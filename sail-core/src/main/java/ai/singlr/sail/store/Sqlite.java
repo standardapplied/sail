@@ -65,6 +65,7 @@ public final class Sqlite implements AutoCloseable {
   private boolean writeLocked;
   private RuntimeException doom;
   private volatile boolean closed;
+  private long statements;
   private Path path;
   final BlobRetention contentRetention = new BlobRetention(null);
 
@@ -326,11 +327,25 @@ public final class Sqlite implements AutoCloseable {
     }
   }
 
+  /**
+   * How many statements this connection has prepared since it opened: the cost a test counts a
+   * request in.
+   */
+  public long statements() {
+    lock.lock();
+    try {
+      return statements;
+    } finally {
+      lock.unlock();
+    }
+  }
+
   private void pragma(String name, String value) {
     execute("PRAGMA " + name + " = " + value);
   }
 
   private MemorySegment prepare(Arena stmtArena, String sql) throws Throwable {
+    statements++;
     var sqlStr = stmtArena.allocateFrom(sql);
     var stmtPtr = stmtArena.allocate(ValueLayout.ADDRESS);
     var rc =

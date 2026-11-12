@@ -199,17 +199,20 @@ class SkillCliHelperTest {
   }
 
   @Test
-  void helpTeachesEveryVerb() throws Exception {
+  void helpTeachesWhatItReadsAndWhereASkillIsShared() throws Exception {
     assertEquals(
         new Ran(
             0,
             """
-            skill — share this project's skills (Agent Skills folders) with every agent and every box
+            skill — read this project's skills (Agent Skills folders), which every agent and every box sees
 
               skill ls                        every skill an agent here can see, and where each comes from (JSON)
               skill show <name>               a skill's SKILL.md (JSON: skill_md)
-              skill add <folder> [--name N]   share a folder holding a SKILL.md, for every agent of the project
-              skill rm <name>                 stop sharing a skill, on every box
+
+            Sharing a skill is a person's, from outside the container: on the host,
+              sail project skills add --container <folder> -p <project>
+              sail project skills rm <skill> -p <project>
+            or in Mast.
             """),
         skill("--help"));
   }

@@ -7,11 +7,14 @@ package ai.singlr.sail.api;
 
 import ai.singlr.sail.access.Access;
 import ai.singlr.sail.access.Action;
+import ai.singlr.sail.access.Decision;
 import ai.singlr.sail.access.ReadFilter;
+import ai.singlr.sail.access.Refusal;
 import ai.singlr.sail.access.Resources;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.store.ProjectStore;
 import java.util.Objects;
+import java.util.Optional;
 
 /**
  * The one gate of a door that acts on a project: the row of the project in this box's catalog, when
@@ -29,10 +32,24 @@ final class ProjectGate {
    */
   static ProjectStore.ProjectRow taking(ProjectStore catalog, Action action, String project) {
     var row = held(catalog, project);
-    Refusals.require(
-        Access.decide(Actor.current(), action, Resources.project(project, row.createdBy())),
-        () -> ProjectReader.absent(project));
+    Refusals.enforce(refusing(action, project, row.createdBy()));
     return row;
+  }
+
+  /**
+   * Why the bound actor may not take {@code action} on {@code project}, as {@link #taking} decides
+   * it; empty when it may.
+   */
+  static Optional<Refusal> refusing(ProjectStore catalog, Action action, String project) {
+    return refusing(action, project, held(catalog, project).createdBy());
+  }
+
+  private static Optional<Refusal> refusing(Action action, String project, String createdBy) {
+    return switch (Access.decide(Actor.current(), action, Resources.project(project, createdBy))) {
+      case Decision.Allowed allowed -> Optional.empty();
+      case Decision.NotFound unread -> throw ProjectReader.absent(project);
+      case Decision.Refused refused -> Optional.of(refused.refusal());
+    };
   }
 
   /** The row of {@code project} in {@code catalog}, when whoever reads may read it. */

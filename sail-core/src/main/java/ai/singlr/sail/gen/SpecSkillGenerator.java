@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.gen;
 
+import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.engine.StageSkill;
 import ai.singlr.sail.store.BlobStore;
 import java.io.ByteArrayInputStream;
@@ -49,6 +50,10 @@ public final class SpecSkillGenerator {
               "7496ac254457448ba0440863d3056b54fb855b720c6493fe69ae96c48f5fc78c"),
           "spec-template.md",
           Set.of("299a557e66625c8e14a9f784393779f7b3540d8de06ed7f4ceac218251c0c89c"));
+
+  /** The host command that moves a spec's status, which the skill hands the engineer. */
+  private static final String MOVE_STATUS =
+      Remedy.of(Remedy.sail("spec update", "<id>", "--status", "<new-status>")).plain();
 
   private static final Map<String, String> FILES =
       Map.of(StageSkill.MANIFEST, skillMd(), "spec-template.md", specTemplateMd());
@@ -111,7 +116,7 @@ public final class SpecSkillGenerator {
         + showInstructions()
         + """
 
-        ### `/spec-board update <id> <status>` or "move auth to in_progress"
+        ### `/spec-board update <id> <status>` or "move auth to done"
         """
         + updateInstructions()
         + """
@@ -192,15 +197,19 @@ public final class SpecSkillGenerator {
 
   private static String updateInstructions() {
     return """
-        Valid statuses: `pending`, `in_progress`, `review`, `awaiting_merge`, `done`.
+        A spec's status is not moved from inside the project's container: promoting a draft,
+        marking one done, archiving or cancelling it are the engineer's, on the board in Mast or on
+        the host:
 
         ```sh
-        spec update <id> --status <new-status>
+        %s
         ```
 
-        Confirm: "Updated `<id>` → `<new-status>`". To revise the body, write the new markdown to a
-        temp file and run `spec content <id> --body-file /tmp/<id>.md`.
-        """;
+        Say so, and give the engineer that line. Inside the container, `spec update <id>` edits a
+        spec's other fields (`--title`, `--wake`, …); to revise the body, write the new markdown to
+        a temp file and run `spec content <id> --body-file /tmp/<id>.md`.
+        """
+        .formatted(MOVE_STATUS);
   }
 
   private static String bulkCreateInstructions() {
@@ -237,16 +246,18 @@ public final class SpecSkillGenerator {
           (set by `sail`)
         - **done**: PR merged, work complete (set by the engineer via `sail`)
 
-        During autonomous execution Sail manages status itself — do not change it. The engineer's
-        `/spec-board update` is the exception, when they explicitly ask to move a spec.
+        During autonomous execution Sail manages status itself — do not change it. The engineer
+        moves a spec's status themselves, outside the container: on the board in Mast, or with
+        `%s` on the host.
 
         ### Fields (set at create or via `spec update`)
         - **id** (required): stable identifier, lowercase with hyphens
         - **title** (required): short human-readable description
-        - **status**: one of pending, in_progress, review, awaiting_merge, done
+        - **status**: one of pending, in_progress, review, awaiting_merge, done; a spec created
+          here is a draft, and its status moves outside the container
         - **assignee**: an FDE handle, or blank for anyone to claim (never an agent type or a
-          run's principal); the agent type goes in `--agent`. An agent claims an unassigned spec
-          for the FDE it acts for
+          run's principal); the agent type goes in `--agent`. A person claims an unassigned spec
+          for themselves; an agent claims none
         - **depends-on**: spec ids that must be done first
         - **repos**: target repository paths from the project's definition (`repos[].path`)
         - **agent**: agent CLI for this spec (`claude-code` or `codex`)
@@ -264,7 +275,8 @@ public final class SpecSkillGenerator {
         ### Where specs live
         Specs are rows in the Sail database, replicated across devboxes by sail's sync. There is no
         `specs/` directory to edit — always go through `spec`.
-        """;
+        """
+        .formatted(MOVE_STATUS);
   }
 
   private static String specTemplateMd() {

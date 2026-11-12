@@ -6,7 +6,9 @@
 package ai.singlr.sail.access;
 
 import ai.singlr.sail.common.Remedy;
+import ai.singlr.sail.engine.StageSkill;
 import ai.singlr.sail.identity.Actor;
+import java.util.List;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
@@ -79,7 +81,25 @@ final class Wording {
         "Ask an admin to do it.");
   }
 
-  static Refusal laneForbidden(Action action, Resource.Kind kind) {
+  /**
+   * The lane step's refusal of {@code action} on {@code resource}, or on some resource of {@code
+   * kind} when it is null, in the words of {@code actor}'s lane: the in-container credential is
+   * told the door outside the container that takes it, and an agent's move of a spec's status, or a
+   * spec it bears ready, what an agent may make instead.
+   */
+  static Refusal laneForbidden(Actor actor, Action action, Resource.Kind kind, Resource resource) {
+    if (actor.lane() == Actor.Lane.CONTAINER) {
+      return new Refusal(
+          Refusal.Kind.LANE_FORBIDDEN,
+          "The credential in a project container cannot " + action.act(kind) + ".",
+          fromOutside(action, kind, resource));
+    }
+    if (action == Action.APPROVE && kind == Resource.Kind.SPEC) {
+      return new Refusal(
+          Refusal.Kind.LANE_FORBIDDEN,
+          "An agent creates only drafts and never sets a status.",
+          "Omit --status; its person promotes it on the board.");
+    }
     return new Refusal(
         Refusal.Kind.LANE_FORBIDDEN,
         "Agent principals cannot " + action.act(kind) + ".",
@@ -87,28 +107,66 @@ final class Wording {
   }
 
   /**
+   * Where a person takes {@code action}, which the credential in a project container may not: on
+   * the host, naming the command for a spec's status or assignee, and for a project's skills both
+   * sharing one and removing one, since a refusal on the project cannot tell which was asked; or in
+   * Mast. The command is rendered as words, not kept as a command a door renders for its reader:
+   * the reader is in the container, and the command runs on the host.
+   */
+  private static Remedy fromOutside(Action action, Resource.Kind kind, Resource resource) {
+    var id = resource == null ? "<id>" : resource.id();
+    var commands =
+        switch (action) {
+          case APPROVE ->
+              kind == Resource.Kind.SPEC
+                  ? List.of(Remedy.sail("spec update", id, "--status", "<status>"))
+                  : List.<Remedy.Command>of();
+          case ASSIGN -> List.of(Remedy.sail("spec update", id, "--assignee", "<fde>"));
+          case SHARE ->
+              List.of(
+                  StageSkill.shareFromContainer("<folder>", id), StageSkill.unshare("<skill>", id));
+          default -> List.<Remedy.Command>of();
+        };
+    return Remedy.of(
+        commands.isEmpty()
+            ? "Do it from outside the container: with sail on the host, or in Mast."
+            : "Do it from outside the container: "
+                + commands.stream()
+                    .map(command -> "'" + Remedy.of(command).plain() + "'")
+                    .collect(Collectors.joining(" or "))
+                + " on the host, or Mast.");
+  }
+
+  /**
    * The refusal of {@code action}, which {@code actor}'s lane grants on its own work alone, on
    * {@code resource}, or on some resource of {@code kind} when it is null, which names no work to
-   * be its own.
+   * be its own: a conflict, which no agent resolves, its person's to settle. Work it may not touch
+   * it may draft a follow-up spec for; a run it may not narrate is simply not its own.
    */
   static Refusal outsideWork(Actor actor, Action action, Resource.Kind kind, Resource resource) {
-    var fix = "An agent acts only on the work sail launched it for.";
+    var fix =
+        "An agent acts only on the work sail launched it for"
+            + (action == Action.NARRATE ? "." : "; draft a follow-up spec for anything else.");
     if (resource == null) {
-      return new Refusal(
-          Refusal.Kind.NOT_OWNER,
-          "'"
-              + actor.handle()
-              + "' acts only on its own work, and no "
-              + kind.noun()
-              + " of it is named.",
-          fix);
+      return kind == Resource.Kind.CONFLICT
+          ? new Refusal(
+              Refusal.Kind.NOT_OWNER,
+              "'" + actor.handle() + "' resolves no conflicts: an agent acts only on its own work.",
+              "Ask the FDE the agent works for to resolve it.")
+          : new Refusal(
+              Refusal.Kind.NOT_OWNER,
+              "'"
+                  + actor.handle()
+                  + "' acts only on its own work, and no "
+                  + kind.noun()
+                  + " of it is named.",
+              fix);
     }
     if (action == Action.POST) {
-      return ownedBy(
-          resource,
-          "post",
-          "Claim its spec first with --assignee <you>, or have an admin post.",
-          named -> "Ask " + named + " to post it, or have an admin do it.");
+      return new Refusal(
+          Refusal.Kind.NOT_OWNER,
+          "'" + actor.handle() + "' may post only in its own work, not in '" + resource.id() + "'.",
+          fix);
     }
     return new Refusal(
         Refusal.Kind.NOT_OWNER,

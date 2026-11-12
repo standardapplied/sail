@@ -32,6 +32,7 @@ import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.ProjectScope;
+import ai.singlr.sail.store.HeldProjects;
 import ai.singlr.sail.store.SpecStore;
 import java.util.List;
 import java.util.Map;
@@ -95,9 +96,10 @@ class RoomAuthorityTest {
     var created = with(LOBBY, "created_by", null);
     var verbs = List.of(roster, wake, retitled, handedOn);
     var rows = Stream.<Case>builder();
-    for (var actor : List.of(ADMIN, OWNER_API, OWNER_CLI, MACHINE, OTHER_API, AGENT, OWNER_SYNC)) {
+    for (var actor : List.of(ADMIN, OWNER_API, OWNER_CLI, MACHINE, OTHER_API, OWNER_SYNC)) {
       rows.add(new Case("create by " + actor, actor, null, created, null));
     }
+    rows.add(new Case("an agent creates no room", AGENT, null, created, Kind.NOT_OWNER));
     rows.add(new Case("a viewer cannot create", VIEWER, null, created, Kind.READ_ONLY));
     rows.add(
         new Case(
@@ -190,6 +192,72 @@ class RoomAuthorityTest {
     assertEquals(Optional.empty(), rule.decide(OWNER_API, "auth", held, next));
     assertEquals(
         Optional.of(Kind.NOT_OWNER), rule.decide(OTHER_API, "auth", held, next).map(Refusal::kind));
+  }
+
+  /**
+   * The one room an agent creates is the own room of a spec it made, as a spec's birth mints it,
+   * and it changes that room after; any other is no agent's to create, nor another run's to change.
+   */
+  @Test
+  void anAgentCreatesAndChangesTheOwnRoomOfASpecItMadeAndNoOther() {
+    Acting.by(
+        AGENT,
+        () ->
+            new SpecStore(board.db)
+                .create(
+                    new SpecStore.SpecRow(
+                        "drafted",
+                        "acme",
+                        "Drafted",
+                        SpecStatus.DRAFT,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        0,
+                        null,
+                        null,
+                        null,
+                        null,
+                        List.of(),
+                        List.of())));
+    var room = with(LOBBY, "created_by", null);
+
+    assertEquals(Optional.empty(), rule.decide(AGENT, "drafted", null, room));
+    assertEquals(
+        Optional.of(Kind.NOT_OWNER),
+        rule.decide(OTHERS_AGENT, "drafted", null, room).map(Refusal::kind),
+        "another run made nothing of it");
+    assertEquals(Optional.empty(), rule.decide(AGENT, "drafted", room, with(room, "wake", "off")));
+    assertEquals(
+        Optional.of(Kind.NOT_OWNER),
+        rule.decide(OTHERS_AGENT, "drafted", room, with(room, "wake", "off")).map(Refusal::kind));
+  }
+
+  /**
+   * An ad-hoc run's work is its whole project: it changes a room of its project, its person's, and
+   * no room of another project, though its person owns that one too, nor moves one into it.
+   */
+  @Test
+  void anAdHocRunChangesARoomOfItsProjectAndNoOther() {
+    var adHoc =
+        Actor.agentPrincipal("claude/" + OWNER + "-adhoc", OWNER)
+            .withWork(Actor.Work.of("acme", null, null));
+    HeldProjects.hold(board.db, "beta");
+    var beta = with(LOBBY, "project", "beta");
+
+    assertEquals(Optional.empty(), rule.decide(adHoc, "lobby", LOBBY, with(LOBBY, "wake", "off")));
+    assertEquals(Optional.empty(), rule.decide(adHoc, "lobby", LOBBY, null), "its deletion too");
+    assertEquals(
+        Optional.of(Kind.NOT_OWNER),
+        rule.decide(adHoc, "lobby", beta, with(beta, "wake", "off")).map(Refusal::kind),
+        "beta is not its project");
+    assertEquals(
+        Optional.of(Kind.NOT_OWNER),
+        rule.decide(adHoc, "lobby", LOBBY, beta).map(Refusal::kind),
+        "nor may it move one of acme there");
+    assertEquals(Optional.empty(), rule.decide(OWNER_API, "lobby", LOBBY, beta), "its person may");
   }
 
   @Test

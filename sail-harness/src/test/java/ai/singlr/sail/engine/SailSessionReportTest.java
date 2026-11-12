@@ -227,6 +227,26 @@ class SailSessionReportTest {
     }
   }
 
+  /**
+   * The report finds its credential by the very lines every helper does, so a run whose credential
+   * is not in its environment presents the box's ambient one, which the socket refuses a run's
+   * report; the hook still exits 0.
+   */
+  @Test
+  void aRunWithoutItsCredentialPresentsTheBoxCredentialAsEveryHelperDoes() throws Exception {
+    var content = SailSessionReport.scriptContent();
+    assertTrue(content.contains(SocketPreamble.credentialLookup()), content);
+    try (var bound = bind()) {
+      Files.writeString(home.resolve("box.credential"), "sailbox_ambient\n");
+      var result = runReport(RUN_ID, null, fakeCurl(), "{\"session_id\": \"abc\"}");
+
+      assertEquals(0, result.exitCode());
+      var calls = curlLog();
+      assertEquals(1, calls.size());
+      assertTrue(calls.get(0).contains("Bearer sailbox_ambient"), calls.get(0));
+    }
+  }
+
   @Test
   void reportIsInertWithoutTheSocket() throws Exception {
     var result = runReport(RUN_ID, CREDENTIAL, fakeCurl(), "{\"session_id\": \"abc\"}");

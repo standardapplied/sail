@@ -88,12 +88,14 @@ class WriteAuthorityTest {
     var edited = with(FILE, "content_hash", "h2");
     var rows = Stream.<Case>builder();
     for (var actor :
-        List.of(
-            ADMIN, OWNER_API, OTHER_API, MACHINE, AGENT, OWNER_SYNC, OTHER_SYNC, MAIN, SYSTEM)) {
+        List.of(ADMIN, OWNER_API, OTHER_API, MACHINE, OWNER_SYNC, OTHER_SYNC, MAIN, SYSTEM)) {
       rows.add(new Case("create by " + actor, actor, null, FILE, null));
       rows.add(new Case("edit by " + actor, actor, FILE, edited, null));
       rows.add(new Case("delete by " + actor, actor, FILE, null, null));
     }
+    rows.add(new Case("an agent shares no file", AGENT, null, FILE, Kind.LANE_FORBIDDEN));
+    rows.add(new Case("an agent edits no file", AGENT, FILE, edited, Kind.LANE_FORBIDDEN));
+    rows.add(new Case("an agent removes no file", AGENT, FILE, null, Kind.LANE_FORBIDDEN));
     for (var actor : List.of(VIEWER, ROOM, VIEWER_SYNC)) {
       rows.add(new Case("create by " + actor, actor, null, FILE, Kind.READ_ONLY));
       rows.add(new Case("edit by " + actor, actor, FILE, edited, Kind.READ_ONLY));
@@ -134,13 +136,13 @@ class WriteAuthorityTest {
     return Stream.of(
         new Case("a member edits it", OWNER_API, HELD, EDITED, null),
         new Case("a member deletes it", OWNER_API, HELD, null, null),
-        new Case("an agent edits it", AGENT, HELD, EDITED, null),
+        new Case("an agent configures none", AGENT, HELD, EDITED, Kind.LANE_FORBIDDEN),
         new Case("a viewer edits none", VIEWER, HELD, EDITED, Kind.READ_ONLY),
         new Case("a viewer renames none", VIEWER, HELD, RENAMED, Kind.READ_ONLY),
         new Case("a viewer's box pushes no rename", VIEWER_SYNC, HELD, RENAMED, Kind.READ_ONLY),
         new Case("a member cannot rename over the API", OWNER_API, HELD, RENAMED, Kind.ADMIN_ONLY),
         new Case("a member cannot rename on the CLI", OWNER_CLI, HELD, RENAMED, Kind.ADMIN_ONLY),
-        new Case("an agent cannot rename", AGENT, HELD, RENAMED, Kind.ADMIN_ONLY),
+        new Case("an agent cannot rename", AGENT, HELD, RENAMED, Kind.LANE_FORBIDDEN),
         new Case("a member's box cannot push a rename", OWNER_SYNC, HELD, RENAMED, Kind.ADMIN_ONLY),
         new Case("an admin renames", ADMIN, HELD, RENAMED, null),
         new Case("an admin's box pushes a rename", ADMIN_SYNC, HELD, RENAMED, null),

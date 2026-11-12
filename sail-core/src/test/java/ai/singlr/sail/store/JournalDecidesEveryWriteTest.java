@@ -386,7 +386,7 @@ class JournalDecidesEveryWriteTest {
 
     for (var actor : READ_ONLY) {
       var expected =
-          actor.roomLane() && write.name().startsWith("MessageStore")
+          actor.lane() == Actor.Lane.ROOM && write.name().startsWith("MessageStore")
               ? Kind.NOT_OWNER
               : Kind.READ_ONLY;
       assertEquals(expected, refusal(actor, write), actor.lane() + " read-only");
@@ -394,7 +394,13 @@ class JournalDecidesEveryWriteTest {
     }
     if (write.memberRefusal() != null) {
       for (var actor : NOT_THE_OWNER) {
-        assertEquals(write.memberRefusal(), refusal(actor, write), actor.lane() + " member");
+        var expected =
+            actor.lane() == Actor.Lane.AGENT
+                    && (write.name().startsWith("ReviewStore")
+                        || write.name().equals("ProjectStore.rename"))
+                ? Kind.LANE_FORBIDDEN
+                : write.memberRefusal();
+        assertEquals(expected, refusal(actor, write), actor.lane() + " member");
         assertEquals(before, box.state(), actor.lane() + " member wrote nothing");
       }
     }

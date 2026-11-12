@@ -6,8 +6,11 @@
 package ai.singlr.sail.authority;
 
 import ai.singlr.sail.access.Refusal;
+import ai.singlr.sail.access.Resource;
+import ai.singlr.sail.access.Resources;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.PrincipalHandle;
+import ai.singlr.sail.store.ChangeLog;
 import ai.singlr.sail.store.Decidability;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.Snapshots;
@@ -17,20 +20,33 @@ import java.util.Objects;
 import java.util.Optional;
 
 /**
- * Whom a pushed revision may name, decided on the {@link Actor.Lane#SYNC} lane only, where the
- * actor is the pusher: main records a revision's {@code _actor} as its author, and a create's
- * creator as its owner while it is unassigned, and hands both to every box. A revision may name as
- * its author the pusher, this box's machinery ({@link Actor#SYSTEM_HANDLE}), or a principal of a
- * run the pusher owns; absent, main records the pusher. A create may name only the pusher as its
- * creator; absent, the creator is the pusher. A principal naming a run main does not hold yet is
- * refused by {@link Decidability}, never denied, so the next round decides it once the run lands.
+ * Who wrote what. Who made a spec, and so its own room, is what the journal's first revision of it
+ * here records ({@link ChangeLog#bornBy}), an agent's own work: the one read of a maker, for every
+ * rule that decides a spec, a room or a post. Whom a pushed revision may name is decided on the
+ * {@link Actor.Lane#SYNC} lane only, where the actor is the pusher: main records a revision's
+ * {@code _actor} as its author, and a create's creator as its owner while it is unassigned, and
+ * hands both to every box. A revision may name as its author the pusher, this box's machinery
+ * ({@link Actor#SYSTEM_HANDLE}), or a principal of a run the pusher owns; absent, main records the
+ * pusher. A create may name only the pusher as its creator; absent, the creator is the pusher. A
+ * principal naming a run main does not hold yet is refused by {@link Decidability}, never denied,
+ * so the next round decides it once the run lands.
  */
 final class Attribution {
 
   private final RunStore runs;
+  private final ChangeLog journal;
 
   Attribution(Sqlite db) {
     this.runs = new RunStore(db);
+    this.journal = new ChangeLog(db);
+  }
+
+  /**
+   * {@code resource}, a spec or the conversation on a spec's id, as made by whoever made that spec;
+   * by no one when the journal no longer keeps its first revision.
+   */
+  Resource made(Resource resource) {
+    return Resources.madeBy(resource, journal.bornBy(resource.id()).orElse(null));
   }
 
   /**

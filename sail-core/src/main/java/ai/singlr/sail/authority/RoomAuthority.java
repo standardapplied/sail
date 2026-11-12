@@ -15,16 +15,18 @@ import ai.singlr.sail.store.RoomStore;
 import ai.singlr.sail.store.Snapshots;
 import ai.singlr.sail.store.Sqlite;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 
 /**
  * Who may write a room: a birth is a {@link Action#CREATE}, and every later revision and its
  * tombstone — roster, wake, title and assignee alike — a {@link Action#CHANGE} of the room as its
- * owner has it ({@link RoomStore#ownerOf}), each decided by {@link Access}. Owning a spec born in a
- * room gives a voice in its conversation, never its settings. A room lands only in a project this
- * box holds ({@link ProjectStore#refusesInto}): a project it does not is not there, which is said
- * before anything is decided. Then the one fact: a push names only its pusher ({@link
- * Attribution}).
+ * owner has it ({@link RoomStore#ownerOf}), in the project it is born into or held in, each decided
+ * by {@link Access}. Owning a spec born in a room gives a voice in its conversation, never its
+ * settings. A room lands only in a project this box holds ({@link ProjectStore#refusesInto}): a
+ * project it does not is not there, which is said before anything is decided. A spec's own room is
+ * made by whoever made the spec ({@link Attribution#made}), an agent's own work. Then the one fact:
+ * a push names only its pusher ({@link Attribution}).
  */
 public final class RoomAuthority implements WriteAuthority {
 
@@ -51,13 +53,33 @@ public final class RoomAuthority implements WriteAuthority {
       return unheld;
     }
     var refused =
-        WriteAuthority.refused(
-            actor,
-            held == null
-                ? Taking.of(Resources.room(id, null, null), Action.CREATE)
-                : Taking.of(Resources.room(id, null, rooms.ownerOf(id, held)), Action.CHANGE));
+        held == null
+            ? WriteAuthority.refused(
+                actor,
+                Taking.of(
+                    attribution.made(Resources.room(id, Snapshots.text(next, PROJECT), null)),
+                    Action.CREATE))
+            : changing(actor, id, held, Snapshots.text(held, PROJECT))
+                .or(
+                    () ->
+                        next == null
+                                || Objects.equals(
+                                    Snapshots.text(held, PROJECT), Snapshots.text(next, PROJECT))
+                            ? Optional.empty()
+                            : changing(actor, id, held, Snapshots.text(next, PROJECT)));
     return refused.isPresent()
         ? refused
         : attribution.decide(actor, held, next, "created_by", null);
+  }
+
+  /**
+   * Why {@code actor} may not change room {@code id}, as {@code held} has it, in {@code project}.
+   */
+  private Optional<Refusal> changing(
+      Actor actor, String id, Map<String, Object> held, String project) {
+    return WriteAuthority.refused(
+        actor,
+        Taking.of(
+            attribution.made(Resources.room(id, project, rooms.ownerOf(id, held))), Action.CHANGE));
   }
 }

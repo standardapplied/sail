@@ -46,11 +46,10 @@ import java.util.function.BiFunction;
  * with 401 and never falls back to a client-chosen actor.
  *
  * <p>Every route is one of the table's ({@link #routes}), each declaring its {@link Gate}, which
- * this router applies as the caller before the route's handler runs: operating the box (sync
- * health) is the box's person's or an admin's; spec writes are decided by the spec rule ({@code
- * SpecAuthority}) as the journal records them; reads see only the caller's scope, and a project the
- * path names that the caller cannot read is not there, whatever is asked of it. The events route is
- * run-only, and the dispatch/stop routes do not exist here at all.
+ * this router applies as the caller before the route's handler runs: spec writes are decided by the
+ * spec rule ({@code SpecAuthority}) as the journal records them; reads see only the caller's scope,
+ * and a project the path names that the caller cannot read is not there, whatever is asked of it.
+ * The events route is run-only, and the dispatch/stop routes do not exist here at all.
  */
 final class LocalApiRouter implements LocalApiHandler, RouteTable {
 
@@ -59,7 +58,6 @@ final class LocalApiRouter implements LocalApiHandler, RouteTable {
   private static final String PUT = "PUT";
   private static final String DELETE = "DELETE";
   private static final String PROJECT = "project";
-  private static final String SYNC = "/v1/sync";
   private static final String CONFLICTS = "/v1/conflicts";
   private static final String RESOLVE = "/v1/conflicts/{id...}/resolve";
   private static final String CONFLICT = "/v1/conflicts/{id...}";
@@ -82,16 +80,15 @@ final class LocalApiRouter implements LocalApiHandler, RouteTable {
   private final LocalLaneOperations operations;
   private final List<Route<Handler>> routes;
 
-  /** A router over {@code operations}, whose box gate decides on the box they stand for. */
+  /** A router over {@code operations}. */
   LocalApiRouter(LocalLaneOperations operations) {
     this.operations = operations;
     var reads = Gate.READS_IN_SCOPE;
     var journal = Gate.JOURNAL;
     var serving = Gate.decides(Action.SERVE);
+    var sharing = Gate.decides(Action.SHARE);
     this.routes =
         List.of(
-            route(GET, SYNC, Gate.box(operations::boxFde), this::sync),
-            unserved(SYNC, "Only GET is available."),
             route(GET, CONFLICTS, reads, this::conflicts),
             unserved(CONFLICTS, "Only GET is available."),
             route(POST, RESOLVE, Gate.decides(Action.CHANGE), this::resolve),
@@ -123,10 +120,10 @@ final class LocalApiRouter implements LocalApiHandler, RouteTable {
                 Gate.UNSERVED,
                 aRoomsOrARunsOwn(answering("run session accepts POST"))),
             route(GET, SKILLS, reads, this::skills),
-            route(POST, SKILLS, journal, this::share),
+            route(POST, SKILLS, sharing, this::unshared),
             unserved(SKILLS, "skills accepts GET or POST"),
             route(GET, SKILL, reads, this::skill),
-            route(DELETE, SKILL, journal, this::unshare),
+            route(DELETE, SKILL, sharing, this::unshared),
             unserved(SKILL, "a skill accepts GET or DELETE"),
             route(POST, SERVE, serving, this::serve),
             route(DELETE, SERVE, serving, this::stop),
@@ -352,10 +349,6 @@ final class LocalApiRouter implements LocalApiHandler, RouteTable {
     }
   }
 
-  private ApiResponse sync(LocalApiRequest request, Caller caller, Map<String, String> path) {
-    return ApiResponse.ok(SyncViews.status(operations.syncStatus()));
-  }
-
   private ApiResponse conflicts(LocalApiRequest request, Caller caller, Map<String, String> path) {
     return ApiResponse.ok(SyncViews.conflicts(operations.conflicts()));
   }
@@ -459,12 +452,11 @@ final class LocalApiRouter implements LocalApiHandler, RouteTable {
 
   /**
    * Reads {@code project} as the caller, before anything is asked of it: a project the caller
-   * cannot read is not there, and a run reaches only its own project.
+   * cannot read is not there.
    */
   private static void project(Caller caller, String project) {
     NameValidator.requireValidProjectName(project);
-    if (caller instanceof Caller.Run(var run, _) && !project.equals(run.project())
-        || !ReadFilter.reads(caller.actor(), () -> project)) {
+    if (!ReadFilter.reads(caller.actor(), () -> project)) {
       throw ProjectReader.absent(project);
     }
   }
@@ -502,32 +494,23 @@ final class LocalApiRouter implements LocalApiHandler, RouteTable {
 
   /**
    * Every skill an agent of the project can see, one of this socket's two project surfaces beside
-   * its stack.
+   * its stack, naming no command its reader in the container cannot run.
    */
   private ApiResponse skills(LocalApiRequest request, Caller caller, Map<String, String> path)
       throws IOException, InterruptedException, TimeoutException {
-    return ApiResponse.ok(operations.skills().rows(path.get(PROJECT)));
+    return ApiResponse.ok(operations.skills().rows(path.get(PROJECT)).inContainer());
   }
 
   /**
-   * Shares a folder in the container as a skill. Sharing is a person's: a shared skill is
-   * instructions every other agent and every other box will follow, so a run's credential, whatever
-   * its lane, is refused it, and the box credential writes as the box's person, whose write the
-   * journal decides.
+   * Sharing or removing a skill, which is a person's from outside the container: a shared skill is
+   * instructions every other agent and every other box will follow, so no credential in a container
+   * may share or remove one (A9), a run's or the box's. The socket serves neither, and answers the
+   * refusal Share is decided with on the project, reading nothing of the container; a column that
+   * granted it here would be a server error, never a share.
    */
-  private ApiResponse share(LocalApiRequest request, Caller caller, Map<String, String> path)
-      throws IOException, InterruptedException, TimeoutException {
-    var form = request.form();
-    var folder = Objects.requireNonNullElse(form.get("folder"), "");
-    requirePerson(
-        caller,
-        "share",
-        Remedy.of(
-            "Ask them to run 'skill add ",
-            folder.isBlank() ? "<folder>" : folder,
-            "' in their own session."));
-    return ApiResponse.ok(
-        operations.skills().shareFromContainer(path.get(PROJECT), folder, form.get("name")));
+  private ApiResponse unshared(LocalApiRequest request, Caller caller, Map<String, String> path) {
+    return ApiResponse.from(
+        Refusals.failure(operations.skills().sharing(path.get(PROJECT)).orElseThrow()));
   }
 
   /** One shared skill's {@code SKILL.md}. */
@@ -536,36 +519,6 @@ final class LocalApiRouter implements LocalApiHandler, RouteTable {
     var name = path.get("name");
     return ApiResponse.ok(
         Map.of("name", name, "skill_md", operations.skills().manifest(path.get(PROJECT), name)));
-  }
-
-  /** Stops sharing one skill, which like sharing is a person's. */
-  private ApiResponse unshare(LocalApiRequest request, Caller caller, Map<String, String> path)
-      throws IOException, InterruptedException, TimeoutException {
-    var project = path.get(PROJECT);
-    var name = path.get("name");
-    requirePerson(
-        caller,
-        "remove",
-        Remedy.of(
-            "Ask them to run 'skill rm ",
-            name,
-            "' in their own session, or '",
-            Remedy.sail("project skills rm", name, "-p", project),
-            "' on the devbox."));
-    return ApiResponse.ok(Map.of("name", name, "files", operations.skills().remove(project, name)));
-  }
-
-  /**
-   * Refuses a run's credential a write only a person makes, naming the line the person types: in
-   * their own session in the container, or, for a removal, on the devbox too.
-   */
-  private static void requirePerson(Caller caller, String verb, Remedy remedy) {
-    if (caller instanceof Caller.Run) {
-      throw new ApiException(
-          ErrorCode.FORBIDDEN,
-          "A skill is shared by a person, so an agent sail launched may not " + verb + " one.",
-          remedy);
-    }
   }
 
   private ApiResponse specs(LocalApiRequest request, Caller caller, Map<String, String> path) {
@@ -621,14 +574,9 @@ final class LocalApiRouter implements LocalApiHandler, RouteTable {
     return ApiResponse.from(result);
   }
 
-  /** A post in a room's conversation; a room session posts only in its own room. */
+  /** A post in a room's conversation, an agent's only in its own work, as the message rule says. */
   private ApiResponse messages(LocalApiRequest request, Caller caller, Map<String, String> path) {
     var id = path.get("id");
-    if (caller instanceof Caller.Run(var run, _)
-        && run.readOnlyLane()
-        && !id.equals(run.conversationId())) {
-      return problem(403, "A room session posts only to its own room.");
-    }
     var form = request.form();
     return ApiResponse.fromCreated(
         operations.postRoomMessage(

@@ -167,6 +167,8 @@ class RouteGateSweepTest {
               "DELETE /v1/projects/{project}/files/{path...} the journal decides",
               "* /v1/projects/{project}/files serves nothing",
               "* /v1/projects/{project}/files/{path...} serves nothing",
+              "POST /v1/projects/{project}/skills operates the box",
+              "DELETE /v1/projects/{project}/skills/{name} decides SHARE",
               "POST /v1/projects/{project}/serve decides SERVE",
               "DELETE /v1/projects/{project}/serve decides SERVE",
               "GET /v1/projects/{project}/ports reads in scope",
@@ -329,6 +331,11 @@ class RouteGateSweepTest {
     assertEquals(List.of(), operations.reached);
   }
 
+  /**
+   * The box's own routes, which name no project, are its person's or an admin's. A project's route
+   * that reads its container, sharing a skill from a folder there, takes the same gate, and is
+   * tested at its own route ({@code ApiRouterTest}).
+   */
   @Test
   void theBoxIsOperatedByItsOwnPersonOrAnAdminAtEveryBoxRoute() throws Exception {
     var roster = new FdeStore(db);
@@ -339,7 +346,10 @@ class RouteGateSweepTest {
     var machine = tokens.create("ci-bot", "member");
     var adminMachine = tokens.create("ops-bot", "admin");
     var boxRoutes =
-        router.routes().stream().filter(route -> route.gate() instanceof Gate.OperatesBox).toList();
+        router.routes().stream()
+            .filter(route -> route.gate() instanceof Gate.OperatesBox)
+            .filter(route -> !route.pattern().contains("{project}"))
+            .toList();
     assertEquals(3, boxRoutes.size());
 
     for (var refused : List.of(eng.token(), machine.token())) {
@@ -386,8 +396,6 @@ class RouteGateSweepTest {
   void theSocketDeclaresEachOfItsRoutesWithItsGate() {
     assertEquals(
         List.of(
-            "GET /v1/sync operates the box",
-            "* /v1/sync serves nothing",
             "GET /v1/conflicts reads in scope",
             "* /v1/conflicts serves nothing",
             "POST /v1/conflicts/{id...}/resolve decides CHANGE",
@@ -404,10 +412,10 @@ class RouteGateSweepTest {
             "POST /v1/run/session the journal decides",
             "* /v1/run/session serves nothing",
             "GET /v1/projects/{project}/skills reads in scope",
-            "POST /v1/projects/{project}/skills the journal decides",
+            "POST /v1/projects/{project}/skills decides SHARE",
             "* /v1/projects/{project}/skills serves nothing",
             "GET /v1/projects/{project}/skills/{name} reads in scope",
-            "DELETE /v1/projects/{project}/skills/{name} the journal decides",
+            "DELETE /v1/projects/{project}/skills/{name} decides SHARE",
             "* /v1/projects/{project}/skills/{name} serves nothing",
             "POST /v1/projects/{project}/serve decides SERVE",
             "DELETE /v1/projects/{project}/serve decides SERVE",
@@ -537,7 +545,7 @@ class RouteGateSweepTest {
                       case "runActor" -> Optional.of(Actors.principalOf(RUN));
                       case "boxFde" -> BOX;
                       case "boxActorForCredential" ->
-                          Optional.of(new Actor(BOX, Role.MEMBER, Actor.Lane.CLI))
+                          Optional.of(new Actor(BOX, Role.MEMBER, Actor.Lane.CONTAINER))
                               .filter(_ -> TestOperations.BOX_CREDENTIAL.equals(args[0]));
                       default -> {
                         reached.add(method.getName());

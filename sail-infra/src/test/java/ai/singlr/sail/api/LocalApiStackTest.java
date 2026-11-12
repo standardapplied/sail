@@ -12,6 +12,9 @@ import ai.singlr.sail.config.TestDefinitions;
 import ai.singlr.sail.engine.ScriptedShellExecutor;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.store.HeldProjects;
+import java.io.IOException;
+import java.nio.file.Path;
+import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -27,27 +30,34 @@ class LocalApiStackTest {
       new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
           .onOk("incus list", StackOperationsTest.RUNNING)
           .onOk("ss -ltnH", StackOperationsTest.LISTENING);
-  private final SocketDoor router =
-      new SocketDoor(
-          new TestOperations() {
-            private final StackOperations stack =
-                new StackOperations(
-                    shell,
-                    HeldProjects.catalog("acme"),
-                    new ProjectLoader(
-                        shell,
-                        project ->
-                            Optional.of(
-                                TestDefinitions.yaml(
-                                    StackOperationsTest.ACME.replace("acme", project)))),
-                    duration -> {},
-                    System::nanoTime);
+  private final SocketDoor router = over(shell, shell);
 
-            @Override
-            public StackOperations stack() {
-              return stack;
-            }
-          });
+  /**
+   * The socket over a stack whose processes {@code shell} asks of the container, and whose state
+   * {@code loader} asks of Incus.
+   */
+  private static SocketDoor over(ShellExec shell, ShellExec loader) {
+    return new SocketDoor(
+        new TestOperations() {
+          private final StackOperations stack =
+              new StackOperations(
+                  shell,
+                  HeldProjects.catalog("acme"),
+                  new ProjectLoader(
+                      loader,
+                      project ->
+                          Optional.of(
+                              TestDefinitions.yaml(
+                                  StackOperationsTest.ACME.replace("acme", project)))),
+                  duration -> {},
+                  System::nanoTime);
+
+          @Override
+          public StackOperations stack() {
+            return stack;
+          }
+        });
+  }
 
   private static String message(ApiResponse response) {
     return (String) assertInstanceOf(Map.class, response.body().get("error")).get("message");
@@ -97,6 +107,52 @@ class LocalApiStackTest {
     assertEquals(
         List.of(),
         shell.invocations().stream().filter(c -> c.contains("systemctl --user restart")).toList());
+  }
+
+  /** A container that cannot be asked is a container error, whatever the route. */
+  @Test
+  void aContainerThatCannotBeAskedIsAContainerError() {
+    shell.onThrow("ss -ltnH", new IOException("incus went away"));
+
+    var failed = router.ask("GET", "/v1/projects/acme/ports", TestOperations.BOX_CREDENTIAL, "");
+
+    assertEquals(500, failed.status());
+    assertEquals(
+        List.of("container_error", "incus went away"),
+        List.of(
+            assertInstanceOf(Map.class, failed.body().get("error")).get("code"), message(failed)));
+  }
+
+  /**
+   * A request interrupted while the container is asked is a container error, the interrupt kept.
+   */
+  @Test
+  void aRequestInterruptedWhileTheContainerIsAskedKeepsTheInterrupt() {
+    var interrupting =
+        new ShellExec() {
+          @Override
+          public Result exec(List<String> command) throws InterruptedException {
+            throw new InterruptedException("stopping");
+          }
+
+          @Override
+          public Result exec(List<String> command, Path workDir, Duration timeout)
+              throws InterruptedException {
+            throw new InterruptedException("stopping");
+          }
+
+          @Override
+          public boolean isDryRun() {
+            return false;
+          }
+        };
+
+    var failed =
+        over(interrupting, shell)
+            .ask("GET", "/v1/projects/acme/ports", TestOperations.BOX_CREDENTIAL, "");
+
+    assertEquals(500, failed.status());
+    assertEquals(true, Thread.interrupted(), "the interrupt is kept for whoever waits on it");
   }
 
   @Test

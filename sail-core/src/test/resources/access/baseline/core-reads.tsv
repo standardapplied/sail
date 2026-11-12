@@ -869,13 +869,26 @@ read messages of b-room as cli viewer ada beta	shown msg(b-room by ada), msg(b-r
 read messages of b-room as cli viewer bob acme	shown nothing
 read messages of b-room as cli viewer bob all	shown msg(b-room by ada), msg(b-room by bob), msg(b-room by root), msg(b-room by sail), msg(b-room by claude/019fee00-0000-7000-8000-0000000ada01), msg(b-room by claude/019fee00-0000-7000-8000-0000000b0b01), msg(b-room by claude/room-019fee00-0000-7000-8000-0000000ada02)
 read messages of b-room as cli viewer bob beta	shown msg(b-room by ada), msg(b-room by bob), msg(b-room by root), msg(b-room by sail), msg(b-room by claude/019fee00-0000-7000-8000-0000000ada01), msg(b-room by claude/019fee00-0000-7000-8000-0000000b0b01), msg(b-room by claude/room-019fee00-0000-7000-8000-0000000ada02)
+read messages of b-room as container admin root all	shown msg(b-room by ada), msg(b-room by bob), msg(b-room by root), msg(b-room by sail), msg(b-room by claude/019fee00-0000-7000-8000-0000000ada01), msg(b-room by claude/019fee00-0000-7000-8000-0000000b0b01), msg(b-room by claude/room-019fee00-0000-7000-8000-0000000ada02)
+read messages of b-room as container member ada acme	shown nothing
+read messages of b-room as container member ada all	shown msg(b-room by ada), msg(b-room by bob), msg(b-room by root), msg(b-room by sail), msg(b-room by claude/019fee00-0000-7000-8000-0000000ada01), msg(b-room by claude/019fee00-0000-7000-8000-0000000b0b01), msg(b-room by claude/room-019fee00-0000-7000-8000-0000000ada02)
+read messages of b-room as container member ada beta	shown msg(b-room by ada), msg(b-room by bob), msg(b-room by root), msg(b-room by sail), msg(b-room by claude/019fee00-0000-7000-8000-0000000ada01), msg(b-room by claude/019fee00-0000-7000-8000-0000000b0b01), msg(b-room by claude/room-019fee00-0000-7000-8000-0000000ada02)
+read messages of b-room as container member bob acme	shown nothing
+read messages of b-room as container member bob all	shown msg(b-room by ada), msg(b-room by bob), msg(b-room by root), msg(b-room by sail), msg(b-room by claude/019fee00-0000-7000-8000-0000000ada01), msg(b-room by claude/019fee00-0000-7000-8000-0000000b0b01), msg(b-room by claude/room-019fee00-0000-7000-8000-0000000ada02)
+read messages of b-room as container member bob beta	shown msg(b-room by ada), msg(b-room by bob), msg(b-room by root), msg(b-room by sail), msg(b-room by claude/019fee00-0000-7000-8000-0000000ada01), msg(b-room by claude/019fee00-0000-7000-8000-0000000b0b01), msg(b-room by claude/room-019fee00-0000-7000-8000-0000000ada02)
+read messages of b-room as container viewer ada acme	shown nothing
+read messages of b-room as container viewer ada all	shown msg(b-room by ada), msg(b-room by bob), msg(b-room by root), msg(b-room by sail), msg(b-room by claude/019fee00-0000-7000-8000-0000000ada01), msg(b-room by claude/019fee00-0000-7000-8000-0000000b0b01), msg(b-room by claude/room-019fee00-0000-7000-8000-0000000ada02)
+read messages of b-room as container viewer ada beta	shown msg(b-room by ada), msg(b-room by bob), msg(b-room by root), msg(b-room by sail), msg(b-room by claude/019fee00-0000-7000-8000-0000000ada01), msg(b-room by claude/019fee00-0000-7000-8000-0000000b0b01), msg(b-room by claude/room-019fee00-0000-7000-8000-0000000ada02)
+read messages of b-room as container viewer bob acme	shown nothing
+read messages of b-room as container viewer bob all	shown msg(b-room by ada), msg(b-room by bob), msg(b-room by root), msg(b-room by sail), msg(b-room by claude/019fee00-0000-7000-8000-0000000ada01), msg(b-room by claude/019fee00-0000-7000-8000-0000000b0b01), msg(b-room by claude/room-019fee00-0000-7000-8000-0000000ada02)
+read messages of b-room as container viewer bob beta	shown msg(b-room by ada), msg(b-room by bob), msg(b-room by root), msg(b-room by sail), msg(b-room by claude/019fee00-0000-7000-8000-0000000ada01), msg(b-room by claude/019fee00-0000-7000-8000-0000000b0b01), msg(b-room by claude/room-019fee00-0000-7000-8000-0000000ada02)
 read messages of b-room as main admin bob all	shown msg(b-room by ada), msg(b-room by bob), msg(b-room by root), msg(b-room by sail), msg(b-room by claude/019fee00-0000-7000-8000-0000000ada01), msg(b-room by claude/019fee00-0000-7000-8000-0000000b0b01), msg(b-room by claude/room-019fee00-0000-7000-8000-0000000ada02)
 read messages of b-room as room viewer ada-room acme	shown nothing
-read messages of b-room as room viewer ada-room all	shown msg(b-room by ada), msg(b-room by root), msg(b-room by sail), msg(b-room by claude/019fee00-0000-7000-8000-0000000ada01), msg(b-room by claude/room-019fee00-0000-7000-8000-0000000ada02)
-read messages of b-room as room viewer ada-room beta	shown msg(b-room by ada), msg(b-room by root), msg(b-room by sail), msg(b-room by claude/019fee00-0000-7000-8000-0000000ada01), msg(b-room by claude/room-019fee00-0000-7000-8000-0000000ada02)
+read messages of b-room as room viewer ada-room all	shown nothing
+read messages of b-room as room viewer ada-room beta	shown nothing
 read messages of b-room as room viewer bob-room acme	shown nothing
-read messages of b-room as room viewer bob-room all	shown msg(b-room by ada), msg(b-room by bob), msg(b-room by root), msg(b-room by sail), msg(b-room by claude/019fee00-0000-7000-8000-0000000ada01), msg(b-room by claude/019fee00-0000-7000-8000-0000000b0b01), msg(b-room by claude/room-019fee00-0000-7000-8000-0000000ada02)
-read messages of b-room as room viewer bob-room beta	shown msg(b-room by ada), msg(b-room by bob), msg(b-room by root), msg(b-room by sail), msg(b-room by claude/019fee00-0000-7000-8000-0000000ada01), msg(b-room by claude/019fee00-0000-7000-8000-0000000b0b01), msg(b-room by claude/room-019fee00-0000-7000-8000-0000000ada02)
+read messages of b-room as room viewer bob-room all	shown nothing
+read messages of b-room as room viewer bob-room beta	shown nothing
 read messages of b-room as sync admin root all	shown msg(b-room by ada), msg(b-room by bob), msg(b-room by root), msg(b-room by sail), msg(b-room by claude/019fee00-0000-7000-8000-0000000ada01), msg(b-room by claude/019fee00-0000-7000-8000-0000000b0b01), msg(b-room by claude/room-019fee00-0000-7000-8000-0000000ada02)
 read messages of b-room as sync member ada acme	shown nothing
 read messages of b-room as sync member ada all	shown msg(b-room by ada), msg(b-room by bob), msg(b-room by root), msg(b-room by sail), msg(b-room by claude/019fee00-0000-7000-8000-0000000ada01), msg(b-room by claude/019fee00-0000-7000-8000-0000000b0b01), msg(b-room by claude/room-019fee00-0000-7000-8000-0000000ada02)
@@ -929,6 +942,19 @@ read messages of den as cli viewer ada beta	shown nothing
 read messages of den as cli viewer bob acme	shown msg(den by ada), msg(den by bob), msg(den by root), msg(den by sail), msg(den by claude/019fee00-0000-7000-8000-0000000ada01), msg(den by claude/019fee00-0000-7000-8000-0000000b0b01), msg(den by claude/room-019fee00-0000-7000-8000-0000000ada02)
 read messages of den as cli viewer bob all	shown msg(den by ada), msg(den by bob), msg(den by root), msg(den by sail), msg(den by claude/019fee00-0000-7000-8000-0000000ada01), msg(den by claude/019fee00-0000-7000-8000-0000000b0b01), msg(den by claude/room-019fee00-0000-7000-8000-0000000ada02)
 read messages of den as cli viewer bob beta	shown nothing
+read messages of den as container admin root all	shown msg(den by ada), msg(den by bob), msg(den by root), msg(den by sail), msg(den by claude/019fee00-0000-7000-8000-0000000ada01), msg(den by claude/019fee00-0000-7000-8000-0000000b0b01), msg(den by claude/room-019fee00-0000-7000-8000-0000000ada02)
+read messages of den as container member ada acme	shown msg(den by ada), msg(den by bob), msg(den by root), msg(den by sail), msg(den by claude/019fee00-0000-7000-8000-0000000ada01), msg(den by claude/019fee00-0000-7000-8000-0000000b0b01), msg(den by claude/room-019fee00-0000-7000-8000-0000000ada02)
+read messages of den as container member ada all	shown msg(den by ada), msg(den by bob), msg(den by root), msg(den by sail), msg(den by claude/019fee00-0000-7000-8000-0000000ada01), msg(den by claude/019fee00-0000-7000-8000-0000000b0b01), msg(den by claude/room-019fee00-0000-7000-8000-0000000ada02)
+read messages of den as container member ada beta	shown nothing
+read messages of den as container member bob acme	shown msg(den by ada), msg(den by bob), msg(den by root), msg(den by sail), msg(den by claude/019fee00-0000-7000-8000-0000000ada01), msg(den by claude/019fee00-0000-7000-8000-0000000b0b01), msg(den by claude/room-019fee00-0000-7000-8000-0000000ada02)
+read messages of den as container member bob all	shown msg(den by ada), msg(den by bob), msg(den by root), msg(den by sail), msg(den by claude/019fee00-0000-7000-8000-0000000ada01), msg(den by claude/019fee00-0000-7000-8000-0000000b0b01), msg(den by claude/room-019fee00-0000-7000-8000-0000000ada02)
+read messages of den as container member bob beta	shown nothing
+read messages of den as container viewer ada acme	shown msg(den by ada), msg(den by bob), msg(den by root), msg(den by sail), msg(den by claude/019fee00-0000-7000-8000-0000000ada01), msg(den by claude/019fee00-0000-7000-8000-0000000b0b01), msg(den by claude/room-019fee00-0000-7000-8000-0000000ada02)
+read messages of den as container viewer ada all	shown msg(den by ada), msg(den by bob), msg(den by root), msg(den by sail), msg(den by claude/019fee00-0000-7000-8000-0000000ada01), msg(den by claude/019fee00-0000-7000-8000-0000000b0b01), msg(den by claude/room-019fee00-0000-7000-8000-0000000ada02)
+read messages of den as container viewer ada beta	shown nothing
+read messages of den as container viewer bob acme	shown msg(den by ada), msg(den by bob), msg(den by root), msg(den by sail), msg(den by claude/019fee00-0000-7000-8000-0000000ada01), msg(den by claude/019fee00-0000-7000-8000-0000000b0b01), msg(den by claude/room-019fee00-0000-7000-8000-0000000ada02)
+read messages of den as container viewer bob all	shown msg(den by ada), msg(den by bob), msg(den by root), msg(den by sail), msg(den by claude/019fee00-0000-7000-8000-0000000ada01), msg(den by claude/019fee00-0000-7000-8000-0000000b0b01), msg(den by claude/room-019fee00-0000-7000-8000-0000000ada02)
+read messages of den as container viewer bob beta	shown nothing
 read messages of den as main admin bob all	shown msg(den by ada), msg(den by bob), msg(den by root), msg(den by sail), msg(den by claude/019fee00-0000-7000-8000-0000000ada01), msg(den by claude/019fee00-0000-7000-8000-0000000b0b01), msg(den by claude/room-019fee00-0000-7000-8000-0000000ada02)
 read messages of den as room viewer ada-room acme	shown msg(den by ada), msg(den by bob), msg(den by root), msg(den by sail), msg(den by claude/019fee00-0000-7000-8000-0000000ada01), msg(den by claude/019fee00-0000-7000-8000-0000000b0b01), msg(den by claude/room-019fee00-0000-7000-8000-0000000ada02)
 read messages of den as room viewer ada-room all	shown msg(den by ada), msg(den by bob), msg(den by root), msg(den by sail), msg(den by claude/019fee00-0000-7000-8000-0000000ada01), msg(den by claude/019fee00-0000-7000-8000-0000000b0b01), msg(den by claude/room-019fee00-0000-7000-8000-0000000ada02)
@@ -989,6 +1015,19 @@ read messages of ghost as cli viewer ada beta	shown nothing
 read messages of ghost as cli viewer bob acme	shown nothing
 read messages of ghost as cli viewer bob all	shown nothing
 read messages of ghost as cli viewer bob beta	shown nothing
+read messages of ghost as container admin root all	shown nothing
+read messages of ghost as container member ada acme	shown nothing
+read messages of ghost as container member ada all	shown nothing
+read messages of ghost as container member ada beta	shown nothing
+read messages of ghost as container member bob acme	shown nothing
+read messages of ghost as container member bob all	shown nothing
+read messages of ghost as container member bob beta	shown nothing
+read messages of ghost as container viewer ada acme	shown nothing
+read messages of ghost as container viewer ada all	shown nothing
+read messages of ghost as container viewer ada beta	shown nothing
+read messages of ghost as container viewer bob acme	shown nothing
+read messages of ghost as container viewer bob all	shown nothing
+read messages of ghost as container viewer bob beta	shown nothing
 read messages of ghost as main admin bob all	shown nothing
 read messages of ghost as room viewer ada-room acme	shown nothing
 read messages of ghost as room viewer ada-room all	shown nothing
@@ -1049,6 +1088,19 @@ read messages of hall as cli viewer ada beta	shown nothing
 read messages of hall as cli viewer bob acme	shown nothing
 read messages of hall as cli viewer bob all	shown nothing
 read messages of hall as cli viewer bob beta	shown nothing
+read messages of hall as container admin root all	shown nothing
+read messages of hall as container member ada acme	shown nothing
+read messages of hall as container member ada all	shown nothing
+read messages of hall as container member ada beta	shown nothing
+read messages of hall as container member bob acme	shown nothing
+read messages of hall as container member bob all	shown nothing
+read messages of hall as container member bob beta	shown nothing
+read messages of hall as container viewer ada acme	shown nothing
+read messages of hall as container viewer ada all	shown nothing
+read messages of hall as container viewer ada beta	shown nothing
+read messages of hall as container viewer bob acme	shown nothing
+read messages of hall as container viewer bob all	shown nothing
+read messages of hall as container viewer bob beta	shown nothing
 read messages of hall as main admin bob all	shown nothing
 read messages of hall as room viewer ada-room acme	shown nothing
 read messages of hall as room viewer ada-room all	shown nothing
@@ -1109,6 +1161,19 @@ read messages of lobby as cli viewer ada beta	shown nothing
 read messages of lobby as cli viewer bob acme	shown msg(lobby by ada), msg(lobby by bob), msg(lobby by root), msg(lobby by sail), msg(lobby by claude/019fee00-0000-7000-8000-0000000ada01), msg(lobby by claude/019fee00-0000-7000-8000-0000000b0b01), msg(lobby by claude/room-019fee00-0000-7000-8000-0000000ada02)
 read messages of lobby as cli viewer bob all	shown msg(lobby by ada), msg(lobby by bob), msg(lobby by root), msg(lobby by sail), msg(lobby by claude/019fee00-0000-7000-8000-0000000ada01), msg(lobby by claude/019fee00-0000-7000-8000-0000000b0b01), msg(lobby by claude/room-019fee00-0000-7000-8000-0000000ada02)
 read messages of lobby as cli viewer bob beta	shown nothing
+read messages of lobby as container admin root all	shown msg(lobby by ada), msg(lobby by bob), msg(lobby by root), msg(lobby by sail), msg(lobby by claude/019fee00-0000-7000-8000-0000000ada01), msg(lobby by claude/019fee00-0000-7000-8000-0000000b0b01), msg(lobby by claude/room-019fee00-0000-7000-8000-0000000ada02)
+read messages of lobby as container member ada acme	shown msg(lobby by ada), msg(lobby by bob), msg(lobby by root), msg(lobby by sail), msg(lobby by claude/019fee00-0000-7000-8000-0000000ada01), msg(lobby by claude/019fee00-0000-7000-8000-0000000b0b01), msg(lobby by claude/room-019fee00-0000-7000-8000-0000000ada02)
+read messages of lobby as container member ada all	shown msg(lobby by ada), msg(lobby by bob), msg(lobby by root), msg(lobby by sail), msg(lobby by claude/019fee00-0000-7000-8000-0000000ada01), msg(lobby by claude/019fee00-0000-7000-8000-0000000b0b01), msg(lobby by claude/room-019fee00-0000-7000-8000-0000000ada02)
+read messages of lobby as container member ada beta	shown nothing
+read messages of lobby as container member bob acme	shown msg(lobby by ada), msg(lobby by bob), msg(lobby by root), msg(lobby by sail), msg(lobby by claude/019fee00-0000-7000-8000-0000000ada01), msg(lobby by claude/019fee00-0000-7000-8000-0000000b0b01), msg(lobby by claude/room-019fee00-0000-7000-8000-0000000ada02)
+read messages of lobby as container member bob all	shown msg(lobby by ada), msg(lobby by bob), msg(lobby by root), msg(lobby by sail), msg(lobby by claude/019fee00-0000-7000-8000-0000000ada01), msg(lobby by claude/019fee00-0000-7000-8000-0000000b0b01), msg(lobby by claude/room-019fee00-0000-7000-8000-0000000ada02)
+read messages of lobby as container member bob beta	shown nothing
+read messages of lobby as container viewer ada acme	shown msg(lobby by ada), msg(lobby by bob), msg(lobby by root), msg(lobby by sail), msg(lobby by claude/019fee00-0000-7000-8000-0000000ada01), msg(lobby by claude/019fee00-0000-7000-8000-0000000b0b01), msg(lobby by claude/room-019fee00-0000-7000-8000-0000000ada02)
+read messages of lobby as container viewer ada all	shown msg(lobby by ada), msg(lobby by bob), msg(lobby by root), msg(lobby by sail), msg(lobby by claude/019fee00-0000-7000-8000-0000000ada01), msg(lobby by claude/019fee00-0000-7000-8000-0000000b0b01), msg(lobby by claude/room-019fee00-0000-7000-8000-0000000ada02)
+read messages of lobby as container viewer ada beta	shown nothing
+read messages of lobby as container viewer bob acme	shown msg(lobby by ada), msg(lobby by bob), msg(lobby by root), msg(lobby by sail), msg(lobby by claude/019fee00-0000-7000-8000-0000000ada01), msg(lobby by claude/019fee00-0000-7000-8000-0000000b0b01), msg(lobby by claude/room-019fee00-0000-7000-8000-0000000ada02)
+read messages of lobby as container viewer bob all	shown msg(lobby by ada), msg(lobby by bob), msg(lobby by root), msg(lobby by sail), msg(lobby by claude/019fee00-0000-7000-8000-0000000ada01), msg(lobby by claude/019fee00-0000-7000-8000-0000000b0b01), msg(lobby by claude/room-019fee00-0000-7000-8000-0000000ada02)
+read messages of lobby as container viewer bob beta	shown nothing
 read messages of lobby as main admin bob all	shown msg(lobby by ada), msg(lobby by bob), msg(lobby by root), msg(lobby by sail), msg(lobby by claude/019fee00-0000-7000-8000-0000000ada01), msg(lobby by claude/019fee00-0000-7000-8000-0000000b0b01), msg(lobby by claude/room-019fee00-0000-7000-8000-0000000ada02)
 read messages of lobby as room viewer ada-room acme	shown msg(lobby by ada), msg(lobby by root), msg(lobby by sail), msg(lobby by claude/019fee00-0000-7000-8000-0000000ada01), msg(lobby by claude/room-019fee00-0000-7000-8000-0000000ada02)
 read messages of lobby as room viewer ada-room all	shown msg(lobby by ada), msg(lobby by root), msg(lobby by sail), msg(lobby by claude/019fee00-0000-7000-8000-0000000ada01), msg(lobby by claude/room-019fee00-0000-7000-8000-0000000ada02)
@@ -1169,6 +1234,19 @@ read messages of s-ada as cli viewer ada beta	shown nothing
 read messages of s-ada as cli viewer bob acme	shown msg(s-ada by ada), msg(s-ada by bob), msg(s-ada by root), msg(s-ada by sail), msg(s-ada by claude/019fee00-0000-7000-8000-0000000ada01), msg(s-ada by claude/019fee00-0000-7000-8000-0000000b0b01), msg(s-ada by claude/room-019fee00-0000-7000-8000-0000000ada02)
 read messages of s-ada as cli viewer bob all	shown msg(s-ada by ada), msg(s-ada by bob), msg(s-ada by root), msg(s-ada by sail), msg(s-ada by claude/019fee00-0000-7000-8000-0000000ada01), msg(s-ada by claude/019fee00-0000-7000-8000-0000000b0b01), msg(s-ada by claude/room-019fee00-0000-7000-8000-0000000ada02)
 read messages of s-ada as cli viewer bob beta	shown nothing
+read messages of s-ada as container admin root all	shown msg(s-ada by ada), msg(s-ada by bob), msg(s-ada by root), msg(s-ada by sail), msg(s-ada by claude/019fee00-0000-7000-8000-0000000ada01), msg(s-ada by claude/019fee00-0000-7000-8000-0000000b0b01), msg(s-ada by claude/room-019fee00-0000-7000-8000-0000000ada02)
+read messages of s-ada as container member ada acme	shown msg(s-ada by ada), msg(s-ada by bob), msg(s-ada by root), msg(s-ada by sail), msg(s-ada by claude/019fee00-0000-7000-8000-0000000ada01), msg(s-ada by claude/019fee00-0000-7000-8000-0000000b0b01), msg(s-ada by claude/room-019fee00-0000-7000-8000-0000000ada02)
+read messages of s-ada as container member ada all	shown msg(s-ada by ada), msg(s-ada by bob), msg(s-ada by root), msg(s-ada by sail), msg(s-ada by claude/019fee00-0000-7000-8000-0000000ada01), msg(s-ada by claude/019fee00-0000-7000-8000-0000000b0b01), msg(s-ada by claude/room-019fee00-0000-7000-8000-0000000ada02)
+read messages of s-ada as container member ada beta	shown nothing
+read messages of s-ada as container member bob acme	shown msg(s-ada by ada), msg(s-ada by bob), msg(s-ada by root), msg(s-ada by sail), msg(s-ada by claude/019fee00-0000-7000-8000-0000000ada01), msg(s-ada by claude/019fee00-0000-7000-8000-0000000b0b01), msg(s-ada by claude/room-019fee00-0000-7000-8000-0000000ada02)
+read messages of s-ada as container member bob all	shown msg(s-ada by ada), msg(s-ada by bob), msg(s-ada by root), msg(s-ada by sail), msg(s-ada by claude/019fee00-0000-7000-8000-0000000ada01), msg(s-ada by claude/019fee00-0000-7000-8000-0000000b0b01), msg(s-ada by claude/room-019fee00-0000-7000-8000-0000000ada02)
+read messages of s-ada as container member bob beta	shown nothing
+read messages of s-ada as container viewer ada acme	shown msg(s-ada by ada), msg(s-ada by bob), msg(s-ada by root), msg(s-ada by sail), msg(s-ada by claude/019fee00-0000-7000-8000-0000000ada01), msg(s-ada by claude/019fee00-0000-7000-8000-0000000b0b01), msg(s-ada by claude/room-019fee00-0000-7000-8000-0000000ada02)
+read messages of s-ada as container viewer ada all	shown msg(s-ada by ada), msg(s-ada by bob), msg(s-ada by root), msg(s-ada by sail), msg(s-ada by claude/019fee00-0000-7000-8000-0000000ada01), msg(s-ada by claude/019fee00-0000-7000-8000-0000000b0b01), msg(s-ada by claude/room-019fee00-0000-7000-8000-0000000ada02)
+read messages of s-ada as container viewer ada beta	shown nothing
+read messages of s-ada as container viewer bob acme	shown msg(s-ada by ada), msg(s-ada by bob), msg(s-ada by root), msg(s-ada by sail), msg(s-ada by claude/019fee00-0000-7000-8000-0000000ada01), msg(s-ada by claude/019fee00-0000-7000-8000-0000000b0b01), msg(s-ada by claude/room-019fee00-0000-7000-8000-0000000ada02)
+read messages of s-ada as container viewer bob all	shown msg(s-ada by ada), msg(s-ada by bob), msg(s-ada by root), msg(s-ada by sail), msg(s-ada by claude/019fee00-0000-7000-8000-0000000ada01), msg(s-ada by claude/019fee00-0000-7000-8000-0000000b0b01), msg(s-ada by claude/room-019fee00-0000-7000-8000-0000000ada02)
+read messages of s-ada as container viewer bob beta	shown nothing
 read messages of s-ada as main admin bob all	shown msg(s-ada by ada), msg(s-ada by bob), msg(s-ada by root), msg(s-ada by sail), msg(s-ada by claude/019fee00-0000-7000-8000-0000000ada01), msg(s-ada by claude/019fee00-0000-7000-8000-0000000b0b01), msg(s-ada by claude/room-019fee00-0000-7000-8000-0000000ada02)
 read messages of s-ada as room viewer ada-room acme	shown msg(s-ada by ada), msg(s-ada by root), msg(s-ada by sail), msg(s-ada by claude/019fee00-0000-7000-8000-0000000ada01), msg(s-ada by claude/room-019fee00-0000-7000-8000-0000000ada02)
 read messages of s-ada as room viewer ada-room all	shown msg(s-ada by ada), msg(s-ada by root), msg(s-ada by sail), msg(s-ada by claude/019fee00-0000-7000-8000-0000000ada01), msg(s-ada by claude/room-019fee00-0000-7000-8000-0000000ada02)
@@ -1229,6 +1307,19 @@ read messages of s-bob as cli viewer ada beta	shown nothing
 read messages of s-bob as cli viewer bob acme	shown nothing
 read messages of s-bob as cli viewer bob all	shown nothing
 read messages of s-bob as cli viewer bob beta	shown nothing
+read messages of s-bob as container admin root all	shown nothing
+read messages of s-bob as container member ada acme	shown nothing
+read messages of s-bob as container member ada all	shown nothing
+read messages of s-bob as container member ada beta	shown nothing
+read messages of s-bob as container member bob acme	shown nothing
+read messages of s-bob as container member bob all	shown nothing
+read messages of s-bob as container member bob beta	shown nothing
+read messages of s-bob as container viewer ada acme	shown nothing
+read messages of s-bob as container viewer ada all	shown nothing
+read messages of s-bob as container viewer ada beta	shown nothing
+read messages of s-bob as container viewer bob acme	shown nothing
+read messages of s-bob as container viewer bob all	shown nothing
+read messages of s-bob as container viewer bob beta	shown nothing
 read messages of s-bob as main admin bob all	shown nothing
 read messages of s-bob as room viewer ada-room acme	shown nothing
 read messages of s-bob as room viewer ada-room all	shown nothing

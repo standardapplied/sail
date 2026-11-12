@@ -43,6 +43,10 @@ public enum ErrorCode {
   RUN_ON_OTHER_NODE(409),
   NOT_YOUR_SPEC(403),
   READ_ONLY_CREDENTIAL(403),
+  /**
+   * Refused by the caller's lane: an agent's, and also the in-container credential's, which answers
+   * with this wire name too since it is the one every client reads for a lane's refusal.
+   */
   AGENT_LANE_FORBIDDEN(403),
   FORBIDDEN_NOT_ASSIGNEE(403),
   FORBIDDEN_ADMIN_ONLY(403),

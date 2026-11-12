@@ -44,6 +44,7 @@ class SpecCliSocketReachabilityIT extends AbstractIncusIT {
 
   private static final String CONTAINER = "sail-it-spec-socket";
   private static final String SPEC_ID = "reachability-probe";
+  private static final String OTHER_SPEC = "reachability-other";
   private static final Path CONTAINER_DIR = Path.of("/var/lib/sail/run");
 
   @Test
@@ -58,7 +59,8 @@ class SpecCliSocketReachabilityIT extends AbstractIncusIT {
       new SchemaManager(db).migrate();
       HeldProjects.hold(db, CONTAINER);
       var specStore = new SpecStore(db);
-      Acting.as("it", () -> specStore.create(seededSpec()));
+      Acting.as("it", () -> specStore.create(seededSpec(SPEC_ID)));
+      Acting.as("it", () -> specStore.create(seededSpec(OTHER_SPEC)));
       var runStore = new RunStore(db);
       var reservation =
           (RunStore.Reservation.Reserved)
@@ -249,6 +251,48 @@ class SpecCliSocketReachabilityIT extends AbstractIncusIT {
         assertTrue(
             bogus.stdout().contains("401"),
             "a forged box credential must be refused: " + bogus.stdout());
+
+        var elsewhere =
+            exec(
+                CONTAINER,
+                List.of(
+                    "curl",
+                    "--silent",
+                    "--unix-socket",
+                    CONTAINER_DIR.resolve("api.sock").toString(),
+                    "-H",
+                    "Authorization: Bearer " + credential,
+                    "-w",
+                    "\\n%{http_code}",
+                    "-X",
+                    "POST",
+                    "--data-urlencode",
+                    "body=off my work",
+                    "http://sail/v1/specs/" + OTHER_SPEC + "/messages"));
+        assertTrue(
+            elsewhere.stdout().endsWith("\n403")
+                && elsewhere
+                    .stdout()
+                    .contains("may post only in its own work, not in '" + OTHER_SPEC + "'."),
+            "a run posts only in its own work: " + elsewhere.stdout());
+
+        var done =
+            exec(
+                CONTAINER,
+                List.of(
+                    "bash",
+                    "-c",
+                    "curl --silent -w '\\n%{http_code}' --unix-socket "
+                        + CONTAINER_DIR.resolve("api.sock")
+                        + " -H \"Authorization: Bearer $(cat "
+                        + CONTAINER_DIR.resolve(BoxCredentialFile.FILE_NAME)
+                        + ")\" -X PUT --data-urlencode status=done http://sail/v1/specs/"
+                        + SPEC_ID));
+        assertTrue(
+            done.stdout().endsWith("\n403")
+                && done.stdout()
+                    .contains("The credential in a project container cannot approve specs."),
+            "the box credential in the container moves no status: " + done.stdout());
       }
     } finally {
       deleteContainerQuietly(CONTAINER);
@@ -257,9 +301,9 @@ class SpecCliSocketReachabilityIT extends AbstractIncusIT {
     }
   }
 
-  private static SpecStore.SpecRow seededSpec() {
+  private static SpecStore.SpecRow seededSpec(String id) {
     return new SpecStore.SpecRow(
-        SPEC_ID,
+        id,
         CONTAINER,
         "Reachability probe",
         SpecStatus.PENDING,

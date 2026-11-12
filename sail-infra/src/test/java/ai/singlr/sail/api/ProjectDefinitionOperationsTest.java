@@ -111,7 +111,7 @@ class ProjectDefinitionOperationsTest {
   @Test
   void aProjectOutsideTheReadersScopeOrNotHeldIsNotFound() {
     var scoped =
-        new Actor("mady", Role.MEMBER, Actor.Lane.API, null, ProjectScope.of(Set.of("beta")));
+        new Actor("mady", Role.MEMBER, Actor.Lane.API).withScope(ProjectScope.of(Set.of("beta")));
 
     var outside =
         assertThrows(
@@ -136,7 +136,7 @@ class ProjectDefinitionOperationsTest {
   @Test
   void aProjectOutsideTheCreatorsScopeIsRefusedByTheScopeRuleNamingTheGrantThatAllowsIt() {
     var scoped =
-        new Actor("mady", Role.MEMBER, Actor.Lane.API, null, ProjectScope.of(Set.of("beta")));
+        new Actor("mady", Role.MEMBER, Actor.Lane.API).withScope(ProjectScope.of(Set.of("beta")));
 
     var refused =
         assertThrows(

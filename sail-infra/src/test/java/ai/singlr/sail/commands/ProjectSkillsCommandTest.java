@@ -29,6 +29,7 @@ import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Base64;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -198,7 +199,7 @@ class ProjectSkillsCommandTest {
           e2e          shared  Claude Code  ok
           sail-portal  sail    Claude Code  ok
           spec-board   sail    Claude Code  ok
-          java         local   Claude Code  not synced: share it with 'skill add ~/.claude/skills/java' in the container
+          java         local   Claude Code  not synced: share it with 'sail project skills add --container /home/dev/.claude/skills/java -p acme'
         """,
         CommandLine.Help.Ansi.OFF.string(ran.out()));
   }
@@ -217,7 +218,12 @@ class ProjectSkillsCommandTest {
             row("e2e", "shared", 1, "ok", null),
             row("sail-portal", "sail", 2, "ok", null),
             row("spec-board", "sail", 2, "ok", null),
-            row("java", "local", 0, "not synced", "skill add ~/.claude/skills/java")),
+            row(
+                "java",
+                "local",
+                0,
+                "not synced",
+                "sail project skills add --container /home/dev/.claude/skills/java -p acme")),
         parsed.get("skills"));
     assertNull(parsed.get("note"));
   }
@@ -257,6 +263,28 @@ class ProjectSkillsCommandTest {
         "  ✓ Shared skill e2e (3 files) on acme; it is installed for Claude Code at the next"
             + " launch or apply.\n",
         CommandLine.Help.Ansi.OFF.string(ran.out()));
+  }
+
+  /** With --container, the folder is a path inside the project's container, read there. */
+  @Test
+  void addWithContainerSharesAFolderThatLivesInTheProjectsContainer() {
+    shell
+        .onOk("incus list", "[{\"name\": \"acme\", \"status\": \"Running\"}]")
+        .onOk("-printf", "f " + E2E.length() + " 644 SKILL.md\0")
+        .onOk("base64", Base64.getEncoder().encodeToString(E2E.getBytes(StandardCharsets.UTF_8)));
+
+    var ran = add("-p", "acme", "--container", "/home/dev/.agents/skills/e2e");
+
+    assertEquals(0, ran.exit(), ran.err() + ran.escaped());
+    assertEquals(List.of(".sail/skills/e2e/SKILL.md"), shared());
+    assertEquals(
+        "  ✓ Shared skill e2e (1 file) on acme; it is installed for Claude Code at the next"
+            + " launch or apply.\n",
+        CommandLine.Help.Ansi.OFF.string(ran.out()));
+    assertTrue(
+        shell.invocations().stream()
+            .anyMatch(command -> command.contains("/home/dev/.agents/skills/e2e")),
+        "the folder is read in the container, not on this box");
   }
 
   @Test

@@ -332,6 +332,11 @@ readonly ASK_UDAY_TO_OPERATE='Ask uday to operate it, or have an admin do it.'
 readonly AGENT_VERB_RUNS_AS_THE_BOX="'agent stop' reads this box's control plane directly, as the box's own person, so it is not available over an SSH-key session."
 readonly FOLLOW_WITH_SPEC="Follow the work with 'sail spec' and the board, or SSH to the host directly to run it."
 readonly NO_SYNC_SESSION='sync: main serves no session whose token is missing, invalid or expired'
+readonly CONTAINER_CANNOT_APPROVE='The credential in a project container cannot approve specs.'
+readonly PROMOTE_FROM_OUTSIDE="Do it from outside the container: 'sail spec update e21 --status <status>' on the host, or Mast."
+readonly CONTAINER_CANNOT_SHARE='The credential in a project container cannot share files and skills in projects.'
+readonly SHARE_FROM_OUTSIDE="Do it from outside the container: 'sail project skills add --container <folder> -p acme' or 'sail project skills rm <skill> -p acme' on the host, or Mast."
+readonly FLEET_SKILL='mkdir -p /home/dev/fleet-skill && printf -- "---\\nname: fleet-skill\\ndescription: A fleet check.\\n---\\nCheck.\\n" > /home/dev/fleet-skill/SKILL.md'
 
 doors() {
   local run=${1:-} before
@@ -727,6 +732,39 @@ access() {
   check "$run" "eng triggers a sync round on main, uday's box: refused [HTTP]" \
     naming "$ASK_UDAY_TO_OPERATE" http_token_door "$run" main eng member 403 POST /v1/sync '{}' "$MAIN_IS_UDAYS"
   check "$run" "eng triggers a sync round on its own box [HTTP]" http_token_door "$run" eng eng member 200 POST /v1/sync '{}'
+  container_lane "$run"
+}
+
+# Rows 20 and 21 of the matrix: the box credential in a project container, which whatever runs
+# there can read, has the in-container column. eng's own shell in its acme presents exactly the
+# credential an agent would read from the file, so these rows need no agent. Each refusal has a
+# positive control beside it: the same credential writing what it may, or the same act from
+# outside the container.
+container_lane() {
+  local run=${1:-}
+  [[ -n $run ]] || usage
+  check "$run" "eng writes e21 for itself, a draft [CLI]" \
+    allowed "$run" eng "sudo sail spec create -p acme --id e21 --title 'eng owns e21' --assignee eng"
+  check "$run" "matrix 20: eng's in-container credential comments on e1 as eng [socket]" \
+    container_allows "$run" eng acme "spec comment e1 --body 'eng inside acme on e1'"
+  check "$run" "matrix 21: eng's in-container credential retitles e1, which eng owns: the control [socket]" \
+    container_allows "$run" eng acme "spec update e1 --title 'eng retitles e1 inside acme'"
+  check "$run" "matrix 21: eng's in-container credential reassigns e1 to client, refused admin-only, role before lane [socket]" \
+    naming "$ASK_AN_ADMIN" container_refuses "$run" eng acme "$E1_ADMIN_ONLY" "spec update e1 --assignee client"
+  check "$run" "matrix 21: eng's in-container credential sets e21 ready, refused naming the container lane [socket]" \
+    naming "$PROMOTE_FROM_OUTSIDE" container_refuses "$run" eng acme "$CONTAINER_CANNOT_APPROVE" "spec update e21 --status pending"
+  check "$run" "matrix 21: eng sets e21 ready from the host: the control [CLI]" \
+    allowed "$run" eng "sudo sail spec update e21 --status pending"
+  check "$run" "matrix 21: eng's in-container credential marks e21 done, refused naming the container lane [socket]" \
+    naming "$PROMOTE_FROM_OUTSIDE" container_refuses "$run" eng acme "$CONTAINER_CANNOT_APPROVE" "spec update e21 --status done"
+  check "$run" "matrix 21: eng's in-container credential shares a skill, refused naming the container lane [socket]" \
+    naming "$SHARE_FROM_OUTSIDE" container_refuses "$run" eng acme "$CONTAINER_CANNOT_SHARE" "$FLEET_SKILL && skill add /home/dev/fleet-skill"
+  check "$run" "skill add from the host shares the folder in eng's acme container: the control [CLI]" \
+    allowed "$run" eng "sudo sail project skills add --container /home/dev/fleet-skill -p acme"
+  check "$run" "and eng's box lists it shared [CLI]" \
+    allowed "$run" eng "sudo sail project skills ls -p acme | grep -E '^ +fleet-skill +shared '"
+  check "$run" "eng stops sharing it from the host [CLI]" \
+    allowed "$run" eng "sudo sail project skills rm fleet-skill -p acme"
 }
 
 file_on() {

@@ -2224,8 +2224,8 @@ whether its sender speaks for this box, whether it retells, and whether this box
 Those the machinery acts on are taken first-hand only from whoever speaks for this box (its FDE,
 or an admin), and retold only by one who may take the action on the work, about a run this box
 did not execute. A run's narration is a person's only on the box that executed it; a run's own
-principal narrates its own run alone, and publishes nothing else. An announcement is retold by
-any voice that acts for an FDE, about a conversation.
+principal narrates its own run alone, and publishes nothing else that is taken at its word. An
+announcement is retold by any voice that acts for an FDE, about a conversation.
 
 The host token acts as the box's FDE: an admin on main or a standalone box, the synced
 roster role on a node. The socket's event route takes a run credential only; the box
@@ -2283,9 +2283,11 @@ the row in hand. It is reached in this order, so one principal hears the same re
 2. Audience: a resource filed under a project outside the principal's scope is not found. A box and
    the org's people are filed under none.
 3. Role: the role's cell says no: refused, read-only or admin-only; unless the agent's lane grants
-   the action on its own work, which decides it alone whatever the role, so a room agent,
-   read-only by construction, posts in its room and narrates its run.
-4. Lane: an agent's lane says no: refused, naming the lane.
+   the action as its own, which decides it alone whatever the role, so a room agent, read-only by
+   construction, posts in its room and narrates its run.
+4. Lane: the lane of an agent or of the in-container credential says no: refused, naming the
+   lane; or an agent's lane narrows the action to its own work, and the resource is not: refused,
+   naming the work.
 5. Ownership: the role's cell says owner and the principal is neither an admin nor acting for an
    owner, or it starts work in the room a spec was born in (creates or claims the spec there)
    without acting for that room's owners: refused, naming the owners.
@@ -2300,35 +2302,51 @@ the rule's own facts. A deletion of an id this box holds no head of is decided a
 a birth, as on main. A door's placement comes after `Access` too. The table is
 `Policy`, and this copy of it is generated (`PolicyTableTest`):
 
-| Action | Covers | Viewer | Member | Admin | Work agent | Read-only room agent |
-| --- | --- | --- | --- | --- | --- | --- |
-| Read | specs, rooms, messages, runs, files, projects | yes | yes | yes | yes | yes |
-| Read a definition | a project's definition | no | yes | yes | yes | no |
-| Post | a message in a conversation | no | yes | yes | yes | own work |
-| Create | a spec, a room, a project | no | yes | yes | yes | no |
-| Change | edit, delete or restore a spec or room; settle a parked conflict | no | owner | yes | yes | no |
-| Claim | take an unassigned spec; one born in a room also needs that room's owners | no | yes | yes | yes | no |
-| Assign | give or move a spec to someone | no | no | yes | no | no |
-| Approve | promote a draft to ready; approve or dismiss findings; mark done | no | owner | yes | yes | no |
-| Dispatch | dispatch or resume a spec; seat or remove a room agent | no | owner | yes | no | no |
-| Operate a run | stop it; attach to it; read its log | no | owner | yes | no | no |
-| Narrate | a run's reports about itself: events, session, inbox acks | no | owner | yes | own work | own work |
-| Share | add, change or remove project files and skills | no | yes | yes | yes | no |
-| Serve | start and stop the project's processes | no | yes | yes | yes | no |
-| Restore | restore or delete a snapshot | no | yes | yes | yes | no |
-| Configure | change a project's definition | no | yes | yes | yes | no |
-| Prune | erase a spec everywhere, once archived, cancelled or deleted | no | owner | yes | no | no |
-| Purge | erase a project everywhere; a retention sweep | no | no | yes | no | no |
-| Manage people | add, change role, grant, remove, pair, mint tokens | no | no | yes | no | no |
-| Operate the box | sync now; read sync health and bus stats; point the box at another main | owner | owner | yes | no | no |
+| Action | Covers | Viewer | Member | Admin | Work agent | Read-only room agent | In-container credential |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| Read | specs, rooms, messages, runs, files, projects | yes | yes | yes | yes | yes | yes |
+| Read a definition | a project's definition | no | yes | yes | own work | no | yes |
+| Post | a message in a conversation | no | yes | yes | own work | its own | yes |
+| Create | a spec, a room, a project | no | yes | yes | own work | no | yes |
+| Change | edit, delete or restore a spec or room; settle a parked conflict | no | owner | yes | own work | no | yes |
+| Claim | take an unassigned spec; one born in a room also needs that room's owners | no | yes | yes | no | no | yes |
+| Assign | give or move a spec to someone | no | no | yes | no | no | no |
+| Approve | move a spec's status (promote, done, archive, cancel) or create it ready; approve or dismiss findings | no | owner | yes | no | no | no |
+| Dispatch | dispatch or resume a spec; seat or remove a room agent | no | owner | yes | no | no | no |
+| Operate a run | stop it; attach to it; read its log | no | owner | yes | no | no | no |
+| Narrate | a run's reports about itself: events, session, inbox acks | no | owner | yes | its own | its own | no |
+| Share | add, change or remove project files and skills | no | yes | yes | no | no | no |
+| Serve | start and stop the project's processes | no | yes | yes | own work | no | yes |
+| Restore | restore or delete a snapshot | no | yes | yes | no | no | no |
+| Configure | change a project's definition | no | yes | yes | no | no | no |
+| Prune | erase a spec everywhere, once archived, cancelled or deleted | no | owner | yes | no | no | no |
+| Purge | erase a project everywhere; a retention sweep | no | no | yes | no | no | no |
+| Manage people | add, change role, grant, remove, pair, mint tokens | no | no | yes | no | no | no |
+| Operate the box | sync now; read sync health and bus stats; point the box at another main | owner | owner | yes | no | no | no |
 
 A person reads the column of their role on every lane they come in by, a push over sync included.
 An agent reads its role's column too (its person's, capped by the lane), and its lane's column
-narrows it: a lane cell is yes (it narrows nothing), no, or own work, the lane's own grant whatever
-the role; whose the work is, is the role column's to say. A cell holds today's answer where the
-agreed design changes it, and `Policy` names the spec that does; the in-container credential is
-its person's on the CLI lane until sail-agents-act-on-their-own-work gives it a lane and a column
-of its own. A question asked before there is one resource, a prune by policy or of a whole
+narrows it: a lane cell is yes (it narrows nothing), no, own work (the agent's own work alone, as
+its role allows, asked after the role and before the owner), or its own (the lane's own grant on
+its own work whatever the role: a run narrating itself, a room agent posting in its room); whose
+the work is, is the role column's to say. An agent's work (`Actor.Work`, which only `RoleRule`
+builds from the run) is its spec, in that spec's room, for a build, review, fix or a room member
+of a spec's room; its room for a spec-less room member; its whole project for an ad-hoc run; and
+every spec it made, read from the journal's first revision of the spec (`ChangeLog.bornBy`) with
+that spec's own room, all within its work's project. It files a spec only under its project,
+born in no room or its own, moves none out of it (a revision that moves a spec's or a room's
+project is a Change where it lands as well as where it was), posts in the room of none a person
+moved out of it (the room stays filed where it was, so the post is decided where the spec is as
+well), and creates no room but a spec's own. A read-only room agent reads its room's project
+alone, which `RoleRule` narrows its scope to, so the table's Read stays yes. A run credential readable by
+another run of the same person gains only that run's agent column, which is accepted until runs
+are isolated. A cell holds today's answer where the
+agreed design changes it, and `Policy` names the spec that does. The box credential presented in
+a project container is its person, narrowed by its own column (`Actor.Lane.CONTAINER`, the
+`In-container credential` column): whatever runs in the container can read it, so it carries no
+human gate (assigning, approving, sharing skills, operating the box), whoever presents it, and the
+role column still says whose the work is; its refusals name the door outside the container that
+takes the action (the host CLI, or Mast). A question asked before there is one resource, a prune by policy or of a whole
 project, a conflict's resolution, or again once an erased spec has nothing left to own, is the
 role and lane alone (`Access.atAll`), answered as a refusal or none, never not found; a lane's
 grant on its own work alone is refused there, since no work is in hand.
@@ -2369,7 +2387,7 @@ does not hold is answered before that, and the rule's own facts after it:
 
 | Rule | Actions | Its own facts |
 | --- | --- | --- |
-| `SpecAuthority` | a birth is Create, plus Claim or Assign for one born in another room naming an assignee; an edit, tombstone or restore is Change; moving a live spec's assignee is Claim (an unassigned spec, for the FDE the actor acts as) or Assign | not held: a project this box holds, a conversation it holds to be born in (what no one here can own is an admin's, `Access.unowned`); taking a room's reserved id from its owner is Assign of the room; facts: a push names only its pusher; `room_id` never changes; a spec's id is reserved for its own room |
+| `SpecAuthority` | a birth is Create, plus Claim or Assign for one born in another room naming an assignee; an edit, tombstone or restore is Change; moving a live spec's assignee is Claim (an unassigned spec, for the FDE the actor acts as) or Assign; a move of its status, and a birth in any status but draft, then Approve, of the role and lane alone (`Access.atAll`), since whose the spec is the other actions asked | not held: a project this box holds, a conversation it holds to be born in (what no one here can own is an admin's, `Access.unowned`); taking a room's reserved id from its owner is Assign of the room; facts: a push names only its pusher; `room_id` never changes; a spec's id is reserved for its own room |
 | `RoomAuthority` | a birth is Create; every later revision, tombstone included, is Change of its settings | not held: a project this box holds; facts: attribution |
 | `MessageAuthority` | Post in its conversation | not held: a conversation this box holds; facts: a credential acting for no FDE posts nothing; both are of what no one here can own, an admin's (`Access.unowned`); as whom a pusher posts |
 | `RunAuthority` | a run's own session report by its own principal is Narrate; every other revision is Change | its principals are its own; attribution; spec and room never change; a run names a spec or a room, never both; a pushed run is its executing box's |
@@ -2393,8 +2411,11 @@ run's reports of itself are Narrate, a run's stop or failure Operate a run, a di
 Dispatch, the review types Approve, a message's announcement Post, and an event about the box
 Operate the box. The rule keeps three facts: whether its sender speaks for this box (Operate the
 box) or only retells what another box did, whether this box executed the run (a person's
-narration, an admin's included, is believed only of a run this box executed), and that a run's
-own principal publishes only its own run's narration (until sail-agents-act-on-their-own-work).
+narration, an admin's included, is believed only of a run this box executed, and a run's own
+principal of its own run, whose credential only the executing box holds), and that an agent's
+announcement is never taken at its word: it retells nothing, since the socket strips `source`. An
+agent is decided like anyone, the run it names as Narrate's resource, and hears its own words: an
+agent narrates only its own run, and every other type but an announcement is not for agents.
 Work outside the sender's scope is not found.
 
 **Reads and sync.** Read is yes in every column, so a read is the audience alone. One read filter
@@ -2415,7 +2436,8 @@ it implies the room rule's Change), stop (Operate a run), posting into a room wi
 (the terminal's room pin and a room session's report ask the message rule's own post,
 `MessageAuthority.post`, the one decision of a rule a door asks, since a post with no message to
 journal still answers to the rule's fact that a post is someone's), serving a stack, restoring a
-snapshot and reading a definition (`ProjectGate`, the one project gate), pruning, resolving a
+snapshot, reading a definition, and sharing or removing a skill before its folder is read
+(`ProjectGate`, the one project gate), pruning, resolving a
 conflict, reading a run's log and attaching to it (Operate a run, then placement, as a stop), sync
 now, sync health,
 bus stats and pointing the box at another main (Operate the box), managing people (the passkey
@@ -2464,10 +2486,10 @@ every table the server mounts, and the socket's, whole; fails a context created 
 is proven by that router's own tests, not by the sweep. The socket's table also carries what it
 has always answered a method a pattern does not serve, each pattern's last route.
 
-The facts that read a lane or role to know which applies, and the checks of an agent's own work
-until `sail-agents-act-on-their-own-work`, are the allowlist of `OneDecisionSweepTest`. It sees
-every such read compiled code makes: of a role, a lane (`peer` and `owner` included), a scope or
-whom an actor acts for, a scope widened (`withScope`), a principal minted with its role
+The facts that read a lane or role to know which applies are the allowlist of
+`OneDecisionSweepTest`. It sees every such read compiled code makes: of a role, a lane (`peer` and
+`owner` included), a scope, an agent's work or whom an actor acts for, a scope or a work widened
+(`withScope`, `withWork`), a principal minted with its role
 (`agentPrincipal`, `roomPrincipal`, `main`), whoami's view of a role outside the two whoami
 handlers, a role constant, resolver (`values` and `valueOf` included) or `switch`, a type check
 of the socket's run or box caller, and an audience asked of a project in Java (`Access.audience`
@@ -2660,8 +2682,12 @@ no pairing is removed through the gateway as before, and no key file is touched.
     the terminal are refused: nothing acts as an FDE the box cannot place
     (`CliOperator.unplaced`).
   - **A run's credential** acts as the run's principal, with the role `RoleRule` gives the FDE
-    the run acts for, capped by its lane (`member` for an agent run, `viewer` for a room run).
-    A run whose FDE is disabled is refused at the socket.
+    the run acts for, capped by its lane (`member` for an agent run, `viewer` for a room run),
+    on the work it was launched for (`Actor.Work`); a room run reads its own project alone. A
+    run whose FDE is disabled is refused at the socket.
+  - **The box credential in a container** acts as the box's person on the
+    `CONTAINER` lane, whose column carries no human gate: whatever runs in the container can
+    read the file.
 - **Whose a row is** is `Resources`' (the Access section above), each owner rule once. Owning
   a spec born in a room gives a voice in its conversation, never its settings. A spec left
   without an assignee stays unassigned, and so does its identity room; dispatch refuses it until
@@ -2786,7 +2812,7 @@ no pairing is removed through the gateway as before, and no key file is touched.
   at rest in the local-only `run_credentials` table. The credential authenticates the
   in-container lane; every run finisher revokes it and the expired-row sweep collects
   stragglers. What an agent principal may do is its lane's column of the Access table, its
-  person's role capped by the lane. Agent-ness is a relationship, not a type: the owner link is
+  person's role capped by the lane, on its own work. Agent-ness is a relationship, not a type: the owner link is
   attribution and its column, never a separate authorization system.
 - **Tokens.** Host-local bearer tokens are SHA-256 hashed at rest, returned in plaintext
   once, and stored `0600` under a `0700` `~/.sail`. They carry a 90-day default expiry, where

@@ -402,7 +402,8 @@ class RunDeliveryOperationsTest {
   void aRunCredentialActingForNoOneReportsNoRoomSession() {
     var failure =
         Actor.call(
-                Actor.agentPrincipal("claude/run-x", null),
+                Actor.agentPrincipal("claude/run-x", null)
+                    .withWork(Actor.Work.of("acme", null, "room")),
                 () -> operations.recordRoomConversation("room", "claude-code", "abc", null, null))
             .asFailure();
 

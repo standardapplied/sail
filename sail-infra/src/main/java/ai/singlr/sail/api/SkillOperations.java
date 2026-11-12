@@ -5,6 +5,10 @@
 
 package ai.singlr.sail.api;
 
+import ai.singlr.sail.access.Action;
+import ai.singlr.sail.access.Refusal;
+import ai.singlr.sail.common.Remedy;
+import ai.singlr.sail.engine.ContainerExec;
 import ai.singlr.sail.engine.ProjectProvisioner;
 import ai.singlr.sail.engine.ProjectSkillInstaller;
 import ai.singlr.sail.engine.SailSkills;
@@ -12,6 +16,7 @@ import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.SkillFolders;
 import ai.singlr.sail.engine.StageSkill;
 import ai.singlr.sail.harness.Harness;
+import ai.singlr.sail.store.ProjectStore;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -33,17 +38,24 @@ import java.util.concurrent.TimeoutException;
  * synced; sail's; and the ones someone made by hand in an installed agent's skills folder, which
  * reach that agent alone and no other box until someone shares them. A folder is never shared but
  * on a person's word: sail lists a hand-made skill and names the line that shares it, nothing more.
+ *
+ * <p>Sharing and removing are {@link Action#SHARE} of the project, asked of the bound actor ({@link
+ * ProjectGate#taking}) before anything is read, the container's folder or the box's: a refused
+ * caller costs no read, and hears what the journal would have said of the write.
  */
 public final class SkillOperations {
 
   private final ProjectSkills skills;
   private final ShellExec shell;
   private final ProjectLoader projects;
+  private final ProjectStore catalog;
 
-  SkillOperations(ProjectSkills skills, ShellExec shell, ProjectLoader projects) {
+  SkillOperations(
+      ProjectSkills skills, ShellExec shell, ProjectLoader projects, ProjectStore catalog) {
     this.skills = Objects.requireNonNull(skills, "skills");
     this.shell = Objects.requireNonNull(shell, "shell");
     this.projects = Objects.requireNonNull(projects, "projects");
+    this.catalog = Objects.requireNonNull(catalog, "catalog");
   }
 
   /** Where a skill an agent sees comes from. */
@@ -62,10 +74,16 @@ public final class SkillOperations {
    * @param files how many files its folder holds; for a local one, unknown and 0
    * @param agents the agents that see it, by display name
    * @param status {@code ok}, {@code invalid: <why>}, or for a local one {@code not synced}
-   * @param share for a local one, the command that shares it; otherwise empty
+   * @param share for a local one, the host command a person shares it by from outside the
+   *     container; otherwise empty
    */
   public record Row(
-      String name, Kind kind, int files, List<String> agents, String status, String share)
+      String name,
+      Kind kind,
+      int files,
+      List<String> agents,
+      String status,
+      Optional<Remedy.Command> share)
       implements Mappable {
 
     @Override
@@ -76,7 +94,7 @@ public final class SkillOperations {
       map.put("files", files);
       map.put("agents", agents);
       map.put("status", status);
-      map.put("share", share.isEmpty() ? null : share);
+      map.put("share", share.map(command -> Remedy.of(command).plain()).orElse(null));
       return map;
     }
   }
@@ -95,6 +113,34 @@ public final class SkillOperations {
       map.put("note", note.orElse(null));
       return map;
     }
+
+    /**
+     * The rows as a reader in the container reads them: with no command, since none it could run
+     * there shares a skill.
+     */
+    public Rows inContainer() {
+      return new Rows(
+          rows.stream()
+              .map(
+                  row ->
+                      new Row(
+                          row.name(),
+                          row.kind(),
+                          row.files(),
+                          row.agents(),
+                          row.status(),
+                          Optional.empty()))
+              .toList(),
+          note);
+    }
+  }
+
+  /**
+   * Why the bound actor may not share or remove a skill of {@code project}: Share decided on the
+   * project, as every share and removal here decides it before anything is read.
+   */
+  public Optional<Refusal> sharing(String project) {
+    return ProjectGate.refusing(catalog, Action.SHARE, project);
   }
 
   /**
@@ -144,7 +190,14 @@ public final class SkillOperations {
     SailSkills.all()
         .forEach(
             skill ->
-                rows.add(new Row(skill.name(), Kind.SAIL, skill.files().size(), agents, "ok", "")));
+                rows.add(
+                    new Row(
+                        skill.name(),
+                        Kind.SAIL,
+                        skill.files().size(),
+                        agents,
+                        "ok",
+                        Optional.empty())));
     var taken = rows.stream().map(Row::name).toList();
     var local = new LinkedHashMap<String, List<Harness>>();
     try {
@@ -163,7 +216,7 @@ public final class SkillOperations {
     }
     local.entrySet().stream()
         .sorted(Map.Entry.comparingByKey())
-        .map(entry -> local(entry.getKey(), entry.getValue()))
+        .map(entry -> local(project, entry.getKey(), entry.getValue()))
         .forEach(rows::add);
     return new Rows(List.copyOf(rows), Optional.empty());
   }
@@ -176,6 +229,7 @@ public final class SkillOperations {
    */
   public Shared shareFromContainer(String project, String folder, String name)
       throws IOException, InterruptedException, TimeoutException {
+    ProjectGate.taking(catalog, Action.SHARE, project);
     var harnesses = ProjectProvisioner.installedHarnesses(projects.loadRunning(project).config());
     var skillName = nameOf(folder, name);
     var skill =
@@ -198,6 +252,7 @@ public final class SkillOperations {
 
   /** Shares the folder at {@code folder} on this box as skill {@code name}, or its own name. */
   public Shared shareFromHost(String project, Path folder, String name) throws IOException {
+    ProjectGate.taking(catalog, Action.SHARE, project);
     var harnesses = ProjectProvisioner.installedHarnesses(projects.definition(project));
     var source = folder.toAbsolutePath().normalize();
     var skillName = nameOf(source.toString(), name);
@@ -212,6 +267,7 @@ public final class SkillOperations {
    * @throws ApiException {@code NOT_FOUND} when the project shares no skill of that name
    */
   public int remove(String project, String name) throws IOException {
+    ProjectGate.taking(catalog, Action.SHARE, project);
     var removed = skills.remove(project, name);
     if (removed == 0) {
       throw new ApiException(
@@ -258,7 +314,13 @@ public final class SkillOperations {
   private static Row shared(ProjectSkills.Folder folder, List<String> agents) {
     return switch (folder) {
       case ProjectSkills.Folder.Held held ->
-          new Row(held.name(), Kind.SHARED, held.skill().files().size(), agents, "ok", "");
+          new Row(
+              held.name(),
+              Kind.SHARED,
+              held.skill().files().size(),
+              agents,
+              "ok",
+              Optional.empty());
       case ProjectSkills.Folder.Invalid invalid ->
           new Row(
               invalid.name(),
@@ -266,11 +328,15 @@ public final class SkillOperations {
               invalid.files(),
               List.of(),
               "invalid: " + invalid.why(),
-              "");
+              Optional.empty());
     };
   }
 
-  private static Row local(String name, List<Harness> harnesses) {
+  /**
+   * A skill only {@code harnesses} of {@code project}'s container hold, with the command a person
+   * outside the container shares it by: nothing inside it may.
+   */
+  private static Row local(String project, String name, List<Harness> harnesses) {
     var first = harnesses.getFirst();
     return new Row(
         name,
@@ -278,6 +344,8 @@ public final class SkillOperations {
         0,
         harnesses.stream().map(Harness::displayName).toList(),
         "not synced",
-        "skill add ~/" + first.skillFolder(name));
+        Optional.of(
+            StageSkill.shareFromContainer(
+                ContainerExec.DEV_HOME + "/" + first.skillFolder(name), project)));
   }
 }

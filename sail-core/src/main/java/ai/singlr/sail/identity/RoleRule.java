@@ -6,10 +6,13 @@
 package ai.singlr.sail.identity;
 
 import ai.singlr.sail.common.Strings;
+import ai.singlr.sail.config.Lane;
 import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.store.AuthSessionStore;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.RunStore;
+import ai.singlr.sail.store.SpecStore;
+import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.function.Supplier;
@@ -34,10 +37,21 @@ public final class RoleRule {
 
   private final Supplier<SyncConfig> box;
   private final FdeStore roster;
+  private final SpecStore specs;
 
+  /** The rule of a door that takes no run credential, so finds no run's work. */
   public RoleRule(Supplier<SyncConfig> box, FdeStore roster) {
+    this(box, roster, null);
+  }
+
+  /**
+   * The rule of a door that takes run credentials too, whose work's room is read from {@code specs}
+   * when a decision asks it.
+   */
+  public RoleRule(Supplier<SyncConfig> box, FdeStore roster, SpecStore specs) {
     this.box = Objects.requireNonNull(box, "box");
     this.roster = roster;
+    this.specs = specs;
   }
 
   /**
@@ -63,11 +77,20 @@ public final class RoleRule {
     }
 
     /**
-     * The box's own person with their full role, on the CLI lane of its root: the host CLI, the box
-     * credential in a project container, the terminal's blank token.
+     * The box's own person with their full role, on the CLI lane of its root: the host CLI and the
+     * terminal's blank token.
      */
     static Credential box() {
       return new Box(Role.ADMIN, Actor.Lane.CLI);
+    }
+
+    /**
+     * The box's own person as the box credential presents them in a project container, where
+     * anything that runs can read it: their full role, on the {@link Actor.Lane#CONTAINER} lane,
+     * whose column narrows it.
+     */
+    static Credential container() {
+      return new Box(Role.ADMIN, Actor.Lane.CONTAINER);
     }
 
     /** The host CLI's API token, minted with the role {@code minted} names: the box's person. */
@@ -83,7 +106,10 @@ public final class RoleRule {
       return new Machine(Role.fromAttribute(minted));
     }
 
-    /** A run's credential: its principal, for the FDE the run acts for. */
+    /**
+     * A run's credential: its principal, for the FDE the run acts for, on the work it was launched
+     * for ({@link #workOf}).
+     */
     static Credential run(RunStore.RunRow run) {
       return new Run(Objects.requireNonNull(run, "run"));
     }
@@ -121,7 +147,8 @@ public final class RoleRule {
    * The principal {@code credential} stands for: its handle, its role capped by what the credential
    * was minted with, its lane, and its scope, always the resolved person's; empty when the
    * credential is refused — an FDE disabled or unknown here, or a box that cannot place its own
-   * FDE.
+   * FDE. A run's principal also carries its work ({@link #workOf}), and a read-only run reads only
+   * the project it was launched in, of what its person reads.
    */
   public Optional<Actor> principal(Credential credential) {
     return switch (Objects.requireNonNull(credential, "credential")) {
@@ -136,9 +163,43 @@ public final class RoleRule {
                 ? Actor.roomPrincipal(run.principal(), run.owner())
                 : Actor.agentPrincipal(run.principal(), run.owner());
         yield actingFor(
-            run.owner(), principal.handle(), principal.role(), principal.lane(), run.owner());
+                run.owner(), principal.handle(), principal.role(), principal.lane(), run.owner())
+            .map(
+                actor ->
+                    (run.readOnlyLane()
+                            ? actor.withScope(only(actor.scope(), run.project()))
+                            : actor)
+                        .withWork(workOf(run)));
       }
     };
+  }
+
+  /**
+   * What {@code run} was launched for: an ad-hoc run its whole project; a run of no spec the room
+   * it was launched in, which its row carries; any other its spec and the room that spec lives in,
+   * its own once the spec is gone, read only when a decision asks it.
+   */
+  private Actor.Work workOf(RunStore.RunRow run) {
+    if (Lane.ADHOC.matches(run.role())) {
+      return Actor.Work.of(run.project(), null, null);
+    }
+    var spec = run.specId();
+    if (spec == null) {
+      return Actor.Work.of(run.project(), null, run.roomId());
+    }
+    if (specs == null) {
+      throw new IllegalStateException(
+          "Run " + run.id() + " works spec " + spec + ", and this door reads no specs.");
+    }
+    return new Actor.Work(
+        run.project(),
+        spec,
+        () -> specs.findById(spec).map(SpecStore.SpecRow::roomIdOrIdentity).orElse(spec));
+  }
+
+  /** Project {@code project} alone, of what {@code scope} admits: none when it admits it not. */
+  private static ProjectScope only(ProjectScope scope, String project) {
+    return ProjectScope.of(scope.admits(project) ? List.of(project) : List.of());
   }
 
   /**

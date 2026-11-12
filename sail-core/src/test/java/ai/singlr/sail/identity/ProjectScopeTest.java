@@ -70,10 +70,11 @@ class ProjectScopeTest {
     assertEquals(ProjectScope.all(), new Actor("ada", Role.ADMIN, Actor.Lane.CLI).scope());
     var scoped = actor.withScope(ProjectScope.of(List.of()));
     assertEquals(
-        new Actor("ada", Role.MEMBER, Actor.Lane.API, null, ProjectScope.of(List.of())), scoped);
+        new Actor("ada", Role.MEMBER, Actor.Lane.API, null, ProjectScope.of(List.of()), null),
+        scoped);
     assertThrows(
         NullPointerException.class,
-        () -> new Actor("ada", Role.MEMBER, Actor.Lane.API, null, null));
+        () -> new Actor("ada", Role.MEMBER, Actor.Lane.API, null, null, null));
   }
 
   @Test

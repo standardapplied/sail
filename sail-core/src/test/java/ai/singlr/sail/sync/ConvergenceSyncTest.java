@@ -21,6 +21,7 @@ import ai.singlr.sail.config.TestDefinitions;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.identity.Actors;
 import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.store.ChangeLog;
 import ai.singlr.sail.store.EraseRequests;
@@ -875,7 +876,7 @@ class ConvergenceSyncTest {
     var principal = runs.findById(runId).orElseThrow().principal();
     var post =
         Acting.by(
-            Actor.agentPrincipal(principal, "ada"),
+            Actors.principalOf(runs.findById(runId).orElseThrow()),
             () -> new MessageStore(ada.db).append("s", principal, "working", null));
     Acting.as("ada", () -> new MessageStore(ada.db).append("s", "ada", "note", post.id()));
     Acting.as("ada", () -> runs.complete(runId, "completed", 0));
@@ -907,11 +908,11 @@ class ConvergenceSyncTest {
   void aSpecEditedByTheAgentOfADeniedRunSettles() {
     ownSpec(main, "ada", "mine", "ada");
     SyncBox.round(main, ada);
+    var mains = main.specs.getContent("mine");
     var runId = run(ada, "ada", "mine");
     ada.db.execute("INSERT INTO run_principals (run_id, principal) VALUES (?, 'bob')", runId);
-    var agent =
-        Actor.agentPrincipal(new RunStore(ada.db).findById(runId).orElseThrow().principal(), "ada");
-    Acting.by(agent, () -> ada.specs.updateStatus("mine", SpecStatus.IN_PROGRESS));
+    var agent = Actors.principalOf(new RunStore(ada.db).findById(runId).orElseThrow());
+    Acting.by(agent, () -> ada.specs.setContent("mine", "edited", ""));
     Acting.unchecked("ada", () -> new RunStore(ada.db).complete(runId, "completed", 0));
 
     SyncBox.round(main, ada);
@@ -919,8 +920,8 @@ class ConvergenceSyncTest {
     assertConverged();
     assertTrue(new RunStore(main.db).findById(runId).isEmpty(), "main denied the run");
     assertEquals(
-        SpecStatus.PENDING,
-        main.specs.findById("mine").orElseThrow().status(),
+        mains,
+        ada.specs.getContent("mine"),
         "the edit by the denied run's agent reverts to main's version");
   }
 

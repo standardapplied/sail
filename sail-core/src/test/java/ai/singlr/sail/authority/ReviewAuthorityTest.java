@@ -91,12 +91,13 @@ class ReviewAuthorityTest {
             case "verdict" -> verdict;
             default -> null;
           };
-      for (var actor :
-          List.of(ADMIN, OWNER_API, OWNER_CLI, AGENT, OWNER_SYNC, ADMIN_SYNC, MAIN, SYSTEM)) {
+      for (var actor : List.of(ADMIN, OWNER_API, OWNER_CLI, OWNER_SYNC, ADMIN_SYNC, MAIN, SYSTEM)) {
         rows.add(new Case(verb + " by " + actor, actor, held, next, null));
       }
+      rows.add(new Case(verb + " by the owner's agent", AGENT, held, next, Kind.LANE_FORBIDDEN));
       rows.add(new Case(verb + " by another member", OTHER_API, held, next, Kind.NOT_OWNER));
-      rows.add(new Case(verb + " by another's agent", OTHERS_AGENT, held, next, Kind.NOT_OWNER));
+      rows.add(
+          new Case(verb + " by another's agent", OTHERS_AGENT, held, next, Kind.LANE_FORBIDDEN));
       rows.add(new Case(verb + " by a machine credential", MACHINE, held, next, Kind.NOT_OWNER));
       rows.add(new Case(verb + " pushed by another", OTHER_SYNC, held, next, Kind.NOT_OWNER));
       rows.add(new Case(verb + " by a viewer", VIEWER, held, next, Kind.READ_ONLY));

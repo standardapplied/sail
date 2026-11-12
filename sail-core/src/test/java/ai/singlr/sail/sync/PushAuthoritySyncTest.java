@@ -5,7 +5,9 @@
 
 package ai.singlr.sail.sync;
 
+import static ai.singlr.sail.sync.SyncFixtures.agent;
 import static ai.singlr.sail.sync.SyncFixtures.assign;
+import static ai.singlr.sail.sync.SyncFixtures.draft;
 import static ai.singlr.sail.sync.SyncFixtures.findingKeptInChangeLog;
 import static ai.singlr.sail.sync.SyncFixtures.ownSpec;
 import static ai.singlr.sail.sync.SyncFixtures.principal;
@@ -361,8 +363,8 @@ class PushAuthoritySyncTest {
     assign(ada, "ada", "open", "ada");
     var runs = new RunStore(ada.db);
     var offline = run(ada, "ada", "open");
-    var agent = Actor.agentPrincipal(principal(ada, offline), "ada");
-    Acting.by(agent, () -> ada.specs.updateStatus("open", SpecStatus.IN_PROGRESS));
+    var agent = agent(ada, offline);
+    Acting.by(agent, () -> ada.specs.setContent("open", "built", ""));
     Acting.as("ada", () -> runs.complete(offline, "completed", 0));
 
     sync(ada, ADA);
@@ -371,7 +373,7 @@ class PushAuthoritySyncTest {
     assertEquals("completed", new RunStore(main.db).findById(offline).orElseThrow().status());
     var claimed = main.specs.findById("open").orElseThrow();
     assertEquals("ada", claimed.assignee());
-    assertEquals(SpecStatus.IN_PROGRESS, claimed.status());
+    assertEquals("built", main.specs.getContent("open").orElseThrow().body());
   }
 
   @Test
@@ -406,8 +408,13 @@ class PushAuthoritySyncTest {
     assertEveryBoxConverged(ADA);
   }
 
+  /**
+   * Main takes a post its pusher's run authored wherever the pusher may post: what the agent itself
+   * may do is decided on the box it runs on, which here posted only in its work, and a box whose
+   * journal decided nothing (an older release) is still taken at its pusher's word.
+   */
   @Test
-  void anAgentPostsInAnotherSpecsRoomOfItsFdesProject() throws IOException {
+  void mainTakesAPostByItsPushersAgentWhereverThePusherMayPost() throws IOException {
     ownSpec(main, "ada", "mine", "ada");
     ownSpec(main, "ada", "also-mine", "ada");
     ownSpec(main, "bob", "theirs", "bob");
@@ -415,24 +422,18 @@ class PushAuthoritySyncTest {
     var agentRun = run(ada, "ada", "mine");
     var agent = principal(ada, agentRun);
     var messages = new MessageStore(ada.db);
-    var allowed =
-        Acting.by(
-            Actor.agentPrincipal(agent, "ada"),
-            () -> messages.append("also-mine", agent, "here", null));
-    var elsewhere =
-        Acting.by(
-            Actor.agentPrincipal(agent, "ada"),
-            () -> messages.append("theirs", agent, "there", null));
+    var own = Acting.by(agent(ada, agentRun), () -> messages.append("mine", agent, "here", null));
+    var elsewhere = Acting.unchecked("ada", () -> messages.append("theirs", agent, "there", null));
 
     push(ada, ADA, "run");
     var report = push(ada, ADA, "message");
 
     assertEquals(List.of(), denied(report));
-    assertEquals(agent, new MessageStore(main.db).findById(allowed.id()).orElseThrow().author());
+    assertEquals(agent, new MessageStore(main.db).findById(own.id()).orElseThrow().author());
     assertEquals(
         agent,
         new MessageStore(main.db).findById(elsewhere.id()).orElseThrow().author(),
-        "bob's spec's room is in ada's project, so ada's agent speaks there too");
+        "bob's spec's room is in ada's project, so main takes what ada's box pushes there");
     assertCleanRound(ada, ADA, "message");
     assertEveryBoxConverged(ADA);
   }
@@ -443,8 +444,8 @@ class PushAuthoritySyncTest {
     ownSpec(main, "ada", "mine", "ada");
     sync(ada, ADA);
     var agentRun = run(ada, "ada", "mine");
-    var agent = Actor.agentPrincipal(principal(ada, agentRun), "ada");
-    Acting.by(agent, () -> ada.specs.create(spec("born", null)));
+    var agent = agent(ada, agentRun);
+    Acting.by(agent, () -> ada.specs.create(draft("born", null)));
     var post =
         Acting.by(
             agent, () -> new MessageStore(ada.db).append("mine", agent.handle(), "early", null));

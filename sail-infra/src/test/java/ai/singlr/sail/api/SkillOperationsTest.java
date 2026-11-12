@@ -15,8 +15,12 @@ import ai.singlr.sail.config.TestDefinitions;
 import ai.singlr.sail.engine.ScriptedShellExecutor;
 import ai.singlr.sail.engine.SharedProjectFiles;
 import ai.singlr.sail.engine.ShellExec;
+import ai.singlr.sail.engine.StageSkill;
 import ai.singlr.sail.identity.Acting;
+import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.store.FileStore;
+import ai.singlr.sail.store.ProjectStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.Sqlite;
 import java.io.ByteArrayInputStream;
@@ -32,6 +36,7 @@ import java.util.concurrent.TimeoutException;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.function.Executable;
 import org.junit.jupiter.api.io.TempDir;
 
 class SkillOperationsTest {
@@ -47,6 +52,7 @@ class SkillOperationsTest {
   private Sqlite db;
   private FileStore files;
   private ScriptedShellExecutor shell;
+  private ProjectStore catalog;
   private SkillOperations skills;
 
   @BeforeEach
@@ -56,6 +62,8 @@ class SkillOperationsTest {
     files = new FileStore(db);
     shell = new ScriptedShellExecutor(new ShellExec.Result(0, "", ""));
     var definition = TestDefinitions.yaml(ACME);
+    catalog = new ProjectStore(db);
+    Acting.system(() -> catalog.upsert(definition));
     skills =
         new SkillOperations(
             new ProjectSkills(
@@ -65,7 +73,8 @@ class SkillOperationsTest {
             shell,
             new ProjectLoader(
                 shell,
-                project -> "acme".equals(project) ? Optional.of(definition) : Optional.empty()));
+                project -> "acme".equals(project) ? Optional.of(definition) : Optional.empty()),
+            catalog);
   }
 
   @AfterEach
@@ -99,17 +108,25 @@ class SkillOperationsTest {
 
     assertEquals(
         List.of(
-            new Row("e2e", Kind.SHARED, 1, BOTH, "ok", ""),
-            new Row("sail-portal", Kind.SAIL, 2, BOTH, "ok", ""),
-            new Row("spec-board", Kind.SAIL, 2, BOTH, "ok", ""),
+            new Row("e2e", Kind.SHARED, 1, BOTH, "ok", Optional.empty()),
+            new Row("sail-portal", Kind.SAIL, 2, BOTH, "ok", Optional.empty()),
+            new Row("spec-board", Kind.SAIL, 2, BOTH, "ok", Optional.empty()),
             new Row(
                 "java",
                 Kind.LOCAL,
                 0,
                 List.of("Codex CLI"),
                 "not synced",
-                "skill add ~/.agents/skills/java"),
-            new Row("lint", Kind.LOCAL, 0, BOTH, "not synced", "skill add ~/.claude/skills/lint")),
+                Optional.of(
+                    StageSkill.shareFromContainer("/home/dev/.agents/skills/java", "acme"))),
+            new Row(
+                "lint",
+                Kind.LOCAL,
+                0,
+                BOTH,
+                "not synced",
+                Optional.of(
+                    StageSkill.shareFromContainer("/home/dev/.claude/skills/lint", "acme")))),
         rows.rows());
     assertEquals(Optional.empty(), rows.note());
   }
@@ -122,8 +139,8 @@ class SkillOperationsTest {
 
     assertEquals(
         List.of(
-            new Row("sail-portal", Kind.SAIL, 2, BOTH, "ok", ""),
-            new Row("spec-board", Kind.SAIL, 2, BOTH, "ok", "")),
+            new Row("sail-portal", Kind.SAIL, 2, BOTH, "ok", Optional.empty()),
+            new Row("spec-board", Kind.SAIL, 2, BOTH, "ok", Optional.empty())),
         rows.rows());
     assertEquals(
         Optional.of(
@@ -241,7 +258,8 @@ class SkillOperationsTest {
                     new SharedProjectFiles(
                         files, dir.resolve("projects"), project, FileLimits.defaults())),
             interrupting,
-            new ProjectLoader(shell, project -> Optional.of(TestDefinitions.yaml(ACME))));
+            new ProjectLoader(shell, project -> Optional.of(TestDefinitions.yaml(ACME))),
+            catalog);
 
     var shared =
         Acting.as(
@@ -284,6 +302,27 @@ class SkillOperationsTest {
         Acting.as("uday", () -> skills.shareFromContainer("acme", "/home/dev/java/", "")).name());
   }
 
+  /**
+   * Sharing and removing are decided before anything is read: a viewer is refused on the host and
+   * in the container alike, before the folder is looked for and before the container is asked.
+   */
+  @Test
+  void aCallerWhoMayNotShareIsRefusedBeforeAnyFolderIsRead() {
+    var viewer = new Actor("vic", Role.VIEWER, Actor.Lane.API);
+    var asked = shell.invocations().size();
+
+    for (var refused :
+        List.<Executable>of(
+            () -> skills.shareFromHost("acme", dir.resolve("no-such-folder"), null),
+            () -> skills.shareFromContainer("acme", "/home/dev/no-such-folder", null),
+            () -> skills.remove("acme", "java"))) {
+      assertEquals(
+          "Your credential is read-only and cannot share files and skills in projects.",
+          assertThrows(ApiException.class, () -> Acting.by(viewer, refused::execute)).getMessage());
+    }
+    assertEquals(asked, shell.invocations().size(), "nothing was asked of the container");
+  }
+
   @Test
   void aStoppedContainerSharesNothingAndSaysHowToStartIt() {
     shell.onOk("incus list", "[{\"name\": \"acme\", \"status\": \"Stopped\"}]");
@@ -291,7 +330,11 @@ class SkillOperationsTest {
     var refused =
         assertThrows(
             ApiException.class,
-            () -> skills.shareFromContainer("acme", "/home/dev/.agents/skills/java", null));
+            () ->
+                Acting.as(
+                    "uday",
+                    () ->
+                        skills.shareFromContainer("acme", "/home/dev/.agents/skills/java", null)));
 
     assertEquals("Project 'acme' is stopped.", refused.getMessage());
     assertEquals(List.of(), shared());
@@ -326,19 +369,34 @@ class SkillOperationsTest {
             "files", 0,
             "agents", List.of("Codex CLI"),
             "status", "not synced",
-            "share", "skill add ~/.agents/skills/java"),
+            "share", "sail project skills add --container /home/dev/.agents/skills/java -p acme"),
         new Row(
                 "java",
                 Kind.LOCAL,
                 0,
                 List.of("Codex CLI"),
                 "not synced",
-                "skill add ~/.agents/skills/java")
+                Optional.of(StageSkill.shareFromContainer("/home/dev/.agents/skills/java", "acme")))
             .toMap());
-    var sail = new Row("spec-board", Kind.SAIL, 2, BOTH, "ok", "").toMap();
+    var sail = new Row("spec-board", Kind.SAIL, 2, BOTH, "ok", Optional.empty()).toMap();
     assertEquals(null, sail.get("share"));
     var rows = new SkillOperations.Rows(List.of(), Optional.of("why")).toMap();
     assertEquals(Map.of("skills", List.of(), "note", "why"), rows);
+    var local =
+        new Row(
+            "java",
+            Kind.LOCAL,
+            0,
+            List.of("Codex CLI"),
+            "not synced",
+            Optional.of(StageSkill.shareFromContainer("/home/dev/.agents/skills/java", "acme")));
+    assertEquals(
+        new SkillOperations.Rows(
+            List.of(
+                new Row(
+                    "java", Kind.LOCAL, 0, List.of("Codex CLI"), "not synced", Optional.empty())),
+            Optional.of("why")),
+        new SkillOperations.Rows(List.of(local), Optional.of("why")).inContainer());
     var advised =
         new SkillOperations.Shared("java", 1, BOTH, false, List.of("blocked"), Optional.of("long"))
             .toMap();

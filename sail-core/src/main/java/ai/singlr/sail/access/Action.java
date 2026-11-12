@@ -43,8 +43,16 @@ public enum Action {
       "claim"),
   /** Giving a spec to someone, or moving it from one FDE to another: work changes hands. */
   ASSIGN("Assign", "give or move a spec to someone", "assign"),
-  /** The human gates on work: promoting a draft, approving or dismissing findings, marking done. */
-  APPROVE("Approve", "promote a draft to ready; approve or dismiss findings; mark done", "approve"),
+  /**
+   * The human gates on work: every move of a spec's status (promoting a draft, marking it done,
+   * archiving or cancelling it), a spec born in any status but draft, and approving or dismissing
+   * findings.
+   */
+  APPROVE(
+      "Approve",
+      "move a spec's status (promote, done, archive, cancel) or create it ready; approve or"
+          + " dismiss findings",
+      "approve"),
   /**
    * Starting work on this box: dispatching or resuming a spec, seating or removing a room's agent.
    * The roster a seating writes is the journal's to decide, as a change of the room. Where the work

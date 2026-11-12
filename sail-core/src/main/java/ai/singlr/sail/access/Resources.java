@@ -38,6 +38,7 @@ public final class Resources {
         one(Ownership.ownerOf(assignee, createdBy)),
         Strings.isBlank(assignee) ? null : assignee,
         null,
+        null,
         null);
   }
 
@@ -47,7 +48,31 @@ public final class Resources {
    */
   public static Resource bornIn(Resource spec, Resource room) {
     return new Resource(
-        spec.kind(), spec.id(), spec.project(), spec.owners(), spec.assignee(), spec.spec(), room);
+        spec.kind(),
+        spec.id(),
+        spec.project(),
+        spec.owners(),
+        spec.assignee(),
+        spec.spec(),
+        room,
+        spec.madeBy());
+  }
+
+  /**
+   * {@code resource}, a spec or a conversation, as made by {@code principal}: the spec's maker, or
+   * the maker of the spec whose own room the conversation is, as the journal's first revision of it
+   * records ({@code ChangeLog.bornBy}); none, null, when the journal no longer keeps that revision.
+   */
+  public static Resource madeBy(Resource resource, String principal) {
+    return new Resource(
+        resource.kind(),
+        resource.id(),
+        resource.project(),
+        resource.owners(),
+        resource.assignee(),
+        resource.spec(),
+        resource.bornIn(),
+        principal);
   }
 
   /**
@@ -57,7 +82,7 @@ public final class Resources {
    * the box can tell which row a room answers to.
    */
   public static Resource room(String id, String project, String owner) {
-    return new Resource(Resource.Kind.ROOM, id, project, one(owner), null, null, null);
+    return new Resource(Resource.Kind.ROOM, id, project, one(owner), null, null, null, null);
   }
 
   /**
@@ -66,12 +91,13 @@ public final class Resources {
    * room's own.
    */
   public static Resource conversation(String id, String project, List<String> owners) {
-    return new Resource(Resource.Kind.ROOM, id, project, owners, null, null, null);
+    return new Resource(Resource.Kind.ROOM, id, project, owners, null, null, null, null);
   }
 
   /** Review {@code id} of spec {@code specId}, in {@code project}: its spec's owner's. */
   public static Resource review(String id, String project, String specId, String specOwner) {
-    return new Resource(Resource.Kind.REVIEW, id, project, one(specOwner), null, specId, null);
+    return new Resource(
+        Resource.Kind.REVIEW, id, project, one(specOwner), null, specId, null, null);
   }
 
   /**
@@ -95,6 +121,7 @@ public final class Resources {
         Stream.of(owner, adHoc ? node : specOwner.apply(specId).orElse(null)).toList(),
         null,
         adHoc ? null : specId,
+        null,
         null);
   }
 
@@ -112,12 +139,13 @@ public final class Resources {
         one(worker),
         null,
         Strings.isBlank(specId) ? null : specId,
+        null,
         null);
   }
 
   /** Project {@code name}, filed under itself: its creator's ({@code projects.created_by}). */
   public static Resource project(String name, String createdBy) {
-    return new Resource(Resource.Kind.PROJECT, name, name, one(createdBy), null, null, null);
+    return new Resource(Resource.Kind.PROJECT, name, name, one(createdBy), null, null, null, null);
   }
 
   /**
@@ -126,12 +154,19 @@ public final class Resources {
    */
   public static Resource box(String fde) {
     return new Resource(
-        Resource.Kind.BOX, Strings.isBlank(fde) ? null : fde, null, one(fde), null, null, null);
+        Resource.Kind.BOX,
+        Strings.isBlank(fde) ? null : fde,
+        null,
+        one(fde),
+        null,
+        null,
+        null,
+        null);
   }
 
   /** The org's people, tokens and pairings, which no one owns: an admin's alone. */
   public static Resource people() {
-    return new Resource(Resource.Kind.PEOPLE, "people", null, List.of(), null, null, null);
+    return new Resource(Resource.Kind.PEOPLE, "people", null, List.of(), null, null, null, null);
   }
 
   private static List<String> one(String owner) {

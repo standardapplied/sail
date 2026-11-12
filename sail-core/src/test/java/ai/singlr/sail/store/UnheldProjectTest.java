@@ -117,8 +117,8 @@ class UnheldProjectTest {
   @Test
   void anActorIsToldOnlyOfTheProjectsItMaySee() {
     var scoped =
-        new Actor(
-            "ada", Role.MEMBER, Actor.Lane.API, null, ProjectScope.of(List.of("acme", "gamma")));
+        new Actor("ada", Role.MEMBER, Actor.Lane.API)
+            .withScope(ProjectScope.of(List.of("acme", "gamma")));
 
     var refused =
         assertThrows(

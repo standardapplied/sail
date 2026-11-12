@@ -62,8 +62,6 @@ class OneDecisionTest {
   private static final SyncConfig MAIN = new SyncConfig("main", null, "root", "main-box");
   private static final SyncConfig ADAS_NODE = new SyncConfig("node", "sail@main", "ada", "ada");
   private static final String NOT_ADAS_SPEC = "Spec 'theirs' is assigned to 'bob', not you.";
-  private static final String NOT_ADAS_ROOM =
-      "'den' belongs to bob: only bob or an admin may post there, not you.";
 
   private static final ShellExec SHELL =
       new ShellExec() {
@@ -153,9 +151,16 @@ class OneDecisionTest {
                 }));
   }
 
-  /** The socket doors ada reaches: her box's credential on her box, and her run on main. */
-  private List<Map.Entry<LocalLaneOperations, String>> adasSocketDoors() {
-    return List.of(Map.entry(adasBox, boxCredential), Map.entry(operations, agentRun));
+  /** What ada's agent and her room agent, on main, hear outside their work. */
+  private String outsideWork(String credential, String verb, String what) {
+    return "'"
+        + new RunStore(db).findByCredential(credential).orElseThrow().principal()
+        + "' may "
+        + verb
+        + " only "
+        + (verb.equals("post") ? "in its own work, not in '" : "its own work, not spec '")
+        + what
+        + "'.";
   }
 
   private static RoomStore.RoomRow room(String id, String owner) {
@@ -195,12 +200,14 @@ class OneDecisionTest {
     var failure = assertInstanceOf(Result.Failure.class, cli, "the host CLI");
     assertEquals(ErrorCode.FORBIDDEN_NOT_ASSIGNEE, failure.errorCode());
     assertEquals(NOT_ADAS_SPEC, failure.errorMessage());
-    for (var door : adasSocketDoors()) {
-      assertRefusedOnSocket(
-          socket(door.getKey(), "PUT", "/v1/specs/theirs", door.getValue(), "title=x"),
-          "forbidden_not_assignee",
-          NOT_ADAS_SPEC);
-    }
+    assertRefusedOnSocket(
+        socket(adasBox, "PUT", "/v1/specs/theirs", boxCredential, "title=x"),
+        "forbidden_not_assignee",
+        NOT_ADAS_SPEC);
+    assertRefusedOnSocket(
+        socket(operations, "PUT", "/v1/specs/theirs", agentRun, "title=x"),
+        "forbidden_not_assignee",
+        outsideWork(agentRun, "change", "theirs"));
     assertRefusedOnSocket(
         socket("PUT", "/v1/specs/theirs", roomRun, "title=x"),
         "read_only_credential",
@@ -238,7 +245,7 @@ class OneDecisionTest {
   }
 
   @Test
-  void postingInAnotherMembersRoomIsAllowedAlikeThroughEveryDoorAndOnMainButNotOnTheRoomLane()
+  void postingInAnotherMembersRoomIsAllowedAlikeThroughEveryDoorAndOnMainButNotToHerAgents()
       throws Exception {
     var byToken = http("POST", "/v1/rooms/den/messages", token, "{\"body\":\"by token\"}");
     assertEquals(201, byToken.statusCode(), byToken.body());
@@ -253,20 +260,17 @@ class OneDecisionTest {
                     new SpecMessageRequest("by the host CLI", null, MessageStore.Mark.PLAIN),
                     "ada"));
     assertTrue(cli.isSuccess(), "the host CLI: " + cli);
-    for (var door : adasSocketDoors()) {
-      var answered =
-          socket(
-              door.getKey(),
-              "POST",
-              "/v1/specs/den/messages",
-              door.getValue(),
-              "body=on the socket");
-      assertEquals(201, answered.status(), answered.body().toString());
-    }
+    var answered =
+        socket(adasBox, "POST", "/v1/specs/den/messages", boxCredential, "body=on the socket");
+    assertEquals(201, answered.status(), answered.body().toString());
     assertRefusedOnSocket(
-        socket("POST", "/v1/specs/den/messages", roomRun, "body=hi"),
+        socket(operations, "POST", "/v1/specs/den/messages", agentRun, "body=hi"),
         "forbidden_not_assignee",
-        NOT_ADAS_ROOM);
+        outsideWork(agentRun, "post", "den"));
+    assertRefusedOnSocket(
+        socket("POST", "/v1/specs/theirs/messages", roomRun, "body=hi"),
+        "forbidden_not_assignee",
+        outsideWork(roomRun, "post", "theirs"));
     var access = new HostAccess(db, TestAuth.roles(db, MAIN));
     access.admit("den", "acme", access.identity(session));
 

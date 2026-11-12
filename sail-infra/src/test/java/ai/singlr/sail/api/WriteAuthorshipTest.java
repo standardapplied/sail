@@ -197,8 +197,8 @@ class WriteAuthorshipTest {
       var principal = runs.findByCredential(credential).orElseThrow().principal();
       var router = new SocketDoor(operations);
 
-      var status = router.ask("PUT", "/v1/specs/auth", credential, "status=pending");
-      assertEquals(200, status.status(), status.body().toString());
+      var title = router.ask("PUT", "/v1/specs/auth", credential, "title=Reviewed");
+      assertEquals(200, title.status(), title.body().toString());
       assertAuthoredBy("auth", principal);
 
       var content = router.ask("PUT", "/v1/specs/auth/content", credential, "body=reviewed");

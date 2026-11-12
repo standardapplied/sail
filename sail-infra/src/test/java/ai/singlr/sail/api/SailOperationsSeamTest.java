@@ -166,7 +166,7 @@ class SailOperationsSeamTest {
           BoxCredentialFile.Outcome.ALREADY_PRESENT, BoxCredentialFile.ensure(store, "it", dir));
       assertEquals(minted, Files.readString(file).strip(), "a restart mints nothing new");
       assertEquals(
-          Optional.of(new Actor("it", Role.ADMIN, Actor.Lane.CLI)),
+          Optional.of(new Actor("it", Role.ADMIN, Actor.Lane.CONTAINER)),
           operations.boxActorForCredential(minted));
 
       handle.set("raj");
@@ -586,15 +586,16 @@ class SailOperationsSeamTest {
     }
   }
 
+  /** No agent resolves a conflict, whose spec its person owns or not: they are its person's. */
   @ParameterizedTest
   @CsvSource({
-    "uday,sailrun_test,mine,200,",
+    "uday,sailrun_test,mine,403,forbidden_not_assignee",
     "other,sailrun_test,mine,403,forbidden_not_assignee",
-    "other,sailrun_test,theirs,200,",
+    "other,sailrun_test,theirs,403,forbidden_not_assignee",
     "uday,sailroom_test,mine,403,read_only_credential",
     "uday,sailroom_test,theirs,403,read_only_credential"
   })
-  void aRunKeepsMineOnlyOnASpecItsFdeOwnsAndARoomLaneResolvesNothing(
+  void anAgentResolvesNoConflictAndARoomLaneNoneEither(
       String specOwner, String credential, String strategy, int expected, String code) {
     try (var box = new SyncBox("node");
         var operations = operations(box.db);
