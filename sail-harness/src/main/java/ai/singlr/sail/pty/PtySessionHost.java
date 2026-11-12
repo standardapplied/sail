@@ -593,30 +593,37 @@ public final class PtySessionHost implements AutoCloseable {
 
   /**
    * Serves one unix connection from accept to its end, counted against the unix socket's own cap,
-   * whose slot it releases whatever happens to it.
+   * whose slot it releases whatever happens to it, and before it closes the channel: a client that
+   * sees its connection end may connect again at once, and finds the slot free.
    */
   private void serveLocal(SocketChannel channel) {
     var overCap = connections.incrementAndGet() > limits.connections();
     try (channel) {
-      if (overCap) {
-        log("refused", "?", "-", "connection cap " + limits.connections());
-        return;
-      }
-      Admission admission;
       try {
-        admission = admitLocal(channel);
-      } catch (RuntimeException crashed) {
-        log("exception", "?", "-", crashed.toString());
-        reply(channel, new PtyMessage.Err(UNSERVED));
-        return;
-      }
-      if (admission != null) {
-        converse(channel, admission);
+        if (overCap) {
+          log("refused", "?", "-", "connection cap " + limits.connections());
+          return;
+        }
+        serveAdmitted(channel);
+      } finally {
+        connections.decrementAndGet();
       }
     } catch (IOException disconnected) {
       var unused = disconnected;
-    } finally {
-      connections.decrementAndGet();
+    }
+  }
+
+  private void serveAdmitted(SocketChannel channel) throws IOException {
+    Admission admission;
+    try {
+      admission = admitLocal(channel);
+    } catch (RuntimeException crashed) {
+      log("exception", "?", "-", crashed.toString());
+      reply(channel, new PtyMessage.Err(UNSERVED));
+      return;
+    }
+    if (admission != null) {
+      converse(channel, admission);
     }
   }
 

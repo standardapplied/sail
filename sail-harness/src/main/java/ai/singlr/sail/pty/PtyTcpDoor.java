@@ -231,31 +231,38 @@ final class PtyTcpDoor implements AutoCloseable {
 
   /**
    * Serves one TCP connection {@link #taken} to its end, or closes it for {@code refusal}, and
-   * releases the slot it took whatever happens to it.
+   * releases the slot it took whatever happens to it, and before it closes the channel: a client
+   * that sees its connection end may connect again at once, and finds the slot free.
    */
   private void serve(SocketChannel channel, String refusal) {
     try (channel) {
-      if (refusal != null) {
-        refused(refusal);
-        return;
-      }
-      PtySessionHost.Admission admission;
       try {
-        set(channel, StandardSocketOptions.TCP_NODELAY, true);
-        admission = admit(channel);
+        serveTaken(channel, refusal);
       } finally {
-        settled(channel);
-      }
-      if (admission != null) {
-        keepAlive(channel);
-        host.serve(channel, admission);
+        open.decrementAndGet();
       }
     } catch (IOException disconnected) {
       var unused = disconnected;
     } catch (RuntimeException crashed) {
       PtySessionHost.log("exception", "?", "-", "tcp: " + crashed);
+    }
+  }
+
+  private void serveTaken(SocketChannel channel, String refusal) throws IOException {
+    if (refusal != null) {
+      refused(refusal);
+      return;
+    }
+    PtySessionHost.Admission admission;
+    try {
+      set(channel, StandardSocketOptions.TCP_NODELAY, true);
+      admission = admit(channel);
     } finally {
-      open.decrementAndGet();
+      settled(channel);
+    }
+    if (admission != null) {
+      keepAlive(channel);
+      host.serve(channel, admission);
     }
   }
 

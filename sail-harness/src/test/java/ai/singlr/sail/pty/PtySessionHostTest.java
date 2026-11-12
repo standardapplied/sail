@@ -1696,16 +1696,16 @@ class PtySessionHostTest {
 
   @Test
   @Timeout(value = 30, unit = TimeUnit.SECONDS)
-  void everyUnixConnectionReleasesItsSlotSoTheSocketServesForAsLongAsItRuns() throws Exception {
-    try (var host = startHost(new PtySessionHost.Limits(32, 16, 2, 256))) {
-      for (var i = 0; i < 10; i++) {
+  void aUnixConnectionTheHostEndsHasGivenBackItsSlotBeforeItsClientSeesItEnd() throws Exception {
+    try (var host = startHost(new PtySessionHost.Limits(32, 16, 1, 256))) {
+      for (var i = 0; i < 200; i++) {
         var channel = SocketChannel.open(StandardProtocolFamily.UNIX);
         channel.connect(UnixDomainSocketAddress.of(dir.resolve("host.sock")));
         try (channel) {
           PtyWire.handshake(channel, channel);
           PtyWire.write(channel, new PtyMessage.Detach());
           assertInstanceOf(PtyMessage.Err.class, PtyWire.read(channel), "connection " + i);
-          assertEquals(-1, channel.read(ByteBuffer.allocate(1)));
+          assertEquals(-1, channel.read(ByteBuffer.allocate(1)), "connection " + i + " ended");
         }
       }
       try (var unix = connect()) {
