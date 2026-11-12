@@ -103,7 +103,7 @@ class HostProvisionerTest {
             "already installed",
             "already installed; ZFS cache capped at 6.4 GiB",
             "bridge: incusbr0",
-            "devpool (zfs on /dev/sdb)",
+            "devpool (zfs on /dev/sdb, one device: no redundancy)",
             "singlr-base (already exists): containers on devpool (zfs)",
             "already cached"),
         doneDetails);
@@ -986,7 +986,9 @@ class HostProvisionerTest {
             .filter(c -> !c.startsWith("zpool list ") && !c.startsWith("zfs list "))
             .toList(),
         "sail only reads ZFS and makes nothing in the pool itself; Incus does");
-    assertTrue(steps.contains("done:5/8:devpool (zfs on /dev/sdb)"), steps.toString());
+    assertTrue(
+        steps.contains("done:5/8:devpool (zfs on /dev/sdb, one device: no redundancy)"),
+        steps.toString());
     assertTrue(
         steps.contains("done:6/8:singlr-base (already exists): containers on devpool (zfs)"),
         steps.toString());
@@ -997,7 +999,7 @@ class HostProvisionerTest {
 
   @Test
   void aZfsPoolOnAPartitionIsMadeTheSameWay() throws Exception {
-    var partition = "/dev/sdb1";
+    var partition = "/dev/sdd3";
     var shell =
         new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
             .onceOnOk("incus storage list --format json", "[]")
@@ -1010,11 +1012,13 @@ class HostProvisionerTest {
             .onOk("incus profile device list", "root\neth0\n")
             .onOk("incus profile device get singlr-base root pool", "devpool\n")
             .onOk("realpath -e -- " + partition, partition + "\n")
-            .onOk(
-                DeviceFixtures.LSBLK,
-                DeviceFixtures.read("gcp/gpt-3-raid-partitions-no-arrays.lsblk-tree.json"));
+            .onOk(DeviceFixtures.LSBLK, DeviceFixtures.read("gcp2/b-layout-initial.lsblk.json"));
 
-    var hostYaml = provision(shell, new PoolSource.Device(partition, "2147483648"), null);
+    var hostYaml =
+        provision(
+            shell,
+            new PoolSource.Device(partition, "sail-fleet-zfsproof2-b-d3 8:51 4294967296"),
+            null);
 
     assertTrue(
         shell
@@ -1333,13 +1337,40 @@ class HostProvisionerTest {
     var restart = shell.arguments().indexOf(List.of("systemctl", "restart", "incus"));
     var creates =
         shell.invocations().stream().filter(c -> c.startsWith("incus storage create")).count();
+    var second =
+        shell.invocations().lastIndexOf("incus storage create devpool zfs source=/dev/sdb");
+    var cleared = shell.invocations().lastIndexOf("realpath -e -- /dev/sdb");
     assertTrue(restart > 0, shell.invocations().toString());
     assertEquals(2, creates);
+    assertTrue(restart < cleared && cleared < second, shell.invocations().toString());
     assertTrue(
         steps.contains(
-            "done:5/8:devpool (zfs on /dev/sdb); restarted Incus, which ran no container, to see"
-                + " ZFS"),
+            "done:5/8:devpool (zfs on /dev/sdb, one device: no redundancy); restarted Incus, which"
+                + " ran no container, to see ZFS"),
         steps.toString());
+  }
+
+  @Test
+  void aDeviceThatChangedWhileIncusRestartedIsRefusedBeforeTheSecondCreate() {
+    var shell =
+        fresh(
+            new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
+                .onceOnFail("incus storage create", "Error: Required tool 'zpool' is missing")
+                .onOk("incus list", "[]")
+                .onceOnOk("lsblk --json --tree", DeviceFixtures.read(DeviceFixtures.SPARES))
+                .onOk(
+                    "--tree --bytes",
+                    DeviceFixtures.read(DeviceFixtures.SPARES).replace("spare-sdb", "spare-other")),
+            "zfs");
+
+    var refused = assertThrows(IllegalStateException.class, () -> provision(shell, SDB, null));
+
+    assertEquals(
+        "/dev/sdb is not the device first cleared: it was spare-sdb 8:16 42949672960, it is now"
+            + " spare-other 8:16 42949672960.",
+        refused.getMessage());
+    assertEquals(
+        1, shell.invocations().stream().filter(c -> c.startsWith("incus storage create")).count());
   }
 
   @Test
@@ -1518,7 +1549,8 @@ class HostProvisionerTest {
         .onOk("realpath -e -- /dev/sdb", "/dev/sdb\n")
         .onOk(DeviceFixtures.LSBLK, DeviceFixtures.read(DeviceFixtures.SPARES))
         .onOk("wipefs --all --no-act")
-        .onOk("zpool list -vHP", "");
+        .onOk("zpool list -vHP", "")
+        .onOk("/proc/[0-9]*");
   }
 
   /** {@code shell}, on a box whose Incus holds no pool until one is created. */

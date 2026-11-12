@@ -10,9 +10,13 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.io.BufferedReader;
+import java.io.InputStreamReader;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
+import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -198,6 +202,43 @@ class PoolDevicesIT extends AbstractIncusIT {
       shell.exec(List.of("incus", "storage", "delete", "sail-it-taken"));
       root.exec(List.of("losetup", "-d", blank));
       root.exec(List.of("losetup", "-d", taken));
+    }
+  }
+
+  /**
+   * A loop device a process holds open read-write, without the exclusive open the probe sees, is
+   * refused by the walk of {@code /proc/<pid>/fd}, naming the process; once it lets go, nothing
+   * holds it.
+   */
+  @Test
+  void aDeviceAProcessHoldsOpenPlainlyIsRefusedUntilItLetsGo(@TempDir Path dir) throws Exception {
+    ensureIncusOrSkip();
+    var root = new RootShell();
+    var loop = attach(root, dir.resolve("open.img"), "true");
+    var devices = new PoolDevices(root);
+    try {
+      var holder =
+          new ProcessBuilder(
+                  "sudo", "-n", "bash", "-c", "exec 3<>\"$1\"; echo held; read -r _", "bash", loop)
+              .redirectErrorStream(true)
+              .start();
+      List<String> held;
+      try (var said = new BufferedReader(new InputStreamReader(holder.getInputStream()))) {
+        assertEquals("held", said.readLine());
+        held = devices.openBy(loop, Set.of(loop));
+        holder.getOutputStream().close();
+        assertTrue(holder.waitFor(60, TimeUnit.SECONDS), "the holder did not let go");
+      }
+      var released = devices.openBy(loop, Set.of(loop));
+      System.out.println("HELD " + held + " RELEASED " + released);
+
+      assertEquals(1, held.size(), held.toString());
+      assertTrue(
+          held.getFirst().matches("process [0-9]+ \\(bash\\) has " + loop + " open"),
+          held.toString());
+      assertEquals(List.of(), released);
+    } finally {
+      root.exec(List.of("losetup", "-d", loop));
     }
   }
 

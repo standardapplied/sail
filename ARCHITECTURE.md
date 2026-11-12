@@ -1003,40 +1003,53 @@ never with `-f`: Sail never passes `source.wipe`.
 - **Z2. Sail erases nothing.** No command of Sail wipes, repartitions or overwrites a signature:
   it never passes `source.wipe`, so Incus never runs `zpool create -f` (Incus runs `-f`, after
   zeroing the device's headers, only for `source.wipe`: `driver_zfs.go` `Create`, v6.0.0 and
-  v7.6.0 alike). Incus's own `zpool create` is then the last guard: a device that took a
-  filesystem between Sail's checks and the create is refused by zpool and left as it was. `PoolDevices.cleared`
+  v7.6.0 alike). Incus's own `zpool create` is then a last guard, not the decision: Sail's own checks decide.
+  Without `-f`, zpool refuses a device on which libblkid sees a filesystem, swap, a member's or a
+  pool's label at the whole-device level (OpenZFS 2.2.2 `check_disk`, `check_slice`); it does not
+  look inside an MBR disk's partitions, and it takes an empty partition table and content libblkid
+  cannot read unambiguously. The window it guards is the moment between Sail's re-check and
+  Incus's create. `PoolDevices.cleared`
   resolves the named device (a `/dev/mapper` name by its kernel name) and reads the whole device
   tree (`lsblk --json --tree --bytes`; a flat list fails closed), then takes the device only when
   all of this holds, each refused by name otherwise: it is a plain disk (at the top of the tree, of
   type disk; not an array, a loop device, a mapping, a ZFS volume, a zram or nbd device, or a disk
-  built on another, as bcache is) or a partition of one, not removable and not empty; a partition's
-  type is one lsblk reads and is no EFI system, BIOS boot, XBOOTLDR, extended or ZFS-reserved type,
-  compared without case, since such a partition may carry no signature; nothing is mounted on it,
-  used as swap or built on it; neither lsblk nor `wipefs`'s listing of it shows a signature of any
-  kind (a filesystem, swap, a RAID, LVM, LUKS or zfs member, a partition table), nor for a disk any
-  partition; the exclusive open `wipefs --all --no-act --types sail_exclusive_probe` makes finds no
-  other holder (`--no-act` skips the writes, and the type filter matches no signature, so it
-  neither reports anything erased nor re-reads a partition table, as an unfiltered `--no-act
-  --all` does); and neither it nor another partition of its disk is a device of an imported pool,
+  built on another, as bcache is) or a partition of one, not removable and not empty; every
+  partition's type, on the device or for a disk on any of its partitions, is Linux filesystem data
+  (GPT `0fc63daf-…`, MBR `0x83`) or ZFS (`6a898cc3-…`, `0xbf`), compared without case, and any
+  other type or none refuses it, since a boot, firmware, reserved or extended partition may carry
+  no signature; nothing is mounted on it, used as swap or built on it; neither lsblk nor `wipefs`'s
+  listing of it shows a signature of any kind (a filesystem, swap, a partition table, or a member's:
+  any `*_member` (a RAID, LVM or zfs member, an exported pool's included), `bcache`,
+  `ceph_bluestore`, LUKS), nor for a disk any partition; the exclusive open `wipefs --all --no-act
+  --types sail_exclusive_probe` makes finds no other holder (`--no-act` skips the writes, and the
+  type filter matches no signature, so wipefs neither reports anything erased nor re-reads a
+  partition table, as an unfiltered `--no-act --all` does; udev may re-read one when the device is
+  closed, which writes nothing); no process has it, or for a disk any of its partitions, open at
+  all, read from every `/proc/<pid>/fd` (a process whose open files cannot be read refuses it too);
+  and neither it nor another partition of its disk is a device of an imported pool,
   whatever class it is listed under (`zpool list -vHP <pool>`), named with the pool and with
   Incus's pool when Incus holds it. Where it sits does not matter: a blank partition on the
   system's disk is taken, and everything the system uses there carries a signature, a mount or a
-  boot type. A device whose only obstacle is what it holds names the `sudo wipefs --all <device>`
-  the operator may run; one in use names the use, and a member the command that frees it. A
-  refused device that holds a filesystem unmounted names it. The open sees only exclusive holders:
-  a process that opens a device plainly, a virtual machine's raw disk or `dd`, is not seen. A disk
+  boot type. A device whose only obstacle is a filesystem, swap or a bare partition table names
+  the `sudo wipefs --all <device>` the operator may run; one in use names the use, and a member
+  of anything the command that frees it (a zpool not imported: `zpool import` or `zpool
+  labelclear`), never wipefs. A refused device that holds a filesystem unmounted names it. What
+  neither the open nor the walk sees is a consumer that does not keep the device open while Sail
+  looks, a stopped virtual machine's raw disk or a closed dm-crypt volume with no header. A disk
   with no partition table and no signature is blank to Sail, even where a filesystem survives
   further in after its table was erased. The check runs when the flags are read and again just
   before the pool is made, which refuses unless the device is the one first cleared (its or its
-  disk's WWN or serial, its major:minor and its size in bytes). Offered disks (none named) are only
-  whole blank ones.
+  disk's WWN or serial, its major:minor and its size in bytes), and once more before the create
+  that follows Incus restarting to see ZFS. Offered disks (none named) are only whole blank ones.
+  A pool on one partition or one disk has no redundancy: losing that device loses every container
+  on the pool, however the system's own disks are mirrored.
   *`PoolDevicesTest` (on lsblk, wipefs and zpool output captured from this devbox, a GitHub
   runner and two GCP proofs taken through blank, partitioned, RAID, pool, swap, btrfs, swapped-disk
   and pivoted root-on-ZFS and btrfs layouts, plus hand-written layouts marked as such),
   `PoolDevicesIT` (the runner's own disks, read-only; the probe on a loop device mounted and
   mapped; a `/dev/mapper` path refused as a dm device; a pool with every vdev class; Incus making
   the pool Sail asks for on a blank loop device, and zpool refusing one that took ext4 after the
-  checks, its ext4 kept), `HostProvisionerTest.aDeviceMountedSinceItWasNamedIsRefusedAndUntouched`.*
+  checks, its ext4 kept; a loop device a process holds open plainly refused until it lets go), `HostProvisionerTest.aDeviceMountedSinceItWasNamedIsRefusedAndUntouched`.*
 - **Z3. One pool, one owner.** Sail only reads ZFS (`zpool list`); every pool,
   dataset, snapshot and copy is made or removed by Incus. *`HostProvisionerTest.aZfsPoolOnAWholeDiskIsIncussOwnAndTheProfilePutsContainersOnIt`.*
 - **Z4. The ZFS cache cap is set before ZFS can take memory.** Step 3 writes
@@ -1046,7 +1059,8 @@ never with `-f`: Sail never passes `source.wipe`.
   zfsutils-linux, and to the loaded module when ZFS is already in, so it holds from the next load
   and across reboots. Where `/` is on ZFS the module loads from the initramfs, which carries a
   copy of `/etc/modprobe.d`, so init runs `update-initramfs -u`. A cap the operator set, one
-  `modprobe --showconfig` lists from any file modprobe reads that Sail did not write, or one the
+  `modprobe --showconfig` lists from any file modprobe reads that Sail did not write, a value in
+  Sail's own file other than the one Sail writes for this box (the operator's edit), or one the
   loaded module holds that Sail did not write, is kept, nothing written, and the step names it;
   the cap Sail wrote before is removed, so the operator's is the one modprobe applies whichever
   file sorts last.

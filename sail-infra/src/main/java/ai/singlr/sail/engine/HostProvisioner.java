@@ -276,24 +276,16 @@ public final class HostProvisioner {
   private void createStoragePool(String pool, PoolSource source)
       throws IOException, InterruptedException, TimeoutException {
     step(5, "Creating storage pool...");
-    var existing = storage.find(pool);
+    var existing =
+        shell.isDryRun()
+            ? new IncusStorage(reads)
+                .poolsOrNone().stream().filter(found -> found.name().equals(pool)).findFirst()
+            : storage.find(pool);
     if (existing.isPresent()) {
       var held = existing.get();
       held.requireDriver(source.driver());
       stepDone(5, pool + " (" + held.driver() + " on " + held.source() + ", already exists)");
       return;
-    }
-    if (source instanceof PoolSource.Device device && !shell.isDryRun()) {
-      var now = devices.cleared(device.path());
-      if (!now.equals(source)) {
-        throw new IllegalStateException(
-            device.path()
-                + " is not the device first cleared: it was "
-                + device.identity()
-                + ", it is now "
-                + now.identity()
-                + ".");
-      }
     }
     var restarted = make(pool, source);
     var trial =
@@ -302,22 +294,44 @@ public final class HostProvisioner {
   }
 
   /**
-   * Creates the pool. An incusd that started before the ZFS tools were installed and does not see
-   * them is restarted only when it runs no container, since a restart ends every {@code incus exec}
-   * into one; otherwise the operator is told to restart it. Returns what the step says it did.
+   * Creates the pool, a device cleared again just before each create, since it may have changed
+   * since the operator named it, or while Incus restarted. An incusd that started before the ZFS
+   * tools were installed and does not see them is restarted only when it runs no container, since a
+   * restart ends every {@code incus exec} into one; otherwise the operator is told to restart it.
+   * Returns what the step says it did.
    */
   private String make(String pool, PoolSource source)
       throws IOException, InterruptedException, TimeoutException {
+    clearedAgain(source);
     var made = storage.create(pool, source);
     var unseen = !made.ok() && IncusStorage.zfsUnseen(made);
     if (unseen) {
       restartToSeeZfs(made);
+      clearedAgain(source);
       made = storage.create(pool, source);
     }
     if (!made.ok()) {
       throw new IOException("Failed to create storage pool " + pool + ": " + made.reason());
     }
     return unseen ? "; restarted Incus, which ran no container, to see ZFS" : "";
+  }
+
+  /** Refuses a device that is no longer the one first cleared, or no longer carries nothing. */
+  private void clearedAgain(PoolSource source)
+      throws IOException, InterruptedException, TimeoutException {
+    if (!(source instanceof PoolSource.Device device) || shell.isDryRun()) {
+      return;
+    }
+    var now = devices.cleared(device.path());
+    if (!now.equals(source)) {
+      throw new IllegalStateException(
+          device.path()
+              + " is not the device first cleared: it was "
+              + device.identity()
+              + ", it is now "
+              + now.identity()
+              + ".");
+    }
   }
 
   private void restartToSeeZfs(ShellExec.Result unseen)

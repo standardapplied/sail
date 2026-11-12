@@ -25,6 +25,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermissions;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Set;
@@ -51,6 +52,43 @@ class HostInitCommandTest {
   @Test
   @EnabledOnOs(OS.LINUX)
   void aDryRunShowsTheProfileWhereIncusHasItAndTouchesNoStore(@TempDir Path home) throws Exception {
+    var said =
+        dryRun(home, POOLS, "--storage", "zfs", "--pool-file-size", "20GiB", "--pool", "tank");
+
+    assertTrue(said.contains("singlr-base (already exists): containers on devpool (dir)"), said);
+    assertFalse(said.contains("demo project"), said);
+    try (var held = Files.list(home.resolve("data"))) {
+      assertEquals(List.of(), held.toList());
+    }
+  }
+
+  /**
+   * A dry run of the command that made the zfs pool tank, on the box whose Incus holds it: it reads
+   * the pool Incus has, as a real run does, and says it is kept.
+   */
+  @Test
+  @EnabledOnOs(OS.LINUX)
+  void aDryRunOfTheCommandThatMadeAPoolSaysItIsKept(@TempDir Path home) throws Exception {
+    var tank =
+        "{\"name\":\"tank\",\"driver\":\"zfs\",\"config\":{\"source\":\"tank\","
+            + "\"volatile.initial_source\":\"/dev/sdb\",\"zfs.pool_name\":\"tank\"}}";
+
+    var said =
+        dryRun(home, POOLS.replace("[{", "[" + tank + ",{"), "--storage", "zfs", "--pool", "tank");
+
+    assertTrue(said.contains("tank (zfs on /dev/sdb, already exists)"), said);
+  }
+
+  private static final String POOLS =
+      "[{\"name\":\"devpool\",\"driver\":\"dir\",\"config\":{\"source\":"
+          + "\"/var/lib/incus/storage-pools/devpool\"}}]";
+
+  /**
+   * What {@code host init --dry-run --yes} with {@code flags} prints, run through the command line
+   * in a JVM of its own, its store and home in {@code home}, on a box whose Incus is a stand-in
+   * that lists {@code pools} and a base profile with its root disk on devpool.
+   */
+  private static String dryRun(Path home, String pools, String... flags) throws Exception {
     var data = Files.createDirectories(home.resolve("data"));
     var bin = Files.createDirectories(home.resolve("bin"));
     var incus = bin.resolve("incus");
@@ -59,18 +97,19 @@ class HostInitCommandTest {
         """
         #!/bin/sh
         case "$*" in
-          "storage list --format json")
-            printf '%s\\n' '[{"name":"devpool","driver":"dir","config":{"source":"/var/lib/incus/storage-pools/devpool"}}]' ;;
+          "storage list --format json") printf '%s\\n' '$POOLS' ;;
           "profile show singlr-base") echo "name: singlr-base" ;;
           "profile device list singlr-base") printf 'root\\neth0\\n' ;;
           "profile device get singlr-base root pool") echo devpool ;;
           *) exit 1 ;;
         esac
-        """);
+        """
+            .replace("$POOLS", pools));
     Files.setPosixFilePermissions(incus, PosixFilePermissions.fromString("rwxr-xr-x"));
     var output = home.resolve("output.txt");
-    var builder =
-        new ProcessBuilder(
+    var command =
+        new ArrayList<>(
+            List.of(
                 Path.of(System.getProperty("java.home"), "bin", "java").toString(),
                 "-Duser.home=" + home,
                 "--enable-native-access=ALL-UNNAMED",
@@ -80,15 +119,10 @@ class HostInitCommandTest {
                 "host",
                 "init",
                 "--dry-run",
-                "--storage",
-                "zfs",
-                "--pool-file-size",
-                "20GiB",
-                "--pool",
-                "tank",
-                "--yes")
-            .redirectErrorStream(true)
-            .redirectOutput(output.toFile());
+                "--yes"));
+    command.addAll(List.of(flags));
+    var builder =
+        new ProcessBuilder(command).redirectErrorStream(true).redirectOutput(output.toFile());
     builder.environment().put("SAIL_DATA_DIR", data.toString());
     builder.environment().put("PATH", bin + ":" + System.getenv("PATH"));
     var process = builder.start();
@@ -96,11 +130,7 @@ class HostInitCommandTest {
       assertTrue(process.waitFor(60, TimeUnit.SECONDS), "the dry run timed out");
       var said = Files.readString(output);
       assertEquals(0, process.exitValue(), said);
-      assertTrue(said.contains("singlr-base (already exists): containers on devpool (dir)"), said);
-      assertFalse(said.contains("demo project"), said);
-      try (var held = Files.list(data)) {
-        assertEquals(List.of(), held.toList());
-      }
+      return said;
     } finally {
       process.destroyForcibly();
     }
@@ -415,7 +445,8 @@ class HostInitCommandTest {
         .onOk("realpath -e -- /dev/sdb", "/dev/sdb\n")
         .onOk(DeviceFixtures.LSBLK, layout)
         .onOk("wipefs -- ", DeviceFixtures.NOTHING_HELD)
-        .onOk("wipefs --all --no-act");
+        .onOk("wipefs --all --no-act")
+        .onOk("/proc/[0-9]*");
   }
 
   private static PoolSource source(ScriptedShellExecutor shell, String... args) throws Exception {

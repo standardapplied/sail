@@ -47,7 +47,7 @@ public sealed interface PoolSource {
 
     @Override
     public String said() {
-      return "zfs on " + path;
+      return "zfs on " + path + ", one device: no redundancy";
     }
   }
 

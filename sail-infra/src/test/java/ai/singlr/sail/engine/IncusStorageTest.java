@@ -46,7 +46,9 @@ class IncusStorageTest {
   @Test
   void eachSourceIsSaidAsTheOperatorReadsIt() {
     assertEquals("dir", new PoolSource.Dir().said());
-    assertEquals("zfs on /dev/sdb", new PoolSource.Device("/dev/sdb", "id").said());
+    assertEquals(
+        "zfs on /dev/sdb, one device: no redundancy",
+        new PoolSource.Device("/dev/sdb", "id").said());
     assertEquals("zfs in a 50.0 GiB file", new PoolSource.File(51200).said());
     assertEquals("zpool devpool as it is", new PoolSource.Zpool("devpool").said());
   }

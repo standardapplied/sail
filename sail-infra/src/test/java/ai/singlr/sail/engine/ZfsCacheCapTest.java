@@ -88,13 +88,13 @@ class ZfsCacheCapTest {
   @Test
   void theCapSailWroteBeforeGoesSoTheOperatorsIsTheOneModprobeAppliesInEitherOrder()
       throws Exception {
-    var ours = "options zfs zfs_arc_max=1676148736\n";
+    var ours = "options zfs zfs_arc_max=" + ZfsCacheCap.forMemory(16000).bytes() + "\n";
     var theirs = "options zfs zfs_arc_max=1073741824\n";
     for (var config : List.of(theirs + ours, ours + theirs)) {
       var shell =
           new ScriptedShellExecutor()
               .onOk("modprobe --showconfig", config)
-              .onOk("grep -ho", "zfs_arc_max=1676148736\n")
+              .onOk("grep -ho", "zfs_arc_max=" + ZfsCacheCap.forMemory(16000).bytes() + "\n")
               .onOk("rm -f");
 
       var said = ZfsCacheCap.forMemory(16000).install(shell);
@@ -126,7 +126,7 @@ class ZfsCacheCapTest {
     var shell =
         new ScriptedShellExecutor()
             .onOk("modprobe --showconfig", "options zfs zfs_arc_max=1073741824\n")
-            .onOk("grep -ho", "zfs_arc_max=1676148736\n")
+            .onOk("grep -ho", "zfs_arc_max=" + ZfsCacheCap.forMemory(16000).bytes() + "\n")
             .onFail("rm -f", "rm: cannot remove: Read-only file system");
 
     var failed = assertThrows(IOException.class, () -> ZfsCacheCap.forMemory(16000).install(shell));
@@ -138,8 +138,8 @@ class ZfsCacheCapTest {
   }
 
   @Test
-  void aCapSailWroteBeforeIsWrittenAgainForThisMemory() throws Exception {
-    var cap = ZfsCacheCap.forMemory(131072);
+  void aCapSailWroteBeforeIsWrittenAgainAsItWas() throws Exception {
+    var cap = ZfsCacheCap.forMemory(65536);
     var shell =
         new ScriptedShellExecutor()
             .onOk("modprobe --showconfig", "options zfs zfs_arc_max=6871947673\n")
@@ -148,8 +148,23 @@ class ZfsCacheCapTest {
             .onOk("bash -c")
             .onOk("findmnt", "ext4\n");
 
-    assertEquals("ZFS cache capped at 12.8 GiB", cap.install(shell));
+    assertEquals("ZFS cache capped at 6.4 GiB", cap.install(shell));
     assertTrue(shell.arguments().contains(cap.dropIn().installCommand(ZfsCacheCap.PATH)));
+  }
+
+  @Test
+  void aCapTheOperatorEditedIntoSailsFileIsTheirsAndKept() throws Exception {
+    var shell =
+        new ScriptedShellExecutor()
+            .onOk("modprobe --showconfig", "options zfs zfs_arc_max=4294967296\n")
+            .onOk("grep -ho", "zfs_arc_max=4294967296\n");
+
+    assertEquals(
+        "ZFS cache cap left as you set it (zfs_arc_max=4294967296)",
+        ZfsCacheCap.forMemory(65536).install(shell));
+    assertTrue(
+        shell.invocations().stream().noneMatch(c -> c.startsWith("bash -c") || c.startsWith("rm")),
+        shell.invocations().toString());
   }
 
   @Test

@@ -44,23 +44,27 @@ sudo sail host init --storage zfs --pool-file-size 200GiB    # a file, to try ZF
 ```
 
 Incus creates and owns the pool. Sail erases nothing: it takes a disk or a partition only when it
-carries nothing at all, no partition table, no filesystem, no swap, no RAID, LVM, LUKS or ZFS
-signature, and nothing holds it open. Anything else is refused naming what it holds; where only
-what it holds is in the way, the refusal names the command that erases it (`sudo wipefs --all
-<device>`), for you to run if nothing on it is wanted, and then run `host init` again. A blank
-partition on the disk the system runs from is taken, as on a server whose two disks both carry the
-system. Refused whatever it holds: a disk with partitions; a mounted or swap device, or one with
-something built on it; a RAID, LVM or LUKS member (the refusal names the command that frees it);
-an EFI system, BIOS boot, XBOOTLDR, extended or ZFS-reserved partition, by its type, and a
-partition whose type lsblk cannot read; anything but a plain disk or a partition of one (an array,
-a loop device, a ZFS volume, an LVM or LUKS mapping, a partition of any of them); and a device of
-an imported zpool, or a partition beside one on the same disk (export or destroy the pool yourself
-first). Something that opens a device without holding it exclusively, a virtual machine's raw disk
-or `dd`, is not seen. A disk with no partition table and no signature is blank to Sail, even if a
-filesystem survives further in after its table was erased. A file is slower
+carries nothing at all, no partition table, no filesystem, no swap, no RAID, LVM, LUKS, bcache,
+ceph or ZFS signature, and nothing holds it open, exclusively or not. A partition is taken only
+with the Linux filesystem data or ZFS partition type. Anything else is refused naming what it
+holds. Where only a filesystem, swap or a bare partition table is in the way, the refusal names
+the command that erases it (`sudo wipefs --all <device>`), for you to run if nothing on it is
+wanted, and then run `host init` again; a member of a pool, an array, a volume group or a cache
+is refused naming the tool that frees it instead (an exported pool: `zpool import`, or `zpool
+labelclear` yourself). A blank partition on the disk the system runs from is taken, as on a server
+whose two disks both carry the system. Refused whatever it holds: a disk with partitions; a mounted
+or swap device, or one with something built on it, or one a process has open; a boot, firmware,
+reserved or extended partition, by its type; anything but a plain disk or a partition of one (an
+array, a loop device, a ZFS volume, an LVM or LUKS mapping, a partition of any of them); and a
+device of an imported zpool, or a partition beside one on the same disk (export or destroy the
+pool yourself first). A disk with no partition table and no signature is blank to Sail, even if a
+filesystem survives further in after its table was erased. A pool on one partition or one disk
+has no redundancy: if that device dies, every container on the pool is lost, however the system's
+own disks are mirrored. A file is slower
 than a disk and meant for trials. `host init` caps the ZFS cache at a tenth of memory, at most
-16 GiB (`/etc/modprobe.d/sail-zfs.conf`), and says so; a cap you set yourself is kept, and a cap
-Sail wrote before yours is removed so yours is the one that applies. On ZFS a
+16 GiB (`/etc/modprobe.d/sail-zfs.conf`), and says so; a cap you set yourself is kept, in your own
+file or edited into Sail's, and a cap Sail wrote before yours is removed so yours is the one that
+applies. On ZFS a
 container's disk limit is enforced: Incus sets the root disk's size as the dataset's ZFS `quota`,
 which its snapshots count against, and a snapshot copy is a clone that costs nothing at first.
 On a box already on `dir`, the same command with `--pool <name>` adds the ZFS pool beside it:

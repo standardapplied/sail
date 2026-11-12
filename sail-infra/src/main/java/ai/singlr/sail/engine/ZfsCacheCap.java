@@ -71,19 +71,25 @@ public record ZfsCacheCap(long bytes, long floor) {
   /**
    * Writes the cap on the machine {@code shell} runs on, unless the operator set one, and says what
    * holds. The operator's cap is one modprobe applies ({@code modprobe --showconfig}, every file it
-   * reads) that Sail did not write, or one the loaded module holds that Sail did not write (set on
+   * reads) that Sail did not write, a value in Sail's own file other than the one Sail writes for
+   * this box (the operator's edit), or one the loaded module holds that Sail did not write (set on
    * the kernel command line, or by hand).
    */
   public String install(ShellExec shell)
       throws IOException, InterruptedException, TimeoutException {
     var ours = shell.exec(List.of("grep", "-ho", "zfs_arc_max=[0-9]*", PATH));
     var written = ours.ok() ? ours.stdout().strip().replace("zfs_arc_max=", "") : "";
-    var theirs = applied(shell).stream().filter(value -> !value.equals(written)).toList();
+    var edited = !written.isEmpty() && !written.equals(String.valueOf(bytes));
+    var applied = applied(shell);
+    var theirs =
+        edited
+            ? (applied.isEmpty() ? List.of(written) : applied)
+            : applied.stream().filter(value -> !value.equals(written)).toList();
     if (!theirs.isEmpty()) {
       return "ZFS cache cap left as you set it (zfs_arc_max="
           + theirs.getLast()
           + ")"
-          + (written.isEmpty() ? "" : removed(shell));
+          + (written.isEmpty() || edited ? "" : removed(shell));
     }
     var live = shell.exec(List.of("cat", LOADED + "max"));
     var held = live.ok() ? live.stdout().strip() : "0";

@@ -6,6 +6,7 @@
 package ai.singlr.sail.engine;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -40,6 +41,11 @@ class PoolDevicesTest {
   private static final String BTRFS_ROOT = "gcp2/e-root-on-btrfs-raid1-pivot.lsblk.json";
   private static final String ZFS_ROOT = "gcp2/e-root-on-zfs-mirror-pivot.lsblk.json";
   private static final String TYPES = "handwritten-review3-layouts.lsblk.json";
+  private static final String PROBES = "handwritten-review4-layouts.lsblk.json";
+  private static final String LISTED = "DEVICE OFFSET TYPE UUID LABEL\n";
+  private static final String ACCEPTED =
+      ", not Linux filesystem data (0fc63daf-8483-4772-8e79-3d69d8477de4, 0x83) or ZFS"
+          + " (6a898cc3-1dd2-11b2-99a6-080020736631, 0xbf)";
   private static final List<String> RAID_LAYOUTS =
       List.of(
           OWNER,
@@ -98,24 +104,22 @@ class PoolDevicesTest {
 
   @Test
   void theDevboxRefusalsNameWhatHoldsEachDevice() {
+    var untyped =
+        " has no partition type lsblk reads: run sudo udevadm settle, then run this again";
+    var disk = refusal(DEVBOX, "/dev/nvme0n1");
+    for (var reason :
+        List.of(
+            "/dev/nvme0n1p1" + untyped,
+            "/dev/md0 (raid1) is built on it",
+            "/dev/md2 is mounted at /;",
+            "/dev/md2 (raid1) is built on it")) {
+      assertTrue(disk.contains(reason), disk);
+    }
     assertEquals(
-        "/dev/nvme0n1 is refused: /dev/md0 (raid1) is built on it;"
-            + " /dev/md1 (raid1) is built on it; /dev/md2 is mounted at /var/lib/sail/run; /dev/md2"
-            + " is mounted at /dev/.incus-systemd-credentials; /dev/md2 is mounted at /; /dev/md2"
-            + " (raid1) is built on it.",
-        refusal(DEVBOX, "/dev/nvme0n1"));
-    assertEquals(
-        "/dev/nvme1n1p1 is refused: lsblk shows no partition type for it: run sudo udevadm settle,"
-            + " then this again.",
+        "/dev/nvme1n1p1 is refused: /dev/nvme1n1p1" + untyped + ".",
         refusal(DEVBOX, "/dev/nvme1n1p1"));
     assertEquals(
-        "/dev/nvme0n1p4 is refused: lsblk shows no partition type for it: run sudo udevadm settle,"
-            + " then this again; /dev/md2 is mounted at /var/lib/sail/run; /dev/md2 is mounted at"
-            + " /dev/.incus-systemd-credentials; /dev/md2 is mounted at /; /dev/md2 (raid1) is built"
-            + " on it.",
-        refusal(DEVBOX, "/dev/nvme0n1p4"));
-    assertEquals(
-        "/dev/md0 is refused: it is an md array (raid1), not a disk or a" + " partition.",
+        "/dev/md0 is refused: it is an md array (raid1), not a disk or a partition.",
         refusal(DEVBOX, "/dev/md0"));
   }
 
@@ -129,13 +133,21 @@ class PoolDevicesTest {
       }
     }
     assertEquals(
-        "/dev/sda14 is refused: /dev/sda14 is a BIOS boot partition.",
+        "/dev/sda14 is refused: /dev/sda14 has partition type"
+            + " 21686148-6449-6e6f-744e-656564454649"
+            + ACCEPTED
+            + ".",
         refusal(gcp(BLANK), "/dev/sda14"));
     assertEquals(
-        "/dev/sda (/dev/disk/by-id/google-persistent-disk-0) is refused:"
-            + " /dev/sda1 is mounted at /; /dev/sda14 is a BIOS boot partition; /dev/sda15 is an EFI"
-            + " system partition; /dev/sda15 is mounted at /boot/efi; /dev/sda16 is an XBOOTLDR boot"
-            + " partition; /dev/sda16 is mounted at /boot.",
+        "/dev/sda (/dev/disk/by-id/google-persistent-disk-0) is refused: /dev/sda1 is mounted at /;"
+            + " /dev/sda14 has partition type 21686148-6449-6e6f-744e-656564454649"
+            + ACCEPTED
+            + "; /dev/sda15 has partition type c12a7328-f81f-11d2-ba4b-00a0c93ec93b"
+            + ACCEPTED
+            + "; /dev/sda15 is mounted at /boot/efi; /dev/sda16 has partition type"
+            + " bc13c2ff-59e6-4262-a352-b275fd6f7172"
+            + ACCEPTED
+            + "; /dev/sda16 is mounted at /boot.",
         refusal(
             gcp(BLANK).name("/dev/disk/by-id/google-persistent-disk-0", "/dev/sda"),
             "/dev/disk/by-id/google-persistent-disk-0"));
@@ -154,28 +166,26 @@ class PoolDevicesTest {
 
   @Test
   void theOwnerLayoutsRefusalsNameTheArraysTheSwapAndTheMount() {
-    assertEquals(
-        "/dev/sdb is refused: /dev/sdb1 is a RAID member: stop its array"
-            + " and clear it with mdadm --zero-superblock /dev/sdb1 yourself; /dev/md0 is in use as"
-            + " swap; /dev/md0 (raid1) is built on it; /dev/sdb2 is a RAID member: stop its array"
-            + " and clear it with mdadm --zero-superblock /dev/sdb2 yourself; /dev/md1 is mounted"
-            + " at /mnt/sailtrial-boot; /dev/md1 (raid1) is built on it; /dev/sdb3 is a RAID"
-            + " member: stop its array and clear it with mdadm --zero-superblock /dev/sdb3"
-            + " yourself; /dev/md2 (raid1) is built on it.",
-        refusal(gcp(OWNER), "/dev/sdb"));
-    assertEquals(
-        "/dev/sdb3 is refused: /dev/sdb3 is a RAID"
-            + " member: stop its array and clear it with mdadm --zero-superblock /dev/sdb3"
-            + " yourself; /dev/md2 (raid1) is built on it.",
-        refusal(gcp(OWNER), "/dev/sdb3"));
+    var disk = refusal(gcp(OWNER), "/dev/sdb");
+    for (var reason :
+        List.of(
+            "/dev/sdb1 is a RAID member: stop its array and clear it with mdadm --zero-superblock"
+                + " /dev/sdb1 yourself",
+            "/dev/md0 is in use as swap",
+            "/dev/md1 is mounted at /mnt/sailtrial-boot",
+            "/dev/md2 (raid1) is built on it",
+            "/dev/sdb3 has partition type a19d880f-05fc-4d3b-a006-743f0f84911e" + ACCEPTED)) {
+      assertTrue(disk.contains(reason), disk);
+    }
+    assertFalse(disk.contains("wipefs"), disk);
   }
 
   @Test
   void aRaidMemberUdevDoesNotKnowIsRefusedOnWhatItsListingShows() {
     assertEquals(
-        "/dev/sdc1 is refused: /dev/sdc1 is a RAID member: stop its array"
-            + " and clear it with mdadm --zero-superblock /dev/sdc1 yourself.",
-        refusal(gcp(STOPPED), "/dev/sdc1"));
+        "/dev/sda4 is refused: /dev/sda4 is a RAID member: stop its array and clear it with mdadm"
+            + " --zero-superblock /dev/sda4 yourself.",
+        refusal(names(new Box(PROBES)).holds("/dev/sda4", RAID_MEMBER), "/dev/sda4"));
   }
 
   @Test
@@ -230,26 +240,27 @@ class PoolDevicesTest {
               LSBLK,
               "wipefs -- /dev/sdb",
               "which zpool",
-              String.join(" ", PoolDevices.exclusiveOpen("/dev/sdb"))),
+              String.join(" ", PoolDevices.exclusiveOpen("/dev/sdb")),
+              "bash -c " + PoolDevices.OPEN_FILES),
           shell.invocations());
     }
   }
 
   @Test
-  void aPartitionedDiskIsRefusedNamingItsTableItsPartitionsAndTheCommandThatErasesIt()
-      throws Exception {
+  void aPartitionedDiskIsRefusedNamingItsTableItsPartitionsAndTheCommandThatErasesIt() {
     assertEquals(
-        "/dev/sdb holds gpt, PMBR, partition /dev/sdb1, partition /dev/sdb2, partition /dev/sdb3."
-            + " Sail erases nothing: if nothing on it is wanted, erase it yourself with sudo wipefs"
-            + " --all /dev/sdb, then run this again.",
-        refusal(gcp(PARTITIONED), "/dev/sdb"));
+        "/dev/sdb holds gpt, partition /dev/sdb1. Sail erases nothing: if nothing on it is wanted,"
+            + " erase it yourself with sudo wipefs --all /dev/sdb, then run this again.",
+        refusal(PROBES, "/dev/sdb"));
   }
 
   @Test
-  void aSparePartitionIsCleared() throws Exception {
+  void aBlankPartitionOfAnotherTypeIsRefusedNamingItsType() {
     assertEquals(
-        new PoolSource.Device("/dev/sdb1", "2147483648"),
-        devices(gcp(PARTITIONED).shell()).cleared("/dev/sdb1"));
+        "/dev/sdb1 is refused: /dev/sdb1 has partition type a19d880f-05fc-4d3b-a006-743f0f84911e"
+            + ACCEPTED
+            + ".",
+        refusal(gcp(PARTITIONED), "/dev/sdb1"));
   }
 
   @Test
@@ -441,16 +452,85 @@ class PoolDevicesTest {
   }
 
   @Test
-  void anExportedPoolsDeviceIsRefusedNamingWhatItHolds() throws Exception {
-    var box =
-        spares()
-            .holds("/dev/sdj1", RAID_MEMBER.replace("linux_raid_member", "zfs_member"))
-            .zpool("sail-raw", fixture("raw-file-pool.zpool-list.txt"), "/tmp/sail-raw.img");
+  void anExportedPoolsDeviceIsRefusedNamingThePoolAndNoErase() {
+    var refused =
+        refusal(
+            names(new Box(PROBES))
+                .holds("/dev/sda5", LISTED + "sda5 0x3f000 zfs_member 1234567890 oldtank\n"),
+            "/dev/sda5");
 
     assertEquals(
-        "/dev/sdj1 holds zfs_member. Sail erases nothing: if nothing on it is wanted, erase it"
-            + " yourself with sudo wipefs --all /dev/sdj1, then run this again.",
-        refusal(box, "/dev/sdj1"));
+        "/dev/sda5 is refused: /dev/sda5 is a device of zpool oldtank, which is not imported:"
+            + " import it with sudo zpool import oldtank, or clear it yourself with sudo zpool"
+            + " labelclear /dev/sda5.",
+        refused);
+    assertFalse(refused.contains("wipefs"), refused);
+    assertEquals(
+        "/dev/sdb is refused: /dev/sdb1 is a device of zpool exported, which is not imported:"
+            + " import it with sudo zpool import exported, or clear it yourself with sudo zpool"
+            + " labelclear /dev/sdb1.",
+        refusal(
+            names(new Box(PROBES))
+                .holds("/dev/sdb1", LISTED + "sdb1 0x3f000 zfs_member 1234567890 exported\n"),
+            "/dev/sdb"));
+  }
+
+  @Test
+  void aMemberOfAnythingIsRefusedWithNoErase() {
+    for (var listing :
+        List.of(
+            "sda4 0x1fffffe00 isw_raid_member\n",
+            "sda4 0xfffffe00 ddf_raid_member\n",
+            "sda4 0x218 LVM1_member\n",
+            "sda4 0x1018 bcache abc\n",
+            "sda4 0x0 ceph_bluestore\n")) {
+      var type = listing.split(" ")[2].strip();
+      var refused =
+          refusal(names(new Box(PROBES)).holds("/dev/sda4", LISTED + listing), "/dev/sda4");
+
+      assertEquals(
+          "/dev/sda4 is refused: /dev/sda4 carries "
+              + type
+              + " metadata: free it with the tool that made it, then run this again.",
+          refused);
+      assertFalse(refused.contains("wipefs"), refused);
+    }
+  }
+
+  @Test
+  void onlyLinuxDataAndZfsPartitionTypesAreTaken() throws Exception {
+    Map.of(
+            "/dev/sda2", "e3c9e316-0b5c-4db8-817d-f92df00215ae",
+            "/dev/sda3", "9e1a2d38-c612-4316-aa26-8b49521e5a8b",
+            "/dev/sda6", "0657fd6d-a4ab-43c4-84e5-0933c84b4f4f")
+        .forEach(
+            (partition, type) ->
+                assertEquals(
+                    partition
+                        + " is refused: "
+                        + partition
+                        + " has partition type "
+                        + type
+                        + ACCEPTED
+                        + ".",
+                    refusal(PROBES, partition)));
+    for (var partition : List.of("/dev/sdc1", "/dev/sdd1", "/dev/sdd2")) {
+      assertEquals(partition, devices(names(new Box(PROBES)).shell()).cleared(partition).path());
+    }
+  }
+
+  @Test
+  void aDeviceAProcessHasOpenIsRefusedNamingIt() {
+    assertEquals(
+        "/dev/sdk is refused: process 4242 (qemu-system-x86) has /dev/sdk open.",
+        refusal(spares().open(4242, "qemu-system-x86", "/dev/sdk"), "/dev/sdk"));
+    assertEquals(
+        "/dev/sdh is refused: process 99 (dd) has /dev/sdh open.",
+        refusal(spares().open(99, "dd", "/dev/sdh"), "/dev/sdh"));
+    assertEquals(
+        "/dev/sdk is refused: Sail cannot read the files process 77 has open, so whether it holds"
+            + " /dev/sdk cannot be told: run this as root.",
+        refusal(spares().unreadable(77), "/dev/sdk"));
   }
 
   @Test
@@ -488,18 +568,24 @@ class PoolDevicesTest {
   void bootPartitionsAreRefusedMountedOrNotOnAnyDisk() {
     var reasons =
         Map.of(
-            "/dev/sdh1", "/dev/sdh1 is an EFI system partition; it holds vfat",
-            "/dev/sdh2", "/dev/sdh2 is a BIOS boot partition",
-            "/dev/sdh4", "/dev/sdh4 is an XBOOTLDR boot partition; it holds vfat",
-            "/dev/sdi1", "/dev/sdi1 is an EFI system partition; it holds vfat");
+            "/dev/sdh1", "c12a7328-f81f-11d2-ba4b-00a0c93ec93b" + ACCEPTED + "; it holds vfat",
+            "/dev/sdh2", "21686148-6449-6e6f-744e-656564454649" + ACCEPTED,
+            "/dev/sdh4", "bc13c2ff-59e6-4262-a352-b275fd6f7172" + ACCEPTED + "; it holds vfat",
+            "/dev/sdi1", "0xef" + ACCEPTED + "; it holds vfat");
     reasons.forEach(
         (device, reason) ->
-            assertEquals(device + " is refused: " + reason + ".", refusal(A_INITIAL, device)));
+            assertEquals(
+                device + " is refused: " + device + " has partition type " + reason + ".",
+                refusal(A_INITIAL, device)));
     assertEquals(
-        "/dev/sdb1 is refused: /dev/sdb1 is an EFI system partition; it holds vfat.",
+        "/dev/sdb1 is refused: /dev/sdb1 has partition type c12a7328-f81f-11d2-ba4b-00a0c93ec93b"
+            + ACCEPTED
+            + "; it holds vfat.",
         refusal(BTRFS_ROOT, "/dev/sdb1"));
     assertEquals(
-        "/dev/sdb9 is refused: /dev/sdb9 is ZFS's reserved partition.",
+        "/dev/sdb9 is refused: /dev/sdb9 has partition type 6a945a3b-1dd2-11b2-99a6-080020736631"
+            + ACCEPTED
+            + ".",
         refusal("gcp2/b-layout-after-devpool.lsblk.json", "/dev/sdb9"));
   }
 
@@ -527,7 +613,7 @@ class PoolDevicesTest {
   void aDeviceMapperDeviceWithNoParentIsNotAFlatList() throws Exception {
     var shell = names(new Box("handwritten-gcp-blank-with-dm-zero.lsblk.json")).shell();
 
-    assertEquals("zfs on /dev/sdb", devices(shell).cleared("/dev/sdb").said());
+    assertEquals("/dev/sdb", devices(shell).cleared("/dev/sdb").path());
   }
 
   @Test
@@ -622,24 +708,26 @@ class PoolDevicesTest {
   }
 
   @Test
-  void aPartitionIsTakenOnlyWithAPartitionTypeLsblkReadsThatIsNoBootOrExtendedOne() {
+  void aPartitionWithoutATypeLsblkReadsOrWithAnyOtherTypeIsRefused() {
     var reasons =
         Map.of(
             "/dev/sdd1",
-            "lsblk shows no partition type for it: run sudo udevadm settle, then this again",
+            " has no partition type lsblk reads: run sudo udevadm settle, then run this again",
             "/dev/sdd2",
-            "/dev/sdd2 is an EFI system partition; it holds vfat",
+            " has partition type C12A7328-F81F-11D2-BA4B-00A0C93EC93B"
+                + ACCEPTED
+                + "; it holds vfat",
             "/dev/sde2",
-            "/dev/sde2 is an XBOOTLDR boot partition",
+            " has partition type 0xea" + ACCEPTED,
             "/dev/sde4",
-            "/dev/sde4 is an extended partition, which holds the logical ones",
+            " has partition type 0x5" + ACCEPTED,
             "/dev/sdf1",
-            "/dev/sdf1 is an extended partition, which holds the logical ones",
+            " has partition type 0xf" + ACCEPTED,
             "/dev/sdf2",
-            "/dev/sdf2 is an extended partition, which holds the logical ones");
+            " has partition type 0x85" + ACCEPTED);
     reasons.forEach(
         (device, reason) ->
-            assertEquals(device + " is refused: " + reason + ".", refusal(TYPES, device)));
+            assertEquals(device + " is refused: " + device + reason + ".", refusal(TYPES, device)));
   }
 
   @Test
@@ -683,7 +771,9 @@ class PoolDevicesTest {
             + " export or destroy the pool yourself first.",
         refusal(names(new Box(ZFS_ROOT)).zpool("rpool", rpool, "/dev/sdb2"), "/dev/sdb2"));
     assertEquals(
-        "/dev/sdd1 is refused: /dev/sdd1 is an EFI system partition; it holds vfat.",
+        "/dev/sdd1 is refused: /dev/sdd1 has partition type c12a7328-f81f-11d2-ba4b-00a0c93ec93b"
+            + ACCEPTED
+            + "; it holds vfat.",
         refusal(ZFS_ROOT, "/dev/sdd1"));
   }
 
@@ -740,6 +830,8 @@ class PoolDevicesTest {
     private final Map<String, String> listings = new LinkedHashMap<>();
     private final Map<String, String> busy = new LinkedHashMap<>();
     private final Map<String, List<String>> pools = new LinkedHashMap<>();
+    private final StringBuilder opened = new StringBuilder();
+    private final Map<Integer, String> comms = new LinkedHashMap<>();
     private String incus;
 
     Box(String layout) {
@@ -774,6 +866,19 @@ class PoolDevicesTest {
 
     Box busy(String path, String said) {
       busy.put(path, said);
+      return this;
+    }
+
+    /** Process {@code pid}, named {@code comm}, holding {@code path} open as /proc shows it. */
+    Box open(int pid, String comm, String path) {
+      opened.append(pid).append('\t').append(path).append('\n');
+      comms.put(pid, comm);
+      return this;
+    }
+
+    /** Process {@code pid}, whose open files cannot be read. */
+    Box unreadable(int pid) {
+      opened.append("unreadable\t").append(pid).append('\n');
       return this;
     }
 
@@ -820,6 +925,8 @@ class PoolDevicesTest {
       if (incus != null) {
         shell.onOk("incus storage list", incus);
       }
+      comms.forEach((pid, comm) -> shell.onOk("cat /proc/" + pid + "/comm", comm + "\n"));
+      shell.onOk("/proc/[0-9]*", opened.toString());
       return shell;
     }
 

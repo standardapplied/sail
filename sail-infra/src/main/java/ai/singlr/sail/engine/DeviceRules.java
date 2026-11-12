@@ -5,11 +5,11 @@
 
 package ai.singlr.sail.engine;
 
-import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Stream;
 
@@ -23,19 +23,15 @@ final class DeviceRules {
       Map.of("lvm", "an LVM logical volume", "crypt", "an open LUKS volume");
   private static final Map<String, String> NAMED =
       Map.of("zram", "a zram device", "nbd", "an nbd device", "zd", "a ZFS volume");
-  private static final String EXTENDED = "an extended partition, which holds the logical ones";
-  private static final Map<String, String> RESERVED =
-      Map.ofEntries(
-          Map.entry("c12a7328-f81f-11d2-ba4b-00a0c93ec93b", "an EFI system partition"),
-          Map.entry("0xef", "an EFI system partition"),
-          Map.entry("21686148-6449-6e6f-744e-656564454649", "a BIOS boot partition"),
-          Map.entry("bc13c2ff-59e6-4262-a352-b275fd6f7172", "an XBOOTLDR boot partition"),
-          Map.entry("0xea", "an XBOOTLDR boot partition"),
-          Map.entry("6a945a3b-1dd2-11b2-99a6-080020736631", "ZFS's reserved partition"),
-          Map.entry("0x5", EXTENDED),
-          Map.entry("0xf", EXTENDED),
-          Map.entry("0x85", EXTENDED));
+  private static final Set<String> ACCEPTED =
+      Set.of(
+          "0fc63daf-8483-4772-8e79-3d69d8477de4",
+          "0x83",
+          "6a898cc3-1dd2-11b2-99a6-080020736631",
+          "0xbf");
   private static final String SWAP = "[SWAP]";
+  private static final String ZFS = "zfs_member";
+  private static final Set<String> HELD = Set.of("bcache", "ceph_bluestore", "crypto_LUKS");
   private static final Map<String, String> MEMBERS =
       Map.of(
           "linux_raid_member",
@@ -69,9 +65,6 @@ final class DeviceRules {
               + parent.get().type()
               + "), not of a disk");
     }
-    if (device.partition() && device.parttype() == null) {
-      uses.add("lsblk shows no partition type for it: run sudo udevadm settle, then this again");
-    }
     if (disk.removable()) {
       uses.add(disk.path() + " is removable");
     }
@@ -87,15 +80,12 @@ final class DeviceRules {
         .subtree()
         .forEach(
             node -> {
-              if (node.parttype() != null) {
-                var reserved = RESERVED.get(node.parttype().toLowerCase(Locale.ROOT));
-                if (reserved != null) {
-                  uses.add(node.path() + " is " + reserved);
-                }
+              if (node.partition()) {
+                typed(node).ifPresent(uses::add);
               }
               node.mountpoints().forEach(mount -> uses.add(mounted(node, mount)));
-              if (node.fstype() != null && MEMBERS.containsKey(node.fstype())) {
-                uses.add(node.path() + " " + MEMBERS.get(node.fstype()).formatted(node.path()));
+              if (member(node.fstype()) && !ZFS.equals(node.fstype())) {
+                uses.add(membership(node.path(), node.fstype(), null));
               }
               if (node != device && !node.partition()) {
                 uses.add(node.path() + " (" + node.type() + ") is built on it");
@@ -112,22 +102,76 @@ final class DeviceRules {
     var uses = uses(device, disk);
     if (uses.isEmpty()
         || device.fstype() == null
-        || MEMBERS.containsKey(device.fstype())
+        || member(device.fstype())
         || !device.mountpoints().isEmpty()) {
       return uses;
     }
     return Stream.concat(uses.stream(), Stream.of("it holds " + device.fstype())).toList();
   }
 
-  /** Each RAID, LVM or LUKS signature the probes found, which keeps any pool off its device. */
-  static List<String> memberships(Map<String, List<String>> signatures) {
-    var uses = new ArrayList<String>();
-    signatures.forEach(
-        (path, types) ->
-            types.stream()
-                .filter(MEMBERS::containsKey)
-                .forEach(type -> uses.add(path + " " + MEMBERS.get(type).formatted(path))));
-    return uses;
+  /**
+   * Each member of something, a pool, an array, a volume group, a cache or a cluster, that the
+   * probes or lsblk found on {@code device} or its partitions; {@code pools} names the zpool a
+   * {@code zfs_member} listing gives. Such a device is never offered an erase.
+   */
+  static List<String> memberships(
+      BlockDevice device, Map<String, List<String>> signatures, Map<String, String> pools) {
+    var uses = new LinkedHashSet<String>();
+    for (var member : device.members()) {
+      Stream.concat(
+              signatures.getOrDefault(member.path(), List.of()).stream(),
+              Stream.ofNullable(member.fstype()))
+          .filter(DeviceRules::member)
+          .forEach(type -> uses.add(membership(member.path(), type, pools.get(member.path()))));
+    }
+    return List.copyOf(uses);
+  }
+
+  /** Whether {@code type} marks a device as part of something Sail must not take apart. */
+  static boolean member(String type) {
+    return type != null && (type.endsWith("_member") || HELD.contains(type));
+  }
+
+  private static String membership(String path, String type, String pool) {
+    if (MEMBERS.containsKey(type)) {
+      return path + " " + MEMBERS.get(type).formatted(path);
+    }
+    if (ZFS.equals(type)) {
+      return path
+          + " is a device of "
+          + (pool == null ? "a zpool" : "zpool " + pool)
+          + ", which is not imported: import it with sudo zpool import"
+          + (pool == null ? "" : " " + pool)
+          + ", or clear it yourself with sudo zpool labelclear "
+          + path;
+    }
+    return path
+        + " carries "
+        + type
+        + " metadata: free it with the tool that made it, then run"
+        + " this again";
+  }
+
+  /**
+   * Why a partition's type keeps a pool off it: none lsblk reads, or one that is neither Linux
+   * filesystem data nor ZFS. A boot, firmware, reserved or extended partition may carry no
+   * signature at all, so only those two are taken.
+   */
+  private static Optional<String> typed(BlockDevice node) {
+    if (node.parttype() == null) {
+      return Optional.of(
+          node.path()
+              + " has no partition type lsblk reads: run sudo udevadm settle, then run this again");
+    }
+    if (ACCEPTED.contains(node.parttype().toLowerCase(Locale.ROOT))) {
+      return Optional.empty();
+    }
+    return Optional.of(
+        node.path()
+            + " has partition type "
+            + node.parttype()
+            + ", not Linux filesystem data (0fc63daf-8483-4772-8e79-3d69d8477de4, 0x83) or ZFS"
+            + " (6a898cc3-1dd2-11b2-99a6-080020736631, 0xbf)");
   }
 
   /**
