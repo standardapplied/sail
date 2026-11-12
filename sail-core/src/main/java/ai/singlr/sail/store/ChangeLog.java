@@ -681,6 +681,18 @@ public final class ChangeLog {
   }
 
   /**
+   * The seqs of the entries of an entity {@link #compact} dropped, oldest first: where its {@link
+   * #history} no longer holds what was there.
+   */
+  public List<Long> compacted(String entityType, String entityId) {
+    return db.query(
+        "SELECT seq FROM compacted_entries WHERE entity_type = ? AND entity_id = ? ORDER BY seq",
+        row -> row.integer(0),
+        entityType,
+        entityId);
+  }
+
+  /**
    * Whether an entity began on this box: the oldest entry its log keeps is a write this box made
    * itself, not one synced from another box — it names no peer ({@link Actor#peer}), and its origin
    * is not a sync, which alone says so for entries written before revisions named their peer. False

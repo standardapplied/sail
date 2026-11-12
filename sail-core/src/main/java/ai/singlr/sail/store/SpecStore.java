@@ -540,6 +540,11 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
     return changeLog.history(ENTITY, id);
   }
 
+  /** The seqs of the revisions of a spec compaction dropped from its history, oldest first. */
+  public List<Long> compacted(String id) {
+    return changeLog.compacted(ENTITY, id);
+  }
+
   /**
    * Restores a spec to a prior revision's content, recorded as a NEW revision (origin {@code
    * restore}) — the current state is never discarded, it becomes part of history too, so a restore

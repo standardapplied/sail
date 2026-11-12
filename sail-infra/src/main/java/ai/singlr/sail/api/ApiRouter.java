@@ -152,6 +152,7 @@ public final class ApiRouter implements HttpHandler, RouteTable {
         route(GET, "/v1/events/recent", reads, this::recentEvents),
         route(GET, "/v1/events/stats", box, this::eventBusStats),
         route(POST, "/v1/specs:prune", Gate.decides(Action.PRUNE), this::prune),
+        route(GET, "/v1/specs:measures", reads, this::listMeasures),
         route(GET, "/v1/specs", reads, this::globalSpecs),
         route(POST, "/v1/specs", journal, this::createGlobalSpec),
         route(GET, "/v1/specs/board", reads, this::globalBoard),
@@ -162,6 +163,11 @@ public final class ApiRouter implements HttpHandler, RouteTable {
         route(PUT, "/v1/specs/{spec}/content", journal, this::setGlobalSpecContent),
         route(GET, "/v1/specs/{spec}/reviews", reads, this::reviewsForSpec),
         route(GET, "/v1/specs/{spec}/history", reads, this::globalSpecHistory),
+        route(
+            GET,
+            "/v1/specs/{spec}/measures",
+            reads,
+            call -> ApiResponse.from(operations.specMeasures(call.param(SPEC)))),
         route(POST, "/v1/specs/{spec}/restore", journal, this::restoreGlobalSpec),
         route(POST, "/v1/specs/{spec}/followup", journal, this::createFollowupSpec),
         route(Route.ANY, "/v1/specs/{spec}/{sub}", unserved, ApiRouter::absent),
@@ -697,15 +703,25 @@ public final class ApiRouter implements HttpHandler, RouteTable {
   }
 
   private ApiResponse globalSpecs(Call call) {
+    return ApiResponse.from(operations.globalSpecs(specFilter(call)));
+  }
+
+  private ApiResponse listMeasures(Call call) {
     var params = call.query();
     return ApiResponse.from(
-        operations.globalSpecs(
-            new SpecStore.SpecFilter(
-                params.get("project"),
-                params.get("status"),
-                resolveAssignee(params.get("assignee"), caller(call.exchange())),
-                params.get("repo"),
-                params.get("q"))));
+        operations.listMeasures(
+            specFilter(call), params.get("done_since"), params.get("done_until")));
+  }
+
+  /** The specs a list request names, as {@code GET /v1/specs} and its measures read them. */
+  private SpecStore.SpecFilter specFilter(Call call) {
+    var params = call.query();
+    return new SpecStore.SpecFilter(
+        params.get("project"),
+        params.get("status"),
+        resolveAssignee(params.get("assignee"), caller(call.exchange())),
+        params.get("repo"),
+        params.get("q"));
   }
 
   private ApiResponse createGlobalSpec(Call call) throws IOException {

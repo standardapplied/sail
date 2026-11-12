@@ -1909,6 +1909,7 @@ public final class SailOperations implements HostOperations {
               detail.plan(),
               detail.openFindings(),
               detail.latestRun(),
+              detail.measures(),
               ofReadableRooms(messageStore.openQuestions()).get(detail.spec().roomId()));
         });
   }
@@ -2092,6 +2093,18 @@ public final class SailOperations implements HostOperations {
   @Override
   public Result<GlobalSpecHistoryResponse> globalSpecHistory(String specId) {
     return safeRead(() -> globalSpecOps.history(specId));
+  }
+
+  @Override
+  public Result<SpecMeasures> specMeasures(String specId) {
+    return safeRead(() -> globalSpecOps.measures(specId));
+  }
+
+  @Override
+  public Result<SpecMeasuresList> listMeasures(
+      SpecStore.SpecFilter filter, String doneSince, String doneUntil) {
+    return safeRead(
+        () -> globalSpecOps.measures(filter, SpecMeasuresList.Window.parse(doneSince, doneUntil)));
   }
 
   @Override

@@ -272,6 +272,23 @@ class OwnWorkSocketTest {
         said(run(build, "POST", "/v1/specs/d1/messages", "body=hi")));
   }
 
+  /**
+   * Measures scenario 11: a build agent's {@code spec show}, inside its own work, carries the
+   * Measures of its spec, counting the run it is.
+   */
+  @ParameterizedTest
+  @ValueSource(strings = {"claude-code", "codex"})
+  void anAgentsSpecShowCarriesTheMeasuresOfItsOwnSpec(String harness) {
+    var build = build("e1", harness);
+
+    var shown = run(build, "GET", "/v1/specs/e1", "");
+
+    assertEquals("allowed", said(shown));
+    assertEquals(
+        Map.of("review_rounds", 0, "dispatch_attempts", 1, "fix_runs", 0, "carried_findings", 0),
+        ((Map<?, ?>) shown.body().get("measures")).get("rework"));
+  }
+
   /** Row 16: no agent sets e1 done or archives it; one that may write still retitles it. */
   @ParameterizedTest(name = "{0} {1}")
   @MethodSource("everyAgent")

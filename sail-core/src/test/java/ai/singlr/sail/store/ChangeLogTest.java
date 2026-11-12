@@ -386,6 +386,21 @@ class ChangeLogTest {
   }
 
   @Test
+  void compactedNamesTheSeqsCompactionDroppedOfOneEntityOldestFirst() {
+    for (var i = 1; i <= ChangeLog.HISTORY_REVISIONS + 2; i++) {
+      log.append("spec", "a", i + "-x", "local", false, "{}");
+    }
+    var seqs = log.history("spec", "a").stream().map(ChangeLog.Entry::seq).toList();
+    log.append("spec", "b", "1-y", "local", false, "{}");
+    assertEquals(List.of(), log.compacted("spec", "a"), "nothing is dropped before a compaction");
+
+    log.compact("spec", List.of("a", "b"), id -> null);
+
+    assertEquals(seqs.subList(0, 2), log.compacted("spec", "a"));
+    assertEquals(List.of(), log.compacted("spec", "b"));
+  }
+
+  @Test
   void aSeqEmptiedUnderManyNewerRevisionsIsNotHeldUnlessCompactionKeptThatItWasTheEntryRead() {
     log.append("spec", "a", "1-x", "local", false, "{}");
     var a = seqOf("a");

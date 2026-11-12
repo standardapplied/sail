@@ -156,6 +156,10 @@ class AccessDoorsBaselineTest {
 
   private static void reads(World world, List<Door> doors) {
     doors.add(new Door("list specs", ops -> ops.globalSpecs(SpecStore.SpecFilter.all())));
+    doors.add(
+        new Door(
+            "list measures",
+            ops -> measured(ops.listMeasures(SpecStore.SpecFilter.all(), null, null))));
     doors.add(new Door("list rooms", ops -> ops.rooms(null)));
     doors.add(new Door("list runs", ops -> ops.runs(null, null)));
     doors.add(new Door("list projects", Operations::projects));
@@ -170,6 +174,7 @@ class AccessDoorsBaselineTest {
     for (var spec : List.of("s-ada", "s-beta", "s-gone", "ghost")) {
       doors.add(new Door("read spec " + spec, ops -> ops.globalSpec(spec)));
       doors.add(new Door("list reviews of " + spec, ops -> ops.reviewsForSpec(spec)));
+      doors.add(new Door("read measures of " + spec, ops -> ops.specMeasures(spec)));
     }
     for (var room : List.of("lobby", "b-room", "s-ada", "ghost")) {
       doors.add(new Door("read room " + room, ops -> ops.room(room)));
@@ -181,6 +186,15 @@ class AccessDoorsBaselineTest {
     }
     var review = world.id("review-ada");
     doors.add(new Door("read review review-ada", ops -> ops.reviewDetail(review)));
+  }
+
+  /** A listing of measures as the specs it lists, which name their spec by {@code spec_id}. */
+  private static Object measured(Result<SpecMeasuresList> listed) {
+    return listed instanceof Result.Success<SpecMeasuresList>(var listing, _)
+        ? "SpecMeasuresList "
+            + String.join(
+                ", ", listing.specs().stream().map(SpecMeasures::specId).sorted().toList())
+        : listed;
   }
 
   private static void runs(World world, List<Door> doors) {

@@ -2184,6 +2184,31 @@ reviewer's and fix agent's own run log, and every fix commit intact, so the FDE 
 resolves with `sail spec update <id> --status done` (accept the work as-is) or `--status
 pending` (send it back to be re-dispatched). Nothing is deleted along the way.
 
+**Measures of a change.** What a spec's change took is computed on read, by one pure function
+(`SpecMeasures.of` over the spec's `MeasureRows`), from the rows a box already holds and nothing
+else: the revisions this box's change log keeps of it and the seqs compaction dropped
+(`compacted_entries`), its reviews and their findings, and its runs as `GET /v1/runs?spec=` lists
+them. Ready is the spec's first move into `pending`, known while the log holds every revision
+before it from the birth; done is the move that began its current stretch in `done`, known while
+the revision before that move is held; the dwell is the stretch in `awaiting_merge` that move
+ended; each is the author's time of its revision, from this box's log, which the answer names;
+verified is when the current attempt's latest passing review completed. Rework is review rows,
+build runs, fix runs and findings carried forward. "No recorded human code act" is a done spec no
+person decided a human stage of, an upper bound. Cost and human minutes are `unknown`: no row
+records them yet. `GET /v1/specs/{spec}/measures` serves the record, `GET /v1/specs/{spec}`
+carries it as `measures` (so `sail spec show`, its `--json` and the container's `spec show`
+print it), and `GET /v1/specs:measures`, behind `sail spec list --measures [--done-since]
+[--done-until]`, lists it per spec with the nearest-rank median and p90 of every number.
+
+| | Invariant | Proven by |
+|---|---|---|
+| M8 | A measure is computed only from recorded rows: a number missing an input is `unknown`, with a count of what is missing; nothing is estimated, interpolated or zero-filled, and a revision compacted away or filed where the reader does not read is a gap, never skipped over. | `SpecMeasuresTest` (a compacted `pending`, a log that begins after the birth, a gap inside a stretch, cost with its runs), `SpecMeasuresRouteTest` (the stores' own compaction) |
+| M9 | No fact is counted twice: a run counts once by its id, and times come from this box's change log alone, which the answer names. | `SpecMeasuresTest` (a run listed twice), `SpecMeasuresRouteTest` (a run of the spec's own room) |
+| M10 | One computation: the route, the spec's detail and both CLI verbs serve the one record. | `SpecMeasuresRouteTest`, `SpecMeasuresCommandTest` (the section and the listing pinned whole; each `--json` is the record) |
+| M11 | A negative interval is an error naming both instants, never clamped; a listing leaves it out of the median and counts it. | `SpecMeasuresTest` |
+| M12 | Served measures name no individual. | `SpecMeasuresTest` |
+| M13 | Reading is reading: a measure read writes no row, and a spec the caller may not read is one that is not there. | `SpecMeasuresRouteTest` (every row before and after; a hidden spec answers as a missing one), `ScopedReadsTest`, `RouteGateSweepTest`, `AccessDoorsBaselineTest` (`infra-doors`), `OwnWorkSocketTest` (an agent's own spec in its container) |
+
 **Events:** an in-process `EventBus` (lock-light, with bounded per-subscriber queues that
 are lossy by design so publishers never block) fans out to the SSE stream and to startup
 reactors: audit persistence, the webhook reactor, and the spec lifecycle reactor, which

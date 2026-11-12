@@ -21,6 +21,7 @@ import ai.singlr.sail.store.RoomStore;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.Snapshots;
 import ai.singlr.sail.store.SpecStore;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -92,9 +93,14 @@ final class GlobalSpecOperations {
 
   GlobalSpecsListResponse list(SpecStore.SpecFilter filter) {
     requireStore();
+    var specs = listed(filter).stream().map(this::viewOf).toList();
+    return new GlobalSpecsListResponse(specs, specs.size());
+  }
+
+  /** The specs {@code filter} lists that the reader may see; a filter naming no status refused. */
+  private List<SpecStore.SpecRow> listed(SpecStore.SpecFilter filter) {
     try {
-      var specs = readable(filter).stream().map(this::viewOf).toList();
-      return new GlobalSpecsListResponse(specs, specs.size());
+      return readable(filter);
     } catch (IllegalArgumentException e) {
       throw ApiException.of(ErrorCode.INVALID_REQUEST, e);
     }
@@ -114,7 +120,65 @@ final class GlobalSpecOperations {
         content != null ? content.body() : null,
         content != null ? content.plan() : null,
         openFindingCount(specId),
-        latestRun(specId));
+        latestRun(specId),
+        runStore == null || reviewStore == null ? null : measuresOf(row),
+        null);
+  }
+
+  /**
+   * What spec {@code specId}'s change took, as this box records it ({@link SpecMeasures}): a spec
+   * the reader may not read is one that is not there (M13).
+   */
+  SpecMeasures measures(String specId) {
+    requireMeasured();
+    return measuresOf(findOrThrow(specId));
+  }
+
+  /**
+   * The measures of every spec {@code filter} lists that the reader sees, done within {@code
+   * window}.
+   */
+  SpecMeasuresList measures(SpecStore.SpecFilter filter, SpecMeasuresList.Window window) {
+    requireMeasured();
+    return SpecMeasuresList.of(listed(filter).stream().map(this::measuresOf).toList(), window);
+  }
+
+  /**
+   * The rows of {@code spec} the reader sees, measured: its revisions on this box, with every entry
+   * compacted away or filed where the reader does not read as a gap; its reviews and their
+   * findings; and its runs, as {@code GET /v1/runs?spec=} lists them. Only reads.
+   */
+  private SpecMeasures measuresOf(SpecStore.SpecRow spec) {
+    var reader = Actor.reader();
+    var id = spec.id();
+    var history = specStore.history(id);
+    var sees = ReadFilter.<ChangeLog.Entry>readable(reader, GlobalSpecOperations::projectOf);
+    var gaps = new HashSet<>(specStore.compacted(id));
+    history.stream().filter(sees.negate()).map(ChangeLog.Entry::seq).forEach(gaps::add);
+    var reviews =
+        ReadFilter.readable(reader, reviewStore.reviewsForSpec(id), reviewStore::projectOf);
+    return SpecMeasures.of(
+        new MeasureRows(
+            id,
+            spec.status(),
+            HostInfo.hostname(),
+            history.stream().filter(sees).toList(),
+            gaps,
+            reviews,
+            reviews.stream()
+                .flatMap(review -> reviewStore.findingsForReview(review.id()).stream())
+                .toList(),
+            ReadFilter.readable(reader, runStore.list(null, id), RunStore.RunRow::project)));
+  }
+
+  private void requireMeasured() {
+    requireStore();
+    if (runStore == null) {
+      throw SailOperations.storeUnavailable("Run store");
+    }
+    if (reviewStore == null) {
+      throw SailOperations.storeUnavailable("Review store");
+    }
   }
 
   /**

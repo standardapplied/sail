@@ -404,6 +404,20 @@ class SpecStoreTest {
   }
 
   @Test
+  void compactedNamesTheRevisionsCompactionDroppedFromASpecsHistory() {
+    store.create(spec("a", "Test", "draft"));
+    for (var i = 1; i <= ChangeLog.HISTORY_REVISIONS; i++) {
+      store.setContent("a", "body " + i, "");
+    }
+    var born = store.history("a").getFirst().seq();
+    assertEquals(List.of(), store.compacted("a"));
+
+    new ChangeLog(db).compact("spec", List.of("a"), id -> null);
+
+    assertEquals(List.of(born), store.compacted("a"));
+  }
+
+  @Test
   void updateReposAndStatusWithBlankBranchKeepsTheStoredOne() {
     store.create(spec("a", "Test", "pending"));
     store.updateReposAndStatus("a", List.of("api"), SpecStatus.IN_PROGRESS, "agent/a");

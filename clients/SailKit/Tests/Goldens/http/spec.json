@@ -15,6 +15,59 @@
         "principal": "claude/run-1",
         "status": "running"
       },
+      "measures": {
+        "cost": {
+          "runs_without_usage": 1,
+          "unknown": "not_recorded"
+        },
+        "human_minutes": {
+          "unknown": "not_recorded"
+        },
+        "intervals": {
+          "awaiting_merge": {
+            "missing": 2,
+            "unknown": "inputs_missing"
+          },
+          "ready_to_done": {
+            "missing": 1,
+            "unknown": "inputs_missing"
+          },
+          "ready_to_verified": {
+            "seconds": 0
+          },
+          "verified_to_done": {
+            "missing": 1,
+            "unknown": "inputs_missing"
+          }
+        },
+        "no_recorded_human_code_act": {
+          "unknown": "not_done"
+        },
+        "rework": {
+          "carried_findings": 0,
+          "dispatch_attempts": 1,
+          "fix_runs": 0,
+          "review_rounds": 1
+        },
+        "spec_id": "harbor-docks",
+        "times": {
+          "awaiting_merge": {
+            "unknown": "not_reached"
+          },
+          "box": "box",
+          "done": {
+            "unknown": "not_reached"
+          },
+          "ready": {
+            "at": "2026-11-11T09:00:00.656Z",
+            "source": "change_log"
+          },
+          "verified": {
+            "at": "2026-11-11T09:00:00.656Z",
+            "source": "review"
+          }
+        }
+      },
       "open_findings": 1,
       "plan": "",
       "schema_version": 1,

@@ -56,6 +56,22 @@ public final class ApiSpecListCommand implements Runnable {
       description = "Search by ID or title.")
   private String query;
 
+  @Option(
+      names = "--measures",
+      description =
+          "Print each spec's measures, as this box records them, and their medians and p90.")
+  private boolean measures;
+
+  @Option(
+      names = "--done-since",
+      description = "With --measures: only specs done on or after this date (YYYY-MM-DD, UTC).")
+  private String doneSince;
+
+  @Option(
+      names = "--done-until",
+      description = "With --measures: only specs done on or before this date (YYYY-MM-DD, UTC).")
+  private String doneUntil;
+
   @Mixin private SyncOptions syncOptions;
 
   @Mixin private ConnectionOptions connection;
@@ -70,16 +86,22 @@ public final class ApiSpecListCommand implements Runnable {
 
   @SuppressWarnings("unchecked")
   private void execute() throws Exception {
+    if (!measures && (doneSince != null || doneUntil != null)) {
+      throw new IllegalArgumentException(
+          "--done-since and --done-until choose which measures to list; add --measures.");
+    }
     var config = connection.resolve();
     var resolvedProject = CurrentProject.scope(project, allProjects).orElse(null);
     var resolvedStatus = statusFilter(status, allStatuses);
     try (var client = new SailApiClient(config.serverUrl(), config.token(), syncOptions.noSync())) {
-      var params = new StringBuilder("/v1/specs?");
+      var params = new StringBuilder(measures ? "/v1/specs:measures?" : "/v1/specs?");
       if (resolvedProject != null) params.append("project=").append(resolvedProject).append("&");
       if (resolvedStatus != null) params.append("status=").append(resolvedStatus).append("&");
       if (assignee != null) params.append("assignee=").append(assignee).append("&");
       if (repo != null) params.append("repo=").append(repo).append("&");
       if (query != null) params.append("q=").append(query).append("&");
+      if (doneSince != null) params.append("done_since=").append(doneSince).append("&");
+      if (doneUntil != null) params.append("done_until=").append(doneUntil).append("&");
       var path = params.toString();
       if (path.endsWith("&") || path.endsWith("?")) {
         path = path.substring(0, path.length() - 1);
@@ -88,6 +110,12 @@ public final class ApiSpecListCommand implements Runnable {
       var result = client.get(path);
       if (json) {
         System.out.println(YamlUtil.dumpJson(new LinkedHashMap<>(result)));
+        return;
+      }
+      if (measures) {
+        for (var line : MeasuresText.listing(result)) {
+          System.out.println(Ansi.AUTO.string(line));
+        }
         return;
       }
 

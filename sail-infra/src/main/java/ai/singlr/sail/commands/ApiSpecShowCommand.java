@@ -88,6 +88,13 @@ public final class ApiSpecShowCommand implements Runnable {
                     + spec.get("question_message_id")));
       }
 
+      if (result.get("measures") instanceof Map<?, ?> measures) {
+        System.out.println();
+        for (var line : MeasuresText.section((Map<String, Object>) measures)) {
+          System.out.println(Ansi.AUTO.string(line));
+        }
+      }
+
       var body = (String) result.get("body");
       if (Strings.isNotBlank(body)) {
         System.out.println();
