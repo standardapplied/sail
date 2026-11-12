@@ -8,6 +8,7 @@ package ai.singlr.sail.commands;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -338,6 +339,40 @@ class LocalPtyHostTest {
     try (var client = Client.connect(socket())) {
       client.open("fresh", folder("work"), List.of("sh", "-c", "exec cat"));
       assertEquals(List.of("fresh"), client.list().stream().map(i -> i.name()).toList());
+    }
+  }
+
+  /** L5: sessions outlive their clients, not their host, and the boot id says so. */
+  @Test
+  void aRestartedHostHasANewBootIdAndNoneOfTheSessionsItsPredecessorHeld() throws Exception {
+    var work = folder("work");
+    var first = start();
+    String boot;
+    try (var client = Client.connect(socket())) {
+      client.open("before", work, List.of("sh", "-c", "exec cat"));
+      boot = client.boot();
+    }
+    stop(first);
+
+    start();
+
+    try (var client = Client.connect(socket())) {
+      assertNotEquals(boot, client.boot());
+      assertEquals(List.of(), client.list());
+    }
+  }
+
+  @Test
+  void aHostThatCannotStartLetsGoOfThePersonsLockSoTheNextStartIsNotRefused() throws Exception {
+    Files.createDirectories(socket().resolve("in-the-way"));
+
+    assertThrows(IOException.class, this::start);
+
+    Files.delete(socket().resolve("in-the-way"));
+    Files.delete(socket());
+    start();
+    try (var client = Client.connect(socket())) {
+      assertEquals(List.of(), client.list());
     }
   }
 
