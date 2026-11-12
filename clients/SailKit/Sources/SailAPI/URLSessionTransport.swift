@@ -4,46 +4,50 @@ import FoundationNetworking
 #endif
 import Synchronization
 
-/// A ``Transport`` over `URLSession`. A stream is read through a data delegate rather than
+/// A ``Transport`` over one `URLSession`, which lives as long as a copy of the transport or a
+/// request it sent does. A stream is read through the session's data delegate rather than
 /// `bytes(for:)`, which Linux's `URLSession` does not have, so one adapter serves every platform.
 public struct URLSessionTransport: Transport {
-    private let base: URL
-    private let configuration: URLSessionConfiguration
-    private let session: URLSession
+    /// How many chunks of a stream wait for a reader that has fallen behind. One more and the
+    /// stream fails, since dropping a chunk would corrupt everything after it.
+    package static let streamBacklog = 256
 
-    /// Requests reach the server at `base`, `https://box.example.com` say.
+    private let root: String
+    private let connection: Connection
+
+    /// Requests reach the server at `base`, `https://box.example.com` say; a path in `base` is
+    /// kept in front of every request's.
     public init(base: URL, configuration: URLSessionConfiguration = .default) {
-        self.base = base
-        self.configuration = configuration
-        session = URLSession(configuration: configuration)
+        let base = base.absoluteString
+        root = base.hasSuffix("/") ? String(base.dropLast()) : base
+        connection = Connection(configuration: configuration)
     }
 
     public func send(_ request: HTTPRequest) async throws(SailError) -> HTTPResponse {
-        let (body, response) = try await Self.reaching(base) { try await session.data(for: urlRequest(request)) }
+        let request = try urlRequest(request)
+        let (body, response) = try await reaching { try await connection.session.data(for: request) }
         return HTTPResponse(status: response.status, headers: response.headers, body: body)
     }
 
     public func open(_ request: HTTPRequest) async throws(SailError) -> HTTPStream {
-        let (body, chunks) = AsyncThrowingStream.makeStream(of: [UInt8].self)
+        let task = connection.session.dataTask(with: try urlRequest(request))
+        let (chunks, body) = ChunkBacklog.make(limit: Self.streamBacklog) { task.cancel() }
         let reader = StreamReader(chunks: chunks)
-        let session = URLSession(configuration: configuration, delegate: reader, delegateQueue: nil)
-        let task = session.dataTask(with: urlRequest(request))
-        chunks.onTermination = { _ in
-            task.cancel()
-            session.finishTasksAndInvalidate()
-        }
+        connection.streams.read(task, with: reader)
         task.resume()
-        let head = try await Self.reaching(base) {
+        let head = try await reaching {
             try await withTaskCancellationHandler { try await reader.head() } onCancel: { task.cancel() }
         }
         return HTTPStream(status: head.status, headers: head.headers, body: body)
     }
 
-    func urlRequest(_ request: HTTPRequest) -> URLRequest {
-        guard let target = URL(string: request.path, relativeTo: base) else {
-            preconditionFailure("'\(request.path)' is not a percent-encoded path; build requests with Endpoint")
+    /// `request` at this transport's server. Its path is appended to the base, never resolved
+    /// against it, so no path leaves the server or the base's own path.
+    func urlRequest(_ request: HTTPRequest) throws(SailError) -> URLRequest {
+        guard request.path.hasPrefix("/"), let target = URL(string: root + request.path) else {
+            throw .unsendable("'\(request.path)' is not a path under \(root)")
         }
-        var url = URLRequest(url: target.absoluteURL)
+        var url = URLRequest(url: target)
         url.httpMethod = request.method.rawValue
         url.httpBody = request.body
         for (name, value) in request.headers {
@@ -52,19 +56,32 @@ public struct URLSessionTransport: Transport {
         return url
     }
 
-    private static func reaching<Answer>(
-        _ base: URL, _ call: () async throws -> Answer
-    ) async throws(SailError) -> Answer {
+    private func reaching<Answer>(_ call: () async throws -> Answer) async throws(SailError) -> Answer {
         do {
             return try await call()
         } catch {
-            throw .unreachable("\(base.absoluteString): \(error.localizedDescription)")
+            throw .unreachable("\(root): \(error.localizedDescription)")
         }
     }
 }
 
+/// The session a transport's copies share, invalidated when the last of them goes; a stream still
+/// being read then runs to its end.
+private final class Connection: Sendable {
+    let session: URLSession
+    let streams = Streams()
+
+    init(configuration: URLSessionConfiguration) {
+        session = URLSession(configuration: configuration, delegate: streams, delegateQueue: nil)
+    }
+
+    deinit {
+        session.finishTasksAndInvalidate()
+    }
+}
+
 /// A response's status and headers, names lowercased.
-struct Head: Sendable {
+private struct Head: Sendable {
     let status: Int
     let headers: [String: String]
 }
@@ -82,19 +99,48 @@ private extension URLResponse {
     }
 }
 
-/// The delegate of one streamed request: its head resumes whoever waits for it once, and every
-/// chunk of its body is yielded as it arrives.
-private final class StreamReader: NSObject, URLSessionDataDelegate, Sendable {
+/// The session's delegate: hands what arrives for a streamed task to that task's reader.
+private final class Streams: NSObject, URLSessionDataDelegate, Sendable {
+    private let readers = Mutex<[Int: StreamReader]>([:])
+
+    func read(_ task: URLSessionTask, with reader: StreamReader) {
+        readers.withLock { $0[task.taskIdentifier] = reader }
+    }
+
+    private func reader(of task: URLSessionTask) -> StreamReader? {
+        readers.withLock { $0[task.taskIdentifier] }
+    }
+
+    func urlSession(
+        _ session: URLSession, dataTask: URLSessionDataTask, didReceive response: URLResponse,
+        completionHandler: @escaping @Sendable (URLSession.ResponseDisposition) -> Void
+    ) {
+        reader(of: dataTask)?.answer(.success(Head(status: response.status, headers: response.headers)))
+        completionHandler(.allow)
+    }
+
+    func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive data: Data) {
+        reader(of: dataTask)?.chunks.receive([UInt8](data))
+    }
+
+    func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: (any Error)?) {
+        readers.withLock { $0.removeValue(forKey: task.taskIdentifier) }?.finish(error)
+    }
+}
+
+/// One streamed request as its caller reads it: its head resumes whoever waits for it once, and
+/// every chunk of its body is queued as it arrives.
+private final class StreamReader: Sendable {
     private enum Waiting {
         case nobody
         case caller(CheckedContinuation<Head, any Error>)
         case answered(Result<Head, any Error>)
     }
 
-    private let chunks: AsyncThrowingStream<[UInt8], any Error>.Continuation
+    let chunks: ChunkBacklog
     private let waiting = Mutex(Waiting.nobody)
 
-    init(chunks: AsyncThrowingStream<[UInt8], any Error>.Continuation) {
+    init(chunks: ChunkBacklog) {
         self.chunks = chunks
     }
 
@@ -113,7 +159,7 @@ private final class StreamReader: NSObject, URLSessionDataDelegate, Sendable {
         }
     }
 
-    private func answer(_ result: Result<Head, any Error>) {
+    func answer(_ result: Result<Head, any Error>) {
         let caller: CheckedContinuation<Head, any Error>? = waiting.withLock { waiting in
             switch waiting {
             case .nobody:
@@ -129,25 +175,36 @@ private final class StreamReader: NSObject, URLSessionDataDelegate, Sendable {
         caller?.resume(with: result)
     }
 
-    func urlSession(
-        _ session: URLSession, dataTask: URLSessionDataTask, didReceive response: URLResponse,
-        completionHandler: @escaping @Sendable (URLSession.ResponseDisposition) -> Void
-    ) {
-        answer(.success(Head(status: response.status, headers: response.headers)))
-        completionHandler(.allow)
-    }
-
-    func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive data: Data) {
-        chunks.yield([UInt8](data))
-    }
-
-    func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: (any Error)?) {
+    func finish(_ error: (any Error)?) {
         answer(.failure(error ?? URLError(.badServerResponse)))
-        if let error {
-            chunks.finish(throwing: error)
-        } else {
-            chunks.finish()
+        chunks.finish(error)
+    }
+}
+
+/// The writing end of a stream's body: its chunks are held for the reader as they arrive, `limit`
+/// of them at most. A reader that falls further behind loses the stream: it reads the chunks held
+/// and then the failure, since a chunk dropped from the middle would corrupt everything after it.
+package struct ChunkBacklog: Sendable {
+    private let chunks: AsyncThrowingStream<[UInt8], any Error>.Continuation
+    private let limit: Int
+
+    /// A backlog and the body its reader reads. `onEnd` runs once, when the body fails, finishes,
+    /// or loses its reader, which is why the backlog does not hold the body itself.
+    package static func make(
+        limit: Int, onEnd: @escaping @Sendable () -> Void
+    ) -> (backlog: ChunkBacklog, body: AsyncThrowingStream<[UInt8], any Error>) {
+        let (body, chunks) = AsyncThrowingStream.makeStream(of: [UInt8].self, bufferingPolicy: .bufferingOldest(limit))
+        chunks.onTermination = { _ in onEnd() }
+        return (ChunkBacklog(chunks: chunks, limit: limit), body)
+    }
+
+    package func receive(_ chunk: [UInt8]) {
+        if case .dropped = chunks.yield(chunk) {
+            chunks.finish(throwing: SailError.unreachable("the stream's reader fell \(limit) chunks behind"))
         }
-        session.finishTasksAndInvalidate()
+    }
+
+    package func finish(_ error: (any Error)?) {
+        chunks.finish(throwing: error)
     }
 }
