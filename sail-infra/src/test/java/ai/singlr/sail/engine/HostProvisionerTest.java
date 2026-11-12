@@ -1094,6 +1094,27 @@ class HostProvisionerTest {
   }
 
   @Test
+  void aDeviceThatJoinedAPoolSinceItWasNamedIsRefusedAndUntouched() {
+    var shell =
+        fresh(
+            new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
+                .onOk(
+                    "zpool list",
+                    DeviceFixtures.read("raw-file-pool.zpool-list.txt")
+                        .replace("/tmp/sail-raw.img", "/dev/sdb"))
+                .onOk("realpath -m", "/dev/sdb\n")
+                .onOk("zfs list", DeviceFixtures.read("raw-file-pool.zfs-list.txt")),
+            "zfs");
+
+    var refused = assertThrows(IllegalStateException.class, () -> provision(shell, SDB, null));
+
+    assertEquals(
+        "/dev/sdb changed since it was named: it now reads as zpool sail-raw as it is.",
+        refused.getMessage());
+    assertNoPoolCreated(shell);
+  }
+
+  @Test
   void aDeviceMountedSinceItWasNamedIsRefusedAndUntouched() {
     var shell =
         fresh(

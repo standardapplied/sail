@@ -299,6 +299,47 @@
          "rm": false
       },
       {
+         "name": "sdl",
+         "path": "/dev/sdl",
+         "type": "disk",
+         "fstype": null,
+         "pttype": "gpt",
+         "mountpoints": [
+            null
+         ],
+         "size": 107374182400,
+         "model": "Virtual Disk",
+         "rm": false,
+         "children": [
+            {
+               "name": "sdl1",
+               "path": "/dev/sdl1",
+               "type": "part",
+               "fstype": "swap",
+               "pttype": "gpt",
+               "mountpoints": [
+                  "[SWAP]"
+               ],
+               "size": 53687091200,
+               "model": null,
+               "rm": false
+            },
+            {
+               "name": "sdl2",
+               "path": "/dev/sdl2",
+               "type": "part",
+               "fstype": null,
+               "pttype": "gpt",
+               "mountpoints": [
+                  null
+               ],
+               "size": 53687091200,
+               "model": null,
+               "rm": false
+            }
+         ]
+      },
+      {
          "name": "zram0",
          "path": "/dev/zram0",
          "type": "disk",

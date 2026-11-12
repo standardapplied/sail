@@ -49,6 +49,7 @@ public final class PoolDevices {
   static final String NOTHING = "sail_exclusive_probe";
 
   private static final Set<String> KINDS = Set.of("disk", "part");
+  private static final Set<String> WHOLE = Set.of("disk", "loop", "rom");
   private static final String PARTITION = "part";
   private static final String SWAP = "[SWAP]";
   private static final String BUSY = "Device or resource busy";
@@ -255,7 +256,10 @@ public final class PoolDevices {
         .toList();
   }
 
-  /** Every device as lsblk lists it, whole disks at the top; refused unless it printed a tree. */
+  /**
+   * Every device as lsblk lists it, whole devices at the top. A partition, an array or a volume at
+   * the top means lsblk printed a flat list, which cannot say what is built on what: refused.
+   */
   private List<BlockDevice> tree() throws IOException, InterruptedException, TimeoutException {
     var listed = shell.exec(LSBLK);
     if (!listed.ok()) {
@@ -266,11 +270,7 @@ public final class PoolDevices {
               + " MOUNTPOINTS); nothing was wiped.");
     }
     var devices = BlockDevice.listed(YamlUtil.parseMap(listed.stdout()).get("blockdevices"));
-    var paths = devices.stream().map(BlockDevice::path).toList();
-    var flat =
-        devices.stream().anyMatch(device -> PARTITION.equals(device.type()))
-            || Set.copyOf(paths).size() != paths.size();
-    if (flat) {
+    if (devices.stream().anyMatch(device -> !WHOLE.contains(device.type()))) {
       throw new IOException(
           "lsblk printed a flat list, not a device tree, so what is built on a device cannot be"
               + " read; nothing was wiped.");

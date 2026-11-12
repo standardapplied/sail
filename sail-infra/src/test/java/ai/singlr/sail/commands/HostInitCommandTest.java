@@ -301,6 +301,7 @@ class HostInitCommandTest {
 
   @Test
   void anEmptyImportedPoolOnTheNamedDiskIsHandedToIncusAsItIs() throws Exception {
+    answering("", false);
     var shell =
         spare(DeviceFixtures.read(DeviceFixtures.SPARES))
             .onOk("realpath -e -- /dev/sdi", "/dev/sdi\n")
@@ -315,6 +316,10 @@ class HostInitCommandTest {
     assertEquals(
         new PoolSource.Zpool("sail-raw"),
         source(shell, "--storage", "zfs", "--disk", "/dev/sdi", "--yes"));
+    assertEquals(
+        "  Found:   the empty imported zpool sail-raw on that device, which Incus does not have:"
+            + " it is handed to Incus as it is (source=sail-raw), and nothing on it is erased.\n",
+        out.toString(StandardCharsets.UTF_8));
   }
 
   @Test

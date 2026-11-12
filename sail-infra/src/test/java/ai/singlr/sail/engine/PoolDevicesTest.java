@@ -103,6 +103,11 @@ class PoolDevicesTest {
             + " partition; it is a partition of /dev/nvme0n1, which carries the running system"
             + " (/dev/md2 is mounted at /, the running system).",
         refusal(DEVBOX, "/dev/md0", "/dev/md0"));
+    assertEquals(
+        "/dev/nvme0n1p4 is refused, even with --force-wipe: /dev/md2 is mounted at"
+            + " /var/lib/sail/run; /dev/md2 is mounted at /dev/.incus-systemd-credentials; /dev/md2"
+            + " is mounted at /, the running system; /dev/md2 (raid1) is built on it.",
+        refusal(DEVBOX, "/dev/nvme0n1p4", null));
   }
 
   @Test
@@ -201,6 +206,14 @@ class PoolDevicesTest {
   }
 
   @Test
+  void aPartitionBesideSwapInUseIsRefusedEvenWithTheForceFlag() {
+    assertEquals(
+        "/dev/sdl2 is refused, even with --force-wipe: it is a partition of /dev/sdl, which"
+            + " carries the running system (/dev/sdl1 is in use as swap).",
+        refusal(spares().name("/dev/sdl2", "/dev/sdl2"), "/dev/sdl2", "/dev/sdl2"));
+  }
+
+  @Test
   void aSparePartitionIsCleared() throws Exception {
     assertEquals(
         new PoolSource.Device("/dev/sdd1", false),
@@ -290,6 +303,21 @@ class PoolDevicesTest {
             + " is never wiped: drop --force-wipe to hand the empty pool to Incus, or destroy the"
             + " pool yourself.",
         refusal(imported("raw-file-pool.zfs-list.txt"), "/dev/sdi", "/dev/sdi"));
+  }
+
+  @Test
+  void aDeviceInTwoImportedPoolsIsRefused() {
+    var pools =
+        fixture("raw-file-pool.zpool-list.txt").replace("/tmp/sail-raw.img", "/dev/sdi1")
+            + fixture("raw-file-pool.zpool-list.txt")
+                .replace("sail-raw", "other")
+                .replace("/tmp/other.img", "/dev/sdi9");
+    var box = spares().holds("/dev/sdi", GPT).zpool(pools, "/dev/sdi1\n/dev/sdi9");
+
+    assertEquals(
+        "/dev/sdi is refused, even with --force-wipe: it holds devices of the imported pools"
+            + " sail-raw, other.",
+        refusal(box, "/dev/sdi", null));
   }
 
   @Test
