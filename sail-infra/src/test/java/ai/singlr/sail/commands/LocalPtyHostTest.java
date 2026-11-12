@@ -89,16 +89,20 @@ class LocalPtyHostTest {
     var work = folder("work");
     start();
     try (var client = Client.connect(socket())) {
-      client.open("one", work, List.of());
-      client.attach("one");
+      client.open("shell", work, List.of());
+      client.attach("shell");
       client.type(Client.PROBE);
 
       assertEquals(
+          "@42@" + account.shell() + " -l@" + work.toRealPath() + "@xterm-256color@",
+          client.probed());
+    }
+    try (var client = Client.connect(socket())) {
+      client.open("environment", work, Client.ENVIRONMENT);
+      client.attach("environment");
+
+      assertEquals(
           "@42@"
-              + account.shell()
-              + " -l@"
-              + work.toRealPath()
-              + "@xterm-256color@C.UTF-8@"
               + account.home()
               + "@"
               + account.name()
@@ -106,7 +110,7 @@ class LocalPtyHostTest {
               + account.name()
               + "@"
               + account.shell()
-              + "@",
+              + "@C.UTF-8@",
           client.probed());
     }
   }
@@ -436,12 +440,19 @@ class LocalPtyHostTest {
   static final class Client implements AutoCloseable {
 
     /**
-     * A line that answers who runs it and where: the shell's own command line, its folder, its
-     * terminal, its locale and the account's variables, after {@code @42@}, which only an evaluated
-     * line holds, never the terminal's echo of the typed one.
+     * A line typed into a session's shell that answers who runs it and where: the shell's own
+     * command line, its folder and its terminal, after {@code @42@}, which only an evaluated line
+     * holds, never the terminal's echo of the typed one.
      */
-    static final String PROBE =
-        "echo \"@$((6*7))@$(ps -o args= -p $$)@$(pwd)@$TERM@$LANG@$HOME@$USER@$LOGNAME@$SHELL@\"\n";
+    static final String PROBE = "echo \"@$((6*7))@$(ps -o args= -p $$)@$(pwd)@$TERM@\"\n";
+
+    /**
+     * A session's command that says what the host put in its environment. {@code sh -c} reads no
+     * profile, where a login shell's start-up may set variables of its own: a macOS runner's
+     * profile sets {@code LANG}.
+     */
+    static final List<String> ENVIRONMENT =
+        List.of("sh", "-c", "echo \"@$((6*7))@$HOME@$USER@$LOGNAME@$SHELL@$LANG@\"; exec cat");
 
     private final SocketChannel channel;
     private final StringBuilder said = new StringBuilder();

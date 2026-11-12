@@ -152,11 +152,14 @@ class LocalPtyHostProcessTest {
       client.attach("here");
       client.type(LocalPtyHostTest.Client.PROBE);
       assertEquals(
+          "@42@" + account.shell() + " -l@" + work.toRealPath() + "@xterm-256color@",
+          client.probed());
+    }
+    try (var client = LocalPtyHostTest.Client.connect(socket())) {
+      client.open("environment", work, LocalPtyHostTest.Client.ENVIRONMENT);
+      client.attach("environment");
+      assertEquals(
           "@42@"
-              + account.shell()
-              + " -l@"
-              + work.toRealPath()
-              + "@xterm-256color@en_US.UTF-8@"
               + account.home()
               + "@"
               + account.name()
@@ -164,7 +167,7 @@ class LocalPtyHostProcessTest {
               + account.name()
               + "@"
               + account.shell()
-              + "@",
+              + "@en_US.UTF-8@",
           client.probed());
 
       assertEquals(List.of(), internetSockets(host.process().pid()), "no port, no connection");
