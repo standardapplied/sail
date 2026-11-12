@@ -1633,6 +1633,8 @@ class PtySessionHostTest {
   /**
    * One TCP connection ended at {@code stage}: closed before the magic, after it, mid-length, on an
    * oversized length, on a forged ticket, after a welcome, or reset after a frame once welcomed.
+   * Each but the first is shaken hands on again when the cap turns it away, since a slot is
+   * released only once the host has seen the connection that held it end.
    */
   private void endAtStage(
       PtySessionHost host, SocketChannel asker, InetSocketAddress address, int stage)
@@ -1646,23 +1648,18 @@ class PtySessionHostTest {
       }
       return;
     }
-    try (var tcp = SocketChannel.open(address)) {
+    if (stage == 0) {
+      SocketChannel.open(address).close();
+      return;
+    }
+    try (var tcp = PtyTcpDoorTest.handshaken(address)) {
       switch (stage) {
-        case 1 -> {
-          var magic = ByteBuffer.allocate(8);
-          while (magic.hasRemaining() && tcp.read(magic) >= 0) {}
-        }
-        case 2 -> {
-          PtyWire.handshake(tcp, tcp);
-          tcp.write(ByteBuffer.wrap(new byte[] {0, 0}));
-        }
+        case 2 -> tcp.write(ByteBuffer.wrap(new byte[] {0, 0}));
         case 3 -> {
-          PtyWire.handshake(tcp, tcp);
           tcp.write(ByteBuffer.allocate(4).putInt(1 << 20).flip());
           assertEquals(-1, tcp.read(ByteBuffer.allocate(1)));
         }
         case 4 -> {
-          PtyWire.handshake(tcp, tcp);
           PtyWire.write(tcp, new PtyMessage.Hello("tkt_" + "0".repeat(64)));
           assertInstanceOf(PtyMessage.Err.class, PtyWire.read(tcp));
         }
