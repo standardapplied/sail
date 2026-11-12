@@ -13,13 +13,18 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.common.Secrets;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.ProjectScope;
 import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.store.SqliteException;
 import java.io.IOException;
+import java.net.InetAddress;
+import java.net.InetSocketAddress;
 import java.net.StandardProtocolFamily;
+import java.net.StandardSocketOptions;
 import java.net.UnixDomainSocketAddress;
+import java.nio.ByteBuffer;
 import java.nio.channels.SocketChannel;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -27,12 +32,15 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicLong;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.api.io.TempDir;
 
 class PtySessionHostTest {
@@ -48,6 +56,20 @@ class PtySessionHostTest {
 
   private final Map<String, PtyIdentity.Person> reresolved = new ConcurrentHashMap<>();
   private volatile boolean storeDown;
+  private PtySessionHost.Network network = PtySessionHost.Network.NONE;
+
+  /** A ticket's credential, by its hash, resolved as the same token would be at a hello. */
+  private final PtyIdentity.Holders holders =
+      hash -> {
+        for (var token : List.of("tok-uday", "tok-mady", "tok-root", "tok-vic")) {
+          if (Secrets.hash(token).equals(hash)) {
+            return this.resolver.resolve(token);
+          }
+        }
+        throw new IOException("The credential is not valid or has expired.");
+      };
+
+  private final AtomicLong now = new AtomicLong(1_000_000_000L);
 
   private final PtyIdentity.Resolver resolver =
       token -> {
@@ -72,8 +94,18 @@ class PtySessionHostTest {
 
   private final Set<String> unheld = ConcurrentHashMap.newKeySet();
 
+  private final Set<String> boxless = ConcurrentHashMap.newKeySet();
+
   private final PtyAdmission admission =
       new PtyAdmission() {
+        @Override
+        public void box(PtyIdentity.Person who) throws IOException {
+          if (boxless.contains(who.fde())) {
+            throw new IOException(
+                "This box is uday's, so " + who.fde() + " opens no terminal on it.");
+          }
+        }
+
         @Override
         public void project(String project, PtyIdentity.Person who) throws IOException {
           if (project.equals("outage")) {
@@ -139,7 +171,8 @@ class PtySessionHostTest {
             },
             "0.0.0-test",
             limits,
-            handoff);
+            handoff,
+            network);
     host.start();
     return host;
   }
@@ -1388,6 +1421,369 @@ class PtySessionHostTest {
       assertTrue(refused.message().contains("could not serve"), refused.message());
       assertThrows(IOException.class, () -> PtyWire.read(channel), "then the host hangs up");
     }
+  }
+
+  @Test
+  @Timeout(value = 30, unit = TimeUnit.SECONDS)
+  void aHostListeningOnNoTcpAddressIssuesNoTicket() throws Exception {
+    try (var ignored = startHost()) {
+      assertEquals(
+          "unavailable This host listens for no terminal over the network. Name an address with"
+              + " 'sail host config set terminal-listen <address>:<port>' and restart the"
+              + " sail-pty-host service.",
+          said(askTicket("tok-uday", PtyMessage.TicketAction.OPEN, "acme")));
+    }
+  }
+
+  @Test
+  @Timeout(value = 30, unit = TimeUnit.SECONDS)
+  void aTicketIsDecidedAsTheOpenOrAttachItNamesForTheCredentialItCarries() throws Exception {
+    unheld.add("acme:uday");
+    boxless.add("mady");
+    try (var ignored = startTcpHost()) {
+      assertEquals(
+          List.of(
+              "not_found Project 'acme' is not in the catalog.",
+              "invalid Invalid project name: 'Acme'. Must match [a-z0-9][a-z0-9-]*, max 63"
+                  + " characters.",
+              "not_found There is no session 'ghost' on this box that you may attach.",
+              "forbidden A ticket is issued for the credential that asks for it, and this request"
+                  + " carries none: the box's own person exists only on the unix socket.",
+              "forbidden The credential is not valid or has expired.",
+              "forbidden This box is uday's, so mady opens no terminal on it."),
+          List.of(
+              said(askTicket("tok-uday", PtyMessage.TicketAction.OPEN, "acme")),
+              said(askTicket("tok-uday", PtyMessage.TicketAction.OPEN, "Acme")),
+              said(askTicket("tok-uday", PtyMessage.TicketAction.ATTACH, "ghost")),
+              said(askTicket("", PtyMessage.TicketAction.OPEN, "beta")),
+              said(askTicket("tok-nobody", PtyMessage.TicketAction.OPEN, "beta")),
+              said(askTicket("tok-mady", PtyMessage.TicketAction.OPEN, "beta"))));
+      assertEquals(
+          "unavailable " + PtySessionHost.UNSERVED,
+          said(askTicket("tok-uday", PtyMessage.TicketAction.OPEN, "outage")));
+      try (var dispatch = connect(dispatchCredential())) {
+        PtyWire.write(
+            dispatch, new PtyMessage.IssueTicket(PtyMessage.TicketAction.OPEN, "beta", "tok-uday"));
+        assertEquals(
+            "The dispatch authority may only yield and list sessions.",
+            ((PtyMessage.Err) PtyWire.read(dispatch)).message());
+      }
+      assertInstanceOf(
+          PtyMessage.Ticket.class, askTicket("tok-uday", PtyMessage.TicketAction.OPEN, "beta"));
+    }
+  }
+
+  @Test
+  @Timeout(value = 30, unit = TimeUnit.SECONDS)
+  void aTicketIsAskedOnlyOnAConnectionThatPresentedNoToken() throws Exception {
+    try (var ignored = startTcpHost();
+        var mady = connect("tok-mady")) {
+      PtyWire.write(
+          mady, new PtyMessage.IssueTicket(PtyMessage.TicketAction.OPEN, "beta", "tok-uday"));
+
+      assertEquals(
+          "forbidden A ticket is asked by this box's own process alone, on a connection that"
+              + " presented no token.",
+          said(PtyWire.read(mady)));
+      assertInstanceOf(
+          PtyMessage.Ticket.class, askTicket("tok-uday", PtyMessage.TicketAction.OPEN, "beta"));
+    }
+  }
+
+  @Test
+  @Timeout(value = 30, unit = TimeUnit.SECONDS)
+  void anAttachTicketIsRefusedAsNotFoundWhetherTheSessionIsAbsentOrNotTheCallers()
+      throws Exception {
+    try (var host = startTcpHost();
+        var channel = connect("tok-uday")) {
+      PtyWire.write(
+          channel,
+          new PtyMessage.Create("lounge", List.of("sh", "-c", "read a"), "/tmp", "", "", 80, 24));
+      assertInstanceOf(PtyMessage.Ok.class, PtyWire.read(channel));
+      assertEquals(
+          List.of(
+              "not_found There is no session 'lounge' on this box that you may attach.",
+              "not_found There is no session 'ghost' on this box that you may attach."),
+          List.of(
+              said(askTicket("tok-mady", PtyMessage.TicketAction.ATTACH, "lounge")),
+              said(askTicket("tok-mady", PtyMessage.TicketAction.ATTACH, "ghost"))));
+      assertInstanceOf(
+          PtyMessage.Ticket.class, askTicket("tok-uday", PtyMessage.TicketAction.ATTACH, "lounge"));
+    }
+  }
+
+  @Test
+  @Timeout(value = 30, unit = TimeUnit.SECONDS)
+  void aPresentedTicketIsWelcomedAsItsCredentialResolvesNowAndAdmitsItsActionAlone()
+      throws Exception {
+    try (var host = startTcpHost()) {
+      var ticket = (PtyMessage.Ticket) askTicket("tok-mady", PtyMessage.TicketAction.OPEN, "beta");
+      try (var tcp = presentTcp(host, ticket.ticket())) {
+        assertEquals(new PtyMessage.Welcome(host.bootId()), PtyWire.read(tcp));
+        PtyWire.write(tcp, new PtyMessage.ListSessions("", PtyMessage.PAGE_LIMIT));
+        assertEquals(
+            "This connection's ticket is to open a session in project 'beta', and it admits"
+                + " nothing else; ask the API for a ticket for that.",
+            ((PtyMessage.Err) PtyWire.read(tcp)).message());
+        assertThrows(IOException.class, () -> PtyWire.read(tcp), "then the host hangs up");
+      }
+
+      var revokedSince =
+          (PtyMessage.Ticket) askTicket("tok-mady", PtyMessage.TicketAction.OPEN, "beta");
+      revoked.add("tok-mady");
+      try (var tcp = presentTcp(host, revokedSince.ticket())) {
+        assertEquals(
+            "Session token is not valid or has expired.",
+            ((PtyMessage.Err) PtyWire.read(tcp)).message());
+      }
+
+      var unanswered =
+          (PtyMessage.Ticket) askTicket("tok-uday", PtyMessage.TicketAction.OPEN, "beta");
+      storeDown = true;
+      try (var tcp = presentTcp(host, unanswered.ticket())) {
+        assertEquals(PtySessionHost.UNSERVED, ((PtyMessage.Err) PtyWire.read(tcp)).message());
+      }
+    }
+  }
+
+  @Test
+  @Timeout(value = 30, unit = TimeUnit.SECONDS)
+  void aTcpConnectionThatPresentsNoTicketIsClosedAtTheDeadlineAndAnyOtherFrameAtOnce()
+      throws Exception {
+    try (var host = startTcpHost();
+        var silent = served(host);
+        var early = SocketChannel.open(host.tcpAddress().orElseThrow())) {
+      PtyWire.handshake(early, early);
+      PtyWire.write(early, new PtyMessage.ListSessions("", PtyMessage.PAGE_LIMIT));
+      assertEquals(-1, early.read(ByteBuffer.allocate(1)));
+
+      host.tick(now.get() + PtySessionHost.UNTICKETED_DEADLINE.toNanos());
+      assertTrue(silent.isOpen());
+      host.tick(now.get() + PtySessionHost.UNTICKETED_DEADLINE.toNanos() + 1);
+
+      assertEquals(-1, silent.read(ByteBuffer.allocate(1)));
+    }
+  }
+
+  @Test
+  @Timeout(value = 60, unit = TimeUnit.SECONDS)
+  void everyTcpConnectionReleasesItsSlotSoTheDoorServesForAsLongAsItRuns() throws Exception {
+    network =
+        new PtySessionHost.Network(
+            Optional.of(new InetSocketAddress(InetAddress.getLoopbackAddress(), 0)),
+            now::get,
+            holders);
+    try (var host = startHost(new PtySessionHost.Limits(32, 16, 4, 256))) {
+      for (var i = 0; i < 300; i++) {
+        try (var tcp = presentTcp(host, "tkt_" + "0".repeat(64))) {
+          assertInstanceOf(PtyMessage.Err.class, PtyWire.read(tcp), "connection " + i);
+        }
+      }
+      var ticket = (PtyMessage.Ticket) askTicket("tok-uday", PtyMessage.TicketAction.OPEN, "beta");
+      try (var tcp = presentTcp(host, ticket.ticket())) {
+        assertEquals(new PtyMessage.Welcome(host.bootId()), PtyWire.read(tcp));
+      }
+    }
+  }
+
+  @Test
+  @Timeout(value = 120, unit = TimeUnit.SECONDS)
+  void aTcpConnectionReleasesItsSlotExactlyOnceWhateverStageItEndsAt() throws Exception {
+    network =
+        new PtySessionHost.Network(
+            Optional.of(new InetSocketAddress(InetAddress.getLoopbackAddress(), 0)),
+            now::get,
+            holders);
+    try (var host = startHost(new PtySessionHost.Limits(32, 16, 4, 256));
+        var asker = connect("")) {
+      var address = host.tcpAddress().orElseThrow();
+      for (var i = 0; i < 301; i++) {
+        endAtStage(host, asker, address, i % 7);
+      }
+      var held = new ArrayList<SocketChannel>();
+      try {
+        for (var i = 0; i < 4; i++) {
+          held.add(admitted(host, asker));
+        }
+        try (var fifth = SocketChannel.open(address)) {
+          assertEquals(-1, fifth.read(ByteBuffer.allocate(8)), "exactly the cap, never lifted");
+        }
+      } finally {
+        for (var channel : held) {
+          channel.close();
+        }
+      }
+      var unix = new ArrayList<SocketChannel>();
+      try {
+        for (var i = 0; i < 3; i++) {
+          unix.add(connect());
+        }
+        assertThrows(
+            IOException.class,
+            () -> connect().close(),
+            "the unix cap is exactly 4, the asker's one");
+      } finally {
+        for (var channel : unix) {
+          channel.close();
+        }
+      }
+    }
+  }
+
+  /**
+   * One TCP connection ended at {@code stage}: closed before the magic, after it, mid-length, on an
+   * oversized length, on a forged ticket, after a welcome, or reset after a frame once welcomed.
+   */
+  private void endAtStage(
+      PtySessionHost host, SocketChannel asker, InetSocketAddress address, int stage)
+      throws IOException {
+    if (stage >= 5) {
+      try (var tcp = admitted(host, asker)) {
+        if (stage == 6) {
+          PtyWire.write(tcp, new PtyMessage.Resize(10, 10));
+          tcp.setOption(StandardSocketOptions.SO_LINGER, 0);
+        }
+      }
+      return;
+    }
+    try (var tcp = SocketChannel.open(address)) {
+      switch (stage) {
+        case 1 -> {
+          var magic = ByteBuffer.allocate(8);
+          while (magic.hasRemaining() && tcp.read(magic) >= 0) {}
+        }
+        case 2 -> {
+          PtyWire.handshake(tcp, tcp);
+          tcp.write(ByteBuffer.wrap(new byte[] {0, 0}));
+        }
+        case 3 -> {
+          PtyWire.handshake(tcp, tcp);
+          tcp.write(ByteBuffer.allocate(4).putInt(1 << 20).flip());
+          assertEquals(-1, tcp.read(ByteBuffer.allocate(1)));
+        }
+        case 4 -> {
+          PtyWire.handshake(tcp, tcp);
+          PtyWire.write(tcp, new PtyMessage.Hello("tkt_" + "0".repeat(64)));
+          assertInstanceOf(PtyMessage.Err.class, PtyWire.read(tcp));
+        }
+        default -> {}
+      }
+    }
+  }
+
+  @Test
+  @Timeout(value = 60, unit = TimeUnit.SECONDS)
+  void connectionsFromTheNetworkNeverLiftOrCrowdOutTheUnixSocketsCap() throws Exception {
+    network =
+        new PtySessionHost.Network(
+            Optional.of(new InetSocketAddress(InetAddress.getLoopbackAddress(), 0)),
+            now::get,
+            holders);
+    try (var host = startHost(new PtySessionHost.Limits(32, 16, 2, 256))) {
+      for (var i = 0; i < 10; i++) {
+        try (var tcp = presentTcp(host, "tkt_" + "0".repeat(64))) {
+          assertInstanceOf(PtyMessage.Err.class, PtyWire.read(tcp));
+        }
+      }
+      try (var unixFirst = connect("");
+          var first = admitted(host, unixFirst);
+          var second = admitted(host, unixFirst);
+          var third = SocketChannel.open(host.tcpAddress().orElseThrow());
+          var unixSecond = connect()) {
+        assertEquals(-1, third.read(ByteBuffer.allocate(8)), "past the TCP cap: closed unread");
+        assertInstanceOf(PtyMessage.Sessions.class, listing(unixSecond));
+        assertThrows(IOException.class, () -> connect().close(), "past the unix cap: refused");
+      }
+    }
+  }
+
+  @Test
+  @Timeout(value = 30, unit = TimeUnit.SECONDS)
+  void everyUnixConnectionReleasesItsSlotSoTheSocketServesForAsLongAsItRuns() throws Exception {
+    try (var host = startHost(new PtySessionHost.Limits(32, 16, 2, 256))) {
+      for (var i = 0; i < 10; i++) {
+        var channel = SocketChannel.open(StandardProtocolFamily.UNIX);
+        channel.connect(UnixDomainSocketAddress.of(dir.resolve("host.sock")));
+        try (channel) {
+          PtyWire.handshake(channel, channel);
+          PtyWire.write(channel, new PtyMessage.Detach());
+          assertInstanceOf(PtyMessage.Err.class, PtyWire.read(channel), "connection " + i);
+          assertEquals(-1, channel.read(ByteBuffer.allocate(1)));
+        }
+      }
+      try (var unix = connect()) {
+        assertInstanceOf(PtyMessage.Sessions.class, listing(unix));
+      }
+    }
+  }
+
+  /** A TCP connection the host is serving: it has written the magic, so it counted it. */
+  private static SocketChannel served(PtySessionHost host) throws IOException {
+    var channel = SocketChannel.open(host.tcpAddress().orElseThrow());
+    var magic = ByteBuffer.allocate(8);
+    while (magic.hasRemaining()) {
+      assertTrue(channel.read(magic) >= 0, "a connection under the cap is served");
+    }
+    return channel;
+  }
+
+  /**
+   * A TCP connection welcomed on a fresh ticket that {@code asker}, a unix connection that
+   * presented no token, asked for; tried again while slots that ended connections held are still
+   * being released. Asking on one held connection keeps the unix socket's count fixed, since a
+   * closed one releases its slot only once the host has seen it close.
+   */
+  private SocketChannel admitted(PtySessionHost host, SocketChannel asker) throws IOException {
+    PtyWire.write(
+        asker, new PtyMessage.IssueTicket(PtyMessage.TicketAction.OPEN, "beta", "tok-uday"));
+    var ticket = (PtyMessage.Ticket) PtyWire.read(asker);
+    while (true) {
+      var channel = SocketChannel.open(host.tcpAddress().orElseThrow());
+      try {
+        PtyWire.handshake(channel, channel);
+        PtyWire.write(channel, new PtyMessage.Hello(ticket.ticket()));
+        assertEquals(new PtyMessage.Welcome(host.bootId()), PtyWire.read(channel));
+        return channel;
+      } catch (IOException turnedAway) {
+        channel.close();
+      }
+    }
+  }
+
+  private static PtyMessage listing(SocketChannel channel) throws IOException {
+    PtyWire.write(channel, new PtyMessage.ListSessions("", PtyMessage.PAGE_LIMIT));
+    return PtyWire.read(channel);
+  }
+
+  private PtySessionHost startTcpHost() throws IOException {
+    network =
+        new PtySessionHost.Network(
+            Optional.of(new InetSocketAddress(InetAddress.getLoopbackAddress(), 0)),
+            now::get,
+            holders);
+    return startHost();
+  }
+
+  /** What the host answers a ticket for the holder of {@code credential}, asked as the box. */
+  private PtyMessage askTicket(String credential, PtyMessage.TicketAction action, String target)
+      throws IOException {
+    try (var channel = connect("")) {
+      PtyWire.write(channel, new PtyMessage.IssueTicket(action, target, credential));
+      return PtyWire.read(channel);
+    }
+  }
+
+  /** A ticket refusal as its kind and words. */
+  private static String said(PtyMessage answer) {
+    var refused = (PtyMessage.TicketRefused) answer;
+    return refused.kind().wire() + " " + refused.detail().plain();
+  }
+
+  private static SocketChannel presentTcp(PtySessionHost host, String ticket) throws IOException {
+    var channel = SocketChannel.open(host.tcpAddress().orElseThrow());
+    PtyWire.handshake(channel, channel);
+    PtyWire.write(channel, new PtyMessage.Hello(ticket));
+    return channel;
   }
 
   private static PtyMessage.SessionInfo listed(SocketChannel channel, String name)

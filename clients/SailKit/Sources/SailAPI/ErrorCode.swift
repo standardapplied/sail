@@ -23,6 +23,7 @@ public enum ErrorCode: String, CaseIterable, Sendable {
     case containerError = "container_error"
     case containerIpUnavailable = "container_ip_unavailable"
     case serverIpNotConfigured = "server_ip_not_configured"
+    case terminalUnavailable = "terminal_unavailable"
     case specNotFound = "spec_not_found"
     case specPruned = "spec_pruned"
     case specNotPrunable = "spec_not_prunable"

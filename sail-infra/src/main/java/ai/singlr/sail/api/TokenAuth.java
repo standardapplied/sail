@@ -54,12 +54,16 @@ public final class TokenAuth implements ApiAuth {
             .orElseThrow(
                 () -> new ApiException(ErrorCode.INVALID_BEARER_TOKEN, "Bearer token is invalid."));
     exchange.setAttribute("token.name", info.name());
+    exchange.setAttribute(ApiAuth.CREDENTIAL, token);
     exchange.setAttribute(
         ApiAuth.ACTOR, roles.principal(credential(info)).orElseThrow(() -> refused(info)));
   }
 
-  /** Whom {@code token} names: its FDE, the box's person for the host token, or no one. */
-  private static Credential credential(TokenStore.TokenInfo token) {
+  /**
+   * Whom {@code token} names: its FDE, the box's person for the host token, or no one. The terminal
+   * door reads an API token through this too ({@code HostAccess}).
+   */
+  public static Credential credential(TokenStore.TokenInfo token) {
     if (token.fdeHandle() != null) {
       return Credential.token(token.fdeHandle(), token.role());
     }

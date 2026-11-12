@@ -23,6 +23,7 @@ let calls: [String: @Sendable (SailClient) async throws -> Void] = [
     "refusal-invalid-bearer-token": { _ = try await $0.send(.whoami) },
     "refusal-bad-request": { _ = try await $0.send(.post(MessagePost(body: ""), room: "harbor-design")) },
     "refusal-not-found": { _ = try await $0.send(Endpoint<Whoami>(.get, ["v1", "nowhere"])) },
+    "terminal-ticket": { _ = try await $0.send(.terminalTicket(open: "harbor")) },
 ]
 
 let question = MessagePost(body: "Which berth takes the ferry — north or south? ⚓", asksQuestion: true)
@@ -76,6 +77,13 @@ func answer<Response>(
         #expect(whoami.email == "uday@example.com")
         #expect(whoami.role == .known(.admin))
         #expect(whoami.capabilities == [.known(.read), .known(.write), .known(.admin)])
+    }
+
+    @Test func aTerminalTicketReadsTheTicketWhereToPresentItAndWhenItLapses() throws {
+        let ticket = try Endpoint.terminalTicket(open: "harbor").decode(response(try Exchange("terminal-ticket")))
+        #expect(ticket.ticket == "tkt_harbor")
+        #expect(ticket.address == "100.64.0.7:7072")
+        #expect(ticket.expiresAt.milliseconds == Goldens.pinnedMilliseconds + 30_000)
     }
 
     @Test func projectsReadEachProjectAndItsContainer() throws {

@@ -43,6 +43,21 @@ record HealthResponse(String status) implements Mappable {
   }
 }
 
+/**
+ * A terminal ticket: presented within its life as the {@code Hello} token of one connection to the
+ * terminal host at {@code address}, it admits that connection for what it was issued for.
+ */
+record TicketResponse(String ticket, String address, String expiresAt) implements Mappable {
+  @Override
+  public Map<String, Object> toMap() {
+    var m = new LinkedHashMap<String, Object>();
+    m.put("ticket", ticket);
+    m.put("address", address);
+    m.put("expires_at", expiresAt);
+    return m;
+  }
+}
+
 record WhoamiResponse(
     String fde,
     String name,

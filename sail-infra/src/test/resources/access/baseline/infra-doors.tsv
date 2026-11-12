@@ -1,3 +1,9 @@
+a machine token asks a ticket to attach to ghost	denied FORBIDDEN 403 Token 'corpus-ci' is bound to no FDE, so it is issued no ticket: the host's own token is the box's person, who exists only on the unix socket, and a machine token acts for no one. Use a token of your own. | 
+a machine token asks a ticket to attach to lounge	denied FORBIDDEN 403 Token 'corpus-ci' is bound to no FDE, so it is issued no ticket: the host's own token is the box's person, who exists only on the unix socket, and a machine token acts for no one. Use a token of your own. | 
+a machine token asks a ticket to open a terminal in acme	denied FORBIDDEN 403 Token 'corpus-ci' is bound to no FDE, so it is issued no ticket: the host's own token is the box's person, who exists only on the unix socket, and a machine token acts for no one. Use a token of your own. | 
+a machine token asks a ticket to open a terminal in beta	denied FORBIDDEN 403 Token 'corpus-ci' is bound to no FDE, so it is issued no ticket: the host's own token is the box's person, who exists only on the unix socket, and a machine token acts for no one. Use a token of your own. | 
+a machine token asks a ticket to open a terminal in delta	denied FORBIDDEN 403 Token 'corpus-ci' is bound to no FDE, so it is issued no ticket: the host's own token is the box's person, who exists only on the unix socket, and a machine token acts for no one. Use a token of your own. | 
+a machine token asks a ticket to open a terminal in omega	denied FORBIDDEN 403 Token 'corpus-ci' is bound to no FDE, so it is issued no ticket: the host's own token is the box's person, who exists only on the unix socket, and a machine token acts for no one. Use a token of your own. | 
 approve review-ada as agent member ada-agent acme	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot approve reviews. | Only an operator lane (CLI or API token) may do this.
 approve review-ada as agent member ada-agent all	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot approve reviews. | Only an operator lane (CLI or API token) may do this.
 approve review-ada as agent member ada-agent beta	denied NOT_FOUND 404 Review 'review-ada' not found. | 
@@ -2456,6 +2462,12 @@ ensure the home room of bob in beta as container viewer ada all	ok Outcome {skip
 ensure the home room of bob in beta as container viewer ada beta	ok Outcome {skipped=this box's FDE holds a read-only credential and posts in no room, so it has no home room}
 ensure the home room of bob in beta as container viewer bob all	ok Outcome {skipped=this box's FDE holds a read-only credential and posts in no room, so it has no home room}
 ensure the home room of bob in beta as container viewer bob beta	ok Outcome {skipped=this box's FDE holds a read-only credential and posts in no room, so it has no home room}
+fde ada asks a ticket to attach to ghost	denied NOT_FOUND 404 There is no session 'ghost' on this box that you may attach. | 
+fde ada asks a ticket to attach to lounge	ok TicketResponse
+fde ada asks a ticket to open a terminal in acme	ok TicketResponse
+fde ada asks a ticket to open a terminal in beta	ok TicketResponse
+fde ada asks a ticket to open a terminal in delta	ok TicketResponse
+fde ada asks a ticket to open a terminal in omega	denied NOT_FOUND 404 Project 'omega' is not in the catalog. Create it with 'sail project create omega', or sync it from main with 'sail sync'. | 
 fde ada pins a terminal to attic on a node as cli admin root all	denied IOException Room 'attic' was not found. | 
 fde ada pins a terminal to attic on main as cli admin root all	denied IOException Room 'attic' was not found. | 
 fde ada pins a terminal to b-room on a node as cli admin root all	ok admitted
@@ -2470,6 +2482,12 @@ fde ada pins a terminal to lobby under beta on a node as cli admin root all	deni
 fde ada pins a terminal to lobby under beta on main as cli admin root all	denied IOException Room 'lobby' belongs to project 'acme'; open the session with --project acme. | 
 fde ada pins a terminal to s-ada on a node as cli admin root all	ok admitted
 fde ada pins a terminal to s-ada on main as cli admin root all	ok admitted
+fde bob asks a ticket to attach to ghost	denied NOT_FOUND 404 There is no session 'ghost' on this box that you may attach. | 
+fde bob asks a ticket to attach to lounge	denied NOT_FOUND 404 There is no session 'lounge' on this box that you may attach. | 
+fde bob asks a ticket to open a terminal in acme	denied FORBIDDEN 403 Box 'ada' belongs to 'ada', not you. Ask ada to operate it, or have an admin do it. | 
+fde bob asks a ticket to open a terminal in beta	denied FORBIDDEN 403 Box 'ada' belongs to 'ada', not you. Ask ada to operate it, or have an admin do it. | 
+fde bob asks a ticket to open a terminal in delta	denied FORBIDDEN 403 Box 'ada' belongs to 'ada', not you. Ask ada to operate it, or have an admin do it. | 
+fde bob asks a ticket to open a terminal in omega	denied FORBIDDEN 403 Box 'ada' belongs to 'ada', not you. Ask ada to operate it, or have an admin do it. | 
 fde bob pins a terminal to attic on a node as cli admin root all	denied IOException Room 'attic' was not found. | 
 fde bob pins a terminal to attic on main as cli admin root all	denied IOException Room 'attic' was not found. | 
 fde bob pins a terminal to b-room on a node as cli admin root all	denied Io Your credential is read-only and cannot post in rooms. | Ask an admin for a member or admin credential.
@@ -2482,6 +2500,12 @@ fde bob pins a terminal to lobby on a node as cli admin root all	denied Io Your 
 fde bob pins a terminal to lobby on main as cli admin root all	ok admitted
 fde bob pins a terminal to s-ada on a node as cli admin root all	denied Io Your credential is read-only and cannot post in rooms. | Ask an admin for a member or admin credential.
 fde bob pins a terminal to s-ada on main as cli admin root all	ok admitted
+fde root asks a ticket to attach to ghost	denied NOT_FOUND 404 There is no session 'ghost' on this box that you may attach. | 
+fde root asks a ticket to attach to lounge	ok TicketResponse
+fde root asks a ticket to open a terminal in acme	ok TicketResponse
+fde root asks a ticket to open a terminal in beta	ok TicketResponse
+fde root asks a ticket to open a terminal in delta	ok TicketResponse
+fde root asks a ticket to open a terminal in omega	denied NOT_FOUND 404 Project 'omega' is not in the catalog. Create it with 'sail project create omega', or sync it from main with 'sail sync'. | 
 fde root pins a terminal to attic on a node as cli admin root all	denied IOException Room 'attic' was not found. | 
 fde root pins a terminal to attic on main as cli admin root all	denied IOException Room 'attic' was not found. | 
 fde root pins a terminal to b-room on a node as cli admin root all	denied Io Your credential is read-only and cannot post in rooms. | Ask an admin for a member or admin credential.
@@ -2494,6 +2518,12 @@ fde root pins a terminal to lobby on a node as cli admin root all	denied Io Your
 fde root pins a terminal to lobby on main as cli admin root all	ok admitted
 fde root pins a terminal to s-ada on a node as cli admin root all	denied Io Your credential is read-only and cannot post in rooms. | Ask an admin for a member or admin credential.
 fde root pins a terminal to s-ada on main as cli admin root all	ok admitted
+fde sam asks a ticket to attach to ghost	denied NOT_FOUND 404 There is no session 'ghost' on this box that you may attach. | 
+fde sam asks a ticket to attach to lounge	denied NOT_FOUND 404 There is no session 'lounge' on this box that you may attach. | 
+fde sam asks a ticket to open a terminal in acme	denied FORBIDDEN 403 Box 'ada' belongs to 'ada', not you. Ask ada to operate it, or have an admin do it. | 
+fde sam asks a ticket to open a terminal in beta	denied FORBIDDEN 403 Box 'ada' belongs to 'ada', not you. Ask ada to operate it, or have an admin do it. | 
+fde sam asks a ticket to open a terminal in delta	denied FORBIDDEN 403 Box 'ada' belongs to 'ada', not you. Ask ada to operate it, or have an admin do it. | 
+fde sam asks a ticket to open a terminal in omega	denied FORBIDDEN 403 Box 'ada' belongs to 'ada', not you. Ask ada to operate it, or have an admin do it. | 
 fde sam pins a terminal to attic on a node as cli admin root all	denied IOException Room 'attic' was not found. | 
 fde sam pins a terminal to attic on main as cli admin root all	denied IOException Room 'attic' was not found. | 
 fde sam pins a terminal to b-room on a node as cli admin root all	denied Io Your credential is read-only and cannot post in rooms. | Ask an admin for a member or admin credential.
@@ -2506,6 +2536,12 @@ fde sam pins a terminal to lobby on a node as cli admin root all	denied IOExcept
 fde sam pins a terminal to lobby on main as cli admin root all	denied IOException Room 'lobby' was not found. | 
 fde sam pins a terminal to s-ada on a node as cli admin root all	denied IOException Room 's-ada' was not found. | 
 fde sam pins a terminal to s-ada on main as cli admin root all	denied IOException Room 's-ada' was not found. | 
+fde vic asks a ticket to attach to ghost	denied NOT_FOUND 404 There is no session 'ghost' on this box that you may attach. | 
+fde vic asks a ticket to attach to lounge	denied NOT_FOUND 404 There is no session 'lounge' on this box that you may attach. | 
+fde vic asks a ticket to open a terminal in acme	denied FORBIDDEN 403 Box 'ada' belongs to 'ada', not you. Ask ada to operate it, or have an admin do it. | 
+fde vic asks a ticket to open a terminal in beta	denied FORBIDDEN 403 Box 'ada' belongs to 'ada', not you. Ask ada to operate it, or have an admin do it. | 
+fde vic asks a ticket to open a terminal in delta	denied FORBIDDEN 403 Box 'ada' belongs to 'ada', not you. Ask ada to operate it, or have an admin do it. | 
+fde vic asks a ticket to open a terminal in omega	denied FORBIDDEN 403 Box 'ada' belongs to 'ada', not you. Ask ada to operate it, or have an admin do it. | 
 fde vic pins a terminal to attic on a node as cli admin root all	denied IOException Room 'attic' was not found. | 
 fde vic pins a terminal to attic on main as cli admin root all	denied IOException Room 'attic' was not found. | 
 fde vic pins a terminal to b-room on a node as cli admin root all	denied Io Your credential is read-only and cannot post in rooms. | Ask an admin for a member or admin credential.
@@ -17858,6 +17894,12 @@ stop the stack of omega as room viewer ada-room beta	denied PROJECT_NOT_IN_CATAL
 stop the stack of omega as room viewer bob-room acme	denied PROJECT_NOT_IN_CATALOG 404 Project 'omega' is not in the catalog. | Create it with 'sail project create omega', or sync it from main with 'sail sync'.
 stop the stack of omega as room viewer bob-room all	denied PROJECT_NOT_IN_CATALOG 404 Project 'omega' is not in the catalog. | Create it with 'sail project create omega', or sync it from main with 'sail sync'.
 stop the stack of omega as room viewer bob-room beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'omega' is not in the catalog. | Create it with 'sail project create omega', or sync it from main with 'sail sync'.
+the host token asks a ticket to attach to ghost	denied FORBIDDEN 403 Token 'admin' is bound to no FDE, so it is issued no ticket: the host's own token is the box's person, who exists only on the unix socket, and a machine token acts for no one. Use a token of your own. | 
+the host token asks a ticket to attach to lounge	denied FORBIDDEN 403 Token 'admin' is bound to no FDE, so it is issued no ticket: the host's own token is the box's person, who exists only on the unix socket, and a machine token acts for no one. Use a token of your own. | 
+the host token asks a ticket to open a terminal in acme	denied FORBIDDEN 403 Token 'admin' is bound to no FDE, so it is issued no ticket: the host's own token is the box's person, who exists only on the unix socket, and a machine token acts for no one. Use a token of your own. | 
+the host token asks a ticket to open a terminal in beta	denied FORBIDDEN 403 Token 'admin' is bound to no FDE, so it is issued no ticket: the host's own token is the box's person, who exists only on the unix socket, and a machine token acts for no one. Use a token of your own. | 
+the host token asks a ticket to open a terminal in delta	denied FORBIDDEN 403 Token 'admin' is bound to no FDE, so it is issued no ticket: the host's own token is the box's person, who exists only on the unix socket, and a machine token acts for no one. Use a token of your own. | 
+the host token asks a ticket to open a terminal in omega	denied FORBIDDEN 403 Token 'admin' is bound to no FDE, so it is issued no ticket: the host's own token is the box's person, who exists only on the unix socket, and a machine token acts for no one. Use a token of your own. | 
 unseat the agent of ada-born-in-attic on ada's box as agent member ada-agent acme	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot dispatch specs. | Only an operator lane (CLI or API token) may do this.
 unseat the agent of ada-born-in-attic on ada's box as agent member ada-agent all	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot dispatch specs. | Only an operator lane (CLI or API token) may do this.
 unseat the agent of ada-born-in-attic on ada's box as agent member ada-agent beta	denied ROOM_NOT_FOUND 404 Room 'ada-born-in-attic' was not found. | 

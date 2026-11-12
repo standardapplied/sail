@@ -77,6 +77,11 @@ import org.junit.jupiter.api.io.TempDir;
 class RosterChangeTest {
 
   private static final SyncConfig MAIN = new SyncConfig(SyncConfig.ROLE_MAIN, null, "ada", "main");
+
+  /** A box of nia's own, reading main's roster: the terminal she operates. */
+  private static final SyncConfig NIAS_BOX =
+      new SyncConfig(SyncConfig.ROLE_NODE, "sail@main", "nia", "nia-box");
+
   private static final SyncConfig NODE =
       new SyncConfig(SyncConfig.ROLE_NODE, "sail@main", "nia", "node-box");
 
@@ -300,12 +305,14 @@ class RosterChangeTest {
    * The terminal host resolves a connection's principal at its hello and again at each sweep. The
    * sweep severs an open connection once its credential resolves to another principal, or to none,
    * after its person is demoted, rescoped or disabled alike, and the reconnect is admitted as what
-   * it is now.
+   * it is now. The terminal is nia's own box's, reading main's roster, so she opens on it and her
+   * new role and scope are what the reconnect hears.
    */
   @Test
   void aChangeOfAccessSeversAnOpenTerminalAtTheNextSweepAndNotBefore() throws Throwable {
     var session = niasSession();
-    onMainsTerminal(
+    onTerminal(
+        NIAS_BOX,
         host -> {
           severedAtTheSweep(host, session, "UPDATE fdes SET role = 'viewer' WHERE handle = 'nia'");
           assertEquals(
@@ -333,12 +340,31 @@ class RosterChangeTest {
   }
 
   /**
+   * On a box someone else operates, nia opens no terminal whatever her role: the box half of the
+   * one open decision is asked before her role and scope are.
+   */
+  @Test
+  void aPersonWhoDoesNotOperateTheBoxOpensNoTerminalOnItWhateverTheirRole() throws Throwable {
+    var session = niasSession();
+    onMainsTerminal(
+        host -> {
+          var notHers =
+              "Box 'ada' belongs to 'ada', not you. Ask ada to operate it, or have an admin do it.";
+          assertEquals(notHers, refusedAPin(socket(), session));
+          onMain("UPDATE fdes SET role = 'viewer' WHERE handle = 'nia'");
+          assertEquals(notHers, refusedAPin(socket(), session));
+        });
+  }
+
+  /**
    * Until the sweep, an open connection pins rooms and opens sessions as the principal it was
-   * admitted as: the one window A10 leaves the terminal. Opening the session needs a real pty.
+   * admitted as: the one window A10 leaves the terminal. Nia is an admin when she connects, so she
+   * may open a terminal on ada's box. Opening the session needs a real pty.
    */
   @Test
   @EnabledOnOs(OS.LINUX)
   void anOpenTerminalActsAsItWasAdmittedUntilTheSweepAndNotAfter() throws Throwable {
+    onMain("UPDATE fdes SET role = 'admin' WHERE handle = 'nia'");
     var session = niasSession();
     onMainsTerminal(
         host -> {
@@ -364,6 +390,14 @@ class RosterChangeTest {
 
   /** Runs {@code check} against main's terminal host, started on {@link #socket}. */
   private void onMainsTerminal(ThrowingConsumer<PtySessionHost> check) throws Throwable {
+    onTerminal(MAIN, check);
+  }
+
+  /**
+   * Runs {@code check} against the terminal host of the box {@code box} configures, over main's
+   * roster, started on {@link #socket}.
+   */
+  private void onTerminal(SyncConfig box, ThrowingConsumer<PtySessionHost> check) throws Throwable {
     try (var operations =
             DoorBox.wired(
                 OperationsFactory.create(
@@ -375,7 +409,7 @@ class RosterChangeTest {
                     SessionYield.NONE),
                 mainDb,
                 tempDir,
-                MAIN);
+                box);
         var host = terminalHost(socket(), tempDir.resolve("sessions"), operations.pty())) {
       host.start();
       check.accept(host);
@@ -420,6 +454,11 @@ class RosterChangeTest {
         64 * 1024,
         pty::identity,
         new PtyAdmission() {
+          @Override
+          public void box(PtyIdentity.Person who) throws IOException {
+            pty.admitBox(who);
+          }
+
           @Override
           public void project(String project, PtyIdentity.Person who) throws IOException {
             pty.admitProject(project, who);

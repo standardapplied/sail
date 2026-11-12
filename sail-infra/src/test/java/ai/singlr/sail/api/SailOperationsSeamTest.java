@@ -849,7 +849,8 @@ class SailOperationsSeamTest {
     PrivateAttributes.context(
         http,
         "/",
-        new ApiRouter(operations, auth, new RateLimitGate(), new AgentLogStreamer(auth)));
+        new ApiRouter(
+            operations, auth, new RateLimitGate(), new AgentLogStreamer(auth), Optional.empty()));
     http.start();
     return new Api(http);
   }

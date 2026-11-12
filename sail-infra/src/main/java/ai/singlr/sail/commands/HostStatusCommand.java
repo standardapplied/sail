@@ -5,7 +5,9 @@
 
 package ai.singlr.sail.commands;
 
+import ai.singlr.sail.api.SailApiServer;
 import ai.singlr.sail.config.HostYaml;
+import ai.singlr.sail.config.ListenConfig;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.Banner;
 import ai.singlr.sail.engine.ContainerManager;
@@ -18,13 +20,21 @@ import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.ShellExecutor;
+import ai.singlr.sail.pty.PtySessionHost;
 import java.io.IOException;
 import java.io.PrintStream;
+import java.net.InetSocketAddress;
+import java.net.Socket;
 import java.nio.file.Files;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
+import java.util.Optional;
 import java.util.concurrent.TimeoutException;
+import java.util.function.Function;
+import java.util.function.Predicate;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
 import picocli.CommandLine.Model.CommandSpec;
@@ -81,8 +91,9 @@ public final class HostStatusCommand implements Runnable {
     var versions = new HostPackages(shell, detail -> {}).versions();
     var containers = Containers.of(shell);
 
+    var doors = doors(hostYaml.listen(), HostStatusCommand::bound, HostStatusCommand::answers);
     if (json) {
-      printJson(hostYaml, incusVersion, versions, hostInfo, storage, containers, out);
+      printJson(hostYaml, incusVersion, versions, hostInfo, storage, containers, doors, out);
       return;
     }
 
@@ -97,6 +108,93 @@ public final class HostStatusCommand implements Runnable {
         containers.summary(),
         out,
         Ansi.AUTO);
+    for (var door : doors) {
+      out.println("  " + door.setting() + "  " + door.state());
+    }
+  }
+
+  /**
+   * A private-network door, and what the running service does with it: listening on the address it
+   * bound, with the setting it will take at its next restart when that differs; or not listening,
+   * with what it is set to, or why that setting is refused at start.
+   */
+  record Door(String setting, String state) {}
+
+  /**
+   * Each door a running service says it listens on, or the settings name: what {@code bound} says
+   * the service bound for a setting, confirmed by {@code answers}, else what the setting says.
+   */
+  static List<Door> doors(
+      ListenConfig listen,
+      Function<String, Optional<String>> bound,
+      Predicate<InetSocketAddress> answers) {
+    var doors = new ArrayList<Door>();
+    for (var setting : List.of(ListenConfig.API, ListenConfig.TERMINAL)) {
+      var set = ListenConfig.API.equals(setting) ? listen.api() : listen.terminal();
+      var serving = bound.apply(setting).filter(at -> listening(setting, at, answers));
+      if (serving.isPresent()) {
+        var pending =
+            same(setting, serving.get(), set)
+                ? ""
+                : "; set to "
+                    + Objects.requireNonNullElse(set, ListenConfig.NONE)
+                    + ", restart to apply";
+        doors.add(new Door(setting, "listening on " + serving.get() + pending));
+      } else if (set != null) {
+        doors.add(new Door(setting, notListening(listen, setting, set)));
+      }
+    }
+    return List.copyOf(doors);
+  }
+
+  /** Whether {@code set} names the address {@code bound} is, however it is written. */
+  private static boolean same(String setting, String bound, String set) {
+    try {
+      return set != null
+          && ListenConfig.address(setting, bound).equals(ListenConfig.address(setting, set));
+    } catch (IllegalArgumentException unreadable) {
+      return false;
+    }
+  }
+
+  private static boolean listening(
+      String setting, String at, Predicate<InetSocketAddress> answers) {
+    try {
+      return answers.test(ListenConfig.address(setting, at));
+    } catch (IllegalArgumentException unreadable) {
+      return false;
+    }
+  }
+
+  private static String notListening(ListenConfig listen, String setting, String set) {
+    try {
+      if (ListenConfig.API.equals(setting)) {
+        listen.apiAddress();
+      } else {
+        listen.terminalAddress();
+      }
+      return "not listening (set to " + set + ")";
+    } catch (IllegalArgumentException refused) {
+      return "refused at start: " + refused.getMessage();
+    }
+  }
+
+  /** What the running service of {@code setting} says it is bound to. */
+  private static Optional<String> bound(String setting) {
+    return ListenConfig.said(
+        ListenConfig.API.equals(setting)
+            ? SailApiServer.listeningOf(SailPaths.apiSocketPath())
+            : PtySessionHost.listeningOf(SailPaths.ptySocketPath()));
+  }
+
+  /** Whether something accepts a TCP connection at {@code address} within a second. */
+  private static boolean answers(InetSocketAddress address) {
+    try (var socket = new Socket()) {
+      socket.connect(address, 1000);
+      return true;
+    } catch (IOException silent) {
+      return false;
+    }
   }
 
   /**
@@ -116,6 +214,7 @@ public final class HostStatusCommand implements Runnable {
       HostDetector.HostInfo hostInfo,
       Storage storage,
       Containers containers,
+      List<Door> doors,
       PrintStream out) {
     var map = new LinkedHashMap<String, Object>();
     map.put("hostname", hostInfo.hostname());
@@ -141,6 +240,13 @@ public final class HostStatusCommand implements Runnable {
       map.put("containers_running", containers.running());
       map.put("containers_frozen", containers.frozen());
       map.put("containers_stopped", containers.stopped());
+    }
+    if (!doors.isEmpty()) {
+      map.put(
+          "listen",
+          doors.stream()
+              .map(door -> Map.of("setting", door.setting(), "state", door.state()))
+              .toList());
     }
     out.println(YamlUtil.dumpJson(map));
   }

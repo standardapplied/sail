@@ -17,6 +17,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import ai.singlr.sail.common.Remedied;
 import ai.singlr.sail.config.FileLimits;
 import ai.singlr.sail.config.HostYaml;
+import ai.singlr.sail.config.ListenConfig;
 import ai.singlr.sail.config.RetentionConfig;
 import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.config.WebauthnConfig;
@@ -728,7 +729,8 @@ class HostProvisionerTest {
             passkeys,
             node,
             limits,
-            retention);
+            retention,
+            ListenConfig.none());
     YamlUtil.dumpToFile(before.toMap(), path);
 
     var after = reProvision(path);
