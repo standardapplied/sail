@@ -336,18 +336,25 @@ public final class SailPaths {
   }
 
   /**
-   * Returns the path to the running binary. Uses {@code /proc/self/exe} on Linux, falls back to
-   * {@link #INSTALLED_BINARY}.
+   * Returns the path to the running binary: {@code /proc/self/exe} where there is one (Linux), else
+   * the executable the system says this process runs (macOS), made absolute because macOS answers
+   * the path it was started by, else {@link #INSTALLED_BINARY}. A Linux binary replaced under the
+   * running process answers the installed path, never the deleted file's.
    */
   public static Path binaryPath() {
     var procSelf = Path.of("/proc/self/exe");
-    try {
-      if (Files.exists(procSelf)) {
-        return procSelf.toRealPath();
-      }
-    } catch (IOException ignored) {
+    if (!Files.exists(procSelf, LinkOption.NOFOLLOW_LINKS)) {
+      return ProcessHandle.current()
+          .info()
+          .command()
+          .map(command -> Path.of(command).toAbsolutePath())
+          .orElse(INSTALLED_BINARY);
     }
-    return INSTALLED_BINARY;
+    try {
+      return procSelf.toRealPath();
+    } catch (IOException replaced) {
+      return INSTALLED_BINARY;
+    }
   }
 
   /** Where {@code install.sh} puts sail and {@code sail upgrade} replaces it. */

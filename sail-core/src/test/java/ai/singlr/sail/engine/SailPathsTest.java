@@ -102,6 +102,14 @@ class SailPathsTest {
   }
 
   @Test
+  void theBinaryPathIsTheExecutableThisProcessRuns() throws Exception {
+    assertEquals(
+        Path.of(System.getProperty("java.home"), "bin", "java").toRealPath(),
+        SailPaths.binaryPath().toRealPath(),
+        "a JVM runs java, and the session shim is spawned from what runs");
+  }
+
+  @Test
   void theInstalledBinaryResolvesThroughALinkToTheExecutableItNames() throws Exception {
     var binary = Files.writeString(tempDir.resolve("sail-0.46.0"), "#!/bin/sh\n");
     binary.toFile().setExecutable(true);
