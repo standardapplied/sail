@@ -1004,7 +1004,9 @@ said once to be meant for trials. Incus runs `zpool create -m none -O compressio
   device and reads the whole device tree (`lsblk --json --tree`; a flat list fails closed, and a
   tree with nothing mounted at `/`, as with root on ZFS, refuses every disk and partition, since
   which disks carry the system cannot be told; the file pool is the way on). It refuses, even with
-  `--force-wipe`: anything but a disk or a partition; a removable, empty, zram or nbd device; one
+  `--force-wipe`: anything but a disk or a partition of a disk (an md array, a loop device, an LVM
+  or LUKS mapping, a partition of an array or of a loop device, named by its `/dev/mapper` path
+  or its kernel name); a removable, empty, zram or nbd device, or a ZFS volume; one
   mounted or swap, or with something built on it (an array, a volume, an open LUKS volume); an EFI
   system or BIOS boot partition, by its partition type, and a disk holding one; a partition of the
   disk the running system is on (any partition there, or anything built on one, mounted at `/` or
@@ -1014,17 +1016,23 @@ said once to be meant for trials. Incus runs `zpool create -m none -O compressio
   by the exclusive open `wipefs --all --no-act --types sail_exclusive_probe` makes (`--no-act`
   skips the writes, and the type filter matches no signature, so it neither reports anything
   erased nor re-reads a partition table, as an unfiltered `--no-act --all` does); and a device of
-  an imported pool, whatever class it is listed under (`zpool list -vHP <pool>`), named with the
-  pool and with Incus's pool when Incus holds it. The open sees only exclusive holders: a process
-  that opens a device plainly, a virtual machine's raw disk or `dd`, is not seen. Anything else a device or its partitions hold (a filesystem, a
-  partition table, an exported pool) is refused unless `--force-wipe` names the same device;
+  an imported pool, whatever class it is listed under (`zpool list -vHP <pool>`), or a partition
+  of a disk another partition of which is one, named with the pool and with Incus's pool when
+  Incus holds it. A refused device that holds a filesystem unmounted names it. The open sees only
+  exclusive holders: a process that opens a device plainly, a virtual machine's raw disk or `dd`,
+  is not seen. Anything else a device or its partitions hold (a filesystem, a partition table, an
+  exported pool) is refused unless `--force-wipe` names the same device; a disk with no partition
+  table and no signature is blank to Sail, even where a filesystem survives further in after its
+  table was erased;
   that is the one case Incus is passed `source.wipe=true`. It runs when the flags are read and
   again just before the pool is made, which refuses unless the device is the one first cleared
   (its or its disk's WWN or serial, its major:minor and size). Offered disks (none named) are only whole unused ones.
   *`PoolDevicesTest` (on lsblk, wipefs and zpool output captured from this devbox, a GitHub
-  runner and a GCP VM taken through blank, partitioned and RAID layouts, plus one hand-written
-  layout of spare disks), `PoolDevicesIT` (the runner's own disks, read-only, and the probe on a
-  loop device), `HostProvisionerTest.aDeviceMountedSinceItWasNamedIsRefusedAndUntouched`.*
+  runner and a GCP VM taken through blank, partitioned and RAID layouts, plus hand-written
+  layouts marked as such, among them the GCP proof's arrays, mappings, zvol and loop partitions),
+  `PoolDevicesIT` (the runner's own disks, read-only; the probe on a loop device mounted and
+  mapped; a `/dev/mapper` path refused as a dm device; a pool with every vdev class),
+  `HostProvisionerTest.aDeviceMountedSinceItWasNamedIsRefusedAndUntouched`.*
 - **Z3. One pool, one owner.** Sail only reads ZFS (`zpool list`, `zfs list`); every pool,
   dataset, snapshot and copy is made or removed by Incus. *`HostProvisionerTest.aZfsPoolOnAWholeDiskIsIncussOwnAndTheProfilePutsContainersOnIt`.*
 - **Z4. The ZFS cache cap is set before ZFS can take memory.** Step 3 writes
@@ -1033,15 +1041,18 @@ said once to be meant for trials. Incus runs `zpool create -m none -O compressio
   the ceiling falls under ZFS's default floor of a thirty-second of memory) before installing
   zfsutils-linux, and to the loaded module when ZFS is already in, so it holds from the next load
   and across reboots. Where `/` is on ZFS the module loads from the initramfs, which carries a
-  copy of `/etc/modprobe.d`, so init runs `update-initramfs -u`. A cap the operator set in any
-  other file under `/etc/modprobe.d` is kept, nothing written, and the step names it.
+  copy of `/etc/modprobe.d`, so init runs `update-initramfs -u`. A cap the operator set in
+  another `*.conf` under `/etc/modprobe.d` (the only files modprobe reads), or one the loaded
+  module holds that Sail did not write, is kept, nothing written, and the step names it.
   *`HostProvisionerTest.theZfsCacheIsCappedBeforeTheToolsThatLoadZfsAreInstalled`, `ZfsCacheCapTest`.*
 - **Z5. A `dir` box keeps working unchanged.** A re-run of `host init --storage zfs --pool <new>`
   on a box whose profile exists adds the pool beside the old one and touches no container, no
   profile device and `host.yaml`'s storage; `host status` lists it. Placing a project's
   containers on it is `sail-project-workspaces`. A pool name Incus already has with another
   driver is refused before anything is installed; a zfs pool Incus already has is kept, and a
-  source flag that re-run would ignore is refused by name.
+  source flag that re-run would ignore is refused by name, while the command that made it,
+  `--force-wipe` and all, runs again as a no-op. A dry run reads the profile and pools Incus
+  holds, so it shows the base profile staying where it is.
   *`HostProvisionerTest.aDirBoxWithContainersAddsAZfsPoolBesideItsOwnAndTouchesNoContainer`,
   `HostProvisionerIT`.*
 

@@ -48,7 +48,12 @@ partition table or an exported pool, is refused naming what is on it, and erased
 name it again with `--force-wipe <device>`. One in use is refused even then: mounted, swap, a
 partition of the disk the system runs from, a RAID, LVM or LUKS member (the refusal names the
 command that frees it), an EFI system or BIOS boot partition, or one something else holds open.
-A device of an imported zpool is refused: export or destroy the pool yourself first. On a box
+Only a disk or a partition of a disk is taken: an array, a loop device, a ZFS volume, an LVM or
+LUKS mapping and a partition of any of them are refused. A device of an imported zpool, or a
+partition beside one on the same disk, is refused: export or destroy the pool yourself first.
+Something that opens a device without holding it exclusively, a virtual machine's raw disk or
+`dd`, is not seen. A disk with no partition table and no signature is blank to Sail, even if a
+filesystem survives further in after its table was erased. On a box
 whose root lsblk cannot place, root on ZFS for one, every disk is refused and a file pool is the
 way to try ZFS. A file is slower
 than a disk and meant for trials. `host init` caps the ZFS cache at a tenth of memory, at most
