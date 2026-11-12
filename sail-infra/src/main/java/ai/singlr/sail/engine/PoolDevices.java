@@ -47,14 +47,16 @@ public final class PoolDevices {
 
   /**
    * Lists, for each process, the block devices it has open: {@code pid<TAB>device} per open device,
-   * and {@code unreadable<TAB>pid} for a process whose open files cannot be read. A constant
-   * script: it takes no input.
+   * and {@code unreadable<TAB>pid} for a process whose open files Sail may not read. An entry or a
+   * process gone while it is listed, as a busy process's descriptors come and go, is skipped. A
+   * constant script: it takes no input.
    */
   static final String OPEN_FILES =
       """
       for d in /proc/[0-9]*; do
         p=${d#/proc/}
-        l=$(ls -l "$d/fd" 2>/dev/null) || { [ -e "$d" ] && printf 'unreadable\\t%s\\n' "$p"; continue; }
+        l=$(ls -l "$d/fd" 2>&1)
+        case $l in *'Permission denied'*) [ -e "$d" ] && printf 'unreadable\\t%s\\n' "$p"; continue ;; esac
         printf '%s\\n' "$l" | while IFS= read -r line; do
           case $line in *' -> /dev/'*) printf '%s\\t%s\\n' "$p" "${line##* -> }" ;; esac
         done
