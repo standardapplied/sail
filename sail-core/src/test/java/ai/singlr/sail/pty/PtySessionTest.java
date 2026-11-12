@@ -428,7 +428,10 @@ class PtySessionTest {
     assertTrue(Files.readString(history).contains("echo"), "bash wrote its history");
   }
 
-  /** A child that rides out the hangup is asked to terminate once the grace has passed. */
+  /**
+   * A child that rides out the hangup is asked to terminate once the grace has passed: a second,
+   * well before the kill that follows {@code SIGTERM} by five.
+   */
   @Test
   void aChildThatIgnoresTheHangupIsSentTerminateAfterTheGrace() throws Exception {
     var session =
@@ -439,10 +442,13 @@ class PtySessionTest {
     session.attach(client, true, "uday");
     client.awaitOutput("ready");
 
+    var closing = System.nanoTime();
     session.close();
+    var closed = Duration.ofNanos(System.nanoTime() - closing);
 
     assertTrue(client.outputText().contains("terminated"), client.outputText());
     assertEquals("exited(0)", session.endedReason());
+    assertTrue(closed.compareTo(Duration.ofSeconds(3)) < 0, "terminated after a second: " + closed);
   }
 
   /** A session started beside {@code t.ring} that reports its ending to {@code ending}. */
