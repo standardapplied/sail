@@ -67,7 +67,6 @@ class RemedyOverHttpTest {
             ProjectReader.ofCatalog(new ProjectStore(db)),
             (command, logPath) -> 4242L,
             null,
-            null,
             new SpecStore(db),
             new ReviewStore(db),
             null,

@@ -10,7 +10,16 @@ public struct SailClient: Sendable {
 
     /// The answer `endpoint` gives this caller.
     public func send<Response>(_ endpoint: Endpoint<Response>) async throws(SailError) -> Response {
-        try endpoint.decode(try await transport.send(authorized(endpoint.request)))
+        try await positioned(endpoint).response
+    }
+
+    /// The answer `endpoint` gives this caller, with the position it was read at when the route
+    /// names one: a list or a detail of a row the change feed serves, to follow the feed from.
+    public func positioned<Response>(
+        _ endpoint: Endpoint<Response>
+    ) async throws(SailError) -> (response: Response, position: String?) {
+        let answer = try await transport.send(authorized(endpoint.request))
+        return (try endpoint.decode(answer), answer.position)
     }
 
     /// `request` as this caller sends it.

@@ -16,8 +16,10 @@ import java.lang.invoke.MethodHandle;
 import java.nio.file.Path;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.Supplier;
 
@@ -68,6 +70,8 @@ public final class Sqlite implements AutoCloseable {
   private long statements;
   private Path path;
   final BlobRetention contentRetention = new BlobRetention(null);
+  final ChangeLog.Watchers appended = new ChangeLog.Watchers();
+  private final Set<Runnable> afterCommit = new LinkedHashSet<>();
 
   private Sqlite(Arena arena, MemorySegment db, SqliteLib lib) {
     this.arena = arena;
@@ -75,9 +79,24 @@ public final class Sqlite implements AutoCloseable {
     this.lib = lib;
   }
 
+  /**
+   * Opens the database file at {@code path}. A command whose process announces its commits to the
+   * box's API server binds {@link #ANNOUNCING} around its work, and every database it opens then
+   * runs that announcer after each commit that appended to the change log; the server binds none.
+   */
   public static Sqlite open(Path path) {
-    return open(path, path.toAbsolutePath().toString());
+    var sqlite = open(path, path.toAbsolutePath().toString());
+    if (ANNOUNCING.isBound()) {
+      sqlite.appended.add(ANNOUNCING.get());
+    }
+    return sqlite;
   }
+
+  /**
+   * The announcer the command running on this thread has its databases run after each commit that
+   * appended to the change log ({@link #open}).
+   */
+  public static final ScopedValue<Runnable> ANNOUNCING = ScopedValue.newInstance();
 
   public static Sqlite openMemory() {
     return open(Path.of(":memory:"), ":memory:");
@@ -275,6 +294,9 @@ public final class Sqlite implements AutoCloseable {
           throw doom;
         }
         execute(commit ? "COMMIT" : "ROLLBACK");
+        if (commit) {
+          afterCommit.forEach(Runnable::run);
+        }
         return result;
       } catch (Exception e) {
         try {
@@ -286,10 +308,29 @@ public final class Sqlite implements AutoCloseable {
       } finally {
         transactionDepth = 0;
         doom = null;
+        afterCommit.clear();
       }
     } finally {
       lock.unlock();
     }
+  }
+
+  /**
+   * Runs {@code work} once the transaction the calling thread is in commits, and never when it
+   * rolls back; at once outside one. Each distinct {@code work} runs once per commit, however often
+   * the transaction asks. What it runs must not touch this database: it runs as the commit ends.
+   */
+  void afterCommit(Runnable work) {
+    lock.lock();
+    try {
+      if (transactionDepth > 0) {
+        afterCommit.add(work);
+        return;
+      }
+    } finally {
+      lock.unlock();
+    }
+    work.run();
   }
 
   /**

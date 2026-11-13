@@ -97,7 +97,6 @@ class PtyRoomSessionIT extends AbstractIncusIT {
                   new ShellExecutor(false),
                   ProjectReader.ofCatalog(new ProjectStore(db)),
                   bus,
-                  null,
                   specStore,
                   new ReviewStore(db),
                   new RunStore(db),

@@ -54,7 +54,6 @@ class OptimisticConcurrencyTest {
             new ShellExecutor(false),
             ProjectReader.ofCatalog(new ProjectStore(db)),
             bus,
-            persister,
             specStore);
     server =
         new SailApiServer(

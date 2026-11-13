@@ -459,6 +459,29 @@ public final class MessageStore implements ConflictResolver, SyncedStore {
     return latest;
   }
 
+  /**
+   * The messages among {@code ids} their reader may see, as {@link #list} decides it of each: filed
+   * under a project of the reader's scope, and, for a reader that hears only steering, said by a
+   * voice that steers its room. In id order; one read however many.
+   */
+  public List<MessageRow> findReadable(Collection<String> ids) {
+    var agent = Policy.hearsOnlySteering(Actor.reader());
+    var sql =
+        "SELECT "
+            + COLUMNS
+            + " FROM room_messages WHERE id IN (SELECT value FROM json_each(?1)) AND "
+            + readable("room_messages.id", 2)
+            + (agent
+                ? " AND "
+                    + RoomStore.steering("room_messages.author", "room_messages.room_id", "?3")
+                : "")
+            + " ORDER BY id";
+    var listed = YamlUtil.dumpJson(List.copyOf(ids));
+    return agent
+        ? db.query(sql, MessageStore::map, listed, reader(), Actor.reader().actingFde())
+        : db.query(sql, MessageStore::map, listed, reader());
+  }
+
   public Optional<MessageRow> findById(String id) {
     return db.queryOne(
         "SELECT " + COLUMNS + " FROM room_messages WHERE id = ?", MessageStore::map, id);

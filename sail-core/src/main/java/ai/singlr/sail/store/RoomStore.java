@@ -14,6 +14,7 @@ import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.Ownership;
 import java.time.Instant;
+import java.util.Collection;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -444,13 +445,18 @@ public final class RoomStore implements ConflictResolver, SyncedStore {
   }
 
   public Optional<RoomRow> findById(String id) {
-    return db.queryOne(
+    return findByIds(List.of(id)).stream().findFirst();
+  }
+
+  /** The rooms among {@code ids} this box holds, in id order: one read however many. */
+  public List<RoomRow> findByIds(Collection<String> ids) {
+    return db.query(
         """
         SELECT id, project, title, assignee, wake, roster, created_by, created_at,
             updated_at, updated_by
-        FROM rooms WHERE id = ?""",
+        FROM rooms WHERE id IN (SELECT value FROM json_each(?)) ORDER BY id""",
         RoomStore::mapRoom,
-        id);
+        YamlUtil.dumpJson(List.copyOf(ids)));
   }
 
   /** Every current room across all projects, in creation order — the rooms front door. */

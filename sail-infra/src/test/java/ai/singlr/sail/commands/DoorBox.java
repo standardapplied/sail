@@ -53,7 +53,7 @@ record DoorBox(SyncConfig config, Sqlite db, SailOperations operations, SailApiS
     var operations =
         wired(
             OperationsFactory.create(
-                db, acmeRuns(), new EventBus(), null, SyncScheduler.disabled(), SessionYield.NONE),
+                db, acmeRuns(), new EventBus(), SyncScheduler.disabled(), SessionYield.NONE),
             db,
             dir,
             config);

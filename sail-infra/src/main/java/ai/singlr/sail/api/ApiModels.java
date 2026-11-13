@@ -616,18 +616,6 @@ record EventPublishResponse(long id, Map<String, Object> event) implements Mappa
   }
 }
 
-record RecentEventsResponse(int limit, int returned, List<Map<String, Object>> events)
-    implements Mappable {
-  @Override
-  public Map<String, Object> toMap() {
-    var m = new LinkedHashMap<String, Object>();
-    m.put("limit", limit);
-    m.put("returned", returned);
-    m.put("events", events);
-    return m;
-  }
-}
-
 record SpecEventsResponse(
     String spec, Long since, int limit, int returned, List<Map<String, Object>> events)
     implements Mappable {
@@ -894,22 +882,40 @@ record RoomsListResponse(
   @Override
   public Map<String, Object> toMap() {
     var m = new LinkedHashMap<String, Object>();
-    m.put(
-        "rooms",
-        rooms.stream()
-            .map(
-                view -> {
-                  var one = view.toMap();
-                  var latest = latestByRoom.get(view.id());
-                  if (latest != null) one.put("last_activity_at", latest);
-                  var question = openQuestions.get(view.id());
-                  one.put("needs_reply", question != null);
-                  if (question != null) one.put("question_message_id", question);
-                  return one;
-                })
-            .toList());
+    m.put("rooms", rooms.stream().map(view -> item(view, latestByRoom, openQuestions)).toList());
     m.put("count", rooms.size());
     return m;
+  }
+
+  /**
+   * The fields of a room in a list that are derived from other rows, which the change feed leaves
+   * out: the specs living in it (from the spec rows whose room is this room), its newest message's
+   * time and the question it waits on (from the messages said in it). A client of the feed derives
+   * them from the rows it holds.
+   */
+  static final Set<String> DERIVED =
+      Set.of("spec_ids", "last_activity_at", "needs_reply", "question_message_id");
+
+  /** {@code view} as the change feed serves it: its list shape, less {@link #DERIVED}. */
+  static Map<String, Object> fed(RoomView view) {
+    var one = item(view, Map.of(), Map.of());
+    one.keySet().removeAll(DERIVED);
+    return one;
+  }
+
+  /**
+   * {@code view} as the list shows it: with its newest message's time and the question it waits on,
+   * from {@code latestByRoom} and {@code openQuestions}. The one shape of a room in a list.
+   */
+  static Map<String, Object> item(
+      RoomView view, Map<String, String> latestByRoom, Map<String, String> openQuestions) {
+    var one = view.toMap();
+    var latest = latestByRoom.get(view.id());
+    if (latest != null) one.put("last_activity_at", latest);
+    var question = openQuestions.get(view.id());
+    one.put("needs_reply", question != null);
+    if (question != null) one.put("question_message_id", question);
+    return one;
   }
 }
 
@@ -1371,31 +1377,48 @@ record GlobalSpecsListResponse(
   @Override
   public Map<String, Object> toMap() {
     var m = new LinkedHashMap<String, Object>();
-    if (latestMessageAt == null) {
-      m.put("specs", specs);
-    } else {
-      m.put(
-          "specs",
-          specs.stream()
-              .map(
-                  view -> {
-                    var spec = view.toMap();
-                    var message = latestMessageAt.get(view.id());
-                    var updated = view.updatedAt();
-                    spec.put(
-                        "last_activity_at",
-                        message != null && message.compareTo(updated) > 0 ? message : updated);
-                    var question = openQuestions.get(view.roomId());
-                    if (question != null) {
-                      spec.put("needs_reply", true);
-                      spec.put("question_message_id", question);
-                    }
-                    return spec;
-                  })
-              .toList());
-    }
+    m.put("specs", specs.stream().map(view -> item(view, latestMessageAt, openQuestions)).toList());
     m.put("total", total);
     return m;
+  }
+
+  /**
+   * The fields of a spec in a list that are derived from other rows, which the change feed leaves
+   * out: its room's wake and who is seated in it (from the room row), and its latest activity and
+   * the question it waits on (from its room's messages, with its own {@code updated_at}). A client
+   * of the feed derives them from the rows it holds.
+   */
+  static final Set<String> DERIVED =
+      Set.of("wake", "engagement", "last_activity_at", "needs_reply", "question_message_id");
+
+  /** {@code view} as the change feed serves it: its list shape, less {@link #DERIVED}. */
+  static Map<String, Object> fed(GlobalSpecView view) {
+    var spec = item(view, null, Map.of());
+    spec.keySet().removeAll(DERIVED);
+    return spec;
+  }
+
+  /**
+   * {@code view} as the list shows it, decorated from {@code latestMessageAt} (null on a box with
+   * no message store, which decorates nothing) and {@code openQuestions}: the one shape of a spec
+   * in a list.
+   */
+  static Map<String, Object> item(
+      GlobalSpecView view, Map<String, String> latestMessageAt, Map<String, String> openQuestions) {
+    var spec = view.toMap();
+    if (latestMessageAt == null) {
+      return spec;
+    }
+    var message = latestMessageAt.get(view.id());
+    var updated = view.updatedAt();
+    spec.put(
+        "last_activity_at", message != null && message.compareTo(updated) > 0 ? message : updated);
+    var question = openQuestions.get(view.roomId());
+    if (question != null) {
+      spec.put("needs_reply", true);
+      spec.put("question_message_id", question);
+    }
+    return spec;
   }
 }
 

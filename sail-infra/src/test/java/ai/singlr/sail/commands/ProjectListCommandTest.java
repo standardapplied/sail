@@ -88,7 +88,6 @@ class ProjectListCommandTest {
                       db,
                       new ScriptedShellExecutor(),
                       null,
-                      null,
                       SyncScheduler.disabled(),
                       SessionYield.NONE)));
     }

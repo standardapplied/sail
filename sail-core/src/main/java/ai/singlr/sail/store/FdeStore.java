@@ -173,7 +173,8 @@ public final class FdeStore {
 
   /**
    * Scopes {@code handle} to the projects it is granted, none until one is: an FDE main scoped sees
-   * nothing it was not granted. Returns whether the roster holds the handle.
+   * nothing it was not granted. Returns whether the roster holds the handle. Like every change of
+   * what an FDE reads, it raises the change feed's floor of its readers ({@link #rescoped}).
    *
    * @throws IllegalArgumentException for an admin, who could undo its own scope
    */
@@ -181,8 +182,24 @@ public final class FdeStore {
     if (byHandle(handle).filter(fde -> ADMIN.equals(fde.role())).isPresent()) {
       throw scopedAdmin(handle);
     }
-    db.execute("UPDATE fdes SET scope = 'granted' WHERE handle = ?", handle);
-    return db.changes() > 0;
+    return db.transaction(
+        () -> {
+          db.execute(
+              "UPDATE fdes SET scope = 'granted' WHERE handle = ? AND scope <> 'granted'", handle);
+          rescoped(handle);
+          return byHandle(handle).isPresent();
+        });
+  }
+
+  /**
+   * Raises the change feed's floor of {@code handle}'s readers when the statement just run changed
+   * what it reads: no entry of any row says so, so a position read before it no longer tells those
+   * readers what they hold. Every other reader's position stands.
+   */
+  private void rescoped(String handle) {
+    if (db.changes() > 0) {
+      new FeedFloors(db).raiseFor(handle);
+    }
   }
 
   /**
@@ -195,8 +212,9 @@ public final class FdeStore {
           db.execute(
               "DELETE FROM project_grants WHERE fde_id = (SELECT id FROM fdes WHERE handle = ?)",
               handle);
-          db.execute("UPDATE fdes SET scope = 'all' WHERE handle = ?", handle);
-          return db.changes() > 0;
+          db.execute("UPDATE fdes SET scope = 'all' WHERE handle = ? AND scope <> 'all'", handle);
+          rescoped(handle);
+          return byHandle(handle).isPresent();
         });
   }
 
@@ -236,11 +254,22 @@ public final class FdeStore {
   }
 
   /**
-   * Takes {@code project} back from every FDE granted it: the project was erased, and one created
-   * under its name later is another project, granted anew.
+   * Takes {@code project} back from every FDE granted it, raising each one's change-feed floor: the
+   * project was erased, and one created under its name later is another project, granted anew.
    */
   public void revokeFromEveryone(String project) {
-    db.execute("DELETE FROM project_grants WHERE project = ?", project);
+    db.transaction(
+        () -> {
+          var granted =
+              db.query(
+                  "SELECT f.handle FROM project_grants g JOIN fdes f ON f.id = g.fde_id"
+                      + " WHERE g.project = ?",
+                  row -> row.text(0),
+                  project);
+          db.execute("DELETE FROM project_grants WHERE project = ?", project);
+          var floors = new FeedFloors(db);
+          granted.forEach(floors::raiseFor);
+        });
   }
 
   /**
@@ -279,6 +308,7 @@ public final class FdeStore {
               project,
               DateTimeUtils.now(),
               handle);
+          rescoped(handle);
           return null;
         });
   }
@@ -297,6 +327,7 @@ public final class FdeStore {
               AND fde_id = (SELECT id FROM fdes WHERE handle = ?)""",
               project,
               handle);
+          rescoped(handle);
           return null;
         });
   }
@@ -407,10 +438,15 @@ public final class FdeStore {
         });
   }
 
+  /**
+   * Deletes {@code fde} and raises its change-feed floor: one added later under the same handle may
+   * read otherwise, so a position its clients hold from before is answered afresh.
+   */
   private void delete(Fde fde) {
     db.execute("DELETE FROM api_tokens WHERE fde_id = ?", fde.id());
     new FdeBoxes(db).release(fde.handle());
     db.execute("DELETE FROM fdes WHERE id = ?", fde.id());
+    new FeedFloors(db).raiseFor(fde.handle());
   }
 
   /**

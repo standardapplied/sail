@@ -257,7 +257,6 @@ class WorkspaceIT extends AbstractIncusIT {
                   new ShellExecutor(false),
                   ProjectReader.ofCatalog(new ProjectStore(db)),
                   new EventBus(),
-                  null,
                   specs,
                   null,
                   new RunStore(db),

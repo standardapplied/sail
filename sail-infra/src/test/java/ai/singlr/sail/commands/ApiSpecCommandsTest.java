@@ -65,12 +65,7 @@ class ApiSpecCommandsTest {
     var operations =
         TestControlPlane.standalone(
             OperationsFactory.create(
-                db,
-                new ShellExecutor(false),
-                bus,
-                persister,
-                SyncScheduler.disabled(),
-                SessionYield.NONE),
+                db, new ShellExecutor(false), bus, SyncScheduler.disabled(), SessionYield.NONE),
             db,
             tempDir);
     server =

@@ -28,6 +28,7 @@ import ai.singlr.sail.store.AuthSessionStore;
 import ai.singlr.sail.store.ChangeLog;
 import ai.singlr.sail.store.EventStore;
 import ai.singlr.sail.store.FdeStore;
+import ai.singlr.sail.store.FeedPositions;
 import ai.singlr.sail.store.FileStore;
 import ai.singlr.sail.store.Finding;
 import ai.singlr.sail.store.MessageStore;
@@ -107,7 +108,7 @@ class ScopedReadsTest {
           "/v1/agents",
           "/v1/sync",
           "/v1/conflicts",
-          "/v1/events/recent",
+          "/v1/changes?since={since}",
           "/v1/events/stats",
           "/v1/specs",
           "/v1/specs:measures",
@@ -126,7 +127,7 @@ class ScopedReadsTest {
       Set.of(
           "/v1/fdes",
           "/v1/conflicts",
-          "/v1/events/recent",
+          "/v1/changes?since={since}",
           "/v1/specs",
           "/v1/specs:measures",
           "/v1/specs/board",
@@ -291,7 +292,7 @@ class ScopedReadsTest {
   private final Set<String> reached = new ConcurrentSkipListSet<>();
   private final HttpClient client = HttpClient.newHttpClient();
   private Sqlite db;
-  private AuditPersister recent;
+  private String since;
   private EventBus bus;
   private HttpServer server;
   private SailOperations operations;
@@ -303,7 +304,6 @@ class ScopedReadsTest {
   void aBoxHoldingAlphaAlone() throws Exception {
     db = Sqlite.open(tempDir.resolve("main.db"));
     new SchemaManager(db).migrate();
-    recent = new AuditPersister(tempDir.resolve("events.jsonl"), 64);
     bus = new EventBus();
     Acting.system(
         () -> {
@@ -332,7 +332,6 @@ class ScopedReadsTest {
                     ProjectReader.ofCatalog(new ProjectStore(db)),
                     (command, logPath) -> 4242L,
                     bus,
-                    recent,
                     specs,
                     new ReviewStore(db),
                     runs,
@@ -356,6 +355,17 @@ class ScopedReadsTest {
             recording(operations), auth, new RateLimitGate(), streamer, Optional.empty()));
     server.setExecutor(Executors.newVirtualThreadPerTaskExecutor());
     server.start();
+    var log = new ChangeLog(db);
+    var positions = new FeedPositions(db);
+    since = positions.newest(positions.catalog());
+  }
+
+  /**
+   * {@code answer} with the change feed's next position left out: a scoped reader's feed is the
+   * same changes whether or not another project is busy, but its position moves past the newest.
+   */
+  private static String skipped(String answer) {
+    return answer.replaceAll("\"next\": \"[^\"]*\"", "\"next\": \"<the newest>\"");
   }
 
   @AfterEach
@@ -374,7 +384,7 @@ class ScopedReadsTest {
     var unrestricted = sweep(ada, bravoReview);
 
     for (var route : withBravo.keySet()) {
-      assertEquals(withoutBravo.get(route), withBravo.get(route), route);
+      assertEquals(skipped(withoutBravo.get(route)), skipped(withBravo.get(route)), route);
     }
     for (var route : withBravo.keySet()) {
       if (!route.startsWith("bravo ") && !THE_BOXS.contains(route)) {
@@ -1128,7 +1138,6 @@ class ScopedReadsTest {
             new BoxShell(),
             ProjectReader.ofCatalog(new ProjectStore(db)),
             null,
-            null,
             new SpecStore(db),
             new ReviewStore(db),
             runs,
@@ -1162,15 +1171,13 @@ class ScopedReadsTest {
 
   @Test
   void aPageOfEventsIsAsLongAsItsLimitOfWhatTheReaderSees() throws Exception {
-    var recentBefore = ask(sam, "/v1/events/recent?limit=1");
     var specBefore = ask(sam, "/v1/events?spec=alpha-spec&limit=1");
 
     Acting.system(this::bravoArrives);
 
     assertEquals(
-        List.of(recentBefore, specBefore),
-        List.of(
-            ask(sam, "/v1/events/recent?limit=1"), ask(sam, "/v1/events?spec=alpha-spec&limit=1")),
+        specBefore,
+        ask(sam, "/v1/events?spec=alpha-spec&limit=1"),
         "a busy project outside the scope, and an event of no project, take no room in the page");
   }
 
@@ -1351,8 +1358,7 @@ class ScopedReadsTest {
    * Everything of {@code project} reaches the box: its definition and container, a pending spec
    * assigned to {@code owner} with a body, a room with a message and an agent's open question, talk
    * in the spec's own room before that room's row exists, a finished run on {@code node}, a review,
-   * a shared file, a stored event and a recent one, and a parked conflict on the spec. Returns the
-   * review's id.
+   * a shared file, a stored event, and a parked conflict on the spec. Returns the review's id.
    */
   private String arrive(
       String project, String run, String file, String node, String owner, int priority) {
@@ -1437,7 +1443,6 @@ class ScopedReadsTest {
                 "sail",
                 "main",
                 "{}"));
-    recent.onEvent(Event.of(project, spec, "spec_dispatched", "sail", "main"));
     var held = specs.comparableSnapshot(spec);
     var theirs = new LinkedHashMap<>(held);
     theirs.put("title", "The " + project + " work, as main has it");
@@ -1463,7 +1468,6 @@ class ScopedReadsTest {
     fdes.add("bea", "Bea", "bea@x", "member");
     fdes.restrict("bea");
     fdes.grant("bea", "bravo");
-    recent.onEvent(SyncTransitionEvents.health("main@unplaced", false, "unreachable", "x", "main"));
     new EventStore(db)
         .insert(
             new EventStore.EventRow(
@@ -1487,7 +1491,7 @@ class ScopedReadsTest {
   private Map<String, String> sweep(String token, String bravoReview) throws Exception {
     var answers = new LinkedHashMap<String, String>();
     for (var route : UNADDRESSED) {
-      answers.put(route, ask(token, route));
+      answers.put(route, ask(token, route.replace("{since}", since)));
     }
     for (var template : ADDRESSED) {
       if (!NEVER_ASKED_OF_ALPHA.contains(template)) {

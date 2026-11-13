@@ -73,8 +73,7 @@ class ProjectSkillsCommandTest {
   private ScriptedShellExecutor shell = new ScriptedShellExecutor();
 
   private HostOperations operations() {
-    return OperationsFactory.create(
-        db, shell, null, null, SyncScheduler.disabled(), SessionYield.NONE);
+    return OperationsFactory.create(db, shell, null, SyncScheduler.disabled(), SessionYield.NONE);
   }
 
   private static final String UNLISTED =

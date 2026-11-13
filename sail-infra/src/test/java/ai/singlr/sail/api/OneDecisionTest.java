@@ -136,8 +136,7 @@ class OneDecisionTest {
 
   /** Operations over this database on a box {@code config} names. */
   private SailOperations box(SyncConfig config) {
-    return OperationsFactory.create(
-            db, SHELL, null, null, SyncScheduler.disabled(), SessionYield.NONE)
+    return OperationsFactory.create(db, SHELL, null, SyncScheduler.disabled(), SessionYield.NONE)
         .useControlPlane(
             db,
             tempDir,

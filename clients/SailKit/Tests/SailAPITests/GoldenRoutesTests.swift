@@ -24,6 +24,10 @@ let calls: [String: @Sendable (SailClient) async throws -> Void] = [
     "refusal-bad-request": { _ = try await $0.send(.post(MessagePost(body: ""), room: "harbor-design")) },
     "refusal-not-found": { _ = try await $0.send(Endpoint<Whoami>(.get, ["v1", "nowhere"])) },
     "terminal-ticket": { _ = try await $0.send(.terminalTicket(open: "harbor")) },
+    "changes": { _ = try await $0.send(.changes(since: "golden.0.0")) },
+    "board-specs": { _ = try await $0.send(.specs(SpecFilter(project: "harbor"))) },
+    "board-rooms": { _ = try await $0.send(.rooms(project: "harbor")) },
+    "refusal-resync-required": { _ = try await $0.send(.changes(since: "999999999")) },
 ]
 
 let question = MessagePost(body: "Which berth takes the ferry — north or south? ⚓", asksQuestion: true)
@@ -46,7 +50,7 @@ func answer<Response>(
 @Suite struct GoldenRoutesTests {
     @Test func everyRecordedExchangeIsOneThisClientMakes() throws {
         #expect(Set(calls.keys).union(refusalsOfRoutesNotYetCalled).union(answersOfRoutesNotYetCalled)
-            .union(exchangesOfSailEvents) == Set(try Goldens.names(in: "http")))
+            == Set(try Goldens.names(in: "http")))
     }
 
     @Test(arguments: calls.keys.sorted())
@@ -376,9 +380,6 @@ let refusalsOfRoutesNotYetCalled: Set<String> = [
 /// The answers of routes this client does not call yet, recorded for the apps that will.
 let answersOfRoutesNotYetCalled: Set<String> = ["spec-measures", "specs-measures", "workspaces"]
 
-/// The exchange `SailEvents` makes, proven by its own tests.
-let exchangesOfSailEvents: Set<String> = ["events-recent"]
-
 /// The member the golden writer seats in the room.
 func expectSeated(_ member: RoomMember?, sourceLocation: SourceLocation = #_sourceLocation) {
     #expect(member?.agent == "claude-code", sourceLocation: sourceLocation)
@@ -405,7 +406,7 @@ func expectUndecodable(
 }
 
 func response(_ exchange: Exchange) -> HTTPResponse {
-    HTTPResponse(status: exchange.status, body: exchange.body)
+    HTTPResponse(status: exchange.status, headers: exchange.headers, body: exchange.body)
 }
 
 func json(_ data: Data?) throws -> NSDictionary? {

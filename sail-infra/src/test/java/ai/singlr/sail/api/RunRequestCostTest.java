@@ -100,7 +100,6 @@ class RunRequestCostTest {
                 db,
                 new ScriptedShellExecutor(new ShellExec.Result(0, "", "")),
                 new EventBus(),
-                null,
                 SyncScheduler.disabled(),
                 SessionYield.NONE)
             .useControlPlane(

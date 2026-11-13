@@ -67,8 +67,7 @@ class PtyHostAccessIdentityTest {
   private PtyHostAccess resolver(SyncConfig box) {
     return new PtyHostAccess(
         () ->
-            OperationsFactory.create(
-                    db, SHELL, null, null, SyncScheduler.disabled(), SessionYield.NONE)
+            OperationsFactory.create(db, SHELL, null, SyncScheduler.disabled(), SessionYield.NONE)
                 .useControlPlane(
                     db,
                     dir,

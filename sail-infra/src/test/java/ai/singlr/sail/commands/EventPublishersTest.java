@@ -323,7 +323,7 @@ class EventPublishersTest {
     serverOperations =
         TestControlPlane.on(
             OperationsFactory.create(
-                box.db, shell(), bus, null, SyncScheduler.disabled(), SessionYield.NONE),
+                box.db, shell(), bus, SyncScheduler.disabled(), SessionYield.NONE),
             box.db,
             tempDir,
             config);

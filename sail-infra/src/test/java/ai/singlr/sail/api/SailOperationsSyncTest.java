@@ -252,7 +252,6 @@ class SailOperationsSyncTest {
             TestProjects.reading(yaml),
             (command, logPath) -> 4242L,
             bus,
-            null,
             specStore,
             null,
             null,

@@ -68,7 +68,6 @@ class RoomsSurfaceTest {
                 TestProjects.reading(yaml),
                 WatcherSpawner::spawnProcess,
                 null,
-                null,
                 specStore,
                 new ReviewStore(db),
                 new RunStore(db))
@@ -325,7 +324,6 @@ class RoomsSurfaceTest {
                 TestProjects.reading(yaml),
                 WatcherSpawner::spawnProcess,
                 null,
-                null,
                 specStore,
                 new ReviewStore(db),
                 new RunStore(db))
@@ -364,7 +362,6 @@ class RoomsSurfaceTest {
                 new ShellExecutor(false),
                 TestProjects.reading(yaml),
                 WatcherSpawner::spawnProcess,
-                null,
                 null,
                 specStore,
                 new ReviewStore(db),
@@ -422,7 +419,6 @@ class RoomsSurfaceTest {
             WatcherSpawner::spawnProcess,
             null,
             null,
-            null,
             new ReviewStore(db),
             new RunStore(db));
     var posted =
@@ -441,7 +437,6 @@ class RoomsSurfaceTest {
                 new ShellExecutor(false),
                 TestProjects.reading(yaml),
                 WatcherSpawner::spawnProcess,
-                null,
                 null,
                 null,
                 new ReviewStore(db),

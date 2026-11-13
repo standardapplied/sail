@@ -65,7 +65,6 @@ class ResourceAuthzTest {
             new ShellExecutor(false),
             ProjectReader.ofCatalog(null),
             new EventBus(),
-            null,
             specStore,
             reviewStore);
     var auth = TestAuth.sessions(db);

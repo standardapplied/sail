@@ -57,8 +57,7 @@ public final class ProjectRenamer {
 
   public ProjectRenamer(Sqlite db, ShellExec shell, Path projectsDir) {
     this(
-        OperationsFactory.create(
-            db, shell, null, null, SyncScheduler.disabled(), SessionYield.NONE),
+        OperationsFactory.create(db, shell, null, SyncScheduler.disabled(), SessionYield.NONE),
         shell,
         projectsDir);
   }

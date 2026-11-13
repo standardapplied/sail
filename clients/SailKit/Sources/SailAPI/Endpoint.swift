@@ -21,7 +21,7 @@ package enum Route {
     package static let rooms = ["v1", "rooms"]
     package static let specs = ["v1", "specs"]
     package static let eventStream = ["v1", "events", "stream"]
-    package static let recentEvents = ["v1", "events", "recent"]
+    package static let changes = ["v1", "changes"]
     package static let terminalTickets = ["v1", "terminal", "tickets"]
 
     package static func room(_ id: String) -> [String] {

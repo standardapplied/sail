@@ -36,14 +36,15 @@ import Testing
     }
 
     @Test func eachEventCarriesItsTypeDataAndTheLastIdTheServerGave() throws {
+        let changes = parse([try Goldens.bytes("events/resumed-stream.sse")])
+        #expect(changes.map(\.type) == Array(repeating: "change", count: changes.count))
+        #expect(changes.map(\.lastEventID) == (try Goldens.changeIds()))
         let events = parse([try Goldens.bytes("events/room-stream.sse")])
         let turn = try #require(events.first)
         #expect(turn.type == "message")
-        #expect(turn.lastEventID == "")
-        #expect(events.dropFirst().first?.lastEventID == "1")
+        #expect(events.allSatisfy { $0.lastEventID == "" }, "only a row change carries an id")
         let end = try #require(events.last)
         #expect(end.type == "error")
-        #expect(end.lastEventID == events.dropLast().last?.lastEventID)
     }
 
     @Test func theServersOwnCommentsAreNotEvents() throws {

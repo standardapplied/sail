@@ -457,6 +457,35 @@ http_token_door() {
   grep -q "^HTTP $expected$" <<< "$out" && grep -qF "$says" <<< "$out"
 }
 
+readonly FEED_DOOR='set -u
+mode=$1 handle=$2 arg=$3 text=${4:-}
+token=$(sudo sail server token create "feed-$handle" member --fde "$handle" 2>/dev/null | sed -n 2p | tr -d " ")
+[ -n "$token" ] || { echo "no token"; exit 1; }
+if [ "$mode" = position ]; then
+  curl -s -D /tmp/feed.head -o /dev/null -H "Authorization: Bearer $token" "http://127.0.0.1:7070$arg"
+  tr -d "\r" < /tmp/feed.head | sed -n "s/^[Ss]eq: //p"
+  told=0
+else
+  curl -s -o /tmp/feed.json -H "Authorization: Bearer $token" \
+    "http://127.0.0.1:7070/v1/changes?since=$arg&types=message"
+  python3 -c "import json,sys; since=int(sys.argv[1].split(\".\")[1]); changes=json.load(sys.stdin)[\"changes\"]; told=[c[\"seq\"] for c in changes if sys.argv[2] in json.dumps(c.get(\"row\", {}), ensure_ascii=False)]; print(\"told at\", told, \"after\", since); sys.exit(0 if told and min(told) > since else 1)" \
+    "$arg" "$text" < /tmp/feed.json
+  told=$?
+fi
+sudo sail server token revoke "feed-$handle" > /dev/null 2>&1
+exit $told'
+
+feed_position() {
+  local run=$1 handle=$2 path=$3
+  on "$run" main "cat > /tmp/sail-feed-door && bash /tmp/sail-feed-door position $handle '$path'" <<< "$FEED_DOOR"
+}
+
+feed_tells() {
+  local run=$1 handle=$2 since=$3 text=$4
+  [[ $since =~ ^[0-9]+$ ]] || { echo "main answered no position: '$since'"; return 1; }
+  on "$run" main "cat > /tmp/sail-feed-door && bash /tmp/sail-feed-door after $handle $since '$text'" <<< "$FEED_DOOR"
+}
+
 gateway_door() {
   local run=$1 box=$2 says=$3 main_ip
   shift 3
@@ -694,6 +723,12 @@ rooms() {
     says_in_order "$run" observer acme-chat "client: first word|uday: second word|eng: third word|client: fourth word"
   check "$run" "the room reads the same on every box" conversation_matches "$run" acme-chat
   check "$run" "client's database has no trace of beta-chat or obs-chat" holds_no_trace_of "$run" client beta-chat obs-chat
+  local position
+  position=$(feed_position "$run" client /v1/rooms/acme-chat/messages)
+  check "$run" "client posts a fifth word and syncs" \
+    allowed "$run" client "sudo sail spec comment acme-chat --body 'client: fifth word' && sudo sail sync"
+  check "$run" "main's feed tells client the fifth word, past the position its read of the room answered" \
+    feed_tells "$run" client "$position" "client: fifth word"
 }
 
 while_cut_off() {
