@@ -36,6 +36,10 @@ final class DeviceRules {
   private static final String SWAP = "[SWAP]";
   private static final long SECTOR = 512;
   private static final String ZFS = "zfs_member";
+  private static final String ZFS_DATA = "6a898cc3-1dd2-11b2-99a6-080020736631";
+  private static final String ZFS_RESERVED = "6a945a3b-1dd2-11b2-99a6-080020736631";
+  private static final long ZFS_RESERVED_BYTES = 8L << 20;
+  private static final Set<String> LEFT = Set.of("gpt", "PMBR");
   private static final Set<String> HELD = Set.of("bcache", "ceph_bluestore", "crypto_LUKS");
   private static final long MIRROR_FUZZ = 16L << 20;
   private static final Pattern NVME_NAMESPACE = Pattern.compile("(nvme[0-9]+)n[0-9]+");
@@ -211,6 +215,68 @@ final class DeviceRules {
     return List.copyOf(uses);
   }
 
+  /**
+   * What returns {@code device} to blank when it holds only what a zpool left on a whole disk:
+   * zpool's own layout ({@code make_disks}), a GPT with a ZFS data partition and its 8 MiB reserved
+   * partition, the data partition carrying nothing or the labels of a zpool {@code zpool import}
+   * does not list (destroyed), and nothing else on the disk. None for any other device, whose rules
+   * say what it holds. The commands are in the order to run them: {@code zpool labelclear} of the
+   * labels, which needs the partition, then {@code wipefs --all} of the disk's table.
+   */
+  static Optional<String> zpoolLeftovers(
+      BlockDevice device,
+      Map<String, List<String>> signatures,
+      Map<String, String> pools,
+      Set<String> importable) {
+    var partitions = device.children();
+    if (!BlockDevice.DISK.equals(device.type())
+        || device.fstype() != null
+        || !"gpt".equals(device.pttype())
+        || partitions.size() != 2
+        || partitions.stream().anyMatch(part -> !part.partition() || !part.children().isEmpty())
+        || !LEFT.containsAll(signatures.getOrDefault(device.path(), List.of()))) {
+      return Optional.empty();
+    }
+    var data = partitions.stream().filter(part -> typedAs(part, ZFS_DATA)).findFirst();
+    var reserved =
+        partitions.stream()
+            .filter(part -> typedAs(part, ZFS_RESERVED) && part.size() == ZFS_RESERVED_BYTES)
+            .findFirst();
+    if (data.isEmpty()
+        || reserved.isEmpty()
+        || reserved.get().fstype() != null
+        || !signatures.getOrDefault(reserved.get().path(), List.of()).isEmpty()
+        || !Set.of(ZFS).containsAll(signatures.getOrDefault(data.get().path(), List.of()))
+        || (data.get().fstype() != null && !ZFS.equals(data.get().fstype()))) {
+      return Optional.empty();
+    }
+    var labelled =
+        ZFS.equals(data.get().fstype())
+            || signatures.getOrDefault(data.get().path(), List.of()).contains(ZFS);
+    var pool = pools.get(data.get().path());
+    if (labelled && (pool == null || importable.contains(pool))) {
+      return Optional.empty();
+    }
+    return Optional.of(
+        "holds only what a zpool left: its data partition "
+            + data.get().path()
+            + (labelled
+                ? ", carrying the labels of zpool " + pool + ", which cannot be imported,"
+                : ", which carries nothing,")
+            + " and its reserved partition "
+            + reserved.get().path()
+            + ". Sail erases nothing: if nothing on it is wanted, return it to blank yourself with "
+            + (labelled ? "sudo zpool labelclear " + data.get().path() + ", then " : "")
+            + "sudo wipefs --all "
+            + device.path()
+            + ", then run this again");
+  }
+
+  private static boolean typedAs(BlockDevice partition, String type) {
+    return partition.parttype() != null
+        && type.equals(partition.parttype().toLowerCase(Locale.ROOT));
+  }
+
   /** Whether {@code type} marks a device as part of something Sail must not take apart. */
   static boolean member(String type) {
     return type != null && (type.endsWith("_member") || HELD.contains(type));
@@ -234,7 +300,7 @@ final class DeviceRules {
           + (pool == null ? "a zpool" : "zpool " + pool)
           + ", which is not imported: import it with sudo zpool import"
           + (pool == null ? "" : " " + pool)
-          + ", or clear it yourself with sudo zpool labelclear "
+          + ", or, if nothing on it is wanted, clear it yourself with sudo zpool labelclear -f "
           + path;
     }
     return path

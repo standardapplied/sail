@@ -102,9 +102,9 @@ class IncusStorageTest {
 
     assertEquals(
         "This box's Incus cannot make a mirrored pool: it lacks the storage_zfs_vdev API"
-            + " extension, which Incus has from 6.0.1 on. Nothing was written. Install Incus from"
-            + " Zabbly's stable repository, as host init does on a box without it, then run this"
-            + " again.",
+            + " extension, which Incus has from 6.0.1 on. Nothing was written. Add Zabbly's stable"
+            + " apt source as Zabbly's README says (https://github.com/zabbly/incus), then move the"
+            + " Incus Sail holds to it with sudo sail host incus upgrade; then run this again.",
         refused.getMessage());
     assertTrue(
         assertThrows(

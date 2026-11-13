@@ -15,6 +15,7 @@ import java.io.InputStreamReader;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.TimeUnit;
@@ -391,6 +392,77 @@ class PoolDevicesIT extends AbstractIncusIT {
       assertEquals(List.of(), released);
     } finally {
       root.exec(List.of("rm", "-f", node));
+      root.exec(List.of("losetup", "-d", loop));
+    }
+  }
+
+  /**
+   * The commands a refusal names for what a destroyed zpool left on a whole disk, run as printed: a
+   * loop device laid out as zpool lays out a whole disk (a GPT, a ZFS data partition and the 8 MiB
+   * reserved partition 9), a pool made on the data partition and destroyed, then {@code zpool
+   * labelclear} of the data partition and {@code wipefs --all} of the device leave it with no
+   * table, no partition and no signature: blank, as Sail reads a disk.
+   */
+  @Test
+  void theCommandsForWhatAZpoolLeftReturnTheDiskToBlank(@TempDir Path dir) throws Exception {
+    ensureIncusOrSkip();
+    var root = new RootShell();
+    var attached =
+        root.exec(
+            List.of(
+                "bash",
+                "-c",
+                "truncate -s 256M \"$1\" && printf 'label: gpt\\nstart=2048, size=505822,"
+                    + " type=6A898CC3-1DD2-11B2-99A6-080020736631\\n' | sfdisk -q \"$1\" && printf"
+                    + " 'start=507870, size=16384, type=6A945A3B-1DD2-11B2-99A6-080020736631\\n' |"
+                    + " sfdisk -q -N 9 \"$1\" && losetup -fP --show \"$1\"",
+                "bash",
+                dir.resolve("left.img").toString()));
+    assertTrue(attached.ok(), attached.reason());
+    var loop = attached.stdout().strip();
+    var data = loop + "p1";
+    try {
+      root.exec(PoolDevices.SETTLE);
+      var made = root.exec(List.of("zpool", "create", "-m", "none", "sail-it-left", data));
+      var destroyed = root.exec(List.of("zpool", "destroy", "sail-it-left"));
+      var before = root.exec(List.of("lsblk", "-rno", "NAME,PARTTYPE,FSTYPE", loop));
+      var labelclear = root.exec(List.of("zpool", "labelclear", data));
+      var wipefs = root.exec(List.of("wipefs", "--all", loop));
+      root.exec(PoolDevices.SETTLE);
+      var after = root.exec(List.of("lsblk", "-rno", "NAME,PTTYPE,FSTYPE", loop));
+      var listed = root.exec(List.of("wipefs", "--", loop));
+      System.out.println(
+          "LEFT made ["
+              + made.reason()
+              + "] destroyed ["
+              + destroyed.reason()
+              + "]\n"
+              + before.stdout()
+              + "LABELCLEAR exit "
+              + labelclear.exitCode()
+              + " ["
+              + labelclear.reason()
+              + "] WIPEFS exit "
+              + wipefs.exitCode()
+              + " ["
+              + wipefs.stdout().strip()
+              + "]\nAFTER ["
+              + after.stdout()
+              + "] LISTED ["
+              + listed.stdout()
+              + "]");
+
+      assertTrue(made.ok() && destroyed.ok(), made.reason() + destroyed.reason());
+      assertTrue(before.stdout().contains("zfs_member"), before.stdout());
+      assertTrue(before.stdout().toLowerCase(Locale.ROOT).contains("6a945a3b"), before.stdout());
+      assertTrue(labelclear.ok(), labelclear.reason());
+      assertTrue(wipefs.ok(), wipefs.reason());
+      assertEquals(
+          List.of(loop.substring("/dev/".length())),
+          after.stdout().lines().map(line -> line.strip().split(" ")[0]).toList());
+      assertEquals("", listed.stdout());
+    } finally {
+      root.exec(List.of("zpool", "destroy", "-f", "sail-it-left"));
       root.exec(List.of("losetup", "-d", loop));
     }
   }

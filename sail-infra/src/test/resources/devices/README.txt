@@ -93,3 +93,10 @@ Hand-written (layouts no machine at hand has), in the call's format:
   path), suspended with both removed, and faulted with both unopenable, in the output OpenZFS
   2.2.2 prints (`zpool_main.c` `status_callback` and `print_status_config`); a real-device proof
   is to replace them with captures
+- gcp5/<case>.lsblk.json   the mirror's real-device proof (of 9cff06c3), the call above verbatim:
+  d-225 two whole disks after the destroyed mirror zpend (GPT, data partition with zpend's labels,
+  8 MiB reserved partition 9), d-226 the same once the labels were cleared; gcp5/d-225-wipefs-*.txt
+  the `wipefs <device>` listings of those disks and data partitions, from the proof's log.
+  gcp5/handwritten-d-225-after-the-printed-remedy.lsblk.json is d-225 with sdf and sdg left as
+  `wipefs --all` leaves them, no table and no partitions (the commands verified on a loop device by
+  PoolDevicesIT)

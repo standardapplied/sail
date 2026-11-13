@@ -1007,23 +1007,27 @@ never with `-f`: Sail never passes `source.wipe`.
 - **Z1. What `host init` reports as done is what Incus has.** The base profile's root disk is
   converged (added when missing, an existing one kept) and the pool it names must be one Incus
   lists, else init fails; `host.yaml` states that pool, its driver and its source
-  (`pool_source`) as Incus has them. A pool Incus lists under the name as `Pending` or `Errored`
-  is one it did not finish making (incusd stopped between its driver's create, a zfs pool's `zpool
-  create`, and marking the pool created: `storagePoolCreateLocal`): a re-run never answers
-  "already exists" for it and makes nothing over it, refused at the flags and again at step 5, for
-  every driver, naming the status and the remedy Incus's `storagePoolDelete` gives: `incus storage
-  delete` of a `Pending` pool removes only Incus's record and runs no driver delete, so a zpool it
-  made is left for the operator to see (`zfs list -r`) and destroy (`zpool destroy`); of an
+  (`pool_source`) as Incus has them. A pool Incus lists under the name as `Pending`, `Errored` or
+  `Unavailable` is never taken for one that exists: refused at the flags and again at step 5, for
+  every driver, before any profile is touched and with no "ready", naming the status and the
+  remedy. If incusd stops between its driver's create, a zfs pool's `zpool create`, and marking the
+  pool created (`storagePoolCreateLocal`), the record stays `Pending` while it runs and Incus 7.6
+  reports it `Unavailable` once restarted, the zpool's name not yet written to it (the real-device
+  proof, case D2): such a zfs record naming no zpool names `incus storage delete <pool>`, which
+  removes the record and leaves the zpool (only its root dataset in it), then `zfs list -r` and
+  `zpool destroy`; any other `Unavailable` pool was made, and names `incus storage show` and, for
+  zfs, `zpool status`, to mend it. `incus storage delete` of a `Pending` pool removes only Incus's
+  record and runs no driver delete, so its zpool is left for the operator to see and destroy; of an
   `Errored` one it runs the driver's delete, which destroys the zpool its record names when it
-  holds only Incus's own datasets. Every other status is a pool Incus made, kept as 0.67.0 kept
-  it; one Incus reports `Unavailable` (made, and failed to start) is kept with step 5 saying so
-  and naming `incus storage show` and, for zfs, `zpool status`, nothing changed.
+  holds only Incus's own datasets. Every other status, `Unknown` among them, is kept as 0.67.0
+  kept it.
   *`HostProvisionerTest.aZfsPoolOnAWholeDiskIsIncussOwnAndTheProfilePutsContainersOnIt`,
   `HostProvisionerTest.aProfileThatNamesAPoolIncusLacksIsRefused`,
   `HostProvisionerTest.aPoolIncusLeftUnfinishedIsNeverTakenAsMadeNorMadeOver`,
   `HostInitCommandTest.aReRunFindingAPoolIncusDidNotFinishSaysSoAndTakesItForNoPool`,
-  `HostInitCommandTest.aReRunFindingAPoolIncusMadeInAnotherStatusKeepsItAsBefore`,
-  `HostProvisionerTest.aPoolIncusMadeAndReportsInAnotherStatusIsKeptAsBeforeAndUnavailableIsSaid`,
+  `HostInitCommandTest.aReRunFindingAPoolIncusReportsUnknownKeepsItAsBefore`,
+  `HostInitCommandTest.aReRunFindingAPoolIncusCannotStartIsRefusedBeforeAnythingAndSaysWhatToRun`,
+  `HostProvisionerTest.aPoolIncusCannotStartStopsInitBeforeAnyProfileOrReady`,
   `HostProvisionerIT`.*
 - **Z2. Sail erases nothing.** No command of Sail wipes, repartitions or overwrites a signature:
   it never passes `source.wipe`, so Incus never runs `zpool create -f` (Incus runs `-f`, after
@@ -1069,8 +1073,15 @@ never with `-f`: Sail never passes `source.wipe`.
   boot type. A device whose only obstacle is a filesystem, swap or a bare partition table names
   the `sudo wipefs --all <device>` the operator may run; one in use names the use, and a member
   of anything the command that frees it (a zpool `zpool import` lists: import it or `zpool
-  labelclear` it; the labels of a pool it does not list, destroyed or missing its other devices:
-  `zpool labelclear`, never import), never wipefs; a pool's whole disk is named by its pool. A refused device that holds a filesystem unmounted names it. What
+  labelclear -f` it, since labelclear refuses an exported pool's device without `-f`; the labels
+  of a pool it does not list, destroyed: `zpool labelclear`, never import), never wipefs; a pool's
+  whole disk is named by its pool. A whole disk that holds only what a destroyed zpool left there,
+  zpool's own layout (a GPT of a ZFS data partition, with no labels or a destroyed pool's, and its
+  8 MiB reserved partition) and nothing else, names the commands that return it to blank, in order:
+  `zpool labelclear <data partition>`, then `wipefs --all <disk>` (`DeviceRules.zpoolLeftovers`;
+  verified on a loop device by `PoolDevicesIT`). Of two devices named, each is asked every rule
+  until one refuses it, the other going on, and one refusal names what is wrong with each, in the
+  order named. A refused device that holds a filesystem unmounted names it. What
   neither the open nor the walk sees is a consumer that does not keep the device open while Sail
   looks, a stopped virtual machine's raw disk or a closed dm-crypt volume with no header. A disk
   with no partition table and no signature is blank to Sail, even where a filesystem survives
@@ -1163,9 +1174,12 @@ never with `-f`: Sail never passes `source.wipe`.
   naming both sizes; within the 16 MiB the output says how much of the larger goes unused. A
   re-run compares the `--disk` devices and Incus's `volatile.initial_source` as sets of the devices
   `realpath -e` resolves them to: either flag order is a no-op, one of the two or another pair is
-  refused naming the flags, a member that resolves to nothing is named as gone. On disks with no
-  hardware identity Incus records kernel names, which can move across a reboot; a re-run compares
-  what they resolve to now. The NVMe rule refuses two persistent disks of a cloud VM that shows
+  refused naming the flags, a member that resolves to nothing is named as gone. The devices
+  compared are the pool's members as ZFS lists its imported zpool now (`PoolMembers`: `zpool list
+  -vHP`, and `-vH`, in which ZFS names a whole-disk vdev by its disk), not Incus's record, whose
+  kernel names can move across a reboot or outlive a `zpool replace`; `host init` and `host status`
+  say the same, and Incus's record is used only for a zpool ZFS says is not imported, said as
+  recorded at creation. The NVMe rule refuses two persistent disks of a cloud VM that shows
   every disk as a namespace of one controller (GCP); SCSI-attached disks there are separate.
   `host.yaml`'s `pool_source` is Incus's string, `mirror=<a>,<b>`, said as `a mirror of <a> and
   <b>`. *`PoolDevicesTest.twoBlankDisksAreAMirrorOfTwoDevicesEachClearedAsOneIs`,

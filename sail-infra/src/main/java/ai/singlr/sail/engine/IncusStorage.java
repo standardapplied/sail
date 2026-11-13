@@ -81,11 +81,12 @@ public final class IncusStorage {
      * is made. Incus's {@code incus storage delete} of a {@code Pending} pool removes only its
      * record and runs no driver delete ({@code storagePoolDelete}), so a zpool it made stays for
      * the operator to destroy; of an {@code Errored} one it runs the driver's delete, which
-     * destroys the zpool its record names when it holds only Incus's own datasets. Every other
-     * status, {@code Unavailable} (made, and failed to start) and {@code Unknown} among them, is a
-     * pool that was made, kept as it is.
+     * destroys the zpool its record names when it holds only Incus's own datasets. One Incus
+     * reports {@code Unavailable} it has and cannot start ({@link #requireAvailable}). Every other
+     * status, {@code Unknown} among them, is kept as it is.
      */
     public void requireFinished() {
+      requireAvailable();
       if (!UNFINISHED.contains(status)) {
         return;
       }
@@ -119,19 +120,39 @@ public final class IncusStorage {
     }
 
     /**
-     * What a re-run that keeps this pool says of how Incus has it: for one Incus reports
-     * unavailable, that it does and where to look, since nothing is changed; nothing otherwise.
+     * Refuses a pool Incus reports {@code Unavailable}: it has the pool and cannot start it, which
+     * no profile and no "ready" may stand on. A zfs pool whose record names no zpool is one incusd
+     * stopped making after its {@code zpool create} (Incus 7.6 writes the zpool's name to the
+     * record only after mounting it, and reports such a pool {@code Unavailable} once restarted):
+     * {@code incus storage delete} removes that record and leaves the zpool, which holds only its
+     * own root dataset, for the operator to destroy. Any other was made, and is mended, not
+     * removed.
      */
-    public String standing() {
+    private void requireAvailable() {
       if (!UNAVAILABLE.equals(status)) {
-        return "";
+        return;
       }
-      return "; Incus reports it Unavailable: see sudo incus storage show "
-          + name
-          + (HostYaml.BACKEND_ZFS.equals(driver)
-              ? " and sudo zpool status " + Objects.requireNonNullElse(zpool, name)
-              : "")
-          + ", nothing was changed";
+      var zfs = HostYaml.BACKEND_ZFS.equals(driver);
+      throw new IllegalStateException(
+          "Incus's pool '"
+              + name
+              + "' is Unavailable: Incus has the pool but cannot start it, so it is not taken for a"
+              + " pool that exists and nothing is changed. "
+              + (zfs && zpool == null
+                  ? "Its record names no zpool, as when incusd stopped while making it: remove the"
+                      + " half-made pool with sudo incus storage delete "
+                      + name
+                      + ", then sudo zfs list -r "
+                      + name
+                      + ", and if it lists only "
+                      + name
+                      + " itself, sudo zpool destroy "
+                      + name
+                      + "; then run this again."
+                  : "It was made: see why with sudo incus storage show "
+                      + name
+                      + (zfs ? " and sudo zpool status " + zpool : "")
+                      + ", mend that, then run this again."));
     }
 
     /** Refuses a pool of {@code driver} under this pool's name, which Incus has with another. */
@@ -150,6 +171,11 @@ public final class IncusStorage {
 
     /** The pool as one line of {@code host status}. */
     public String summary() {
+      return summary(said(source));
+    }
+
+    /** The pool as one line of {@code host status}, on {@code on}. */
+    public String summary(String on) {
       var measured =
           space
               .map(
@@ -158,7 +184,7 @@ public final class IncusStorage {
                           + " free of "
                           + Strings.gibibytes(s.total()))
               .orElse("free space unknown");
-      return name + " (" + driver + ", " + said(source) + "): " + measured;
+      return name + " (" + driver + ", " + on + "): " + measured;
     }
   }
 
@@ -196,7 +222,9 @@ public final class IncusStorage {
   /**
    * Refuses, before anything is made, an Incus that cannot make a mirrored pool: one without the
    * {@value #VDEVS} API extension (Incus 6.0.0, as Ubuntu 24.04 packages it), which would read a
-   * mirror's source as the name of a dataset.
+   * mirror's source as the name of a dataset. Its remedy is what moves such a box: Zabbly's source,
+   * then {@code host incus upgrade}, which moves the packages Sail holds to apt's candidate; apt
+   * itself refuses to replace held packages, and without Zabbly's source the candidate is 6.0.0.
    */
   public void requireMirrors() throws IOException, InterruptedException, TimeoutException {
     var server = shell.exec(List.of("incus", "query", "/1.0"));
@@ -212,8 +240,9 @@ public final class IncusStorage {
               + VDEVS
               + " API extension, which Incus has from 6.0.1 on"
               + (server.ok() ? "" : " (incus query /1.0: " + server.reason() + ")")
-              + ". Nothing was written. Install Incus from Zabbly's stable repository, as host init"
-              + " does on a box without it, then run this again.");
+              + ". Nothing was written. Add Zabbly's stable apt source as Zabbly's README says"
+              + " (https://github.com/zabbly/incus), then move the Incus Sail holds to it with sudo"
+              + " sail host incus upgrade; then run this again.");
     }
   }
 

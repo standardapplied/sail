@@ -1,0 +1,4 @@
+DEVICE OFFSET      TYPE UUID LABEL
+sdf    0x200       gpt       
+sdf    0x4fffffe00 gpt       
+sdf    0x1fe       PMBR      

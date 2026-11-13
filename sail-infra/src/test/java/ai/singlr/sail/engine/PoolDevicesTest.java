@@ -548,14 +548,14 @@ class PoolDevicesTest {
 
     assertEquals(
         "/dev/sda5 is refused: /dev/sda5 is a device of zpool oldtank, which is not imported:"
-            + " import it with sudo zpool import oldtank, or clear it yourself with sudo zpool"
-            + " labelclear /dev/sda5.",
+            + " import it with sudo zpool import oldtank, or, if nothing on it is wanted, clear it"
+            + " yourself with sudo zpool labelclear -f /dev/sda5.",
         refused);
     assertFalse(refused.contains("wipefs"), refused);
     assertEquals(
         "/dev/sdb is refused: /dev/sdb1 is a device of zpool exported, which is not imported:"
-            + " import it with sudo zpool import exported, or clear it yourself with sudo zpool"
-            + " labelclear /dev/sdb1.",
+            + " import it with sudo zpool import exported, or, if nothing on it is wanted, clear it"
+            + " yourself with sudo zpool labelclear -f /dev/sdb1.",
         refusal(
             names(new Box(PROBES))
                 .holds("/dev/sdb1", LISTED + "sdb1 0x3f000 zfs_member 1234567890 exported\n")
@@ -567,7 +567,8 @@ class PoolDevicesTest {
   void aPoolMemberOnlyLsblkShowsIsRefusedWithNoErase() {
     assertEquals(
         "/dev/sdd1 is refused: /dev/sdd1 is a device of a zpool, which is not imported: import it"
-            + " with sudo zpool import, or clear it yourself with sudo zpool labelclear /dev/sdd1.",
+            + " with sudo zpool import, or, if nothing on it is wanted, clear it yourself with sudo"
+            + " zpool labelclear -f /dev/sdd1.",
         refusal("gcp2/a-layout-final.lsblk.json", "/dev/sdd1"));
   }
 
@@ -922,8 +923,9 @@ class PoolDevicesTest {
     assertEquals(
         "/dev/sdk is refused: process 4242 (python3) has /dev/sdk open.", refused.getMessage());
     assertTrue(
-        shell.invocations().stream().noneMatch(c -> c.startsWith("wipefs")),
-        "neither device is probed: " + shell.invocations());
+        shell.invocations().stream()
+            .noneMatch(c -> c.startsWith("wipefs") && c.endsWith("/dev/sdk")),
+        "the held device is never probed: " + shell.invocations());
   }
 
   @Test
@@ -968,6 +970,88 @@ class PoolDevicesTest {
         mirror.said(),
         "equal raw sizes, yet ZFS partitions the whole disk, so no figure of what goes unused is"
             + " true");
+  }
+
+  private static final String LEFT = "gcp5/d-225-destroyed-mirror-on-two-whole-disks.lsblk.json";
+
+  /** The proof's two whole disks after the destroyed mirror zpend, with their real listings. */
+  private static Box leftovers(String layout) {
+    var box = names(new Box(layout));
+    for (var disk : List.of("sdf", "sdg")) {
+      box.holds("/dev/" + disk, fixture("gcp5/d-225-wipefs-" + disk + ".txt"));
+      if (layout.equals(LEFT)) {
+        box.holds("/dev/" + disk + "1", fixture("gcp5/d-225-wipefs-" + disk + "1.txt"));
+      }
+    }
+    return box;
+  }
+
+  @Test
+  void theRemedyForWhatAZpoolLeftNamesBothDisksAndEndsInAMirrorAfterOneRefusal() throws Exception {
+    var refused =
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> devices(leftovers(LEFT).shell()).mirror("/dev/sdf", "/dev/sdg"))
+            .getMessage();
+
+    assertEquals(
+        "/dev/sdf holds only what a zpool left: its data partition /dev/sdf1, carrying the labels"
+            + " of zpool zpend, which cannot be imported, and its reserved partition /dev/sdf9. Sail"
+            + " erases nothing: if nothing on it is wanted, return it to blank yourself with sudo"
+            + " zpool labelclear /dev/sdf1, then sudo wipefs --all /dev/sdf, then run this again.\n"
+            + "/dev/sdg holds only what a zpool left: its data partition /dev/sdg1, carrying the labels"
+            + " of zpool zpend, which cannot be imported, and its reserved partition /dev/sdg9. Sail"
+            + " erases nothing: if nothing on it is wanted, return it to blank yourself with sudo"
+            + " zpool labelclear /dev/sdg1, then sudo wipefs --all /dev/sdg, then run this again.",
+        refused);
+    var made =
+        devices(
+                names(new Box("gcp5/handwritten-d-225-after-the-printed-remedy.lsblk.json"))
+                    .shell())
+            .mirror("/dev/sdf", "/dev/sdg");
+    assertEquals("zfs on a mirror of /dev/sdf and /dev/sdg", made.said());
+  }
+
+  @Test
+  void aDiskWhoseZpoolLabelsAreClearedNeedsOnlyItsTableErased() {
+    assertEquals(
+        "/dev/sdf holds only what a zpool left: its data partition /dev/sdf1, which carries"
+            + " nothing, and its reserved partition /dev/sdf9. Sail erases nothing: if nothing on it"
+            + " is wanted, return it to blank yourself with sudo wipefs --all /dev/sdf, then run this"
+            + " again.",
+        refusal(leftovers("gcp5/d-226-labels-cleared.lsblk.json"), "/dev/sdf"));
+  }
+
+  @Test
+  void theLeftoversOfAPoolZpoolCanStillImportAreNeverOfferedAnErase() {
+    var refused = refusal(leftovers(LEFT).importable("zpend"), "/dev/sdf");
+
+    assertEquals(
+        "/dev/sdf is refused: /dev/sdf1 is a device of zpool zpend, which is not imported: import it"
+            + " with sudo zpool import zpend, or, if nothing on it is wanted, clear it yourself with"
+            + " sudo zpool labelclear -f /dev/sdf1.",
+        refused);
+  }
+
+  @Test
+  void oneRefusalNamesWhatIsWrongWithEachDeviceInTheOrderNamed() {
+    var refused =
+        assertThrows(
+                IllegalArgumentException.class,
+                () ->
+                    devices(
+                            spares()
+                                .holds("/dev/sdh", EXT4)
+                                .open(4242, "python3", "/dev/sdk")
+                                .shell())
+                        .mirror("/dev/sdh", "/dev/sdk"))
+            .getMessage();
+
+    assertEquals(
+        "/dev/sdh holds ext4. Sail erases nothing: if nothing on it is wanted, erase it yourself"
+            + " with sudo wipefs --all /dev/sdh, then run this again.\n/dev/sdk is refused: process"
+            + " 4242 (python3) has /dev/sdk open.",
+        refused);
   }
 
   @Test
@@ -1230,8 +1314,8 @@ class PoolDevicesTest {
             "/dev/sdb"));
     assertEquals(
         "/dev/sdd is refused: /dev/sdd1 is a device of zpool handpool, which is not imported:"
-            + " import it with sudo zpool import handpool, or clear it yourself with sudo zpool"
-            + " labelclear /dev/sdd1.",
+            + " import it with sudo zpool import handpool, or, if nothing on it is wanted, clear it"
+            + " yourself with sudo zpool labelclear -f /dev/sdd1.",
         refusal(
             names(new Box("gcp3/c-layout-exported-pool.lsblk.json"))
                 .holds("/dev/sdd1", LISTED + "sdd1 0x3f000 zfs_member 1234567890 handpool\n")

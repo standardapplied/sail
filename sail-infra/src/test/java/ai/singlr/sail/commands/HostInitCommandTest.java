@@ -767,61 +767,197 @@ class HostInitCommandTest {
     }
   }
 
-  @Test
-  void aReRunFindingAPoolIncusMadeInAnotherStatusKeepsItAsBefore() throws Exception {
-    for (var status : List.of("Unavailable", "Unknown")) {
-      var single =
-          new ScriptedShellExecutor()
-              .onOk(
-                  "incus storage list",
-                  "[{\"name\": \"tank\", \"driver\": \"zfs\", \"status\": \""
-                      + status
-                      + "\", \"config\": {\"source\": \"tank\", \"volatile.initial_source\":"
-                      + " \"/dev/sdb\", \"zfs.pool_name\": \"tank\"}}]")
-              .onOk("realpath -e -- /dev/sdb", "/dev/sdb\n");
-      var mirror =
-          new ScriptedShellExecutor()
-              .onOk(
-                  "incus storage list",
-                  "[{\"name\": \"tank\", \"driver\": \"zfs\", \"status\": \""
-                      + status
-                      + "\", \"config\": {\"source\": \"tank\", \"volatile.initial_source\":"
-                      + " \"mirror="
-                      + MIRROR_A
-                      + ","
-                      + MIRROR_B
-                      + "\", \"zfs.pool_name\": \"tank\"}}]")
-              .onOk("realpath -e -- " + MIRROR_A, "/dev/sdb5\n")
-              .onOk("realpath -e -- " + MIRROR_B, "/dev/sdc5\n")
-              .onOk("realpath -e -- /dev/sdb5", "/dev/sdb5\n")
-              .onOk("realpath -e -- /dev/sdc5", "/dev/sdc5\n");
-      var dir =
-          new ScriptedShellExecutor()
-              .onOk(
-                  "incus storage list",
-                  "[{\"name\": \"devpool\", \"driver\": \"dir\", \"status\": \""
-                      + status
-                      + "\", \"config\": {\"source\": \"/var/lib/incus/storage-pools/devpool\"}}]");
+  /** A box whose Incus lists one pool in {@code status}, named and sourced as given. */
+  private static ScriptedShellExecutor listing(
+      String name, String driver, String status, String config) {
+    return new ScriptedShellExecutor()
+        .onOk(
+            "incus storage list",
+            "[{\"name\": \""
+                + name
+                + "\", \"driver\": \""
+                + driver
+                + "\", \"status\": \""
+                + status
+                + "\", \"config\": {"
+                + config
+                + "}}]")
+        .onOk("realpath -e -- " + MIRROR_A, "/dev/sdb5\n")
+        .onOk("realpath -e -- " + MIRROR_B, "/dev/sdc5\n")
+        .onOk("realpath -e -- /dev/sdb5", "/dev/sdb5\n")
+        .onOk("realpath -e -- /dev/sdc5", "/dev/sdc5\n")
+        .onOk("realpath -e -- /dev/sdb", "/dev/sdb\n");
+  }
 
+  private static final String SINGLE =
+      "\"source\": \"tank\", \"volatile.initial_source\": \"/dev/sdb\", \"zfs.pool_name\": \"tank\"";
+  private static final String PAIR =
+      "\"source\": \"tank\", \"volatile.initial_source\": \"mirror="
+          + MIRROR_A
+          + ","
+          + MIRROR_B
+          + "\", \"zfs.pool_name\": \"tank\"";
+  private static final String HALF_MADE =
+      "\"source\": \"mirror=" + MIRROR_A + "," + MIRROR_B + "\"";
+  private static final String DIR = "\"source\": \"/var/lib/incus/storage-pools/devpool\"";
+
+  @Test
+  void aReRunFindingAPoolIncusReportsUnknownKeepsItAsBefore() throws Exception {
+    assertEquals(
+        new PoolSource.Zpool("tank"),
+        source(
+            listing("tank", "zfs", "Unknown", SINGLE),
+            "--storage",
+            "zfs",
+            "--pool",
+            "tank",
+            "--disk",
+            "/dev/sdb"));
+    assertEquals(
+        new PoolSource.Zpool("tank"),
+        source(
+            listing("tank", "zfs", "Unknown", PAIR),
+            "--storage",
+            "zfs",
+            "--pool",
+            "tank",
+            "--disk",
+            "/dev/sdc5",
+            "--disk",
+            "/dev/sdb5"));
+    assertEquals(
+        new PoolSource.Dir(),
+        source(listing("devpool", "dir", "Unknown", DIR), "--storage", "dir"));
+  }
+
+  @Test
+  void aReRunFindingAPoolIncusCannotStartIsRefusedBeforeAnythingAndSaysWhatToRun() {
+    var made =
+        "Incus's pool 'tank' is Unavailable: Incus has the pool but cannot start it, so it is not"
+            + " taken for a pool that exists and nothing is changed. It was made: see why with sudo"
+            + " incus storage show tank and sudo zpool status tank, mend that, then run this again.";
+    for (var shape : List.of(SINGLE, PAIR)) {
+      var shell = listing("tank", "zfs", "Unavailable", shape);
       assertEquals(
-          new PoolSource.Zpool("tank"),
-          source(single, "--storage", "zfs", "--pool", "tank", "--disk", "/dev/sdb"),
-          status);
-      assertEquals(
-          new PoolSource.Zpool("tank"),
-          source(
-              mirror,
-              "--storage",
-              "zfs",
-              "--pool",
-              "tank",
-              "--disk",
-              "/dev/sdc5",
-              "--disk",
-              "/dev/sdb5"),
-          status);
-      assertEquals(new PoolSource.Dir(), source(dir, "--storage", "dir"), status);
+          made,
+          assertThrows(
+                  IllegalStateException.class,
+                  () -> source(shell, "--storage", "zfs", "--pool", "tank"))
+              .getMessage());
+      assertTrue(
+          shell.invocations().stream()
+              .noneMatch(c -> c.startsWith("lsblk") || c.startsWith("wipefs")),
+          shell.invocations().toString());
     }
+    assertEquals(
+        "Incus's pool 'tank' is Unavailable: Incus has the pool but cannot start it, so it is not"
+            + " taken for a pool that exists and nothing is changed. Its record names no zpool, as"
+            + " when incusd stopped while making it: remove the half-made pool with sudo incus"
+            + " storage delete tank, then sudo zfs list -r tank, and if it lists only tank itself,"
+            + " sudo zpool destroy tank; then run this again.",
+        assertThrows(
+                IllegalStateException.class,
+                () ->
+                    source(
+                        listing("tank", "zfs", "Unavailable", HALF_MADE),
+                        "--storage",
+                        "zfs",
+                        "--pool",
+                        "tank",
+                        "--disk",
+                        "/dev/sdb5",
+                        "--disk",
+                        "/dev/sdc5"))
+            .getMessage());
+    assertEquals(
+        "Incus's pool 'devpool' is Unavailable: Incus has the pool but cannot start it, so it is"
+            + " not taken for a pool that exists and nothing is changed. It was made: see why with"
+            + " sudo incus storage show devpool, mend that, then run this again.",
+        assertThrows(
+                IllegalStateException.class,
+                () -> source(listing("devpool", "dir", "Unavailable", DIR), "--storage", "dir"))
+            .getMessage());
+  }
+
+  /** The proof's case G: kernel names moved after the pool was made, and ZFS says where it is. */
+  private static ScriptedShellExecutor movedNames(ScriptedShellExecutor shell) {
+    var k1 = "/dev/disk/by-id/scsi-0Google_PersistentDisk_k1";
+    var k2 = "/dev/disk/by-id/scsi-0Google_PersistentDisk_k2";
+    return shell
+        .onOk(
+            "incus storage list",
+            "[{\"name\": \"zg\", \"driver\": \"zfs\", \"status\": \"Created\","
+                + " \"config\": {\"source\": \"zg\", \"volatile.initial_source\":"
+                + " \"mirror=/dev/sdd,/dev/sde\", \"zfs.pool_name\": \"zg\"}}]")
+        .onOk(
+            "zpool list -vHP zg",
+            "zg\t19.5G\t1M\t19.5G\t-\t-\t0%\t0%\t1.00x\tONLINE\t-\n"
+                + "\tmirror-0\t19.5G\t1M\t19.5G\t-\t-\t0%\t0.00%\t-\tONLINE\n"
+                + "\t"
+                + k1
+                + "-part1\t20.0G\t-\t-\t-\t-\t-\t-\t-\tONLINE\n"
+                + "\t"
+                + k2
+                + "-part1\t20.0G\t-\t-\t-\t-\t-\t-\t-\tONLINE\n")
+        .onOk(
+            "zpool list -vH zg",
+            "zg\t19.5G\t1M\t19.5G\t-\t-\t0%\t0%\t1.00x\tONLINE\t-\n"
+                + "\tmirror-0\t19.5G\t1M\t19.5G\t-\t-\t0%\t0.00%\t-\tONLINE\n"
+                + "\tscsi-0Google_PersistentDisk_k1\t20.0G\t-\t-\t-\t-\t-\t-\t-\tONLINE\n"
+                + "\tscsi-0Google_PersistentDisk_k2\t20.0G\t-\t-\t-\t-\t-\t-\t-\tONLINE\n")
+        .onOk("realpath -e -- " + k1, "/dev/sdh\n")
+        .onOk("realpath -e -- " + k2, "/dev/sdj\n")
+        .onOk("realpath -e -- /dev/sdh", "/dev/sdh\n")
+        .onOk("realpath -e -- /dev/sdj", "/dev/sdj\n")
+        .onOk("realpath -e -- /dev/sdd", "/dev/sdd\n")
+        .onOk("realpath -e -- /dev/sde", "/dev/sde\n");
+  }
+
+  @Test
+  void aReRunComparesThePoolsDevicesAsZfsListsThemNotAsIncusRecordedThem() throws Exception {
+    var shell = movedNames(new ScriptedShellExecutor());
+
+    assertEquals(
+        new PoolSource.Zpool("zg"),
+        source(
+            shell, "--storage", "zfs", "--pool", "zg", "--disk", "/dev/sdj", "--disk", "/dev/sdh"));
+    assertEquals(
+        "Incus already has zfs pool 'zg' on a mirror of"
+            + " /dev/disk/by-id/scsi-0Google_PersistentDisk_k1 and"
+            + " /dev/disk/by-id/scsi-0Google_PersistentDisk_k2, which a re-run keeps, so --disk"
+            + " /dev/sdd --disk /dev/sde would be ignored. Drop it, or name a new pool with --pool"
+            + " <name>.",
+        assertThrows(
+                IllegalArgumentException.class,
+                () ->
+                    source(
+                        shell,
+                        "--storage",
+                        "zfs",
+                        "--pool",
+                        "zg",
+                        "--disk",
+                        "/dev/sdd",
+                        "--disk",
+                        "/dev/sde"))
+            .getMessage());
+  }
+
+  @Test
+  void aPoolZpoolHasNotImportedIsSaidAsIncusRecordedIt() {
+    var shell =
+        listing("tank", "zfs", "Created", SINGLE)
+            .onFail("zpool list -vHP tank", "cannot open 'tank': no such pool")
+            .onOk("realpath -e -- /dev/sdc", "/dev/sdc\n");
+
+    assertEquals(
+        "Incus already has zfs pool 'tank' on /dev/sdb (as Incus recorded at creation: zpool tank"
+            + " is not imported), which a re-run keeps, so --disk /dev/sdc would be ignored. Drop"
+            + " it, or name a new pool with --pool <name>.",
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> source(shell, "--storage", "zfs", "--pool", "tank", "--disk", "/dev/sdc"))
+            .getMessage());
   }
 
   /** A box whose lsblk prints {@code layout}, /dev/sdb resolving and every probe answering free. */

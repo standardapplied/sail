@@ -1798,51 +1798,98 @@ class HostProvisionerTest {
     assertNoPoolCreated(shell);
   }
 
+  /** A box whose Incus holds devpool, of {@code driver} and {@code source}, in {@code status}. */
+  private static ScriptedShellExecutor held(String driver, String status, String source) {
+    return new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
+        .onOk(
+            "incus storage list",
+            "[{\"name\": \"devpool\", \"driver\": \""
+                + driver
+                + "\", \"status\": \""
+                + status
+                + "\", \"config\": {\"source\": \"devpool\", \"volatile.initial_source\":"
+                + " \""
+                + source
+                + "\", \"zfs.pool_name\": \"devpool\"}}]")
+        .onOk("incus profile device list", "root\neth0\n")
+        .onOk("incus profile device get singlr-base root pool", "devpool\n");
+  }
+
   @Test
-  void aPoolIncusMadeAndReportsInAnotherStatusIsKeptAsBeforeAndUnavailableIsSaid()
-      throws Exception {
+  void aPoolIncusReportsUnknownIsKeptAsBefore() throws Exception {
     for (var driver : List.of("zfs single", "zfs mirror", "dir")) {
-      for (var status : List.of("Unavailable", "Unknown")) {
-        var source =
-            driver.equals("zfs single")
-                ? "/dev/sdb"
-                : driver.equals("dir")
-                    ? "/var/lib/incus/storage-pools/devpool"
-                    : "mirror=/dev/sdb,/dev/sdc";
-        var shell =
-            new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
-                .onOk(
-                    "incus storage list",
-                    "[{\"name\": \"devpool\", \"driver\": \""
-                        + driver.split(" ")[0]
-                        + "\", \"status\": \""
-                        + status
-                        + "\", \"config\": {\"source\": \"devpool\", \"volatile.initial_source\":"
-                        + " \""
-                        + source
-                        + "\", \"zfs.pool_name\": \"devpool\"}}]")
-                .onOk("incus profile device list", "root\neth0\n")
-                .onOk("incus profile device get singlr-base root pool", "devpool\n");
-        var steps = new ArrayList<String>();
-        var asked =
-            driver.equals("dir") ? DIR : driver.equals("zfs single") ? SDB : (PoolSource) SDB_SDC;
+      var source =
+          driver.equals("zfs single")
+              ? "/dev/sdb"
+              : driver.equals("dir")
+                  ? "/var/lib/incus/storage-pools/devpool"
+                  : "mirror=/dev/sdb,/dev/sdc";
+      var shell = held(driver.split(" ")[0], "Unknown", source);
+      var steps = new ArrayList<String>();
+      var asked =
+          driver.equals("dir") ? DIR : driver.equals("zfs single") ? SDB : (PoolSource) SDB_SDC;
 
-        provision(shell, asked, new RecordingListener(steps));
+      provision(shell, asked, new RecordingListener(steps));
 
-        var kept = "done:5/8:devpool (" + driver.split(" ")[0] + " on " + IncusStorage.said(source);
-        assertTrue(
-            steps.contains(
-                kept
-                    + (status.equals("Unavailable")
-                        ? ", already exists; Incus reports it Unavailable: see sudo incus storage"
-                            + " show devpool"
-                            + (driver.equals("dir") ? "" : " and sudo zpool status devpool")
-                            + ", nothing was changed)"
-                        : ", already exists)")),
-            driver + " " + status + " " + steps);
-        assertNoPoolCreated(shell);
-      }
+      assertTrue(
+          steps.contains(
+              "done:5/8:devpool ("
+                  + driver.split(" ")[0]
+                  + " on "
+                  + IncusStorage.said(source)
+                  + ", already exists)"),
+          driver + " " + steps);
+      assertNoPoolCreated(shell);
     }
+  }
+
+  @Test
+  void aPoolIncusCannotStartStopsInitBeforeAnyProfileOrReady() {
+    for (var driver : List.of("zfs", "dir")) {
+      var shell =
+          held(driver, "Unavailable", driver.equals("zfs") ? "mirror=/dev/sdb,/dev/sdc" : "/d");
+      var steps = new ArrayList<String>();
+
+      var refused =
+          assertThrows(
+              IllegalStateException.class,
+              () ->
+                  provision(
+                      shell, driver.equals("zfs") ? SDB_SDC : DIR, new RecordingListener(steps)));
+
+      assertTrue(refused.getMessage().startsWith("Incus's pool 'devpool' is Unavailable: "));
+      assertNoPoolCreated(shell);
+      assertTrue(
+          shell.invocations().stream().noneMatch(c -> c.startsWith("incus profile")),
+          shell.invocations().toString());
+      assertTrue(steps.stream().noneMatch(step -> step.contains(":6/8:")), steps.toString());
+    }
+  }
+
+  @Test
+  void aPoolThatExistsIsSaidOnTheDevicesZfsListsNow() throws Exception {
+    var shell =
+        held("zfs", "Created", "mirror=/dev/sdb,/dev/sdc")
+            .onOk(
+                "zpool list -vHP devpool",
+                "devpool\t19.5G\t1M\t19.5G\t-\t-\t0%\t0%\t1.00x\tONLINE\t-\n"
+                    + "\tmirror-0\t19.5G\t1M\t19.5G\t-\t-\t0%\t0.00%\t-\tONLINE\n"
+                    + "\t/dev/sdb1\t20.0G\t-\t-\t-\t-\t-\t-\t-\tONLINE\n"
+                    + "\t/dev/sdk1\t20.0G\t-\t-\t-\t-\t-\t-\t-\tONLINE\n")
+            .onOk(
+                "zpool list -vH devpool",
+                "devpool\t19.5G\t1M\t19.5G\t-\t-\t0%\t0%\t1.00x\tONLINE\t-\n"
+                    + "\tmirror-0\t19.5G\t1M\t19.5G\t-\t-\t0%\t0.00%\t-\tONLINE\n"
+                    + "\tsdb\t20.0G\t-\t-\t-\t-\t-\t-\t-\tONLINE\n"
+                    + "\tsdk\t20.0G\t-\t-\t-\t-\t-\t-\t-\tONLINE\n");
+    var steps = new ArrayList<String>();
+
+    provision(shell, SDB_SDC, new RecordingListener(steps));
+
+    assertTrue(
+        steps.contains(
+            "done:5/8:devpool (zfs on a mirror of /dev/sdb and /dev/sdk, already exists)"),
+        steps.toString());
   }
 
   @Test

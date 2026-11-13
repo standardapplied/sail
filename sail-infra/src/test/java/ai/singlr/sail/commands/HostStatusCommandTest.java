@@ -406,6 +406,34 @@ class HostStatusCommandTest {
   }
 
   @Test
+  void aPoolIsSaidOnTheDevicesZfsListsNowNotTheNamesIncusRecorded() throws Exception {
+    var replaced =
+        mirror("handwritten-mirror-online.zpool-status.txt")
+            .onOk(
+                "zpool list -vHP devpool",
+                "devpool\t19.5G\t1M\t19.5G\t-\t-\t0%\t0%\t1.00x\tONLINE\t-\n"
+                    + "\tmirror-0\t19.5G\t1M\t19.5G\t-\t-\t0%\t0.00%\t-\tONLINE\n"
+                    + "\t/dev/sdb1\t20.0G\t-\t-\t-\t-\t-\t-\t-\tONLINE\n"
+                    + "\t/dev/sdk1\t20.0G\t-\t-\t-\t-\t-\t-\t-\tONLINE\n")
+            .onOk(
+                "zpool list -vH devpool",
+                "devpool\t19.5G\t1M\t19.5G\t-\t-\t0%\t0%\t1.00x\tONLINE\t-\n"
+                    + "\tmirror-0\t19.5G\t1M\t19.5G\t-\t-\t0%\t0.00%\t-\tONLINE\n"
+                    + "\tsdb\t20.0G\t-\t-\t-\t-\t-\t-\t-\tONLINE\n"
+                    + "\tsdk\t20.0G\t-\t-\t-\t-\t-\t-\t-\tONLINE\n");
+
+    assertEquals(
+        List.of(
+            "  │  Pool:        devpool (zfs, a mirror of /dev/sdb and /dev/sdk): 16.0 GiB free of"
+                + " 20.0 GiB"),
+        rows(replaced, "Pool:"));
+    var pool = (Map<?, ?>) ((List<?>) json(replaced).get("pools")).getFirst();
+    assertEquals(List.of("/dev/sdb", "/dev/sdk"), pool.get("devices"));
+    assertEquals("zfs", pool.get("devices_from"));
+    assertEquals("mirror=" + A + "," + B, pool.get("source"));
+  }
+
+  @Test
   void storageIncusCannotListIsSaidAndNeverReadAsNoPools() throws Exception {
     var shell =
         new ScriptedShellExecutor()

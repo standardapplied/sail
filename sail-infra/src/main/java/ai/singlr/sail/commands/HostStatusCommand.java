@@ -19,6 +19,7 @@ import ai.singlr.sail.engine.HostProvisioner;
 import ai.singlr.sail.engine.IncusStorage;
 import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.PoolHealth;
+import ai.singlr.sail.engine.PoolMembers;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.ShellExecutor;
@@ -259,21 +260,26 @@ public final class HostStatusCommand implements Runnable {
    * zfs pool its health as zpool says it now, where zpool can say.
    */
   private record Storage(
-      List<IncusStorage.Pool> pools, Map<String, PoolHealth> health, String error) {
+      List<IncusStorage.Pool> pools,
+      Map<String, PoolMembers> members,
+      Map<String, PoolHealth> health,
+      String error) {
 
     static Storage of(ShellExec shell) throws InterruptedException {
       try {
         var pools = new IncusStorage(shell).pools();
+        var members = new LinkedHashMap<String, PoolMembers>();
         var health = new LinkedHashMap<String, PoolHealth>();
         for (var pool : pools) {
+          members.put(pool.name(), PoolMembers.of(shell, pool));
           if (HostYaml.BACKEND_ZFS.equals(pool.driver())) {
             PoolHealth.of(shell, Objects.requireNonNullElse(pool.zpool(), pool.name()))
                 .ifPresent(found -> health.put(pool.name(), found));
           }
         }
-        return new Storage(pools, health, null);
+        return new Storage(pools, members, health, null);
       } catch (IOException | TimeoutException e) {
-        return new Storage(List.of(), Map.of(), e.getMessage());
+        return new Storage(List.of(), Map.of(), Map.of(), e.getMessage());
       }
     }
 
@@ -284,12 +290,13 @@ public final class HostStatusCommand implements Runnable {
     }
 
     private String row(IncusStorage.Pool pool) {
+      var summary = pool.summary(members.get(pool.name()).said());
       var found = health.get(pool.name());
       if (found == null) {
-        return pool.summary();
+        return summary;
       }
       var zpool = Objects.requireNonNullElse(pool.zpool(), pool.name());
-      var lines = new ArrayList<>(List.of(pool.summary(), "health " + found.state()));
+      var lines = new ArrayList<>(List.of(summary, "health " + found.state()));
       found.unhealthy().forEach((device, state) -> lines.add(device + " " + state));
       if (found.degraded()) {
         lines.add("replace the missing device: sudo zpool replace " + zpool + " <device> <new>");
@@ -313,6 +320,11 @@ public final class HostStatusCommand implements Runnable {
                 map.put("used_bytes", space.used());
                 map.put("total_bytes", space.total());
               });
+      var on = members.get(pool.name());
+      if (on.listed() || on.unimported() != null) {
+        map.put("devices", on.devices());
+        map.put("devices_from", on.listed() ? "zfs" : "incus record, zpool not imported");
+      }
       var found = health.get(pool.name());
       if (found != null) {
         map.put("health", found.state());

@@ -296,10 +296,8 @@ public final class HostProvisioner {
               + " ("
               + held.driver()
               + " on "
-              + IncusStorage.said(held.source())
-              + ", already exists"
-              + held.standing()
-              + ")");
+              + PoolMembers.of(reads, held).said()
+              + ", already exists)");
       return;
     }
     var restarted = make(pool, source);

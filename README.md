@@ -53,7 +53,10 @@ holds. Where only a filesystem, swap or a bare partition table is in the way, th
 the command that erases it (`sudo wipefs --all <device>`), for you to run if nothing on it is
 wanted, and then run `host init` again; a member of a pool, an array, a volume group or a cache
 is refused naming the tool that frees it instead (an exported pool: `zpool import`, or `zpool
-labelclear` yourself). A blank partition on the disk the system runs from is taken, as on a server
+labelclear -f` yourself). A whole disk that holds only what a destroyed zpool left on it (zpool's
+own table: its data partition and the 8 MiB reserved partition 9) is refused naming the commands
+that return it to blank, in order (`sudo zpool labelclear <data partition>`, then `sudo wipefs
+--all <disk>`). With two `--disk`, one refusal names what is wrong with each device. A blank partition on the disk the system runs from is taken, as on a server
 whose two disks both carry the system. Refused whatever it holds: a disk with partitions; a mounted
 or swap device, or one with something built on it, or one a process has open (for a partition, its whole disk too); a boot, firmware,
 reserved or extended partition, by its type; anything but a plain disk or a partition of one (an
@@ -92,19 +95,24 @@ zpool replace <pool> <missing device> <new device>`, which ZFS resilvers. A pool
 `ONLINE` nor `DEGRADED` (both devices gone, `FAULTED`, `SUSPENDED`, or not imported) refuses
 workspace and template verbs, naming its state and `sudo zpool status <pool>`. Re-running the
 command that made a mirror, in either order of its two `--disk` flags, is a no-op; naming one of
-the two, or another pair, is refused by name. On disks with no hardware identity Incus records
-their kernel names (`/dev/sdb`), which can move across a reboot: a re-run compares what those
-names resolve to now. After your own `zpool replace`, Incus still names the old device, so re-run
-`host init` without `--disk`. The mirror needs an Incus with the
-`storage_zfs_vdev` API extension (6.0.1 and later, as Sail installs it); Ubuntu's own Incus 6.0.0
-is refused before anything is made, in a dry run too. A pool Incus did not finish making, which it
-lists as `Pending` or `Errored` (incusd stopped mid-create), is never taken for one that exists:
-`host init` names the status and how to clear it (`sudo incus storage delete <pool>`; for a
-`Pending` pool that leaves the zpool Incus made, for you to destroy with `sudo zpool destroy
-<zpool>` once `sudo zfs list -r <zpool>` shows nothing wanted). A pool in any other status was
-made and is kept: one Incus reports `Unavailable` (made, and failed to start) is kept, and `host
-init` says so and points at `sudo incus storage show <pool>` and `sudo zpool status <pool>`,
-changing nothing. A file is slower
+the two, or another pair, is refused by name. What a pool is on is what ZFS lists for its zpool
+now (a whole-disk device as its disk), not the names Incus recorded when it made the pool, which
+on disks with no hardware identity are kernel names that can move across a reboot: a re-run
+compares the devices it names with those, `host init` and `host status` say those, and a pool
+whose zpool is not imported is said as Incus recorded it, saying so. After your own `zpool
+replace`, the pool is on its new device. The mirror needs an Incus with the `storage_zfs_vdev` API
+extension (6.0.1 and later, as Sail installs it); Ubuntu's own Incus 6.0.0 is refused before
+anything is made, in a dry run too, naming what moves it: add Zabbly's apt source, then `sudo sail
+host incus upgrade`. A pool Incus did not finish making is never taken for one that exists, and
+`host init` stops before the base profile, naming what Incus reports and how to clear it. If
+incusd stops between its `zpool create` and marking the pool created, Incus 7.6 reports the pool
+`Unavailable` once it is back: its record names no zpool, and `host init` names the commands that
+remove the half-made pool (`sudo incus storage delete <pool>`, then `sudo zfs list -r <pool>` and,
+if it lists only the pool itself, `sudo zpool destroy <pool>`); the next run names what the zpool
+left on each disk and how to return it to blank. An `Unavailable` pool Incus made and cannot start
+is refused too, pointing at `sudo incus storage show <pool>` and `sudo zpool status <zpool>` to mend
+it. A record Incus left `Pending` or `Errored` is refused with `sudo incus storage delete <pool>`
+(for `Pending` that leaves the zpool for you to destroy as above). A file is slower
 than a disk and meant for trials. `host init` caps the ZFS cache at a tenth of memory, at most
 16 GiB (`/etc/modprobe.d/sail-zfs.conf`), and says so; a cap you set yourself is kept, in your own
 file or edited into Sail's, and a cap Sail wrote before yours is removed so yours is the one that

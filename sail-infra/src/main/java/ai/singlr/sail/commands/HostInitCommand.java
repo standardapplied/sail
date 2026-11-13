@@ -17,6 +17,7 @@ import ai.singlr.sail.engine.IncusStorage;
 import ai.singlr.sail.engine.NetworkDetector;
 import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.PoolDevices;
+import ai.singlr.sail.engine.PoolMembers;
 import ai.singlr.sail.engine.PoolSource;
 import ai.singlr.sail.engine.PrerequisiteChecker;
 import ai.singlr.sail.engine.ProvisionListener;
@@ -268,9 +269,7 @@ public final class HostInitCommand implements Runnable {
                 + hostYaml.pool()
                 + " ("
                 + hostYaml.storageBackend()
-                + (hostYaml.poolSource() == null
-                    ? ""
-                    : " on " + IncusStorage.said(hostYaml.poolSource()))
+                + (hostYaml.poolSource() == null ? "" : " on " + on(reads, hostYaml))
                 + ")"));
     System.out.println(Ansi.AUTO.string("    @|bold Bridge:|@   " + hostYaml.bridge()));
     System.out.println(Ansi.AUTO.string("    @|bold Image:|@    " + hostYaml.image()));
@@ -361,7 +360,7 @@ public final class HostInitCommand implements Runnable {
     }
     var devices = new PoolDevices(probe);
     if (held.isPresent()) {
-      return kept(held.get(), devices);
+      return kept(held.get(), devices, probe);
     }
     if (poolFileSize != null) {
       return file(poolFileSize);
@@ -379,9 +378,11 @@ public final class HostInitCommand implements Runnable {
    * handed it, by-id names where the disks have them; a source that resolves to nothing is a device
    * gone, which no {@code --disk} can be.
    */
-  private PoolSource kept(IncusStorage.Pool held, PoolDevices devices) throws Exception {
+  private PoolSource kept(IncusStorage.Pool held, PoolDevices devices, ShellExec probe)
+      throws Exception {
+    var on = PoolMembers.of(probe, held);
     var ignored = new ArrayList<String>();
-    if (disks != null && !disks.isEmpty() && !sameDevices(held, devices)) {
+    if (disks != null && !disks.isEmpty() && !sameDevices(held, on, devices)) {
       ignored.add(diskFlags());
     }
     if (poolFileSize != null && !(file(poolFileSize).sizeMb() + "MiB").equals(held.size())) {
@@ -392,7 +393,7 @@ public final class HostInitCommand implements Runnable {
           "Incus already has zfs pool '"
               + pool
               + "' on "
-              + IncusStorage.said(held.source())
+              + on.said()
               + ", which a re-run keeps, so "
               + String.join(" and ", ignored)
               + " would be ignored. Drop it, or name a new pool with --pool <name>.");
@@ -400,12 +401,13 @@ public final class HostInitCommand implements Runnable {
     return new PoolSource.Zpool(Objects.requireNonNullElse(held.zpool(), held.name()));
   }
 
-  private boolean sameDevices(IncusStorage.Pool held, PoolDevices devices) throws Exception {
+  private boolean sameDevices(IncusStorage.Pool held, PoolMembers on, PoolDevices devices)
+      throws Exception {
     var named = new HashSet<String>();
     for (var one : disks) {
       named.add(devices.resolved("--disk", one));
     }
-    var sources = IncusStorage.devices(held.source());
+    var sources = on.devices();
     var resolved = new HashSet<String>();
     for (var source : sources) {
       resolved.add(
@@ -417,7 +419,7 @@ public final class HostInitCommand implements Runnable {
                           "Incus already has zfs pool '"
                               + pool
                               + "' on "
-                              + IncusStorage.said(held.source())
+                              + on.said()
                               + (sources.size() == 1
                                   ? ", which names no device on this box now: the pool's device is"
                                       + " gone, so "
@@ -436,6 +438,21 @@ public final class HostInitCommand implements Runnable {
   /** The {@code --disk} flags as the operator gave them. */
   private String diskFlags() {
     return String.join(" ", disks.stream().map(named -> "--disk " + named).toList());
+  }
+
+  /**
+   * What the pool {@code hostYaml} states is on now, as {@link PoolMembers} says it; as recorded
+   * where Incus has no such pool yet, as after a dry run.
+   */
+  private static String on(ShellExec reads, HostYaml hostYaml) throws Exception {
+    var held =
+        new IncusStorage(reads)
+            .poolsOrNone().stream()
+                .filter(found -> found.name().equals(hostYaml.pool()))
+                .findFirst();
+    return held.isPresent()
+        ? PoolMembers.of(reads, held.get()).said()
+        : IncusStorage.said(hostYaml.poolSource());
   }
 
   /** A file pool of {@code size}, refused unless it reads as at least {@link #MIN_FILE_MB}. */
