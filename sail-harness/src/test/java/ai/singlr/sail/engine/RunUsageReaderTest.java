@@ -25,6 +25,8 @@ import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Function;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.EnabledOnOs;
+import org.junit.jupiter.api.condition.OS;
 import org.junit.jupiter.api.io.TempDir;
 
 /**
@@ -241,7 +243,8 @@ class RunUsageReaderTest {
 
   /**
    * The reader's own command run on this machine, the container's part dropped: its script meets
-   * the real {@code sh}, {@code tac} and {@code grep}, over files under {@link #dir}.
+   * the real {@code sh}, {@code tac} and {@code grep}, over files under {@link #dir}. Only on
+   * Linux, where a run's container is: macOS has no {@code tac}.
    */
   private static final class Local implements ShellExec {
     private final ShellExecutor shell = new ShellExecutor(false);
@@ -281,6 +284,7 @@ class RunUsageReaderTest {
    * marker has its own last lines, and the model is still read.
    */
   @Test
+  @EnabledOnOs(OS.LINUX)
   void aCodexTurnWithMoreCountsThanTheLinesReadStillGivesItsModel() throws IOException {
     var count =
         CODEX_ROLLOUT.lines().filter(line -> line.contains("\"type\":\"token_count\"")).toList();
@@ -296,6 +300,7 @@ class RunUsageReaderTest {
    * the file does not hide its lines.
    */
   @Test
+  @EnabledOnOs(OS.LINUX)
   void theReadersScriptAnswersEveryFileItMeetsWithExitZero() throws IOException {
     var counts =
         CODEX_ROLLOUT.lines().filter(line -> !line.contains("\"type\":\"turn_context\"")).toList();
