@@ -7,6 +7,7 @@ package ai.singlr.sail.api;
 
 import ai.singlr.sail.engine.AgentUnit;
 import ai.singlr.sail.engine.ContainerSailSetup;
+import ai.singlr.sail.engine.ReportLines;
 import ai.singlr.sail.engine.ScriptedShellExecutor;
 import ai.singlr.sail.engine.ShellExec;
 import java.io.IOException;
@@ -343,6 +344,9 @@ final class FakeContainer implements ShellExec {
   private Result sh(List<String> inner) {
     if (!failingFragment.isEmpty() && String.join(" ", inner).contains(failingFragment)) {
       return fail(failingWith);
+    }
+    if (inner.get(2).startsWith("tac -- ")) {
+      return ReportLines.answer(files.get(inner.get(4)), inner);
     }
     if (inner.get(2).startsWith("for d in")) {
       var skillsDir = inner.getLast();

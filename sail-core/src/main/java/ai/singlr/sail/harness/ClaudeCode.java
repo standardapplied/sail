@@ -21,6 +21,7 @@ import java.util.stream.Collectors;
 final class ClaudeCode implements Harness {
 
   private static final String BINARY = "claude";
+  private static final String RESULT = "\"type\":\"result\"";
 
   private static final List<String> EFFORTS = List.of("low", "medium", "high", "xhigh");
 
@@ -219,17 +220,22 @@ final class ClaudeCode implements Harness {
     return ReportFile.AGENT_LOG;
   }
 
+  @Override
+  public List<String> reportMarkers() {
+    return List.of(RESULT);
+  }
+
   /**
    * The last {@code result} line of the log that reports anything: a crashed session's last result
    * may carry every figure zeroed, and the running totals of the one before it are the run's.
    * Tokens are {@code modelUsage}'s, summed over the models it names, since {@code usage} leaves
    * out what subagents spent; the dollars are {@code total_cost_usd}; the model is the one that
    * cost most. A result with no {@code modelUsage} gives its {@code usage}, and no model. A last
-   * result line that does not parse leaves the report unread.
+   * result line that does not parse gives null.
    */
   @Override
   public RunUsage usage(String report) {
-    var found = RunUsage.last(report, "\"type\":\"result\"", ClaudeCode::reports);
+    var found = RunUsage.last(report, RESULT, ClaudeCode::reports);
     if (found.unreadable()) {
       return null;
     }

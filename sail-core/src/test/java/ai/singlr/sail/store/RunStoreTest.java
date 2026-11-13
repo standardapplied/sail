@@ -187,7 +187,7 @@ class RunStoreTest {
   void aHandleChangeOnMainIsStrandedOnlyByRunsThisBoxExecutesThatAreLive() {
     var live = newRunOn("p", "s", "ada");
     var finished = newRunOn("q", "s", "ada");
-    store.complete(finished, "completed", 0);
+    TestRuns.complete(store, finished, "completed", 0);
     newRunOn("r", "s", "bob");
 
     assertEquals(List.of(live), ids(store.liveUnder("ada")));
@@ -328,7 +328,7 @@ class RunStoreTest {
   @Test
   void updateProcessRefusesToStampARunTheStopAlreadyClaimed() {
     var id = newRun("backend", "auth");
-    assertTrue(store.transition(id, "running", "stopped"));
+    assertTrue(store.finish(id, "running", "stopped", null, null));
 
     assertFalse(store.updateProcess(id, 4321, 987654321L, 8765));
 
@@ -392,15 +392,15 @@ class RunStoreTest {
   void transitionCommitsOnlyFromTheExpectedStatus() {
     var id = newRun("backend", "auth");
 
-    assertFalse(store.transition(id, "stopping", "stopped"));
+    assertFalse(store.finish(id, "stopping", "stopped", null, null));
     assertEquals("running", store.findById(id).orElseThrow().status());
 
-    assertTrue(store.transition(id, "running", "stopping"));
+    assertTrue(store.claimStop(id, "stopping", () -> {}));
     var claimed = store.findById(id).orElseThrow();
     assertEquals("stopping", claimed.status());
     assertNull(claimed.completedAt(), "a claim is not terminal, so nothing is stamped complete");
 
-    assertTrue(store.transition(id, "stopping", "stopped"));
+    assertTrue(store.finish(id, "stopping", "stopped", null, null));
     var stopped = store.findById(id).orElseThrow();
     assertEquals("stopped", stopped.status());
     assertNotNull(stopped.completedAt());
@@ -409,9 +409,9 @@ class RunStoreTest {
   @Test
   void transitionBackToRunningClearsCompletedAt() {
     var id = newRun("backend", "auth");
-    store.transition(id, "running", "stopping");
+    store.claimStop(id, "stopping", () -> {});
 
-    assertTrue(store.transition(id, "stopping", "running"));
+    assertTrue(store.releaseStop(id, () -> {}));
 
     var restored = store.findById(id).orElseThrow();
     assertEquals("running", restored.status());
@@ -439,7 +439,7 @@ class RunStoreTest {
     assertEquals("running", untouched.status(), "an alongside failure rolls the claim back");
     assertFalse(untouched.stoppedByOperator(), "and the operator's mark with it");
 
-    store.transition(id, "running", "stopped");
+    store.finish(id, "running", "stopped", null, null);
     assertFalse(store.claimStop(id, "stopping", () -> ran.set(true)), "the run ended first");
     assertFalse(ran.get());
     assertFalse(store.findById(id).orElseThrow().stoppedByOperator());
@@ -456,7 +456,7 @@ class RunStoreTest {
     assertTrue(store.findById(id).orElseThrow().stoppedByOperator());
     assertEquals("operator", store.comparableSnapshot(id).get("stop_source"));
 
-    assertTrue(store.transition(id, "stopping", "stopped"));
+    assertTrue(store.finish(id, "stopping", "stopped", null, null));
 
     assertTrue(
         store.findById(id).orElseThrow().stoppedByOperator(),
@@ -493,7 +493,7 @@ class RunStoreTest {
     var id = newRun("backend", "auth");
     var before = store.latestRev(id);
 
-    store.transition(id, "running", "stopping");
+    store.claimStop(id, "stopping", () -> {});
 
     assertNotEquals(before, store.latestRev(id));
   }
@@ -520,7 +520,7 @@ class RunStoreTest {
   @Test
   void runIfLatestAttemptIgnoresReviewRowsWhenPickingTheLatestAttempt() {
     var build = newRun("backend", "auth");
-    store.complete(build, "completed", 0);
+    TestRuns.complete(store, build, "completed", 0);
     ReviewRuns.reserve(
         store,
         DateTimeUtils.newId().toString(),
@@ -565,7 +565,7 @@ class RunStoreTest {
                 id,
                 "auth",
                 () -> {
-                  store.complete(id, "stopped", null);
+                  TestRuns.complete(store, id, "stopped", null);
                   throw new IllegalStateException("conflict");
                 }));
     assertEquals(
@@ -578,7 +578,7 @@ class RunStoreTest {
   void stoppingListsTheRunsHoldingAClaimWhicheverTheirLane() {
     var claimed = DateTimeUtils.newId().toString();
     reserve(store, claimed, "auth", "node-a", List.of("app"));
-    store.transition(claimed, "running", "stopping");
+    store.claimStop(claimed, "stopping", () -> {});
     var unclaimed = DateTimeUtils.newId().toString();
     reserve(store, unclaimed, "other", "node-a", List.of("web"));
     var reviewer = DateTimeUtils.newId().toString();
@@ -592,7 +592,7 @@ class RunStoreTest {
         Lane.REVIEW,
         "codex",
         List.of("docs"));
-    store.transition(reviewer, "running", "stopping");
+    store.claimStop(reviewer, "stopping", () -> {});
 
     var claims = store.stopping();
 
@@ -607,7 +607,7 @@ class RunStoreTest {
   @Test
   void aStoppingRunStaysTheActiveRunForItsProjectAndNode() {
     var id = newRun("backend", "auth");
-    store.transition(id, "running", "stopping");
+    store.claimStop(id, "stopping", () -> {});
 
     var active = store.runningForProjectOnNode("backend", "node-a").orElseThrow();
 
@@ -650,7 +650,7 @@ class RunStoreTest {
     assertEquals("sail-agent-" + id, running.unit());
     assertEquals("review", store.comparableSnapshot(id).get("role"));
 
-    store.complete(id, "completed", 0);
+    TestRuns.complete(store, id, "completed", 0);
 
     var completed = store.findById(id).orElseThrow();
     assertEquals("completed", completed.status());
@@ -773,7 +773,7 @@ class RunStoreTest {
   @Test
   void completeRun() {
     var id = newRun("backend", "auth");
-    store.complete(id, "completed", 0);
+    TestRuns.complete(store, id, "completed", 0);
 
     var run = store.findById(id).orElseThrow();
     assertEquals("completed", run.status());
@@ -784,17 +784,18 @@ class RunStoreTest {
   @Test
   void completeRecordsANonZeroExitCode() {
     var id = newRun("backend", "auth");
-    store.complete(id, "stopped", 137);
+    TestRuns.complete(store, id, "stopped", 137);
 
     assertEquals(137, store.findById(id).orElseThrow().exitCode());
   }
 
   @Test
-  void completeRunsAlongsideWorkInTheSameTransaction() {
+  void aStopClaimRunsAlongsideWorkInTheSameTransaction() {
     var id = newRun("backend", "auth");
     var other = newRun("backend", "auth");
 
-    store.complete(id, "stopped", null, () -> store.complete(other, "stopped", null));
+    assertTrue(
+        store.claimStop(id, "stopped", () -> TestRuns.complete(store, other, "stopped", null)));
 
     assertEquals("stopped", store.findById(id).orElseThrow().status());
     assertEquals("stopped", store.findById(other).orElseThrow().status());
@@ -808,12 +809,11 @@ class RunStoreTest {
     assertThrows(
         IllegalStateException.class,
         () ->
-            store.complete(
+            store.claimStop(
                 id,
                 "stopped",
-                null,
                 () -> {
-                  store.complete(other, "stopped", null);
+                  TestRuns.complete(store, other, "stopped", null);
                   throw new IllegalStateException("boom");
                 }));
 
@@ -824,7 +824,7 @@ class RunStoreTest {
   @Test
   void recordExitCodeStampsAnAlreadyFinishedRun() {
     var id = newRun("backend", "auth");
-    store.complete(id, "stopped", null);
+    TestRuns.complete(store, id, "stopped", null);
     store.recordExitCode(id, 42);
 
     assertEquals(42, store.findById(id).orElseThrow().exitCode());
@@ -862,7 +862,7 @@ class RunStoreTest {
   void aReviewerRunIsASessionEveryRunQuerySees() {
     var buildId = DateTimeUtils.newId().toString();
     reserve(store, buildId, "auth", "node-a", List.of("app"));
-    store.complete(buildId, "completed", 0);
+    TestRuns.complete(store, buildId, "completed", 0);
     var concurrentBuildId = DateTimeUtils.newId().toString();
     reserve(store, concurrentBuildId, "billing", "node-a", List.of("web"));
     var reviewerId = DateTimeUtils.newId().toString();
@@ -894,7 +894,7 @@ class RunStoreTest {
     var fix = DateTimeUtils.newId().toString();
     ReviewRuns.reserve(
         store, reviewer, review, "backend", "auth", "node-a", Lane.REVIEW, "codex", List.of());
-    store.complete(reviewer, "completed", 0);
+    TestRuns.complete(store, reviewer, "completed", 0);
     ReviewRuns.reserve(
         store, fix, review, "backend", "auth", "node-a", Lane.FIX, "claude-code", List.of());
 
@@ -969,7 +969,7 @@ class RunStoreTest {
   @Test
   void runningForProjectOnNodeFindsActiveRun() {
     var id1 = newRun("backend", "spec-1");
-    store.complete(id1, "completed", 0);
+    TestRuns.complete(store, id1, "completed", 0);
     newRun("backend", "spec-2");
 
     var running = store.runningForProjectOnNode("backend", "node-a").orElseThrow();
@@ -989,7 +989,7 @@ class RunStoreTest {
   @Test
   void runningForProjectOnNodeReturnsEmptyWhenAllCompleted() {
     var id = newRun("backend", "spec-1");
-    store.complete(id, "completed", 0);
+    TestRuns.complete(store, id, "completed", 0);
 
     assertTrue(store.runningForProjectOnNode("backend", "node-a").isEmpty());
   }
@@ -1019,7 +1019,7 @@ class RunStoreTest {
   void roomTurnsMintedInOrderReadInOrderWhateverTheTextOfTheirInstants(
       String earlier, String later) {
     var first = FixedInstants.at(earlier, () -> roomTurn("chat-room"));
-    store.complete(first, "completed", 0);
+    TestRuns.complete(store, first, "completed", 0);
     var second = FixedInstants.at(later, () -> roomTurn("chat-room"));
 
     assertEquals(List.of(second, first), ids(store.listForRoom("chat-room")));
@@ -1055,7 +1055,7 @@ class RunStoreTest {
                 Lane.FIX,
                 "claude-code",
                 List.of()));
-    store.complete(fix, "completed", 0);
+    TestRuns.complete(store, fix, "completed", 0);
     FixedInstants.at(
         later,
         () ->
@@ -1192,7 +1192,7 @@ class RunStoreTest {
     assertEquals(rev, store.latestRev(id), "presence stamping never mints revisions of its own");
     assertNull(store.comparableAtRev(id, rev).get("last_activity_at"));
 
-    store.complete(id, "completed", 0);
+    TestRuns.complete(store, id, "completed", 0);
 
     assertNotNull(
         store.comparableSnapshot(id).get("last_activity_at"),
@@ -1202,7 +1202,7 @@ class RunStoreTest {
   @Test
   void stampActivityRefusesANonRunningRun() {
     var id = newRun("backend", "auth");
-    store.complete(id, "completed", 0);
+    TestRuns.complete(store, id, "completed", 0);
 
     assertFalse(store.stampActivity(id, Duration.ofSeconds(30)));
     assertNull(store.findById(id).orElseThrow().lastActivityAt());
@@ -1233,7 +1233,7 @@ class RunStoreTest {
     assertNull(running.get("id"), "the surrogate id is excluded from the comparable snapshot");
     var rev1 = store.latestRev(id);
 
-    store.complete(id, "completed", 0);
+    TestRuns.complete(store, id, "completed", 0);
 
     assertNotEquals(rev1, store.latestRev(id));
     assertEquals("completed", store.comparableSnapshot(id).get("status"));
@@ -1506,7 +1506,7 @@ class RunStoreTest {
   void aFinishedAdhocRunFreesTheContainerForTheNextReservation() {
     var first = DateTimeUtils.newId().toString();
     reserveAdhoc(first, "node-a");
-    store.complete(first, "stopped", 0);
+    TestRuns.complete(store, first, "stopped", 0);
 
     assertTrue(reserveAdhoc(DateTimeUtils.newId().toString(), "node-a").isEmpty());
   }
@@ -1650,7 +1650,7 @@ class RunStoreTest {
     assertEquals(id, store.runningForProjectOnNode("backend", "node-a").orElseThrow().id());
     assertEquals(id, store.latestForProjectOnNode("backend", "node-a").orElseThrow().id());
     assertEquals(List.of(id), ids(store.running()));
-    assertTrue(store.transition(id, "running", "stopping"));
+    assertTrue(store.claimStop(id, "stopping", () -> {}));
     assertEquals(List.of(id), ids(store.stopping()));
   }
 
@@ -1658,9 +1658,9 @@ class RunStoreTest {
   void aRowKnowsItsLane() {
     var adhoc = DateTimeUtils.newId().toString();
     reserveAdhoc(adhoc, "node-a");
-    store.complete(adhoc, "completed", 0);
+    TestRuns.complete(store, adhoc, "completed", 0);
     var build = newRun("backend", "auth");
-    store.complete(build, "completed", 0);
+    TestRuns.complete(store, build, "completed", 0);
     var review = DateTimeUtils.newId().toString();
     ReviewRuns.reserve(
         store, review, review, "backend", "auth", "node-a", Lane.REVIEW, "codex", List.of());
@@ -1941,7 +1941,7 @@ class RunStoreTest {
   void aFinishedRunNeverBlocksAReservation() {
     var first = DateTimeUtils.newId().toString();
     reserve(store, first, "auth", "node-a", List.of("app"));
-    store.complete(first, "stopped", 0);
+    TestRuns.complete(store, first, "stopped", 0);
 
     var conflict =
         reserve(store, DateTimeUtils.newId().toString(), "billing", "node-a", List.of("app"));
@@ -2179,7 +2179,7 @@ class RunStoreTest {
       var id = DateTimeUtils.newId().toString();
       var credential = reservedCredential(id, "spec-" + terminal, List.of(terminal));
 
-      assertTrue(store.transition(id, "running", terminal));
+      assertTrue(store.finish(id, "running", terminal, null, null));
 
       assertTrue(store.findByCredential(credential).isEmpty(), terminal);
       assertEquals(0, credentialRows(id), terminal);
@@ -2191,12 +2191,12 @@ class RunStoreTest {
     var id = DateTimeUtils.newId().toString();
     var credential = reservedCredential(id, "auth", List.of("app"));
 
-    assertTrue(store.transition(id, "running", "stopping"));
+    assertTrue(store.claimStop(id, "stopping", () -> {}));
     assertTrue(
         store.findByCredential(credential).isPresent(),
         "mid-stop the agent may still be alive; only the verified finish revokes");
 
-    assertTrue(store.transition(id, "stopping", "stopped"));
+    assertTrue(store.finish(id, "stopping", "stopped", null, null));
     assertTrue(store.findByCredential(credential).isEmpty());
   }
 
@@ -2205,7 +2205,7 @@ class RunStoreTest {
     var id = DateTimeUtils.newId().toString();
     var credential = reservedCredential(id, "auth", List.of("app"));
 
-    assertFalse(store.transition(id, "stopping", "stopped"));
+    assertFalse(store.finish(id, "stopping", "stopped", null, null));
 
     assertTrue(store.findByCredential(credential).isPresent());
   }
@@ -2215,7 +2215,7 @@ class RunStoreTest {
     var id = DateTimeUtils.newId().toString();
     var credential = reservedCredential(id, "auth", List.of("app"));
 
-    store.complete(id, "failed", 1);
+    TestRuns.complete(store, id, "failed", 1);
 
     assertTrue(store.findByCredential(credential).isEmpty());
   }
@@ -2366,7 +2366,7 @@ class RunStoreTest {
                 "u");
     assertTrue(store.findByCredential(reservation.credential()).isPresent());
 
-    store.complete(id, "completed", 0);
+    TestRuns.complete(store, id, "completed", 0);
 
     assertTrue(
         store.findByCredential(reservation.credential()).isEmpty(),

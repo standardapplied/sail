@@ -12,6 +12,7 @@ import ai.singlr.sail.config.ProjectDefinition;
 import ai.singlr.sail.config.ProjectDefinitionJson;
 import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.config.YamlUtil;
+import ai.singlr.sail.engine.SemVer;
 import ai.singlr.sail.identity.Actor;
 import java.io.IOException;
 import java.io.UncheckedIOException;
@@ -57,6 +58,16 @@ public final class LegacyConversion {
 
   /** The schema version Sail 0.58.0 stamps: the one database this converts. */
   public static final int VERSION = 264;
+
+  /**
+   * Whether {@code release}, the Sail version a box runs, is a 0.58 one, whose database this
+   * converts.
+   */
+  public static boolean converts(String release) {
+    return SemVer.tryParse(release)
+        .filter(version -> version.major() == 0 && version.minor() == 58)
+        .isPresent();
+  }
 
   private static final String LEGACY = "legacy_";
 

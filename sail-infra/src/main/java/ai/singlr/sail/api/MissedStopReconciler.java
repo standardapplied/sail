@@ -395,24 +395,18 @@ public final class MissedStopReconciler implements AutoCloseable {
   /**
    * Reads again what each finished run this box executed cost, while its report is unread: a
    * container that was stopped, missing or slow as the run finished, or an operator's stop, which
-   * never waits on one (M3). A report read is recorded and journaled; none, once, when the report
-   * is gone or says nothing; an unanswered read is left for the next sweep, the run's directory
-   * kept by retention meanwhile. Returns how many were recorded.
+   * never waits on one (M3). Whatever the container answers is recorded and journaled, once: a
+   * report, or none when the report is gone, says nothing or does not parse; only an unanswered
+   * read is left for the next sweep, the run's directory kept by retention meanwhile. Returns how
+   * many were recorded.
    */
   int readUnreadUsage() {
     var recorded = 0;
     for (var run : sessionStore.unread(localHandle.get())) {
       try {
         var usage = unitProbe.usage(run);
-        if (usage == null || !sessionStore.recordRead(run.id(), usage)) {
-          continue;
-        }
-        recorded++;
-        if (!usage.reported()) {
-          System.err.println(
-              "  [reconcile] run "
-                  + run.id()
-                  + " finished with no usage its report holds: recorded none");
+        if (usage != null && sessionStore.recordRead(run.id(), usage)) {
+          recorded++;
         }
       } catch (RuntimeException e) {
         System.err.println(

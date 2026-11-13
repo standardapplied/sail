@@ -296,22 +296,41 @@ class SyncRpcServerTest {
         "nothing is served to it");
   }
 
+  /**
+   * Review 2, finding 2: protocol 4 spans 0.44.1 to 0.58.0, and an upgrade converts only 0.58's
+   * database, so the hello's version decides: a 0.58 box is told to upgrade, and every other box on
+   * an older protocol, a 0.57 on protocol 4 as much as a 0.67 on 7, to reinstall.
+   */
   @Test
-  void aBoxOn058WhoseDatabaseAnUpgradeConvertsIsToldToUpgradeNotToReinstall() throws Exception {
-    var answers =
-        serve(
-            writer(new FakeMain()),
-            new SyncWire.Hello(SyncWire.CONVERTED_PROTOCOL, "0.58.0", "b"),
-            new SyncWire.Pull("spec", 0, 10));
-    var refusal = assertInstanceOf(SyncWire.Refuse.class, answers.getFirst());
-    assertEquals(
+  void onlyA058BoxOnAnOlderProtocolIsToldToUpgradeEveryOtherToReinstall() throws Exception {
+    var upgrade =
         Remedy.of(
-            "this main speaks sync protocol 8, not 4: upgrade to dev: ", Remedy.sail("upgrade")),
-        refusal.reason());
+            "this main speaks sync protocol 8, not 4: upgrade to dev: ", Remedy.sail("upgrade"));
+
+    assertEquals(upgrade, refusedAtHello(new SyncWire.Hello(4, "0.58.0", "b")));
+    assertEquals(upgrade, refusedAtHello(new SyncWire.Hello(4, "0.58.3", "b")));
+    for (var hello :
+        List.of(
+            new SyncWire.Hello(4, "0.57.0", "b"),
+            new SyncWire.Hello(4, "0.44.1", "b"),
+            new SyncWire.Hello(4, null, "b"),
+            new SyncWire.Hello(7, "0.59.0", "b"),
+            new SyncWire.Hello(7, "0.67.0", "b"))) {
+      var refusal = refusedAtHello(hello);
+      assertEquals(List.of(Remedy.sail("init")), refusal.commands(), hello.toString());
+      assertTrue(
+          refusal.plain().startsWith("this main speaks sync protocol 8, not " + hello.protocol()),
+          refusal.plain());
+    }
+  }
+
+  private Remedy refusedAtHello(SyncWire.Hello hello) throws Exception {
+    var answers = serve(writer(new FakeMain()), hello, new SyncWire.Pull("spec", 0, 10));
     assertEquals(
         List.of(),
         answers.stream().filter(SyncWire.Page.class::isInstance).toList(),
         "nothing is served to it");
+    return assertInstanceOf(SyncWire.Refuse.class, answers.getFirst()).reason();
   }
 
   @Test

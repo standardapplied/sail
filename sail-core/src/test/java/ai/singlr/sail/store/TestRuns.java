@@ -5,28 +5,35 @@
 
 package ai.singlr.sail.store;
 
+import ai.singlr.sail.config.RunStatus;
+
 /**
- * Moves a run's row as only a test may: to a status with no usage read, the bookkeeping a test
- * seeds beside the state it checks. Every finisher in Sail records what its harness reported
- * ({@link RunStore#finish}); these are the store's own usage-blind writes, kept to its package.
+ * Moves a run's row through the store's production writes, leaving its report unread: the
+ * bookkeeping a test seeds beside the state it checks.
  */
 public final class TestRuns {
 
   private TestRuns() {}
 
-  /** Finishes run {@code id} as {@code status} with {@code exitCode}, whatever it held. */
+  /** Finishes run {@code id} as {@code status} with {@code exitCode}, from whatever it held. */
   public static void complete(RunStore runs, String id, String status, Integer exitCode) {
-    runs.complete(id, status, exitCode);
+    var held = runs.findById(id).orElseThrow().status();
+    if (!runs.finish(id, held, status, exitCode, null)) {
+      throw new IllegalStateException("Run " + id + " did not finish as " + status + ".");
+    }
   }
 
-  /** As {@link #complete(RunStore, String, String, Integer)}, with {@code alongside} in one go. */
-  public static void complete(
-      RunStore runs, String id, String status, Integer exitCode, Runnable alongside) {
-    runs.complete(id, status, exitCode, alongside);
-  }
-
-  /** Moves run {@code id} from {@code expected} to {@code status}; whether it moved. */
+  /**
+   * Moves run {@code id} from {@code expected} to {@code status}, as a finish or, to {@code
+   * stopping}, as an operator's stop claim; whether it moved.
+   */
   public static boolean transition(RunStore runs, String id, String expected, String status) {
-    return runs.transition(id, expected, status);
+    if (RunStatus.isTerminal(status)) {
+      return runs.finish(id, expected, status, null, null);
+    }
+    if (!"running".equals(expected) || !"stopping".equals(status)) {
+      throw new IllegalArgumentException("No production write moves " + expected + " → " + status);
+    }
+    return runs.claimStop(id, status, () -> {});
   }
 }

@@ -114,17 +114,18 @@ final class MeasuresText {
       return "unknown (" + reason(runs) + ")";
     }
     var all = ((Number) runs.get(COUNT)).longValue();
-    var bound = Boolean.TRUE.equals(runs.get("at_least")) ? "at least " : "";
-    var withoutCost = number(cost, "runs_without_cost");
+    var counted =
+        (Boolean.TRUE.equals(runs.get("at_least")) ? "at least " : "") + plural(all, "run");
     var withoutUsage = number(cost, "runs_without_usage");
-    return figure(cost, "usd")
-        + " over "
-        + (all - withoutCost)
-        + " of "
-        + bound
-        + plural(all, "run")
-        + ", "
-        + tokens(cost, all - withoutUsage);
+    var dollars =
+        ((Map<String, Object>) cost.get("usd")).containsKey("unknown")
+            ? "unknown, " + counted + " reported no dollars"
+            : figure(cost, "usd")
+                + " over "
+                + (all - number(cost, "runs_without_cost"))
+                + " of "
+                + counted;
+    return dollars + ", " + tokens(cost, all - withoutUsage);
   }
 
   /** The tokens of the runs that reported them, by kind; said once when none did. */

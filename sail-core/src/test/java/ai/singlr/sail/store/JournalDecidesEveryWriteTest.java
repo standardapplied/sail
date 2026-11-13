@@ -151,7 +151,7 @@ class JournalDecidesEveryWriteTest {
       runs.updateProcess(unstarted, null, null, null);
       runs.create(
           unread, "acme", "theirs", "bob", "room", "claude-code", "b", "t", 1, 2, "/l", "u");
-      runs.complete(unread, "stopped", null);
+      TestRuns.complete(runs, unread, "stopped", null);
       review = reviews.createReview("theirs", 1);
       stage = reviews.createStage(review, "codex", "agent");
       reviews.startStage(stage, "codex");

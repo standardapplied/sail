@@ -214,11 +214,17 @@ public interface Harness {
   ReportFile reportFile();
 
   /**
+   * What each line of its {@link #reportFile} that {@link #usage} reads holds one of: a container
+   * is asked only for the last lines holding one, never the whole file.
+   */
+  List<String> reportMarkers();
+
+  /**
    * What a run cost, as this harness reported it in {@code report}, its {@link #reportFile} or that
-   * file's last bytes (null when there is none): {@link RunUsage#NONE} when it reported nothing
-   * there, and null when its last report there does not parse, so the report is not read rather
-   * than taken from an earlier one. The figures are the conversation's running totals as the
-   * harness keeps them.
+   * file's last lines holding a {@link #reportMarkers marker}, in the file's order (null when there
+   * is none): {@link RunUsage#NONE} when it reported nothing there, and null when its last report
+   * there does not parse, never taken from an earlier one. The figures are the conversation's
+   * running totals as the harness keeps them.
    */
   RunUsage usage(String report);
 

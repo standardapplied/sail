@@ -416,12 +416,12 @@ public final class Erasure {
       case SPEC -> {
         slackThreads.eraseBySpec(target.id());
         attention.forget(target.id());
-        runs.forgetSessions(target.id());
+        runs.forgetConversation(target.id());
         yield events.eraseBySpec(target.id());
       }
       case ROOM -> {
         attention.forget(target.id());
-        runs.forgetSessions(target.id());
+        runs.forgetConversation(target.id());
         yield events.eraseBySpec(target.id());
       }
       case RUN -> {

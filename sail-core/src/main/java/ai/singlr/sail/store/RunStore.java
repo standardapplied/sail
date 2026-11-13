@@ -1403,32 +1403,6 @@ public final class RunStore implements ConflictResolver, SyncedStore {
   }
 
   /**
-   * As {@link #complete(String, String, Integer)}, also running {@code alongside} inside the same
-   * immediate transaction — the seam for a caller that must drive two aggregates terminal as one
-   * intent (a stop cancelling a spec while releasing its run). Any failure rolls back both writes,
-   * so a partial terminal state is never exposed. Records no usage: only this package's tests
-   * finish a run so; every finisher records what it read ({@link #finish}).
-   */
-  void complete(String id, String status, Integer exitCode, Runnable alongside) {
-    db.transaction(
-        () -> {
-          alongside.run();
-          complete(id, status, exitCode);
-          return null;
-        });
-  }
-
-  /**
-   * Status transition that commits only if the run still holds {@code expected}. Returns whether
-   * the transition happened; a false return wrote nothing. A terminal target status stamps {@code
-   * completed_at}; a non-terminal one clears it. Records no usage: only this package's tests move a
-   * run so; every finisher records what it read ({@link #finish}).
-   */
-  boolean transition(String id, String expected, String status) {
-    return transition(id, expected, status, null, () -> {});
-  }
-
-  /**
    * Finishes run {@code id}: {@code expected → status}, a terminal status, as one compare-and-set
    * that stamps {@code exitCode} (when non-null) and records {@code usage}, what its harness
    * reported, in the same UPDATE (M1). The report is its harness session's running total, so the
@@ -1617,9 +1591,13 @@ public final class RunStore implements ConflictResolver, SyncedStore {
         RunUsage.Source.RESULT);
   }
 
-  /** Forgets the usage of every harness session of {@code conversation}, as it is erased. */
-  void forgetSessions(String conversation) {
+  /**
+   * Forgets what this box kept of {@code conversation}'s runs, as it is erased: the usage of every
+   * harness session of it, and the runs of it main erased uncounted.
+   */
+  void forgetConversation(String conversation) {
     db.execute("DELETE FROM session_usage WHERE conversation = ?", conversation);
+    db.execute("DELETE FROM uncounted_runs WHERE spec_id = ?", conversation);
   }
 
   /**
@@ -1671,15 +1649,16 @@ public final class RunStore implements ConflictResolver, SyncedStore {
   }
 
   /**
-   * An operator's stop claim: {@code running → status} as {@link #transition(String, String,
-   * String)} commits it, marking in the same revision that an operator ended the run and running
-   * {@code alongside} inside the same immediate transaction once the claim has won — the seam a
-   * stop uses to move its spec terminal in the very same commit. A lost claim wrote nothing and
-   * never ran {@code alongside}, and an {@code alongside} that throws rolls the claim back. {@code
-   * status} is {@code stopping} while the halt is under way, or {@code stopped} for a run with no
-   * process left to halt, whose report is left unread for {@link #recordRead}: an operator's stop
-   * never waits on a container. The mark outlives the claim's finalization, so a stop of the same
-   * run that arrives afterwards still reads as the operator's.
+   * An operator's stop claim: {@code running → status}, committed only while the run still runs and
+   * stamping {@code completed_at} for a terminal {@code status}, marking in the same revision that
+   * an operator ended the run and running {@code alongside} inside the same immediate transaction
+   * once the claim has won — the seam a stop uses to move its spec terminal in the very same
+   * commit. A lost claim wrote nothing and never ran {@code alongside}, and an {@code alongside}
+   * that throws rolls the claim back. {@code status} is {@code stopping} while the halt is under
+   * way, or {@code stopped} for a run with no process left to halt, whose report is left unread for
+   * {@link #recordRead}: an operator's stop never waits on a container. The mark outlives the
+   * claim's finalization, so a stop of the same run that arrives afterwards still reads as the
+   * operator's.
    */
   public boolean claimStop(String id, String status, Runnable alongside) {
     return transition(
@@ -1793,24 +1772,6 @@ public final class RunStore implements ConflictResolver, SyncedStore {
           }
           work.run();
           return true;
-        });
-  }
-
-  /**
-   * Marks a run finished with its final status and the agent process's exit code (nullable),
-   * recording no usage: only this package's tests finish a run so.
-   */
-  void complete(String id, String status, Integer exitCode) {
-    db.transaction(
-        () -> {
-          db.execute(
-              "UPDATE runs SET status = ?, completed_at = ?, exit_code = ? WHERE id = ?",
-              status,
-              DateTimeUtils.now(),
-              exitCode != null ? exitCode.longValue() : null,
-              id);
-          revokeCredential(id);
-          recordRevision(id, ChangeLog.Entry.LOCAL, false);
         });
   }
 

@@ -534,6 +534,68 @@ class MissedStopReconcilerTest {
     assertEquals(List.of(silent), asked, "a run recorded none is not read again");
   }
 
+  /**
+   * Review 2, finding 1, through the box's own reader: a log holding no result line however long, a
+   * last result cut mid-write and a last result holding a raw C1 control are each recorded in one
+   * sweep and never asked about again; only a container that does not answer is asked again.
+   */
+  @Test
+  void aReportItsContainerAnsweredIsRecordedInOneSweepAndOnlyASilentContainerIsAskedAgain() {
+    var noResult = runningSession("auth");
+    var cut = runningSession("auth");
+    var control = runningSession("auth");
+    var silent = runningSession("auth");
+    Acting.system(
+        () -> {
+          for (var id : List.of(noResult, cut, control, silent)) {
+            assertTrue(sessionStore.claimStop(id, "stopped", () -> {}));
+          }
+        });
+    var result =
+        "{\"type\":\"result\",\"result\":\"ok \u009b done\",\"total_cost_usd\":1.5,"
+            + "\"usage\":{\"input_tokens\":10,\"output_tokens\":5}}\n";
+    var answers =
+        Map.of(
+            noResult, new ShellExec.Result(1, "", ""),
+            cut, new ShellExec.Result(0, result.substring(0, 40) + "\n", ""),
+            control, new ShellExec.Result(0, result, ""),
+            silent, new ShellExec.Result(1, "", "Error: Instance is not running\n"));
+    var asked = new CopyOnWriteArrayList<String>();
+    var container =
+        new ShellExec() {
+          @Override
+          public Result exec(List<String> command) {
+            throw new AssertionError("every read is bounded");
+          }
+
+          @Override
+          public Result exec(List<String> command, Path workDir, Duration timeout) {
+            var run =
+                answers.keySet().stream()
+                    .filter(id -> command.stream().anyMatch(arg -> arg.contains(id)))
+                    .findFirst()
+                    .orElseThrow();
+            asked.add(run);
+            return answers.get(run);
+          }
+
+          @Override
+          public boolean isDryRun() {
+            return false;
+          }
+        };
+    var reconciler = reconciler(MissedStopReconciler.systemdUnitProbe(container), Instant::now);
+
+    assertEquals(3, (int) Acting.system(() -> reconciler.readUnreadUsage()));
+    assertEquals(0, (int) Acting.system(() -> reconciler.readUnreadUsage()));
+
+    assertEquals(RunUsage.NONE, sessionStore.findById(noResult).orElseThrow().usage());
+    assertEquals(RunUsage.NONE, sessionStore.findById(cut).orElseThrow().usage());
+    assertEquals(1.5, sessionStore.findById(control).orElseThrow().usage().costUsd());
+    assertNull(sessionStore.findById(silent).orElseThrow().usage());
+    assertEquals(List.of(noResult, cut, control, silent, silent), asked);
+  }
+
   @Test
   void aReadThatFailsLeavesTheRunUnreadForTheNextSweepAndTheOthersAreStillRead() {
     var broken = runningSession("auth");

@@ -1493,7 +1493,7 @@ class ReviewStoreTest {
     assertTrue(store.live(review, "ada"));
     assertFalse(store.live(review, "bob"), "a review another box runs is never live here");
 
-    runs.complete(reviewer, "stopped", 0);
+    TestRuns.complete(runs, reviewer, "stopped", 0);
     assertFalse(
         store.live(review, "ada"),
         "with no run serving it — between stages, or waiting on a person — main's version"

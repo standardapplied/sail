@@ -16,6 +16,8 @@ import java.util.OptionalInt;
 final class Codex implements Harness {
 
   private static final String BINARY = "codex";
+  private static final String TOKEN_COUNT = "\"type\":\"token_count\"";
+  private static final String TURN_CONTEXT = "\"type\":\"turn_context\"";
 
   /**
    * Codex takes whatever level the selected model advertises ({@code model_reasoning_effort}), so
@@ -130,15 +132,20 @@ final class Codex implements Harness {
     return ReportFile.TRANSCRIPT;
   }
 
+  @Override
+  public List<String> reportMarkers() {
+    return List.of(TOKEN_COUNT, TURN_CONTEXT);
+  }
+
   /**
    * The transcript's last {@code token_count}: the thread's running totals, with no dollars, and
    * the model of its last {@code turn_context}. Codex's input count includes its cached part, which
    * is taken out, so the run's input is what it read uncached. A last {@code token_count} line that
-   * does not parse leaves the report unread.
+   * does not parse gives null.
    */
   @Override
   public RunUsage usage(String report) {
-    var found = RunUsage.last(report, "\"type\":\"token_count\"", Codex::counts);
+    var found = RunUsage.last(report, TOKEN_COUNT, Codex::counts);
     if (found.unreadable()) {
       return null;
     }
@@ -151,11 +158,7 @@ final class Codex implements Harness {
     var input = RunUsage.count(total, "input_tokens");
     var cached = RunUsage.count(total, "cached_input_tokens");
     var context =
-        RunUsage.last(
-                report,
-                "\"type\":\"turn_context\"",
-                line -> "turn_context".equals(line.get("type")))
-            .line();
+        RunUsage.last(report, TURN_CONTEXT, line -> "turn_context".equals(line.get("type"))).line();
     var model = context == null ? null : RunUsage.map(context, "payload").get("model");
     return new RunUsage(
         model instanceof String named ? named : null,

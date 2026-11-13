@@ -88,6 +88,11 @@ public record StubHarness(String yamlName, HookFile hooks, OptionalInt loginTunn
   }
 
   @Override
+  public List<String> reportMarkers() {
+    return List.of();
+  }
+
+  @Override
   public RunUsage usage(String report) {
     return RunUsage.NONE;
   }

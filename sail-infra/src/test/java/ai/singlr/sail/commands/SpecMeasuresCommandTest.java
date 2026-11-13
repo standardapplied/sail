@@ -215,7 +215,7 @@ class SpecMeasuresCommandTest {
             In awaiting merge: 55m 0s
             Rework: 1 review round, 0 review errors, 1 build run, 0 fix runs, 0 carried findings
             No recorded human code act: yes (an upper bound)
-            Cost: unknown (runs not reported) over 0 of 1 run, tokens unknown (runs not reported)
+            Cost: unknown, 1 run reported no dollars, tokens unknown (runs not reported)
             Budget: none set
             Human minutes: 0 from 0 people (terminal input 0, post 0, review act 0, focus 0), a lower bound
         """,
@@ -224,7 +224,7 @@ class SpecMeasuresCommandTest {
 
   private static final String KNOWN_ROWS =
       """
-            • auth  1 review round, 0 review errors, 1 build run, 0 fix runs, 0 carried findings · Ready → verified 1h 0m 0s · Verified → done 1h 0m 0s · Ready → done 2h 0m 0s · In awaiting merge 55m 0s · no recorded human code act: yes (an upper bound) · cost unknown (runs not reported) over 0 of 1 run, tokens unknown (runs not reported) · human minutes 0 from 0 people (terminal input 0, post 0, review act 0, focus 0), a lower bound
+            • auth  1 review round, 0 review errors, 1 build run, 0 fix runs, 0 carried findings · Ready → verified 1h 0m 0s · Verified → done 1h 0m 0s · Ready → done 2h 0m 0s · In awaiting merge 55m 0s · no recorded human code act: yes (an upper bound) · cost unknown, 1 run reported no dollars, tokens unknown (runs not reported) · human minutes 0 from 0 people (terminal input 0, post 0, review act 0, focus 0), a lower bound
             • quick  0 review rounds, 0 review errors, 0 build runs, 0 fix runs, 0 carried findings · Ready → verified unknown (2 inputs missing) · Verified → done unknown (1 input missing) · Ready → done unknown (1 input missing) · In awaiting merge unknown (1 input missing) · no recorded human code act: yes (an upper bound) · cost $0.00 over 0 of 0 runs, 0 tokens over 0 (in 0, out 0, cache read 0, cache write 0) · human minutes 0 from 0 people (terminal input 0, post 0, review act 0, focus 0), a lower bound
         """;
 

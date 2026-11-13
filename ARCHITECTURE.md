@@ -495,10 +495,11 @@ is an earlier offer's when the recorded one never reached it.
 ### The wire: sync protocol 8
 
 A session opens with `hello` (protocol, build, box id) and is `welcome`d or `refuse`d once: a node
-on another protocol is refused: told to upgrade when it speaks Sail 0.58.0's protocol 4, whose
-database an upgrade converts, to reinstall itself when its protocol is any other older one
-(protocol 8's run and spec snapshots carry cost and times, and the database before it is not
-converted), and to upgrade main first when it is newer. The `welcome` always names the handle main authenticated the
+on another protocol is refused: told to upgrade main first when its protocol is newer and, when
+it is older, to upgrade when its hello names a 0.58 release, whose database an upgrade converts,
+and to reinstall itself otherwise (protocol 8's run and spec snapshots carry cost and times, and
+no other database before it is converted; protocol 4 spans 0.44.1 to 0.58.0, so the version, not
+the protocol, tells). The `welcome` always names the handle main authenticated the
 session as and main's `limits.file_max`, and a welcome missing either is a protocol failure; the
 node enforces the lower of its own limit and main's before a file ever reaches a sync, and a node
 whose configured sync handle is blank or another does nothing that round (`NodeRound.begin`). It
@@ -2593,8 +2594,8 @@ hundred.
   anything (tokens summed over `modelUsage`, so subagents count; dollars from `total_cost_usd`;
   the model that cost most), Codex from its rollout transcript's last `token_count` and
   `turn_context` model (no dollars; its cached input taken out of its input). `RunUsageReader`
-  reads the last 4 MiB of the one file the harness reports in, in the run's container, waiting at
-  most 10 s, and the finish writes the usage, the reported model and the effort passed in the
+  reads, in the run's container and in one command waiting at most 10 s, the last 16 lines of the
+  one file the harness reports in that hold one of its markers (`tac | grep -m 16 -a -F`), and the finish writes the usage, the reported model and the effort passed in the
   update that makes the row terminal: the tracker, the pipeline, the foreground launcher and the
   reconciler finish that way. An operator's stop never waits on a container: it leaves the
   report unread. A harness session's report is its running total, so a run records its share:
@@ -2607,11 +2608,13 @@ hundred.
   nothing, and its spec's tokens and dollars are a lower bound. A live member sets each turn's
   share on its run, and its finish keeps the last in the one write that ends it. A report that
   says nothing, or a report file that is not there, is `usage_source = none` with every count
-  null. A report that could not be read (the container stopped, missing or silent; a last report
-  line that does not parse; a file longer than the window whose window holds none) leaves the
-  usage unrecorded: retention keeps that run's directory, and each reconciler sweep of the box
-  that ran it reads it again until it is answered. Usage syncs with the run, its executing box's
-  fact.
+  null. What the container answered is final, so it is recorded once: a file holding no marked
+  line, however long, is `none`, and so is a last report line that does not parse, said once on
+  stderr (a character JSON takes raw in a string and YAML refuses, a C1 control, U+FFFE or
+  U+FFFF, is read as its escape, so it parses). Only a container that did not answer (stopped,
+  missing or silent past 10 s) leaves the usage unrecorded: retention keeps that run's directory,
+  and each reconciler sweep of the box that ran it reads it again until it is answered. Usage
+  syncs with the run, its executing box's fact.
 - **Times.** Ready is the spec's first move into `pending`, written once; awaiting merge its
   latest move into `awaiting_merge`, kept as it moves on to `done` and `archived`; done its
   latest move into `done`, kept as it is archived and cleared on any other move. The status
@@ -2633,7 +2636,10 @@ hundred.
   never saw finish (`uncounted_runs`: that run's spec when the box held its row, every spec of
   its project made before it when not). Tokens and dollars are exact only when every run counted
   reported them: a lower bound when some did not or a run was unattributable, and `unknown`
-  (`runs_not_reported`) when none did. A review or run the reader may not see leaves every
+  (`runs_not_reported`) when none did. A run main's retention erased before its node read the
+  report late is counted on main as it last held it, unread, so main may serve `unknown` or a
+  lower bound where the node serves an exact number: two answers that never disagree as exact
+  numbers. A review or run the reader may not see leaves every
   number of its kind `hidden_rows`. Over budget is true once what was reported passes a limit the project sets,
   false only when every run reported the figure that limit is of; display only.
 - **Human minutes.** `attention(person, conversation, minute, channel)` is box-local and never
@@ -2661,9 +2667,9 @@ hundred.
 
 | | Invariant | Proven by |
 |---|---|---|
-| M1 | A finished run records its usage once, from its harness's own report, in the update that finishes it or, when it could not be read then, in the sweep that reads it; a harness that reported nothing records `none` with null counts, never zeros; a report that could not be read is never `none` nor an earlier running total. | `HarnessUsageTest` (a recorded stream-json log and a Codex rollout, golden; a last line that does not parse), `RunUsageReaderTest` (a container stopped, missing or silent; a missing file; a full window), `HarnessContractTest`, `RunUsageStoreTest`, `ReviewLanesTest` (Claude Code, Codex and an empty log through the production finish), `LiveMemberTest` (three turns), `MissedStopReconcilerTest` (the sweep's read), `StopOperationsTest` (a stop reads nothing) |
+| M1 | A finished run records its usage once, from its harness's own report, in the update that finishes it or, when it could not be read then, in the sweep that reads it; a harness that reported nothing, or whose last report does not parse, records `none` with null counts, never zeros nor an earlier running total; a report its container did not answer is never `none`. | `HarnessUsageTest` (a recorded stream-json log and a Codex rollout, golden; their marked lines alone; a last line cut mid-write; a raw C1 control), `YamlUtilTest` (a raw C1 control, U+FFFE and U+FFFF read as JSON), `RunUsageReaderTest` (a container stopped, missing or silent; a missing file; a long log with no result line, in one command; a last line that does not parse, said once), `HarnessContractTest`, `RunUsageStoreTest`, `ReviewLanesTest` (Claude Code, Codex and an empty log through the production finish), `LiveMemberTest` (three turns), `MissedStopReconcilerTest` (the sweep's read), `StopOperationsTest` (a stop reads nothing) |
 | M2 | A run's usage is its executing box's fact: it syncs with the run and no other box writes it. | `SpecMeasuresSyncTest` (main holds the node's usage after one round), `BoxRunsSyncTest`, `JournalDecidesEveryWriteTest` |
-| M3 | Retention never removes the directory of a finished run whose usage was not read, and the read is tried again until it is answered. | `ReviewLanesTest` (past the newest twenty), `MissedStopReconcilerTest` |
+| M3 | Retention never removes the directory of a finished run whose usage was not read, and the read is tried again until its container answers; what it answers is recorded once and never asked for again. | `ReviewLanesTest` (past the newest twenty), `MissedStopReconcilerTest` (a long log with no result line, a cut last result and a raw C1 control each recorded in one sweep through the box's own reader; a silent container asked again) |
 | M4 | Ready, awaiting merge and done are the moves' own times, the same on every box. | `SchemaManagerTest` (the triggers), `SpecMeasuresSyncTest` (made ready, restarted, reopened, done on a node, read on both boxes) |
 | M5 | An attention minute comes only from a fact the server observed, for a person on a person's own lane, once per tuple. | `AttentionStoreTest`, `AttentionTest`, `PtySessionHostTest` (once a minute, room-bound only) |
 | M6 | A heartbeat speaks only for its caller, in the server's minute, about a conversation it may read; one it may not read answers as a missing one. | `AttentionTest`, `ScopedReadsTest`, `RouteGateSweepTest`, `AccessDoorsBaselineTest` (`infra-doors`) |

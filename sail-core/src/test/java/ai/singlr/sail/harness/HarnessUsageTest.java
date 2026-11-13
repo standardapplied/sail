@@ -48,12 +48,26 @@ class HarnessUsageTest {
         new Object[] {CODEX, Harness.ReportFile.TRANSCRIPT, CODEX_ROLLOUT});
   }
 
+  /** Only a report file's lines holding a marker: what the reader asks a container for. */
+  private static String marked(Harness harness, String report) {
+    return String.join(
+        "\n",
+        report
+            .lines()
+            .filter(line -> harness.reportMarkers().stream().anyMatch(line::contains))
+            .toList());
+  }
+
   @ParameterizedTest
   @MethodSource("reports")
   void everyHarnessAnswersUsageFromItsOwnReportAndNothingFromNone(
       Harness harness, Harness.ReportFile file, String report) {
     assertEquals(file, harness.reportFile(), harness.yamlName());
     assertEquals(true, harness.usage(report).reported(), harness.yamlName());
+    assertEquals(
+        harness.usage(report),
+        harness.usage(marked(harness, report)),
+        "the lines holding a marker are the whole report");
     assertEquals(RunUsage.NONE, harness.usage(null), harness.yamlName());
     assertEquals(RunUsage.NONE, harness.usage(""), harness.yamlName());
     assertEquals(RunUsage.NONE, harness.usage("not json\n{\"type\":\"system\"}\n"));
@@ -100,28 +114,25 @@ class HarnessUsageTest {
   }
 
   /**
-   * Minor 1 of the first review: a last result line that does not parse (cut mid-write, or holding
-   * a raw C1 control or U+FFFF the parser refuses) leaves the report unread, never the running
-   * total of a result before it.
+   * Minor 1 of the first review: a last result line that does not parse (cut mid-write) leaves the
+   * report unparsed, never the running total of a result before it. A character JSON takes raw in a
+   * string and YAML refuses (a C1 control, U+FFFE, U+FFFF) is read as it is.
    */
   @Test
-  void aLastResultLineThatDoesNotParseLeavesTheReportUnreadNotAnEarlierTotal() {
+  void aLastResultLineCutMidWriteIsUnparsedAndARawC1ControlIsReadAsItIs() {
     var last = CLAUDE_LOG.strip().lines().toList().getLast();
     var before = CLAUDE_LOG.strip().substring(0, CLAUDE_LOG.strip().length() - last.length());
     var opened = last.indexOf("\"result\":\"") + "\"result\":\"".length();
+    var cut = last.substring(0, last.length() / 2);
 
-    for (var unparseable :
-        List.of(
-            last.substring(0, last.length() / 2),
-            last.substring(0, opened) + "\u0080" + last.substring(opened),
-            last.substring(0, opened) + "\uffff" + last.substring(opened))) {
-      assertEquals(null, CLAUDE_CODE.usage(before + unparseable + "\n"));
-      assertEquals(null, CLAUDE_CODE.usage(unparseable));
+    assertEquals(null, CLAUDE_CODE.usage(before + cut + "\n"));
+    assertEquals(null, CLAUDE_CODE.usage(cut));
+    for (var raw : List.of("\u007f", "\u0080", "\u009b", "\u009f", "\ufffe", "\uffff")) {
+      assertEquals(
+          CLAUDE_CODE.usage(CLAUDE_LOG),
+          CLAUDE_CODE.usage(before + last.substring(0, opened) + raw + last.substring(opened)),
+          "a raw " + raw.codePointAt(0) + " is read as it is");
     }
-    assertEquals(
-        CLAUDE_CODE.usage(CLAUDE_LOG),
-        CLAUDE_CODE.usage(before + last.substring(0, opened) + "\u007f" + last.substring(opened)),
-        "a character the parser takes is read as it is");
   }
 
   @Test

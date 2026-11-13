@@ -365,6 +365,19 @@ class RunUsageStoreTest {
     assertEquals(0, sessions());
   }
 
+  /** Review 2, nit 5: a run marked uncounted is forgotten with the spec it was of. */
+  @Test
+  void aRunMarkedUncountedIsForgottenWithItsSpec() {
+    store.markUncounted(new RunStore.Uncounted(run("gone"), "auth"));
+    store.markUncounted(new RunStore.Uncounted(run("other"), "billing"));
+
+    Acting.system(
+        () -> new Erasure(db).erase(List.of(new Erasure.Target(Erasure.SPEC, "auth")), "local"));
+
+    assertEquals(
+        List.of("billing"), db.query("SELECT spec_id FROM uncounted_runs", row -> row.text(0)));
+  }
+
   private long sessions() {
     return db.queryOne("SELECT COUNT(*) FROM session_usage", row -> row.integer(0)).orElseThrow();
   }
