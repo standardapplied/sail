@@ -185,18 +185,17 @@ public final class ProjectApplyCommand implements Runnable {
             catalog().read(name).orElseThrow(() -> ProjectMutations.notFound(name, operator)),
             operator);
     requireReadyBox(operator);
+    var observer = shells.apply(false);
+    var shell = shells.apply(dryRun);
+    var observed = new ContainerManager(observer);
+    var mgr = new ContainerManager(shell);
+    var action = plan(observed.queryState(config.name()));
     var git = LocalIdentity.detect().git();
 
     if (!json) {
       Banner.printBranding(System.out, Ansi.AUTO);
       System.out.println();
     }
-
-    var observer = shells.apply(false);
-    var shell = shells.apply(dryRun);
-    var observed = new ContainerManager(observer);
-    var mgr = new ContainerManager(shell);
-    var action = plan(observed.queryState(config.name()));
 
     if (action == Action.STARTED) {
       if (!json) {
