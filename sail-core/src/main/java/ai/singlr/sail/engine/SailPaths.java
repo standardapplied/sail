@@ -121,6 +121,14 @@ public final class SailPaths {
     return projectDir(name).resolve("provision-state.yaml");
   }
 
+  /**
+   * The progress of the run that builds project {@code name}'s template, beside the project's own,
+   * so a template build and an apply never resume each other's run.
+   */
+  public static Path templateProvisionState(String name) {
+    return projectDir(name).resolve("template-provision-state.yaml");
+  }
+
   /** Returns the update check cache file: {@code ~/.sail/update-check.yaml}. */
   public static Path updateCheckFile() {
     return SAIL_DIR.resolve("update-check.yaml");

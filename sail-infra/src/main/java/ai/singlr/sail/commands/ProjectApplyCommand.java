@@ -15,6 +15,7 @@ import ai.singlr.sail.config.HostYaml;
 import ai.singlr.sail.config.ProjectDefinition;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.Banner;
+import ai.singlr.sail.engine.BoxInstances;
 import ai.singlr.sail.engine.ContainerExec;
 import ai.singlr.sail.engine.ContainerManager;
 import ai.singlr.sail.engine.ContainerManager.ContainerInfo;
@@ -35,6 +36,7 @@ import ai.singlr.sail.engine.ProvisionListener;
 import ai.singlr.sail.engine.ProvisionState;
 import ai.singlr.sail.engine.ProvisionTracker;
 import ai.singlr.sail.engine.SailPaths;
+import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.engine.WorkstationIdentity;
 import ai.singlr.sail.identity.Actor;
@@ -50,6 +52,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
+import java.util.function.Function;
 import java.util.function.Supplier;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
@@ -101,13 +104,19 @@ public final class ProjectApplyCommand implements Runnable {
   private String gitToken;
 
   private final Supplier<Box> box;
+  private final Function<Boolean, ShellExec> shells;
 
   public ProjectApplyCommand() {
-    this(Box::here);
+    this(Box::here, ShellExecutor::new);
   }
 
-  ProjectApplyCommand(Supplier<Box> box) {
+  /**
+   * @param box the box apply provisions on
+   * @param shells the host shell, by whether this is a dry run
+   */
+  ProjectApplyCommand(Supplier<Box> box, Function<Boolean, ShellExec> shells) {
     this.box = box;
+    this.shells = shells;
   }
 
   /** The box apply provisions on: its database, its host.yaml and sail-api's socket directory. */
@@ -145,12 +154,7 @@ public final class ProjectApplyCommand implements Runnable {
 
   private void execute() throws Exception {
     var operator = OperatorCommand.here();
-    if (json && dryRun) {
-      throw new IllegalArgumentException(
-          "--json and --dry-run cannot be combined: dry-run narrates the underlying shell"
-              + " commands on stdout, which would corrupt the JSON document. Drop one of the two"
-              + " flags.");
-    }
+    CliCommand.requireJsonOrDryRun(json, dryRun);
     if (all && Strings.isNotBlank(name)) {
       throw new IllegalArgumentException("Pass a project name OR --all, not both.");
     }
@@ -181,18 +185,17 @@ public final class ProjectApplyCommand implements Runnable {
             catalog().read(name).orElseThrow(() -> ProjectMutations.notFound(name, operator)),
             operator);
     requireReadyBox(operator);
+    var observer = shells.apply(false);
+    var shell = shells.apply(dryRun);
+    var observed = new ContainerManager(observer);
+    var mgr = new ContainerManager(shell);
+    var action = plan(observed.queryState(config.name()));
     var git = LocalIdentity.detect().git();
 
     if (!json) {
       Banner.printBranding(System.out, Ansi.AUTO);
       System.out.println();
     }
-
-    var observer = new ShellExecutor(false);
-    var shell = new ShellExecutor(dryRun);
-    var observed = new ContainerManager(observer);
-    var mgr = new ContainerManager(shell);
-    var action = plan(observed.queryState(config.name()));
 
     if (action == Action.STARTED) {
       if (!json) {
@@ -265,11 +268,11 @@ public final class ProjectApplyCommand implements Runnable {
    */
   private void applyAll(OperatorCommand operator) throws Exception {
     requireReadyBox(operator);
-    var observer = new ShellExecutor(false);
-    var shell = new ShellExecutor(dryRun);
+    var observer = shells.apply(false);
+    var shell = shells.apply(dryRun);
     var mgr = new ContainerManager(shell);
     var devices = new IncusDeviceManager(observer);
-    var targets = targets(new ContainerManager(observer));
+    var targets = targets(new BoxInstances(observer));
 
     if (!json) {
       Banner.printBranding(System.out, Ansi.AUTO);
@@ -390,12 +393,16 @@ public final class ProjectApplyCommand implements Runnable {
   record TargetPlan(Action action, ProjectDefinition config) {}
 
   /**
-   * The containers a bulk apply converges: every one Incus lists whose project the box's person may
-   * read, so a container kept for a project outside their grants is neither changed nor named, as
-   * {@code project list} names it not.
+   * The containers a bulk apply converges: every plain instance Incus lists whose project the box's
+   * person may read, so a container kept for a project outside their grants is neither changed nor
+   * named, as {@code project list} names it not, and a workspace or a template is never taken for a
+   * project.
    */
-  static List<ContainerInfo> targets(ContainerManager containers) throws Exception {
-    return ReadFilter.readable(Actor.reader(), containers.listAll(), ContainerInfo::name);
+  static List<ContainerInfo> targets(BoxInstances instances) throws Exception {
+    return ReadFilter.readable(
+        Actor.reader(),
+        instances.plain().stream().map(BoxInstances.Instance::info).toList(),
+        ContainerInfo::name);
   }
 
   /**
@@ -449,8 +456,8 @@ public final class ProjectApplyCommand implements Runnable {
    * {@code shell}, which a dry run swaps for command narration.
    */
   private Outcome converge(
-      ShellExecutor observer,
-      ShellExecutor shell,
+      ShellExec observer,
+      ShellExec shell,
       ProjectDefinition config,
       LocalIdentity.GitIdentity git,
       OperatorCommand operator)
@@ -509,7 +516,7 @@ public final class ProjectApplyCommand implements Runnable {
     return Actor.call(operator.get(), () -> HomeRoom.ensure(operations, config, handle));
   }
 
-  private Outcome convergeMachineryOnly(ShellExecutor observer, ShellExecutor shell, String project)
+  private Outcome convergeMachineryOnly(ShellExec observer, ShellExec shell, String project)
       throws Exception {
     var observed = new ContainerManager(observer);
     var mgr = new ContainerManager(shell);
@@ -618,7 +625,7 @@ public final class ProjectApplyCommand implements Runnable {
   private void provision(
       ProjectDefinition config,
       LocalIdentity.GitIdentity git,
-      ShellExecutor shell,
+      ShellExec shell,
       boolean fresh,
       boolean recorded,
       Optional<SshPublicKey> workstationKey,
@@ -686,7 +693,7 @@ public final class ProjectApplyCommand implements Runnable {
   }
 
   private void printConnectHints(
-      ProjectDefinition config, ShellExecutor shell, ContainerManager mgr, OperatorCommand operator)
+      ProjectDefinition config, ShellExec shell, ContainerManager mgr, OperatorCommand operator)
       throws Exception {
     var state = mgr.queryState(config.name());
     if (!(state instanceof ContainerState.Running r) || r.ipv4() == null) {
@@ -725,21 +732,15 @@ public final class ProjectApplyCommand implements Runnable {
   }
 
   private Map<String, String> resolveGitTokens(ProjectDefinition config, OperatorCommand operator) {
+    var known = GitCredentials.known(config.repos(), gitToken);
     if (Strings.isNotBlank(gitToken)) {
-      return GitCredentials.singleTokenMap(gitToken);
+      return known;
     }
-    var hosts = GitCredentials.extractHttpsHosts(config.repos());
-    if (hosts.isEmpty()) {
-      return Map.of();
-    }
-    var tokens = new LinkedHashMap<String, String>();
-    for (var host : hosts) {
-      var envToken = GitCredentials.resolveTokenForHost(host, null);
-      if (Strings.isNotBlank(envToken)) {
-        tokens.put(host, envToken);
-      }
-    }
-    var missingHosts = hosts.stream().filter(h -> !tokens.containsKey(h)).toList();
+    var tokens = new LinkedHashMap<>(known);
+    var missingHosts =
+        GitCredentials.extractHttpsHosts(config.repos()).stream()
+            .filter(h -> !tokens.containsKey(h))
+            .toList();
     if (missingHosts.isEmpty() || yes || json || dryRun) {
       return Map.copyOf(tokens);
     }

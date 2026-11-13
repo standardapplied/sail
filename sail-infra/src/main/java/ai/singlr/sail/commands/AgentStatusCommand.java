@@ -15,6 +15,7 @@ import ai.singlr.sail.config.SpecCatalog;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.AgentSession;
 import ai.singlr.sail.engine.Banner;
+import ai.singlr.sail.engine.BoxInstances;
 import ai.singlr.sail.engine.ContainerExec;
 import ai.singlr.sail.engine.ContainerManager;
 import ai.singlr.sail.engine.ContainerState;
@@ -82,9 +83,12 @@ public final class AgentStatusCommand implements Runnable {
   }
 
   private void executeAll(OperatorCommand operator) throws Exception {
-    var mgr = new ContainerManager(shell);
     var running =
-        mgr.listAll().stream().filter(c -> c.state() instanceof ContainerState.Running).toList();
+        new BoxInstances(shell)
+            .plain().stream()
+                .map(BoxInstances.Instance::info)
+                .filter(c -> c.state() instanceof ContainerState.Running)
+                .toList();
     var runningContainers =
         ReadFilter.readable(Actor.reader(), running, ContainerManager.ContainerInfo::name);
 

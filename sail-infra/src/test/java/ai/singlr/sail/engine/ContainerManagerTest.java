@@ -16,6 +16,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import java.io.IOException;
 import java.util.List;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.function.Executable;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 
 class ContainerManagerTest {
 
@@ -51,43 +54,6 @@ class ContainerManagerTest {
       """;
 
   private static final String EMPTY_JSON = "[]";
-
-  private static final String MULTI_JSON =
-      """
-      [
-        {
-          "name": "acme-health",
-          "status": "Running",
-          "state": {
-            "network": {
-              "eth0": {
-                "addresses": [
-                  {"family": "inet", "address": "10.0.0.42", "netmask": "24", "scope": "global"}
-                ]
-              }
-            }
-          }
-        },
-        {
-          "name": "fintech-api",
-          "status": "Stopped",
-          "state": {}
-        },
-        {
-          "name": "ml-pipeline",
-          "status": "Running",
-          "state": {
-            "network": {
-              "eth0": {
-                "addresses": [
-                  {"family": "inet", "address": "10.0.0.99", "netmask": "24", "scope": "global"}
-                ]
-              }
-            }
-          }
-        }
-      ]
-      """;
 
   private static final String FROZEN_JSON =
       """
@@ -127,52 +93,6 @@ class ContainerManagerTest {
               "eth0": {
                 "addresses": [
                   {"family": "inet", "address": "10.0.0.42", "netmask": "24", "scope": "global"}
-                ]
-              }
-            }
-          }
-        }
-      ]
-      """;
-
-  private static final String MULTI_WITH_CONFIG_JSON =
-      """
-      [
-        {
-          "name": "acme-health",
-          "status": "Running",
-          "config": {
-            "limits.cpu": "4",
-            "limits.memory": "12GB"
-          },
-          "state": {
-            "network": {
-              "eth0": {
-                "addresses": [
-                  {"family": "inet", "address": "10.0.0.42", "netmask": "24", "scope": "global"}
-                ]
-              }
-            }
-          }
-        },
-        {
-          "name": "fintech-api",
-          "status": "Stopped",
-          "config": {
-            "limits.cpu": "2",
-            "limits.memory": "8GB"
-          },
-          "state": {}
-        },
-        {
-          "name": "personal-site",
-          "status": "Running",
-          "config": {},
-          "state": {
-            "network": {
-              "eth0": {
-                "addresses": [
-                  {"family": "inet", "address": "10.0.0.99", "netmask": "24", "scope": "global"}
                 ]
               }
             }
@@ -265,61 +185,6 @@ class ContainerManagerTest {
   }
 
   @Test
-  void listAllReturnsMultipleContainers() throws Exception {
-    var shell = new ScriptedShellExecutor().onOk("incus list --format json", MULTI_JSON);
-    var mgr = new ContainerManager(shell);
-
-    var containers = mgr.listAll();
-
-    assertEquals(3, containers.size());
-    assertEquals("acme-health", containers.get(0).name());
-    assertInstanceOf(ContainerState.Running.class, containers.get(0).state());
-    assertEquals("fintech-api", containers.get(1).name());
-    assertInstanceOf(ContainerState.Stopped.class, containers.get(1).state());
-    assertEquals("ml-pipeline", containers.get(2).name());
-    assertInstanceOf(ContainerState.Running.class, containers.get(2).state());
-  }
-
-  @Test
-  void listContainersLeavesOutVirtualMachines() throws Exception {
-    var shell =
-        new ScriptedShellExecutor()
-            .onOk(
-                "incus list --format json",
-                """
-                [{"name": "acme", "status": "Running", "type": "container", "state": {}},
-                 {"name": "win", "status": "Stopped", "type": "virtual-machine", "state": {}},
-                 {"name": "docs", "status": "Stopped", "type": "container", "state": {}}]
-                """);
-
-    var containers = new ContainerManager(shell).listContainers();
-
-    assertEquals(
-        List.of("acme", "docs"),
-        containers.stream().map(ContainerManager.ContainerInfo::name).toList());
-  }
-
-  @Test
-  void listAllReturnsEmptyListWhenNoContainers() throws Exception {
-    var shell = new ScriptedShellExecutor().onOk("incus list --format json", EMPTY_JSON);
-    var mgr = new ContainerManager(shell);
-
-    var containers = mgr.listAll();
-
-    assertTrue(containers.isEmpty());
-  }
-
-  @Test
-  void listAllThrowsOnIncusFailure() {
-    var shell =
-        new ScriptedShellExecutor().onFail("incus list --format json", "daemon not running");
-    var mgr = new ContainerManager(shell);
-
-    var ex = assertThrows(IOException.class, mgr::listAll);
-    assertTrue(ex.getMessage().contains("daemon not running"));
-  }
-
-  @Test
   void startExecutesCorrectCommand() throws Exception {
     var shell = new ScriptedShellExecutor(new ShellExec.Result(0, "", ""));
     var mgr = new ContainerManager(shell);
@@ -382,50 +247,6 @@ class ContainerManagerTest {
     var ex = assertThrows(IOException.class, () -> mgr.forceDelete("acme-health"));
     assertTrue(ex.getMessage().contains("Failed to delete"));
     assertTrue(ex.getMessage().contains("permission denied"));
-  }
-
-  @Test
-  void listAllIncludesResourceLimits() throws Exception {
-    var shell =
-        new ScriptedShellExecutor().onOk("incus list --format json", MULTI_WITH_CONFIG_JSON);
-    var mgr = new ContainerManager(shell);
-
-    var containers = mgr.listAll();
-
-    assertEquals(3, containers.size());
-    var acme = containers.get(0);
-    assertNotNull(acme.limits());
-    assertEquals("4", acme.limits().cpu());
-    assertEquals("12GB", acme.limits().memory());
-
-    var fintech = containers.get(1);
-    assertNotNull(fintech.limits());
-    assertEquals("2", fintech.limits().cpu());
-    assertEquals("8GB", fintech.limits().memory());
-  }
-
-  @Test
-  void listAllHandlesMissingConfig() throws Exception {
-    var shell = new ScriptedShellExecutor().onOk("incus list --format json", MULTI_JSON);
-    var mgr = new ContainerManager(shell);
-
-    var containers = mgr.listAll();
-
-    for (var c : containers) {
-      assertNull(c.limits());
-    }
-  }
-
-  @Test
-  void listAllHandlesEmptyConfig() throws Exception {
-    var shell =
-        new ScriptedShellExecutor().onOk("incus list --format json", MULTI_WITH_CONFIG_JSON);
-    var mgr = new ContainerManager(shell);
-
-    var containers = mgr.listAll();
-
-    var personalSite = containers.get(2);
-    assertNull(personalSite.limits());
   }
 
   @Test
@@ -563,5 +384,37 @@ class ContainerManagerTest {
 
     assertTrue(ex.getMessage().contains("Failed to set hostname"));
     assertTrue(ex.getMessage().contains("read-only"));
+  }
+
+  @ParameterizedTest
+  @CsvSource(
+      delimiter = '|',
+      value = {
+        "\"user.sail.project\": \"acme\", \"user.sail.workspace\": \"fix\"|workspace fix of project acme",
+        "\"user.sail.template.of\": \"acme-fix\"|the template of project acme-fix",
+        "\"user.sail.project\": \"acme\", \"user.sail.workspace\": \"other\"|a copy carrying the keys of project acme"
+      })
+  void aContainerAddressedByAProjectsNameThatIsNoProjectsIsRefusedNamingWhatItIs(
+      String keys, String what) {
+    var name = keys.contains("template") ? "acme-fix--tmpl" : "acme-fix";
+    var shell =
+        new ScriptedShellExecutor()
+            .onOk(
+                "incus list ^" + name + "$",
+                "[{\"name\": \""
+                    + name
+                    + "\", \"status\": \"Running\", \"config\": {"
+                    + keys
+                    + "}}]");
+    var containers = new ContainerManager(shell);
+
+    for (Executable asked :
+        List.<Executable>of(() -> containers.queryState(name), () -> containers.queryInfo(name))) {
+      var refused = assertThrows(BoxInstances.Taken.class, asked);
+      assertEquals(name, refused.project());
+      assertEquals(
+          "Project " + name + " cannot take instance " + name + ": it is " + what + ".",
+          refused.reason());
+    }
   }
 }

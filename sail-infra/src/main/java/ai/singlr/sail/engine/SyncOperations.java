@@ -497,12 +497,16 @@ public final class SyncOperations {
 
   /**
    * Takes off this box each project the scope main named does not admit and the box holds nothing
-   * of: its {@code ~/.sail/projects/<name>} directory, and its container when Sail provisioned it
-   * ({@link IncusDeviceManager#sailManaged}), as {@code project destroy} without {@code --purge}
-   * would. It is decided from what the box holds, not from what this round {@code dropped}, so a
-   * directory or container an earlier release, a failed round or an unreachable Incus left behind
-   * goes in the first round that can take it. A project kept for a run still under way here is
-   * still held, and keeps both. An unscoped box is never asked, nor is Incus of a project in scope.
+   * of: its {@code ~/.sail/projects/<name>} directory, its container when Sail provisioned it
+   * ({@link IncusDeviceManager#sailManaged}), and its workspaces and template, told by their keys
+   * ({@link BoxInstances}), as {@code project destroy} without {@code --purge} would. A copy
+   * carrying a leaving project's keys under another name is not Sail's and stays, said once, in the
+   * round that drops the project. A workspace or template of a project in scope is never touched,
+   * nor taken for a project of its own name. It is decided from what the box holds, not from what
+   * this round {@code dropped}, so a directory or container an earlier release, a failed round or
+   * an unreachable Incus left behind goes in the first round that can take it. A project kept for a
+   * run still under way here is still held, and keeps both. An unscoped box is never asked, nor is
+   * Incus of a project in scope.
    */
   private void tearDownOutOfScope(Set<String> dropped) {
     var scope = new SyncScope(db).held();
@@ -517,12 +521,12 @@ public final class SyncOperations {
     try {
       for (var name : directoriesUnder(projectsDir)) {
         if (leaving.test(name)) {
-          takeOff(teardown, name, false);
+          takeOff(teardown, name, List.of());
         }
       }
-      List<ContainerManager.ContainerInfo> containers;
+      List<BoxInstances.Instance> instances;
       try {
-        containers = new ContainerManager(shell).listAll();
+        instances = new BoxInstances(shell).all();
       } catch (IOException | TimeoutException unreachable) {
         dropped.forEach(
             project ->
@@ -537,29 +541,62 @@ public final class SyncOperations {
         return;
       }
       var devices = new IncusDeviceManager(shell);
-      for (var container : containers) {
-        var name = container.name();
-        if (!leaving.test(name)) {
-          continue;
-        }
-        if (devices.sailManaged(name)) {
-          if (takeOff(teardown, name, true)) {
-            notice.accept(
-                Remedy.of(
-                    "project "
-                        + name
-                        + ": its container deleted, workspace and uncommitted work included — main"
-                        + " no longer grants this box the project"));
+      for (var instance : instances) {
+        var name = instance.name();
+        switch (instance.kind()) {
+          case BoxInstances.Plain _ when leaving.test(name) -> {
+            if (devices.sailManaged(name)) {
+              if (takeOff(teardown, name, List.of(name))) {
+                notice.accept(
+                    Remedy.of(
+                        "project "
+                            + name
+                            + ": its container deleted, workspace and uncommitted work included —"
+                            + " main no longer grants this box the project"));
+              }
+            } else if (dropped.contains(name)) {
+              notice.accept(
+                  Remedy.of(
+                      "project "
+                          + name
+                          + ": container '"
+                          + name
+                          + "' kept — Sail did not provision it; remove it yourself if it holds the"
+                          + " project's work"));
+            }
           }
-        } else if (dropped.contains(name)) {
-          notice.accept(
-              Remedy.of(
-                  "project "
-                      + name
-                      + ": container '"
-                      + name
-                      + "' kept — Sail did not provision it; remove it yourself if it holds the"
-                      + " project's work"));
+          case BoxInstances.Workspace workspace when leaving.test(workspace.project()) -> {
+            if (takeOff(teardown, workspace.project(), List.of(name))) {
+              notice.accept(
+                  Remedy.of(
+                      "project "
+                          + workspace.project()
+                          + ": its workspace "
+                          + workspace.workspace()
+                          + " deleted, uncommitted work included — main no longer grants this box"
+                          + " the project"));
+            }
+          }
+          case BoxInstances.Template template when leaving.test(template.project()) -> {
+            if (takeOff(teardown, template.project(), List.of(name))) {
+              notice.accept(
+                  Remedy.of(
+                      "project "
+                          + template.project()
+                          + ": its template deleted — main no longer grants this box the project"));
+            }
+          }
+          case BoxInstances.Stray stray when dropped.contains(stray.project()) ->
+              notice.accept(
+                  Remedy.of(
+                      "project "
+                          + stray.project()
+                          + ": instance '"
+                          + name
+                          + "' kept — a copy carrying the project's keys under another name is not"
+                          + " Sail's; delete it yourself if it is not wanted, as it holds the"
+                          + " project's work"));
+          default -> {}
         }
       }
     } catch (IOException | TimeoutException e) {
@@ -577,10 +614,10 @@ public final class SyncOperations {
    * Tears {@code name} down, saying so when it cannot: the next round finds it still held on disk
    * or in Incus and tries again. Returns whether it went.
    */
-  private static boolean takeOff(ProjectTeardown teardown, String name, boolean container)
+  private static boolean takeOff(ProjectTeardown teardown, String name, List<String> instances)
       throws InterruptedException {
     try {
-      teardown.tearDown(name, container);
+      teardown.tearDown(name, instances);
       return true;
     } catch (IOException | UncheckedIOException | TimeoutException e) {
       System.err.println(
@@ -615,11 +652,20 @@ public final class SyncOperations {
 
   /**
    * Names the projects this round brought to the catalog that it did not hold before, each with the
-   * command that makes its container here.
+   * command that makes its container here, and once, in this round alone, each that cannot have one
+   * because the instance of its name is a workspace, a template or a copy (W10), with what frees
+   * the name. A box that cannot read Incus names them all.
    */
   private void announceNewProjects(ProjectStore projects, Set<String> known) {
     var created = names(projects);
     created.removeAll(known);
+    if (created.isEmpty()) {
+      return;
+    }
+    for (var taken : takenAmong(created)) {
+      created.remove(taken.project());
+      notice.accept(Remedied.whole(taken));
+    }
     if (created.isEmpty()) {
       return;
     }
@@ -634,6 +680,22 @@ public final class SyncOperations {
                     + String.join(", ", created)
                     + ". Provision each with:")
             .then(applies));
+  }
+
+  private List<BoxInstances.Taken> takenAmong(Set<String> names) {
+    List<BoxInstances.Instance> instances;
+    try {
+      instances = new BoxInstances(shell).all();
+    } catch (InterruptedException e) {
+      Thread.currentThread().interrupt();
+      return List.of();
+    } catch (IOException | TimeoutException e) {
+      return List.of();
+    }
+    return instances.stream()
+        .filter(instance -> names.contains(instance.name()))
+        .flatMap(instance -> BoxInstances.taken(instance.name(), Optional.of(instance)).stream())
+        .toList();
   }
 
   /** Projects the synced files onto disk, warning about any local edits it deliberately left. */

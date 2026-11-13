@@ -7,6 +7,7 @@ package ai.singlr.sail.api;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.api.SkillOperations.Kind;
 import ai.singlr.sail.api.SkillOperations.Row;
@@ -129,6 +130,30 @@ class SkillOperationsTest {
                     StageSkill.shareFromContainer("/home/dev/.claude/skills/lint", "acme")))),
         rows.rows());
     assertEquals(Optional.empty(), rows.note());
+  }
+
+  @Test
+  void anInstanceOfTheProjectsNameThatIsNotItsContainerIsNeverReadForItsSkills() throws Exception {
+    shell
+        .onOk(
+            "incus list",
+            "[{\"name\": \"acme\", \"status\": \"Running\", \"config\":"
+                + " {\"user.sail.project\": \"ac\", \"user.sail.workspace\": \"me\"}}]")
+        .onOk("/home/dev/.claude/skills", "lint\n");
+
+    var rows = skills.rows("acme");
+
+    assertEquals(
+        List.of(
+            new Row("sail-portal", Kind.SAIL, 2, BOTH, "ok", Optional.empty()),
+            new Row("spec-board", Kind.SAIL, 2, BOTH, "ok", Optional.empty())),
+        rows.rows());
+    assertEquals(
+        Optional.of(
+            "Project acme cannot take instance acme: it is a copy carrying the keys of project ac."
+                + " Its hand-made skills are not listed."),
+        rows.note());
+    assertTrue(shell.invocations().stream().noneMatch(c -> c.contains("skills")));
   }
 
   @Test

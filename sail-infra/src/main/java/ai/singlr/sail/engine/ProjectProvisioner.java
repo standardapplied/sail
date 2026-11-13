@@ -26,6 +26,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.TreeMap;
 import java.util.concurrent.TimeoutException;
 import java.util.regex.Pattern;
 
@@ -48,7 +49,7 @@ public final class ProjectProvisioner {
   private static final String MAVEN_ARCHIVE_BASE_URL =
       "https://archive.apache.org/dist/maven/maven-3/";
 
-  private static final String INPUTS_KEY = "user.sail.inputs";
+  static final String INPUTS_KEY = "user.sail.inputs";
 
   /**
    * An {@code authorized_keys} options field before a key, as {@link ContainerAuthorizedKeys} reads
@@ -58,6 +59,25 @@ public final class ProjectProvisioner {
 
   static final List<String> BASELINE_PACKAGES =
       List.of("curl", "wget", "git", "sudo", "openssh-server", "gh", "ripgrep");
+
+  /**
+   * The instance a run provisions, and how it is launched when it does not exist yet: on {@code
+   * pool} when one is named, carrying {@code keys} from birth. The project's own container is
+   * launched on the base profile's pool with no key ({@link #of}); its template on the box's ZFS
+   * pool with the key that says whose template it is.
+   */
+  public record Instance(String name, Optional<String> pool, Map<String, String> keys) {
+    public Instance {
+      NameValidator.requireValidProjectName(name);
+      Objects.requireNonNull(pool, "pool");
+      keys = Map.copyOf(keys);
+    }
+
+    /** The project's own container, named after it, on the base profile's pool. */
+    public static Instance of(ProjectDefinition config) {
+      return new Instance(config.name(), Optional.empty(), Map.of());
+    }
+  }
 
   private final ShellExec shell;
   private final ContainerConfig containerConfig;
@@ -115,34 +135,52 @@ public final class ProjectProvisioner {
       LocalIdentity.GitIdentity git,
       Path filesDir)
       throws Exception {
+    provision(Instance.of(config), config, host, gitTokens, git, filesDir);
+  }
+
+  /**
+   * Provisions {@code config} into the instance {@code into} names, launched on its pool when it
+   * names one: what {@link #provision(ProjectDefinition, HostYaml, Map, LocalIdentity.GitIdentity,
+   * Path)} does for the project's own container, for another instance, such as its template. The
+   * definition, its digest and the project's skills are the project's whatever instance takes them.
+   */
+  public void provision(
+      Instance into,
+      ProjectDefinition config,
+      HostYaml host,
+      Map<String, String> gitTokens,
+      LocalIdentity.GitIdentity git,
+      Path filesDir)
+      throws Exception {
     var inputs = inputs(config, workstationKey);
     if (!inputs.equals(tracker.currentState().inputs())) {
       tracker.load(inputs);
     }
+    var name = into.name();
     try {
-      launchContainer(config, host);
+      launchContainer(config, into, host);
       if (!tracker.isComplete()) {
-        clearProvisionedInputs(config.name());
+        clearProvisionedInputs(name);
       }
-      setDiskQuota(config, host);
-      setResourceLimits(config);
-      waitForNetwork(config);
-      installPackages(config);
-      configureSsh(config, host);
-      installSailMachinery(config);
-      installPodman(config);
-      configureTestcontainers(config);
-      installJdk(config);
-      installNode(config);
-      configureGit(config, gitTokens, git);
-      installMaven(config);
-      cloneRepos(config, gitTokens);
-      pushWorkspaceFiles(config, filesDir);
-      provisionServices(config);
-      configurePruneCron(config);
-      installAgentTools(config);
-      installSkills(config);
-      writeProjectState(config);
+      setDiskQuota(config, name, host);
+      setResourceLimits(config, name);
+      waitForNetwork(name);
+      installPackages(config, name);
+      configureSsh(config, name, host);
+      installSailMachinery(config, name);
+      installPodman(name);
+      configureTestcontainers(config, name);
+      installJdk(config, name);
+      installNode(config, name);
+      configureGit(config, name, gitTokens, git);
+      installMaven(config, name);
+      cloneRepos(config, name, gitTokens);
+      pushWorkspaceFiles(name, filesDir);
+      provisionServices(config, name);
+      configurePruneCron(config, name);
+      installAgentTools(config, name);
+      installSkills(config, name);
+      writeProjectState(config, name);
       tracker.cleanup();
     } catch (Exception e) {
       listener.onStepFailed();
@@ -203,32 +241,35 @@ public final class ProjectProvisioner {
     }
   }
 
-  private void launchContainer(ProjectDefinition config, HostYaml host) throws Exception {
+  private void launchContainer(ProjectDefinition config, Instance into, HostYaml host)
+      throws Exception {
     currentPhase = ProjectPhase.CONTAINER_LAUNCHED;
     if (tracker.isCompleted(currentPhase)) {
       stepSkipped(1, "container already running");
       return;
     }
-    step(1, "Launching container " + config.name() + "...");
+    var name = into.name();
+    step(1, "Launching container " + name + "...");
 
-    var check = shell.exec(List.of("incus", "info", config.name()));
+    var check = shell.exec(List.of("incus", "info", name));
     if (check.ok()) {
       tracker.advance(currentPhase);
-      stepDone(1, "Container " + config.name() + " (already exists)");
+      stepDone(1, "Container " + name + " (already exists)");
       return;
     }
 
     var image = image(config, host).replace('/', '-');
-    var result =
-        shell.exec(
-            List.of("incus", "launch", image, config.name(), "--profile", host.baseProfile()),
-            null,
-            LAUNCH_TIMEOUT);
+    var launch =
+        new ArrayList<>(List.of("incus", "launch", image, name, "--profile", host.baseProfile()));
+    into.pool().ifPresent(pool -> launch.addAll(List.of("--storage", pool)));
+    new TreeMap<>(into.keys())
+        .forEach((key, value) -> launch.addAll(List.of("-c", key + "=" + value)));
+    var result = shell.exec(launch, null, LAUNCH_TIMEOUT);
     if (!result.ok()) {
       throw new IOException("Failed to launch container: " + result.stderr());
     }
     tracker.advance(currentPhase);
-    stepDone(1, "Container " + config.name());
+    stepDone(1, "Container " + name);
   }
 
   /**
@@ -239,13 +280,13 @@ public final class ProjectProvisioner {
    * so provisioning and recovery install identically. Failure is non-fatal: it is logged with the
    * one command that fixes it, and the agent hooks fall back to file-only audit until then.
    */
-  private void installSailMachinery(ProjectDefinition config) {
+  private void installSailMachinery(ProjectDefinition config, String name) {
     try {
-      ContainerSailSetup.ensureInstalled(shell, config.name());
+      ContainerSailSetup.ensureInstalled(shell, name);
     } catch (Exception e) {
       System.err.println(
           "  [provision] Warning: failed to install the sail machinery in "
-              + config.name()
+              + name
               + ": "
               + e.getMessage()
               + ". Run '"
@@ -254,7 +295,7 @@ public final class ProjectProvisioner {
     }
   }
 
-  private void setDiskQuota(ProjectDefinition config, HostYaml host) throws Exception {
+  private void setDiskQuota(ProjectDefinition config, String name, HostYaml host) throws Exception {
     currentPhase = ProjectPhase.DISK_QUOTA_SET;
     if (tracker.isCompleted(currentPhase)) {
       stepSkipped(2, "disk quota already set");
@@ -263,7 +304,7 @@ public final class ProjectProvisioner {
     step(2, "Setting disk quota...");
 
     var disk = config.resources().disk();
-    new ContainerManager(shell).setDiskQuota(config.name(), disk);
+    new ContainerManager(shell).setDiskQuota(name, disk);
     tracker.advance(currentPhase);
     if (host.isDir()) {
       stepDone(2, "Disk quota " + disk + " (advisory)");
@@ -272,7 +313,7 @@ public final class ProjectProvisioner {
     }
   }
 
-  private void setResourceLimits(ProjectDefinition config) throws Exception {
+  private void setResourceLimits(ProjectDefinition config, String name) throws Exception {
     currentPhase = ProjectPhase.RESOURCE_LIMITS_SET;
     if (tracker.isCompleted(currentPhase)) {
       stepSkipped(3, "resource limits already set");
@@ -280,7 +321,6 @@ public final class ProjectProvisioner {
     }
     step(3, "Setting resource limits...");
 
-    var name = config.name();
     var cpu = config.resources().cpu();
     var memory = config.resources().memory();
     var limits = new LinkedHashMap<String, String>();
@@ -338,7 +378,7 @@ public final class ProjectProvisioner {
     return true;
   }
 
-  private void waitForNetwork(ProjectDefinition config) throws Exception {
+  private void waitForNetwork(String name) throws Exception {
     currentPhase = ProjectPhase.NETWORK_READY;
     if (tracker.isCompleted(currentPhase)) {
       stepSkipped(4, "network already ready");
@@ -352,20 +392,19 @@ public final class ProjectProvisioner {
               ip -4 addr show eth0 | grep -q inet && exit 0; \
               sleep 1; \
             done; exit 1""";
-    var result = execInContainer(config.name(), List.of("bash", "-c", script), NETWORK_TIMEOUT);
+    var result = execInContainer(name, List.of("bash", "-c", script), NETWORK_TIMEOUT);
     if (!result.ok()) {
       throw new IOException("Container network did not come up within 30s");
     }
     var ipResult =
         execInContainer(
-            config.name(),
-            List.of("bash", "-c", "ip -4 addr show eth0 | grep -oP '(?<=inet )\\S+'"));
+            name, List.of("bash", "-c", "ip -4 addr show eth0 | grep -oP '(?<=inet )\\S+'"));
     var ipDetail = ipResult.ok() ? ipResult.stdout().strip() : "";
     tracker.advance(currentPhase);
     stepDone(4, "Network connected" + (ipDetail.isEmpty() ? "" : " (" + ipDetail + ")"));
   }
 
-  private void installPackages(ProjectDefinition config) throws Exception {
+  private void installPackages(ProjectDefinition config, String name) throws Exception {
     currentPhase = ProjectPhase.PACKAGES_INSTALLED;
     if (tracker.isCompleted(currentPhase)) {
       stepSkipped(5, "packages already installed");
@@ -373,8 +412,7 @@ public final class ProjectProvisioner {
     }
     step(5, "Installing packages...");
 
-    var updateResult =
-        execInContainer(config.name(), List.of("apt-get", "update", "-qq"), INSTALL_TIMEOUT);
+    var updateResult = execInContainer(name, List.of("apt-get", "update", "-qq"), INSTALL_TIMEOUT);
     if (!updateResult.ok()) {
       throw new IOException("Failed to update package lists: " + updateResult.stderr());
     }
@@ -386,7 +424,7 @@ public final class ProjectProvisioner {
 
     var cmd = new ArrayList<>(List.of("apt-get", "install", "-y", "-qq"));
     cmd.addAll(packages);
-    var result = execInContainer(config.name(), cmd, INSTALL_TIMEOUT);
+    var result = execInContainer(name, cmd, INSTALL_TIMEOUT);
     if (!result.ok()) {
       throw new IOException("Failed to install packages: " + result.stderr());
     }
@@ -394,7 +432,7 @@ public final class ProjectProvisioner {
     stepDone(5, "Installed " + packages.size() + " packages");
   }
 
-  private void configureSsh(ProjectDefinition config, HostYaml host) throws Exception {
+  private void configureSsh(ProjectDefinition config, String name, HostYaml host) throws Exception {
     currentPhase = ProjectPhase.SSH_CONFIGURED;
     if (tracker.isCompleted(currentPhase)) {
       stepSkipped(6, "SSH already configured");
@@ -402,7 +440,6 @@ public final class ProjectProvisioner {
     }
     step(6, "Configuring SSH access...");
 
-    var name = config.name();
     var user = ProjectDefinition.USER;
 
     var userCheck = execInContainer(name, List.of("id", user));
@@ -507,15 +544,13 @@ public final class ProjectProvisioner {
     return Objects.requireNonNullElse(config.image(), host.image());
   }
 
-  private void installPodman(ProjectDefinition config) throws Exception {
+  private void installPodman(String name) throws Exception {
     currentPhase = ProjectPhase.PODMAN_INSTALLED;
     if (tracker.isCompleted(currentPhase)) {
       stepSkipped(7, "Podman already installed");
       return;
     }
     step(7, "Installing Podman...");
-
-    var name = config.name();
 
     var check = execInContainer(name, List.of("which", "podman"));
     if (!check.ok()) {
@@ -573,7 +608,7 @@ public final class ProjectProvisioner {
    * {@code cleanup-containers.sh} cron (a plain {@code podman rm -f}, no client-side timeout to
    * lose) is the reliable sweep instead.
    */
-  private void configureTestcontainers(ProjectDefinition config) throws Exception {
+  private void configureTestcontainers(ProjectDefinition config, String name) throws Exception {
     currentPhase = ProjectPhase.TESTCONTAINERS_CONFIGURED;
     if (tracker.isCompleted(currentPhase)) {
       stepSkipped(8, "Testcontainers already configured");
@@ -581,7 +616,6 @@ public final class ProjectProvisioner {
     }
     step(8, "Configuring Testcontainers environment...");
 
-    var name = config.name();
     var profilePath = "/etc/profile.d/testcontainers.sh";
 
     var check = execInContainer(name, List.of("test", "-f", profilePath));
@@ -604,7 +638,7 @@ public final class ProjectProvisioner {
     stepDone(8, "Testcontainers configured");
   }
 
-  private void installJdk(ProjectDefinition config) throws Exception {
+  private void installJdk(ProjectDefinition config, String name) throws Exception {
     currentPhase = ProjectPhase.JDK_INSTALLED;
     if (tracker.isCompleted(currentPhase)) {
       stepSkipped(9, "JDK already installed");
@@ -620,7 +654,6 @@ public final class ProjectProvisioner {
     var version = config.runtimes().jdk();
     step(9, "Installing JDK " + version + "...");
 
-    var name = config.name();
     var pkg = "temurin-" + version + "-jdk";
 
     var check = execInContainer(name, List.of("dpkg", "-s", pkg));
@@ -697,7 +730,7 @@ public final class ProjectProvisioner {
     stepDone(9, "JDK " + version + " (Temurin)");
   }
 
-  private void installNode(ProjectDefinition config) throws Exception {
+  private void installNode(ProjectDefinition config, String name) throws Exception {
     currentPhase = ProjectPhase.NODE_INSTALLED;
     if (tracker.isCompleted(currentPhase)) {
       stepSkipped(10, "Node already installed");
@@ -720,8 +753,6 @@ public final class ProjectProvisioner {
     }
     var majorVersion = version.contains(".") ? version.substring(0, version.indexOf('.')) : version;
     step(10, "Installing Node.js " + version + "...");
-
-    var name = config.name();
 
     var check = execInContainer(name, List.of("node", "--version"));
     if (check.ok()) {
@@ -775,7 +806,10 @@ public final class ProjectProvisioner {
   }
 
   private void configureGit(
-      ProjectDefinition config, Map<String, String> gitTokens, LocalIdentity.GitIdentity git)
+      ProjectDefinition config,
+      String name,
+      Map<String, String> gitTokens,
+      LocalIdentity.GitIdentity git)
       throws Exception {
     currentPhase = ProjectPhase.GIT_CONFIGURED;
     if (tracker.isCompleted(currentPhase)) {
@@ -785,7 +819,6 @@ public final class ProjectProvisioner {
 
     step(11, "Configuring git identity...");
 
-    var name = config.name();
     var user = ProjectDefinition.USER;
 
     var nameResult =
@@ -819,7 +852,7 @@ public final class ProjectProvisioner {
     stepDone(11, "Git identity configured");
   }
 
-  private void installMaven(ProjectDefinition config) throws Exception {
+  private void installMaven(ProjectDefinition config, String name) throws Exception {
     currentPhase = ProjectPhase.MAVEN_INSTALLED;
     if (tracker.isCompleted(currentPhase)) {
       stepSkipped(12, "Maven already installed");
@@ -841,8 +874,6 @@ public final class ProjectProvisioner {
               + "\n  Example: runtimes.maven: 3.9.9");
     }
     step(12, "Installing Maven " + version + "...");
-
-    var name = config.name();
 
     var check = execInContainer(name, List.of("/opt/maven/bin/mvn", "--version"));
     if (check.ok() && check.stdout().contains(version)) {
@@ -901,7 +932,7 @@ public final class ProjectProvisioner {
     return baseUrl + version + "/binaries/apache-maven-" + version + "-bin.tar.gz";
   }
 
-  private void cloneRepos(ProjectDefinition config, Map<String, String> gitTokens)
+  private void cloneRepos(ProjectDefinition config, String name, Map<String, String> gitTokens)
       throws Exception {
     currentPhase = ProjectPhase.REPOS_CLONED;
     if (tracker.isCompleted(currentPhase)) {
@@ -917,7 +948,6 @@ public final class ProjectProvisioner {
 
     step(13, "Cloning " + config.repos().size() + " repositories...");
 
-    var name = config.name();
     var user = ProjectDefinition.USER;
     var cloned = 0;
 
@@ -974,7 +1004,7 @@ public final class ProjectProvisioner {
     ForgeCliLogin.loginGitHub(shell, containerName, user, gitTokens, config.repos());
   }
 
-  private void pushWorkspaceFiles(ProjectDefinition config, Path filesDir) throws Exception {
+  private void pushWorkspaceFiles(String name, Path filesDir) throws Exception {
     currentPhase = ProjectPhase.WORKSPACE_FILES_PUSHED;
     if (tracker.isCompleted(currentPhase)) {
       stepSkipped(14, "workspace files already pushed");
@@ -1003,7 +1033,7 @@ public final class ProjectProvisioner {
           new ArrayList<>(List.of("incus", "file", "push", "-p", "--uid", "1000", "--gid", "1000"));
       cmd.addAll(List.of("--mode", String.format("%04o", WorkspaceFiles.mode(entry.hostPath()))));
       cmd.add(entry.hostPath().toString());
-      cmd.add(config.name() + workspace + entry.relativePath());
+      cmd.add(name + workspace + entry.relativePath());
       var pushResult = shell.exec(cmd);
       if (!pushResult.ok()) {
         throw new IOException(
@@ -1015,7 +1045,7 @@ public final class ProjectProvisioner {
     stepDone(14, "Pushed " + entries.size() + " workspace file(s)");
   }
 
-  private void provisionServices(ProjectDefinition config) throws Exception {
+  private void provisionServices(ProjectDefinition config, String name) throws Exception {
     currentPhase = ProjectPhase.SERVICES_PROVISIONED;
     if (tracker.isCompleted(currentPhase)) {
       stepSkipped(15, "services already provisioned");
@@ -1030,7 +1060,6 @@ public final class ProjectProvisioner {
 
     step(15, "Provisioning " + config.services().size() + " services...");
 
-    var name = config.name();
     var started = 0;
 
     for (var entry : config.services().entrySet()) {
@@ -1057,7 +1086,7 @@ public final class ProjectProvisioner {
         "Started " + started + "/" + config.services().size() + " services (" + serviceNames + ")");
   }
 
-  private void configurePruneCron(ProjectDefinition config) throws Exception {
+  private void configurePruneCron(ProjectDefinition config, String name) throws Exception {
     currentPhase = ProjectPhase.PRUNE_CRON_CONFIGURED;
     if (tracker.isCompleted(currentPhase)) {
       stepSkipped(16, "cleanup cron already configured");
@@ -1065,7 +1094,6 @@ public final class ProjectProvisioner {
     }
     step(16, "Configuring stale container cleanup...");
 
-    var name = config.name();
     var user = ProjectDefinition.USER;
 
     var check = execAsDevUser(name, List.of("crontab", "-l"));
@@ -1097,7 +1125,7 @@ public final class ProjectProvisioner {
     stepDone(16, "Container cleanup scheduled (hourly) + agent cleanup helper installed");
   }
 
-  private void installAgentTools(ProjectDefinition config) throws Exception {
+  private void installAgentTools(ProjectDefinition config, String name) throws Exception {
     currentPhase = ProjectPhase.AGENT_TOOLS_INSTALLED;
     if (tracker.isCompleted(currentPhase)) {
       stepSkipped(17, "agent tools already installed");
@@ -1115,7 +1143,6 @@ public final class ProjectProvisioner {
 
     step(17, "Installing " + tools.size() + " agent CLI(s)...");
 
-    var name = config.name();
     var installed = 0;
 
     for (var tool : tools) {
@@ -1151,7 +1178,7 @@ public final class ProjectProvisioner {
    * harness the project installs. Sail writes no context file: how the codebase is built is the
    * repository's own {@code AGENTS.md} to say, and the loop's rules are in the prompts.
    */
-  private void installSkills(ProjectDefinition config) throws Exception {
+  private void installSkills(ProjectDefinition config, String name) throws Exception {
     currentPhase = ProjectPhase.SKILLS_INSTALLED;
     if (tracker.isCompleted(currentPhase)) {
       stepSkipped(18, "skills already installed");
@@ -1160,8 +1187,8 @@ public final class ProjectProvisioner {
 
     var user = ProjectDefinition.USER;
     var workspace = "/home/" + user + "/workspace";
-    execInContainer(config.name(), List.of("mkdir", "-p", workspace));
-    execInContainer(config.name(), List.of("chown", user + ":" + user, workspace));
+    execInContainer(name, List.of("mkdir", "-p", workspace));
+    execInContainer(name, List.of("chown", user + ":" + user, workspace));
 
     var harnesses = installedHarnesses(config);
     if (harnesses.isEmpty()) {
@@ -1172,7 +1199,8 @@ public final class ProjectProvisioner {
     step(18, "Installing skills...");
     var detail = "";
     for (var harness : harnesses) {
-      var report = ProjectSkillInstaller.installProject(shell, config.name(), harness, skills);
+      var report =
+          ProjectSkillInstaller.installProject(shell, config.name(), name, harness, skills);
       detail =
           "Skills installed ("
               + String.join(", ", report.installed())
@@ -1191,7 +1219,7 @@ public final class ProjectProvisioner {
     return config.agent().installs().stream().map(Harnesses::of).toList();
   }
 
-  private void writeProjectState(ProjectDefinition config) throws Exception {
+  private void writeProjectState(ProjectDefinition config, String name) throws Exception {
     currentPhase = ProjectPhase.COMPLETE;
     if (tracker.isCompleted(currentPhase)) {
       stepSkipped(19, "project state already written");
@@ -1199,7 +1227,6 @@ public final class ProjectProvisioner {
     }
     step(19, "Writing project state...");
 
-    var name = config.name();
     execInContainer(name, List.of("mkdir", "-p", "/etc/sail"));
 
     var yaml =
@@ -1207,7 +1234,7 @@ public final class ProjectProvisioner {
             name: %s
             created_at: %s
             """
-            .formatted(name, DateTimeUtils.now());
+            .formatted(config.name(), DateTimeUtils.now());
     pushFileToContainer(name, "/etc/sail/project.yaml", yaml);
     var recorded =
         containerConfig.set(name, List.of(INPUTS_KEY + "=" + inputs(config, workstationKey)));

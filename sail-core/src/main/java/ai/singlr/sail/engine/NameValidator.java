@@ -40,6 +40,8 @@ public final class NameValidator {
   private static final Pattern SCP_GIT_URL =
       Pattern.compile("^[a-zA-Z0-9._-]+@[a-zA-Z0-9._-]+:[^\\s]+$");
 
+  private static final String TEMPLATE_SUFFIX = "--tmpl";
+
   private NameValidator() {}
 
   /** Returns whether the given name is a valid project name. */
@@ -56,6 +58,22 @@ public final class NameValidator {
               + "'. Must match [a-z0-9][a-z0-9-]*, max "
               + MAX_LENGTH
               + " characters.");
+    }
+  }
+
+  /**
+   * Refuses a name no new project may take: one that breaks the project-name rule, or one ending
+   * {@code --tmpl}, which names a project's template instance.
+   */
+  public static void requireNewProjectName(String name) {
+    requireValidProjectName(name);
+    if (name.endsWith(TEMPLATE_SUFFIX)) {
+      throw new IllegalArgumentException(
+          "Invalid project name: '"
+              + name
+              + "'. A name ending '"
+              + TEMPLATE_SUFFIX
+              + "' is kept for a project's template; give the project another name.");
     }
   }
 

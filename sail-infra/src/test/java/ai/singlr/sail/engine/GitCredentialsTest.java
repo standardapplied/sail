@@ -13,11 +13,135 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.config.ProjectDefinition;
+import com.sun.net.httpserver.HttpServer;
+import java.net.InetAddress;
+import java.net.InetSocketAddress;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+import java.util.function.Predicate;
 import org.junit.jupiter.api.Test;
 
 class GitCredentialsTest {
+
+  @Test
+  void aTokenGivenServesEveryHostAndNoneAsksNoOne() {
+    var repos = List.of(new ProjectDefinition.Repo("https://git.example.com/a/b.git", "b", null));
+
+    assertEquals(Map.of("*", "tok"), GitCredentials.known(repos, "tok"));
+    assertEquals(Map.of(), GitCredentials.known(repos, null));
+    assertEquals(Map.of(), GitCredentials.known(null, " "));
+  }
+
+  @Test
+  void aRepoWhoseHostHasNoTokenAndThatAsksForCredentialsIsNamed() {
+    var repos =
+        List.of(
+            new ProjectDefinition.Repo("https://github.com/acme/private.git", "private", null),
+            new ProjectDefinition.Repo("https://github.com/acme/public.git/", "public", null),
+            new ProjectDefinition.Repo("https://git.example.com/a/b.git", "b", null),
+            new ProjectDefinition.Repo("https://git.example.com/a/down.git", "down", null));
+    var asked = new CopyOnWriteArrayList<String>();
+    Predicate<String> status =
+        url -> {
+          asked.add(url);
+          return url.contains("private");
+        };
+
+    assertEquals(
+        List.of("https://github.com/acme/private.git"),
+        GitCredentials.askingForAToken(repos, Map.of(), status));
+    assertTrue(
+        asked.contains("https://github.com/acme/public.git/info/refs?service=git-upload-pack"),
+        String.valueOf(asked));
+    assertEquals(
+        List.of(),
+        GitCredentials.askingForAToken(repos, Map.of("github.com", "tok"), url -> true).stream()
+            .filter(url -> url.contains("github.com"))
+            .toList());
+    assertEquals(List.of(), GitCredentials.askingForAToken(null, Map.of(), url -> true));
+  }
+
+  @Test
+  void theReposAreAskedAtOnceSoTheCheckTakesAsLongAsOneAnswer() {
+    var repos =
+        List.of(
+            new ProjectDefinition.Repo("https://github.com/acme/a.git", "a", null),
+            new ProjectDefinition.Repo("https://github.com/acme/b.git", "b", null),
+            new ProjectDefinition.Repo("https://gitlab.com/acme/c.git", "c", null));
+    var inFlight = new CountDownLatch(repos.size());
+    Predicate<String> status =
+        url -> {
+          inFlight.countDown();
+          try {
+            return inFlight.await(10, TimeUnit.SECONDS);
+          } catch (InterruptedException e) {
+            return false;
+          }
+        };
+
+    assertEquals(
+        List.of(
+            "https://github.com/acme/a.git",
+            "https://github.com/acme/b.git",
+            "https://gitlab.com/acme/c.git"),
+        GitCredentials.askingForAToken(repos, Map.of(), status));
+  }
+
+  @Test
+  void onlyA401OrA403WithAChallengeAsksForCredentialsAndNoRedirectIsFollowed() throws Exception {
+    var elsewhere =
+        HttpServer.create(new InetSocketAddress(InetAddress.getLoopbackAddress(), 0), 0);
+    var followed = new CopyOnWriteArrayList<String>();
+    elsewhere.createContext(
+        "/",
+        exchange -> {
+          followed.add(exchange.getRequestURI().toString());
+          exchange.sendResponseHeaders(401, -1);
+          exchange.close();
+        });
+    var server = HttpServer.create(new InetSocketAddress(InetAddress.getLoopbackAddress(), 0), 0);
+    server.createContext(
+        "/",
+        exchange -> {
+          switch (exchange.getRequestURI().getPath()) {
+            case "/private" -> exchange.sendResponseHeaders(401, -1);
+            case "/challenged" -> {
+              exchange.getResponseHeaders().add("WWW-Authenticate", "Basic realm=\"git\"");
+              exchange.sendResponseHeaders(403, -1);
+            }
+            case "/forbidden" -> exchange.sendResponseHeaders(403, -1);
+            case "/moved" -> {
+              exchange
+                  .getResponseHeaders()
+                  .add(
+                      "Location",
+                      "http://127.0.0.1:" + elsewhere.getAddress().getPort() + "/private");
+              exchange.sendResponseHeaders(302, -1);
+            }
+            default -> exchange.sendResponseHeaders(200, -1);
+          }
+          exchange.close();
+        });
+    elsewhere.start();
+    server.start();
+    var at = "http://127.0.0.1:" + server.getAddress().getPort();
+    try {
+      assertTrue(GitCredentials.asksForCredentials(at + "/private"));
+      assertTrue(GitCredentials.asksForCredentials(at + "/challenged"));
+      assertFalse(GitCredentials.asksForCredentials(at + "/forbidden"), "a 403 no token lifts");
+      assertFalse(GitCredentials.asksForCredentials(at + "/public"));
+      assertFalse(GitCredentials.asksForCredentials(at + "/moved"));
+      assertEquals(List.of(), followed, "a redirect is not followed to another host");
+      assertFalse(GitCredentials.asksForCredentials("http://127.0.0.1:1/info/refs"));
+      assertFalse(GitCredentials.asksForCredentials("not a url"));
+    } finally {
+      server.stop(0);
+      elsewhere.stop(0);
+    }
+  }
 
   @Test
   void buildCredentialStoreEmptyWhenNoRepos() {

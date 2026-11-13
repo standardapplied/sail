@@ -3774,6 +3774,238 @@ list specs of omega as room viewer ada-room beta	denied PROJECT_NOT_IN_CATALOG 4
 list specs of omega as room viewer bob-room acme	denied PROJECT_NOT_IN_CATALOG 404 Project 'omega' is not in the catalog. | Create it with 'sail project create omega', or sync it from main with 'sail sync'.
 list specs of omega as room viewer bob-room all	denied PROJECT_NOT_IN_CATALOG 404 Project 'omega' is not in the catalog. | Create it with 'sail project create omega', or sync it from main with 'sail sync'.
 list specs of omega as room viewer bob-room beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'omega' is not in the catalog. | Create it with 'sail project create omega', or sync it from main with 'sail sync'.
+list the workspaces of acme as agent member ada-agent acme	ok WorkspaceListResponse main
+list the workspaces of acme as agent member ada-agent all	ok WorkspaceListResponse main
+list the workspaces of acme as agent member ada-agent beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+list the workspaces of acme as agent member bob-agent acme	ok WorkspaceListResponse main
+list the workspaces of acme as agent member bob-agent all	ok WorkspaceListResponse main
+list the workspaces of acme as agent member bob-agent beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+list the workspaces of acme as agent viewer ada-agent acme	ok WorkspaceListResponse main
+list the workspaces of acme as agent viewer ada-agent all	ok WorkspaceListResponse main
+list the workspaces of acme as agent viewer ada-agent beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+list the workspaces of acme as agent viewer bob-agent acme	ok WorkspaceListResponse main
+list the workspaces of acme as agent viewer bob-agent all	ok WorkspaceListResponse main
+list the workspaces of acme as agent viewer bob-agent beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+list the workspaces of acme as api admin root all	ok WorkspaceListResponse main
+list the workspaces of acme as api member ada acme	ok WorkspaceListResponse main
+list the workspaces of acme as api member ada all	ok WorkspaceListResponse main
+list the workspaces of acme as api member ada beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+list the workspaces of acme as api member bob acme	ok WorkspaceListResponse main
+list the workspaces of acme as api member bob all	ok WorkspaceListResponse main
+list the workspaces of acme as api member bob beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+list the workspaces of acme as api member machine all	ok WorkspaceListResponse main
+list the workspaces of acme as api viewer ada acme	ok WorkspaceListResponse main
+list the workspaces of acme as api viewer ada all	ok WorkspaceListResponse main
+list the workspaces of acme as api viewer ada beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+list the workspaces of acme as api viewer bob acme	ok WorkspaceListResponse main
+list the workspaces of acme as api viewer bob all	ok WorkspaceListResponse main
+list the workspaces of acme as api viewer bob beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+list the workspaces of acme as cli admin root all	ok WorkspaceListResponse main
+list the workspaces of acme as cli member ada acme	ok WorkspaceListResponse main
+list the workspaces of acme as cli member ada all	ok WorkspaceListResponse main
+list the workspaces of acme as cli member ada beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+list the workspaces of acme as cli member bob acme	ok WorkspaceListResponse main
+list the workspaces of acme as cli member bob all	ok WorkspaceListResponse main
+list the workspaces of acme as cli member bob beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+list the workspaces of acme as cli viewer ada acme	ok WorkspaceListResponse main
+list the workspaces of acme as cli viewer ada all	ok WorkspaceListResponse main
+list the workspaces of acme as cli viewer ada beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+list the workspaces of acme as cli viewer bob acme	ok WorkspaceListResponse main
+list the workspaces of acme as cli viewer bob all	ok WorkspaceListResponse main
+list the workspaces of acme as cli viewer bob beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+list the workspaces of acme as container admin root all	ok WorkspaceListResponse main
+list the workspaces of acme as container member ada acme	ok WorkspaceListResponse main
+list the workspaces of acme as container member ada all	ok WorkspaceListResponse main
+list the workspaces of acme as container member ada beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+list the workspaces of acme as container member bob acme	ok WorkspaceListResponse main
+list the workspaces of acme as container member bob all	ok WorkspaceListResponse main
+list the workspaces of acme as container member bob beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+list the workspaces of acme as container viewer ada acme	ok WorkspaceListResponse main
+list the workspaces of acme as container viewer ada all	ok WorkspaceListResponse main
+list the workspaces of acme as container viewer ada beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+list the workspaces of acme as container viewer bob acme	ok WorkspaceListResponse main
+list the workspaces of acme as container viewer bob all	ok WorkspaceListResponse main
+list the workspaces of acme as container viewer bob beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+list the workspaces of acme as room viewer ada-room acme	ok WorkspaceListResponse main
+list the workspaces of acme as room viewer ada-room all	ok WorkspaceListResponse main
+list the workspaces of acme as room viewer ada-room beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+list the workspaces of acme as room viewer bob-room acme	ok WorkspaceListResponse main
+list the workspaces of acme as room viewer bob-room all	ok WorkspaceListResponse main
+list the workspaces of acme as room viewer bob-room beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+list the workspaces of beta as agent member ada-agent acme	denied PROJECT_NOT_IN_CATALOG 404 Project 'beta' is not in the catalog. | Create it with 'sail project create beta', or sync it from main with 'sail sync'.
+list the workspaces of beta as agent member ada-agent all	ok WorkspaceListResponse main
+list the workspaces of beta as agent member ada-agent beta	ok WorkspaceListResponse main
+list the workspaces of beta as agent member bob-agent acme	denied PROJECT_NOT_IN_CATALOG 404 Project 'beta' is not in the catalog. | Create it with 'sail project create beta', or sync it from main with 'sail sync'.
+list the workspaces of beta as agent member bob-agent all	ok WorkspaceListResponse main
+list the workspaces of beta as agent member bob-agent beta	ok WorkspaceListResponse main
+list the workspaces of beta as agent viewer ada-agent acme	denied PROJECT_NOT_IN_CATALOG 404 Project 'beta' is not in the catalog. | Create it with 'sail project create beta', or sync it from main with 'sail sync'.
+list the workspaces of beta as agent viewer ada-agent all	ok WorkspaceListResponse main
+list the workspaces of beta as agent viewer ada-agent beta	ok WorkspaceListResponse main
+list the workspaces of beta as agent viewer bob-agent acme	denied PROJECT_NOT_IN_CATALOG 404 Project 'beta' is not in the catalog. | Create it with 'sail project create beta', or sync it from main with 'sail sync'.
+list the workspaces of beta as agent viewer bob-agent all	ok WorkspaceListResponse main
+list the workspaces of beta as agent viewer bob-agent beta	ok WorkspaceListResponse main
+list the workspaces of beta as api admin root all	ok WorkspaceListResponse main
+list the workspaces of beta as api member ada acme	denied PROJECT_NOT_IN_CATALOG 404 Project 'beta' is not in the catalog. | Create it with 'sail project create beta', or sync it from main with 'sail sync'.
+list the workspaces of beta as api member ada all	ok WorkspaceListResponse main
+list the workspaces of beta as api member ada beta	ok WorkspaceListResponse main
+list the workspaces of beta as api member bob acme	denied PROJECT_NOT_IN_CATALOG 404 Project 'beta' is not in the catalog. | Create it with 'sail project create beta', or sync it from main with 'sail sync'.
+list the workspaces of beta as api member bob all	ok WorkspaceListResponse main
+list the workspaces of beta as api member bob beta	ok WorkspaceListResponse main
+list the workspaces of beta as api member machine all	ok WorkspaceListResponse main
+list the workspaces of beta as api viewer ada acme	denied PROJECT_NOT_IN_CATALOG 404 Project 'beta' is not in the catalog. | Create it with 'sail project create beta', or sync it from main with 'sail sync'.
+list the workspaces of beta as api viewer ada all	ok WorkspaceListResponse main
+list the workspaces of beta as api viewer ada beta	ok WorkspaceListResponse main
+list the workspaces of beta as api viewer bob acme	denied PROJECT_NOT_IN_CATALOG 404 Project 'beta' is not in the catalog. | Create it with 'sail project create beta', or sync it from main with 'sail sync'.
+list the workspaces of beta as api viewer bob all	ok WorkspaceListResponse main
+list the workspaces of beta as api viewer bob beta	ok WorkspaceListResponse main
+list the workspaces of beta as cli admin root all	ok WorkspaceListResponse main
+list the workspaces of beta as cli member ada acme	denied PROJECT_NOT_IN_CATALOG 404 Project 'beta' is not in the catalog. | Create it with 'sail project create beta', or sync it from main with 'sail sync'.
+list the workspaces of beta as cli member ada all	ok WorkspaceListResponse main
+list the workspaces of beta as cli member ada beta	ok WorkspaceListResponse main
+list the workspaces of beta as cli member bob acme	denied PROJECT_NOT_IN_CATALOG 404 Project 'beta' is not in the catalog. | Create it with 'sail project create beta', or sync it from main with 'sail sync'.
+list the workspaces of beta as cli member bob all	ok WorkspaceListResponse main
+list the workspaces of beta as cli member bob beta	ok WorkspaceListResponse main
+list the workspaces of beta as cli viewer ada acme	denied PROJECT_NOT_IN_CATALOG 404 Project 'beta' is not in the catalog. | Create it with 'sail project create beta', or sync it from main with 'sail sync'.
+list the workspaces of beta as cli viewer ada all	ok WorkspaceListResponse main
+list the workspaces of beta as cli viewer ada beta	ok WorkspaceListResponse main
+list the workspaces of beta as cli viewer bob acme	denied PROJECT_NOT_IN_CATALOG 404 Project 'beta' is not in the catalog. | Create it with 'sail project create beta', or sync it from main with 'sail sync'.
+list the workspaces of beta as cli viewer bob all	ok WorkspaceListResponse main
+list the workspaces of beta as cli viewer bob beta	ok WorkspaceListResponse main
+list the workspaces of beta as container admin root all	ok WorkspaceListResponse main
+list the workspaces of beta as container member ada acme	denied PROJECT_NOT_IN_CATALOG 404 Project 'beta' is not in the catalog. | Create it with 'sail project create beta', or sync it from main with 'sail sync'.
+list the workspaces of beta as container member ada all	ok WorkspaceListResponse main
+list the workspaces of beta as container member ada beta	ok WorkspaceListResponse main
+list the workspaces of beta as container member bob acme	denied PROJECT_NOT_IN_CATALOG 404 Project 'beta' is not in the catalog. | Create it with 'sail project create beta', or sync it from main with 'sail sync'.
+list the workspaces of beta as container member bob all	ok WorkspaceListResponse main
+list the workspaces of beta as container member bob beta	ok WorkspaceListResponse main
+list the workspaces of beta as container viewer ada acme	denied PROJECT_NOT_IN_CATALOG 404 Project 'beta' is not in the catalog. | Create it with 'sail project create beta', or sync it from main with 'sail sync'.
+list the workspaces of beta as container viewer ada all	ok WorkspaceListResponse main
+list the workspaces of beta as container viewer ada beta	ok WorkspaceListResponse main
+list the workspaces of beta as container viewer bob acme	denied PROJECT_NOT_IN_CATALOG 404 Project 'beta' is not in the catalog. | Create it with 'sail project create beta', or sync it from main with 'sail sync'.
+list the workspaces of beta as container viewer bob all	ok WorkspaceListResponse main
+list the workspaces of beta as container viewer bob beta	ok WorkspaceListResponse main
+list the workspaces of beta as room viewer ada-room acme	denied PROJECT_NOT_IN_CATALOG 404 Project 'beta' is not in the catalog. | Create it with 'sail project create beta', or sync it from main with 'sail sync'.
+list the workspaces of beta as room viewer ada-room all	denied PROJECT_NOT_IN_CATALOG 404 Project 'beta' is not in the catalog. | Create it with 'sail project create beta', or sync it from main with 'sail sync'.
+list the workspaces of beta as room viewer ada-room beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'beta' is not in the catalog. | Create it with 'sail project create beta', or sync it from main with 'sail sync'.
+list the workspaces of beta as room viewer bob-room acme	denied PROJECT_NOT_IN_CATALOG 404 Project 'beta' is not in the catalog. | Create it with 'sail project create beta', or sync it from main with 'sail sync'.
+list the workspaces of beta as room viewer bob-room all	denied PROJECT_NOT_IN_CATALOG 404 Project 'beta' is not in the catalog. | Create it with 'sail project create beta', or sync it from main with 'sail sync'.
+list the workspaces of beta as room viewer bob-room beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'beta' is not in the catalog. | Create it with 'sail project create beta', or sync it from main with 'sail sync'.
+list the workspaces of delta as agent member ada-agent acme	denied PROJECT_NOT_IN_CATALOG 404 Project 'delta' is not in the catalog. | Create it with 'sail project create delta', or sync it from main with 'sail sync'.
+list the workspaces of delta as agent member ada-agent all	ok WorkspaceListResponse main
+list the workspaces of delta as agent member ada-agent beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'delta' is not in the catalog. | Create it with 'sail project create delta', or sync it from main with 'sail sync'.
+list the workspaces of delta as agent member bob-agent acme	denied PROJECT_NOT_IN_CATALOG 404 Project 'delta' is not in the catalog. | Create it with 'sail project create delta', or sync it from main with 'sail sync'.
+list the workspaces of delta as agent member bob-agent all	ok WorkspaceListResponse main
+list the workspaces of delta as agent member bob-agent beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'delta' is not in the catalog. | Create it with 'sail project create delta', or sync it from main with 'sail sync'.
+list the workspaces of delta as agent viewer ada-agent acme	denied PROJECT_NOT_IN_CATALOG 404 Project 'delta' is not in the catalog. | Create it with 'sail project create delta', or sync it from main with 'sail sync'.
+list the workspaces of delta as agent viewer ada-agent all	ok WorkspaceListResponse main
+list the workspaces of delta as agent viewer ada-agent beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'delta' is not in the catalog. | Create it with 'sail project create delta', or sync it from main with 'sail sync'.
+list the workspaces of delta as agent viewer bob-agent acme	denied PROJECT_NOT_IN_CATALOG 404 Project 'delta' is not in the catalog. | Create it with 'sail project create delta', or sync it from main with 'sail sync'.
+list the workspaces of delta as agent viewer bob-agent all	ok WorkspaceListResponse main
+list the workspaces of delta as agent viewer bob-agent beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'delta' is not in the catalog. | Create it with 'sail project create delta', or sync it from main with 'sail sync'.
+list the workspaces of delta as api admin root all	ok WorkspaceListResponse main
+list the workspaces of delta as api member ada acme	denied PROJECT_NOT_IN_CATALOG 404 Project 'delta' is not in the catalog. | Create it with 'sail project create delta', or sync it from main with 'sail sync'.
+list the workspaces of delta as api member ada all	ok WorkspaceListResponse main
+list the workspaces of delta as api member ada beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'delta' is not in the catalog. | Create it with 'sail project create delta', or sync it from main with 'sail sync'.
+list the workspaces of delta as api member bob acme	denied PROJECT_NOT_IN_CATALOG 404 Project 'delta' is not in the catalog. | Create it with 'sail project create delta', or sync it from main with 'sail sync'.
+list the workspaces of delta as api member bob all	ok WorkspaceListResponse main
+list the workspaces of delta as api member bob beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'delta' is not in the catalog. | Create it with 'sail project create delta', or sync it from main with 'sail sync'.
+list the workspaces of delta as api member machine all	ok WorkspaceListResponse main
+list the workspaces of delta as api viewer ada acme	denied PROJECT_NOT_IN_CATALOG 404 Project 'delta' is not in the catalog. | Create it with 'sail project create delta', or sync it from main with 'sail sync'.
+list the workspaces of delta as api viewer ada all	ok WorkspaceListResponse main
+list the workspaces of delta as api viewer ada beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'delta' is not in the catalog. | Create it with 'sail project create delta', or sync it from main with 'sail sync'.
+list the workspaces of delta as api viewer bob acme	denied PROJECT_NOT_IN_CATALOG 404 Project 'delta' is not in the catalog. | Create it with 'sail project create delta', or sync it from main with 'sail sync'.
+list the workspaces of delta as api viewer bob all	ok WorkspaceListResponse main
+list the workspaces of delta as api viewer bob beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'delta' is not in the catalog. | Create it with 'sail project create delta', or sync it from main with 'sail sync'.
+list the workspaces of delta as cli admin root all	ok WorkspaceListResponse main
+list the workspaces of delta as cli member ada acme	denied PROJECT_NOT_IN_CATALOG 404 Project 'delta' is not in the catalog. | Create it with 'sail project create delta', or sync it from main with 'sail sync'.
+list the workspaces of delta as cli member ada all	ok WorkspaceListResponse main
+list the workspaces of delta as cli member ada beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'delta' is not in the catalog. | Create it with 'sail project create delta', or sync it from main with 'sail sync'.
+list the workspaces of delta as cli member bob acme	denied PROJECT_NOT_IN_CATALOG 404 Project 'delta' is not in the catalog. | Create it with 'sail project create delta', or sync it from main with 'sail sync'.
+list the workspaces of delta as cli member bob all	ok WorkspaceListResponse main
+list the workspaces of delta as cli member bob beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'delta' is not in the catalog. | Create it with 'sail project create delta', or sync it from main with 'sail sync'.
+list the workspaces of delta as cli viewer ada acme	denied PROJECT_NOT_IN_CATALOG 404 Project 'delta' is not in the catalog. | Create it with 'sail project create delta', or sync it from main with 'sail sync'.
+list the workspaces of delta as cli viewer ada all	ok WorkspaceListResponse main
+list the workspaces of delta as cli viewer ada beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'delta' is not in the catalog. | Create it with 'sail project create delta', or sync it from main with 'sail sync'.
+list the workspaces of delta as cli viewer bob acme	denied PROJECT_NOT_IN_CATALOG 404 Project 'delta' is not in the catalog. | Create it with 'sail project create delta', or sync it from main with 'sail sync'.
+list the workspaces of delta as cli viewer bob all	ok WorkspaceListResponse main
+list the workspaces of delta as cli viewer bob beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'delta' is not in the catalog. | Create it with 'sail project create delta', or sync it from main with 'sail sync'.
+list the workspaces of delta as container admin root all	ok WorkspaceListResponse main
+list the workspaces of delta as container member ada acme	denied PROJECT_NOT_IN_CATALOG 404 Project 'delta' is not in the catalog. | Create it with 'sail project create delta', or sync it from main with 'sail sync'.
+list the workspaces of delta as container member ada all	ok WorkspaceListResponse main
+list the workspaces of delta as container member ada beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'delta' is not in the catalog. | Create it with 'sail project create delta', or sync it from main with 'sail sync'.
+list the workspaces of delta as container member bob acme	denied PROJECT_NOT_IN_CATALOG 404 Project 'delta' is not in the catalog. | Create it with 'sail project create delta', or sync it from main with 'sail sync'.
+list the workspaces of delta as container member bob all	ok WorkspaceListResponse main
+list the workspaces of delta as container member bob beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'delta' is not in the catalog. | Create it with 'sail project create delta', or sync it from main with 'sail sync'.
+list the workspaces of delta as container viewer ada acme	denied PROJECT_NOT_IN_CATALOG 404 Project 'delta' is not in the catalog. | Create it with 'sail project create delta', or sync it from main with 'sail sync'.
+list the workspaces of delta as container viewer ada all	ok WorkspaceListResponse main
+list the workspaces of delta as container viewer ada beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'delta' is not in the catalog. | Create it with 'sail project create delta', or sync it from main with 'sail sync'.
+list the workspaces of delta as container viewer bob acme	denied PROJECT_NOT_IN_CATALOG 404 Project 'delta' is not in the catalog. | Create it with 'sail project create delta', or sync it from main with 'sail sync'.
+list the workspaces of delta as container viewer bob all	ok WorkspaceListResponse main
+list the workspaces of delta as container viewer bob beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'delta' is not in the catalog. | Create it with 'sail project create delta', or sync it from main with 'sail sync'.
+list the workspaces of delta as room viewer ada-room acme	denied PROJECT_NOT_IN_CATALOG 404 Project 'delta' is not in the catalog. | Create it with 'sail project create delta', or sync it from main with 'sail sync'.
+list the workspaces of delta as room viewer ada-room all	denied PROJECT_NOT_IN_CATALOG 404 Project 'delta' is not in the catalog. | Create it with 'sail project create delta', or sync it from main with 'sail sync'.
+list the workspaces of delta as room viewer ada-room beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'delta' is not in the catalog. | Create it with 'sail project create delta', or sync it from main with 'sail sync'.
+list the workspaces of delta as room viewer bob-room acme	denied PROJECT_NOT_IN_CATALOG 404 Project 'delta' is not in the catalog. | Create it with 'sail project create delta', or sync it from main with 'sail sync'.
+list the workspaces of delta as room viewer bob-room all	denied PROJECT_NOT_IN_CATALOG 404 Project 'delta' is not in the catalog. | Create it with 'sail project create delta', or sync it from main with 'sail sync'.
+list the workspaces of delta as room viewer bob-room beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'delta' is not in the catalog. | Create it with 'sail project create delta', or sync it from main with 'sail sync'.
+list the workspaces of omega as agent member ada-agent acme	denied PROJECT_NOT_IN_CATALOG 404 Project 'omega' is not in the catalog. | Create it with 'sail project create omega', or sync it from main with 'sail sync'.
+list the workspaces of omega as agent member ada-agent all	denied PROJECT_NOT_IN_CATALOG 404 Project 'omega' is not in the catalog. | Create it with 'sail project create omega', or sync it from main with 'sail sync'.
+list the workspaces of omega as agent member ada-agent beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'omega' is not in the catalog. | Create it with 'sail project create omega', or sync it from main with 'sail sync'.
+list the workspaces of omega as agent member bob-agent acme	denied PROJECT_NOT_IN_CATALOG 404 Project 'omega' is not in the catalog. | Create it with 'sail project create omega', or sync it from main with 'sail sync'.
+list the workspaces of omega as agent member bob-agent all	denied PROJECT_NOT_IN_CATALOG 404 Project 'omega' is not in the catalog. | Create it with 'sail project create omega', or sync it from main with 'sail sync'.
+list the workspaces of omega as agent member bob-agent beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'omega' is not in the catalog. | Create it with 'sail project create omega', or sync it from main with 'sail sync'.
+list the workspaces of omega as agent viewer ada-agent acme	denied PROJECT_NOT_IN_CATALOG 404 Project 'omega' is not in the catalog. | Create it with 'sail project create omega', or sync it from main with 'sail sync'.
+list the workspaces of omega as agent viewer ada-agent all	denied PROJECT_NOT_IN_CATALOG 404 Project 'omega' is not in the catalog. | Create it with 'sail project create omega', or sync it from main with 'sail sync'.
+list the workspaces of omega as agent viewer ada-agent beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'omega' is not in the catalog. | Create it with 'sail project create omega', or sync it from main with 'sail sync'.
+list the workspaces of omega as agent viewer bob-agent acme	denied PROJECT_NOT_IN_CATALOG 404 Project 'omega' is not in the catalog. | Create it with 'sail project create omega', or sync it from main with 'sail sync'.
+list the workspaces of omega as agent viewer bob-agent all	denied PROJECT_NOT_IN_CATALOG 404 Project 'omega' is not in the catalog. | Create it with 'sail project create omega', or sync it from main with 'sail sync'.
+list the workspaces of omega as agent viewer bob-agent beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'omega' is not in the catalog. | Create it with 'sail project create omega', or sync it from main with 'sail sync'.
+list the workspaces of omega as api admin root all	denied PROJECT_NOT_IN_CATALOG 404 Project 'omega' is not in the catalog. | Create it with 'sail project create omega', or sync it from main with 'sail sync'.
+list the workspaces of omega as api member ada acme	denied PROJECT_NOT_IN_CATALOG 404 Project 'omega' is not in the catalog. | Create it with 'sail project create omega', or sync it from main with 'sail sync'.
+list the workspaces of omega as api member ada all	denied PROJECT_NOT_IN_CATALOG 404 Project 'omega' is not in the catalog. | Create it with 'sail project create omega', or sync it from main with 'sail sync'.
+list the workspaces of omega as api member ada beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'omega' is not in the catalog. | Create it with 'sail project create omega', or sync it from main with 'sail sync'.
+list the workspaces of omega as api member bob acme	denied PROJECT_NOT_IN_CATALOG 404 Project 'omega' is not in the catalog. | Create it with 'sail project create omega', or sync it from main with 'sail sync'.
+list the workspaces of omega as api member bob all	denied PROJECT_NOT_IN_CATALOG 404 Project 'omega' is not in the catalog. | Create it with 'sail project create omega', or sync it from main with 'sail sync'.
+list the workspaces of omega as api member bob beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'omega' is not in the catalog. | Create it with 'sail project create omega', or sync it from main with 'sail sync'.
+list the workspaces of omega as api member machine all	denied PROJECT_NOT_IN_CATALOG 404 Project 'omega' is not in the catalog. | Create it with 'sail project create omega', or sync it from main with 'sail sync'.
+list the workspaces of omega as api viewer ada acme	denied PROJECT_NOT_IN_CATALOG 404 Project 'omega' is not in the catalog. | Create it with 'sail project create omega', or sync it from main with 'sail sync'.
+list the workspaces of omega as api viewer ada all	denied PROJECT_NOT_IN_CATALOG 404 Project 'omega' is not in the catalog. | Create it with 'sail project create omega', or sync it from main with 'sail sync'.
+list the workspaces of omega as api viewer ada beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'omega' is not in the catalog. | Create it with 'sail project create omega', or sync it from main with 'sail sync'.
+list the workspaces of omega as api viewer bob acme	denied PROJECT_NOT_IN_CATALOG 404 Project 'omega' is not in the catalog. | Create it with 'sail project create omega', or sync it from main with 'sail sync'.
+list the workspaces of omega as api viewer bob all	denied PROJECT_NOT_IN_CATALOG 404 Project 'omega' is not in the catalog. | Create it with 'sail project create omega', or sync it from main with 'sail sync'.
+list the workspaces of omega as api viewer bob beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'omega' is not in the catalog. | Create it with 'sail project create omega', or sync it from main with 'sail sync'.
+list the workspaces of omega as cli admin root all	denied PROJECT_NOT_IN_CATALOG 404 Project 'omega' is not in the catalog. | Create it with 'sail project create omega', or sync it from main with 'sail sync'.
+list the workspaces of omega as cli member ada acme	denied PROJECT_NOT_IN_CATALOG 404 Project 'omega' is not in the catalog. | Create it with 'sail project create omega', or sync it from main with 'sail sync'.
+list the workspaces of omega as cli member ada all	denied PROJECT_NOT_IN_CATALOG 404 Project 'omega' is not in the catalog. | Create it with 'sail project create omega', or sync it from main with 'sail sync'.
+list the workspaces of omega as cli member ada beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'omega' is not in the catalog. | Create it with 'sail project create omega', or sync it from main with 'sail sync'.
+list the workspaces of omega as cli member bob acme	denied PROJECT_NOT_IN_CATALOG 404 Project 'omega' is not in the catalog. | Create it with 'sail project create omega', or sync it from main with 'sail sync'.
+list the workspaces of omega as cli member bob all	denied PROJECT_NOT_IN_CATALOG 404 Project 'omega' is not in the catalog. | Create it with 'sail project create omega', or sync it from main with 'sail sync'.
+list the workspaces of omega as cli member bob beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'omega' is not in the catalog. | Create it with 'sail project create omega', or sync it from main with 'sail sync'.
+list the workspaces of omega as cli viewer ada acme	denied PROJECT_NOT_IN_CATALOG 404 Project 'omega' is not in the catalog. | Create it with 'sail project create omega', or sync it from main with 'sail sync'.
+list the workspaces of omega as cli viewer ada all	denied PROJECT_NOT_IN_CATALOG 404 Project 'omega' is not in the catalog. | Create it with 'sail project create omega', or sync it from main with 'sail sync'.
+list the workspaces of omega as cli viewer ada beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'omega' is not in the catalog. | Create it with 'sail project create omega', or sync it from main with 'sail sync'.
+list the workspaces of omega as cli viewer bob acme	denied PROJECT_NOT_IN_CATALOG 404 Project 'omega' is not in the catalog. | Create it with 'sail project create omega', or sync it from main with 'sail sync'.
+list the workspaces of omega as cli viewer bob all	denied PROJECT_NOT_IN_CATALOG 404 Project 'omega' is not in the catalog. | Create it with 'sail project create omega', or sync it from main with 'sail sync'.
+list the workspaces of omega as cli viewer bob beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'omega' is not in the catalog. | Create it with 'sail project create omega', or sync it from main with 'sail sync'.
+list the workspaces of omega as container admin root all	denied PROJECT_NOT_IN_CATALOG 404 Project 'omega' is not in the catalog. | Create it with 'sail project create omega', or sync it from main with 'sail sync'.
+list the workspaces of omega as container member ada acme	denied PROJECT_NOT_IN_CATALOG 404 Project 'omega' is not in the catalog. | Create it with 'sail project create omega', or sync it from main with 'sail sync'.
+list the workspaces of omega as container member ada all	denied PROJECT_NOT_IN_CATALOG 404 Project 'omega' is not in the catalog. | Create it with 'sail project create omega', or sync it from main with 'sail sync'.
+list the workspaces of omega as container member ada beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'omega' is not in the catalog. | Create it with 'sail project create omega', or sync it from main with 'sail sync'.
+list the workspaces of omega as container member bob acme	denied PROJECT_NOT_IN_CATALOG 404 Project 'omega' is not in the catalog. | Create it with 'sail project create omega', or sync it from main with 'sail sync'.
+list the workspaces of omega as container member bob all	denied PROJECT_NOT_IN_CATALOG 404 Project 'omega' is not in the catalog. | Create it with 'sail project create omega', or sync it from main with 'sail sync'.
+list the workspaces of omega as container member bob beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'omega' is not in the catalog. | Create it with 'sail project create omega', or sync it from main with 'sail sync'.
+list the workspaces of omega as container viewer ada acme	denied PROJECT_NOT_IN_CATALOG 404 Project 'omega' is not in the catalog. | Create it with 'sail project create omega', or sync it from main with 'sail sync'.
+list the workspaces of omega as container viewer ada all	denied PROJECT_NOT_IN_CATALOG 404 Project 'omega' is not in the catalog. | Create it with 'sail project create omega', or sync it from main with 'sail sync'.
+list the workspaces of omega as container viewer ada beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'omega' is not in the catalog. | Create it with 'sail project create omega', or sync it from main with 'sail sync'.
+list the workspaces of omega as container viewer bob acme	denied PROJECT_NOT_IN_CATALOG 404 Project 'omega' is not in the catalog. | Create it with 'sail project create omega', or sync it from main with 'sail sync'.
+list the workspaces of omega as container viewer bob all	denied PROJECT_NOT_IN_CATALOG 404 Project 'omega' is not in the catalog. | Create it with 'sail project create omega', or sync it from main with 'sail sync'.
+list the workspaces of omega as container viewer bob beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'omega' is not in the catalog. | Create it with 'sail project create omega', or sync it from main with 'sail sync'.
+list the workspaces of omega as room viewer ada-room acme	denied PROJECT_NOT_IN_CATALOG 404 Project 'omega' is not in the catalog. | Create it with 'sail project create omega', or sync it from main with 'sail sync'.
+list the workspaces of omega as room viewer ada-room all	denied PROJECT_NOT_IN_CATALOG 404 Project 'omega' is not in the catalog. | Create it with 'sail project create omega', or sync it from main with 'sail sync'.
+list the workspaces of omega as room viewer ada-room beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'omega' is not in the catalog. | Create it with 'sail project create omega', or sync it from main with 'sail sync'.
+list the workspaces of omega as room viewer bob-room acme	denied PROJECT_NOT_IN_CATALOG 404 Project 'omega' is not in the catalog. | Create it with 'sail project create omega', or sync it from main with 'sail sync'.
+list the workspaces of omega as room viewer bob-room all	denied PROJECT_NOT_IN_CATALOG 404 Project 'omega' is not in the catalog. | Create it with 'sail project create omega', or sync it from main with 'sail sync'.
+list the workspaces of omega as room viewer bob-room beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'omega' is not in the catalog. | Create it with 'sail project create omega', or sync it from main with 'sail sync'.
 post in b-room as agent member ada-agent acme	denied ROOM_NOT_FOUND 404 Room 'b-room' was not found. | 
 post in b-room as agent member ada-agent all	denied FORBIDDEN_NOT_ASSIGNEE 403 'claude/019fee00-0000-7000-8000-0000000ada01' may post only in its own work, not in 'b-room'. | An agent acts only on the work sail launched it for; draft a follow-up spec for anything else.
 post in b-room as agent member ada-agent beta	denied FORBIDDEN_NOT_ASSIGNEE 403 'claude/019fee00-0000-7000-8000-0000000ada01' may post only in its own work, not in 'b-room'. | An agent acts only on the work sail launched it for; draft a follow-up spec for anything else.

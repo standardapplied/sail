@@ -17,6 +17,7 @@ import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.config.TestDefinitions;
 import ai.singlr.sail.config.YamlUtil;
+import ai.singlr.sail.engine.BoxInstances;
 import ai.singlr.sail.engine.HostAccess;
 import ai.singlr.sail.engine.HostToken;
 import ai.singlr.sail.engine.ScriptedShellExecutor;
@@ -121,7 +122,9 @@ class AccessDoorsBaselineTest {
             TestControlPlane.on(
                 OperationsFactory.create(
                     world.db,
-                    new ScriptedShellExecutor().onOk("incus list", "[]"),
+                    new ScriptedShellExecutor()
+                        .onOk("incus list", "[]")
+                        .onOk("incus storage list", "[{\"name\": \"tank\", \"driver\": \"zfs\"}]"),
                     bus,
                     SyncScheduler.disabled(),
                     SessionYield.NONE),
@@ -179,7 +182,12 @@ class AccessDoorsBaselineTest {
     var roles =
         new RoleRule(
             () -> new SyncConfig(SyncConfig.ROLE_MAIN, null, Cast.OWNER), new FdeStore(world.db));
-    var pty = new HostLanes.Pty(world.db, roles, new EventStore(world.db));
+    var pty =
+        new HostLanes.Pty(
+            world.db,
+            roles,
+            new EventStore(world.db),
+            new BoxInstances(new ScriptedShellExecutor()));
     var socket = tempDir.resolve("pty.sock");
     try (var host =
         new PtySessionHost(
@@ -690,6 +698,7 @@ class AccessDoorsBaselineTest {
               ops -> ops.stack().serve(project, Duration.ofSeconds(1))));
       doors.add(new Door("stop the stack of " + project, ops -> ops.stack().stop(project)));
       doors.add(new Door("read the ports of " + project, ops -> ops.stack().ports(project)));
+      doors.add(new Door("list the workspaces of " + project, ops -> ops.workspaces(project)));
       for (var box : BOXES) {
         doors.add(
             new Door(

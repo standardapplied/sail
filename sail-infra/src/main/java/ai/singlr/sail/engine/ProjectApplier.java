@@ -260,7 +260,7 @@ public final class ProjectApplier {
     var warnings = new ArrayList<String>();
     var installed = 0;
     for (var harness : harnesses) {
-      var report = ProjectSkillInstaller.installProject(shell, name, harness, skills);
+      var report = ProjectSkillInstaller.installProject(shell, name, name, harness, skills);
       out.println(
           "  [apply] Skills \u2192 ~/"
               + harness.skillsDir()

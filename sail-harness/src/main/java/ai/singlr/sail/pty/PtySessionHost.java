@@ -988,12 +988,11 @@ public final class PtySessionHost implements AutoCloseable {
       new PtyMessage.Err("The pty host is shutting down; reconnect and try again.");
 
   /**
-   * Serialized: the per-FDE quota check and the registration of the session it admits must be one
-   * step, or concurrent creates each see the same spare slot and all spawn. Refused once shutdown
-   * has begun — a handoff has snapshotted the sessions, and a create landing after it would replace
-   * a handed-off session's ring and sidecar under the successor's feet.
+   * Admits the open {@code m} asks for, outside the host's lock: its names and size, the open
+   * decision ({@link #openRefusal}), and then, once, the instance its project would run in ({@link
+   * PtyAdmission#instance}), which may wait on Incus. Refused once shutdown has begun.
    */
-  private synchronized PtyMessage create(PtyMessage.Create m, PtyIdentity.Person who) {
+  private PtyMessage create(PtyMessage.Create m, PtyIdentity.Person who) {
     if (closed) {
       return SHUTTING_DOWN;
     }
@@ -1013,6 +1012,30 @@ public final class PtySessionHost implements AutoCloseable {
     if (unopened != null) {
       log("refused", who.fde(), m.session(), "not opened");
       return unopened.err();
+    }
+    if (m.project() != null && !m.project().isBlank()) {
+      try {
+        admission.instance(m.project());
+      } catch (IOException refused) {
+        log("refused", who.fde(), m.session(), "not the project's instance");
+        return new PtyMessage.Err(Remedied.whole(refused));
+      } catch (RuntimeException unavailable) {
+        log("instance-check-failed", who.fde(), m.project(), unavailable.toString());
+        return new PtyMessage.Err(UNSERVED);
+      }
+    }
+    return create(m, who, cwd);
+  }
+
+  /**
+   * Serialized: the per-FDE quota check and the registration of the session it admits must be one
+   * step, or concurrent creates each see the same spare slot and all spawn. Refused once shutdown
+   * has begun — a handoff has snapshotted the sessions, and a create landing after it would replace
+   * a handed-off session's ring and sidecar under the successor's feet.
+   */
+  private synchronized PtyMessage create(PtyMessage.Create m, PtyIdentity.Person who, Path cwd) {
+    if (closed) {
+      return SHUTTING_DOWN;
     }
     var existing = sessions.get(m.session());
     if (existing != null && !admitted(who, existing)) {

@@ -342,7 +342,7 @@ public final class HostProvisioner {
 
   private void restartToSeeZfs(ShellExec.Result unseen)
       throws IOException, InterruptedException, TimeoutException {
-    if (!new ContainerManager(shell).listAll().isEmpty()) {
+    if (!new BoxInstances(shell).all().isEmpty()) {
       throw Remedied.io(
           "Incus started before the ZFS tools were installed and does not see them ("
               + unseen.reason()

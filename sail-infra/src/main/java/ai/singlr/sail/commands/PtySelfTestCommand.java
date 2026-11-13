@@ -7,6 +7,8 @@ package ai.singlr.sail.commands;
 
 import ai.singlr.sail.SailVersion;
 import ai.singlr.sail.common.Secrets;
+import ai.singlr.sail.engine.WorkspaceTemplate;
+import ai.singlr.sail.engine.Workspaces;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.pty.Account;
 import ai.singlr.sail.pty.Locales;
@@ -79,7 +81,15 @@ public final class PtySelfTestCommand implements Callable<Integer> {
   static final Duration PROBE_STEP = Duration.ofSeconds(10);
 
   static final List<String> JSON_KEYS =
-      List.of("host_boot_id", "instance_id", "event_drops", "spec_title", "dispatched");
+      List.of(
+          "host_boot_id",
+          "instance_id",
+          "event_drops",
+          "spec_title",
+          "dispatched",
+          "clone_ms",
+          "change",
+          "created_at");
 
   @Override
   public Integer call() {
@@ -457,6 +467,14 @@ public final class PtySelfTestCommand implements Callable<Integer> {
     var listing = new SessionCommand.Ls.Listing(1, "boot", List.of(info), PtyEventDrops.Drops.NONE);
     var preview = new DispatchCommand.DispatchPreview("box", "spec", "title", "foreground", "task");
     var idle = new DispatchCommand.NoDispatch("box", false, "no_pending_specs");
-    return CliJson.stringify(List.of(listing, preview, idle));
+    var template = new WorkspaceTemplate.Template("p", "p--tmpl", "v1", "i", "tank", true);
+    var created =
+        new Workspaces.Created(
+            "p", "w", "p-w", template, new Workspaces.Timings(1L, 2, 3, 6, Map.of("bus", 1L)));
+    var changed = new Workspaces.Changed("p", "w", "p-w", Workspaces.Change.STOPPED, null);
+    var rows =
+        new Workspaces.Listing(
+            "p", List.of(new Workspaces.Row("w", "p-w", "running", "v1", "2026-11-12", null)));
+    return CliJson.stringify(List.of(listing, preview, idle, created, changed, rows));
   }
 }

@@ -11,6 +11,7 @@ import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.config.ProjectDefinition.Section;
 import ai.singlr.sail.config.ProjectDefinitionJson;
 import ai.singlr.sail.config.YamlUtil;
+import ai.singlr.sail.engine.BoxInstances;
 import ai.singlr.sail.store.ProjectStore;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -24,9 +25,11 @@ import java.util.Objects;
 final class ProjectDefinitionOperations {
 
   private final ProjectStore projects;
+  private final BoxInstances box;
 
-  ProjectDefinitionOperations(ProjectStore projects) {
+  ProjectDefinitionOperations(ProjectStore projects, BoxInstances box) {
     this.projects = Objects.requireNonNull(projects, "projects");
+    this.box = Objects.requireNonNull(box, "box");
   }
 
   /**
@@ -38,9 +41,18 @@ final class ProjectDefinitionOperations {
     return response(ProjectGate.taking(projects, Action.READ_DEFINITION, project));
   }
 
-  /** Creates the project {@code document}, a definition document, names; refused when it exists. */
+  /**
+   * Creates the project {@code document}, a definition document, names; refused when it exists, and
+   * when this box holds an instance of that name that is a workspace, a template or a copy, which
+   * the project could never take (W10). A box whose Incus does not answer, or that holds no such
+   * instance, creates it; a box the project later reaches with such an instance says so once.
+   */
   ProjectDefinitionResponse create(Map<String, Object> document) {
     var definition = ProjectDefinitionJson.read(YamlUtil.dumpJson(document));
+    var instance = BoxInstances.taken(definition.name(), box.namedIfReadable(definition.name()));
+    if (instance.isPresent()) {
+      throw ApiException.of(ErrorCode.CONFLICT, instance.get());
+    }
     try {
       return response(projects.create(definition));
     } catch (ProjectStore.NameTaken taken) {

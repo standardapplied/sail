@@ -41,7 +41,10 @@ public record OperatorCommand(boolean sudo, boolean rootLogin) {
           "project destroy",
           "project rename",
           "project resources set",
-          "project demo");
+          "project demo",
+          "project template build",
+          "project workspace create",
+          "project workspace delete");
 
   /** Root logged in directly: every command runs as typed. */
   public static final OperatorCommand PLAIN = new OperatorCommand(false, true);

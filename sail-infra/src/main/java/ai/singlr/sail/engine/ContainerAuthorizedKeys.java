@@ -88,7 +88,12 @@ public final class ContainerAuthorizedKeys {
       throws IOException, InterruptedException, TimeoutException {
     var entry = entry(key);
     var devices = new IncusDeviceManager(shell);
-    var ofProjects = containers().stream().filter(projects::contains).toList();
+    var ofProjects =
+        new BoxInstances(shell)
+            .containers().stream()
+                .filter(instance -> ofProject(instance, projects))
+                .map(BoxInstances.Instance::name)
+                .toList();
     return each(
         ofProjects,
         container -> {
@@ -136,8 +141,22 @@ public final class ContainerAuthorizedKeys {
   }
 
   private List<String> containers() throws IOException, InterruptedException, TimeoutException {
-    return new ContainerManager(shell)
-        .listContainers().stream().map(ContainerManager.ContainerInfo::name).toList();
+    return new BoxInstances(shell).containers().stream().map(BoxInstances.Instance::name).toList();
+  }
+
+  /**
+   * Whether {@code instance} is the container or a whole workspace of one of {@code projects}: a
+   * new key reaches every workspace of the projects it is for, and no template, which takes it at
+   * its next build.
+   */
+  private static boolean ofProject(BoxInstances.Instance instance, Collection<String> projects) {
+    return switch (instance.kind()) {
+      case BoxInstances.Plain ignored -> projects.contains(instance.name());
+      case BoxInstances.Workspace workspace ->
+          workspace.ready() && projects.contains(workspace.project());
+      case BoxInstances.Template ignored -> false;
+      case BoxInstances.Stray ignored -> false;
+    };
   }
 
   private static Pattern entry(SshPublicKey key) {

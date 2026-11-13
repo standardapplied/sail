@@ -23,5 +23,40 @@
     "name": "ai.singlr.sail.commands.DispatchCommand$NoDispatch",
     "allDeclaredMethods": true,
     "allRecordComponents": true
+  },
+  {
+    "name": "ai.singlr.sail.engine.WorkspaceTemplate$Template",
+    "allDeclaredMethods": true,
+    "allRecordComponents": true
+  },
+  {
+    "name": "ai.singlr.sail.engine.Workspaces$Timings",
+    "allDeclaredMethods": true,
+    "allRecordComponents": true
+  },
+  {
+    "name": "ai.singlr.sail.engine.Workspaces$Created",
+    "allDeclaredMethods": true,
+    "allRecordComponents": true
+  },
+  {
+    "name": "ai.singlr.sail.engine.Workspaces$Changed",
+    "allDeclaredMethods": true,
+    "allRecordComponents": true
+  },
+  {
+    "name": "ai.singlr.sail.engine.Workspaces$Change",
+    "allDeclaredMethods": true,
+    "allRecordComponents": true
+  },
+  {
+    "name": "ai.singlr.sail.engine.Workspaces$Row",
+    "allDeclaredMethods": true,
+    "allRecordComponents": true
+  },
+  {
+    "name": "ai.singlr.sail.engine.Workspaces$Listing",
+    "allDeclaredMethods": true,
+    "allRecordComponents": true
   }
 ]

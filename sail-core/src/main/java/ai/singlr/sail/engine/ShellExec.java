@@ -34,7 +34,7 @@ public interface ShellExec {
   /**
    * Executes a command with the default timeout and no specific working directory.
    *
-   * @param command the command tokens (e.g. {@code List.of("incus", "list", "--format", "json")})
+   * @param command the command tokens (e.g. {@code List.of("incus", "info", "acme")})
    * @return the command result
    */
   Result exec(List<String> command) throws IOException, InterruptedException, TimeoutException;

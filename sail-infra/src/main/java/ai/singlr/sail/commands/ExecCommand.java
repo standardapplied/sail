@@ -11,9 +11,11 @@ import ai.singlr.sail.engine.ContainerManager;
 import ai.singlr.sail.engine.ContainerStateGuard;
 import ai.singlr.sail.engine.NameValidator;
 import ai.singlr.sail.engine.OperatorCommand;
+import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.ShellExecutor;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.function.Function;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Option;
 import picocli.CommandLine.Parameters;
@@ -38,6 +40,19 @@ public final class ExecCommand implements Runnable {
       description = "Output in JSON format (captures output, not interactive).")
   private boolean json;
 
+  private final Function<Boolean, ShellExec> shells;
+
+  public ExecCommand() {
+    this(ShellExecutor::new);
+  }
+
+  /**
+   * @param shells the host shell, by whether this is a dry run
+   */
+  ExecCommand(Function<Boolean, ShellExec> shells) {
+    this.shells = shells;
+  }
+
   @Override
   public void run() {
     CliCommand.run(this::execute);
@@ -46,7 +61,7 @@ public final class ExecCommand implements Runnable {
   private void execute() throws Exception {
     var operator = OperatorCommand.here();
     NameValidator.requireValidProjectName(name);
-    var shell = new ShellExecutor(dryRun);
+    var shell = shells.apply(dryRun);
     var mgr = new ContainerManager(shell);
 
     var state = mgr.queryState(name);

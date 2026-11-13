@@ -7,6 +7,7 @@ package ai.singlr.sail.commands;
 
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.Banner;
+import ai.singlr.sail.engine.BoxInstances;
 import ai.singlr.sail.engine.ContainerExec;
 import ai.singlr.sail.engine.ContainerManager;
 import ai.singlr.sail.engine.ContainerState;
@@ -15,8 +16,10 @@ import ai.singlr.sail.engine.HostDetector;
 import ai.singlr.sail.engine.NameValidator;
 import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.ResourceChecker;
+import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.ShellExecutor;
 import java.util.LinkedHashMap;
+import java.util.function.Function;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
 import picocli.CommandLine.Option;
@@ -39,6 +42,19 @@ public final class SwitchCommand implements Runnable {
   @Option(names = "--json", description = "Output in JSON format.")
   private boolean json;
 
+  private final Function<Boolean, ShellExec> shells;
+
+  public SwitchCommand() {
+    this(ShellExecutor::new);
+  }
+
+  /**
+   * @param shells the host shell, by whether this is a dry run
+   */
+  SwitchCommand(Function<Boolean, ShellExec> shells) {
+    this.shells = shells;
+  }
+
   @Override
   public void run() {
     CliCommand.run(this::execute);
@@ -47,10 +63,11 @@ public final class SwitchCommand implements Runnable {
   private void execute() throws Exception {
     var operator = OperatorCommand.here();
     NameValidator.requireValidProjectName(name);
-    var shell = new ShellExecutor(dryRun);
+    var observer = shells.apply(false);
+    var shell = shells.apply(dryRun);
     var mgr = new ContainerManager(shell);
 
-    var state = mgr.queryState(name);
+    var state = new ContainerManager(observer).queryState(name);
     ContainerStateGuard.requireCreated(state, name);
 
     if (!dryRun) {
@@ -80,7 +97,8 @@ public final class SwitchCommand implements Runnable {
       }
     }
 
-    var containers = mgr.listAll();
+    var containers =
+        new BoxInstances(observer).all().stream().map(BoxInstances.Instance::info).toList();
     var running =
         containers.stream().filter(c -> c.state() instanceof ContainerState.Running).toList();
     var others = running.stream().filter(c -> !c.name().equals(name)).toList();

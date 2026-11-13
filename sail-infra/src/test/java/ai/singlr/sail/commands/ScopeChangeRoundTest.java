@@ -386,6 +386,155 @@ class ScopeChangeRoundTest {
   }
 
   @Test
+  void aScopedRoundLeavesTheWorkspacesAndTemplateOfAProjectInScopeAlone() throws Exception {
+    narrowTo("acme");
+    round();
+    incus.sail("acme");
+    incus.keyed("acme-fix-login", workspace("acme", "fix-login"));
+    incus.keyed("acme--tmpl", "\"user.sail.template.of\":\"acme\"");
+    incus.invocations.clear();
+
+    assertEquals(List.of(), round());
+
+    assertEquals(List.of("acme", "acme--tmpl", "acme-fix-login"), incus.names());
+    assertEquals(List.of("incus list --format json"), incus.invocations);
+  }
+
+  @Test
+  void aProjectThatLeavesTheBoxTakesItsWorkspacesAndTemplateWithIt() throws Exception {
+    round();
+    incus.sail("acme");
+    incus.sail("beta");
+    incus.keyed("beta-w", workspace("beta", "w"));
+    incus.keyed("beta--tmpl", "\"user.sail.template.of\":\"beta\"");
+    incus.keyed("acme-fix", workspace("acme", "fix"));
+    incus.keyed("beta-copy", workspace("beta", "w"));
+    narrowTo("acme");
+    incus.invocations.clear();
+
+    var said = round();
+    var again = round();
+
+    assertEquals(
+        List.of(
+            "  ⚠ project beta: its container deleted, workspace and uncommitted work included"
+                + WHY,
+            "  ⚠ project beta: its workspace w deleted, uncommitted work included" + WHY,
+            "  ⚠ project beta: its template deleted" + WHY),
+        said.stream().filter(line -> line.contains("deleted")).toList());
+    assertEquals(
+        List.of(
+            "  ⚠ project beta: instance 'beta-copy' kept — a copy carrying the project's keys under"
+                + " another name is not Sail's; delete it yourself if it is not wanted, as it holds"
+                + " the project's work"),
+        said.stream().filter(line -> line.contains("beta-copy")).toList());
+    assertEquals(List.of(), again);
+    assertEquals(List.of("acme", "acme-fix", "beta-copy"), incus.names());
+  }
+
+  @Test
+  void aProjectThatSyncsInUnderAWorkspacesNameLeavesTheWorkspaceAloneAndSaysSoOnce()
+      throws Exception {
+    round();
+    incus.sail("acme");
+    incus.keyed(
+        "acme-fix", workspace("acme", "fix") + ",\"limits.cpu\":\"2\",\"limits.memory\":\"4GB\"");
+    Acting.system(
+        () ->
+            new ProjectStore(mainDb)
+                .upsert(
+                    TestDefinitions.yaml(
+                        "name: acme-fix\nresources:\n  cpu: 8\n  memory: 32GB\n  disk: 100GB\n")));
+    incus.invocations.clear();
+
+    var said = round();
+
+    assertEquals(
+        List.of(
+            "  ⚠ Project acme-fix cannot take instance acme-fix: it is workspace fix of project"
+                + " acme. Delete the workspace (sail project workspace delete acme fix) or give the"
+                + " project another name; the workspace itself is reached with sail project"
+                + " workspace shell acme fix."),
+        said.stream().filter(line -> line.contains("acme-fix")).toList());
+    assertEquals(
+        List.of("incus list --format json", "incus list ^acme-fix$ --format json"),
+        incus.invocations);
+    incus.invocations.clear();
+    assertEquals(List.of(), round());
+    assertEquals(List.of(), incus.invocations);
+    assertEquals(List.of("acme", "acme-fix"), incus.names());
+  }
+
+  @Test
+  void takenNamesAreLeftAloneAndSaidOnceWhileEveryOtherProjectStillConverges() throws Exception {
+    round();
+    incus.sail("acme");
+    incus.sail("beta");
+    incus.keyed(
+        "acme-fix", workspace("acme", "fix") + ",\"limits.cpu\":\"2\",\"limits.memory\":\"4GB\"");
+    incus.keyed("acme--tmpl", "\"user.sail.template.of\":\"acme\"");
+    var sized = "\nresources:\n  cpu: 8\n  memory: 32GB\n  disk: 100GB\n";
+    Acting.system(
+        () -> {
+          var projects = new ProjectStore(mainDb);
+          projects.upsert(TestDefinitions.yaml("name: acme-fix" + sized));
+          projects.upsert(TestDefinitions.yaml("name: acme--tmpl" + sized));
+          projects.upsert(TestDefinitions.yaml("name: beta" + sized));
+        });
+    incus.invocations.clear();
+
+    var first = round();
+
+    assertEquals(List.of(), writesTo("acme-fix", "acme--tmpl"));
+    assertTrue(
+        incus.invocations.contains("incus config set beta limits.cpu=8 limits.memory=32GB"),
+        String.valueOf(incus.invocations));
+    assertEquals(
+        1, first.stream().filter(line -> line.contains("cannot take instance acme-fix")).count());
+    assertEquals(
+        1, first.stream().filter(line -> line.contains("cannot take instance acme--tmpl")).count());
+    assertFalse(first.stream().anyMatch(line -> line.contains("project apply acme-")));
+
+    incus.invocations.clear();
+    var second = round();
+    Acting.system(
+        () ->
+            new ProjectStore(mainDb)
+                .upsert(
+                    TestDefinitions.yaml(
+                        "name: acme-fix\nresources:\n  cpu: 4\n  memory: 8GB\n  disk: 60GB\n")));
+    var third = round();
+
+    assertFalse(
+        second.stream().anyMatch(line -> line.contains("cannot take")), String.valueOf(second));
+    assertFalse(
+        third.stream().anyMatch(line -> line.contains("cannot take")), String.valueOf(third));
+    assertEquals(List.of(), writesTo("acme-fix", "acme--tmpl"), "nor is a later edit applied");
+    assertEquals(List.of("acme", "acme--tmpl", "acme-fix", "beta"), incus.names());
+  }
+
+  /** What Incus was asked, besides listings, that names one of {@code names}. */
+  private List<String> writesTo(String... names) {
+    var touched = Set.of(names);
+    return incus.invocations.stream()
+        .filter(command -> !command.startsWith("incus list"))
+        .filter(
+            command ->
+                touched.stream()
+                    .anyMatch(
+                        name -> command.contains(" " + name + " ") || command.endsWith(" " + name)))
+        .toList();
+  }
+
+  private static String workspace(String project, String name) {
+    return "\"user.sail.project\":\""
+        + project
+        + "\",\"user.sail.workspace\":\""
+        + name
+        + "\",\"user.sail.ready\":\"1\"";
+  }
+
+  @Test
   void anUnscopedRoundNeverAsksIncus() throws Exception {
     round();
     incus.sail("acme");
@@ -431,6 +580,7 @@ class ScopeChangeRoundTest {
    */
   private static final class Incus implements ShellExec {
     private final Map<String, Boolean> containers = new LinkedHashMap<>();
+    private final Map<String, String> keys = new LinkedHashMap<>();
     final List<String> invocations = new ArrayList<>();
     final Set<String> busy = new HashSet<>();
     boolean reachable = true;
@@ -441,6 +591,12 @@ class ScopeChangeRoundTest {
 
     void foreign(String name) {
       containers.put(name, false);
+    }
+
+    /** A workspace or template of Sail's, told by {@code config}, its keys as JSON members. */
+    void keyed(String name, String config) {
+      containers.put(name, true);
+      keys.put(name, config);
     }
 
     List<String> names() {
@@ -460,9 +616,36 @@ class ScopeChangeRoundTest {
             containers.keySet().stream()
                 .map(
                     name ->
-                        "{\"name\":\"" + name + "\",\"status\":\"Running\",\"type\":\"container\"}")
+                        "{\"name\":\""
+                            + name
+                            + "\",\"status\":\"Running\",\"type\":\"container\",\"config\":{"
+                            + keys.getOrDefault(name, "")
+                            + "}}")
                 .collect(Collectors.joining(",", "[", "]")),
             "");
+      }
+      if (command.size() == 5 && command.get(1).equals("list") && command.get(2).startsWith("^")) {
+        var name = command.get(2).substring(1, command.get(2).length() - 1);
+        return new Result(
+            0,
+            containers.containsKey(name)
+                ? "[{\"name\":\""
+                    + name
+                    + "\",\"status\":\"Running\",\"type\":\"container\",\"config\":{"
+                    + keys.getOrDefault(name, "")
+                    + "}}]"
+                : "[]",
+            "");
+      }
+      if (command.size() == 7
+          && joined.startsWith("incus config device get ")
+          && command.get(5).equals("root")) {
+        return new Result(0, "50GB\n", "");
+      }
+      if (joined.startsWith("incus config set ")
+          || joined.startsWith("incus config device override ")
+          || joined.startsWith("incus config device set ")) {
+        return new Result(0, "", "");
       }
       if (command.size() == 7 && joined.startsWith("incus config device get ")) {
         return Boolean.TRUE.equals(containers.get(command.get(4)))

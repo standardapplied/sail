@@ -268,7 +268,8 @@ class ReviewAgentLoopIT extends AbstractIncusIT {
                 new SharedProjectFiles(
                     files, stateDir.resolve("projects"), project, FileLimits.defaults()));
     for (var harness : Harnesses.all()) {
-      var report = ProjectSkillInstaller.installProject(shell, CONTAINER, harness, skills);
+      var report =
+          ProjectSkillInstaller.installProject(shell, CONTAINER, CONTAINER, harness, skills);
       assertEquals(List.of("e2e", PortalSkill.NAME, SpecSkillGenerator.NAME), report.installed());
       assertEquals(
           "---\nname: e2e\ndescription: Runs the e2e suite.\n---\nRun the e2e suite.\n",

@@ -68,7 +68,16 @@ Usage:
                                 partition are refused, and its ext4 scratch disk until the row itself
                                 erases it with the wipefs the refusal names, then the scratch pool is
                                 made with Sail's last probe of the disk under a second before its
-                                incus storage create (strace); observer, left on dir, is unchanged
+                                incus storage create (strace); acme's template is built on tank, a
+                                workspace of it is a clone of its snapshot with a machine-id of its
+                                own (create time in the report), a second is made and stopped,
+                                apply --all leaves both and the template alone; with acme's repos set
+                                to octocat/Hello-World for the row (and given back after), ten made at
+                                once are each whole on their own branch of it, each one's ready steps and
+                                fetch retries in the report; a dry run of destroying acme names them all,
+                                and destroying acme
+                                removes all of them before acme is applied again; observer, left
+                                on dir, is unchanged
   ci/fleet rebuilt RUN VERSION  main is copied by the README's backup line, takes a spec, and is lost; client
                                 writes while it is gone; a new main installs VERSION and inits empty, which
                                 observer refuses as another org; the copy goes in place, every node re-pins
@@ -1127,6 +1136,66 @@ probed_last_on() {
   awk -v g="$gap" 'BEGIN { exit !(g >= 0 && g < 1) }'
 }
 
+workspace_on() {
+  local run=$1 box=$2 created timings origin template workspace
+  created=$(on "$run" "$box" "sudo sail project workspace create acme fleet-w --json") || return 1
+  echo "$created"
+  timings=$(python3 -I -c 'import json,sys; t=json.load(sys.stdin)["timings"]; print("%s ms (clone %s, start %s, ready %s)" % (t["total_ms"], t["clone_ms"], t["start_ms"], t["ready_ms"]))' <<< "$created") || return 1
+  echo "workspace create on $box: $timings" | tee -a "$(log_dir "$run")/report.txt"
+  origin=$(on "$run" "$box" "sudo zfs get -H -o value origin tank/containers/acme-fleet-w")
+  template=$(on "$run" "$box" "sudo incus file pull acme--tmpl/etc/machine-id -")
+  workspace=$(on "$run" "$box" "sudo incus exec acme-fleet-w -- cat /etc/machine-id")
+  echo "origin $origin; machine-id of the template $template, of the workspace $workspace"
+  [[ $origin == tank/containers/acme--tmpl@snapshot-v* && -n $template && -n $workspace && $template != "$workspace" ]]
+}
+
+instance_state() {
+  on "$1" "$2" "sudo incus list --format csv -c ns $3" | awk -F, -v name="$3" '$1 == name { print $2 }'
+}
+
+untouched_by_apply_all() {
+  local run=$1 box=$2 before after
+  before="$(instance_state "$run" "$box" acme-fleet-v) $(instance_state "$run" "$box" acme--tmpl) $(on "$run" "$box" "sudo incus exec acme-fleet-w -- hostname")"
+  on "$run" "$box" "sudo sail project apply --all --yes" || return 1
+  after="$(instance_state "$run" "$box" acme-fleet-v) $(instance_state "$run" "$box" acme--tmpl) $(on "$run" "$box" "sudo incus exec acme-fleet-w -- hostname")"
+  echo "stopped workspace, template, workspace hostname: before $before, after $after"
+  [[ $before == "STOPPED STOPPED acme" && $after == "$before" ]]
+}
+
+ten_at_once() {
+  local run=$1 box=$2 n created said ready branch failed=0
+  on "$run" "$box" 'failed=0; for n in $(seq 1 10); do sudo sail project workspace create acme fleet-p$n --json > /tmp/fleet-p$n.out 2>&1 & done; for job in $(jobs -p); do wait "$job" || failed=1; done; [ "$failed" = 0 ]' || failed=1
+  for n in $(seq 1 10); do
+    created=$(on "$run" "$box" "cat /tmp/fleet-p$n.out" || true)
+    if ! said=$(python3 -I -c 'import json,sys; t=json.load(sys.stdin)["timings"]; s=t["ready_steps"]; print("total %s ms (clone %s, start %s, ready %s); ready steps %s" % (t["total_ms"], t["clone_ms"], t["start_ms"], t["ready_ms"], json.dumps(s)))' <<< "$created" 2>/dev/null); then
+      echo "fleet-p$n was not created: $created"
+      failed=1
+      continue
+    fi
+    echo "workspace fleet-p$n of ten at once on $box: $said" | tee -a "$(log_dir "$run")/report.txt"
+    ready=$(on "$run" "$box" "sudo incus config get acme-fleet-p$n user.sail.ready" || true)
+    branch=$(on "$run" "$box" "sudo incus exec acme-fleet-p$n -- runuser -u dev -- git -C /home/dev/workspace/hello branch --show-current" || true)
+    echo "fleet-p$n: ready mark '$ready', hello on branch '$branch'"
+    [[ -n $ready && $branch == "fleet-p$n" ]] || failed=1
+  done
+  on "$run" "$box" 'for n in $(seq 1 10); do sudo sail project workspace delete acme fleet-p$n --yes > /dev/null 2>&1; done; rm -f /tmp/fleet-p*.out' || true
+  [[ $failed == 0 ]]
+}
+
+destroy_dry_run_names() {
+  local run=$1 box=$2 out
+  out=$(on "$run" "$box" "sudo sail project destroy acme --dry-run") || { echo "$out"; return 1; }
+  echo "$out"
+  grep -qF "acme-fleet-w" <<< "$out" && grep -qF "acme-fleet-v" <<< "$out" && grep -qF "acme--tmpl" <<< "$out"
+}
+
+all_gone() {
+  local run=$1 box=$2 left
+  left=$(on "$run" "$box" "sudo incus list --format csv -c n" | grep -E '^acme(-fleet-w|-fleet-v|--tmpl)?$' || true)
+  echo "acme's instances left: ${left:-none}"
+  [[ -z $left ]]
+}
+
 uncapped_on() {
   on "$1" "$2" "test ! -e /etc/modprobe.d/sail-zfs.conf"
 }
@@ -1163,6 +1232,30 @@ storage() {
   check "$run" "the ZFS cache cap is still in force after the reboot" capped_on "$run" client
   check "$run" "acme runs after the reboot, on devpool" running_on_pool "$run" client acme devpool
   check "$run" "host status names both pools" status_pools "$run" client "devpool:dir tank:zfs"
+  local repos
+  repos=$(on "$run" main "sudo sail project config get acme repos | base64 -w0")
+  check "$run" "main gives acme one public repository that needs no token, octocat/Hello-World at hello" \
+    on "$run" main "echo '[{\"url\":\"https://github.com/octocat/Hello-World.git\",\"path\":\"hello\"}]' | sudo sail project config set acme repos -"
+  check "$run" "client syncs acme's repos from main and applies acme" \
+    allowed "$run" client "sudo sail sync && sudo sail project apply acme --yes"
+  check "$run" "acme's template is built on tank" \
+    allowed "$run" client "sudo sail project template build acme"
+  check "$run" "a workspace of acme is a clone of its template's snapshot on tank, with its own machine-id" \
+    workspace_on "$run" client
+  check "$run" "a second workspace of acme is made and stopped" \
+    allowed "$run" client "sudo sail project workspace create acme fleet-v && sudo sail project workspace stop acme fleet-v"
+  check "$run" "apply --all leaves the workspaces and the template as they are" \
+    untouched_by_apply_all "$run" client
+  check "$run" "ten workspaces of acme made at once are each whole, each fetched hello onto its own branch (each one's ready steps, its fetch retries among them, in the report), and go" \
+    ten_at_once "$run" client
+  check "$run" "a dry run of destroying acme names its workspaces and template" \
+    destroy_dry_run_names "$run" client
+  check "$run" "destroying acme removes its container, workspaces and template" \
+    allowed "$run" client "sudo sail project destroy acme --yes"
+  check "$run" "nothing of acme is left in Incus" all_gone "$run" client
+  check "$run" "main gives acme back the repos it had before the row" \
+    on "$run" main "echo $repos | base64 -d | sudo sail project config set acme repos -"
+  check "$run" "acme is applied again" allowed "$run" client "sudo sail sync && sudo sail project apply acme --yes"
   check "$run" "client's test containers go" on "$run" client "sudo incus delete --force zc zt"
   check "$run" "observer, a dir box, has devpool alone" pools_on "$run" observer "devpool:dir"
   check "$run" "observer's host status names devpool alone" status_pools "$run" observer "devpool:dir"

@@ -27,6 +27,7 @@ import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.AgentReporter;
 import ai.singlr.sail.engine.AgentSession;
 import ai.singlr.sail.engine.AgentUnit;
+import ai.singlr.sail.engine.BoxInstances;
 import ai.singlr.sail.engine.CliOperator;
 import ai.singlr.sail.engine.ConflictOperations;
 import ai.singlr.sail.engine.ConnectEnvironment;
@@ -35,11 +36,13 @@ import ai.singlr.sail.engine.ContainerManager;
 import ai.singlr.sail.engine.ContainerState;
 import ai.singlr.sail.engine.HostInfo;
 import ai.singlr.sail.engine.NameValidator;
+import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.SharedProjectFiles;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.engine.SyncOperations;
 import ai.singlr.sail.engine.WatcherSpawner;
+import ai.singlr.sail.engine.Workspaces;
 import ai.singlr.sail.harness.Harness;
 import ai.singlr.sail.harness.Harnesses;
 import ai.singlr.sail.identity.Actor;
@@ -109,7 +112,7 @@ public final class SailOperations implements HostOperations {
         new HostLanes.Catalog(
             db, projectStore, specStore, roomStore, schema, pruner, this::cliOperator);
     this.identity = new HostLanes.Identity(db, this::box, roles(), this::cliOperator);
-    this.pty = new HostLanes.Pty(db, roles(), eventStore);
+    this.pty = new HostLanes.Pty(db, roles(), eventStore, new BoxInstances(shell));
     projectSkills = new ProjectSkills(this::projectFiles);
     dispatchOps.useProjectSkills(projectSkills);
     return this;
@@ -1337,7 +1340,7 @@ public final class SailOperations implements HostOperations {
   }
 
   private ProjectDefinitionOperations definitions() {
-    return new ProjectDefinitionOperations(projectCatalog());
+    return new ProjectDefinitionOperations(projectCatalog(), new BoxInstances(shell));
   }
 
   @Override
@@ -1370,6 +1373,27 @@ public final class SailOperations implements HostOperations {
   @Override
   public Result<SnapshotListResponse> snapshots(String project) {
     return safe(() -> snapshotOps.list(readable(project)));
+  }
+
+  /** Read in scope, as the snapshot list is; a box with no ZFS pool lists its default one. */
+  @Override
+  public Result<WorkspaceListResponse> workspaces(String project) {
+    return safe(
+        () -> {
+          var readable = readable(project);
+          try {
+            return new WorkspaceListResponse(
+                readable,
+                new Workspaces(shell, shell, System::nanoTime, SailPaths.locksDir())
+                    .list(readable)
+                    .workspaces());
+          } catch (Exception unread) {
+            if (unread instanceof InterruptedException) {
+              Thread.currentThread().interrupt();
+            }
+            throw ApiException.of(ErrorCode.CONTAINER_ERROR, unread);
+          }
+        });
   }
 
   @Override
@@ -1554,8 +1578,9 @@ public final class SailOperations implements HostOperations {
 
   /**
    * The full project roster, mirroring {@code sail project list}: every catalogued project plus any
-   * container without a catalog entry. Catalogued-but-unprovisioned projects surface as {@code
-   * not_created}; a live container's state wins over the catalog placeholder.
+   * plain container without a catalog entry, never a workspace or a template.
+   * Catalogued-but-unprovisioned projects surface as {@code not_created}; a live container's state
+   * wins over the catalog placeholder.
    */
   private ProjectListResponse projectsValue() {
     var statuses = new TreeMap<String, String>();
@@ -1578,7 +1603,7 @@ public final class SailOperations implements HostOperations {
 
   private List<ContainerManager.ContainerInfo> listContainers() {
     try {
-      return new ContainerManager(shell).listAll();
+      return new BoxInstances(shell).plain().stream().map(BoxInstances.Instance::info).toList();
     } catch (Exception e) {
       throw new ApiException(ErrorCode.COMMAND_FAILED, "Failed to list project containers.", e);
     }

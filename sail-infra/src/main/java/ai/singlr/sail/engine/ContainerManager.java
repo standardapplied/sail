@@ -12,12 +12,12 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.TimeoutException;
-import java.util.function.Predicate;
 
 /**
  * Manages Incus container lifecycle: query state, start, stop, delete. All state is queried live
- * from Incus — no local caching. Used by {@code up}, {@code down}, {@code switch}, {@code project
- * list}, and {@code project destroy} commands.
+ * from Incus — no local caching; the box's instances are listed by {@link BoxInstances}. Used by
+ * {@code up}, {@code down}, {@code switch}, {@code project list}, and {@code project destroy}
+ * commands.
  */
 public final class ContainerManager {
 
@@ -38,7 +38,12 @@ public final class ContainerManager {
   /** Summary of a container's name, current state, and resource limits. */
   public record ContainerInfo(String name, ContainerState state, ResourceLimits limits) {}
 
-  /** Queries the current state of a single container by name. */
+  /**
+   * The current state of project {@code name}'s own container. An instance of that name that is a
+   * workspace, a template or a copy of one is refused, naming what it is ({@link
+   * BoxInstances#requireNotTakenFor}): every command that addresses a container by a project's name
+   * asks here, so none acts on another's instance (W10).
+   */
   public ContainerState queryState(String name)
       throws IOException, InterruptedException, TimeoutException {
     var result = shell.exec(List.of("incus", "list", "^" + name + "$", "--format", "json"));
@@ -49,40 +54,21 @@ public final class ContainerManager {
     if (entries.isEmpty()) {
       return new ContainerState.NotCreated();
     }
-    return parseContainerState(entries.getFirst());
+    return parseContainerState(project(name, entries.getFirst()));
   }
 
-  /** Lists all containers with their current state. */
-  public List<ContainerInfo> listAll() throws IOException, InterruptedException, TimeoutException {
-    return list(entry -> true);
+  /** {@code entry}, the instance Incus lists under {@code name}, when it can be that project's. */
+  private static Map<String, Object> project(String name, Map<String, Object> entry) {
+    BoxInstances.requireNotTakenFor(name, Optional.of(BoxInstances.instance(entry)));
+    return entry;
   }
 
-  /**
-   * Lists this box's system containers, leaving out its virtual machines: a stopped one serves no
-   * file, and sail provisions none.
-   */
-  public List<ContainerInfo> listContainers()
-      throws IOException, InterruptedException, TimeoutException {
-    return list(entry -> "container".equals(entry.get("type")));
-  }
-
-  private List<ContainerInfo> list(Predicate<Map<String, Object>> kept)
-      throws IOException, InterruptedException, TimeoutException {
-    var result = shell.exec(List.of("incus", "list", "--format", "json"));
-    if (!result.ok()) {
-      throw new IOException("incus list failed: " + result.stderr());
-    }
-    var entries = YamlUtil.parseList(result.stdout());
-    return entries.stream()
-        .filter(kept)
-        .map(
-            entry -> {
-              var name = Objects.toString(entry.get("name"), "unknown");
-              var state = parseContainerState(entry);
-              var limits = extractResourceLimits(entry);
-              return new ContainerInfo(name, state, limits);
-            })
-        .toList();
+  /** A container as one entry of {@code incus list --format json} describes it. */
+  static ContainerInfo info(Map<String, Object> entry) {
+    return new ContainerInfo(
+        Objects.toString(entry.get("name"), "unknown"),
+        parseContainerState(entry),
+        extractResourceLimits(entry));
   }
 
   /** Starts a container. Throws on failure. */
@@ -225,7 +211,10 @@ public final class ContainerManager {
     }
   }
 
-  /** Queries a single container by name, returning full info including resource limits. */
+  /**
+   * Project {@code name}'s own container with its resource limits, refused as {@link #queryState}
+   * refuses an instance that is not one.
+   */
   public ContainerInfo queryInfo(String name)
       throws IOException, InterruptedException, TimeoutException {
     var result = shell.exec(List.of("incus", "list", "^" + name + "$", "--format", "json"));
@@ -237,7 +226,7 @@ public final class ContainerManager {
     if (entries.isEmpty()) {
       return new ContainerInfo(name, new ContainerState.NotCreated(), null);
     }
-    var entry = entries.getFirst();
+    var entry = project(name, entries.getFirst());
     return new ContainerInfo(name, parseContainerState(entry), extractResourceLimits(entry));
   }
 

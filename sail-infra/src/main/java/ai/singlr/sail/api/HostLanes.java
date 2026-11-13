@@ -12,6 +12,7 @@ import ai.singlr.sail.config.ProjectDefinition;
 import ai.singlr.sail.config.Spec;
 import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.engine.AgentSession;
+import ai.singlr.sail.engine.BoxInstances;
 import ai.singlr.sail.engine.DemoSeeder;
 import ai.singlr.sail.engine.HostAccess;
 import ai.singlr.sail.engine.HostToken;
@@ -43,6 +44,7 @@ import java.time.Duration;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.concurrent.TimeoutException;
 import java.util.function.Function;
 import java.util.function.Supplier;
 
@@ -314,7 +316,7 @@ final class HostLanes {
     }
   }
 
-  record Pty(Sqlite db, RoleRule roles, EventStore events) implements HostPty {
+  record Pty(Sqlite db, RoleRule roles, EventStore events, BoxInstances box) implements HostPty {
     @Override
     public PtyIdentity.Person identity(String token) throws IOException {
       return new HostAccess(db, roles).identity(token);
@@ -342,6 +344,37 @@ final class HostLanes {
       } catch (ApiException absent) {
         throw Remedied.io(absent.reason(), absent.remedy());
       }
+    }
+
+    /**
+     * Refuses an open in {@code project} when the instance of its name is a workspace, a template
+     * or a copy, not its container (W10), or when Incus cannot say within {@value
+     * BoxInstances#LOOKUP_SECONDS} s what it is: asked of the one instance by name, once per open.
+     */
+    @Override
+    public void admitInstance(String project) throws IOException {
+      Optional<BoxInstances.Instance> instance;
+      try {
+        instance = box.lookup(project, Duration.ofSeconds(BoxInstances.LOOKUP_SECONDS));
+      } catch (TimeoutException slow) {
+        throw unanswered(project);
+      } catch (InterruptedException interrupted) {
+        Thread.currentThread().interrupt();
+        throw unanswered(project);
+      }
+      var taken = BoxInstances.taken(project, instance);
+      if (taken.isPresent()) {
+        throw Remedied.io(taken.get().reason(), taken.get().remedy());
+      }
+    }
+
+    private static IOException unanswered(String project) {
+      return new IOException(
+          "Incus did not say within "
+              + BoxInstances.LOOKUP_SECONDS
+              + " s what instance '"
+              + project
+              + "' is, so no terminal was opened in it. Try again once Incus answers.");
     }
 
     @Override

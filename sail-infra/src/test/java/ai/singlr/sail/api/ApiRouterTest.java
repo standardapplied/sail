@@ -27,6 +27,7 @@ import ai.singlr.sail.engine.ScriptedShellExecutor;
 import ai.singlr.sail.engine.SharedProjectFiles;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.WorkspaceFiles;
+import ai.singlr.sail.engine.Workspaces;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.Role;
@@ -1344,6 +1345,41 @@ class ApiRouterTest {
           ((List<?>) YamlUtil.parseMap(ports.body()).get("ports"))
               .stream().map(row -> ((Map<?, ?>) row).get("name")).toList());
       assertEquals(200, stopped.statusCode(), stopped.body());
+    }
+  }
+
+  @Test
+  void aViewerReadsTheWorkspacesOfAProject() throws Exception {
+    ApiAuth viewer =
+        exchange ->
+            exchange.setAttribute(ApiAuth.ACTOR, new Actor(null, Role.VIEWER, Actor.Lane.API));
+    var operations =
+        new TestOperations() {
+          @Override
+          public Result<WorkspaceListResponse> workspaces(String project) {
+            return Result.success(
+                new WorkspaceListResponse(
+                    project,
+                    List.of(
+                        new Workspaces.Row("main", project, "running", null, null, "10.0.0.2"),
+                        new Workspaces.Row(
+                            "fix-login",
+                            project + "-fix-login",
+                            "frozen",
+                            "v1",
+                            "2026-11-12T10:00:00.000Z",
+                            null))));
+          }
+        };
+    try (var server = serverWith(operations, true, viewer)) {
+      var listed = get(server, "/v1/projects/acme/workspaces", "token");
+
+      assertEquals(200, listed.statusCode(), listed.body());
+      assertEquals(
+          List.of("main", "fix-login"),
+          ((List<?>) YamlUtil.parseMap(listed.body()).get("workspaces"))
+              .stream().map(row -> ((Map<?, ?>) row).get("name")).toList());
+      assertEquals(405, post(server, "/v1/projects/acme/workspaces", "token", "").statusCode());
     }
   }
 

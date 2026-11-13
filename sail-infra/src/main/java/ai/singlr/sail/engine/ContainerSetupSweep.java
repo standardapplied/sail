@@ -12,10 +12,11 @@ import java.util.List;
 import java.util.concurrent.TimeoutException;
 
 /**
- * Boot-time reconciliation of every running project container's sail-owned surface: the socket bind
- * mount (re-pointed when its source moved) and the sail-owned files (rewritten when the machinery
- * stamp does not match this binary). This is the eager half of an enforcement change — a server
- * that starts requiring something new must also provision it, not wait for the next sail-launched
+ * Boot-time reconciliation of every running project container's sail-owned surface, and every
+ * running workspace's of a project this box holds ({@link Workspaces}): the socket bind mount
+ * (re-pointed when its source moved) and the sail-owned files (rewritten when the machinery stamp
+ * does not match this binary). This is the eager half of an enforcement change — a server that
+ * starts requiring something new must also provision it, not wait for the next sail-launched
  * session to wander by. Best-effort by design: one wedged container is reported and skipped, an
  * unlistable daemon reconciles nothing, and the server boots either way.
  */
@@ -24,8 +25,8 @@ public final class ContainerSetupSweep {
   private ContainerSetupSweep() {}
 
   /**
-   * Reconciles each running container whose name is in {@code projects}; returns how many were
-   * reconciled.
+   * Reconciles each running container whose name is in {@code projects}, and each running workspace
+   * of one of them; returns how many were reconciled.
    */
   public static int sweep(ShellExec shell, Collection<String> projects)
       throws InterruptedException {
@@ -67,14 +68,28 @@ public final class ContainerSetupSweep {
     }
   }
 
+  /**
+   * Whether {@code instance} is a project's own container or a whole workspace of a project in
+   * {@code projects}: a template, a stray and a half-made workspace are never reconciled.
+   */
+  private static boolean swept(BoxInstances.Instance instance, Collection<String> projects) {
+    return switch (instance.kind()) {
+      case BoxInstances.Plain ignored -> projects.contains(instance.name());
+      case BoxInstances.Workspace workspace ->
+          workspace.ready() && projects.contains(workspace.project());
+      case BoxInstances.Template ignored -> false;
+      case BoxInstances.Stray ignored -> false;
+    };
+  }
+
   private static Collection<String> running(ShellExec shell, Collection<String> projects)
       throws InterruptedException {
     try {
-      return new ContainerManager(shell)
-          .listAll().stream()
-              .filter(info -> projects.contains(info.name()))
-              .filter(info -> info.state() instanceof ContainerState.Running)
-              .map(ContainerManager.ContainerInfo::name)
+      return new BoxInstances(shell)
+          .all().stream()
+              .filter(instance -> swept(instance, projects))
+              .filter(instance -> instance.state() instanceof ContainerState.Running)
+              .map(BoxInstances.Instance::name)
               .toList();
     } catch (IOException | TimeoutException | RuntimeException e) {
       System.err.println("sail setup sweep: could not list containers (" + e.getMessage() + ").");

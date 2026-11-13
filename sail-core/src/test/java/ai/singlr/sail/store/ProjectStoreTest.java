@@ -47,6 +47,20 @@ class ProjectStoreTest {
   }
 
   @Test
+  void noProjectIsCreatedUnderANameKeptForATemplate() {
+    var failure =
+        assertThrows(
+            IllegalArgumentException.class,
+            () -> store.create(TestDefinitions.yaml("name: acme--tmpl\nimage: ubuntu/24.04\n")));
+
+    assertEquals(
+        "Invalid project name: 'acme--tmpl'. A name ending '--tmpl' is kept for a project's"
+            + " template; give the project another name.",
+        failure.getMessage());
+    assertTrue(store.findByName("acme--tmpl").isEmpty());
+  }
+
+  @Test
   void renameTombstonesTheOldIdentityAndCreatesTheNew() {
     store.upsert(TestDefinitions.yaml("name: old\nimage: ubuntu/24.04\n"));
     var oldRev = store.latestRev("old");

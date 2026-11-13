@@ -7,6 +7,7 @@ package ai.singlr.sail.commands;
 
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.Banner;
+import ai.singlr.sail.engine.BoxInstances;
 import ai.singlr.sail.engine.ContainerExec;
 import ai.singlr.sail.engine.ContainerManager;
 import ai.singlr.sail.engine.ContainerSetupSweep;
@@ -16,8 +17,10 @@ import ai.singlr.sail.engine.HostDetector;
 import ai.singlr.sail.engine.NameValidator;
 import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.ResourceChecker;
+import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.ShellExecutor;
 import java.util.LinkedHashMap;
+import java.util.function.Function;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
 import picocli.CommandLine.Option;
@@ -38,6 +41,19 @@ public final class UpCommand implements Runnable {
   @Option(names = "--json", description = "Output in JSON format.")
   private boolean json;
 
+  private final Function<Boolean, ShellExec> shells;
+
+  public UpCommand() {
+    this(ShellExecutor::new);
+  }
+
+  /**
+   * @param shells the host shell, by whether this is a dry run
+   */
+  UpCommand(Function<Boolean, ShellExec> shells) {
+    this.shells = shells;
+  }
+
   @Override
   public void run() {
     CliCommand.run(this::execute);
@@ -46,7 +62,7 @@ public final class UpCommand implements Runnable {
   private void execute() throws Exception {
     var operator = OperatorCommand.here();
     NameValidator.requireValidProjectName(name);
-    var shell = new ShellExecutor(dryRun);
+    var shell = shells.apply(dryRun);
     var mgr = new ContainerManager(shell);
     var state = mgr.queryState(name);
 
@@ -62,7 +78,7 @@ public final class UpCommand implements Runnable {
         Banner.printContainerStatus(name, r, System.out, Ansi.AUTO);
         Banner.printConnect(name, operator, System.out, Ansi.AUTO);
         printTunnelHints(shell);
-        printOvercommitHints(mgr, operator);
+        printOvercommitHints(shell, operator);
       }
       case ContainerState.Stopped _, ContainerState.Frozen _ -> {
         if (!json) {
@@ -81,7 +97,7 @@ public final class UpCommand implements Runnable {
         Banner.printContainerStatus(name, new ContainerState.Running(ip), System.out, Ansi.AUTO);
         Banner.printConnect(name, operator, System.out, Ansi.AUTO);
         printTunnelHints(shell);
-        printOvercommitHints(mgr, operator);
+        printOvercommitHints(shell, operator);
       }
       case ContainerState.NotCreated ignored -> throw ContainerStateGuard.notCreated(name);
       case ContainerState.Error e ->
@@ -97,7 +113,7 @@ public final class UpCommand implements Runnable {
     System.out.println(YamlUtil.dumpJson(map));
   }
 
-  private void printTunnelHints(ShellExecutor shell) {
+  private void printTunnelHints(ShellExec shell) {
     try {
       var ports = ContainerExec.queryServicePorts(shell, name);
       Banner.printSshTunnels(name, null, ports, System.out, Ansi.AUTO);
@@ -105,9 +121,10 @@ public final class UpCommand implements Runnable {
     }
   }
 
-  private void printOvercommitHints(ContainerManager mgr, OperatorCommand operator) {
+  private void printOvercommitHints(ShellExec shell, OperatorCommand operator) {
     try {
-      var containers = mgr.listAll();
+      var containers =
+          new BoxInstances(shell).all().stream().map(BoxInstances.Instance::info).toList();
       var running =
           containers.stream().filter(c -> c.state() instanceof ContainerState.Running).toList();
       var others = running.stream().filter(c -> !c.name().equals(name)).toList();

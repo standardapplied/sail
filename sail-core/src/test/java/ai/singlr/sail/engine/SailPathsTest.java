@@ -45,6 +45,13 @@ class SailPathsTest {
   }
 
   @Test
+  void aTemplatesProgressIsBesideItsProjectsOwn() {
+    assertEquals(
+        SailPaths.projectDir("acme").resolve("template-provision-state.yaml"),
+        SailPaths.templateProvisionState("acme"));
+  }
+
+  @Test
   void projectDirVariesByName() {
     assertNotEquals(SailPaths.projectDir("alpha"), SailPaths.projectDir("beta"));
   }

@@ -74,8 +74,8 @@ container's disk limit is enforced: Incus sets the root disk's size as the datas
 which its snapshots count against, and a snapshot copy is a clone that costs nothing at first.
 On a box already on `dir`, the same command with `--pool <name>` adds the ZFS pool beside it:
 existing containers and the base profile stay where they are, and `sudo sail host status` lists
-every pool with its driver, source and free space. Placing a project's containers on the new
-pool comes with workspaces.
+every pool with its driver, source and free space. A project's workspaces and its template go
+on the ZFS pool (see [Workspaces](#workspaces-several-lines-of-work-on-one-box)).
 
 ## The model: one main, many nodes
 
@@ -266,6 +266,74 @@ port that listens to the Mac's own `localhost` over the connection it already ho
 the browser: no `ssh -L`, nothing installed on the Mac, nothing listening once Mast quits.
 Agents get the same through sail's `sail-portal` skill (`scripts/portal up`, `ports`, `log`,
 `stop`), whatever harness they run in.
+
+### Workspaces: several lines of work on one box
+
+A project's container is its default workspace, `main`. On a box with a ZFS pool, a project can
+run more, each its own container with its own tree, services and ports, cloned from the project's
+template. On a 4-vCPU cloud VM the clone takes about half a second and a whole create, the clone,
+the start and making it its own, about three seconds:
+
+```bash
+sudo sail project workspace create web fix-login   # builds the template first if it is missing or stale
+sail project workspace list web                      # main, then every workspace: state, template, created, IPv4
+sail project workspace shell web fix-login
+sail project workspace stop web fix-login
+sail project workspace start web fix-login           # says how long it took to be ready
+sudo sail project workspace delete web fix-login     # asks once it finds it; --yes to skip
+sudo sail project template build web                 # build the template now; a no-op when it is current
+```
+
+The template is the container `web--tmpl`, provisioned as `project apply` provisions `web`, kept
+stopped, with one snapshot per version (`v1`, `v2`, ...). A workspace is a ZFS clone of the
+current version. It gets:
+- a machine-id of its own;
+- `web` as its hostname, so the in-container `spec` and portal work as they do in `main`;
+- SSH host keys of its own, made under that name;
+- every repo fetched and on the branch named after the workspace (the remote's, when it has one),
+  asking again for up to 10 s while the repo's host does not resolve, as a fresh clone's
+  resolver can lag its address (`ready_steps.fetch_retries` counts how often);
+- none of the template's own keys.
+
+`create` says how long each phase took, for example `Created fix-login from v1 in 3.2 s (clone 0.5 s,
+start 0.4 s, ready 2.3 s)`; `--json` breaks the readiness down step by step (`ready_steps`).
+
+A workspace counts as whole only once its create finished. One whose create was interrupted is
+listed as `incomplete`, is not started or entered, and is replaced by the next `create` of its
+name. One whose ready mark was taken off by hand is not replaced: `create`, `start` and `shell`
+name `workspace delete`. Two creates of one name make one workspace and refuse the other; two of
+different names build a missing or stale template once and both clone it. `delete` asks, once it
+finds the workspace, before it removes it and its uncommitted work.
+
+An edited definition is built as the next version at the next `create`. Workspaces made from an
+older version keep running on it. A stale template is converged on its disk, as `apply` converges
+a container, so what the definition dropped stays in it.
+
+On a box without ZFS, `list` shows `main` alone, and the verbs that make or change a workspace
+name `sudo sail host init --storage zfs` to add a pool. `main` is never touched: `delete main`
+names `project destroy`.
+
+`sudo sail project destroy web` removes the template and every workspace with the container,
+naming each in its prompt; `--dry-run` names the same. A project that leaves a box's scope takes
+them with it the same way. `project list`, `project apply --all`, `snaps prune` and the sync round
+never take a workspace or a template for a project, and no project verb acts on one: a project
+named like a workspace's instance (`web-fix-login`) is refused everywhere, naming the workspace to
+delete or another name to choose.
+
+A copy of a workspace made by hand (`incus copy web-fix-login keep`) is not Sail's. No verb acts on
+it, and it outlives its project, keeping the project's tree and your credentials; delete it
+yourself.
+
+Know what a clone carries. The template is provisioned like your own container, so every
+workspace holds your GitHub token, your git identity and your workstation key. The workstation
+key is part of what the template is built from: revoking it makes the template stale, so the next
+`create` builds a new version without it. Older versions keep the old key, but nothing is cloned
+from them again. A new pairing reaches your workspaces at once and the template when the next
+`create` rebuilds it, as the pairing's key is in what the template is built from. Key lines added
+by hand are not tracked.
+
+Deleting an old template version by hand (`sudo incus snapshot delete web--tmpl v1`) leaves its
+workspaces running. Its space is freed when the last of them goes.
 
 ## Specs and agents
 

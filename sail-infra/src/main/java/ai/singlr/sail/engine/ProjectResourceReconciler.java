@@ -20,7 +20,9 @@ import java.util.concurrent.TimeoutException;
  * applied live — no recreate, no restart — so a resource change that synced from another box
  * expands or contracts the local container in place. Idempotent: a container already at the desired
  * size is left untouched, and a container that does not exist yet is skipped (provisioning will
- * size it).
+ * size it). A project whose name is a workspace's, a template's or a copy's instance has no
+ * container of its own here and is skipped likewise, never touched (W10); the round that brought
+ * the project says so.
  *
  * <p>CPU and memory are compared against the container's live limits. Disk is compared against its
  * current root quota; a shrink the storage backend refuses (ZFS below used space; advisory on the
@@ -96,7 +98,12 @@ public final class ProjectResourceReconciler {
     if (desired == null) {
       return Outcome.absent();
     }
-    var info = manager.queryInfo(name);
+    ContainerManager.ContainerInfo info;
+    try {
+      info = manager.queryInfo(name);
+    } catch (BoxInstances.Taken notItsOwn) {
+      return Outcome.absent();
+    }
     if (!isProvisioned(info.state())) {
       return Outcome.absent();
     }

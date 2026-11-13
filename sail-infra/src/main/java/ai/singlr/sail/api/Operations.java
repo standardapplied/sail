@@ -80,6 +80,9 @@ public interface Operations extends LocalLaneOperations {
   /** Lists the project's container snapshots with the source each name's prefix encodes. */
   Result<SnapshotListResponse> snapshots(String project);
 
+  /** Lists the project's workspaces on this box, its own container first, as Incus has them. */
+  Result<WorkspaceListResponse> workspaces(String project);
+
   /**
    * Accepts an async restore of the container to {@code label}: validation and the live-run gate
    * run inline, the mutation completes in the background and reports via {@code snapshot_restored}.

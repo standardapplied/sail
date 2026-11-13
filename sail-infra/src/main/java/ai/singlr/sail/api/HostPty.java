@@ -22,6 +22,8 @@ public interface HostPty {
 
   void admitProject(String project, PtyIdentity.Person who) throws IOException;
 
+  void admitInstance(String project) throws IOException;
+
   void admitRoom(String room, String project, PtyIdentity.Person who) throws IOException;
 
   void recordEvent(EventStore.EventRow event);

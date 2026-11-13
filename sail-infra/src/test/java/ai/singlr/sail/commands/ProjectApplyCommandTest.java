@@ -20,7 +20,7 @@ import ai.singlr.sail.api.SailOperations;
 import ai.singlr.sail.config.ProjectDefinition;
 import ai.singlr.sail.config.TestDefinitions;
 import ai.singlr.sail.engine.Banner;
-import ai.singlr.sail.engine.ContainerManager;
+import ai.singlr.sail.engine.BoxInstances;
 import ai.singlr.sail.engine.ContainerManager.ContainerInfo;
 import ai.singlr.sail.engine.ContainerSailSetup;
 import ai.singlr.sail.engine.ContainerState;
@@ -30,6 +30,7 @@ import ai.singlr.sail.engine.PairingTrust;
 import ai.singlr.sail.engine.ProvisionState;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ScriptedShellExecutor;
+import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.ProjectScope;
@@ -75,10 +76,30 @@ class ProjectApplyCommandTest {
         new Actor("ada", Role.MEMBER, Actor.Lane.CLI).withScope(ProjectScope.of(List.of("alpha")));
 
     var targets =
-        Actor.readingAs(
-            () -> scoped, () -> ProjectApplyCommand.targets(new ContainerManager(incus)));
+        Actor.readingAs(() -> scoped, () -> ProjectApplyCommand.targets(new BoxInstances(incus)));
 
     assertEquals(List.of("alpha"), targets.stream().map(ContainerInfo::name).toList());
+  }
+
+  @Test
+  void aBulkApplyNeverTakesAWorkspaceOrATemplateForAProject() throws Exception {
+    var incus =
+        new ScriptedShellExecutor()
+            .onOk(
+                "incus list",
+                """
+                [{"name": "acme", "status": "Running", "state": {}},
+                 {"name": "acme-fix", "status": "Stopped",
+                  "config": {"user.sail.project": "acme", "user.sail.workspace": "fix"}},
+                 {"name": "acme--tmpl", "status": "Stopped",
+                  "config": {"user.sail.template.of": "acme"}}]
+                """);
+    var owner = new Actor("ada", Role.ADMIN, Actor.Lane.CLI);
+
+    var targets =
+        Actor.readingAs(() -> owner, () -> ProjectApplyCommand.targets(new BoxInstances(incus)));
+
+    assertEquals(List.of("acme"), targets.stream().map(ContainerInfo::name).toList());
   }
 
   @Test
@@ -260,7 +281,7 @@ class ProjectApplyCommandTest {
     catalogue(box.database(), "name: acme\nresources:\n  cpu: 2\n  memory: 4GB\n  disk: 50GB\n");
 
     for (var args : List.of(new String[] {"acme", "--yes"}, new String[] {"--all", "--yes"})) {
-      var ran = SailCli.run(new ProjectApplyCommand(() -> box), args);
+      var ran = SailCli.run(new ProjectApplyCommand(() -> box, ShellExecutor::new), args);
 
       assertEquals(1, ran.exit());
       assertEquals("", ran.out());
@@ -414,7 +435,8 @@ class ProjectApplyCommandTest {
             new ProjectApplyCommand(
                 () ->
                     new ProjectApplyCommand.Box(
-                        database, database.resolveSibling("host.yaml"), database.getParent())));
+                        database, database.resolveSibling("host.yaml"), database.getParent()),
+                ShellExecutor::new));
     command.setExecutionExceptionHandler((failure, line, parsed) -> 1);
     return new FutureTask<>(() -> command.execute(args));
   }

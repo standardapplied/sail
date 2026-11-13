@@ -147,7 +147,7 @@ class SkillShareIT extends AbstractIncusIT {
 
       assertEquals(2, (int) Acting.as("uday", () -> skills.remove(CONTAINER, "java")));
       for (var harness : List.of(Harnesses.of("codex"), Harnesses.of("claude-code"))) {
-        ProjectSkillInstaller.installProject(shell, CONTAINER, harness, projectSkills);
+        ProjectSkillInstaller.installProject(shell, CONTAINER, CONTAINER, harness, projectSkills);
       }
       for (var skillsDir : List.of(codex, claude)) {
         assertEquals(

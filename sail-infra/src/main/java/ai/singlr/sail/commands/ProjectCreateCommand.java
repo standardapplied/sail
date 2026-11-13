@@ -9,8 +9,11 @@ import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.ProjectDefinition;
 import ai.singlr.sail.config.ProjectDefinitionJson;
 import ai.singlr.sail.engine.Banner;
+import ai.singlr.sail.engine.BoxInstances;
 import ai.singlr.sail.engine.NameValidator;
 import ai.singlr.sail.engine.OperatorCommand;
+import ai.singlr.sail.engine.ShellExec;
+import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.gen.ServicePresets;
 import ai.singlr.sail.harness.Harnesses;
 import java.io.InputStream;
@@ -98,16 +101,28 @@ public final class ProjectCreateCommand implements Runnable {
   private final Supplier<InputStream> stdin;
   private final BooleanSupplier console;
   private final ProjectMutations mutations;
+  private final ShellExec incus;
 
   public ProjectCreateCommand() {
-    this(() -> System.in, ConsoleHelper::hasConsole, ProjectMutations.here());
+    this(
+        () -> System.in,
+        ConsoleHelper::hasConsole,
+        ProjectMutations.here(),
+        new ShellExecutor(false));
   }
 
+  /**
+   * {@code incus} reads this box's instances, so no project takes a workspace's or template's name.
+   */
   ProjectCreateCommand(
-      Supplier<InputStream> stdin, BooleanSupplier console, ProjectMutations mutations) {
+      Supplier<InputStream> stdin,
+      BooleanSupplier console,
+      ProjectMutations mutations,
+      ShellExec incus) {
     this.stdin = stdin;
     this.console = console;
     this.mutations = mutations;
+    this.incus = incus;
   }
 
   @Override
@@ -120,6 +135,8 @@ public final class ProjectCreateCommand implements Runnable {
     var ansi = Ansi.AUTO;
     var out = System.out;
     var created = ProjectDefinitionJson.validated(definition(out, ansi));
+    BoxInstances.requireNotTakenFor(
+        created.name(), new BoxInstances(incus).namedIfReadable(created.name()));
     var catalog = mutations.catalog();
     catalog.requireInScope(created.name());
     catalog.requireUnpruned(created.name());
@@ -199,7 +216,7 @@ public final class ProjectCreateCommand implements Runnable {
       throw new IllegalArgumentException(
           "Name the project to create, or pass its definition with --definition -.");
     }
-    NameValidator.requireValidProjectName(name);
+    NameValidator.requireNewProjectName(name);
     var runtimes =
         jdk != null || node != null || maven != null
             ? new ProjectDefinition.Runtimes(jdk == null ? 0 : jdk, node, maven)
@@ -305,7 +322,7 @@ public final class ProjectCreateCommand implements Runnable {
                 ansi,
                 "Project name",
                 sanitizeProjectName(Path.of("").toAbsolutePath().getFileName().toString()));
-    NameValidator.requireValidProjectName(name);
+    NameValidator.requireNewProjectName(name);
 
     var description = ConsoleHelper.promptWithDefault(out, ansi, "Description", "");
     if (description.isEmpty()) description = null;

@@ -7,9 +7,20 @@ package ai.singlr.sail.engine;
 
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.ProjectDefinition;
+import java.io.IOException;
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
+import java.time.Duration;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.Executors;
+import java.util.function.Predicate;
 import java.util.regex.Pattern;
 
 /**
@@ -19,6 +30,9 @@ import java.util.regex.Pattern;
  * attacker-influenced URLs out of generated files and shell arguments.
  */
 public final class GitCredentials {
+
+  private static final String REFS = "/info/refs?service=git-upload-pack";
+  private static final Duration PROBE_TIMEOUT = Duration.ofSeconds(3);
 
   private static final Pattern HOST_PATTERN =
       Pattern.compile("^[A-Za-z0-9][A-Za-z0-9.-]*(?::[0-9]{1,5})?$");
@@ -110,6 +124,87 @@ public final class GitCredentials {
       return System.getenv("BITBUCKET_TOKEN");
     }
     return null;
+  }
+
+  /**
+   * The tokens a run clones {@code repos} with, asking no one: {@code token} for every host when it
+   * is given, else each https host's own from its provider's environment variable.
+   */
+  public static Map<String, String> known(List<ProjectDefinition.Repo> repos, String token) {
+    if (Strings.isNotBlank(token)) {
+      return singleTokenMap(token);
+    }
+    var tokens = new LinkedHashMap<String, String>();
+    for (var host : extractHttpsHosts(repos)) {
+      var found = resolveTokenForHost(host, null);
+      if (Strings.isNotBlank(found)) {
+        tokens.put(host, found);
+      }
+    }
+    return Map.copyOf(tokens);
+  }
+
+  /**
+   * The https {@code repos} a run cannot clone with {@code tokens}: those whose host has no token
+   * there and whose smart-HTTP refs {@code asks} says ask for credentials ({@link
+   * #asksForCredentials}). Any other answer, a public repo or a host that cannot be reached, asks
+   * for none, and the clone says what is wrong with it. The repos are asked at once, so the whole
+   * check takes as long as its slowest answer, which {@link #asksForCredentials} bounds.
+   */
+  public static List<String> askingForAToken(
+      List<ProjectDefinition.Repo> repos, Map<String, String> tokens, Predicate<String> asks) {
+    var asked = new ArrayList<ProjectDefinition.Repo>();
+    for (var repo : repos == null ? List.<ProjectDefinition.Repo>of() : repos) {
+      var hosts = extractHttpsHosts(List.of(repo));
+      if (!hosts.isEmpty() && Strings.isBlank(resolveTokenForHost(hosts.getFirst(), tokens))) {
+        asked.add(repo);
+      }
+    }
+    try (var probes = Executors.newVirtualThreadPerTaskExecutor()) {
+      var answers =
+          asked.stream()
+              .map(repo -> probes.submit(() -> asks.test(repo.url().replaceAll("/+$", "") + REFS)))
+              .toList();
+      var asking = new ArrayList<String>();
+      for (var i = 0; i < asked.size(); i++) {
+        if (answers.get(i).get()) {
+          asking.add(asked.get(i).url());
+        }
+      }
+      return List.copyOf(asking);
+    } catch (InterruptedException e) {
+      Thread.currentThread().interrupt();
+      return List.of();
+    } catch (ExecutionException e) {
+      throw new IllegalStateException("Could not ask whether a repo needs a token.", e.getCause());
+    }
+  }
+
+  /**
+   * Whether a plain GET of {@code url}, sent without credentials and following no redirect, asks
+   * for them: a {@code 401}, or a {@code 403} that carries an authentication challenge. A {@code
+   * 403} without one is a refusal no token would lift, and a URL that cannot be asked within 3 s to
+   * connect and 3 s more for the answer asks for nothing.
+   */
+  public static boolean asksForCredentials(String url) {
+    try (var client =
+        HttpClient.newBuilder()
+            .connectTimeout(PROBE_TIMEOUT)
+            .followRedirects(HttpClient.Redirect.NEVER)
+            .build()) {
+      var answer =
+          client.send(
+              HttpRequest.newBuilder(URI.create(url)).timeout(PROBE_TIMEOUT).GET().build(),
+              HttpResponse.BodyHandlers.discarding());
+      return answer.statusCode() == 401
+          || answer.statusCode() == 403
+              && answer.headers().firstValue("WWW-Authenticate").isPresent();
+    } catch (IOException | IllegalArgumentException e) {
+      return false;
+    } catch (InterruptedException e) {
+      Thread.currentThread().interrupt();
+      return false;
+    }
   }
 
   /** Wraps a single token string into a wildcard token map. Returns empty map if null/blank. */

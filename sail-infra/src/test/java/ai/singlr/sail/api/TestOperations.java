@@ -334,6 +334,11 @@ class TestOperations implements Operations {
   }
 
   @Override
+  public Result<WorkspaceListResponse> workspaces(String project) {
+    return Result.success(new WorkspaceListResponse(project, List.of()));
+  }
+
+  @Override
   public Result<SnapshotActionResponse> restoreSnapshot(
       String project, String label, String localHandle) {
     return Result.success(new SnapshotActionResponse(project, label, "restore", "accepted"));
