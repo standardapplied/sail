@@ -296,7 +296,7 @@ public final class HostProvisioner {
               + " ("
               + held.driver()
               + " on "
-              + PoolMembers.of(reads, held).said()
+              + PoolMembers.of(reads, held).requireAnswered().said()
               + ", already exists)");
       return;
     }

@@ -30,6 +30,7 @@ import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -1864,6 +1865,25 @@ class HostProvisionerTest {
           shell.invocations().toString());
       assertTrue(steps.stream().noneMatch(step -> step.contains(":6/8:")), steps.toString());
     }
+  }
+
+  @Test
+  void aPoolWhoseZpoolHangsRefusesThePoolStepAfterOneBound() {
+    var hanging = new TimingOutShell(held("zfs", "Created", "mirror=/dev/sdb,/dev/sdc"), "zpool ");
+    var steps = new ArrayList<String>();
+
+    var refused =
+        assertThrows(
+            IllegalStateException.class,
+            () -> provision(hanging, SDB_SDC, new RecordingListener(steps)));
+
+    assertEquals(
+        "zpool did not answer within 10 s for zpool devpool, so Sail cannot tell what the pool is"
+            + " on or whether a device is in use. Nothing was changed; run this again once zpool"
+            + " answers.",
+        refused.getMessage());
+    assertEquals(List.of(Duration.ofSeconds(10)), hanging.deadlines());
+    assertTrue(steps.stream().noneMatch(step -> step.startsWith("done:5/8")), steps.toString());
   }
 
   @Test

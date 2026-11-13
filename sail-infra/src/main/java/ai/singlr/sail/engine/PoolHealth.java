@@ -6,7 +6,6 @@
 package ai.singlr.sail.engine;
 
 import java.io.IOException;
-import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;
@@ -21,11 +20,11 @@ import java.util.stream.IntStream;
 /**
  * A zpool's health as {@code zpool status -P} says it now: the pool's state (ONLINE, DEGRADED,
  * FAULTED, SUSPENDED, ...; {@value #NOT_IMPORTED} when zpool has no such pool, and {@value
- * #UNANSWERED} and why when zpool did not answer within {@link #BOUND} or failed, so the health
- * cannot be told) and each of its devices that is not online, by path, with its state. A device
- * absent when the pool was imported is listed by its GUID and named by the path zpool says it
- * {@code was}. Sail reads it and repairs nothing: a device is replaced with {@code zpool replace},
- * by the operator.
+ * #UNANSWERED} and why when zpool did not answer within {@link Zpool#BOUND} or failed, so the
+ * health cannot be told) and each of its devices that is not online, by path, with its state. A
+ * device absent when the pool was imported is listed by its GUID and named by the path zpool says
+ * it {@code was}. Sail reads it and repairs nothing: a device is replaced with {@code zpool
+ * replace}, by the operator.
  *
  * @param state the pool's state, as zpool prints it
  * @param unhealthy each device that is not online, by path, and its state
@@ -37,9 +36,6 @@ public record PoolHealth(String state, Map<String, String> unhealthy) {
 
   /** The start of the state of a pool zpool did not answer for. */
   public static final String UNANSWERED = "did not answer";
-
-  /** How long zpool is given to answer: a suspended pool can hang it. */
-  static final Duration BOUND = Duration.ofSeconds(10);
 
   private static final String ONLINE = "ONLINE";
   private static final String DEGRADED = "DEGRADED";
@@ -61,16 +57,16 @@ public record PoolHealth(String state, Map<String, String> unhealthy) {
   }
 
   /**
-   * What zpool says of {@code zpool} now, given {@link #BOUND} to say it: none where zpool cannot
-   * be run, as where ZFS is not installed; {@value #UNANSWERED} and why where it ran and did not
-   * answer in time, failed, or said no state.
+   * What zpool says of {@code zpool} now, given {@link Zpool#BOUND} to say it: none where zpool
+   * cannot be run, as where ZFS is not installed; {@value #UNANSWERED} and why where it ran and did
+   * not answer in time, failed, or said no state.
    */
   public static Optional<PoolHealth> of(ShellExec shell, String zpool) throws InterruptedException {
     ShellExec.Result said;
     try {
-      said = shell.exec(status(zpool), null, BOUND);
+      said = Zpool.read(shell, status(zpool));
     } catch (TimeoutException e) {
-      return Optional.of(unanswered("within " + BOUND.toSeconds() + " s"));
+      return Optional.of(unanswered());
     } catch (IOException e) {
       return Optional.empty();
     }
@@ -86,6 +82,14 @@ public record PoolHealth(String state, Map<String, String> unhealthy) {
       return Optional.of(unanswered("(" + said.reason() + ")"));
     }
     return Optional.of(parsed(said.stdout()).orElseGet(() -> unanswered("with a state")));
+  }
+
+  /**
+   * The health of a pool zpool did not answer for within {@link Zpool#BOUND}, said without asking
+   * it again.
+   */
+  public static PoolHealth unanswered() {
+    return new PoolHealth(Zpool.NO_ANSWER, Map.of());
   }
 
   private static PoolHealth unanswered(String why) {

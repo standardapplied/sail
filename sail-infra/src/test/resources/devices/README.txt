@@ -96,6 +96,17 @@ Hand-written (layouts no machine at hand has), in the call's format:
   proof's real `zpool status -P devpool` of a mirror suspended with both disks detached under I/O
   (its rows read DEGRADED, the device still ONLINE with errors, the other REMOVED; the harness's
   trailing `zpool status rc=0` line dropped) and of one with a device the operator took offline
+- gcp6/g-701-mirror-with-log.zpool-list-P.txt, gcp6/g-701-mirror-with-log.zpool-list.txt,
+  gcp6/g-705-mirror-with-log-and-cache.zpool-list-P.txt   the mirror's third real-device proof (of
+  3c143c8a), verbatim: `zpool list -vHP zg` and `env -u ZPOOL_VDEV_NAME_PATH zpool list -vH zg` of
+  the mirror zg on its two by-id disks once `zpool add zg log /dev/sde`, and `zpool list -vHP zg`
+  once `zpool add zg cache /dev/sdf` too; gcp6/handwritten-g-705-*.zpool-list.txt is the `-vH`
+  listing the proof did not take, g-701's with the cache row added as zpool prints it, and
+  gcp6/handwritten-mirror-with-spare.* are g-701's with the log replaced by a spare /dev/sdg1, its
+  header and row in the format classes.zpool-list.txt shows (no proof added a spare to a mirror).
+  gcp6/h-900-mirror-suspended-device-faulted.zpool-status.txt   the same proof's real `zpool status
+  -P devpool` of a mirror suspended with both disks detached under I/O: one device FAULTED with too
+  many errors, the other ONLINE with write errors (the harness's trailing rc line dropped)
 - gcp5/<case>.lsblk.json   the mirror's real-device proof (of 9cff06c3), the call above verbatim:
   d-225 two whole disks after the destroyed mirror zpend (GPT, data partition with zpend's labels,
   8 MiB reserved partition 9), d-226 the same once the labels were cleared; gcp5/d-225-wipefs-*.txt

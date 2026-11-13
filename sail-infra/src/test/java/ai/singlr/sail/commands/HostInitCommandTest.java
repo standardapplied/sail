@@ -16,6 +16,8 @@ import ai.singlr.sail.engine.DeviceFixtures;
 import ai.singlr.sail.engine.PoolDevices.Candidate;
 import ai.singlr.sail.engine.PoolSource;
 import ai.singlr.sail.engine.ScriptedShellExecutor;
+import ai.singlr.sail.engine.ShellExec;
+import ai.singlr.sail.engine.TimingOutShell;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.PrintStream;
@@ -25,6 +27,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermissions;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
@@ -944,6 +947,94 @@ class HostInitCommandTest {
   }
 
   @Test
+  void aReRunOfTheTwoDiskCommandKeepsAMirrorTheOperatorGaveALogOrCacheDeviceByHand()
+      throws Exception {
+    for (var listed :
+        List.of(
+            List.of(
+                "gcp6/g-701-mirror-with-log.zpool-list-P.txt",
+                "gcp6/g-701-mirror-with-log.zpool-list.txt"),
+            List.of(
+                "gcp6/g-705-mirror-with-log-and-cache.zpool-list-P.txt",
+                "gcp6/handwritten-g-705-mirror-with-log-and-cache.zpool-list.txt"))) {
+      var shell =
+          DeviceFixtures.zpoolLists(
+                  new ScriptedShellExecutor(), "zg", listed.getFirst(), listed.getLast())
+              .onOk(
+                  "incus storage list",
+                  "[{\"name\": \"zg\", \"driver\": \"zfs\", \"status\": \"Created\","
+                      + " \"config\": {\"source\": \"zg\", \"volatile.initial_source\":"
+                      + " \"mirror=/dev/sdd,/dev/sde\", \"zfs.pool_name\": \"zg\"}}]")
+              .onOk("realpath -e -- " + DeviceFixtures.K1, "/dev/sdn\n")
+              .onOk("realpath -e -- " + DeviceFixtures.K2, "/dev/sdm\n")
+              .onOk("realpath -e -- /dev/sdn", "/dev/sdn\n")
+              .onOk("realpath -e -- /dev/sdm", "/dev/sdm\n")
+              .onOk("realpath -e -- /dev/sde", "/dev/sde\n");
+
+      assertEquals(
+          new PoolSource.Zpool("zg"),
+          source(
+              shell,
+              "--storage",
+              "zfs",
+              "--pool",
+              "zg",
+              "--disk",
+              "/dev/sdn",
+              "--disk",
+              "/dev/sdm"),
+          listed.getFirst());
+      assertEquals(
+          "Incus already has zfs pool 'zg' on a mirror of "
+              + DeviceFixtures.K1
+              + " and "
+              + DeviceFixtures.K2
+              + ", which a re-run keeps, so --disk /dev/sdn --disk /dev/sde would be ignored."
+              + " Drop it, or name a new pool with --pool <name>.",
+          assertThrows(
+                  IllegalArgumentException.class,
+                  () ->
+                      source(
+                          shell,
+                          "--storage",
+                          "zfs",
+                          "--pool",
+                          "zg",
+                          "--disk",
+                          "/dev/sdn",
+                          "--disk",
+                          "/dev/sde"))
+              .getMessage(),
+          listed.getFirst());
+    }
+  }
+
+  @Test
+  void aReRunFindingAZpoolThatHangsRefusesAfterOneBoundAndChangesNothing() {
+    var hanging = new TimingOutShell(movedNames(new ScriptedShellExecutor()), "zpool ");
+
+    assertEquals(
+        "zpool did not answer within 10 s for zpool zg, so Sail cannot tell what the pool is on or"
+            + " whether a device is in use. Nothing was changed; run this again once zpool"
+            + " answers.",
+        assertThrows(
+                IllegalStateException.class,
+                () ->
+                    source(
+                        hanging,
+                        "--storage",
+                        "zfs",
+                        "--pool",
+                        "zg",
+                        "--disk",
+                        "/dev/sdj",
+                        "--disk",
+                        "/dev/sdh"))
+            .getMessage());
+    assertEquals(List.of(Duration.ofSeconds(10)), hanging.deadlines());
+  }
+
+  @Test
   void aPoolZpoolHasNotImportedIsSaidAsIncusRecordedIt() {
     var shell =
         listing("tank", "zfs", "Created", SINGLE)
@@ -970,7 +1061,7 @@ class HostInitCommandTest {
         .onOk("/proc/[0-9]*");
   }
 
-  private static PoolSource source(ScriptedShellExecutor shell, String... args) throws Exception {
+  private static PoolSource source(ShellExec shell, String... args) throws Exception {
     var command = new HostInitCommand();
     new CommandLine(command).parseArgs(args);
     return command.source(shell);

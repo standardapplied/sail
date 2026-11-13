@@ -271,8 +271,11 @@ public final class HostStatusCommand implements Runnable {
         var members = new LinkedHashMap<String, PoolMembers>();
         var health = new LinkedHashMap<String, PoolHealth>();
         for (var pool : pools) {
-          members.put(pool.name(), PoolMembers.of(shell, pool));
-          if (HostYaml.BACKEND_ZFS.equals(pool.driver())) {
+          var on = PoolMembers.of(shell, pool);
+          members.put(pool.name(), on);
+          if (on.unanswered() != null) {
+            health.put(pool.name(), PoolHealth.unanswered());
+          } else if (HostYaml.BACKEND_ZFS.equals(pool.driver())) {
             PoolHealth.of(shell, Objects.requireNonNullElse(pool.zpool(), pool.name()))
                 .ifPresent(found -> health.put(pool.name(), found));
           }
@@ -290,16 +293,18 @@ public final class HostStatusCommand implements Runnable {
     }
 
     private String row(IncusStorage.Pool pool) {
-      var summary = pool.summary(members.get(pool.name()).said());
-      var found = health.get(pool.name());
-      if (found == null) {
-        return summary;
+      var on = members.get(pool.name());
+      var lines = new ArrayList<>(List.of(pool.summary(on.said())));
+      if (!on.auxiliary().isEmpty()) {
+        lines.add(on.besides());
       }
-      var zpool = Objects.requireNonNullElse(pool.zpool(), pool.name());
-      var lines = new ArrayList<>(List.of(summary, "health " + found.state()));
-      found.unhealthy().forEach((device, state) -> lines.add(device + " " + state));
-      if (found.degraded()) {
-        lines.addAll(found.remedies(zpool));
+      var found = health.get(pool.name());
+      if (found != null) {
+        lines.add("health " + found.state());
+        found.unhealthy().forEach((device, state) -> lines.add(device + " " + state));
+        if (found.degraded()) {
+          lines.addAll(found.remedies(Objects.requireNonNullElse(pool.zpool(), pool.name())));
+        }
       }
       return String.join("\n", lines);
     }
@@ -321,9 +326,18 @@ public final class HostStatusCommand implements Runnable {
                 map.put("total_bytes", space.total());
               });
       var on = members.get(pool.name());
-      if (on.listed() || on.unimported() != null) {
+      if (on.listed() || on.unimported() != null || on.unanswered() != null) {
         map.put("devices", on.devices());
-        map.put("devices_from", on.listed() ? "zfs" : "incus record, zpool not imported");
+        map.put(
+            "devices_from",
+            on.listed()
+                ? "zfs"
+                : on.unimported() != null
+                    ? "incus record, zpool not imported"
+                    : "incus record, zpool did not answer");
+      }
+      if (on.listed()) {
+        map.put("auxiliary_devices", on.auxiliary());
       }
       var found = health.get(pool.name());
       if (found != null) {

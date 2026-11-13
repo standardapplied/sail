@@ -12,6 +12,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.config.YamlUtil;
 import java.io.IOException;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Comparator;
@@ -493,6 +494,19 @@ class PoolDevicesTest {
         "/dev/sdi1 is refused: it is in the imported zpool sail-raw, and no pool's device is"
             + " taken: export or destroy the pool yourself first.",
         refusal(imported(), "/dev/sdi1"));
+  }
+
+  @Test
+  void aZpoolThatDoesNotAnswerRefusesTheDeviceAfterOneBoundAndIsNeverTakenForNoPools() {
+    var hanging = new TimingOutShell(imported().shell(), "zpool ");
+
+    assertEquals(
+        "zpool did not answer within 10 s (zpool list -H -o name), so Sail cannot tell whether a"
+            + " device is in use or a zpool's name is taken. Nothing was written; run this again"
+            + " once zpool answers.",
+        assertThrows(IllegalStateException.class, () -> devices(hanging).cleared("/dev/sdb"))
+            .getMessage());
+    assertEquals(List.of(Duration.ofSeconds(10)), hanging.deadlines());
   }
 
   @Test

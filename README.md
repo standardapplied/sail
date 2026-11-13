@@ -101,7 +101,14 @@ now (a whole-disk device as its disk), not the names Incus recorded when it made
 on disks with no hardware identity are kernel names that can move across a reboot: a re-run
 compares the devices it names with those, `host init` and `host status` say those, and a pool
 whose zpool is not imported is said as Incus recorded it, saying so. After your own `zpool
-replace`, the pool is on its new device. The mirror needs an Incus with the `storage_zfs_vdev` API
+replace`, the pool is on its new device. A log, cache, spare, special or dedup device you add
+with `zpool add` is no member of the mirror: the re-run of the two-disk command still keeps the
+pool, and `host status` names it on a row of its own (`plus a log device /dev/sde`, and in
+`--json` as `auxiliary_devices`); it is still a device in use, never offered for a pool. Every
+read of zpool is given 10 s: a pool whose zpool does not answer is asked nothing more in that
+command, so it costs 10 s, a box with two such pools 20 s; `host status` says so and shows the
+pool as Incus recorded it, and `host init` refuses, changing nothing, since what the pool is on
+and whether a device is in use cannot be told. The mirror needs an Incus with the `storage_zfs_vdev` API
 extension (6.0.1 and later, as Sail installs it); Ubuntu's own Incus 6.0.0 is refused before
 anything is made, in a dry run too, naming what moves it: add Zabbly's apt source, then `sudo sail
 host incus upgrade`. A pool Incus did not finish making is never taken for one that exists, and

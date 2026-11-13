@@ -1178,8 +1178,13 @@ never with `-f`: Sail never passes `source.wipe`.
   compared are the pool's members as ZFS lists its imported zpool now (`PoolMembers`: `zpool list
   -vHP`, and `-vH`, in which ZFS names a whole-disk vdev by its disk), not Incus's record, whose
   kernel names can move across a reboot or outlive a `zpool replace`; `host init` and `host status`
-  say the same, and Incus's record is used only for a zpool ZFS says is not imported, said as
-  recorded at creation. The NVMe rule refuses two persistent disks of a cloud VM that shows
+  say the same, and Incus's record is used only for a zpool ZFS says is not imported or that does
+  not answer (Z7), said as recorded at creation. Members are the data vdevs, the rows before the
+  listing's first class header (`ImportedPools.classes`, the one parser of `zpool list -vH`): a
+  log, cache, spare, special or dedup device an operator adds with `zpool add` is no member, so
+  the re-run of the two-disk command keeps the pool; `host status` names those on a row of their
+  own (`plus a log device /dev/sde and a cache device /dev/sdf`) and `--json` as
+  `auxiliary_devices`, by class; `ImportedPools` still counts every class as a device in use. The NVMe rule refuses two persistent disks of a cloud VM that shows
   every disk as a namespace of one controller (GCP); SCSI-attached disks there are separate.
   `host.yaml`'s `pool_source` is Incus's string, `mirror=<a>,<b>`, said as `a mirror of <a> and
   <b>`. *`PoolDevicesTest.twoBlankDisksAreAMirrorOfTwoDevicesEachClearedAsOneIs`,
@@ -1187,13 +1192,22 @@ never with `-f`: Sail never passes `source.wipe`.
   `PoolDevicesTest.twoNamesOfOnePhysicalDiskAreRefusedAsAMirror`,
   `HostProvisionerTest.aMirrorIsOneIncusCreateOfBothDevicesEachProbedLastAndNeverForced`,
   `HostProvisionerTest.aSecondDeviceThatTookASignatureRefusesTheMirrorAndNoPoolOfOneDeviceIsMade`,
-  `HostInitCommandTest.aReRunOfAMirrorInEitherOrderOfItsDisksKeepsIt`, `PoolDevicesIT`.*
+  `HostInitCommandTest.aReRunOfAMirrorInEitherOrderOfItsDisksKeepsIt`,
+  `HostInitCommandTest.aReRunOfTheTwoDiskCommandKeepsAMirrorTheOperatorGaveALogOrCacheDeviceByHand`,
+  `PoolMembersTest`, `PoolDevicesIT`.*
 - **Z7. What Sail says of a pool's health is what ZFS says now.** `PoolHealth` reads `zpool status
   -P <zpool>` in the C locale: the ` state:` line is the pool's, and each leaf of the config table
   not ONLINE (a path, or the GUID of a device absent at import, named by the path it `was`) is
-  named with its state; "no such pool" is not imported. zpool is given 10 s: one that does not
+  named with its state; "no such pool" is not imported. Every read Sail makes of zpool (`status`,
+  `list`, the `import` listing) is given the one bound, `Zpool.BOUND`, 10 s: one that does not
   answer in time, fails, or says no state is "did not answer" and why; one that cannot be run
-  (ZFS not installed) says nothing.
+  (ZFS not installed) says nothing. Once zpool has not answered for a pool, that command asks it
+  nothing more about the pool, so a hung pool costs one bound, not one per read: `host status` on
+  a box with two hung pools answers in about 20 s, each pool said as Incus recorded it, "zpool
+  <pool> did not answer within 10 s", with `health did not answer within 10 s`; `host init`'s
+  flags check and its pool step refuse, changing nothing, since what the pool is on and whether a
+  device is in use cannot be told; a read that decides whether a device is free (`ImportedPools`)
+  refuses too, and is never read as no pools.
   `host status` puts it in rows under each zfs pool's (`health <state>`, each device not online
   with its state, and when DEGRADED what mends each: `zpool online` for a device taken offline,
   `zpool replace` for one gone or failed; the banner's rows a pool may run
@@ -1206,6 +1220,10 @@ never with `-f`: Sail never passes `source.wipe`.
   `HostStatusCommandTest.aDegradedMirrorNamesTheMissingDeviceAndTheReplaceThatMendsIt`,
   `WorkspacesTest.aFaultedPoolRefusesEveryVerbThatChangesAWorkspaceOrTemplateAndChangesNothing`,
   `WorkspacesTest.aMirrorWhoseHealthZpoolDoesNotTellRefusesEveryChangeAndChangesNothing`,
+  `HostStatusCommandTest.aZpoolThatHangsCostsOneBoundPerPoolAndThePoolIsSaidAsIncusRecordedIt`,
+  `HostInitCommandTest.aReRunFindingAZpoolThatHangsRefusesAfterOneBoundAndChangesNothing`,
+  `HostProvisionerTest.aPoolWhoseZpoolHangsRefusesThePoolStepAfterOneBound`,
+  `PoolDevicesTest.aZpoolThatDoesNotAnswerRefusesTheDeviceAfterOneBoundAndIsNeverTakenForNoPools`,
   `PoolDevicesIT`.* CI's incus suites run Zabbly's current stable Incus, unpinned, as a new box
   installs it; Ubuntu's own 6.0.0, which a box keeps when it came with it, is covered only by the
   unit tests of the mirror's refusal of it (`IncusStorageTest`, `HostProvisionerTest`).

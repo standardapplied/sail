@@ -6,6 +6,7 @@
 package ai.singlr.sail.commands;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -152,6 +153,22 @@ class HostIncusCommandTest {
             String.join(" ", Apt.HOLD) + " incus incus-client"),
         installs(shell));
     assertTrue(out.endsWith("  ✓ Incus upgraded from 6.17 to 6.18.\n"), out);
+  }
+
+  @Test
+  void aBoxWithNoDatabaseYetIsUpgradedAndGivenNone(@TempDir Path dir) throws Exception {
+    var shell = box(MOVABLE);
+    var sail = dir.resolve(".sail");
+
+    var out =
+        upgrade(
+            shell,
+            HostIncusCommand.Upgrade.live(dir.resolve("pty.sock"), sail.resolve("sail.db")),
+            true);
+
+    assertEquals(2, installs(shell).size());
+    assertTrue(out.endsWith("  ✓ Incus upgraded from 6.17 to 6.18.\n"), out);
+    assertFalse(Files.exists(sail), "no database is made for runs a box cannot have had");
   }
 
   @Test

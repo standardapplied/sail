@@ -93,6 +93,15 @@ class PoolHealthTest {
         "the proof's real SUSPENDED pool: its rows read DEGRADED, the device detached with I/O in"
             + " flight still ONLINE with errors, the other REMOVED");
     assertEquals("FAULTED (" + A + " is UNAVAIL, " + B + " is UNAVAIL)", faulted.said());
+    var deviceFaulted =
+        read("gcp6/h-900-mirror-suspended-device-faulted.zpool-status.txt").orElseThrow();
+    assertEquals(
+        new PoolHealth("SUSPENDED", Map.of("/dev/sdb1", "FAULTED")),
+        deviceFaulted,
+        "the third proof's real SUSPENDED pool: one device FAULTED with too many errors, the other"
+            + " ONLINE with write errors");
+    assertEquals("SUSPENDED (/dev/sdb1 is FAULTED)", deviceFaulted.said());
+    assertFalse(deviceFaulted.usable());
     assertFalse(suspended.usable());
     assertFalse(faulted.usable());
   }

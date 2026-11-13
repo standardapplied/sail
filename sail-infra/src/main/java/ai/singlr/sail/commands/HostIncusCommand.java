@@ -18,6 +18,7 @@ import ai.singlr.sail.pty.PtyMessage;
 import ai.singlr.sail.store.RunStore;
 import java.io.IOException;
 import java.io.PrintStream;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
@@ -79,7 +80,7 @@ public final class HostIncusCommand implements Runnable {
             }
             upgrade(
                 new ShellExecutor(false),
-                () -> LiveWork.of(SailPaths.ptySocketPath(), liveRuns(), SESSIONS_DEADLINE),
+                live(SailPaths.ptySocketPath(), SailPaths.controlPlaneDb()),
                 yes,
                 dryRun,
                 OperatorCommand.here(),
@@ -87,8 +88,20 @@ public final class HostIncusCommand implements Runnable {
           });
     }
 
-    private static List<RunStore.RunRow> liveRuns() {
-      try (var operations = OperationsFactory.open()) {
+    /**
+     * The live work on this box, read once a move is due: the pty host's sessions and the runs in
+     * {@code database}, none where the box has no database yet, as before its first {@code host
+     * init} finishes, which is when a mirror's refusal sends the operator here.
+     */
+    static Supplier<LiveWork> live(Path ptySocket, Path database) {
+      return () -> LiveWork.of(ptySocket, liveRuns(database), SESSIONS_DEADLINE);
+    }
+
+    private static List<RunStore.RunRow> liveRuns(Path database) {
+      if (!Files.exists(database)) {
+        return List.of();
+      }
+      try (var operations = OperationsFactory.open(database)) {
         return operations.dispatching().liveRuns(NodeIdentity.handle());
       }
     }

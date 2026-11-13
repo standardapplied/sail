@@ -22,6 +22,7 @@ import ai.singlr.sail.engine.TimingOutShell;
 import java.io.ByteArrayOutputStream;
 import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -417,6 +418,42 @@ class HostStatusCommandTest {
   }
 
   @Test
+  void aZpoolThatHangsCostsOneBoundPerPoolAndThePoolIsSaidAsIncusRecordedIt() throws Exception {
+    var hanging =
+        new TimingOutShell(
+            new ScriptedShellExecutor()
+                .onOk("incus list", "[]")
+                .onOk(
+                    "incus storage list",
+                    "[{\"name\": \"devpool\", \"driver\": \"zfs\", \"config\": {\"source\":"
+                        + " \"devpool\", \"volatile.initial_source\": \"mirror="
+                        + A
+                        + ","
+                        + B
+                        + "\", \"zfs.pool_name\": \"devpool\"}}, {\"name\": \"zg\", \"driver\":"
+                        + " \"zfs\", \"config\": {\"source\": \"zg\", \"volatile.initial_source\":"
+                        + " \"/dev/sdd\", \"zfs.pool_name\": \"zg\"}}]"),
+            "zpool ");
+
+    var text = report(hanging, false);
+
+    assertEquals(List.of(Duration.ofSeconds(10), Duration.ofSeconds(10)), hanging.deadlines());
+    assertTrue(
+        text.contains(
+            "Pool:        zg (zfs, /dev/sdd (as Incus recorded at creation: zpool zg did not answer"
+                + " within"),
+        text);
+    assertEquals(
+        2, text.split(CONTINUED + "health did not answer within 10 s", -1).length - 1, text);
+    var zg =
+        (Map<?, ?>) ((List<?>) YamlUtil.parseMap(report(hanging, true)).get("pools")).getLast();
+    assertEquals(List.of("/dev/sdd"), zg.get("devices"));
+    assertEquals("incus record, zpool did not answer", zg.get("devices_from"));
+    assertEquals("did not answer within 10 s", zg.get("health"));
+    assertTrue(text.contains("Containers:"), text);
+  }
+
+  @Test
   void aPoolIsSaidOnTheDevicesZfsListsNowNotTheNamesIncusRecorded() throws Exception {
     var replaced =
         mirror("handwritten-mirror-online.zpool-status.txt")
@@ -441,7 +478,40 @@ class HostStatusCommandTest {
     var pool = (Map<?, ?>) ((List<?>) json(replaced).get("pools")).getFirst();
     assertEquals(List.of("/dev/sdb", "/dev/sdk"), pool.get("devices"));
     assertEquals("zfs", pool.get("devices_from"));
+    assertEquals(Map.of(), pool.get("auxiliary_devices"));
     assertEquals("mirror=" + A + "," + B, pool.get("source"));
+  }
+
+  @Test
+  void aMirrorWithALogAndACacheDeviceIsSaidOnItsTwoDisksPlusThoseDevices() throws Exception {
+    var shell =
+        DeviceFixtures.zpoolLists(
+                new ScriptedShellExecutor(),
+                "zg",
+                "gcp6/g-705-mirror-with-log-and-cache.zpool-list-P.txt",
+                "gcp6/handwritten-g-705-mirror-with-log-and-cache.zpool-list.txt")
+            .onOk("incus list", "[]")
+            .onOk(
+                "incus storage list",
+                "[{\"name\": \"zg\", \"driver\": \"zfs\", \"config\": {\"source\": \"zg\","
+                    + " \"volatile.initial_source\": \"mirror=/dev/sdd,/dev/sde\","
+                    + " \"zfs.pool_name\": \"zg\"}}]")
+            .onOk(
+                "incus query /1.0/storage-pools/zg/resources",
+                "{\"space\": {\"used\": 4294967296, \"total\": 21474836480}}");
+
+    var rows = rows(shell, "Pool:", "plus ");
+    assertEquals(2, rows.size(), rows.toString());
+    assertTrue(
+        rows.getFirst().startsWith("  │  Pool:        zg (zfs, a mirror of /dev/disk/by-id/"),
+        rows.toString());
+    assertEquals(
+        CONTINUED + "plus a log device /dev/sde and a cache device /dev/sdf", rows.getLast());
+    var pool = (Map<?, ?>) ((List<?>) json(shell).get("pools")).getFirst();
+    assertEquals(List.of(DeviceFixtures.K1, DeviceFixtures.K2), pool.get("devices"));
+    assertEquals(
+        Map.of("logs", List.of("/dev/sde"), "cache", List.of("/dev/sdf")),
+        pool.get("auxiliary_devices"));
   }
 
   @Test
@@ -480,7 +550,7 @@ class HostStatusCommandTest {
     return report(shell, false);
   }
 
-  private static String report(ScriptedShellExecutor shell, boolean json) throws Exception {
+  private static String report(ShellExec shell, boolean json) throws Exception {
     var out = new ByteArrayOutputStream();
     HostStatusCommand.report(
         RECORDED_AT_INIT,

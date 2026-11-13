@@ -380,7 +380,7 @@ public final class HostInitCommand implements Runnable {
    */
   private PoolSource kept(IncusStorage.Pool held, PoolDevices devices, ShellExec probe)
       throws Exception {
-    var on = PoolMembers.of(probe, held);
+    var on = PoolMembers.of(probe, held).requireAnswered();
     var ignored = new ArrayList<String>();
     if (disks != null && !disks.isEmpty() && !sameDevices(held, on, devices)) {
       ignored.add(diskFlags());

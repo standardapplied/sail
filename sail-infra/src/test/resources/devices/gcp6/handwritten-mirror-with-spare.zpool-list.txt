@@ -1,0 +1,6 @@
+zg	9.50G	2.18M	9.50G	-	-	0%	0%	1.00x	ONLINE	-
+	mirror-0	9.50G	2.18M	9.50G	-	-	0%	0.02%	-	ONLINE
+	scsi-0Google_PersistentDisk_sail-fleet-mirrorproof-p3h-k1	9.99G	-	-	-	-	-	-	-	ONLINE
+	scsi-0Google_PersistentDisk_sail-fleet-mirrorproof-p3h-k2	9.99G	-	-	-	-	-	-	-	ONLINE
+spare                                                              -      -      -        -         -      -      -      -         -
+	sdg	9.99G	-	-	-	-	-	-	-	AVAIL
