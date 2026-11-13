@@ -12,6 +12,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.store.AuthSessionStore;
+import ai.singlr.sail.store.ChangeLog;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.Sqlite;
@@ -38,6 +39,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Supplier;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -63,6 +65,7 @@ class OpenStreamRecheckTest {
   private final AtomicInteger checks = new AtomicInteger();
   private final List<InputStream> bodies = new CopyOnWriteArrayList<>();
   private final CountDownLatch clientChecked = new CountDownLatch(1);
+  private final CountDownLatch firstPageRead = new CountDownLatch(1);
   private volatile CountDownLatch holdClient;
 
   @BeforeEach
@@ -87,9 +90,41 @@ class OpenStreamRecheckTest {
     PrivateAttributes.context(
         server,
         "/v1/events/stream",
-        new SseHandler(bus, counted, SseHandler.RoomTurns.NONE, ChangeFeed.NONE, 4, clock));
+        new SseHandler(bus, counted, SseHandler.RoomTurns.NONE, readingFeed(), 4, clock));
     server.setExecutor(Executors.newVirtualThreadPerTaskExecutor());
     server.start();
+  }
+
+  /** The feed of a box that keeps no change log, saying when a stream first reads a page of it. */
+  private ChangeFeed readingFeed() {
+    return new ChangeFeed() {
+      @Override
+      public String newest() {
+        return ChangeFeed.NONE.newest();
+      }
+
+      @Override
+      public ChangeLog.Watch watch(Runnable wake) {
+        return ChangeFeed.NONE.watch(wake);
+      }
+
+      @Override
+      public void wake() {
+        ChangeFeed.NONE.wake();
+      }
+
+      @Override
+      public Page page(Ask ask) {
+        var page = ChangeFeed.NONE.page(ask);
+        firstPageRead.countDown();
+        return page;
+      }
+
+      @Override
+      public <T> Positioned<T> at(Supplier<T> read) {
+        return ChangeFeed.NONE.at(read);
+      }
+    };
   }
 
   /** Holds {@code client}'s check, once asked to, between its authentication and its read. */
@@ -126,6 +161,13 @@ class OpenStreamRecheckTest {
   }
 
   private BlockingQueue<String> open(FdeStore.Fde caller) throws Exception {
+    var frames = connect(caller);
+    checks.set(0);
+    return frames;
+  }
+
+  /** Opens {@code caller}'s stream once it has subscribed, counting every check since. */
+  private BlockingQueue<String> connect(FdeStore.Fde caller) throws Exception {
     var token = new AuthSessionStore(db).create(caller.id(), Duration.ofHours(1)).token();
     var request =
         HttpRequest.newBuilder(
@@ -167,7 +209,6 @@ class OpenStreamRecheckTest {
               }
             });
     assertEquals(true, subscribed.poll(10, TimeUnit.SECONDS), "the stream never subscribed");
-    checks.set(0);
     return frames;
   }
 
@@ -212,6 +253,15 @@ class OpenStreamRecheckTest {
     publish("acme");
     publish("beta");
     assertEquals("beta", next(frames));
+  }
+
+  @Test
+  void aStreamIsCheckedOnceAsItOpensAndNotAgainForAFirstPageWithNothingToSend() throws Exception {
+    checks.set(0);
+    connect(client);
+
+    assertTrue(firstPageRead.await(10, TimeUnit.SECONDS), "the stream never read its first page");
+    assertEquals(1, checks.get(), "the opening's check; the first page sends nothing to check");
   }
 
   @Test

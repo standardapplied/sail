@@ -326,13 +326,15 @@ public final class SseHandler implements HttpHandler, RouteTable {
 
   /**
    * Sends one page of the changes after {@code ask}'s position, read as the caller is now and sent
-   * only if the caller is still admitted once it is read, and answers where the next page starts;
-   * when more follow, the stream is woken to read them after whatever else it has to send, unless
-   * the page did not move the position, which would only read it again: then the next wake reads
-   * it. Each page starts where the one before it ended, so a change committed between two of them
-   * is in the next. A position the feed refuses is told once, with the newest as its id: on the
-   * first page, where the client named it, the stream goes on from there; on any later one, where
-   * the caller's view changed under the stream, the stream ends.
+   * only if the caller is still admitted once it is read, and answers where the next page starts.
+   * The door is asked before each page but the first, which the request that opened the stream was
+   * just admitted for, so a stream that opens with nothing to send asks it once; when more follow,
+   * the stream is woken to read them after whatever else it has to send, unless the page did not
+   * move the position, which would only read it again: then the next wake reads it. Each page
+   * starts where the one before it ended, so a change committed between two of them is in the next.
+   * A position the feed refuses is told once, with the newest as its id: on the first page, where
+   * the client named it, the stream goes on from there; on any later one, where the caller's view
+   * changed under the stream, the stream ends.
    *
    * @throws StreamRecheck.Ended when the caller no longer authenticates
    * @throws Severed when the stream is told to resync after its first page
@@ -344,9 +346,11 @@ public final class SseHandler implements HttpHandler, RouteTable {
       ChangeFeed.Ask ask,
       boolean first)
       throws IOException, StreamRecheck.Ended, Severed {
-    var refused = refusal(exchange);
-    if (refused.isPresent()) {
-      throw new StreamRecheck.Ended(refused.get());
+    if (!first) {
+      var refused = refusal(exchange);
+      if (refused.isPresent()) {
+        throw new StreamRecheck.Ended(refused.get());
+      }
     }
     ChangeFeed.Page page;
     try {
@@ -361,7 +365,7 @@ public final class SseHandler implements HttpHandler, RouteTable {
       throw new Severed();
     }
     if (!page.changes().isEmpty()) {
-      refused = refusal(exchange);
+      var refused = refusal(exchange);
       if (refused.isPresent()) {
         throw new StreamRecheck.Ended(refused.get());
       }
