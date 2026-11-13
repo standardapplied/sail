@@ -1103,15 +1103,20 @@ capped_on() {
   [[ -n $written && $written == "$live" ]]
 }
 
+# A box that is stopping its containers still answers ssh for a while after the reboot is asked,
+# so the wait is for a new boot id, never for an answer alone.
 reboots() {
-  local before after
+  local before after attempt
   before=$(on "$1" "$2" "cat /proc/sys/kernel/random/boot_id")
+  [[ -n $before ]] || { echo "no boot id before the reboot"; return 1; }
   on "$1" "$2" "sudo systemctl reboot" || true
-  sleep 20
-  answers_ssh "$1" "$2" || return 1
-  after=$(on "$1" "$2" "cat /proc/sys/kernel/random/boot_id")
+  for attempt in $(seq 1 60); do
+    sleep 5
+    after=$(on "$1" "$2" "cat /proc/sys/kernel/random/boot_id" 2> /dev/null) || after=
+    [[ -n $after && $after != "$before" ]] && break
+  done
   echo "boot id $before, then $after"
-  [[ -n $before && -n $after && $before != "$after" ]]
+  [[ -n $after && $after != "$before" ]]
 }
 
 root_disk() {
