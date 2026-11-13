@@ -18,9 +18,12 @@ import ai.singlr.sail.engine.ProjectProvisioner;
 import ai.singlr.sail.engine.ProvisionTracker;
 import ai.singlr.sail.engine.SailPaths;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.Callable;
+import java.util.concurrent.atomic.AtomicBoolean;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -71,15 +74,52 @@ class WorkspaceVerbsTest {
     var failure =
         assertThrows(
             IllegalArgumentException.class,
-            () -> WorkspaceVerbs.requireTokens(acme(), Map.of(), url -> 401));
+            () -> WorkspaceVerbs.requireTokens(acme(), Map.of(), url -> true));
 
     assertEquals(
         "The template cannot clone https://github.com/acme/app.git: it asks for credentials and no"
             + " token was given for its host. Pass one with --git-token <token>, or keep"
             + " GITHUB_TOKEN through sudo with sudo -E.",
         failure.getMessage());
-    WorkspaceVerbs.requireTokens(acme(), Map.of("*", "tok"), url -> 401);
-    WorkspaceVerbs.requireTokens(acme(), Map.of(), url -> 200);
+    WorkspaceVerbs.requireTokens(acme(), Map.of("*", "tok"), url -> true);
+    WorkspaceVerbs.requireTokens(acme(), Map.of(), url -> false);
+  }
+
+  @Test
+  void aBuildAsksAboutTokensBeforeItTakesThePairingLockAndARefusedOneNeverTakesIt()
+      throws Exception {
+    var held = new AtomicBoolean();
+    var seen = new ArrayList<String>();
+    Callable<AutoCloseable> pairing =
+        () -> {
+          seen.add("lock");
+          held.set(true);
+          return () -> held.set(false);
+        };
+    var build =
+        WorkspaceVerbs.checkedThenPaired(
+            acme(),
+            Map.of(),
+            url -> {
+              seen.add("probe while held=" + held.get());
+              return false;
+            },
+            pairing,
+            (into, fresh) -> seen.add("provision while held=" + held.get()));
+    var refused =
+        WorkspaceVerbs.checkedThenPaired(
+            acme(),
+            Map.of(),
+            url -> true,
+            pairing,
+            (into, fresh) -> seen.add("provisioned anyway"));
+    var template = new ProjectProvisioner.Instance("acme--tmpl", Optional.of("tank"), Map.of());
+
+    build.into(template, true);
+    assertThrows(IllegalArgumentException.class, () -> refused.into(template, true));
+
+    assertEquals(List.of("probe while held=false", "lock", "provision while held=true"), seen);
+    assertFalse(held.get(), "the lock is let go after the build");
   }
 
   @Test

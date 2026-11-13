@@ -44,6 +44,7 @@ import java.time.Duration;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.concurrent.TimeoutException;
 import java.util.function.Function;
 import java.util.function.Supplier;
 
@@ -334,9 +335,7 @@ final class HostLanes {
     /**
      * Admits {@code identity} into {@code project} when it holds the project on this box ({@link
      * ProjectGate#readable}): the catalog holds it and its person's scope admits it, whatever their
-     * role. One it does not hold is not in the catalog, as a project this box does not have. One
-     * whose name is a workspace's, a template's or a copy's instance is refused, naming it: a
-     * terminal in project {@code project} runs in the instance of that name (W10).
+     * role. One it does not hold is not in the catalog, as a project this box does not have.
      */
     @Override
     public void admitProject(String project, PtyIdentity.Person who) throws IOException {
@@ -345,10 +344,37 @@ final class HostLanes {
       } catch (ApiException absent) {
         throw Remedied.io(absent.reason(), absent.remedy());
       }
-      var taken = BoxInstances.taken(project, box.namedIfReadable(project));
+    }
+
+    /**
+     * Refuses an open in {@code project} when the instance of its name is a workspace, a template
+     * or a copy, not its container (W10), or when Incus cannot say within {@value
+     * BoxInstances#LOOKUP_SECONDS} s what it is: asked of the one instance by name, once per open.
+     */
+    @Override
+    public void admitInstance(String project) throws IOException {
+      Optional<BoxInstances.Instance> instance;
+      try {
+        instance = box.lookup(project, Duration.ofSeconds(BoxInstances.LOOKUP_SECONDS));
+      } catch (TimeoutException slow) {
+        throw unanswered(project);
+      } catch (InterruptedException interrupted) {
+        Thread.currentThread().interrupt();
+        throw unanswered(project);
+      }
+      var taken = BoxInstances.taken(project, instance);
       if (taken.isPresent()) {
         throw Remedied.io(taken.get().reason(), taken.get().remedy());
       }
+    }
+
+    private static IOException unanswered(String project) {
+      return new IOException(
+          "Incus did not say within "
+              + BoxInstances.LOOKUP_SECONDS
+              + " s what instance '"
+              + project
+              + "' is, so no terminal was opened in it. Try again once Incus answers.");
     }
 
     @Override

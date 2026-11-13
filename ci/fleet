@@ -71,8 +71,11 @@ Usage:
                                 incus storage create (strace); acme's template is built on tank, a
                                 workspace of it is a clone of its snapshot with a machine-id of its
                                 own (create time in the report), a second is made and stopped,
-                                apply --all leaves both and the template alone, five made at once are
-                                each whole, a dry run of destroying acme names them all, and destroying acme
+                                apply --all leaves both and the template alone; with acme's repos set
+                                to octocat/Hello-World for the row (and given back after), ten made at
+                                once are each whole on their own branch of it, each one's ready steps and
+                                fetch retries in the report; a dry run of destroying acme names them all,
+                                and destroying acme
                                 removes all of them before acme is applied again; observer, left
                                 on dir, is unchanged
   ci/fleet rebuilt RUN VERSION  main is copied by the README's backup line, takes a spec, and is lost; client
@@ -1159,9 +1162,24 @@ untouched_by_apply_all() {
   [[ $before == "STOPPED STOPPED acme" && $after == "$before" ]]
 }
 
-made_at_once() {
-  local run=$1 box=$2
-  on "$run" "$box" 'failed=0; for n in 1 2 3 4 5; do sudo sail project workspace create acme fleet-p$n --json > /tmp/fleet-p$n.out 2>&1 & done; for job in $(jobs -p); do wait "$job" || failed=1; done; for n in 1 2 3 4 5; do grep -q "\"total_ms\"" /tmp/fleet-p$n.out || { cat /tmp/fleet-p$n.out; failed=1; }; sudo sail project workspace delete acme fleet-p$n --yes > /dev/null || failed=1; done; rm -f /tmp/fleet-p?.out; [ "$failed" = 0 ]'
+ten_at_once() {
+  local run=$1 box=$2 n created said ready branch failed=0
+  on "$run" "$box" 'failed=0; for n in $(seq 1 10); do sudo sail project workspace create acme fleet-p$n --json > /tmp/fleet-p$n.out 2>&1 & done; for job in $(jobs -p); do wait "$job" || failed=1; done; [ "$failed" = 0 ]' || failed=1
+  for n in $(seq 1 10); do
+    created=$(on "$run" "$box" "cat /tmp/fleet-p$n.out" || true)
+    if ! said=$(python3 -I -c 'import json,sys; t=json.load(sys.stdin)["timings"]; s=t["ready_steps"]; print("total %s ms (clone %s, start %s, ready %s); ready steps %s" % (t["total_ms"], t["clone_ms"], t["start_ms"], t["ready_ms"], json.dumps(s)))' <<< "$created" 2>/dev/null); then
+      echo "fleet-p$n was not created: $created"
+      failed=1
+      continue
+    fi
+    echo "workspace fleet-p$n of ten at once on $box: $said" | tee -a "$(log_dir "$run")/report.txt"
+    ready=$(on "$run" "$box" "sudo incus config get acme-fleet-p$n user.sail.ready" || true)
+    branch=$(on "$run" "$box" "sudo incus exec acme-fleet-p$n -- runuser -u dev -- git -C /home/dev/workspace/hello branch --show-current" || true)
+    echo "fleet-p$n: ready mark '$ready', hello on branch '$branch'"
+    [[ -n $ready && $branch == "fleet-p$n" ]] || failed=1
+  done
+  on "$run" "$box" 'for n in $(seq 1 10); do sudo sail project workspace delete acme fleet-p$n --yes > /dev/null 2>&1; done; rm -f /tmp/fleet-p*.out' || true
+  [[ $failed == 0 ]]
 }
 
 destroy_dry_run_names() {
@@ -1214,6 +1232,12 @@ storage() {
   check "$run" "the ZFS cache cap is still in force after the reboot" capped_on "$run" client
   check "$run" "acme runs after the reboot, on devpool" running_on_pool "$run" client acme devpool
   check "$run" "host status names both pools" status_pools "$run" client "devpool:dir tank:zfs"
+  local repos
+  repos=$(on "$run" main "sudo sail project config get acme repos | base64 -w0")
+  check "$run" "main gives acme one public repository that needs no token, octocat/Hello-World at hello" \
+    on "$run" main "echo '[{\"url\":\"https://github.com/octocat/Hello-World.git\",\"path\":\"hello\"}]' | sudo sail project config set acme repos -"
+  check "$run" "client syncs acme's repos from main and applies acme" \
+    allowed "$run" client "sudo sail sync && sudo sail project apply acme --yes"
   check "$run" "acme's template is built on tank" \
     allowed "$run" client "sudo sail project template build acme"
   check "$run" "a workspace of acme is a clone of its template's snapshot on tank, with its own machine-id" \
@@ -1222,14 +1246,16 @@ storage() {
     allowed "$run" client "sudo sail project workspace create acme fleet-v && sudo sail project workspace stop acme fleet-v"
   check "$run" "apply --all leaves the workspaces and the template as they are" \
     untouched_by_apply_all "$run" client
-  check "$run" "five workspaces of acme made at once are each whole, and go" \
-    made_at_once "$run" client
+  check "$run" "ten workspaces of acme made at once are each whole, each fetched hello onto its own branch (each one's ready steps, its fetch retries among them, in the report), and go" \
+    ten_at_once "$run" client
   check "$run" "a dry run of destroying acme names its workspaces and template" \
     destroy_dry_run_names "$run" client
   check "$run" "destroying acme removes its container, workspaces and template" \
     allowed "$run" client "sudo sail project destroy acme --yes"
   check "$run" "nothing of acme is left in Incus" all_gone "$run" client
-  check "$run" "acme is applied again" allowed "$run" client "sudo sail project apply acme --yes"
+  check "$run" "main gives acme back the repos it had before the row" \
+    on "$run" main "echo $repos | base64 -d | sudo sail project config set acme repos -"
+  check "$run" "acme is applied again" allowed "$run" client "sudo sail sync && sudo sail project apply acme --yes"
   check "$run" "client's test containers go" on "$run" client "sudo incus delete --force zc zt"
   check "$run" "observer, a dir box, has devpool alone" pools_on "$run" observer "devpool:dir"
   check "$run" "observer's host status names devpool alone" status_pools "$run" observer "devpool:dir"

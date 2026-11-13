@@ -35,8 +35,8 @@ import java.nio.file.Path;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.concurrent.Callable;
 import java.util.function.Predicate;
-import java.util.function.ToIntFunction;
 import picocli.CommandLine.Model.CommandSpec;
 
 /**
@@ -131,8 +131,8 @@ final class WorkspaceVerbs {
    * {@code tokens} has none of, naming the flag that gives one.
    */
   static void requireTokens(
-      ProjectDefinition config, Map<String, String> tokens, ToIntFunction<String> status) {
-    var asking = GitCredentials.askingForAToken(config.repos(), tokens, status);
+      ProjectDefinition config, Map<String, String> tokens, Predicate<String> asks) {
+    var asking = GitCredentials.askingForAToken(config.repos(), tokens, asks);
     if (!asking.isEmpty()) {
       throw Remedied.argument(
           "The template cannot clone "
@@ -164,41 +164,62 @@ final class WorkspaceVerbs {
     var host = HostYaml.fromMap(YamlUtil.parseFile(SailPaths.hostConfigPath()));
     var key = WorkstationIdentity.registered();
     var catalog = ProjectCatalog.here();
+    var tokens = GitCredentials.known(config.repos(), gitToken);
     return source(
         host,
         config,
         key,
         name -> catalog.read(name).isPresent(),
-        (into, fresh) -> {
-          var tokens = GitCredentials.known(config.repos(), gitToken);
-          requireTokens(config, tokens, GitCredentials::httpStatus);
-          try (var held = dryRun ? null : PairingTrust.hold(SailPaths.controlPlaneDb())) {
-            catalog.requireUnpruned(config.name());
-            var tracker =
-                tracker(
-                    progressOf(config.name()),
-                    ProjectProvisioner.inputs(config, WorkstationIdentity.registered()),
-                    fresh,
-                    dryRun);
-            var listener = json ? ProvisionListener.NOOP : ConsoleProvisionListener.INSTANCE;
-            try (var operations = OperationsFactory.open()) {
-              new ProjectProvisioner(
-                      new ShellExecutor(dryRun),
-                      tracker,
-                      listener,
-                      new ProjectSkills(operations::projectFiles),
-                      WorkstationIdentity.registered(),
-                      operator)
-                  .provision(
-                      into,
-                      config,
-                      host,
-                      tokens,
-                      LocalIdentity.detect().git(),
-                      SailPaths.projectFilesDir(config.name()));
-            }
-          }
-        });
+        checkedThenPaired(
+            config,
+            tokens,
+            GitCredentials::asksForCredentials,
+            () -> dryRun ? null : PairingTrust.hold(SailPaths.controlPlaneDb()),
+            (into, fresh) -> {
+              catalog.requireUnpruned(config.name());
+              var tracker =
+                  tracker(
+                      progressOf(config.name()),
+                      ProjectProvisioner.inputs(config, WorkstationIdentity.registered()),
+                      fresh,
+                      dryRun);
+              var listener = json ? ProvisionListener.NOOP : ConsoleProvisionListener.INSTANCE;
+              try (var operations = OperationsFactory.open()) {
+                new ProjectProvisioner(
+                        new ShellExecutor(dryRun),
+                        tracker,
+                        listener,
+                        new ProjectSkills(operations::projectFiles),
+                        WorkstationIdentity.registered(),
+                        operator)
+                    .provision(
+                        into,
+                        config,
+                        host,
+                        tokens,
+                        LocalIdentity.detect().git(),
+                        SailPaths.projectFilesDir(config.name()));
+              }
+            }));
+  }
+
+  /**
+   * A template build that asks first whether a repo needs a token none was given for ({@link
+   * #requireTokens}), outside the box's pairing lock, so a slow host holds up no other write of the
+   * box, then takes that lock ({@code pairing}, none in a dry run) while it {@code provision}s.
+   */
+  static WorkspaceTemplate.Build checkedThenPaired(
+      ProjectDefinition config,
+      Map<String, String> tokens,
+      Predicate<String> asks,
+      Callable<? extends AutoCloseable> pairing,
+      WorkspaceTemplate.Build provision) {
+    return (into, fresh) -> {
+      requireTokens(config, tokens, asks);
+      try (var held = pairing.call()) {
+        provision.into(into, fresh);
+      }
+    };
   }
 
   /** {@code config}'s template source on a box whose {@code host.yaml} is {@code host}. */

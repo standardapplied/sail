@@ -9,6 +9,7 @@ import ai.singlr.sail.common.Remedied;
 import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.config.YamlUtil;
 import java.io.IOException;
+import java.time.Duration;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -124,6 +125,11 @@ public final class BoxInstances {
     }
   }
 
+  /** How long a one-name lookup waits for Incus. */
+  public static final int LOOKUP_SECONDS = 3;
+
+  private static final Duration LOOKUP_TIMEOUT = Duration.ofSeconds(LOOKUP_SECONDS);
+
   private final ShellExec shell;
 
   public BoxInstances(ShellExec shell) {
@@ -156,12 +162,30 @@ public final class BoxInstances {
   }
 
   /**
-   * The instance named {@code name}, and none where Incus does not answer, as on a box that runs no
-   * containers: what decides whether a new project's name is free here (W10).
+   * The instance named {@code name}, asked of Incus by that name alone, which it filters itself,
+   * and answered within {@code timeout} or refused with a {@link TimeoutException}.
+   */
+  public Optional<Instance> lookup(String name, Duration timeout)
+      throws IOException, InterruptedException, TimeoutException {
+    var result =
+        shell.exec(List.of("incus", "list", "^" + name + "$", "--format", "json"), null, timeout);
+    if (!result.ok()) {
+      throw new IOException("incus list failed: " + result.stderr());
+    }
+    return YamlUtil.parseList(result.stdout()).stream()
+        .map(BoxInstances::instance)
+        .filter(instance -> instance.name().equals(name))
+        .findFirst();
+  }
+
+  /**
+   * The instance named {@code name} ({@link #lookup}, within {@value #LOOKUP_SECONDS} s), and none
+   * where Incus does not answer in time or at all, as on a box that runs no containers: what
+   * decides whether a new project's name is free here (W10).
    */
   public Optional<Instance> namedIfReadable(String name) {
     try {
-      return named(name);
+      return lookup(name, LOOKUP_TIMEOUT);
     } catch (IOException | TimeoutException unreachable) {
       return Optional.empty();
     } catch (InterruptedException e) {

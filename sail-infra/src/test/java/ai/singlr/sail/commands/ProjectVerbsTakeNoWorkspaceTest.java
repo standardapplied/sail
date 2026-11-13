@@ -228,6 +228,17 @@ class ProjectVerbsTakeNoWorkspaceTest {
     assertTrue(switched.out().contains("\"name\": \"acme\""), switched.out());
     assertTrue(switched.out().contains("acme-fix"), switched.out());
     assertEquals(List.of(), switching.invocations());
+    var narrating = new ScriptedShellExecutor(new ShellExec.Result(0, "", ""));
+    var told =
+        CommandRun.of(
+            new SwitchCommand(dryRun -> dryRun ? narrating : observed), "acme", "--dry-run");
+    assertEquals(0, told.exit(), told.err());
+    assertTrue(
+        narrating.invocations().stream().allMatch(command -> command.startsWith("incus exec acme")),
+        "the ports are asked through the dry shell: " + narrating.invocations());
+    assertTrue(
+        observed.invocations().stream().allMatch(command -> command.startsWith("incus list ")),
+        "nothing but a listing runs for real: " + observed.invocations());
     assertTrue(
         observed.invocations().stream().allMatch(command -> command.startsWith("incus list ")),
         String.valueOf(observed.invocations()));

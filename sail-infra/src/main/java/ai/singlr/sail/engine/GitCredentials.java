@@ -20,7 +20,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Executors;
-import java.util.function.ToIntFunction;
+import java.util.function.Predicate;
 import java.util.regex.Pattern;
 
 /**
@@ -146,15 +146,13 @@ public final class GitCredentials {
 
   /**
    * The https {@code repos} a run cannot clone with {@code tokens}: those whose host has no token
-   * there and that ask for credentials, as {@code status} answers for their smart-HTTP refs (401 or
-   * 403). An answer of anything else, a public repo or a host that cannot be reached, asks for
-   * none, and the clone says what is wrong with it. The repos are asked at once, so the whole check
-   * takes as long as its slowest answer, which {@link #httpStatus} bounds.
+   * there and whose smart-HTTP refs {@code asks} says ask for credentials ({@link
+   * #asksForCredentials}). Any other answer, a public repo or a host that cannot be reached, asks
+   * for none, and the clone says what is wrong with it. The repos are asked at once, so the whole
+   * check takes as long as its slowest answer, which {@link #asksForCredentials} bounds.
    */
   public static List<String> askingForAToken(
-      List<ProjectDefinition.Repo> repos,
-      Map<String, String> tokens,
-      ToIntFunction<String> status) {
+      List<ProjectDefinition.Repo> repos, Map<String, String> tokens, Predicate<String> asks) {
     var asked = new ArrayList<ProjectDefinition.Repo>();
     for (var repo : repos == null ? List.<ProjectDefinition.Repo>of() : repos) {
       var hosts = extractHttpsHosts(List.of(repo));
@@ -165,15 +163,11 @@ public final class GitCredentials {
     try (var probes = Executors.newVirtualThreadPerTaskExecutor()) {
       var answers =
           asked.stream()
-              .map(
-                  repo ->
-                      probes.submit(
-                          () -> status.applyAsInt(repo.url().replaceAll("/+$", "") + REFS)))
+              .map(repo -> probes.submit(() -> asks.test(repo.url().replaceAll("/+$", "") + REFS)))
               .toList();
       var asking = new ArrayList<String>();
       for (var i = 0; i < asked.size(); i++) {
-        var answer = answers.get(i).get();
-        if (answer == 401 || answer == 403) {
+        if (answers.get(i).get()) {
           asking.add(asked.get(i).url());
         }
       }
@@ -187,25 +181,29 @@ public final class GitCredentials {
   }
 
   /**
-   * What {@code url} answers a plain GET with, or -1 when it cannot be asked: within 3 s to connect
-   * and 3 s more for the answer.
+   * Whether a plain GET of {@code url}, sent without credentials and following no redirect, asks
+   * for them: a {@code 401}, or a {@code 403} that carries an authentication challenge. A {@code
+   * 403} without one is a refusal no token would lift, and a URL that cannot be asked within 3 s to
+   * connect and 3 s more for the answer asks for nothing.
    */
-  public static int httpStatus(String url) {
+  public static boolean asksForCredentials(String url) {
     try (var client =
         HttpClient.newBuilder()
             .connectTimeout(PROBE_TIMEOUT)
-            .followRedirects(HttpClient.Redirect.NORMAL)
+            .followRedirects(HttpClient.Redirect.NEVER)
             .build()) {
-      return client
-          .send(
+      var answer =
+          client.send(
               HttpRequest.newBuilder(URI.create(url)).timeout(PROBE_TIMEOUT).GET().build(),
-              HttpResponse.BodyHandlers.discarding())
-          .statusCode();
+              HttpResponse.BodyHandlers.discarding());
+      return answer.statusCode() == 401
+          || answer.statusCode() == 403
+              && answer.headers().firstValue("WWW-Authenticate").isPresent();
     } catch (IOException | IllegalArgumentException e) {
-      return -1;
+      return false;
     } catch (InterruptedException e) {
       Thread.currentThread().interrupt();
-      return -1;
+      return false;
     }
   }
 

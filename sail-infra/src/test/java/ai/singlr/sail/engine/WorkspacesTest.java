@@ -236,7 +236,8 @@ class WorkspacesTest {
             .onOk(
                 "sail-workspace acme fix-login",
                 "sail-step start 1762941600000\nsail-step identity 1762941600150\nfetched\n"
-                    + "sail-step network 1762941600400\nsail-step bus x\n");
+                    + "sail-step network 1762941600400\nsail-count fetch_retries 2\n"
+                    + "sail-step bus x\n");
 
     var created =
         workspaces(
@@ -286,12 +287,13 @@ class WorkspacesTest {
                 Map.of(
                     "identity", 150L,
                     "network", 250L,
+                    "fetch_retries", 2L,
                     "files", 90L,
                     "machinery", 100L,
                     "mark", 100L))),
         created);
     assertEquals(
-        List.of("identity", "network", "files", "machinery", "mark"),
+        List.of("identity", "network", "fetch_retries", "files", "machinery", "mark"),
         List.copyOf(created.timings().readySteps().keySet()),
         "the steps in the order they ran");
   }
@@ -1130,16 +1132,21 @@ class WorkspacesTest {
         ssh-keygen -A >/dev/null
         step identity
         as_dev() { runuser -u dev -- env HOME=/home/dev "$@"; }
+        retries=0
         fetch() {
-          for _ in $(seq 1 100); do
-            if failed=$(as_dev git -C "$1" fetch --quiet origin 2>&1); then return 0; fi
+          local until=$((SECONDS + 10))
+          while ! failed=$(as_dev env LC_ALL=C git -C "$1" fetch --quiet origin 2>&1); do
             case $failed in
-              *"Could not resolve host"*) sleep 0.1 ;;
+              *"Could not resolve host"*) ;;
               *) printf '%s\\n' "$failed" >&2; return 1 ;;
             esac
+            if [ "$SECONDS" -ge "$until" ]; then
+              printf '%s\\n' "$failed" >&2
+              return 1
+            fi
+            retries=$((retries + 1))
+            sleep 0.1
           done
-          printf '%s\\n' "$failed" >&2
-          return 1
         }
         if [ "$#" -gt 0 ]; then
           for _ in $(seq 1 300); do
@@ -1163,6 +1170,7 @@ class WorkspacesTest {
           fi
         done
         step repos
+        printf 'sail-count fetch_retries %s\\n' "$retries"
         for _ in $(seq 1 300); do systemctl show --property=Version >/dev/null 2>&1 && break; sleep 0.1; done
         systemctl try-restart ssh.service
         step sshd
@@ -1178,22 +1186,26 @@ class WorkspacesTest {
 
   /**
    * The fetch of {@link Workspaces#FETCH} run by bash, the dev user's {@code git} a stand-in that
-   * answers each attempt with the next of {@code answers}, a status and what it says, and its pause
-   * taking no time; answered with the attempts made and what the fetch said.
+   * answers each attempt with the next of {@code answers}, a status and what it says, and each
+   * pause moving bash's {@code SECONDS} on by one; answered with the attempts made, the retries
+   * counted and what the fetch said.
    */
   private static ShellExec.Result fetched(Path dir, String... answers) throws Exception {
     var script =
         Workspaces.FETCH
             + """
-            sleep() { :; }
+            sleep() { SECONDS=$((SECONDS + 1)); }
             as_dev() {
-              n=$(($(cat "$TRIES") + 1)); echo "$n" > "$TRIES"
+              n=$(($(cat "$TRIES") + 1)); echo "$n" > "$TRIES"; echo "$*" > "$TRIES.args"
               eval "answer=\\${ANSWER_$n:-0}"
               status=${answer%%|*}; said=${answer#*|}
               [ "$said" = "$answer" ] || echo "$said" >&2
               return "$status"
             }
             fetch /home/dev/workspace/app
+            status=$?
+            printf 'retries=%s' "$retries"
+            exit "$status"
             """;
     var tries = dir.resolve("tries");
     Files.writeString(tries, "0");
@@ -1203,13 +1215,20 @@ class WorkspacesTest {
       process.environment().put("ANSWER_" + (i + 1), answers[i]);
     }
     var running = process.start();
+    var out = new String(running.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
     var err = new String(running.getErrorStream().readAllBytes(), StandardCharsets.UTF_8);
-    return new ShellExec.Result(running.waitFor(), Files.readString(tries).strip(), err);
+    assertEquals(
+        "env LC_ALL=C git -C /home/dev/workspace/app fetch --quiet origin",
+        Files.readString(dir.resolve("tries.args")).strip(),
+        "git is run in the C locale");
+    return new ShellExec.Result(
+        running.waitFor(), "attempts=" + Files.readString(tries).strip() + " " + out, err);
   }
 
   @Test
   @EnabledOnOs({OS.LINUX, OS.MAC})
-  void aFetchWaitsOutAHostThatDoesNotResolveYetAndSaysAnyOtherFailureAtOnce() throws Exception {
+  void aFetchWaitsOutAHostThatDoesNotResolveForTenSecondsAndSaysAnyOtherFailureAtOnce()
+      throws Exception {
     var unresolved =
         "128|fatal: unable to access 'https://github.com/acme/app.git/': Could not resolve host:"
             + " github.com";
@@ -1217,15 +1236,17 @@ class WorkspacesTest {
     var late = fetched(tempDir, unresolved, unresolved, "0");
     var refused =
         fetched(tempDir, unresolved, "128|fatal: Authentication failed for 'https://github.com/'");
-    var never = fetched(tempDir, Collections.nCopies(100, unresolved).toArray(String[]::new));
+    var never = fetched(tempDir, Collections.nCopies(50, unresolved).toArray(String[]::new));
 
-    assertEquals(new ShellExec.Result(0, "3", ""), late);
+    assertEquals(new ShellExec.Result(0, "attempts=3 retries=2", ""), late);
     assertEquals(
-        new ShellExec.Result(1, "2", "fatal: Authentication failed for 'https://github.com/'\n"),
+        new ShellExec.Result(
+            1, "attempts=2 retries=1", "fatal: Authentication failed for 'https://github.com/'\n"),
         refused);
-    assertEquals(1, never.exitCode());
-    assertEquals("100", never.stdout());
-    assertEquals(unresolved.substring(4) + "\n", never.stderr());
+    assertEquals(
+        new ShellExec.Result(1, "attempts=11 retries=10", unresolved.substring(4) + "\n"),
+        never,
+        "ten seconds of asking, whatever the count");
   }
 
   private static String incomplete(String project, String name) {

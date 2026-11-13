@@ -136,7 +136,7 @@ class ProjectDefinitionOperationsTest {
     assertTrue(projects.findByName("acme-fix").isEmpty());
     assertEquals("plain", onThisBox.create(Map.of("name", "plain")).name());
     assertEquals("acme-fix", operations.create(Map.of("name", "acme-fix")).name());
-    assertEquals(List.of("incus list --format json"), incus.invocations());
+    assertEquals(List.of("incus list ^acme-fix$ --format json"), incus.invocations());
   }
 
   @Test

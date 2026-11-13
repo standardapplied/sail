@@ -1160,16 +1160,18 @@ own, about three (2.9 to 4.3 s over 32 creates, median 3.2 s).
     project from), new SSH host keys made under that name, each repo fetched and on the branch
     named after the workspace, sshd restarted onto the new keys once systemd answers (it boots
     while the repos are fetched), and the dev user's bus. A fetch whose host does not resolve yet
-    is asked again for up to 10 s (`Workspaces.FETCH`): a clone's address comes up a fraction of a
-    second before its resolver, and more when several start at once. The script prints `sail-step
-    <step> <epoch ms>` as each step ends.
+    is asked again until 10 s have passed (`Workspaces.FETCH`, a deadline on bash's `SECONDS`, git
+    run with `LC_ALL=C` so its words are the ones matched): a clone's address comes up a fraction
+    of a second before its resolver, and more when several start at once. The script prints
+    `sail-step <step> <epoch ms>` as each step ends, and `sail-count fetch_retries <n>`, how many
+    times its fetches asked again.
   - Then come the shared files and the machinery, as `project start` reconciles them, and last one
     write: `user.sail.ready`, clearing `user.sail.creating` and the template's own keys
     (`user.sail.template.of`, `.current`, `.inputs`, `.last` and `user.sail.inputs`), which the
     clone carried from the copy: a workspace is no template.
   - It says `Created <name> from v<n> in 3.2 s (clone 0.5 s, start 0.4 s, ready 2.3 s)`, and
-    `--json` adds `timings.ready_steps`, the readiness step by step (`identity`, `network`,
-    `repos`, `sshd`, `bus`, `files`, `machinery`, `mark`).
+    `--json` adds `timings.ready_steps`, the readiness step by step in milliseconds (`identity`,
+    `network`, `repos`, `sshd`, `bus`, `files`, `machinery`, `mark`), and `fetch_retries`, a count.
   - One create of a workspace runs at a time, under `<p>-<name>.workspace.lock`, and the template
     is read inside its own lock, so two creates of one stale or missing template build it once.
   - `list`, `shell`, `start`, `stop` and `delete` act on the workspace the seam finds.
@@ -1201,7 +1203,8 @@ own, about three (2.9 to 4.3 s over 32 creates, median 3.2 s).
   | `project stop --all`, `host status`, the overcommit hints, `host init`'s restart check | every instance, as before |
   | every verb that addresses a container by a project's name (`project start`, `stop`, `switch`, `shell`, `exec`, `logs`, `connect`, `containers`, `snapshot create`, `list`, `restore`, `delete`, `rename`, `resources set`, `config show`, `install-agent`, `repo add`, `service add`, `service remove`, `demo`, `apply`, `files`, `agent run`, `attach`, `logs`, `report`, `status`, `sweep`, `watch`) | plain only: `ContainerManager.queryState` and `queryInfo`, which each passes through, refuse an instance of the project's name that is a workspace, a template or a copy (`BoxInstances.Taken`), naming what it is and what frees the name; `snapshot prune`, `create` and `destroy`, which read no state, ask `BoxInstances.requireNotTakenFor` |
   | every API door that reaches a container by a project's name: dispatch and every run launch (build, review, fix, ad hoc, room wake, live member), serve and ports, snapshots and restore, skills share, agent status, logs and report, through `ProjectLoader` | plain only: the loader's `queryState` refusal is `409 conflict` with the reason and remedy |
-  | the terminal host's admission (`HostLanes.Pty.admitProject`) and `skills ls`'s read of hand-made skills | plain only: refused, or left out with the reason |
+  | the terminal host's open (`PtyAdmission.instance`, `HostLanes.Pty.admitInstance`) | plain only: asked once per open, outside the host's lock, of the one instance by name (`incus list ^<p>$`, `BoxInstances.lookup`) within 3 s, and refused, saying so, when Incus does not answer in that time; an attach and a ticket ask Incus nothing, an attach joining a session an open already admitted |
+  | `skills ls`'s read of hand-made skills, `project create`, `POST /v1/projects` | plain only, by the same one-name lookup within 3 s (`BoxInstances.namedIfReadable`); an Incus that does not answer in time holds no instance of the name |
   | the resource reconcile after a sync round | plain only: a project whose name is another's instance has no container here, and is skipped |
   | the sync round's arrival notice | names once, in the round that brings it, a project whose name is another's instance, with what frees the name |
   | `project create` and `POST /v1/projects` | refuse a name this box holds as a workspace's, a template's or a copy's instance |
@@ -1346,15 +1349,27 @@ Each row with the tests that prove it:
   - The workstation key is in the digest the template is built from, so revoking it makes the
     template stale and the next create builds a new version without it. Older versions keep the
     old key, but no create clones them again.
-  - A new pairing reaches the project's container and its whole workspaces, not the template.
+  - A new pairing reaches the project's container and its whole workspaces at once. It replaces
+    the workstation key, which is in the digest, so the template takes it only when the next create
+    rebuilds it.
   - Key lines added to `authorized_keys` by hand are not tracked at all.
 - **Hand copies are not Sail's.** A copy of a workspace made with `incus copy` carries the
   project's keys under another name: every verb refuses it, and it outlives its project, keeping
   the project's tree and the owner's credentials (and, through `deleted/`, the dataset of a
   template version it was cloned from). Its owner deletes it.
-- **The resolver wait is proven by the fleet alone.** A test body reaches no network, so the
+- **The resolver wait is exercised by the fleet alone.** A test body reaches no network, so the
   wait for a repo's host to resolve (`Workspaces.FETCH`) is pinned and run against a stand-in git
-  in `WorkspacesTest`; only the fleet's storage row shows it against a real resolver.
+  in `WorkspacesTest`. The fleet's storage row runs it against a real resolver: it gives acme the
+  public `octocat/Hello-World` for the row, makes ten workspaces at once, checks each is whole
+  with the repo on its own branch, and writes each one's ready steps and fetch retries into the
+  report. Until that row has run green on this release, the wait is not proven against one.
+- **Version numbers live with the template instance.** `user.sail.template.last` keeps a number
+  from being given twice only while `<p>--tmpl` exists: deleting it by hand starts again at `v1`,
+  while older workspaces still record the `v1` they were cloned from.
+- **Older dry runs read through the dry shell.** `project destroy`, `stop` and `switch` read Incus
+  for real in a dry run; `project start`, `snapshot create`, `delete` and `restore`, and `snapshot
+  prune` across every project, still read what a dry run is told (nothing), as on main before this
+  work.
 - **What the digest does not see:** the base image moving under its alias, package, runtime and
   harness versions drifting with time, the sail binary (machinery is re-stamped per workspace), and
   git tokens.

@@ -228,6 +228,8 @@ class WorkspaceIT extends AbstractIncusIT {
                   BoxInstances.TEMPLATE_OF_KEY,
                   WorkspaceTemplate.CURRENT_KEY,
                   WorkspaceTemplate.INPUTS_KEY,
+                  WorkspaceTemplate.LAST_KEY,
+                  ProjectProvisioner.INPUTS_KEY,
                   Workspaces.CREATING_KEY)
               .stream()
               .filter(key -> keys.key(key).isPresent())

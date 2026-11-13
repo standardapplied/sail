@@ -66,6 +66,7 @@ public final class Workspaces {
           ProjectProvisioner.INPUTS_KEY);
 
   private static final String STEP = "sail-step ";
+  private static final String COUNT = "sail-count ";
 
   private static final Pattern MILLIS = Pattern.compile("[0-9]{1,18}");
   private static final Duration READY_TIMEOUT = Duration.ofMinutes(10);
@@ -88,22 +89,29 @@ public final class Workspaces {
       """;
 
   /**
-   * Fetches the repository at {@code $1} as the dev user, asking again for up to 10 s while its
-   * host does not resolve: a clone's network answers before its resolver does, by a fraction of a
-   * second and by more when several clones start at once. Any other failure is said at once.
+   * Fetches the repository at {@code $1} as the dev user, in the C locale so git's words are the
+   * ones matched, asking again until 10 s have passed while its host does not resolve: a clone's
+   * network answers before its resolver does, by a fraction of a second and by more when several
+   * clones start at once. Each ask again adds one to {@code retries}. Any other failure, or one
+   * still unresolved at the deadline, is said with git's own words.
    */
   static final String FETCH =
       """
+      retries=0
       fetch() {
-        for _ in $(seq 1 100); do
-          if failed=$(as_dev git -C "$1" fetch --quiet origin 2>&1); then return 0; fi
+        local until=$((SECONDS + 10))
+        while ! failed=$(as_dev env LC_ALL=C git -C "$1" fetch --quiet origin 2>&1); do
           case $failed in
-            *"Could not resolve host"*) sleep 0.1 ;;
+            *"Could not resolve host"*) ;;
             *) printf '%s\\n' "$failed" >&2; return 1 ;;
           esac
+          if [ "$SECONDS" -ge "$until" ]; then
+            printf '%s\\n' "$failed" >&2
+            return 1
+          fi
+          retries=$((retries + 1))
+          sleep 0.1
         done
-        printf '%s\\n' "$failed" >&2
-        return 1
       }
       """;
 
@@ -160,6 +168,7 @@ public final class Workspaces {
             fi
           done
           step repos
+          printf 'sail-count fetch_retries %s\\n' "$retries"
           for _ in $(seq 1 300); do systemctl show --property=Version >/dev/null 2>&1 && break; sleep 0.1; done
           systemctl try-restart ssh.service
           step sshd
@@ -485,14 +494,20 @@ public final class Workspaces {
 
   /**
    * The steps {@code stdout}, the prepare script's, timed, each {@code sail-step <step> <epoch ms>}
-   * line ending one, the first marking the start; lines of any other shape are passed over.
+   * line ending one, the first marking the start, and each {@code sail-count <name> <n>} line a
+   * count kept as it is (the fetch's retries); lines of any other shape are passed over.
    */
   static LinkedHashMap<String, Long> steps(String stdout) {
     var steps = new LinkedHashMap<String, Long>();
     Long before = null;
     for (var line : Objects.requireNonNullElse(stdout, "").lines().toList()) {
-      var fields = line.startsWith(STEP) ? line.substring(STEP.length()).split(" ") : new String[0];
-      if (fields.length != 2 || !MILLIS.matcher(fields[1]).matches()) {
+      var counted = fields(line, COUNT);
+      if (counted.length == 2) {
+        steps.put(counted[0], Long.parseLong(counted[1]));
+        continue;
+      }
+      var fields = fields(line, STEP);
+      if (fields.length != 2) {
         continue;
       }
       var at = Long.parseLong(fields[1]);
@@ -502,6 +517,13 @@ public final class Workspaces {
       before = at;
     }
     return steps;
+  }
+
+  /** The name and number after {@code prefix} on {@code line}, or nothing when it has no such. */
+  private static String[] fields(String line, String prefix) {
+    var fields =
+        line.startsWith(prefix) ? line.substring(prefix.length()).split(" ") : new String[0];
+    return fields.length == 2 && MILLIS.matcher(fields[1]).matches() ? fields : new String[0];
   }
 
   private long took(Map<String, Long> steps, String step, long since) {

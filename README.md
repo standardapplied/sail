@@ -291,8 +291,8 @@ current version. It gets:
 - `web` as its hostname, so the in-container `spec` and portal work as they do in `main`;
 - SSH host keys of its own, made under that name;
 - every repo fetched and on the branch named after the workspace (the remote's, when it has one),
-  waiting up to 10 s for the repo's host to resolve, as a fresh clone's resolver can lag its
-  address;
+  asking again for up to 10 s while the repo's host does not resolve, as a fresh clone's
+  resolver can lag its address (`ready_steps.fetch_retries` counts how often);
 - none of the template's own keys.
 
 `create` says how long each phase took, for example `Created fix-login from v1 in 3.2 s (clone 0.5 s,
@@ -328,7 +328,8 @@ Know what a clone carries. The template is provisioned like your own container, 
 workspace holds your GitHub token, your git identity and your workstation key. The workstation
 key is part of what the template is built from: revoking it makes the template stale, so the next
 `create` builds a new version without it. Older versions keep the old key, but nothing is cloned
-from them again. A new pairing reaches your workspaces but not the template, and key lines added
+from them again. A new pairing reaches your workspaces at once and the template when the next
+`create` rebuilds it, as the pairing's key is in what the template is built from. Key lines added
 by hand are not tracked.
 
 Deleting an old template version by hand (`sudo incus snapshot delete web--tmpl v1`) leaves its

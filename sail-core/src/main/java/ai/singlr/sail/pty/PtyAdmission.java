@@ -31,6 +31,13 @@ public interface PtyAdmission {
   void project(String project, PtyIdentity.Person who) throws IOException;
 
   /**
+   * Throws, with the reason, when the instance a session in {@code project} would run in is not
+   * that project's container. Asked once per open, of an open the caller may make, and never of an
+   * attach, which joins a session an open already admitted. Nothing to refuse by default.
+   */
+  default void instance(String project) throws IOException {}
+
+  /**
    * Throws, with the reason, when {@code who} may not pin a session in {@code project} to {@code
    * room}.
    */

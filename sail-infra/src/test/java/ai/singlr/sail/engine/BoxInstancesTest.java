@@ -13,9 +13,13 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.IOException;
+import java.nio.file.Path;
+import java.time.Duration;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.TimeoutException;
 import org.junit.jupiter.api.Test;
 
 /** The box's instances as one {@code incus list} reads them, and what each is from its keys. */
@@ -315,5 +319,51 @@ class BoxInstancesTest {
             .toList());
     BoxInstances.requireNotTakenFor("acme", box.named("acme"));
     BoxInstances.requireNotTakenFor("ghost", box.named("ghost"));
+  }
+
+  @Test
+  void aNewNamesInstanceIsAskedByThatNameAloneWithinThreeSecondsAndNoAnswerHoldsNone() {
+    var asked = new ArrayList<String>();
+    ShellExec incus =
+        new ShellExec() {
+          @Override
+          public Result exec(List<String> command) {
+            throw new AssertionError("asked without a bound: " + command);
+          }
+
+          @Override
+          public Result exec(List<String> command, Path workDir, Duration timeout)
+              throws TimeoutException {
+            asked.add(String.join(" ", command) + " within " + timeout);
+            return switch (command.get(2)) {
+              case "^acme-fix$" ->
+                  new Result(
+                      0,
+                      "[{\"name\": \"acme-fix\", \"config\": {\"user.sail.project\": \"acme\","
+                          + " \"user.sail.workspace\": \"fix\"}}]",
+                      "");
+              case "^slow$" -> throw new TimeoutException("timed out");
+              default -> new Result(1, "", "Error: not authorized");
+            };
+          }
+
+          @Override
+          public boolean isDryRun() {
+            return false;
+          }
+        };
+    var box = new BoxInstances(incus);
+
+    assertEquals(
+        new BoxInstances.Workspace("acme", "fix", false),
+        box.namedIfReadable("acme-fix").orElseThrow().kind());
+    assertEquals(Optional.empty(), box.namedIfReadable("slow"));
+    assertEquals(Optional.empty(), box.namedIfReadable("down"));
+    assertEquals(
+        List.of(
+            "incus list ^acme-fix$ --format json within PT3S",
+            "incus list ^slow$ --format json within PT3S",
+            "incus list ^down$ --format json within PT3S"),
+        asked);
   }
 }

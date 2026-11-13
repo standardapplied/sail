@@ -465,6 +465,67 @@ class ScopeChangeRoundTest {
     assertEquals(List.of("acme", "acme-fix"), incus.names());
   }
 
+  @Test
+  void takenNamesAreLeftAloneAndSaidOnceWhileEveryOtherProjectStillConverges() throws Exception {
+    round();
+    incus.sail("acme");
+    incus.sail("beta");
+    incus.keyed(
+        "acme-fix", workspace("acme", "fix") + ",\"limits.cpu\":\"2\",\"limits.memory\":\"4GB\"");
+    incus.keyed("acme--tmpl", "\"user.sail.template.of\":\"acme\"");
+    var sized = "\nresources:\n  cpu: 8\n  memory: 32GB\n  disk: 100GB\n";
+    Acting.system(
+        () -> {
+          var projects = new ProjectStore(mainDb);
+          projects.upsert(TestDefinitions.yaml("name: acme-fix" + sized));
+          projects.upsert(TestDefinitions.yaml("name: acme--tmpl" + sized));
+          projects.upsert(TestDefinitions.yaml("name: beta" + sized));
+        });
+    incus.invocations.clear();
+
+    var first = round();
+
+    assertEquals(List.of(), writesTo("acme-fix", "acme--tmpl"));
+    assertTrue(
+        incus.invocations.contains("incus config set beta limits.cpu=8 limits.memory=32GB"),
+        String.valueOf(incus.invocations));
+    assertEquals(
+        1, first.stream().filter(line -> line.contains("cannot take instance acme-fix")).count());
+    assertEquals(
+        1, first.stream().filter(line -> line.contains("cannot take instance acme--tmpl")).count());
+    assertFalse(first.stream().anyMatch(line -> line.contains("project apply acme-")));
+
+    incus.invocations.clear();
+    var second = round();
+    Acting.system(
+        () ->
+            new ProjectStore(mainDb)
+                .upsert(
+                    TestDefinitions.yaml(
+                        "name: acme-fix\nresources:\n  cpu: 4\n  memory: 8GB\n  disk: 60GB\n")));
+    var third = round();
+
+    assertFalse(
+        second.stream().anyMatch(line -> line.contains("cannot take")), String.valueOf(second));
+    assertFalse(
+        third.stream().anyMatch(line -> line.contains("cannot take")), String.valueOf(third));
+    assertEquals(List.of(), writesTo("acme-fix", "acme--tmpl"), "nor is a later edit applied");
+    assertEquals(List.of("acme", "acme--tmpl", "acme-fix", "beta"), incus.names());
+  }
+
+  /** What Incus was asked, besides listings, that names one of {@code names}. */
+  private List<String> writesTo(String... names) {
+    var touched = Set.of(names);
+    return incus.invocations.stream()
+        .filter(command -> !command.startsWith("incus list"))
+        .filter(
+            command ->
+                touched.stream()
+                    .anyMatch(
+                        name -> command.contains(" " + name + " ") || command.endsWith(" " + name)))
+        .toList();
+  }
+
   private static String workspace(String project, String name) {
     return "\"user.sail.project\":\""
         + project
@@ -575,6 +636,16 @@ class ScopeChangeRoundTest {
                     + "}}]"
                 : "[]",
             "");
+      }
+      if (command.size() == 7
+          && joined.startsWith("incus config device get ")
+          && command.get(5).equals("root")) {
+        return new Result(0, "50GB\n", "");
+      }
+      if (joined.startsWith("incus config set ")
+          || joined.startsWith("incus config device override ")
+          || joined.startsWith("incus config device set ")) {
+        return new Result(0, "", "");
       }
       if (command.size() == 7 && joined.startsWith("incus config device get ")) {
         return Boolean.TRUE.equals(containers.get(command.get(4)))

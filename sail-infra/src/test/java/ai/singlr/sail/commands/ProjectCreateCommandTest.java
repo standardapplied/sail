@@ -276,7 +276,7 @@ class ProjectCreateCommandTest {
             () -> new ByteArrayInputStream(new byte[0]),
             () -> false,
             mutations,
-            new ScriptedShellExecutor().onOk("incus list --format json", instances)),
+            new ScriptedShellExecutor().onOk("incus list ^", instances)),
         args);
   }
 

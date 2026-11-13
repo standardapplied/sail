@@ -35,6 +35,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
@@ -95,6 +96,11 @@ class PtySessionHostTest {
 
   private final Set<String> boxless = ConcurrentHashMap.newKeySet();
 
+  /** Each instance an open asked about, in order, and the projects whose instance is not theirs. */
+  private final List<String> instancesAsked = new CopyOnWriteArrayList<>();
+
+  private final Set<String> notTheirInstance = ConcurrentHashMap.newKeySet();
+
   private final PtyAdmission admission =
       new PtyAdmission() {
         @Override
@@ -112,6 +118,14 @@ class PtySessionHostTest {
           }
           if (unheld.contains(project + ":" + who.fde())) {
             throw new IOException("Project '" + project + "' is not in the catalog.");
+          }
+        }
+
+        @Override
+        public void instance(String project) throws IOException {
+          instancesAsked.add(project);
+          if (notTheirInstance.contains(project)) {
+            throw new IOException("Project " + project + " cannot take instance " + project + ".");
           }
         }
 
@@ -782,6 +796,47 @@ class PtySessionHostTest {
         assertInstanceOf(PtyMessage.Ok.class, PtyWire.read(root));
         awaitText(root, "up");
       }
+    }
+  }
+
+  @Test
+  void anOpenAsksAboutItsInstanceOnceAndAnAttachOrATicketNever() throws Exception {
+    var shim =
+        new PtySessionHost.Handoff(
+            SdNotify.NONE,
+            Map.of(),
+            exit -> PtyChildShimTest.shim(exit, "sh", "-c", "echo up; read a", "--"));
+    network =
+        PtySessionHost.Network.listening(
+            new InetSocketAddress(InetAddress.getLoopbackAddress(), 0), now::get, holders);
+    try (var ignored = startHost(PtySessionHost.Limits.DEFAULTS, shim)) {
+      notTheirInstance.add("acme-fix");
+      unheld.add("beta:mady");
+      try (var mady = connect("tok-mady")) {
+        PtyWire.write(mady, new PtyMessage.Create("hers", List.of(), "/tmp", "acme", "", 80, 24));
+        assertInstanceOf(PtyMessage.Ok.class, readControl(mady));
+        PtyWire.write(
+            mady, new PtyMessage.Create("fix", List.of(), "/tmp", "acme-fix", "", 80, 24));
+        assertEquals(
+            "Project acme-fix cannot take instance acme-fix.",
+            assertInstanceOf(PtyMessage.Err.class, readControl(mady)).message());
+        PtyWire.write(mady, new PtyMessage.Create("nope", List.of(), "/tmp", "beta", "", 80, 24));
+        assertInstanceOf(PtyMessage.Err.class, readControl(mady));
+        PtyWire.write(mady, new PtyMessage.Create("plain", List.of(), "/tmp", "", "", 80, 24));
+        assertInstanceOf(PtyMessage.Ok.class, readControl(mady));
+      }
+      assertEquals(List.of("acme", "acme-fix"), instancesAsked, "one ask per open in a project");
+      assertEquals(2, host.sessionCount(), "nothing is spawned for a refused instance");
+
+      try (var mady = connect("tok-mady")) {
+        PtyWire.write(mady, new PtyMessage.Attach("hers", true));
+        assertInstanceOf(PtyMessage.Ok.class, readControl(mady));
+      }
+      assertInstanceOf(
+          PtyMessage.Ticket.class, askTicket("tok-mady", PtyMessage.TicketAction.OPEN, "acme"));
+      assertInstanceOf(
+          PtyMessage.Ticket.class, askTicket("tok-mady", PtyMessage.TicketAction.ATTACH, "hers"));
+      assertEquals(List.of("acme", "acme-fix"), instancesAsked, "an attach and a ticket ask none");
     }
   }
 
