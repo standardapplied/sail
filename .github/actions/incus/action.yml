@@ -13,16 +13,19 @@ outputs:
 runs:
   using: composite
   steps:
-    # The Incus host init installs: Zabbly's stable repository, as on every box (HostPackages).
-    # Ubuntu 24.04's own incus is 6.0.0, which cannot make a mirrored ZFS pool. The runner image
-    # also carries third-party apt sources (Chrome, Microsoft, ...) whose index fetches fail on
-    # their own schedule, and a plain update refreshes them all — so only Ubuntu's own sources and
-    # Zabbly's are refreshed here.
+    # The Incus host init installs: Zabbly's stable repository, as on every box (HostPackages),
+    # unpinned, so CI tests Zabbly's current stable release, not the release a box that installed
+    # it earlier holds. Ubuntu 24.04's own incus 6.0.0, which a box keeps when it came with it and
+    # which cannot make a mirrored ZFS pool, is covered only by the unit tests of Sail's refusal of
+    # it (IncusStorageTest, HostProvisionerTest). The runner image also carries third-party apt
+    # sources (Chrome, Microsoft, ...) whose index fetches fail on their own schedule, and a plain
+    # update refreshes them all — so only Ubuntu's own sources and Zabbly's are refreshed here.
     #
-    # Zabbly's incus client, run as root in this step, leaves the runner a ~/.config/incus it cannot
-    # read (seen in CI: "open /home/runner/.config/incus/config.yml: permission denied" at the
-    # runner's first incus, with root's HOME under sudo /root), so the runner is given its own back.
-    # The client writes that file only when it is missing, so no later root incus takes it again.
+    # The runner's sudo keeps the runner's environment, HOME and XDG_CONFIG_HOME/XDG_CACHE_HOME
+    # among it, and the incus client makes its config and cache directories there on its first
+    # run (os.UserConfigDir, os.UserCacheDir): root's init is run as a box's sudo runs it, its own
+    # home and no XDG directories, so no root-owned directory is left in the runner's home, and the
+    # runner's first incus makes its own, which a later root incus finds and leaves as it is.
     - name: Install and initialize incus
       shell: bash
       run: |
@@ -33,11 +36,12 @@ runs:
           | sudo tee /etc/apt/sources.list.d/zabbly-incus-stable.sources > /dev/null
         sudo apt-get update
         sudo apt-get install -y incus
-        sudo incus admin init --minimal
+        sudo -H env -u XDG_CONFIG_HOME -u XDG_CACHE_HOME incus admin init --minimal
         sudo chmod o+rw /var/lib/incus/unix.socket
-        sudo ls -la "$HOME/.config/incus" || true
-        if sudo test -e "$HOME/.config/incus"; then
-          sudo chown -R "$(id -u):$(id -g)" "$HOME/.config/incus"
+        if [ -e "$HOME/.config/incus" ] || [ -e "$HOME/.cache/incus" ]; then
+          ls -la "$HOME/.config" "$HOME/.cache" >&2
+          echo "a root incus left directories in the runner's home" >&2
+          exit 1
         fi
 
     # The runner's Docker install sets the iptables FORWARD policy to DROP, which silently drops
