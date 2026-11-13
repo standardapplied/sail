@@ -14,7 +14,11 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.IOException;
+import java.util.List;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.function.Executable;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 
 class ContainerManagerTest {
 
@@ -380,5 +384,43 @@ class ContainerManagerTest {
 
     assertTrue(ex.getMessage().contains("Failed to set hostname"));
     assertTrue(ex.getMessage().contains("read-only"));
+  }
+
+  @ParameterizedTest
+  @CsvSource(
+      delimiter = '|',
+      value = {
+        "\"user.sail.project\": \"acme\", \"user.sail.workspace\": \"fix\"|workspace 'fix' of project acme",
+        "\"user.sail.template.of\": \"acme-fix\"|the template of project acme-fix",
+        "\"user.sail.project\": \"acme\", \"user.sail.workspace\": \"other\"|a copy carrying the keys of project acme"
+      })
+  void aContainerAddressedByAProjectsNameThatIsNoProjectsIsRefusedNamingWhatItIs(
+      String keys, String what) {
+    var name = keys.contains("template") ? "acme-fix--tmpl" : "acme-fix";
+    var shell =
+        new ScriptedShellExecutor()
+            .onOk(
+                "incus list ^" + name + "$",
+                "[{\"name\": \""
+                    + name
+                    + "\", \"status\": \"Running\", \"config\": {"
+                    + keys
+                    + "}}]");
+    var containers = new ContainerManager(shell);
+
+    for (Executable asked :
+        List.<Executable>of(() -> containers.queryState(name), () -> containers.queryInfo(name))) {
+      var refused = assertThrows(IllegalStateException.class, asked).getMessage();
+      assertTrue(
+          refused.startsWith(
+              "Instance '"
+                  + name
+                  + "' is "
+                  + what
+                  + ", not a project's container: project "
+                  + name
+                  + " may not take it."),
+          refused);
+    }
   }
 }

@@ -5,6 +5,8 @@
 
 package ai.singlr.sail.engine;
 
+import ai.singlr.sail.common.Remedied;
+import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.config.YamlUtil;
 import java.io.IOException;
 import java.util.LinkedHashMap;
@@ -169,18 +171,32 @@ public final class BoxInstances {
           case Stray stray -> "a copy carrying the keys of project " + stray.project();
         };
     if (what != null) {
-      throw new IllegalStateException(
+      throw Remedied.state(
           "Instance '"
               + project
               + "' is "
               + what
               + ", not a project's container: project "
               + project
-              + " may not take it.");
+              + " may not take it.",
+          switch (kind) {
+            case Workspace workspace ->
+                Remedy.of(
+                    "Use the workspace's own commands, e.g. ",
+                    Remedy.sail(
+                        "project workspace shell", workspace.project(), workspace.workspace()),
+                    ".");
+            case Template template ->
+                Remedy.of(
+                    "Only ",
+                    Remedy.sail("project template build", template.project()),
+                    " changes it.");
+            default -> Remedy.of("Delete the copy, or its keys, if it is not wanted.");
+          });
     }
   }
 
-  private static Instance instance(Map<String, Object> entry) {
+  static Instance instance(Map<String, Object> entry) {
     var config = new LinkedHashMap<String, String>();
     if (entry.get("config") instanceof Map<?, ?> keys) {
       keys.forEach((key, value) -> config.put(String.valueOf(key), String.valueOf(value)));

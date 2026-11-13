@@ -1186,6 +1186,7 @@ with its own tree, services and ports, cloned in a second from the project's tem
   | the boot sweep | plain containers of held projects, and whole workspaces of them |
   | the authorized-keys rewrite | every container on remove; a project's container and whole workspaces on add |
   | `project stop --all`, `host status`, the overcommit hints, `host init`'s restart check | every instance, as before |
+  | every verb that addresses a container by a project's name (`project start`, `stop`, `switch`, `shell`, `exec`, `logs`, `connect`, `containers`, `snapshot create`, `list`, `restore`, `delete`, `rename`, `resources set`, `config show`, `install-agent`, `repo add`, `service add`, `service remove`, `demo`, `apply`, `files`, `agent run`, `attach`, `logs`, `report`, `status`, `sweep`, `watch`, and every API door through `ProjectLoader`) | plain only: `ContainerManager.queryState` and `queryInfo`, which each passes through, refuse an instance of the project's name that is a workspace, a template or a copy, naming what it is and the command that acts on it; `snapshot prune`, `create` and `destroy`, which read no state, ask `BoxInstances.requireNotTakenFor` |
 
 Each row with the tests that prove it:
 
@@ -1262,7 +1263,9 @@ Each row with the tests that prove it:
 - **W10. Every instance on a box is exactly one kind, told from its keys.** No command takes a
   workspace, a template or a stray for a project: each one that walks the box's instances asks
   `BoxInstances`, the only class that lists them.
-  *`BoxInstancesSweepTest`, `ProjectApplyCommandTest.aBulkApplyNeverTakesAWorkspaceOrATemplateForAProject`,
+  *`BoxInstancesSweepTest`, `ProjectVerbsTakeNoWorkspaceTest`,
+  `ContainerManagerTest.aContainerAddressedByAProjectsNameThatIsNoProjectsIsRefusedNamingWhatItIs`,
+  `ProjectApplyCommandTest.aBulkApplyNeverTakesAWorkspaceOrATemplateForAProject`,
   `SailOperationsTest.projectsNeverListAWorkspaceOrATemplateAsAProject`,
   `ScopeChangeRoundTest.aScopedRoundLeavesTheWorkspacesAndTemplateOfAProjectInScopeAlone`,
   `ContainerSetupSweepTest`, `ContainerAuthorizedKeysTest`.*

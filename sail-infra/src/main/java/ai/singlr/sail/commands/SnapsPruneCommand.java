@@ -85,6 +85,7 @@ public final class SnapsPruneCommand implements Runnable {
 
     List<String> targets;
     if (name != null) {
+      BoxInstances.requireNotTakenFor(name, new BoxInstances(new ShellExecutor(false)).named(name));
       targets = List.of(name);
     } else {
       targets = new BoxInstances(shell).plain().stream().map(BoxInstances.Instance::name).toList();

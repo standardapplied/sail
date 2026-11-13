@@ -188,7 +188,6 @@ public final class ProjectApplyCommand implements Runnable {
     var shell = new ShellExecutor(dryRun);
     var observed = new ContainerManager(observer);
     var mgr = new ContainerManager(shell);
-    BoxInstances.requireNotTakenFor(config.name(), new BoxInstances(observer).named(config.name()));
     var action = plan(observed.queryState(config.name()));
 
     if (action == Action.STARTED) {

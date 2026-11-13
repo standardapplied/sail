@@ -232,7 +232,9 @@ class WorkspaceIT extends AbstractIncusIT {
     assertTrue(edited.ok(), edited.stderr());
 
     assertEquals(Workspaces.Change.STOPPED, workspaces.stop(PROJECT, FIX).change());
-    assertEquals(new ContainerState.Stopped(), containers.queryState(fix.instance()));
+    assertEquals(
+        new ContainerState.Stopped(),
+        new BoxInstances(shell).named(fix.instance()).orElseThrow().state());
     var resumed = workspaces.start(PROJECT, FIX);
     record("start " + FIX, resumed.timings());
 

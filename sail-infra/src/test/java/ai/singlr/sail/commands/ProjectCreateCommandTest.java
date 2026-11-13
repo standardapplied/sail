@@ -304,7 +304,8 @@ class ProjectCreateCommandTest {
             1,
             "",
             "  ✗ Instance 'acme-fix' is workspace 'fix' of project acme, not a project's container:"
-                + " project acme-fix may not take it.\n"),
+                + " project acme-fix may not take it. Use the workspace's own commands, e.g. sail"
+                + " project workspace shell acme fix.\n"),
         taken);
     assertTrue(mutations.catalog().read("acme-fix").isEmpty());
     assertTrue(mutations.catalog().read("acme--tmpl").isEmpty());
