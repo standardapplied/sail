@@ -1187,14 +1187,15 @@ class WorkspacesTest {
   /**
    * The fetch of {@link Workspaces#FETCH} run by bash, the dev user's {@code git} a stand-in that
    * answers each attempt with the next of {@code answers}, a status and what it says, and each
-   * pause moving bash's {@code SECONDS} on by one; answered with the attempts made, the retries
-   * counted and what the fetch said.
+   * pause moving bash's {@code SECONDS} on by five, so the wall clock's own second ticking during
+   * the run cannot change how many pauses fit before the deadline; answered with the attempts made,
+   * the retries counted and what the fetch said.
    */
   private static ShellExec.Result fetched(Path dir, String... answers) throws Exception {
     var script =
         Workspaces.FETCH
             + """
-            sleep() { SECONDS=$((SECONDS + 1)); }
+            sleep() { SECONDS=$((SECONDS + 5)); }
             as_dev() {
               n=$(($(cat "$TRIES") + 1)); echo "$n" > "$TRIES"; echo "$*" > "$TRIES.args"
               eval "answer=\\${ANSWER_$n:-0}"
@@ -1244,7 +1245,7 @@ class WorkspacesTest {
             1, "attempts=2 retries=1", "fatal: Authentication failed for 'https://github.com/'\n"),
         refused);
     assertEquals(
-        new ShellExec.Result(1, "attempts=11 retries=10", unresolved.substring(4) + "\n"),
+        new ShellExec.Result(1, "attempts=3 retries=2", unresolved.substring(4) + "\n"),
         never,
         "ten seconds of asking, whatever the count");
   }
