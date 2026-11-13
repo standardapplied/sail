@@ -90,9 +90,12 @@ Hand-written (layouts no machine at hand has), in the call's format:
   serial and no WWN, disks of 20 GiB and of 20 GiB + 8 MiB, + 17 MiB and + 100 MiB, two of 40 and 60 GiB, and a blank 20 GiB disk beside a 21 GiB disk whose one partition is 20 GiB
 - handwritten-mirror-*.zpool-status.txt   `zpool status -P devpool` of a mirror online, degraded
   with a device removed, degraded at import with a device absent (listed by its GUID, `was` its
-  path), suspended with both removed, and faulted with both unopenable, in the output OpenZFS
-  2.2.2 prints (`zpool_main.c` `status_callback` and `print_status_config`); a real-device proof
-  is to replace them with captures
+  path), and faulted with both unopenable, in the output OpenZFS 2.2.2 prints (`zpool_main.c`
+  `status_callback` and `print_status_config`); the proof could not build a real FAULTED pool
+- gcp5/e-540-mirror-suspended.zpool-status.txt, gcp5/e-501-mirror-offline.zpool-status.txt   the
+  proof's real `zpool status -P devpool` of a mirror suspended with both disks detached under I/O
+  (its rows read DEGRADED, the device still ONLINE with errors, the other REMOVED; the harness's
+  trailing `zpool status rc=0` line dropped) and of one with a device the operator took offline
 - gcp5/<case>.lsblk.json   the mirror's real-device proof (of 9cff06c3), the call above verbatim:
   d-225 two whole disks after the destroyed mirror zpend (GPT, data partition with zpend's labels,
   8 MiB reserved partition 9), d-226 the same once the labels were cleared; gcp5/d-225-wipefs-*.txt

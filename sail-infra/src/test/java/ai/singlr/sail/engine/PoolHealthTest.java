@@ -49,20 +49,49 @@ class PoolHealthTest {
         "a device absent at import is listed by its GUID and named by the path it was");
     assertTrue(removed.usable() && removed.degraded());
     assertEquals(
+        List.of("replace " + B + ": sudo zpool replace devpool " + B + " <new device>"),
+        removed.remedies("devpool"));
+    assertEquals(
         "Pool devpool is DEGRADED ("
             + B
             + " is REMOVED), as zpool status says: it runs on the device left, with no redundancy"
-            + " until the missing one is replaced. Sail replaces nothing: put a new device in its"
-            + " place with sudo zpool replace devpool <missing device> <new device>.",
+            + " until that is mended. Sail mends nothing: replace "
+            + B
+            + ": sudo zpool replace devpool "
+            + B
+            + " <new device>.",
         removed.degradedNotice("devpool"));
   }
 
   @Test
+  void aDeviceTheOperatorTookOfflineIsBroughtBackOnlineNotReplaced() throws Exception {
+    var offline = read("gcp5/e-501-mirror-offline.zpool-status.txt").orElseThrow();
+
+    assertEquals(new PoolHealth("DEGRADED", Map.of("/dev/sdc1", "OFFLINE")), offline);
+    assertEquals(
+        List.of("bring /dev/sdc1 back: sudo zpool online devpool /dev/sdc1"),
+        offline.remedies("devpool"));
+    assertTrue(
+        offline
+            .degradedNotice("devpool")
+            .endsWith(
+                "Sail mends nothing: bring /dev/sdc1 back: sudo zpool online devpool /dev/sdc1."));
+  }
+
+  @Test
   void aMirrorWithBothDevicesGoneIsNotUsable() throws Exception {
-    var suspended = read("handwritten-mirror-suspended.zpool-status.txt").orElseThrow();
+    var suspended = read("gcp5/e-540-mirror-suspended.zpool-status.txt").orElseThrow();
     var faulted = read("handwritten-mirror-faulted.zpool-status.txt").orElseThrow();
 
-    assertEquals(new PoolHealth("SUSPENDED", Map.of(A, "REMOVED", B, "REMOVED")), suspended);
+    assertEquals(
+        new PoolHealth(
+            "SUSPENDED",
+            Map.of(
+                "/dev/disk/by-id/scsi-0Google_PersistentDisk_sail-fleet-mirrorproof-b-n1-part1",
+                "REMOVED")),
+        suspended,
+        "the proof's real SUSPENDED pool: its rows read DEGRADED, the device detached with I/O in"
+            + " flight still ONLINE with errors, the other REMOVED");
     assertEquals("FAULTED (" + A + " is UNAVAIL, " + B + " is UNAVAIL)", faulted.said());
     assertFalse(suspended.usable());
     assertFalse(faulted.usable());

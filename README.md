@@ -90,8 +90,9 @@ A mirror keeps every container through the loss of either device: `sudo sail hos
 says the pool is `DEGRADED` and names the device that is gone, and workspace and template verbs
 go on, saying once that the pool is degraded. It does not protect against losing both, against a
 deleted file or a bad write by software (ZFS writes it to both), or against the box itself; it is no backup.
-Sail replaces and resilvers nothing: put a new device in place of the missing one with `sudo
-zpool replace <pool> <missing device> <new device>`, which ZFS resilvers. A pool that is neither
+Sail replaces and resilvers nothing: put a new device in place of one gone or failed with `sudo
+zpool replace <pool> <missing device> <new device>`, which ZFS resilvers, and bring back one you
+took offline with `sudo zpool online <pool> <device>`; `host status` names the one that fits. A pool that is neither
 `ONLINE` nor `DEGRADED` (both devices gone, `FAULTED`, `SUSPENDED`, or not imported) refuses
 workspace and template verbs, naming its state and `sudo zpool status <pool>`. Re-running the
 command that made a mirror, in either order of its two `--disk` flags, is a no-op; naming one of

@@ -1195,7 +1195,8 @@ never with `-f`: Sail never passes `source.wipe`.
   answer in time, fails, or says no state is "did not answer" and why; one that cannot be run
   (ZFS not installed) says nothing.
   `host status` puts it in rows under each zfs pool's (`health <state>`, each device not online
-  with its state, and the `zpool replace` pointer when DEGRADED; the banner's rows a pool may run
+  with its state, and when DEGRADED what mends each: `zpool online` for a device taken offline,
+  `zpool replace` for one gone or failed; the banner's rows a pool may run
   to) and `--json` carries `health` and `unhealthy`. The verbs that change a workspace or a
   template (create, start, stop, delete, template build) read the health of the mirror they act
   on: DEGRADED goes on, said once on stderr; any other state, and a mirror whose health zpool does

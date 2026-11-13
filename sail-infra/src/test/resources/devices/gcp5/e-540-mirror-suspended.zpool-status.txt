@@ -1,0 +1,15 @@
+  pool: devpool
+ state: SUSPENDED
+status: One or more devices are faulted in response to IO failures.
+action: Make sure the affected devices are connected, then run 'zpool clear'.
+   see: https://openzfs.github.io/openzfs-docs/msg/ZFS-8000-HC
+  scan: resilvered 968M in 00:00:04 with 0 errors on Fri Nov 13 17:49:34 2026
+config:
+
+	NAME                                                                               STATE     READ WRITE CKSUM
+	devpool                                                                            DEGRADED     0     0     0
+	  mirror-0                                                                         DEGRADED     0   128     0
+	    /dev/sdb1                                                                      ONLINE       3   128     0
+	    /dev/disk/by-id/scsi-0Google_PersistentDisk_sail-fleet-mirrorproof-b-n1-part1  REMOVED      0     0     0
+
+errors: 1845 data errors, use '-v' for a list

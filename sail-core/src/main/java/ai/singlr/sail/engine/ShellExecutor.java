@@ -68,7 +68,7 @@ public final class ShellExecutor implements ShellExec {
 
     var finished = process.waitFor(timeout.toMillis(), TimeUnit.MILLISECONDS);
     if (!finished) {
-      process.destroyForcibly();
+      destroyWithDescendants(process);
       throw new TimeoutException(
           "Command timed out after " + timeout.toSeconds() + "s: " + String.join(" ", command));
     }
@@ -76,6 +76,16 @@ public final class ShellExecutor implements ShellExec {
     stdoutThread.join();
     stderrThread.join();
     return new Result(process.exitValue(), stdout.get(), stderr.get());
+  }
+
+  /**
+   * Destroys {@code process} and every process it started, its descendants first, while they are
+   * still its descendants: once it is gone they belong to init and can no longer be found, and they
+   * would run on, holding its pipes.
+   */
+  private static void destroyWithDescendants(Process process) {
+    process.descendants().forEach(ProcessHandle::destroyForcibly);
+    process.destroyForcibly();
   }
 
   @Override

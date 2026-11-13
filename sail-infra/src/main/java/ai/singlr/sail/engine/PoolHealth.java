@@ -43,6 +43,7 @@ public record PoolHealth(String state, Map<String, String> unhealthy) {
 
   private static final String ONLINE = "ONLINE";
   private static final String DEGRADED = "DEGRADED";
+  private static final String OFFLINE = "OFFLINE";
   private static final Set<String> SOUND = Set.of(ONLINE, "AVAIL", "INUSE");
   private static final Pattern LEAF = Pattern.compile("/.*|[0-9]+");
   private static final String STATE = "state: ";
@@ -156,19 +157,39 @@ public record PoolHealth(String state, Map<String, String> unhealthy) {
   }
 
   /**
-   * What the operator is told of a degraded pool {@code zpool}: what is missing, that the pool goes
-   * on with the device left, and the {@code zpool replace} that puts a new one in its place, which
-   * Sail never runs.
+   * What mends each device of {@code zpool} that is not online, which Sail never runs: one the
+   * operator took offline is brought back with {@code zpool online}; one gone or failed (UNAVAIL,
+   * FAULTED, REMOVED) has a new device put in its place with {@code zpool replace}.
+   */
+  public List<String> remedies(String zpool) {
+    var remedies = new ArrayList<String>();
+    unhealthy.forEach(
+        (device, its) ->
+            remedies.add(
+                OFFLINE.equals(its)
+                    ? "bring " + device + " back: sudo zpool online " + zpool + " " + device
+                    : "replace "
+                        + device
+                        + ": sudo zpool replace "
+                        + zpool
+                        + " "
+                        + device
+                        + " <new device>"));
+    return List.copyOf(remedies);
+  }
+
+  /**
+   * What the operator is told of a degraded pool {@code zpool}: what is not online, that the pool
+   * goes on with the device left, and what mends each ({@link #remedies}).
    */
   public String degradedNotice(String zpool) {
     return "Pool "
         + zpool
         + " is "
         + said()
-        + ", as zpool status says: it runs on the device left, with no redundancy until the"
-        + " missing one is replaced. Sail replaces nothing: put a new device in its place with sudo"
-        + " zpool replace "
-        + zpool
-        + " <missing device> <new device>.";
+        + ", as zpool status says: it runs on the device left, with no redundancy until that is"
+        + " mended. Sail mends nothing: "
+        + String.join("; ", remedies(zpool))
+        + ".";
   }
 }

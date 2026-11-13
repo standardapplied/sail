@@ -299,7 +299,7 @@ public final class HostStatusCommand implements Runnable {
       var lines = new ArrayList<>(List.of(summary, "health " + found.state()));
       found.unhealthy().forEach((device, state) -> lines.add(device + " " + state));
       if (found.degraded()) {
-        lines.add("replace the missing device: sudo zpool replace " + zpool + " <device> <new>");
+        lines.addAll(found.remedies(zpool));
       }
       return String.join("\n", lines);
     }

@@ -677,7 +677,10 @@ class WorkspacesTest {
 
     assertTrue(indexOf(shell, copyArgv("v1")) >= 0, String.join("\n", shell.invocations()));
     assertEquals(1, said.split("Pool tank is DEGRADED", -1).length - 1, said);
-    assertTrue(said.contains("sudo zpool replace tank <missing device> <new device>"), said);
+    assertTrue(
+        said.contains(
+            "sudo zpool replace tank /dev/disk/by-id/wwn-0x5000c500e5f6a7b8-part5 <new device>"),
+        said);
   }
 
   @Test

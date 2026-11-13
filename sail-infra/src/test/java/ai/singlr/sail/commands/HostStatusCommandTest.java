@@ -364,15 +364,26 @@ class HostStatusCommandTest {
   void aDegradedMirrorNamesTheMissingDeviceAndTheReplaceThatMendsIt() throws Exception {
     var degraded = mirror("handwritten-mirror-degraded-at-import.zpool-status.txt");
 
+    var rows = rows(degraded, "health ", " UNAVAIL", "zpool replace");
     assertEquals(
-        List.of(
-            CONTINUED + "health DEGRADED",
-            CONTINUED + B + " UNAVAIL",
-            CONTINUED + "replace the missing device: sudo zpool replace devpool <device> <new>"),
-        rows(degraded, "health ", " UNAVAIL", "zpool replace"));
+        List.of(CONTINUED + "health DEGRADED", CONTINUED + B + " UNAVAIL"), rows.subList(0, 2));
+    assertTrue(
+        rows.get(2).startsWith(CONTINUED + "replace " + B + ": sudo zpool replace devpool"),
+        rows.toString());
     var pool = (Map<?, ?>) ((List<?>) json(degraded).get("pools")).getFirst();
     assertEquals("DEGRADED", pool.get("health"));
     assertEquals(List.of(Map.of("device", B, "state", "UNAVAIL")), pool.get("unhealthy"));
+  }
+
+  @Test
+  void aDeviceTakenOfflineNamesTheOnlineThatBringsItBack() throws Exception {
+    assertEquals(
+        List.of(
+            CONTINUED + "health DEGRADED",
+            CONTINUED + "/dev/sdc1 OFFLINE",
+            CONTINUED + "bring /dev/sdc1 back: sudo zpool online devpool /dev/sdc1"),
+        rows(
+            mirror("gcp5/e-501-mirror-offline.zpool-status.txt"), "health ", " OFFLINE", "zpool "));
   }
 
   @Test
