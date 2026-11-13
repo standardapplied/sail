@@ -13,13 +13,19 @@ outputs:
 runs:
   using: composite
   steps:
-    # incus ships in Ubuntu 24.04 itself. The runner image also carries third-party apt sources
-    # (Chrome, Microsoft, ...) whose index fetches fail on their own schedule, and a plain update
-    # refreshes them all — so only Ubuntu's own sources are refreshed here.
+    # The Incus host init installs: Zabbly's stable repository, as on every box (HostPackages).
+    # Ubuntu 24.04's own incus is 6.0.0, which cannot make a mirrored ZFS pool. The runner image
+    # also carries third-party apt sources (Chrome, Microsoft, ...) whose index fetches fail on
+    # their own schedule, and a plain update refreshes them all — so only Ubuntu's own sources and
+    # Zabbly's are refreshed here.
     - name: Install and initialize incus
       shell: bash
       run: |
         sudo find /etc/apt/sources.list.d -type f ! -name ubuntu.sources -delete
+        sudo curl -fsSL --create-dirs -o /etc/apt/keyrings/zabbly.asc https://pkgs.zabbly.com/key.asc
+        printf 'Enabled: yes\nTypes: deb\nURIs: https://pkgs.zabbly.com/incus/stable\nSuites: %s\nComponents: main\nArchitectures: %s\nSigned-By: /etc/apt/keyrings/zabbly.asc\n' \
+          "$(. /etc/os-release && echo "$VERSION_CODENAME")" "$(dpkg --print-architecture)" \
+          | sudo tee /etc/apt/sources.list.d/zabbly-incus-stable.sources > /dev/null
         sudo apt-get update
         sudo apt-get install -y incus
         sudo incus admin init --minimal
