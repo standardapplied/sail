@@ -39,7 +39,7 @@ class HarnessUsageTest {
     }
   }
 
-  static final String CLAUDE_LOG = fixture("claude-code-agent.log");
+  static final String CLAUDE_LOG = fixture("claude-code-agent.jsonl");
   static final String CODEX_ROLLOUT = fixture("codex-rollout.jsonl");
 
   /** What each harness reads its report from, as a run leaves it: its log, then its transcript. */

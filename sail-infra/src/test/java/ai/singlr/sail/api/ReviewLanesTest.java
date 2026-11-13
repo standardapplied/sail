@@ -996,7 +996,7 @@ class ReviewLanesTest {
     loop = ReviewLoop.staged(tempDir, "codex");
     loop.spec("auth", "api");
     var build = loop.run("auth", "build");
-    loop.container.wrote(build, fixture("claude-code-agent.log"));
+    loop.container.wrote(build, fixture("claude-code-agent.jsonl"));
 
     loop.onEvent(ReviewLoop.buildStop("auth", build));
 
