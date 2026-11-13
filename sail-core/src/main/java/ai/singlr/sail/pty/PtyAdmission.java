@@ -6,6 +6,9 @@
 package ai.singlr.sail.pty;
 
 import java.io.IOException;
+import java.nio.file.Path;
+import java.util.List;
+import java.util.Map;
 
 /**
  * Where the host lets a person open a terminal: on this box, when it is theirs to operate ({@link
@@ -32,4 +35,35 @@ public interface PtyAdmission {
    * room}.
    */
   void room(String room, String project, PtyIdentity.Person who) throws IOException;
+
+  /**
+   * How a session {@code who} opens in the folder {@code named} runs there, or throws with the
+   * reason before any process starts. The server takes the folder as named ({@link
+   * Folder#asNamed}).
+   */
+  default Folder folder(Path named, PtyIdentity.Person who) throws IOException {
+    return Folder.asNamed(named);
+  }
+
+  /**
+   * Where a session runs ({@code path}), what it runs there when it names no command ({@code
+   * shell}), and what its environment holds beyond the host's own and the terminal's ({@code env}).
+   */
+  record Folder(Path path, List<String> shell, Map<String, String> env) {
+
+    public Folder {
+      shell = List.copyOf(shell);
+      env = Map.copyOf(env);
+    }
+
+    /** {@code path} as named, a login {@code bash}, nothing added: the server's sessions. */
+    public static Folder asNamed(Path path) {
+      return new Folder(path, List.of("bash", "-l"), Map.of());
+    }
+
+    /** The command a session that asked for {@code requested} runs here. */
+    public List<String> command(List<String> requested) {
+      return requested.isEmpty() ? shell : requested;
+    }
+  }
 }

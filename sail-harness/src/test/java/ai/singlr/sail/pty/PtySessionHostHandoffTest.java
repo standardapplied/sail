@@ -280,6 +280,41 @@ class PtySessionHostHandoffTest {
     }
   }
 
+  /**
+   * A session its successor adopted is hung up first when ended there, as one born there is: an
+   * interactive shell ends on the hangup, its history written, and its status crosses the gap in
+   * the shim's exit file, which a kill would never let the shim write.
+   */
+  @Test
+  void aSuccessorEndsAnAdoptedInteractiveShellByHangingItUp() throws Exception {
+    var history = dir.resolve("history");
+    var a = host(new PtySessionHost.Handoff(SdNotify.NONE, Map.of(), JVM_SHIM));
+    Map<String, Integer> masters;
+    try (var owner = connect("tok-uday")) {
+      create(owner, "shell", "exec bash --norc --noprofile -i");
+      attach(owner, "shell", true);
+      PtyWire.write(
+          owner,
+          new PtyMessage.Input(
+              1,
+              ("HISTFILE=" + history + "; echo \"@$((6*7))@\"\n")
+                  .getBytes(StandardCharsets.UTF_8)));
+      awaitText(owner, "@42@");
+      masters = a.handoff();
+    }
+    try (var b = host(new PtySessionHost.Handoff(SdNotify.NONE, masters, JVM_SHIM));
+        var watcher = connect("tok-uday");
+        var owner = connect("tok-uday")) {
+      attach(watcher, "shell", false);
+
+      PtyWire.write(owner, new PtyMessage.Kill("shell"));
+
+      assertInstanceOf(PtyMessage.Ok.class, readControl(owner));
+      assertEquals("exited(129)", awaitEnd(watcher).reason(), "hung up, not killed");
+      assertTrue(Files.readString(history).contains("echo"), "bash wrote its history");
+    }
+  }
+
   private long s2Pid(Map<String, Integer> masters) {
     try {
       return childPid("s2");

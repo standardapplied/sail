@@ -9,6 +9,7 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -82,11 +83,21 @@ public final class PtySession implements AutoCloseable {
   private static final long KILL_WAIT_SECONDS = 5;
 
   /**
+   * How long a session whose terminal was hung up has to end before it is asked to terminate: a
+   * shell ends on a hangup at once, its history written, where an interactive one ignores {@code
+   * SIGTERM}.
+   */
+  static final Duration HANGUP_GRACE = Duration.ofSeconds(1);
+
+  /**
    * The child as this host can reach it: the {@link Process} it spawned, or — after a handoff — an
    * orphan it only knows by pid, whose status is read from the exit file its shim wrote.
    */
   private sealed interface Child {
     long pid();
+
+    /** Sends the child {@code SIGHUP}, as a terminal that closes does, while it runs. */
+    void hangUp();
 
     void destroy();
 
@@ -104,6 +115,13 @@ public final class PtySession implements AutoCloseable {
     @Override
     public long pid() {
       return process.pid();
+    }
+
+    @Override
+    public void hangUp() {
+      if (process.isAlive()) {
+        Native.kill(process.pid(), Native.SIGHUP);
+      }
     }
 
     @Override
@@ -128,6 +146,13 @@ public final class PtySession implements AutoCloseable {
   }
 
   private record Adopted(long pid, Optional<ProcessHandle> handle, Path exitFile) implements Child {
+    @Override
+    public void hangUp() {
+      handle
+          .filter(ProcessHandle::isAlive)
+          .ifPresent(shim -> Native.kill(shim.pid(), Native.SIGHUP));
+    }
+
     @Override
     public void destroy() {
       handle.ifPresent(ProcessHandle::destroy);
@@ -990,21 +1015,28 @@ public final class PtySession implements AutoCloseable {
   }
 
   /**
-   * Ends the child (if alive), waits for the gather thread, and releases the journal. By the time
-   * the gather thread is done it has forced {@code SessionEnded} into every subscriber's queue, so
-   * the subscribers are dropped rather than poisoned: their sender threads end on delivering the
-   * ending, and a detach's queue-clearing poison would race that delivery and lose it. Those
-   * senders are given a moment to deliver it before the caller moves on — a host stopping for good
-   * exits right after, and the ending must be on the wire by then, not in a queue.
+   * Ends the child (if alive), waits for the gather thread, and releases the journal. The child is
+   * hung up first, as a terminal that closes hangs up its session; one still running after {@link
+   * #HANGUP_GRACE} is sent {@code SIGTERM}, and one still running {@value #KILL_WAIT_SECONDS} s
+   * after that is killed with everything under it. The terminal is read throughout, so what the
+   * child says on its way out is kept. By the time the gather thread is done it has forced {@code
+   * SessionEnded} into every subscriber's queue, so the subscribers are dropped rather than
+   * poisoned: their sender threads end on delivering the ending, and a detach's queue-clearing
+   * poison would race that delivery and lose it. Those senders are given a moment to deliver it
+   * before the caller moves on — a host stopping for good exits right after, and the ending must be
+   * on the wire by then, not in a queue.
    */
   @Override
   public void close() {
-    child.destroy();
+    child.hangUp();
     try {
-      if (!gatherDone.await(5, TimeUnit.SECONDS)) {
-        child.destroyForcibly(origin.name());
-        pty.close();
-        gatherDone.await();
+      if (!gatherDone.await(HANGUP_GRACE.toMillis(), TimeUnit.MILLISECONDS)) {
+        child.destroy();
+        if (!gatherDone.await(KILL_WAIT_SECONDS, TimeUnit.SECONDS)) {
+          child.destroyForcibly(origin.name());
+          pty.close();
+          gatherDone.await();
+        }
       }
     } catch (InterruptedException e) {
       Thread.currentThread().interrupt();
@@ -1034,7 +1066,7 @@ public final class PtySession implements AutoCloseable {
         return;
       }
       try {
-        sender.join(java.time.Duration.ofNanos(remaining));
+        sender.join(Duration.ofNanos(remaining));
       } catch (InterruptedException e) {
         Thread.currentThread().interrupt();
         return;
