@@ -143,7 +143,8 @@ final class WorkspaceVerbs {
               + (asking.size() == 1 ? "its" : "their")
               + " host.",
           Remedy.of(
-              "Pass one with --git-token <token>, or keep GITHUB_TOKEN through sudo with sudo -E."));
+              "Pass one with --git-token <token>, or keep GITHUB_TOKEN through sudo with sudo"
+                  + " --preserve-env=GITHUB_TOKEN."));
     }
   }
 
