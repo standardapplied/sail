@@ -172,6 +172,26 @@ class HostIncusCommandTest {
   }
 
   @Test
+  void aBoxWithNoSessionHostSocketHasNoSessionsToWarnOfAndIsUpgraded(@TempDir Path dir)
+      throws Exception {
+    var shell = box(MOVABLE);
+    ConsoleStub.answering("\n", true);
+
+    var out =
+        upgrade(
+            shell,
+            HostIncusCommand.Upgrade.live(
+                dir.resolve(".sail").resolve("pty.sock"), dir.resolve(".sail").resolve("sail.db")),
+            false);
+
+    assertEquals(
+        "  Upgrade Incus 6.17 to 6.18? No session or agent run is live to end. [Y/n] ", printed());
+    assertFalse(out.contains("Could not list terminal sessions"), out);
+    assertEquals(2, installs(shell).size());
+    assertTrue(out.endsWith("  ✓ Incus upgraded from 6.17 to 6.18.\n"), out);
+  }
+
+  @Test
   void withNothingLiveItAsksWithADefaultOfYes() throws Exception {
     var shell = box(MOVABLE);
     ConsoleStub.answering("\n", true);
@@ -185,11 +205,12 @@ class HostIncusCommandTest {
   }
 
   @Test
-  void aPtyHostThatDoesNotAnswerIsSaidAndTheQuestionDefaultsToNo(@TempDir Path dir) {
+  void aPtyHostThatDoesNotAnswerIsSaidAndTheQuestionDefaultsToNo(@TempDir Path dir)
+      throws IOException {
     var shell = box(MOVABLE);
+    var socket = Files.createFile(dir.resolve("uncredentialed.sock"));
     var live =
-        HostIncusCommand.LiveWork.of(
-            dir.resolve("absent.sock"), List.of(run("01a2", "acme", null, "room")), DEADLINE);
+        HostIncusCommand.LiveWork.of(socket, List.of(run("01a2", "acme", null, "room")), DEADLINE);
     assertNotNull(live.sessionsUnread());
     ConsoleStub.answering("\n", true);
 

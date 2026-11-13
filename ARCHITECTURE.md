@@ -1184,7 +1184,9 @@ never with `-f`: Sail never passes `source.wipe`.
   log, cache, spare, special or dedup device an operator adds with `zpool add` is no member, so
   the re-run of the two-disk command keeps the pool; `host status` names those on a row of their
   own (`plus a log device /dev/sde and a cache device /dev/sdf`) and `--json` as
-  `auxiliary_devices`, by class; `ImportedPools` still counts every class as a device in use. The NVMe rule refuses two persistent disks of a cloud VM that shows
+  `auxiliary_devices`, by class (`{}` when ZFS listed none; the key is absent for a pool said as
+  Incus recorded it, not imported or not answering, since ZFS listed nothing); `ImportedPools`
+  still counts every class as a device in use. The NVMe rule refuses two persistent disks of a cloud VM that shows
   every disk as a namespace of one controller (GCP); SCSI-attached disks there are separate.
   `host.yaml`'s `pool_source` is Incus's string, `mirror=<a>,<b>`, said as `a mirror of <a> and
   <b>`. *`PoolDevicesTest.twoBlankDisksAreAMirrorOfTwoDevicesEachClearedAsOneIs`,

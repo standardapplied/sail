@@ -227,7 +227,14 @@ public final class HostIncusCommand implements Runnable {
       }
     }
 
+    /**
+     * The sessions the pty host at {@code ptySocket} lists; none on a box with no socket there,
+     * whose session host was never installed or started, so no session can be live.
+     */
     private static LiveWork listed(Path ptySocket, List<RunStore.RunRow> runs) {
+      if (!Files.exists(ptySocket)) {
+        return new LiveWork(List.of(), null, runs);
+      }
       try (var client =
           SessionClient.connect(ptySocket, PtyHostYield.dispatchCredential(ptySocket))) {
         var sessions = client.list().stream().filter(PtyMessage.SessionInfo::live).toList();
