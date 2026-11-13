@@ -956,6 +956,21 @@ class PoolDevicesTest {
   }
 
   @Test
+  void aWholeDiskBesideAPartitionIsSaidAsZfsSizesItNotByTheirRawBytes() throws Exception {
+    var layouts = "handwritten-mirror-layouts.lsblk.json";
+
+    var mirror = devices(names(new Box(layouts)).shell()).mirror("/dev/sdm", "/dev/sdn1");
+
+    assertEquals(
+        "zfs on a mirror of /dev/sdm and /dev/sdn1, a whole disk and a partition: ZFS sizes it to"
+            + " the smaller of the partition and the disk's first partition, about 9 MiB less than"
+            + " the disk",
+        mirror.said(),
+        "equal raw sizes, yet ZFS partitions the whole disk, so no figure of what goes unused is"
+            + " true");
+  }
+
+  @Test
   void aSecondDeviceSomethingHoldsExclusivelyIsRefusedNamingWhatItsOwnProbesFound() {
     var shell = spares().holds("/dev/sdk", EXT4).busy("/dev/sdk").shell();
 

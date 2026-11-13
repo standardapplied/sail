@@ -140,11 +140,12 @@ public final class PoolDevices {
         cleared.getFirst().device(),
         cleared.getLast().device(),
         cleared.getFirst().size(),
-        cleared.getLast().size());
+        cleared.getLast().size(),
+        cleared.getFirst().whole() != cleared.getLast().whole());
   }
 
-  /** A device cleared, and its size in bytes. */
-  private record Cleared(PoolSource.Device device, long size) {}
+  /** A device cleared, its size in bytes, and whether it is a whole disk. */
+  private record Cleared(PoolSource.Device device, long size, boolean whole) {}
 
   /** A device named, where it sits, and how a refusal names it. */
   private record Named(String path, BlockTree.Place place, String label) {}
@@ -193,7 +194,8 @@ public final class PoolDevices {
       cleared.add(
           new Cleared(
               new PoolSource.Device(persistent(place, device.path()), place.identity()),
-              place.device().size()));
+              place.device().size(),
+              place.device() == place.disk()));
     }
     return cleared;
   }

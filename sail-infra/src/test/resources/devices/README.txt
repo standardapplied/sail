@@ -87,7 +87,7 @@ Hand-written (layouts no machine at hand has), in the call's format:
 - handwritten-mirror-layouts.lsblk.json   pairs no machine at hand had, for a mirror: the fourth
   GCP proof's NVMe persistent-disk capture (c-nvme-pd) with a third blank namespace nvme0n3 of the
   same controller, two blank disks with one WWN and serial (two paths to one disk), two with one
-  serial and no WWN, disks of 20 GiB and of 20 GiB + 8 MiB, + 17 MiB and + 100 MiB, and two of 40 and 60 GiB
+  serial and no WWN, disks of 20 GiB and of 20 GiB + 8 MiB, + 17 MiB and + 100 MiB, two of 40 and 60 GiB, and a blank 20 GiB disk beside a 21 GiB disk whose one partition is 20 GiB
 - handwritten-mirror-*.zpool-status.txt   `zpool status -P devpool` of a mirror online, degraded
   with a device removed, degraded at import with a device absent (listed by its GUID, `was` its
   path), suspended with both removed, and faulted with both unopenable, in the output OpenZFS

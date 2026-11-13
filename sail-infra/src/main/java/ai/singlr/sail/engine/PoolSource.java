@@ -56,17 +56,26 @@ public sealed interface PoolSource {
   /**
    * Two block devices on two physical disks, each cleared as one {@link Device} is, for a ZFS pool
    * that mirrors them; {@code oneBytes} and {@code otherBytes} their sizes, of which ZFS uses the
-   * smaller. Incus is handed both in one source, {@code mirror=<one>,<other>}, a list it splits on
-   * {@code =} and {@code ,}, so neither path may hold either.
+   * smaller; {@code mixed} when one is a whole disk and the other a partition, since ZFS partitions
+   * a whole disk itself and uses its first partition, so the raw sizes say less. Incus is handed
+   * both in one source, {@code mirror=<one>,<other>}, a list it splits on {@code =} and {@code ,},
+   * so neither path may hold either.
    */
-  record Mirror(Device one, Device other, long oneBytes, long otherBytes) implements PoolSource {
+  record Mirror(Device one, Device other, long oneBytes, long otherBytes, boolean mixed)
+      implements PoolSource {
+
+    /** A mirror of two disks or of two partitions, whose raw sizes ZFS compares and uses. */
+    public Mirror(Device one, Device other, long oneBytes, long otherBytes) {
+      this(one, other, oneBytes, otherBytes, false);
+    }
+
     public Mirror {
       for (var device : List.of(one, other)) {
         if (device.path().contains(",") || device.path().contains("=")) {
           throw new IllegalArgumentException(
               device.path()
-                  + " holds ',' or '=', which Incus reads as separators in a mirror's source:"
-                  + " name the device by another path.");
+                  + " holds ',' or '=', which Incus reads as separators in a mirror's source, so"
+                  + " Sail makes no pool from it.");
         }
       }
     }
@@ -88,7 +97,11 @@ public sealed interface PoolSource {
           + one.path()
           + " and "
           + other.path()
-          + (unused == 0
+          + (mixed
+              ? ", a whole disk and a partition: ZFS sizes it to the smaller of the partition and"
+                  + " the disk's first partition, about 9 MiB less than the disk"
+              : "")
+          + (mixed || unused == 0
               ? ""
               : ", "
                   + String.format(Locale.ROOT, "%.1f MiB", unused / (double) (1L << 20))

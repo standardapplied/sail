@@ -83,7 +83,7 @@ class IncusStorageTest {
 
     assertEquals(
         "/dev/disk/by-id/odd,name holds ',' or '=', which Incus reads as separators in a mirror's"
-            + " source: name the device by another path.",
+            + " source, so Sail makes no pool from it.",
         refused.getMessage());
   }
 
