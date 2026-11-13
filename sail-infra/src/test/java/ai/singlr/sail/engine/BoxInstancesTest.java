@@ -296,15 +296,15 @@ class BoxInstancesTest {
 
     assertEquals(
         List.of(
-            "Instance 'acme-fix' is workspace 'fix' of project acme, not a project's container:"
-                + " project acme-fix may not take it. Use the workspace's own commands, e.g. sail"
-                + " project workspace shell acme fix.",
-            "Instance 'acme--tmpl' is the template of project acme, not a project's container:"
-                + " project acme--tmpl may not take it. Only sail project template build acme"
-                + " changes it.",
-            "Instance 'acme-backup' is a copy carrying the keys of project acme, not a project's"
-                + " container: project acme-backup may not take it. Delete the copy, or its keys, if"
-                + " it is not wanted."),
+            "Project acme-fix cannot take instance acme-fix: it is workspace fix of project acme. Delete"
+                + " the workspace (sail project workspace delete acme fix) or give the project another"
+                + " name; the workspace itself is reached with sail project workspace shell acme fix.",
+            "Project acme--tmpl cannot take instance acme--tmpl: it is the template of project"
+                + " acme. Give the project another name; only sail project template build acme"
+                + " changes the template.",
+            "Project acme-backup cannot take instance acme-backup: it is a copy carrying the keys"
+                + " of project acme. Delete the copy, or its keys, if it is not wanted, or give the"
+                + " project another name."),
         List.of("acme-fix", "acme--tmpl", "acme-backup").stream()
             .map(
                 name ->

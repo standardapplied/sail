@@ -150,8 +150,9 @@ final class WorkspaceVerbs {
   /**
    * What {@code config}'s template is built from on this box: the base profile's pool ({@code
    * host.yaml}'s, the default when it names none), the digest of the definition and the workstation
-   * key, the catalog's names, and a build that, under the box's pairing lock, runs the project's
-   * own provisioner against the template with its own progress file.
+   * key, the catalog's names, and a build that asks first whether a repo needs a token none was
+   * given for, outside the box's pairing lock, then under it runs the project's own provisioner
+   * against the template with its own progress file.
    */
   static WorkspaceTemplate.Source source(
       ProjectDefinition config,
@@ -169,10 +170,10 @@ final class WorkspaceVerbs {
         key,
         name -> catalog.read(name).isPresent(),
         (into, fresh) -> {
+          var tokens = GitCredentials.known(config.repos(), gitToken);
+          requireTokens(config, tokens, GitCredentials::httpStatus);
           try (var held = dryRun ? null : PairingTrust.hold(SailPaths.controlPlaneDb())) {
             catalog.requireUnpruned(config.name());
-            var tokens = GitCredentials.known(config.repos(), gitToken);
-            requireTokens(config, tokens, GitCredentials::httpStatus);
             var tracker =
                 tracker(
                     progressOf(config.name()),

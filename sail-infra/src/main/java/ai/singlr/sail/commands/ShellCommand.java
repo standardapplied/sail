@@ -9,8 +9,10 @@ import ai.singlr.sail.engine.ContainerManager;
 import ai.singlr.sail.engine.ContainerStateGuard;
 import ai.singlr.sail.engine.NameValidator;
 import ai.singlr.sail.engine.OperatorCommand;
+import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.ShellExecutor;
 import java.util.List;
+import java.util.function.Function;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Parameters;
 
@@ -23,6 +25,19 @@ public final class ShellCommand implements Runnable {
   @Parameters(index = "0", description = "Project name.")
   private String name;
 
+  private final Function<Boolean, ShellExec> shells;
+
+  public ShellCommand() {
+    this(ShellExecutor::new);
+  }
+
+  /**
+   * @param shells the host shell, by whether this is a dry run
+   */
+  ShellCommand(Function<Boolean, ShellExec> shells) {
+    this.shells = shells;
+  }
+
   @Override
   public void run() {
     CliCommand.run(this::execute);
@@ -31,7 +46,7 @@ public final class ShellCommand implements Runnable {
   private void execute() throws Exception {
     var operator = OperatorCommand.here();
     NameValidator.requireValidProjectName(name);
-    var shell = new ShellExecutor(false);
+    var shell = shells.apply(false);
     var mgr = new ContainerManager(shell);
 
     var state = mgr.queryState(name);

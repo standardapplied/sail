@@ -469,7 +469,8 @@ public final class PtySelfTestCommand implements Callable<Integer> {
     var idle = new DispatchCommand.NoDispatch("box", false, "no_pending_specs");
     var template = new WorkspaceTemplate.Template("p", "p--tmpl", "v1", "i", "tank", true);
     var created =
-        new Workspaces.Created("p", "w", "p-w", template, new Workspaces.Timings(1L, 2, 3, 6));
+        new Workspaces.Created(
+            "p", "w", "p-w", template, new Workspaces.Timings(1L, 2, 3, 6, Map.of("bus", 1L)));
     var changed = new Workspaces.Changed("p", "w", "p-w", Workspaces.Change.STOPPED, null);
     var rows =
         new Workspaces.Listing(

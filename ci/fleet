@@ -71,7 +71,8 @@ Usage:
                                 incus storage create (strace); acme's template is built on tank, a
                                 workspace of it is a clone of its snapshot with a machine-id of its
                                 own (create time in the report), a second is made and stopped,
-                                apply --all leaves both and the template alone, and destroying acme
+                                apply --all leaves both and the template alone, five made at once are
+                                each whole, a dry run of destroying acme names them all, and destroying acme
                                 removes all of them before acme is applied again; observer, left
                                 on dir, is unchanged
   ci/fleet rebuilt RUN VERSION  main is copied by the README's backup line, takes a spec, and is lost; client
@@ -1158,6 +1159,18 @@ untouched_by_apply_all() {
   [[ $before == "STOPPED STOPPED acme" && $after == "$before" ]]
 }
 
+made_at_once() {
+  local run=$1 box=$2
+  on "$run" "$box" 'failed=0; for n in 1 2 3 4 5; do sudo sail project workspace create acme fleet-p$n --json > /tmp/fleet-p$n.out 2>&1 & done; for job in $(jobs -p); do wait "$job" || failed=1; done; for n in 1 2 3 4 5; do grep -q "\"total_ms\"" /tmp/fleet-p$n.out || { cat /tmp/fleet-p$n.out; failed=1; }; sudo sail project workspace delete acme fleet-p$n --yes > /dev/null || failed=1; done; rm -f /tmp/fleet-p?.out; [ "$failed" = 0 ]'
+}
+
+destroy_dry_run_names() {
+  local run=$1 box=$2 out
+  out=$(on "$run" "$box" "sudo sail project destroy acme --dry-run") || { echo "$out"; return 1; }
+  echo "$out"
+  grep -qF "acme-fleet-w" <<< "$out" && grep -qF "acme-fleet-v" <<< "$out" && grep -qF "acme--tmpl" <<< "$out"
+}
+
 all_gone() {
   local run=$1 box=$2 left
   left=$(on "$run" "$box" "sudo incus list --format csv -c n" | grep -E '^acme(-fleet-w|-fleet-v|--tmpl)?$' || true)
@@ -1209,6 +1222,10 @@ storage() {
     allowed "$run" client "sudo sail project workspace create acme fleet-v && sudo sail project workspace stop acme fleet-v"
   check "$run" "apply --all leaves the workspaces and the template as they are" \
     untouched_by_apply_all "$run" client
+  check "$run" "five workspaces of acme made at once are each whole, and go" \
+    made_at_once "$run" client
+  check "$run" "a dry run of destroying acme names its workspaces and template" \
+    destroy_dry_run_names "$run" client
   check "$run" "destroying acme removes its container, workspaces and template" \
     allowed "$run" client "sudo sail project destroy acme --yes"
   check "$run" "nothing of acme is left in Incus" all_gone "$run" client

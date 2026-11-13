@@ -12,9 +12,11 @@ import ai.singlr.sail.engine.ContainerManager;
 import ai.singlr.sail.engine.ContainerStateGuard;
 import ai.singlr.sail.engine.NameValidator;
 import ai.singlr.sail.engine.OperatorCommand;
+import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.engine.SnapshotManager;
 import java.util.LinkedHashMap;
+import java.util.function.Function;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
 import picocli.CommandLine.Option;
@@ -38,6 +40,19 @@ public final class RestoreCommand implements Runnable {
   @Option(names = "--json", description = "Output in JSON format.")
   private boolean json;
 
+  private final Function<Boolean, ShellExec> shells;
+
+  public RestoreCommand() {
+    this(ShellExecutor::new);
+  }
+
+  /**
+   * @param shells the host shell, by whether this is a dry run
+   */
+  RestoreCommand(Function<Boolean, ShellExec> shells) {
+    this.shells = shells;
+  }
+
   @Override
   public void run() {
     CliCommand.run(this::execute);
@@ -46,7 +61,7 @@ public final class RestoreCommand implements Runnable {
   private void execute() throws Exception {
     var operator = OperatorCommand.here();
     NameValidator.requireValidProjectName(name);
-    var shell = new ShellExecutor(dryRun);
+    var shell = shells.apply(dryRun);
     var mgr = new ContainerManager(shell);
     var snapMgr = new SnapshotManager(shell);
 

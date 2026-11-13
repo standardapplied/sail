@@ -30,6 +30,7 @@ import ai.singlr.sail.engine.PairingTrust;
 import ai.singlr.sail.engine.ProvisionState;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ScriptedShellExecutor;
+import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.ProjectScope;
@@ -280,7 +281,7 @@ class ProjectApplyCommandTest {
     catalogue(box.database(), "name: acme\nresources:\n  cpu: 2\n  memory: 4GB\n  disk: 50GB\n");
 
     for (var args : List.of(new String[] {"acme", "--yes"}, new String[] {"--all", "--yes"})) {
-      var ran = SailCli.run(new ProjectApplyCommand(() -> box), args);
+      var ran = SailCli.run(new ProjectApplyCommand(() -> box, ShellExecutor::new), args);
 
       assertEquals(1, ran.exit());
       assertEquals("", ran.out());
@@ -434,7 +435,8 @@ class ProjectApplyCommandTest {
             new ProjectApplyCommand(
                 () ->
                     new ProjectApplyCommand.Box(
-                        database, database.resolveSibling("host.yaml"), database.getParent())));
+                        database, database.resolveSibling("host.yaml"), database.getParent()),
+                ShellExecutor::new));
     command.setExecutionExceptionHandler((failure, line, parsed) -> 1);
     return new FutureTask<>(() -> command.execute(args));
   }

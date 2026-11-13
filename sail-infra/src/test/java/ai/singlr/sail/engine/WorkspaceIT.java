@@ -16,6 +16,15 @@ import ai.singlr.sail.api.SailOperations;
 import ai.singlr.sail.api.SessionYield;
 import ai.singlr.sail.api.SyncScheduler;
 import ai.singlr.sail.api.TestControlPlane;
+import ai.singlr.sail.commands.DownCommand;
+import ai.singlr.sail.commands.ExecCommand;
+import ai.singlr.sail.commands.ProjectDestroyCommand;
+import ai.singlr.sail.commands.RestoreCommand;
+import ai.singlr.sail.commands.ShellCommand;
+import ai.singlr.sail.commands.SnapCommand;
+import ai.singlr.sail.commands.SnapDeleteCommand;
+import ai.singlr.sail.commands.SnapsPruneCommand;
+import ai.singlr.sail.commands.UpCommand;
 import ai.singlr.sail.config.ProjectDefinition;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.config.SyncConfig;
@@ -30,16 +39,21 @@ import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
+import java.io.ByteArrayOutputStream;
+import java.io.PrintStream;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermissions;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import picocli.CommandLine;
 
 /**
  * Workspaces on a real Incus: a dir pool the runner's Incus starts with and its base profile uses,
@@ -125,7 +139,6 @@ class WorkspaceIT extends AbstractIncusIT {
     assertTrue(sealed.ok(), "could not seal the template: " + sealed.stderr() + sealed.stdout());
     ContainerSailSetup.ensureInstalled(shell, TEMPLATE);
     containers.stop(TEMPLATE);
-    new SnapshotManager(shell).create(TEMPLATE, "v1");
     var recorded =
         shell.exec(
             List.of(
@@ -138,6 +151,7 @@ class WorkspaceIT extends AbstractIncusIT {
                 "user.sail.template.inputs="
                     + ProjectProvisioner.inputs(definition(), Optional.empty())));
     assertTrue(recorded.ok(), recorded.reason());
+    new SnapshotManager(shell).create(TEMPLATE, "v1");
   }
 
   @AfterEach
@@ -202,6 +216,25 @@ class WorkspaceIT extends AbstractIncusIT {
     hostKeys.add(read(second.instance() + "/etc/ssh/ssh_host_ed25519_key.pub"));
     assertEquals(3, new HashSet<>(identities).size(), "machine-ids: " + identities);
     assertEquals(3, new HashSet<>(hostKeys).size(), "host keys: " + hostKeys);
+    for (var workspace : List.of(fix, second)) {
+      assertTrue(
+          read(workspace.instance() + "/etc/ssh/ssh_host_ed25519_key.pub")
+              .endsWith(" root@" + PROJECT),
+          "a workspace's host keys are made under the project's name");
+      var keys = new BoxInstances(shell).named(workspace.instance()).orElseThrow();
+      assertEquals(
+          List.of(),
+          List.of(
+                  BoxInstances.TEMPLATE_OF_KEY,
+                  WorkspaceTemplate.CURRENT_KEY,
+                  WorkspaceTemplate.INPUTS_KEY,
+                  Workspaces.CREATING_KEY)
+              .stream()
+              .filter(key -> keys.key(key).isPresent())
+              .toList(),
+          "a workspace carries none of its template's keys, nor the copy's mark");
+      assertTrue(keys.key(BoxInstances.READY_KEY).isPresent());
+    }
 
     var serve =
         "setsid python3 -m http.server 3000 >/dev/null 2>&1 < /dev/null &"
@@ -223,6 +256,57 @@ class WorkspaceIT extends AbstractIncusIT {
             .toList();
     assertEquals(2, new HashSet<>(addresses).size(), "two clones, two addresses: " + addresses);
     assertEquals(before, bystander(), "the project's own container is untouched");
+  }
+
+  @Test
+  void everyProjectVerbIsRefusedOnARealWorkspaceAndTemplateAndChangesNeither() throws Exception {
+    var fix = workspaces.create(definition(), FIX, source(), null);
+    var ws = fix.instance();
+    var verbs =
+        List.<Map.Entry<Object, List<String>>>of(
+            Map.entry(new ShellCommand(), List.of(ws)),
+            Map.entry(new ExecCommand(), List.of(ws, "true")),
+            Map.entry(new ExecCommand(), List.of(TEMPLATE, "true")),
+            Map.entry(new UpCommand(), List.of(TEMPLATE)),
+            Map.entry(new DownCommand(), List.of(ws)),
+            Map.entry(new SnapCommand(), List.of(TEMPLATE)),
+            Map.entry(new SnapCommand(), List.of(ws)),
+            Map.entry(new SnapDeleteCommand(), List.of(TEMPLATE, "v1")),
+            Map.entry(new RestoreCommand(), List.of(TEMPLATE, "v1")),
+            Map.entry(new SnapsPruneCommand(), List.of(TEMPLATE, "--keep", "0")),
+            Map.entry(new ProjectDestroyCommand(), List.of(ws, "--dry-run")));
+
+    for (var verb : verbs) {
+      var err = new ByteArrayOutputStream();
+      var original = System.err;
+      System.setErr(new PrintStream(err, true, StandardCharsets.UTF_8));
+      int exit;
+      try {
+        var cli = new CommandLine(verb.getKey());
+        cli.setExecutionExceptionHandler((failure, line, parsed) -> 1);
+        exit = cli.execute(verb.getValue().toArray(String[]::new));
+      } finally {
+        System.setErr(original);
+      }
+      var said = err.toString(StandardCharsets.UTF_8);
+      var name = verb.getValue().getFirst();
+      assertEquals(1, exit, verb.getValue() + ": " + said);
+      assertTrue(
+          said.contains("Project " + name + " cannot take instance " + name + ": it is "),
+          verb.getValue() + ": " + said);
+    }
+
+    var box = new BoxInstances(shell);
+    assertEquals(new ContainerState.Stopped(), box.named(TEMPLATE).orElseThrow().state());
+    assertTrue(box.named(ws).orElseThrow().state() instanceof ContainerState.Running);
+    assertEquals(
+        List.of("v1"),
+        new SnapshotManager(shell)
+            .list(TEMPLATE).stream().map(SnapshotManager.SnapshotInfo::name).toList());
+    assertEquals(
+        List.of(),
+        new SnapshotManager(shell)
+            .list(ws).stream().map(SnapshotManager.SnapshotInfo::name).toList());
   }
 
   @Test
@@ -362,6 +446,8 @@ class WorkspaceIT extends AbstractIncusIT {
             + " ready_ms="
             + timings.readyMs()
             + " total_ms="
-            + timings.totalMs());
+            + timings.totalMs()
+            + " ready_steps_ms="
+            + timings.readySteps());
   }
 }

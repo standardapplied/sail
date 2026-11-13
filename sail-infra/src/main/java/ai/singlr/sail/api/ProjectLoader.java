@@ -7,6 +7,7 @@ package ai.singlr.sail.api;
 
 import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.config.ProjectDefinition;
+import ai.singlr.sail.engine.BoxInstances;
 import ai.singlr.sail.engine.ContainerManager;
 import ai.singlr.sail.engine.ContainerState;
 import ai.singlr.sail.engine.ContainerStateGuard;
@@ -16,7 +17,9 @@ import java.util.Objects;
 /**
  * Loads a project's definition and live container state for the operations layer. One loader for
  * every lane — {@link SailOperations} routes and {@link DispatchOperations} both resolve projects
- * through it, so "project not found / stopped / errored" is decided (and worded) exactly once.
+ * through it, so "project not found / stopped / errored" is decided (and worded) exactly once, as
+ * is a project whose name is a workspace's, a template's or a copy's instance (W10), a conflict
+ * that names what frees the name.
  */
 final class ProjectLoader {
 
@@ -38,6 +41,8 @@ final class ProjectLoader {
     try {
       var state = new ContainerManager(shell).queryState(project);
       return new LoadedProject(config, state);
+    } catch (BoxInstances.Taken taken) {
+      throw ApiException.of(ErrorCode.CONFLICT, taken);
     } catch (Exception e) {
       throw new ApiException(ErrorCode.PROJECT_LOAD_FAILED, "Failed to load project.", e);
     }

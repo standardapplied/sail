@@ -390,7 +390,7 @@ class ContainerManagerTest {
   @CsvSource(
       delimiter = '|',
       value = {
-        "\"user.sail.project\": \"acme\", \"user.sail.workspace\": \"fix\"|workspace 'fix' of project acme",
+        "\"user.sail.project\": \"acme\", \"user.sail.workspace\": \"fix\"|workspace fix of project acme",
         "\"user.sail.template.of\": \"acme-fix\"|the template of project acme-fix",
         "\"user.sail.project\": \"acme\", \"user.sail.workspace\": \"other\"|a copy carrying the keys of project acme"
       })
@@ -410,17 +410,11 @@ class ContainerManagerTest {
 
     for (Executable asked :
         List.<Executable>of(() -> containers.queryState(name), () -> containers.queryInfo(name))) {
-      var refused = assertThrows(IllegalStateException.class, asked).getMessage();
-      assertTrue(
-          refused.startsWith(
-              "Instance '"
-                  + name
-                  + "' is "
-                  + what
-                  + ", not a project's container: project "
-                  + name
-                  + " may not take it."),
-          refused);
+      var refused = assertThrows(BoxInstances.Taken.class, asked);
+      assertEquals(name, refused.project());
+      assertEquals(
+          "Project " + name + " cannot take instance " + name + ": it is " + what + ".",
+          refused.reason());
     }
   }
 }

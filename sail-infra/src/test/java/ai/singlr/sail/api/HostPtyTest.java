@@ -10,6 +10,8 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import ai.singlr.sail.common.Remedied;
 import ai.singlr.sail.config.SyncConfig;
+import ai.singlr.sail.engine.BoxInstances;
+import ai.singlr.sail.engine.ScriptedShellExecutor;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.ProjectScope;
 import ai.singlr.sail.identity.Role;
@@ -36,7 +38,17 @@ class HostPtyTest {
     HeldProjects.hold(db, "acme");
     pty =
         new HostLanes.Pty(
-            db, TestAuth.roles(db, new SyncConfig("main", null, "root", "box")), null);
+            db,
+            TestAuth.roles(db, new SyncConfig("main", null, "root", "box")),
+            null,
+            new BoxInstances(
+                new ScriptedShellExecutor()
+                    .onOk(
+                        "incus list",
+                        "[{\"name\": \"acme\", \"status\": \"Running\", \"config\": {}},"
+                            + " {\"name\": \"acme-fix\", \"status\": \"Running\", \"config\":"
+                            + " {\"user.sail.project\": \"acme\", \"user.sail.workspace\":"
+                            + " \"fix\"}}]")));
   }
 
   @AfterEach
@@ -81,5 +93,19 @@ class HostPtyTest {
                         "gone",
                         new PtyIdentity.Person(new Actor("root", Role.ADMIN, Actor.Lane.API))))
             .getMessage());
+  }
+
+  @Test
+  void aTerminalNeverOpensInAWorkspaceForAProjectNamedLikeIt() throws IOException {
+    HeldProjects.hold(db, "acme-fix");
+    var admin = new PtyIdentity.Person(new Actor("root", Role.ADMIN, Actor.Lane.API));
+
+    pty.admitProject("acme", admin);
+    assertEquals(
+        "Project acme-fix cannot take instance acme-fix: it is workspace fix of project acme."
+            + " Delete the workspace (sail project workspace delete acme fix) or give the project"
+            + " another name; the workspace itself is reached with sail project workspace shell"
+            + " acme fix.",
+        assertThrows(Remedied.Io.class, () -> pty.admitProject("acme-fix", admin)).getMessage());
   }
 }

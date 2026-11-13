@@ -1133,14 +1133,16 @@ start` resume it with `incus start`, and stop, restore, rename and resize treat 
 
 **Workspaces** (`BoxInstances`, `WorkspaceTemplate`, `Workspaces`, `ProjectWorkspaceCommand`,
 `ProjectTemplateCommand`). A project runs several workspaces on one box, each its own container
-with its own tree, services and ports, cloned in a second from the project's template.
+with its own tree, services and ports, cloned from the project's template. On a 4-vCPU cloud VM
+the clone takes about half a second and a whole create, the clone, the start and making it its
+own, about three (2.9 to 4.3 s over 32 creates, median 3.2 s).
 
 - **The template** is the instance `<project>--tmpl`, built by the project's own
   `ProjectProvisioner` run against that name (`ProjectProvisioner.Instance`: the name every step
   addresses, the pool the launch puts it on, and the keys it is born with:
   `user.sail.template.of=<project>`). Its progress is kept in `template-provision-state.yaml`
-  beside the project's own. Once built it is stopped and snapshotted as `v<n>`, and it records
-  three keys:
+  beside the project's own. Once built it is stopped, records three keys and is snapshotted as
+  `v<n>`, so each version's snapshot carries its own record:
   - `user.sail.template.current=v<n>`;
   - `user.sail.template.inputs=<digest>`, the digest apply already records
     (`ProjectProvisioner.inputs`: the definition and the workstation key);
@@ -1151,17 +1153,28 @@ with its own tree, services and ports, cloned in a second from the project's tem
   - `sudo sail project workspace create <p> <name>` builds it first when there is none or it is
     stale. It then clones it with `incus copy <p>--tmpl/v<n> <p>-<name>`, passing the workspace's
     keys at the copy: `-c user.sail.project=<p> -c user.sail.workspace=<name> -c
-    user.sail.template=v<n> -c user.sail.created_ms=<ms>`.
+    user.sail.template=v<n> -c user.sail.created_ms=<ms> -c user.sail.creating=1`.
   - It starts the clone and makes it its own in one `incus exec` (`Workspaces.PREPARE`, constant
     text with the project, the workspace and each repo's path and base branch as its arguments):
-    a new machine-id and SSH host keys, the project's name as its hostname (which the in-container
-    helpers read the project from), each repo fetched and on the branch named after the workspace,
-    and the dev user's bus.
-  - Then come the shared files and the machinery, as `project start` reconciles them, and last
-    `user.sail.ready`.
-  - It says `Created <name> from v<n> in 1.4 s (clone 0.2 s, start 0.9 s, ready 0.3 s)`.
+    a new machine-id, the project's name as its hostname (which the in-container helpers read the
+    project from), new SSH host keys made under that name, each repo fetched and on the branch
+    named after the workspace, sshd restarted onto the new keys once systemd answers (it boots
+    while the repos are fetched), and the dev user's bus. A fetch whose host does not resolve yet
+    is asked again for up to 10 s (`Workspaces.FETCH`): a clone's address comes up a fraction of a
+    second before its resolver, and more when several start at once. The script prints `sail-step
+    <step> <epoch ms>` as each step ends.
+  - Then come the shared files and the machinery, as `project start` reconciles them, and last one
+    write: `user.sail.ready`, clearing `user.sail.creating` and the template's own keys
+    (`user.sail.template.of`, `.current`, `.inputs`, `.last` and `user.sail.inputs`), which the
+    clone carried from the copy: a workspace is no template.
+  - It says `Created <name> from v<n> in 3.2 s (clone 0.5 s, start 0.4 s, ready 2.3 s)`, and
+    `--json` adds `timings.ready_steps`, the readiness step by step (`identity`, `network`,
+    `repos`, `sshd`, `bus`, `files`, `machinery`, `mark`).
+  - One create of a workspace runs at a time, under `<p>-<name>.workspace.lock`, and the template
+    is read inside its own lock, so two creates of one stale or missing template build it once.
   - `list`, `shell`, `start`, `stop` and `delete` act on the workspace the seam finds.
-    `delete` asks first, naming the workspace and that its uncommitted work is lost (`--yes`).
+    `delete` asks first, once the workspace is found, naming it and that its uncommitted work is
+    lost (`--yes`); a missing workspace or `main` is refused without a question.
     `create`, `delete` and `template build` are root's, as `apply` and `destroy` are.
   - `GET /v1/projects/{p}/workspaces` lists the same rows, read in scope.
 - **The seam.** `BoxInstances` reads the box's instances in one `incus list` and says what each one
@@ -1186,7 +1199,12 @@ with its own tree, services and ports, cloned in a second from the project's tem
   | the boot sweep | plain containers of held projects, and whole workspaces of them |
   | the authorized-keys rewrite | every container on remove; a project's container and whole workspaces on add |
   | `project stop --all`, `host status`, the overcommit hints, `host init`'s restart check | every instance, as before |
-  | every verb that addresses a container by a project's name (`project start`, `stop`, `switch`, `shell`, `exec`, `logs`, `connect`, `containers`, `snapshot create`, `list`, `restore`, `delete`, `rename`, `resources set`, `config show`, `install-agent`, `repo add`, `service add`, `service remove`, `demo`, `apply`, `files`, `agent run`, `attach`, `logs`, `report`, `status`, `sweep`, `watch`, and every API door through `ProjectLoader`) | plain only: `ContainerManager.queryState` and `queryInfo`, which each passes through, refuse an instance of the project's name that is a workspace, a template or a copy, naming what it is and the command that acts on it; `snapshot prune`, `create` and `destroy`, which read no state, ask `BoxInstances.requireNotTakenFor` |
+  | every verb that addresses a container by a project's name (`project start`, `stop`, `switch`, `shell`, `exec`, `logs`, `connect`, `containers`, `snapshot create`, `list`, `restore`, `delete`, `rename`, `resources set`, `config show`, `install-agent`, `repo add`, `service add`, `service remove`, `demo`, `apply`, `files`, `agent run`, `attach`, `logs`, `report`, `status`, `sweep`, `watch`) | plain only: `ContainerManager.queryState` and `queryInfo`, which each passes through, refuse an instance of the project's name that is a workspace, a template or a copy (`BoxInstances.Taken`), naming what it is and what frees the name; `snapshot prune`, `create` and `destroy`, which read no state, ask `BoxInstances.requireNotTakenFor` |
+  | every API door that reaches a container by a project's name: dispatch and every run launch (build, review, fix, ad hoc, room wake, live member), serve and ports, snapshots and restore, skills share, agent status, logs and report, through `ProjectLoader` | plain only: the loader's `queryState` refusal is `409 conflict` with the reason and remedy |
+  | the terminal host's admission (`HostLanes.Pty.admitProject`) and `skills ls`'s read of hand-made skills | plain only: refused, or left out with the reason |
+  | the resource reconcile after a sync round | plain only: a project whose name is another's instance has no container here, and is skipped |
+  | the sync round's arrival notice | names once, in the round that brings it, a project whose name is another's instance, with what frees the name |
+  | `project create` and `POST /v1/projects` | refuse a name this box holds as a workspace's, a template's or a copy's instance |
 
 Each row with the tests that prove it:
 
@@ -1215,34 +1233,55 @@ Each row with the tests that prove it:
     `--tmpl`. A copy carrying its keys under another name refuses it too.
   - A template is no project's name.
   - In the other direction, no project takes a template's name (`NameValidator.requireNewProjectName`,
-    at create and in `ProjectStore.create`). A project's `create`, `apply` and `destroy` refuse an
-    instance of its name that is a workspace, a template or a stray, naming what it is
-    (`BoxInstances.requireNotTakenFor`).
+    at create and in `ProjectStore.create`). A project created on this box, by `project create` or
+    `POST /v1/projects`, is refused when the box holds an instance of its name that is a workspace,
+    a template or a stray. A box that holds none cannot know, so such a project can still reach a
+    box that does, by sync or through another box's API. There it never takes the instance: the
+    round that brings it says once that project `<p>-<w>` cannot take instance `<p>-<w>` because it
+    is workspace `<w>` of `<p>`, naming `workspace delete` or another name, and every door that
+    resolves a container from the project's name refuses it (W10). A run of such a project cannot
+    exist here, since its launch is refused, so the doors that act on a run's project are never
+    reached.
   - A workspace is found only as the one instance whose name and keys both match. Several, or a
     keyed instance under another name, are refused, naming them all.
 
   *`WorkspacesTest.aNameThatCollidesIsRefusedNamingWhatItCollidesWith`,
   `WorkspacesTest.aWorkspaceIsTheOneInstanceNamedForItAndCopiesCarryingItsKeysAreRefusedByName`,
   `ProjectCreateCommandTest.aProjectTakesNeitherATemplatesNameNorTheInstanceOfAWorkspace`,
+  `ProjectDefinitionOperationsTest.aProjectIsNotCreatedUnderTheNameOfAWorkspaceOrTemplateThisBoxHoldsAndIsWhereNoneIsHeld`,
+  `ScopeChangeRoundTest.aProjectThatSyncsInUnderAWorkspacesNameLeavesTheWorkspaceAloneAndSaysSoOnce`,
   `BoxInstancesTest.noProjectIsGivenAnInstanceThatIsAWorkspaceATemplateOrACopy`.*
 - **W5. A clone shares no machine identity.** The per-workspace step regenerates the machine-id
-  and the SSH host keys, which every clone otherwise has from the template.
+  and the SSH host keys, which every clone otherwise has from the template, the keys after the
+  hostname, so their comment names the project. Its template's keys are cleared with the ready
+  mark.
   *`WorkspaceIT`; the script is pinned by `WorkspacesTest.theScriptThatMakesACloneItsOwnIsPinnedWhole`.*
 - **W6. Times are measured and said.** `create` and `start` print each phase and return it in
-  JSON (`timings.clone_ms`, `start_ms`, `ready_ms`, `total_ms`), measured on `System.nanoTime`.
+  JSON (`timings.clone_ms`, `start_ms`, `ready_ms`, `total_ms`), measured on `System.nanoTime`;
+  a create's `ready_steps` breaks the readiness down, the script's steps as it timed them in the
+  container and the host's after them.
   *`WorkspacesTest.startResumesAStoppedWorkspaceAndSaysWhatItsResumeTook`,
+  `WorkspacesTest.aFirstCreateBuildsTheTemplateAsV1OnTheZfsPoolThenClonesItsSnapshotAndSaysWhatItTook`,
   `ProjectWorkspaceCommandTest.aCreateSaysEachPhaseItTookInSeconds`.*
 - **W7. A template version is current only once it is whole.**
-  - The record moves to `v<n>` only after the build, the stop and the snapshot.
-  - A failed build leaves the previous version current and makes no snapshot.
-  - A record that cannot be written removes the snapshot.
+  - The record moves to `v<n>` after the build and the stop, and the snapshot follows it, so the
+    snapshot's own keys are true. A version is current only when it is recorded and its snapshot
+    exists: one recorded whose snapshot failed is stale, and the next build is the one after it.
+  - A failed build leaves the previous version current, makes no snapshot, and stops a template it
+    started or launched; one it found running is left running.
+  - A record that cannot be written makes no snapshot.
   - A stale template is converged on its disk, as apply converges a container: packages, repos and
     services the definition dropped stay in it. It is not built again from nothing.
-  - The template's lock is held while it builds.
+  - The template's lock is held while it builds, and the template is read inside it, so a create
+    that waited for another's build clones what it built.
 
-  *`WorkspacesTest.aFailedBuildLeavesThePreviousVersionCurrentAndMakesNoSnapshot`,
-  `WorkspacesTest.aVersionWhoseRecordCannotBeWrittenIsRemovedSoThePreviousStaysCurrent`,
+  *`WorkspacesTest.aFailedBuildLeavesThePreviousVersionCurrentMakesNoSnapshotAndStopsTheTemplateItStarted`,
+  `WorkspacesTest.aFailedBuildLeavesATemplateItFoundRunningRunningAndOneItLaunchedStopped`,
+  `WorkspacesTest.aVersionWhoseRecordCannotBeWrittenIsNeverSnapshottedSoThePreviousStaysCurrent`,
+  `WorkspacesTest.aVersionRecordedButNeverSnapshottedIsStaleSoTheNextBuildIsTheOneAfter`,
   `WorkspacesTest.theTemplatesLockIsHeldWhileItBuilds`,
+  `WorkspacesTest.twoCreatesOfOneStaleTemplateBuildItOnceAndBothCloneThatVersion`,
+  `WorkspacesTest.twoCreatesOnABoxWithNoTemplateBuildItOnceIntoAFreshInstanceAndBothClone`,
   `WorkspacesTest.aVersionNumberIsNeverGivenTwiceEvenWhenEverySnapshotIsGone`.*
 - **W8. ZFS or nothing.**
   - A new template goes on the base profile's pool when it is ZFS, else on the one ZFS pool beside
@@ -1263,7 +1302,11 @@ Each row with the tests that prove it:
 - **W10. Every instance on a box is exactly one kind, told from its keys.** No command takes a
   workspace, a template or a stray for a project: each one that walks the box's instances asks
   `BoxInstances`, the only class that lists them.
-  *`BoxInstancesSweepTest`, `ProjectVerbsTakeNoWorkspaceTest`,
+  *`BoxInstancesSweepTest`, `ProjectVerbsTakeNoWorkspaceTest` (each single-name verb run against
+  a workspace, an unfinished workspace and the template, and refused having only read Incus;
+  `apply <p>` and `destroy <p>` included; dry runs read Incus for real), `WorkspaceIT` (the same
+  verbs on a real workspace and template), `ProjectRenamerTest`, `ProjectLoaderTest`,
+  `HostPtyTest.aTerminalNeverOpensInAWorkspaceForAProjectNamedLikeIt`, `SkillOperationsTest`,
   `ContainerManagerTest.aContainerAddressedByAProjectsNameThatIsNoProjectsIsRefusedNamingWhatItIs`,
   `ProjectApplyCommandTest.aBulkApplyNeverTakesAWorkspaceOrATemplateForAProject`,
   `SailOperationsTest.projectsNeverListAWorkspaceOrATemplateAsAProject`,
@@ -1271,19 +1314,28 @@ Each row with the tests that prove it:
   `ContainerSetupSweepTest`, `ContainerAuthorizedKeysTest`.*
 - **W11. A project's instances go with it.** `project destroy <p>` removes the project's
   workspaces and its template with its container, naming each in its confirmation. When a project
-  leaves a box's scope, the sync round removes them the same way, and only then.
+  leaves a box's scope, the sync round removes them the same way, and only then. A copy carrying
+  the project's keys under another name is not Sail's: it stays, said once, in the round that
+  drops the project.
   *`ProjectDestroyCommandTest.destroyTakesTheProjectsWorkspacesAndTemplateAndNothingElse`,
   `ProjectTeardownTest`, `ScopeChangeRoundTest.aProjectThatLeavesTheBoxTakesItsWorkspacesAndTemplateWithIt`.*
-- **W12. A workspace is whole or it is not one.** `user.sail.ready` is written last. A workspace
-  without it:
+- **W12. A workspace is whole or it is not one.** `user.sail.ready` is written last, in the write
+  that clears the copy's `user.sail.creating`. A workspace without it:
   - is listed as `incomplete`;
-  - is refused by `start` and `shell`, which name the create that replaces it;
-  - is deleted and made again by `create`;
+  - is refused by `start` and `shell`;
+  - is deleted and made again by `create` when it carries `user.sail.creating`, a create that did
+    not finish; one without either had its mark taken off by hand, and `create`, `start` and
+    `shell` refuse it alike, naming `workspace delete`;
   - is removed by `delete`;
   - is never swept, and never given a new key.
 
+  One create of a workspace runs at a time: of two of one name, one makes it and the other is
+  refused, and the workspace is never deleted under the one that made it.
+
   *`WorkspacesTest.aWorkspaceIsMarkedWholeLastAfterItsFilesAndMachinery`,
-  `WorkspacesTest.anIncompleteWorkspaceIsListedAsSuchNeverStartedOrEnteredAndReplacedByTheNextCreate`.*
+  `WorkspacesTest.anIncompleteWorkspaceIsListedAsSuchNeverStartedOrEnteredAndReplacedByTheNextCreate`,
+  `WorkspacesTest.aWholeWorkspaceWhoseMarkWasTakenOffByHandIsNeitherReplacedNorUsedButNamesItsDelete`,
+  `WorkspacesTest.twoCreatesOfOneNameMakeOneWorkspaceAndTheOtherIsRefusedLeavingItWhole`.*
 
 **Known limits.**
 - **The template is its owner's.** A clone carries the box owner's GitHub token
@@ -1291,10 +1343,18 @@ Each row with the tests that prove it:
   workstation key in `authorized_keys`, as the project's own container does. On a box of one
   person, that is the same person.
 - **Keys and the template.**
-  - A key line removed by a revocation stays in the template's existing versions, so a later clone
-    of an unchanged version brings it back. Rebuild the template after a revocation.
-  - A new pairing reaches the project's container and its whole workspaces, not the template, which
-    takes it at its next build.
+  - The workstation key is in the digest the template is built from, so revoking it makes the
+    template stale and the next create builds a new version without it. Older versions keep the
+    old key, but no create clones them again.
+  - A new pairing reaches the project's container and its whole workspaces, not the template.
+  - Key lines added to `authorized_keys` by hand are not tracked at all.
+- **Hand copies are not Sail's.** A copy of a workspace made with `incus copy` carries the
+  project's keys under another name: every verb refuses it, and it outlives its project, keeping
+  the project's tree and the owner's credentials (and, through `deleted/`, the dataset of a
+  template version it was cloned from). Its owner deletes it.
+- **The resolver wait is proven by the fleet alone.** A test body reaches no network, so the
+  wait for a repo's host to resolve (`Workspaces.FETCH`) is pinned and run against a stand-in git
+  in `WorkspacesTest`; only the fleet's storage row shows it against a real resolver.
 - **What the digest does not see:** the base image moving under its alias, package, runtime and
   harness versions drifting with time, the sail binary (machinery is re-stamped per workspace), and
   git tokens.

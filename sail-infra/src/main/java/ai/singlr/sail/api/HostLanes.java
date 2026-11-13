@@ -12,6 +12,7 @@ import ai.singlr.sail.config.ProjectDefinition;
 import ai.singlr.sail.config.Spec;
 import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.engine.AgentSession;
+import ai.singlr.sail.engine.BoxInstances;
 import ai.singlr.sail.engine.DemoSeeder;
 import ai.singlr.sail.engine.HostAccess;
 import ai.singlr.sail.engine.HostToken;
@@ -314,7 +315,7 @@ final class HostLanes {
     }
   }
 
-  record Pty(Sqlite db, RoleRule roles, EventStore events) implements HostPty {
+  record Pty(Sqlite db, RoleRule roles, EventStore events, BoxInstances box) implements HostPty {
     @Override
     public PtyIdentity.Person identity(String token) throws IOException {
       return new HostAccess(db, roles).identity(token);
@@ -333,7 +334,9 @@ final class HostLanes {
     /**
      * Admits {@code identity} into {@code project} when it holds the project on this box ({@link
      * ProjectGate#readable}): the catalog holds it and its person's scope admits it, whatever their
-     * role. One it does not hold is not in the catalog, as a project this box does not have.
+     * role. One it does not hold is not in the catalog, as a project this box does not have. One
+     * whose name is a workspace's, a template's or a copy's instance is refused, naming it: a
+     * terminal in project {@code project} runs in the instance of that name (W10).
      */
     @Override
     public void admitProject(String project, PtyIdentity.Person who) throws IOException {
@@ -341,6 +344,10 @@ final class HostLanes {
         Actor.run(who.actor(), () -> ProjectGate.readable(new ProjectStore(db), project));
       } catch (ApiException absent) {
         throw Remedied.io(absent.reason(), absent.remedy());
+      }
+      var taken = BoxInstances.taken(project, box.namedIfReadable(project));
+      if (taken.isPresent()) {
+        throw Remedied.io(taken.get().reason(), taken.get().remedy());
       }
     }
 

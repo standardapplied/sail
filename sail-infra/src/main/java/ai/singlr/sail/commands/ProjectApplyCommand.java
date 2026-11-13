@@ -36,6 +36,7 @@ import ai.singlr.sail.engine.ProvisionListener;
 import ai.singlr.sail.engine.ProvisionState;
 import ai.singlr.sail.engine.ProvisionTracker;
 import ai.singlr.sail.engine.SailPaths;
+import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.engine.WorkstationIdentity;
 import ai.singlr.sail.identity.Actor;
@@ -51,6 +52,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
+import java.util.function.Function;
 import java.util.function.Supplier;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
@@ -102,13 +104,19 @@ public final class ProjectApplyCommand implements Runnable {
   private String gitToken;
 
   private final Supplier<Box> box;
+  private final Function<Boolean, ShellExec> shells;
 
   public ProjectApplyCommand() {
-    this(Box::here);
+    this(Box::here, ShellExecutor::new);
   }
 
-  ProjectApplyCommand(Supplier<Box> box) {
+  /**
+   * @param box the box apply provisions on
+   * @param shells the host shell, by whether this is a dry run
+   */
+  ProjectApplyCommand(Supplier<Box> box, Function<Boolean, ShellExec> shells) {
     this.box = box;
+    this.shells = shells;
   }
 
   /** The box apply provisions on: its database, its host.yaml and sail-api's socket directory. */
@@ -184,8 +192,8 @@ public final class ProjectApplyCommand implements Runnable {
       System.out.println();
     }
 
-    var observer = new ShellExecutor(false);
-    var shell = new ShellExecutor(dryRun);
+    var observer = shells.apply(false);
+    var shell = shells.apply(dryRun);
     var observed = new ContainerManager(observer);
     var mgr = new ContainerManager(shell);
     var action = plan(observed.queryState(config.name()));
@@ -261,8 +269,8 @@ public final class ProjectApplyCommand implements Runnable {
    */
   private void applyAll(OperatorCommand operator) throws Exception {
     requireReadyBox(operator);
-    var observer = new ShellExecutor(false);
-    var shell = new ShellExecutor(dryRun);
+    var observer = shells.apply(false);
+    var shell = shells.apply(dryRun);
     var mgr = new ContainerManager(shell);
     var devices = new IncusDeviceManager(observer);
     var targets = targets(new BoxInstances(observer));
@@ -449,8 +457,8 @@ public final class ProjectApplyCommand implements Runnable {
    * {@code shell}, which a dry run swaps for command narration.
    */
   private Outcome converge(
-      ShellExecutor observer,
-      ShellExecutor shell,
+      ShellExec observer,
+      ShellExec shell,
       ProjectDefinition config,
       LocalIdentity.GitIdentity git,
       OperatorCommand operator)
@@ -509,7 +517,7 @@ public final class ProjectApplyCommand implements Runnable {
     return Actor.call(operator.get(), () -> HomeRoom.ensure(operations, config, handle));
   }
 
-  private Outcome convergeMachineryOnly(ShellExecutor observer, ShellExecutor shell, String project)
+  private Outcome convergeMachineryOnly(ShellExec observer, ShellExec shell, String project)
       throws Exception {
     var observed = new ContainerManager(observer);
     var mgr = new ContainerManager(shell);
@@ -618,7 +626,7 @@ public final class ProjectApplyCommand implements Runnable {
   private void provision(
       ProjectDefinition config,
       LocalIdentity.GitIdentity git,
-      ShellExecutor shell,
+      ShellExec shell,
       boolean fresh,
       boolean recorded,
       Optional<SshPublicKey> workstationKey,
@@ -686,7 +694,7 @@ public final class ProjectApplyCommand implements Runnable {
   }
 
   private void printConnectHints(
-      ProjectDefinition config, ShellExecutor shell, ContainerManager mgr, OperatorCommand operator)
+      ProjectDefinition config, ShellExec shell, ContainerManager mgr, OperatorCommand operator)
       throws Exception {
     var state = mgr.queryState(config.name());
     if (!(state instanceof ContainerState.Running r) || r.ipv4() == null) {

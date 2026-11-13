@@ -18,6 +18,8 @@ import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.Executors;
 import java.util.function.ToIntFunction;
 import java.util.regex.Pattern;
 
@@ -30,7 +32,7 @@ import java.util.regex.Pattern;
 public final class GitCredentials {
 
   private static final String REFS = "/info/refs?service=git-upload-pack";
-  private static final Duration PROBE_TIMEOUT = Duration.ofSeconds(10);
+  private static final Duration PROBE_TIMEOUT = Duration.ofSeconds(3);
 
   private static final Pattern HOST_PATTERN =
       Pattern.compile("^[A-Za-z0-9][A-Za-z0-9.-]*(?::[0-9]{1,5})?$");
@@ -146,27 +148,48 @@ public final class GitCredentials {
    * The https {@code repos} a run cannot clone with {@code tokens}: those whose host has no token
    * there and that ask for credentials, as {@code status} answers for their smart-HTTP refs (401 or
    * 403). An answer of anything else, a public repo or a host that cannot be reached, asks for
-   * none, and the clone says what is wrong with it.
+   * none, and the clone says what is wrong with it. The repos are asked at once, so the whole check
+   * takes as long as its slowest answer, which {@link #httpStatus} bounds.
    */
   public static List<String> askingForAToken(
       List<ProjectDefinition.Repo> repos,
       Map<String, String> tokens,
       ToIntFunction<String> status) {
-    var asking = new ArrayList<String>();
+    var asked = new ArrayList<ProjectDefinition.Repo>();
     for (var repo : repos == null ? List.<ProjectDefinition.Repo>of() : repos) {
       var hosts = extractHttpsHosts(List.of(repo));
-      if (hosts.isEmpty() || Strings.isNotBlank(resolveTokenForHost(hosts.getFirst(), tokens))) {
-        continue;
-      }
-      var answer = status.applyAsInt(repo.url().replaceAll("/+$", "") + REFS);
-      if (answer == 401 || answer == 403) {
-        asking.add(repo.url());
+      if (!hosts.isEmpty() && Strings.isBlank(resolveTokenForHost(hosts.getFirst(), tokens))) {
+        asked.add(repo);
       }
     }
-    return List.copyOf(asking);
+    try (var probes = Executors.newVirtualThreadPerTaskExecutor()) {
+      var answers =
+          asked.stream()
+              .map(
+                  repo ->
+                      probes.submit(
+                          () -> status.applyAsInt(repo.url().replaceAll("/+$", "") + REFS)))
+              .toList();
+      var asking = new ArrayList<String>();
+      for (var i = 0; i < asked.size(); i++) {
+        var answer = answers.get(i).get();
+        if (answer == 401 || answer == 403) {
+          asking.add(asked.get(i).url());
+        }
+      }
+      return List.copyOf(asking);
+    } catch (InterruptedException e) {
+      Thread.currentThread().interrupt();
+      return List.of();
+    } catch (ExecutionException e) {
+      throw new IllegalStateException("Could not ask whether a repo needs a token.", e.getCause());
+    }
   }
 
-  /** What {@code url} answers a plain GET with, or -1 when it cannot be asked. */
+  /**
+   * What {@code url} answers a plain GET with, or -1 when it cannot be asked: within 3 s to connect
+   * and 3 s more for the answer.
+   */
   public static int httpStatus(String url) {
     try (var client =
         HttpClient.newBuilder()

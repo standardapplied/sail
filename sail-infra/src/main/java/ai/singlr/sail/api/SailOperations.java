@@ -112,7 +112,7 @@ public final class SailOperations implements HostOperations {
         new HostLanes.Catalog(
             db, projectStore, specStore, roomStore, schema, pruner, this::cliOperator);
     this.identity = new HostLanes.Identity(db, this::box, roles(), this::cliOperator);
-    this.pty = new HostLanes.Pty(db, roles(), eventStore);
+    this.pty = new HostLanes.Pty(db, roles(), eventStore, new BoxInstances(shell));
     projectSkills = new ProjectSkills(this::projectFiles);
     dispatchOps.useProjectSkills(projectSkills);
     return this;
@@ -1340,7 +1340,7 @@ public final class SailOperations implements HostOperations {
   }
 
   private ProjectDefinitionOperations definitions() {
-    return new ProjectDefinitionOperations(projectCatalog());
+    return new ProjectDefinitionOperations(projectCatalog(), new BoxInstances(shell));
   }
 
   @Override

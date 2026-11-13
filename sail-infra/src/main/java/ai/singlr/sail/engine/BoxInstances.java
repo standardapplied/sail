@@ -156,43 +156,105 @@ public final class BoxInstances {
   }
 
   /**
+   * The instance named {@code name}, and none where Incus does not answer, as on a box that runs no
+   * containers: what decides whether a new project's name is free here (W10).
+   */
+  public Optional<Instance> namedIfReadable(String name) {
+    try {
+      return named(name);
+    } catch (IOException | TimeoutException unreachable) {
+      return Optional.empty();
+    } catch (InterruptedException e) {
+      Thread.currentThread().interrupt();
+      return Optional.empty();
+    }
+  }
+
+  /**
    * Refuses to act on {@code instance}, the instance named {@code project}, as that project's own
    * container when it is a workspace, a template or a stray, naming what it is: a project is never
    * given another's instance (W10).
    */
   public static void requireNotTakenFor(String project, Optional<Instance> instance) {
+    var taken = taken(project, instance);
+    if (taken.isPresent()) {
+      throw taken.get();
+    }
+  }
+
+  /**
+   * Why project {@code project} may not take {@code instance}, the instance of its name, as its own
+   * container: empty when it is plain or absent.
+   */
+  public static Optional<Taken> taken(String project, Optional<Instance> instance) {
     var kind = instance.map(Instance::kind).orElse(new Plain());
     var what =
         switch (kind) {
           case Plain ignored -> null;
           case Workspace workspace ->
-              "workspace '" + workspace.workspace() + "' of project " + workspace.project();
+              "workspace " + workspace.workspace() + " of project " + workspace.project();
           case Template template -> "the template of project " + template.project();
           case Stray stray -> "a copy carrying the keys of project " + stray.project();
         };
-    if (what != null) {
-      throw Remedied.state(
-          "Instance '"
-              + project
-              + "' is "
-              + what
-              + ", not a project's container: project "
-              + project
-              + " may not take it.",
-          switch (kind) {
-            case Workspace workspace ->
-                Remedy.of(
-                    "Use the workspace's own commands, e.g. ",
-                    Remedy.sail(
-                        "project workspace shell", workspace.project(), workspace.workspace()),
-                    ".");
-            case Template template ->
-                Remedy.of(
-                    "Only ",
-                    Remedy.sail("project template build", template.project()),
-                    " changes it.");
-            default -> Remedy.of("Delete the copy, or its keys, if it is not wanted.");
-          });
+    if (what == null) {
+      return Optional.empty();
+    }
+    return Optional.of(
+        new Taken(
+            project,
+            "Project " + project + " cannot take instance " + project + ": it is " + what + ".",
+            switch (kind) {
+              case Workspace workspace ->
+                  Remedy.of(
+                      "Delete the workspace (",
+                      Remedy.sail(
+                          "project workspace delete", workspace.project(), workspace.workspace()),
+                      ") or give the project another name; the workspace itself is reached with ",
+                      Remedy.sail(
+                          "project workspace shell", workspace.project(), workspace.workspace()),
+                      ".");
+              case Template template ->
+                  Remedy.of(
+                      "Give the project another name; only ",
+                      Remedy.sail("project template build", template.project()),
+                      " changes the template.");
+              default ->
+                  Remedy.of(
+                      "Delete the copy, or its keys, if it is not wanted, or give the project another"
+                          + " name.");
+            }));
+  }
+
+  /**
+   * A project met an instance of its own name that is a workspace, a template or a copy, not its
+   * container: the reason names both, the remedy what frees the name or where the instance is
+   * reached. Typed, so a door that walks many projects passes over this one and says why.
+   */
+  public static final class Taken extends IllegalStateException implements Remedied {
+    private final String project;
+    private final String reason;
+    private final transient Remedy remedy;
+
+    private Taken(String project, String reason, Remedy remedy) {
+      super(Remedied.message(reason, remedy));
+      this.project = project;
+      this.reason = reason;
+      this.remedy = remedy;
+    }
+
+    /** The project that may not take the instance of its name. */
+    public String project() {
+      return project;
+    }
+
+    @Override
+    public String reason() {
+      return reason;
+    }
+
+    @Override
+    public Remedy remedy() {
+      return remedy;
     }
   }
 

@@ -8,6 +8,7 @@ package ai.singlr.sail.api;
 import ai.singlr.sail.access.Action;
 import ai.singlr.sail.access.Refusal;
 import ai.singlr.sail.common.Remedy;
+import ai.singlr.sail.engine.BoxInstances;
 import ai.singlr.sail.engine.ContainerExec;
 import ai.singlr.sail.engine.ProjectProvisioner;
 import ai.singlr.sail.engine.ProjectSkillInstaller;
@@ -175,8 +176,9 @@ public final class SkillOperations {
 
   /**
    * Every skill an agent of {@code project} can see: shared, then sail's, then local, by name. The
-   * local ones are read from the container; when it cannot be read, as when it is stopped, they are
-   * left out and the note says why.
+   * local ones are read from the container; when it cannot be read, as when it is stopped, or the
+   * instance of the project's name is not its container (W10), they are left out and the note says
+   * why.
    */
   public Rows rows(String project) throws InterruptedException, TimeoutException {
     var held = skills.all(project);
@@ -198,6 +200,12 @@ public final class SkillOperations {
                         agents,
                         "ok",
                         Optional.empty())));
+    var notItsOwn = BoxInstances.taken(project, new BoxInstances(shell).namedIfReadable(project));
+    if (notItsOwn.isPresent()) {
+      return new Rows(
+          List.copyOf(rows),
+          Optional.of(notItsOwn.get().reason() + " Its hand-made skills are not listed."));
+    }
     var taken = rows.stream().map(Row::name).toList();
     var local = new LinkedHashMap<String, List<Harness>>();
     try {

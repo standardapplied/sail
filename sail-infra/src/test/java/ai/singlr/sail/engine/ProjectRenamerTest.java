@@ -140,6 +140,31 @@ class ProjectRenamerTest {
     assertTrue(new ProjectStore(db).findByName("old").isPresent());
   }
 
+  @Test
+  void aProjectWhoseNameIsAWorkspacesInstanceIsNotRenamedAndTheWorkspaceIsNotTouched()
+      throws Exception {
+    new ProjectStore(db).upsert(TestDefinitions.yaml("name: acme-fix\n"));
+    var shell =
+        new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
+            .onOk("incus list ^renamed$", "[]")
+            .onOk(
+                "incus list ^acme-fix$",
+                "[{\"name\": \"acme-fix\", \"status\": \"Running\", \"config\":"
+                    + " {\"user.sail.project\": \"acme\", \"user.sail.workspace\": \"fix\"}}]");
+
+    var refused =
+        assertThrows(BoxInstances.Taken.class, () -> renamer(shell).rename("acme-fix", "renamed"));
+
+    assertEquals(
+        "Project acme-fix cannot take instance acme-fix: it is workspace fix of project acme.",
+        refused.reason());
+    assertEquals(
+        List.of("incus list ^renamed$ --format json", "incus list ^acme-fix$ --format json"),
+        shell.invocations());
+    assertTrue(new ProjectStore(db).findByName("acme-fix").isPresent());
+    assertTrue(new ProjectStore(db).findByName("renamed").isEmpty());
+  }
+
   private ProjectRenamer renamer(ScriptedShellExecutor shell) {
     return new ProjectRenamer(db, shell, projectsDir);
   }

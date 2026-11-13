@@ -17,6 +17,7 @@ import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.config.TestDefinitions;
 import ai.singlr.sail.config.YamlUtil;
+import ai.singlr.sail.engine.BoxInstances;
 import ai.singlr.sail.engine.HostAccess;
 import ai.singlr.sail.engine.HostToken;
 import ai.singlr.sail.engine.ScriptedShellExecutor;
@@ -181,7 +182,12 @@ class AccessDoorsBaselineTest {
     var roles =
         new RoleRule(
             () -> new SyncConfig(SyncConfig.ROLE_MAIN, null, Cast.OWNER), new FdeStore(world.db));
-    var pty = new HostLanes.Pty(world.db, roles, new EventStore(world.db));
+    var pty =
+        new HostLanes.Pty(
+            world.db,
+            roles,
+            new EventStore(world.db),
+            new BoxInstances(new ScriptedShellExecutor()));
     var socket = tempDir.resolve("pty.sock");
     try (var host =
         new PtySessionHost(

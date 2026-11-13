@@ -16,7 +16,6 @@ import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.gen.ServicePresets;
 import ai.singlr.sail.harness.Harnesses;
-import java.io.IOException;
 import java.io.InputStream;
 import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
@@ -25,8 +24,6 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
-import java.util.concurrent.TimeoutException;
 import java.util.function.BooleanSupplier;
 import java.util.function.Supplier;
 import picocli.CommandLine.Command;
@@ -133,24 +130,13 @@ public final class ProjectCreateCommand implements Runnable {
     CliCommand.run(this::execute);
   }
 
-  /**
-   * The instance this box's Incus has under {@code name}; none where Incus does not answer, as on a
-   * box that runs no containers, since a catalog row needs none.
-   */
-  private Optional<BoxInstances.Instance> instanceNamed(String name) throws InterruptedException {
-    try {
-      return new BoxInstances(incus).named(name);
-    } catch (IOException | TimeoutException unreachable) {
-      return Optional.empty();
-    }
-  }
-
   private void execute() throws Exception {
     var operator = OperatorCommand.here();
     var ansi = Ansi.AUTO;
     var out = System.out;
     var created = ProjectDefinitionJson.validated(definition(out, ansi));
-    BoxInstances.requireNotTakenFor(created.name(), instanceNamed(created.name()));
+    BoxInstances.requireNotTakenFor(
+        created.name(), new BoxInstances(incus).namedIfReadable(created.name()));
     var catalog = mutations.catalog();
     catalog.requireInScope(created.name());
     catalog.requireUnpruned(created.name());

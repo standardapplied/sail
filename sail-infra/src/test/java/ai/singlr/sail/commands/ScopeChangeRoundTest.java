@@ -408,10 +408,12 @@ class ScopeChangeRoundTest {
     incus.keyed("beta-w", workspace("beta", "w"));
     incus.keyed("beta--tmpl", "\"user.sail.template.of\":\"beta\"");
     incus.keyed("acme-fix", workspace("acme", "fix"));
+    incus.keyed("beta-copy", workspace("beta", "w"));
     narrowTo("acme");
     incus.invocations.clear();
 
     var said = round();
+    var again = round();
 
     assertEquals(
         List.of(
@@ -420,6 +422,46 @@ class ScopeChangeRoundTest {
             "  ⚠ project beta: its workspace w deleted, uncommitted work included" + WHY,
             "  ⚠ project beta: its template deleted" + WHY),
         said.stream().filter(line -> line.contains("deleted")).toList());
+    assertEquals(
+        List.of(
+            "  ⚠ project beta: instance 'beta-copy' kept — a copy carrying the project's keys under"
+                + " another name is not Sail's; delete it yourself if it is not wanted, as it holds"
+                + " the project's work"),
+        said.stream().filter(line -> line.contains("beta-copy")).toList());
+    assertEquals(List.of(), again);
+    assertEquals(List.of("acme", "acme-fix", "beta-copy"), incus.names());
+  }
+
+  @Test
+  void aProjectThatSyncsInUnderAWorkspacesNameLeavesTheWorkspaceAloneAndSaysSoOnce()
+      throws Exception {
+    round();
+    incus.sail("acme");
+    incus.keyed(
+        "acme-fix", workspace("acme", "fix") + ",\"limits.cpu\":\"2\",\"limits.memory\":\"4GB\"");
+    Acting.system(
+        () ->
+            new ProjectStore(mainDb)
+                .upsert(
+                    TestDefinitions.yaml(
+                        "name: acme-fix\nresources:\n  cpu: 8\n  memory: 32GB\n  disk: 100GB\n")));
+    incus.invocations.clear();
+
+    var said = round();
+
+    assertEquals(
+        List.of(
+            "  ⚠ Project acme-fix cannot take instance acme-fix: it is workspace fix of project"
+                + " acme. Delete the workspace (sail project workspace delete acme fix) or give the"
+                + " project another name; the workspace itself is reached with sail project"
+                + " workspace shell acme fix."),
+        said.stream().filter(line -> line.contains("acme-fix")).toList());
+    assertEquals(
+        List.of("incus list --format json", "incus list ^acme-fix$ --format json"),
+        incus.invocations);
+    incus.invocations.clear();
+    assertEquals(List.of(), round());
+    assertEquals(List.of(), incus.invocations);
     assertEquals(List.of("acme", "acme-fix"), incus.names());
   }
 
@@ -519,6 +561,19 @@ class ScopeChangeRoundTest {
                             + keys.getOrDefault(name, "")
                             + "}}")
                 .collect(Collectors.joining(",", "[", "]")),
+            "");
+      }
+      if (command.size() == 5 && command.get(1).equals("list") && command.get(2).startsWith("^")) {
+        var name = command.get(2).substring(1, command.get(2).length() - 1);
+        return new Result(
+            0,
+            containers.containsKey(name)
+                ? "[{\"name\":\""
+                    + name
+                    + "\",\"status\":\"Running\",\"type\":\"container\",\"config\":{"
+                    + keys.getOrDefault(name, "")
+                    + "}}]"
+                : "[]",
             "");
       }
       if (command.size() == 7 && joined.startsWith("incus config device get ")) {

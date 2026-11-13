@@ -11,6 +11,7 @@ import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.Banner;
 import ai.singlr.sail.engine.BoxInstances;
 import ai.singlr.sail.engine.ContainerManager;
+import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.engine.SnapshotManager;
 import java.time.Duration;
@@ -23,6 +24,7 @@ import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Set;
+import java.util.function.Function;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
 import picocli.CommandLine.Option;
@@ -63,6 +65,19 @@ public final class SnapsPruneCommand implements Runnable {
   @Option(names = "--json", description = "Output in JSON format.")
   private boolean json;
 
+  private final Function<Boolean, ShellExec> shells;
+
+  public SnapsPruneCommand() {
+    this(ShellExecutor::new);
+  }
+
+  /**
+   * @param shells the host shell, by whether this is a dry run
+   */
+  SnapsPruneCommand(Function<Boolean, ShellExec> shells) {
+    this.shells = shells;
+  }
+
   @Override
   public void run() {
     CliCommand.run(this::execute);
@@ -78,14 +93,14 @@ public final class SnapsPruneCommand implements Runnable {
     }
     Duration maxAge = olderThan != null ? DateTimeUtils.parseAge(olderThan) : null;
     Instant cutoff = maxAge != null ? DateTimeUtils.now().minus(maxAge) : null;
-    var shell = new ShellExecutor(dryRun);
+    var shell = shells.apply(dryRun);
     var mgr = new ContainerManager(shell);
     var snapMgr = new SnapshotManager(shell);
     var ansi = Ansi.AUTO;
 
     List<String> targets;
     if (name != null) {
-      BoxInstances.requireNotTakenFor(name, new BoxInstances(new ShellExecutor(false)).named(name));
+      BoxInstances.requireNotTakenFor(name, new BoxInstances(shells.apply(false)).named(name));
       targets = List.of(name);
     } else {
       targets = new BoxInstances(shell).plain().stream().map(BoxInstances.Instance::name).toList();

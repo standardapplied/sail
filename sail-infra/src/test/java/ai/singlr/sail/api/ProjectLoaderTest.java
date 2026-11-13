@@ -16,9 +16,11 @@ import ai.singlr.sail.engine.ContainerState;
 import ai.singlr.sail.engine.ScriptedShellExecutor;
 import ai.singlr.sail.engine.ShellExec;
 import java.io.IOException;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.function.Executable;
 
 class ProjectLoaderTest {
 
@@ -74,6 +76,37 @@ class ProjectLoaderTest {
 
     assertEquals(ErrorCode.PROJECT_LOAD_FAILED, failed.failure().errorCode());
     assertEquals("Failed to load project.", failed.getMessage());
+  }
+
+  @Test
+  void aProjectWhoseNameIsAWorkspacesInstanceIsAConflictEveryLoadRefusesAlike() {
+    var loader =
+        new ProjectLoader(
+            listing(
+                "[{\"name\":\"acme-fix\",\"status\":\"Running\",\"config\":"
+                    + "{\"user.sail.project\":\"acme\",\"user.sail.workspace\":\"fix\"}}]"),
+            p -> Optional.of(ACME));
+
+    for (Executable load :
+        List.<Executable>of(
+            () -> loader.load("acme-fix"),
+            () -> loader.loadRunning("acme-fix"),
+            () -> loader.loadCreated("acme-fix"),
+            () -> loader.requireExists("acme-fix"))) {
+      var refused = assertThrows(ApiException.class, load);
+      assertEquals(ErrorCode.CONFLICT, refused.failure().errorCode());
+      assertEquals(
+          "Project acme-fix cannot take instance acme-fix: it is workspace fix of project acme.",
+          refused.getMessage());
+      assertEquals(
+          Remedy.of(
+              "Delete the workspace (",
+              Remedy.sail("project workspace delete", "acme", "fix"),
+              ") or give the project another name; the workspace itself is reached with ",
+              Remedy.sail("project workspace shell", "acme", "fix"),
+              "."),
+          refused.remedy());
+    }
   }
 
   @Test

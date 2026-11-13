@@ -18,12 +18,14 @@ import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.TimeoutException;
+import java.util.function.Consumer;
 import java.util.function.LongSupplier;
 import java.util.regex.Pattern;
 
@@ -44,6 +46,27 @@ public final class Workspaces {
   static final String TEMPLATE_KEY = "user.sail.template";
   static final String CREATED_KEY = "user.sail.created_ms";
 
+  /**
+   * Written by the copy and cleared with the ready mark: a workspace without the mark that carries
+   * it is one a create did not finish, which the next create replaces; one without either had its
+   * mark taken away by hand, and is left to {@code workspace delete}.
+   */
+  static final String CREATING_KEY = "user.sail.creating";
+
+  /**
+   * The template's own keys, which its clone carries from the copy and drops with the ready mark: a
+   * workspace is no template.
+   */
+  private static final List<String> TEMPLATE_KEYS =
+      List.of(
+          BoxInstances.TEMPLATE_OF_KEY,
+          WorkspaceTemplate.CURRENT_KEY,
+          WorkspaceTemplate.INPUTS_KEY,
+          WorkspaceTemplate.LAST_KEY,
+          ProjectProvisioner.INPUTS_KEY);
+
+  private static final String STEP = "sail-step ";
+
   private static final Pattern MILLIS = Pattern.compile("[0-9]{1,18}");
   private static final Duration READY_TIMEOUT = Duration.ofMinutes(10);
   private static final long NANOS_PER_MILLI = 1_000_000L;
@@ -57,65 +80,102 @@ public final class Workspaces {
    */
   static final String AWAIT_BUS =
       """
-      for _ in $(seq 1 300); do [ -S /run/user/1000/bus ] && exit 0; sleep 0.1; done
-      echo "the dev user's session bus did not come up within 30 s" >&2
-      exit 1
+      for _ in $(seq 1 300); do [ -S /run/user/1000/bus ] && break; sleep 0.1; done
+      if [ ! -S /run/user/1000/bus ]; then
+        echo "the dev user's session bus did not come up within 30 s" >&2
+        exit 1
+      fi
+      """;
+
+  /**
+   * Fetches the repository at {@code $1} as the dev user, asking again for up to 10 s while its
+   * host does not resolve: a clone's network answers before its resolver does, by a fraction of a
+   * second and by more when several clones start at once. Any other failure is said at once.
+   */
+  static final String FETCH =
+      """
+      fetch() {
+        for _ in $(seq 1 100); do
+          if failed=$(as_dev git -C "$1" fetch --quiet origin 2>&1); then return 0; fi
+          case $failed in
+            *"Could not resolve host"*) sleep 0.1 ;;
+            *) printf '%s\\n' "$failed" >&2; return 1 ;;
+          esac
+        done
+        printf '%s\\n' "$failed" >&2
+        return 1
+      }
       """;
 
   /**
    * What makes a fresh clone a workspace of its own, run as root with the project ({@code $1}), the
    * workspace ({@code $2}) and each repository's path and base branch after them, none of them ever
-   * part of the text: a machine-id and SSH host keys of its own (a clone has the template's, and
-   * sshd is restarted onto the new keys once systemd answers, which it does not yet when {@code
-   * incus start} returns), the project's name as its hostname (which the in-container helpers read
-   * the project from; Incus rewrote it to the instance's name on the copy), every repository
-   * fetched and switched to the workspace's branch (the remote's when it has one, else a new one
-   * from the base), and the bus.
+   * part of the text: a machine-id of its own, the project's name as its hostname (which the
+   * in-container helpers read the project from; Incus rewrote it to the instance's name on the
+   * copy), SSH host keys of its own made under that name, every repository fetched and switched to
+   * the workspace's branch (the remote's when it has one, else a new one from the base), sshd
+   * restarted onto the new keys once systemd answers (it does not yet when {@code incus start}
+   * returns, and it boots while the repositories are fetched), and the bus. It prints {@code
+   * sail-step <step> <epoch ms>} as each step ends, which the create reads as the steps' times.
    */
   static final String PREPARE =
       """
       set -eu
       project=$1 workspace=$2
       shift 2
+      step() { printf 'sail-step %s %s\\n' "$1" "$(date +%s%3N)"; }
+      step start
       rm -f /etc/machine-id
-      systemd-machine-id-setup >/dev/null
+      systemd-machine-id-setup >/dev/null 2>&1
       if [ -e /var/lib/dbus/machine-id ]; then ln -sf /etc/machine-id /var/lib/dbus/machine-id; fi
-      rm -f /etc/ssh/ssh_host_*
-      ssh-keygen -A >/dev/null
-      for _ in $(seq 1 300); do systemctl show --property=Version >/dev/null 2>&1 && break; sleep 0.1; done
-      systemctl try-restart ssh.service
       printf '%s\\n' "$project" > /etc/hostname
       hostname "$project"
       sed -i "s/^\\(127\\.0\\.1\\.1[[:space:]]*\\).*/\\1$project/" /etc/hosts
+      rm -f /etc/ssh/ssh_host_*
+      ssh-keygen -A >/dev/null
+      step identity
       as_dev() { runuser -u dev -- env HOME=/home/dev "$@"; }
-      if [ "$#" -gt 0 ]; then
-        for _ in $(seq 1 300); do
-          ip -4 -o addr show dev eth0 | grep -q inet && break
-          sleep 0.1
-        done
-      fi
-      while [ "$#" -ge 2 ]; do
-        repo=/home/dev/workspace/$1 base=$2
-        shift 2
-        as_dev git -C "$repo" fetch --quiet origin
-        if as_dev git -C "$repo" show-ref --verify --quiet "refs/remotes/origin/$workspace"; then
-          as_dev git -C "$repo" switch --quiet -C "$workspace" "origin/$workspace"
-        else
-          if [ -z "$base" ]; then
-            base=$(as_dev git -C "$repo" symbolic-ref --short refs/remotes/origin/HEAD)
-            base=${base#origin/}
-          fi
-          as_dev git -C "$repo" switch --quiet --no-track -c "$workspace" "origin/$base"
-        fi
-      done
       """
-          + AWAIT_BUS;
+          + FETCH
+          + """
+          if [ "$#" -gt 0 ]; then
+            for _ in $(seq 1 300); do
+              ip -4 -o addr show dev eth0 | grep -q inet && break
+              sleep 0.1
+            done
+          fi
+          step network
+          while [ "$#" -ge 2 ]; do
+            repo=/home/dev/workspace/$1 base=$2
+            shift 2
+            fetch "$repo"
+            if as_dev git -C "$repo" show-ref --verify --quiet "refs/remotes/origin/$workspace"; then
+              as_dev git -C "$repo" switch --quiet -C "$workspace" "origin/$workspace"
+            else
+              if [ -z "$base" ]; then
+                base=$(as_dev git -C "$repo" symbolic-ref --short refs/remotes/origin/HEAD)
+                base=${base#origin/}
+              fi
+              as_dev git -C "$repo" switch --quiet --no-track -c "$workspace" "origin/$base"
+            fi
+          done
+          step repos
+          for _ in $(seq 1 300); do systemctl show --property=Version >/dev/null 2>&1 && break; sleep 0.1; done
+          systemctl try-restart ssh.service
+          step sshd
+          """
+          + AWAIT_BUS
+          + """
+          step bus
+          """;
 
   /**
    * What each phase took, in milliseconds, measured on {@link System#nanoTime}: the clone ({@code
-   * null} for a start), the start, the readiness that follows it, and the whole.
+   * null} for a start), the start, the readiness that follows it, and the whole; and each step of
+   * the readiness by name, in the order they ran.
    */
-  public record Timings(Long cloneMs, long startMs, long readyMs, long totalMs) {}
+  public record Timings(
+      Long cloneMs, long startMs, long readyMs, long totalMs, Map<String, Long> readySteps) {}
 
   /** A workspace made: its instance, the template version it was cloned from, and its times. */
   public record Created(
@@ -188,7 +248,9 @@ public final class Workspaces {
   /**
    * Creates workspace {@code name} of {@code config}'s project: a clone of its template's current
    * version, built first when there is none or it is stale, then started, made its own, and marked
-   * whole. An incomplete workspace of that name is deleted and made again.
+   * whole. One create of a workspace runs at a time, under its lock: of two of one name, the second
+   * finds the first's workspace and is refused. An instance a create of it did not finish is
+   * deleted and made again.
    */
   public Created create(
       ProjectDefinition config, String name, WorkspaceTemplate.Source source, Path files)
@@ -197,12 +259,27 @@ public final class Workspaces {
     var instance = requireNewName(project, name);
     var zfs = WorkspaceTemplate.requireZfs(observer);
     var template = WorkspaceTemplate.requireName(project, source);
-    var instances = box.all();
-    var incomplete = requireUnclaimed(project, name, instance, source, instances);
-    var built =
-        new WorkspaceTemplate(observer, shell, locks)
-            .ensure(config, source, template, zfs, instances);
-    if (incomplete) {
+    if (shell.isDryRun()) {
+      return create(config, name, instance, template, zfs, source, files);
+    }
+    try (var held = FileMutex.acquire(locks.resolve(instance + ".workspace.lock"))) {
+      return create(config, name, instance, template, zfs, source, files);
+    }
+  }
+
+  private Created create(
+      ProjectDefinition config,
+      String name,
+      String instance,
+      String template,
+      List<String> zfs,
+      WorkspaceTemplate.Source source,
+      Path files)
+      throws Exception {
+    var project = config.name();
+    var unfinished = requireUnclaimed(project, name, instance, source, box.all());
+    var built = new WorkspaceTemplate(observer, shell, locks).ensure(config, source, template, zfs);
+    if (unfinished) {
       containers.forceDelete(instance);
     }
     var started = nanos.getAsLong();
@@ -211,7 +288,7 @@ public final class Workspaces {
       var cloned = nanos.getAsLong();
       containers.start(instance);
       var running = nanos.getAsLong();
-      prepare(config, name, instance, files);
+      var steps = prepare(config, name, instance, files);
       var ready = nanos.getAsLong();
       return new Created(
           project,
@@ -222,7 +299,8 @@ public final class Workspaces {
               millis(cloned - started),
               millis(running - cloned),
               millis(ready - running),
-              millis(ready - started)));
+              millis(ready - started),
+              steps));
     } catch (Exception e) {
       discard(instance, e);
       throw e;
@@ -279,7 +357,11 @@ public final class Workspaces {
         found.name(),
         Change.STARTED,
         new Timings(
-            null, millis(running - started), millis(ready - running), millis(ready - started)));
+            null,
+            millis(running - started),
+            millis(ready - running),
+            millis(ready - started),
+            Map.of()));
   }
 
   /** Stops workspace {@code name} when its processes run. */
@@ -294,7 +376,17 @@ public final class Workspaces {
 
   /** Deletes workspace {@code name}, whole or not, and with its instance the workspace (W3). */
   public Changed delete(String project, String name) throws Exception {
+    return delete(project, name, instance -> {});
+  }
+
+  /**
+   * As {@link #delete(String, String)}, once {@code confirm}, handed the workspace's instance,
+   * returns: it is asked only of a workspace that exists, so a missing one or the default one is
+   * refused before anything is asked.
+   */
+  public Changed delete(String project, String name, Consumer<String> confirm) throws Exception {
     var found = existing(project, name, "project destroy", true);
+    confirm.accept(found.name());
     containers.forceDelete(found.name());
     return new Changed(project, name, found.name(), Change.DELETED, null);
   }
@@ -335,7 +427,9 @@ public final class Workspaces {
                 "-c",
                 TEMPLATE_KEY + "=" + template.version(),
                 "-c",
-                CREATED_KEY + "=" + DateTimeUtils.toMillis(DateTimeUtils.now())));
+                CREATED_KEY + "=" + DateTimeUtils.toMillis(DateTimeUtils.now()),
+                "-c",
+                CREATING_KEY + "=1"));
     if (!copied.ok()) {
       throw new IOException(
           "Failed to clone "
@@ -349,7 +443,14 @@ public final class Workspaces {
     }
   }
 
-  private void prepare(ProjectDefinition config, String name, String instance, Path files)
+  /**
+   * Makes {@code instance} workspace {@code name} of its own and marks it whole, answering what
+   * each step took: the script's steps as it timed them, then the shared files, the machinery and
+   * the mark. The mark drops the template's keys and the copy's {@value #CREATING_KEY} in the same
+   * write.
+   */
+  private Map<String, Long> prepare(
+      ProjectDefinition config, String name, String instance, Path files)
       throws IOException, InterruptedException, TimeoutException {
     var argv =
         new ArrayList<>(List.of("bash", "-c", PREPARE, "sail-workspace", config.name(), name));
@@ -362,19 +463,51 @@ public final class Workspaces {
       throw new IOException(
           "Workspace '" + name + "' could not be made its own: " + prepared.reason());
     }
+    var steps = steps(prepared.stdout());
+    var at = nanos.getAsLong();
     new ProjectApplier(observer, shell, DISCARD)
         .applyWorkspaceFiles(instance, files, ProjectDefinition.USER);
+    at = took(steps, "files", at);
     ContainerSetupSweep.reconcile(shell, instance, locks);
-    var marked =
-        new ContainerConfig(shell, locks)
-            .set(
-                instance,
-                List.of(
-                    BoxInstances.READY_KEY + "=" + DateTimeUtils.toMillis(DateTimeUtils.now())));
+    at = took(steps, "machinery", at);
+    var mark = new ArrayList<String>();
+    mark.add(BoxInstances.READY_KEY + "=" + DateTimeUtils.toMillis(DateTimeUtils.now()));
+    mark.add(CREATING_KEY + "=");
+    TEMPLATE_KEYS.forEach(key -> mark.add(key + "="));
+    var marked = new ContainerConfig(shell, locks).set(instance, mark);
     if (!marked.ok()) {
       throw new IOException(
           "Workspace '" + name + "' could not be marked whole: " + marked.reason());
     }
+    took(steps, "mark", at);
+    return Collections.unmodifiableMap(steps);
+  }
+
+  /**
+   * The steps {@code stdout}, the prepare script's, timed, each {@code sail-step <step> <epoch ms>}
+   * line ending one, the first marking the start; lines of any other shape are passed over.
+   */
+  static LinkedHashMap<String, Long> steps(String stdout) {
+    var steps = new LinkedHashMap<String, Long>();
+    Long before = null;
+    for (var line : Objects.requireNonNullElse(stdout, "").lines().toList()) {
+      var fields = line.startsWith(STEP) ? line.substring(STEP.length()).split(" ") : new String[0];
+      if (fields.length != 2 || !MILLIS.matcher(fields[1]).matches()) {
+        continue;
+      }
+      var at = Long.parseLong(fields[1]);
+      if (before != null) {
+        steps.put(fields[0], at - before);
+      }
+      before = at;
+    }
+    return steps;
+  }
+
+  private long took(Map<String, Long> steps, String step, long since) {
+    var now = nanos.getAsLong();
+    steps.put(step, millis(now - since));
+    return now;
   }
 
   private void awaitReady(String instance)
@@ -439,8 +572,9 @@ public final class Workspaces {
   }
 
   /**
-   * Refuses a name already taken; answers whether the instance there is this workspace left
-   * incomplete, which the create deletes and makes again.
+   * Refuses a name already taken; answers whether the instance there is this workspace a create did
+   * not finish (it carries {@value #CREATING_KEY}), which the create deletes and makes again. One
+   * that lost its ready mark otherwise is refused, naming {@code workspace delete}.
    */
   private static boolean requireUnclaimed(
       String project,
@@ -482,6 +616,9 @@ public final class Workspaces {
                 + instance
                 + "'.");
       }
+      if (taken.get().key(CREATING_KEY).isEmpty()) {
+        throw markTakenOff(project, name);
+      }
       return true;
     }
     if (taken.isPresent()) {
@@ -514,6 +651,9 @@ public final class Workspaces {
       String project, String name, String projectVerb, boolean changes)
       throws IOException, InterruptedException, TimeoutException {
     var found = existing(project, name, projectVerb, changes);
+    if (!((BoxInstances.Workspace) found.kind()).ready() && found.key(CREATING_KEY).isEmpty()) {
+      throw markTakenOff(project, name);
+    }
     if (!((BoxInstances.Workspace) found.kind()).ready()) {
       throw Remedied.state(
           "Workspace '"
@@ -592,6 +732,21 @@ public final class Workspaces {
               + name
               + "'. Must match [a-z0-9][a-z0-9-]*, as a project name does.");
     }
+  }
+
+  /** A workspace whose create finished and whose ready mark was taken off since, by hand. */
+  private static IllegalStateException markTakenOff(String project, String name) {
+    return Remedied.state(
+        "Workspace '"
+            + name
+            + "' of "
+            + project
+            + " has no ready mark, yet a create of it finished: the mark was taken off by hand, so"
+            + " the workspace is left as it is.",
+        Remedy.of(
+            "Delete it if it is not wanted: ",
+            Remedy.sail("project workspace delete", project, name),
+            "."));
   }
 
   private static IllegalStateException absent(String project, String name) {

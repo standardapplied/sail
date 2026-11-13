@@ -13,9 +13,11 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.config.ProjectDefinition;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import java.util.function.ToIntFunction;
 import org.junit.jupiter.api.Test;
 
@@ -38,7 +40,7 @@ class GitCredentialsTest {
             new ProjectDefinition.Repo("https://github.com/acme/public.git/", "public", null),
             new ProjectDefinition.Repo("https://git.example.com/a/b.git", "b", null),
             new ProjectDefinition.Repo("https://git.example.com/a/down.git", "down", null));
-    var asked = new ArrayList<String>();
+    var asked = new CopyOnWriteArrayList<String>();
     ToIntFunction<String> status =
         url -> {
           asked.add(url);
@@ -48,14 +50,41 @@ class GitCredentialsTest {
     assertEquals(
         List.of("https://github.com/acme/private.git"),
         GitCredentials.askingForAToken(repos, Map.of(), status));
-    assertEquals(
-        "https://github.com/acme/public.git/info/refs?service=git-upload-pack", asked.get(1));
+    assertTrue(
+        asked.contains("https://github.com/acme/public.git/info/refs?service=git-upload-pack"),
+        String.valueOf(asked));
     assertEquals(
         List.of(),
         GitCredentials.askingForAToken(repos, Map.of("github.com", "tok"), url -> 401).stream()
             .filter(url -> url.contains("github.com"))
             .toList());
     assertEquals(List.of(), GitCredentials.askingForAToken(null, Map.of(), url -> 401));
+  }
+
+  @Test
+  void theReposAreAskedAtOnceSoTheCheckTakesAsLongAsOneAnswer() {
+    var repos =
+        List.of(
+            new ProjectDefinition.Repo("https://github.com/acme/a.git", "a", null),
+            new ProjectDefinition.Repo("https://github.com/acme/b.git", "b", null),
+            new ProjectDefinition.Repo("https://gitlab.com/acme/c.git", "c", null));
+    var inFlight = new CountDownLatch(repos.size());
+    ToIntFunction<String> status =
+        url -> {
+          inFlight.countDown();
+          try {
+            return inFlight.await(10, TimeUnit.SECONDS) ? 401 : 200;
+          } catch (InterruptedException e) {
+            return -1;
+          }
+        };
+
+    assertEquals(
+        List.of(
+            "https://github.com/acme/a.git",
+            "https://github.com/acme/b.git",
+            "https://gitlab.com/acme/c.git"),
+        GitCredentials.askingForAToken(repos, Map.of(), status));
   }
 
   @Test

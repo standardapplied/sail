@@ -49,7 +49,7 @@ public final class ProjectProvisioner {
   private static final String MAVEN_ARCHIVE_BASE_URL =
       "https://archive.apache.org/dist/maven/maven-3/";
 
-  private static final String INPUTS_KEY = "user.sail.inputs";
+  static final String INPUTS_KEY = "user.sail.inputs";
 
   /**
    * An {@code authorized_keys} options field before a key, as {@link ContainerAuthorizedKeys} reads

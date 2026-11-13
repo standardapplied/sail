@@ -17,6 +17,7 @@ import ai.singlr.sail.engine.ShellExecutor;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.function.Function;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
 import picocli.CommandLine.Option;
@@ -37,25 +38,39 @@ public final class DownCommand implements Runnable {
   @Option(names = "--json", description = "Output in JSON format.")
   private boolean json;
 
+  private final Function<Boolean, ShellExec> shells;
+
+  public DownCommand() {
+    this(ShellExecutor::new);
+  }
+
+  /**
+   * @param shells the host shell, by whether this is a dry run
+   */
+  DownCommand(Function<Boolean, ShellExec> shells) {
+    this.shells = shells;
+  }
+
   @Override
   public void run() {
     CliCommand.run(this::execute);
   }
 
   private void execute() throws Exception {
-    var shell = new ShellExecutor(dryRun);
-    var mgr = new ContainerManager(shell);
+    var observer = shells.apply(false);
+    var mgr = new ContainerManager(shells.apply(dryRun));
 
     if (name != null) {
       NameValidator.requireValidProjectName(name);
-      stopOne(mgr, name);
+      stopOne(mgr, observer, name);
     } else {
-      stopAll(mgr, shell);
+      stopAll(mgr, observer);
     }
   }
 
-  private void stopOne(ContainerManager mgr, String projectName) throws Exception {
-    var state = mgr.queryState(projectName);
+  private void stopOne(ContainerManager mgr, ShellExec observer, String projectName)
+      throws Exception {
+    var state = new ContainerManager(observer).queryState(projectName);
 
     switch (state) {
       case ContainerState.Running _, ContainerState.Frozen _ -> {
@@ -86,9 +101,9 @@ public final class DownCommand implements Runnable {
     }
   }
 
-  private void stopAll(ContainerManager mgr, ShellExec shell) throws Exception {
+  private void stopAll(ContainerManager mgr, ShellExec observer) throws Exception {
     var containers =
-        new BoxInstances(shell).all().stream().map(BoxInstances.Instance::info).toList();
+        new BoxInstances(observer).all().stream().map(BoxInstances.Instance::info).toList();
     var running = containers.stream().filter(c -> c.state().live()).toList();
 
     if (running.isEmpty()) {

@@ -220,16 +220,14 @@ public final class ProjectWorkspaceCommand implements Runnable {
     public void run() {
       target.change(
           spec,
-          (workspaces, named) -> {
-            confirm(yes, named);
-            return workspaces.delete(named.project, named.name);
-          });
+          (workspaces, named) ->
+              workspaces.delete(named.project, named.name, instance -> confirm(yes, named)));
     }
   }
 
   /**
-   * Returns when a delete may go on: asked, defaulting to no, where nobody can answer and under
-   * {@code --json} refused; {@code --yes} or a dry run asks nothing.
+   * Returns when a delete of a workspace that exists may go on: asked, defaulting to no, where
+   * nobody can answer and under {@code --json} refused; {@code --yes} or a dry run asks nothing.
    */
   static void confirm(boolean yes, Target named) {
     if (yes || named.dryRun) {

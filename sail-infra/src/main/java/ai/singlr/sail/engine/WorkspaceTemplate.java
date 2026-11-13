@@ -24,10 +24,11 @@ import java.util.stream.Stream;
 /**
  * A project's template: the instance {@code <project>--tmpl}, launched with {@value
  * BoxInstances#TEMPLATE_OF_KEY} on the box's ZFS pool and built by the project's own provisioner,
- * then stopped and snapshotted once per version, {@code v<n>}, which its workspaces clone. A
- * version is current only once the build, the stop and the snapshot are done and it is recorded
- * (W7); a stale template is converged on its disk, as {@code project apply} converges a container,
- * not built again from nothing.
+ * then stopped, recorded and snapshotted once per version, {@code v<n>}, which its workspaces
+ * clone. The record ({@value #CURRENT_KEY}, {@value #INPUTS_KEY}, {@value #LAST_KEY}) is written
+ * before the snapshot, so a version's snapshot carries its own record; a version is current only
+ * when it is recorded and its snapshot exists (W7). A stale template is converged on its disk, as
+ * {@code project apply} converges a container, not built again from nothing.
  */
 public final class WorkspaceTemplate {
 
@@ -95,23 +96,29 @@ public final class WorkspaceTemplate {
   public Template ensure(ProjectDefinition config, Source source) throws Exception {
     NameValidator.requireValidProjectName(config.name());
     var template = requireName(config.name(), source);
-    var zfs = requireZfs(observer);
-    return ensure(config, source, template, zfs, new BoxInstances(observer).all());
+    return ensure(config, source, template, requireZfs(observer));
   }
 
   /**
-   * As {@link #ensure(ProjectDefinition, Source)}, from {@code instances}, what the box holds, and
-   * {@code zfs}, its ZFS pools: an existing template stays on its pool, a new one goes on the base
-   * profile's pool when it is ZFS, else on the one ZFS pool beside it.
+   * As {@link #ensure(ProjectDefinition, Source)} on a box whose ZFS pools are {@code zfs}: under
+   * the template's lock, the template is read as Incus has it then, so of two creates that find it
+   * stale or missing the second clones what the first built rather than build it again. An existing
+   * template stays on its pool; a new one goes on the base profile's pool when it is ZFS, else on
+   * the one ZFS pool beside it.
    */
-  Template ensure(
-      ProjectDefinition config,
-      Source source,
-      String template,
-      List<String> zfs,
-      List<BoxInstances.Instance> instances)
+  Template ensure(ProjectDefinition config, Source source, String template, List<String> zfs)
       throws Exception {
-    var found = instances.stream().filter(i -> i.name().equals(template)).findFirst();
+    if (shell.isDryRun()) {
+      return buildIfStale(config, source, template, zfs);
+    }
+    try (var held = ContainerConfig.hold(locks, template)) {
+      return buildIfStale(config, source, template, zfs);
+    }
+  }
+
+  private Template buildIfStale(
+      ProjectDefinition config, Source source, String template, List<String> zfs) throws Exception {
+    var found = new BoxInstances(observer).named(template);
     if (found.isPresent()
         && !(found.get().kind() instanceof BoxInstances.Template(var of)
             && of.equals(config.name()))) {
@@ -137,21 +144,6 @@ public final class WorkspaceTemplate {
               "Delete it so the next create builds it on ZFS: ",
               Remedy.program("incus", "delete", "--force", template)));
     }
-    if (shell.isDryRun()) {
-      return buildIfStale(config, source, template, pool, found);
-    }
-    try (var held = ContainerConfig.hold(locks, template)) {
-      return buildIfStale(config, source, template, pool, found);
-    }
-  }
-
-  private Template buildIfStale(
-      ProjectDefinition config,
-      Source source,
-      String template,
-      String pool,
-      Optional<BoxInstances.Instance> found)
-      throws Exception {
     var project = config.name();
     var versions =
         found.isPresent()
@@ -179,18 +171,7 @@ public final class WorkspaceTemplate {
                     .max()
                     .orElse(0)
                 + 1);
-    if (found.isPresent() && !(found.get().state() instanceof ContainerState.Running)) {
-      new ContainerManager(shell).start(template);
-    }
-    source
-        .build()
-        .into(
-            new ProjectProvisioner.Instance(
-                template, Optional.of(pool), Map.of(BoxInstances.TEMPLATE_OF_KEY, project)),
-            found.isEmpty());
-    new ContainerManager(shell).stop(template);
-    var snapshots = new SnapshotManager(shell);
-    snapshots.create(template, version);
+    build(source, project, template, pool, found);
     var recorded =
         new ContainerConfig(shell, locks)
             .set(
@@ -200,22 +181,52 @@ public final class WorkspaceTemplate {
                     INPUTS_KEY + "=" + source.inputs(),
                     LAST_KEY + "=" + version));
     if (!recorded.ok()) {
-      var failure =
-          new IOException(
-              "Failed to record "
-                  + version
-                  + " as "
-                  + project
-                  + "'s current template, so it was removed and the version before stays current: "
-                  + recorded.reason());
-      try {
-        snapshots.delete(template, version);
-      } catch (IOException | TimeoutException removal) {
-        failure.addSuppressed(removal);
+      throw new IOException(
+          "Failed to record "
+              + version
+              + " as "
+              + project
+              + "'s current template, so the version before stays current: "
+              + recorded.reason());
+    }
+    new SnapshotManager(shell).create(template, version);
+    return new Template(project, template, version, source.inputs(), pool, true);
+  }
+
+  /**
+   * Provisions {@code template} and stops it. One this call starts, by launching it or starting it
+   * stopped, is stopped again when the build fails, so a failed build leaves no template running.
+   */
+  private void build(
+      Source source,
+      String project,
+      String template,
+      String pool,
+      Optional<BoxInstances.Instance> found)
+      throws Exception {
+    var containers = new ContainerManager(shell);
+    var startedHere = found.isEmpty() || !(found.get().state() instanceof ContainerState.Running);
+    try {
+      if (found.isPresent() && startedHere) {
+        containers.start(template);
+      }
+      source
+          .build()
+          .into(
+              new ProjectProvisioner.Instance(
+                  template, Optional.of(pool), Map.of(BoxInstances.TEMPLATE_OF_KEY, project)),
+              found.isEmpty());
+    } catch (Exception failure) {
+      if (startedHere) {
+        try {
+          containers.stop(template);
+        } catch (IOException | TimeoutException stopping) {
+          failure.addSuppressed(stopping);
+        }
       }
       throw failure;
     }
-    return new Template(project, template, version, source.inputs(), pool, true);
+    containers.stop(template);
   }
 
   /**

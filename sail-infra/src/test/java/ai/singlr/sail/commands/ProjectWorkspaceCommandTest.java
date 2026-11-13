@@ -13,6 +13,7 @@ import ai.singlr.sail.Sail;
 import ai.singlr.sail.engine.WorkspaceTemplate;
 import ai.singlr.sail.engine.Workspaces;
 import java.util.List;
+import java.util.Map;
 import org.junit.jupiter.api.Test;
 import picocli.CommandLine;
 
@@ -29,7 +30,7 @@ class ProjectWorkspaceCommandTest {
             "fix-login",
             "acme-fix-login",
             V1,
-            new Workspaces.Timings(210L, 900, 300, 1410));
+            new Workspaces.Timings(210L, 900, 300, 1410, Map.of()));
 
     assertEquals(
         "Created fix-login from v1 in 1.4 s (clone 0.2 s, start 0.9 s, ready 0.3 s)",
@@ -44,7 +45,7 @@ class ProjectWorkspaceCommandTest {
             "fix-login",
             "acme-fix-login",
             Workspaces.Change.STARTED,
-            new Workspaces.Timings(null, 350, 450, 800));
+            new Workspaces.Timings(null, 350, 450, 800, Map.of()));
 
     assertEquals(
         "Started fix-login in 0.8 s (start 0.4 s, ready 0.5 s)",

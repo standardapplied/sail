@@ -15,6 +15,8 @@ import ai.singlr.sail.authority.WriteRefused;
 import ai.singlr.sail.config.ProjectDefinition;
 import ai.singlr.sail.config.ProjectDefinitionJson;
 import ai.singlr.sail.config.TestDefinitions;
+import ai.singlr.sail.engine.BoxInstances;
+import ai.singlr.sail.engine.ScriptedShellExecutor;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.ActingAs;
 import ai.singlr.sail.identity.Actor;
@@ -23,6 +25,7 @@ import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.store.ProjectStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.Sqlite;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import org.junit.jupiter.api.AfterEach;
@@ -35,13 +38,15 @@ class ProjectDefinitionOperationsTest {
   private Sqlite db;
   private ProjectStore projects;
   private ProjectDefinitionOperations operations;
+  private ScriptedShellExecutor incus;
 
   @BeforeEach
   void setUp() {
     db = Sqlite.openMemory();
     new SchemaManager(db).migrate();
     projects = new ProjectStore(db);
-    operations = new ProjectDefinitionOperations(projects);
+    incus = new ScriptedShellExecutor().onFail("incus list", "Error: not authorized");
+    operations = new ProjectDefinitionOperations(projects, new BoxInstances(incus));
     Acting.system(() -> projects.upsert(TestDefinitions.yaml("name: acme\nimage: ubuntu/24.04\n")));
   }
 
@@ -106,6 +111,32 @@ class ProjectDefinitionOperationsTest {
     assertEquals("beta", created.name());
     assertEquals(ErrorCode.CONFLICT, taken.failure().errorCode());
     assertEquals("A project named 'beta' already exists.", taken.getMessage());
+  }
+
+  @Test
+  void aProjectIsNotCreatedUnderTheNameOfAWorkspaceOrTemplateThisBoxHoldsAndIsWhereNoneIsHeld() {
+    var held =
+        new ScriptedShellExecutor()
+            .onOk(
+                "incus list",
+                "[{\"name\": \"acme-fix\", \"status\": \"Running\", \"config\":"
+                    + " {\"user.sail.project\": \"acme\", \"user.sail.workspace\": \"fix\"}},"
+                    + " {\"name\": \"acme--tmpl\", \"status\": \"Stopped\", \"config\":"
+                    + " {\"user.sail.template.of\": \"acme\"}},"
+                    + " {\"name\": \"plain\", \"status\": \"Running\", \"config\": {}}]");
+    var onThisBox = new ProjectDefinitionOperations(projects, new BoxInstances(held));
+
+    var workspace =
+        assertThrows(ApiException.class, () -> onThisBox.create(Map.of("name", "acme-fix")));
+
+    assertEquals(ErrorCode.CONFLICT, workspace.failure().errorCode());
+    assertEquals(
+        "Project acme-fix cannot take instance acme-fix: it is workspace fix of project acme.",
+        workspace.failure().errorMessage());
+    assertTrue(projects.findByName("acme-fix").isEmpty());
+    assertEquals("plain", onThisBox.create(Map.of("name", "plain")).name());
+    assertEquals("acme-fix", operations.create(Map.of("name", "acme-fix")).name());
+    assertEquals(List.of("incus list --format json"), incus.invocations());
   }
 
   @Test

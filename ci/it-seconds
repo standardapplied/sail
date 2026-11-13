@@ -36,5 +36,5 @@
 4 SyncProvenanceIT
 25 UpgradeE2EIT
 0 WatcherSpawnerIT
-90 WorkspaceIT
+110 WorkspaceIT
 47 ZfsPoolIT

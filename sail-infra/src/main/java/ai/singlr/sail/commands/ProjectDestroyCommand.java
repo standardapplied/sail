@@ -15,11 +15,13 @@ import ai.singlr.sail.engine.NameValidator;
 import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.ProjectTeardown;
 import ai.singlr.sail.engine.SailPaths;
+import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.ShellExecutor;
 import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.function.Function;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
 import picocli.CommandLine.Model.CommandSpec;
@@ -56,6 +58,19 @@ public final class ProjectDestroyCommand implements Runnable {
   @Option(names = "--json", description = "Output in JSON format.")
   private boolean json;
 
+  private final Function<Boolean, ShellExec> shells;
+
+  public ProjectDestroyCommand() {
+    this(ShellExecutor::new);
+  }
+
+  /**
+   * @param shells the host shell, by whether this is a dry run
+   */
+  ProjectDestroyCommand(Function<Boolean, ShellExec> shells) {
+    this.shells = shells;
+  }
+
   @Override
   public void run() {
     CliCommand.run(CliCommand.DRY_RUN_HINT, this::execute);
@@ -73,8 +88,8 @@ public final class ProjectDestroyCommand implements Runnable {
       throw RootRequired.refusal(spec);
     }
 
-    var shell = new ShellExecutor(dryRun);
-    var instances = new BoxInstances(shell).all();
+    var shell = shells.apply(dryRun);
+    var instances = new BoxInstances(shells.apply(false)).all();
     var own = instances.stream().filter(instance -> instance.name().equals(name)).findFirst();
     BoxInstances.requireNotTakenFor(name, own);
     var state = own.map(BoxInstances.Instance::state).orElse(new ContainerState.NotCreated());
