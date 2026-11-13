@@ -1778,12 +1778,14 @@ upgrade() {
 down() {
   local run=${1:-} filter="labels.purpose=sail-fleet"
   [[ -n $run ]] && filter="$filter AND labels.run=$run"
-  local names
+  local names disks
   names=$(gc compute instances list --filter="$filter" --format='value(name)')
-  [[ -z $names ]] && { echo "No fleet VMs to delete."; return; }
-  gc compute instances delete $names --zone "$ZONE" > /dev/null
-  echo "Deleted: $names"
-  local disks
+  if [[ -z $names ]]; then
+    echo "No fleet VMs to delete."
+  else
+    gc compute instances delete $names --zone "$ZONE" > /dev/null
+    echo "Deleted: $names"
+  fi
   disks=$(gc compute disks list --filter="name ~ ^sail-fleet-${run:-.*}-client-scratch2\$ AND -users:*" --format='value(name)')
   [[ -z $disks ]] || { gc compute disks delete $disks --zone "$ZONE" > /dev/null; echo "Deleted: $disks"; }
 }
