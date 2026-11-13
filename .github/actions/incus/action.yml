@@ -28,7 +28,8 @@ runs:
       run: |
         echo 'Defaults always_set_home' | sudo tee /etc/sudoers.d/zz-sail-root-home > /dev/null
         sudo chmod 0440 /etc/sudoers.d/zz-sail-root-home
-        sudo visudo -cq
+        home=$(sudo sh -c 'echo "$HOME"')
+        [ "$home" = /root ] || { echo "sudo still gives root HOME=$home, not /root" >&2; exit 1; }
         sudo find /etc/apt/sources.list.d -type f ! -name ubuntu.sources -delete
         sudo curl -fsSL --create-dirs -o /etc/apt/keyrings/zabbly.asc https://pkgs.zabbly.com/key.asc
         printf 'Enabled: yes\nTypes: deb\nURIs: https://pkgs.zabbly.com/incus/stable\nSuites: %s\nComponents: main\nArchitectures: %s\nSigned-By: /etc/apt/keyrings/zabbly.asc\n' \
