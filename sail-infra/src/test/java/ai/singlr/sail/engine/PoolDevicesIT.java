@@ -16,6 +16,7 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -203,6 +204,94 @@ class PoolDevicesIT extends AbstractIncusIT {
       root.exec(List.of("losetup", "-d", blank));
       root.exec(List.of("losetup", "-d", taken));
     }
+  }
+
+  /**
+   * The mirror Sail has Incus make, exactly as {@link IncusStorage#createCommand} builds it: two
+   * blank loop devices become one pool Incus lists as zfs and makes a volume on; with one of them
+   * gone (the pool exported, the device detached, the pool imported from the other) zpool calls it
+   * DEGRADED and names the missing one. A pair whose second device took ext4 after Sail's checks is
+   * refused by zpool as a whole: the first device carries nothing and the second keeps its ext4.
+   */
+  @Test
+  void incusMakesTheMirrorFromBothDevicesOrFromNeither(@TempDir Path dir) throws Exception {
+    ensureIncusOrSkip();
+    var root = new RootShell();
+    var storage = new IncusStorage(shell);
+    storage.requireMirrors();
+    var one = attach(root, dir.resolve("one.img"), "true");
+    var other = attach(root, dir.resolve("other.img"), "true");
+    var blank = attach(root, dir.resolve("blank.img"), "true");
+    var taken = attach(root, dir.resolve("taken.img"), "true");
+    var detached = false;
+    try {
+      var made = storage.create("sail-it-mirror", mirror(one, other));
+      var listed = storage.find("sail-it-mirror");
+      var volume =
+          shell.exec(
+              List.of(
+                  "incus",
+                  "storage",
+                  "volume",
+                  "create",
+                  "sail-it-mirror",
+                  "sail-it-vol",
+                  "size=16MiB"));
+      var online = PoolHealth.of(root, "sail-it-mirror");
+      var exported = root.exec(List.of("zpool", "export", "sail-it-mirror"));
+      detached = root.exec(List.of("losetup", "-d", other)).ok();
+      var imported = root.exec(List.of("zpool", "import", "-d", one, "sail-it-mirror"));
+      var said = root.exec(PoolHealth.status("sail-it-mirror"));
+      var degraded = PoolHealth.of(root, "sail-it-mirror");
+      assertTrue(root.exec(List.of("mkfs.ext4", "-qF", taken)).ok());
+      var refused = storage.create("sail-it-half", mirror(blank, taken));
+      var blankKept = root.exec(List.of("wipefs", "--", blank));
+      var takenKept = root.exec(List.of("wipefs", "--", taken));
+      System.out.println("MIRROR exit " + made.exitCode() + " [" + made.reason() + "] " + listed);
+      System.out.println("VOLUME exit " + volume.exitCode() + " [" + volume.reason() + "]");
+      System.out.println("ONLINE " + online);
+      System.out.println(
+          "DETACHED "
+              + other
+              + " export ["
+              + exported.reason()
+              + "] import ["
+              + imported.reason()
+              + "]\n"
+              + said.stdout());
+      System.out.println("DEGRADED " + degraded);
+      System.out.println("HALF exit " + refused.exitCode() + " [" + refused.reason() + "]");
+      System.out.println(
+          "BLANK KEPT [" + blankKept.stdout() + "] TAKEN KEPT [" + takenKept.stdout() + "]");
+
+      assertTrue(made.ok(), made.reason());
+      assertEquals("zfs", listed.orElseThrow().driver());
+      assertEquals("mirror=" + one + "," + other, listed.orElseThrow().source());
+      assertTrue(volume.ok(), volume.reason());
+      assertEquals(Optional.of(new PoolHealth("ONLINE", Map.of())), online);
+      assertTrue(exported.ok() && detached && imported.ok(), exported.reason() + imported.reason());
+      assertEquals("DEGRADED", degraded.orElseThrow().state());
+      assertEquals(Map.of(other, "UNAVAIL"), degraded.orElseThrow().unhealthy());
+      assertFalse(refused.ok(), "zpool made a mirror of a device holding ext4");
+      assertTrue(refused.reason().contains("ext4"), refused.reason());
+      assertTrue(storage.find("sail-it-half").isEmpty());
+      assertEquals("", blankKept.stdout(), "zpool wrote to the blank device of a refused pair");
+      assertTrue(takenKept.stdout().contains("ext4"), takenKept.stdout());
+    } finally {
+      shell.exec(List.of("incus", "storage", "volume", "delete", "sail-it-mirror", "sail-it-vol"));
+      shell.exec(List.of("incus", "storage", "delete", "sail-it-mirror"));
+      root.exec(List.of("zpool", "destroy", "-f", "sail-it-mirror"));
+      shell.exec(List.of("incus", "storage", "delete", "sail-it-half"));
+      for (var loop : detached ? List.of(one, blank, taken) : List.of(one, other, blank, taken)) {
+        root.exec(List.of("losetup", "-d", loop));
+      }
+    }
+  }
+
+  /** Two loop devices as a mirror Sail cleared, for the create Incus is asked for. */
+  private static PoolSource.Mirror mirror(String one, String other) {
+    return new PoolSource.Mirror(
+        new PoolSource.Device(one, "checked"), new PoolSource.Device(other, "checked"), 1, 1);
   }
 
   /**

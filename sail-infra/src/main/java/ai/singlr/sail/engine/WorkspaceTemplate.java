@@ -144,6 +144,7 @@ public final class WorkspaceTemplate {
               "Delete it so the next create builds it on ZFS: ",
               Remedy.program("incus", "delete", "--force", template)));
     }
+    requireUsable(observer, pool);
     var project = config.name();
     var versions =
         found.isPresent()
@@ -250,6 +251,42 @@ public final class WorkspaceTemplate {
               ", or with --pool-file-size <size> in place of --disk to try ZFS in a file."));
     }
     return zfs;
+  }
+
+  /**
+   * Refuses a change on {@code pool}, when it is a mirror, unless ZFS says it is online or
+   * degraded, naming its state and the {@code zpool status} that says more; a degraded mirror is
+   * said once, on stderr, with the {@code zpool replace} that mends it. A pool of one device or a
+   * file, whose health {@code host status} shows, is left to Incus as it always was, and so is a
+   * mirror whose health zpool cannot tell.
+   */
+  static void requireUsable(ShellExec observer, String pool)
+      throws IOException, InterruptedException, TimeoutException {
+    var held =
+        pool == null
+            ? Optional.<IncusStorage.Pool>empty()
+            : new IncusStorage(observer)
+                .find(pool)
+                .filter(found -> IncusStorage.devices(found.source()).size() == 2);
+    if (held.isEmpty()) {
+      return;
+    }
+    var zpool = Objects.requireNonNullElse(held.get().zpool(), pool);
+    var health = PoolHealth.of(observer, zpool);
+    if (health.isPresent() && !health.get().usable()) {
+      throw new IllegalStateException(
+          "Pool "
+              + pool
+              + " is "
+              + health.get().said()
+              + ", as zpool status says, so no workspace or template is changed on it. See sudo"
+              + " zpool status "
+              + zpool
+              + ".");
+    }
+    if (health.isPresent() && health.get().degraded()) {
+      System.err.println("  ! " + health.get().degradedNotice(zpool));
+    }
   }
 
   /** {@code project}'s template instance name, when it is one Incus can have and no project's. */

@@ -792,6 +792,175 @@ class PoolDevicesTest {
     }
   }
 
+  @Test
+  void twoBlankDisksAreAMirrorOfTwoDevicesEachClearedAsOneIs() throws Exception {
+    var shell = gcp(BLANK).shell();
+
+    var mirror = devices(shell).mirror("/dev/sdb", "/dev/sdc");
+
+    assertEquals(
+        new PoolSource.Mirror(
+            devices(gcp(BLANK).shell()).cleared("/dev/sdb"),
+            devices(gcp(BLANK).shell()).cleared("/dev/sdc"),
+            42949672960L,
+            42949672960L),
+        mirror);
+    assertEquals("zfs on a mirror of /dev/sdb and /dev/sdc", mirror.said());
+    assertEquals(
+        List.of(
+            "realpath -e -- /dev/sdb",
+            "realpath -e -- /dev/sdc",
+            LSBLK,
+            "bash -c " + PoolDevices.OPEN_FILES,
+            "wipefs -- /dev/sdb",
+            "which zpool",
+            "wipefs -- /dev/sdc",
+            "which zpool",
+            String.join(" ", PoolDevices.exclusiveOpen("/dev/sdb")),
+            String.join(" ", PoolDevices.exclusiveOpen("/dev/sdc"))),
+        shell.invocations(),
+        "lsblk and the walk are read once, every slow read of both comes before either device's"
+            + " probe, and the probes of both are the last commands");
+  }
+
+  @Test
+  void blankPartitionsBesideARaid1OnTwoDisksAreAMirrorAndNothingIsWritten() throws Exception {
+    var shell = names(new Box("gcp4/b-local-nvme-ssd.lsblk.json")).shell();
+
+    var mirror = devices(shell).mirror("/dev/sdb2", "/dev/sdc2");
+
+    assertEquals(
+        List.of("/dev/sdb2", "/dev/sdc2"),
+        mirror.devices().stream().map(PoolSource.Device::path).toList());
+    assertEquals("zfs on a mirror of /dev/sdb2 and /dev/sdc2", mirror.said());
+    assertEquals(
+        List.of(),
+        shell.arguments().stream()
+            .filter(argv -> argv.getFirst().equals("wipefs"))
+            .filter(argv -> argv.contains("--all") && !argv.contains("--no-act"))
+            .toList(),
+        "every probe of either device only reads");
+  }
+
+  @Test
+  void theOwnersTwoRaid1DisksOfferNoDeviceToAMirror() {
+    var refused =
+        assertThrows(
+                IllegalArgumentException.class,
+                () ->
+                    devices(names(new Box(DEVBOX)).shell())
+                        .mirror("/dev/nvme0n1p4", "/dev/nvme1n1p4"))
+            .getMessage();
+
+    assertTrue(refused.startsWith("/dev/nvme0n1p4 is refused: "), refused);
+    assertTrue(refused.contains("/dev/md2 is mounted at /;"), refused);
+  }
+
+  @Test
+  void twoPartitionsOfOneDiskAreRefusedAsAMirrorBeforeAnyProbe() {
+    var shell = names(new Box(HOLDERS)).shell();
+
+    var refused =
+        assertThrows(
+            IllegalArgumentException.class, () -> devices(shell).mirror("/dev/sdg1", "/dev/sdg2"));
+
+    assertEquals(
+        "/dev/sdg1 and /dev/sdg2 cannot be a mirror: both are on /dev/sdg, and a mirror on one"
+            + " disk dies with it.",
+        refused.getMessage());
+    assertEquals(
+        List.of("realpath -e -- /dev/sdg1", "realpath -e -- /dev/sdg2", LSBLK),
+        shell.invocations());
+    assertEquals(
+        "/dev/sdg1 and /dev/sdg1 cannot be a mirror: both name /dev/sdg1.",
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> devices(names(new Box(HOLDERS)).shell()).mirror("/dev/sdg1", "/dev/sdg1"))
+            .getMessage());
+  }
+
+  @Test
+  void twoNamesOfOnePhysicalDiskAreRefusedAsAMirror() {
+    var layouts = "handwritten-mirror-layouts.lsblk.json";
+    assertEquals(
+        "/dev/nvme0n2 and /dev/nvme0n3 cannot be a mirror: /dev/nvme0n2 and /dev/nvme0n3 are"
+            + " namespaces of one NVMe controller, nvme0, which dies with both.",
+        mirrorRefusal(layouts, "/dev/nvme0n2", "/dev/nvme0n3"));
+    assertEquals(
+        "/dev/sdb and /dev/sdc cannot be a mirror: /dev/sdb and /dev/sdc have one WWN,"
+            + " 0x5000c500a1b2c3d4: they are two paths to one disk.",
+        mirrorRefusal(layouts, "/dev/sdb", "/dev/sdc"));
+    assertEquals(
+        "/dev/sdd and /dev/sde cannot be a mirror: /dev/sdd and /dev/sde report one serial,"
+            + " ZA1B2C3E: they are one disk seen twice.",
+        mirrorRefusal(layouts, "/dev/sdd", "/dev/sde"));
+  }
+
+  @Test
+  void aBlankDeviceBesideOneHoldingExt4IsRefusedNamingTheSecondAndWhatItHolds() {
+    var shell = spares().shell();
+
+    var refused =
+        assertThrows(
+            IllegalArgumentException.class, () -> devices(shell).mirror("/dev/sdh", "/dev/sdd"));
+
+    assertEquals(
+        "/dev/sdd holds ext4. Sail erases nothing: if nothing on it is wanted, erase it yourself"
+            + " with sudo wipefs --all /dev/sdd, then run this again.",
+        refused.getMessage());
+    assertNothingWritten(shell);
+  }
+
+  @Test
+  void aDeviceAProcessHoldsRefusesTheMirrorNamingTheHolderBeforeEitherIsProbed() {
+    var shell = spares().open(4242, "python3", "/dev/sdk").shell();
+
+    var refused =
+        assertThrows(
+            IllegalArgumentException.class, () -> devices(shell).mirror("/dev/sdh", "/dev/sdk"));
+
+    assertEquals(
+        "/dev/sdk is refused: process 4242 (python3) has /dev/sdk open.", refused.getMessage());
+    assertTrue(
+        shell.invocations().stream().noneMatch(c -> c.startsWith("wipefs")),
+        "neither device is probed: " + shell.invocations());
+  }
+
+  @Test
+  void devicesOfSizesZpoolMirrorsOnlyWithForceAreRefusedAndANearMatchSaysWhatGoesUnused()
+      throws Exception {
+    var layouts = "handwritten-mirror-layouts.lsblk.json";
+    assertEquals(
+        "/dev/sdh and /dev/sdi cannot be a mirror: /dev/sdh is 40.0 GiB and /dev/sdi 60.0 GiB, and"
+            + " zpool create refuses, without the force Sail never passes, a mirror whose devices"
+            + " differ by more than 16 MiB: name two devices of one size, such as a partition of"
+            + " that size on each disk.",
+        mirrorRefusal(layouts, "/dev/sdh", "/dev/sdi"));
+    assertEquals(
+        "zfs on a mirror of /dev/sdf and /dev/sdg, 8.0 MiB of /dev/sdg unused",
+        devices(names(new Box(layouts)).shell()).mirror("/dev/sdf", "/dev/sdg").said());
+  }
+
+  private static String mirrorRefusal(String layout, String one, String other) {
+    return assertThrows(
+            IllegalArgumentException.class,
+            () -> devices(names(new Box(layout)).shell()).mirror(one, other))
+        .getMessage();
+  }
+
+  private static void assertNothingWritten(ScriptedShellExecutor shell) {
+    assertEquals(
+        List.of(),
+        shell.arguments().stream()
+            .filter(argv -> !argv.getFirst().equals("wipefs") || !argv.contains("--no-act"))
+            .filter(
+                argv ->
+                    argv.getFirst().equals("wipefs") && argv.contains("--all")
+                        || argv.getFirst().equals("zpool") && argv.contains("create")
+                        || argv.contains("storage") && argv.contains("create"))
+            .toList());
+  }
+
   private static PoolDevices devices(ShellExec shell) {
     return new PoolDevices(shell);
   }

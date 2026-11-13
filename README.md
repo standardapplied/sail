@@ -40,6 +40,7 @@ host init --storage zfs` with one source:
 ```bash
 sudo sail host init --storage zfs --disk /dev/nvme1n1        # a whole unused disk
 sudo sail host init --storage zfs --disk /dev/nvme0n1p5      # a spare partition
+sudo sail host init --storage zfs --disk /dev/nvme0n1p5 --disk /dev/nvme1n1p5   # a mirror of two
 sudo sail host init --storage zfs --pool-file-size 200GiB    # a file, to try ZFS without a spare disk
 ```
 
@@ -65,7 +66,32 @@ cloud VMs, do not change disks while `host init` runs: one replaced under the sa
 Sail's last check is judged by `zpool create` alone, which does not refuse an empty partition
 table or filesystems inside MBR partitions. A pool on one partition or one disk
 has no redundancy: if that device dies, every container on the pool is lost, however the system's
-own disks are mirrored. A file is slower
+own disks are mirrored.
+
+`--disk` given twice makes one pool that is a ZFS mirror of the two devices, as on a server whose
+two disks carry the system in RAID1 and a spare partition each. Each device must pass every rule
+one device passes; a refusal names which one and why, and nothing is made unless both pass. The
+two must be on two physical disks: two partitions of one disk, two paths to one disk (one WWN or
+serial) and two namespaces of one NVMe controller are refused. They must be of one size, give or
+take the 16 MiB `zpool create` allows without force (Sail never forces): make the spare
+partitions the same size; within that, the output says how much of the larger goes unused. Incus
+makes the mirror in one `zpool create ... mirror <a> <b>`, which takes both devices or neither.
+A mirror keeps every container through the loss of either device: `sudo sail host status` then
+says the pool is `DEGRADED` and names the device that is gone, and workspace and template verbs
+go on, saying once that the pool is degraded. It does not protect against losing both, against a
+deleted file or a bad write by software (ZFS writes it to both), or against the box itself; it is no backup.
+Sail replaces and resilvers nothing: put a new device in place of the missing one with `sudo
+zpool replace <pool> <missing device> <new device>`, which ZFS resilvers. A pool that is neither
+`ONLINE` nor `DEGRADED` (both devices gone, `FAULTED`, `SUSPENDED`, or not imported) refuses
+workspace and template verbs, naming its state and `sudo zpool status <pool>`. Re-running the
+command that made a mirror, in either order of its two `--disk` flags, is a no-op; naming one of
+the two, or another pair, is refused by name. The mirror needs an Incus with the
+`storage_zfs_vdev` API extension (6.0.1 and later, as Sail installs it); Ubuntu's own Incus 6.0.0
+is refused before anything is made. A pool Incus did not finish making, which it lists as
+`Pending` or `Errored` (incusd stopped mid-create), is never taken for one that exists: `host
+init` names the status and how to clear it (`sudo incus storage delete <pool>`; for a `Pending`
+pool that leaves the zpool Incus made, for you to destroy with `sudo zpool destroy <zpool>` once
+`sudo zfs list -r <zpool>` shows nothing wanted). A file is slower
 than a disk and meant for trials. `host init` caps the ZFS cache at a tenth of memory, at most
 16 GiB (`/etc/modprobe.d/sail-zfs.conf`), and says so; a cap you set yourself is kept, in your own
 file or edited into Sail's, and a cap Sail wrote before yours is removed so yours is the one that
@@ -74,7 +100,8 @@ container's disk limit is enforced: Incus sets the root disk's size as the datas
 which its snapshots count against, and a snapshot copy is a clone that costs nothing at first.
 On a box already on `dir`, the same command with `--pool <name>` adds the ZFS pool beside it:
 existing containers and the base profile stay where they are, and `sudo sail host status` lists
-every pool with its driver, source and free space. A project's workspaces and its template go
+every pool with its driver, source and free space, and a ZFS pool with its health as `zpool
+status` gives it. A project's workspaces and its template go
 on the ZFS pool (see [Workspaces](#workspaces-several-lines-of-work-on-one-box)).
 
 ## The model: one main, many nodes

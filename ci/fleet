@@ -68,7 +68,11 @@ Usage:
                                 partition are refused, and its ext4 scratch disk until the row itself
                                 erases it with the wipefs the refusal names, then the scratch pool is
                                 made with Sail's last probe of the disk under a second before its
-                                incus storage create (strace); acme's template is built on tank, a
+                                incus storage create (strace); with a second scratch disk, the two
+                                become one ZFS mirror (one incus storage create, never forced, the
+                                probes of both last), its re-run in the other order is kept, ONLINE
+                                after the reboot, and DEGRADED naming the disk once it is detached;
+                                acme's template is built on tank, a
                                 workspace of it is a clone of its snapshot with a machine-id of its
                                 own (create time in the report), a second is made and stopped,
                                 apply --all leaves both and the template alone; with acme's repos set
@@ -140,7 +144,9 @@ internal_ip() {
 
 create_vm() {
   local scratch=()
-  [[ $2 == client ]] && scratch=(--create-disk "size=10GB,type=pd-balanced,auto-delete=yes,device-name=scratch")
+  [[ $2 == client ]] && scratch=(
+    --create-disk "size=10GB,type=pd-balanced,auto-delete=yes,device-name=scratch"
+    --create-disk "size=10GB,type=pd-balanced,auto-delete=yes,device-name=scratch2,name=$(vm "$1" "$2")-scratch2")
   gc compute instances create "$(vm "$1" "$2")" --zone "$ZONE" --machine-type "$MACHINE" \
     --image-family ubuntu-2404-lts-amd64 --image-project ubuntu-os-cloud \
     --boot-disk-size 50GB --boot-disk-type pd-balanced "${scratch[@]}" \
@@ -1141,6 +1147,53 @@ probed_last_on() {
   awk -v g="$gap" 'BEGIN { exit !(g >= 0 && g < 1) }'
 }
 
+mirrored_on() {
+  local run=$1 box=$2 one=$3 other=$4 pool=$5 trace made last first create gap
+  on "$run" "$box" "sudo strace -f -tt -e trace=execve -o /tmp/sail-mirror.trace sail host init --storage zfs --pool $pool --disk $one --disk $other --yes" || return 1
+  on "$run" "$box" "sudo incus storage list --format csv" | grep -q "^$pool,zfs," || { echo "Incus has no zfs pool $pool"; return 1; }
+  on "$run" "$box" "sudo zpool status -P $pool" | grep -q "mirror-0" || { echo "$pool is not a mirror"; return 1; }
+  made=$(on "$run" "$box" "sudo zpool history $pool" | grep "zpool create")
+  echo "$made"
+  [[ $made == *" mirror "* && $made != *" -f "* ]] || { echo "the zpool was not made as an unforced mirror"; return 1; }
+  trace=$(on "$run" "$box" "sudo cat /tmp/sail-mirror.trace" | grep -E 'execve\("[^"]*/(wipefs|incus|realpath)", \["(wipefs", "--all|incus", "storage", "create|realpath)')
+  echo "$trace"
+  [[ $(grep -c '"incus", "storage", "create"' <<< "$trace") == 1 ]] || { echo "Sail asked Incus for more than one create"; return 1; }
+  grep -F '"incus", "storage", "create"' <<< "$trace" | grep -qF 'source=mirror=' || { echo "the create is not the mirror's"; return 1; }
+  grep -qF 'wipe' <<< "$(grep -F '"incus", "storage", "create"' <<< "$trace")" && { echo "the create asks for a wipe"; return 1; }
+  last=$(grep -B2 -F '"incus", "storage", "create"' <<< "$trace" | head -2)
+  [[ $(grep -cF '"wipefs", "--all"' <<< "$last") == 2 ]] || { echo "the probes of both are not the last commands before the create"; return 1; }
+  first=$(head -1 <<< "$last" | awk '{print $2}')
+  create=$(grep -F '"incus", "storage", "create"' <<< "$trace" | awk '{print $2}')
+  gap=$(awk -v p="$first" -v c="$create" 'BEGIN { split(p, a, ":"); split(c, b, ":"); printf "%.3f", (b[1] * 3600 + b[2] * 60 + b[3]) - (a[1] * 3600 + a[2] * 60 + a[3]) }')
+  echo "first device's last probe at $first, incus storage create at $create: $gap s"
+  awk -v g="$gap" 'BEGIN { exit !(g >= 0 && g < 1) }'
+}
+
+pool_health() {
+  on "$1" "$2" "sudo sail host status --json" \
+    | python3 -I -c 'import json,sys; p=[p for p in json.load(sys.stdin)["pools"] if p["name"]==sys.argv[1]][0]; print(p.get("health"), " ".join(d["device"] + ":" + d["state"] for d in p.get("unhealthy", [])))' "$3"
+}
+
+healthy_on() {
+  local said
+  said=$(pool_health "$1" "$2" "$3")
+  echo "$3: $said"
+  [[ $said == "ONLINE " ]]
+}
+
+degraded_on() {
+  local run=$1 box=$2 pool=$3 gone=$4 attempt said
+  on "$run" "$box" "sudo zpool reopen $pool" || true
+  for attempt in $(seq 1 12); do
+    said=$(pool_health "$run" "$box" "$pool")
+    echo "$pool: $said"
+    [[ $said == DEGRADED* && $said == *"$gone"* ]] && break
+    sleep 5
+  done
+  on "$run" "$box" "sudo sail host status"
+  [[ $said == DEGRADED* && $said == *"$gone"* ]]
+}
+
 workspace_on() {
   local run=$1 box=$2 created timings origin template workspace
   created=$(on "$run" "$box" "sudo sail project workspace create acme fleet-w --json") || return 1
@@ -1208,7 +1261,7 @@ uncapped_on() {
 storage() {
   local run=${1:-}
   [[ -n $run ]] || usage
-  local scratch=/dev/disk/by-id/google-scratch disk partition
+  local scratch=/dev/disk/by-id/google-scratch scratch2=/dev/disk/by-id/google-scratch2 disk partition gone
   disk=$(root_disk "$run" client)
   partition=$(root_partition "$run" client)
   check "$run" "client's root disk $disk is refused for a pool" refuses_a_pool_on "$run" client "$disk"
@@ -1224,11 +1277,21 @@ storage() {
   check "$run" "the command that made the scratch pool runs again and keeps it" \
     naming "already exists)" allowed "$run" client "sudo sail host init --storage zfs --pool scratch --disk $scratch --yes"
   check "$run" "the scratch pool goes" on "$run" client "sudo incus storage delete scratch"
+  check "$run" "the row clears the scratch pool's labels and table itself" \
+    on "$run" client "sudo zpool labelclear -f ${scratch}-part1 && sudo wipefs --all $scratch"
+  check "$run" "the two scratch disks become one zfs mirror, Incus asked once, never forced, the probes of both last" \
+    mirrored_on "$run" client "$scratch" "$scratch2" twin
+  check "$run" "the command that made the mirror runs again with its disks in the other order and keeps it" \
+    naming "already exists)" allowed "$run" client "sudo sail host init --storage zfs --pool twin --disk $scratch2 --disk $scratch --yes"
+  check "$run" "naming one of the mirror's disks is refused by name" \
+    refused "$run" client "would be ignored" "sudo sail host init --storage zfs --pool twin --disk $scratch --yes"
+  check "$run" "host status says the mirror of the two and that it is ONLINE" healthy_on "$run" client twin
+  check "$run" "a container launches on the mirror" on "$run" client "sudo incus launch ubuntu-24.04 zm --storage twin"
   check "$run" "a dry run of adding tank shows the base profile staying on devpool" \
     naming "singlr-base (already exists): containers on devpool (dir)" allowed "$run" client "sudo sail host init --storage zfs --pool-file-size 20GiB --pool tank --dry-run --yes"
   check "$run" "client, a dir box running acme, adds a ZFS pool in a file" \
     allowed "$run" client "sudo sail host init --storage zfs --pool-file-size 20GiB --pool tank --yes"
-  check "$run" "client's Incus has tank as zfs beside devpool as dir" pools_on "$run" client "devpool:dir tank:zfs"
+  check "$run" "client's Incus has tank and twin as zfs beside devpool as dir" pools_on "$run" client "devpool:dir tank:zfs twin:zfs"
   check "$run" "acme still runs, on devpool" running_on_pool "$run" client acme devpool
   check "$run" "the base profile still puts containers on devpool" profile_on "$run" client devpool
   check "$run" "a container launched on tank and copied from its snapshot is a zfs clone" clones_on "$run" client
@@ -1236,7 +1299,17 @@ storage() {
   check "$run" "client reboots" reboots "$run" client
   check "$run" "the ZFS cache cap is still in force after the reboot" capped_on "$run" client
   check "$run" "acme runs after the reboot, on devpool" running_on_pool "$run" client acme devpool
-  check "$run" "host status names both pools" status_pools "$run" client "devpool:dir tank:zfs"
+  check "$run" "host status names every pool" status_pools "$run" client "devpool:dir tank:zfs twin:zfs"
+  check "$run" "the mirror is ONLINE after the reboot" healthy_on "$run" client twin
+  gone=$(on "$run" client "realpath $scratch2")
+  check "$run" "client's second scratch disk, $gone, is detached" \
+    gc compute instances detach-disk "$(vm "$run" client)" --zone "$ZONE" --device-name scratch2
+  check "$run" "host status says the mirror is DEGRADED and names the device that went" \
+    degraded_on "$run" client twin "$gone"
+  check "$run" "the container on the mirror and the mirror go" \
+    on "$run" client "sudo incus delete --force zm && sudo incus storage delete twin"
+  check "$run" "the detached disk is deleted" \
+    gc compute disks delete "$(vm "$run" client)-scratch2" --zone "$ZONE"
   local repos
   repos=$(on "$run" main "sudo sail project config get acme repos | base64 -w0")
   check "$run" "main gives acme one public repository that needs no token, octocat/Hello-World at hello" \
@@ -1637,6 +1710,9 @@ down() {
   [[ -z $names ]] && { echo "No fleet VMs to delete."; return; }
   gc compute instances delete $names --zone "$ZONE" > /dev/null
   echo "Deleted: $names"
+  local disks
+  disks=$(gc compute disks list --filter="name ~ ^sail-fleet-${run:-.*}-client-scratch2\$ AND -users:*" --format='value(name)')
+  [[ -z $disks ]] || { gc compute disks delete $disks --zone "$ZONE" > /dev/null; echo "Deleted: $disks"; }
 }
 
 status=0

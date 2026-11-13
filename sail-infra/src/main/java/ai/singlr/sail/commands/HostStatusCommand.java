@@ -18,6 +18,7 @@ import ai.singlr.sail.engine.HostPackages;
 import ai.singlr.sail.engine.HostProvisioner;
 import ai.singlr.sail.engine.IncusStorage;
 import ai.singlr.sail.engine.OperatorCommand;
+import ai.singlr.sail.engine.PoolHealth;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.ShellExecutor;
@@ -228,7 +229,7 @@ public final class HostStatusCommand implements Runnable {
     if (storage.error() != null) {
       map.put("storage_error", storage.error());
     } else {
-      map.put("pools", storage.pools().stream().map(Storage::toMap).toList());
+      map.put("pools", storage.pools().stream().map(storage::toMap).toList());
     }
     map.put("incus_version", incusVersion);
     map.put("incus_installed", versions.installed());
@@ -254,22 +255,46 @@ public final class HostStatusCommand implements Runnable {
 
   /**
    * This box's storage pools as Incus lists them, or why it could not, read as {@link Containers}
-   * reads its containers: each row one pool, its driver, its source and its free space.
+   * reads its containers: each row one pool, its driver, its source and its free space, and for a
+   * zfs pool its health as zpool says it now, where zpool can say.
    */
-  private record Storage(List<IncusStorage.Pool> pools, String error) {
+  private record Storage(
+      List<IncusStorage.Pool> pools, Map<String, PoolHealth> health, String error) {
 
     static Storage of(ShellExec shell) throws InterruptedException {
       try {
-        return new Storage(new IncusStorage(shell).pools(), null);
+        var pools = new IncusStorage(shell).pools();
+        var health = new LinkedHashMap<String, PoolHealth>();
+        for (var pool : pools) {
+          if (HostYaml.BACKEND_ZFS.equals(pool.driver())) {
+            PoolHealth.of(shell, Objects.requireNonNullElse(pool.zpool(), pool.name()))
+                .ifPresent(found -> health.put(pool.name(), found));
+          }
+        }
+        return new Storage(pools, health, null);
       } catch (IOException | TimeoutException e) {
-        return new Storage(List.of(), e.getMessage());
+        return new Storage(List.of(), Map.of(), e.getMessage());
       }
     }
 
     List<String> rows() {
       return error != null
           ? List.of("unavailable (" + error.strip().lines().findFirst().orElse("") + ")")
-          : pools.stream().map(IncusStorage.Pool::summary).toList();
+          : pools.stream().map(this::row).toList();
+    }
+
+    private String row(IncusStorage.Pool pool) {
+      var found = health.get(pool.name());
+      if (found == null) {
+        return pool.summary();
+      }
+      var zpool = Objects.requireNonNullElse(pool.zpool(), pool.name());
+      var lines = new ArrayList<>(List.of(pool.summary(), "health " + found.state()));
+      found.unhealthy().forEach((device, state) -> lines.add(device + " " + state));
+      if (found.degraded()) {
+        lines.add("replace the missing device: sudo zpool replace " + zpool + " <device> <new>");
+      }
+      return String.join("\n", lines);
     }
 
     /** Whether a pool's disk limits are only advisory, as they are on a dir pool. */
@@ -277,7 +302,7 @@ public final class HostStatusCommand implements Runnable {
       return pools.stream().anyMatch(pool -> HostYaml.BACKEND_DIR.equals(pool.driver()));
     }
 
-    static Map<String, Object> toMap(IncusStorage.Pool pool) {
+    Map<String, Object> toMap(IncusStorage.Pool pool) {
       var map = new LinkedHashMap<String, Object>();
       map.put("name", pool.name());
       map.put("driver", pool.driver());
@@ -288,6 +313,15 @@ public final class HostStatusCommand implements Runnable {
                 map.put("used_bytes", space.used());
                 map.put("total_bytes", space.total());
               });
+      var found = health.get(pool.name());
+      if (found != null) {
+        map.put("health", found.state());
+        map.put(
+            "unhealthy",
+            found.unhealthy().entrySet().stream()
+                .map(device -> Map.of("device", device.getKey(), "state", device.getValue()))
+                .toList());
+      }
       return map;
     }
   }

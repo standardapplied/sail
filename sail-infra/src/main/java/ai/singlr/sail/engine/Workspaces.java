@@ -694,7 +694,8 @@ public final class Workspaces {
   /**
    * Workspace {@code name} of {@code project}: the one instance named {@code <project>-<name>}
    * carrying that pair. Any other instance carrying the pair is refused with it, naming each (W4).
-   * A verb that {@code changes} it is refused first on a box with no ZFS pool (W8).
+   * A verb that {@code changes} it is refused first on a box with no ZFS pool (W8), and on a pool
+   * ZFS says is neither online nor degraded.
    */
   private BoxInstances.Instance existing(
       String project, String name, String projectVerb, boolean changes)
@@ -743,6 +744,9 @@ public final class Workspaces {
               + "-"
               + name
               + " may: nothing is done to any of them. Delete the copies, or their keys, first.");
+    }
+    if (changes) {
+      WorkspaceTemplate.requireUsable(observer, carrying.getFirst().pool());
     }
     return carrying.getFirst();
   }

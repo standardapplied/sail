@@ -1,0 +1,276 @@
+{
+   "blockdevices": [
+      {
+         "path": "/dev/nvme0n1",
+         "kname": "nvme0n1",
+         "type": "disk",
+         "fstype": null,
+         "pttype": "gpt",
+         "parttype": null,
+         "mountpoints": [
+            null
+         ],
+         "size": 32212254720,
+         "start": null,
+         "model": "nvme_card-pd",
+         "rm": false,
+         "wwn": "nvme.1ae0-6e766d655f636172642d7064-6e766d655f636172642d7064-00000001",
+         "serial": "persistent-disk-0",
+         "maj:min": "259:0",
+         "children": [
+            {
+               "path": "/dev/nvme0n1p1",
+               "kname": "nvme0n1p1",
+               "type": "part",
+               "fstype": "ext4",
+               "pttype": "gpt",
+               "parttype": "0fc63daf-8483-4772-8e79-3d69d8477de4",
+               "mountpoints": [
+                  "/"
+               ],
+               "size": 31137447424,
+               "start": 2099200,
+               "model": null,
+               "rm": false,
+               "wwn": "nvme.1ae0-6e766d655f636172642d7064-6e766d655f636172642d7064-00000001",
+               "serial": null,
+               "maj:min": "259:1"
+            },
+            {
+               "path": "/dev/nvme0n1p14",
+               "kname": "nvme0n1p14",
+               "type": "part",
+               "fstype": null,
+               "pttype": "gpt",
+               "parttype": "21686148-6449-6e6f-744e-656564454649",
+               "mountpoints": [
+                  null
+               ],
+               "size": 4194304,
+               "start": 2048,
+               "model": null,
+               "rm": false,
+               "wwn": "nvme.1ae0-6e766d655f636172642d7064-6e766d655f636172642d7064-00000001",
+               "serial": null,
+               "maj:min": "259:2"
+            },
+            {
+               "path": "/dev/nvme0n1p15",
+               "kname": "nvme0n1p15",
+               "type": "part",
+               "fstype": "vfat",
+               "pttype": "gpt",
+               "parttype": "c12a7328-f81f-11d2-ba4b-00a0c93ec93b",
+               "mountpoints": [
+                  "/boot/efi"
+               ],
+               "size": 111149056,
+               "start": 10240,
+               "model": null,
+               "rm": false,
+               "wwn": "nvme.1ae0-6e766d655f636172642d7064-6e766d655f636172642d7064-00000001",
+               "serial": null,
+               "maj:min": "259:3"
+            },
+            {
+               "path": "/dev/nvme0n1p16",
+               "kname": "nvme0n1p16",
+               "type": "part",
+               "fstype": "ext4",
+               "pttype": "gpt",
+               "parttype": "bc13c2ff-59e6-4262-a352-b275fd6f7172",
+               "mountpoints": [
+                  "/boot"
+               ],
+               "size": 957350400,
+               "start": 227328,
+               "model": null,
+               "rm": false,
+               "wwn": "nvme.1ae0-6e766d655f636172642d7064-6e766d655f636172642d7064-00000001",
+               "serial": null,
+               "maj:min": "259:4"
+            }
+         ]
+      },
+      {
+         "path": "/dev/nvme0n2",
+         "kname": "nvme0n2",
+         "type": "disk",
+         "fstype": null,
+         "pttype": null,
+         "parttype": null,
+         "mountpoints": [
+            null
+         ],
+         "size": 21474836480,
+         "start": null,
+         "model": "nvme_card-pd",
+         "rm": false,
+         "wwn": "nvme.1ae0-6e766d655f636172642d7064-6e766d655f636172642d7064-00000002",
+         "serial": "sail-mirror-d1",
+         "maj:min": "259:5"
+      },
+      {
+         "path": "/dev/nvme0n3",
+         "kname": "nvme0n3",
+         "type": "disk",
+         "fstype": null,
+         "pttype": null,
+         "parttype": null,
+         "mountpoints": [
+            null
+         ],
+         "size": 21474836480,
+         "start": null,
+         "model": "nvme_card-pd",
+         "rm": false,
+         "wwn": "nvme.1ae0-6e766d655f636172642d7064-6e766d655f636172642d7064-00000003",
+         "serial": "sail-mirror-d2",
+         "maj:min": "259:6"
+      },
+      {
+         "path": "/dev/sdb",
+         "kname": "sdb",
+         "type": "disk",
+         "fstype": null,
+         "pttype": null,
+         "parttype": null,
+         "mountpoints": [
+            null
+         ],
+         "size": 21474836480,
+         "start": null,
+         "model": "PersistentDisk",
+         "rm": false,
+         "wwn": "0x5000c500a1b2c3d4",
+         "serial": "ZA1B2C3D",
+         "maj:min": "8:16"
+      },
+      {
+         "path": "/dev/sdc",
+         "kname": "sdc",
+         "type": "disk",
+         "fstype": null,
+         "pttype": null,
+         "parttype": null,
+         "mountpoints": [
+            null
+         ],
+         "size": 21474836480,
+         "start": null,
+         "model": "PersistentDisk",
+         "rm": false,
+         "wwn": "0x5000c500a1b2c3d4",
+         "serial": "ZA1B2C3D",
+         "maj:min": "8:32"
+      },
+      {
+         "path": "/dev/sdd",
+         "kname": "sdd",
+         "type": "disk",
+         "fstype": null,
+         "pttype": null,
+         "parttype": null,
+         "mountpoints": [
+            null
+         ],
+         "size": 21474836480,
+         "start": null,
+         "model": "PersistentDisk",
+         "rm": false,
+         "wwn": null,
+         "serial": "ZA1B2C3E",
+         "maj:min": "8:48"
+      },
+      {
+         "path": "/dev/sde",
+         "kname": "sde",
+         "type": "disk",
+         "fstype": null,
+         "pttype": null,
+         "parttype": null,
+         "mountpoints": [
+            null
+         ],
+         "size": 21474836480,
+         "start": null,
+         "model": "PersistentDisk",
+         "rm": false,
+         "wwn": null,
+         "serial": "ZA1B2C3E",
+         "maj:min": "8:64"
+      },
+      {
+         "path": "/dev/sdf",
+         "kname": "sdf",
+         "type": "disk",
+         "fstype": null,
+         "pttype": null,
+         "parttype": null,
+         "mountpoints": [
+            null
+         ],
+         "size": 21474836480,
+         "start": null,
+         "model": "PersistentDisk",
+         "rm": false,
+         "wwn": null,
+         "serial": "sail-mirror-f",
+         "maj:min": "8:80"
+      },
+      {
+         "path": "/dev/sdg",
+         "kname": "sdg",
+         "type": "disk",
+         "fstype": null,
+         "pttype": null,
+         "parttype": null,
+         "mountpoints": [
+            null
+         ],
+         "size": 21483225088,
+         "start": null,
+         "model": "PersistentDisk",
+         "rm": false,
+         "wwn": null,
+         "serial": "sail-mirror-g",
+         "maj:min": "8:96"
+      },
+      {
+         "path": "/dev/sdh",
+         "kname": "sdh",
+         "type": "disk",
+         "fstype": null,
+         "pttype": null,
+         "parttype": null,
+         "mountpoints": [
+            null
+         ],
+         "size": 42949672960,
+         "start": null,
+         "model": "PersistentDisk",
+         "rm": false,
+         "wwn": null,
+         "serial": "sail-mirror-h",
+         "maj:min": "8:112"
+      },
+      {
+         "path": "/dev/sdi",
+         "kname": "sdi",
+         "type": "disk",
+         "fstype": null,
+         "pttype": null,
+         "parttype": null,
+         "mountpoints": [
+            null
+         ],
+         "size": 64424509440,
+         "start": null,
+         "model": "PersistentDisk",
+         "rm": false,
+         "wwn": null,
+         "serial": "sail-mirror-i",
+         "maj:min": "8:128"
+      }
+   ]
+}

@@ -82,7 +82,7 @@ public final class HostProvisioner {
    * Runs all provisioning steps and writes host.yaml.
    *
    * @param source what the storage pool is made from; a device as {@link PoolDevices#cleared}
-   *     cleared it
+   *     cleared it, or two as {@link PoolDevices#mirror} did
    * @param pool the storage pool name (e.g. {@code devpool})
    * @param bridge the network bridge name (e.g. {@code incusbr0})
    * @param serverIp the server's public IP address (for SSH config generation), may be null
@@ -289,7 +289,15 @@ public final class HostProvisioner {
     if (existing.isPresent()) {
       var held = existing.get();
       held.requireDriver(source.driver());
-      stepDone(5, pool + " (" + held.driver() + " on " + held.source() + ", already exists)");
+      held.requireCreated();
+      stepDone(
+          5,
+          pool
+              + " ("
+              + held.driver()
+              + " on "
+              + IncusStorage.said(held.source())
+              + ", already exists)");
       return;
     }
     var restarted = make(pool, source);
@@ -307,6 +315,9 @@ public final class HostProvisioner {
    */
   private String make(String pool, PoolSource source)
       throws IOException, InterruptedException, TimeoutException {
+    if (source instanceof PoolSource.Mirror && !shell.isDryRun()) {
+      storage.requireMirrors();
+    }
     clearedAgain(source);
     var made = storage.create(pool, source);
     var unseen = !made.ok() && IncusStorage.zfsUnseen(made);
@@ -322,18 +333,33 @@ public final class HostProvisioner {
     return unseen ? "; restarted Incus, which ran no container, to see ZFS" : "";
   }
 
-  /** Refuses a device that is no longer the one first cleared, or no longer carries nothing. */
+  /**
+   * Refuses a device, or either device of a mirror, that is no longer the one first cleared, or no
+   * longer carries nothing; a mirror's two are cleared again together, so the last look at each is
+   * right before the create.
+   */
   private void clearedAgain(PoolSource source)
       throws IOException, InterruptedException, TimeoutException {
-    if (!(source instanceof PoolSource.Device device) || shell.isDryRun()) {
+    if (shell.isDryRun()) {
       return;
     }
-    var now = devices.cleared(device.path());
-    if (!now.equals(source)) {
+    switch (source) {
+      case PoolSource.Device device -> requireSame(device, devices.cleared(device.path()));
+      case PoolSource.Mirror mirror -> {
+        var now = devices.mirror(mirror.one().path(), mirror.other().path());
+        requireSame(mirror.one(), now.one());
+        requireSame(mirror.other(), now.other());
+      }
+      default -> {}
+    }
+  }
+
+  private static void requireSame(PoolSource.Device first, PoolSource.Device now) {
+    if (!now.equals(first)) {
       throw new IllegalStateException(
-          device.path()
+          first.path()
               + " is not the device first cleared: it was "
-              + device.identity()
+              + first.identity()
               + ", it is now "
               + now.identity()
               + ".");
@@ -450,8 +476,8 @@ public final class HostProvisioner {
 
   /** The pool a dry run would have made, as {@code host.yaml} would state it. */
   private static IncusStorage.Pool planned(String pool, PoolSource source) {
-    var from = source instanceof PoolSource.Device device ? device.path() : null;
-    return new IncusStorage.Pool(pool, source.driver(), from, null, null, Optional.empty());
+    return new IncusStorage.Pool(
+        pool, source.driver(), IncusStorage.sourceOf(source), null, null, Optional.empty());
   }
 
   private void cacheImage() throws IOException, InterruptedException, TimeoutException {

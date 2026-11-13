@@ -1,0 +1,14 @@
+  pool: devpool
+ state: SUSPENDED
+status: One or more devices are faulted in response to IO failures.
+action: Make sure the affected devices are connected, then run 'zpool clear'.
+   see: https://openzfs.github.io/openzfs-docs/msg/ZFS-8000-HC
+config:
+
+	NAME                                            STATE     READ WRITE CKSUM
+	devpool                                         UNAVAIL      0     0     0  insufficient replicas
+	  mirror-0                                      UNAVAIL      0     0     0  insufficient replicas
+	    /dev/disk/by-id/wwn-0x5000c500a1b2c3d4-part5  REMOVED      0     0     0
+	    /dev/disk/by-id/wwn-0x5000c500e5f6a7b8-part5  REMOVED      0     0     0
+
+errors: List of errors unavailable: pool I/O is currently suspended

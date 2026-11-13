@@ -6,6 +6,7 @@
 package ai.singlr.sail.engine;
 
 import ai.singlr.sail.common.Strings;
+import ai.singlr.sail.config.HostYaml;
 import ai.singlr.sail.config.YamlUtil;
 import java.io.IOException;
 import java.time.Duration;
@@ -19,12 +20,15 @@ import java.util.concurrent.TimeoutException;
 /**
  * Incus's storage pools: the one place that builds the command creating one, and that reads them
  * back as Incus has them. Sail hands Incus the whole source and makes nothing inside a pool itself;
- * Incus creates the zpool on a device or a file ({@code zpool create -m none -O compression=on},
- * never {@code -f}: Sail never passes {@code source.wipe}) and owns every dataset in it.
+ * Incus creates the zpool on a device, a mirror of two or a file ({@code zpool create -m none -O
+ * compression=on}, with {@code mirror} before a mirror's two devices; never {@code -f}: Sail never
+ * passes {@code source.wipe}) and owns every dataset in it.
  */
 public final class IncusStorage {
 
   private static final Duration CREATE_TIMEOUT = Duration.ofMinutes(3);
+  private static final String MIRROR = "mirror=";
+  private static final String VDEVS = "storage_zfs_vdev";
 
   private final ShellExec shell;
 
@@ -36,10 +40,73 @@ public final class IncusStorage {
    * A pool as Incus has it: its {@code source} is what it was made from, the device or file for a
    * zfs pool, the directory for a dir pool; {@code zpool} is the zpool a zfs pool is, null for
    * another driver; {@code size} is the size Incus made a file-backed pool's file, null for any
-   * other; {@code space} is empty when Incus cannot measure it.
+   * other; {@code space} is empty when Incus cannot measure it; {@code status} is Incus's own
+   * ({@value #CREATED} once Incus finished making it).
    */
   public record Pool(
-      String name, String driver, String source, String zpool, String size, Optional<Space> space) {
+      String name,
+      String driver,
+      String source,
+      String zpool,
+      String size,
+      Optional<Space> space,
+      String status) {
+
+    /** Incus's status of a pool it finished making ({@code api.StoragePoolStatusCreated}). */
+    public static final String CREATED = "Created";
+
+    /** A pool Incus finished making. */
+    public Pool(
+        String name,
+        String driver,
+        String source,
+        String zpool,
+        String size,
+        Optional<Space> space) {
+      this(name, driver, source, zpool, size, space, CREATED);
+    }
+
+    /**
+     * Refuses a pool Incus did not finish making: one whose record incusd left {@code Pending} (it
+     * stopped between its driver's create, a zfs pool's {@code zpool create}, and marking the pool
+     * created) or {@code Errored}, which is never taken for one that exists, and over which nothing
+     * is made. Incus's {@code incus storage delete} of a {@code Pending} pool removes only its
+     * record and runs no driver delete ({@code storagePoolDelete}), so a zpool it made stays for
+     * the operator to destroy; of an {@code Errored} one it runs the driver's delete, which
+     * destroys the zpool when it holds only Incus's own datasets.
+     */
+    public void requireCreated() {
+      if (CREATED.equals(status)) {
+        return;
+      }
+      var zfs = HostYaml.BACKEND_ZFS.equals(driver);
+      var zpool = Objects.requireNonNullElse(this.zpool, name);
+      var pending = "Pending".equals(status);
+      throw new IllegalStateException(
+          "Incus's pool '"
+              + name
+              + "' is "
+              + status
+              + ", not Created: Incus did not finish making it, so it is not taken for a pool that"
+              + " exists and nothing is made over it. Remove Incus's record of it with sudo incus"
+              + " storage delete "
+              + name
+              + (zfs && pending
+                  ? ", which leaves any zpool "
+                      + zpool
+                      + " Incus made; see what that holds with sudo zfs list -r "
+                      + zpool
+                      + " and, if nothing on it is wanted, destroy it yourself with sudo zpool"
+                      + " destroy "
+                      + zpool
+                  : "")
+              + (zfs && !pending
+                  ? ", which also destroys zpool "
+                      + zpool
+                      + " if it holds only Incus's own datasets"
+                  : "")
+              + ", then run this again.");
+    }
 
     /** Refuses a pool of {@code driver} under this pool's name, which Incus has with another. */
     public void requireDriver(String driver) {
@@ -65,7 +132,62 @@ public final class IncusStorage {
                           + " free of "
                           + Strings.gibibytes(s.total()))
               .orElse("free space unknown");
-      return name + " (" + driver + ", " + source + "): " + measured;
+      return name + " (" + driver + ", " + said(source) + "): " + measured;
+    }
+  }
+
+  /**
+   * The source Incus is handed for {@code source}, as Incus then records it: the device's path, or
+   * {@code mirror=<one>,<other>} ({@code driver_zfs.go} {@code parseSource}); none for any other.
+   */
+  static String sourceOf(PoolSource source) {
+    return switch (source) {
+      case PoolSource.Device device -> device.path();
+      case PoolSource.Mirror mirror -> MIRROR + mirror.one().path() + "," + mirror.other().path();
+      default -> null;
+    };
+  }
+
+  /**
+   * The paths a pool's {@code source} names: a mirror's two devices, the one device or file of any
+   * other pool, none for a zpool's name.
+   */
+  public static List<String> devices(String source) {
+    if (source.startsWith(MIRROR)) {
+      return List.of(source.substring(MIRROR.length()).split(","));
+    }
+    return source.startsWith("/") ? List.of(source) : List.of();
+  }
+
+  /** A pool's {@code source} as the operator reads it: a mirror of its two devices, by name. */
+  public static String said(String source) {
+    var devices = devices(source);
+    return source.startsWith(MIRROR) && devices.size() == 2
+        ? "a mirror of " + devices.getFirst() + " and " + devices.getLast()
+        : source;
+  }
+
+  /**
+   * Refuses, before anything is made, an Incus that cannot make a mirrored pool: one without the
+   * {@value #VDEVS} API extension (Incus 6.0.0, as Ubuntu 24.04 packages it), which would read a
+   * mirror's source as the name of a dataset.
+   */
+  public void requireMirrors() throws IOException, InterruptedException, TimeoutException {
+    var server = shell.exec(List.of("incus", "query", "/1.0"));
+    var extensions =
+        server.ok()
+                && YamlUtil.parseMap(server.stdout()).get("api_extensions")
+                    instanceof List<?> listed
+            ? listed
+            : List.of();
+    if (!extensions.contains(VDEVS)) {
+      throw new IllegalStateException(
+          "This box's Incus cannot make a mirrored pool: it lacks the "
+              + VDEVS
+              + " API extension, which Incus has from 6.0.1 on"
+              + (server.ok() ? "" : " (incus query /1.0: " + server.reason() + ")")
+              + ". Nothing was written. Install Incus from Zabbly's stable repository, as host init"
+              + " does on a box without it, then run this again.");
     }
   }
 
@@ -77,7 +199,8 @@ public final class IncusStorage {
     var command = new ArrayList<>(List.of("incus", "storage", "create", name, source.driver()));
     switch (source) {
       case PoolSource.Dir dir -> {}
-      case PoolSource.Device device -> command.add("source=" + device.path());
+      case PoolSource.Device device -> command.add("source=" + sourceOf(device));
+      case PoolSource.Mirror mirror -> command.add("source=" + sourceOf(mirror));
       case PoolSource.File file -> command.add("size=" + file.sizeMb() + "MiB");
       case PoolSource.Zpool zpool ->
           throw new IllegalStateException(
@@ -137,7 +260,8 @@ public final class IncusStorage {
               source(config),
               (String) config.get("zfs.pool_name"),
               Strings.isBlank((String) config.get("size")) ? null : (String) config.get("size"),
-              space(name)));
+              space(name),
+              Objects.toString(entry.get("status"), Pool.CREATED)));
     }
     return pools;
   }

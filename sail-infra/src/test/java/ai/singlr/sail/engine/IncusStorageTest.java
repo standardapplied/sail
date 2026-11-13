@@ -31,6 +31,113 @@ class IncusStorageTest {
   }
 
   @Test
+  void aMirrorIsOneCreateOfIncussMirrorSourceAndNeverForced() {
+    var mirror =
+        new PoolSource.Mirror(
+            new PoolSource.Device("/dev/disk/by-id/wwn-0x5000c500a1b2c3d4-part5", "a"),
+            new PoolSource.Device("/dev/disk/by-id/wwn-0x5000c500e5f6a7b8-part5", "b"),
+            1L << 40,
+            1L << 40);
+
+    var create = IncusStorage.createCommand("devpool", mirror);
+
+    assertEquals(
+        List.of(
+            "incus",
+            "storage",
+            "create",
+            "devpool",
+            "zfs",
+            "source=mirror=/dev/disk/by-id/wwn-0x5000c500a1b2c3d4-part5,"
+                + "/dev/disk/by-id/wwn-0x5000c500e5f6a7b8-part5"),
+        create);
+    assertTrue(create.stream().noneMatch(word -> word.contains("wipe")), create.toString());
+    assertEquals(
+        "zfs on a mirror of /dev/disk/by-id/wwn-0x5000c500a1b2c3d4-part5 and"
+            + " /dev/disk/by-id/wwn-0x5000c500e5f6a7b8-part5",
+        mirror.said());
+  }
+
+  @Test
+  void aSourceIsReadAsTheDevicesItNamesAndSaidAsTheOperatorReadsIt() {
+    assertEquals(
+        List.of("/dev/sdb1", "/dev/sdc1"), IncusStorage.devices("mirror=/dev/sdb1,/dev/sdc1"));
+    assertEquals(List.of("/dev/sdb"), IncusStorage.devices("/dev/sdb"));
+    assertEquals(List.of(), IncusStorage.devices("tank"));
+    assertEquals(
+        "a mirror of /dev/sdb1 and /dev/sdc1", IncusStorage.said("mirror=/dev/sdb1,/dev/sdc1"));
+    assertEquals("/dev/sdb", IncusStorage.said("/dev/sdb"));
+  }
+
+  @Test
+  void aDevicePathIncusWouldSplitIsNoMirror() {
+    var refused =
+        assertThrows(
+            IllegalArgumentException.class,
+            () ->
+                new PoolSource.Mirror(
+                    new PoolSource.Device("/dev/disk/by-id/odd,name", "a"),
+                    new PoolSource.Device("/dev/sdc", "b"),
+                    1,
+                    1));
+
+    assertEquals(
+        "/dev/disk/by-id/odd,name holds ',' or '=', which Incus reads as separators in a mirror's"
+            + " source: name the device by another path.",
+        refused.getMessage());
+  }
+
+  @Test
+  void anIncusWithoutZfsVdevsIsRefusedBeforeAMirrorIsAsked() throws Exception {
+    new IncusStorage(
+            new ScriptedShellExecutor()
+                .onOk("incus query /1.0", "{\"api_extensions\": [\"storage_zfs_vdev\"]}"))
+        .requireMirrors();
+    var old =
+        new ScriptedShellExecutor()
+            .onOk("incus query /1.0", "{\"api_extensions\": [\"storage_zfs_clone_copy\"]}");
+
+    var refused =
+        assertThrows(IllegalStateException.class, () -> new IncusStorage(old).requireMirrors());
+
+    assertEquals(
+        "This box's Incus cannot make a mirrored pool: it lacks the storage_zfs_vdev API"
+            + " extension, which Incus has from 6.0.1 on. Nothing was written. Install Incus from"
+            + " Zabbly's stable repository, as host init does on a box without it, then run this"
+            + " again.",
+        refused.getMessage());
+    assertTrue(
+        assertThrows(
+                IllegalStateException.class,
+                () -> new IncusStorage(new ScriptedShellExecutor()).requireMirrors())
+            .getMessage()
+            .contains("(incus query /1.0: command not found)"));
+  }
+
+  @Test
+  void aPoolsStatusIsIncussOwnAndOnlyACreatedPoolIsTakenAsMade() throws Exception {
+    var shell =
+        new ScriptedShellExecutor()
+            .onOk(
+                "incus storage list --format json",
+                """
+                [{"name": "tank", "driver": "zfs", "status": "Pending",
+                  "config": {"source": "/dev/sdb", "zfs.pool_name": "tank"}},
+                 {"name": "devpool", "driver": "dir", "status": "Created", "config": {}}]
+                """);
+
+    var pools = new IncusStorage(shell).pools();
+
+    assertEquals(
+        List.of("Pending", "Created"), pools.stream().map(IncusStorage.Pool::status).toList());
+    pools.getLast().requireCreated();
+    assertTrue(
+        assertThrows(IllegalStateException.class, () -> pools.getFirst().requireCreated())
+            .getMessage()
+            .startsWith("Incus's pool 'tank' is Pending, not Created: "));
+  }
+
+  @Test
   void aZpoolIsNeverMadeIntoAPool() {
     var refused =
         assertThrows(

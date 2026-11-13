@@ -27,6 +27,7 @@ import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.ssh.SshPublicKey;
 import java.nio.file.Files;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
@@ -65,11 +66,13 @@ public final class HostInitCommand implements Runnable {
       names = "--disk",
       description =
           "Whole disk or partition for the ZFS pool (e.g. /dev/sdb, /dev/nvme0n1p5), carrying"
-              + " nothing: Sail erases nothing. With --storage zfs. Do not change disks while host"
-              + " init runs: on disks with no hardware identity (no WWN or NVMe id), a disk replaced"
-              + " under the same name after the last check is judged by zpool create alone, which"
-              + " does not refuse an empty partition table or filesystems inside MBR partitions.")
-  private String disk;
+              + " nothing: Sail erases nothing. With --storage zfs. Give it twice, a device on each"
+              + " of two disks of one size, for a pool that mirrors them. Do not change disks while"
+              + " host init runs: on disks with no hardware identity (no WWN or NVMe id), a disk"
+              + " replaced under the same name after the last check is judged by zpool create"
+              + " alone, which does not refuse an empty partition table or filesystems inside MBR"
+              + " partitions.")
+  private List<String> disks;
 
   @Option(
       names = "--pool-file-size",
@@ -265,7 +268,9 @@ public final class HostInitCommand implements Runnable {
                 + hostYaml.pool()
                 + " ("
                 + hostYaml.storageBackend()
-                + (hostYaml.poolSource() == null ? "" : " on " + hostYaml.poolSource())
+                + (hostYaml.poolSource() == null
+                    ? ""
+                    : " on " + IncusStorage.said(hostYaml.poolSource()))
                 + ")"));
     System.out.println(Ansi.AUTO.string("    @|bold Bridge:|@   " + hostYaml.bridge()));
     System.out.println(Ansi.AUTO.string("    @|bold Image:|@    " + hostYaml.image()));
@@ -321,12 +326,13 @@ public final class HostInitCommand implements Runnable {
   /**
    * The pool these flags ask for, read on the machine {@code probe} runs on: dir; the zfs pool
    * Incus already holds under this name, which a re-run keeps; a file; a named device {@link
-   * PoolDevices#cleared} clears; or for zfs with neither, an unused disk the operator picks.
-   * Refused when the flags disagree, with each other or with the pool Incus has, before anything is
-   * installed.
+   * PoolDevices#cleared} clears, or two {@link PoolDevices#mirror} clears for a mirror; or for zfs
+   * with neither, an unused disk the operator picks. Refused when the flags disagree, with each
+   * other or with the pool Incus has, before anything is installed.
    */
   PoolSource source(ShellExec probe) throws Exception {
     var zfs = HostYaml.BACKEND_ZFS.equals(storage);
+    var disk = disks == null || disks.isEmpty() ? null : disks.getFirst();
     if (!zfs && (disk != null || poolFileSize != null)) {
       throw new IllegalArgumentException(
           "--disk and --pool-file-size choose a ZFS pool's source: pass them with"
@@ -335,13 +341,23 @@ public final class HostInitCommand implements Runnable {
     var held =
         new IncusStorage(probe)
             .poolsOrNone().stream().filter(found -> found.name().equals(pool)).findFirst();
-    held.ifPresent(found -> found.requireDriver(storage));
+    held.ifPresent(
+        found -> {
+          found.requireDriver(storage);
+          found.requireCreated();
+        });
     if (!zfs) {
       return new PoolSource.Dir();
     }
     if (disk != null && poolFileSize != null) {
       throw new IllegalArgumentException(
           "Pass --disk or --pool-file-size, not both: a pool is made from one source.");
+    }
+    if (disk != null && disks.size() > 2) {
+      throw new IllegalArgumentException(
+          "Pass --disk once, or twice for a mirror of two devices: Sail makes no pool of "
+              + disks.size()
+              + " devices.");
     }
     var devices = new PoolDevices(probe);
     if (held.isPresent()) {
@@ -350,19 +366,23 @@ public final class HostInitCommand implements Runnable {
     if (poolFileSize != null) {
       return file(poolFileSize);
     }
+    if (disk != null && disks.size() == 2) {
+      return devices.mirror(disks.getFirst(), disks.getLast());
+    }
     return devices.cleared(disk != null ? disk : detectAndSelectDisk(devices));
   }
 
   /**
    * The zfs pool Incus holds under this pool's name, which a re-run keeps; a source flag the re-run
-   * would ignore is refused, naming it. {@code --disk} and the pool's source are compared as the
-   * devices they resolve to, since Incus holds the path Sail handed it, a by-id name where the disk
-   * has one; a source that resolves to nothing is a device gone, which no {@code --disk} can be.
+   * would ignore is refused, naming it. The {@code --disk} devices and the pool's source are
+   * compared as the sets of devices they resolve to, in any order, since Incus holds the paths Sail
+   * handed it, by-id names where the disks have them; a source that resolves to nothing is a device
+   * gone, which no {@code --disk} can be.
    */
   private PoolSource kept(IncusStorage.Pool held, PoolDevices devices) throws Exception {
     var ignored = new ArrayList<String>();
-    if (disk != null && !sameDevice(held, devices.resolved("--disk", disk), devices)) {
-      ignored.add("--disk " + disk);
+    if (disks != null && !disks.isEmpty() && !sameDevices(held, devices)) {
+      ignored.add(diskFlags());
     }
     if (poolFileSize != null && !(file(poolFileSize).sizeMb() + "MiB").equals(held.size())) {
       ignored.add("--pool-file-size " + poolFileSize);
@@ -372,7 +392,7 @@ public final class HostInitCommand implements Runnable {
           "Incus already has zfs pool '"
               + pool
               + "' on "
-              + held.source()
+              + IncusStorage.said(held.source())
               + ", which a re-run keeps, so "
               + String.join(" and ", ignored)
               + " would be ignored. Drop it, or name a new pool with --pool <name>.");
@@ -380,28 +400,42 @@ public final class HostInitCommand implements Runnable {
     return new PoolSource.Zpool(Objects.requireNonNullElse(held.zpool(), held.name()));
   }
 
-  private boolean sameDevice(IncusStorage.Pool held, String named, PoolDevices devices)
-      throws Exception {
-    if (!held.source().startsWith("/")) {
-      return false;
+  private boolean sameDevices(IncusStorage.Pool held, PoolDevices devices) throws Exception {
+    var named = new HashSet<String>();
+    for (var one : disks) {
+      named.add(devices.resolved("--disk", one));
     }
-    var source =
-        devices
-            .device(held.source())
-            .orElseThrow(
-                () ->
-                    new IllegalArgumentException(
-                        "Incus already has zfs pool '"
-                            + pool
-                            + "' on "
-                            + held.source()
-                            + ", which names no device on this box now: the pool's device is gone,"
-                            + " so --disk "
-                            + disk
-                            + " cannot be it. See sudo zpool status "
-                            + Objects.requireNonNullElse(held.zpool(), held.name())
-                            + ", or name a new pool with --pool <name>."));
-    return source.equals(named);
+    var sources = IncusStorage.devices(held.source());
+    var resolved = new HashSet<String>();
+    for (var source : sources) {
+      resolved.add(
+          devices
+              .device(source)
+              .orElseThrow(
+                  () ->
+                      new IllegalArgumentException(
+                          "Incus already has zfs pool '"
+                              + pool
+                              + "' on "
+                              + IncusStorage.said(held.source())
+                              + (sources.size() == 1
+                                  ? ", which names no device on this box now: the pool's device is"
+                                      + " gone, so "
+                                  : ", and "
+                                      + source
+                                      + " names no device on this box now: a device of the pool is"
+                                      + " gone, so ")
+                              + diskFlags()
+                              + " cannot be it. See sudo zpool status "
+                              + Objects.requireNonNullElse(held.zpool(), held.name())
+                              + ", or name a new pool with --pool <name>.")));
+    }
+    return sources.size() == disks.size() && resolved.equals(named);
+  }
+
+  /** The {@code --disk} flags as the operator gave them. */
+  private String diskFlags() {
+    return String.join(" ", disks.stream().map(named -> "--disk " + named).toList());
   }
 
   /** A file pool of {@code size}, refused unless it reads as at least {@link #MIN_FILE_MB}. */

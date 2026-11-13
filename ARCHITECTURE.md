@@ -995,7 +995,8 @@ host and path as one repository whatever the scheme, user, port or `.git`).
 every pool: `host init` has it create the pool with one `incus storage create`, built only by
 `IncusStorage.createCommand`, and Sail makes no dataset of its own inside one. The sources are
 `--storage dir` (the host filesystem, `incus storage create <pool> dir`), and for `--storage zfs`
-a whole disk or a partition (`--disk <device>`, `source=<device>`), a sparse file Incus makes
+a whole disk or a partition (`--disk <device>`, `source=<device>`), a mirror of two (`--disk <a>
+--disk <b>`, `source=mirror=<a>,<b>`), a sparse file Incus makes
 under `/var/lib/incus/disks/` (`--pool-file-size <size>`, `size=<n>MiB`), slower than a disk and
 said once to be meant for trials. Incus runs `zpool create -m none -O compression=on` itself,
 never with `-f`: Sail never passes `source.wipe`.
@@ -1003,8 +1004,19 @@ never with `-f`: Sail never passes `source.wipe`.
 - **Z1. What `host init` reports as done is what Incus has.** The base profile's root disk is
   converged (added when missing, an existing one kept) and the pool it names must be one Incus
   lists, else init fails; `host.yaml` states that pool, its driver and its source
-  (`pool_source`) as Incus has them. *`HostProvisionerTest.aZfsPoolOnAWholeDiskIsIncussOwnAndTheProfilePutsContainersOnIt`,
-  `HostProvisionerTest.aProfileThatNamesAPoolIncusLacksIsRefused`, `HostProvisionerIT`.*
+  (`pool_source`) as Incus has them. A pool Incus lists under the name in any status but
+  `Created` is one it did not finish making (incusd stopped between its driver's create, a zfs
+  pool's `zpool create`, and marking the pool created: `storagePoolCreateLocal`): a re-run never
+  answers "already exists" for it and makes nothing over it, refused at the flags and again at step
+  5, naming the status and the remedy Incus's `storagePoolDelete` gives: `incus storage delete`
+  of a `Pending` pool removes only Incus's record and runs no driver delete, so a zpool it made is
+  left for the operator to see (`zfs list -r`) and destroy (`zpool destroy`); of an `Errored` one it
+  runs the driver's delete, which destroys the zpool when it holds only Incus's own datasets.
+  *`HostProvisionerTest.aZfsPoolOnAWholeDiskIsIncussOwnAndTheProfilePutsContainersOnIt`,
+  `HostProvisionerTest.aProfileThatNamesAPoolIncusLacksIsRefused`,
+  `HostProvisionerTest.aPoolIncusLeftUnfinishedIsNeverTakenAsMadeNorMadeOver`,
+  `HostInitCommandTest.aReRunFindingAPoolIncusDidNotFinishSaysSoAndTakesItForNoPool`,
+  `HostProvisionerIT`.*
 - **Z2. Sail erases nothing.** No command of Sail wipes, repartitions or overwrites a signature:
   it never passes `source.wipe`, so Incus never runs `zpool create -f` (Incus runs `-f`, after
   zeroing the device's headers, only for `source.wipe`: `driver_zfs.go` `Create`, v6.0.0 and
@@ -1082,7 +1094,7 @@ never with `-f`: Sail never passes `source.wipe`.
   the pool Sail asks for on a blank loop device, and zpool refusing one that took ext4 after the
   checks, its ext4 kept; a loop device a process holds open plainly, through a device node of its
   own, refused until it lets go, and a partition of one whose whole device a process holds), `HostProvisionerTest.aDeviceMountedSinceItWasNamedIsRefusedAndUntouched`.*
-- **Z3. One pool, one owner.** Sail only reads ZFS (`zpool list`); every pool,
+- **Z3. One pool, one owner.** Sail only reads ZFS (`zpool list`, `zpool status`); every pool,
   dataset, snapshot and copy is made or removed by Incus. *`HostProvisionerTest.aZfsPoolOnAWholeDiskIsIncussOwnAndTheProfilePutsContainersOnIt`.*
 - **Z4. The ZFS cache cap is set before ZFS can take memory.** Step 3 writes
   `/etc/modprobe.d/sail-zfs.conf` (`options zfs zfs_arc_max=`, a tenth of memory, at most
@@ -1116,6 +1128,49 @@ never with `-f`: Sail never passes `source.wipe`.
   than "Server ready".
   *`HostProvisionerTest.aDirBoxWithContainersAddsAZfsPoolBesideItsOwnAndTouchesNoContainer`,
   `HostProvisionerIT`.*
+- **Z6. A mirror is two disks, made whole or not at all.** Two `--disk` flags make one pool that
+  mirrors them, and nothing else: Incus's own source `mirror=<a>,<b>` (`driver_zfs.go`
+  `parseSource`, API extension `storage_zfs_vdev`, Incus 6.0.1 and later; an Incus without it is
+  refused before the devices are cleared again), which Incus turns into one `zpool create -m none
+  -O compression=on <pool> mirror <a> <b>`, never `-f`. Sail makes no zpool and hands Incus no
+  existing one. Zpool checks both devices (`is_device_in_use`, `check_replication`) before it
+  labels either (`make_disks`), and the kernel creates no pool unless both open, so a refusal at
+  any point leaves neither device labelled and no path makes a one-device pool where a mirror was
+  asked for; a failure after the create is Incus's own revert, which destroys the whole pool.
+  Each device is cleared by `PoolDevices.cleared`'s one decision, every rule asked once of each:
+  the names resolved, lsblk read once and judged per device, the pair judged, the `/proc` walk read
+  once and matched per device, each device's listings and pool reads, then each device's
+  exclusive probes, then each by-id path; so at the re-check before the create the probes of both
+  are the last commands, and the window before Incus's `zpool create` is one device's plus the
+  other's probe. The pair is refused when it is not two physical disks (one device, partitions of
+  one disk, disks with one WWN or one serial, NVMe namespaces `nvme<C>n<N>` of one controller), or
+  when the sizes differ by more than the 16 MiB `zpool create` mirrors without force (`ZPOOL_FUZZ`):
+  a pair the spec wanted taken at 40 and 60 GiB cannot be made without force, so it is refused
+  naming both sizes; within the 16 MiB the output says how much of the larger goes unused. A
+  re-run compares the `--disk` devices and Incus's `volatile.initial_source` as sets of the devices
+  `realpath -e` resolves them to: either flag order is a no-op, one of the two or another pair is
+  refused naming the flags, a member that resolves to nothing is named as gone.
+  `host.yaml`'s `pool_source` is Incus's string, `mirror=<a>,<b>`, said as `a mirror of <a> and
+  <b>`. *`PoolDevicesTest.twoBlankDisksAreAMirrorOfTwoDevicesEachClearedAsOneIs`,
+  `PoolDevicesTest.twoPartitionsOfOneDiskAreRefusedAsAMirrorBeforeAnyProbe`,
+  `PoolDevicesTest.twoNamesOfOnePhysicalDiskAreRefusedAsAMirror`,
+  `HostProvisionerTest.aMirrorIsOneIncusCreateOfBothDevicesEachProbedLastAndNeverForced`,
+  `HostProvisionerTest.aSecondDeviceThatTookASignatureRefusesTheMirrorAndNoPoolOfOneDeviceIsMade`,
+  `HostInitCommandTest.aReRunOfAMirrorInEitherOrderOfItsDisksKeepsIt`, `PoolDevicesIT`.*
+- **Z7. What Sail says of a pool's health is what ZFS says now.** `PoolHealth` reads `zpool status
+  -P <zpool>` in the C locale: the ` state:` line is the pool's, and each leaf of the config table
+  not ONLINE (a path, or the GUID of a device absent at import, named by the path it `was`) is
+  named with its state; "no such pool" is not imported; an answer zpool cannot give says nothing.
+  `host status` puts it in rows under each zfs pool's (`health <state>`, each device not online
+  with its state, and the `zpool replace` pointer when DEGRADED; the banner's rows a pool may run
+  to) and `--json` carries `health` and `unhealthy`. The verbs that change a workspace or a
+  template (create, start, stop, delete, template build) read the health of the mirror they act
+  on: DEGRADED goes on, said once on stderr; any other state is refused naming it and `sudo zpool
+  status <pool>`. A pool of one device or a file is left to Incus there as in 0.67.0, its
+  health shown by `host status`. Sail replaces and resilvers nothing. *`PoolHealthTest`,
+  `HostStatusCommandTest.aDegradedMirrorNamesTheMissingDeviceAndTheReplaceThatMendsIt`,
+  `WorkspacesTest.aFaultedPoolRefusesEveryVerbThatChangesAWorkspaceOrTemplateAndChangesNothing`,
+  `PoolDevicesIT`.*
 
 Incus finds the ZFS tools when a pool is created, not only when it starts (its driver looks
 them up on each load until one succeeds; only `incus info`'s list of supported drivers is read

@@ -7,11 +7,13 @@ package ai.singlr.sail.engine;
 
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.HostYaml;
+import java.util.List;
+import java.util.Locale;
 
 /**
  * What an Incus storage pool is made from: the host's filesystem, a block device (a whole disk or a
- * partition) that ZFS takes whole, an existing zpool, or a file ZFS runs on. {@link IncusStorage}
- * turns each into the one {@code incus storage create} that makes it.
+ * partition) that ZFS takes whole, two that ZFS mirrors, an existing zpool, or a file ZFS runs on.
+ * {@link IncusStorage} turns each into the one {@code incus storage create} that makes it.
  */
 public sealed interface PoolSource {
 
@@ -48,6 +50,51 @@ public sealed interface PoolSource {
     @Override
     public String said() {
       return "zfs on " + path + ", one device: no redundancy";
+    }
+  }
+
+  /**
+   * Two block devices on two physical disks, each cleared as one {@link Device} is, for a ZFS pool
+   * that mirrors them; {@code oneBytes} and {@code otherBytes} their sizes, of which ZFS uses the
+   * smaller. Incus is handed both in one source, {@code mirror=<one>,<other>}, a list it splits on
+   * {@code =} and {@code ,}, so neither path may hold either.
+   */
+  record Mirror(Device one, Device other, long oneBytes, long otherBytes) implements PoolSource {
+    public Mirror {
+      for (var device : List.of(one, other)) {
+        if (device.path().contains(",") || device.path().contains("=")) {
+          throw new IllegalArgumentException(
+              device.path()
+                  + " holds ',' or '=', which Incus reads as separators in a mirror's source:"
+                  + " name the device by another path.");
+        }
+      }
+    }
+
+    /** Both devices, in the order the operator named them. */
+    public List<Device> devices() {
+      return List.of(one, other);
+    }
+
+    @Override
+    public String driver() {
+      return HostYaml.BACKEND_ZFS;
+    }
+
+    @Override
+    public String said() {
+      var unused = Math.abs(oneBytes - otherBytes);
+      return "zfs on a mirror of "
+          + one.path()
+          + " and "
+          + other.path()
+          + (unused == 0
+              ? ""
+              : ", "
+                  + String.format(Locale.ROOT, "%.1f MiB", unused / (double) (1L << 20))
+                  + " of "
+                  + (oneBytes > otherBytes ? one : other).path()
+                  + " unused");
     }
   }
 

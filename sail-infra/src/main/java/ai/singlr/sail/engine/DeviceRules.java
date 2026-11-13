@@ -5,13 +5,16 @@
 
 package ai.singlr.sail.engine;
 
+import ai.singlr.sail.common.Strings;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.regex.Pattern;
 import java.util.stream.Stream;
 
 /** What lsblk and the probes show that keeps a pool off a device, each said as a reason. */
@@ -34,6 +37,8 @@ final class DeviceRules {
   private static final long SECTOR = 512;
   private static final String ZFS = "zfs_member";
   private static final Set<String> HELD = Set.of("bcache", "ceph_bluestore", "crypto_LUKS");
+  private static final long MIRROR_FUZZ = 16L << 20;
+  private static final Pattern NVME_NAMESPACE = Pattern.compile("(nvme[0-9]+)n[0-9]+");
   private static final Map<String, String> MEMBERS =
       Map.of(
           "linux_raid_member",
@@ -286,6 +291,69 @@ final class DeviceRules {
           .forEach(type -> holds.add(type + on));
     }
     return List.copyOf(holds);
+  }
+
+  /**
+   * Why the devices at {@code one} and {@code other} cannot be a mirror: they are not on two
+   * physical disks, since a mirror on one disk dies with it (the same device, partitions of one
+   * disk, two paths to one disk by its WWN or serial, or two namespaces of one NVMe controller); or
+   * their sizes differ by more than the 16 MiB {@code zpool create} mirrors without force ({@code
+   * ZPOOL_FUZZ}, OpenZFS {@code zpool_vdev.c}), which Sail never passes.
+   */
+  static List<String> mirrorable(BlockTree.Place one, BlockTree.Place other) {
+    var reasons = new ArrayList<String>();
+    var disk = one.disk();
+    var twin = other.disk();
+    if (one.device() == other.device()) {
+      reasons.add("both name " + one.device().path());
+    } else if (disk == twin) {
+      reasons.add("both are on " + disk.path() + ", and a mirror on one disk dies with it");
+    } else if (disk.wwn() != null && disk.wwn().equals(twin.wwn())) {
+      reasons.add(
+          disk.path()
+              + " and "
+              + twin.path()
+              + " have one WWN, "
+              + disk.wwn()
+              + ": they are two paths to one disk");
+    } else if (disk.serial() != null && disk.serial().equals(twin.serial())) {
+      reasons.add(
+          disk.path()
+              + " and "
+              + twin.path()
+              + " report one serial, "
+              + disk.serial()
+              + ": they are one disk seen twice");
+    } else if (controller(disk).isPresent() && controller(disk).equals(controller(twin))) {
+      reasons.add(
+          disk.path()
+              + " and "
+              + twin.path()
+              + " are namespaces of one NVMe controller, "
+              + controller(disk).get()
+              + ", which dies with both");
+    }
+    var sizes = Math.abs(one.device().size() - other.device().size());
+    if (reasons.isEmpty() && sizes > MIRROR_FUZZ) {
+      reasons.add(
+          one.device().path()
+              + " is "
+              + Strings.gibibytes(one.device().size())
+              + " and "
+              + other.device().path()
+              + " "
+              + Strings.gibibytes(other.device().size())
+              + ", and zpool create refuses, without the force Sail never passes, a mirror whose"
+              + " devices differ by more than 16 MiB: name two devices of one size, such as a"
+              + " partition of that size on each disk");
+    }
+    return reasons;
+  }
+
+  /** The NVMe controller {@code disk} is a namespace of, by its kernel name. */
+  private static Optional<String> controller(BlockDevice disk) {
+    var matched = NVME_NAMESPACE.matcher(Objects.requireNonNullElse(disk.kname(), ""));
+    return matched.matches() ? Optional.of(matched.group(1)) : Optional.empty();
   }
 
   /** What a device that is neither a disk nor a partition is, as a refusal names it. */

@@ -751,9 +751,10 @@ public final class Banner {
 
   /**
    * Prints a bordered host status box showing server info, each storage pool, and container
-   * summary. The Incus version is the one installed now, not the one {@code host.yaml} recorded at
-   * init; {@code incusUpgrade}, the command that moves it, has a row of its own when there is one,
-   * so neither is cut to fit.
+   * summary. A pool's text may run to several lines, the first its "Pool:" row and each further one
+   * a row of its own under it. The Incus version is the one installed now, not the one {@code
+   * host.yaml} recorded at init; {@code incusUpgrade}, the command that moves it, has a row of its
+   * own when there is one, so neither is cut to fit.
    */
   public static void printHostStatus(
       HostYaml hostYaml,
@@ -786,7 +787,9 @@ public final class Banner {
     w = Math.max(w, rowWidth("Initialized:", formatTimestamp(hostYaml.initializedAt())));
 
     for (var pool : pools) {
-      w = Math.max(w, rowWidth("Pool:", pool));
+      for (var line : pool.lines().toList()) {
+        w = Math.max(w, rowWidth("Pool:", line));
+      }
     }
     if (advisory) {
       w = Math.max(w, rowWidth("Note:", ADVISORY));
@@ -804,7 +807,10 @@ public final class Banner {
     emptyRow(out, ansi, w);
 
     for (var pool : pools) {
-      labelRow(out, ansi, w, "Pool:", pool, null, null);
+      var lines = pool.lines().toList();
+      for (var i = 0; i < lines.size(); i++) {
+        labelRow(out, ansi, w, i == 0 ? "Pool:" : "", lines.get(i), null, null);
+      }
     }
     if (advisory) {
       labelRow(out, ansi, w, "Note:", ADVISORY, null, null);

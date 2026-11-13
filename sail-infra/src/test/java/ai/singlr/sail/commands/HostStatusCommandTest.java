@@ -13,9 +13,11 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import ai.singlr.sail.config.HostYaml;
 import ai.singlr.sail.config.ListenConfig;
 import ai.singlr.sail.config.YamlUtil;
+import ai.singlr.sail.engine.DeviceFixtures;
 import ai.singlr.sail.engine.HostDetector;
 import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.ScriptedShellExecutor;
+import ai.singlr.sail.engine.ShellExec;
 import java.io.ByteArrayOutputStream;
 import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
@@ -297,6 +299,90 @@ class HostStatusCommandTest {
             "  │  Pool:        tank (zfs, /var/lib/incus/disks/tank.img): 50.0 GiB free of 50.0"
                 + " GiB"),
         rows(shell, "Pool:", "Note:"));
+  }
+
+  private static final String A = "/dev/disk/by-id/wwn-0x5000c500a1b2c3d4-part5";
+  private static final String B = "/dev/disk/by-id/wwn-0x5000c500e5f6a7b8-part5";
+
+  /** A row under a pool's first, as the banner prints it. */
+  private static final String CONTINUED = "  │" + " ".repeat(15);
+
+  /** A box whose Incus holds devpool, a mirror of A and B, and whose zpool says {@code status}. */
+  private static ScriptedShellExecutor mirror(String status) {
+    return new ScriptedShellExecutor()
+        .onOk("incus list", "[]")
+        .onOk(
+            "incus storage list",
+            "[{\"name\": \"devpool\", \"driver\": \"zfs\", \"config\": {\"source\": \"devpool\","
+                + " \"volatile.initial_source\": \"mirror="
+                + A
+                + ","
+                + B
+                + "\", \"zfs.pool_name\": \"devpool\"}}]")
+        .onOk(
+            "incus query /1.0/storage-pools/devpool/resources",
+            "{\"space\": {\"used\": 4294967296, \"total\": 21474836480}}")
+        .on(
+            "zpool status -P devpool",
+            status.startsWith("cannot")
+                ? new ShellExec.Result(1, "", status)
+                : new ShellExec.Result(0, DeviceFixtures.read(status), ""));
+  }
+
+  @Test
+  void aMirrorIsSaidAsItsTwoDevicesWithItsHealthAsZfsSaysIt() throws Exception {
+    var online = mirror("handwritten-mirror-online.zpool-status.txt");
+
+    var rows = rows(online, "Pool:", "health ");
+    assertEquals(2, rows.size(), rows.toString());
+    assertTrue(
+        rows.getFirst().startsWith("  │  Pool:        devpool (zfs, a mirror of " + A),
+        rows.toString());
+    assertEquals(CONTINUED + "health ONLINE", rows.getLast());
+    var pool = ((List<?>) json(online).get("pools")).getFirst();
+    assertEquals(
+        Map.of(
+            "name",
+            "devpool",
+            "driver",
+            "zfs",
+            "source",
+            "mirror=" + A + "," + B,
+            "used_bytes",
+            4294967296L,
+            "total_bytes",
+            21474836480L,
+            "health",
+            "ONLINE",
+            "unhealthy",
+            List.of()),
+        pool);
+  }
+
+  @Test
+  void aDegradedMirrorNamesTheMissingDeviceAndTheReplaceThatMendsIt() throws Exception {
+    var degraded = mirror("handwritten-mirror-degraded-at-import.zpool-status.txt");
+
+    assertEquals(
+        List.of(
+            CONTINUED + "health DEGRADED",
+            CONTINUED + B + " UNAVAIL",
+            CONTINUED + "replace the missing device: sudo zpool replace devpool <device> <new>"),
+        rows(degraded, "health ", " UNAVAIL", "zpool replace"));
+    var pool = (Map<?, ?>) ((List<?>) json(degraded).get("pools")).getFirst();
+    assertEquals("DEGRADED", pool.get("health"));
+    assertEquals(List.of(Map.of("device", B, "state", "UNAVAIL")), pool.get("unhealthy"));
+  }
+
+  @Test
+  void aFaultedOrUnimportedPoolIsSaidSo() throws Exception {
+    assertEquals(
+        List.of(
+            CONTINUED + "health FAULTED", CONTINUED + A + " UNAVAIL", CONTINUED + B + " UNAVAIL"),
+        rows(mirror("handwritten-mirror-faulted.zpool-status.txt"), "health ", " UNAVAIL"));
+    assertEquals(
+        List.of(CONTINUED + "health not imported"),
+        rows(mirror("cannot open 'devpool': no such pool"), "health "));
   }
 
   @Test
