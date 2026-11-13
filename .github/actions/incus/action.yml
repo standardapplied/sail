@@ -19,17 +19,13 @@ runs:
     # their own schedule, and a plain update refreshes them all — so only Ubuntu's own sources and
     # Zabbly's are refreshed here.
     #
-    # The runner's sudo keeps the runner's HOME, so a root incus client (incus admin init here, the
-    # suites' RootShell later) writes ~/.config/incus/config.yml as root, 0600, and the runner's own
-    # incus can no longer read its configuration. Root gets its own home under sudo, as Ubuntu's
-    # sudo gives it on every box.
+    # Zabbly's incus client, run as root in this step, leaves the runner a ~/.config/incus it cannot
+    # read (seen in CI: "open /home/runner/.config/incus/config.yml: permission denied" at the
+    # runner's first incus, with root's HOME under sudo /root), so the runner is given its own back.
+    # The client writes that file only when it is missing, so no later root incus takes it again.
     - name: Install and initialize incus
       shell: bash
       run: |
-        echo 'Defaults always_set_home' | sudo tee /etc/sudoers.d/zz-sail-root-home > /dev/null
-        sudo chmod 0440 /etc/sudoers.d/zz-sail-root-home
-        home=$(sudo sh -c 'echo "$HOME"')
-        [ "$home" = /root ] || { echo "sudo still gives root HOME=$home, not /root" >&2; exit 1; }
         sudo find /etc/apt/sources.list.d -type f ! -name ubuntu.sources -delete
         sudo curl -fsSL --create-dirs -o /etc/apt/keyrings/zabbly.asc https://pkgs.zabbly.com/key.asc
         printf 'Enabled: yes\nTypes: deb\nURIs: https://pkgs.zabbly.com/incus/stable\nSuites: %s\nComponents: main\nArchitectures: %s\nSigned-By: /etc/apt/keyrings/zabbly.asc\n' \
@@ -39,6 +35,10 @@ runs:
         sudo apt-get install -y incus
         sudo incus admin init --minimal
         sudo chmod o+rw /var/lib/incus/unix.socket
+        sudo ls -la "$HOME/.config/incus" || true
+        if sudo test -e "$HOME/.config/incus"; then
+          sudo chown -R "$(id -u):$(id -g)" "$HOME/.config/incus"
+        fi
 
     # The runner's Docker install sets the iptables FORWARD policy to DROP, which silently drops
     # the incus NAT bridge's egress, so containers can resolve DNS but cannot connect out (apt and
