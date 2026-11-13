@@ -17,6 +17,7 @@ import ai.singlr.sail.engine.HarnessHooks;
 import ai.singlr.sail.engine.LiveMemberPrompt;
 import ai.singlr.sail.engine.LiveStream;
 import ai.singlr.sail.harness.Harnesses;
+import ai.singlr.sail.harness.RunUsage;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.ActingAs;
 import ai.singlr.sail.store.MessageStore;
@@ -246,6 +247,45 @@ class LiveMemberTest {
             .filter(event -> turnTypes.contains(event.type()))
             .map(event -> event.type() + ":" + event.data().get("turn"))
             .toList());
+  }
+
+  /**
+   * Scenario 5: each turn's result carries the call's running totals, so the run holds the last of
+   * them, the sum of its three turns, and its finish keeps it; a member that answered no turn with
+   * a report reported nothing.
+   */
+  @Test
+  void aLiveMembersRunHoldsTheSumOfTheTurnsItAnswered() {
+    var process = room.prompted(SPEC, "full", "first");
+    room.says(process, Lines.init("sess-1"), Lines.delta("One"), Lines.spent("One", 10, 1.0));
+    room.says(SPEC, "second");
+    room.says(process, Lines.delta("Two"), Lines.spent("Two", 25, 2.5));
+    room.says(SPEC, "third");
+    room.says(process, Lines.delta("Three"), Lines.spent("Three", 45, 4.0));
+
+    var expected =
+        new RunUsage("claude-opus-5-5", 45L, 90L, 450L, 135L, 4.0, RunUsage.Source.RESULT);
+    assertEquals(expected, room.runs.findById(process.runId).orElseThrow().usage());
+    process.onClose(() -> process.exits(0));
+    room.later(Duration.ofMinutes(20));
+    room.live.sweep();
+    room.awaitStopped(process);
+
+    var ended = room.runs.findById(process.runId).orElseThrow();
+    assertEquals("stopped", ended.status());
+    assertEquals(expected, ended.usage());
+  }
+
+  @Test
+  void aLiveMemberThatReportedNothingFinishesWithNone() {
+    var process = room.prompted(SPEC, "full", "first");
+    room.says(process, Lines.init("sess-1"), Lines.delta("One"), Lines.result("One"));
+    process.onClose(() -> process.exits(0));
+    room.later(Duration.ofMinutes(20));
+    room.live.sweep();
+    room.awaitStopped(process);
+
+    assertEquals(RunUsage.NONE, room.runs.findById(process.runId).orElseThrow().usage());
   }
 
   @Test

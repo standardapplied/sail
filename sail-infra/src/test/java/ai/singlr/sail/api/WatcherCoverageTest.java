@@ -45,6 +45,9 @@ class WatcherCoverageTest {
         null,
         null,
         "review-1",
+        null,
+        null,
+        null,
         null);
   }
 

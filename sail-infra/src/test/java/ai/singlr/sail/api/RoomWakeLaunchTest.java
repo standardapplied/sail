@@ -35,6 +35,7 @@ import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
+import ai.singlr.sail.store.TestRuns;
 import ai.singlr.sail.sync.NodeRound;
 import ai.singlr.sail.sync.SyncBox;
 import ai.singlr.sail.sync.SyncWire;
@@ -487,7 +488,7 @@ class RoomWakeLaunchTest {
     var run = runStore.findById(runId).orElseThrow();
     var agent = Actors.principalOf(run);
     var posted = Acting.by(agent, () -> messageStore.append("draft", agent.handle(), "here", null));
-    Acting.system(() -> runStore.complete(runId, "completed", 0));
+    Acting.system(() -> TestRuns.complete(runStore, runId, "completed", 0));
 
     try (var main = new SyncBox("main");
         var link =
@@ -667,7 +668,7 @@ class RoomWakeLaunchTest {
                 "sail-agent-" + prior));
     Acting.system(
         () -> runStore.recordSession(prior, "sess-42", "startup", "/tmp/transcript.jsonl"));
-    Acting.system(() -> runStore.complete(prior, "completed", 0));
+    Acting.system(() -> TestRuns.complete(runStore, prior, "completed", 0));
 
     var runId = ops.startRoomRun("acme", "auth", HANDLE);
 
@@ -699,7 +700,7 @@ class RoomWakeLaunchTest {
                 null,
                 "sail-agent-" + codex));
     Acting.system(() -> runStore.recordSession(codex, "codex-sess", "startup", null));
-    Acting.system(() -> runStore.complete(codex, "completed", 0));
+    Acting.system(() -> TestRuns.complete(runStore, codex, "completed", 0));
     var malformed = DateTimeUtils.newId().toString();
     Acting.system(
         () ->
@@ -717,7 +718,7 @@ class RoomWakeLaunchTest {
                 null,
                 "sail-agent-" + malformed));
     Acting.system(() -> runStore.recordSession(malformed, "$(rm -rf ~)", "startup", null));
-    Acting.system(() -> runStore.complete(malformed, "completed", 0));
+    Acting.system(() -> TestRuns.complete(runStore, malformed, "completed", 0));
 
     ops.startRoomRun("acme", "auth", HANDLE);
 
@@ -747,7 +748,7 @@ class RoomWakeLaunchTest {
                 null,
                 "sail-agent-" + remote));
     Acting.system(() -> runStore.recordSession(remote, "sess-remote", "startup", null));
-    Acting.system(() -> runStore.complete(remote, "completed", 0));
+    Acting.system(() -> TestRuns.complete(runStore, remote, "completed", 0));
 
     var runId = ops.startRoomRun("acme", "auth", HANDLE);
 
@@ -771,6 +772,46 @@ class RoomWakeLaunchTest {
         declined.failure().errorMessage().contains("claude-code"),
         declined.failure().errorMessage());
     assertTrue(runStore.listForSpec("auth").isEmpty(), "a declined wake reserves nothing");
+  }
+
+  /**
+   * Review 1, minor 5: a wake whose member's harness refuses the spec's effort (a Codex spec at
+   * {@code none}, a Claude Code member) is refused before a run is reserved, so no message leaves a
+   * failed run counted against the spec.
+   */
+  @Test
+  void aWakeWhoseMemberRefusesTheSpecsEffortReservesNoRun() throws Exception {
+    var ops = operations(liveAgentShell());
+    seedSpec("auth", "codex");
+    Acting.system(
+        () -> {
+          var spec = specStore.findById("auth").orElseThrow();
+          specStore.update(
+              new SpecStore.SpecRow(
+                  spec.id(),
+                  spec.project(),
+                  spec.title(),
+                  spec.status(),
+                  spec.assignee(),
+                  spec.agent(),
+                  null,
+                  "none",
+                  null,
+                  0,
+                  spec.createdBy(),
+                  null,
+                  null,
+                  null,
+                  List.of(),
+                  spec.repos()));
+        });
+    engage("auth", "claude-code", "read-only");
+
+    var refused = assertThrows(ApiException.class, () -> ops.startRoomRun("acme", "auth", HANDLE));
+
+    assertEquals(ErrorCode.INVALID_REQUEST, refused.failure().errorCode());
+    assertTrue(refused.reason().startsWith("Claude Code takes no reasoning effort 'none'"));
+    assertEquals(List.of(), runStore.listForSpec("auth"), "nothing reserved, nothing counted");
   }
 
   private void engage(String specId, String agent, String mode) {
@@ -888,7 +929,7 @@ class RoomWakeLaunchTest {
                 null,
                 null,
                 "sail-agent-" + build));
-    Acting.system(() -> runStore.complete(build, "completed", 0));
+    Acting.system(() -> TestRuns.complete(runStore, build, "completed", 0));
     Acting.system(() -> runStore.recordSession(build, "build-session-1", "startup", null));
 
     var firstTurn = ops.startRoomRun("acme", "auth", HANDLE);
@@ -896,7 +937,7 @@ class RoomWakeLaunchTest {
         String.join(" ", launched.get()).contains("--resume"),
         "a build conversation never reopens under a chat turn");
 
-    Acting.system(() -> runStore.complete(firstTurn, "completed", 0));
+    Acting.system(() -> TestRuns.complete(runStore, firstTurn, "completed", 0));
     Acting.system(() -> runStore.recordSession(firstTurn, "chat-session-1", "startup", null));
 
     ops.startRoomRun("acme", "auth", HANDLE);
@@ -930,7 +971,7 @@ class RoomWakeLaunchTest {
                 null,
                 null,
                 "sail-agent-" + runId));
-    Acting.system(() -> runStore.complete(runId, "completed", 0));
+    Acting.system(() -> TestRuns.complete(runStore, runId, "completed", 0));
     Acting.system(() -> runStore.saveRoomGuardBaseline(runId, "{\"app\": {\"head\": \"aaa111\"}}"));
 
     ops.guardRoomRun("acme", runId);
@@ -973,7 +1014,7 @@ class RoomWakeLaunchTest {
                 null,
                 null,
                 "sail-agent-" + runId));
-    Acting.system(() -> runStore.complete(runId, "completed", 0));
+    Acting.system(() -> TestRuns.complete(runStore, runId, "completed", 0));
     Acting.system(
         () ->
             runStore.saveRoomGuardBaseline(
@@ -1019,7 +1060,7 @@ class RoomWakeLaunchTest {
                 null,
                 null,
                 "sail-agent-" + runId));
-    Acting.system(() -> runStore.complete(runId, "completed", 0));
+    Acting.system(() -> TestRuns.complete(runStore, runId, "completed", 0));
     var baselineDiff = "diff --git a/src/Main.java b/src/Main.java\n-old\n+new\n";
     Acting.system(
         () ->
@@ -1062,7 +1103,7 @@ class RoomWakeLaunchTest {
                 null,
                 null,
                 "sail-agent-" + runId));
-    Acting.system(() -> runStore.complete(runId, "completed", 0));
+    Acting.system(() -> TestRuns.complete(runStore, runId, "completed", 0));
     Acting.system(() -> runStore.saveRoomGuardBaseline(runId, "{\"app\": {\"head\": \"aaa111\"}}"));
     var live = DateTimeUtils.newId().toString();
     db.execute(
@@ -1101,7 +1142,7 @@ class RoomWakeLaunchTest {
                 null,
                 null,
                 "sail-agent-" + runId));
-    Acting.system(() -> runStore.complete(runId, "completed", 0));
+    Acting.system(() -> TestRuns.complete(runStore, runId, "completed", 0));
     Acting.system(() -> runStore.saveRoomGuardBaseline(runId, "{\"app\": {\"head\": \"aaa111\"}}"));
     var foreignBuild = DateTimeUtils.newId().toString();
     db.execute(
@@ -1142,7 +1183,7 @@ class RoomWakeLaunchTest {
                 null,
                 null,
                 "sail-agent-" + runId));
-    Acting.system(() -> runStore.complete(runId, "completed", 0));
+    Acting.system(() -> TestRuns.complete(runStore, runId, "completed", 0));
     Acting.system(() -> runStore.saveRoomGuardBaseline(runId, "{\"app\": {\"head\": \"aaa111\"}}"));
     var build = DateTimeUtils.newId().toString();
     db.execute(
@@ -1186,7 +1227,7 @@ class RoomWakeLaunchTest {
                 null,
                 null,
                 "sail-agent-" + runId));
-    Acting.system(() -> runStore.complete(runId, "completed", 0));
+    Acting.system(() -> TestRuns.complete(runStore, runId, "completed", 0));
     Acting.system(() -> runStore.saveRoomGuardBaseline(runId, "{\"app\": {\"head\": \"aaa111\"}}"));
     var build = DateTimeUtils.newId().toString();
     db.execute(
@@ -1230,7 +1271,7 @@ class RoomWakeLaunchTest {
                 null,
                 null,
                 "sail-agent-" + runId));
-    Acting.system(() -> runStore.complete(runId, "completed", 0));
+    Acting.system(() -> TestRuns.complete(runStore, runId, "completed", 0));
     Acting.system(() -> runStore.saveRoomGuardBaseline(runId, "{\"app\": {\"head\": \"aaa111\"}}"));
     var chat = DateTimeUtils.newId().toString();
     db.execute(

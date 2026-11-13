@@ -373,9 +373,13 @@ public final class StopOperations {
     return cancelled.get();
   }
 
-  /** Finalizes a claim whose agent is gone; the event is the winner's to publish, exactly once. */
+  /**
+   * Finalizes a claim whose agent is gone; the event is the winner's to publish, exactly once. The
+   * run's report is left unread, for the reconciler's next sweep to read: an operator's stop never
+   * waits on what its container still holds.
+   */
   private void finishStop(RunStore.RunRow run) {
-    if (runStore.transition(run.id(), STOPPING, "stopped")) {
+    if (runStore.finish(run.id(), STOPPING, "stopped", null, null)) {
       events.publish(operatorCancelEvent(run));
     }
   }

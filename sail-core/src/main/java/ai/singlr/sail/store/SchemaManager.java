@@ -9,6 +9,7 @@ import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.common.Remedied;
 import ai.singlr.sail.common.Remedy;
 import java.util.List;
+import java.util.Map;
 
 /**
  * Creates the one schema this release opens. A fresh database gets it in one shot, stamped {@value
@@ -23,8 +24,13 @@ import java.util.List;
  * record of the one box each FDE syncs from), {@code materialized_files} (the versions of each
  * shared file this box wrote to disk or published), {@code fde_pairings} (the key and token this
  * box made for each FDE's Mast), {@code project_grants} (the projects main granted each scoped
- * FDE), {@code sync_scope} (the scope main last named for this node) and {@code catalog} (which
- * database this is, and which of main's a node syncs with).
+ * FDE), {@code sync_scope} (the scope main last named for this node), {@code catalog} (which
+ * database this is, and which of main's a node syncs with), {@code attention} (the minutes this box
+ * saw a person give a conversation), {@code session_usage} (each harness session's highest running
+ * total here and what its runs were given of it, which retention never touches) and {@code
+ * uncounted_runs} (the runs main erased before this box saw them finish). A spec's kept sums of its
+ * runs ({@code runs_total} through {@code run_cost_usd}) are box-local columns: each box folds the
+ * run rows it holds, so they never join a snapshot either.
  */
 public final class SchemaManager {
 
@@ -32,7 +38,7 @@ public final class SchemaManager {
    * The version this release stamps and opens. It lies beyond every version a release before v1
    * stamped, so no older database is ever read as this one.
    */
-  public static final int CURRENT_VERSION = 1002;
+  public static final int CURRENT_VERSION = 1003;
 
   private static final String SCHEMA_VERSION_TABLE =
       """
@@ -48,6 +54,127 @@ public final class SchemaManager {
    */
   static final String CATALOG =
       "CREATE TABLE catalog AS SELECT lower(hex(randomblob(16))) AS id, NULL AS main";
+
+  /** Now, as a trigger stamps a row that names no time of its own. */
+  private static final String NOW = "CAST(unixepoch('now', 'subsec') * 1000 AS INTEGER)";
+
+  /** The statuses a run is finished in ({@code RunStatus#isTerminal}). */
+  private static final String FINISHED = "('stopped', 'completed', 'failed')";
+
+  /**
+   * The kept sums of a spec's runs, each with how one run adds to it, as {@code run} names the
+   * run's row: how many, how many built or fixed, how many reported no usage or no dollars, and the
+   * tokens and dollars they reported.
+   */
+  private static final List<Map.Entry<String, String>> KEPT =
+      List.of(
+          Map.entry("runs_total", "1"),
+          Map.entry("runs_build", "(%1$s.role = 'build')"),
+          Map.entry("runs_fix", "(%1$s.role = 'fix')"),
+          Map.entry(
+              "runs_without_usage",
+              "(%1$s.usage_source IS NULL OR %1$s.usage_source IN ('none', 'unattributable'))"),
+          Map.entry("runs_without_cost", "(%1$s.cost_usd IS NULL)"),
+          Map.entry("run_tokens_in", "COALESCE(%1$s.tokens_in, 0)"),
+          Map.entry("run_tokens_out", "COALESCE(%1$s.tokens_out, 0)"),
+          Map.entry("run_tokens_cache_read", "COALESCE(%1$s.tokens_cache_read, 0)"),
+          Map.entry("run_tokens_cache_write", "COALESCE(%1$s.tokens_cache_write, 0)"),
+          Map.entry("run_cost_usd", "COALESCE(%1$s.cost_usd, 0)"));
+
+  /**
+   * A spec's times, stamped as its status moves, from the revision's own {@code updated_at}: when
+   * it was archived or cancelled, while it is; when it first entered {@code pending}, once; when it
+   * last entered {@code awaiting_merge}, kept as it moves on to {@code done} and {@code archived};
+   * when it last entered {@code done}, kept as it is archived. Each is cleared on any other move. A
+   * revision applied from another box then writes the author's own ({@link SpecStore}), so every
+   * box holds the same.
+   */
+  private static final String SPEC_TIMES =
+      """
+          archived_at = CASE WHEN NEW.status = 'archived' THEN COALESCE(NEW.updated_at, @NOW@) END,
+          cancelled_at = CASE WHEN NEW.status = 'cancelled' THEN COALESCE(NEW.updated_at, @NOW@) END,
+          ready_at = COALESCE(NEW.ready_at,
+              CASE WHEN NEW.status = 'pending' THEN COALESCE(NEW.updated_at, @NOW@) END),
+          awaiting_merge_at = CASE
+              WHEN NEW.status = 'awaiting_merge' THEN COALESCE(NEW.updated_at, @NOW@)
+              WHEN NEW.status IN ('done', 'archived') THEN NEW.awaiting_merge_at END,
+          done_at = CASE
+              WHEN NEW.status = 'done' THEN COALESCE(NEW.updated_at, @NOW@)
+              WHEN NEW.status = 'archived' THEN NEW.done_at END"""
+          .replace("@NOW@", NOW);
+
+  /**
+   * A spec arriving stamps its times and starts its kept sums from the finished runs this box
+   * already holds of it, so a spec synced after its runs counts them as one synced before does.
+   */
+  private static final String SPEC_BORN =
+      "CREATE TRIGGER specs_born AFTER INSERT ON specs BEGIN UPDATE specs SET "
+          + SPEC_TIMES
+          + ", "
+          + String.join(
+              ", ",
+              KEPT.stream()
+                  .map(
+                      kept ->
+                          kept.getKey()
+                              + " = (SELECT COALESCE(SUM("
+                              + kept.getValue().formatted("r")
+                              + "), 0) FROM runs r WHERE (r.spec_id = NEW.id"
+                              + " OR (r.spec_id IS NULL AND r.room_id = NEW.id))"
+                              + " AND r.status IN "
+                              + FINISHED
+                              + ")")
+                  .toList())
+          + " WHERE id = NEW.id; END";
+
+  private static final String SPEC_MOVED =
+      "CREATE TRIGGER specs_moved AFTER UPDATE OF status ON specs"
+          + " WHEN NEW.status IS NOT OLD.status BEGIN UPDATE specs SET "
+          + SPEC_TIMES
+          + " WHERE id = NEW.id; END";
+
+  /**
+   * A run's row finishing on this box, however it gets here, adds the run to its spec's kept sums
+   * (a spec's runs are those naming it, and its room's that name no spec); a row that stops being
+   * finished takes it back out. Erasing a row takes nothing out: what retention erases stays
+   * counted (M14).
+   */
+  private static String counting(String name, String event, String when, String row, String sign) {
+    return "CREATE TRIGGER "
+        + name
+        + " AFTER "
+        + event
+        + " ON runs WHEN "
+        + when
+        + " BEGIN UPDATE specs SET "
+        + String.join(
+            ", ",
+            KEPT.stream()
+                .map(
+                    kept ->
+                        kept.getKey()
+                            + " = "
+                            + kept.getKey()
+                            + " "
+                            + sign
+                            + " "
+                            + kept.getValue().formatted(row))
+                .toList())
+        + " WHERE id = COALESCE("
+        + row
+        + ".spec_id, "
+        + row
+        + ".room_id); END";
+  }
+
+  private static final String RUN_COUNTED =
+      counting("runs_counted", "INSERT", "NEW.status IN " + FINISHED, "NEW", "+");
+
+  private static final String RUN_RECOUNTED_FROM =
+      counting("runs_recounted_from", "UPDATE", "OLD.status IN " + FINISHED, "OLD", "-");
+
+  private static final String RUN_RECOUNTED_INTO =
+      counting("runs_recounted_into", "UPDATE", "NEW.status IN " + FINISHED, "NEW", "+");
 
   private static final List<String> BASELINE =
       List.of(
@@ -75,32 +202,25 @@ public final class SchemaManager {
               body_hash TEXT,
               plan_hash TEXT,
               archived_at INTEGER,
-              cancelled_at INTEGER
+              cancelled_at INTEGER,
+              ready_at INTEGER,
+              awaiting_merge_at INTEGER,
+              done_at INTEGER,
+              runs_total INTEGER NOT NULL DEFAULT 0,
+              runs_build INTEGER NOT NULL DEFAULT 0,
+              runs_fix INTEGER NOT NULL DEFAULT 0,
+              runs_without_usage INTEGER NOT NULL DEFAULT 0,
+              runs_without_cost INTEGER NOT NULL DEFAULT 0,
+              run_tokens_in INTEGER NOT NULL DEFAULT 0,
+              run_tokens_out INTEGER NOT NULL DEFAULT 0,
+              run_tokens_cache_read INTEGER NOT NULL DEFAULT 0,
+              run_tokens_cache_write INTEGER NOT NULL DEFAULT 0,
+              run_cost_usd REAL NOT NULL DEFAULT 0
           )""",
           "CREATE INDEX idx_specs_project ON specs(project)",
           "CREATE INDEX idx_specs_room ON specs(room_id)",
-          """
-          CREATE TRIGGER specs_status_since_insert AFTER INSERT ON specs
-          WHEN NEW.status IN ('archived', 'cancelled')
-          BEGIN
-              UPDATE specs SET
-                  archived_at = CASE WHEN NEW.status = 'archived'
-                      THEN COALESCE(NEW.updated_at, CAST(unixepoch('now', 'subsec') * 1000 AS INTEGER)) END,
-                  cancelled_at = CASE WHEN NEW.status = 'cancelled'
-                      THEN COALESCE(NEW.updated_at, CAST(unixepoch('now', 'subsec') * 1000 AS INTEGER)) END
-              WHERE id = NEW.id;
-          END""",
-          """
-          CREATE TRIGGER specs_status_since_update AFTER UPDATE OF status ON specs
-          WHEN NEW.status IS NOT OLD.status
-          BEGIN
-              UPDATE specs SET
-                  archived_at = CASE WHEN NEW.status = 'archived'
-                      THEN COALESCE(NEW.updated_at, CAST(unixepoch('now', 'subsec') * 1000 AS INTEGER)) END,
-                  cancelled_at = CASE WHEN NEW.status = 'cancelled'
-                      THEN COALESCE(NEW.updated_at, CAST(unixepoch('now', 'subsec') * 1000 AS INTEGER)) END
-              WHERE id = NEW.id;
-          END""",
+          SPEC_BORN,
+          SPEC_MOVED,
           """
           CREATE TABLE spec_dependencies (
               spec_id TEXT NOT NULL REFERENCES specs(id) ON DELETE CASCADE,
@@ -353,12 +473,25 @@ public final class SchemaManager {
               last_activity_at INTEGER,
               room_id TEXT,
               review_id TEXT,
-              stop_source TEXT
+              stop_source TEXT,
+              model TEXT,
+              effort TEXT,
+              tokens_in INTEGER,
+              tokens_out INTEGER,
+              tokens_cache_read INTEGER,
+              tokens_cache_write INTEGER,
+              cost_usd REAL,
+              usage_source TEXT
+                  CHECK (usage_source IN ('result', 'transcript', 'none', 'unattributable'))
           )""",
+          RUN_COUNTED,
+          RUN_RECOUNTED_FROM,
+          RUN_RECOUNTED_INTO,
           "CREATE INDEX idx_runs_project ON runs(project)",
           "CREATE INDEX idx_runs_spec ON runs(spec_id)",
           "CREATE INDEX idx_runs_room ON runs(room_id)",
           "CREATE INDEX idx_runs_review ON runs(review_id)",
+          "CREATE INDEX idx_runs_session ON runs(session_id)",
           """
           CREATE TABLE run_principals (
               run_id TEXT NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
@@ -548,7 +681,38 @@ public final class SchemaManager {
               entity_id TEXT NOT NULL,
               rev TEXT NOT NULL
           )""",
-          "CREATE INDEX idx_compacted_entries_entity ON compacted_entries(entity_type, entity_id)");
+          "CREATE INDEX idx_compacted_entries_entity ON compacted_entries(entity_type, entity_id)",
+          """
+          CREATE TABLE attention (
+              person TEXT NOT NULL,
+              conversation TEXT NOT NULL,
+              minute INTEGER NOT NULL,
+              channel TEXT NOT NULL
+                  CHECK (channel IN ('terminal_input', 'post', 'review_act', 'focus')),
+              PRIMARY KEY (person, conversation, minute, channel)
+          ) WITHOUT ROWID""",
+          "CREATE INDEX idx_attention_conversation ON attention(conversation)",
+          """
+          CREATE TABLE session_usage (
+              session_id TEXT PRIMARY KEY,
+              conversation TEXT,
+              highest_tokens_in INTEGER,
+              highest_tokens_out INTEGER,
+              highest_tokens_cache_read INTEGER,
+              highest_tokens_cache_write INTEGER,
+              highest_cost_usd REAL,
+              given_tokens_in INTEGER,
+              given_tokens_out INTEGER,
+              given_tokens_cache_read INTEGER,
+              given_tokens_cache_write INTEGER,
+              given_cost_usd REAL
+          ) WITHOUT ROWID""",
+          "CREATE INDEX idx_session_usage_conversation ON session_usage(conversation)",
+          """
+          CREATE TABLE uncounted_runs (
+              run_id TEXT PRIMARY KEY,
+              spec_id TEXT
+          ) WITHOUT ROWID""");
 
   private final Sqlite db;
 
@@ -638,9 +802,9 @@ public final class SchemaManager {
     return Remedied.state(
         "Database schema v"
             + version
-            + " was made by a Sail release before v1; this release opens only v"
+            + " was made by an earlier Sail release; this release opens only v"
             + CURRENT_VERSION
-            + ".",
+            + " and converts none: the box is reinstalled.",
         freshStart());
   }
 

@@ -110,6 +110,7 @@ public final class RoomWakeLauncher {
               + " restrictions. Set the spec's agent to claude-code to chat in this room, or"
               + " answer from the room directly and dispatch when code should change.");
     }
+    LaunchAdmission.requireEffort(Harnesses.of(agentType), spec.reasoningEffort());
     var body = specStore.getContent(specId).map(SpecStore.SpecContent::body).orElse("");
     var messages = messageStore.get();
     var room =

@@ -18,10 +18,15 @@ import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.AgentUnit;
+import ai.singlr.sail.harness.RunUsage;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.store.EventStore;
 import ai.singlr.sail.store.Finding;
 import ai.singlr.sail.store.RunStore;
+import ai.singlr.sail.store.TestRuns;
+import java.io.IOException;
+import java.io.UncheckedIOException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Instant;
@@ -480,7 +485,8 @@ class ReviewLanesTest {
         loop.statusOf(fix.reviewId()),
         "nothing is decided while the halt is under way: one that fails gives the run back");
 
-    Acting.system(() -> assertTrue(loop.runs.transition(fix.id(), "stopping", "stopped")));
+    Acting.system(
+        () -> assertTrue(TestRuns.transition(loop.runs, fix.id(), "stopping", "stopped")));
     loop.onEvent(
         StopOperations.cancelEvent(
             loop.runs.findById(fix.id()).orElseThrow(),
@@ -502,7 +508,8 @@ class ReviewLanesTest {
     loop.container.dirty("api", " M src/Half.java\n");
     Acting.system(() -> assertTrue(loop.runs.claimStop(fix.id(), "stopping", () -> {})));
     loop.container.exited(fix.id(), "half done", 0);
-    Acting.system(() -> assertTrue(loop.runs.transition(fix.id(), "stopping", "stopped")));
+    Acting.system(
+        () -> assertTrue(TestRuns.transition(loop.runs, fix.id(), "stopping", "stopped")));
 
     loop.onEvent(loop.watcherStop(fix.id(), null));
 
@@ -535,7 +542,8 @@ class ReviewLanesTest {
     var reviewer = loop.onlyLive();
     Acting.system(() -> assertTrue(loop.runs.claimStop(reviewer.id(), "stopping", () -> {})));
     loop.container.exited(reviewer.id(), "", 143);
-    Acting.system(() -> assertTrue(loop.runs.transition(reviewer.id(), "stopping", "stopped")));
+    Acting.system(
+        () -> assertTrue(TestRuns.transition(loop.runs, reviewer.id(), "stopping", "stopped")));
 
     loop.onEvent(loop.watcherStop(reviewer.id(), null));
 
@@ -556,7 +564,8 @@ class ReviewLanesTest {
     loop.container.dirty("api", " M src/Half.java\n");
     Acting.system(() -> assertTrue(loop.runs.claimStop(fix.id(), "stopping", () -> {})));
     loop.container.exited(fix.id(), "half done", 0);
-    Acting.system(() -> assertTrue(loop.runs.transition(fix.id(), "stopping", "stopped")));
+    Acting.system(
+        () -> assertTrue(TestRuns.transition(loop.runs, fix.id(), "stopping", "stopped")));
     loop.restart();
 
     assertEquals(1, loop.reconciler(ReviewLoop.LATER).sweep());
@@ -613,7 +622,7 @@ class ReviewLanesTest {
                     Event.WellKnownData.REASON,
                     "time limit (45m)"))
             .withId(903));
-    Acting.system(() -> loop.runs.complete(fix.id(), "stopped", 0));
+    Acting.system(() -> TestRuns.complete(loop.runs, fix.id(), "stopped", 0));
     loop.restart();
 
     assertEquals(1, loop.reconciler(ReviewLoop.LATER).sweep());
@@ -636,7 +645,7 @@ class ReviewLanesTest {
     loop.container.exited(fix.id(), "half done", 0);
     new SpecStoreAuditPersister(new EventStore(loop.db))
         .onEvent(loop.watcherStop(fix.id(), "time limit (45m)").withId(901));
-    Acting.system(() -> loop.runs.complete(fix.id(), "stopped", null));
+    Acting.system(() -> TestRuns.complete(loop.runs, fix.id(), "stopped", null));
     loop.restart();
 
     assertEquals(1, loop.reconciler(ReviewLoop.LATER).sweep());
@@ -736,7 +745,7 @@ class ReviewLanesTest {
     var next =
         Acting.system(
             () -> {
-              loop.runs.complete(fix.id(), "stopped", 0);
+              TestRuns.complete(loop.runs, fix.id(), "stopped", 0);
               var id = loop.reviews.createReview("auth", 2);
               loop.reviews.updateReviewStatus(id, "running");
               return id;
@@ -764,7 +773,7 @@ class ReviewLanesTest {
     loop.container.exited(first.id(), CLEAN_REVIEW, 0);
     Acting.system(
         () -> {
-          loop.runs.complete(first.id(), "stopped", 0);
+          TestRuns.complete(loop.runs, first.id(), "stopped", 0);
           loop.reviews.completeStage(stages.getFirst().id(), "passed");
           loop.reviews.startStage(stages.getLast().id(), "claude-code");
         });
@@ -794,7 +803,7 @@ class ReviewLanesTest {
     loop.container.exited(reviewer.id(), CRITICAL_FINDING, 0);
     Acting.system(
         () -> {
-          loop.runs.complete(reviewer.id(), "stopped", 0);
+          TestRuns.complete(loop.runs, reviewer.id(), "stopped", 0);
           loop.reviews.addFinding(
               stage.id(),
               Finding.create(
@@ -906,7 +915,7 @@ class ReviewLanesTest {
             loop.container.afterAliveProbe(
                 () -> {
                   loop.container.exited(runId, "fixed and pushed", 0);
-                  assertTrue(loop.runs.transition(runId, "running", "stopped", 0));
+                  assertTrue(loop.runs.finish(runId, "running", "stopped", 0, null));
                 }));
 
     loop.finish(reviewer.id(), CRITICAL_FINDING);
@@ -934,7 +943,7 @@ class ReviewLanesTest {
     loop = ReviewLoop.staged(tempDir, "codex");
     loop.built("auth");
     var reviewer = loop.onlyLive();
-    loop.onLaunch(runId -> assertTrue(loop.runs.transition(runId, "running", "stopped")));
+    loop.onLaunch(runId -> assertTrue(TestRuns.transition(loop.runs, runId, "running", "stopped")));
 
     loop.finish(reviewer.id(), CRITICAL_FINDING);
 
@@ -960,7 +969,7 @@ class ReviewLanesTest {
     loop.onLaunch(
         runId -> {
           loop.container.exited(runId, "codex: command not found", 127);
-          assertTrue(loop.runs.transition(runId, "running", "stopped", 127));
+          assertTrue(loop.runs.finish(runId, "running", "stopped", 127, null));
         });
 
     loop.finish(reviewer.id(), CRITICAL_FINDING);
@@ -976,5 +985,121 @@ class ReviewLanesTest {
 
     assertEquals(List.of("fix agent failed: exit 127"), loop.details("review_iteration_failed"));
     assertEquals("escalated", loop.statusOf(fix.reviewId()));
+  }
+
+  private static String fixture(String name) {
+    try (var in = ReviewLanesTest.class.getResourceAsStream("/ai/singlr/sail/harness/" + name)) {
+      return new String(in.readAllBytes(), StandardCharsets.UTF_8);
+    } catch (IOException e) {
+      throw new UncheckedIOException(e);
+    }
+  }
+
+  /** Scenario 1: a recorded stream-json log, read once by the finish its watcher's stop drives. */
+  @Test
+  void aClaudeCodeBuildRecordsWhatItsLogsLastResultReportedAsItFinishes() {
+    loop = ReviewLoop.staged(tempDir, "codex");
+    loop.spec("auth", "api");
+    var build = loop.run("auth", "build");
+    loop.container.wrote(build, fixture("claude-code-agent.jsonl"));
+
+    loop.onEvent(ReviewLoop.buildStop("auth", build));
+
+    var row = loop.runs.findById(build).orElseThrow();
+    assertEquals("stopped", row.status());
+    assertEquals(
+        new RunUsage(
+            "claude-opus-5-5",
+            370L,
+            138021L,
+            45026873L,
+            374463L,
+            14.762978600000006,
+            RunUsage.Source.RESULT),
+        row.usage());
+    assertEquals("claude-opus-5-5", row.model(), "the model it reported");
+  }
+
+  /**
+   * Scenario 2: Codex's rollout, the transcript its session reported, gives tokens and no dollars.
+   */
+  @Test
+  void aCodexFixRecordsItsTranscriptsLastTokenCountAndNoDollars() {
+    loop = ReviewLoop.staged(tempDir, "codex");
+    loop.spec("auth", "api");
+    var fix = loop.runOf("auth", "fix", "codex");
+    var transcript = "/home/dev/.codex/sessions/2026/10/27/rollout-fix.jsonl";
+    Acting.system(() -> loop.runs.recordSession(fix, "thread-1", "startup", transcript));
+    loop.container.wrote(fix, "codex exec writes text, not its report\n");
+    loop.container.wroteFile(transcript, fixture("codex-rollout.jsonl"));
+
+    loop.onEvent(
+        RunStops.of(
+            Event.WellKnownData.SOURCE_WATCHER,
+            ReviewLoop.PROJECT,
+            "auth",
+            "codex",
+            fix,
+            "fix",
+            0,
+            null));
+
+    assertEquals(
+        new RunUsage(
+            "gpt-6-astra", 856314L - 768640L, 4004L, 768640L, 0L, null, RunUsage.Source.TRANSCRIPT),
+        loop.runs.findById(fix).orElseThrow().usage());
+  }
+
+  /** Scenario 3: no log to read is no usage reported, never zeros, and the spec counts it apart. */
+  @Test
+  void aRunWhoseLogIsEmptyOrMissingRecordsNoneAndItsSpecCountsItWithoutUsage() {
+    loop = ReviewLoop.staged(tempDir, "codex");
+    loop.spec("auth", "api");
+    var missing = loop.run("auth", "build");
+    var empty = loop.run("auth", "build");
+    loop.container.wrote(empty, "");
+
+    loop.onEvent(ReviewLoop.buildStop("auth", missing));
+    loop.onEvent(ReviewLoop.buildStop("auth", empty));
+
+    for (var run : List.of(missing, empty)) {
+      var usage = loop.runs.findById(run).orElseThrow().usage();
+      assertEquals(RunUsage.Source.NONE, usage.source(), run);
+      assertNull(usage.tokensIn(), run);
+      assertNull(usage.costUsd(), run);
+    }
+    var kept = loop.specs.recorded(List.of("auth")).get("auth").runs();
+    assertEquals(
+        List.of(2L, 2L, 2L, 0L),
+        List.of(kept.runs(), kept.withoutUsage(), kept.withoutCost(), kept.tokensIn()));
+  }
+
+  /**
+   * Scenario 4 (M3): a reservation's retention keeps the newest twenty run directories and also
+   * every finished run whose usage was never read, however old.
+   */
+  @Test
+  void aFinishedRunWhoseUsageWasNeverReadKeepsItsDirectoryPastTheNewestTwenty() {
+    loop = ReviewLoop.staged(tempDir, "codex");
+    loop.spec("auth", "api");
+    var unread = loop.run("auth", "build");
+    loop.container.wrote(unread, "the only evidence of what it cost");
+    Acting.system(() -> loop.runs.finish(unread, "running", "stopped", null, null));
+    var read = loop.run("auth", "build");
+    loop.container.wrote(read, "read");
+    Acting.system(() -> loop.runs.finish(read, "running", "stopped", null, RunUsage.NONE));
+    for (var newer = 0; newer < 20; newer++) {
+      var run = loop.run("other", "build");
+      loop.container.wrote(run, "newer");
+      Acting.system(() -> loop.runs.finish(run, "running", "completed", 0, RunUsage.NONE));
+    }
+
+    loop.built("next");
+
+    assertEquals(
+        "the only evidence of what it cost",
+        loop.container.file(AgentUnit.forRun(unread).logPath()),
+        "its usage is read before its evidence can go");
+    assertNull(loop.container.file(AgentUnit.forRun(read).logPath()), "one read goes as before");
   }
 }

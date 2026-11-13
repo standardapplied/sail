@@ -12,6 +12,7 @@ import ai.singlr.sail.engine.LiveMemberPrompt;
 import ai.singlr.sail.engine.LiveStream;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.WatcherSpawner;
+import ai.singlr.sail.harness.RunUsage;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.Role;
@@ -151,7 +152,9 @@ final class LiveRoom implements AutoCloseable {
             now::get);
     started.subscribe(settling.counted(new SpecStoreAuditPersister(new EventStore(db))));
     started.subscribe(
-        settling.counted(new RunTracker(runs, SyncScheduler.disabled(), () -> HANDLE)));
+        settling.counted(
+            new RunTracker(
+                runs, finished -> RunUsage.NONE, SyncScheduler.disabled(), () -> HANDLE)));
     started.subscribe(settling.counted(reactor));
     started.subscribe(settling.counted(recorder()));
   }
@@ -589,6 +592,28 @@ final class LiveRoom implements AutoCloseable {
       return "{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":false,\"result\":\""
           + text
           + "\"}";
+    }
+
+    /**
+     * A turn's result as Claude Code streams it to a live member: the call's running totals so far,
+     * whole-tree tokens in {@code modelUsage} and dollars in {@code total_cost_usd}.
+     */
+    static String spent(String text, long tokensIn, double usd) {
+      return "{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":false,\"result\":\""
+          + text
+          + "\",\"total_cost_usd\":"
+          + usd
+          + ",\"modelUsage\":{\"claude-opus-5-5\":{\"inputTokens\":"
+          + tokensIn
+          + ",\"outputTokens\":"
+          + 2 * tokensIn
+          + ",\"cacheReadInputTokens\":"
+          + 10 * tokensIn
+          + ",\"cacheCreationInputTokens\":"
+          + 3 * tokensIn
+          + ",\"costUSD\":"
+          + usd
+          + "}}}";
     }
 
     static String failure(String subtype, String text) {

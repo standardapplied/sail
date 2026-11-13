@@ -54,9 +54,9 @@ class SyncSchemaConvergenceTest {
     var failure = assertThrows(Remedied.State.class, () -> SyncDatabase.converge(path, "box"));
 
     assertEquals(
-        "Database schema v100 was made by a Sail release before v1; this release opens only v"
+        "Database schema v100 was made by an earlier Sail release; this release opens only v"
             + SchemaManager.CURRENT_VERSION
-            + ".",
+            + " and converts none: the box is reinstalled.",
         failure.reason());
     assertEquals(List.of(Remedy.sail("init")), failure.remedy().commands());
     try (var db = Sqlite.open(path)) {

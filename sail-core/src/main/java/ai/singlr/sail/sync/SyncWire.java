@@ -55,8 +55,11 @@ public final class SyncWire {
   /**
    * The protocol this build speaks; a peer announcing another is refused at the hello, so nothing
    * here reads a message another protocol wrote. Bump it with any change to what a message carries.
+   * Protocol 8 is the first whose run and spec snapshots carry what a change cost and when it was
+   * ready and done: a box on an older one holds a database this release does not convert, so it is
+   * told to reinstall, not to upgrade, unless it runs 0.58, whose database an upgrade converts.
    */
-  public static final int PROTOCOL = 7;
+  public static final int PROTOCOL = 8;
 
   /** The byte ceiling for a JSON announcing line, including a whole blob manifest. */
   public static final int MAX_FRAME = 16 * 1024 * 1024;

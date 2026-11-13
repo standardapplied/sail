@@ -37,6 +37,7 @@ import ai.singlr.sail.engine.PipedSyncChannel;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.SyncOperations;
 import ai.singlr.sail.engine.WatcherSpawner;
+import ai.singlr.sail.harness.RunUsage;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.Role;
@@ -179,7 +180,9 @@ class EventPublishersTest {
                 run, "acme", "auth", ME, "build", List.of(), "claude-code", "b", "t", "l", "u"));
     var tracked = new CountDownLatch(1);
     bus.subscribe(
-        BusTesting.latching(new RunTracker(runs, SyncScheduler.disabled(), () -> ME), tracked));
+        BusTesting.latching(
+            new RunTracker(runs, finished -> RunUsage.NONE, SyncScheduler.disabled(), () -> ME),
+            tracked));
 
     RunWatch.emitStop(
         publisher::publish,
@@ -249,7 +252,7 @@ class EventPublishersTest {
       var run = startRunOn(runs, "auth");
       SyncBox.round(box, node);
       forgetLanded();
-      Acting.system(() -> runs.transition(run, "running", "stopped", 2));
+      Acting.system(() -> runs.finish(run, "running", "stopped", 2, null));
 
       SyncBox.round(box, node);
 
@@ -284,7 +287,7 @@ class EventPublishersTest {
       SyncBox.round(box, node);
       box.reassign("theirs", "bob");
       forgetLanded();
-      Acting.system(() -> runs.transition(started, "running", "stopped", 2));
+      Acting.system(() -> runs.finish(started, "running", "stopped", 2, null));
 
       SyncBox.round(box, node);
 

@@ -203,6 +203,18 @@ public final class LaunchAdmission {
   }
 
   /**
+   * {@code effort} as {@code harness} takes it: an effort it does not take is refused as an invalid
+   * request naming it, as the spec door refuses it, before any reservation, never dropped (M15).
+   */
+  public static String requireEffort(Harness harness, String effort) {
+    try {
+      return harness.requireEffort(effort);
+    } catch (IllegalArgumentException e) {
+      throw ApiException.of(ErrorCode.INVALID_REQUEST, e);
+    }
+  }
+
+  /**
    * Validates the model exactly like a spec write, refusing shell-unsafe values as a client error
    * before any reservation or snapshot — the model rides the agent command through {@code bash -l
    * -c}, so only a single safe token may reach it.

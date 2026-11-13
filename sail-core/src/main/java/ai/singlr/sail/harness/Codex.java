@@ -8,6 +8,7 @@ package ai.singlr.sail.harness;
 import ai.singlr.sail.engine.ContainerExec;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.OptionalInt;
 
@@ -15,6 +16,14 @@ import java.util.OptionalInt;
 final class Codex implements Harness {
 
   private static final String BINARY = "codex";
+  private static final String TOKEN_COUNT = "\"type\":\"token_count\"";
+  private static final String TURN_CONTEXT = "\"type\":\"turn_context\"";
+
+  /**
+   * Codex takes whatever level the selected model advertises ({@code model_reasoning_effort}), so
+   * every Sail level is passed as it is.
+   */
+  private static final List<String> EFFORTS = List.of("none", "low", "medium", "high", "xhigh");
 
   /**
    * Codex does not expose a {@code --settings <path>} flag the way Claude Code does: its discovery
@@ -114,8 +123,57 @@ final class Codex implements Harness {
   }
 
   @Override
-  public boolean honoursReasoningEffort() {
-    return true;
+  public List<String> efforts() {
+    return EFFORTS;
+  }
+
+  @Override
+  public ReportFile reportFile() {
+    return ReportFile.TRANSCRIPT;
+  }
+
+  @Override
+  public List<String> reportMarkers() {
+    return List.of(TOKEN_COUNT, TURN_CONTEXT);
+  }
+
+  /**
+   * The transcript's last {@code token_count}: the thread's running totals, with no dollars, and
+   * the model of its last {@code turn_context}. Codex's input count includes its cached part, which
+   * is taken out, so the run's input is what it read uncached. A last {@code token_count} line that
+   * does not parse gives null.
+   */
+  @Override
+  public RunUsage usage(String report) {
+    var found = RunUsage.last(report, TOKEN_COUNT, Codex::counts);
+    if (found.unreadable()) {
+      return null;
+    }
+    if (found.line() == null) {
+      return RunUsage.NONE;
+    }
+    var total =
+        RunUsage.map(
+            RunUsage.map(RunUsage.map(found.line(), "payload"), "info"), "total_token_usage");
+    var input = RunUsage.count(total, "input_tokens");
+    var cached = RunUsage.count(total, "cached_input_tokens");
+    var context =
+        RunUsage.last(report, TURN_CONTEXT, line -> "turn_context".equals(line.get("type"))).line();
+    var model = context == null ? null : RunUsage.map(context, "payload").get("model");
+    return new RunUsage(
+        model instanceof String named ? named : null,
+        input == null || cached == null ? input : input - cached,
+        RunUsage.count(total, "output_tokens"),
+        cached,
+        RunUsage.count(total, "cache_write_input_tokens"),
+        null,
+        RunUsage.Source.TRANSCRIPT);
+  }
+
+  private static boolean counts(Map<String, Object> line) {
+    var payload = RunUsage.map(line, "payload");
+    return "token_count".equals(payload.get("type"))
+        && !RunUsage.map(RunUsage.map(payload, "info"), "total_token_usage").isEmpty();
   }
 
   @Override

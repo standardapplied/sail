@@ -282,7 +282,7 @@ class AgentAttachCommandTest {
                   member, AgentAttachCommand.besides(member, List.of(itself, build)), "acme"),
           "any other run over its repos still refuses");
 
-      Acting.system(() -> runs.transition(id, "running", "stopped", 0));
+      Acting.system(() -> runs.finish(id, "running", "stopped", 0, null));
       assertFalse(
           AgentAttachCommand.takesFromMember(runs.findById(id).orElseThrow(), "sess-1"),
           "a member already over is resumed as any finished run is");
@@ -378,7 +378,7 @@ class AgentAttachCommandTest {
 
   private static RunStore.RunRow completedRun(RunStore runs, String id, List<String> repos) {
     reserve(runs, id, "build", repos);
-    Acting.system(() -> runs.transition(id, "running", "completed", 0));
+    Acting.system(() -> runs.finish(id, "running", "completed", 0, null));
     return runs.findById(id).orElseThrow();
   }
 
@@ -413,6 +413,9 @@ class AgentAttachCommandTest {
         Instant.EPOCH,
         null,
         repos,
+        null,
+        null,
+        null,
         null,
         null,
         null,

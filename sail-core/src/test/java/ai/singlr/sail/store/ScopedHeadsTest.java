@@ -189,7 +189,7 @@ class ScopedHeadsTest {
     var run = DateTimeUtils.newId().toString();
     var runs = new RunStore(db);
     runs.create(run, project, id, "ada", "build", "claude", "b", "t", null, null, "/log", "u");
-    runs.complete(run, "completed", 0);
+    TestRuns.complete(runs, run, "completed", 0);
     var review = new ReviewStore(db).createReview(id, 1);
     ContentFixtures.put(new FileStore(db), project, "notes.md", "shared in " + project);
     return new Seeded(first.id(), run, review);

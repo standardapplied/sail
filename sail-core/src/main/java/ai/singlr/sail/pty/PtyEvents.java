@@ -6,9 +6,9 @@
 package ai.singlr.sail.pty;
 
 /**
- * The record-class facts a session emits — started, attached, ended — with the existing source
- * discipline: observational only, nothing here drives run or spec state. Each fact carries the
- * session's {@link PtySession.Origin}, so a room-bound session's room travels with it.
+ * The record-class facts a session emits — started, attached, ended, typed in — with the existing
+ * source discipline: observational only, nothing here drives run or spec state. Each fact carries
+ * the session's {@link PtySession.Origin}, so a room-bound session's room travels with it.
  *
  * <p>Emission is fail-open on both sides of this seam: {@link PtySession} swallows whatever an
  * implementation throws, and an implementation is still expected to swallow (and measure) its own
@@ -33,4 +33,11 @@ public interface PtyEvents {
   void sessionAttached(PtySession.Origin origin, String fde);
 
   void sessionEnded(PtySession.Origin origin, String reason);
+
+  /**
+   * {@code person}, the connection's principal and a person on a person's own lane, had input
+   * accepted in the room-bound session of {@code origin} during the current minute: told at most
+   * once a minute per connection, never with what was typed (M7).
+   */
+  default void typed(PtySession.Origin origin, String person) {}
 }

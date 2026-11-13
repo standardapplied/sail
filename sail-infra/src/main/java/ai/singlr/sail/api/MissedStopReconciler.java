@@ -12,7 +12,9 @@ import ai.singlr.sail.engine.AgentPresence;
 import ai.singlr.sail.engine.AgentSession;
 import ai.singlr.sail.engine.AgentUnit;
 import ai.singlr.sail.engine.GuardrailTrigger;
+import ai.singlr.sail.engine.RunUsageReader;
 import ai.singlr.sail.engine.ShellExec;
+import ai.singlr.sail.harness.RunUsage;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.store.EventStore;
 import ai.singlr.sail.store.MissedStops;
@@ -104,6 +106,14 @@ public final class MissedStopReconciler implements AutoCloseable {
     default Ending ending(String project, String runId, String unit) throws Exception {
       return Ending.UNKNOWN;
     }
+
+    /**
+     * What {@code run}'s harness reported it cost, as its container still holds it ({@link
+     * RunUsageReader}); unread, by default.
+     */
+    default RunUsage usage(RunStore.RunRow run) {
+      return null;
+    }
   }
 
   /**
@@ -168,6 +178,7 @@ public final class MissedStopReconciler implements AutoCloseable {
   public static UnitProbe systemdUnitProbe(ShellExec shell) {
     var agentSession = new AgentSession(shell);
     var presence = new AgentPresence(shell);
+    var usage = new RunUsageReader(shell);
     return new UnitProbe() {
       @Override
       public boolean active(String project, String runId, String unit) throws Exception {
@@ -198,6 +209,11 @@ public final class MissedStopReconciler implements AutoCloseable {
                 .filter(GuardrailTrigger::stops)
                 .map(GuardrailTrigger::cause);
         return new Ending(exitCode.orElse(null), limit.orElse(null));
+      }
+
+      @Override
+      public RunUsage usage(RunStore.RunRow run) {
+        return usage.read(run);
       }
     };
   }
@@ -252,6 +268,7 @@ public final class MissedStopReconciler implements AutoCloseable {
       replayed += rescueStrandedReviews(handledThisSweep);
       replayed += finishDeadSessions(handledThisSweep);
       replayed += finalizeInterruptedStops();
+      readUnreadUsage();
     } catch (Exception e) {
       System.err.println("  [reconcile] missed-stop sweep aborted: " + e.getMessage());
     }
@@ -331,7 +348,7 @@ public final class MissedStopReconciler implements AutoCloseable {
             + " ("
             + why
             + ")");
-    return sessionStore.transition(run.id(), "running", "stopped", exitCode);
+    return sessionStore.finish(run.id(), "running", "stopped", exitCode, unitProbe.usage(run));
   }
 
   /**
@@ -376,6 +393,30 @@ public final class MissedStopReconciler implements AutoCloseable {
   }
 
   /**
+   * Reads again what each finished run this box executed cost, while its report is unread: a
+   * container that was stopped, missing or slow as the run finished, or an operator's stop, which
+   * never waits on one (M3). Whatever the container answers is recorded and journaled, once: a
+   * report, or none when the report is gone, says nothing or does not parse; only an unanswered
+   * read is left for the next sweep, the run's directory kept by retention meanwhile. Returns how
+   * many were recorded.
+   */
+  int readUnreadUsage() {
+    var recorded = 0;
+    for (var run : sessionStore.unread(localHandle.get())) {
+      try {
+        var usage = unitProbe.usage(run);
+        if (usage != null && sessionStore.recordRead(run.id(), usage)) {
+          recorded++;
+        }
+      } catch (RuntimeException e) {
+        System.err.println(
+            "  [reconcile] could not read the usage of run " + run.id() + ": " + e.getMessage());
+      }
+    }
+    return recorded;
+  }
+
+  /**
    * Finalizes stop claims interrupted before their verified finish: a run left {@code stopping} —
    * its spec already cancelled by the claim — whose recorded unit is now dead is released as {@code
    * stopped} and its withheld {@code agent_cancelled} event published, so a crash between a stop's
@@ -396,7 +437,7 @@ public final class MissedStopReconciler implements AutoCloseable {
         if (unitProbe.active(run.project(), run.id(), StopOperations.runUnit(run).unitName())) {
           continue;
         }
-        if (sessionStore.transition(run.id(), "stopping", "stopped")) {
+        if (sessionStore.finish(run.id(), "stopping", "stopped", null, unitProbe.usage(run))) {
           System.err.println(
               "  [reconcile] finalized interrupted stop "
                   + run.id()

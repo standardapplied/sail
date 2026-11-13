@@ -35,6 +35,7 @@ import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
 import ai.singlr.sail.store.SyncConflicts;
+import ai.singlr.sail.store.TestRuns;
 import ai.singlr.sail.sync.ConflictMerge;
 import ai.singlr.sail.sync.StoreReplica;
 import ai.singlr.sail.sync.SyncBox;
@@ -557,7 +558,7 @@ class ConflictOperationsTest {
             replicas.get("run").current(id),
             new MainVersion(remote, "10-main", "main"),
             List.of("branch"));
-    runs.complete(id, "completed", 0);
+    TestRuns.complete(runs, id, "completed", 0);
 
     var refused = assertThrows(ApiException.class, () -> operations.resolve("run", id, mine()));
 

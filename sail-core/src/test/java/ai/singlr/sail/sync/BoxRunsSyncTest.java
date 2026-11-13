@@ -24,6 +24,7 @@ import ai.singlr.sail.store.RoomStore;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.SyncConflicts;
+import ai.singlr.sail.store.TestRuns;
 import java.io.IOException;
 import java.util.List;
 import java.util.Set;
@@ -132,7 +133,7 @@ class BoxRunsSyncTest {
   }
 
   private static void finish(SyncBox box, String id) {
-    Acting.system(() -> runs(box).complete(id, "completed", 0));
+    Acting.system(() -> TestRuns.complete(runs(box), id, "completed", 0));
   }
 
   private static Actor agentOf(SyncBox box, String runId) {
@@ -514,7 +515,7 @@ class BoxRunsSyncTest {
     SyncBox.quiesce(main, ada);
     var live = reserve(ada, "ada", "mine", "build");
     SyncBox.quiesce(main, ada);
-    Acting.system(() -> runs(main).complete(live, "completed", 0));
+    Acting.system(() -> TestRuns.complete(runs(main), live, "completed", 0));
     Acting.system(() -> runs(ada).recordSession(live, "sess-1", "claude", "/t"));
     var rev = runs(ada).latestRev(live);
 

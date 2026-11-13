@@ -36,6 +36,7 @@ import ai.singlr.sail.store.RoomStore;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.Snapshots;
 import ai.singlr.sail.store.SpecStore;
+import ai.singlr.sail.store.TestRuns;
 import java.io.IOException;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -274,7 +275,9 @@ class PushAuthoritySyncTest {
     var own = run(ada, "ada", "mine");
     var ahead = run(ada, "ada", "fresh");
     Acting.as(
-        "ada", () -> List.of(forged, own, ahead).forEach(id -> runs.complete(id, "completed", 0)));
+        "ada",
+        () ->
+            List.of(forged, own, ahead).forEach(id -> TestRuns.complete(runs, id, "completed", 0)));
 
     var pushed = push(ada, ADA, "run");
 
@@ -343,7 +346,7 @@ class PushAuthoritySyncTest {
     sync(bob, BOB);
     assertEquals(List.of(), new RunStore(bob.db).listForRoom("den"));
 
-    Acting.unchecked("ada", () -> new RunStore(ada.db).complete(forged, "completed", 0));
+    Acting.unchecked("ada", () -> TestRuns.complete(new RunStore(ada.db), forged, "completed", 0));
     assertEquals(List.of(forged), denied(push(ada, ADA, "run")));
     assertTrue(
         new RunStore(ada.db).findById(forged).isEmpty(), "finished, it settles as main says");
@@ -365,7 +368,7 @@ class PushAuthoritySyncTest {
     var offline = run(ada, "ada", "open");
     var agent = agent(ada, offline);
     Acting.by(agent, () -> ada.specs.setContent("open", "built", ""));
-    Acting.as("ada", () -> runs.complete(offline, "completed", 0));
+    Acting.as("ada", () -> TestRuns.complete(runs, offline, "completed", 0));
 
     sync(ada, ADA);
 
@@ -391,8 +394,8 @@ class PushAuthoritySyncTest {
     Acting.unchecked(
         "ada",
         () -> {
-          runs.complete(namingBob, "completed", 0);
-          runs.complete(namingAnother, "completed", 0);
+          TestRuns.complete(runs, namingBob, "completed", 0);
+          TestRuns.complete(runs, namingAnother, "completed", 0);
         });
     var forged =
         Acting.unchecked(
@@ -542,7 +545,7 @@ class PushAuthoritySyncTest {
     var said =
         Acting.as(
             "ada", () -> new MessageStore(ada.db).append("mine", "ada", "handing over", null));
-    Acting.system(() -> new RunStore(ada.db).complete(agentRun, "stopped", null));
+    Acting.system(() -> TestRuns.complete(new RunStore(ada.db), agentRun, "stopped", null));
 
     assertEquals(List.of("mine"), denied(push(ada, ADA, "spec")));
     assertEquals(1, push(ada, ADA, "run").report().pushed(), "the run is still the box's");

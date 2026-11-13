@@ -479,6 +479,49 @@ class ProjectDefinitionTest {
     assertEquals("dev", env.get("POSTGRES_USER"));
   }
 
+  /** Scenario 14's budget: both limits optional, a bad value refused naming its key. */
+  @Test
+  void anAgentBudgetSetsTokensAndDollarsEachOptionallyAndRefusesABadValueNamingItsKey() {
+    var both =
+        ProjectDefinition.fromMap(
+            YamlUtil.parseMap(
+                "name: test\nagent:\n  type: claude-code\n  budget:\n    tokens: 2000000\n"
+                    + "    usd: 12.5\n"));
+    var dollars =
+        ProjectDefinition.fromMap(
+            YamlUtil.parseMap("name: test\nagent:\n  type: codex\n  budget:\n    usd: 5\n"));
+
+    assertEquals(new ProjectDefinition.Budget(2_000_000L, 12.5), both.agent().budget());
+    assertEquals(new ProjectDefinition.Budget(null, 5.0), dollars.agent().budget());
+    assertEquals(both.agent().budget(), ProjectDefinition.fromMap(both.toMap()).agent().budget());
+    assertNull(
+        ProjectDefinition.fromMap(YamlUtil.parseMap("name: t\nagent:\n  type: codex\n"))
+            .agent()
+            .budget());
+    for (var bad :
+        Map.of(
+                "tokens: -1",
+                "agent.budget.tokens must be a whole number of tokens above 0, such as 2000000.",
+                "tokens: 1.5",
+                "agent.budget.tokens must be a whole number of tokens above 0, such as 2000000.",
+                "usd: 0",
+                "agent.budget.usd must be a number of dollars above 0, such as 5 or 12.50.",
+                "usd: five",
+                "agent.budget.usd must be a number of dollars above 0, such as 5 or 12.50.",
+                "minutes: 3",
+                "agent.budget.minutes is not a key of agent.budget. Its keys are: tokens, usd.")
+            .entrySet()) {
+      var yaml = "name: t\nagent:\n  type: codex\n  budget:\n    " + bad.getKey() + "\n";
+      assertEquals(
+          bad.getValue(),
+          assertThrows(
+                  IllegalArgumentException.class,
+                  () -> ProjectDefinition.fromMap(YamlUtil.parseMap(yaml)))
+              .getMessage(),
+          bad.getKey());
+    }
+  }
+
   @Test
   void toMapPreservesGuardrails() throws Exception {
     var yaml =
@@ -976,7 +1019,7 @@ class ProjectDefinitionTest {
         refusal("name: acme\nssh:\n  user: dev\n"));
     assertEquals(
         "agent.review_pipeline is not a key of agent. Its keys are: type, auto_branch,"
-            + " branch_prefix, auto_snapshot, install, config, guardrails, notifications, member.",
+            + " branch_prefix, auto_snapshot, install, config, guardrails, notifications, member, budget.",
         refusal("name: acme\nagent:\n  type: claude-code\n  review_pipeline: {}\n"));
     assertEquals(
         "resources.cpus is not a key of resources. Its keys are: cpu, memory, disk.",

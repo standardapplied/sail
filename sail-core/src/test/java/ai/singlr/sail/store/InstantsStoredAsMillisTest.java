@@ -103,7 +103,7 @@ class InstantsStoredAsMillisTest {
     var run = DateTimeUtils.newId().toString();
     runs.create(run, "proj", "archived", "box", "build", "claude", "b", "t", null, null, "/l", "u");
     runs.stampActivity(run, Duration.ZERO);
-    runs.complete(run, "completed", 0);
+    TestRuns.complete(runs, run, "completed", 0);
     var reviews = new ReviewStore(db);
     var review = reviews.createReview("archived", 1);
     reviews.createStage(review, "tests", "test");

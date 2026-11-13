@@ -15,6 +15,7 @@ import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.ShellExec;
+import ai.singlr.sail.harness.RunUsage;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.store.DispatchGate;
 import ai.singlr.sail.store.EventStore;
@@ -156,7 +157,8 @@ class EventDoorTest {
   @Test
   void aMembersForgedStopDoesNotFinishARunOfAnotherMembersSpec() throws Exception {
     var run = reserve("theirs", null, "build");
-    bus.subscribe(new RunTracker(runs, SyncScheduler.disabled(), () -> "root"));
+    bus.subscribe(
+        new RunTracker(runs, finished -> RunUsage.NONE, SyncScheduler.disabled(), () -> "root"));
 
     var stop = publish(adaToken, event("theirs", STOPPED, watcherStop(run)));
     var retold = publish(adaToken, event("theirs", STOPPED, retoldStop(run)));
@@ -258,7 +260,8 @@ class EventDoorTest {
   @Test
   void anOwnerIsNotTakenAtTheirWordForWhatThisBoxObserved() throws Exception {
     var local = reserve("theirs", null, "build");
-    bus.subscribe(new RunTracker(runs, SyncScheduler.disabled(), () -> "root"));
+    bus.subscribe(
+        new RunTracker(runs, finished -> RunUsage.NONE, SyncScheduler.disabled(), () -> "root"));
 
     var unnamed = publish(bobToken, event("theirs", STOPPED, watcherStop(null)));
     var named = publish(bobToken, event("theirs", STOPPED, retoldStop(local)));
@@ -666,7 +669,7 @@ class EventDoorTest {
           specs.create(spec("stranded", "root"));
           specs.compareAndSetStatus("stranded", SpecStatus.PENDING, SpecStatus.IN_PROGRESS);
           var run = reserve("stranded", null, "build");
-          runs.transition(run, "running", "stopped", 0);
+          runs.finish(run, "running", "stopped", 0, null);
           new EventStore(db)
               .insert(
                   new EventStore.EventRow(

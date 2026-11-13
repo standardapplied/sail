@@ -47,6 +47,7 @@ import ai.singlr.sail.harness.Harness;
 import ai.singlr.sail.harness.Harnesses;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.RoleRule;
+import ai.singlr.sail.store.AttentionStore;
 import ai.singlr.sail.store.BlobStore;
 import ai.singlr.sail.store.BoxCredentialStore;
 import ai.singlr.sail.store.ChangeLog;
@@ -90,6 +91,7 @@ import java.util.stream.Collectors;
 public final class SailOperations implements HostOperations {
 
   private Sqlite controlPlane;
+  private AttentionStore attention;
   private SyncOperations syncOperations;
   private Clock syncClock = Clock.systemUTC();
   private Path projectsDir;
@@ -103,6 +105,7 @@ public final class SailOperations implements HostOperations {
   public SailOperations useControlPlane(
       Sqlite db, Path projectsDir, SyncOperations syncOperations) {
     this.controlPlane = Objects.requireNonNull(db, "db");
+    this.attention = new AttentionStore(db);
     this.projectsDir = Objects.requireNonNull(projectsDir, "projectsDir");
     this.syncOperations = Objects.requireNonNull(syncOperations, "syncOperations");
     this.pruner = new SpecPruner(db, eventBus, this::authoritative, DateTimeUtils::now);
@@ -733,7 +736,14 @@ public final class SailOperations implements HostOperations {
     this.snapshotOps = new SnapshotOperations(shell, projects, runStore, this::publishOnBus);
     this.globalSpecOps =
         new GlobalSpecOperations(
-            specStore, reviewStore, eventBus, runStore, () -> roomStore, this::authoritative);
+            specStore,
+            reviewStore,
+            eventBus,
+            runStore,
+            () -> roomStore,
+            this::authoritative,
+            definitions,
+            () -> attention);
     this.reviewOps = new ReviewOperations(reviewStore, specStore);
     this.dispatchOps =
         new DispatchOperations(
@@ -976,6 +986,7 @@ public final class SailOperations implements HostOperations {
     } catch (IllegalArgumentException invalid) {
       throw ApiException.of(ErrorCode.BAD_REQUEST, invalid);
     }
+    attend(roomId, AttentionStore.Channel.POST);
     var data = new LinkedHashMap<String, Object>();
     data.put(Event.WellKnownData.MESSAGE_ID, row.id());
     data.put("preview", preview(row.body()));
@@ -2033,7 +2044,7 @@ public final class SailOperations implements HostOperations {
   @Override
   public Result<FollowupSpecResponse> createFollowupSpec(
       String specId, FollowupCreateRequest request) {
-    return safeWrite(() -> reviewOps.createFollowup(specId, request));
+    return safeWrite(() -> attended(specId, reviewOps.createFollowup(specId, request)));
   }
 
   @Override
@@ -2211,6 +2222,29 @@ public final class SailOperations implements HostOperations {
     return safeRead(() -> globalSpecOps.measures(specId, box().boxId()));
   }
 
+  /**
+   * The minute is the server's and the person is the caller's, whatever the client sent (M6); the
+   * row is this box's alone, so nothing is synced after it.
+   */
+  @Override
+  public Result<AttentionResponse> attend(String conversation) {
+    return safe(
+        () -> {
+          requireRoomOrSpec(conversation);
+          if (attention == null) {
+            throw storeUnavailable("Attention store");
+          }
+          var now = DateTimeUtils.now();
+          var recorded =
+              Access.attendee(Actor.current())
+                  .map(
+                      person ->
+                          attention.record(person, conversation, now, AttentionStore.Channel.FOCUS))
+                  .orElse(false);
+          return new AttentionResponse(conversation, AttentionStore.minuteOf(now), recorded);
+        });
+  }
+
   @Override
   public Result<SpecMeasuresList> listMeasures(
       SpecStore.SpecFilter filter, String doneSince, String doneUntil) {
@@ -2271,11 +2305,33 @@ public final class SailOperations implements HostOperations {
 
   @Override
   public Result<ReviewApproveResponse> approveReview(String reviewId) {
-    return safeWrite(() -> reviewOps.approve(reviewId));
+    return safeWrite(() -> attended(specOfReview(reviewId), reviewOps.approve(reviewId)));
   }
 
   @Override
   public Result<FindingDismissResponse> dismissFinding(String reviewId, String findingId) {
-    return safeWrite(() -> reviewOps.dismissFinding(reviewId, findingId));
+    return safeWrite(
+        () -> attended(specOfReview(reviewId), reviewOps.dismissFinding(reviewId, findingId)));
+  }
+
+  /** The spec review {@code reviewId} is of; the review is the caller's to act on by now. */
+  private String specOfReview(String reviewId) {
+    return reviewStore.findReview(reviewId).map(ReviewStore.ReviewRow::specId).orElse(reviewId);
+  }
+
+  /**
+   * {@code done}, a review act the caller just made in {@code conversation}, once the caller's
+   * minute in it is recorded, when the caller is a person ({@link AttentionStore#attend}).
+   */
+  private <T> T attended(String conversation, T done) {
+    attend(conversation, AttentionStore.Channel.REVIEW_ACT);
+    return done;
+  }
+
+  /** Records the caller's minute in {@code conversation}, on a box that keeps attention. */
+  private void attend(String conversation, AttentionStore.Channel channel) {
+    if (attention != null) {
+      attention.attend(Actor.current(), conversation, channel);
+    }
   }
 }

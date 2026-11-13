@@ -13,6 +13,7 @@ readonly MAX_RUN=6h
 readonly SECRETS="fleet-anthropic-key fleet-openai-key fleet-github-token"
 readonly LOOP_REPO=standardapplied/nocaptcha
 readonly LOOP_AGENTS=${FLEET_LOOP_AGENTS:-claude-code}
+readonly SCHEMA_CHANGED_IN=0.68.0
 
 usage() {
   cat >&2 <<'EOF'
@@ -86,8 +87,13 @@ Usage:
                                 writes while it is gone; a new main installs VERSION and inits empty, which
                                 observer refuses as another org; the copy goes in place, every node re-pins
                                 main, drops the lost spec into its history, and pushes what main never had
-  ci/fleet upgrade RUN TARGET   upgrade main, then every node, to TARGET, and check that the projects
-                                and the conflicts scenario's spec and conversation held
+  ci/fleet upgrade RUN TARGET [FROM]
+                                upgrade main, then every node, to TARGET, and check that the projects
+                                and the conflicts scenario's spec and conversation held; from FROM
+                                across a release whose schema no older database opens (0.68.0), each
+                                box is reinstalled on TARGET instead: it refuses its old database
+                                naming a reinstall, the database is moved aside, the fleet joins again
+                                and its projects are made again (run passes its VERSION as FROM)
   ci/fleet ssh RUN BOX COMMAND  run COMMAND on BOX as the operator account
   ci/fleet down [RUN]           delete the run's VMs, or every fleet VM when RUN is left out
 
@@ -1603,6 +1609,31 @@ sys.exit(0 if rounds > 0 and exact and served == (rounds, errors, builds) else 1
 ' "$spec" "$shown" "$reviews" "$runs"
 }
 
+measures_record_the_cost_and_the_times() {
+  local run=$1 spec=$2 built=$3 on_main on_box runs
+  on_main=$(on "$run" main "sudo sail spec show $spec --no-sync --json") || return 1
+  on_box=$(on "$run" "$built" "sudo sail spec show $spec --no-sync --json") || return 1
+  runs=$(on "$run" main "sudo sail agent sessions acme --json") || return 1
+  python3 -I -c '
+import json, sys
+spec = sys.argv[1]
+main, box = (json.loads(sys.argv[i])["measures"] for i in (2, 3))
+finished = {r["id"] for r in json.loads(sys.argv[4]).get("runs", [])
+            if (r.get("spec_id") == spec or (not r.get("spec_id") and r.get("room_id") == spec))
+            and r.get("status") in ("completed", "stopped", "failed")}
+cost = main["cost"]
+usd = cost["usd"].get("usd")
+counted = cost["runs"].get("count")
+times = [(main["times"][k], box["times"][k]) for k in ("ready", "done")]
+print("cost: %s usd over %s runs (%d finished listed); ready, done on main and %s: %s"
+      % (usd, counted, len(finished), sys.argv[5], times))
+dollars = isinstance(usd, (int, float)) and usd > 0
+exact = counted == len(finished) and counted > 0
+equal = all(m == b and "at" in m for m, b in times)
+sys.exit(0 if dollars and exact and equal else 1)
+' "$spec" "$on_main" "$on_box" "$runs" "$built"
+}
+
 closes_the_pull_request() {
   local number
   number=$(GH_TOKEN=$(secret fleet-github-token) gh pr list --repo "$LOOP_REPO" --head "agent/$1" --json number --jq '.[0].number')
@@ -1651,6 +1682,10 @@ loop() {
   check "$run" "every node syncs twice" sync_all "$run"
   check "$run" "every box sees it awaiting merge" everywhere "$run" "$spec" status awaiting_merge
   check "$run" "main's measures of it count the reviews and the build runs listed for it" measures_match_the_rows "$run" "$spec"
+  check "$run" "eng marks it done" on "$run" eng "sudo sail spec update $spec --status done"
+  check "$run" "every node syncs twice" sync_all "$run"
+  check "$run" "its cost is dollars over every run listed for it, and its ready and done are the same on main and eng" \
+    measures_record_the_cost_and_the_times "$run" "$spec" eng
   check "$run" "the fleet closes its pull request and deletes the branch" closes_the_pull_request "$spec" "$run"
   check "$run" "still no secret appears in the run's logs" no_secret_in_logs "$run"
 }
@@ -1679,10 +1714,48 @@ upgrade_box() {
   fi
 }
 
+# Whether going from release $1 to $2 crosses SCHEMA_CHANGED_IN, whose database no older release
+# made: a candidate binary file is the newest release there is.
+crosses_the_schema() {
+  local from=$1 to=$2 oldest
+  [[ -f $to ]] && to=999.0.0
+  [[ $from == "$SCHEMA_CHANGED_IN" ]] && return 1
+  oldest=$(printf '%s\n%s\n' "$from" "$SCHEMA_CHANGED_IN" | sort -V | head -1)
+  [[ $oldest == "$from" ]] || return 1
+  oldest=$(printf '%s\n%s\n' "$SCHEMA_CHANGED_IN" "$to" | sort -V | head -1)
+  [[ $oldest == "$SCHEMA_CHANGED_IN" ]]
+}
+
+refuses_its_old_database() {
+  local said
+  said=$(on "$1" "$2" "sudo sail spec list --no-sync 2>&1 || true")
+  echo "$said" | tail -3
+  grep -q "was made by an earlier Sail release" <<< "$said" && grep -q "sail init" <<< "$said"
+}
+
+moves_its_database_aside() {
+  on "$1" "$2" "sudo systemctl stop sail-api 2>/dev/null || true; sudo mv /var/lib/sail/sail.db /var/lib/sail/sail.db.before-reinstall && sudo rm -f /var/lib/sail/sail.db-wal /var/lib/sail/sail.db-shm"
+}
+
+reinstall() {
+  local run=$1 target=$2 box
+  for box in main eng client observer; do
+    check "$run" "$box takes $target over the old release" upgrade_box "$run" "$box" "$target"
+    check "$run" "$box refuses its old database, naming a reinstall" refuses_its_old_database "$run" "$box"
+    check "$run" "$box moves its database aside" moves_its_database_aside "$run" "$box"
+  done
+  join "$run"
+  projects "$run"
+}
+
 upgrade() {
-  local run=${1:-} target box expected
+  local run=${1:-} target box expected from=${3:-}
   target=$(from_caller "${2:-}")
   [[ -n $run && -n $target ]] || usage
+  if [[ -n $from ]] && crosses_the_schema "$from" "$target"; then
+    reinstall "$run" "$target"
+    return
+  fi
   for box in main eng client observer; do
     check "$run" "$box upgrades to $target" upgrade_box "$run" "$box" "$target"
     if [[ -f $target ]]; then
@@ -1742,11 +1815,13 @@ run() {
   step projects "$id"
   if [[ -n $target ]]; then
     step conflicts "$id"
-    step upgrade "$id" "$target"
+    step upgrade "$id" "$target" "$version"
   fi
   step doors "$id"
   step inside "$id"
-  [[ -n $target ]] || step conflicts "$id"
+  if [[ -z $target ]] || crosses_the_schema "$version" "$target"; then
+    step conflicts "$id"
+  fi
   step rooms "$id"
   step access "$id"
   step files "$id"

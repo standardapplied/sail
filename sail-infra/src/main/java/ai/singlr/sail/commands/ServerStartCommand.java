@@ -49,6 +49,7 @@ import ai.singlr.sail.engine.GracefulShutdown;
 import ai.singlr.sail.engine.HostInfo;
 import ai.singlr.sail.engine.HostToken;
 import ai.singlr.sail.engine.NodeIdentity;
+import ai.singlr.sail.engine.RunUsageReader;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.engine.WatcherSpawner;
@@ -215,7 +216,12 @@ public final class ServerStartCommand implements Runnable {
                 syncScheduler::afterWrite,
                 NodeIdentity::handle)
             .useMessages(messageStore);
-    bus.subscribe(new RunTracker(runStore, syncScheduler, NodeIdentity::handle));
+    bus.subscribe(
+        new RunTracker(
+            runStore,
+            new RunUsageReader(new ShellExecutor(false))::read,
+            syncScheduler,
+            NodeIdentity::handle));
     bus.subscribe(new RunActivityStamper(runStore));
     var roomWake =
         new RoomWakeReactor(

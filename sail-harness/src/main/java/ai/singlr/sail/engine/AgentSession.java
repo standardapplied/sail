@@ -6,7 +6,6 @@
 package ai.singlr.sail.engine;
 
 import ai.singlr.sail.common.DateTimeUtils;
-import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.ProjectDefinition;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.harness.Harness;
@@ -563,10 +562,9 @@ public final class AgentSession {
       String role,
       String resumeSessionId) {
     var launching = Objects.requireNonNullElse(harness, Harnesses.DEFAULT);
-    warnIfReasoningEffortDropped(launching, specId, reasoningEffort);
+    var effort = launching.requireEffort(reasoningEffort);
     var unit = AgentUnit.forRun(runId);
-    var launch =
-        new Launch(unit.taskPath(), fullPermissions, model, reasoningEffort, resumeSessionId, true);
+    var launch = new Launch(unit.taskPath(), fullPermissions, model, effort, resumeSessionId, true);
     var agentCmd = agentCommand(launching, role, launch);
     var effectiveSpec = Objects.requireNonNullElse(specId, "");
     var effectiveAgent =
@@ -666,11 +664,11 @@ public final class AgentSession {
       String runCredential,
       String role) {
     var launching = Objects.requireNonNullElse(harness, Harnesses.DEFAULT);
-    warnIfReasoningEffortDropped(launching, specId, reasoningEffort);
+    var effort = launching.requireEffort(reasoningEffort);
     var unit = AgentUnit.forRun(runId);
     var agentCmd =
         launching.headless(
-            new Launch(unit.taskPath(), fullPermissions, model, reasoningEffort, null, false));
+            new Launch(unit.taskPath(), fullPermissions, model, effort, null, false));
     var effectiveSpec = Objects.requireNonNullElse(specId, "");
     var effectiveAgent =
         agentType == null || agentType.isBlank() ? launching.yamlName() : agentType;
@@ -706,22 +704,6 @@ public final class AgentSession {
    */
   private static String agentCommand(Harness harness, String role, Launch launch) {
     return "room".equals(role) ? harness.readOnly(launch) : harness.headless(launch);
-  }
-
-  private static void warnIfReasoningEffortDropped(
-      Harness harness, String specId, String reasoningEffort) {
-    if (harness.honoursReasoningEffort() || Strings.isBlank(reasoningEffort)) {
-      return;
-    }
-    var target = Strings.isBlank(specId) ? "this launch" : "spec " + specId;
-    System.err.println(
-        "  ⚠ "
-            + harness.displayName()
-            + " has no reasoning_effort setting; dropping reasoning_effort='"
-            + reasoningEffort
-            + "' for "
-            + target
-            + ".");
   }
 
   /**

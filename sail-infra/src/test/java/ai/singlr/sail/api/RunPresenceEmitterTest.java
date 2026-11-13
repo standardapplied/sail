@@ -12,6 +12,7 @@ import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.Sqlite;
+import ai.singlr.sail.store.TestRuns;
 import java.nio.file.Path;
 import java.time.Instant;
 import java.util.concurrent.ConcurrentLinkedQueue;
@@ -185,7 +186,7 @@ class RunPresenceEmitterTest {
     stampAt(id, now().minus(RunPresence.THRESHOLD).minusSeconds(60));
     assertEquals(1, emitter.sweep());
 
-    Acting.system(() -> runStore.complete(id, "completed", 0));
+    Acting.system(() -> TestRuns.complete(runStore, id, "completed", 0));
 
     assertEquals(0, emitter.sweep(), "terminal runs have no presence and no edges");
   }

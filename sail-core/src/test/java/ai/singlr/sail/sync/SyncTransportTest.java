@@ -25,6 +25,7 @@ import ai.singlr.sail.store.ProjectStore;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.SyncState;
+import ai.singlr.sail.store.TestRuns;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.nio.file.Path;
@@ -224,7 +225,7 @@ class SyncTransportTest {
     try (var link = connect(nodeA)) {
       link.reconcile("run", replica);
     }
-    new RunStore(nodeA.db).complete(id, "stopped", 0);
+    TestRuns.complete(new RunStore(nodeA.db), id, "stopped", 0);
     var changed = new LinkedHashMap<>(runs.comparableSnapshot(id));
     changed.put("branch", "from-main");
     runs.commitRevision(id, changed, runs.latestRev(id), runs.authority());

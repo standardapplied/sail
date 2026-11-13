@@ -67,7 +67,11 @@ public final class YamlUtil {
     return result instanceof Map<?, ?> m ? (Map<String, Object>) m : Map.of();
   }
 
-  /** Parses one bounded protocol object with the same character ceiling as its frame. */
+  /**
+   * Parses one bounded protocol object with the same character ceiling as its frame. The YAML
+   * parser refuses a C1 control, U+FFFE or U+FFFF anywhere in a document, which JSON takes raw in a
+   * string, so each is read as its escape: the value is the one JSON gives.
+   */
   @SuppressWarnings("unchecked")
   public static Map<String, Object> parseJsonLine(String text, int maxChars) {
     if (maxChars <= 0) {
@@ -76,14 +80,15 @@ public final class YamlUtil {
     if (text == null || text.length() > maxChars) {
       throw new IllegalArgumentException("message exceeded " + maxChars + " characters");
     }
+    var json = escapedForYaml(text);
     try {
       var settings =
           LoadSettings.builder()
-              .setCodePointLimit(maxChars)
+              .setCodePointLimit(json.length())
               .setAllowDuplicateKeys(false)
-              .setBufferSize(Math.min(text.length() + 1, LINE_BUFFER))
+              .setBufferSize(Math.min(json.length() + 1, LINE_BUFFER))
               .build();
-      var value = new Load(settings).loadFromString(text);
+      var value = new Load(settings).loadFromString(json);
       if (!(value instanceof Map<?, ?> map)) {
         throw new IllegalArgumentException("Expected a JSON object");
       }
@@ -270,6 +275,20 @@ public final class YamlUtil {
             sb.append(ch);
           }
         }
+      }
+    }
+    return sb.toString();
+  }
+
+  /** {@code text} with each character JSON takes raw and the YAML parser refuses escaped. */
+  private static String escapedForYaml(String text) {
+    var sb = new StringBuilder(text.length());
+    for (var i = 0; i < text.length(); i++) {
+      var ch = text.charAt(i);
+      if (ch >= 0x20 && yamlRejects(text, i)) {
+        sb.append(String.format("\\u%04x", (int) ch));
+      } else {
+        sb.append(ch);
       }
     }
     return sb.toString();

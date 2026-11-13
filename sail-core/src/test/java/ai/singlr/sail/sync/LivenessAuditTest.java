@@ -32,6 +32,7 @@ import ai.singlr.sail.store.RoomStore;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.Sqlite;
 import ai.singlr.sail.store.SyncLimits;
+import ai.singlr.sail.store.TestRuns;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.nio.file.Path;
@@ -303,7 +304,7 @@ class LivenessAuditTest {
     var agent = agent(ada, run);
     Acting.by(agent, () -> ada.specs.create(draft("born", null)));
     Acting.by(agent, () -> ada.specs.setContent("born", "drafted", ""));
-    Acting.system(() -> new RunStore(ada.db).complete(run, "stopped", null));
+    Acting.system(() -> TestRuns.complete(new RunStore(ada.db), run, "stopped", null));
     var before = new ChangeLog(ada.db).history("spec", "born").size();
 
     assertConvergedWithin(3, ada, new Actor("ada", Role.VIEWER, Actor.Lane.SYNC));
@@ -324,7 +325,7 @@ class LivenessAuditTest {
     ada.db.execute("INSERT INTO run_principals (run_id, principal) VALUES (?, 'bob')", run);
     var agent = agentIn(ada, run, "lab");
     Acting.by(agent, () -> ada.specs.create(draft("born", null).withRoomId("lab")));
-    Acting.system(() -> new RunStore(ada.db).complete(run, "stopped", null));
+    Acting.system(() -> TestRuns.complete(new RunStore(ada.db), run, "stopped", null));
 
     assertConvergedWithin(3, ada, ADA);
 
@@ -348,7 +349,7 @@ class LivenessAuditTest {
     ada.db.execute("INSERT INTO run_principals (run_id, principal) VALUES (?, 'bob')", run);
     var agent = agentIn(ada, run, "lab");
     Acting.by(agent, () -> ada.specs.create(draft("born", null).withRoomId("lab")));
-    Acting.system(() -> new RunStore(ada.db).complete(run, "stopped", null));
+    Acting.system(() -> TestRuns.complete(new RunStore(ada.db), run, "stopped", null));
     Acting.as("ada", () -> new RoomStore(ada.db).delete("lab"));
     var before = new ChangeLog(ada.db).history("spec", "born").size();
 
@@ -388,7 +389,7 @@ class LivenessAuditTest {
     var run = run(ada, "ada", "mine");
     var agent = agentIn(ada, run, "lab");
     Acting.by(agent, () -> ada.specs.create(draft("born", null).withRoomId("lab")));
-    Acting.system(() -> new RunStore(ada.db).complete(run, "stopped", null));
+    Acting.system(() -> TestRuns.complete(new RunStore(ada.db), run, "stopped", null));
     Acting.as("ada", () -> new RoomStore(ada.db).delete("lab"));
 
     assertConvergedWithin(3, ada, ADA);
@@ -434,7 +435,7 @@ class LivenessAuditTest {
     assertTrue(
         reviews.findReview(review).isPresent(), "the running review is kept for its pipeline");
 
-    Acting.system(() -> new RunStore(ada.db).complete(review, "stopped", null));
+    Acting.system(() -> TestRuns.complete(new RunStore(ada.db), review, "stopped", null));
     Acting.system(() -> reviews.updateReviewStatus(review, "failed"));
 
     assertConvergedWithin(3, ada, viewer);
@@ -525,7 +526,7 @@ class LivenessAuditTest {
       var verdict =
           Acting.system(
               () -> new MessageStore(bob.db).append("mine", MessageStore.SAIL_AUTHOR, "ok", null));
-      Acting.system(() -> new RunStore(bob.db).complete(run, "stopped", null));
+      Acting.system(() -> TestRuns.complete(new RunStore(bob.db), run, "stopped", null));
       assertConvergedWithin(3, bob, bobSyncs);
       var adaIsAdmin = new Actor("ada", Role.ADMIN, Actor.Lane.SYNC);
       round(ada, adaIsAdmin);
@@ -548,7 +549,7 @@ class LivenessAuditTest {
     var post =
         Acting.system(
             () -> new MessageStore(ada.db).append("mine", MessageStore.SAIL_AUTHOR, "done", null));
-    Acting.system(() -> new RunStore(ada.db).complete(run, "stopped", null));
+    Acting.system(() -> TestRuns.complete(new RunStore(ada.db), run, "stopped", null));
 
     assertConvergedWithin(3, ada, new Actor("ada", Role.VIEWER, Actor.Lane.SYNC));
 
@@ -860,7 +861,7 @@ class LivenessAuditTest {
     ada.db.execute("INSERT INTO run_principals (run_id, principal) VALUES (?, 'bob')", run);
     var agent = agent(ada, run);
     Acting.by(agent, () -> ada.specs.create(draft("born", null)));
-    Acting.system(() -> new RunStore(ada.db).complete(run, "stopped", null));
+    Acting.system(() -> TestRuns.complete(new RunStore(ada.db), run, "stopped", null));
     assertConvergedWithin(3, ada, ADA);
     assertTrue(new ChangeLog(ada.db).head("spec", "born").orElseThrow().withdrawn());
     room(ada, "ada", "lab");
@@ -881,14 +882,14 @@ class LivenessAuditTest {
     ada.db.execute("INSERT INTO run_principals (run_id, principal) VALUES (?, 'bob')", first);
     var agent = agent(ada, first);
     Acting.by(agent, () -> ada.specs.create(draft("born", null)));
-    Acting.system(() -> new RunStore(ada.db).complete(first, "stopped", null));
+    Acting.system(() -> TestRuns.complete(new RunStore(ada.db), first, "stopped", null));
     assertConvergedWithin(3, ada, ADA);
     var second = run(ada, "ada", "mine");
     ada.db.execute("INSERT INTO run_principals (run_id, principal) VALUES (?, 'bob')", second);
     var again = agent(ada, second);
     Acting.by(again, () -> ada.specs.create(draft("born", null)));
     var post = Acting.as("ada", () -> new MessageStore(ada.db).append("born", "ada", "hi", null));
-    Acting.system(() -> new RunStore(ada.db).complete(second, "stopped", null));
+    Acting.system(() -> TestRuns.complete(new RunStore(ada.db), second, "stopped", null));
 
     assertConvergedWithin(3, ada, ADA);
 

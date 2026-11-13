@@ -16,6 +16,7 @@ import ai.singlr.sail.engine.AgentUnit;
 import ai.singlr.sail.engine.ContainerSailSetup;
 import ai.singlr.sail.engine.HostInfo;
 import ai.singlr.sail.engine.ProjectSkillInstaller;
+import ai.singlr.sail.engine.RunUsageReader;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.WatcherSpawner;
 import ai.singlr.sail.harness.Harnesses;
@@ -228,9 +229,15 @@ public final class RunLauncher {
   }
 
   LaunchOutcome launchSession(LaunchSpec s) {
+    LaunchAdmission.requireEffort(LaunchAdmission.resolveAgent(s.agentType()), s.reasoningEffort());
     try {
       staged(s);
       var command = launchCommand(s);
+      runBookkeeping(
+          "record the launch of run " + s.runId(),
+          () ->
+              runStore.recordLaunch(
+                  s.runId(), s.model(), s.reasoningEffort(), s.resumeSessionId()));
       listener.launching(s.background(), redactCredential(command, s.runCredential()));
       var exitCode = launcher.launch(command);
       if (s.background()) {
@@ -478,7 +485,13 @@ public final class RunLauncher {
   private void completeForegroundRun(String runId, int exitCode) {
     runBookkeeping(
         "complete run " + runId,
-        () -> RunTracker.finish(runStore, runId, exitCode == 0 ? "completed" : "failed", exitCode));
+        () ->
+            RunTracker.finish(
+                runStore,
+                new RunUsageReader(shell)::read,
+                runId,
+                exitCode == 0 ? "completed" : "failed",
+                exitCode));
   }
 
   /**

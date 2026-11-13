@@ -16,6 +16,7 @@ import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.config.TestDefinitions;
 import ai.singlr.sail.engine.AgentSession;
 import ai.singlr.sail.engine.AgentUnit;
+import ai.singlr.sail.engine.RunUsageReader;
 import ai.singlr.sail.engine.SharedProjectFiles;
 import ai.singlr.sail.engine.SlackPoster;
 import ai.singlr.sail.engine.StageSkill;
@@ -190,7 +191,13 @@ final class ReviewLoop implements AutoCloseable {
                 () -> HANDLE)
             .useMessages(messages);
     started.subscribe(counted(new SpecStoreAuditPersister(new EventStore(db))));
-    started.subscribe(counted(new RunTracker(runs, SyncScheduler.disabled(), () -> HANDLE)));
+    started.subscribe(
+        counted(
+            new RunTracker(
+                runs,
+                new RunUsageReader(container)::read,
+                SyncScheduler.disabled(),
+                () -> HANDLE)));
     started.subscribe(counted(controller));
     started.subscribe(counted(recorder()));
   }
@@ -362,7 +369,16 @@ final class ReviewLoop implements AutoCloseable {
     return run(id, specId, role);
   }
 
+  /** As {@link #run(String, String)}, of a run of {@code agent}. */
+  String runOf(String specId, String role, String agent) {
+    return run(DateTimeUtils.newId().toString(), specId, role, agent);
+  }
+
   private String run(String id, String specId, String role) {
+    return run(id, specId, role, "claude-code");
+  }
+
+  private String run(String id, String specId, String role, String agent) {
     Acting.system(
         () ->
             runs.create(
@@ -371,7 +387,7 @@ final class ReviewLoop implements AutoCloseable {
                 specId,
                 HANDLE,
                 role,
-                "claude-code",
+                agent,
                 "feat/test",
                 "work",
                 null,

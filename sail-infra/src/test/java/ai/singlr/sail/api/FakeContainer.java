@@ -7,6 +7,7 @@ package ai.singlr.sail.api;
 
 import ai.singlr.sail.engine.AgentUnit;
 import ai.singlr.sail.engine.ContainerSailSetup;
+import ai.singlr.sail.engine.ReportLines;
 import ai.singlr.sail.engine.ScriptedShellExecutor;
 import ai.singlr.sail.engine.ShellExec;
 import java.io.IOException;
@@ -264,7 +265,7 @@ final class FakeContainer implements ShellExec {
     var inner = command.subList(boundary + 1, command.size());
     return switch (inner.get(0)) {
       case "cat" -> cat(inner.get(1));
-      case "tail" -> cat(inner.getLast());
+      case "tail" -> tail(inner.getLast());
       case "kill" -> kill(inner);
       case "bash" -> bash(inner);
       case "systemctl" -> managerDown ? fail("Failed to connect to bus") : systemctl(inner);
@@ -344,6 +345,9 @@ final class FakeContainer implements ShellExec {
     if (!failingFragment.isEmpty() && String.join(" ", inner).contains(failingFragment)) {
       return fail(failingWith);
     }
+    if (ReportLines.asks(inner)) {
+      return ReportLines.answer(files.get(inner.get(4)), inner);
+    }
     if (inner.get(2).startsWith("for d in")) {
       var skillsDir = inner.getLast();
       var stamped =
@@ -389,6 +393,14 @@ final class FakeContainer implements ShellExec {
     }
     var content = files.get(path);
     return content == null ? fail("cat: " + path + ": No such file or directory") : ok(content);
+  }
+
+  /** The file's last bytes, as {@code tail} answers, saying what it says of a missing file. */
+  private Result tail(String path) {
+    var content = files.get(path);
+    return content == null
+        ? fail("tail: cannot open '" + path + "' for reading: No such file or directory")
+        : ok(content);
   }
 
   private Result kill(List<String> inner) {

@@ -24,6 +24,7 @@ import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
+import ai.singlr.sail.store.TestRuns;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -151,7 +152,7 @@ class SessionReportDeliveryIT {
   @Test
   void aFinishedRunsRevokedCredentialCannotRewriteItsSession() throws Exception {
     runScript("{\"session_id\": \"live-111\", \"source\": \"startup\"}");
-    Acting.system(() -> runStore.complete(runId, "completed", 0));
+    Acting.system(() -> TestRuns.complete(runStore, runId, "completed", 0));
 
     var late = runScript("{\"session_id\": \"stale-999\", \"source\": \"resume\"}");
 

@@ -17,7 +17,6 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.Set;
 
 class TestOperations implements Operations {
 
@@ -160,6 +159,9 @@ class TestOperations implements Operations {
         null,
         null,
         "lounge",
+        null,
+        null,
+        null,
         null,
         null);
   }
@@ -618,15 +620,21 @@ class TestOperations implements Operations {
         SpecMeasures.of(
             new MeasureRows(
                 specId,
-                "test-project",
                 SpecStatus.PENDING,
                 "box",
-                List.of(),
-                Set.of(),
+                new SpecStore.Recorded(
+                    null, null, null, new SpecStore.KeptRuns(0, 0, 0, 0, 0, 0, 0, 0, 0, 0), false),
                 MeasureRows.Seen.all(List.of()),
                 List.of(),
                 MeasureRows.Seen.all(List.of()),
-                Map.of())));
+                List.of(),
+                null)));
+  }
+
+  @Override
+  public Result<AttentionResponse> attend(String conversation) {
+    return Result.success(
+        new AttentionResponse(conversation, Instant.parse("2026-11-13T09:00:00Z"), true));
   }
 
   @Override

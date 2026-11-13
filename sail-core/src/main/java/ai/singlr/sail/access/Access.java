@@ -117,6 +117,18 @@ public final class Access {
   }
 
   /**
+   * The person {@code actor} is, when it is one acting on a person's own lane: the host CLI or an
+   * HTTP credential, a person's session, passkey or token. Empty for a run's principal, the
+   * credential in a project container (an agent may hold it), sync and Sail itself, so nothing they
+   * do is counted as a person's attention (M5).
+   */
+  public static Optional<String> attendee(Actor actor) {
+    return actor.lane() == Actor.Lane.CLI || actor.lane() == Actor.Lane.API
+        ? Optional.ofNullable(actor.handle()).filter(handle -> !handle.isBlank())
+        : Optional.empty();
+  }
+
+  /**
    * Whether {@code actor} is the principal of {@code resource}, a run: the one run an agent
    * narrates, its own. A rule that takes a narration at its word asks it here, as the lane's grant
    * decides it, rather than reading the actor's handle.

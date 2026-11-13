@@ -476,6 +476,9 @@ class AccessDoorsBaselineTest {
   }
 
   private static void rooms(World world, List<Door> doors) {
+    for (var conversation : List.of("lobby", "b-room", "s-ada", "s-beta", "ghost")) {
+      doors.add(new Door("send a heartbeat for " + conversation, ops -> ops.attend(conversation)));
+    }
     for (var room : List.of("lobby", "den", "hall", "s-ada", "b-room")) {
       doors.add(
           new Door(

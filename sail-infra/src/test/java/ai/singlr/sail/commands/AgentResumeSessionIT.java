@@ -176,7 +176,7 @@ class AgentResumeSessionIT extends AbstractIncusIT {
                 "log",
                 "u"));
     Acting.system(() -> runStore.recordSession(id, sessionId, "hook", null));
-    Acting.system(() -> runStore.transition(id, "running", "completed", 0));
+    Acting.system(() -> runStore.finish(id, "running", "completed", 0, null));
     return id;
   }
 
@@ -198,7 +198,7 @@ class AgentResumeSessionIT extends AbstractIncusIT {
                 "task",
                 AgentUnit.forRun(id),
                 CONFIG));
-    Acting.system(() -> runStore.transition(id, "running", "completed", 0));
+    Acting.system(() -> runStore.finish(id, "running", "completed", 0, null));
     return id;
   }
 

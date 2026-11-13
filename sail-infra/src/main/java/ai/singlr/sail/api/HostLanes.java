@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.api;
 
+import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.common.Remedied;
 import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.config.Lane;
@@ -24,6 +25,7 @@ import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.RoleRule;
 import ai.singlr.sail.pty.PtyIdentity;
 import ai.singlr.sail.ssh.SshGateway;
+import ai.singlr.sail.store.AttentionStore;
 import ai.singlr.sail.store.AuthSessionStore;
 import ai.singlr.sail.store.BlobStore;
 import ai.singlr.sail.store.DispatchGate;
@@ -385,6 +387,12 @@ final class HostLanes {
     @Override
     public void recordEvent(EventStore.EventRow event) {
       events.insert(event);
+    }
+
+    @Override
+    public void recordTyping(String person, String room) {
+      new AttentionStore(db)
+          .record(person, room, DateTimeUtils.now(), AttentionStore.Channel.TERMINAL_INPUT);
     }
   }
 

@@ -8,115 +8,37 @@ package ai.singlr.sail.api;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
+import ai.singlr.sail.config.ProjectDefinition;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.config.YamlUtil;
-import ai.singlr.sail.store.ChangeLog;
+import ai.singlr.sail.store.AttentionStore;
 import ai.singlr.sail.store.Finding;
 import ai.singlr.sail.store.ReviewStore;
 import ai.singlr.sail.store.RunStore;
+import ai.singlr.sail.store.SpecStore;
 import java.time.Instant;
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import java.util.stream.IntStream;
 import org.junit.jupiter.api.Test;
 
 /**
  * {@link SpecMeasures#of} on plain rows: every number is computed from the rows it is handed, a
- * number missing an input is unknown with its reason, never a smaller number (M8), a run is counted
- * once (M9), a negative interval is an error naming both instants (M11), and nothing names a person
- * (M12). {@link SpecMeasuresList#of} summarizes what it lists over the numbers known exactly,
- * counting what it left out of each.
+ * number missing an input is unknown with its reason, never a smaller number (M8), nothing is
+ * counted twice (M9), a negative interval is an error naming both instants (M11), and nothing names
+ * a person (M12). {@link SpecMeasuresList#of} summarizes what it lists over the numbers known
+ * exactly, counting what it left out of each.
  */
 class SpecMeasuresTest {
 
   private static final Instant T0 = Instant.parse("2026-11-01T09:00:00Z");
+  private static final SpecStore.KeptRuns NO_RUNS =
+      new SpecStore.KeptRuns(0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
 
   private static Instant at(int minutes) {
-    return T0.plusSeconds(60L * minutes);
-  }
-
-  /**
-   * Revision {@code seq} of the spec written on this box, in {@code status}, at {@code minutes}.
-   */
-  private static ChangeLog.Entry revision(long seq, SpecStatus status, int minutes) {
-    return revision(seq, status, at(0), at(minutes));
-  }
-
-  private static ChangeLog.Entry revision(
-      long seq, SpecStatus status, Instant created, Instant updated) {
-    return entry(seq, status, created, updated, ChangeLog.Entry.LOCAL);
-  }
-
-  /** Revision {@code seq} heard by sync from another box, made at {@code minutes}. */
-  private static ChangeLog.Entry heard(long seq, SpecStatus status, int minutes) {
-    return entry(seq, status, at(0), at(minutes), ChangeLog.Entry.SYNC);
-  }
-
-  private static ChangeLog.Entry entry(
-      long seq, SpecStatus status, Instant created, Instant updated, String origin) {
-    return entry(seq, status, created, updated, origin, "acme");
-  }
-
-  private static ChangeLog.Entry heard(
-      long seq, SpecStatus status, Instant created, Instant updated) {
-    return entry(seq, status, created, updated, ChangeLog.Entry.SYNC);
-  }
-
-  private static ChangeLog.Entry entry(
-      long seq,
-      SpecStatus status,
-      Instant created,
-      Instant updated,
-      String origin,
-      String project) {
-    var snapshot = new LinkedHashMap<String, Object>();
-    snapshot.put("id", LoopRows.SPEC);
-    snapshot.put("project", project);
-    snapshot.put("status", status.wire());
-    snapshot.put("created_at", created.toEpochMilli());
-    snapshot.put("updated_at", updated.toEpochMilli());
-    return new ChangeLog.Entry(
-        seq,
-        "spec",
-        LoopRows.SPEC,
-        seq + "-r",
-        "uday",
-        updated,
-        origin,
-        false,
-        YamlUtil.dumpJson(snapshot),
-        null,
-        ChangeLog.Kind.REVISION);
-  }
-
-  private static ChangeLog.Entry tombstone(long seq, int minutes) {
-    return new ChangeLog.Entry(
-        seq,
-        "spec",
-        LoopRows.SPEC,
-        seq + "-t",
-        "uday",
-        at(minutes),
-        ChangeLog.Entry.LOCAL,
-        true,
-        "{}",
-        null,
-        ChangeLog.Kind.TOMBSTONE);
-  }
-
-  /** The loop's usual path: drafted, ready at 10, built and reviewed, passed at 70, done at 130. */
-  private static List<ChangeLog.Entry> shipped() {
-    return List.of(
-        revision(1, SpecStatus.DRAFT, 0),
-        revision(2, SpecStatus.PENDING, 10),
-        revision(3, SpecStatus.IN_PROGRESS, 20),
-        revision(4, SpecStatus.REVIEW, 50),
-        revision(5, SpecStatus.AWAITING_MERGE, 70),
-        revision(6, SpecStatus.DONE, 130));
+    return T0.plusSeconds(minutes * 60L);
   }
 
   private static ReviewStore.ReviewRow review(
@@ -164,91 +86,153 @@ class SpecMeasuresTest {
         "still there");
   }
 
-  private static RunStore.RunRow run(String id, String role) {
-    return LoopRows.ended(id, role, null);
+  private static AttentionStore.Minute minute(
+      String person, int minutes, AttentionStore.Channel channel) {
+    return new AttentionStore.Minute(person, LoopRows.SPEC, at(minutes), channel);
   }
 
   private record Given(
       SpecStatus status,
-      List<ChangeLog.Entry> history,
-      Set<Long> gaps,
+      SpecStore.Recorded recorded,
       MeasureRows.Seen<ReviewStore.ReviewRow> reviews,
       List<Finding> findings,
       MeasureRows.Seen<RunStore.RunRow> runs,
-      Map<String, Long> erasures) {
+      List<AttentionStore.Minute> minutes,
+      ProjectDefinition.Budget budget) {
 
+    /**
+     * A change made ready at 09:10, verified at 10:10, awaiting merge from 10:10, done at 11:10.
+     */
     static Given done() {
       return new Given(
           SpecStatus.DONE,
-          shipped(),
-          Set.of(),
+          new SpecStore.Recorded(at(10), at(70), at(130), NO_RUNS, false),
           MeasureRows.Seen.all(List.of(review("r1", 1, "passed", at(70), null))),
           List.of(),
           MeasureRows.Seen.all(List.of()),
-          Map.of());
+          List.of(),
+          null);
     }
 
-    Given history(List<ChangeLog.Entry> history, Set<Long> gaps) {
-      return new Given(status, history, gaps, reviews, findings, runs, erasures);
+    Given times(Instant ready, Instant awaitingMerge, Instant done) {
+      return new Given(
+          status,
+          new SpecStore.Recorded(
+              ready, awaitingMerge, done, recorded.runs(), recorded.erasedBeforeHeld()),
+          reviews,
+          findings,
+          runs,
+          minutes,
+          budget);
+    }
+
+    Given kept(SpecStore.KeptRuns kept) {
+      return new Given(
+          status,
+          new SpecStore.Recorded(
+              recorded.readyAt(),
+              recorded.awaitingMergeAt(),
+              recorded.doneAt(),
+              kept,
+              recorded.erasedBeforeHeld()),
+          reviews,
+          findings,
+          runs,
+          minutes,
+          budget);
+    }
+
+    Given heldLate() {
+      return new Given(
+          status,
+          new SpecStore.Recorded(
+              recorded.readyAt(),
+              recorded.awaitingMergeAt(),
+              recorded.doneAt(),
+              recorded.runs(),
+              true),
+          reviews,
+          findings,
+          runs,
+          minutes,
+          budget);
     }
 
     Given reviewed(ReviewStore.ReviewRow... reviews) {
       return new Given(
-          status, history, gaps, MeasureRows.Seen.all(List.of(reviews)), findings, runs, erasures);
+          status,
+          recorded,
+          MeasureRows.Seen.all(List.of(reviews)),
+          findings,
+          runs,
+          minutes,
+          budget);
     }
 
     Given reviewsHidden() {
       return new Given(
           status,
-          history,
-          gaps,
+          recorded,
           new MeasureRows.Seen<>(reviews.rows(), true),
           findings,
           runs,
-          erasures);
+          minutes,
+          budget);
     }
 
     Given found(Finding... findings) {
-      return new Given(status, history, gaps, reviews, List.of(findings), runs, erasures);
+      return new Given(status, recorded, reviews, List.of(findings), runs, minutes, budget);
     }
 
-    Given ran(RunStore.RunRow... runs) {
-      return new Given(
-          status, history, gaps, reviews, findings, MeasureRows.Seen.all(List.of(runs)), erasures);
-    }
-
-    Given runsHidden() {
+    Given hideRuns() {
       return new Given(
           status,
-          history,
-          gaps,
+          recorded,
           reviews,
           findings,
           new MeasureRows.Seen<>(runs.rows(), true),
-          erasures);
+          minutes,
+          budget);
     }
 
-    Given erased(Map<String, Long> erasures) {
-      return new Given(status, history, gaps, reviews, findings, runs, erasures);
+    Given running(RunStore.RunRow... held) {
+      return new Given(
+          status,
+          recorded,
+          reviews,
+          findings,
+          MeasureRows.Seen.all(List.of(held)),
+          minutes,
+          budget);
+    }
+
+    Given attended(AttentionStore.Minute... minutes) {
+      return new Given(status, recorded, reviews, findings, runs, List.of(minutes), budget);
+    }
+
+    Given budget(Long tokens, Double usd) {
+      return new Given(
+          status,
+          recorded,
+          reviews,
+          findings,
+          runs,
+          minutes,
+          new ProjectDefinition.Budget(tokens, usd));
     }
 
     Given status(SpecStatus status) {
-      return new Given(status, history, gaps, reviews, findings, runs, erasures);
+      return new Given(status, recorded, reviews, findings, runs, minutes, budget);
     }
 
     SpecMeasures measured() {
+      return measured("box-7");
+    }
+
+    SpecMeasures measured(String box) {
       return SpecMeasures.of(
           new MeasureRows(
-              LoopRows.SPEC,
-              "acme",
-              status,
-              "box-7",
-              history,
-              gaps,
-              reviews,
-              findings,
-              runs,
-              erasures));
+              LoopRows.SPEC, status, box, recorded, reviews, findings, runs, minutes, budget));
     }
 
     Map<String, Object> wire() {
@@ -271,10 +255,6 @@ class SpecMeasuresTest {
 
   private static Map<String, Object> count(long count) {
     return Map.of("count", count);
-  }
-
-  private static Map<String, Object> atLeast(long count) {
-    return Map.of("count", count, "at_least", true);
   }
 
   private static Map<String, Object> unknown(String reason) {
@@ -308,27 +288,50 @@ class SpecMeasuresTest {
     return String.format("%02d:%02d:00", 9 + minutes / 60, minutes % 60);
   }
 
+  private static Map<String, Object> cost(
+      long runs,
+      long withoutUsage,
+      long withoutCost,
+      long in,
+      long out,
+      long read,
+      long write,
+      double usd,
+      Object budget,
+      Object over) {
+    var cost = new LinkedHashMap<String, Object>();
+    cost.put("runs", count(runs));
+    cost.put("runs_without_usage", count(withoutUsage));
+    cost.put("runs_without_cost", count(withoutCost));
+    cost.put("tokens", count(in + out + read + write));
+    cost.put("tokens_in", count(in));
+    cost.put("tokens_out", count(out));
+    cost.put("tokens_cache_read", count(read));
+    cost.put("tokens_cache_write", count(write));
+    cost.put("usd", Map.of("usd", usd));
+    cost.put("budget", budget);
+    cost.put("over_budget", over);
+    return cost;
+  }
+
   private static final Map<String, Object> NOT_REACHED = unknown("not_reached");
-  private static final Map<String, Object> INCOMPLETE = unknown("history_incomplete");
-  private static final Map<String, Object> COLLAPSED = unknown("collapsed_by_sync");
   private static final Map<String, Object> HIDDEN = unknown("hidden_rows");
+  private static final Map<String, Object> NOT_SET = unknown("not_set");
 
   @Test
-  void aShippedChangeStatesItsTimesFromThisBoxsChangeLogAndItsPassingReview() {
+  void aShippedChangeStatesItsOwnTimesAndItsPassingReview() {
     var wire = Given.done().wire();
 
     assertEquals(
         Map.of(
-            "box",
-            Map.of("sail_id", "box-7"),
             "ready",
-            moment(10, "change_log"),
+            moment(10, "spec"),
             "verified",
             moment(70, "review"),
             "awaiting_merge",
-            moment(70, "change_log"),
+            moment(70, "spec"),
             "done",
-            moment(130, "change_log")),
+            moment(130, "spec")),
         at(wire, "times"));
     assertEquals(
         Map.of(
@@ -337,12 +340,12 @@ class SpecMeasuresTest {
             "ready_to_done", seconds(7200),
             "awaiting_merge", seconds(3600)),
         at(wire, "intervals"));
+    assertEquals(Map.of("sail_id", "box-7"), wire.get("box"));
     assertEquals(LoopRows.SPEC, wire.get("spec_id"));
   }
 
-  /** Scenario 1, with a resumed build counted as the build run it is. */
   @Test
-  void aSpecReviewedThreeTimesAcrossTwoDispatchesCountsItsRoundsBuildRunsAndFixRuns() {
+  void aSpecReviewedThreeTimesCountsItsRoundsAndItsKeptBuildAndFixRuns() {
     var given =
         Given.done()
             .reviewed(
@@ -350,18 +353,24 @@ class SpecMeasuresTest {
                 review("r2", 1, "failed", at(60), null),
                 review("r3", 2, "passed", at(70), null))
             .found(LoopRows.finding("f1", Finding.Severity.HIGH), carried("f2", "f1"))
-            .ran(
-                run("b1", "build"),
-                run("v1", "review"),
-                run("b2", "build"),
-                run("b3", "build"),
-                run("v2", "review"),
-                run("x1", "fix"),
-                run("v3", "review"),
-                run("w1", "room"));
+            .kept(new SpecStore.KeptRuns(8, 3, 1, 8, 8, 0, 0, 0, 0, 0));
 
     assertEquals(
         rework(count(3), count(0), count(3), count(1), count(1)), at(given.wire(), "rework"));
+  }
+
+  /** A build or fix still running is rework under way, counted once, never in the cost. */
+  @Test
+  void aBuildOrFixUnderWayIsReworkButNotYetCost() {
+    var running = LoopRows.ended("b2", "build", null);
+    var live = LoopRows.run("b3", LoopRows.NODE, "build", null, "running", null);
+    var given =
+        Given.done()
+            .kept(new SpecStore.KeptRuns(1, 1, 0, 1, 1, 0, 0, 0, 0, 0))
+            .running(running, live, live);
+
+    assertEquals(count(2), at(given.wire(), "rework", "build_runs"), "b1 kept, b3 under way");
+    assertEquals(count(1), at(given.wire(), "cost", "runs"), "a run's cost is counted as it ends");
   }
 
   /** An errored review is retried as a new row of the same iteration: no round, an error. */
@@ -380,7 +389,6 @@ class SpecMeasuresTest {
     assertEquals(moment(60, "review"), at(given.wire(), "times", "verified"));
   }
 
-  /** Scenario 2, an approval in an earlier attempt included. */
   @Test
   void aDoneSpecWithAPassedHumanStageInAnyAttemptIsNotCountedAsNoRecordedHumanCodeAct() {
     var current =
@@ -399,185 +407,59 @@ class SpecMeasuresTest {
         "a person reviewed the change's work line by line in an earlier attempt");
   }
 
-  /** Scenario 3. */
   @Test
-  void aDoneSpecWithNoHumanStageIsCountedAndLabelledAnUpperBound() {
+  void aDoneSpecWithNoHumanActIsCountedAndLabelledAnUpperBound() {
+    var posted =
+        Given.done()
+            .attended(
+                minute("ada", 20, AttentionStore.Channel.POST),
+                minute("ada", 21, AttentionStore.Channel.FOCUS),
+                minute("ada", 22, AttentionStore.Channel.REVIEW_ACT));
+
     assertEquals(
         Map.of("counted", true, "bound", "upper"),
         at(Given.done().wire(), "no_recorded_human_code_act"));
+    assertEquals(
+        Map.of("counted", true, "bound", "upper"),
+        at(posted.wire(), "no_recorded_human_code_act"),
+        "a post, a focus or a status move is no code act");
     assertEquals(
         unknown("not_done"),
         at(Given.done().status(SpecStatus.REVIEW).wire(), "no_recorded_human_code_act"));
   }
 
-  /** Scenario 4. */
+  /**
+   * Scenario 17, as the code is: a terminal input minute in the spec's own conversation (its id);
+   * typing in a room other specs share is not this spec's.
+   */
   @Test
-  void aSpecWhosePendingSnapshotWasCompactedOutHasNoReadyTimeAndSaysOneInputIsMissing() {
-    var kept = shipped().subList(2, 6);
-    var wire = Given.done().history(kept, Set.of(1L, 2L)).wire();
-
-    assertEquals(INCOMPLETE, at(wire, "times", "ready"));
-    assertEquals(moment(130, "change_log"), at(wire, "times", "done"), "its move to done is held");
-    assertEquals(missing(1), at(wire, "intervals", "ready_to_verified"));
-    assertEquals(missing(1), at(wire, "intervals", "ready_to_done"));
-    assertEquals(seconds(3600), at(wire, "intervals", "verified_to_done"));
-  }
-
-  @Test
-  void aSyncedBaseOlderThanTheCompactedEntriesStillGivesTheReadyTime() {
-    var history = new ArrayList<ChangeLog.Entry>();
-    history.add(revision(2, SpecStatus.PENDING, at(10), at(10)));
-    history.addAll(shipped().subList(4, 6));
-
-    var wire = Given.done().history(history, Set.of(3L, 4L)).wire();
-
-    assertEquals(moment(10, "change_log"), at(wire, "times", "ready"), "born ready, then kept");
-    assertEquals(INCOMPLETE, at(wire, "times", "awaiting_merge"), "a gap sits before its stretch");
-  }
-
-  @Test
-  void aLogThatBeginsAfterTheBirthOrHoldsNothingKnowsNoEarlierMove() {
-    var adopted = List.of(revision(9, SpecStatus.PENDING, 30), revision(10, SpecStatus.DONE, 130));
-
-    var wire = Given.done().history(adopted, Set.of()).wire();
-    var empty = Given.done().status(SpecStatus.PENDING).history(List.of(), Set.of()).wire();
-
-    assertEquals(INCOMPLETE, at(wire, "times", "ready"), "it may have been ready before");
-    assertEquals(NOT_REACHED, at(wire, "times", "awaiting_merge"));
-    assertEquals(moment(130, "change_log"), at(wire, "times", "done"));
-    assertEquals(INCOMPLETE, at(empty, "times", "ready"), "a log holding nothing");
-    assertEquals(INCOMPLETE, at(empty, "times", "done"), "a done stretch may lie outside it");
-  }
-
-  @Test
-  void aGapInsideTheStretchInDoneLeavesItsStartUnknown() {
-    var history = new ArrayList<>(shipped());
-    history.add(revision(8, SpecStatus.DONE, 140));
-
-    var wire = Given.done().history(history, Set.of(7L)).wire();
-
-    assertEquals(INCOMPLETE, at(wire, "times", "done"));
-    assertEquals(INCOMPLETE, at(wire, "times", "awaiting_merge"), "what precedes it is unknown");
-    assertEquals(missing(2), at(wire, "intervals", "awaiting_merge"));
-    assertEquals(moment(10, "change_log"), at(wire, "times", "ready"));
-    var cut =
-        Given.done()
-            .history(
-                List.of(
-                    revision(1, SpecStatus.DRAFT, 0),
-                    revision(30, SpecStatus.DONE, 300),
-                    revision(31, SpecStatus.DONE, 310)),
-                Set.of(2L, 3L, 4L))
-            .wire();
-    assertEquals(INCOMPLETE, at(cut, "times", "done"), "compaction cut the move to done");
-  }
-
-  @Test
-  void doneIsTheMoveThatBeganItsLatestStretchInDoneAndAwaitingMergeTheStretchBeforeIt() {
-    var reopened = new ArrayList<>(shipped());
-    reopened.add(revision(7, SpecStatus.IN_PROGRESS, 150));
-    reopened.add(revision(8, SpecStatus.AWAITING_MERGE, 200));
-    reopened.add(revision(9, SpecStatus.AWAITING_MERGE, 210));
-    reopened.add(revision(10, SpecStatus.DONE, 240));
-    reopened.add(tombstone(11, 245));
-    reopened.add(revision(12, SpecStatus.DONE, 250));
-
-    var wire =
-        Given.done()
-            .history(reopened, Set.of())
-            .reviewed(
-                review("r1", 1, "passed", at(70), at(150)),
-                review("r2", 1, "passed", at(190), null))
-            .wire();
-
-    assertEquals(moment(240, "change_log"), at(wire, "times", "done"));
-    assertEquals(moment(200, "change_log"), at(wire, "times", "awaiting_merge"));
-    assertEquals(moment(190, "review"), at(wire, "times", "verified"), "what shipped passed last");
-    assertEquals(moment(10, "change_log"), at(wire, "times", "ready"), "ready is the first move");
-  }
-
-  @Test
-  void anArchivedSpecThatShippedKeepsTheMoveThatBeganItsLastStretchInDone() {
-    var archived = new ArrayList<>(shipped());
-    archived.add(revision(7, SpecStatus.ARCHIVED, 500));
-
-    var wire = Given.done().status(SpecStatus.ARCHIVED).history(archived, Set.of()).wire();
-
-    assertEquals(moment(130, "change_log"), at(wire, "times", "done"));
-    assertEquals(moment(70, "change_log"), at(wire, "times", "awaiting_merge"));
-  }
-
-  @Test
-  void readyIsTheFirstMoveIntoPendingWhateverCameAfter() {
-    var restarted =
-        List.of(
-            revision(1, SpecStatus.DRAFT, 0),
-            revision(2, SpecStatus.CANCELLED, 5),
-            revision(3, SpecStatus.PENDING, 10),
-            revision(4, SpecStatus.IN_PROGRESS, 20),
-            revision(5, SpecStatus.PENDING, 30),
-            revision(6, SpecStatus.IN_PROGRESS, 40),
-            revision(7, SpecStatus.PENDING, 50),
-            revision(8, SpecStatus.AWAITING_MERGE, 70),
-            revision(9, SpecStatus.DONE, 130));
+  void aDoneSpecWithATerminalInputMinuteInItsOwnConversationIsNotCountedAsNoRecordedCodeAct() {
+    var typed = Given.done().attended(minute("ada", 20, AttentionStore.Channel.TERMINAL_INPUT));
 
     assertEquals(
-        moment(10, "change_log"),
-        at(Given.done().history(restarted, Set.of()).wire(), "times", "ready"));
+        Map.of("counted", false, "bound", "upper"), at(typed.wire(), "no_recorded_human_code_act"));
   }
 
   @Test
-  void equalInstantsAreAnIntervalOfNoSeconds() {
-    var at0 =
-        List.of(
-            revision(1, SpecStatus.PENDING, at(0), at(0)),
-            revision(2, SpecStatus.AWAITING_MERGE, at(0), at(0)),
-            revision(3, SpecStatus.DONE, at(0), at(0)));
-
-    var wire =
-        Given.done().history(at0, Set.of()).reviewed(review("r1", 1, "passed", at(0), null)).wire();
+  void aSpecNotYetReadyOrDoneOrVerifiedSaysWhatItHasNotReached() {
+    var wire = Given.done().times(null, null, null).reviewed().wire();
 
     assertEquals(
         Map.of(
-            "ready_to_verified", seconds(0),
-            "verified_to_done", seconds(0),
-            "ready_to_done", seconds(0),
-            "awaiting_merge", seconds(0)),
-        at(wire, "intervals"));
-  }
-
-  @Test
-  void aSpecNotDoneOrNeverVerifiedOrPastAwaitingMergeSaysWhatItHasNotReached() {
-    var wire = Given.done().history(shipped().subList(0, 4), Set.of()).reviewed().wire();
-
-    assertEquals(NOT_REACHED, at(wire, "times", "done"));
-    assertEquals(NOT_REACHED, at(wire, "times", "awaiting_merge"));
-    assertEquals(NOT_REACHED, at(wire, "times", "verified"));
-    assertEquals(missing(1), at(wire, "intervals", "ready_to_verified"));
-    assertEquals(missing(2), at(wire, "intervals", "verified_to_done"));
-
-    var straightToDone =
-        List.of(
-            revision(1, SpecStatus.PENDING, 0),
-            revision(2, SpecStatus.IN_PROGRESS, 5),
-            revision(3, SpecStatus.DONE, 9));
-    var skipped = Given.done().history(straightToDone, Set.of()).wire();
-    assertEquals(NOT_REACHED, at(skipped, "times", "awaiting_merge"));
-    assertEquals(missing(1), at(skipped, "intervals", "awaiting_merge"));
-    var bornDone = Given.done().history(List.of(revision(1, SpecStatus.DONE, 0)), Set.of()).wire();
-    assertEquals(moment(0, "change_log"), at(bornDone, "times", "done"));
-    assertEquals(NOT_REACHED, at(bornDone, "times", "ready"));
+            "ready",
+            NOT_REACHED,
+            "verified",
+            NOT_REACHED,
+            "awaiting_merge",
+            NOT_REACHED,
+            "done",
+            NOT_REACHED),
+        at(wire, "times"));
+    assertEquals(missing(2), at(wire, "intervals", "ready_to_verified"));
     assertEquals(
-        moment(0, "change_log"),
-        at(
-            Given.done()
-                .history(
-                    List.of(revision(1, SpecStatus.DONE, 0), revision(2, SpecStatus.DONE, 5)),
-                    Set.of(3L))
-                .wire(),
-            "times",
-            "done"),
-        "a stretch begun at the birth is known whatever lies past it out of sight");
+        missing(1),
+        at(Given.done().times(at(10), null, at(130)).wire(), "intervals", "awaiting_merge"),
+        "a change done without awaiting merge has no dwell in it");
   }
 
   @Test
@@ -613,58 +495,9 @@ class SpecMeasuresTest {
         "a pass a later review of the attempt failed verified nothing that shipped");
   }
 
-  /** Main's view of a node's spec: what the node did between two rounds is one revision here. */
-  @Test
-  void aMoveHeardBySyncIsCollapsedNeverExactNeverNotReachedAndNeverAClockError() {
-    var mainsView =
-        List.of(
-            entry(1, SpecStatus.DRAFT, at(0), at(0), ChangeLog.Entry.SYNC),
-            heard(2, SpecStatus.REVIEW, 60),
-            heard(3, SpecStatus.PENDING, 500),
-            heard(4, SpecStatus.AWAITING_MERGE, 600),
-            heard(5, SpecStatus.DONE, 700));
-
-    var wire = Given.done().history(mainsView, Set.of()).wire();
-
-    assertEquals(COLLAPSED, at(wire, "times", "ready"), "the move to ready hides in revision 2");
-    assertEquals(COLLAPSED, at(wire, "times", "done"));
-    assertEquals(COLLAPSED, at(wire, "times", "awaiting_merge"));
-    assertEquals(missing(1), at(wire, "intervals", "ready_to_verified"), "no clock-skew error");
-
-    var doneHere =
-        List.of(
-            revision(1, SpecStatus.PENDING, 0),
-            heard(2, SpecStatus.AWAITING_MERGE, 60),
-            revision(3, SpecStatus.DONE, 130));
-    var local = Given.done().history(doneHere, Set.of()).wire();
-    assertEquals(moment(130, "change_log"), at(local, "times", "done"), "done was written here");
-    assertEquals(COLLAPSED, at(local, "times", "awaiting_merge"));
-    assertEquals(moment(0, "change_log"), at(local, "times", "ready"));
-
-    var inReview =
-        List.of(
-            entry(1, SpecStatus.DRAFT, at(0), at(0), ChangeLog.Entry.SYNC),
-            heard(2, SpecStatus.REVIEW, 60));
-    var open = Given.done().status(SpecStatus.REVIEW).history(inReview, Set.of()).wire();
-    assertEquals(COLLAPSED, at(open, "times", "done"), "a stretch in done may hide in revision 2");
-    assertEquals(COLLAPSED, at(open, "times", "ready"));
-    var reopened = new ArrayList<>(shipped());
-    reopened.add(heard(7, SpecStatus.IN_PROGRESS, 200));
-    assertEquals(
-        COLLAPSED,
-        at(Given.done().history(reopened, Set.of()).wire(), "times", "done"),
-        "a later stretch in done may hide in the batch after it");
-  }
-
-  /** Scenario 5. */
   @Test
   void readyAtTAndDoneFiveMinutesBeforeItIsAnErrorNamingBothInstantsNeverAnInterval() {
-    var skewed =
-        List.of(
-            revision(1, SpecStatus.PENDING, at(30), at(30)),
-            revision(2, SpecStatus.DONE, at(30), at(25)));
-
-    var wire = Given.done().reviewed().history(skewed, Set.of()).wire();
+    var wire = Given.done().reviewed().times(at(30), null, at(25)).wire();
 
     assertEquals(
         Map.of(
@@ -677,165 +510,217 @@ class SpecMeasuresTest {
             "error",
             "done at 2026-11-01T09:25:00.000Z is before verified at 2026-11-01T10:10:00.000Z;"
                 + " a negative interval is not served."),
-        at(Given.done().history(skewed, Set.of()).wire(), "intervals", "verified_to_done"));
+        at(Given.done().times(at(30), null, at(25)).wire(), "intervals", "verified_to_done"));
   }
 
-  /** Scenario 6. */
+  /** Scenario 3: a run that reported nothing is counted apart, never as zero tokens or dollars. */
   @Test
-  void aSpecWithFiveRunsHasAnUnknownCostWithFiveRunsWithoutUsageAndNoHumanMinutes() {
-    var wire =
-        Given.done()
-            .ran(
-                run("b1", "build"),
-                run("v1", "review"),
-                run("x1", "fix"),
-                run("v2", "review"),
-                run("w1", "room"))
-            .wire();
+  void aRunWithoutUsageIsCountedApartAndAddsNothing() {
+    var wire = Given.done().kept(new SpecStore.KeptRuns(1, 1, 0, 1, 1, 0, 0, 0, 0, 0)).wire();
+
+    var none = Map.of("unknown", "runs_not_reported", "missing", 1);
+    var expected = cost(1, 1, 1, 0, 0, 0, 0, 0, NOT_SET, NOT_SET);
+    for (var figure :
+        List.of(
+            "tokens",
+            "tokens_in",
+            "tokens_out",
+            "tokens_cache_read",
+            "tokens_cache_write",
+            "usd")) {
+      expected.put(figure, none);
+    }
+    assertEquals(expected, wire.get("cost"), "no run reported them, so they are not known");
+  }
+
+  /**
+   * Review 1, major 4: dollars or tokens some runs never reported are a lower bound, and unknown
+   * when none did; a listing's medians leave both out and count them, never taking them as $0.
+   */
+  @Test
+  void figuresSomeRunsLeftUnreportedAreLowerBoundsAndTheListingLeavesThemOut() {
+    var codex = Given.done().kept(new SpecStore.KeptRuns(2, 1, 1, 0, 2, 10, 20, 30, 40, 0));
+    var mixed = Given.done().kept(new SpecStore.KeptRuns(3, 2, 1, 1, 2, 10, 500, 11000, 0, 1.0));
+    var whole = Given.done().kept(new SpecStore.KeptRuns(1, 1, 0, 0, 0, 1, 1, 1, 1, 0.5));
 
     assertEquals(
-        Map.of("unknown", "not_recorded", "runs_without_usage", count(5)), wire.get("cost"));
-    assertEquals(unknown("not_recorded"), wire.get("human_minutes"));
+        Map.of("unknown", "runs_not_reported", "missing", 2), at(codex.wire(), "cost", "usd"));
+    assertEquals(count(100), at(codex.wire(), "cost", "tokens"));
+    assertEquals(Map.of("usd", 1.0, "at_least", true), at(mixed.wire(), "cost", "usd"));
+    assertEquals(Map.of("count", 11510L, "at_least", true), at(mixed.wire(), "cost", "tokens"));
+    assertEquals(Map.of("count", 500L, "at_least", true), at(mixed.wire(), "cost", "tokens_out"));
+    var wire =
+        SpecMeasuresList.of(
+                List.of(codex.measured(), mixed.measured(), whole.measured()),
+                SpecMeasuresList.Window.parse(null, null))
+            .toMap();
+    assertEquals(spread("usd", 1, 0.5, 0.5, 1, 1, 0), at(wire, "summary", "usd"));
+    assertEquals(spread("count", 2, 4L, 100L, 0, 1, 0), at(wire, "summary", "tokens"));
   }
 
-  /** Scenario 7. */
+  /** Scenario 13. */
   @Test
-  void aRunLinkedByItsRoomAndItsSpecIsCountedOnce() {
-    var build = run("b1", "build");
-    var wire = Given.done().ran(build, build, run("x1", "fix"), run("x1", "fix")).wire();
+  void twoCodexRunsAndThreeClaudeRunsGiveTokensOverFiveAndDollarsOverThree() {
+    var kept = new SpecStore.KeptRuns(5, 2, 1, 0, 2, 1000, 200, 30000, 400, 7.2);
 
-    assertEquals(count(1), at(wire, "rework", "build_runs"));
-    assertEquals(count(1), at(wire, "rework", "fix_runs"));
-    assertEquals(count(2), at(wire, "cost", "runs_without_usage"));
+    var expected = cost(5, 0, 2, 1000, 200, 30000, 400, 7.2, NOT_SET, NOT_SET);
+    expected.put("usd", Map.of("usd", 7.2, "at_least", true));
+    assertEquals(
+        expected, Given.done().kept(kept).wire().get("cost"), "dollars over the three that said");
+  }
+
+  /** Scenario 14. */
+  @Test
+  void aCostAboveTheBudgetIsOverItWithBothValues() {
+    var claude = new SpecStore.KeptRuns(3, 1, 1, 0, 0, 10, 20, 30, 40, 7.2);
+    var withCodex = new SpecStore.KeptRuns(4, 2, 1, 0, 1, 10, 20, 30, 40, 4.0);
+
+    assertEquals(
+        cost(3, 0, 0, 10, 20, 30, 40, 7.2, Map.of("usd", 5.0), true),
+        Given.done().kept(claude).budget(null, 5.0).wire().get("cost"));
+    assertEquals(
+        false,
+        at(Given.done().kept(claude).budget(null, 8.0).wire(), "cost", "over_budget"),
+        "every run reported its dollars, and they are within the budget");
+    assertEquals(
+        unknown("runs_not_reported"),
+        at(Given.done().kept(withCodex).budget(null, 5.0).wire(), "cost", "over_budget"),
+        "a run that reported no dollars may have taken it over");
+    assertEquals(
+        true,
+        at(Given.done().kept(withCodex).budget(99L, 5.0).wire(), "cost", "over_budget"),
+        "100 tokens are over a budget of 99 whatever the dollars say");
+    assertEquals(
+        Map.of("tokens", 100L, "usd", 5.0),
+        at(Given.done().kept(withCodex).budget(100L, 5.0).wire(), "cost", "budget"));
   }
 
   @Test
   void aReviewOrRunTheReaderMayNotSeeLeavesWhatItsKindGivesUnknownSayingNoMore() {
+    var kept = new SpecStore.KeptRuns(2, 1, 1, 0, 0, 1, 1, 1, 1, 1.0);
     var hiddenReviews =
         Given.done()
             .reviewed(approved("r1", at(70), null))
             .found(carried("f2", "f1"))
-            .ran(run("b1", "build"))
+            .kept(kept)
             .reviewsHidden()
             .wire();
-    var hiddenRuns = Given.done().ran(run("b1", "build")).runsHidden().wire();
+    var hiddenRuns = Given.done().kept(kept).budget(null, 5.0).hideRuns().wire();
 
-    assertEquals(rework(HIDDEN, HIDDEN, count(1), count(0), HIDDEN), at(hiddenReviews, "rework"));
+    assertEquals(rework(HIDDEN, HIDDEN, count(1), count(1), HIDDEN), at(hiddenReviews, "rework"));
     assertEquals(HIDDEN, at(hiddenReviews, "times", "verified"));
     assertEquals(HIDDEN, at(hiddenReviews, "no_recorded_human_code_act"));
     assertEquals(rework(count(1), count(0), HIDDEN, HIDDEN, count(0)), at(hiddenRuns, "rework"));
-    assertEquals(HIDDEN, at(hiddenRuns, "cost", "runs_without_usage"));
-  }
-
-  /**
-   * Minor 2 of review 2: a run erased after the spec arrived bounds its run counts only when it was
-   * filed under a project the spec was filed under, or under none; reviews are never erased away.
-   */
-  @Test
-  void runsAnErasureInTheSpecsProjectMayHaveTakenAreALowerBoundAndOthersMarkNothing() {
-    var built = Given.done().ran(run("b1", "build"), run("x1", "fix"));
-    var since = built.erased(Map.of("acme", 7L)).wire();
-    var elsewhere = built.erased(Map.of("beta", 7L)).wire();
-    var before =
-        built.history(shipped().subList(1, 6), Set.of(1L)).erased(Map.of("acme", 1L)).wire();
-    var unfiled = new HashMap<String, Long>();
-    unfiled.put(null, 9L);
-    var nowhere = built.erased(unfiled).wire();
-    var moved = new ArrayList<>(shipped());
-    moved.set(0, entry(1, SpecStatus.DRAFT, at(0), at(0), ChangeLog.Entry.LOCAL, "beta"));
-    var once = built.history(moved, Set.of()).erased(Map.of("beta", 7L)).wire();
-    var gapped =
-        built.history(shipped().subList(1, 6), Set.of(1L)).erased(Map.of("beta", 7L)).wire();
-    var nothingHeld = built.history(List.of(), Set.of()).erased(Map.of("acme", 1L)).wire();
-
-    assertEquals(atLeast(1), at(since, "rework", "build_runs"));
-    assertEquals(atLeast(2), at(since, "cost", "runs_without_usage"));
-    assertEquals(count(1), at(since, "rework", "review_rounds"), "reviews are never erased away");
-    assertEquals(count(1), at(elsewhere, "rework", "build_runs"), "another project's run");
-    assertEquals(count(1), at(before, "rework", "build_runs"), "erased before it arrived");
-    assertEquals(atLeast(1), at(nowhere, "rework", "build_runs"), "a run filed nowhere");
-    assertEquals(atLeast(1), at(once, "rework", "build_runs"), "a project it was filed under");
-    assertEquals(atLeast(1), at(gapped, "rework", "build_runs"), "its projects are not all known");
-    assertEquals(atLeast(1), at(nothingHeld, "rework", "build_runs"));
-  }
-
-  /**
-   * Major 1 of review 2, on plain rows: a box's own write that main took comes back heard, at the
-   * same time and in the same status; it is the move it answers, so a node reads its own moves
-   * exact. A heard revision in the same status at another time is another box's write.
-   */
-  @Test
-  void aBoxsOwnWriteComingBackFromMainIsThatMoveNotACollapse() {
-    var echoed =
+    var cost = new LinkedHashMap<String, Object>();
+    for (var name :
         List.of(
-            revision(1, SpecStatus.DRAFT, 0),
-            heard(2, SpecStatus.DRAFT, at(0), at(0)),
-            revision(3, SpecStatus.PENDING, 10),
-            heard(4, SpecStatus.PENDING, at(0), at(10)),
-            revision(5, SpecStatus.AWAITING_MERGE, 70),
-            heard(6, SpecStatus.AWAITING_MERGE, at(0), at(70)),
-            revision(7, SpecStatus.DONE, 130),
-            heard(8, SpecStatus.DONE, at(0), at(130)));
-    var someoneElses = new ArrayList<>(echoed);
-    someoneElses.set(7, heard(8, SpecStatus.DONE, at(0), at(140)));
-
-    var wire = Given.done().history(echoed, Set.of()).wire();
-
-    assertEquals(moment(10, "change_log"), at(wire, "times", "ready"));
-    assertEquals(moment(70, "change_log"), at(wire, "times", "awaiting_merge"));
-    assertEquals(moment(130, "change_log"), at(wire, "times", "done"));
-    assertEquals(
-        COLLAPSED,
-        at(Given.done().history(someoneElses, Set.of()).wire(), "times", "done"),
-        "an edit made on another box after the move");
+            "runs",
+            "runs_without_usage",
+            "runs_without_cost",
+            "tokens",
+            "tokens_in",
+            "tokens_out",
+            "tokens_cache_read",
+            "tokens_cache_write",
+            "usd")) {
+      cost.put(name, HIDDEN);
+    }
+    cost.put("budget", Map.of("usd", 5.0));
+    cost.put("over_budget", HIDDEN);
+    assertEquals(cost, hiddenRuns.get("cost"));
   }
 
-  /** Minor 4 of review 2: a birth heard unedited is one move, so what follows it here is exact. */
+  /**
+   * The coordinator's ruling: on a box that first held the change after main erased runs of its
+   * project, every number its runs give is a lower bound, said so, and left out of a summary.
+   */
   @Test
-  void anUneditedBirthHeardBySyncIsOneMoveSoAReadyMoveAfterItHereIsExact() {
-    var bornElsewhere =
-        List.of(heard(1, SpecStatus.DRAFT, at(0), at(0)), revision(2, SpecStatus.PENDING, 10));
-    var editedElsewhere =
-        List.of(heard(1, SpecStatus.DRAFT, at(0), at(5)), revision(2, SpecStatus.PENDING, 10));
+  void aBoxThatHeldTheChangeOnlyAfterRunsOfItsProjectWereErasedServesLowerBounds() {
+    var kept = new SpecStore.KeptRuns(2, 1, 1, 0, 1, 1, 2, 3, 4, 1.25);
+    var late = Given.done().kept(kept).heldLate();
+    var wire = late.budget(null, 5.0).wire();
+
+    var atLeast = Map.of("count", 1L, "at_least", true);
+    assertEquals(
+        rework(count(1), count(0), atLeast, atLeast, count(0)), at(wire, "rework"), "reviews stay");
+    assertEquals(Map.of("count", 2L, "at_least", true), at(wire, "cost", "runs"));
+    assertEquals(Map.of("count", 10L, "at_least", true), at(wire, "cost", "tokens"));
+    assertEquals(Map.of("usd", 1.25, "at_least", true), at(wire, "cost", "usd"));
+    assertEquals(unknown("runs_not_held"), at(wire, "cost", "over_budget"));
+    assertEquals(
+        true,
+        at(late.budget(null, 1.0).wire(), "cost", "over_budget"),
+        "already over on what it holds");
+    var summary =
+        (Map<?, ?>)
+            SpecMeasuresList.of(
+                    List.of(late.measured(), Given.done().kept(kept).measured()),
+                    SpecMeasuresList.Window.parse(null, null))
+                .toMap()
+                .get("summary");
+    assertEquals(spread("count", 1, 1L, 1L, 0, 1, 0), summary.get("build_runs"));
+    assertEquals(spread("usd", 0, null, null, 0, 2, 0), summary.get("usd"));
+  }
+
+  /** Scenario 10, as the measures count it. */
+  @Test
+  void humanMinutesAreDistinctPersonMinutesSplitByChannelAndAMinuteSeenTwiceCountsOnce() {
+    var wire =
+        Given.done()
+            .attended(
+                minute("ada", 20, AttentionStore.Channel.TERMINAL_INPUT),
+                minute("ada", 21, AttentionStore.Channel.TERMINAL_INPUT),
+                minute("ada", 22, AttentionStore.Channel.TERMINAL_INPUT),
+                minute("ada", 22, AttentionStore.Channel.POST),
+                minute("sam", 22, AttentionStore.Channel.FOCUS))
+            .wire();
 
     assertEquals(
-        moment(10, "change_log"),
-        at(Given.done().history(bornElsewhere, Set.of()).wire(), "times", "ready"));
+        Map.of(
+            "minutes",
+            count(4),
+            "by_channel",
+            Map.of(
+                "terminal_input", count(3),
+                "post", count(1),
+                "review_act", count(0),
+                "focus", count(1)),
+            "people",
+            count(2),
+            "bound",
+            "lower"),
+        wire.get("human_minutes"));
     assertEquals(
-        INCOMPLETE,
-        at(Given.done().history(editedElsewhere, Set.of()).wire(), "times", "ready"),
-        "a birth edited before it was sent is no birth: the log begins after it");
+        count(3),
+        at(
+            Given.done()
+                .attended(
+                    minute("ada", 20, AttentionStore.Channel.TERMINAL_INPUT),
+                    minute("ada", 21, AttentionStore.Channel.TERMINAL_INPUT),
+                    minute("ada", 22, AttentionStore.Channel.TERMINAL_INPUT),
+                    minute("ada", 22, AttentionStore.Channel.POST))
+                .wire(),
+            "human_minutes",
+            "minutes"),
+        "3 minutes typed and a post in the third are 3 minutes, not 4");
   }
 
   @Test
   void aBoxWithNoSailIdSaysSoInTheOneShapeEveryUnknownHas() {
-    var given = Given.done();
-    var unnamed =
-        SpecMeasures.of(
-                new MeasureRows(
-                    LoopRows.SPEC,
-                    "acme",
-                    SpecStatus.DONE,
-                    null,
-                    given.history(),
-                    given.gaps(),
-                    given.reviews(),
-                    given.findings(),
-                    given.runs(),
-                    given.erasures()))
-            .toMap();
-
-    assertEquals(unknown("no_box_id"), at(unnamed, "times", "box"));
+    assertEquals(unknown("no_box_id"), Given.done().measured(null).toMap().get("box"));
   }
 
   @Test
   void theMeasuresNameNoPerson() {
     var wire =
         YamlUtil.dumpJson(
-            Given.done().reviewed(approved("r1", at(70), null)).ran(run("b1", "build")).wire());
+            Given.done()
+                .reviewed(approved("r1", at(70), null))
+                .attended(minute("ada", 20, AttentionStore.Channel.POST))
+                .wire());
 
     assertEquals(false, wire.contains("uday"), wire);
-    assertEquals(false, wire.contains(LoopRows.NODE), wire);
+    assertEquals(false, wire.contains("ada"), wire);
   }
 
   @Test
@@ -849,25 +734,20 @@ class SpecMeasuresTest {
   }
 
   private static SpecMeasures measured(int readyMinutes, int doneMinutes) {
-    return Given.done()
-        .history(
-            List.of(
-                revision(1, SpecStatus.PENDING, at(readyMinutes), at(readyMinutes)),
-                revision(2, SpecStatus.DONE, at(readyMinutes), at(doneMinutes))),
-            Set.of())
-        .reviewed()
-        .measured();
+    return Given.done().reviewed().times(at(readyMinutes), null, at(doneMinutes)).measured();
   }
 
   private static SpecMeasures unknownTimes() {
-    return Given.done()
-        .history(List.of(revision(9, SpecStatus.DONE, 130)), Set.of(1L))
-        .reviewed()
-        .measured();
+    return Given.done().reviewed().times(null, null, null).measured();
   }
 
   private static Map<String, Object> spread(
-      String unit, int n, Long median, Long p90, int unknown, int atLeast, int errors) {
+      String unit, int n, Object median, Object p90, int unknown, int errors) {
+    return spread(unit, n, median, p90, unknown, 0, errors);
+  }
+
+  private static Map<String, Object> spread(
+      String unit, int n, Object median, Object p90, int unknown, int atLeast, int errors) {
     var spread = new LinkedHashMap<String, Object>();
     spread.put("n", n);
     spread.put("median", median == null ? unknown("none_known") : Map.of(unit, median));
@@ -878,9 +758,8 @@ class SpecMeasuresTest {
     return spread;
   }
 
-  /** Scenario 8. */
   @Test
-  void fortyDoneSpecsSixWithUnknownTimesListFortyRowsAndSummarizeThirtyFourSayingSixWereLeftOut() {
+  void fortyDoneSpecsSixNeverReadyListFortyRowsAndSummarizeThirtyFourSayingSixWereLeftOut() {
     var rows = new ArrayList<SpecMeasures>();
     IntStream.rangeClosed(1, 34).forEach(minutes -> rows.add(measured(0, minutes)));
     IntStream.range(0, 6).forEach(unknown -> rows.add(unknownTimes()));
@@ -890,8 +769,8 @@ class SpecMeasuresTest {
     assertEquals(40, ((List<?>) wire.get("specs")).size());
     assertEquals(40, wire.get("total"));
     assertEquals(
-        spread("seconds", 34, 17L * 60, 31L * 60, 6, 0, 0), at(wire, "summary", "ready_to_done"));
-    assertEquals(spread("count", 40, 0L, 0L, 0, 0, 0), at(wire, "summary", "review_rounds"));
+        spread("seconds", 34, 17L * 60, 31L * 60, 6, 0), at(wire, "summary", "ready_to_done"));
+    assertEquals(spread("count", 40, 0L, 0L, 0, 0), at(wire, "summary", "review_rounds"));
     assertEquals(
         Map.of("counted", 40, "of", 40, "left_out_unknown", 0, "bound", "upper"),
         at(wire, "summary", "no_recorded_human_code_act"));
@@ -908,23 +787,40 @@ class SpecMeasuresTest {
       var median = Map.of(1, 60L, 2, 60L, 3, 120L, 10, 300L).get(n);
       var p90 = Map.of(1, 60L, 2, 120L, 3, 180L, 10, 540L).get(n);
       assertEquals(
-          spread("seconds", n, median, p90, 0, 0, 0),
+          spread("seconds", n, median, p90, 0, 0),
           at(wire, "summary", "ready_to_done"),
           "n = " + n);
     }
   }
 
   @Test
-  void aNegativeIntervalAndALowerBoundAreLeftOutOfTheSummaryAndCountedApart() {
-    var bounded = Given.done().ran(run("b1", "build")).erased(Map.of("acme", 9L)).measured();
-    var rows = List.of(measured(0, 10), measured(0, 20), measured(30, 25), bounded);
+  void dollarsTokensAndMinutesAreSummarizedOverTheChangesThatKnowThem() {
+    var cheap = Given.done().kept(new SpecStore.KeptRuns(1, 1, 0, 0, 0, 1, 1, 1, 1, 0.5));
+    var dear = Given.done().kept(new SpecStore.KeptRuns(1, 1, 0, 0, 0, 5, 5, 5, 5, 9.25));
+    var hidden = Given.done().hideRuns();
+    var rows =
+        List.of(
+            cheap.measured(),
+            dear.attended(minute("ada", 1, AttentionStore.Channel.POST)).measured(),
+            hidden.measured());
 
     var wire = SpecMeasuresList.of(rows, SpecMeasuresList.Window.parse(null, null)).toMap();
 
-    assertEquals(spread("seconds", 3, 1200L, 7200L, 0, 0, 1), at(wire, "summary", "ready_to_done"));
-    assertEquals(spread("count", 3, 0L, 0L, 0, 1, 0), at(wire, "summary", "build_runs"));
+    assertEquals(spread("usd", 2, 0.5, 9.25, 1, 0), at(wire, "summary", "usd"));
+    assertEquals(spread("count", 2, 4L, 20L, 1, 0), at(wire, "summary", "tokens"));
     assertEquals(
-        spread("seconds", 1, 3600L, 3600L, 3, 0, 0), at(wire, "summary", "ready_to_verified"));
+        spread("count", 3, 0L, 1L, 0, 0, 0),
+        at(wire, "summary", "human_minutes"),
+        "the listing summarizes the minutes this box counted, over every change");
+  }
+
+  @Test
+  void aNegativeIntervalIsLeftOutOfTheSummaryAndCountedApart() {
+    var rows = List.of(measured(0, 10), measured(0, 20), measured(30, 25));
+
+    var wire = SpecMeasuresList.of(rows, SpecMeasuresList.Window.parse(null, null)).toMap();
+
+    assertEquals(spread("seconds", 2, 600L, 1200L, 0, 1), at(wire, "summary", "ready_to_done"));
   }
 
   @Test
@@ -942,14 +838,16 @@ class SpecMeasuresTest {
             "build_runs",
             "fix_runs",
             "carried_findings",
+            "tokens",
+            "usd",
+            "human_minutes",
             "no_recorded_human_code_act"),
         List.copyOf(((Map<?, ?>) wire.get("summary")).keySet()));
-    assertEquals(spread("count", 0, null, null, 0, 0, 0), at(wire, "summary", "fix_runs"));
+    assertEquals(spread("count", 0, null, null, 0, 0), at(wire, "summary", "fix_runs"));
   }
 
-  /** Scenario 9. */
   @Test
-  void aWindowListsOnlyTheSpecsDoneInItByThisBoxsRecordAndCountsThoseWithNoDoneTime() {
+  void aWindowListsOnlyTheSpecsDoneInItAndCountsThoseWithNoDoneTime() {
     var before = measured(0, -9 * 60 - 1);
     var first = measured(0, -9 * 60);
     var last = measured(0, 14 * 24 * 60 + 14 * 60 + 59);

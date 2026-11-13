@@ -204,6 +204,8 @@ public final class ApiRouter implements HttpHandler, RouteTable {
         route(GET, "/v1/rooms/{room}/messages", reads, this::roomMessages),
         route(POST, "/v1/rooms/{room}/messages", journal, this::postRoomMessage),
         route(Route.ANY, "/v1/rooms/{room}/{sub}", unserved, ApiRouter::absent),
+        route(POST, "/v1/attention", Gate.ATTENDS, this::attend),
+        route(Route.ANY, "/v1/attention", unserved, ApiRouter::absent),
         route(GET, "/v1/reviews/{review}", reads, this::reviewDetail),
         route(POST, "/v1/reviews/{review}/approve", journal, this::approveReview),
         route(POST, "/v1/reviews/{review}/dismiss/{finding}", journal, this::dismissFinding),
@@ -743,6 +745,21 @@ public final class ApiRouter implements HttpHandler, RouteTable {
             roomId,
             SpecMessageRequest.fromMap(JsonBody.readMessageMap(call.exchange())),
             ApiAuth.actorOf(call.exchange()).handle()));
+  }
+
+  /**
+   * A focus heartbeat: the body names the conversation, and only that; a person or a time it names
+   * is not read, since the server stamps both (M6).
+   */
+  private ApiResponse attend(Call call) throws IOException {
+    var conversation = JsonBody.readMap(call.exchange()).get("conversation");
+    if (!(conversation instanceof String named) || named.isBlank()) {
+      throw new ApiException(
+          ErrorCode.BAD_REQUEST,
+          "Name the conversation the view is focused on.",
+          "Send {\"conversation\": \"<room or spec id>\"}.");
+    }
+    return ApiResponse.from(operations.attend(named));
   }
 
   private ApiResponse globalSpecs(Call call) {
