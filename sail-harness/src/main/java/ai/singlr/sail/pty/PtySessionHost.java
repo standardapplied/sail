@@ -9,6 +9,7 @@ import ai.singlr.sail.access.Access;
 import ai.singlr.sail.access.Action;
 import ai.singlr.sail.access.Decision;
 import ai.singlr.sail.access.Resources;
+import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.common.Ids;
 import ai.singlr.sail.common.Remedied;
 import ai.singlr.sail.common.Remedy;
@@ -671,6 +672,7 @@ public final class PtySessionHost implements AutoCloseable {
   void converse(SocketChannel channel, Admission admission) {
     PtySession attached = null;
     var subscriberId = -1L;
+    var typedIn = Long.MIN_VALUE;
     var who = admission.who();
     var bound = admission.bound();
     var principal = who.fde();
@@ -758,7 +760,7 @@ public final class PtySessionHost implements AutoCloseable {
                       reply(
                           channel,
                           new PtyMessage.Err("Input backlog is full; the session is not reading."));
-                  case ACCEPTED -> {}
+                  case ACCEPTED -> typedIn = typed(attached, who, typedIn);
                 }
               }
             }
@@ -928,6 +930,39 @@ public final class PtySessionHost implements AutoCloseable {
 
     /** Why {@code message} lies outside what this connection may do, or null when it does not. */
     PtyMessage.Err refusal(PtyMessage message, String opened);
+  }
+
+  /**
+   * Tells the events of {@code session} that {@code who} typed in it, once in each minute: a
+   * keystroke whose minute is {@code toldIn}, the last one told, costs a clock read and a compare,
+   * and the one write a minute runs on its own thread, so input never waits on it. Returns the
+   * minute last told. A session bound to no room tells nothing, and nor does a writer who is no
+   * person on a person's own lane ({@link Access#attendee}). A write that fails is logged by its
+   * session and cause alone: no log line ties a person to a minute (M7).
+   */
+  private long typed(PtySession session, PtyIdentity who, long toldIn) {
+    var minute = DateTimeUtils.now().getEpochSecond() / 60;
+    if (minute == toldIn
+        || !session.origin().roomBound()
+        || !(who instanceof PtyIdentity.Person(var writer))) {
+      return toldIn;
+    }
+    var person = Access.attendee(writer);
+    if (person.isEmpty()) {
+      return minute;
+    }
+    var origin = session.origin();
+    Thread.ofVirtual()
+        .name("pty-typed-" + origin.name())
+        .start(
+            () -> {
+              try {
+                events.typed(origin, person.get());
+              } catch (RuntimeException failed) {
+                log("typed-not-recorded", "-", origin.name(), failed.toString());
+              }
+            });
+    return minute;
   }
 
   /**

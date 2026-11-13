@@ -25,6 +25,7 @@ import ai.singlr.sail.store.DispatchGate;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.Sqlite;
+import ai.singlr.sail.store.TestRuns;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.time.Duration;
@@ -208,7 +209,7 @@ class RunReservationTest {
           var id = DateTimeUtils.newId().toString();
           runStore.reserveDispatch(
               id, "acme", specId, "node", "build", repos, "codex", null, "task", "log", "unit");
-          runStore.transition(id, "running", "completed", 0);
+          runStore.finish(id, "running", "completed", 0, null);
           return id;
         });
   }
@@ -467,7 +468,8 @@ class RunReservationTest {
             displacing(
                 (runId, why) -> {
                   asked.add(runId + ": " + why);
-                  return Acting.system(() -> runStore.transition(runId, "running", "stopped"));
+                  return Acting.system(
+                      () -> TestRuns.transition(runStore, runId, "running", "stopped"));
                 }),
             "build");
 
@@ -489,7 +491,8 @@ class RunReservationTest {
                     displacing(
                         (runId, why) -> {
                           ended.add(runId);
-                          Acting.system(() -> runStore.transition(runId, "running", "stopped"));
+                          Acting.system(
+                              () -> TestRuns.transition(runStore, runId, "running", "stopped"));
                           liveMember("chat", List.of("app"));
                           return true;
                         }),
@@ -535,7 +538,7 @@ class RunReservationTest {
         () ->
             runStore
                 .listForProject("acme")
-                .forEach(run -> runStore.transition(run.id(), "running", "stopped")));
+                .forEach(run -> TestRuns.transition(runStore, run.id(), "running", "stopped")));
     Acting.system(
         () ->
             runStore.reserveDispatch(

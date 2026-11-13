@@ -29,6 +29,7 @@ import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
+import ai.singlr.sail.store.TestRuns;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -93,6 +94,12 @@ class StopOperationsTest {
     assertTrue(stopped.mutated());
     assertEquals(List.of("halt " + UNIT, "spec cancelled", "run stopping"), order);
     assertEquals("stopped", runStore.findById(R1).orElseThrow().status());
+    assertNull(
+        runStore.findById(R1).orElseThrow().usage(),
+        "the stop left its report unread for the sweep to read");
+    assertTrue(
+        shell.invocations.stream().noneMatch(command -> command.contains(" tail ")),
+        "an operator's stop never waits on reading what the run cost");
   }
 
   @Test
@@ -176,7 +183,7 @@ class StopOperationsTest {
             StopOperations.Listener.NONE);
     seedSpec("auth", SpecStatus.IN_PROGRESS, LOCAL_HANDLE);
     seedRun(123, UNIT);
-    runStore.complete(R1, "completed", 0);
+    TestRuns.complete(runStore, R1, "completed", 0);
 
     var outcome =
         Actor.call(ADMIN, () -> ops.stop(new StopOperations.RunTarget(R1), LOCAL_HANDLE, false));
@@ -690,7 +697,7 @@ class StopOperationsTest {
             StopOperations.Listener.NONE);
     seedSpec("auth", SpecStatus.IN_PROGRESS, "raj");
     seedRun(123, UNIT);
-    runStore.complete(R1, "completed", 0);
+    TestRuns.complete(runStore, R1, "completed", 0);
     var member = new Actor(LOCAL_HANDLE, Role.MEMBER, Actor.Lane.CLI);
 
     var outcome =
@@ -879,7 +886,7 @@ class StopOperationsTest {
     var shell = liveAgentShell();
     var ops = stopOps(shell, killingHalter(shell), StopOperations.Listener.NONE);
     seedAdhocRun(123, UNIT);
-    assertTrue(runStore.transition(R1, "running", "stopping"));
+    assertTrue(TestRuns.transition(runStore, R1, "running", "stopping"));
 
     var outcome =
         Actor.call(ADMIN, () -> ops.stop(new StopOperations.RunTarget(R1), LOCAL_HANDLE, false));
@@ -1078,7 +1085,7 @@ class StopOperationsTest {
             StopOperations.Listener.NONE);
     seedSpec("auth", SpecStatus.IN_PROGRESS, LOCAL_HANDLE);
     seedRun(123, UNIT);
-    runStore.complete(R1, "completed", 0);
+    TestRuns.complete(runStore, R1, "completed", 0);
 
     var outcome =
         Actor.call(ADMIN, () -> ops.stop(new StopOperations.RunTarget(R1), LOCAL_HANDLE, true));
@@ -1213,7 +1220,7 @@ class StopOperationsTest {
         new StopOperations.Listener() {
           @Override
           public void halting(String project, String unit, Integer pid) {
-            runStore.complete(R1, "completed", 0);
+            TestRuns.complete(runStore, R1, "completed", 0);
           }
         };
     var ops = stopOps(liveAgentShell(), failingHalter(), listener);
@@ -1419,7 +1426,7 @@ class StopOperationsTest {
         stopOps(
             shell,
             (project, unit) -> {
-              runStore.transition(R1, "stopping", "stopped");
+              TestRuns.transition(runStore, R1, "stopping", "stopped");
               return agentDies(shell);
             },
             StopOperations.Listener.NONE);
@@ -1443,7 +1450,7 @@ class StopOperationsTest {
             StopOperations.Listener.NONE);
     seedSpec("auth", SpecStatus.IN_PROGRESS, LOCAL_HANDLE);
     seedRun(123, UNIT);
-    runStore.complete(R1, "completed", 0);
+    TestRuns.complete(runStore, R1, "completed", 0);
     seedNewerRun();
 
     var outcome =
@@ -1466,7 +1473,7 @@ class StopOperationsTest {
             StopOperations.Listener.NONE);
     seedSpec("auth", SpecStatus.IN_PROGRESS, LOCAL_HANDLE);
     seedRun(123, UNIT);
-    runStore.complete(R1, "completed", 0);
+    TestRuns.complete(runStore, R1, "completed", 0);
     seedNewerRun();
 
     var outcome =
@@ -1525,7 +1532,7 @@ class StopOperationsTest {
     var shell =
         shell()
             .on("incus list ^acme$", RUNNING_JSON)
-            .hookOn("cat " + RUN_PID_FILE, () -> runStore.complete(R1, "completed", 0));
+            .hookOn("cat " + RUN_PID_FILE, () -> TestRuns.complete(runStore, R1, "completed", 0));
     var ops = stopOps(shell, failingHalter(), StopOperations.Listener.NONE);
     seedSpec("auth", SpecStatus.IN_PROGRESS, LOCAL_HANDLE);
     seedRun(123, UNIT);
@@ -1564,7 +1571,7 @@ class StopOperationsTest {
             StopOperations.Listener.NONE);
     seedSpec("auth", SpecStatus.REVIEW, LOCAL_HANDLE);
     seedRun(123, UNIT);
-    runStore.complete(R1, "completed", 0);
+    TestRuns.complete(runStore, R1, "completed", 0);
     seedReviewRun();
 
     var outcome =

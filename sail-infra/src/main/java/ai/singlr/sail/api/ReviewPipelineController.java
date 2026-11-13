@@ -62,6 +62,7 @@ public final class ReviewPipelineController implements EventSubscriber {
 
   private final SpecStore specStore;
   private final RunStore runStore;
+  private final ReviewLanes lanes;
   private final Runnable syncTrigger;
   private final Supplier<String> localHandle;
   private final LoopFactsReader reader;
@@ -93,6 +94,7 @@ public final class ReviewPipelineController implements EventSubscriber {
     Objects.requireNonNull(configResolver, "configResolver");
     Objects.requireNonNull(reviewerResolver, "reviewerResolver");
     Objects.requireNonNull(lanes, "lanes");
+    this.lanes = lanes;
     this.pipelines = LoopFactsReader.pipelines(configResolver, reviewerResolver);
     this.reader = new LoopFactsReader(specStore, reviewStore, runStore, localHandle);
     this.narrator = new LoopNarrator(specStore, eventBus, syncTrigger);
@@ -219,7 +221,7 @@ public final class ReviewPipelineController implements EventSubscriber {
       return run;
     }
     if (RunTracker.finish(
-        runStore, run.id(), "stopped", Event.WellKnownData.exitCode(event.data()))) {
+        runStore, lanes::usage, run.id(), "stopped", Event.WellKnownData.exitCode(event.data()))) {
       syncTrigger.run();
     }
     return runStore.findById(run.id()).orElse(run);

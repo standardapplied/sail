@@ -21,6 +21,7 @@ import ai.singlr.sail.store.Snapshots;
 import ai.singlr.sail.store.Sqlite;
 import ai.singlr.sail.store.SyncConflicts;
 import ai.singlr.sail.store.SyncState;
+import ai.singlr.sail.store.TestRuns;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Instant;
@@ -144,7 +145,7 @@ class RunSyncTest {
     sync(node);
     sync(other);
 
-    node.runs.complete(id, "completed", 0);
+    TestRuns.complete(node.runs, id, "completed", 0);
     sync(node);
     assertEquals("completed", main.runs.findById(id).orElseThrow().status());
 
@@ -213,7 +214,7 @@ class RunSyncTest {
     sync(node);
     sync(other);
 
-    other.runs.complete(id, "stopped", 0);
+    TestRuns.complete(other.runs, id, "stopped", 0);
 
     sync(other);
 

@@ -123,9 +123,8 @@ public interface Harness {
 
   /**
    * The headless command for the room lane's read-only chat turn, which the harness itself keeps
-   * from mutating anything. {@code fullPermissions} and {@code reasoningEffort} of the launch are
-   * ignored. A harness with a {@link #readOnlyRefusal} has no such session and refuses to build
-   * one.
+   * from mutating anything. {@code fullPermissions} of the launch is ignored. A harness with a
+   * {@link #readOnlyRefusal} has no such session and refuses to build one.
    *
    * @throws IllegalStateException when this harness has no read-only session
    */
@@ -172,8 +171,63 @@ public interface Harness {
    */
   String attach(String sessionId);
 
-  /** Whether the harness has a reasoning effort setting a launch's {@code reasoningEffort} sets. */
-  boolean honoursReasoningEffort();
+  /**
+   * The reasoning efforts this harness takes, in order: a launch's {@code reasoningEffort} is
+   * passed to it only as one of these. Empty for a harness that takes none.
+   */
+  List<String> efforts();
+
+  /**
+   * {@code effort} as this harness takes it, or null for none asked (a blank one asks none): an
+   * effort it does not take is refused naming it, never dropped (M15).
+   *
+   * @throws IllegalArgumentException when the harness does not take {@code effort}
+   */
+  default String requireEffort(String effort) {
+    if (Strings.isBlank(effort)) {
+      return null;
+    }
+    if (efforts().contains(effort)) {
+      return effort;
+    }
+    throw new IllegalArgumentException(
+        efforts().isEmpty()
+            ? displayName()
+                + " takes no reasoning effort, so reasoning_effort '"
+                + effort
+                + "' cannot be passed to it. Clear the effort, or choose a harness that takes one."
+            : displayName()
+                + " takes no reasoning effort '"
+                + effort
+                + "'; it takes "
+                + String.join(", ", efforts())
+                + ". Choose one of those, or clear the effort.");
+  }
+
+  /** The file of a run a harness writes what the run cost in. */
+  enum ReportFile {
+    AGENT_LOG,
+    TRANSCRIPT
+  }
+
+  /** Which of a run's files this harness reports its usage in. */
+  ReportFile reportFile();
+
+  /**
+   * What each line of its {@link #reportFile} that {@link #usage} reads holds one of: a container
+   * is asked only for the last lines holding each, never the whole file.
+   */
+  List<String> reportMarkers();
+
+  /**
+   * What a run cost, as this harness reported it in {@code report}, its {@link #reportFile} or the
+   * last lines of that file holding each of its {@link #reportMarkers markers}, each marker's in
+   * the file's order (null when there is none), each marker's lines read from the last on, so the
+   * order between markers does not matter: {@link RunUsage#NONE} when it reported nothing there,
+   * and null when its last report there does not parse, never taken from an earlier one. The
+   * figures are the conversation's running totals as the harness keeps them.
+   */
+  RunUsage usage(String report);
 
   /**
    * The local port an interactive session's login flow listens on, which the engineer forwards over

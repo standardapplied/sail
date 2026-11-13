@@ -13,10 +13,12 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.common.DateTimeUtils;
+import ai.singlr.sail.harness.RunUsage;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.Sqlite;
+import ai.singlr.sail.store.TestRuns;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.LinkedHashMap;
@@ -53,7 +55,7 @@ class RunTrackerTest {
             },
             Duration.ofMillis(1),
             Duration.ofMillis(1));
-    tracker = new RunTracker(runStore, scheduler, () -> "node-a");
+    tracker = new RunTracker(runStore, finished -> RunUsage.NONE, scheduler, () -> "node-a");
   }
 
   @AfterEach
@@ -214,7 +216,7 @@ class RunTrackerTest {
   @Test
   void aWatcherCompletionNeverOverwritesACommittedStopClaim() {
     var id = runningRun("backend", "auth");
-    Acting.system(() -> runStore.transition(id, "running", "stopping"));
+    Acting.system(() -> TestRuns.transition(runStore, id, "running", "stopping"));
 
     tracker.onEvent(
         Event.of(
@@ -236,7 +238,7 @@ class RunTrackerTest {
   @Test
   void aWatcherStopArrivingAfterAnOperatorCancelDoesNotReopenTheRun() {
     var id = runningRun("backend", "auth");
-    Acting.system(() -> runStore.complete(id, "stopped", null));
+    Acting.system(() -> TestRuns.complete(runStore, id, "stopped", null));
 
     tracker.onEvent(
         stopped(
@@ -256,7 +258,7 @@ class RunTrackerTest {
   @Test
   void anAuthoritativeStopUpgradesTheExitCodeOfAnAlreadyFinishedRun() {
     var id = runningRun("backend", "auth");
-    Acting.system(() -> runStore.complete(id, "stopped", null));
+    Acting.system(() -> TestRuns.complete(runStore, id, "stopped", null));
 
     tracker.onEvent(
         stopped(
@@ -274,7 +276,7 @@ class RunTrackerTest {
   @Test
   void stringExitCodeIsParsed() {
     var id = runningRun("backend", "auth");
-    Acting.system(() -> runStore.complete(id, "stopped", null));
+    Acting.system(() -> TestRuns.complete(runStore, id, "stopped", null));
 
     tracker.onEvent(stopped("backend", id, Map.of(Event.WellKnownData.EXIT_CODE, "9")));
 
@@ -284,7 +286,7 @@ class RunTrackerTest {
   @Test
   void anInvalidStringExitCodeIsIgnored() {
     var id = runningRun("backend", "auth");
-    Acting.system(() -> runStore.complete(id, "stopped", null));
+    Acting.system(() -> TestRuns.complete(runStore, id, "stopped", null));
 
     tracker.onEvent(stopped("backend", id, Map.of(Event.WellKnownData.EXIT_CODE, "nope")));
 
@@ -301,7 +303,7 @@ class RunTrackerTest {
   @Test
   void aStopWithNoRunningRunAndAnAlreadyStampedLatestIsLeftAlone() {
     var id = runningRun("backend", "auth");
-    Acting.system(() -> runStore.complete(id, "stopped", 0));
+    Acting.system(() -> TestRuns.complete(runStore, id, "stopped", 0));
 
     tracker.onEvent(stopped("backend", id, Map.of(Event.WellKnownData.EXIT_CODE, 137)));
 
@@ -362,7 +364,7 @@ class RunTrackerTest {
 
   @Test
   void aStandaloneBoxWithNoHandleClosesOutItsOwnBlankNodeRun() {
-    var standalone = new RunTracker(runStore, scheduler, () -> null);
+    var standalone = new RunTracker(runStore, finished -> RunUsage.NONE, scheduler, () -> null);
     var id = runningRunOn("backend", "auth", "");
 
     standalone.onEvent(stopped("backend", id, Map.of(Event.WellKnownData.EXIT_CODE, 0)));

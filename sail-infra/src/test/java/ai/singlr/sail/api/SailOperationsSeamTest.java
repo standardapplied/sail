@@ -52,6 +52,7 @@ import ai.singlr.sail.store.Snapshots;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
 import ai.singlr.sail.store.SyncConflicts;
+import ai.singlr.sail.store.TestRuns;
 import ai.singlr.sail.store.TokenStore;
 import ai.singlr.sail.sync.ConflictMerge;
 import ai.singlr.sail.sync.MainReplica;
@@ -1110,7 +1111,7 @@ class SailOperationsSeamTest {
         () -> {
           runs.reserveDispatch(
               id, "acme", null, handle, "adhoc", List.of(), "claude-code", "b", "t", "/l", "u");
-          runs.complete(id, "completed", 0);
+          TestRuns.complete(runs, id, "completed", 0);
         });
     return id;
   }
@@ -1610,7 +1611,7 @@ class SailOperationsSeamTest {
       assertTrue(
           Acting.system(() -> operations.dispatching().latestOperable("proj", "node", Lane.REVIEW))
               .isEmpty());
-      Acting.system(() -> runs.complete(id, "completed", 0));
+      Acting.system(() -> TestRuns.complete(runs, id, "completed", 0));
       var reviewer = DateTimeUtils.newId().toString();
       Acting.system(
           () ->

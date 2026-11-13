@@ -20,6 +20,7 @@ import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.MessageStore;
 import ai.singlr.sail.store.RoomStore;
 import ai.singlr.sail.store.RunStore;
+import ai.singlr.sail.store.TestRuns;
 import java.io.FilterOutputStream;
 import java.io.IOException;
 import java.io.OutputStream;
@@ -465,7 +466,7 @@ class DeniedSyncTest {
     var posted =
         messages.append("room", runs.findById(id).orElseThrow().principal(), "unstamped", null);
     var reply = messages.append("room", "ada", "answering it", posted.id());
-    runs.complete(id, "completed", 0);
+    TestRuns.complete(runs, id, "completed", 0);
 
     var run = round(ADA, "run", unhandled("run"));
 
@@ -543,7 +544,7 @@ class DeniedSyncTest {
     assertEquals(
         List.of(id),
         round(ADA_VIEWING, "run").denials().stream().map(SyncSession.Denial::id).toList());
-    runs.complete(id, "completed", 0);
+    TestRuns.complete(runs, id, "completed", 0);
 
     var finished = round(ADA_VIEWING, "run");
 
@@ -574,7 +575,7 @@ class DeniedSyncTest {
     var believesItOwnsIt = SyncedEntities.replicas(node.db, "node", "grace").get("run");
     round(ADA, "run", believesItOwnsIt);
     var runs = new RunStore(node.db);
-    runs.complete(id, "stopped", 0);
+    TestRuns.complete(runs, id, "stopped", 0);
 
     var report = round(ADA, "run", believesItOwnsIt);
 

@@ -492,11 +492,14 @@ against exactly that state and main's edits the offer merged in stay. The record
 when main's answer is to that offer: main answers the latest version it took from the box, which
 is an earlier offer's when the recorded one never reached it.
 
-### The wire: sync protocol 7
+### The wire: sync protocol 8
 
 A session opens with `hello` (protocol, build, box id) and is `welcome`d or `refuse`d once: a node
-on another protocol is refused, told to upgrade itself when its protocol is older and to upgrade
-main first when it is newer. The `welcome` always names the handle main authenticated the
+on another protocol is refused: told to upgrade main first when its protocol is newer and, when
+it is older, to upgrade when its hello names a 0.58 release, whose database an upgrade converts,
+and to reinstall itself otherwise (protocol 8's run and spec snapshots carry cost and times, and
+no other database before it is converted; protocol 4 spans 0.44.1 to 0.58.0, so the version, not
+the protocol, tells). The `welcome` always names the handle main authenticated the
 session as and main's `limits.file_max`, and a welcome missing either is a protocol failure; the
 node enforces the lower of its own limit and main's before a file ever reaches a sync, and a node
 whose configured sync handle is blank or another does nothing that round (`NodeRound.begin`). It
@@ -1476,14 +1479,16 @@ adapter gives, not a name a caller recognises. Adding a harness is adding one ad
 | `readOnly(Launch)`, `readOnlyRefusal()` | the room lane's harness-restricted command, or why the harness has none |
 | `live(LiveLaunch)`, `liveSettings()` | the argv of a live member (one process prompted over stdin, read over stdout) and the settings file it runs under, or empty for a harness with no live mode |
 | `interactive(fullPermissions)`, `attach(sessionId)` | the TTY session, fresh or resuming a recorded conversation exactly by id |
-| `honoursReasoningEffort()`, `loginTunnelPort()`, `interactiveTip()` | whether a reasoning effort means anything, which port the login flow needs forwarded, what to tell an engineer before an interactive session |
+| `efforts()`, `requireEffort(effort)` | the reasoning efforts the harness takes, and the one refusal, naming it, of any other (M15) |
+| `usage(agentLog, transcript)` | what a run cost, from the harness's own report: tokens, dollars and model, or empty for none |
+| `loginTunnelPort()`, `interactiveTip()` | which port the login flow needs forwarded, what to tell an engineer before an interactive session |
 | `hooks()` | the harness's `HookFile`: which of its events run which of sail's `SailHook`s |
 | `isSafeSessionId(id)`, `requireSafeSessionId(id)` | whether a hook-reported, replicated session id may touch a shell string, and the one check every adapter makes before it does |
 
 A `Launch` carries the task file, whether every action is auto-approved, the model, the
 reasoning effort, the session to resume and whether to stream. A malformed session id throws
 before it can reach a shell string, in `headless`, `readOnly` and `attach` alike; `readOnly`
-ignores permissions and reasoning effort, and a harness with a refusal throws rather than
+ignores permissions, and a harness with a refusal throws rather than
 build one. The login port is the adapter's alone to name: `sail agent run`
 prints the tunnel for the harness it starts, and `sail project connect` for each harness sail
 knows that needs one.
@@ -2577,44 +2582,79 @@ resolves with `sail spec update <id> --status done` (accept the work as-is) or `
 pending` (send it back to be re-dispatched). Nothing is deleted along the way.
 
 **Measures of a change.** What a spec's change took is computed on read, by one pure function
-(`SpecMeasures.of` over the spec's `MeasureRows`), from the rows a box already holds and nothing
-else: the revisions this box's change log keeps of it and the seqs compaction dropped
-(`compacted_entries`), its reviews and their findings, its runs as `GET /v1/runs?spec=` lists
-them, and the latest run erasure this box recorded in each project. Each kind is one read for
-every spec measured, so a listing costs the same statements for one spec as for a hundred.
+(`SpecMeasures.of` over the spec's `MeasureRows`), from rows a box already holds and nothing else:
+the spec's own record (`SpecStore.recorded`: its times and the sums this box kept of its finished
+runs), its reviews and their findings, its runs as `GET /v1/runs?spec=` lists them, the minutes
+this box saw people give its conversation, and its project's `agent.budget`. Each kind is one
+read for every spec measured, so a listing costs the same statements for one spec as for a
+hundred.
 
-- **Times.** Ready is the first move into `pending`, known while the log holds every revision
-  before it from the birth; done is the move that began the latest stretch in `done`; the dwell
-  is the stretch in `awaiting_merge` that move ended; verified is when the current attempt's
-  latest review completed, if it passed. Each change-log time is the author's time of its
-  revision, from this box's log, which the answer names by its Sail box id (`times.box`, or
-  `no_box_id`). Times are exact only for moves written on the reading box: a revision heard by sync
-  is one per round, so the moves another box made between two rounds are collapsed into it, and
-  what it says or could hide is `collapsed_by_sync`, never `not_reached` and never a clock-skew
-  error. A box's own write that main took comes back heard, in the same status at the same time;
-  it is that move, not another. An unedited birth heard by sync is one move. The second spec's
-  `ready_at` and `done_at` columns are what make the times equal on every box.
-- **Counts.** Rework is reviews that reached a verdict, reviews that errored (served apart as
-  `review_errors`), build runs (a resumed build is one more), fix runs and findings carried
-  forward. A review or run the reader may not see leaves every number of its kind `hidden_rows`,
-  with no count. Every box records each run erasure, main as retention makes it and a node as it
-  hears it from main, filed under the run's project and naming no spec; a run of a project the
-  spec was filed under, erased after the spec arrived, may have been one of its own, so its run
-  counts are then a lower bound (`at_least`). The row names no spec, so a run erased with a pruned
-  spec of the same project bounds them too; one of another project bounds nothing.
-- **The rest.** "No recorded human code act" is a done spec no person decided a human stage of,
-  in any attempt: an upper bound on changes no person reviewed, except that an approval of a
-  superseded attempt counts though it reviewed other work. Cost and human minutes are `unknown`:
-  no row records them yet.
-- **What is exact where.** On every box: review rounds, review errors, carried findings and
-  verified are exact for every reader who sees the spec's reviews. Build runs, fix runs and runs
-  without usage are exact until retention erases a run of the spec's project, and a lower bound
-  after that. On the box that made a move (a node for the loop's moves, main for a person's moves
-  made there): ready, awaiting merge, done and the intervals between them are exact, unless
-  compaction or a project move out of the reader's scope dropped a revision before them. On any
-  other box those moves are `collapsed_by_sync`. A node therefore reads the times of the work it
-  built, and main reads a person's ready and done but not the loop's awaiting merge; the second
-  spec's columns end the difference.
+- **What a run cost.** Each harness answers `Harness.usage(agentLog, transcript)` from its own
+  report: Claude Code from the last `result` line of the run's stream-json log that reports
+  anything (tokens summed over `modelUsage`, so subagents count; dollars from `total_cost_usd`;
+  the model that cost most), Codex from its rollout transcript's last `token_count` and
+  `turn_context` model (no dollars; its cached input taken out of its input). `RunUsageReader`
+  reads, in the run's container and in one command waiting at most 10 s, for each of its markers the
+  last 16 lines of the one file the harness reports in that hold it (`tac | grep -m 16 -a -F` per
+  marker, so Codex's many `token_count` lines never crowd out its one `turn_context` a turn), and
+  the finish writes the usage, the reported model and the effort passed in the
+  update that makes the row terminal: the tracker, the pipeline, the foreground launcher and the
+  reconciler finish that way. An operator's stop never waits on a container: it leaves the
+  report unread. A harness session's report is its running total, so a run records its share:
+  the report less what the session's other runs were given, kept per session in the box-local
+  `session_usage` row (the highest total the session reported and what its runs were given),
+  written in the finish's transaction, never touched by retention and erased with the spec or
+  room it is of. A resumed run's session is stamped at launch from the session it resumes. A
+  report below the session's highest in any figure (an earlier run finishing late, a harness
+  that started counting over) tells no share: the run is `usage_source = unattributable`, adds
+  nothing, and its spec's tokens and dollars are a lower bound. A live member sets each turn's
+  share on its run, and its finish keeps the last in the one write that ends it. A report that
+  says nothing, or a report file that is not there, is `usage_source = none` with every count
+  null. What the container answered is final, so it is recorded once: a file holding no marked
+  line, however long, is `none`, and so is a last report line that does not parse, said once on
+  stderr (a character JSON takes raw in a string and YAML refuses, a C1 control, U+FFFE or
+  U+FFFF, is read as its escape, so it parses). Only a container that did not answer (stopped,
+  missing or silent past 10 s) leaves the usage unrecorded: retention keeps that run's directory,
+  and each reconciler sweep of the box that ran it reads it again until it is answered. Usage
+  syncs with the run, its executing box's fact.
+- **Times.** Ready is the spec's first move into `pending`, written once; awaiting merge its
+  latest move into `awaiting_merge`, kept as it moves on to `done` and `archived`; done its
+  latest move into `done`, kept as it is archived and cleared on any other move. The status
+  triggers stamp each from the moving revision's `updated_at`; the snapshot carries them
+  (`_ready_at`, `_awaiting_merge_at`, `_done_at`, metadata outside the comparison, tied to
+  `status` like `_status_since`), and every box that applies the revision writes them verbatim,
+  so every box holds the author's times. Verified is when the current attempt's latest review
+  completed, if it passed.
+- **Counts and cost.** Rework is reviews that reached a verdict, reviews that errored (served
+  apart as `review_errors`), build runs (a resumed build is one more), fix runs and findings
+  carried forward. Runs, their usage and their dollars are kept on the spec: box-local columns of
+  `specs` that SQLite triggers on `runs` fold as a run's row becomes finished on this box, and
+  take back as it stops being finished; erasing a row folds nothing out. A spec that arrives
+  after its runs starts from the finished ones held. Builds and fixes still running are added as
+  rework under way. Every box in scope holds the same run rows, so every box keeps the same sums,
+  with nothing to merge. A box that may lack a run cannot vouch it counted every run, and there
+  the run figures are a lower bound (`at_least`): one that first held the spec after main erased
+  a run of its project made after the spec was, and one that adopted main's erasure of a run it
+  never saw finish (`uncounted_runs`: that run's spec when the box held its row, every spec of
+  its project made before it when not). Tokens and dollars are exact only when every run counted
+  reported them: a lower bound when some did not or a run was unattributable, and `unknown`
+  (`runs_not_reported`) when none did. A run main's retention erased before its node read the
+  report late is counted on main as it last held it, unread, so main may serve `unknown` or a
+  lower bound where the node serves an exact number: two answers that never disagree as exact
+  numbers. A review or run the reader may not see leaves every
+  number of its kind `hidden_rows`. Over budget is true once what was reported passes a limit the project sets,
+  false only when every run reported the figure that limit is of; display only.
+- **Human minutes.** `attention(person, conversation, minute, channel)` is box-local and never
+  synced: a person's accepted input in a room-bound terminal (`terminal_input`, told by the pty
+  host once a minute per connection), a post (`post`), a review decision or a status move
+  (`review_act`), and a client's focus heartbeat (`focus`, `POST /v1/attention`). Only a person on
+  a person's own lane is counted (`Access.attendee`: the host CLI or an HTTP credential), never
+  the credential in a container or a run's principal. Human minutes are the distinct (person,
+  minute) pairs in the spec's own conversation (its id: activity in a room the spec was born in
+  that other specs share is not its), by channel and in all, with the count of people and the
+  box named; always a lower bound, since reading leaves no row and another box's minutes are not
+  here. "No recorded human code act" is a done spec no person decided a human stage of, in any
+  attempt, and no person typed in a terminal bound to its own conversation: an upper bound.
 - **Where it is read.** `GET /v1/specs/{spec}/measures` serves the record. `GET
   /v1/specs/{spec}?measures=true` carries it as `measures`, with no ETag; `sail spec show` and its
   `--json` ask for it, and no other read of a spec pays for it. Reading measures is the permission
@@ -2622,16 +2662,28 @@ every spec measured, so a listing costs the same statements for one spec as for 
   work's project; and none for the credential in a container, which is answered the detail as
   without asking. `GET /v1/specs:measures`, behind `sail spec list --status done --measures
   [--done-since] [--done-until]`, lists it per spec with the nearest-rank median and p90 of every
-  number over the values known exactly, counting what each left out.
+  number over the values known exactly, counting what each left out as unknown, as a lower bound
+  or as an error. Human minutes are summarized as this box counted them: one spec's are served
+  as a lower bound, since another box may hold minutes this one never saw, and the listing's
+  median is over this box's counts, with the box named.
 
 | | Invariant | Proven by |
 |---|---|---|
-| M8 | A measure is computed only from recorded rows: a number missing an input is `unknown`, with its reason; nothing is estimated, interpolated or zero-filled. A revision compacted away, filed where the reader does not read, or heard by sync from another box is never read past; a row the reader may not see is never counted as none; a count retention may have shortened is a lower bound. | `SpecMeasuresTest`; `SpecMeasuresSyncTest` (real rounds between main and a node); `SpecMeasuresRouteTest` (compaction, a moved spec read per scope, erasures by project, one heard from main) |
-| M9 | No fact is counted twice: a run counts once by its id, and times come from this box's change log alone, named by its Sail id. | `SpecMeasuresTest` (a run listed twice), `SpecMeasuresRouteTest` (a run of the spec's own room) |
+| M1 | A finished run records its usage once, from its harness's own report, in the update that finishes it or, when it could not be read then, in the sweep that reads it; a harness that reported nothing, or whose last report does not parse, records `none` with null counts, never zeros nor an earlier running total; a report its container did not answer is never `none`. | `HarnessUsageTest` (a recorded stream-json log and a Codex rollout, golden; their marked lines alone; a last line cut mid-write; a raw C1 control), `YamlUtilTest` (a raw C1 control, U+FFFE and U+FFFF read as JSON), `RunUsageReaderTest` (a container stopped, missing or silent; a missing file; a long log with no result line, in one command; a last line that does not parse, said once), `HarnessContractTest`, `RunUsageStoreTest`, `ReviewLanesTest` (Claude Code, Codex and an empty log through the production finish), `LiveMemberTest` (three turns), `MissedStopReconcilerTest` (the sweep's read), `StopOperationsTest` (a stop reads nothing) |
+| M2 | A run's usage is its executing box's fact: it syncs with the run and no other box writes it. | `SpecMeasuresSyncTest` (main holds the node's usage after one round), `BoxRunsSyncTest`, `JournalDecidesEveryWriteTest` |
+| M3 | Retention never removes the directory of a finished run whose usage was not read, and the read is tried again until its container answers; what it answers is recorded once and never asked for again. | `ReviewLanesTest` (past the newest twenty), `MissedStopReconcilerTest` (a long log with no result line, a cut last result and a raw C1 control each recorded in one sweep through the box's own reader; a silent container asked again) |
+| M4 | Ready, awaiting merge and done are the moves' own times, the same on every box. | `SchemaManagerTest` (the triggers), `SpecMeasuresSyncTest` (made ready, restarted, reopened, done on a node, read on both boxes) |
+| M5 | An attention minute comes only from a fact the server observed, for a person on a person's own lane, once per tuple. | `AttentionStoreTest`, `AttentionTest`, `PtySessionHostTest` (once a minute, room-bound only) |
+| M6 | A heartbeat speaks only for its caller, in the server's minute, about a conversation it may read; one it may not read answers as a missing one. | `AttentionTest`, `ScopedReadsTest`, `RouteGateSweepTest`, `AccessDoorsBaselineTest` (`infra-doors`) |
+| M7 | Nothing about a person is stored beyond (person, conversation, minute, channel). | `AttentionStoreTest` (the table's columns), `PtySessionHostTest` (the host tells a name and a session, nothing typed) |
+| M8 | A measure is computed only from recorded rows: a number missing an input is `unknown`, with its reason; nothing is estimated or zero-filled; a row the reader may not see is never counted as none; a figure a box cannot vouch for (runs it may lack, runs that did not report it, a run whose share could not be told, human minutes) is a lower bound, and no two boxes serve two different exact numbers. | `SpecMeasuresTest` (a figure some runs or none reported, in the detail and the listing), `SpecMeasuresSyncTest` (a node that joins after an erasure; a run made and erased between a node's rounds, held or not), `SpecMeasuresRouteTest` |
+| M9 | No fact is counted twice: a run is folded once as it finishes; a run records its share of its harness session's running total, the report less what the session's other runs were given, kept where retention never reaches, whatever order its runs finish in; a report whose share cannot be told adds nothing; a minute seen two ways once. | `SchemaManagerTest`, `RunUsageStoreTest` (an erased earlier run, a later run finishing first, a resumed row whose hook never named its session, a harness restarting at zero), `HarnessUsageTest`, `SpecMeasuresTest` |
 | M10 | One computation: the route, the spec's detail and both CLI verbs serve the one record. | `SpecMeasuresRouteTest`, `SpecMeasuresCommandTest` (the section and the listing pinned whole; each `--json` is the record) |
 | M11 | A negative interval is an error naming both instants, never clamped; a listing leaves it out of the median and counts it. | `SpecMeasuresTest` |
 | M12 | Served measures name no individual. | `SpecMeasuresTest` |
-| M13 | Reading is reading: a measure read writes no row but the door's stamp of the credential's last use, and a spec the caller may not read is one that is not there; reading measures is the table's Read measures, an agent's own work alone. | `SpecMeasuresRouteTest` (every column before and after, the clock moving; a hidden spec answers as a missing one; a flat statement count), `ScopedReadsTest`, `RouteGateSweepTest`, `AccessDoorsBaselineTest` (`infra-doors`), `OwnWorkSocketTest` (its own spec, no other, and none moved out of its project), `AccessTest`, `PolicyTableTest`, `DoorParityTest` |
+| M13 | Reading is reading: a measure read writes no row but the door's stamp of the credential's last use, and a spec the caller may not read is one that is not there; reading measures is the table's Read measures, an agent's own work alone. | `SpecMeasuresRouteTest`, `ScopedReadsTest`, `RouteGateSweepTest`, `AccessDoorsBaselineTest` (`infra-doors`), `OwnWorkSocketTest`, `AccessTest`, `PolicyTableTest`, `DoorParityTest` |
+| M14 | Erasing a run by retention changes no measure of its spec. | `SchemaManagerTest`, `SpecMeasuresRouteTest`, `SpecMeasuresSyncTest` (three of five runs erased on main, read on both boxes) |
+| M15 | An asked effort is never silently dropped: a harness takes it (`--effort` for Claude Code, `model_reasoning_effort` for Codex) or it is refused naming the harness, as `invalid_request`, before any run is reserved: at the spec door when the agent or the effort changes, at the dispatch door, at a room wake and at the launch. | `HarnessUsageTest`, `HarnessGoldenTest`, `AgentSessionTest`, `GlobalSpecOperationsTest` (a stored refused effort still moves and is retitled), `BuildDispatchCoverageTest`, `RoomWakeLaunchTest` |
 
 **Events:** an in-process `EventBus` (lock-light, with bounded per-subscriber queues that
 are lossy by design so publishers never block) fans out to the SSE stream and to startup

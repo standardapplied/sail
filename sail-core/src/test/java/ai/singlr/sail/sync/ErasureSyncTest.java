@@ -29,6 +29,7 @@ import ai.singlr.sail.store.RoomStore;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
+import ai.singlr.sail.store.TestRuns;
 import java.io.FilterOutputStream;
 import java.io.IOException;
 import java.io.OutputStream;
@@ -590,7 +591,7 @@ class ErasureSyncTest {
     var runs = new RunStore(box.db);
     var run = DateTimeUtils.newId().toString();
     runs.create(run, "proj", id, "node", "build", "claude", "b", "t", null, null, "/log", "u");
-    runs.complete(run, "completed", 0);
+    TestRuns.complete(runs, run, "completed", 0);
     var reviews = new ReviewStore(box.db);
     var review = reviews.createReview(id, 1);
     var stage = reviews.createStage(review, "security", "agent");

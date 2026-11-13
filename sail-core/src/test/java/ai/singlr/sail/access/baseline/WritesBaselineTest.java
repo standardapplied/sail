@@ -12,6 +12,7 @@ import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.store.ChangeLog;
 import ai.singlr.sail.store.Finding;
 import ai.singlr.sail.store.RunStore;
+import ai.singlr.sail.store.TestRuns;
 import java.io.ByteArrayInputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
@@ -181,7 +182,8 @@ class WritesBaselineTest {
               world -> world.runs.recordSession(run, "s-1", "startup", "/t")));
       mutations.add(
           Mutation.of(
-              "run " + run + " complete", world -> world.runs.complete(run, "completed", 0)));
+              "run " + run + " complete",
+              world -> TestRuns.complete(world.runs, run, "completed", 0)));
       mutations.add(
           Mutation.of(
               "run " + run + " stop", world -> world.runs.claimStop(run, "stopping", () -> {})));

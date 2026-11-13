@@ -37,6 +37,7 @@ import ai.singlr.sail.store.ChangeLog;
 import ai.singlr.sail.store.Erasure;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SpecStore;
+import ai.singlr.sail.store.TestRuns;
 import java.util.List;
 import java.util.Optional;
 import java.util.stream.Stream;
@@ -311,7 +312,7 @@ class EraseAuthorityTest {
                     new Erasure(board.db).closure(List.of(new Erasure.Target("project", "acme"))))),
         "a project is purged whole, once its container is gone, and never waits for a run");
 
-    Acting.system(() -> runs.complete(going, "completed", 0));
+    Acting.system(() -> TestRuns.complete(runs, going, "completed", 0));
     assertEquals(Optional.empty(), rule.idle(plan));
   }
 
@@ -386,7 +387,7 @@ class EraseAuthorityTest {
   private void run(String id, String project, String spec) {
     var runs = new RunStore(board.db);
     runs.create(id, project, spec, OWNER, "build", "claude-code", "b", "t", null, null, "/l", "u");
-    runs.complete(id, "completed", 0);
+    TestRuns.complete(runs, id, "completed", 0);
   }
 
   @Test

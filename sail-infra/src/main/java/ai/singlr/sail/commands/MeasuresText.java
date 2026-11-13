@@ -7,6 +7,7 @@ package ai.singlr.sail.commands;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 
@@ -33,7 +34,7 @@ final class MeasuresText {
   static List<String> section(Map<String, Object> measures) {
     var times = (Map<String, Object>) measures.get("times");
     var lines = new ArrayList<String>();
-    lines.add("  @|bold Measures|@ (" + record(times) + "):");
+    lines.add("  @|bold Measures|@ (" + record(measures) + "):");
     for (var moment : List.of("ready", "verified", "awaiting_merge", "done")) {
       lines.add(line(label(moment), moment((Map<String, Object>) times.get(moment))));
     }
@@ -47,18 +48,9 @@ final class MeasuresText {
             "No recorded human code act",
             codeAct((Map<String, Object>) measures.get("no_recorded_human_code_act"))));
     var cost = (Map<String, Object>) measures.get("cost");
-    lines.add(
-        line(
-            "Cost",
-            "unknown: "
-                + reason(cost)
-                + " ("
-                + count((Map<String, Object>) cost.get("runs_without_usage"), "run")
-                + " without usage)"));
-    lines.add(
-        line(
-            "Human minutes",
-            "unknown: " + reason((Map<String, Object>) measures.get("human_minutes"))));
+    lines.add(line("Cost", cost(cost)));
+    lines.add(line("Budget", budget(cost)));
+    lines.add(line("Human minutes", minutes((Map<String, Object>) measures.get("human_minutes"))));
     return lines;
   }
 
@@ -67,15 +59,12 @@ final class MeasuresText {
   static List<String> listing(Map<String, Object> listing) {
     var specs = (List<Map<String, Object>>) listing.get("specs");
     var lines = new ArrayList<String>();
-    var times =
-        specs.isEmpty()
-            ? Map.<String, Object>of()
-            : (Map<String, Object>) specs.getFirst().get("times");
+    var first = specs.isEmpty() ? Map.<String, Object>of() : specs.getFirst();
     lines.add(
         "  @|bold Measures of "
             + plural(listing.get("total"), "spec")
             + "|@ ("
-            + record(times)
+            + record(first)
             + ")"
             + window((Map<String, Object>) listing.get("window"))
             + ":");
@@ -89,6 +78,8 @@ final class MeasuresText {
       parts.add(
           "no recorded human code act: "
               + codeAct((Map<String, Object>) spec.get("no_recorded_human_code_act")));
+      parts.add("cost " + cost((Map<String, Object>) spec.get("cost")));
+      parts.add("human minutes " + minutes((Map<String, Object>) spec.get("human_minutes")));
       lines.add("    • @|bold " + spec.get("spec_id") + "|@  " + String.join(" · ", parts));
     }
     var summary = (Map<String, Object>) listing.get("summary");
@@ -98,15 +89,132 @@ final class MeasuresText {
     return lines;
   }
 
-  /** Whose record the times are: this box's, by its Sail id, or saying it has none. */
+  /**
+   * The box whose runs and minutes are counted: by its Sail id, or saying it has none. The times
+   * are the spec's own, the same on every box.
+   */
   @SuppressWarnings("unchecked")
-  private static String record(Map<String, Object> times) {
-    if (!(times.get("box") instanceof Map<?, ?> box)) {
-      return "this box's record";
+  private static String record(Map<String, Object> measures) {
+    if (!(measures.get("box") instanceof Map<?, ?> box)) {
+      return "counted on this box";
     }
     return box.containsKey("sail_id")
-        ? "this box's record, " + box.get("sail_id")
-        : "this box's record, unknown: " + reason((Map<String, Object>) box);
+        ? "counted on " + box.get("sail_id")
+        : "counted on this box, unknown: " + reason((Map<String, Object>) box);
+  }
+
+  /**
+   * What a change's runs cost, as the answer says: dollars, tokens, and the runs behind each; a
+   * figure some runs left unreported reads as a lower bound, and one none reported as unknown.
+   */
+  @SuppressWarnings("unchecked")
+  private static String cost(Map<String, Object> cost) {
+    var runs = (Map<String, Object>) cost.get("runs");
+    if (!runs.containsKey(COUNT)) {
+      return "unknown (" + reason(runs) + ")";
+    }
+    var all = ((Number) runs.get(COUNT)).longValue();
+    var counted =
+        (Boolean.TRUE.equals(runs.get("at_least")) ? "at least " : "") + plural(all, "run");
+    var withoutUsage = number(cost, "runs_without_usage");
+    var dollars =
+        ((Map<String, Object>) cost.get("usd")).containsKey("unknown")
+            ? "unknown, " + counted + " reported no dollars"
+            : figure(cost, "usd")
+                + " over "
+                + (all - number(cost, "runs_without_cost"))
+                + " of "
+                + counted;
+    return dollars + ", " + tokens(cost, all - withoutUsage);
+  }
+
+  /** The tokens of the runs that reported them, by kind; said once when none did. */
+  @SuppressWarnings("unchecked")
+  private static String tokens(Map<String, Object> cost, long reporting) {
+    if (((Map<String, Object>) cost.get("tokens")).containsKey("unknown")) {
+      return "tokens " + figure(cost, "tokens");
+    }
+    return figure(cost, "tokens")
+        + " tokens over "
+        + reporting
+        + " (in "
+        + part(cost, "tokens_in")
+        + ", out "
+        + part(cost, "tokens_out")
+        + ", cache read "
+        + part(cost, "tokens_cache_read")
+        + ", cache write "
+        + part(cost, "tokens_cache_write")
+        + ")";
+  }
+
+  /** One kind of the tokens, bare: the total before it says whether the kinds are lower bounds. */
+  @SuppressWarnings("unchecked")
+  private static String part(Map<String, Object> cost, String key) {
+    var part = (Map<String, Object>) cost.get(key);
+    return part.containsKey("unknown")
+        ? "unknown"
+        : String.format(Locale.ROOT, "%,d", ((Number) part.get(COUNT)).longValue());
+  }
+
+  /** The figure under {@code key}: dollars or a count, a lower bound, or unknown and why. */
+  @SuppressWarnings("unchecked")
+  private static String figure(Map<String, Object> cost, String key) {
+    var figure = (Map<String, Object>) cost.get(key);
+    if (figure.containsKey("unknown")) {
+      return "unknown (" + reason(figure) + ")";
+    }
+    return (Boolean.TRUE.equals(figure.get("at_least")) ? "at least " : "")
+        + (figure.containsKey("usd")
+            ? dollars(figure)
+            : String.format(Locale.ROOT, "%,d", ((Number) figure.get(COUNT)).longValue()));
+  }
+
+  @SuppressWarnings("unchecked")
+  private static long number(Map<String, Object> block, String key) {
+    return ((Number) ((Map<String, Object>) block.get(key)).get(COUNT)).longValue();
+  }
+
+  /** The project's budget and whether the cost is over it, as the answer says. */
+  @SuppressWarnings("unchecked")
+  private static String budget(Map<String, Object> cost) {
+    var budget = (Map<String, Object>) cost.get("budget");
+    if (budget.containsKey("unknown")) {
+      return "none set";
+    }
+    var limits = new ArrayList<String>();
+    if (budget.containsKey("usd")) {
+      limits.add(dollars(budget));
+    }
+    if (budget.containsKey("tokens")) {
+      limits.add(String.format(Locale.ROOT, "%,d", budget.get("tokens")) + " tokens");
+    }
+    var over = cost.get("over_budget");
+    return String.join(", ", limits)
+        + switch (over) {
+          case Boolean overBudget -> overBudget ? ": over" : ": within";
+          default -> ": unknown (" + reason((Map<String, Object>) over) + ")";
+        };
+  }
+
+  /** The minutes people gave a change on the box the answer counted them on. */
+  @SuppressWarnings("unchecked")
+  private static String minutes(Map<String, Object> minutes) {
+    var channels = (Map<String, Object>) minutes.get("by_channel");
+    var parts = new ArrayList<String>();
+    channels.forEach(
+        (channel, count) ->
+            parts.add(channel.replace('_', ' ') + " " + ((Map<String, Object>) count).get(COUNT)));
+    return number(minutes, "minutes")
+        + " from "
+        + plural(number(minutes, "people"), "person", "people")
+        + " ("
+        + String.join(", ", parts)
+        + "), a lower bound";
+  }
+
+  private static String dollars(Map<String, Object> amount) {
+    return String.format(Locale.ROOT, "$%,.2f", ((Number) amount.get("usd")).doubleValue());
   }
 
   private static String line(String label, String value) {
@@ -198,6 +306,9 @@ final class MeasuresText {
     if (value.containsKey("seconds")) {
       return duration(((Number) value.get("seconds")).longValue());
     }
+    if (value.containsKey("usd")) {
+      return dollars(value);
+    }
     return value.containsKey(COUNT) ? value.get(COUNT).toString() : "unknown";
   }
 
@@ -220,7 +331,11 @@ final class MeasuresText {
   }
 
   private static String plural(Object count, String noun) {
-    return count + " " + noun + (((Number) count).intValue() == 1 ? "" : "s");
+    return plural(count, noun, noun + "s");
+  }
+
+  private static String plural(Object count, String one, String many) {
+    return count + " " + (((Number) count).longValue() == 1 ? one : many);
   }
 
   private static String label(String name) {
@@ -233,8 +348,10 @@ final class MeasuresText {
   }
 
   private static String summaryLabel(String name) {
-    return name.equals("no_recorded_human_code_act")
-        ? "No recorded human code act"
-        : intervalLabel(name);
+    return switch (name) {
+      case "no_recorded_human_code_act" -> "No recorded human code act";
+      case "usd" -> "Dollars";
+      default -> intervalLabel(name);
+    };
   }
 }

@@ -40,6 +40,7 @@ import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
 import ai.singlr.sail.store.SyncConflicts;
+import ai.singlr.sail.store.TestRuns;
 import ai.singlr.sail.store.TokenStore;
 import com.sun.net.httpserver.HttpServer;
 import java.io.ByteArrayInputStream;
@@ -197,6 +198,7 @@ class ScopedReadsTest {
           "restoreGlobalSpec",
           "pruneSpecs",
           "postRoomMessage",
+          "attend",
           "addRoomMember",
           "removeRoomMember",
           "createRoom",
@@ -232,6 +234,8 @@ class ScopedReadsTest {
           List.of("POST", "/v1/specs/{spec}/followup", "{}"),
           List.of("POST", "/v1/specs:prune", "{\"ids\": [\"{spec}\"]}"),
           List.of("POST", "/v1/rooms/{room}/messages", "{\"body\": \"hello\"}"),
+          List.of("POST", "/v1/attention", "{\"conversation\": \"{spec}\"}"),
+          List.of("POST", "/v1/attention", "{\"conversation\": \"{room}\"}"),
           List.of("POST", "/v1/rooms/{spec}/messages", "{\"body\": \"hello\"}"),
           List.of("POST", "/v1/rooms/{room}/members", "{\"agent\": \"claude-code\"}"),
           List.of("POST", "/v1/rooms/{spec}/members", "{\"agent\": \"claude-code\"}"),
@@ -609,7 +613,7 @@ class ScopedReadsTest {
               null,
               "/log",
               "u");
-          runs.complete(run, "completed", 0);
+          TestRuns.complete(runs, run, "completed", 0);
         });
     assertEquals(
         "200", send(ada, "PUT", "/v1/specs/wander", "{\"project\": \"alpha\"}").substring(0, 3));
@@ -1424,7 +1428,7 @@ class ScopedReadsTest {
         null,
         "/home/dev/.sail/runs/" + run + "/agent.log",
         "sail-agent-" + run);
-    runs.complete(run, "completed", 0);
+    TestRuns.complete(runs, run, "completed", 0);
     var review = new ReviewStore(db).createReview(spec, 1);
     new FileStore(db)
         .put(

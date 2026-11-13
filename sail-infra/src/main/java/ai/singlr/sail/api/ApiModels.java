@@ -28,6 +28,7 @@ import ai.singlr.sail.store.RoomStore;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SpecStore;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.EnumSet;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -1549,6 +1550,23 @@ record SpecMessageView(
     if (question) map.put("question", true);
     if (error) map.put("error", true);
     return map;
+  }
+}
+
+/**
+ * What a focus heartbeat recorded: the conversation, the minute the server stamped, and whether
+ * this minute of the caller's was new, false for a caller who is not a person or a minute already
+ * recorded.
+ */
+record AttentionResponse(String conversation, Instant minute, boolean recorded)
+    implements Mappable {
+  @Override
+  public Map<String, Object> toMap() {
+    var m = new LinkedHashMap<String, Object>();
+    m.put("conversation", conversation);
+    m.put("minute", DateTimeUtils.format(minute));
+    m.put("recorded", recorded);
+    return m;
   }
 }
 

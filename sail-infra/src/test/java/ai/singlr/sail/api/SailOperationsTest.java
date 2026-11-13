@@ -50,6 +50,7 @@ import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
+import ai.singlr.sail.store.TestRuns;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -980,7 +981,7 @@ class SailOperationsTest {
                   null,
                   RUN_LOG,
                   "sail-agent-" + R1);
-              runs.complete(R1, "stopped", 0);
+              TestRuns.complete(runs, R1, "stopped", 0);
             });
 
     var result = dispatch(operations, "acme", request("auth", "background", true));
@@ -1659,7 +1660,7 @@ class SailOperationsTest {
                   null,
                   RUN_LOG,
                   "sail-agent-" + R1);
-              runs.complete(R1, "completed", 0);
+              TestRuns.complete(runs, R1, "completed", 0);
             });
 
     var result = Acting.by(ADMIN, () -> operations.stopRun(R1, "node-a"));

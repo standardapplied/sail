@@ -404,23 +404,6 @@ class SpecStoreTest {
   }
 
   @Test
-  void compactedAndHistoriesNameWhatEachSpecsLogDroppedAndKeeps() {
-    store.create(spec("a", "Test", "draft"));
-    store.create(spec("b", "Other", "draft"));
-    for (var i = 1; i <= ChangeLog.HISTORY_REVISIONS; i++) {
-      store.setContent("a", "body " + i, "");
-    }
-    var born = store.history("a").getFirst().seq();
-    assertEquals(List.of(), store.compacted(List.of("a", "b")));
-
-    new ChangeLog(db).compact("spec", List.of("a"), id -> null);
-
-    assertEquals(List.of(new ChangeLog.Head(born, "a", null)), store.compacted(List.of("a", "b")));
-    assertEquals(
-        ChangeLog.HISTORY_REVISIONS + 1, store.histories(List.of("a", "b")).size(), "20 and 1");
-  }
-
-  @Test
   void aListHydratesEverySpecInTwoReadsWithItsDependenciesAndReposInOrder() {
     store.create(spec("z", "Zed", "pending"));
     var listed =

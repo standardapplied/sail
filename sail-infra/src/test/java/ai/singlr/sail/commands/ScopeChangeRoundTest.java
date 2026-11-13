@@ -30,6 +30,7 @@ import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
 import ai.singlr.sail.store.SyncScope;
+import ai.singlr.sail.store.TestRuns;
 import ai.singlr.sail.sync.SyncDatabase;
 import ai.singlr.sail.sync.SyncTransitionSink;
 import java.io.ByteArrayOutputStream;
@@ -310,7 +311,7 @@ class ScopeChangeRoundTest {
         round());
     assertEquals(List.of("beta"), incus.names());
 
-    Acting.system(() -> new RunStore(nodeDb).complete(run, "completed", 0));
+    Acting.system(() -> TestRuns.complete(new RunStore(nodeDb), run, "completed", 0));
     var after = round();
 
     assertEquals(

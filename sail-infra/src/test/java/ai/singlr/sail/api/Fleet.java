@@ -40,6 +40,7 @@ import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.SlackThreadStore;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
+import ai.singlr.sail.store.TestRuns;
 import ai.singlr.sail.store.TokenStore;
 import java.net.ServerSocket;
 import java.nio.file.Files;
@@ -437,7 +438,7 @@ public final class Fleet implements AutoCloseable {
 
     public void authoritativeStop(String specId) {
       var run = runs.listForSpec(specId).stream().filter(r -> handle.equals(r.node())).findFirst();
-      run.ifPresent(row -> Acting.system(() -> runs.complete(row.id(), "completed", 0)));
+      run.ifPresent(row -> Acting.system(() -> TestRuns.complete(runs, row.id(), "completed", 0)));
       var event =
           Event.of(
               PROJECT,
@@ -462,7 +463,7 @@ public final class Fleet implements AutoCloseable {
     private void reviewersFinish() {
       for (var reviewer = runningReviewer(); reviewer.isPresent(); reviewer = runningReviewer()) {
         var run = reviewer.get();
-        Acting.system(() -> runs.complete(run.id(), "stopped", 0));
+        Acting.system(() -> TestRuns.complete(runs, run.id(), "stopped", 0));
         reviewsController.onEvent(
             RunStops.of(
                 Event.WellKnownData.SOURCE_WATCHER,

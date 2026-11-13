@@ -19,6 +19,7 @@ import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.HostInfo;
 import ai.singlr.sail.engine.ScriptedShellExecutor;
 import ai.singlr.sail.engine.ShellExec;
+import ai.singlr.sail.harness.RunUsage;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.store.DispatchGate;
 import ai.singlr.sail.store.EventStore;
@@ -30,6 +31,7 @@ import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.Snapshots;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
+import ai.singlr.sail.store.TestRuns;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.time.Duration;
@@ -44,6 +46,7 @@ import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Predicate;
 import java.util.function.Supplier;
 import org.junit.jupiter.api.AfterEach;
@@ -367,7 +370,7 @@ class MissedStopReconcilerTest {
     var runId = adhocSession(77);
     MissedStopReconciler.UnitProbe completingProbe =
         (project, id, unit) -> {
-          Acting.system(() -> sessionStore.transition(runId, "running", "completed", 0));
+          Acting.system(() -> sessionStore.finish(runId, "running", "completed", 0, null));
           return false;
         };
 
@@ -382,7 +385,7 @@ class MissedStopReconcilerTest {
   @Test
   void anInterruptedAdhocStopIsFinalizedOnceItsUnitIsGone() throws Exception {
     var runId = adhocSession(77);
-    Acting.system(() -> sessionStore.transition(runId, "running", "stopping"));
+    Acting.system(() -> TestRuns.transition(sessionStore, runId, "running", "stopping"));
     var latch = new CountDownLatch(1);
     var cancels = captureCancels(latch);
 
@@ -413,7 +416,7 @@ class MissedStopReconcilerTest {
                 "task",
                 "/home/dev/.sail/runs/" + runId + "/agent.log",
                 ""));
-    Acting.system(() -> sessionStore.transition(runId, "running", "stopping"));
+    Acting.system(() -> TestRuns.transition(sessionStore, runId, "running", "stopping"));
     var probe = new CountingProbe(false);
 
     var finalized = reconciler(probe, PAST_GRACE).sweep();
@@ -455,6 +458,176 @@ class MissedStopReconcilerTest {
               "/home/dev/.sail/runs/" + id + "/agent.log",
               "sail-agent-" + id);
         });
+  }
+
+  /**
+   * Review 1, major 3: a finished run whose report was not read (its container stopped as it ended,
+   * or an operator stopped it) is read again on each sweep of the box that ran it until the read is
+   * answered: an unanswered read changes nothing, a report is recorded once, and a report that is
+   * gone is recorded none. A run another box ran is never read here.
+   */
+  @Test
+  void aSweepReadsTheUsageOfItsFinishedUnreadRunsUntilTheContainerAnswers() {
+    var stopped = runningSession("auth");
+    var gone = runningSession("auth");
+    var foreign = session("auth", "node-b", "build");
+    Acting.system(
+        () -> {
+          for (var id : List.of(stopped, gone, foreign)) {
+            assertTrue(sessionStore.claimStop(id, "stopped", () -> {}));
+          }
+        });
+    var answers = new AtomicReference<RunUsage>(null);
+    var asked = new CopyOnWriteArrayList<String>();
+    MissedStopReconciler.UnitProbe probe =
+        new MissedStopReconciler.UnitProbe() {
+          @Override
+          public boolean active(String project, String runId, String unit) {
+            return false;
+          }
+
+          @Override
+          public RunUsage usage(RunStore.RunRow run) {
+            asked.add(run.id());
+            return run.id().equals(gone) && answers.get() != null ? RunUsage.NONE : answers.get();
+          }
+        };
+    var reconciler = reconciler(probe, Instant::now);
+
+    reconciler.sweep();
+    assertNull(sessionStore.findById(stopped).orElseThrow().usage(), "unanswered: still unread");
+    answers.set(new RunUsage("m", 1L, 2L, 3L, 4L, 0.5, RunUsage.Source.RESULT));
+    reconciler.sweep();
+    assertEquals(
+        0, (int) Acting.system(() -> reconciler.readUnreadUsage()), "each is recorded once");
+
+    assertEquals(0.5, sessionStore.findById(stopped).orElseThrow().usage().costUsd());
+    assertEquals(RunUsage.NONE, sessionStore.findById(gone).orElseThrow().usage());
+    assertNull(sessionStore.findById(foreign).orElseThrow().usage());
+    assertEquals(false, asked.contains(foreign), "another box's run is its own to read");
+  }
+
+  @Test
+  void aFinishedRunWhoseReportHoldsNoUsageIsRecordedNoneOnceAndNotReadAgain() {
+    var silent = runningSession("auth");
+    Acting.system(() -> assertTrue(sessionStore.claimStop(silent, "stopped", () -> {})));
+    var asked = new CopyOnWriteArrayList<String>();
+    MissedStopReconciler.UnitProbe probe =
+        new MissedStopReconciler.UnitProbe() {
+          @Override
+          public boolean active(String project, String runId, String unit) {
+            return false;
+          }
+
+          @Override
+          public RunUsage usage(RunStore.RunRow run) {
+            asked.add(run.id());
+            return RunUsage.NONE;
+          }
+        };
+    var reconciler = reconciler(probe, Instant::now);
+
+    assertEquals(1, (int) Acting.system(() -> reconciler.readUnreadUsage()));
+    assertEquals(0, (int) Acting.system(() -> reconciler.readUnreadUsage()));
+
+    assertEquals(RunUsage.NONE, sessionStore.findById(silent).orElseThrow().usage());
+    assertEquals(List.of(silent), asked, "a run recorded none is not read again");
+  }
+
+  /**
+   * Review 2, finding 1, through the box's own reader: a log holding no result line however long, a
+   * last result cut mid-write and a last result holding a raw C1 control are each recorded in one
+   * sweep and never asked about again; only a container that does not answer is asked again.
+   */
+  @Test
+  void aReportItsContainerAnsweredIsRecordedInOneSweepAndOnlyASilentContainerIsAskedAgain() {
+    var noResult = runningSession("auth");
+    var cut = runningSession("auth");
+    var control = runningSession("auth");
+    var silent = runningSession("auth");
+    Acting.system(
+        () -> {
+          for (var id : List.of(noResult, cut, control, silent)) {
+            assertTrue(sessionStore.claimStop(id, "stopped", () -> {}));
+          }
+        });
+    var result =
+        "{\"type\":\"result\",\"result\":\"ok \u009b done\",\"total_cost_usd\":1.5,"
+            + "\"usage\":{\"input_tokens\":10,\"output_tokens\":5}}\n";
+    var answers =
+        Map.of(
+            noResult, new ShellExec.Result(0, "", ""),
+            cut, new ShellExec.Result(0, result.substring(0, 40) + "\n", ""),
+            control, new ShellExec.Result(0, result, ""),
+            silent, new ShellExec.Result(1, "", "Error: Instance is not running\n"));
+    var asked = new CopyOnWriteArrayList<String>();
+    var container =
+        new ShellExec() {
+          @Override
+          public Result exec(List<String> command) {
+            throw new AssertionError("every read is bounded");
+          }
+
+          @Override
+          public Result exec(List<String> command, Path workDir, Duration timeout) {
+            var run =
+                answers.keySet().stream()
+                    .filter(id -> command.stream().anyMatch(arg -> arg.contains(id)))
+                    .findFirst()
+                    .orElseThrow();
+            asked.add(run);
+            return answers.get(run);
+          }
+
+          @Override
+          public boolean isDryRun() {
+            return false;
+          }
+        };
+    var reconciler = reconciler(MissedStopReconciler.systemdUnitProbe(container), Instant::now);
+
+    assertEquals(3, (int) Acting.system(() -> reconciler.readUnreadUsage()));
+    assertEquals(0, (int) Acting.system(() -> reconciler.readUnreadUsage()));
+
+    assertEquals(RunUsage.NONE, sessionStore.findById(noResult).orElseThrow().usage());
+    assertEquals(RunUsage.NONE, sessionStore.findById(cut).orElseThrow().usage());
+    assertEquals(1.5, sessionStore.findById(control).orElseThrow().usage().costUsd());
+    assertNull(sessionStore.findById(silent).orElseThrow().usage());
+    assertEquals(List.of(noResult, cut, control, silent, silent), asked);
+  }
+
+  @Test
+  void aReadThatFailsLeavesTheRunUnreadForTheNextSweepAndTheOthersAreStillRead() {
+    var broken = runningSession("auth");
+    var whole = runningSession("billing");
+    Acting.system(() -> assertTrue(sessionStore.claimStop(broken, "stopped", () -> {})));
+    Acting.system(() -> assertTrue(sessionStore.claimStop(whole, "stopped", () -> {})));
+    var failing = new AtomicBoolean(true);
+    MissedStopReconciler.UnitProbe probe =
+        new MissedStopReconciler.UnitProbe() {
+          @Override
+          public boolean active(String project, String runId, String unit) {
+            return false;
+          }
+
+          @Override
+          public RunUsage usage(RunStore.RunRow run) {
+            if (run.id().equals(broken) && failing.get()) {
+              throw new IllegalStateException("the report could not be parsed");
+            }
+            return RunUsage.NONE;
+          }
+        };
+    var reconciler = reconciler(probe, Instant::now);
+
+    assertEquals(1, (int) Acting.system(() -> reconciler.readUnreadUsage()));
+    assertNull(
+        sessionStore.findById(broken).orElseThrow().usage(), "a failed read records nothing");
+    assertEquals(RunUsage.NONE, sessionStore.findById(whole).orElseThrow().usage());
+
+    failing.set(false);
+    assertEquals(1, (int) Acting.system(() -> reconciler.readUnreadUsage()));
+    assertEquals(RunUsage.NONE, sessionStore.findById(broken).orElseThrow().usage());
   }
 
   private static MissedStopReconciler.UnitProbe aliveOnly(String runId) {
@@ -546,7 +719,7 @@ class MissedStopReconcilerTest {
     return Acting.system(
         () -> {
           var id = runningSession(specId);
-          sessionStore.complete(id, status, exitCode);
+          TestRuns.complete(sessionStore, id, status, exitCode);
           return id;
         });
   }
@@ -644,7 +817,7 @@ class MissedStopReconcilerTest {
     return Acting.system(
         () -> {
           var id = runningSession(specId);
-          sessionStore.transition(id, "running", "stopping");
+          TestRuns.transition(sessionStore, id, "running", "stopping");
           return id;
         });
   }
@@ -738,6 +911,12 @@ class MissedStopReconcilerTest {
               @Override
               public String output(RunStore.RunRow run) {
                 return "";
+              }
+
+              @Override
+              public RunUsage usage(RunStore.RunRow run) {
+
+                return RunUsage.NONE;
               }
 
               @Override
@@ -1037,7 +1216,7 @@ class MissedStopReconcilerTest {
     finishedSession("auth", "stopped", 0);
     recordEvent("auth", "review_stage_started", Instant.now());
     var reviewer = reviewerOf(runningReview("auth"), "auth");
-    Acting.system(() -> sessionStore.complete(reviewer, "stopped", 0));
+    Acting.system(() -> TestRuns.complete(sessionStore, reviewer, "stopped", 0));
 
     assertEquals(0, reconciler(new CountingProbe(false), Instant::now).sweep());
     assertEquals(
@@ -1347,7 +1526,8 @@ class MissedStopReconcilerTest {
             run,
             Event.WellKnownData.EXIT_CODE,
             1);
-    new RunTracker(sessionStore, SyncScheduler.disabled(), () -> "node-a")
+    new RunTracker(
+            sessionStore, finished -> RunUsage.NONE, SyncScheduler.disabled(), () -> "node-a")
         .onEvent(
             Event.of(
                 "test-project",
@@ -1399,7 +1579,7 @@ class MissedStopReconcilerTest {
   void aRunWhoseContainerWasStoppedIsFinishedAndItsStopClaimFinalized() {
     var adhoc = session(null, "node-a", "adhoc");
     var claim = session(null, "node-a", "adhoc");
-    Acting.system(() -> sessionStore.transition(claim, "running", "stopping"));
+    Acting.system(() -> TestRuns.transition(sessionStore, claim, "running", "stopping"));
     var stopped =
         incus(
             "[{\"name\": \"test-project\", \"status\": \"Stopped\"}]",
@@ -1532,7 +1712,7 @@ class MissedStopReconcilerTest {
     createInProgressSpec("auth");
     var build = runningSession("auth");
     var room = session("auth", "node-a", DispatchGate.ROOM_ROLE);
-    Acting.system(() -> sessionStore.transition(room, "running", "stopped", 1));
+    Acting.system(() -> sessionStore.finish(room, "running", "stopped", 1, null));
     recordStopEvent(
         "auth",
         Instant.now().plusSeconds(1),
@@ -1563,7 +1743,7 @@ class MissedStopReconcilerTest {
     var build = runningSession("auth");
     var adhoc = session(null, "node-a", "adhoc");
     var claim = session(null, "node-a", "adhoc");
-    Acting.system(() -> sessionStore.transition(claim, "running", "stopping"));
+    Acting.system(() -> TestRuns.transition(sessionStore, claim, "running", "stopping"));
     var frozen = incus("[{\"name\": \"test-project\", \"status\": \"Frozen\"}]", "frozen");
 
     assertEquals(0, reconciler(MissedStopReconciler.systemdUnitProbe(frozen), PAST_GRACE).sweep());
@@ -1989,7 +2169,7 @@ class MissedStopReconcilerTest {
   void anInterruptedStopFinalizationRevokesTheRunCredential() {
     var id = DateTimeUtils.newId().toString();
     var reservation = reservedAdhoc(id);
-    Acting.system(() -> sessionStore.transition(id, "running", "stopping"));
+    Acting.system(() -> TestRuns.transition(sessionStore, id, "running", "stopping"));
 
     var finalized = reconciler(new CountingProbe(false), PAST_GRACE).sweep();
 

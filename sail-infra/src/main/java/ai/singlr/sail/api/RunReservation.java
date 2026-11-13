@@ -9,10 +9,12 @@ import ai.singlr.sail.authority.WriteRefused;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.Lane;
 import ai.singlr.sail.config.ProjectDefinition;
+import ai.singlr.sail.config.RunStatus;
 import ai.singlr.sail.engine.AgentPresence;
 import ai.singlr.sail.engine.AgentUnit;
 import ai.singlr.sail.engine.RunRetention;
 import ai.singlr.sail.engine.ShellExec;
+import ai.singlr.sail.harness.RunUsage;
 import ai.singlr.sail.store.DispatchGate;
 import ai.singlr.sail.store.RunStore;
 import java.io.IOException;
@@ -427,16 +429,24 @@ public final class RunReservation {
     try {
       var runs = runStore.listForProject(project);
       var ids = runs.stream().map(RunStore.RunRow::id).toList();
-      var active =
+      var kept =
           runs.stream()
-              .filter(DispatchOperations::ownsLiveAgent)
+              .filter(run -> DispatchOperations.ownsLiveAgent(run) || usageUnread(run))
               .map(RunStore.RunRow::id)
               .collect(Collectors.toUnmodifiableSet());
-      var pruned = RunRetention.prune(shell, project, ids, active, RunRetention.DEFAULT_KEEP);
+      var pruned = RunRetention.prune(shell, project, ids, kept, RunRetention.DEFAULT_KEEP);
       listener.runsPruned(pruned.size());
     } catch (Exception e) {
       System.err.println("  [api] Warning: could not prune runs: " + e.getMessage());
     }
+  }
+
+  /**
+   * Whether {@code run} finished with its usage not read: its log and transcript are the only
+   * evidence of what it cost, so retention keeps its directory (M3).
+   */
+  private static boolean usageUnread(RunStore.RunRow run) {
+    return RunStatus.isTerminal(run.status()) && run.usage() == null;
   }
 
   /**
@@ -447,7 +457,7 @@ public final class RunReservation {
   private void failRun(String runId) {
     runBookkeeping(
         "mark run failed " + runId,
-        () -> runStore.transition(runId, "running", "failed", (Integer) null));
+        () -> runStore.finish(runId, "running", "failed", null, RunUsage.NONE));
   }
 
   private boolean agentLive(String project, AgentUnit unit) {

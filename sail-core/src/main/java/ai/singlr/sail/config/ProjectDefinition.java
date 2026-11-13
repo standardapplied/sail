@@ -515,7 +515,31 @@ public record ProjectDefinition(
       Map<String, String> config,
       Guardrails guardrails,
       Notifications notifications,
-      Member member) {
+      Member member,
+      Budget budget) {
+
+    public Agent(
+        String type,
+        boolean autoBranch,
+        String branchPrefix,
+        boolean autoSnapshot,
+        List<String> install,
+        Map<String, String> config,
+        Guardrails guardrails,
+        Notifications notifications,
+        Member member) {
+      this(
+          type,
+          autoBranch,
+          branchPrefix,
+          autoSnapshot,
+          install,
+          config,
+          guardrails,
+          notifications,
+          member,
+          null);
+    }
 
     public Agent(
         String type,
@@ -576,7 +600,8 @@ public record ProjectDefinition(
               "config",
               "guardrails",
               "notifications",
-              "member"));
+              "member",
+              "budget"));
       var notificationsRaw = Fields.map(map, "notifications", "agent.notifications");
       var memberRaw = Fields.map(map, "member", "agent.member");
       var agent =
@@ -590,7 +615,8 @@ public record ProjectDefinition(
               Fields.textMap(map, "config", "agent.config"),
               Guardrails.fromBlock(map.get("guardrails"), Guardrails.BUILD_BLOCK).orElse(null),
               notificationsRaw != null ? Notifications.fromMap(notificationsRaw) : null,
-              memberRaw != null ? Member.fromMap(memberRaw) : null);
+              memberRaw != null ? Member.fromMap(memberRaw) : null,
+              Budget.fromMap(Fields.map(map, "budget", "agent.budget")));
       agent.requireSeatableMember();
       return agent;
     }
@@ -683,6 +709,49 @@ public record ProjectDefinition(
       if (guardrails != null) map.put("guardrails", guardrails.toMap());
       if (notifications != null) map.put("notifications", notifications.toMap());
       if (member != null) map.put("member", member.toMap());
+      if (budget != null) map.put("budget", budget.toMap());
+      return map;
+    }
+  }
+
+  /**
+   * What a change of this project is meant to cost at most, in tokens and in dollars, each
+   * optional: shown beside what its runs reported, never enforced.
+   */
+  public record Budget(Long tokens, Double usd) {
+
+    static Budget fromMap(Map<String, Object> map) {
+      if (map == null) {
+        return null;
+      }
+      Fields.only(map, "agent.budget", List.of("tokens", "usd"));
+      return new Budget(
+          map.get("tokens") == null ? null : positiveTokens(map.get("tokens")),
+          map.get("usd") == null ? null : positiveDollars(map.get("usd")));
+    }
+
+    private static long positiveTokens(Object value) {
+      if ((value instanceof Integer || value instanceof Long) && ((Number) value).longValue() > 0) {
+        return ((Number) value).longValue();
+      }
+      throw new IllegalArgumentException(
+          "agent.budget.tokens must be a whole number of tokens above 0, such as 2000000.");
+    }
+
+    private static double positiveDollars(Object value) {
+      if (value instanceof Number number
+          && Double.isFinite(number.doubleValue())
+          && number.doubleValue() > 0) {
+        return number.doubleValue();
+      }
+      throw new IllegalArgumentException(
+          "agent.budget.usd must be a number of dollars above 0, such as 5 or 12.50.");
+    }
+
+    public Map<String, Object> toMap() {
+      var map = new LinkedHashMap<String, Object>();
+      if (tokens != null) map.put("tokens", tokens);
+      if (usd != null) map.put("usd", usd);
       return map;
     }
   }

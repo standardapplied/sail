@@ -84,7 +84,10 @@ class MissedStopsTest {
         null,
         null,
         reviewId,
-        RunStore.STOPPED_BY_OPERATOR);
+        RunStore.STOPPED_BY_OPERATOR,
+        null,
+        null,
+        null);
   }
 
   @Test

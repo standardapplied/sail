@@ -10,8 +10,10 @@ import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.ProjectDefinition;
 import ai.singlr.sail.engine.AgentUnit;
 import ai.singlr.sail.engine.ContainerExec;
+import ai.singlr.sail.engine.RunUsageReader;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.StreamJsonResult;
+import ai.singlr.sail.harness.RunUsage;
 import ai.singlr.sail.store.RunStore;
 import java.util.ArrayList;
 import java.util.List;
@@ -138,6 +140,11 @@ final class ReviewLaneLauncher implements ReviewLanes {
             ContainerExec.asDevUser(
                 run.project(), List.of("cat", AgentUnit.readableLogPath(run.id(), run.logPath()))));
     return log.ok() ? StreamJsonResult.extract(log.stdout()) : "";
+  }
+
+  @Override
+  public RunUsage usage(RunStore.RunRow run) {
+    return new RunUsageReader(shell).read(run);
   }
 
   /**

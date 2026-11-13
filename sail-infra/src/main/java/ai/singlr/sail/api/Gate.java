@@ -55,6 +55,13 @@ sealed interface Gate {
   Gate RUNS_OWN = new RunsOwn();
 
   /**
+   * The caller's own minute of attention: the server stamps the person and the minute, so the route
+   * records for its caller alone, and only a person (M5), about a conversation it reads in scope;
+   * it names no one else and decides nothing of anyone else (M6).
+   */
+  Gate ATTENDS = new Attends();
+
+  /**
    * Operating the box whose FDE {@code boxFde} names when asked: its sync health, bus stats, sync
    * rounds and main.
    */
@@ -93,6 +100,9 @@ sealed interface Gate {
 
   /** The route acts on the run its credential names, and on no other. */
   record RunsOwn() implements Gate {}
+
+  /** The route records the caller's own attention, about what it reads in scope. */
+  record Attends() implements Gate {}
 
   /** The terminal host decides the route's open or attach, as it decides one presented to it. */
   record Terminal() implements Gate {}

@@ -19,6 +19,7 @@ import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.HostYaml;
 import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.config.YamlUtil;
+import ai.singlr.sail.harness.RunUsage;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.ProjectScope;
@@ -29,6 +30,7 @@ import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.Sqlite;
 import ai.singlr.sail.store.SyncScope;
+import ai.singlr.sail.store.TestRuns;
 import ai.singlr.sail.sync.SyncBox;
 import java.io.IOException;
 import java.nio.file.Files;
@@ -116,7 +118,7 @@ class HandleChangeTest {
   }
 
   private void finish(String id) {
-    Acting.system(() -> runs.complete(id, "completed", 0));
+    Acting.system(() -> TestRuns.complete(runs, id, "completed", 0));
   }
 
   private HostYaml host(SyncConfig sync) {
@@ -317,7 +319,7 @@ class HandleChangeTest {
     assertEquals(List.of(unstamped), apply(standalone, main("ada")));
 
     try (var scheduler = new SyncScheduler(() -> {}, Duration.ofMillis(1), Duration.ofMillis(1))) {
-      var tracker = new RunTracker(runs, scheduler, () -> "ada");
+      var tracker = new RunTracker(runs, finished -> RunUsage.NONE, scheduler, () -> "ada");
       for (var id : List.of(unstamped, stamped)) {
         tracker.onEvent(
             Event.of(

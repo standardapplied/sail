@@ -42,6 +42,17 @@ public final class Snapshots {
    */
   public static final String STATUS_SINCE = "_status_since";
 
+  /**
+   * Reserved metadata keys carrying when a spec first entered {@code pending}, last entered {@code
+   * awaiting_merge} and last entered {@code done}, each on the clock of the revision that made the
+   * move, so every box holds the author's (M4). Absent while the spec holds none.
+   */
+  public static final String READY_AT = "_ready_at";
+
+  public static final String AWAITING_MERGE_AT = "_awaiting_merge_at";
+
+  public static final String DONE_AT = "_done_at";
+
   private Snapshots() {}
 
   /**

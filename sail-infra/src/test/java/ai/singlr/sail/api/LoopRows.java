@@ -154,6 +154,9 @@ final class LoopRows {
         null,
         null,
         reviewId,
+        null,
+        null,
+        null,
         null);
   }
 

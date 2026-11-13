@@ -13,6 +13,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.common.Secrets;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.ProjectScope;
@@ -29,6 +30,9 @@ import java.nio.channels.SocketChannel;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Clock;
+import java.time.Instant;
+import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -37,6 +41,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 import org.junit.jupiter.api.Test;
@@ -49,6 +54,10 @@ class PtySessionHostTest {
 
   private PtySessionHost host;
   private final ConcurrentLinkedQueue<String> events = new ConcurrentLinkedQueue<>();
+
+  /** Each minute of typing the host told, as {@code session:person}, in the order told. */
+  private final LinkedBlockingQueue<String> typed = new LinkedBlockingQueue<>();
+
   private volatile CountDownLatch startGate;
   private final CountDownLatch startGated = new CountDownLatch(1);
 
@@ -180,6 +189,11 @@ class PtySessionHostTest {
               @Override
               public void sessionEnded(PtySession.Origin origin, String reason) {
                 events.add("ended:" + origin.name());
+              }
+
+              @Override
+              public void typed(PtySession.Origin origin, String person) {
+                typed.add(origin.name() + ":" + person);
               }
             },
             "0.0.0-test",
@@ -455,6 +469,65 @@ class PtySessionHostTest {
         awaitText(channel, "room=design-talk");
       }
     }
+  }
+
+  private void attachAsWriter(SocketChannel channel, String session) throws IOException {
+    PtyWire.write(channel, new PtyMessage.Attach(session, true));
+    assertInstanceOf(PtyMessage.Ok.class, PtyWire.read(channel));
+    assertAttachPrologue(channel);
+  }
+
+  private void create(SocketChannel channel, String session, String room) throws IOException {
+    PtyWire.write(
+        channel,
+        new PtyMessage.Create(
+            session, List.of("sh", "-c", "while read a; do :; done"), "/tmp", "", room, 80, 24));
+    assertInstanceOf(PtyMessage.Ok.class, PtyWire.read(channel));
+  }
+
+  private static void type(SocketChannel channel, long seq) throws IOException {
+    PtyWire.write(channel, new PtyMessage.Input(seq, "x\n".getBytes(StandardCharsets.UTF_8)));
+  }
+
+  /**
+   * Scenario 10 at its source (M5, M7): the writer of a room-bound session is told typing once in
+   * each minute, by name alone; a session bound to no room and the container's credential are never
+   * told, nor is anything typed.
+   */
+  @Test
+  void aWritersInputInARoomBoundSessionIsToldOnceAMinuteForAPersonAlone() throws Exception {
+    var clock = DateTimeUtils.clock;
+    try {
+      DateTimeUtils.clock = Clock.fixed(Instant.parse("2026-11-13T09:00:10Z"), ZoneOffset.UTC);
+      try (var ignored = startHost()) {
+        try (var free = connect();
+            var person = connect()) {
+          create(free, "free", "");
+          attachAsWriter(free, "free");
+          type(free, 1);
+          create(person, "pinned", "design-talk");
+          attachAsWriter(person, "pinned");
+          type(person, 1);
+          type(person, 2);
+          type(person, 3);
+          assertEquals("pinned:uday", typed.poll(10, TimeUnit.SECONDS));
+
+          DateTimeUtils.clock = Clock.fixed(Instant.parse("2026-11-13T09:01:00Z"), ZoneOffset.UTC);
+          type(person, 4);
+          assertEquals("pinned:uday", typed.poll(10, TimeUnit.SECONDS));
+          type(person, 5);
+          PtyWire.write(person, new PtyMessage.ListSessions("", PtyMessage.PAGE_LIMIT));
+          awaitSessions(person);
+        }
+      }
+      assertEquals(List.of(), List.copyOf(typed), "once a minute, and never for anyone else");
+    } finally {
+      DateTimeUtils.clock = clock;
+    }
+  }
+
+  private static void awaitSessions(SocketChannel channel) throws IOException {
+    while (!(PtyWire.read(channel) instanceof PtyMessage.Sessions)) {}
   }
 
   @Test

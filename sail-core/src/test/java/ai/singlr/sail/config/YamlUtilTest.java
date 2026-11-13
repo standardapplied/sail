@@ -8,6 +8,7 @@ package ai.singlr.sail.config;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.IOException;
@@ -30,6 +31,22 @@ class YamlUtilTest {
         IllegalArgumentException.class, () -> YamlUtil.parseJsonLine(line, line.length() - 1));
     org.junit.jupiter.api.Assertions.assertThrows(
         IllegalArgumentException.class, () -> YamlUtil.parseJsonLine("{}", 0));
+  }
+
+  /**
+   * RFC 8259 takes every character from U+0020 up raw in a string, and YAML refuses the C1
+   * controls, U+FFFE and U+FFFF anywhere in a document: a JSON line holding them raw is read as
+   * JSON, at the bound its own length sets. A raw C0 control, which JSON refuses too, still is.
+   */
+  @Test
+  void aJsonLineHoldingACharacterYamlRefusesRawInAStringIsReadAsJson() {
+    var text = "del\u007f c1\u0080\u009b\u009f nel\u0085 ￾￿ 😀 ok";
+    var line = "{\"value\":\"" + text + "\"}";
+
+    assertEquals(text, YamlUtil.parseJsonLine(line, line.length()).get("value"));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> YamlUtil.parseJsonLine("{\"value\":\"bell\u0007\"}", 100));
   }
 
   @Test

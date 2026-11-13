@@ -18,6 +18,7 @@ import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.store.FdeBoxes;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SpecStore;
+import ai.singlr.sail.store.TestRuns;
 import java.io.IOException;
 import java.util.List;
 import org.junit.jupiter.api.AfterEach;
@@ -80,7 +81,7 @@ class NodeIdentitySyncTest {
         () -> {
           runs.reserveDispatch(
               id, "acme", specId, handle, "build", List.of(), "claude-code", "b", "t", "/l", "u");
-          runs.complete(id, "completed", 0);
+          TestRuns.complete(runs, id, "completed", 0);
         });
     return id;
   }

@@ -37,6 +37,7 @@ import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
+import ai.singlr.sail.store.TestRuns;
 import ai.singlr.sail.sync.SyncDatabase;
 import ai.singlr.sail.sync.SyncSession;
 import ai.singlr.sail.sync.SyncTransitionSink;
@@ -669,7 +670,7 @@ class MainRebuiltRoundTest {
     round();
     write("n1");
     var ended = reserveRun(nodeDb, "n1", "nia");
-    Acting.system(() -> new RunStore(nodeDb).complete(ended, "completed", 0));
+    Acting.system(() -> TestRuns.complete(new RunStore(nodeDb), ended, "completed", 0));
     round();
     var copy = copyOf(serving, "copy.db", serving.id());
     Acting.as("ada", () -> new SpecStore(serving.db()).create(spec("g1")));
@@ -693,7 +694,7 @@ class MainRebuiltRoundTest {
                 + "Each stays in its history: sudo sail spec history <id>."),
         notices);
     assertEquals(List.of(ended, run), runIds(nodeDb), "work under way here is left alone");
-    Acting.system(() -> new RunStore(nodeDb).complete(run, "completed", 0));
+    Acting.system(() -> TestRuns.complete(new RunStore(nodeDb), run, "completed", 0));
 
     var next = round();
 

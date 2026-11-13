@@ -25,6 +25,7 @@ import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
+import ai.singlr.sail.store.TestRuns;
 import ai.singlr.sail.store.TokenStore;
 import com.sun.net.httpserver.HttpServer;
 import java.net.InetSocketAddress;
@@ -187,7 +188,7 @@ class SpecMeasuresRouteTest {
               "/var/log/" + run,
               "sail-agent-" + run,
               null);
-          runs.complete(run, "completed", 0);
+          TestRuns.complete(runs, run, "completed", 0);
         });
   }
 
@@ -195,7 +196,7 @@ class SpecMeasuresRouteTest {
     Acting.system(
         () -> {
           ReviewRuns.reserve(runs, run, review, "alpha", spec, NODE, lane, "codex", List.of());
-          runs.complete(run, "completed", 0);
+          TestRuns.complete(runs, run, "completed", 0);
         });
   }
 
@@ -333,10 +334,12 @@ class SpecMeasuresRouteTest {
     var measures = read(ada, "/v1/specs/auth/measures");
 
     assertEquals(rework(count(3), count(0), count(2), count(1), count(1)), measures.get("rework"));
+    var cost = (Map<?, ?>) measures.get("cost");
     assertEquals(
-        Map.of("unknown", "not_recorded", "runs_without_usage", count(6)), measures.get("cost"));
-    assertEquals(
-        Map.of("sail_id", BOX), ((Map<?, ?>) measures.get("times")).get("box"), "its Sail id");
+        List.of(count(6), count(6), count(6)),
+        List.of(cost.get("runs"), cost.get("runs_without_usage"), cost.get("runs_without_cost")),
+        "runs finished without a usage read count apart, never as zeros");
+    assertEquals(Map.of("sail_id", BOX), measures.get("box"), "its Sail id");
     var measured = get(ada, "/v1/specs/auth?measures=true");
     assertEquals(measures, YamlUtil.parseMap(measured.body()).get("measures"), "one computation");
     assertEquals(
@@ -376,21 +379,19 @@ class SpecMeasuresRouteTest {
               "/var/log/w1",
               "sail-agent-w1",
               null);
-          runs.complete("w1", "completed", 0);
+          TestRuns.complete(runs, "w1", "completed", 0);
         });
 
     assertEquals(
-        Map.of("unknown", "not_recorded", "runs_without_usage", count(1)),
-        read(ada, "/v1/specs/auth/measures").get("cost"));
+        count(1), ((Map<?, ?>) read(ada, "/v1/specs/auth/measures").get("cost")).get("runs"));
   }
 
   /**
-   * Scenario 4, through the stores' own compaction: the birth is kept as the synced base, but the
-   * revision that made the spec ready was dropped, so the first revision held in {@code pending}, a
-   * later edit, is not taken for it.
+   * The spec's own times outlive its history: compaction drops the revision that made it ready, and
+   * its ready time is still the move's.
    */
   @Test
-  void aSpecWhosePendingRevisionWasCompactedAwaySaysItsReadyTimeIsUnknown() throws Exception {
+  void aSpecWhosePendingRevisionWasCompactedAwayKeepsItsReadyTime() throws Exception {
     spec("auth", "alpha");
     var birth = specs.revOf("auth");
     at(10);
@@ -400,47 +401,11 @@ class SpecMeasuresRouteTest {
       var body = "body " + edit;
       Acting.system(() -> specs.setContent("auth", body, ""));
     }
-    var before = (Map<?, ?>) read(ada, "/v1/specs/auth/measures").get("times");
     Acting.system(() -> new ChangeLog(db).compact("spec", List.of("auth"), id -> birth));
 
     var times = (Map<?, ?>) read(ada, "/v1/specs/auth/measures").get("times");
 
-    assertEquals(
-        Map.of("at", "2026-11-01T09:10:00.000Z", "source", "change_log"), before.get("ready"));
-    assertEquals(1, specs.compacted(List.of("auth")).size(), "the move to pending, and only it");
-    assertEquals(Map.of("unknown", "history_incomplete"), times.get("ready"));
-  }
-
-  /**
-   * A spec born in alpha, moved into bravo, made ready there and moved back: its revisions filed
-   * under bravo are a gap to a reader of alpha alone, so the ready time it holds after them is not
-   * taken for the first, and ada, who reads both, is told it.
-   */
-  @Test
-  void aRevisionFiledWhereTheReaderDoesNotReadIsAGapNeverSkippedOver() throws Exception {
-    spec("moved", "alpha");
-    at(10);
-    project("moved", "bravo");
-    at(20);
-    move("moved", SpecStatus.DRAFT, SpecStatus.PENDING);
-    at(30);
-    project("moved", "alpha");
-    Acting.system(() -> new Erasure(db).adopt(Erasure.RUN, "elsewhere", "1-erased", "bravo"));
-
-    assertEquals(
-        Map.of("unknown", "history_incomplete"),
-        ((Map<?, ?>) read(sam, "/v1/specs/moved/measures").get("times")).get("ready"));
-    assertEquals(
-        count(0),
-        ((Map<?, ?>) read(sam, "/v1/specs/moved/measures").get("rework")).get("build_runs"),
-        "an erasure in a project sam does not read says nothing to him");
-    assertEquals(
-        Map.of("count", 0, "at_least", true),
-        ((Map<?, ?>) read(ada, "/v1/specs/moved/measures").get("rework")).get("build_runs"),
-        "a project the spec was filed under, which ada reads");
-    assertEquals(
-        Map.of("at", "2026-11-01T09:20:00.000Z", "source", "change_log"),
-        ((Map<?, ?>) read(ada, "/v1/specs/moved/measures").get("times")).get("ready"));
+    assertEquals(Map.of("at", "2026-11-01T09:10:00.000Z", "source", "spec"), times.get("ready"));
   }
 
   private void project(String id, String project) {
@@ -517,69 +482,33 @@ class SpecMeasuresRouteTest {
   }
 
   /**
-   * A run retention erased after the spec arrived, of its own project, may have been one of its
-   * own, so its run counts are a lower bound; one erased before it arrived could not have been, and
-   * neither could one of another project, nor the runs of a spec pruned there.
+   * M14 through the production erasure: retention erasing a spec's finished runs, and pruning
+   * another spec with its runs, leaves every count and every token of the spec as it was.
    */
   @Test
-  void aRunOfItsProjectErasedSinceTheSpecArrivedMakesItsRunCountsALowerBound() throws Exception {
-    spec("old", "alpha");
-    build("o1", "old", "alpha");
-    erase("o1");
+  void aRunErasedByRetentionChangesNoMeasureOfItsSpec() throws Exception {
     spec("erased", "alpha");
     move("erased", SpecStatus.DRAFT, SpecStatus.PENDING);
     build("e1", "erased", "alpha");
     build("e2", "erased", "alpha");
-    spec("bystander", "bravo");
-    build("by1", "bystander", "bravo");
-    spec("gone", "bravo");
-    build("g1", "gone", "bravo");
+    spec("gone", "alpha");
+    build("g1", "gone", "alpha");
     move("gone", SpecStatus.DRAFT, SpecStatus.ARCHIVED);
-    var before = (Map<?, ?>) read(ada, "/v1/specs/erased/measures").get("rework");
+    var before = read(ada, "/v1/specs/erased/measures");
+
+    erase("e1");
+    erase("e2");
     Acting.system(
         () ->
             new Erasure(db)
                 .erase(
                     new Erasure(db).closure(List.of(new Erasure.Target(Erasure.SPEC, "gone"))),
                     SpecPruner.RETENTION));
-    var afterAPrune = (Map<?, ?>) read(ada, "/v1/specs/erased/measures").get("rework");
-
-    erase("e1");
 
     var after = read(ada, "/v1/specs/erased/measures");
-    assertEquals(count(2), before.get("build_runs"), "erased before the spec arrived");
-    assertEquals(count(2), afterAPrune.get("build_runs"), "a pruned spec of another project");
-    assertEquals(
-        Map.of("count", 1, "at_least", true), ((Map<?, ?>) after.get("rework")).get("build_runs"));
-    assertEquals(
-        Map.of("count", 1, "at_least", true),
-        ((Map<?, ?>) after.get("cost")).get("runs_without_usage"));
-    assertEquals(
-        Map.of("count", 1, "at_least", true),
-        ((Map<?, ?>) read(ada, "/v1/specs/bystander/measures").get("rework")).get("build_runs"),
-        "the pruned spec's own project: its run, erased with it, names no spec");
-  }
-
-  /**
-   * Minor 3 of review 2: a node records main's erasure of a run, held or not, as main's row heard
-   * by sync, filed under the run's project, so it bounds a spec's run counts as main's own does.
-   */
-  @Test
-  void anErasureHeardFromMainBoundsTheRunCountsOfASpecOfItsProjectAsMainsOwnDoes()
-      throws Exception {
-    spec("here", "alpha");
-    build("h1", "here", "alpha");
-    spec("there", "bravo");
-    build("t1", "there", "bravo");
-
-    Acting.system(() -> new Erasure(db).adopt(Erasure.RUN, "never-held", "1-erased", "alpha"));
-
-    assertEquals(
-        Map.of("count", 1, "at_least", true),
-        ((Map<?, ?>) read(ada, "/v1/specs/here/measures").get("rework")).get("build_runs"));
-    assertEquals(
-        count(1),
-        ((Map<?, ?>) read(ada, "/v1/specs/there/measures").get("rework")).get("build_runs"));
+    assertEquals(List.of(), runs.listForSpec("erased"), "retention took every run of it");
+    assertEquals(before, after);
+    assertEquals(count(2), ((Map<?, ?>) after.get("rework")).get("build_runs"));
   }
 
   private void erase(String run) {

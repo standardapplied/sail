@@ -163,7 +163,8 @@ public final class BuildDispatch {
           ErrorCode.BAD_REQUEST,
           "Project '" + project + "' names no agent; set agent.type or the spec's agent.");
     }
-    LaunchAdmission.resolveAgent(agentType);
+    LaunchAdmission.requireEffort(
+        LaunchAdmission.resolveAgent(agentType), taskSpec.reasoningEffort());
     var built =
         WorkPrompt.build(
             taskSpec, specBody.isBlank() ? nextSpec.title() : specBody, room, List.of());
@@ -293,7 +294,7 @@ public final class BuildDispatch {
     var spec = row.toSpec();
     var targetRepos = DispatchRepos.resolve(loaded.config(), spec, List.of());
     var agentType = spec.agent() != null ? spec.agent() : loaded.config().agent().type();
-    LaunchAdmission.resolveAgent(agentType);
+    LaunchAdmission.requireEffort(LaunchAdmission.resolveAgent(agentType), spec.reasoningEffort());
     var body = specStore.getContent(specId).map(SpecStore.SpecContent::body).orElse("");
     var built =
         WorkPrompt.build(spec, body.isBlank() ? spec.title() : body, room(specId), List.of());

@@ -488,6 +488,8 @@ public final class LiveMembers implements RoomWakeReactor.Live, AutoCloseable {
         reservation.releaseIfAbsent(runId, seat.project(), unit);
         return;
       }
+      runStore.recordLaunch(
+          runId, member.model(), null, resumed.map(RunStore.RunRow::sessionId).orElse(null));
       handle =
           processes.start(
               seat.project(),
@@ -702,11 +704,13 @@ public final class LiveMembers implements RoomWakeReactor.Live, AutoCloseable {
 
   /**
    * The one end of a live member's run: {@code running} to {@code status} as a compare-and-set, and
-   * the stop its watcher would have published, for whoever wins it. Finishing the row is what
-   * revokes its credential and frees what it reserved.
+   * the stop its watcher would have published, for whoever wins it. The usage its turns recorded
+   * stays as it is; a member that answered no turn reported none, decided in the one write that
+   * finishes it ({@link RunStore#finishAsTurnsRecorded}). Finishing the row is what revokes its
+   * credential and frees what it reserved.
    */
   private void finish(RunStore.RunRow run, String status, Integer exitCode, String reason) {
-    if (runStore.transition(run.id(), "running", status, exitCode)) {
+    if (runStore.finishAsTurnsRecorded(run.id(), status, exitCode)) {
       tellStopped(run, exitCode, reason);
     }
   }
@@ -925,6 +929,7 @@ public final class LiveMembers implements RoomWakeReactor.Live, AutoCloseable {
         case LiveStream.Step.Working working -> open();
         case LiveStream.Step.Result result -> {
           open();
+          spent(line);
           answered(result);
         }
         case LiveStream.Step.Other other -> {}
@@ -1024,6 +1029,17 @@ public final class LiveMembers implements RoomWakeReactor.Live, AutoCloseable {
       data.put("tool", tool);
       data.put("status", "finished");
       tell(Event.WellKnownTypes.AGENT_TOOL_CALL, data);
+    }
+
+    /**
+     * What the run has spent once a turn ends: its harness's running total on the turn's result
+     * line, set on the run as it runs, so its finish records the last of them, once (M1).
+     */
+    private void spent(String line) {
+      var usage = Harnesses.of(run.agent()).usage(line);
+      if (usage != null && usage.reported()) {
+        runStore.recordUsage(runId, usage);
+      }
     }
 
     /** The turn's result: its text becomes the member's message, and the lane's guard looks. */

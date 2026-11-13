@@ -17,6 +17,7 @@ import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.Lane;
 import ai.singlr.sail.config.RunStatus;
 import ai.singlr.sail.config.YamlUtil;
+import ai.singlr.sail.harness.RunUsage;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.PrincipalHandle;
 import java.time.Duration;
@@ -91,6 +92,12 @@ public final class RunStore implements ConflictResolver, SyncedStore {
    * <p>{@code stopSource} is who ended the run when it did not end on its own: {@link
    * #STOPPED_BY_OPERATOR} from the moment an operator's stop claims it ({@link #claimStop}), kept
    * once that stop is finalized. Null on a run that ended itself or that the watcher ended.
+   *
+   * <p>{@code model} is the model the run was launched on, the harness default when null, and the
+   * model its harness reported once it finished; {@code effort} is the reasoning effort passed to
+   * its harness. {@code usage} is what its harness reported it cost, recorded as it finished (M1):
+   * null while it runs and for a finished run whose report could not be read, {@link RunUsage#NONE}
+   * for one whose harness reported nothing. All three are its executing box's facts (M2).
    */
   public record RunRow(
       String id,
@@ -119,7 +126,10 @@ public final class RunStore implements ConflictResolver, SyncedStore {
       Instant lastActivityAt,
       String roomId,
       String reviewId,
-      String stopSource) {
+      String stopSource,
+      String model,
+      String effort,
+      RunUsage usage) {
 
     /** The conversation this run serves — its spec's room, or the room itself when spec-less. */
     public String conversationId() {
@@ -193,6 +203,9 @@ public final class RunStore implements ConflictResolver, SyncedStore {
           sessionId,
           sessionSource,
           transcriptPath,
+          null,
+          null,
+          null,
           null,
           null,
           null,
@@ -335,7 +348,8 @@ public final class RunStore implements ConflictResolver, SyncedStore {
       "id, project, spec_id, node, role, agent, branch, task, pid, watcher_pid, status,"
           + " exit_code, log_path, unit, started_at, completed_at, repos, pid_ticks,"
           + " principal, owner, session_id, session_source, transcript_path, last_activity_at,"
-          + " room_id, review_id, stop_source";
+          + " room_id, review_id, stop_source, model, effort, tokens_in, tokens_out,"
+          + " tokens_cache_read, tokens_cache_write, cost_usd, usage_source";
 
   /**
    * Records a new run in the {@code running} state, journaling a baseline revision so it
@@ -1314,14 +1328,6 @@ public final class RunStore implements ConflictResolver, SyncedStore {
         YamlUtil.dumpJson(List.copyOf(conversationIds)));
   }
 
-  /**
-   * The seq of the latest erasure of a run this box recorded from one of {@code origins}, by the
-   * project the run was filed under; a null key for runs filed under none.
-   */
-  public Map<String, Long> lastErasures(Collection<String> origins) {
-    return changeLog.lastErasures(ENTITY, origins);
-  }
-
   public List<RunRow> listForSpec(String specId) {
     return db.query(
         "SELECT " + COLUMNS + " FROM runs WHERE spec_id = ? ORDER BY id DESC",
@@ -1397,38 +1403,262 @@ public final class RunStore implements ConflictResolver, SyncedStore {
   }
 
   /**
-   * As {@link #complete(String, String, Integer)}, also running {@code alongside} inside the same
-   * immediate transaction — the seam for a caller that must drive two aggregates terminal as one
-   * intent (a stop cancelling a spec while releasing its run). Any failure rolls back both writes,
-   * so a partial terminal state is never exposed.
+   * Finishes run {@code id}: {@code expected → status}, a terminal status, as one compare-and-set
+   * that stamps {@code exitCode} (when non-null) and records {@code usage}, what its harness
+   * reported, in the same UPDATE (M1). The report is its harness session's running total, so the
+   * run records its own share of it ({@link #attributed}); the model it names replaces the one
+   * asked. A null {@code usage} leaves what the row holds: nothing, for a report that could not be
+   * read, which {@link #recordRead} records later. Returns whether the run finished here.
    */
-  public void complete(String id, String status, Integer exitCode, Runnable alongside) {
+  public boolean finish(
+      String id, String expected, String status, Integer exitCode, RunUsage usage) {
+    if (!RunStatus.isTerminal(status)) {
+      throw new IllegalArgumentException(
+          "A run finishes in a terminal status, not " + status + ".");
+    }
+    return transition(id, expected, status, exitCode, usage, () -> {}, "");
+  }
+
+  /**
+   * Finishes a live member's run {@code running → status} keeping what its turns recorded ({@link
+   * #recordUsage}), or none when no turn reported anything: decided in the very UPDATE, so a turn
+   * landing as it ends is never overwritten. Returns whether the run finished here.
+   */
+  public boolean finishAsTurnsRecorded(String id, String status, Integer exitCode) {
+    if (!RunStatus.isTerminal(status)) {
+      throw new IllegalArgumentException(
+          "A run finishes in a terminal status, not " + status + ".");
+    }
+    return db.transaction(
+        () -> {
+          db.execute(
+              "UPDATE runs SET status = ?, completed_at = ?, exit_code = COALESCE(?, exit_code),"
+                  + " usage_source = COALESCE(usage_source, 'none')"
+                  + " WHERE id = ? AND status = 'running'",
+              status,
+              DateTimeUtils.now(),
+              exitCode != null ? exitCode.longValue() : null,
+              id);
+          if (db.changes() == 0) {
+            return false;
+          }
+          revokeCredential(id);
+          recordRevision(id, ChangeLog.Entry.LOCAL, false);
+          return true;
+        });
+  }
+
+  /**
+   * Records {@code reported}, a live run's running total after a turn, as its share of its
+   * session's ({@link #attributed}). Only while it runs, and with no revision: the finish that ends
+   * it journals the row whole.
+   */
+  public void recordUsage(String id, RunUsage reported) {
     db.transaction(
         () -> {
-          alongside.run();
-          complete(id, status, exitCode);
+          var run = findById(id).filter(found -> "running".equals(found.status()));
+          if (run.isEmpty()) {
+            return null;
+          }
+          var attributed = attributed(run.get(), reported);
+          db.execute(
+              "UPDATE runs SET " + USAGE_SET + " WHERE id = ? AND status = 'running'",
+              usageParameters(attributed.own(), id));
+          keep(run.get(), attributed.session());
           return null;
         });
   }
 
   /**
-   * Status transition that commits only if the run still holds {@code expected}. Returns whether
-   * the transition happened; a false return wrote nothing. A terminal target status stamps {@code
-   * completed_at}; a non-terminal one clears it.
+   * Records {@code usage}, read after run {@code id} finished with its report unread, as {@link
+   * #finish} would have, journaling a revision so main hears it. Only while the row still holds no
+   * usage; returns whether it was recorded.
    */
-  public boolean transition(String id, String expected, String status) {
-    return transition(id, expected, status, null, () -> {});
+  public boolean recordRead(String id, RunUsage usage) {
+    Objects.requireNonNull(usage, "usage");
+    return db.transaction(
+        () -> {
+          var run =
+              findById(id)
+                  .filter(found -> RunStatus.isTerminal(found.status()) && found.usage() == null);
+          if (run.isEmpty()) {
+            return false;
+          }
+          var attributed = attributed(run.get(), usage);
+          db.execute(
+              "UPDATE runs SET " + USAGE_SET + " WHERE id = ? AND usage_source IS NULL",
+              usageParameters(attributed.own(), id));
+          keep(run.get(), attributed.session());
+          recordRevision(id, ChangeLog.Entry.LOCAL, false);
+          return true;
+        });
+  }
+
+  /** The finished runs this box executed whose report was not read, oldest first. */
+  public List<RunRow> unread(String localHandle) {
+    return db.query(
+        "SELECT "
+            + COLUMNS
+            + " FROM runs WHERE status IN ('stopped', 'completed', 'failed')"
+            + " AND usage_source IS NULL AND COALESCE(node, '') = ? ORDER BY id",
+        this::mapRow,
+        ownerKey(localHandle));
   }
 
   /**
-   * An operator's stop claim: {@code running → status} as {@link #transition(String, String,
-   * String)} commits it, marking in the same revision that an operator ended the run and running
-   * {@code alongside} inside the same immediate transaction once the claim has won — the seam a
-   * stop uses to move its spec terminal in the very same commit. A lost claim wrote nothing and
-   * never ran {@code alongside}, and an {@code alongside} that throws rolls the claim back. {@code
-   * status} is {@code stopping} while the halt is under way, or {@code stopped} for a run with no
-   * process left to halt. The mark outlives the claim's finalization, so a stop of the same run
-   * that arrives afterwards still reads as the operator's.
+   * Stamps the model a run was launched on (null for the harness default), the reasoning effort
+   * passed to its harness and, for a run resuming a harness session, that session: a resumed run's
+   * report is the session's running total, so the session must be known before it reports. Process
+   * bookkeeping like {@link #updateProcess}: no revision, since the finish journals the row whole.
+   */
+  public void recordLaunch(String id, String model, String effort, String resumedSession) {
+    db.execute(
+        "UPDATE runs SET model = ?, effort = ?, session_id = COALESCE(?, session_id)"
+            + " WHERE id = ? AND status = 'running'",
+        model,
+        effort,
+        resumedSession,
+        id);
+  }
+
+  /**
+   * {@code report} attributed to {@code run} within its harness session on this box ({@link
+   * RunUsage#attributedIn}); a run that names no session is one of its own.
+   */
+  private RunUsage.Attributed attributed(RunRow run, RunUsage report) {
+    var session =
+        Strings.isBlank(run.sessionId())
+            ? RunUsage.Session.NEW
+            : db.queryOne(
+                    "SELECT " + SESSION_FIGURES + " FROM session_usage WHERE session_id = ?",
+                    row ->
+                        new RunUsage.Session(figures(row, 0), figures(row, SESSION_FIGURE_COUNT)),
+                    run.sessionId())
+                .orElse(RunUsage.Session.NEW);
+    return report.attributedIn(session, run.usage());
+  }
+
+  /** Keeps {@code session} as {@code run}'s session's usage here, when it names one. */
+  private void keep(RunRow run, RunUsage.Session session) {
+    if (Strings.isBlank(run.sessionId())) {
+      return;
+    }
+    var highest = session.highest();
+    var given = session.given();
+    db.execute(
+        "INSERT INTO session_usage (session_id, conversation, "
+            + SESSION_FIGURES
+            + ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(session_id) DO UPDATE SET"
+            + " highest_tokens_in = excluded.highest_tokens_in,"
+            + " highest_tokens_out = excluded.highest_tokens_out,"
+            + " highest_tokens_cache_read = excluded.highest_tokens_cache_read,"
+            + " highest_tokens_cache_write = excluded.highest_tokens_cache_write,"
+            + " highest_cost_usd = excluded.highest_cost_usd,"
+            + " given_tokens_in = excluded.given_tokens_in,"
+            + " given_tokens_out = excluded.given_tokens_out,"
+            + " given_tokens_cache_read = excluded.given_tokens_cache_read,"
+            + " given_tokens_cache_write = excluded.given_tokens_cache_write,"
+            + " given_cost_usd = excluded.given_cost_usd",
+        run.sessionId(),
+        run.conversationId(),
+        highest.tokensIn(),
+        highest.tokensOut(),
+        highest.tokensCacheRead(),
+        highest.tokensCacheWrite(),
+        highest.costUsd(),
+        given.tokensIn(),
+        given.tokensOut(),
+        given.tokensCacheRead(),
+        given.tokensCacheWrite(),
+        given.costUsd());
+  }
+
+  private static final int SESSION_FIGURE_COUNT = 5;
+
+  private static final String SESSION_FIGURES =
+      "highest_tokens_in, highest_tokens_out, highest_tokens_cache_read,"
+          + " highest_tokens_cache_write, highest_cost_usd, given_tokens_in, given_tokens_out,"
+          + " given_tokens_cache_read, given_tokens_cache_write, given_cost_usd";
+
+  private static RunUsage figures(Sqlite.Row row, int from) {
+    return new RunUsage(
+        null,
+        row.isNull(from) ? null : row.integer(from),
+        row.isNull(from + 1) ? null : row.integer(from + 1),
+        row.isNull(from + 2) ? null : row.integer(from + 2),
+        row.isNull(from + 3) ? null : row.integer(from + 3),
+        row.real(from + 4),
+        RunUsage.Source.RESULT);
+  }
+
+  /**
+   * Forgets what this box kept of {@code conversation}'s runs, as it is erased: the usage of every
+   * harness session of it, and the runs of it main erased uncounted.
+   */
+  void forgetConversation(String conversation) {
+    db.execute("DELETE FROM session_usage WHERE conversation = ?", conversation);
+    db.execute("DELETE FROM uncounted_runs WHERE spec_id = ?", conversation);
+  }
+
+  /**
+   * A run this box did not count before main erased it, and the conversation it served if this box
+   * held its row: its spec's kept sums may lack it.
+   */
+  public record Uncounted(String runId, String conversation) {}
+
+  /**
+   * Whether run {@code id}, about to be erased by main's word, is one this box never counted: it
+   * holds no finished row of it.
+   */
+  Optional<Uncounted> uncounted(String id) {
+    var held = findById(id);
+    if (held.isPresent() && RunStatus.isTerminal(held.get().status())) {
+      return Optional.empty();
+    }
+    return Optional.of(new Uncounted(id, held.map(RunRow::conversationId).orElse(null)));
+  }
+
+  void markUncounted(Uncounted run) {
+    db.execute(
+        "INSERT OR IGNORE INTO uncounted_runs (run_id, spec_id) VALUES (?, ?)",
+        run.runId(),
+        run.conversation());
+  }
+
+  void forgetUncounted(String id) {
+    db.execute("DELETE FROM uncounted_runs WHERE run_id = ?", id);
+  }
+
+  private static final String USAGE_SET =
+      "model = COALESCE(?, model), tokens_in = ?, tokens_out = ?, tokens_cache_read = ?,"
+          + " tokens_cache_write = ?, cost_usd = ?, usage_source = ?";
+
+  private static Object[] usageParameters(RunUsage usage, Object... after) {
+    var parameters =
+        new ArrayList<Object>(
+            Arrays.asList(
+                usage.model(),
+                usage.tokensIn(),
+                usage.tokensOut(),
+                usage.tokensCacheRead(),
+                usage.tokensCacheWrite(),
+                usage.costUsd(),
+                usage.source().wire()));
+    parameters.addAll(Arrays.asList(after));
+    return parameters.toArray();
+  }
+
+  /**
+   * An operator's stop claim: {@code running → status}, committed only while the run still runs and
+   * stamping {@code completed_at} for a terminal {@code status}, marking in the same revision that
+   * an operator ended the run and running {@code alongside} inside the same immediate transaction
+   * once the claim has won — the seam a stop uses to move its spec terminal in the very same
+   * commit. A lost claim wrote nothing and never ran {@code alongside}, and an {@code alongside}
+   * that throws rolls the claim back. {@code status} is {@code stopping} while the halt is under
+   * way, or {@code stopped} for a run with no process left to halt, whose report is left unread for
+   * {@link #recordRead}: an operator's stop never waits on a container. The mark outlives the
+   * claim's finalization, so a stop of the same run that arrives afterwards still reads as the
+   * operator's.
    */
   public boolean claimStop(String id, String status, Runnable alongside) {
     return transition(
@@ -1464,16 +1694,6 @@ public final class RunStore implements ConflictResolver, SyncedStore {
   }
 
   /**
-   * As {@link #transition(String, String, String)}, also stamping {@code exitCode} (when non-null)
-   * in the same UPDATE, so a finisher that knows the process outcome commits the terminal status
-   * and its exit code as one atomic, single-revision write — a crash or a sync push can never
-   * observe the terminal status without its exit code.
-   */
-  public boolean transition(String id, String expected, String status, Integer exitCode) {
-    return transition(id, expected, status, exitCode, () -> {});
-  }
-
-  /**
    * Ends a run that recorded no process: {@code running → status}, only while its pid is still
    * unset. A live member is prompted only once its process is stamped on its run ({@link
    * #updateProcess}), and both writes compare the same row, so at most one of them lands: whoever
@@ -1481,12 +1701,12 @@ public final class RunStore implements ConflictResolver, SyncedStore {
    * container holds.
    */
   public boolean transitionUnstarted(String id, String status) {
-    return transition(id, "running", status, null, () -> {}, " AND pid IS NULL");
+    return transition(id, "running", status, null, RunUsage.NONE, () -> {}, " AND pid IS NULL");
   }
 
   private boolean transition(
       String id, String expected, String status, Integer exitCode, Runnable alongside) {
-    return transition(id, expected, status, exitCode, alongside, "");
+    return transition(id, expected, status, exitCode, null, alongside, "");
   }
 
   private boolean transition(
@@ -1494,24 +1714,37 @@ public final class RunStore implements ConflictResolver, SyncedStore {
       String expected,
       String status,
       Integer exitCode,
+      RunUsage usage,
       Runnable alongside,
       String alsoWhere) {
     return db.transaction(
         () -> {
+          var run = usage == null ? Optional.<RunRow>empty() : findById(id);
+          var attributed = run.map(found -> attributed(found, usage));
+          var own = attributed.map(RunUsage.Attributed::own).orElse(usage);
+          var parameters =
+              new ArrayList<Object>(
+                  Arrays.asList(
+                      status,
+                      RunStatus.isTerminal(status) ? DateTimeUtils.now() : null,
+                      exitCode != null ? exitCode.longValue() : null));
+          parameters.addAll(
+              Arrays.asList(
+                  own == null ? new Object[] {id, expected} : usageParameters(own, id, expected)));
           db.execute(
               "UPDATE runs SET status = ?, completed_at = ?, exit_code = COALESCE(?, exit_code)"
+                  + (own == null ? "" : ", " + USAGE_SET)
                   + " WHERE id = ? AND status = ?"
                   + alsoWhere,
-              status,
-              RunStatus.isTerminal(status) ? DateTimeUtils.now() : null,
-              exitCode != null ? exitCode.longValue() : null,
-              id,
-              expected);
+              parameters.toArray());
           if (db.changes() == 0) {
             return false;
           }
           if (RunStatus.isTerminal(status)) {
             revokeCredential(id);
+          }
+          if (attributed.isPresent()) {
+            keep(run.get(), attributed.get().session());
           }
           alongside.run();
           recordRevision(id, ChangeLog.Entry.LOCAL, false);
@@ -1539,21 +1772,6 @@ public final class RunStore implements ConflictResolver, SyncedStore {
           }
           work.run();
           return true;
-        });
-  }
-
-  /** Marks a run finished with its final status and the agent process's exit code (nullable). */
-  public void complete(String id, String status, Integer exitCode) {
-    db.transaction(
-        () -> {
-          db.execute(
-              "UPDATE runs SET status = ?, completed_at = ?, exit_code = ? WHERE id = ?",
-              status,
-              DateTimeUtils.now(),
-              exitCode != null ? exitCode.longValue() : null,
-              id);
-          revokeCredential(id);
-          recordRevision(id, ChangeLog.Entry.LOCAL, false);
         });
   }
 
@@ -1724,8 +1942,10 @@ public final class RunStore implements ConflictResolver, SyncedStore {
         INSERT INTO runs (id, project, spec_id, node, role, agent, branch, task, pid, watcher_pid,
             status, exit_code, log_path, unit, started_at, completed_at, repos, pid_ticks,
             principal, owner, session_id, session_source, transcript_path, last_activity_at,
-            room_id, review_id, stop_source)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            room_id, review_id, stop_source, model, effort, tokens_in, tokens_out,
+            tokens_cache_read, tokens_cache_write, cost_usd, usage_source)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+            ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(id) DO UPDATE SET project = excluded.project, spec_id = excluded.spec_id,
             node = excluded.node, role = excluded.role, agent = excluded.agent,
             branch = excluded.branch, task = excluded.task, pid = excluded.pid,
@@ -1737,7 +1957,11 @@ public final class RunStore implements ConflictResolver, SyncedStore {
             session_id = excluded.session_id, session_source = excluded.session_source,
             transcript_path = excluded.transcript_path,
             last_activity_at = excluded.last_activity_at, room_id = excluded.room_id,
-            review_id = excluded.review_id, stop_source = excluded.stop_source""",
+            review_id = excluded.review_id, stop_source = excluded.stop_source,
+            model = excluded.model, effort = excluded.effort, tokens_in = excluded.tokens_in,
+            tokens_out = excluded.tokens_out, tokens_cache_read = excluded.tokens_cache_read,
+            tokens_cache_write = excluded.tokens_cache_write, cost_usd = excluded.cost_usd,
+            usage_source = excluded.usage_source""",
         row.id(),
         row.project(),
         row.specId(),
@@ -1764,7 +1988,15 @@ public final class RunStore implements ConflictResolver, SyncedStore {
         row.lastActivityAt(),
         row.roomId(),
         row.reviewId(),
-        row.stopSource());
+        row.stopSource(),
+        row.model(),
+        row.effort(),
+        row.usage() == null ? null : row.usage().tokensIn(),
+        row.usage() == null ? null : row.usage().tokensOut(),
+        row.usage() == null ? null : row.usage().tokensCacheRead(),
+        row.usage() == null ? null : row.usage().tokensCacheWrite(),
+        row.usage() == null ? null : row.usage().costUsd(),
+        row.usage() == null ? null : row.usage().source().wire());
   }
 
   private static Map<String, Object> snapshotMap(RunRow run) {
@@ -1796,7 +2028,27 @@ public final class RunStore implements ConflictResolver, SyncedStore {
     map.put("room_id", run.roomId());
     map.put("review_id", run.reviewId());
     map.put("stop_source", run.stopSource());
+    map.put("model", run.model());
+    map.put("effort", run.effort());
+    var usage = run.usage();
+    map.put("tokens_in", usage == null ? null : figure(usage.tokensIn()));
+    map.put("tokens_out", usage == null ? null : figure(usage.tokensOut()));
+    map.put("tokens_cache_read", usage == null ? null : figure(usage.tokensCacheRead()));
+    map.put("tokens_cache_write", usage == null ? null : figure(usage.tokensCacheWrite()));
+    map.put("cost_usd", usage == null ? null : usage.costUsd());
+    map.put("usage_source", usage == null ? null : usage.source().wire());
     return map;
+  }
+
+  /**
+   * A token count as a decoded snapshot carries it: the narrowest whole number that holds it, so a
+   * revision read back from the wire compares equal to the row it was taken from.
+   */
+  private static Number figure(Long count) {
+    if (count == null || count != count.intValue()) {
+      return count;
+    }
+    return count.intValue();
   }
 
   /**
@@ -1831,7 +2083,15 @@ public final class RunStore implements ConflictResolver, SyncedStore {
           "room_id",
           "review_id",
           "stop_source",
-          "principals");
+          "principals",
+          "model",
+          "effort",
+          "tokens_in",
+          "tokens_out",
+          "tokens_cache_read",
+          "tokens_cache_write",
+          "cost_usd",
+          "usage_source");
 
   /**
    * The subset of a snapshot that carries the run's meaning across boxes. The surrogate id is out
@@ -1879,7 +2139,17 @@ public final class RunStore implements ConflictResolver, SyncedStore {
         Snapshots.instant(snapshot, "last_activity_at"),
         Snapshots.text(snapshot, "room_id"),
         Snapshots.text(snapshot, "review_id"),
-        Snapshots.text(snapshot, "stop_source"));
+        Snapshots.text(snapshot, "stop_source"),
+        Snapshots.text(snapshot, "model"),
+        Snapshots.text(snapshot, "effort"),
+        usageOf(
+            Snapshots.text(snapshot, "usage_source"),
+            Snapshots.longValue(snapshot, "tokens_in"),
+            Snapshots.longValue(snapshot, "tokens_out"),
+            Snapshots.longValue(snapshot, "tokens_cache_read"),
+            Snapshots.longValue(snapshot, "tokens_cache_write"),
+            snapshot.get("cost_usd") instanceof Number usd ? usd.doubleValue() : null,
+            Snapshots.text(snapshot, "model")));
   }
 
   /** The run's store-specific half of the shared {@link RevisionJournal} sync protocol. */
@@ -1971,7 +2241,32 @@ public final class RunStore implements ConflictResolver, SyncedStore {
         row.instant(23),
         row.text(24),
         row.text(25),
-        row.text(26));
+        row.text(26),
+        row.text(27),
+        row.text(28),
+        usageOf(
+            row.text(34),
+            row.isNull(29) ? null : row.integer(29),
+            row.isNull(30) ? null : row.integer(30),
+            row.isNull(31) ? null : row.integer(31),
+            row.isNull(32) ? null : row.integer(32),
+            row.real(33),
+            row.text(27)));
+  }
+
+  /** The usage a row records, null when it names no source: not finished, or not read. */
+  private static RunUsage usageOf(
+      String source,
+      Long tokensIn,
+      Long tokensOut,
+      Long cacheRead,
+      Long cacheWrite,
+      Double costUsd,
+      String model) {
+    var named = RunUsage.Source.fromWire(source);
+    return named == null
+        ? null
+        : new RunUsage(model, tokensIn, tokensOut, cacheRead, cacheWrite, costUsd, named);
   }
 
   private record Credential(String runId, Instant expiresAt) {}

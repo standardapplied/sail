@@ -147,6 +147,14 @@ public interface Operations extends LocalLaneOperations {
   Result<SpecMeasures> specMeasures(String specId);
 
   /**
+   * A client's focus heartbeat: the caller's view of {@code conversation} is focused, with input in
+   * the last minute. Records the caller's minute in it when the caller is a person ({@link
+   * ai.singlr.sail.store.AttentionStore#attend}); a conversation the caller may not read is one
+   * that is not there (M6).
+   */
+  Result<AttentionResponse> attend(String conversation);
+
+  /**
    * The measures of the specs {@code filter} lists, done between {@code doneSince} and {@code
    * doneUntil} (dates, either blank) by this box's record, with their medians and 90th percentiles.
    */

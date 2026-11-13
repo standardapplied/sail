@@ -8,14 +8,66 @@
       "schema_version": 1,
       "specs": [
         {
+          "box": {
+            "unknown": "no_box_id"
+          },
           "cost": {
-            "runs_without_usage": {
-              "count": 1
+            "budget": {
+              "unknown": "not_set"
             },
-            "unknown": "not_recorded"
+            "over_budget": {
+              "unknown": "not_set"
+            },
+            "runs": {
+              "count": 0
+            },
+            "runs_without_cost": {
+              "count": 0
+            },
+            "runs_without_usage": {
+              "count": 0
+            },
+            "tokens": {
+              "count": 0
+            },
+            "tokens_cache_read": {
+              "count": 0
+            },
+            "tokens_cache_write": {
+              "count": 0
+            },
+            "tokens_in": {
+              "count": 0
+            },
+            "tokens_out": {
+              "count": 0
+            },
+            "usd": {
+              "usd": 0.0
+            }
           },
           "human_minutes": {
-            "unknown": "not_recorded"
+            "bound": "lower",
+            "by_channel": {
+              "focus": {
+                "count": 0
+              },
+              "post": {
+                "count": 0
+              },
+              "review_act": {
+                "count": 0
+              },
+              "terminal_input": {
+                "count": 0
+              }
+            },
+            "minutes": {
+              "count": 0
+            },
+            "people": {
+              "count": 0
+            }
           },
           "intervals": {
             "awaiting_merge": {
@@ -59,15 +111,12 @@
             "awaiting_merge": {
               "unknown": "not_reached"
             },
-            "box": {
-              "unknown": "no_box_id"
-            },
             "done": {
               "unknown": "not_reached"
             },
             "ready": {
               "at": "2026-11-11T09:00:00.656Z",
-              "source": "change_log"
+              "source": "spec"
             },
             "verified": {
               "at": "2026-11-11T09:00:00.656Z",
@@ -76,14 +125,66 @@
           }
         },
         {
+          "box": {
+            "unknown": "no_box_id"
+          },
           "cost": {
+            "budget": {
+              "unknown": "not_set"
+            },
+            "over_budget": {
+              "unknown": "not_set"
+            },
+            "runs": {
+              "count": 0
+            },
+            "runs_without_cost": {
+              "count": 0
+            },
             "runs_without_usage": {
               "count": 0
             },
-            "unknown": "not_recorded"
+            "tokens": {
+              "count": 0
+            },
+            "tokens_cache_read": {
+              "count": 0
+            },
+            "tokens_cache_write": {
+              "count": 0
+            },
+            "tokens_in": {
+              "count": 0
+            },
+            "tokens_out": {
+              "count": 0
+            },
+            "usd": {
+              "usd": 0.0
+            }
           },
           "human_minutes": {
-            "unknown": "not_recorded"
+            "bound": "lower",
+            "by_channel": {
+              "focus": {
+                "count": 0
+              },
+              "post": {
+                "count": 0
+              },
+              "review_act": {
+                "count": 1
+              },
+              "terminal_input": {
+                "count": 0
+              }
+            },
+            "minutes": {
+              "count": 1
+            },
+            "people": {
+              "count": 1
+            }
           },
           "intervals": {
             "awaiting_merge": {
@@ -128,15 +229,12 @@
             "awaiting_merge": {
               "unknown": "not_reached"
             },
-            "box": {
-              "unknown": "no_box_id"
-            },
             "done": {
               "unknown": "not_reached"
             },
             "ready": {
               "at": "2026-11-11T09:00:00.657Z",
-              "source": "change_log"
+              "source": "spec"
             },
             "verified": {
               "unknown": "not_reached"
@@ -193,6 +291,18 @@
             "count": 0
           }
         },
+        "human_minutes": {
+          "left_out_at_least": 0,
+          "left_out_errors": 0,
+          "left_out_unknown": 0,
+          "median": {
+            "count": 0
+          },
+          "n": 2,
+          "p90": {
+            "count": 1
+          }
+        },
         "no_recorded_human_code_act": {
           "bound": "upper",
           "counted": 0,
@@ -245,6 +355,30 @@
           "n": 2,
           "p90": {
             "count": 1
+          }
+        },
+        "tokens": {
+          "left_out_at_least": 0,
+          "left_out_errors": 0,
+          "left_out_unknown": 0,
+          "median": {
+            "count": 0
+          },
+          "n": 2,
+          "p90": {
+            "count": 0
+          }
+        },
+        "usd": {
+          "left_out_at_least": 0,
+          "left_out_errors": 0,
+          "left_out_unknown": 0,
+          "median": {
+            "usd": 0.0
+          },
+          "n": 2,
+          "p90": {
+            "usd": 0.0
           }
         },
         "verified_to_done": {

@@ -66,13 +66,13 @@ class HarnessGoldenTest {
     assertEquals(
         "claude --print --output-format stream-json --verbose --settings"
             + " /home/dev/.sail/claude-settings.json --dangerously-skip-permissions"
-            + " --model claude-opus-4"
+            + " --model claude-opus-4 --effort high"
             + PROMPT,
         claudeHeadless(true, "claude-opus-4", "high", null, true));
     assertEquals(
-        "claude --print --settings /home/dev/.sail/claude-settings.json" + PROMPT,
-        claudeHeadless(false, null, "high", null, false),
-        "Claude Code has no reasoning effort flag; the effort is dropped");
+        "claude --print --settings /home/dev/.sail/claude-settings.json --effort xhigh" + PROMPT,
+        claudeHeadless(false, null, "xhigh", null, false),
+        "Claude Code's --effort takes the effort the launch asks");
   }
 
   @Test
@@ -83,7 +83,7 @@ class HarnessGoldenTest {
     assertEquals(
         "claude --print --output-format stream-json --verbose --settings"
             + " /home/dev/.sail/claude-settings.json --dangerously-skip-permissions"
-            + " --model claude-opus-4 --resume sess-42"
+            + " --model claude-opus-4 --effort high --resume sess-42"
             + PROMPT,
         claudeHeadless(true, "claude-opus-4", "high", "sess-42", true));
   }
@@ -139,12 +139,12 @@ class HarnessGoldenTest {
   }
 
   @Test
-  void claudeCodeReadOnlyIgnoresFullPermissionsAndReasoningEffort() {
+  void claudeCodeReadOnlyIgnoresFullPermissionsAndPassesTheEffort() {
     assertEquals(
-        CLAUDE_ROOM + PROMPT,
+        CLAUDE_ROOM + " --effort high" + PROMPT,
         CLAUDE_CODE.readOnly(new Launch(TASK, true, null, "high", null, false)));
     assertEquals(
-        CLAUDE_ROOM_STREAMED + " --model claude-opus-4 --resume sess-42" + PROMPT,
+        CLAUDE_ROOM_STREAMED + " --model claude-opus-4 --effort high --resume sess-42" + PROMPT,
         CLAUDE_CODE.readOnly(new Launch(TASK, true, "claude-opus-4", "high", "sess-42", true)));
   }
 

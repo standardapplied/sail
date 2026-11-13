@@ -17,6 +17,7 @@ import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.Sqlite;
+import ai.singlr.sail.store.TestRuns;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
@@ -309,7 +310,7 @@ class WatcherRearmerTest {
   @Test
   void terminalSessionsAreIgnored() {
     var completed = runningSession("finished", 5678);
-    Acting.system(() -> sessionStore.complete(completed, "stopped", 0));
+    Acting.system(() -> TestRuns.complete(sessionStore, completed, "stopped", 0));
 
     var rearmed =
         rearmer((project, runId, unit) -> true, NO_UNIT, DEAD, run -> Optional.of(LAUNCHED))
