@@ -101,4 +101,15 @@ class MainTest {
             new String[] {"project", "exec", "acme", "--", "sh", "-c", "touch /tmp/x", "--help"}));
     assertFalse(Main.exempt(new String[] {"spec", "list", "--no-such-flag"}));
   }
+
+  /** What only this machine runs is never refused for whose box it is. */
+  @Test
+  void anAccountThatDoesNotOwnTheBoxStillRunsItsOwnTerminalHostAndItsVerbs() {
+    assertFalse(Main.refuses(new String[] {"_pty-host", "--local"}));
+    assertFalse(Main.refuses(new String[] {"_pty-child", "--exit", "/tmp/x", "--", "sh"}));
+    assertFalse(Main.refuses(new String[] {"_pty-selftest"}));
+    assertFalse(Main.refuses(new String[] {"--version"}));
+    assertTrue(Main.refuses(new String[] {"_pty-host"}), "the box's own host is root's");
+    assertTrue(Main.refuses(new String[] {"spec", "list"}));
+  }
 }

@@ -45,7 +45,6 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 import java.util.Set;
 import java.util.function.Predicate;
 import java.util.stream.Stream;
@@ -215,8 +214,8 @@ class AccessDoorsBaselineTest {
                             PtyChildShim.onClassPath(exit).stream(),
                             Stream.of("sh", "-c", "exec cat", "container"))
                         .toList()),
-            new PtySessionHost.Network(
-                Optional.of(new InetSocketAddress(InetAddress.getLoopbackAddress(), 0)),
+            PtySessionHost.Network.listening(
+                new InetSocketAddress(InetAddress.getLoopbackAddress(), 0),
                 System::nanoTime,
                 pty::holder))) {
       host.start();

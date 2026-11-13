@@ -8,6 +8,8 @@ package ai.singlr.sail.commands;
 import ai.singlr.sail.SailVersion;
 import ai.singlr.sail.common.Secrets;
 import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.pty.Account;
+import ai.singlr.sail.pty.Locales;
 import ai.singlr.sail.pty.Pty;
 import ai.singlr.sail.pty.PtyAdmission;
 import ai.singlr.sail.pty.PtyEvents;
@@ -19,6 +21,7 @@ import ai.singlr.sail.pty.SdNotify;
 import java.io.IOException;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
+import java.net.UnixDomainSocketAddress;
 import java.nio.channels.SocketChannel;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -28,7 +31,6 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
@@ -56,6 +58,11 @@ import picocli.CommandLine.Command;
  * sets keepalive's idle, interval and count, {@code jdk.net} options backed by native code that
  * only a native image can fail to link.
  *
+ * <p>The terminal host on a person's own machine ({@code _pty-host --local}): it starts in a
+ * temporary directory, opens a session in a folder running the account's login shell, read from the
+ * account database through the binary's own downcalls, has a line evaluated, is detached from and
+ * attached to again, finds the line in the replay, and stops.
+ *
  * <p>The CLI JSON layer: {@link CliJson} reads record components reflectively, and a record it
  * serializes that is missing from the reflection configuration dies in the native binary with an
  * unsupported-feature error (the {@code sail session ls --json} field failure). Every record a
@@ -63,7 +70,8 @@ import picocli.CommandLine.Command;
  */
 @Command(
     name = "_pty-selftest",
-    description = "Internal: verify the pty FFM layer, the TCP door and CLI JSON reflection.",
+    description =
+        "Internal: verify the pty FFM layer, the TCP door, the local host and CLI JSON reflection.",
     hidden = true)
 public final class PtySelfTestCommand implements Callable<Integer> {
 
@@ -99,6 +107,13 @@ public final class PtySelfTestCommand implements Callable<Integer> {
       System.out.println("tcp-selftest: ok");
     } catch (Throwable e) {
       System.err.println("tcp-selftest: FAILED: " + e);
+      return 1;
+    }
+    try {
+      localProbe();
+      System.out.println("local-selftest: ok");
+    } catch (Throwable e) {
+      System.err.println("local-selftest: FAILED: " + e);
       return 1;
     }
     if (!SdNotify.available()) {
@@ -239,8 +254,8 @@ public final class PtySelfTestCommand implements Callable<Integer> {
                   argv.addAll(List.of("sh", "-c", "exec cat", "selftest"));
                   return argv;
                 }),
-            new PtySessionHost.Network(
-                Optional.of(new InetSocketAddress(InetAddress.getLoopbackAddress(), 0)),
+            PtySessionHost.Network.listening(
+                new InetSocketAddress(InetAddress.getLoopbackAddress(), 0),
                 System::nanoTime,
                 hash -> {
                   if (!Secrets.hash(credential).equals(hash)) {
@@ -286,6 +301,107 @@ public final class PtySelfTestCommand implements Callable<Integer> {
           Files.deleteIfExists(path);
         }
       }
+    }
+  }
+
+  /**
+   * Starts the local host as {@code _pty-host --local} does, for this account in a temporary home,
+   * and opens a session there with no command, so the account's login shell runs; has it evaluate
+   * {@code local-$((6*7))}, which its terminal's echo of the typed line never reads as, detaches,
+   * attaches again from a new connection and finds the answer in the replay, then stops.
+   */
+  static void localProbe() throws Exception {
+    var dir = Files.createTempDirectory("sail-local");
+    var account = Account.current();
+    var access =
+        new LocalPtyAccess(
+            new Account(account.name(), dir, account.shell()), System.getenv(), Locales::installed);
+    try (var host = LocalPtyHost.start(access, PtyHostCommand::shimCommand)) {
+      var socket = host.socket();
+      try (var first = SocketChannel.open(UnixDomainSocketAddress.of(socket))) {
+        converse(
+            first,
+            () -> {
+              hello(first);
+              PtyWire.write(
+                  first, new PtyMessage.Create("probe", List.of(), dir.toString(), "", "", 80, 24));
+              expect(PtyMessage.Ok.class, PtyWire.read(first));
+              PtyWire.write(first, new PtyMessage.Attach("probe", true));
+              expect(PtyMessage.Ok.class, PtyWire.read(first));
+              PtyWire.write(
+                  first,
+                  new PtyMessage.Input(
+                      1, "echo local-$((6*7))\n".getBytes(StandardCharsets.UTF_8)));
+              outputUntil(first, "local-42");
+              PtyWire.write(first, new PtyMessage.Detach());
+              readTo(first, PtyMessage.Ok.class);
+            });
+      }
+      try (var again = SocketChannel.open(UnixDomainSocketAddress.of(socket))) {
+        converse(
+            again,
+            () -> {
+              hello(again);
+              PtyWire.write(again, new PtyMessage.Attach("probe", false));
+              expect(PtyMessage.Ok.class, PtyWire.read(again));
+              outputUntil(again, "local-42");
+            });
+      }
+      if (host.host().sessionCount() != 1) {
+        throw new IllegalStateException("the session did not outlive its client");
+      }
+    } finally {
+      try (var left = Files.walk(dir)) {
+        for (var path : left.sorted(Comparator.reverseOrder()).toList()) {
+          Files.deleteIfExists(path);
+        }
+      }
+    }
+  }
+
+  /** One step of a probe's conversation on {@code channel}, closed if it outlasts the step. */
+  private interface Step {
+    void run() throws IOException;
+  }
+
+  private static void converse(SocketChannel channel, Step step) throws IOException {
+    var deadline =
+        CompletableFuture.runAsync(
+            () -> closeQuietly(channel),
+            CompletableFuture.delayedExecutor(PROBE_STEP.toMillis(), TimeUnit.MILLISECONDS));
+    try {
+      step.run();
+    } finally {
+      deadline.cancel(false);
+    }
+  }
+
+  private static void hello(SocketChannel channel) throws IOException {
+    PtyWire.handshake(channel, channel);
+    PtyWire.write(channel, new PtyMessage.Hello(""));
+    expect(PtyMessage.Welcome.class, PtyWire.read(channel));
+  }
+
+  /** Reads {@code channel}'s output until {@code marker} has been said. */
+  private static void outputUntil(SocketChannel channel, String marker) throws IOException {
+    var said = new StringBuilder();
+    while (!said.toString().contains(marker)) {
+      switch (PtyWire.read(channel)) {
+        case PtyMessage.Output(var seq, var bytes) ->
+            said.append(new String(bytes, StandardCharsets.UTF_8));
+        case PtyMessage.SessionEnded(var reason) ->
+            throw new IllegalStateException("the session ended (" + reason + "): " + said);
+        default -> {}
+      }
+    }
+  }
+
+  /** Reads {@code channel} past whatever the session says meanwhile, to a {@code wanted} frame. */
+  private static void readTo(SocketChannel channel, Class<? extends PtyMessage> wanted)
+      throws IOException {
+    var frame = PtyWire.read(channel);
+    while (!wanted.isInstance(frame)) {
+      frame = PtyWire.read(channel);
     }
   }
 

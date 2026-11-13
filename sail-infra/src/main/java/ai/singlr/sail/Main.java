@@ -29,7 +29,7 @@ public final class Main {
     switch (RuntimeMode.detect()) {
       case RuntimeMode.Client client ->
           System.exit(new RemoteCommandRunner(client.config()).execute(args));
-      case RuntimeMode.Refused refused when !exempt(args) -> {
+      case RuntimeMode.Refused refused when refuses(args) -> {
         System.err.println(refusal(System.getProperty("user.name"), args));
         System.exit(1);
       }
@@ -41,6 +41,14 @@ public final class Main {
     Runnable announcer = CommitAnnouncer.toThisBox();
     var exitCode = ScopedValue.where(Sqlite.ANNOUNCING, announcer).call(() -> cmd.execute(args));
     System.exit(exitCode);
+  }
+
+  /**
+   * Whether an account that does not own this box is refused {@code args}: everything but help, the
+   * version, and what only this machine runs, the person's own terminal host among it.
+   */
+  static boolean refuses(String[] args) {
+    return !exempt(args) && !RemoteCommandRunner.runsOnThisMachine(args);
   }
 
   /**

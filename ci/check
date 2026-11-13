@@ -23,6 +23,9 @@ Usage:
                                 print CLASS#a+b+... : every COUNT-th of its @Test methods from INDEX
   ci/check prepared-image import|export DIR
                                 load the incus suites' prepared image from DIR, or keep it there
+  ci/check local-host BINARY    run BINARY's own terminal host as the app's agent does, in this
+                                account's home, which must hold none: it serves, a second exits 1
+                                naming it, and SIGTERM stops it leaving only its lock
 EOF
   exit 2
 }
@@ -215,6 +218,66 @@ prepared_image() {
   esac
 }
 
+LOCAL_HOST_PID=""
+LOCAL_HOST_LEFT=()
+
+stop_local_host() {
+  if [[ -n $LOCAL_HOST_PID ]]; then
+    kill -KILL "$LOCAL_HOST_PID" 2> /dev/null || true
+  fi
+  rm -rf "${LOCAL_HOST_LEFT[@]}"
+}
+
+fail_local_host() {
+  echo "ci/check: $1" >&2
+  shift
+  if [[ $# -gt 0 ]]; then
+    cat "$@" >&2
+  fi
+  exit 1
+}
+
+# The account's home is the account database's, so the check runs as this account in its real
+# home, only where no local host has been: it removes what it made, ~/.sail too when it made it.
+local_host() {
+  local sail=${1:-}
+  [[ -x $sail ]] || usage
+  local sail_dir=$HOME/.sail
+  local dir=$sail_dir/local
+  [[ ! -e $dir ]] || fail_local_host "$dir is there already; the check runs only where it is not."
+  local logs
+  logs=$(mktemp -d)
+  LOCAL_HOST_LEFT=("$dir" "$logs")
+  [[ -e $sail_dir ]] || LOCAL_HOST_LEFT+=("$sail_dir")
+  trap stop_local_host EXIT
+  "$sail" _pty-host --local 2> "$logs/first" &
+  LOCAL_HOST_PID=$!
+  local serving="pty-host: serving $(id -un) at $dir/pty.sock" i
+  for i in $(seq 1 100); do
+    grep -qxF "$serving" "$logs/first" && break
+    sleep 0.1
+  done
+  grep -qxF "$serving" "$logs/first" || fail_local_host "the host never said: $serving" "$logs/first"
+  local second=0
+  "$sail" _pty-host --local 2> "$logs/second" || second=$?
+  [[ $second == 1 ]] || fail_local_host "a second host exited $second, not 1." "$logs/second"
+  grep -qxF "A terminal host already serves $(id -un) on this machine, at $dir/pty.sock: connect to it there, or stop it before starting another." "$logs/second" \
+    || fail_local_host "a second host did not name the first." "$logs/second"
+  kill -TERM "$LOCAL_HOST_PID"
+  for i in $(seq 1 100); do
+    kill -0 "$LOCAL_HOST_PID" 2> /dev/null || break
+    sleep 0.1
+  done
+  ! kill -0 "$LOCAL_HOST_PID" 2> /dev/null || fail_local_host "SIGTERM did not stop the host within 10 s." "$logs/first"
+  local first=0
+  wait "$LOCAL_HOST_PID" || first=$?
+  LOCAL_HOST_PID=""
+  [[ $first == 143 ]] || fail_local_host "the host stopped with exit $first, not 143." "$logs/first"
+  [[ $(ls -A "$dir") == pty.lock ]] \
+    || fail_local_host "a clean stop left more than the lock: $(ls -A "$dir" | tr '\n' ' ')"
+  echo "local-host: ok"
+}
+
 changed_tests() {
   local base
   base=$(git merge-base origin/main HEAD)
@@ -256,5 +319,6 @@ case ${1:-} in
   its) shift; its "$@" ;;
   methods) shift; methods "$@" ;;
   prepared-image) shift; prepared_image "$@" ;;
+  local-host) shift; local_host "$@" ;;
   *) usage ;;
 esac

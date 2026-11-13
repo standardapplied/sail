@@ -163,6 +163,16 @@ class RemoteCommandRunnerTest {
     assertFalse(RemoteCommandRunner.isLocalCommand("dispatch"));
   }
 
+  /** Scenario 10: what only this machine can run is never sent to the server it names. */
+  @Test
+  void theLocalTerminalHostAndThePtyVerbsRunHereWithAClientConfig() {
+    assertTrue(RemoteCommandRunner.isLocalCommand("_pty-host", "--local"));
+    assertTrue(RemoteCommandRunner.isLocalCommand("_pty-child", "--exit", "/tmp/x", "--", "sh"));
+    assertTrue(RemoteCommandRunner.isLocalCommand("_pty-selftest"));
+    assertFalse(RemoteCommandRunner.isLocalCommand("_pty-host"), "the server's host is the box's");
+    assertFalse(RemoteCommandRunner.isLocalCommand("_pty-host", "--local", "extra"));
+  }
+
   @Test
   void localVersionCommandExecutesWithoutForking() {
     var runner = new RemoteCommandRunner(CONFIG);

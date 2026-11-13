@@ -30,6 +30,12 @@ class PtySelfTestCommandTest {
     assertDoesNotThrow(PtySelfTestCommand::tcpProbe);
   }
 
+  /** Scenario 14, on the JVM; the native lanes and the release run it in the binary. */
+  @Test
+  void theLocalProbeOpensAFolderSessionTypesDetachesAttachesAgainAndStops() {
+    assertDoesNotThrow(PtySelfTestCommand::localProbe);
+  }
+
   /** systemd's descriptor store, which only Linux has. */
   @Test
   @EnabledOnOs(OS.LINUX)

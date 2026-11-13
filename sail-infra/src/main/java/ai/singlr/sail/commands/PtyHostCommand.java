@@ -14,12 +14,14 @@ import ai.singlr.sail.pty.PtyChildShim;
 import ai.singlr.sail.pty.PtyEvents;
 import ai.singlr.sail.pty.PtyIdentity;
 import ai.singlr.sail.pty.PtySessionHost;
+import java.io.IOException;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CountDownLatch;
 import java.util.function.LongConsumer;
 import picocli.CommandLine.Command;
+import picocli.CommandLine.Option;
 
 /**
  * The per-container session host process: binds the pty socket, sweeps on a timer, and runs until
@@ -29,6 +31,9 @@ import picocli.CommandLine.Command;
  * <p>On {@code SIGTERM} it asks systemd what is happening to it. A restart (an upgrade) hands every
  * session to the descriptor store for the next host to adopt; a stop for good — or a run outside
  * systemd, where there is no store — ends every session loudly instead.
+ *
+ * <p>With {@code --local} it is the host of a person's own machine instead ({@link LocalPtyHost}),
+ * which has no store and no descriptor store: {@code SIGTERM} ends every session.
  */
 @Command(name = "_pty-host", description = "Internal pty session host.", hidden = true)
 public final class PtyHostCommand implements Callable<Integer> {
@@ -38,8 +43,35 @@ public final class PtyHostCommand implements Callable<Integer> {
   static final long TICK_INTERVAL_MILLIS = 1_000;
   static final String STOPPED_REASON = "pty host stopped";
 
+  @Option(
+      names = "--local",
+      description = "Serve this machine's own person, in folders, with no server.")
+  private boolean local;
+
   @Override
   public Integer call() throws Exception {
+    return untilTerminated(local ? serveThisMachine(LocalPtyAccess.here()) : serveTheBox());
+  }
+
+  /** Runs until this process is terminated, then {@code stop}s and returns. */
+  static int untilTerminated(Runnable stop) throws InterruptedException {
+    var done = new CountDownLatch(1);
+    Runtime.getRuntime()
+        .addShutdownHook(
+            new Thread(
+                () -> {
+                  try {
+                    stop.run();
+                  } finally {
+                    done.countDown();
+                  }
+                }));
+    done.await();
+    return 0;
+  }
+
+  /** The box's host, and what its {@code SIGTERM} does: a handoff on a restart, else a stop. */
+  private static Runnable serveTheBox() throws Exception {
     var network =
         ListenConfig.load()
             .terminalAddress()
@@ -55,26 +87,21 @@ public final class PtyHostCommand implements Callable<Integer> {
             new PtyHostEvents(),
             handoff,
             network);
-    var done = new CountDownLatch(1);
-    Runtime.getRuntime()
-        .addShutdownHook(
-            new Thread(
-                () -> {
-                  try {
-                    if (handoff.store().enabled()
-                        && !SystemdStop.stoppingForGood(new ShellExecutor(false))) {
-                      var handed = host.handoff();
-                      System.err.println(
-                          "pty-host: handed off " + handed.size() + " session(s) to the store");
-                    } else {
-                      host.stop(STOPPED_REASON);
-                    }
-                  } finally {
-                    done.countDown();
-                  }
-                }));
-    done.await();
-    return 0;
+    return () -> {
+      if (handoff.store().enabled() && !SystemdStop.stoppingForGood(new ShellExecutor(false))) {
+        var handed = host.handoff();
+        System.err.println("pty-host: handed off " + handed.size() + " session(s) to the store");
+      } else {
+        host.stop(STOPPED_REASON);
+      }
+    };
+  }
+
+  /** The host of {@code access}'s person on this machine, which its {@code SIGTERM} stops. */
+  static Runnable serveThisMachine(LocalPtyAccess access) throws IOException {
+    var host = LocalPtyHost.start(access, PtyHostCommand::shimCommand);
+    System.err.println("pty-host: serving " + access.account().name() + " at " + host.socket());
+    return host::close;
   }
 
   /**
