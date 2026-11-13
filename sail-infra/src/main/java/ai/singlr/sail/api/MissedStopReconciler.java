@@ -12,7 +12,9 @@ import ai.singlr.sail.engine.AgentPresence;
 import ai.singlr.sail.engine.AgentSession;
 import ai.singlr.sail.engine.AgentUnit;
 import ai.singlr.sail.engine.GuardrailTrigger;
+import ai.singlr.sail.engine.RunUsageReader;
 import ai.singlr.sail.engine.ShellExec;
+import ai.singlr.sail.harness.RunUsage;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.store.EventStore;
 import ai.singlr.sail.store.MissedStops;
@@ -104,6 +106,14 @@ public final class MissedStopReconciler implements AutoCloseable {
     default Ending ending(String project, String runId, String unit) throws Exception {
       return Ending.UNKNOWN;
     }
+
+    /**
+     * What {@code run}'s harness reported it cost, as its container still holds it ({@link
+     * RunUsageReader}); unread, by default.
+     */
+    default RunUsage usage(RunStore.RunRow run) {
+      return null;
+    }
   }
 
   /**
@@ -168,6 +178,7 @@ public final class MissedStopReconciler implements AutoCloseable {
   public static UnitProbe systemdUnitProbe(ShellExec shell) {
     var agentSession = new AgentSession(shell);
     var presence = new AgentPresence(shell);
+    var usage = new RunUsageReader(shell);
     return new UnitProbe() {
       @Override
       public boolean active(String project, String runId, String unit) throws Exception {
@@ -198,6 +209,11 @@ public final class MissedStopReconciler implements AutoCloseable {
                 .filter(GuardrailTrigger::stops)
                 .map(GuardrailTrigger::cause);
         return new Ending(exitCode.orElse(null), limit.orElse(null));
+      }
+
+      @Override
+      public RunUsage usage(RunStore.RunRow run) {
+        return usage.read(run);
       }
     };
   }
@@ -331,7 +347,7 @@ public final class MissedStopReconciler implements AutoCloseable {
             + " ("
             + why
             + ")");
-    return sessionStore.transition(run.id(), "running", "stopped", exitCode);
+    return sessionStore.finish(run.id(), "running", "stopped", exitCode, unitProbe.usage(run));
   }
 
   /**
@@ -396,7 +412,7 @@ public final class MissedStopReconciler implements AutoCloseable {
         if (unitProbe.active(run.project(), run.id(), StopOperations.runUnit(run).unitName())) {
           continue;
         }
-        if (sessionStore.transition(run.id(), "stopping", "stopped")) {
+        if (sessionStore.finish(run.id(), "stopping", "stopped", null, unitProbe.usage(run))) {
           System.err.println(
               "  [reconcile] finalized interrupted stop "
                   + run.id()

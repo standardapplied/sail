@@ -7,45 +7,42 @@ package ai.singlr.sail.api;
 
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.Lane;
+import ai.singlr.sail.config.ProjectDefinition;
+import ai.singlr.sail.config.RunStatus;
 import ai.singlr.sail.config.SpecStatus;
-import ai.singlr.sail.config.YamlUtil;
-import ai.singlr.sail.store.ChangeLog;
+import ai.singlr.sail.store.AttentionStore;
 import ai.singlr.sail.store.ReviewStore;
 import ai.singlr.sail.store.RunStore;
-import ai.singlr.sail.store.Snapshots;
+import ai.singlr.sail.store.SpecStore;
+import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.time.Duration;
 import java.time.Instant;
-import java.util.ArrayList;
-import java.util.HashSet;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Objects;
 import java.util.Set;
-import java.util.function.Function;
 import java.util.stream.Collectors;
-import java.util.stream.LongStream;
 
 /**
  * What one spec's change took, computed from the rows a box holds of it and nothing else (M8): when
  * it was made ready, verified and done, how long it sat awaiting merge, how much rework it took,
- * and whether any person's code act is recorded on it. A number an input is missing for is unknown,
- * with the reason and, for an interval, a count of what is missing; never estimated or zero. A
- * count some of whose rows may be gone is served as a lower bound; one some of whose rows the
- * reader may not see is unknown, saying no more. A run is counted once (M9); an interval whose end
- * precedes its start is an error naming both instants, never a number (M11); and no person is named
- * (M12). The route, {@code sail spec show} and {@code sail spec list --measures} all serve this one
- * computation (M10).
+ * what its runs cost, the minutes people gave it, and whether any person's code act is recorded on
+ * it. A number an input is missing for is unknown, with the reason and, for an interval, a count of
+ * what is missing; never estimated or zero. A number some of whose rows the reader may not see is
+ * unknown, saying no more; one some of whose rows may be gone is served as a lower bound. Nothing
+ * is counted twice (M9); an interval whose end precedes its start is an error naming both instants,
+ * never a number (M11); and no person is named (M12). The route, {@code sail spec show} and {@code
+ * sail spec list --measures} all serve this one computation (M10).
  *
- * <p>Ready is the spec's first move into {@code pending}; done is the move that began its latest
- * stretch in {@code done}; the dwell is the stretch in {@code awaiting_merge} that move ended. Each
- * is the author's time of the revision, read from this box's change log alone, and each is exact
- * only for a move written on this box: a revision heard by sync is one per round, so the moves
- * another box made between two rounds are collapsed into it, and what it or a search across it
- * would say is unknown. A box's own write that main took comes back heard, at the same time and in
- * the same status as the write it answers; it is that move, not another. Verified is when the
- * latest review of the current dispatch attempt completed, if it passed: a pass a re-dispatch
- * superseded verified other work, and one a later review failed verified nothing that shipped.
+ * <p>Ready, awaiting merge and done are the spec's own times, written as it made each move and the
+ * same on every box (M4). Verified is when the latest review of the current dispatch attempt
+ * completed, if it passed. Run counts and cost are the sums this box kept of the spec's finished
+ * runs, which erasing a run never lowers (M14), and its builds and fixes under way: exact, unless
+ * this box first held the change after main erased runs of its project, when they are a lower
+ * bound. Human minutes are the distinct (person, minute) pairs this box saw in the spec's
+ * conversation, which it names: a lower bound, since a person's reading and thinking leave no row.
  */
 record SpecMeasures(
     String specId,
@@ -56,18 +53,19 @@ record SpecMeasures(
     Moment done,
     Rework rework,
     CodeAct codeAct,
-    Measure runsWithoutUsage)
+    Cost cost,
+    Minutes minutes)
     implements Mappable {
 
-  static final String CHANGE_LOG = "change_log";
+  static final String SPEC = "spec";
   static final String REVIEW = "review";
   static final String SECONDS = "seconds";
   static final String COUNT = "count";
+  static final String USD = "usd";
 
   private static final Moment.Unknown NOT_REACHED = new Moment.Unknown("not_reached");
-  private static final Moment.Unknown INCOMPLETE = new Moment.Unknown("history_incomplete");
-  private static final Moment.Unknown COLLAPSED = new Moment.Unknown("collapsed_by_sync");
   private static final Moment.Unknown HIDDEN_MOMENT = new Moment.Unknown(Measure.HIDDEN_ROWS);
+  private static final Measure HIDDEN = new Measure.Unknown(Measure.HIDDEN_ROWS, 0);
   private static final Set<String> VERDICTS = Set.of("passed", "failed", "escalated");
 
   /** Every number a listing summarizes, by its wire name and unit, in order. */
@@ -81,7 +79,10 @@ record SpecMeasures(
           Map.entry("review_errors", COUNT),
           Map.entry("build_runs", COUNT),
           Map.entry("fix_runs", COUNT),
-          Map.entry("carried_findings", COUNT));
+          Map.entry("carried_findings", COUNT),
+          Map.entry("tokens", COUNT),
+          Map.entry("usd", USD),
+          Map.entry("human_minutes", COUNT));
 
   /** An instant a measure starts or ends at, or why it is not known. */
   sealed interface Moment {
@@ -90,12 +91,15 @@ record SpecMeasures(
     record At(Instant at, String source) implements Moment {}
 
     /**
-     * Not known, and why: {@code not_reached} when the rows are whole and hold no such move, {@code
-     * history_incomplete} when they lack revisions it could be among, {@code collapsed_by_sync}
-     * when it lies in, or could hide in, a revision heard by sync, and {@code hidden_rows} when the
-     * reader may not see a row it is read from.
+     * Not known, and why: {@code not_reached} when the spec has not made the move, and {@code
+     * hidden_rows} when the reader may not see a row it is read from.
      */
     record Unknown(String reason) implements Moment {}
+
+    /** The instant a spec's own record holds, or not reached when it holds none. */
+    static Moment of(Instant at) {
+      return at == null ? NOT_REACHED : new At(at, SPEC);
+    }
 
     default Map<String, Object> toMap() {
       return switch (this) {
@@ -105,29 +109,53 @@ record SpecMeasures(
     }
   }
 
-  /**
-   * One number of the measures: its value; a value its rows show at least, when some may be gone;
-   * why it is unknown, with how many of an interval's ends are missing; or an error.
-   */
+  /** One number of the measures: its value, why it is unknown, or an error. */
   sealed interface Measure {
 
-    /** Why a count is unknown when the reader may not see every row it is counted from. */
+    /** Why a number is unknown when the reader may not see every row it is counted from. */
     String HIDDEN_ROWS = "hidden_rows";
 
     record Known(long value) implements Measure {}
 
-    record AtLeast(long value) implements Measure {}
+    /** An amount of dollars, to the millionth. */
+    record Dollars(double value) implements Measure {
+
+      static Dollars of(double value) {
+        return new Dollars(
+            BigDecimal.valueOf(value).setScale(6, RoundingMode.HALF_UP).doubleValue());
+      }
+    }
+
+    /**
+     * A number its rows show at least, when some may be gone: a box that first held the change
+     * after main erased runs of its project cannot vouch it counted them all.
+     */
+    record AtLeast(Measure shown) implements Measure {}
 
     record Unknown(String reason, int missing) implements Measure {}
 
     /** An interval ending before it starts, which no clock agrees with: never a number. */
     record Negative(String error) implements Measure {}
 
+    /** The value of a number known exactly, or null for one that is not. */
+    default Number exact() {
+      return switch (this) {
+        case Known(var value) -> value;
+        case Dollars(var value) -> value;
+        default -> null;
+      };
+    }
+
     /** This number on the wire, a value in {@code unit}: one shape for every number served. */
     default Map<String, Object> toMap(String unit) {
       return switch (this) {
         case Known(var value) -> Map.of(unit, value);
-        case AtLeast(var value) -> Map.of(unit, value, "at_least", true);
+        case Dollars(var value) -> Map.of(unit, value);
+        case AtLeast(var shown) -> {
+          var bounded = new LinkedHashMap<String, Object>(shown.toMap(unit));
+          bounded.put("at_least", true);
+          yield bounded;
+        }
         case Unknown(var reason, var missing) ->
             missing > 0 ? Map.of("unknown", reason, "missing", missing) : Map.of("unknown", reason);
         case Negative(var error) -> Map.of("error", error);
@@ -150,9 +178,158 @@ record SpecMeasures(
       Measure carriedFindings) {}
 
   /**
+   * What a change's finished runs cost: how many there were, how many reported no usage and how
+   * many no dollars, the tokens the others reported, in all and by kind, and the dollars; beside
+   * the project's budget, if it sets one, and whether the cost is over it.
+   */
+  record Cost(
+      Measure runs,
+      Measure withoutUsage,
+      Measure withoutCost,
+      Measure tokens,
+      Measure tokensIn,
+      Measure tokensOut,
+      Measure tokensCacheRead,
+      Measure tokensCacheWrite,
+      Measure usd,
+      ProjectDefinition.Budget budget,
+      Over over) {
+
+    /** Whether a cost is over its budget, or why that is not known. */
+    enum Over {
+      YES,
+      NO,
+      NO_BUDGET,
+      NOT_ALL_REPORTED,
+      NOT_ALL_HELD,
+      HIDDEN
+    }
+
+    static Cost of(MeasureRows rows) {
+      var budget = rows.budget();
+      if (rows.runs().hidden()) {
+        return new Cost(
+            HIDDEN,
+            HIDDEN,
+            HIDDEN,
+            HIDDEN,
+            HIDDEN,
+            HIDDEN,
+            HIDDEN,
+            HIDDEN,
+            HIDDEN,
+            budget,
+            budget == null ? Over.NO_BUDGET : Over.HIDDEN);
+      }
+      var kept = rows.recorded().runs();
+      var tokens =
+          kept.tokensIn() + kept.tokensOut() + kept.tokensCacheRead() + kept.tokensCacheWrite();
+      var over = over(budget, kept, tokens);
+      return new Cost(
+          ofRuns(rows, kept.runs()),
+          ofRuns(rows, kept.withoutUsage()),
+          ofRuns(rows, kept.withoutCost()),
+          ofRuns(rows, tokens),
+          ofRuns(rows, kept.tokensIn()),
+          ofRuns(rows, kept.tokensOut()),
+          ofRuns(rows, kept.tokensCacheRead()),
+          ofRuns(rows, kept.tokensCacheWrite()),
+          rows.recorded().erasedBeforeHeld()
+              ? new Measure.AtLeast(Measure.Dollars.of(kept.costUsd()))
+              : Measure.Dollars.of(kept.costUsd()),
+          budget,
+          over == Over.YES || over == Over.NO_BUDGET || !rows.recorded().erasedBeforeHeld()
+              ? over
+              : Over.NOT_ALL_HELD);
+    }
+
+    /**
+     * Over when what was reported already passes a limit the budget sets; not over only when every
+     * run reported the figure that limit is of.
+     */
+    private static Over over(
+        ProjectDefinition.Budget budget, SpecStore.KeptRuns kept, long tokens) {
+      if (budget == null) {
+        return Over.NO_BUDGET;
+      }
+      var tokensOver = budget.tokens() != null && tokens > budget.tokens();
+      var usdOver =
+          budget.usd() != null && Measure.Dollars.of(kept.costUsd()).value() > budget.usd();
+      if (tokensOver || usdOver) {
+        return Over.YES;
+      }
+      var unreported =
+          (budget.tokens() != null && kept.withoutUsage() > 0)
+              || (budget.usd() != null && kept.withoutCost() > 0);
+      return unreported ? Over.NOT_ALL_REPORTED : Over.NO;
+    }
+
+    Map<String, Object> toMap() {
+      var m = new LinkedHashMap<String, Object>();
+      m.put("runs", runs.toMap(COUNT));
+      m.put("runs_without_usage", withoutUsage.toMap(COUNT));
+      m.put("runs_without_cost", withoutCost.toMap(COUNT));
+      m.put("tokens", tokens.toMap(COUNT));
+      m.put("tokens_in", tokensIn.toMap(COUNT));
+      m.put("tokens_out", tokensOut.toMap(COUNT));
+      m.put("tokens_cache_read", tokensCacheRead.toMap(COUNT));
+      m.put("tokens_cache_write", tokensCacheWrite.toMap(COUNT));
+      m.put(USD, usd.toMap(USD));
+      m.put("budget", budget == null ? Map.of("unknown", "not_set") : budget.toMap());
+      m.put(
+          "over_budget",
+          switch (over) {
+            case YES -> true;
+            case NO -> false;
+            case NO_BUDGET -> Map.of("unknown", "not_set");
+            case NOT_ALL_REPORTED -> Map.of("unknown", "runs_not_reported");
+            case NOT_ALL_HELD -> Map.of("unknown", "runs_not_held");
+            case HIDDEN -> Map.of("unknown", Measure.HIDDEN_ROWS);
+          });
+      return m;
+    }
+  }
+
+  /**
+   * The minutes people gave a change's conversation on this box: distinct (person, minute) pairs in
+   * all and by where each was seen, and how many people; a minute seen in two ways counts once in
+   * all.
+   */
+  record Minutes(long minutes, Map<AttentionStore.Channel, Long> byChannel, long people) {
+
+    static Minutes of(List<AttentionStore.Minute> seen) {
+      var byChannel = new LinkedHashMap<AttentionStore.Channel, Long>();
+      for (var channel : AttentionStore.Channel.values()) {
+        byChannel.put(
+            channel,
+            seen.stream()
+                .filter(minute -> minute.channel() == channel)
+                .map(minute -> List.of(minute.person(), minute.minute()))
+                .distinct()
+                .count());
+      }
+      return new Minutes(
+          seen.stream().map(minute -> List.of(minute.person(), minute.minute())).distinct().count(),
+          byChannel,
+          seen.stream().map(AttentionStore.Minute::person).distinct().count());
+    }
+
+    Map<String, Object> toMap() {
+      var channels = new LinkedHashMap<String, Object>();
+      byChannel.forEach((channel, count) -> channels.put(channel.wire(), Map.of(COUNT, count)));
+      var m = new LinkedHashMap<String, Object>();
+      m.put("minutes", Map.of(COUNT, minutes));
+      m.put("by_channel", channels);
+      m.put("people", Map.of(COUNT, people));
+      m.put("bound", "lower");
+      return m;
+    }
+  }
+
+  /**
    * Whether a person's code act is recorded on a done change: a person deciding a human review
-   * stage, in any attempt, is the one Sail records, so none recorded is an upper bound on changes
-   * no person wrote or reviewed line by line.
+   * stage, in any attempt, or typing in its room's terminal, so none recorded is an upper bound on
+   * changes no person wrote or reviewed line by line.
    */
   enum CodeAct {
     NONE_RECORDED,
@@ -180,36 +357,53 @@ record SpecMeasures(
 
   /** The measures of the spec {@code rows} holds, from those rows alone. */
   static SpecMeasures of(MeasureRows rows) {
-    var log = Log.of(rows);
-    var done = log.done();
     var reviews = rows.reviews();
-    var runs =
-        rows.runs().rows().stream()
-            .collect(
-                Collectors.toMap(RunStore.RunRow::id, Function.identity(), (first, again) -> first))
-            .values()
-            .stream()
-            .toList();
+    var kept = rows.recorded().runs();
     var rework =
         new Rework(
             fromReviews(reviews, reviews.rows().stream().filter(SpecMeasures::verdict).count()),
             fromReviews(
                 reviews, reviews.rows().stream().filter(ReviewStore.ReviewRow::errored).count()),
-            fromRuns(rows, log, runs.stream().filter(RunStore.RunRow::buildRole).count()),
-            fromRuns(rows, log, runs.stream().filter(run -> Lane.FIX.matches(run.role())).count()),
+            rows.runs().hidden()
+                ? HIDDEN
+                : ofRuns(rows, kept.builds() + underWay(rows, Lane.BUILD)),
+            rows.runs().hidden() ? HIDDEN : ofRuns(rows, kept.fixes() + underWay(rows, Lane.FIX)),
             fromReviews(
                 reviews,
                 rows.findings().stream().filter(found -> found.carriedFrom() != null).count()));
     return new SpecMeasures(
         rows.specId(),
         rows.box(),
-        log.firstInto(SpecStatus.PENDING),
+        Moment.of(rows.recorded().readyAt()),
         verified(reviews),
-        log.awaitingMergeBefore(done),
-        done.moment(),
+        Moment.of(rows.recorded().awaitingMergeAt()),
+        Moment.of(rows.recorded().doneAt()),
         rework,
         codeAct(rows),
-        fromRuns(rows, log, runs.size()));
+        Cost.of(rows),
+        Minutes.of(rows.minutes()));
+  }
+
+  /**
+   * {@code count} of the change's runs as this box can vouch for it: a lower bound when it first
+   * held the change after main erased runs of its project ({@link SpecStore.Recorded}).
+   */
+  private static Measure ofRuns(MeasureRows rows, long count) {
+    return rows.recorded().erasedBeforeHeld()
+        ? new Measure.AtLeast(new Measure.Known(count))
+        : new Measure.Known(count);
+  }
+
+  /**
+   * The runs in {@code lane} this box holds that have not finished, each once: rework under way,
+   * which the kept sums count once it finishes.
+   */
+  private static long underWay(MeasureRows rows, Lane lane) {
+    return rows.runs().rows().stream()
+        .filter(run -> lane.matches(run.role()) && !RunStatus.isTerminal(run.status()))
+        .map(RunStore.RunRow::id)
+        .distinct()
+        .count();
   }
 
   private static boolean verdict(ReviewStore.ReviewRow review) {
@@ -217,38 +411,7 @@ record SpecMeasures(
   }
 
   private static Measure fromReviews(MeasureRows.Seen<ReviewStore.ReviewRow> reviews, long count) {
-    return reviews.hidden()
-        ? new Measure.Unknown(Measure.HIDDEN_ROWS, 0)
-        : new Measure.Known(count);
-  }
-
-  /**
-   * {@code count} runs, as this box can vouch for it: unknown when the reader may not see a run; a
-   * lower bound when a run filed under one of the projects the spec was ever filed under here was
-   * erased after the spec arrived, which may have been one of its own. Every box records each run
-   * erasure, main as it makes it and a node as it hears it, filed under the run's project and
-   * naming no spec, so a run erased with a pruned spec of the same project bounds it too. When the
-   * log lacks revisions, the projects it was filed under are not all known, and any erasure counts.
-   */
-  private static Measure fromRuns(MeasureRows rows, Log log, long count) {
-    if (rows.runs().hidden()) {
-      return new Measure.Unknown(Measure.HIDDEN_ROWS, 0);
-    }
-    var arrived =
-        LongStream.concat(
-                rows.history().stream().mapToLong(ChangeLog.Entry::seq),
-                rows.gaps().stream().mapToLong(Long::longValue))
-            .min();
-    var projects = new HashSet<>(log.projects());
-    projects.add(rows.project());
-    var erasures =
-        rows.gaps().isEmpty()
-            ? rows.runErasures().entrySet().stream()
-                .filter(erased -> erased.getKey() == null || projects.contains(erased.getKey()))
-                .map(Map.Entry::getValue)
-            : rows.runErasures().values().stream();
-    var erasedSince = erasures.anyMatch(seq -> arrived.isEmpty() || seq > arrived.getAsLong());
-    return erasedSince ? new Measure.AtLeast(count) : new Measure.Known(count);
+    return reviews.hidden() ? HIDDEN : new Measure.Known(count);
   }
 
   private static Moment verified(MeasureRows.Seen<ReviewStore.ReviewRow> reviews) {
@@ -274,9 +437,11 @@ record SpecMeasures(
     if (rows.reviews().hidden()) {
       return CodeAct.HIDDEN;
     }
-    return rows.reviews().rows().stream().anyMatch(review -> review.decidedBy() != null)
-        ? CodeAct.RECORDED
-        : CodeAct.NONE_RECORDED;
+    var decided = rows.reviews().rows().stream().anyMatch(review -> review.decidedBy() != null);
+    var typed =
+        rows.minutes().stream()
+            .anyMatch(minute -> minute.channel() == AttentionStore.Channel.TERMINAL_INPUT);
+    return decided || typed ? CodeAct.RECORDED : CodeAct.NONE_RECORDED;
   }
 
   /** The intervals between this change's moments, by their wire names, in seconds. */
@@ -297,9 +462,20 @@ record SpecMeasures(
     measures.put("build_runs", rework.buildRuns());
     measures.put("fix_runs", rework.fixRuns());
     measures.put("carried_findings", rework.carriedFindings());
+    measures.put("tokens", cost.tokens());
+    measures.put("usd", cost.usd());
+    measures.put("human_minutes", new Measure.Known(minutes.minutes()));
     return FIGURES.stream()
         .map(named -> new Figure(named.getKey(), named.getValue(), measures.get(named.getKey())))
         .toList();
+  }
+
+  /** The exact numbers of {@code measures}, least first. */
+  static List<Measure> exactly(List<Measure> measures) {
+    return measures.stream()
+        .filter(measure -> measure.exact() != null)
+        .sorted(Comparator.comparingDouble(measure -> measure.exact().doubleValue()))
+        .collect(Collectors.toList());
   }
 
   private static Measure between(String fromName, Moment from, String toName, Moment to) {
@@ -324,7 +500,6 @@ record SpecMeasures(
   @Override
   public Map<String, Object> toMap() {
     var times = new LinkedHashMap<String, Object>();
-    times.put("box", box == null ? Map.of("unknown", "no_box_id") : Map.of("sail_id", box));
     times.put("ready", ready.toMap());
     times.put("verified", verified.toMap());
     times.put("awaiting_merge", awaitingMerge.toMap());
@@ -339,6 +514,7 @@ record SpecMeasures(
     counts.put("carried_findings", rework.carriedFindings().toMap(COUNT));
     var m = new LinkedHashMap<String, Object>();
     m.put("spec_id", specId);
+    m.put("box", box == null ? Map.of("unknown", "no_box_id") : Map.of("sail_id", box));
     m.put("times", times);
     m.put("intervals", intervals);
     m.put("rework", counts);
@@ -350,176 +526,8 @@ record SpecMeasures(
           case NOT_DONE -> Map.of("unknown", "not_done");
           case HIDDEN -> Map.of("unknown", Measure.HIDDEN_ROWS);
         });
-    m.put(
-        "cost",
-        Map.of("unknown", "not_recorded", "runs_without_usage", runsWithoutUsage.toMap(COUNT)));
-    m.put("human_minutes", Map.of("unknown", "not_recorded"));
+    m.put("cost", cost.toMap());
+    m.put("human_minutes", minutes.toMap());
     return m;
-  }
-
-  /**
-   * One revision of the spec as the measures read it: its seq, status, project and author's time,
-   * whether it is the spec's birth, and whether it was heard by sync and so may collapse several
-   * moves.
-   */
-  private record Revision(
-      long seq, SpecStatus status, String project, Instant at, boolean born, boolean heard) {
-
-    static Revision of(ChangeLog.Entry entry) {
-      var snapshot = YamlUtil.parseMap(entry.snapshot());
-      var at = Snapshots.instant(snapshot, "updated_at");
-      return new Revision(
-          entry.seq(),
-          SpecStatus.fromWire(Snapshots.text(snapshot, "status")),
-          Snapshots.text(snapshot, "project"),
-          at,
-          Objects.equals(Snapshots.instant(snapshot, "created_at"), at),
-          entry.heardFromMain());
-    }
-
-    /**
-     * Whether this revision, heard by sync, is the revision before it coming back: a box's own
-     * write main took and answered with. Every write moves {@code updated_at} past the last, so one
-     * at the same time in the same status is that write, and adds no move.
-     */
-    boolean echoes(Revision before) {
-      return heard && before.status() == status && before.at().equals(at);
-    }
-
-    /**
-     * Whether moves another box made may be collapsed into this one revision: one heard by sync,
-     * unless it is a birth no write followed before it was sent.
-     */
-    boolean collapsible() {
-      return heard && !born;
-    }
-  }
-
-  /** A move into a status: when, and the index of its revision, or -1 when it is not known. */
-  private record Entered(Moment moment, int index) {}
-
-  /** This box's record of the spec's statuses: the revisions it holds, and what it lacks. */
-  private record Log(List<Revision> revisions, Set<Long> gaps) {
-
-    /** The revisions of {@code rows}, each echo of this box's own write left out. */
-    static Log of(MeasureRows rows) {
-      var revisions = new ArrayList<Revision>();
-      for (var entry : rows.history()) {
-        if (entry.kind() != ChangeLog.Kind.REVISION) {
-          continue;
-        }
-        var revision = Revision.of(entry);
-        if (revisions.isEmpty() || !revision.echoes(revisions.getLast())) {
-          revisions.add(revision);
-        }
-      }
-      return new Log(List.copyOf(revisions), rows.gaps());
-    }
-
-    /** Every project the spec was filed under, as the revisions held say. */
-    Set<String> projects() {
-      return revisions.stream()
-          .map(Revision::project)
-          .filter(Objects::nonNull)
-          .collect(Collectors.toSet());
-    }
-
-    /**
-     * The first move into {@code status}: known while nothing before it is missing and no revision
-     * up to it was heard by sync, which could hide an earlier one.
-     */
-    Moment firstInto(SpecStatus status) {
-      for (var index = 0; index < revisions.size(); index++) {
-        if (!wholeBefore(index)) {
-          return INCOMPLETE;
-        }
-        var revision = revisions.get(index);
-        if (revision.collapsible()) {
-          return COLLAPSED;
-        }
-        if (revision.status() == status) {
-          return at(index);
-        }
-      }
-      return born() && gaps.isEmpty() ? NOT_REACHED : INCOMPLETE;
-    }
-
-    /**
-     * The move that began the latest stretch in {@code done}; not reached only when the whole log
-     * holds none and no revision of it heard by sync could hide one.
-     */
-    Entered done() {
-      var last = revisions.size() - 1;
-      while (last >= 0 && revisions.get(last).status() != SpecStatus.DONE) {
-        last--;
-      }
-      if (last < 0) {
-        if (!born() || !gaps.isEmpty()) {
-          return new Entered(INCOMPLETE, -1);
-        }
-        return new Entered(
-            revisions.stream().anyMatch(Revision::collapsible) ? COLLAPSED : NOT_REACHED, -1);
-      }
-      if (revisions.subList(last + 1, revisions.size()).stream().anyMatch(Revision::collapsible)) {
-        return new Entered(COLLAPSED, -1);
-      }
-      return stretch(last, SpecStatus.DONE);
-    }
-
-    /**
-     * The move into the stretch in {@code awaiting_merge} that {@code done} ended, not reached when
-     * the revision before it was in another status.
-     */
-    Moment awaitingMergeBefore(Entered done) {
-      if (done.index() < 0) {
-        return done.moment();
-      }
-      var before = done.index() - 1;
-      return before >= 0 && revisions.get(before).status() == SpecStatus.AWAITING_MERGE
-          ? stretch(before, SpecStatus.AWAITING_MERGE).moment()
-          : NOT_REACHED;
-    }
-
-    private Entered stretch(int last, SpecStatus status) {
-      var start = last;
-      while (start > 0 && revisions.get(start - 1).status() == status && adjacent(start)) {
-        start--;
-      }
-      if (!adjacent(start)) {
-        return new Entered(INCOMPLETE, -1);
-      }
-      if (revisions.subList(start, last + 1).stream().anyMatch(Revision::collapsible)) {
-        return new Entered(COLLAPSED, -1);
-      }
-      return new Entered(at(start), start);
-    }
-
-    /**
-     * Whether nothing is missing between revision {@code index} and the one before it; before the
-     * first, whether the log begins with the spec's birth.
-     */
-    private boolean adjacent(int index) {
-      if (index == 0) {
-        return wholeBefore(0);
-      }
-      var previous = revisions.get(index - 1).seq();
-      var seq = revisions.get(index).seq();
-      return gaps.stream().noneMatch(gap -> gap > previous && gap < seq);
-    }
-
-    /** Whether the log holds everything before revision {@code index}, from the spec's birth. */
-    private boolean wholeBefore(int index) {
-      var seq = revisions.get(index).seq();
-      return born() && gaps.stream().noneMatch(gap -> gap < seq);
-    }
-
-    /** Whether the first revision held is the spec's birth: made when the spec was. */
-    private boolean born() {
-      return !revisions.isEmpty() && revisions.getFirst().born();
-    }
-
-    private Moment at(int index) {
-      return new Moment.At(revisions.get(index).at(), CHANGE_LOG);
-    }
   }
 }

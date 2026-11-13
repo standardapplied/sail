@@ -16,6 +16,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.config.SpecStatus;
+import ai.singlr.sail.harness.RunUsage;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.store.Finding;
 import ai.singlr.sail.store.ReviewStore;
@@ -89,6 +90,12 @@ class LoopStepsTest {
               }
 
               @Override
+              public RunUsage usage(RunStore.RunRow run) {
+
+                return RunUsage.NONE;
+              }
+
+              @Override
               public List<Rescue> ensureCommitted(
                   String project, List<String> repos, String branch, String commitMessage)
                   throws Exception {
@@ -136,6 +143,12 @@ class LoopStepsTest {
           @Override
           public String output(RunStore.RunRow run) throws Exception {
             return real.output(run);
+          }
+
+          @Override
+          public RunUsage usage(RunStore.RunRow run) {
+
+            return RunUsage.NONE;
           }
 
           @Override
@@ -523,6 +536,12 @@ class LoopStepsTest {
           }
 
           @Override
+          public RunUsage usage(RunStore.RunRow run) {
+
+            return RunUsage.NONE;
+          }
+
+          @Override
           public List<Rescue> ensureCommitted(
               String project, List<String> repos, String branch, String commitMessage) {
             return List.of();
@@ -708,6 +727,12 @@ class LoopStepsTest {
           public String output(RunStore.RunRow run) throws Exception {
             before.run();
             return real.output(run);
+          }
+
+          @Override
+          public RunUsage usage(RunStore.RunRow run) {
+
+            return RunUsage.NONE;
           }
 
           @Override

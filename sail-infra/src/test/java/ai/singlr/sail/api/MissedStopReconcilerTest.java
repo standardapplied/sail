@@ -19,6 +19,7 @@ import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.HostInfo;
 import ai.singlr.sail.engine.ScriptedShellExecutor;
 import ai.singlr.sail.engine.ShellExec;
+import ai.singlr.sail.harness.RunUsage;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.store.DispatchGate;
 import ai.singlr.sail.store.EventStore;
@@ -367,7 +368,7 @@ class MissedStopReconcilerTest {
     var runId = adhocSession(77);
     MissedStopReconciler.UnitProbe completingProbe =
         (project, id, unit) -> {
-          Acting.system(() -> sessionStore.transition(runId, "running", "completed", 0));
+          Acting.system(() -> sessionStore.finish(runId, "running", "completed", 0, null));
           return false;
         };
 
@@ -738,6 +739,12 @@ class MissedStopReconcilerTest {
               @Override
               public String output(RunStore.RunRow run) {
                 return "";
+              }
+
+              @Override
+              public RunUsage usage(RunStore.RunRow run) {
+
+                return RunUsage.NONE;
               }
 
               @Override
@@ -1347,7 +1354,8 @@ class MissedStopReconcilerTest {
             run,
             Event.WellKnownData.EXIT_CODE,
             1);
-    new RunTracker(sessionStore, SyncScheduler.disabled(), () -> "node-a")
+    new RunTracker(
+            sessionStore, finished -> RunUsage.NONE, SyncScheduler.disabled(), () -> "node-a")
         .onEvent(
             Event.of(
                 "test-project",
@@ -1532,7 +1540,7 @@ class MissedStopReconcilerTest {
     createInProgressSpec("auth");
     var build = runningSession("auth");
     var room = session("auth", "node-a", DispatchGate.ROOM_ROLE);
-    Acting.system(() -> sessionStore.transition(room, "running", "stopped", 1));
+    Acting.system(() -> sessionStore.finish(room, "running", "stopped", 1, null));
     recordStopEvent(
         "auth",
         Instant.now().plusSeconds(1),

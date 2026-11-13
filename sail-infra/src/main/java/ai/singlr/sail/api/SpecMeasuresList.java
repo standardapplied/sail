@@ -17,8 +17,8 @@ import java.util.Map;
  * The measures of the specs a list names, one {@link SpecMeasures} each, and over them the median
  * and the 90th percentile of every number, nearest-rank, each over the specs whose number is known
  * exactly, saying how many it left out as unknown, as a lower bound and as an error (M8, M11). A
- * {@link Window} lists only the specs whose move into {@code done}, by this box's record, falls
- * inside it, and counts those with no known move it could test.
+ * {@link Window} lists only the specs whose move into {@code done} falls inside it, and counts
+ * those with no known move it could test.
  */
 record SpecMeasuresList(List<SpecMeasures> specs, Window window, int undated) implements Mappable {
 
@@ -63,7 +63,7 @@ record SpecMeasuresList(List<SpecMeasures> specs, Window window, int undated) im
       return since != null || until != null;
     }
 
-    /** Whether the change {@code measured} was done inside this window, as its box records it. */
+    /** Whether the change {@code measured} was done inside this window. */
     boolean holds(SpecMeasures measured) {
       if (!asked()) {
         return true;
@@ -150,14 +150,9 @@ record SpecMeasuresList(List<SpecMeasures> specs, Window window, int undated) im
    * were left out as unknown, as lower bounds and as errors.
    */
   private static Map<String, Object> spread(String unit, List<SpecMeasures.Measure> measures) {
-    var known =
-        measures.stream()
-            .filter(SpecMeasures.Measure.Known.class::isInstance)
-            .mapToLong(measure -> ((SpecMeasures.Measure.Known) measure).value())
-            .sorted()
-            .toArray();
+    var known = SpecMeasures.exactly(measures);
     var m = new LinkedHashMap<String, Object>();
-    m.put("n", known.length);
+    m.put("n", known.size());
     m.put("median", rank(known, 50).toMap(unit));
     m.put("p90", rank(known, 90).toMap(unit));
     m.put("left_out_unknown", count(measures, SpecMeasures.Measure.Unknown.class));
@@ -171,9 +166,7 @@ record SpecMeasuresList(List<SpecMeasures> specs, Window window, int undated) im
   }
 
   /** The value at rank {@code percent} of {@code sorted}: the least with that share at or below. */
-  private static SpecMeasures.Measure rank(long[] sorted, int percent) {
-    return sorted.length == 0
-        ? NONE_KNOWN
-        : new SpecMeasures.Measure.Known(sorted[(percent * sorted.length + 99) / 100 - 1]);
+  private static SpecMeasures.Measure rank(List<SpecMeasures.Measure> sorted, int percent) {
+    return sorted.isEmpty() ? NONE_KNOWN : sorted.get((percent * sorted.size() + 99) / 100 - 1);
   }
 }

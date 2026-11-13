@@ -483,7 +483,7 @@ class RunStoreTest {
   void aRunThatEndsOnItsOwnIsNeverMarkedTheOperators() {
     var id = newRun("backend", "auth");
 
-    store.transition(id, "running", "stopped", 0);
+    store.finish(id, "running", "stopped", 0, null);
 
     assertFalse(store.findById(id).orElseThrow().stoppedByOperator());
   }
@@ -543,14 +543,14 @@ class RunStoreTest {
   void transitionWithExitCodeStampsStatusAndCodeInOneWrite() {
     var id = newRun("backend", "auth");
 
-    assertTrue(store.transition(id, "running", "failed", 2));
+    assertTrue(store.finish(id, "running", "failed", 2, null));
 
     var run = store.findById(id).orElseThrow();
     assertEquals("failed", run.status());
     assertEquals(2, run.exitCode());
     assertNotNull(run.completedAt());
 
-    assertFalse(store.transition(id, "running", "completed", 0));
+    assertFalse(store.finish(id, "running", "completed", 0, null));
     assertEquals(2, store.findById(id).orElseThrow().exitCode());
   }
 
@@ -1122,17 +1122,6 @@ class RunStoreTest {
         List.of(lobby, payment, auth),
         ids(store.listForConversations(List.of("auth", "payment", "lobby"))));
     assertEquals(List.of(auth), ids(store.listForConversations(List.of("auth"))));
-  }
-
-  @Test
-  void lastErasuresAreTheLatestRunErasureThisBoxRecordedByProject() {
-    var run = newRun("backend", "auth");
-    assertEquals(Map.of(), store.lastErasures(List.of("retention")));
-
-    new Erasure(db).erase(List.of(new Erasure.Target(Erasure.RUN, run)), "retention");
-
-    assertEquals(Set.of("backend"), store.lastErasures(List.of("retention")).keySet());
-    assertEquals(Map.of(), store.lastErasures(List.of("local")));
   }
 
   @Test
@@ -2117,7 +2106,7 @@ class RunStoreTest {
     assertTrue(store.findByCredential("").isEmpty());
     assertTrue(store.findByCredential("sailrun_wrong").isEmpty());
 
-    store.transition(id, "running", "completed", 0);
+    store.finish(id, "running", "completed", 0, null);
 
     assertTrue(store.findByCredential(credential).isEmpty(), "a finished run's credential is dead");
   }

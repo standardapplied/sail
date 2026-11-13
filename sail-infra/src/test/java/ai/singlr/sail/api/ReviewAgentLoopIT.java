@@ -35,6 +35,7 @@ import ai.singlr.sail.engine.WatcherSpawner;
 import ai.singlr.sail.gen.SpecSkillGenerator;
 import ai.singlr.sail.harness.Harness;
 import ai.singlr.sail.harness.Harnesses;
+import ai.singlr.sail.harness.RunUsage;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.FileStore;
@@ -205,7 +206,9 @@ class ReviewAgentLoopIT extends AbstractIncusIT {
                         "codex",
                         "gate",
                         "no_critical"))));
-    bus.subscribe(new RunTracker(runStore, SyncScheduler.disabled(), () -> HANDLE));
+    bus.subscribe(
+        new RunTracker(
+            runStore, finished -> RunUsage.NONE, SyncScheduler.disabled(), () -> HANDLE));
     bus.subscribe(listener());
     bus.subscribe(
         new ReviewPipelineController(

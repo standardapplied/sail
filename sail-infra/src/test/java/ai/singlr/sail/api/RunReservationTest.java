@@ -208,7 +208,7 @@ class RunReservationTest {
           var id = DateTimeUtils.newId().toString();
           runStore.reserveDispatch(
               id, "acme", specId, "node", "build", repos, "codex", null, "task", "log", "unit");
-          runStore.transition(id, "running", "completed", 0);
+          runStore.finish(id, "running", "completed", 0, null);
           return id;
         });
   }

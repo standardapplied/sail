@@ -63,6 +63,26 @@ final class PtyHostEvents implements PtyEvents {
     insert(Event.WellKnownTypes.PTY_SESSION_ENDED, origin, "sail", data);
   }
 
+  /**
+   * The writer's minute in the session's room: one attention row, which holds nothing of what was
+   * typed (M7).
+   */
+  @Override
+  public void typed(PtySession.Origin origin, String person) {
+    try (var operations = OperationsFactory.open(dbPath)) {
+      operations.pty().recordTyping(person, origin.room());
+    } catch (RuntimeException failed) {
+      System.err.println(
+          "pty-events: dropped typed session="
+              + origin.name()
+              + " project="
+              + origin.project()
+              + " cause="
+              + failed);
+      PtyEventDrops.record(dropsPath, "typed", failed.toString());
+    }
+  }
+
   private static Map<String, Object> dataFor(PtySession.Origin origin) {
     var data = new LinkedHashMap<String, Object>();
     data.put("session", origin.name());

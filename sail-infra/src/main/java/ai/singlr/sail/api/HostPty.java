@@ -27,4 +27,7 @@ public interface HostPty {
   void admitRoom(String room, String project, PtyIdentity.Person who) throws IOException;
 
   void recordEvent(EventStore.EventRow event);
+
+  /** Records that {@code person} typed in a terminal of {@code room} this minute. */
+  void recordTyping(String person, String room);
 }

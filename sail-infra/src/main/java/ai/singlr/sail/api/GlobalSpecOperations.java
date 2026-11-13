@@ -13,13 +13,16 @@ import ai.singlr.sail.access.Resource;
 import ai.singlr.sail.access.Resources;
 import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.common.Strings;
+import ai.singlr.sail.config.ProjectDefinition;
 import ai.singlr.sail.config.Spec;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.HostInfo;
 import ai.singlr.sail.engine.NameValidator;
+import ai.singlr.sail.harness.Harnesses;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.PrincipalHandle;
+import ai.singlr.sail.store.AttentionStore;
 import ai.singlr.sail.store.ChangeLog;
 import ai.singlr.sail.store.ReviewStore;
 import ai.singlr.sail.store.RoomStore;
@@ -27,7 +30,6 @@ import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.Snapshots;
 import ai.singlr.sail.store.SpecStore;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -53,6 +55,8 @@ final class GlobalSpecOperations {
   private final RunStore runStore;
   private final Supplier<RoomStore> rooms;
   private final BooleanSupplier authoritative;
+  private final ProjectReader definitions;
+  private final Supplier<AttentionStore> attention;
 
   GlobalSpecOperations(SpecStore specStore) {
     this(specStore, null, null);
@@ -92,12 +96,38 @@ final class GlobalSpecOperations {
       RunStore runStore,
       Supplier<RoomStore> rooms,
       BooleanSupplier authoritative) {
+    this(
+        specStore,
+        reviewStore,
+        eventBus,
+        runStore,
+        rooms,
+        authoritative,
+        project -> Optional.empty(),
+        () -> null);
+  }
+
+  /**
+   * {@code definitions} are the projects whose budgets the measures show, and {@code attention} the
+   * minutes this box saw people give a conversation.
+   */
+  GlobalSpecOperations(
+      SpecStore specStore,
+      ReviewStore reviewStore,
+      EventBus eventBus,
+      RunStore runStore,
+      Supplier<RoomStore> rooms,
+      BooleanSupplier authoritative,
+      ProjectReader definitions,
+      Supplier<AttentionStore> attention) {
     this.specStore = specStore;
     this.reviewStore = reviewStore;
     this.eventBus = eventBus;
     this.runStore = runStore;
     this.rooms = rooms;
     this.authoritative = authoritative;
+    this.definitions = definitions;
+    this.attention = attention;
   }
 
   GlobalSpecsListResponse list(SpecStore.SpecFilter filter) {
@@ -184,17 +214,16 @@ final class GlobalSpecOperations {
 
   /**
    * The rows of {@code specs} the reader sees, measured, one read of each kind for all of them:
-   * their revisions on this box, every entry compacted away or filed where the reader does not read
-   * a gap; their reviews and the findings of those it sees; their runs, as {@code GET
-   * /v1/runs?spec=} lists one spec's; and this box's latest run erasure, by retention here or heard
-   * from main, in each project the reader reads. A review or run the reader may not see is not
-   * counted and is not counted as none either. Only reads.
+   * each spec's own record (its times and the sums this box kept of its runs); its reviews and the
+   * findings of those the reader sees; whether any of its runs this box holds is filed where the
+   * reader does not read; and the minutes this box saw people give its conversation. A review the
+   * reader may not see is not counted and is not counted as none either; a run it may not see
+   * leaves the run figures unknown. Only reads.
    */
   private List<SpecMeasures> measuresOf(List<SpecStore.SpecRow> specs, String box) {
     var reader = Actor.reader();
     var ids = specs.stream().map(SpecStore.SpecRow::id).toList();
-    var history = byKey(specStore.histories(ids), ChangeLog.Entry::entityId);
-    var compacted = byKey(specStore.compacted(ids), ChangeLog.Head::entityId);
+    var recorded = specStore.recorded(ids);
     var everyReview = reviewStore.reviewsForSpecs(ids);
     var filed =
         reviewStore.projectsOf(everyReview.stream().map(ReviewStore.ReviewRow::id).toList());
@@ -205,24 +234,12 @@ final class GlobalSpecOperations {
     var findings = reviewStore.findingsForReviews(seenReviews);
     var reviews = byKey(everyReview, ReviewStore.ReviewRow::specId);
     var everyRun = byKey(runStore.listForConversations(ids), RunStore.RunRow::conversationId);
-    var erasures = new HashMap<String, Long>();
-    runStore
-        .lastErasures(List.of(SpecPruner.RETENTION, ChangeLog.Entry.SYNC))
-        .forEach(
-            (project, seq) -> {
-              if (project == null || ReadFilter.reads(reader, () -> project)) {
-                erasures.put(project, seq);
-              }
-            });
-    var sees = ReadFilter.<ChangeLog.Entry>readable(reader, GlobalSpecOperations::projectOf);
+    var minutes = byKey(attention.get().of(ids), AttentionStore.Minute::conversation);
+    var budgets = new HashMap<String, Optional<ProjectDefinition.Budget>>();
     return specs.stream()
         .map(
             spec -> {
               var id = spec.id();
-              var held = history.getOrDefault(id, List.of());
-              var gaps = new HashSet<Long>();
-              compacted.getOrDefault(id, List.of()).forEach(dropped -> gaps.add(dropped.seq()));
-              held.stream().filter(sees.negate()).map(ChangeLog.Entry::seq).forEach(gaps::add);
               var ofSpec = reviews.getOrDefault(id, List.of());
               var seen =
                   ofSpec.stream().filter(review -> seenReviews.contains(review.id())).toList();
@@ -231,19 +248,26 @@ final class GlobalSpecOperations {
               return SpecMeasures.of(
                   new MeasureRows(
                       id,
-                      spec.project(),
                       spec.status(),
                       box,
-                      held.stream().filter(sees).toList(),
-                      gaps,
+                      recorded.get(id),
                       new MeasureRows.Seen<>(seen, seen.size() < ofSpec.size()),
                       seen.stream()
                           .flatMap(review -> findings.getOrDefault(review.id(), List.of()).stream())
                           .toList(),
                       new MeasureRows.Seen<>(seenRuns, seenRuns.size() < runs.size()),
-                      erasures));
+                      minutes.getOrDefault(id, List.of()),
+                      budgets.computeIfAbsent(spec.project(), this::budgetOf).orElse(null)));
             })
         .toList();
+  }
+
+  /** The budget project {@code project} sets, empty when it sets none or is not held here. */
+  private Optional<ProjectDefinition.Budget> budgetOf(String project) {
+    return definitions
+        .read(project)
+        .map(ProjectDefinition::agent)
+        .map(ProjectDefinition.Agent::budget);
   }
 
   private static <T> Map<String, List<T>> byKey(List<T> rows, Function<T, String> key) {
@@ -257,6 +281,9 @@ final class GlobalSpecOperations {
     }
     if (reviewStore == null) {
       throw SailOperations.storeUnavailable("Review store");
+    }
+    if (attention.get() == null) {
+      throw SailOperations.storeUnavailable("Attention store");
     }
   }
 
@@ -312,6 +339,7 @@ final class GlobalSpecOperations {
             null,
             request.dependsOn(),
             request.repos());
+    requireEffortTaken(row);
     var created = specStore.atomically(() -> birth(row, request));
     publishBoardUpdated(created.project(), created.id(), principal(actor.handle()));
     return new GlobalSpecCreatedResponse(viewOf(created));
@@ -421,8 +449,12 @@ final class GlobalSpecOperations {
             request.dependsOn() != null ? request.dependsOn() : existing.dependsOn(),
             request.repos() != null ? request.repos() : existing.repos(),
             existing.roomIdOrIdentity());
+    requireEffortTaken(updated);
     var result = specStore.atomically(() -> write(existing, updated, wake));
     if (result.status() != existing.status()) {
+      if (attention.get() != null) {
+        attention.get().attend(actor, specId, AttentionStore.Channel.REVIEW_ACT);
+      }
       publishStatusChanged(
           result.project(), specId, existing.status(), result.status(), principal(actor.handle()));
     } else {
@@ -824,6 +856,32 @@ final class GlobalSpecOperations {
   private static String validModel(String model) {
     try {
       return Spec.validatedModel(model);
+    } catch (IllegalArgumentException e) {
+      throw ApiException.of(ErrorCode.INVALID_REQUEST, e);
+    }
+  }
+
+  /**
+   * Refuses a reasoning effort the spec's harness does not take, naming it (M15): the spec's own
+   * agent, else its project's. A spec whose harness is not known here yet is refused at dispatch.
+   */
+  private void requireEffortTaken(SpecStore.SpecRow spec) {
+    if (spec.reasoningEffort() == null) {
+      return;
+    }
+    var agent =
+        Strings.isNotBlank(spec.agent())
+            ? spec.agent()
+            : definitions
+                .read(spec.project())
+                .map(ProjectDefinition::agent)
+                .map(ProjectDefinition.Agent::type)
+                .orElse(null);
+    if (agent == null || !Harnesses.names().contains(agent)) {
+      return;
+    }
+    try {
+      Harnesses.of(agent).requireEffort(spec.reasoningEffort());
     } catch (IllegalArgumentException e) {
       throw ApiException.of(ErrorCode.INVALID_REQUEST, e);
     }

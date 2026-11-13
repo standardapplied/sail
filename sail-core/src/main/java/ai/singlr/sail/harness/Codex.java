@@ -8,6 +8,7 @@ package ai.singlr.sail.harness;
 import ai.singlr.sail.engine.ContainerExec;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.OptionalInt;
 
@@ -15,6 +16,12 @@ import java.util.OptionalInt;
 final class Codex implements Harness {
 
   private static final String BINARY = "codex";
+
+  /**
+   * Codex takes whatever level the selected model advertises ({@code model_reasoning_effort}), so
+   * every Sail level is passed as it is.
+   */
+  private static final List<String> EFFORTS = List.of("none", "low", "medium", "high", "xhigh");
 
   /**
    * Codex does not expose a {@code --settings <path>} flag the way Claude Code does: its discovery
@@ -114,8 +121,49 @@ final class Codex implements Harness {
   }
 
   @Override
-  public boolean honoursReasoningEffort() {
-    return true;
+  public List<String> efforts() {
+    return EFFORTS;
+  }
+
+  /**
+   * The transcript's last {@code token_count}: the thread's running totals, with no dollars, and
+   * the model of its last {@code turn_context}. Codex's input count includes its cached part, which
+   * is taken out, so the run's input is what it read uncached.
+   */
+  @Override
+  public Optional<RunUsage> usage(String agentLog, String transcript) {
+    return RunUsage.last(transcript, "\"type\":\"token_count\"", Codex::counts)
+        .map(
+            line -> {
+              var total =
+                  RunUsage.map(
+                      RunUsage.map(RunUsage.map(line, "payload"), "info"), "total_token_usage");
+              var input = RunUsage.count(total, "input_tokens");
+              var cached = RunUsage.count(total, "cached_input_tokens");
+              var model =
+                  RunUsage.last(
+                          transcript,
+                          "\"type\":\"turn_context\"",
+                          context -> "turn_context".equals(context.get("type")))
+                      .map(context -> RunUsage.map(context, "payload").get("model"))
+                      .filter(String.class::isInstance)
+                      .map(String.class::cast)
+                      .orElse(null);
+              return new RunUsage(
+                  model,
+                  input == null || cached == null ? input : input - cached,
+                  RunUsage.count(total, "output_tokens"),
+                  cached,
+                  RunUsage.count(total, "cache_write_input_tokens"),
+                  null,
+                  RunUsage.Source.TRANSCRIPT);
+            });
+  }
+
+  private static boolean counts(Map<String, Object> line) {
+    var payload = RunUsage.map(line, "payload");
+    return "token_count".equals(payload.get("type"))
+        && !RunUsage.map(RunUsage.map(payload, "info"), "total_token_usage").isEmpty();
   }
 
   @Override

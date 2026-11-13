@@ -893,30 +893,6 @@ public final class ChangeLog {
         entityId);
   }
 
-  /** Every entry of each of {@code ids}, one read whatever their number, oldest first. */
-  public List<Entry> histories(String entityType, Collection<String> ids) {
-    return db.query(
-        SELECT
-            + " WHERE entity_type = ? AND entity_id IN (SELECT value FROM json_each(?)) ORDER BY seq",
-        ChangeLog::map,
-        entityType,
-        YamlUtil.dumpJson(List.copyOf(ids)));
-  }
-
-  /**
-   * The entries of each of {@code ids} that {@link #compact} dropped, as the seq and the id of
-   * each, oldest first: where their {@link #histories} no longer hold what was there.
-   */
-  public List<Head> compacted(String entityType, Collection<String> ids) {
-    return db.query(
-        """
-        SELECT seq, entity_id FROM compacted_entries
-        WHERE entity_type = ? AND entity_id IN (SELECT value FROM json_each(?)) ORDER BY seq""",
-        row -> new Head(row.integer(0), row.text(1), null),
-        entityType,
-        YamlUtil.dumpJson(List.copyOf(ids)));
-  }
-
   /** The project each of {@code ids} is filed under by its head, for those whose head names one. */
   public Map<String, String> headProjects(String entityType, Collection<String> ids) {
     var projects = new HashMap<String, String>();
@@ -930,28 +906,6 @@ public final class ChangeLog {
             YamlUtil.dumpJson(List.copyOf(ids)))
         .forEach(head -> projects.put(head.getKey(), head.getValue()));
     return projects;
-  }
-
-  /**
-   * The seq of the latest erasure of an {@code entityType} this box recorded from one of {@code
-   * origins}, for each project such an erasure is filed under; a null key for those filed under
-   * none.
-   */
-  public Map<String, Long> lastErasures(String entityType, Collection<String> origins) {
-    var latest = new HashMap<String, Long>();
-    db.query(
-            """
-            SELECT NULLIF(h.project, ''), MAX(l.seq) FROM change_log l
-            JOIN change_heads h ON h.entity_type = l.entity_type AND h.entity_id = l.entity_id
-            WHERE l.entity_type = ? AND l.kind = ?
-            AND l.origin IN (SELECT value FROM json_each(?))
-            GROUP BY NULLIF(h.project, '')""",
-            row -> Map.entry(Optional.ofNullable(row.text(0)), row.integer(1)),
-            entityType,
-            Kind.ERASURE.wire(),
-            YamlUtil.dumpJson(List.copyOf(origins)))
-        .forEach(erased -> latest.put(erased.getKey().orElse(null), erased.getValue()));
-    return latest;
   }
 
   /**

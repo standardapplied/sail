@@ -19,6 +19,7 @@ import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.HostYaml;
 import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.config.YamlUtil;
+import ai.singlr.sail.harness.RunUsage;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.ProjectScope;
@@ -317,7 +318,7 @@ class HandleChangeTest {
     assertEquals(List.of(unstamped), apply(standalone, main("ada")));
 
     try (var scheduler = new SyncScheduler(() -> {}, Duration.ofMillis(1), Duration.ofMillis(1))) {
-      var tracker = new RunTracker(runs, scheduler, () -> "ada");
+      var tracker = new RunTracker(runs, finished -> RunUsage.NONE, scheduler, () -> "ada");
       for (var id : List.of(unstamped, stamped)) {
         tracker.onEvent(
             Event.of(

@@ -15,6 +15,7 @@ import ai.singlr.sail.common.Remedied;
 import ai.singlr.sail.common.Remedy;
 import java.nio.file.Path;
 import java.time.Instant;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
@@ -49,6 +50,7 @@ class SchemaManagerTest {
     assertEquals(
         List.of(
             "api_tokens",
+            "attention",
             "blobs",
             "box_credential",
             "catalog",
@@ -120,9 +122,8 @@ class SchemaManagerTest {
     var refusal = assertThrows(Remedied.State.class, schema::migrate);
 
     assertEquals(
-        "Database schema v244 was made by a Sail release before v1; this release opens only v"
-            + SchemaManager.CURRENT_VERSION
-            + ".",
+        "Database schema v244 was made by an earlier Sail release; this release opens only v1003"
+            + " and converts none: the box is reinstalled.",
         refusal.reason());
     assertEquals(List.of(Remedy.sail("init")), refusal.remedy().commands());
     assertEquals(
@@ -133,6 +134,37 @@ class SchemaManagerTest {
         List.of("schema_version"),
         db.query("SELECT name FROM sqlite_master WHERE type = 'table'", row -> row.text(0)),
         "nothing is created beside a refused database");
+  }
+
+  /**
+   * The database 0.67.0 made, before a run recorded its cost: refused whole, the reinstall named,
+   * nothing created or changed beside it.
+   */
+  @Test
+  void aDatabaseTheReleaseBeforeMadeIsRefusedNamingAReinstallAndLeftAsItWas() {
+    stageAtVersion(1002);
+    db.execute("CREATE TABLE runs (id TEXT PRIMARY KEY)");
+    var schema = new SchemaManager(db);
+
+    var refusal = assertThrows(Remedied.State.class, schema::migrate);
+
+    assertEquals(
+        "Database schema v1002 was made by an earlier Sail release; this release opens only v1003"
+            + " and converts none: the box is reinstalled.",
+        refusal.reason());
+    assertEquals(
+        "Move " + tempDir.resolve("test.db") + " aside and run 'sail init' to make a fresh one.",
+        refusal.remedy().plain());
+    assertEquals(1002, schema.currentVersion());
+    assertEquals(
+        List.of("id"),
+        db.query("SELECT name FROM pragma_table_info('runs')", row -> row.text(0)),
+        "no column is added to a refused database");
+    assertEquals(
+        List.of("runs", "schema_version"),
+        db.query(
+            "SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name",
+            row -> row.text(0)));
   }
 
   @Test
@@ -226,6 +258,131 @@ class SchemaManagerTest {
     db.execute("UPDATE specs SET status = 'pending' WHERE id = 's'");
     assertNull(since("archived_at"));
     assertNull(since("cancelled_at"));
+  }
+
+  /**
+   * M4 at its source: ready is the first move into pending, written once; awaiting merge and done
+   * the latest moves into them, kept as the change moves on to done and archived and cleared on any
+   * other move; each the moving revision's own {@code updated_at}.
+   */
+  @Test
+  void aSpecsReadyAwaitingMergeAndDoneTimesAreItsMovesOwn() {
+    new SchemaManager(db).migrate();
+    db.execute(
+        "INSERT INTO specs (id, title, status, created_at, updated_at) VALUES ('s', 's',"
+            + " 'pending', 1000, 1000)");
+    move("in_progress", 2000);
+    move("pending", 3000);
+    move("awaiting_merge", 4000);
+    db.execute("UPDATE specs SET title = 'renamed', updated_at = 4500 WHERE id = 's'");
+    move("done", 5000);
+    assertEquals(List.of(1000L, 4000L, 5000L), times());
+    move("archived", 6000);
+    assertEquals(List.of(1000L, 4000L, 5000L), times(), "a shipped change archived keeps them");
+
+    move("pending", 7000);
+    assertEquals(Arrays.asList(1000L, null, null), times(), "reopened, it holds no done");
+    move("done", 8000);
+    assertEquals(Arrays.asList(1000L, null, 8000L), times(), "done again, not through merge");
+    db.execute(
+        "INSERT INTO specs (id, title, status, created_at, updated_at) VALUES ('d', 'd', 'draft',"
+            + " 1, 1)");
+    assertEquals(
+        Arrays.asList(null, null, null),
+        db.query(
+                "SELECT ready_at, awaiting_merge_at, done_at FROM specs WHERE id = 'd'",
+                row -> Arrays.asList(row.instant(0), row.instant(1), row.instant(2)))
+            .getFirst());
+  }
+
+  private void move(String status, long at) {
+    db.execute("UPDATE specs SET status = ?, updated_at = ? WHERE id = 's'", status, at);
+  }
+
+  private List<Long> times() {
+    return db.query(
+            "SELECT ready_at, awaiting_merge_at, done_at FROM specs WHERE id = 's'",
+            row ->
+                Arrays.asList(
+                    row.isNull(0) ? null : row.integer(0),
+                    row.isNull(1) ? null : row.integer(1),
+                    row.isNull(2) ? null : row.integer(2)))
+        .getFirst();
+  }
+
+  /**
+   * M14 at its source: a run's row finishing here adds it to its spec's kept sums, one leaving a
+   * finished status takes it back, and deleting a row, as retention does, takes nothing; a spec
+   * that arrives after its runs starts from the finished ones held.
+   */
+  @Test
+  void aSpecsKeptSumsAreItsFinishedRunsAndDeletingARowLowersNone() {
+    new SchemaManager(db).migrate();
+    db.execute("INSERT INTO specs (id, title, created_at, updated_at) VALUES ('s', 's', 1, 1)");
+    run("b1", "s", null, "build", "completed", 10, 0.5, "result");
+    run("x1", "s", null, "fix", "running", 20, 1.0, null);
+    run("w1", null, "s", "room", "failed", null, null, "none");
+    run("o1", "other", null, "build", "completed", 99, 9.0, "result");
+    assertEquals(List.of(2L, 1L, 0L, 1L, 1L, 10L, 0.5), kept("s"));
+
+    db.execute("UPDATE runs SET status = 'stopped' WHERE id = 'x1'");
+    assertEquals(List.of(3L, 1L, 1L, 2L, 1L, 30L, 1.5), kept("s"));
+    db.execute("UPDATE runs SET status = 'running' WHERE id = 'x1'");
+    assertEquals(List.of(2L, 1L, 0L, 1L, 1L, 10L, 0.5), kept("s"), "taken back out");
+    db.execute("UPDATE runs SET status = 'stopped' WHERE id = 'x1'");
+    db.execute("UPDATE runs SET exit_code = 3 WHERE id = 'x1'");
+    assertEquals(List.of(3L, 1L, 1L, 2L, 1L, 30L, 1.5), kept("s"), "a finished row's edit nets 0");
+
+    db.execute("DELETE FROM runs WHERE spec_id = 's' OR room_id = 's'");
+    assertEquals(List.of(3L, 1L, 1L, 2L, 1L, 30L, 1.5), kept("s"), "erasing a run lowers nothing");
+
+    run("l1", "late", null, "build", "completed", 5, 0.25, "result");
+    run("l2", "late", null, "fix", "running", 5, 0.25, "result");
+    db.execute("INSERT INTO specs (id, title, created_at, updated_at) VALUES ('late', 'l', 1, 1)");
+    assertEquals(List.of(1L, 1L, 0L, 0L, 0L, 5L, 0.25), kept("late"));
+  }
+
+  private void run(
+      String id,
+      String spec,
+      String room,
+      String role,
+      String status,
+      Integer tokens,
+      Double usd,
+      String source) {
+    db.execute(
+        "INSERT INTO runs (id, project, spec_id, room_id, agent, role, status, started_at,"
+            + " tokens_in, tokens_out, tokens_cache_read, tokens_cache_write, cost_usd,"
+            + " usage_source) VALUES (?, 'acme', ?, ?, 'claude-code', ?, ?, 1, ?, ?, ?, ?, ?, ?)",
+        id,
+        spec,
+        room,
+        role,
+        status,
+        tokens,
+        tokens == null ? null : 0,
+        tokens == null ? null : 0,
+        tokens == null ? null : 0,
+        usd,
+        source);
+  }
+
+  private List<Object> kept(String spec) {
+    return db.query(
+            "SELECT runs_total, runs_build, runs_fix, runs_without_usage, runs_without_cost,"
+                + " run_tokens_in, run_cost_usd FROM specs WHERE id = ?",
+            row ->
+                List.<Object>of(
+                    row.integer(0),
+                    row.integer(1),
+                    row.integer(2),
+                    row.integer(3),
+                    row.integer(4),
+                    row.integer(5),
+                    row.real(6)),
+            spec)
+        .getFirst();
   }
 
   @Test

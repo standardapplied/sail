@@ -16,10 +16,12 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import ai.singlr.sail.access.Refusal;
 import ai.singlr.sail.authority.WriteRefused;
 import ai.singlr.sail.config.SpecStatus;
+import ai.singlr.sail.config.TestDefinitions;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.ActingAs;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.Role;
+import ai.singlr.sail.store.AttentionStore;
 import ai.singlr.sail.store.ChangeLog;
 import ai.singlr.sail.store.Finding;
 import ai.singlr.sail.store.HeldProjects;
@@ -34,6 +36,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.CountDownLatch;
 import java.util.function.Consumer;
 import java.util.function.Predicate;
@@ -80,8 +83,69 @@ class GlobalSpecOperationsTest {
     return SpecCreateRequest.fromMap(base);
   }
 
+  /** Scenario 16 at the spec door (M15): saved with its harness known, refused naming it. */
   @Test
-  void measuresNeedTheRunsAndTheReviewsAndSayWhichStoreIsMissing() {
+  void aSpecAskingAnEffortItsHarnessDoesNotTakeIsRefusedNamingTheHarness() {
+    var definitions =
+        new GlobalSpecOperations(
+            specStore,
+            reviewStore,
+            null,
+            new RunStore(db),
+            () -> null,
+            () -> true,
+            project ->
+                Optional.of(
+                    TestDefinitions.yaml("name: " + project + "\nagent:\n  type: claude-code\n")),
+            () -> new AttentionStore(db));
+    var message =
+        "Claude Code takes no reasoning effort 'none'; it takes low, medium, high, xhigh. Choose"
+            + " one of those, or clear the effort.";
+
+    var ownAgent =
+        assertThrows(
+            ApiException.class,
+            () ->
+                Acting.by(
+                    UDAY_ADMIN,
+                    () ->
+                        ops.create(
+                            createReq(
+                                Map.of("agent", "claude-code", "reasoning_effort", "none")))));
+    var projectsAgent =
+        assertThrows(
+            ApiException.class,
+            () ->
+                Acting.by(
+                    UDAY_ADMIN,
+                    () -> definitions.create(createReq(Map.of("reasoning_effort", "none")))));
+    Acting.by(UDAY_ADMIN, () -> definitions.create(createReq(Map.of("reasoning_effort", "high"))));
+    var updated =
+        assertThrows(
+            ApiException.class,
+            () ->
+                Acting.by(
+                    UDAY_ADMIN,
+                    () ->
+                        definitions.update(
+                            "auth",
+                            SpecUpdateRequest.fromMap(Map.of("reasoning_effort", "none")))));
+
+    assertEquals(message, ownAgent.reason());
+    assertEquals(ErrorCode.INVALID_REQUEST, ownAgent.failure().errorCode());
+    assertEquals(message, projectsAgent.reason());
+    assertEquals(message, updated.reason());
+    assertEquals("high", specStore.findById("auth").orElseThrow().reasoningEffort());
+    Acting.by(
+        UDAY_ADMIN, () -> ops.create(createReq(Map.of("id", "free", "reasoning_effort", "none"))));
+    assertEquals(
+        "none",
+        specStore.findById("free").orElseThrow().reasoningEffort(),
+        "a spec whose harness is not known here yet is refused at dispatch instead");
+  }
+
+  @Test
+  void measuresNeedTheRunsTheReviewsAndTheAttentionAndSayWhichStoreIsMissing() {
     Acting.by(UDAY_ADMIN, () -> ops.create(createReq(Map.of())));
     var withoutRuns = new GlobalSpecOperations(specStore, reviewStore);
     var withoutReviews = new GlobalSpecOperations(specStore, null, null, new RunStore(db));
@@ -92,6 +156,11 @@ class GlobalSpecOperationsTest {
     assertEquals(
         "Review store not available.",
         assertThrows(ApiException.class, () -> withoutReviews.measured("auth", "box-7")).reason());
+    var withoutAttention = new GlobalSpecOperations(specStore, reviewStore, null, new RunStore(db));
+    assertEquals(
+        "Attention store not available.",
+        assertThrows(ApiException.class, () -> withoutAttention.measures("auth", "box-7"))
+            .reason());
   }
 
   /**
@@ -103,7 +172,14 @@ class GlobalSpecOperationsTest {
     Acting.by(UDAY_ADMIN, () -> ops.create(createReq(Map.of())));
     var measured =
         new GlobalSpecOperations(
-            specStore, reviewStore, null, new RunStore(db), () -> null, () -> true);
+            specStore,
+            reviewStore,
+            null,
+            new RunStore(db),
+            () -> null,
+            () -> true,
+            project -> Optional.empty(),
+            () -> new AttentionStore(db));
     var agent =
         Actor.agentPrincipal("claude/019fee00-0000-7000-8000-000000000001", "uday")
             .withWork(Actor.Work.of("manatee", "other", "other"));

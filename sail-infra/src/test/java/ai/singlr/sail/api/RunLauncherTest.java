@@ -205,7 +205,7 @@ class RunLauncherTest {
   @Test
   void aRunThatEndedBetweenItsStatusReadAndItsStampLaunchedAndEndedAndIsNotALostLaunch() {
     seedRunningRun();
-    Acting.system(() -> assertTrue(runStore.transition(RUN_ID, "running", "stopped", 0)));
+    Acting.system(() -> assertTrue(runStore.finish(RUN_ID, "running", "stopped", 0, null)));
     var commands = new ArrayList<String>();
 
     var status = launcher(endingShell(commands), runStore).finishLaunch(ctx(true), outcome());
@@ -319,7 +319,7 @@ class RunLauncherTest {
   @Test
   void aRunFinishedUnderItsLaunchInAContainerThatGivesNoAnswerIsNotTakenForOneThatEndedItself() {
     seedRunningRun();
-    Acting.system(() -> assertTrue(runStore.transition(RUN_ID, "running", "stopped", 0)));
+    Acting.system(() -> assertTrue(runStore.finish(RUN_ID, "running", "stopped", 0, null)));
 
     var ex =
         assertThrows(

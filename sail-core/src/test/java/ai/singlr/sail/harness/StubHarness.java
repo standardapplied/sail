@@ -78,8 +78,13 @@ public record StubHarness(String yamlName, HookFile hooks, OptionalInt loginTunn
   }
 
   @Override
-  public boolean honoursReasoningEffort() {
-    return true;
+  public List<String> efforts() {
+    return List.of();
+  }
+
+  @Override
+  public Optional<RunUsage> usage(String agentLog, String transcript) {
+    return Optional.empty();
   }
 
   @Override

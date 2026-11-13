@@ -1111,75 +1111,46 @@ class AgentSessionTest {
     assertFalse(joined.contains("exec codex exec"));
   }
 
+  /** Scenario 15 at the launch: the effort a spec asks reaches Claude Code as its flag. */
   @Test
-  void buildBackgroundLaunchCommandClaudeCodeToleratesModelAndDropsReasoningWithWarning() {
-    var originalErr = System.err;
-    var captured = new java.io.ByteArrayOutputStream();
-    System.setErr(new java.io.PrintStream(captured, true, java.nio.charset.StandardCharsets.UTF_8));
-    List<String> cmd;
-    try {
-      cmd = background(true, CLAUDE_CODE, "claude-opus-4", "high", "auth-flow", "claude-code");
-    } finally {
-      System.setErr(originalErr);
-    }
+  void claudeCodeIsLaunchedWithTheEffortItsSpecAsks() {
+    var background =
+        String.join(" ", background(true, CLAUDE_CODE, "claude-opus-4", "high", "auth", null));
+    var foreground =
+        String.join(" ", foreground(true, CLAUDE_CODE, null, "xhigh", "auth", "claude-code"));
 
-    var joined = String.join(" ", cmd);
-    assertTrue(joined.contains("claude --print"));
-    assertTrue(joined.contains("--model claude-opus-4"), "explicit model choice is honored");
-    assertFalse(joined.contains("reasoning"), "reasoning_effort is dropped for Claude Code");
+    assertTrue(background.contains("--model claude-opus-4 --effort high -p"), background);
+    assertTrue(foreground.contains("--effort xhigh -p"), foreground);
+  }
 
-    var warning = captured.toString(java.nio.charset.StandardCharsets.UTF_8);
+  /** Scenario 16 at the launch (M15): an effort the harness does not take never launches. */
+  @Test
+  void anEffortTheHarnessDoesNotTakeIsRefusedBeforeAnyCommandIsBuilt() {
+    var refused =
+        assertThrows(
+            IllegalArgumentException.class,
+            () -> background(true, CLAUDE_CODE, null, "none", "auth", "claude-code"));
+
     assertEquals(
-        "  ⚠ Claude Code has no reasoning_effort setting; dropping reasoning_effort='high' for"
-            + " spec auth-flow.\n",
-        warning,
-        "the drop must never be silent, and the harness says so in its own name");
+        "Claude Code takes no reasoning effort 'none'; it takes low, medium, high, xhigh. Choose"
+            + " one of those, or clear the effort.",
+        refused.getMessage());
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> foreground(true, CLAUDE_CODE, null, "none", "auth", null));
   }
 
   @Test
-  void buildBackgroundLaunchCommandClaudeCodeWarnsForReasoningEffortNone() {
-    var originalErr = System.err;
-    var captured = new java.io.ByteArrayOutputStream();
-    System.setErr(new java.io.PrintStream(captured, true, java.nio.charset.StandardCharsets.UTF_8));
-    try {
-      background(true, CLAUDE_CODE, null, "none", "auth-flow", "claude-code");
-    } finally {
-      System.setErr(originalErr);
-    }
-
-    var warning = captured.toString(java.nio.charset.StandardCharsets.UTF_8);
-    assertTrue(warning.contains("auth-flow"));
-    assertTrue(warning.contains("none"));
-  }
-
-  @Test
-  void buildBackgroundLaunchCommandClaudeCodeWithoutReasoningEffortIsSilent() {
-    var originalErr = System.err;
-    var captured = new java.io.ByteArrayOutputStream();
-    System.setErr(new java.io.PrintStream(captured, true, java.nio.charset.StandardCharsets.UTF_8));
-    try {
-      background(true, CLAUDE_CODE, "claude-opus-4", null, null, null);
-    } finally {
-      System.setErr(originalErr);
-    }
-
-    assertTrue(captured.toString(java.nio.charset.StandardCharsets.UTF_8).isEmpty());
-  }
-
-  @Test
-  void buildForegroundTaskCommandClaudeCodeDropsReasoningWithWarning() {
-    var originalErr = System.err;
-    var captured = new java.io.ByteArrayOutputStream();
-    System.setErr(new java.io.PrintStream(captured, true, java.nio.charset.StandardCharsets.UTF_8));
-    List<String> cmd;
-    try {
-      cmd = foreground(true, CLAUDE_CODE, null, "high", "auth-flow", "claude-code");
-    } finally {
-      System.setErr(originalErr);
-    }
-
-    assertFalse(String.join(" ", cmd).contains("reasoning"));
-    assertTrue(captured.toString(java.nio.charset.StandardCharsets.UTF_8).contains("auth-flow"));
+  void aBlankEffortAsksNoneAndNothingIsPrinted() {
+    assertEquals(
+        "",
+        stderrWhile(
+            () ->
+                assertFalse(
+                    String.join(" ", background(true, CLAUDE_CODE, null, "  ", "auth", null))
+                        .contains("--effort"))));
+    assertFalse(
+        String.join(" ", background(true, CODEX, null, "", "auth", null)).contains("effort"));
   }
 
   private static String stderrWhile(Runnable launch) {
@@ -1192,33 +1163,6 @@ class AgentSessionTest {
       System.setErr(originalErr);
     }
     return captured.toString(StandardCharsets.UTF_8);
-  }
-
-  @Test
-  void aHarnessThatHonoursReasoningEffortIsNeverWarnedAbout() {
-    assertEquals("", stderrWhile(() -> background(true, CODEX, null, "high", "auth-flow", null)));
-    assertEquals("", stderrWhile(() -> foreground(true, CODEX, null, "high", "auth-flow", null)));
-  }
-
-  @Test
-  void aBlankReasoningEffortIsNothingToDrop() {
-    assertEquals("", stderrWhile(() -> background(true, CLAUDE_CODE, null, "", "auth-flow", null)));
-    assertEquals(
-        "", stderrWhile(() -> background(true, CLAUDE_CODE, null, "  ", "auth-flow", null)));
-  }
-
-  @Test
-  void theDroppedEffortWarningNamesTheHarnessAndTheSpecOrThisLaunchWhenThereIsNone() {
-    assertEquals(
-        "  ⚠ Claude Code has no reasoning_effort setting; dropping reasoning_effort='high' for"
-            + " this launch."
-            + System.lineSeparator(),
-        stderrWhile(() -> background(true, CLAUDE_CODE, null, "high", null, null)));
-    assertEquals(
-        "  ⚠ Claude Code has no reasoning_effort setting; dropping reasoning_effort='high' for"
-            + " spec auth-flow."
-            + System.lineSeparator(),
-        stderrWhile(() -> foreground(true, CLAUDE_CODE, null, "high", "auth-flow", null)));
   }
 
   @Test

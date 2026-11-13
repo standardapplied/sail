@@ -56,7 +56,15 @@ public final class ConflictDetector {
    * edit made elsewhere, the archive's own time rides with its status.
    */
   private static final Map<String, String> FIELD_METADATA =
-      Map.of(Snapshots.STATUS_SINCE, "status");
+      Map.of(
+          Snapshots.STATUS_SINCE,
+          "status",
+          Snapshots.READY_AT,
+          "status",
+          Snapshots.AWAITING_MERGE_AT,
+          "status",
+          Snapshots.DONE_AT,
+          "status");
 
   /**
    * {@code merged} carrying, for each metadata key that tells of one work field, the side's whose

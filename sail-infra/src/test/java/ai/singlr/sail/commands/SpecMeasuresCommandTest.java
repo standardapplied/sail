@@ -203,33 +203,34 @@ class SpecMeasuresCommandTest {
           Title: OAuth flow
           Status: done
 
-          Measures (this box's record, box-7):
-            Ready: 2026-11-01T09:10:00.000Z (change log)
+          Measures (counted on box-7):
+            Ready: 2026-11-01T09:10:00.000Z (spec)
             Verified: 2026-11-01T10:10:00.000Z (review)
-            Awaiting merge: 2026-11-01T10:15:00.000Z (change log)
-            Done: 2026-11-01T11:10:00.000Z (change log)
+            Awaiting merge: 2026-11-01T10:15:00.000Z (spec)
+            Done: 2026-11-01T11:10:00.000Z (spec)
             Ready → verified: 1h 0m 0s
             Verified → done: 1h 0m 0s
             Ready → done: 2h 0m 0s
             In awaiting merge: 55m 0s
             Rework: 1 review round, 0 review errors, 1 build run, 0 fix runs, 0 carried findings
             No recorded human code act: yes (an upper bound)
-            Cost: unknown: not recorded (1 run without usage)
-            Human minutes: unknown: not recorded
+            Cost: $0.00 over 0 of 1 run, 0 tokens over 0 (in 0, out 0, cache read 0, cache write 0)
+            Budget: none set
+            Human minutes: 0 from 0 people (terminal input 0, post 0, review act 0, focus 0), a lower bound
         """,
         run("show", "auth"));
   }
 
   private static final String KNOWN_ROWS =
       """
-            • auth  1 review round, 0 review errors, 1 build run, 0 fix runs, 0 carried findings · Ready → verified 1h 0m 0s · Verified → done 1h 0m 0s · Ready → done 2h 0m 0s · In awaiting merge 55m 0s · no recorded human code act: yes (an upper bound)
-            • quick  0 review rounds, 0 review errors, 0 build runs, 0 fix runs, 0 carried findings · Ready → verified unknown (2 inputs missing) · Verified → done unknown (1 input missing) · Ready → done unknown (1 input missing) · In awaiting merge unknown (1 input missing) · no recorded human code act: yes (an upper bound)
+            • auth  1 review round, 0 review errors, 1 build run, 0 fix runs, 0 carried findings · Ready → verified 1h 0m 0s · Verified → done 1h 0m 0s · Ready → done 2h 0m 0s · In awaiting merge 55m 0s · no recorded human code act: yes (an upper bound) · cost $0.00 over 0 of 1 run, 0 tokens over 0 (in 0, out 0, cache read 0, cache write 0) · human minutes 0 from 0 people (terminal input 0, post 0, review act 0, focus 0), a lower bound
+            • quick  0 review rounds, 0 review errors, 0 build runs, 0 fix runs, 0 carried findings · Ready → verified unknown (2 inputs missing) · Verified → done unknown (1 input missing) · Ready → done unknown (1 input missing) · In awaiting merge unknown (1 input missing) · no recorded human code act: yes (an upper bound) · cost $0.00 over 0 of 0 runs, 0 tokens over 0 (in 0, out 0, cache read 0, cache write 0) · human minutes 0 from 0 people (terminal input 0, post 0, review act 0, focus 0), a lower bound
         """;
 
   @Test
   void specListMeasuresPrintsARowPerSpecThenTheMedianAndP90OfEachNumber() {
     assertEquals(
-        "  Measures of 2 specs (this box's record, box-7):\n"
+        "  Measures of 2 specs (counted on box-7):\n"
             + KNOWN_ROWS
             + """
               Median and p90, nearest rank, over the numbers known exactly:
@@ -242,11 +243,14 @@ class SpecMeasuresCommandTest {
                 Build runs: median 0, p90 1, over 2; left out 0 unknown, 0 lower bounds, 0 errors
                 Fix runs: median 0, p90 0, over 2; left out 0 unknown, 0 lower bounds, 0 errors
                 Carried findings: median 0, p90 0, over 2; left out 0 unknown, 0 lower bounds, 0 errors
+                Tokens: median 0, p90 0, over 2; left out 0 unknown, 0 lower bounds, 0 errors
+                Dollars: median $0.00, p90 $0.00, over 2; left out 0 unknown, 0 lower bounds, 0 errors
+                Human minutes: median 0, p90 0, over 2; left out 0 unknown, 0 lower bounds, 0 errors
                 No recorded human code act: 2 of 2 done (an upper bound); left out 0 unknown
             """,
         run("list", "--project", "alpha", "--status", "done", "--measures"));
     assertEquals(
-        "  Measures of 2 specs (this box's record, box-7), done any time to 2026-11-01; 0 specs"
+        "  Measures of 2 specs (counted on box-7), done any time to 2026-11-01; 0 specs"
             + " with no known move to done left out:\n"
             + KNOWN_ROWS,
         run(
@@ -269,7 +273,7 @@ class SpecMeasuresCommandTest {
     var nothing =
         "median unknown, p90 unknown, over 0; left out 0 unknown, 0 lower bounds, 0 errors";
     assertEquals(
-        "  Measures of 0 specs (this box's record), done any time to 2026-10-01; 0 specs with no"
+        "  Measures of 0 specs (counted on this box), done any time to 2026-10-01; 0 specs with no"
             + " known move to done left out:\n"
             + "  Median and p90, nearest rank, over the numbers known exactly:\n"
             + String.join(
@@ -283,7 +287,10 @@ class SpecMeasuresCommandTest {
                         "Review errors",
                         "Build runs",
                         "Fix runs",
-                        "Carried findings")
+                        "Carried findings",
+                        "Tokens",
+                        "Dollars",
+                        "Human minutes")
                     .stream()
                     .map(name -> "    " + name + ": " + nothing + "\n")
                     .toList())
@@ -308,17 +315,16 @@ class SpecMeasuresCommandTest {
   }
 
   /**
-   * What a box with no Sail id, a lower bound, a count the reader may not see and an interval no
-   * clock agrees with read as, from an answer in the shape the server serves.
+   * What a box with no Sail id, a lower bound, a count the reader may not see, an interval no clock
+   * agrees with and a cost over its budget read as, from an answer in the shape the server serves.
    */
   @Test
   void aLowerBoundReadsAtLeastAndAnUnknownOrAnErrorSaysWhy() {
-    var at = Map.of("at", "2026-11-01T09:00:00.000Z", "source", "change_log");
+    var at = Map.of("at", "2026-11-01T09:00:00.000Z", "source", "spec");
     var times = new LinkedHashMap<String, Object>();
-    times.put("box", Map.of("unknown", "no_box_id"));
     times.put("ready", at);
     times.put("verified", Map.of("unknown", "hidden_rows"));
-    times.put("awaiting_merge", Map.of("unknown", "collapsed_by_sync"));
+    times.put("awaiting_merge", Map.of("unknown", "not_reached"));
     times.put("done", at);
     var intervals = new LinkedHashMap<String, Object>();
     intervals.put("ready_to_done", Map.of("error", "done at x is before ready at y."));
@@ -328,32 +334,73 @@ class SpecMeasuresCommandTest {
     rework.put("build_runs", Map.of("count", 3, "at_least", true));
     rework.put("fix_runs", Map.of("count", 1, "at_least", true));
     rework.put("carried_findings", Map.of("unknown", "hidden_rows"));
+    var cost = new LinkedHashMap<String, Object>();
+    cost.put("runs", Map.of("count", 4, "at_least", true));
+    cost.put("runs_without_usage", Map.of("count", 1, "at_least", true));
+    cost.put("runs_without_cost", Map.of("count", 2, "at_least", true));
+    cost.put("tokens", Map.of("count", 1234567, "at_least", true));
+    cost.put("tokens_in", Map.of("count", 1000, "at_least", true));
+    cost.put("tokens_out", Map.of("count", 567, "at_least", true));
+    cost.put("tokens_cache_read", Map.of("count", 1233000, "at_least", true));
+    cost.put("tokens_cache_write", Map.of("count", 0, "at_least", true));
+    cost.put("usd", Map.of("usd", 7.204, "at_least", true));
+    cost.put("budget", Map.of("tokens", 1000000, "usd", 5.0));
+    cost.put("over_budget", true);
+    var channels = new LinkedHashMap<String, Object>();
+    channels.put("terminal_input", Map.of("count", 3));
+    channels.put("post", Map.of("count", 1));
+    channels.put("review_act", Map.of("count", 0));
+    channels.put("focus", Map.of("count", 2));
+    var minutes = new LinkedHashMap<String, Object>();
+    minutes.put("minutes", Map.of("count", 5));
+    minutes.put("by_channel", channels);
+    minutes.put("people", Map.of("count", 1));
+    minutes.put("bound", "lower");
     var answer = new LinkedHashMap<String, Object>();
+    answer.put("box", Map.of("unknown", "no_box_id"));
     answer.put("times", times);
     answer.put("intervals", intervals);
     answer.put("rework", rework);
     answer.put("no_recorded_human_code_act", Map.of("unknown", "hidden_rows"));
-    answer.put(
-        "cost",
-        Map.of(
-            "unknown", "not_recorded", "runs_without_usage", Map.of("count", 4, "at_least", true)));
-    answer.put("human_minutes", Map.of("unknown", "not_recorded"));
+    answer.put("cost", cost);
+    answer.put("human_minutes", minutes);
+    var notHeld = new LinkedHashMap<>(cost);
+    notHeld.put("budget", Map.of("unknown", "not_set"));
+    var unknownOver = new LinkedHashMap<>(cost);
+    unknownOver.put("over_budget", Map.of("unknown", "runs_not_held"));
+    var hidden = new LinkedHashMap<>(cost);
+    hidden.put("runs", Map.of("unknown", "hidden_rows"));
 
     assertEquals(
         List.of(
-            "  @|bold Measures|@ (this box's record, unknown: no box id):",
-            "    Ready: 2026-11-01T09:00:00.000Z (change log)",
+            "  @|bold Measures|@ (counted on this box, unknown: no box id):",
+            "    Ready: 2026-11-01T09:00:00.000Z (spec)",
             "    Verified: unknown: hidden rows",
-            "    Awaiting merge: unknown: collapsed by sync",
-            "    Done: 2026-11-01T09:00:00.000Z (change log)",
+            "    Awaiting merge: unknown: not reached",
+            "    Done: 2026-11-01T09:00:00.000Z (spec)",
             "    Ready → done: error: done at x is before ready at y.",
             "    Rework: review rounds unknown (hidden rows), review errors unknown (hidden rows),"
                 + " at least 3 build runs, at least 1 fix run, carried findings unknown (hidden"
                 + " rows)",
             "    No recorded human code act: unknown: hidden rows",
-            "    Cost: unknown: not recorded (at least 4 runs without usage)",
-            "    Human minutes: unknown: not recorded"),
+            "    Cost: at least $7.20 over 2 of 4 runs, 1,234,567 tokens over 3 (in 1,000, out 567,"
+                + " cache read 1,233,000, cache write 0)",
+            "    Budget: $5.00, 1,000,000 tokens: over",
+            "    Human minutes: 5 from 1 person (terminal input 3, post 1, review act 0, focus 2), a"
+                + " lower bound"),
         MeasuresText.section(answer));
+    answer.put("cost", notHeld);
+    assertEquals("    Budget: none set", MeasuresText.section(answer).get(9));
+    answer.put("cost", unknownOver);
+    assertEquals(
+        "    Budget: $5.00, 1,000,000 tokens: unknown (runs not held)",
+        MeasuresText.section(answer).get(9));
+    cost.put("over_budget", false);
+    answer.put("cost", cost);
+    assertEquals(
+        "    Budget: $5.00, 1,000,000 tokens: within", MeasuresText.section(answer).get(9));
+    answer.put("cost", hidden);
+    assertEquals("    Cost: unknown (hidden rows)", MeasuresText.section(answer).get(8));
   }
 
   @Test

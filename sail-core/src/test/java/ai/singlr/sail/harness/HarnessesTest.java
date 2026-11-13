@@ -210,8 +210,8 @@ class HarnessesTest {
 
   @Test
   void capabilitiesAreAnswersNotNames() {
-    assertFalse(CLAUDE_CODE.honoursReasoningEffort());
-    assertTrue(CODEX.honoursReasoningEffort());
+    assertEquals(List.of("low", "medium", "high", "xhigh"), CLAUDE_CODE.efforts());
+    assertEquals(List.of("none", "low", "medium", "high", "xhigh"), CODEX.efforts());
     assertEquals(3000, CLAUDE_CODE.loginTunnelPort().orElseThrow());
     assertTrue(CODEX.loginTunnelPort().isEmpty());
     assertEquals(

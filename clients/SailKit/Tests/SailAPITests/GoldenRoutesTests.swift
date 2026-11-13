@@ -24,6 +24,7 @@ let calls: [String: @Sendable (SailClient) async throws -> Void] = [
     "refusal-bad-request": { _ = try await $0.send(.post(MessagePost(body: ""), room: "harbor-design")) },
     "refusal-not-found": { _ = try await $0.send(Endpoint<Whoami>(.get, ["v1", "nowhere"])) },
     "terminal-ticket": { _ = try await $0.send(.terminalTicket(open: "harbor")) },
+    "attention": { _ = try await $0.send(.attention(conversation: "harbor-docks")) },
     "changes": { _ = try await $0.send(.changes(since: "golden.0.0")) },
     "board-specs": { _ = try await $0.send(.specs(SpecFilter(project: "harbor"))) },
     "board-rooms": { _ = try await $0.send(.rooms(project: "harbor")) },
@@ -88,6 +89,14 @@ func answer<Response>(
         #expect(ticket.ticket == "tkt_harbor")
         #expect(ticket.address == "100.64.0.7:7072")
         #expect(ticket.expiresAt.milliseconds == Goldens.pinnedMilliseconds + 30_000)
+    }
+
+    @Test func aHeartbeatReadsTheConversationTheServersMinuteAndWhetherItWasNew() throws {
+        let minute = try Endpoint<AttentionMinute>.attention(conversation: "harbor-docks")
+            .decode(response(try Exchange("attention")))
+        #expect(minute.conversation == "harbor-docks")
+        #expect(minute.recorded)
+        #expect(Int64(minute.minute.timeIntervalSince1970 * 1000) == Goldens.pinnedMilliseconds / 60_000 * 60_000)
     }
 
     @Test func projectsReadEachProjectAndItsContainer() throws {

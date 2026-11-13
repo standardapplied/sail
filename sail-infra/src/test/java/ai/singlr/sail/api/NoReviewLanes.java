@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.api;
 
+import ai.singlr.sail.harness.RunUsage;
 import ai.singlr.sail.store.RunStore;
 import java.util.List;
 
@@ -24,6 +25,12 @@ final class NoReviewLanes implements ReviewLanes {
   @Override
   public String output(RunStore.RunRow run) {
     throw new AssertionError("this test reads no run's output");
+  }
+
+  @Override
+  public RunUsage usage(RunStore.RunRow run) {
+
+    return RunUsage.NONE;
   }
 
   @Override

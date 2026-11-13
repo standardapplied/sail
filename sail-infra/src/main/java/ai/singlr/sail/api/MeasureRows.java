@@ -5,44 +5,37 @@
 
 package ai.singlr.sail.api;
 
+import ai.singlr.sail.config.ProjectDefinition;
 import ai.singlr.sail.config.SpecStatus;
-import ai.singlr.sail.store.ChangeLog;
+import ai.singlr.sail.store.AttentionStore;
 import ai.singlr.sail.store.Finding;
 import ai.singlr.sail.store.ReviewStore;
 import ai.singlr.sail.store.RunStore;
-import java.util.Collections;
-import java.util.HashMap;
+import ai.singlr.sail.store.SpecStore;
 import java.util.List;
-import java.util.Map;
-import java.util.Set;
 
 /**
  * Every row {@link SpecMeasures#of} reads of one spec, as its reader sees them on the box {@code
- * box} names (its Sail id, null on a box that has none): the spec's current {@code project}; the
- * revisions this box's change log holds of it, oldest first, and the seqs of {@code gaps}, the
- * entries before or between them it does not (compacted, or filed where the reader does not read);
- * its reviews, oldest first, and their findings; its runs, those naming the spec and those of its
- * room that name none; and {@code runErasures}, the seq of the latest run erasure this box
- * recorded, by retention or from main, for each project the reader reads, a null key for erasures
- * filed under no project.
+ * box} names (its Sail id, null on a box that has none): the spec's {@code recorded} times and the
+ * sums this box kept of its finished runs; its reviews, oldest first, and their findings; the runs
+ * of it this box holds, read as {@code GET /v1/runs?spec=} reads them, whose unfinished builds and
+ * fixes are rework already under way; the minutes this box saw people give its conversation; and
+ * the {@code budget} its project sets, null for none.
  */
 record MeasureRows(
     String specId,
-    String project,
     SpecStatus status,
     String box,
-    List<ChangeLog.Entry> history,
-    Set<Long> gaps,
+    SpecStore.Recorded recorded,
     Seen<ReviewStore.ReviewRow> reviews,
     List<Finding> findings,
     Seen<RunStore.RunRow> runs,
-    Map<String, Long> runErasures) {
+    List<AttentionStore.Minute> minutes,
+    ProjectDefinition.Budget budget) {
 
   MeasureRows {
-    history = List.copyOf(history);
-    gaps = Set.copyOf(gaps);
     findings = List.copyOf(findings);
-    runErasures = Collections.unmodifiableMap(new HashMap<>(runErasures));
+    minutes = List.copyOf(minutes);
   }
 
   /**

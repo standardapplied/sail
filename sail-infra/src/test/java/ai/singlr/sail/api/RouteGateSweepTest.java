@@ -142,6 +142,8 @@ class RouteGateSweepTest {
               "GET /v1/rooms/{room}/messages reads in scope",
               "POST /v1/rooms/{room}/messages the journal decides",
               "* /v1/rooms/{room}/{sub} serves nothing",
+              "POST /v1/attention records the caller's own attention",
+              "* /v1/attention serves nothing",
               "GET /v1/reviews/{review} reads in scope",
               "POST /v1/reviews/{review}/approve the journal decides",
               "POST /v1/reviews/{review}/dismiss/{finding} the journal decides",
@@ -526,6 +528,7 @@ class RouteGateSweepTest {
           case Gate.Unserved unserved -> "serves nothing";
           case Gate.Wakes wakes -> "wakes the change feed";
           case Gate.RunsOwn own -> "acts on its own run";
+          case Gate.Attends attends -> "records the caller's own attention";
           case Gate.Decides(var action) -> "decides " + action.name();
           case Gate.Unauthenticated(var reason) -> "unauthenticated: " + reason;
         };

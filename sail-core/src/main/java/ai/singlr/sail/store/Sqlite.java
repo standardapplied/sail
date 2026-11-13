@@ -466,6 +466,9 @@ public final class Sqlite implements AutoCloseable {
     default Instant instant(int col) {
       return isNull(col) ? null : DateTimeUtils.ofMillis(integer(col));
     }
+
+    /** The number a real column holds, or null. */
+    Double real(int col);
   }
 
   private record SqliteRow(SqliteLib lib, MemorySegment stmt) implements Row {
@@ -498,6 +501,18 @@ public final class Sqlite implements AutoCloseable {
         return (long) lib.columnInt64.invokeExact(stmt, col);
       } catch (Throwable t) {
         throw new SqliteException("Failed to read integer column " + col, t);
+      }
+    }
+
+    @Override
+    public Double real(int col) {
+      if (isNull(col)) {
+        return null;
+      }
+      try {
+        return (double) lib.columnDouble.invokeExact(stmt, col);
+      } catch (Throwable t) {
+        throw new SqliteException("Failed to read real column " + col, t);
       }
     }
 
@@ -546,6 +561,7 @@ public final class Sqlite implements AutoCloseable {
       MethodHandle columnText,
       MethodHandle columnBlob,
       MethodHandle columnInt64,
+      MethodHandle columnDouble,
       MethodHandle columnType,
       MethodHandle columnBytes,
       MethodHandle columnCount,
@@ -635,6 +651,10 @@ public final class Sqlite implements AutoCloseable {
               lookup.find("sqlite3_column_int64").orElseThrow(),
               FunctionDescriptor.of(
                   ValueLayout.JAVA_LONG, ValueLayout.ADDRESS, ValueLayout.JAVA_INT)),
+          linker.downcallHandle(
+              lookup.find("sqlite3_column_double").orElseThrow(),
+              FunctionDescriptor.of(
+                  ValueLayout.JAVA_DOUBLE, ValueLayout.ADDRESS, ValueLayout.JAVA_INT)),
           linker.downcallHandle(
               lookup.find("sqlite3_column_type").orElseThrow(),
               FunctionDescriptor.of(

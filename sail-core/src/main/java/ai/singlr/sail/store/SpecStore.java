@@ -26,6 +26,7 @@ import java.util.Collection;
 import java.util.Collections;
 import java.util.EnumMap;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -53,6 +54,25 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
 
   private static final String ENTITY = "spec";
   private static final String STATUS_SINCE = "status_since";
+
+  /**
+   * A spec's own times as its snapshot carries them, by column, with the reserved key each crosses
+   * the wire as: written by the status triggers on the box that makes the move, and verbatim by
+   * every box that applies its revision.
+   */
+  private static final Map<String, String> TIMES =
+      orderedTimes(
+          "ready_at", Snapshots.READY_AT,
+          "awaiting_merge_at", Snapshots.AWAITING_MERGE_AT,
+          "done_at", Snapshots.DONE_AT);
+
+  private static Map<String, String> orderedTimes(String... pairs) {
+    var times = new LinkedHashMap<String, String>();
+    for (var i = 0; i < pairs.length; i += 2) {
+      times.put(pairs[i], pairs[i + 1]);
+    }
+    return Collections.unmodifiableMap(times);
+  }
 
   private final Sqlite db;
   private final BlobStore blobs;
@@ -555,19 +575,92 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
         });
   }
 
+  /**
+   * What this box keeps of a spec's finished runs, folded as each run's row finished here and never
+   * taken back by erasing it (M14): how many, how many built and how many fixed, how many reported
+   * no usage and how many no dollars, and the tokens and dollars the others reported.
+   */
+  public record KeptRuns(
+      long runs,
+      long builds,
+      long fixes,
+      long withoutUsage,
+      long withoutCost,
+      long tokensIn,
+      long tokensOut,
+      long tokensCacheRead,
+      long tokensCacheWrite,
+      double costUsd) {}
+
+  /**
+   * A spec's own record of its change: when it first entered {@code pending}, last entered {@code
+   * awaiting_merge} and last entered {@code done} (null for a move it has not made), the same on
+   * every box (M4), and this box's {@link KeptRuns}. {@code erasedBeforeHeld} says the sums may
+   * lack runs: this box heard main erase a run of the spec's project before it first held the spec,
+   * after the spec was made, so a run of it may have gone before this box could count it.
+   */
+  public record Recorded(
+      Instant readyAt,
+      Instant awaitingMergeAt,
+      Instant doneAt,
+      KeptRuns runs,
+      boolean erasedBeforeHeld) {}
+
+  /** The record of each of {@code ids} this box holds, in two reads however many. */
+  public Map<String, Recorded> recorded(Collection<String> ids) {
+    var marks = YamlUtil.dumpJson(List.copyOf(ids));
+    var lacking =
+        new HashSet<>(
+            db.query(
+                """
+                SELECT DISTINCT s.id FROM specs s
+                JOIN (SELECT entity_id, MIN(seq) AS first FROM (
+                        SELECT entity_id, seq FROM change_log WHERE entity_type = 'spec'
+                        UNION ALL
+                        SELECT entity_id, seq FROM compacted_entries WHERE entity_type = 'spec')
+                    GROUP BY entity_id) held ON held.entity_id = s.id
+                JOIN change_log e ON e.entity_type = 'run' AND e.kind = 'erasure'
+                    AND e.origin = ? AND e.seq < held.first AND e.recorded_at >= s.created_at
+                JOIN change_heads h ON h.entity_type = 'run' AND h.entity_id = e.entity_id
+                    AND (h.project IS NULL OR h.project = '' OR h.project = s.project)
+                WHERE s.id IN (SELECT value FROM json_each(?))""",
+                row -> row.text(0),
+                ChangeLog.Entry.SYNC,
+                marks));
+    var recorded = new HashMap<String, Recorded>();
+    db.query(
+            """
+            SELECT id, ready_at, awaiting_merge_at, done_at, runs_total, runs_build, runs_fix,
+                runs_without_usage, runs_without_cost, run_tokens_in, run_tokens_out,
+                run_tokens_cache_read, run_tokens_cache_write, run_cost_usd
+            FROM specs WHERE id IN (SELECT value FROM json_each(?))""",
+            row ->
+                Map.entry(
+                    row.text(0),
+                    new Recorded(
+                        row.instant(1),
+                        row.instant(2),
+                        row.instant(3),
+                        new KeptRuns(
+                            row.integer(4),
+                            row.integer(5),
+                            row.integer(6),
+                            row.integer(7),
+                            row.integer(8),
+                            row.integer(9),
+                            row.integer(10),
+                            row.integer(11),
+                            row.integer(12),
+                            row.real(13)),
+                        lacking.contains(row.text(0)))),
+            marks)
+        .forEach(entry -> recorded.put(entry.getKey(), entry.getValue()));
+    return recorded;
+  }
+
   /** Every recorded revision of a spec, oldest first. */
   public List<ChangeLog.Entry> history(String id) {
     return changeLog.history(ENTITY, id);
-  }
-
-  /** Every recorded revision of each of {@code ids}, in one read, oldest first. */
-  public List<ChangeLog.Entry> histories(Collection<String> ids) {
-    return changeLog.histories(ENTITY, ids);
-  }
-
-  /** The revisions of each of {@code ids} compaction dropped, as seq and id, oldest first. */
-  public List<ChangeLog.Head> compacted(Collection<String> ids) {
-    return changeLog.compacted(ENTITY, ids);
   }
 
   /**
@@ -586,6 +679,7 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
             .orElseThrow(() -> unrestorable(id, rev));
     var snapshot = new LinkedHashMap<>(YamlUtil.parseMap(entry.snapshot()));
     snapshot.remove(STATUS_SINCE);
+    TIMES.keySet().forEach(snapshot::remove);
     db.transaction(
         () -> {
           snapshot.put(
@@ -800,13 +894,20 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
   private Map<String, Object> snapshotMap(SpecRow spec) {
     var hashes =
         db.queryOne(
-                "SELECT body_hash, plan_hash, COALESCE(archived_at, cancelled_at) FROM specs"
-                    + " WHERE id = ?",
+                "SELECT body_hash, plan_hash, COALESCE(archived_at, cancelled_at), "
+                    + String.join(", ", TIMES.keySet())
+                    + " FROM specs WHERE id = ?",
                 row -> {
                   requireHashed(row.text(0), spec.id());
                   requireHashed(row.text(1), spec.id());
-                  return Arrays.<Object>asList(
-                      row.text(0), row.text(1), Snapshots.millis(row.instant(2)));
+                  var held =
+                      new ArrayList<Object>(
+                          Arrays.asList(
+                              row.text(0), row.text(1), Snapshots.millis(row.instant(2))));
+                  for (var column = 3; column < 3 + TIMES.size(); column++) {
+                    held.add(Snapshots.millis(row.instant(column)));
+                  }
+                  return held;
                 },
                 spec.id())
             .orElseThrow();
@@ -832,6 +933,13 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
     map.put("plan_hash", hashes.get(1));
     if (hashes.get(2) != null) {
       map.put(STATUS_SINCE, hashes.get(2));
+    }
+    var column = 3;
+    for (var time : TIMES.keySet()) {
+      if (hashes.get(column) != null) {
+        map.put(time, hashes.get(column));
+      }
+      column++;
     }
     return map;
   }
@@ -909,6 +1017,12 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
     db.execute(
         "UPDATE specs SET body_hash = ?, plan_hash = ? WHERE id = ?", bodyHash, planHash, id);
     applyStatusSince(id, spec.status(), Snapshots.instant(snapshot, STATUS_SINCE));
+    for (var time : TIMES.keySet()) {
+      var at = Snapshots.instant(snapshot, time);
+      if (at != null) {
+        db.execute("UPDATE specs SET " + time + " = ? WHERE id = ?", at, id);
+      }
+    }
   }
 
   /**
@@ -998,6 +1112,12 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
     if (since != null) {
       m.put(Snapshots.STATUS_SINCE, since);
     }
+    TIMES.forEach(
+        (time, reserved) -> {
+          if (full.get(time) != null) {
+            m.put(reserved, full.get(time));
+          }
+        });
     return Snapshots.timed(m, full);
   }
 
@@ -1148,6 +1268,7 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
     full.put("created_at", snapshot.get(Snapshots.CREATED_AT));
     full.put("updated_at", snapshot.get(Snapshots.UPDATED_AT));
     full.put(STATUS_SINCE, snapshot.get(Snapshots.STATUS_SINCE));
+    TIMES.forEach((time, reserved) -> full.put(time, snapshot.get(reserved)));
     return full;
   }
 

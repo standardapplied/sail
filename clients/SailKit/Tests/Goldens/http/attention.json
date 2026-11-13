@@ -1,0 +1,18 @@
+{
+  "request": {
+    "body": {
+      "conversation": "harbor-docks"
+    },
+    "method": "POST",
+    "path": "/v1/attention"
+  },
+  "response": {
+    "body": {
+      "conversation": "harbor-docks",
+      "minute": "2026-11-11T09:00:00.000Z",
+      "recorded": true,
+      "schema_version": 1
+    },
+    "status": 200
+  }
+}

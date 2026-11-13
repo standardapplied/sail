@@ -22,6 +22,8 @@ final class ClaudeCode implements Harness {
 
   private static final String BINARY = "claude";
 
+  private static final List<String> EFFORTS = List.of("low", "medium", "high", "xhigh");
+
   /**
    * The sail-owned settings file, passed to {@code claude} via {@code --settings} only when sail
    * launches the agent: engineer SSH sessions that run bare {@code claude} never see these hooks,
@@ -91,6 +93,7 @@ final class ClaudeCode implements Harness {
     return invocation(launch)
         + perm
         + modelOption(launch.model())
+        + effortOption(launch.reasoningEffort())
         + resume
         + " -p "
         + launch.task();
@@ -142,6 +145,7 @@ final class ClaudeCode implements Harness {
     return invocation(launch)
         + readOnlyOptions()
         + modelOption(launch.model())
+        + effortOption(launch.reasoningEffort())
         + resume
         + " -p "
         + launch.task();
@@ -202,9 +206,74 @@ final class ClaudeCode implements Harness {
         : BINARY;
   }
 
+  /**
+   * The levels of {@code --effort} that are Sail's own: {@code max} and {@code ultracode} are not.
+   */
   @Override
-  public boolean honoursReasoningEffort() {
-    return false;
+  public List<String> efforts() {
+    return EFFORTS;
+  }
+
+  /**
+   * The last {@code result} line of the log that reports anything: a crashed session's last result
+   * may carry every figure zeroed, and the running totals of the one before it are the run's.
+   * Tokens are {@code modelUsage}'s, summed over the models it names, since {@code usage} leaves
+   * out what subagents spent; the dollars are {@code total_cost_usd}; the model is the one that
+   * cost most. A result with no {@code modelUsage} gives its {@code usage}, and no model.
+   */
+  @Override
+  public Optional<RunUsage> usage(String agentLog, String transcript) {
+    return RunUsage.last(agentLog, "\"type\":\"result\"", ClaudeCode::reports)
+        .map(ClaudeCode::usageOf);
+  }
+
+  private static boolean reports(Map<String, Object> line) {
+    if (!"result".equals(line.get("type"))) {
+      return false;
+    }
+    var usage = usageOf(line);
+    return (usage.costUsd() != null && usage.costUsd() > 0)
+        || (usage.tokens() != null && usage.tokens() > 0);
+  }
+
+  private static RunUsage usageOf(Map<String, Object> result) {
+    var cost = result.get("total_cost_usd") instanceof Number usd ? usd.doubleValue() : null;
+    var models = RunUsage.map(result, "modelUsage");
+    if (models.isEmpty()) {
+      var usage = RunUsage.map(result, "usage");
+      return new RunUsage(
+          null,
+          RunUsage.count(usage, "input_tokens"),
+          RunUsage.count(usage, "output_tokens"),
+          RunUsage.count(usage, "cache_read_input_tokens"),
+          RunUsage.count(usage, "cache_creation_input_tokens"),
+          cost,
+          RunUsage.Source.RESULT);
+    }
+    String model = null;
+    var most = -1.0;
+    long in = 0;
+    long out = 0;
+    long read = 0;
+    long write = 0;
+    for (var entry : models.entrySet()) {
+      var figures = RunUsage.map(models, entry.getKey());
+      in += figure(figures, "inputTokens");
+      out += figure(figures, "outputTokens");
+      read += figure(figures, "cacheReadInputTokens");
+      write += figure(figures, "cacheCreationInputTokens");
+      var spent = figures.get("costUSD") instanceof Number usd ? usd.doubleValue() : 0;
+      if (spent > most) {
+        most = spent;
+        model = entry.getKey();
+      }
+    }
+    return new RunUsage(model, in, out, read, write, cost, RunUsage.Source.RESULT);
+  }
+
+  private static long figure(Map<String, Object> figures, String key) {
+    var count = RunUsage.count(figures, key);
+    return count == null ? 0 : count;
   }
 
   @Override
@@ -304,5 +373,9 @@ final class ClaudeCode implements Harness {
 
   private static String modelOption(String model) {
     return model == null ? "" : " --model " + model;
+  }
+
+  private static String effortOption(String effort) {
+    return effort == null ? "" : " --effort " + effort;
   }
 }

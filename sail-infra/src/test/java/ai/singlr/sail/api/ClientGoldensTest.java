@@ -196,6 +196,7 @@ class ClientGoldensTest {
       box.record(
           http, "specs-measures", "GET", "/v1/specs:measures?project=" + PROJECT, uday, null);
       box.record(http, "workspaces", "GET", "/v1/projects/" + PROJECT + "/workspaces", uday, null);
+      box.record(http, "attention", "POST", "/v1/attention", uday, Map.of("conversation", SPEC));
       box.record(
           http,
           "terminal-ticket",

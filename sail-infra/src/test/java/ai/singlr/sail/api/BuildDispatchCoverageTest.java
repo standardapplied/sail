@@ -113,6 +113,79 @@ class BuildDispatchCoverageTest {
 
   @TempDir Path tempDir;
 
+  private static void asks(Sqlite db, String effort) {
+    var row = auth("acme");
+    Acting.system(
+        () ->
+            new SpecStore(db)
+                .update(
+                    new SpecStore.SpecRow(
+                        row.id(),
+                        row.project(),
+                        row.title(),
+                        row.status(),
+                        row.assignee(),
+                        row.agent(),
+                        row.model(),
+                        effort,
+                        row.branch(),
+                        row.priority(),
+                        row.createdBy(),
+                        row.createdAt(),
+                        row.updatedAt(),
+                        row.updatedBy(),
+                        row.dependsOn(),
+                        row.repos())));
+  }
+
+  /** Scenario 15: the spec's effort reaches Claude Code's command, and its run row says so. */
+  @Test
+  void aSpecAskingHighEffortStartsClaudeCodeWithItAndItsRunSaysHigh() throws IOException {
+    var db = seedDb();
+    asks(db, "high");
+    var launched = new CopyOnWriteArrayList<List<String>>();
+    var ops =
+        ops(
+            happyPath()
+                .on(REPO + " rev-parse --verify --quiet refs/remotes/origin/main", "")
+                .on(REPO + " checkout -b sail/auth origin/main", ""),
+            YAML,
+            db,
+            new RunStore(db),
+            new CopyOnWriteArrayList<>(),
+            command -> {
+              launched.add(command);
+              return 0;
+            });
+
+    assertInstanceOf(DispatchOperations.Dispatched.class, dispatch(ops));
+
+    assertTrue(
+        launched.stream().anyMatch(command -> String.join(" ", command).contains("--effort high")),
+        launched.toString());
+    var run = new RunStore(db).listForSpec("auth").getFirst();
+    assertEquals("high", run.effort());
+    assertEquals(null, run.model(), "none asked: the harness default, until it reports one");
+  }
+
+  /** Scenario 16 at the dispatch door (M15): refused naming the harness, before any run. */
+  @Test
+  void aSpecAskingAnEffortItsHarnessDoesNotTakeIsRefusedBeforeAnyRunIsReserved()
+      throws IOException {
+    var db = seedDb();
+    asks(db, "none");
+    var ops = ops(happyPath(), YAML, db);
+
+    var thrown = assertThrows(ApiException.class, () -> dispatch(ops));
+
+    assertEquals(ErrorCode.BAD_REQUEST, thrown.failure().errorCode());
+    assertEquals(
+        "Claude Code takes no reasoning effort 'none'; it takes low, medium, high, xhigh. Choose"
+            + " one of those, or clear the effort.",
+        thrown.getMessage());
+    assertEquals(List.of(), new RunStore(db).listForSpec("auth"));
+  }
+
   @Test
   void aDispatchWithNoAgentConfiguredFailsLoud() throws IOException {
     var db = seedDb();
