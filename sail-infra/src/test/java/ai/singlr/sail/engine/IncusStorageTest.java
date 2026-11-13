@@ -10,6 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.common.Remedied;
 import java.io.IOException;
 import java.util.List;
 import java.util.Optional;
@@ -105,7 +106,7 @@ class IncusStorageTest {
             + " extension, which Incus has from 6.0.1 on. Nothing was written. Add Zabbly's stable"
             + " apt source as Zabbly's README says (https://github.com/zabbly/incus), then move the"
             + " Incus Sail holds to it with sudo sail host incus upgrade; then run this again.",
-        refused.getMessage());
+        OperatorCommand.SUDO.render((Remedied) refused));
     assertTrue(
         assertThrows(
                 IllegalStateException.class,

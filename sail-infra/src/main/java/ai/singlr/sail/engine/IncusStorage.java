@@ -5,6 +5,8 @@
 
 package ai.singlr.sail.engine;
 
+import ai.singlr.sail.common.Remedied;
+import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.HostYaml;
 import ai.singlr.sail.config.YamlUtil;
@@ -235,14 +237,17 @@ public final class IncusStorage {
             ? listed
             : List.of();
     if (!extensions.contains(VDEVS)) {
-      throw new IllegalStateException(
+      throw Remedied.state(
           "This box's Incus cannot make a mirrored pool: it lacks the "
               + VDEVS
               + " API extension, which Incus has from 6.0.1 on"
               + (server.ok() ? "" : " (incus query /1.0: " + server.reason() + ")")
-              + ". Nothing was written. Add Zabbly's stable apt source as Zabbly's README says"
-              + " (https://github.com/zabbly/incus), then move the Incus Sail holds to it with sudo"
-              + " sail host incus upgrade; then run this again.");
+              + ". Nothing was written.",
+          Remedy.of(
+              "Add Zabbly's stable apt source as Zabbly's README says"
+                  + " (https://github.com/zabbly/incus), then move the Incus Sail holds to it with ",
+              Remedy.sail("host incus upgrade"),
+              "; then run this again."));
     }
   }
 
