@@ -32,7 +32,7 @@ public struct ProjectSummary: Codable, Equatable, Sendable, Identifiable {
 
 /// What a project's container is doing: `error` when the box could not tell.
 public enum ContainerStatus: String, CaseIterable, Sendable {
-    case running, stopped
+    case running, stopped, frozen
     case notCreated = "not_created"
     case error
 }

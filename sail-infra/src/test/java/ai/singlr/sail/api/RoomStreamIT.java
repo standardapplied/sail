@@ -91,7 +91,8 @@ class RoomStreamIT {
         exchange ->
             exchange.setAttribute(ApiAuth.ACTOR, new Actor(null, Role.MEMBER, Actor.Lane.API));
     server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
-    server.createContext("/v1/events/stream", new SseHandler(room.bus, auth, room.live::turnState));
+    server.createContext(
+        "/v1/events/stream", new SseHandler(room.bus, auth, room.live::turnState, ChangeFeed.NONE));
     server.setExecutor(Executors.newVirtualThreadPerTaskExecutor());
     server.start();
   }

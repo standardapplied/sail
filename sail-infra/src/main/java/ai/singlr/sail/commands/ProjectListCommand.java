@@ -121,6 +121,7 @@ public final class ProjectListCommand implements Runnable {
     return switch (state) {
       case ContainerState.Running ignored -> "running";
       case ContainerState.Stopped ignored -> "stopped";
+      case ContainerState.Frozen ignored -> "frozen";
       case ContainerState.NotCreated ignored -> "not_provisioned";
       case ContainerState.Error ignored -> "error";
     };

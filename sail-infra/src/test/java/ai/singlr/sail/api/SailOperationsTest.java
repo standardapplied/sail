@@ -190,6 +190,12 @@ class SailOperationsTest {
             operations(shell().on("incus list ^acme$", EMPTY_JSON)).project("acme"),
             "container_status"));
     assertEquals(
+        "frozen",
+        get(
+            operations(shell().on("incus list ^acme$", STOPPED_JSON.replace("Stopped", "Frozen")))
+                .project("acme"),
+            "container_status"));
+    assertEquals(
         "error",
         get(
             operations(shell().on("incus list ^acme$", new ShellExec.Result(1, "", "boom")))
@@ -304,7 +310,6 @@ class SailOperationsTest {
             shell().on("incus list --format json", EMPTY_JSON),
             TestProjects.reading(yaml),
             null,
-            null,
             new SpecStore(db),
             new ReviewStore(db),
             projectStore);
@@ -327,7 +332,6 @@ class SailOperationsTest {
         new SailOperations(
             new FakeShell(),
             ProjectReader.ofCatalog(new ProjectStore(db)),
-            null,
             null,
             new SpecStore(db),
             new ReviewStore(db),
@@ -835,7 +839,6 @@ class SailOperationsTest {
               shell,
               TestProjects.reading(yaml),
               (command, logPath) -> 4242L,
-              null,
               null,
               specStore,
               new ReviewStore(db),
@@ -1910,7 +1913,6 @@ class SailOperationsTest {
             shell().on("incus list ^acme$", RUNNING_JSON),
             TestProjects.reading(yaml),
             new EventBus(),
-            null,
             new SpecStore(db),
             new ReviewStore(db),
             new RunStore(db),
@@ -1938,7 +1940,6 @@ class SailOperationsTest {
                 shell(),
                 TestProjects.reading(yaml),
                 new EventBus(),
-                null,
                 specStore,
                 new ReviewStore(db),
                 new RunStore(db),
@@ -1982,7 +1983,6 @@ class SailOperationsTest {
             shell(),
             TestProjects.reading(yaml),
             new EventBus(),
-            null,
             new SpecStore(db),
             new ReviewStore(db),
             new RunStore(db),
@@ -2147,7 +2147,6 @@ class SailOperationsTest {
         new SailOperations(
             shell,
             TestProjects.reading(yaml),
-            null,
             null,
             store,
             new ReviewStore(db),
@@ -2345,7 +2344,6 @@ class SailOperationsTest {
               TestProjects.reading(yaml),
               (cmd, log) -> 4242L,
               bus,
-              null,
               store,
               null,
               null,
@@ -2851,8 +2849,7 @@ class SailOperationsTest {
   @Test
   void publishEventFailsWithNoControlPlaneToDecideItBy(@TempDir Path tmp) throws Exception {
     try (var bus = new EventBus()) {
-      var operations =
-          new SailOperations(shell(), TestProjects.reading(baseYamlPath(tmp)), bus, null);
+      var operations = new SailOperations(shell(), TestProjects.reading(baseYamlPath(tmp)), bus);
       var result =
           Actor.call(
               ADMIN,
@@ -2867,8 +2864,7 @@ class SailOperationsTest {
   @Test
   void publishEventReturnsStampedIdWhenBusWired(@TempDir Path tmp) throws Exception {
     try (var bus = new EventBus()) {
-      var persister = new AuditPersister(tmp.resolve("events.jsonl"), 16);
-      var operations = eventOperations(tmp, bus, persister);
+      var operations = eventOperations(tmp, bus);
       var result =
           Actor.call(
               ADMIN,
@@ -2878,44 +2874,6 @@ class SailOperationsTest {
       assertTrue(result.isSuccess());
       assertEquals(1L, get(result, "id"));
       assertNotNull(get(result, "event"));
-    }
-  }
-
-  @Test
-  void recentEventsRejectsBadLimit() throws Exception {
-    var operations = operations(baseYaml(), shell());
-    assertError(ErrorCode.INVALID_REQUEST, operations.recentEvents(0));
-    assertError(ErrorCode.INVALID_REQUEST, operations.recentEvents(-1));
-    assertError(ErrorCode.INVALID_REQUEST, operations.recentEvents(99999));
-  }
-
-  @Test
-  void recentEventsEmptyWhenPersisterMissing() throws Exception {
-    var operations = operations(baseYaml(), shell());
-    var result = operations.recentEvents(10);
-    assertTrue(result.isSuccess());
-    assertEquals(10, get(result, "limit"));
-    assertEquals(0, get(result, "returned"));
-  }
-
-  @Test
-  void recentEventsReplaysFromPersister(@TempDir Path tmp) throws Exception {
-    try (var bus = new EventBus()) {
-      var persister = new AuditPersister(tmp.resolve("events.jsonl"), 16);
-      var latch = new CountDownLatch(2);
-      bus.subscribe(BusTesting.latching(persister, latch));
-      var operations = eventOperations(tmp, bus, persister);
-
-      Actor.run(
-          ADMIN,
-          () -> {
-            operations.publishEvent(Event.of("acme", null, "spec_dispatched", "sail", "h"));
-            operations.publishEvent(Event.of("acme", null, "snapshot_created", "sail", "h"));
-          });
-
-      BusTesting.awaitDelivery(latch);
-      var result = operations.recentEvents(5);
-      assertTrue(result.isSuccess());
     }
   }
 
@@ -3035,7 +2993,7 @@ class SailOperationsTest {
             public void onEvent(Event event) {}
           });
       var operations =
-          new SailOperations(shell(), TestProjects.reading(baseYamlPath(tempDir)), bus, null);
+          new SailOperations(shell(), TestProjects.reading(baseYamlPath(tempDir)), bus);
 
       var result = operations.eventBusStats();
 
@@ -3122,7 +3080,7 @@ class SailOperationsTest {
     var findingId = reviewStore.findingsForReview(reviewId).getFirst().id();
     var operations =
         new SailOperations(
-            shell(), TestProjects.reading(yaml), null, null, null, specStore, reviewStore, null);
+            shell(), TestProjects.reading(yaml), null, null, specStore, reviewStore, null);
 
     assertTrue(operations.reviewDetail(reviewId).isSuccess());
     assertTrue(Acting.by(ADMIN, () -> operations.dismissFinding(reviewId, findingId)).isSuccess());
@@ -3388,8 +3346,7 @@ class SailOperationsTest {
   @Test
   void eventBusStatsReflectsBusState(@TempDir Path tmp) throws Exception {
     try (var bus = new EventBus()) {
-      var persister = new AuditPersister(tmp.resolve("events.jsonl"), 16);
-      var operations = eventOperations(tmp, bus, persister);
+      var operations = eventOperations(tmp, bus);
       Actor.run(
           ADMIN,
           () -> operations.publishEvent(Event.of("acme", null, "spec_dispatched", "sail", "h")));
@@ -3399,15 +3356,12 @@ class SailOperationsTest {
     }
   }
 
-  private SailOperations eventOperations(Path dir, EventBus bus, AuditPersister persister)
-      throws IOException {
+  private SailOperations eventOperations(Path dir, EventBus bus) throws IOException {
     var db = Sqlite.open(dir.resolve("events.db"));
     new SchemaManager(db).migrate();
     HeldProjects.hold(db, "acme");
     return TestControlPlane.standalone(
-        new SailOperations(shell(), TestProjects.reading(baseYamlPath(dir)), bus, persister),
-        db,
-        dir);
+        new SailOperations(shell(), TestProjects.reading(baseYamlPath(dir)), bus), db, dir);
   }
 
   private Path baseYamlPath(Path dir) throws IOException {
@@ -3517,7 +3471,6 @@ class SailOperationsTest {
         TestProjects.reading(yaml),
         (command, logPath) -> 4242L,
         bus,
-        null,
         specStore,
         reviewStore,
         sessionStore,
@@ -3551,7 +3504,6 @@ class SailOperationsTest {
         TestProjects.reading(yaml),
         null,
         null,
-        null,
         specStore,
         null,
         null,
@@ -3582,7 +3534,6 @@ class SailOperationsTest {
         shell,
         TestProjects.reading(yaml),
         fallback,
-        null,
         null,
         store,
         null,
@@ -3725,7 +3676,6 @@ class SailOperationsTest {
         shell,
         definitions,
         (command, logPath) -> 4242L,
-        null,
         null,
         null,
         null,

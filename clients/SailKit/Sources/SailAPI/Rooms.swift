@@ -43,6 +43,28 @@ public struct Room: Codable, Equatable, Sendable, Identifiable {
         self.questionMessageID = questionMessageID
     }
 
+    /// Reads a room as a list or the change feed shapes it. A fed room carries none of the fields
+    /// the list derives from other rows (``HeldRows`` derives them): its specs, latest activity and
+    /// open question read as none until derived.
+    public init(from decoder: any Decoder) throws {
+        let fields = try decoder.container(keyedBy: CodingKeys.self)
+        id = try fields.decode(String.self, forKey: .id)
+        project = try fields.decode(String.self, forKey: .project)
+        title = try fields.decode(String.self, forKey: .title)
+        assignee = try fields.decodeIfPresent(String.self, forKey: .assignee)
+        wake = try fields.decodeIfPresent(Open<WakeMode>.self, forKey: .wake)
+        effectiveWake = try fields.decode(Open<WakeMode>.self, forKey: .effectiveWake)
+        members = try fields.decodeIfPresent([RoomMember].self, forKey: .members) ?? []
+        specIDs = try fields.decodeIfPresent([String].self, forKey: .specIDs) ?? []
+        createdBy = try fields.decodeIfPresent(String.self, forKey: .createdBy)
+        createdAt = try fields.decode(Date.self, forKey: .createdAt)
+        updatedAt = try fields.decode(Date.self, forKey: .updatedAt)
+        updatedBy = try fields.decodeIfPresent(String.self, forKey: .updatedBy)
+        lastActivityAt = try fields.decodeIfPresent(Date.self, forKey: .lastActivityAt)
+        needsReply = try fields.decodeIfPresent(Bool.self, forKey: .needsReply) ?? false
+        questionMessageID = try fields.decodeIfPresent(String.self, forKey: .questionMessageID)
+    }
+
     private enum CodingKeys: String, CodingKey {
         case id, project, title, assignee, wake, members
         case effectiveWake = "effective_wake"

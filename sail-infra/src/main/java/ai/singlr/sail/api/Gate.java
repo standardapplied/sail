@@ -20,10 +20,10 @@ import java.util.function.Supplier;
  * route's handler runs; the pages, which authenticate no one, declare only unauthenticated routes.
  * A route either declares the action its operation decides on the row it resolves; or reads in
  * scope, every row through {@code ReadFilter}; or makes a write the journal decides by its type's
- * rule; or is decided by the terminal host, as it decides an open or an attach; or serves nothing,
- * answering a request as the API always has; or is unauthenticated, for a reason, before any
- * credential is asked. What no row is needed to decide, the router decides itself: operating the
- * box, and managing people.
+ * rule; or wakes the change feed's streams, which any caller may; or is decided by the terminal
+ * host, as it decides an open or an attach; or serves nothing, answering a request as the API
+ * always has; or is unauthenticated, for a reason, before any credential is asked. What no row is
+ * needed to decide, the router decides itself: operating the box, and managing people.
  */
 sealed interface Gate {
 
@@ -38,6 +38,12 @@ sealed interface Gate {
 
   /** A terminal ticket, which the terminal host decides as it decides that open or attach. */
   Gate TERMINAL = new Terminal();
+
+  /**
+   * A wake of the box's change-feed streams, which carries nothing and touches no row: any caller
+   * who authenticates may send it, as every page it wakes is read as its own reader.
+   */
+  Gate WAKES = new Wakes();
 
   /** A request no operation serves, answered with the refusal the API has always given it. */
   Gate UNSERVED = new Unserved();
@@ -93,6 +99,9 @@ sealed interface Gate {
 
   /** The journal decides the route's write by its type's rule. */
   record Journal() implements Gate {}
+
+  /** The route wakes the change feed's streams, and reads and writes nothing. */
+  record Wakes() implements Gate {}
 
   /** The route reaches no operation, after reading at most the project the path names. */
   record Unserved() implements Gate {}

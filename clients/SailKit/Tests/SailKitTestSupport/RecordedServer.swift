@@ -9,7 +9,7 @@ public actor RecordedServer: Transport {
 
     public init(_ exchanges: [Exchange]) {
         answers = Dictionary(
-            exchanges.map { ("\($0.method) \($0.path)", HTTPResponse(status: $0.status, body: $0.body)) },
+            exchanges.map { ("\($0.method) \($0.path)", HTTPResponse(status: $0.status, headers: $0.headers, body: $0.body)) },
             uniquingKeysWith: { first, _ in first }
         )
     }

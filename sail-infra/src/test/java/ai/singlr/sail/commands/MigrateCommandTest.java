@@ -19,6 +19,7 @@ import ai.singlr.sail.engine.Apt;
 import ai.singlr.sail.engine.HostProvisioner;
 import ai.singlr.sail.engine.NeedrestartPolicy;
 import ai.singlr.sail.engine.OperatorCommand;
+import ai.singlr.sail.engine.PoolSource;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ScriptedShellExecutor;
 import ai.singlr.sail.engine.ShellExec;
@@ -458,10 +459,18 @@ class MigrateCommandTest {
 
   @Test
   void initAndMigrateWriteTheSameNeedrestartPolicy(@TempDir Path dir) throws Exception {
-    var provisioning = new ScriptedShellExecutor(new ShellExec.Result(0, "", ""));
+    var provisioning =
+        new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
+            .onOk("incus storage list", "[{\"name\": \"devpool\", \"driver\": \"dir\"}]");
     new HostProvisioner(provisioning, null, OperatorCommand.SUDO)
         .provision(
-            "dir", null, "devpool", "incusbr0", null, dir.resolve("host.yaml"), dir.resolve("db"));
+            new PoolSource.Dir(),
+            "devpool",
+            "incusbr0",
+            null,
+            65536,
+            dir.resolve("host.yaml"),
+            dir.resolve("db"));
     var migrating = new ScriptedShellExecutor(new ShellExec.Result(0, "", ""));
     MigrateCommand.ensureHostDropIns(true, migrating, dir, true);
 

@@ -21,6 +21,7 @@ import ai.singlr.sail.store.EraseRequests;
 import ai.singlr.sail.store.Erasure;
 import ai.singlr.sail.store.EventStore;
 import ai.singlr.sail.store.FdeStore;
+import ai.singlr.sail.store.FeedFloors;
 import ai.singlr.sail.store.Finding;
 import ai.singlr.sail.store.MessageStore;
 import ai.singlr.sail.store.ReviewStore;
@@ -218,7 +219,12 @@ class ErasureSyncTest {
       assertEquals(0, count(box.db, "SELECT count(*) FROM rooms"), box.id);
       assertEquals(0, count(box.db, "SELECT count(*) FROM room_messages"), box.id);
       assertEquals(
-          0, count(box.db, "SELECT count(*) FROM change_log WHERE kind <> 'erasure'"), box.id);
+          0,
+          count(
+              box.db,
+              "SELECT count(*) FROM change_log WHERE kind <> 'erasure' AND entity_type <> ?",
+              FeedFloors.TYPE),
+          box.id);
     }
 
     assertConverged(admin);

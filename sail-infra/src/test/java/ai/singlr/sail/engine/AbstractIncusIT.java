@@ -68,9 +68,12 @@ public abstract class AbstractIncusIT {
     }
   }
 
-  protected void launch(String container) throws Exception {
+  /** Launches {@code container} from the base image, with {@code options} to incus launch. */
+  protected void launch(String container, String... options) throws Exception {
     deleteContainerQuietly(container);
-    var launched = shell.exec(List.of("incus", "launch", IMAGE, container));
+    var command = new ArrayList<>(List.of("incus", "launch", IMAGE, container));
+    command.addAll(List.of(options));
+    var launched = shell.exec(command);
     assertTrue(
         launched.ok(), "could not launch test container " + IMAGE + ": " + launched.stderr());
   }

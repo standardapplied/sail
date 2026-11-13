@@ -148,19 +148,21 @@ class CliEntryPointTest {
 
   @Test
   @EnabledOnOs(OS.LINUX)
-  void hostInitDryRunWithDiskAndYes() {
+  void hostInitDryRunWithAFilePoolAndYes() {
     var cmd = new CommandLine(new Sail());
     cmd.setErr(new PrintWriter(new StringWriter()));
 
     var exitCode =
-        cmd.execute("host", "init", "--dry-run", "--storage", "zfs", "--disk", "/dev/sdb", "--yes");
+        cmd.execute(
+            "host", "init", "--dry-run", "--storage", "zfs", "--pool-file-size", "50GiB", "--yes");
 
     assertEquals(0, exitCode);
     var output = capturedOut.toString(StandardCharsets.UTF_8);
     assertTrue(output.contains("███████"), "Should show branding");
     assertTrue(output.contains("Host Detection"), "Should show host detection banner");
     assertTrue(output.contains("[dry-run]"), "Should show dry-run commands");
-    assertTrue(output.contains("Server ready"), "Should show server ready");
+    assertTrue(output.contains("Dry run done: nothing was changed."), output);
+    assertFalse(output.contains("Server ready"), output);
   }
 
   @Test
@@ -173,7 +175,7 @@ class CliEntryPointTest {
     assertEquals(0, exitCode);
     var output = capturedOut.toString(StandardCharsets.UTF_8);
     assertTrue(output.contains("Host Detection"), "Should show host detection");
-    assertTrue(output.contains("Server ready"), "Should complete with dir backend");
+    assertTrue(output.contains("Dry run done: nothing was changed."), output);
     assertTrue(output.contains("(dir)"), "Should show dir backend in output");
   }
 
@@ -201,8 +203,8 @@ class CliEntryPointTest {
             "--dry-run",
             "--storage",
             "zfs",
-            "--disk",
-            "/dev/nvme1n1",
+            "--pool-file-size",
+            "20GiB",
             "--pool",
             "mypool",
             "--yes");
@@ -210,7 +212,31 @@ class CliEntryPointTest {
     assertEquals(0, exitCode);
     var output = capturedOut.toString(StandardCharsets.UTF_8);
     assertTrue(output.contains("mypool"), "Should show custom pool name");
-    assertTrue(output.contains("/dev/nvme1n1"), "Should show custom disk");
+    assertTrue(output.contains("zfs in a 20.0 GiB file"), output);
+  }
+
+  @Test
+  @EnabledOnOs(OS.LINUX)
+  void hostInitDryRunRefusesADiskThisBoxDoesNotHave() {
+    var cmd = new CommandLine(new Sail());
+
+    var exitCode =
+        cmd.execute(
+            "host",
+            "init",
+            "--dry-run",
+            "--storage",
+            "zfs",
+            "--disk",
+            "/dev/sail-no-such-disk",
+            "--yes");
+
+    assertEquals(1, exitCode);
+    assertTrue(
+        capturedErr
+            .toString(StandardCharsets.UTF_8)
+            .contains("--disk /dev/sail-no-such-disk names no device on this box"),
+        capturedErr.toString(StandardCharsets.UTF_8));
   }
 
   @TempDir Path tempDir;

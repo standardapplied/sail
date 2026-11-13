@@ -16,6 +16,8 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.InetSocketAddress;
 import java.net.ServerSocket;
+import java.net.StandardSocketOptions;
+import java.nio.channels.SocketChannel;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.List;
@@ -27,9 +29,25 @@ class SshTunnelTest {
 
   private static final Duration FAST = Duration.ofMillis(1);
 
-  private static int freePort() throws Exception {
-    try (var socket = new ServerSocket(0)) {
-      return socket.getLocalPort();
+  /**
+   * An ephemeral port this test holds while it runs: bound with address reuse and never listening,
+   * so the tunnel's own check of the port can bind it, while no other process is handed it.
+   */
+  private record Held(SocketChannel channel) implements AutoCloseable {
+    static Held port() throws Exception {
+      var channel = SocketChannel.open();
+      channel.setOption(StandardSocketOptions.SO_REUSEADDR, true);
+      channel.bind(new InetSocketAddress(0));
+      return new Held(channel);
+    }
+
+    int number() throws Exception {
+      return ((InetSocketAddress) channel.getLocalAddress()).getPort();
+    }
+
+    @Override
+    public void close() throws Exception {
+      channel.close();
     }
   }
 
@@ -46,7 +64,8 @@ class SshTunnelTest {
   @Test
   void openBecomesHealthyThenClosesTheTunnelWithTheCommand() throws Exception {
     var ssh = new FakeSshProcess("");
-    try (var tunnel = SshTunnel.open("devbox", freePort(), cmd -> ssh, () -> true, 3, FAST)) {
+    try (var held = Held.port();
+        var tunnel = SshTunnel.open("devbox", held.number(), cmd -> ssh, () -> true, 3, FAST)) {
       assertDoesNotThrow(tunnel::ensureAlive);
     }
     assertFalse(ssh.isAlive());
@@ -83,51 +102,60 @@ class SshTunnelTest {
   void openSurfacesSshStderrWhenSshDiesBeforeBecomingHealthy() throws Exception {
     var ssh = new FakeSshProcess("Permission denied (publickey).");
     ssh.kill();
-    var port = freePort();
-    var error =
-        assertThrows(
-            IllegalStateException.class,
-            () -> SshTunnel.open("devbox", port, cmd -> ssh, () -> false, 3, FAST));
-    assertTrue(error.getMessage().contains("devbox"));
-    assertTrue(error.getMessage().contains("Permission denied (publickey)."));
-    assertTrue(error.getMessage().contains("signs in with your key alone"));
+    try (var held = Held.port()) {
+      var port = held.number();
+      var error =
+          assertThrows(
+              IllegalStateException.class,
+              () -> SshTunnel.open("devbox", port, cmd -> ssh, () -> false, 3, FAST));
+      assertTrue(error.getMessage().contains("devbox"));
+      assertTrue(error.getMessage().contains("Permission denied (publickey)."));
+      assertTrue(error.getMessage().contains("signs in with your key alone"));
+    }
   }
 
   @Test
   void openFailsWithGuidanceWhenTheHealthCheckTimesOut() throws Exception {
     var ssh = new FakeSshProcess("");
-    var port = freePort();
-    var error =
-        assertThrows(
-            IllegalStateException.class,
-            () -> SshTunnel.open("devbox", port, cmd -> ssh, () -> false, 3, FAST));
-    assertTrue(error.getMessage().contains("/v1/health did not answer"));
-    assertTrue(error.getMessage().contains("devbox"));
-    assertTrue(error.getMessage().contains("sail host service install"));
-    assertFalse(ssh.isAlive());
+    try (var held = Held.port()) {
+      var port = held.number();
+      var error =
+          assertThrows(
+              IllegalStateException.class,
+              () -> SshTunnel.open("devbox", port, cmd -> ssh, () -> false, 3, FAST));
+      assertTrue(error.getMessage().contains("/v1/health did not answer"));
+      assertTrue(error.getMessage().contains("devbox"));
+      assertTrue(error.getMessage().contains("sail host service install"));
+      assertFalse(ssh.isAlive());
+    }
   }
 
   @Test
   void ensureAliveNamesTheBoxAndSurfacesSshStderrWhenTheTunnelDiesMidCeremony() throws Exception {
     var ssh = new FakeSshProcess("client_loop: send disconnect: Broken pipe");
-    var tunnel = SshTunnel.open("devbox", freePort(), cmd -> ssh, () -> true, 3, FAST);
-    ssh.kill();
-    var error = assertThrows(IllegalStateException.class, tunnel::ensureAlive);
-    assertTrue(error.getMessage().contains("died mid-ceremony"));
-    assertTrue(error.getMessage().contains("devbox"));
-    assertTrue(error.getMessage().contains("Broken pipe"));
-    tunnel.close();
+    try (var held = Held.port()) {
+      var tunnel = SshTunnel.open("devbox", held.number(), cmd -> ssh, () -> true, 3, FAST);
+      ssh.kill();
+      var error = assertThrows(IllegalStateException.class, tunnel::ensureAlive);
+      assertTrue(error.getMessage().contains("died mid-ceremony"));
+      assertTrue(error.getMessage().contains("devbox"));
+      assertTrue(error.getMessage().contains("Broken pipe"));
+      tunnel.close();
+    }
   }
 
   @Test
   void refusesHostsThatCouldSmuggleSshOptions() throws Exception {
-    var port = freePort();
-    for (var host : new String[] {"-oProxyCommand=evil", "", null, "box name", "box;rm"}) {
-      var error =
-          assertThrows(
-              IllegalArgumentException.class,
-              () -> SshTunnel.open(host, port, cmd -> new FakeSshProcess(""), () -> true, 3, FAST));
-      assertTrue(error.getMessage().contains("plain hostname"));
+    try (var held = Held.port()) {
+      var port = held.number();
+      for (var host : new String[] {"-oProxyCommand=evil", "", null, "box name", "box;rm"}) {
+        var error =
+            assertThrows(
+                IllegalArgumentException.class,
+                () ->
+                    SshTunnel.open(host, port, cmd -> new FakeSshProcess(""), () -> true, 3, FAST));
+        assertTrue(error.getMessage().contains("plain hostname"));
+      }
     }
   }
 

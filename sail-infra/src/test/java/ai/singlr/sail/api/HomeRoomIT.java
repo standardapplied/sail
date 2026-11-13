@@ -102,7 +102,6 @@ class HomeRoomIT extends AbstractIncusIT {
                   TestProjects.reading(yaml),
                   WatcherSpawner::spawnProcess,
                   null,
-                  null,
                   new SpecStore(db),
                   new ReviewStore(db),
                   new RunStore(db))

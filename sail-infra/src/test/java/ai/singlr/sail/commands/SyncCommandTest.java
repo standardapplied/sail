@@ -97,12 +97,7 @@ class SyncCommandTest {
       var hash = new BlobStore(db).putText("orphan");
       var operations =
           OperationsFactory.create(
-                  db,
-                  new ShellExecutor(true),
-                  null,
-                  null,
-                  SyncScheduler.disabled(),
-                  SessionYield.NONE)
+                  db, new ShellExecutor(true), null, SyncScheduler.disabled(), SessionYield.NONE)
               .useControlPlane(
                   db,
                   Path.of(System.getProperty("java.io.tmpdir")),
@@ -147,12 +142,7 @@ class SyncCommandTest {
       var last = SyncBox.pushPastHistory(db, node, "acme", "app.conf");
       var operations =
           OperationsFactory.create(
-                  db,
-                  new ShellExecutor(true),
-                  null,
-                  null,
-                  SyncScheduler.disabled(),
-                  SessionYield.NONE)
+                  db, new ShellExecutor(true), null, SyncScheduler.disabled(), SessionYield.NONE)
               .useControlPlane(
                   db,
                   home,
@@ -190,12 +180,7 @@ class SyncCommandTest {
       var config = new SyncConfig("node", "sail@main", "node");
       var operations =
           OperationsFactory.create(
-                  db,
-                  new ShellExecutor(true),
-                  null,
-                  null,
-                  SyncScheduler.disabled(),
-                  SessionYield.NONE)
+                  db, new ShellExecutor(true), null, SyncScheduler.disabled(), SessionYield.NONE)
               .useControlPlane(
                   db,
                   home,

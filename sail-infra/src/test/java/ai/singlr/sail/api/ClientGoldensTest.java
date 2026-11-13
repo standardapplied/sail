@@ -8,6 +8,7 @@ package ai.singlr.sail.api;
 import static org.junit.jupiter.api.Assertions.assertAll;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 import static org.junit.jupiter.api.Assertions.fail;
 
 import ai.singlr.sail.access.baseline.GoldenFiles;
@@ -33,6 +34,7 @@ import ai.singlr.sail.pty.PtyMessage;
 import ai.singlr.sail.pty.PtyWire;
 import ai.singlr.sail.store.AuthSessionStore;
 import ai.singlr.sail.store.FdeStore;
+import ai.singlr.sail.store.FeedPositions;
 import ai.singlr.sail.store.Finding;
 import ai.singlr.sail.store.HeldProjects;
 import ai.singlr.sail.store.MessageStore;
@@ -45,10 +47,12 @@ import ai.singlr.sail.store.Sqlite;
 import ai.singlr.sail.store.TokenStore;
 import ai.singlr.sail.sync.SyncTransition;
 import com.sun.net.httpserver.HttpServer;
+import java.io.BufferedReader;
 import java.io.ByteArrayOutputStream;
 import java.io.EOFException;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.InputStreamReader;
 import java.io.UncheckedIOException;
 import java.lang.reflect.Field;
 import java.lang.reflect.Modifier;
@@ -88,6 +92,7 @@ import java.util.stream.Stream;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.api.io.TempDir;
 
 /**
@@ -112,10 +117,19 @@ import org.junit.jupiter.api.io.TempDir;
  * JSON keys are sorted, since a map's iteration order is not part of the wire. Nothing else is
  * rewritten.
  */
+@Timeout(value = 5, unit = TimeUnit.MINUTES)
 class ClientGoldensTest {
 
   private static final Path GOLDENS = Path.of("..", "clients", "SailKit", "Tests", "Goldens");
   private static final Instant AT = Instant.parse("2026-11-11T09:00:00.656Z");
+
+  /**
+   * A position the box hands out: its database's catalog, the seq and the fingerprint of the entry
+   * there, scrubbed to {@code golden}, the seq, and the seq again in the fingerprint's place.
+   */
+  private static final Pattern POSITION =
+      Pattern.compile("\\b([0-9a-f]{32})\\.([0-9]+)\\.([0-9a-f]{12}|0)\\b");
+
   private static final Pattern UUID =
       Pattern.compile("[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}");
   private static final String PROJECT = "harbor";
@@ -125,6 +139,7 @@ class ClientGoldensTest {
   private static final String BARE_SPEC = "harbor-buoys";
   private static final String RUN = "run-1";
   private static final String DATA = "data: ";
+  private static final String ID = "id: ";
   private static final int STREAMS = 2;
   private static final SyncConfig OWNER = new SyncConfig(null, null, "uday");
 
@@ -180,7 +195,6 @@ class ClientGoldensTest {
       box.record(http, "spec-measures", "GET", "/v1/specs/" + SPEC + "/measures", uday, null);
       box.record(
           http, "specs-measures", "GET", "/v1/specs:measures?project=" + PROJECT, uday, null);
-      box.record(http, "events-recent", "GET", "/v1/events/recent?limit=3", uday, null);
       box.record(
           http,
           "terminal-ticket",
@@ -200,13 +214,27 @@ class ClientGoldensTest {
       box.record(http, "refusal-not-found", "GET", "/v1/nowhere", uday, null);
       box.run("run-2", SPEC, "ada");
       box.record(http, "refusal-run-on-other-node", "GET", "/v1/runs/run-2/log", uday, null);
+      box.seed("DELETE", "/v1/rooms/" + QUIET_ROOM, uday, null);
+      box.seed("PUT", "/v1/specs/" + BARE_SPEC, uday, Map.of("status", "cancelled"));
+      box.seed(
+          "POST", "/v1/specs:prune", uday, Map.of("ids", List.of(BARE_SPEC), "dry_run", false));
+      var beginning = box.beginning();
+      var changes =
+          box.record(http, "changes", "GET", "/v1/changes?since=" + beginning, uday, null);
+      box.record(http, "board-specs", "GET", "/v1/specs?project=" + PROJECT, uday, null);
+      box.record(http, "board-rooms", "GET", "/v1/rooms?project=" + PROJECT, uday, null);
+      box.record(http, "refusal-resync-required", "GET", "/v1/changes?since=999999999", uday, null);
+      var resumed = box.resumed(uday, beginning, "id: " + changes.get("next"));
+      var resync = box.resumed(uday, "999999999", "event: resync");
 
       var full = box.fullHouse(uday);
       box.end(uday, box.publishEveryOtherWellKnownEvent(run));
       var events = new TreeMap<String, String>();
       events.put("answers.json", json(Map.of("open", stream.head(), "full", full)));
-      events.put("stream.sse", Scrub.stream(stream.join(), box::renamed));
-      events.put("room-stream.sse", Scrub.stream(roomStream.join(), box::renamed));
+      events.put("stream.sse", Scrub.stream(Scrub.busEvents(stream.join()), box::renamed));
+      events.put("room-stream.sse", Scrub.stream(Scrub.busEvents(roomStream.join()), box::renamed));
+      events.put("resumed-stream.sse", Scrub.stream(resumed, box::renamed));
+      events.put("resync-stream.sse", Scrub.stream(resync, box::renamed));
 
       assertAll(
           () -> GoldenFiles.check(GOLDENS.resolve("http"), http),
@@ -256,6 +284,7 @@ class ClientGoldensTest {
         Arrays.stream(ErrorCode.values())
             .map(code -> Map.of("code", code.code(), "status", code.httpCode()))
             .toList());
+    vocabulary.put("change_types", ChangeFeed.TYPES);
     vocabulary.put("event_types", List.copyOf(wellKnownTypes()));
     vocabulary.put(
         "member_modes", Arrays.stream(EngagementMode.values()).map(EngagementMode::wire).toList());
@@ -490,6 +519,7 @@ class ClientGoldensTest {
     private final SailOperations operations;
     private final HttpServer server;
     private final ManualClock streamClock;
+    private final ApiAuth auth;
     private final List<OpenStream> streams = new ArrayList<>();
     private final Map<String, String> ids = new LinkedHashMap<>();
 
@@ -504,7 +534,6 @@ class ClientGoldensTest {
                   db,
                   new ScriptedShellExecutor(new ShellExec.Result(0, "[]", "")),
                   bus,
-                  null,
                   SyncScheduler.disabled(),
                   SessionYield.NONE)
               .useControlPlane(
@@ -518,7 +547,7 @@ class ClientGoldensTest {
                       target -> {
                         throw new IOException("main unavailable");
                       }));
-      var auth = TestAuth.sessions(db, OWNER);
+      this.auth = TestAuth.sessions(db, OWNER);
       this.server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
       server.setExecutor(Executors.newVirtualThreadPerTaskExecutor());
       PrivateAttributes.context(
@@ -535,7 +564,13 @@ class ClientGoldensTest {
                       new InetSocketAddress(InetAddress.ofLiteral("100.64.0.7"), 7072)))));
       server.createContext(
           "/v1/events/stream",
-          new SseHandler(bus, auth, operations.liveMembers()::turnState, STREAMS, streamClock));
+          new SseHandler(
+              bus,
+              auth,
+              operations.liveMembers()::turnState,
+              operations.changes(),
+              STREAMS,
+              streamClock));
       server.start();
     }
 
@@ -714,12 +749,14 @@ class ClientGoldensTest {
       if (body != null) {
         request.put("body", body);
       }
-      var exchange =
-          Map.of(
-              "request",
-              request,
-              "response",
-              Map.of("status", response.statusCode(), "body", parsed));
+      var answer = new LinkedHashMap<String, Object>();
+      answer.put("status", response.statusCode());
+      response
+          .headers()
+          .firstValue(ChangeFeed.SEQ_HEADER)
+          .ifPresent(seq -> answer.put("headers", Map.of("seq", seq)));
+      answer.put("body", parsed);
+      var exchange = Map.of("request", request, "response", answer);
       goldens.put(name + ".json", json(Scrub.canonical(exchange, this::renamed)));
       return parsed;
     }
@@ -764,8 +801,72 @@ class ClientGoldensTest {
               .header("Authorization", "Bearer " + token)
               .build();
       try (var client = HttpClient.newHttpClient()) {
-        var response = client.send(request, HttpResponse.BodyHandlers.discarding());
+        var response = client.send(request, HttpResponse.BodyHandlers.ofInputStream());
+        response.body().close();
         return head(response);
+      }
+    }
+
+    /**
+     * What a stream resumed from {@code since} as {@code token} is first sent, up to and with the
+     * frame that holds the line {@code last}: its replay, every frame as written. It is read
+     * through a handler of its own, since the box's allows only the streams the rest of the test
+     * holds open.
+     */
+    /** The position before anything this box's database holds: where a feed of all of it starts. */
+    String beginning() {
+      var positions = new FeedPositions(db);
+      return positions.at(positions.catalog(), 0);
+    }
+
+    String resumed(String token, String since, String last) {
+      return assertTimeoutPreemptively(
+          Duration.ofSeconds(BusTesting.DELIVERY_TIMEOUT_SECONDS),
+          () -> replay(token, since, last));
+    }
+
+    private String replay(String token, String since, String last) throws Exception {
+      var alone = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+      alone.setExecutor(Executors.newVirtualThreadPerTaskExecutor());
+      PrivateAttributes.context(
+          alone,
+          "/v1/events/stream",
+          new SseHandler(
+              bus, auth, SseHandler.RoomTurns.NONE, operations.changes(), 1, streamClock));
+      alone.start();
+      try {
+        return replay(alone, token, since, last);
+      } finally {
+        alone.stop(0);
+      }
+    }
+
+    private static String replay(HttpServer alone, String token, String since, String last)
+        throws Exception {
+      var request =
+          HttpRequest.newBuilder(
+                  URI.create(
+                      "http://127.0.0.1:" + alone.getAddress().getPort() + "/v1/events/stream"))
+              .header("Authorization", "Bearer " + token)
+              .header("Last-Event-ID", since)
+              .GET()
+              .build();
+      try (var client = HttpClient.newHttpClient()) {
+        var response = client.send(request, HttpResponse.BodyHandlers.ofInputStream());
+        assertEquals(200, response.statusCode());
+        try (var reader =
+            new BufferedReader(new InputStreamReader(response.body(), StandardCharsets.UTF_8))) {
+          var lines = new ArrayList<String>();
+          var reached = false;
+          for (var line = reader.readLine();
+              !(reached && line.isEmpty());
+              line = reader.readLine()) {
+            lines.add(line);
+            reached |= line.equals(last);
+          }
+          lines.add("");
+          return String.join("\n", lines) + "\n";
+        }
       }
     }
 
@@ -793,7 +894,7 @@ class ClientGoldensTest {
      */
     void end(String token, Event last) throws InterruptedException {
       for (var stream : streams) {
-        stream.awaitLine("id: " + last.id());
+        stream.awaitLine(DATA + last.toJsonLine());
       }
       streamClock.advance(Duration.ofMillis(SseHandler.HEARTBEAT_MILLIS + 1));
       for (var stream : streams) {
@@ -809,7 +910,18 @@ class ClientGoldensTest {
       if (text.equals(HostInfo.hostname())) {
         return "box";
       }
-      return UUID.matcher(text)
+      var positioned =
+          POSITION
+              .matcher(text)
+              .replaceAll(
+                  found ->
+                      "golden."
+                          + found.group(2)
+                          + "."
+                          + (found.group(3).equals("0")
+                              ? "0"
+                              : String.format("%012d", Long.parseLong(found.group(2)))));
+      return UUID.matcher(positioned)
           .replaceAll(
               found ->
                   ids.computeIfAbsent(
@@ -898,6 +1010,17 @@ class ClientGoldensTest {
 
     private Scrub() {}
 
+    /**
+     * The frames of {@code stream} the bus published, its row changes left out: where a change
+     * falls among them is the stream thread's timing, not the wire's, and the changes are recorded
+     * in their own order by a resumed stream.
+     */
+    static String busEvents(String stream) {
+      return Arrays.stream(stream.split("\n\n", -1))
+          .filter(frame -> !frame.startsWith("event: change\n"))
+          .collect(Collectors.joining("\n\n"));
+    }
+
     /** {@code value} with its keys sorted and every text {@code rename}d. */
     @SuppressWarnings("unchecked")
     static Object canonical(Object value, UnaryOperator<String> rename) {
@@ -921,7 +1044,11 @@ class ClientGoldensTest {
      */
     static String stream(String stream, UnaryOperator<String> rename) {
       return Arrays.stream(stream.split("\n", -1))
-          .map(line -> line.startsWith(DATA) ? DATA + data(line, rename) : line)
+          .map(
+              line ->
+                  line.startsWith(DATA)
+                      ? DATA + data(line, rename)
+                      : line.startsWith(ID) ? ID + rename.apply(line.substring(ID.length())) : line)
           .collect(Collectors.joining("\n"));
     }
 

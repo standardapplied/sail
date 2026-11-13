@@ -61,6 +61,14 @@ Usage:
                                 awaiting_merge; the pull request, the room and every box's status are checked,
                                 main's measures of the spec count the reviews and the build runs listed for it,
                                 no secret reaches a log, and the pull request is closed
+  ci/fleet storage RUN           client, a dir box running acme, adds a ZFS pool in a 20 GiB file: Incus has
+                                it beside devpool, acme and the base profile stay on devpool, a copy of a
+                                container's snapshot on it is a clone (zfs get origin), and the ZFS cache
+                                cap holds across a reboot (boot id changed); client's root disk and root
+                                partition are refused, and its ext4 scratch disk until the row itself
+                                erases it with the wipefs the refusal names, then the scratch pool is
+                                made with Sail's last probe of the disk under a second before its
+                                incus storage create (strace); observer, left on dir, is unchanged
   ci/fleet rebuilt RUN VERSION  main is copied by the README's backup line, takes a spec, and is lost; client
                                 writes while it is gone; a new main installs VERSION and inits empty, which
                                 observer refuses as another org; the copy goes in place, every node re-pins
@@ -122,9 +130,11 @@ internal_ip() {
 }
 
 create_vm() {
+  local scratch=()
+  [[ $2 == client ]] && scratch=(--create-disk "size=10GB,type=pd-balanced,auto-delete=yes,device-name=scratch")
   gc compute instances create "$(vm "$1" "$2")" --zone "$ZONE" --machine-type "$MACHINE" \
     --image-family ubuntu-2404-lts-amd64 --image-project ubuntu-os-cloud \
-    --boot-disk-size 50GB --boot-disk-type pd-balanced \
+    --boot-disk-size 50GB --boot-disk-type pd-balanced "${scratch[@]}" \
     --provisioning-model STANDARD --instance-termination-action DELETE --max-run-duration "$MAX_RUN" \
     --labels "purpose=sail-fleet,run=$1,box=$2" > /dev/null
 }
@@ -445,6 +455,35 @@ http_token_door() {
   grep -q "^HTTP $expected$" <<< "$out" && grep -qF "$says" <<< "$out"
 }
 
+readonly FEED_DOOR='set -u
+mode=$1 handle=$2 arg=$3 text=${4:-}
+token=$(sudo sail server token create "feed-$handle" member --fde "$handle" 2>/dev/null | sed -n 2p | tr -d " ")
+[ -n "$token" ] || { echo "no token"; exit 1; }
+if [ "$mode" = position ]; then
+  curl -s -D /tmp/feed.head -o /dev/null -H "Authorization: Bearer $token" "http://127.0.0.1:7070$arg"
+  tr -d "\r" < /tmp/feed.head | sed -n "s/^[Ss]eq: //p"
+  told=0
+else
+  curl -s -o /tmp/feed.json -H "Authorization: Bearer $token" \
+    "http://127.0.0.1:7070/v1/changes?since=$arg&types=message"
+  python3 -c "import json,sys; since=int(sys.argv[1].split(\".\")[1]); changes=json.load(sys.stdin)[\"changes\"]; told=[c[\"seq\"] for c in changes if sys.argv[2] in json.dumps(c.get(\"row\", {}), ensure_ascii=False)]; print(\"told at\", told, \"after\", since); sys.exit(0 if told and min(told) > since else 1)" \
+    "$arg" "$text" < /tmp/feed.json
+  told=$?
+fi
+sudo sail server token revoke "feed-$handle" > /dev/null 2>&1
+exit $told'
+
+feed_position() {
+  local run=$1 handle=$2 path=$3
+  on "$run" main "cat > /tmp/sail-feed-door && bash /tmp/sail-feed-door position $handle '$path'" <<< "$FEED_DOOR"
+}
+
+feed_tells() {
+  local run=$1 handle=$2 since=$3 text=$4
+  [[ $since =~ ^[0-9]+$ ]] || { echo "main answered no position: '$since'"; return 1; }
+  on "$run" main "cat > /tmp/sail-feed-door && bash /tmp/sail-feed-door after $handle $since '$text'" <<< "$FEED_DOOR"
+}
+
 gateway_door() {
   local run=$1 box=$2 says=$3 main_ip
   shift 3
@@ -682,6 +721,12 @@ rooms() {
     says_in_order "$run" observer acme-chat "client: first word|uday: second word|eng: third word|client: fourth word"
   check "$run" "the room reads the same on every box" conversation_matches "$run" acme-chat
   check "$run" "client's database has no trace of beta-chat or obs-chat" holds_no_trace_of "$run" client beta-chat obs-chat
+  local position
+  position=$(feed_position "$run" client /v1/rooms/acme-chat/messages)
+  check "$run" "client posts a fifth word and syncs" \
+    allowed "$run" client "sudo sail spec comment acme-chat --body 'client: fifth word' && sudo sail sync"
+  check "$run" "main's feed tells client the fifth word, past the position its read of the room answered" \
+    feed_tells "$run" client "$position" "client: fifth word"
 }
 
 while_cut_off() {
@@ -994,6 +1039,135 @@ resilience() {
   check "$run" "client writes a spec with no sync after incus restarted" \
     allowed "$run" client "sudo sail spec create -p acme --id after-incus --title 'after incus restarted'"
   check "$run" "that one reaches main within 30 s too" reaches_main_unasked "$run" after-incus
+}
+
+pools_on() {
+  local run=$1 box=$2 expected=$3 listed
+  listed=$(on "$run" "$box" "sudo incus storage list --format json" \
+    | python3 -I -c 'import json,sys; print(" ".join(sorted(p["name"] + ":" + p["driver"] for p in json.load(sys.stdin))))')
+  echo "$box has: $listed"
+  [[ $listed == "$expected" ]]
+}
+
+status_pools() {
+  local run=$1 box=$2 expected=$3 listed
+  listed=$(on "$run" "$box" "sudo sail host status --json" \
+    | python3 -I -c 'import json,sys; print(" ".join(sorted(p["name"] + ":" + p["driver"] for p in json.load(sys.stdin)["pools"])))')
+  echo "$box's host status names: $listed"
+  [[ $listed == "$expected" ]]
+}
+
+running_on_pool() {
+  local run=$1 box=$2 container=$3 pool=$4 placed
+  placed=$(on "$run" "$box" "sudo incus query /1.0/instances/$container" \
+    | python3 -I -c 'import json,sys; i=json.load(sys.stdin); print(i["status"] + " on " + i["expanded_devices"]["root"]["pool"])')
+  echo "$container: $placed"
+  [[ $placed == "Running on $pool" ]]
+}
+
+profile_on() {
+  local run=$1 box=$2 pool=$3 named
+  named=$(on "$run" "$box" "sudo incus profile device get singlr-base root pool")
+  echo "singlr-base puts containers on $named"
+  [[ $named == "$pool" ]]
+}
+
+clones_on() {
+  local run=$1 box=$2 origin
+  on "$run" "$box" "sudo incus launch ubuntu-24.04 zt --storage tank && sudo incus snapshot create zt s1 && sudo incus copy zt/s1 zc"
+  origin=$(on "$run" "$box" "sudo zfs get -H -o value origin tank/containers/zc")
+  echo "zc's origin: $origin"
+  [[ $origin == "tank/containers/zt@snapshot-s1" ]]
+}
+
+capped_on() {
+  local run=$1 box=$2 written live
+  written=$(on "$run" "$box" "sed -n 's/^options zfs zfs_arc_max=//p' /etc/modprobe.d/sail-zfs.conf")
+  live=$(on "$run" "$box" "cat /sys/module/zfs/parameters/zfs_arc_max")
+  echo "written $written, in force $live"
+  [[ -n $written && $written == "$live" ]]
+}
+
+reboots() {
+  local before after
+  before=$(on "$1" "$2" "cat /proc/sys/kernel/random/boot_id")
+  on "$1" "$2" "sudo systemctl reboot" || true
+  sleep 20
+  answers_ssh "$1" "$2" || return 1
+  after=$(on "$1" "$2" "cat /proc/sys/kernel/random/boot_id")
+  echo "boot id $before, then $after"
+  [[ -n $before && -n $after && $before != "$after" ]]
+}
+
+root_disk() {
+  on "$1" "$2" 'echo /dev/$(lsblk -no PKNAME "$(findmnt -n -o SOURCE /)")'
+}
+
+root_partition() {
+  on "$1" "$2" 'findmnt -n -o SOURCE /'
+}
+
+refuses_a_pool_on() {
+  local run=$1 box=$2 device=$3
+  refused "$run" "$box" "$device is refused" \
+    "sudo sail host init --storage zfs --pool refused --disk $device --yes"
+}
+
+probed_last_on() {
+  local run=$1 box=$2 device=$3 pool=$4 trace probe create gap
+  on "$run" "$box" "sudo apt-get install -y -q strace > /dev/null && sudo strace -f -tt -e trace=execve -o /tmp/sail-gap.trace sail host init --storage zfs --pool $pool --disk $device --yes" || return 1
+  on "$run" "$box" "sudo incus storage list --format csv" | grep -q "^$pool,zfs," || { echo "Incus has no zfs pool $pool"; return 1; }
+  trace=$(on "$run" "$box" "sudo cat /tmp/sail-gap.trace" | grep -E 'execve\("[^"]*/(wipefs|incus)", \["(wipefs", "--all|incus", "storage", "create)')
+  echo "$trace"
+  probe=$(grep -F '"wipefs", "--all"' <<< "$trace" | tail -1 | awk '{print $2}')
+  create=$(grep -F '"incus", "storage", "create"' <<< "$trace" | tail -1 | awk '{print $2}')
+  [[ -n $probe && -n $create ]] || { echo "the trace has no probe or no create"; return 1; }
+  gap=$(awk -v p="$probe" -v c="$create" 'BEGIN { split(p, a, ":"); split(c, b, ":"); printf "%.3f", (b[1] * 3600 + b[2] * 60 + b[3]) - (a[1] * 3600 + a[2] * 60 + a[3]) }')
+  echo "last probe of $device at $probe, incus storage create at $create: $gap s"
+  awk -v g="$gap" 'BEGIN { exit !(g >= 0 && g < 1) }'
+}
+
+uncapped_on() {
+  on "$1" "$2" "test ! -e /etc/modprobe.d/sail-zfs.conf"
+}
+
+storage() {
+  local run=${1:-}
+  [[ -n $run ]] || usage
+  local scratch=/dev/disk/by-id/google-scratch disk partition
+  disk=$(root_disk "$run" client)
+  partition=$(root_partition "$run" client)
+  check "$run" "client's root disk $disk is refused for a pool" refuses_a_pool_on "$run" client "$disk"
+  check "$run" "client's root partition $partition is refused for a pool" refuses_a_pool_on "$run" client "$partition"
+  check "$run" "client's scratch disk is given an ext4 filesystem" on "$run" client "sudo mkfs.ext4 -qF $scratch"
+  check "$run" "the scratch disk holding ext4 is refused, naming ext4 and the wipefs that erases it" \
+    refused "$run" client "holds ext4. Sail erases nothing: if nothing on it is wanted, erase it yourself with sudo wipefs --all /dev/" \
+    "sudo sail host init --storage zfs --pool scratch --disk $scratch --yes"
+  check "$run" "the row erases the scratch disk itself, with the wipefs the refusal named" \
+    on "$run" client "sudo wipefs --all $scratch"
+  check "$run" "the blank scratch disk becomes a zfs pool, Sail's last probe of it under a second before the create" \
+    probed_last_on "$run" client "$scratch" scratch
+  check "$run" "the command that made the scratch pool runs again and keeps it" \
+    naming "already exists)" allowed "$run" client "sudo sail host init --storage zfs --pool scratch --disk $scratch --yes"
+  check "$run" "the scratch pool goes" on "$run" client "sudo incus storage delete scratch"
+  check "$run" "a dry run of adding tank shows the base profile staying on devpool" \
+    naming "singlr-base (already exists): containers on devpool (dir)" allowed "$run" client "sudo sail host init --storage zfs --pool-file-size 20GiB --pool tank --dry-run --yes"
+  check "$run" "client, a dir box running acme, adds a ZFS pool in a file" \
+    allowed "$run" client "sudo sail host init --storage zfs --pool-file-size 20GiB --pool tank --yes"
+  check "$run" "client's Incus has tank as zfs beside devpool as dir" pools_on "$run" client "devpool:dir tank:zfs"
+  check "$run" "acme still runs, on devpool" running_on_pool "$run" client acme devpool
+  check "$run" "the base profile still puts containers on devpool" profile_on "$run" client devpool
+  check "$run" "a container launched on tank and copied from its snapshot is a zfs clone" clones_on "$run" client
+  check "$run" "the ZFS cache cap is in force" capped_on "$run" client
+  check "$run" "client reboots" reboots "$run" client
+  check "$run" "the ZFS cache cap is still in force after the reboot" capped_on "$run" client
+  check "$run" "acme runs after the reboot, on devpool" running_on_pool "$run" client acme devpool
+  check "$run" "host status names both pools" status_pools "$run" client "devpool:dir tank:zfs"
+  check "$run" "client's test containers go" on "$run" client "sudo incus delete --force zc zt"
+  check "$run" "observer, a dir box, has devpool alone" pools_on "$run" observer "devpool:dir"
+  check "$run" "observer's host status names devpool alone" status_pools "$run" observer "devpool:dir"
+  check "$run" "observer has no ZFS cache cap" uncapped_on "$run" observer
+  check "$run" "acme still runs on observer, on devpool" running_on_pool "$run" observer acme devpool
 }
 
 copies_main() {
@@ -1405,6 +1579,7 @@ run() {
   step portal "$id"
   step resilience "$id"
   [[ ${FLEET_LOOP:-1} == 0 ]] || step loop "$id"
+  step storage "$id"
   step rebuilt "$id" "${target:-$version}"
   if [[ ${FLEET_KEEP:-0} != always && ( $status == 0 || ${FLEET_KEEP:-0} != 1 ) ]]; then
     down "$id"
@@ -1431,6 +1606,7 @@ case ${1:-} in
   files) shift; files "$@" ;;
   portal) shift; portal "$@" ;;
   resilience) shift; resilience "$@" ;;
+  storage) shift; storage "$@" ;;
   loop) shift; loop "$@" ;;
   rebuilt) shift; rebuilt "$@" ;;
   ssh) shift; [[ $# -ge 3 ]] || usage; r=$1 b=$2; shift 2; on "$r" "$b" "$@" ;;

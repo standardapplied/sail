@@ -67,6 +67,22 @@ public enum Goldens {
         return (status, answer.compactMapValues { $0 as? String })
     }
 
+    /// The id of each change the recorded resumed stream sends, in order: the position a reconnect
+    /// after it resumes from, a re-told row's the position of what re-told it.
+    public static func changeIds() throws -> [String] {
+        String(decoding: try bytes("events/resumed-stream.sse"), as: UTF8.self)
+            .split(separator: "\n", omittingEmptySubsequences: false)
+            .filter { $0.hasPrefix("id: ") }
+            .map { String($0.dropFirst(4)) }
+    }
+
+    /// The seq of each change the recorded page of the change feed holds, in order.
+    public static func changeSeqs() throws -> [String] {
+        let body = try object("http/changes.json")["response"] as? [String: Any]
+        let changes = (body?["body"] as? [String: Any])?["changes"] as? [[String: Any]] ?? []
+        return changes.compactMap { ($0["seq"] as? Int).map(String.init) }
+    }
+
     /// The words of `vocabulary` the server's own enum holds.
     public static func vocabulary(_ vocabulary: String) throws -> [String] {
         let words = try object("vocabulary/vocabulary.json")[vocabulary] as? [Any] ?? []
@@ -93,6 +109,8 @@ public struct Exchange: Sendable {
     public let path: String
     public let requestBody: Data?
     public let status: Int
+    /// The headers of the answer a client acts on, where the server sent one: its position.
+    public let headers: [String: String]
     public let body: Data
 
     public init(_ name: String) throws {
@@ -109,6 +127,7 @@ public struct Exchange: Sendable {
         self.method = method
         self.path = path
         self.status = status
+        self.headers = response["headers"] as? [String: String] ?? [:]
         self.requestBody = try request["body"].map { try JSONSerialization.data(withJSONObject: $0) }
         self.body = try JSONSerialization.data(withJSONObject: body)
     }
@@ -118,6 +137,7 @@ public struct Exchange: Sendable {
         path = exchange.path
         requestBody = exchange.requestBody
         status = exchange.status
+        headers = exchange.headers
         self.body = body
     }
 

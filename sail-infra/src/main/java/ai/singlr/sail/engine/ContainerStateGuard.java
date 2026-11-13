@@ -24,6 +24,10 @@ public final class ContainerStateGuard {
           throw Remedied.state(
               "Project '" + name + "' is stopped.",
               Remedy.of("Start it with: ", Remedy.sail("project start", name)));
+      case ContainerState.Frozen ignored ->
+          throw Remedied.state(
+              "Project '" + name + "' is frozen.",
+              Remedy.of("Resume it with: ", Remedy.sail("project start", name)));
       default -> requireCreated(state, name);
     }
   }
@@ -32,6 +36,7 @@ public final class ContainerStateGuard {
     switch (state) {
       case ContainerState.Running ignored -> {}
       case ContainerState.Stopped ignored -> {}
+      case ContainerState.Frozen ignored -> {}
       case ContainerState.NotCreated ignored -> throw notCreated(name);
       case ContainerState.Error e ->
           throw new IllegalStateException("Container error: " + e.message());

@@ -1,0 +1,198 @@
+{
+   "blockdevices": [
+      {
+         "path": "/dev/loop0",
+         "kname": "loop0",
+         "type": "loop",
+         "fstype": "squashfs",
+         "pttype": null,
+         "parttype": null,
+         "mountpoints": [
+             "/snap/core24/2124"
+         ],
+         "size": 70033408,
+         "start": null,
+         "model": null,
+         "rm": false,
+         "wwn": null,
+         "serial": null,
+         "maj:min": "7:0"
+      },{
+         "path": "/dev/loop1",
+         "kname": "loop1",
+         "type": "loop",
+         "fstype": "squashfs",
+         "pttype": null,
+         "parttype": null,
+         "mountpoints": [
+             "/snap/google-cloud-cli/519"
+         ],
+         "size": 373112832,
+         "start": null,
+         "model": null,
+         "rm": false,
+         "wwn": null,
+         "serial": null,
+         "maj:min": "7:1"
+      },{
+         "path": "/dev/loop2",
+         "kname": "loop2",
+         "type": "loop",
+         "fstype": "squashfs",
+         "pttype": null,
+         "parttype": null,
+         "mountpoints": [
+             "/snap/snapd/28254"
+         ],
+         "size": 46882816,
+         "start": null,
+         "model": null,
+         "rm": false,
+         "wwn": null,
+         "serial": null,
+         "maj:min": "7:2"
+      },{
+         "path": "/dev/nvme0n1",
+         "kname": "nvme0n1",
+         "type": "disk",
+         "fstype": null,
+         "pttype": "gpt",
+         "parttype": null,
+         "mountpoints": [
+             null
+         ],
+         "size": 32212254720,
+         "start": null,
+         "model": "nvme_card-pd",
+         "rm": false,
+         "wwn": "nvme.1ae0-6e766d655f636172642d7064-6e766d655f636172642d7064-00000001",
+         "serial": "persistent-disk-0",
+         "maj:min": "259:0",
+         "children": [
+            {
+               "path": "/dev/nvme0n1p1",
+               "kname": "nvme0n1p1",
+               "type": "part",
+               "fstype": "ext4",
+               "pttype": "gpt",
+               "parttype": "0fc63daf-8483-4772-8e79-3d69d8477de4",
+               "mountpoints": [
+                   "/"
+               ],
+               "size": 31137447424,
+               "start": 2099200,
+               "model": null,
+               "rm": false,
+               "wwn": "nvme.1ae0-6e766d655f636172642d7064-6e766d655f636172642d7064-00000001",
+               "serial": null,
+               "maj:min": "259:1"
+            },{
+               "path": "/dev/nvme0n1p14",
+               "kname": "nvme0n1p14",
+               "type": "part",
+               "fstype": null,
+               "pttype": "gpt",
+               "parttype": "21686148-6449-6e6f-744e-656564454649",
+               "mountpoints": [
+                   null
+               ],
+               "size": 4194304,
+               "start": 2048,
+               "model": null,
+               "rm": false,
+               "wwn": "nvme.1ae0-6e766d655f636172642d7064-6e766d655f636172642d7064-00000001",
+               "serial": null,
+               "maj:min": "259:2"
+            },{
+               "path": "/dev/nvme0n1p15",
+               "kname": "nvme0n1p15",
+               "type": "part",
+               "fstype": "vfat",
+               "pttype": "gpt",
+               "parttype": "c12a7328-f81f-11d2-ba4b-00a0c93ec93b",
+               "mountpoints": [
+                   "/boot/efi"
+               ],
+               "size": 111149056,
+               "start": 10240,
+               "model": null,
+               "rm": false,
+               "wwn": "nvme.1ae0-6e766d655f636172642d7064-6e766d655f636172642d7064-00000001",
+               "serial": null,
+               "maj:min": "259:3"
+            },{
+               "path": "/dev/nvme0n1p16",
+               "kname": "nvme0n1p16",
+               "type": "part",
+               "fstype": "ext4",
+               "pttype": "gpt",
+               "parttype": "bc13c2ff-59e6-4262-a352-b275fd6f7172",
+               "mountpoints": [
+                   "/boot"
+               ],
+               "size": 957350400,
+               "start": 227328,
+               "model": null,
+               "rm": false,
+               "wwn": "nvme.1ae0-6e766d655f636172642d7064-6e766d655f636172642d7064-00000001",
+               "serial": null,
+               "maj:min": "259:4"
+            }
+         ]
+      },{
+         "path": "/dev/nvme0n2",
+         "kname": "nvme0n2",
+         "type": "disk",
+         "fstype": null,
+         "pttype": "gpt",
+         "parttype": null,
+         "mountpoints": [
+             null
+         ],
+         "size": 21474836480,
+         "start": null,
+         "model": "nvme_card-pd",
+         "rm": false,
+         "wwn": "nvme.1ae0-6e766d655f636172642d7064-6e766d655f636172642d7064-00000002",
+         "serial": "sail-fleet-zfsproof4-c-d1",
+         "maj:min": "259:5",
+         "children": [
+            {
+               "path": "/dev/nvme0n2p1",
+               "kname": "nvme0n2p1",
+               "type": "part",
+               "fstype": "zfs_member",
+               "pttype": "gpt",
+               "parttype": "6a898cc3-1dd2-11b2-99a6-080020736631",
+               "mountpoints": [
+                   null
+               ],
+               "size": 21464350720,
+               "start": 2048,
+               "model": null,
+               "rm": false,
+               "wwn": "nvme.1ae0-6e766d655f636172642d7064-6e766d655f636172642d7064-00000002",
+               "serial": null,
+               "maj:min": "259:6"
+            },{
+               "path": "/dev/nvme0n2p9",
+               "kname": "nvme0n2p9",
+               "type": "part",
+               "fstype": null,
+               "pttype": "gpt",
+               "parttype": "6a945a3b-1dd2-11b2-99a6-080020736631",
+               "mountpoints": [
+                   null
+               ],
+               "size": 8388608,
+               "start": 41924608,
+               "model": null,
+               "rm": false,
+               "wwn": "nvme.1ae0-6e766d655f636172642d7064-6e766d655f636172642d7064-00000002",
+               "serial": null,
+               "maj:min": "259:7"
+            }
+         ]
+      }
+   ]
+}

@@ -1,0 +1,24 @@
+### wipefs /dev/sdb
+DEVICE OFFSET      TYPE UUID LABEL
+sdb    0x200       gpt       
+sdb    0x9fffffe00 gpt       
+sdb    0x1fe       PMBR      
+exit=0
+### wipefs /dev/sdb1
+exit=0
+### wipefs /dev/sdb2
+exit=0
+### wipefs /dev/sdb3
+exit=0
+### wipefs /dev/sdc
+DEVICE OFFSET      TYPE UUID LABEL
+sdc    0x200       gpt       
+sdc    0x9fffffe00 gpt       
+sdc    0x1fe       PMBR      
+exit=0
+### wipefs /dev/sdc1
+exit=0
+### wipefs /dev/sdc2
+exit=0
+### wipefs /dev/sdc3
+exit=0

@@ -168,8 +168,7 @@ class AgentLogCommandTest {
   }
 
   private static HostOperations operations(Sqlite db, Path dir) {
-    return OperationsFactory.create(
-            db, SHELL, null, null, SyncScheduler.disabled(), SessionYield.NONE)
+    return OperationsFactory.create(db, SHELL, null, SyncScheduler.disabled(), SessionYield.NONE)
         .useControlPlane(
             db,
             dir,

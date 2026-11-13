@@ -1,0 +1,21 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/v1/changes?since=999999999"
+  },
+  "response": {
+    "body": {
+      "error": {
+        "action": "Read the rows afresh, then follow the feed from the seq header those reads answer.",
+        "code": "resync_required",
+        "field_errors": [],
+        "message": "Position '999999999' is not one this box can answer from: it names another database, an entry this one no longer holds as it stood, or no position at all."
+      },
+      "schema_version": 1
+    },
+    "headers": {
+      "seq": "golden.22.000000000022"
+    },
+    "status": 409
+  }
+}

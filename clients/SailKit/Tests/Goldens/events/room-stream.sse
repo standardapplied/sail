@@ -2,50 +2,35 @@
 
 data: {"agent": "sail", "data": {"open": false}, "host": "box", "project": "harbor", "spec": "harbor-design", "ts": "2026-11-11T09:00:00.656Z", "type": "agent_turn_state", "v": 1}
 
-id: 1
 data: {"agent": "uday", "data": {"message_id": "00000000-0000-7000-8000-000000000001", "preview": "Which berth takes the ferry — north or south? ⚓", "question": true}, "host": "box", "id": 1, "project": "harbor", "spec": "harbor-design", "ts": "2026-11-11T09:00:00.656Z", "type": "spec_message_posted", "v": 1}
 
-id: 2
 data: {"agent": "uday", "data": {"message_id": "00000000-0000-7000-8000-000000000002", "preview": "South: it has the deeper draft. 🚢"}, "host": "box", "id": 2, "project": "harbor", "spec": "harbor-design", "ts": "2026-11-11T09:00:00.656Z", "type": "spec_message_posted", "v": 1}
 
-id: 5
 data: {"agent": "claude/run-1", "data": {"message_id": "00000000-0000-7000-8000-000000000004", "preview": "The harness exited before it answered."}, "host": "box", "id": 5, "project": "harbor", "spec": "harbor-design", "ts": "2026-11-11T09:00:00.656Z", "type": "spec_message_posted", "v": 1}
 
-id: 6
 data: {"agent": "claude/run-1", "data": {"message_id": "00000000-0000-7000-8000-000000000003", "preview": "Shall I take the south berth?", "question": true}, "host": "box", "id": 6, "project": "harbor", "spec": "harbor-design", "ts": "2026-11-11T09:00:00.656Z", "type": "spec_message_posted", "v": 1}
 
-id: 18
-data: {"agent": "claude/run-1", "data": {"agent": "claude", "room_id": "harbor-design", "session_id": "s-1", "session_source": "startup"}, "host": "box", "id": 18, "project": "harbor", "spec": "harbor-design", "ts": "2026-11-11T09:00:00.656Z", "type": "agent_conversation_started", "v": 1}
+data: {"agent": "claude/run-1", "data": {"agent": "claude", "room_id": "harbor-design", "session_id": "s-1", "session_source": "startup"}, "host": "box", "id": 20, "project": "harbor", "spec": "harbor-design", "ts": "2026-11-11T09:00:00.656Z", "type": "agent_conversation_started", "v": 1}
 
-id: 29
-data: {"agent": "sail", "host": "box", "id": 29, "project": "harbor", "spec": "harbor-design", "ts": "2026-11-11T09:00:00.656Z", "type": "spec_engaged", "v": 1}
+data: {"agent": "sail", "host": "box", "id": 31, "project": "harbor", "spec": "harbor-design", "ts": "2026-11-11T09:00:00.656Z", "type": "spec_engaged", "v": 1}
 
-id: 30
-data: {"agent": "sail", "host": "box", "id": 30, "project": "harbor", "spec": "harbor-design", "ts": "2026-11-11T09:00:00.656Z", "type": "spec_disengaged", "v": 1}
+data: {"agent": "sail", "host": "box", "id": 32, "project": "harbor", "spec": "harbor-design", "ts": "2026-11-11T09:00:00.656Z", "type": "spec_disengaged", "v": 1}
 
-id: 31
-data: {"agent": "sail", "host": "box", "id": 31, "project": "harbor", "spec": "harbor-design", "ts": "2026-11-11T09:00:00.656Z", "type": "spec_engage_failed", "v": 1}
+data: {"agent": "sail", "host": "box", "id": 33, "project": "harbor", "spec": "harbor-design", "ts": "2026-11-11T09:00:00.656Z", "type": "spec_engage_failed", "v": 1}
 
-id: 32
-data: {"agent": "sail", "host": "box", "id": 32, "project": "harbor", "spec": "harbor-design", "ts": "2026-11-11T09:00:00.656Z", "type": "agent_turn_began", "v": 1}
+data: {"agent": "sail", "host": "box", "id": 34, "project": "harbor", "spec": "harbor-design", "ts": "2026-11-11T09:00:00.656Z", "type": "agent_turn_began", "v": 1}
 
-id: 33
-data: {"agent": "sail", "host": "box", "id": 33, "project": "harbor", "spec": "harbor-design", "ts": "2026-11-11T09:00:00.656Z", "type": "agent_text_delta", "v": 1}
+data: {"agent": "sail", "host": "box", "id": 35, "project": "harbor", "spec": "harbor-design", "ts": "2026-11-11T09:00:00.656Z", "type": "agent_text_delta", "v": 1}
 
-id: 34
-data: {"agent": "sail", "host": "box", "id": 34, "project": "harbor", "spec": "harbor-design", "ts": "2026-11-11T09:00:00.656Z", "type": "agent_tool_call", "v": 1}
+data: {"agent": "sail", "host": "box", "id": 36, "project": "harbor", "spec": "harbor-design", "ts": "2026-11-11T09:00:00.656Z", "type": "agent_tool_call", "v": 1}
 
-id: 35
-data: {"agent": "sail", "host": "box", "id": 35, "project": "harbor", "spec": "harbor-design", "ts": "2026-11-11T09:00:00.656Z", "type": "agent_turn_ended", "v": 1}
+data: {"agent": "sail", "host": "box", "id": 37, "project": "harbor", "spec": "harbor-design", "ts": "2026-11-11T09:00:00.656Z", "type": "agent_turn_ended", "v": 1}
 
-id: 36
-data: {"agent": "sail", "host": "box", "id": 36, "project": "harbor", "spec": "harbor-design", "ts": "2026-11-11T09:00:00.656Z", "type": "pty_session_started", "v": 1}
+data: {"agent": "sail", "host": "box", "id": 38, "project": "harbor", "spec": "harbor-design", "ts": "2026-11-11T09:00:00.656Z", "type": "pty_session_started", "v": 1}
 
-id: 37
-data: {"agent": "sail", "host": "box", "id": 37, "project": "harbor", "spec": "harbor-design", "ts": "2026-11-11T09:00:00.656Z", "type": "pty_session_attached", "v": 1}
+data: {"agent": "sail", "host": "box", "id": 39, "project": "harbor", "spec": "harbor-design", "ts": "2026-11-11T09:00:00.656Z", "type": "pty_session_attached", "v": 1}
 
-id: 38
-data: {"agent": "sail", "host": "box", "id": 38, "project": "harbor", "spec": "harbor-design", "ts": "2026-11-11T09:00:00.656Z", "type": "pty_session_ended", "v": 1}
+data: {"agent": "sail", "host": "box", "id": 40, "project": "harbor", "spec": "harbor-design", "ts": "2026-11-11T09:00:00.656Z", "type": "pty_session_ended", "v": 1}
 
 : keepalive
 

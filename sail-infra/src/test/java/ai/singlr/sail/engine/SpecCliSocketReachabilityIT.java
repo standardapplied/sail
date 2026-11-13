@@ -90,7 +90,6 @@ class SpecCliSocketReachabilityIT extends AbstractIncusIT {
                   new ShellExecutor(false),
                   ProjectReader.ofCatalog(new ProjectStore(db)),
                   bus,
-                  null,
                   specStore,
                   null,
                   runStore,

@@ -47,7 +47,7 @@ class AgentLogStreamerWiringTest {
         new SailOperations(),
         new FixedTokenTestAuth("tok"),
         new EventBus(),
-        new AuditPersister(tmp.resolve("events.jsonl"), 8),
+        null,
         tmp.resolve("api.sock"));
   }
 

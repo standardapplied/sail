@@ -123,7 +123,7 @@ public final class ProjectResourceReconciler {
   }
 
   private static boolean isProvisioned(ContainerState state) {
-    return state instanceof ContainerState.Running || state instanceof ContainerState.Stopped;
+    return state.live() || state instanceof ContainerState.Stopped;
   }
 
   private static boolean limitsDiffer(ResourceLimits limits, ProjectDefinition.Resources desired) {

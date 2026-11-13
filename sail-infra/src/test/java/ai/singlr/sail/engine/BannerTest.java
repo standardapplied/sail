@@ -872,8 +872,8 @@ class BannerTest {
                   "6.22",
                   null,
                   SUPPORTED,
-                  null,
-                  null,
+                  List.of(),
+                  false,
                   "unavailable (incus list failed)",
                   out,
                   Ansi.OFF);
@@ -945,8 +945,8 @@ class BannerTest {
                       "6.22",
                       "sudo sail host incus upgrade",
                       SUPPORTED,
-                      null,
-                      null,
+                      List.of(),
+                      false,
                       "unavailable (incus list failed)",
                       out,
                       Ansi.OFF));
@@ -1014,15 +1014,14 @@ class BannerTest {
 
   @Test
   void hostStatusShowsAllFields() {
-    var poolUsage = new ZfsQuery.PoolUsage("960G", "150G", "810G", "15%");
     var out = new ByteArrayOutputStream();
     Banner.printHostStatus(
         SAMPLE_HOST_YAML,
         "6.22",
         null,
         SUPPORTED,
-        poolUsage,
-        null,
+        List.of("devpool (zfs, /dev/sdb): 810.0 GiB free of 960.0 GiB"),
+        false,
         "2 total (1 running, 1 stopped)",
         new PrintStream(out),
         Ansi.OFF);
@@ -1033,27 +1032,26 @@ class BannerTest {
     assertTrue(output.contains("Ubuntu 24.04.1 LTS"));
     assertTrue(output.contains("6 cores / 12 threads"));
     assertTrue(output.contains("31,868 MB"));
-    assertTrue(output.contains("devpool on /dev/sdb"));
-    assertTrue(output.contains("960G"));
-    assertTrue(output.contains("150G (15%)"));
-    assertTrue(output.contains("810G"));
+    assertTrue(
+        output.contains("│  Pool:        devpool (zfs, /dev/sdb): 810.0 GiB free of 960.0 GiB"),
+        output);
     assertTrue(output.contains("│  Incus:       6.22 "), output);
     assertFalse(output.contains("6.21"), "the version running now, not the one init recorded");
     assertTrue(output.contains("2026-02-18 01:00:00"));
     assertTrue(output.contains("2 total (1 running, 1 stopped)"));
+    assertFalse(output.contains("Note:"), "a zfs pool's limits are enforced");
   }
 
   @Test
   void hostStatusBordersAlign() {
-    var poolUsage = new ZfsQuery.PoolUsage("960G", "150G", "810G", "15%");
     var out = new ByteArrayOutputStream();
     Banner.printHostStatus(
         SAMPLE_HOST_YAML,
         "6.21",
         null,
         SUPPORTED,
-        poolUsage,
-        null,
+        List.of("devpool (dir, /var/lib/incus/storage-pools/devpool): 1.0 GiB free of 9.0 GiB"),
+        true,
         "0 total (0 running, 0 stopped)",
         new PrintStream(out),
         Ansi.OFF);
@@ -1068,57 +1066,32 @@ class BannerTest {
   }
 
   @Test
-  void hostStatusWithNullPoolUsage() {
+  void hostStatusNamesEveryPoolAndSaysADirPoolsLimitsAreAdvisory() {
     var out = new ByteArrayOutputStream();
     Banner.printHostStatus(
         SAMPLE_HOST_YAML,
         "6.21",
         null,
         SUPPORTED,
-        null,
-        null,
+        List.of(
+            "devpool (dir, /var/lib/incus/storage-pools/devpool): 774.0 GiB free of 894.0 GiB",
+            "tank (zfs, /var/lib/incus/disks/tank.img): free space unknown"),
+        true,
         "0 total (0 running, 0 stopped)",
         new PrintStream(out),
         Ansi.OFF);
-    var output = out.toString(StandardCharsets.UTF_8);
 
-    assertTrue(output.contains("devpool on /dev/sdb"));
-    assertFalse(output.contains("Pool Size:"));
-  }
-
-  @Test
-  void hostStatusDirBackendShowsAdvisoryNote() {
-    var dirHostYaml =
-        new HostYaml(
-            "dir",
-            "devpool",
-            null,
-            "incusbr0",
-            "singlr-base",
-            "ubuntu/24.04",
-            "6.21",
-            null,
-            "2026-02-18T01:00:00Z");
-    var fsUsage = new DirQuery.FsUsage("894G", "120G", "774G", "14%");
-    var out = new ByteArrayOutputStream();
-    Banner.printHostStatus(
-        dirHostYaml,
-        "unknown",
-        null,
-        SUPPORTED,
-        null,
-        fsUsage,
-        "0 total (0 running, 0 stopped)",
-        new PrintStream(out),
-        Ansi.OFF);
-    var output = out.toString(StandardCharsets.UTF_8);
-
-    assertTrue(output.contains("devpool (dir)"));
-    assertTrue(output.contains("894G"));
-    assertTrue(output.contains("120G (14%)"));
-    assertTrue(output.contains("774G"));
-    assertTrue(output.contains("advisory"));
-    assertFalse(output.contains("Pool:"));
+    assertEquals(
+        List.of(
+            "  │  Pool:        devpool (dir, /var/lib/incus/storage-pools/devpool): 774.0 GiB free"
+                + " of 894.0 GiB",
+            "  │  Pool:        tank (zfs, /var/lib/incus/disks/tank.img): free space unknown",
+            "  │  Note:        Disk limits on a dir pool are advisory"),
+        out.toString(StandardCharsets.UTF_8)
+            .lines()
+            .filter(line -> line.contains("Pool:") || line.contains("Note:"))
+            .map(line -> line.replaceAll(" *│$", ""))
+            .toList());
   }
 
   @Test
@@ -1324,6 +1297,42 @@ class BannerTest {
     var output = out.toString(StandardCharsets.UTF_8);
 
     assertTrue(output.contains("Stopped"));
+  }
+
+  @Test
+  void aFrozenContainerReadsAsFrozenInEveryView() {
+    var frozen = new ContainerState.Frozen();
+    var line = new ByteArrayOutputStream();
+    Banner.printContainerStatus("acme", frozen, new PrintStream(line), Ansi.OFF);
+    var table = new ByteArrayOutputStream();
+    Banner.printProjectTable(
+        List.of(new ContainerManager.ContainerInfo("acme", frozen, null)),
+        new PrintStream(table),
+        Ansi.OFF);
+    var config = new ByteArrayOutputStream();
+    Banner.printProjectConfig(
+        new ProjectDefinition(
+            "acme",
+            null,
+            new ProjectDefinition.Resources(2, "4GB", "50GB"),
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null),
+        frozen,
+        new PrintStream(config),
+        Ansi.OFF);
+
+    assertEquals("  \u25a0 acme is frozen\n", line.toString(StandardCharsets.UTF_8));
+    assertTrue(table.toString(StandardCharsets.UTF_8).contains(" Frozen "), table.toString());
+    assertTrue(config.toString(StandardCharsets.UTF_8).contains(" Frozen "), config.toString());
+    assertFalse(
+        (table.toString(StandardCharsets.UTF_8) + config.toString(StandardCharsets.UTF_8))
+            .contains("Error"));
   }
 
   @Test

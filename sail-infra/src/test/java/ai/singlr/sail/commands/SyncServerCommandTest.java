@@ -52,6 +52,7 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -65,6 +66,7 @@ import org.junit.jupiter.api.io.TempDir;
 class SyncServerCommandTest {
 
   @TempDir Path tempDir;
+  private Path mainPath;
   private SyncDatabase mainReplicaDb;
   private Sqlite mainDb;
   private Sqlite nodeDb;
@@ -74,7 +76,7 @@ class SyncServerCommandTest {
 
   @BeforeEach
   void setUp() {
-    var mainPath = tempDir.resolve("main.db");
+    mainPath = tempDir.resolve("main.db");
     try (var db = Sqlite.open(mainPath)) {
       BoxDatabase.prepare(db);
     }
@@ -171,6 +173,29 @@ class SyncServerCommandTest {
     } finally {
       serverThread.join();
     }
+  }
+
+  @Test
+  void aRowANodePushesWakesMainsWatchersAndIsAnnouncedByTheProcessThatAppliedIt() throws Exception {
+    mainReplicaDb.close();
+    var announced = new AtomicInteger();
+    Runnable counting = announced::incrementAndGet;
+    mainReplicaDb =
+        ScopedValue.where(Sqlite.ANNOUNCING, counting)
+            .call(() -> SyncDatabase.converge(mainPath, "main"));
+    mainDb = mainReplicaDb.db();
+    mainSpecs = new SpecStore(mainDb);
+    var woken = new AtomicInteger();
+    var token = tokenFor("member");
+    Acting.as("uday", () -> nodeSpecs.create(spec("auth", "Auth")));
+    var before = announced.get();
+
+    try (var watching = new ChangeLog(mainDb).watch(woken::incrementAndGet)) {
+      assertEquals(1, syncWithToken(token).pushed());
+    }
+
+    assertTrue(woken.get() > 0, "a stream on main waiting on its log is woken by the push");
+    assertTrue(announced.get() > before, "and _sync, a process apart from the server, tells it");
   }
 
   @Test

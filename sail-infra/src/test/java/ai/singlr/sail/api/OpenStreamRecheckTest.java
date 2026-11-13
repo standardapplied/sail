@@ -87,7 +87,7 @@ class OpenStreamRecheckTest {
     PrivateAttributes.context(
         server,
         "/v1/events/stream",
-        new SseHandler(bus, counted, SseHandler.RoomTurns.NONE, 4, clock));
+        new SseHandler(bus, counted, SseHandler.RoomTurns.NONE, ChangeFeed.NONE, 4, clock));
     server.setExecutor(Executors.newVirtualThreadPerTaskExecutor());
     server.start();
   }

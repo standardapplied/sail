@@ -41,6 +41,12 @@ runs:
         incus version
         incus list
 
+    # After incus has started, as on a box whose Incus came first: the ZFS suite proves Incus sees
+    # the tools without a restart.
+    - name: Install the ZFS tools
+      shell: bash
+      run: sudo apt-get install -y zfsutils-linux
+
     # Every suite launches this image; fetched once here, its download is no test class's time.
     - name: Fetch the base image
       shell: bash

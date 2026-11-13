@@ -11,6 +11,11 @@ package ai.singlr.sail.engine;
  */
 public sealed interface ContainerState {
 
+  /** Whether its processes exist, running or frozen, so stopping it ends them. */
+  default boolean live() {
+    return this instanceof Running || this instanceof Frozen;
+  }
+
   /** Container does not exist — {@code incus list} returned an empty array. */
   record NotCreated() implements ContainerState {}
 
@@ -20,6 +25,12 @@ public sealed interface ContainerState {
   /** Container exists but is stopped. */
   record Stopped() implements ContainerState {}
 
-  /** Container is in an unexpected state (e.g. Frozen, Error). */
+  /**
+   * Container is paused ({@code incus pause}): its processes and memory are kept, none of them is
+   * scheduled, and Incus refuses to exec in it. {@code incus start} resumes it.
+   */
+  record Frozen() implements ContainerState {}
+
+  /** Container is in a state Incus did not name as one of these (e.g. Error, or mid-change). */
   record Error(String message) implements ContainerState {}
 }

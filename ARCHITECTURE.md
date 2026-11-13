@@ -974,7 +974,9 @@ definition has no field that names another; step 6 is recorded only once that us
 that uid.
 It launches the Incus container from the configured image, bind-mounts the host `sail-api`
 Unix socket in, installs the in-container `spec` CLI and event hooks, applies the disk quota
-(advisory on `dir`, hard via `refquota` on `zfs`) and the cpu and memory limits (with
+(the root disk's `size`: advisory on `dir`; on `zfs`, Incus sets it as the dataset's ZFS
+`quota`, which counts the container's own snapshots, since Sail sets no `zfs.use_refquota`; see
+**Storage**) and the cpu and memory limits (with
 `security.nesting` and unconfined AppArmor so rootless Podman runs inside), installs
 packages, the SSH user and the workstation key it trusts, Podman (with linger and a restart
 service), Testcontainers wiring, and the JDK, Node, and Maven runtimes, configures the box's git
@@ -988,6 +990,146 @@ path, not silently here. Neither path deletes or re-clones a checkout already in
 container, which may hold work: one whose `origin` is not the definition's repository, or that
 is no git checkout, is refused before the step is recorded (`RepoOrigin`, which reads the same
 host and path as one repository whatever the scheme, user, port or `.git`).
+
+**Storage** (`HostProvisioner`, `IncusStorage`, `PoolDevices`, `ZfsCacheCap`). Incus owns
+every pool: `host init` has it create the pool with one `incus storage create`, built only by
+`IncusStorage.createCommand`, and Sail makes no dataset of its own inside one. The sources are
+`--storage dir` (the host filesystem, `incus storage create <pool> dir`), and for `--storage zfs`
+a whole disk or a partition (`--disk <device>`, `source=<device>`), a sparse file Incus makes
+under `/var/lib/incus/disks/` (`--pool-file-size <size>`, `size=<n>MiB`), slower than a disk and
+said once to be meant for trials. Incus runs `zpool create -m none -O compression=on` itself,
+never with `-f`: Sail never passes `source.wipe`.
+
+- **Z1. What `host init` reports as done is what Incus has.** The base profile's root disk is
+  converged (added when missing, an existing one kept) and the pool it names must be one Incus
+  lists, else init fails; `host.yaml` states that pool, its driver and its source
+  (`pool_source`) as Incus has them. *`HostProvisionerTest.aZfsPoolOnAWholeDiskIsIncussOwnAndTheProfilePutsContainersOnIt`,
+  `HostProvisionerTest.aProfileThatNamesAPoolIncusLacksIsRefused`, `HostProvisionerIT`.*
+- **Z2. Sail erases nothing.** No command of Sail wipes, repartitions or overwrites a signature:
+  it never passes `source.wipe`, so Incus never runs `zpool create -f` (Incus runs `-f`, after
+  zeroing the device's headers, only for `source.wipe`: `driver_zfs.go` `Create`, v6.0.0 and
+  v7.6.0 alike). Incus's own `zpool create` is then a last guard, not the decision: Sail's own checks decide.
+  Without `-f`, zpool refuses a device on which libblkid sees a filesystem, swap, a member's or a
+  pool's label at the whole-device level (OpenZFS 2.2.2 `check_disk`, `check_slice`); it does not
+  look inside an MBR disk's partitions, and it takes an empty partition table and content libblkid
+  cannot read unambiguously. The window it guards is the moment between Sail's re-check and
+  Incus's create. `PoolDevices.cleared`
+  resolves the named device (a `/dev/mapper` name by its kernel name) and reads the whole device
+  tree (`lsblk --json --tree --bytes`; a flat list fails closed), then takes the device only when
+  all of this holds, each refused by name otherwise: it is a plain disk (at the top of the tree, of
+  type disk; not an array, a loop device, a mapping, a ZFS volume, a zram or nbd device, or a disk
+  built on another, as bcache is) or a partition of one, not removable and not empty; a
+  partition's extent (its START and size from the same lsblk call) lies inside its disk and
+  overlaps no other partition, and a disk with an overlapping pair refuses every partition of it,
+  since writing one destroys the other, and the disk itself names the pair; a partition with no
+  type udev can read that ends at its disk's last byte is one the kernel cut there, and is refused
+  as reaching past the disk's end; every
+  partition's type, on the device or for a disk on any of its partitions, is Linux filesystem data
+  (GPT `0fc63daf-…`, MBR `0x83`) or ZFS (`6a898cc3-…`, `0xbf`), compared without case, and any
+  other type or none refuses it, since a boot, firmware, reserved or extended partition may carry
+  no signature; nothing is mounted on it, used as swap or built on it; neither lsblk nor `wipefs`'s
+  listing of it shows a signature of any kind (a filesystem, swap, a partition table, or a member's:
+  any `*_member` (a RAID, LVM or zfs member, an exported pool's included), `bcache`,
+  `ceph_bluestore`, LUKS), nor for a disk any partition; the exclusive open `wipefs --all --no-act
+  --types sail_exclusive_probe` makes finds no other holder (`--no-act` skips the writes, and the
+  type filter matches no signature, so wipefs neither reports anything erased nor re-reads a
+  partition table, as an unfiltered `--no-act --all` does; udev may re-read one when the device is
+  closed, which writes nothing, so a disk's partitions are probed before the disk, Sail waits for
+  udev to settle after a disk's probe, at most 10 s, and a partition gone while it is probed or a
+  table that does not settle is refused as a partition table that is changing); no process has it,
+  any of its partitions, or for a partition its disk, open at
+  all, read from every `/proc/<pid>/fd` and matched by device number, so a holder is seen through
+  any node or path it opened the device by, in any mount namespace (a process whose open files
+  cannot be read refuses it too, and an exclusive holder the walk cannot find is said to be one
+  Sail cannot name);
+  and neither it nor another partition of its disk is a device of an imported pool,
+  whatever class it is listed under (`zpool list -vHP <pool>`), named with the pool and with
+  Incus's pool when Incus holds it. Where it sits does not matter: a blank partition on the
+  system's disk is taken, and everything the system uses there carries a signature, a mount or a
+  boot type. A device whose only obstacle is a filesystem, swap or a bare partition table names
+  the `sudo wipefs --all <device>` the operator may run; one in use names the use, and a member
+  of anything the command that frees it (a zpool `zpool import` lists: import it or `zpool
+  labelclear` it; the labels of a pool it does not list, destroyed or missing its other devices:
+  `zpool labelclear`, never import), never wipefs; a pool's whole disk is named by its pool. A refused device that holds a filesystem unmounted names it. What
+  neither the open nor the walk sees is a consumer that does not keep the device open while Sail
+  looks, a stopped virtual machine's raw disk or a closed dm-crypt volume with no header. A disk
+  with no partition table and no signature is blank to Sail, even where a filesystem survives
+  further in after its table was erased. The check runs when the flags are read and again just
+  before the pool is made, which refuses unless the device is the one first cleared (its or its
+  disk's WWN or serial, its major:minor and its size in bytes), and once more before the create
+  that follows Incus restarting to see ZFS; each re-check is the last command before its create.
+  The walk of `/proc` takes seconds on a busy box, so it runs after lsblk is read and before the
+  device is probed: the device's own probes, then its by-id name, are the last look at it before
+  Incus is handed it.
+  A device whose disk has a hardware identity (a WWN, or an NVMe EUI, NGUID or vendor id) is handed
+  to Incus by the path udev names from it (`/dev/disk/by-id/wwn-…`, `nvme-eui.…` or `nvme-nvme.…`,
+  with `-partN`), only when that path resolves to the device checked, so no other disk
+  can stand under the name the pool is made on; a disk with none, as on GCP, is handed by its
+  kernel path. There, a disk physically replaced under the same name between Sail's last check and
+  the pool's creation is judged by `zpool create` alone, which refuses a filesystem, swap, a pool
+  member or a device in use, but not an empty partition table or filesystems inside MBR
+  partitions: do not change disks while `host init` runs. Zpool's offer to force a create it
+  refused is never passed on: the refusal says what zpool found and that Sail erases nothing.
+  Offered disks (none named) are only whole blank ones.
+  A pool on one partition or one disk has no redundancy: losing that device loses every container
+  on the pool, however the system's own disks are mirrored.
+  *`PoolDevicesTest` (on lsblk, wipefs and zpool output captured from this devbox, a GitHub
+  runner and four GCP proofs taken through blank, partitioned, RAID, pool, swap, btrfs,
+  swapped-disk, overlapping-partition and pivoted root-on-ZFS and btrfs layouts, plus hand-written
+  layouts marked as such),
+  `PoolDevicesIT` (the runner's own disks, read-only; the probe on a loop device mounted and
+  mapped; a `/dev/mapper` path refused as a dm device; a pool with every vdev class; Incus making
+  the pool Sail asks for on a blank loop device, and zpool refusing one that took ext4 after the
+  checks, its ext4 kept; a loop device a process holds open plainly, through a device node of its
+  own, refused until it lets go, and a partition of one whose whole device a process holds), `HostProvisionerTest.aDeviceMountedSinceItWasNamedIsRefusedAndUntouched`.*
+- **Z3. One pool, one owner.** Sail only reads ZFS (`zpool list`); every pool,
+  dataset, snapshot and copy is made or removed by Incus. *`HostProvisionerTest.aZfsPoolOnAWholeDiskIsIncussOwnAndTheProfilePutsContainersOnIt`.*
+- **Z4. The ZFS cache cap is set before ZFS can take memory.** Step 3 writes
+  `/etc/modprobe.d/sail-zfs.conf` (`options zfs zfs_arc_max=`, a tenth of memory, at most
+  16 GiB and at least the 64 MiB ZFS honours, with `zfs_arc_min` lowered to half the cap where
+  the ceiling falls under ZFS's default floor of a thirty-second of memory) before installing
+  zfsutils-linux, and to the loaded module when ZFS is already in, so it holds from the next load
+  and across reboots. Where `/` is on ZFS the module loads from the initramfs, which carries a
+  copy of `/etc/modprobe.d`, so init runs `update-initramfs -u`. It decides from what the next
+  boot applies, the merged configuration `modprobe --showconfig` lists from every file modprobe
+  reads and the kernel command line: a cap the operator set there that Sail did not write, or a
+  value in Sail's own file other than the one Sail writes for this box (the operator's edit), is
+  kept, nothing written, and the step names it; a value only the loaded module holds is gone at
+  the next boot, so Sail writes its own;
+  the cap Sail wrote before is removed, so the operator's is the one modprobe applies whichever
+  file sorts last.
+  *`HostProvisionerTest.theZfsCacheIsCappedBeforeTheToolsThatLoadZfsAreInstalled`, `ZfsCacheCapTest`.*
+- **Z5. A `dir` box keeps working unchanged.** A re-run of `host init --storage zfs --pool <new>`
+  on a box whose profile exists adds the pool beside the old one and touches no container, no
+  profile device and `host.yaml`'s storage; `host status` lists it. Placing a project's
+  containers on it is `sail-project-workspaces`. A pool name Incus already has with another
+  driver is refused before anything is installed; a zfs pool Incus already has is kept, and a
+  source flag that re-run would ignore is refused by name, while the command that made it, a disk
+  or a file of the same size, runs again as a no-op: `--disk` and the pool's source are compared as
+  the devices `realpath -e` resolves them to, so any name of the pool's device (its kernel path, the
+  by-id path Incus holds, another link of the disk) is the same device, and a source that resolves
+  to nothing is refused as the pool's device gone. A zfs pool Incus no longer has when the pool is made is never made from its
+  zpool. A dry run reads the profile, pools and packages the box has, so it shows the base
+  profile staying where it is and says whether Incus and ZFS would be installed, which bridge, pool
+  and profile it would create, whether the image would be cached and the bridge rules added, and
+  ends "Dry run done: nothing was changed" rather
+  than "Server ready".
+  *`HostProvisionerTest.aDirBoxWithContainersAddsAZfsPoolBesideItsOwnAndTouchesNoContainer`,
+  `HostProvisionerIT`.*
+
+Incus finds the ZFS tools when a pool is created, not only when it starts (its driver looks
+them up on each load until one succeeds; only `incus info`'s list of supported drivers is read
+at start), so a box whose Incus started first needs no restart. If Incus still says a tool is
+missing, init restarts it only on a box with no container, saying so, and otherwise names
+`systemctl restart incus` and stops. On a `zfs` pool a container's disk limit is the root disk's
+`size`, which Incus sets as the dataset's `quota` (`zfs.use_refquota` would make it `refquota`;
+Sail leaves the Incus default), so a write past it fails inside the container with "Disk quota
+exceeded" and the snapshots of that container count against it. A copy of an instance's
+snapshot on the pool is a `zfs clone` whose `origin` is the snapshot. `sail host status` lists
+every pool with its driver, source and free space (`incus storage list`, `incus query
+/1.0/storage-pools/<pool>/resources`). A paused container (`incus pause`) reads as
+`ContainerState.Frozen`, `frozen` at the API and counted in `host status`; apply and `project
+start` resume it with `incus start`, and stop, restore, rename and resize treat it as live.
 
 **The stack** (`ProjectServer`, `StackOperations`): a project's services and its processes,
 each process an app the dev user runs, declared with the port it listens on. `sudo sail project
@@ -1040,11 +1182,10 @@ credential minted at dispatch (`SAIL_RUN_CREDENTIAL`), which resolves to the run
 principal; a missing or revoked credential is refused with 401. Every box runs it, and it
 is what lets an engineer dispatch agents locally.
 
-Event history has two read shapes. `GET /v1/events/recent?limit=` is the unscoped window,
-and `GET /v1/events?spec=<id>[&since=<eventId>][&limit=]` serves one spec's durable history
-from the `EventStore`: RECORD-class events only (telemetry is pruned by retention and never
-served from history), oldest first, with `since` an exclusive monotonic event-id cursor for
-gap-fill after an SSE reconnect. The record is **node-local** — there is no event replica,
+What changed is read from the change feed (below). A spec's own event history is
+`GET /v1/events?spec=<id>[&since=<eventId>][&limit=]`, served from the `EventStore`:
+RECORD-class events only (telemetry is pruned by retention and never served from history),
+oldest first, with `since` an exclusive event-id cursor. The record is **node-local** — there is no event replica,
 so events recorded on another FDE's box never land in this box's audit store (same
 provenance posture as agent logs). The route serves the local record completely; the
 fleet-consistent room content is and remains the durable synced stores — messages, reviews,
@@ -2331,6 +2472,91 @@ straight to the database and announces each, and the door decides it on the conv
 message is in, never on a run named beside it, and rebuilds the event whole from the stored row, as the messages route emits it
 for a local post, refusing a message this box does not hold. A refusal is a 403 through
 `Refusals`, naming the event type and what the sender may not drive.
+
+### The change feed
+
+A client keeps a copy of the rows it shows and stays current without reading them all again:
+it reads a list, which answers a `Seq` header, then asks `GET /v1/changes?since=<position>` (or
+holds `GET /v1/events/stream` open with `Last-Event-ID: <position>`) for every row that changed
+after. A position is one opaque string, `<catalog>.<seq>.<fingerprint>` (`FeedPositions`): the
+database's catalog id, a `change_log.seq`, and the first 6 bytes of a SHA-256 of the type, id
+and rev of the entry at that seq, as the log holds it or compaction kept it (`0` where none ever
+stood). The `Seq` header, `since`, `next`, the SSE `id:`, `Last-Event-ID` and `after` all carry
+one; a change's own `seq` in its envelope stays an integer. A revision's rev is
+`<counter>-<content hash>`: a reader who held a row's content can test a guess at a later
+revision of it, never enumerate one.
+
+One seam, `ChangeFeed`, serves both. A page reads the heads after the position from
+`ChangeLog.changesAfter`, each type's range (and, for a scoped reader, each of its projects'
+ranges of it) in seq order through an index and cut at the limit, then each fed type's rows in
+one read, in one read snapshot. It serves a reader a row it may read now, or `gone` or `erased`,
+without content, for a head filed where it may read now; nothing else, and a change to one row
+never re-sends another. A fed row is shaped by its type's list record less the fields that list
+derives from other rows (`RoomsListResponse.DERIVED`, `GlobalSpecsListResponse.DERIVED`), which
+a client derives from the rows it holds (SailKit's `HeldRows`):
+
+| Field | Derived from |
+|---|---|
+| room `spec_ids` | the spec rows whose `room_id` is the room |
+| room `last_activity_at` | the newest message held of the room |
+| room `needs_reply`, `question_message_id` | the room's latest question an agent asked, of the messages held, that no person spoke after |
+| spec `wake`, `engagement` | its room row's `wake` and first member |
+| spec `needs_reply`, `question_message_id` | its room's open question |
+| spec `last_activity_at` | the later of its `updated_at` and the newest message held of the conversation named as the spec is |
+
+A spec whose room its reader may not read is listed with none of the room's fields, as the client,
+holding no such room, derives none. Deriving without the box's roster has known limits, where a
+client's copy disagrees with the list: the server counts a question answered only by a voice that
+steers its room, and a client any person's message, so a reply from someone who does not steer
+the room clears the client's `needs_reply` while the list shows it; a client that rebuilt from the
+lists holds only the newest page of a room's messages, so a question older than that page, with no
+person's message since, is open on the list and not on the client; and a reader that hears only a
+room's steering voices is listed with the time of the room's newest message of any voice, which it
+is never sent.
+
+A client follows the feed only from the position of the reads it holds, and applies changes in
+the order told. A stream reads one page per turn of its loop, as the caller is now: it asks the
+door that opened it before a page is read and again before it is written, so a caller refused
+since is ended with none of it. It reads on from its own cursor without checking that cursor's
+entry again. It reads when this process commits an append to the change log (`ChangeLog.watch`)
+or when another process announces one through `POST /v1/changes:wake`, a burst of either waking
+it once; never on a timer and on no other event. The wake carries nothing, is delivered to no
+client, and any caller who authenticates may send it (gate `WAKES`). A command other than the
+server binds a `CommitAnnouncer` to every database it opens (`Sqlite.ANNOUNCING`, bound by
+`Main`; the server binds none), which sends the wake after each commit that appended. Bus events
+carry no `id:`, so they never move a cursor.
+
+A change of what a reader may read raises a **floor** (`FeedFloors`): an entry of the change
+log's own type `feed`, filed under no project, that no sync pages and every other reader of the
+log passes over by naming its types (`FeedFloorTest` sweeps the sources for it). Raising one
+moves it to a new entry with a fresh random rev, so a position standing on it says nothing of
+whose floor rose, and keeps the entry it replaces as a compacted one, so a position standing on
+that still checks. The box's floor rises when history is rewritten with no newer entry
+(`ChangeLog.purge`, `forget`, on a node); an FDE's when what it reads changes
+(`FdeStore.restrict`, `unrestrict`, `grant`, `revoke`, its removal, an erased project's grants
+taken back); a project's when a spec, room or run moves into or out of it (both projects), when
+main refiles a head on a node (`fileUnder`), and when a message filed apart from its
+conversation is deleted or erased: every message said in a room before the room moved stays filed
+under the project it left, as does a later reply in one of its threads, so retention or a prune of
+a moved room's old history resyncs every scoped reader of the project it left, though none of
+them can read any of it, rather than tell them the end of a message that was never theirs. A reader of every project answers to no
+project floor. A position that does not parse, names another database, lies past the newest
+seq, stands where no entry now stands as it was handed out (a copy restored from an older backup
+and grown again; an entry erased since), or below its reader's floor is `409 resync_required` on
+the feed and one `event: resync` with an `id:` on the stream, each naming the newest position;
+a stream told so after it started is then ended. An older binary run against the database raises
+no floor while it runs.
+
+| | Invariant | Proven by |
+|---|---|---|
+| F1 | A position is opaque and names the database, the `change_log.seq` and the entry standing there: durable across restarts, strictly increasing, assigned where the revision is written, with no second counter. One from another database, from a copy restored from an older backup, standing on an entry no longer there, or a bare number is `resync`, never served. | `ChangeFeedTest` (a restart; a reinstall; a restore, before and after the entry at the seq is erased; the same row at the same seq with another revision; an old client's bare id), `FeedFloorTest` |
+| F2 | For any reader and position, replay then live delivery is every readable change after it, each once a page, in order, including a change committed during the replay; a page's `next` passes what it read and told nothing of; a stream's cursor survives the erasure of its entry. | `ChangeFeedTest` (a change committed between two replay pages; a row changed three times; 5,000 changes paged; a skipped tail; an erased cursor) |
+| F3 | A change is told only to a reader of its row, by its own read route's rule; a scoped reader's feed and stream are the same changes with and without another project's activity, positions aside; no position names a floor that rose. One erasure is seen by readers who could read nothing of it: the deletion or erasure of a message filed apart from its conversation, which is every pre-move message of a moved room, resyncs the scoped readers of the project it is filed under. | `ChangeFeedTest` (a scoped viewer; a reply in a moved room's old thread; a run's credential; the floor fingerprints), `ScopedReadsTest`, `OneDecisionSweepTest` |
+| F4 | A change of what a reader may read raises a floor for the readers it can affect, who are answered `resync` and whose open streams end; a caller refused before a page is written is sent none of it. | `ChangeFeedTest` (a revoked member; a disabled one; a disable, a deleted session and a revoke landing between the door and the page), `FeedFloorTest` |
+| F5 | An erased row is told as `erased` with its id and type, never its content, to a reader of where it is filed; a reader that hears only a room's steering voices is never told the erasure of a message, so it keeps one it was told. | `ChangeFeedTest` (a pruned spec; erased messages and a steering-only reader), `FeedFloorTest` |
+| F6 | A page holds at most 500 heads (100 by default), reads each range through an index in seq order, and costs the same statements however many it holds; each page is its own read, so a replay never holds a write, and a stream reads one page a turn. | `ChangeFeedTest` (statements; twenty streams over 60,000 hidden messages; a 200,000-change replay), `FeedFloorTest` (query plans at 200,000 heads) |
+| F7 | `/v1/changes` and the stream's row events are one read through `ChangeFeed`; a fed row carries what its own journal entry holds, shaped by its list record less the fields derived from other rows, and a change to one row never re-sends another; a client deriving those fields from what it holds agrees with the lists. | `ChangeFeedTest` (scenario 7 on the derived view; a room's wake change), `ClientGoldensTest` (`changes.json`, `board-*.json`), SailKit `ChangeFeedTests` |
+| F8 | A client that names no position is served as before, but for the `Seq` header and the ids row changes carry; bus events, turn deltas, pty facts and a room's turn state carry no id, and no client is sent a wake. An idle stream reads nothing, and only commits and wakes make a stream read. | `ChangeFeedTest` (no position; deltas on a resumed stream; an idle stream; a member's wake; wakes in a burst and door events), `SseHandlerTest`, `ClientGoldensTest` (`stream.sse`) |
 
 ## Access
 

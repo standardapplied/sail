@@ -58,7 +58,7 @@ class OperationsFactoryTest {
         var bus = new EventBus();
         var operations =
             OperationsFactory.create(
-                box.db, shell, bus, null, SyncScheduler.disabled(), SessionYield.NONE)) {
+                box.db, shell, bus, SyncScheduler.disabled(), SessionYield.NONE)) {
       Acting.system(() -> new ProjectStore(box.db).upsert(TestDefinitions.named("proj")));
       var preview = new DispatchOperations.AdhocRequest("task", null, null, true, true);
       var plain = operations.dispatching().startAdhoc("proj", preview, "node");

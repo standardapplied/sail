@@ -49,14 +49,16 @@ class SseHandlerTest {
   @Test
   void constructorRejectsNullBus() {
     assertThrows(
-        NullPointerException.class, () -> new SseHandler(null, AUTH, SseHandler.RoomTurns.NONE));
+        NullPointerException.class,
+        () -> new SseHandler(null, AUTH, SseHandler.RoomTurns.NONE, ChangeFeed.NONE));
   }
 
   @Test
   void constructorRejectsNullAuth() {
     try (var bus = new EventBus()) {
       assertThrows(
-          NullPointerException.class, () -> new SseHandler(bus, null, SseHandler.RoomTurns.NONE));
+          NullPointerException.class,
+          () -> new SseHandler(bus, null, SseHandler.RoomTurns.NONE, ChangeFeed.NONE));
     }
   }
 
@@ -170,7 +172,8 @@ class SseHandlerTest {
     try (var bus = new EventBus()) {
       var httpServer = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
       httpServer.createContext(
-          "/v1/events/stream", new SseHandler(bus, auth, SseHandler.RoomTurns.NONE));
+          "/v1/events/stream",
+          new SseHandler(bus, auth, SseHandler.RoomTurns.NONE, ChangeFeed.NONE));
       httpServer.setExecutor(Executors.newVirtualThreadPerTaskExecutor());
       httpServer.start();
       try {
@@ -247,7 +250,6 @@ class SseHandlerTest {
   void anOpenStreamEndsWhenItsBusClosesSoAStoppingServerWaitsForNoKeepalive(@TempDir Path tmp)
       throws Exception {
     var bus = new EventBus();
-    var persister = new AuditPersister(tmp.resolve("events.jsonl"), 32);
     try (var server =
         new SailApiServer(
             "127.0.0.1",
@@ -255,7 +257,7 @@ class SseHandlerTest {
             new SailOperations(),
             new FixedTokenTestAuth("tok"),
             bus,
-            persister,
+            null,
             tmp.resolve("api.sock"))) {
       server.start();
       var request =
@@ -284,7 +286,6 @@ class SseHandlerTest {
   @Test
   void streamDeliversPublishedEventsAndClosesOnClient(@TempDir Path tmp) throws Exception {
     try (var bus = new EventBus()) {
-      var persister = new AuditPersister(tmp.resolve("events.jsonl"), 32);
       try (var server =
           new SailApiServer(
               "127.0.0.1",
@@ -292,7 +293,7 @@ class SseHandlerTest {
               new SailOperations(),
               new FixedTokenTestAuth("tok"),
               bus,
-              persister,
+              null,
               tmp.resolve("api.sock"))) {
         server.start();
 
@@ -356,7 +357,6 @@ class SseHandlerTest {
   @Test
   void streamReturns405ForPostMethod(@TempDir Path tmp) throws Exception {
     try (var bus = new EventBus()) {
-      var persister = new AuditPersister(tmp.resolve("events.jsonl"), 8);
       try (var server =
           new SailApiServer(
               "127.0.0.1",
@@ -364,7 +364,7 @@ class SseHandlerTest {
               new SailOperations(),
               new FixedTokenTestAuth("tok"),
               bus,
-              persister,
+              null,
               tmp.resolve("api.sock"))) {
         server.start();
         var client = HttpClient.newHttpClient();
@@ -385,7 +385,6 @@ class SseHandlerTest {
   void theStreamAnswersOnlyItsOwnPathAndAsksTheCallerBeforeTheMethod(@TempDir Path tmp)
       throws Exception {
     try (var bus = new EventBus()) {
-      var persister = new AuditPersister(tmp.resolve("events.jsonl"), 8);
       try (var server =
           new SailApiServer(
               "127.0.0.1",
@@ -393,7 +392,7 @@ class SseHandlerTest {
               new SailOperations(),
               new FixedTokenTestAuth("tok"),
               bus,
-              persister,
+              null,
               tmp.resolve("api.sock"))) {
         server.start();
         var client = HttpClient.newHttpClient();
@@ -436,7 +435,6 @@ class SseHandlerTest {
   void theStreamReadsItsPathAsTheApiRouterDoesSoATrailingOrDoubledSlashStillStreams(
       @TempDir Path tmp) throws Exception {
     var bus = new EventBus();
-    var persister = new AuditPersister(tmp.resolve("events.jsonl"), 8);
     try (var server =
         new SailApiServer(
             "127.0.0.1",
@@ -444,7 +442,7 @@ class SseHandlerTest {
             new SailOperations(),
             new FixedTokenTestAuth("tok"),
             bus,
-            persister,
+            null,
             tmp.resolve("api.sock"))) {
       server.start();
       var readers = new ArrayList<BufferedReader>();
@@ -481,7 +479,6 @@ class SseHandlerTest {
   @Test
   void streamRejectsMissingToken(@TempDir Path tmp) throws Exception {
     try (var bus = new EventBus()) {
-      var persister = new AuditPersister(tmp.resolve("events.jsonl"), 8);
       try (var server =
           new SailApiServer(
               "127.0.0.1",
@@ -489,7 +486,7 @@ class SseHandlerTest {
               new SailOperations(),
               new FixedTokenTestAuth("tok"),
               bus,
-              persister,
+              null,
               tmp.resolve("api.sock"))) {
         server.start();
         var response =
@@ -571,9 +568,9 @@ class SseHandlerTest {
                   assertEquals(List.of("data: " + state.toJsonLine()), frame(lounge));
                   var stamped = bus.publish(later);
                   assertEquals(
-                      List.of("id: " + stamped.id(), "data: " + stamped.toJsonLine()),
+                      List.of("data: " + stamped.toJsonLine()),
                       frame(lounge),
-                      "what the bus publishes follows, with its id");
+                      "what the bus publishes follows, with no id: only a row change moves a cursor");
 
                   var kitchen = open(port, "all", "?room=kitchen");
                   var shut = open(port, "dark-only", "?room=lounge");
@@ -581,15 +578,15 @@ class SseHandlerTest {
                   var inKitchen = bus.publish(Event.of("light", "kitchen", "t", "a", "h"));
                   var darkInLounge = bus.publish(Event.of("dark", "lounge", "t", "a", "h"));
                   assertEquals(
-                      List.of("id: " + inKitchen.id(), "data: " + inKitchen.toJsonLine()),
+                      List.of("data: " + inKitchen.toJsonLine()),
                       frame(kitchen),
                       "a room this box does not know is told nothing first");
                   assertEquals(
-                      List.of("id: " + darkInLounge.id(), "data: " + darkInLounge.toJsonLine()),
+                      List.of("data: " + darkInLounge.toJsonLine()),
                       frame(shut),
                       "nor is a reader whose scope keeps the room's project out");
                   assertEquals(
-                      List.of("id: " + inKitchen.id(), "data: " + inKitchen.toJsonLine()),
+                      List.of("data: " + inKitchen.toJsonLine()),
                       frame(everything),
                       "nor a stream of no room");
                 });
@@ -626,7 +623,7 @@ class SseHandlerTest {
                   var lounge = open(port, "all", "?room=lounge");
                   assertEquals(List.of("data: " + state.toJsonLine()), frame(lounge));
                   assertEquals(
-                      List.of("id: " + during.get().id(), "data: " + during.get().toJsonLine()),
+                      List.of("data: " + during.get().toJsonLine()),
                       frame(lounge),
                       "the stream subscribed before it read the state, so nothing is lost");
                 });
@@ -693,7 +690,8 @@ class SseHandlerTest {
         };
     var httpServer = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
     httpServer.createContext(
-        "/v1/events/stream", new SseHandler(bus, auth, turns, 8, InstantSource.system()));
+        "/v1/events/stream",
+        new SseHandler(bus, auth, turns, ChangeFeed.NONE, 8, InstantSource.system()));
     httpServer.setExecutor(Executors.newVirtualThreadPerTaskExecutor());
     httpServer.start();
     try {

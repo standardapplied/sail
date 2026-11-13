@@ -5,6 +5,7 @@
 
 package ai.singlr.sail;
 
+import ai.singlr.sail.api.CommitAnnouncer;
 import ai.singlr.sail.api.Refusals;
 import ai.singlr.sail.commands.CliCommand;
 import ai.singlr.sail.commands.RootRequired;
@@ -15,6 +16,7 @@ import ai.singlr.sail.engine.AutoUpgrader;
 import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.RemoteCommandRunner;
 import ai.singlr.sail.engine.RuntimeMode;
+import ai.singlr.sail.store.Sqlite;
 import java.util.Arrays;
 import java.util.List;
 import picocli.CommandLine;
@@ -36,7 +38,8 @@ public final class Main {
     AutoUpgrader.upgradeIfAvailable(args);
     var cmd = SailCommandLine.of(new Sail());
     cmd.setExecutionExceptionHandler((ex, commandLine, parseResult) -> report(ex, commandLine));
-    var exitCode = cmd.execute(args);
+    Runnable announcer = CommitAnnouncer.toThisBox();
+    var exitCode = ScopedValue.where(Sqlite.ANNOUNCING, announcer).call(() -> cmd.execute(args));
     System.exit(exitCode);
   }
 

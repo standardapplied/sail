@@ -78,6 +78,31 @@ public final class ProjectDemoCommand implements Runnable {
     }
   }
 
+  /** Refuses a demo where its container exists, saying what to do with it. */
+  static void requireAbsent(ContainerState state, OperatorCommand operator) {
+    var exists =
+        switch (state) {
+          case ContainerState.Running ignored ->
+              "is already running.\n  Get a shell:    "
+                  + operator.sail("project shell " + DEMO_PROJECT);
+          case ContainerState.Frozen ignored ->
+              "exists but is frozen.\n  Resume it:      "
+                  + operator.sail("project start " + DEMO_PROJECT);
+          case ContainerState.Stopped ignored ->
+              "exists but is stopped.\n  Start it:       "
+                  + operator.sail("project start " + DEMO_PROJECT);
+          case ContainerState.NotCreated ignored -> null;
+          case ContainerState.Error ignored -> null;
+        };
+    if (exists != null) {
+      throw new IllegalStateException(
+          "Demo project "
+              + exists
+              + "\n  Destroy first:  "
+              + operator.sail("project destroy " + DEMO_PROJECT));
+    }
+  }
+
   @Override
   public void run() {
     CliCommand.run(this::execute);
@@ -101,22 +126,7 @@ public final class ProjectDemoCommand implements Runnable {
       var shell = new ShellExecutor(false);
       var mgr = new ContainerManager(shell);
       var state = mgr.queryState(DEMO_PROJECT);
-      if (state instanceof ContainerState.Running) {
-        throw new IllegalStateException(
-            "Demo project is already running."
-                + "\n  Get a shell:    "
-                + operator.sail("project shell " + DEMO_PROJECT)
-                + "\n  Destroy first:  "
-                + operator.sail("project destroy " + DEMO_PROJECT));
-      }
-      if (state instanceof ContainerState.Stopped) {
-        throw new IllegalStateException(
-            "Demo project exists but is stopped."
-                + "\n  Start it:       "
-                + operator.sail("project start " + DEMO_PROJECT)
-                + "\n  Destroy first:  "
-                + operator.sail("project destroy " + DEMO_PROJECT));
-      }
+      requireAbsent(state, operator);
     }
 
     if (!json) {

@@ -98,7 +98,7 @@ class NodeWritesTest {
     room("rajs", "raj");
     room("adas", "ada");
     operations =
-        OperationsFactory.create(db, SHELL, null, null, SyncScheduler.disabled(), SessionYield.NONE)
+        OperationsFactory.create(db, SHELL, null, SyncScheduler.disabled(), SessionYield.NONE)
             .useControlPlane(
                 db,
                 tempDir,

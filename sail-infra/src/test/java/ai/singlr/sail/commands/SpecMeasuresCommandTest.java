@@ -80,12 +80,7 @@ class SpecMeasuresCommandTest {
     var operations =
         TestControlPlane.on(
             OperationsFactory.create(
-                db,
-                new ShellExecutor(true),
-                bus,
-                null,
-                SyncScheduler.disabled(),
-                SessionYield.NONE),
+                db, new ShellExecutor(true), bus, SyncScheduler.disabled(), SessionYield.NONE),
             db,
             tempDir,
             new SyncConfig(null, null, null, "box-7"));

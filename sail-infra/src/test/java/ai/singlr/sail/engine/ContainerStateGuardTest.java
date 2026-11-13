@@ -31,6 +31,22 @@ class ContainerStateGuardTest {
   }
 
   @Test
+  void requireRunningRejectsFrozenWithTheCommandThatResumesIt() {
+    var ex =
+        assertThrows(
+            IllegalStateException.class,
+            () -> ContainerStateGuard.requireRunning(new ContainerState.Frozen(), "demo"));
+    assertEquals(
+        "Project 'demo' is frozen. Resume it with: sail project start demo", ex.getMessage());
+  }
+
+  @Test
+  void requireCreatedPassesWhenFrozen() {
+    assertDoesNotThrow(
+        () -> ContainerStateGuard.requireCreated(new ContainerState.Frozen(), "demo"));
+  }
+
+  @Test
   void requireRunningRejectsNotCreatedWithCreateHint() {
     var ex =
         assertThrows(

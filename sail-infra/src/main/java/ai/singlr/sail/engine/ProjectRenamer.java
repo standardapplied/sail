@@ -57,8 +57,7 @@ public final class ProjectRenamer {
 
   public ProjectRenamer(Sqlite db, ShellExec shell, Path projectsDir) {
     this(
-        OperationsFactory.create(
-            db, shell, null, null, SyncScheduler.disabled(), SessionYield.NONE),
+        OperationsFactory.create(db, shell, null, SyncScheduler.disabled(), SessionYield.NONE),
         shell,
         projectsDir);
   }
@@ -98,9 +97,8 @@ public final class ProjectRenamer {
     if (oldState instanceof ContainerState.Error error) {
       throw new IllegalStateException("Cannot inspect container '" + old + "': " + error.message());
     }
-    var hasContainer =
-        oldState instanceof ContainerState.Running || oldState instanceof ContainerState.Stopped;
-    var wasRunning = oldState instanceof ContainerState.Running;
+    var wasRunning = oldState.live();
+    var hasContainer = wasRunning || oldState instanceof ContainerState.Stopped;
     var undo = new ArrayDeque<Compensation>();
     try {
       if (wasRunning) {

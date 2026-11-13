@@ -1,0 +1,24 @@
+### wipefs --no-act --all /dev/sdb
+/dev/sdb: 8 bytes were erased at offset 0x00000200 (gpt): 45 46 49 20 50 41 52 54
+/dev/sdb: 8 bytes were erased at offset 0x9fffffe00 (gpt): 45 46 49 20 50 41 52 54
+/dev/sdb: 2 bytes were erased at offset 0x000001fe (PMBR): 55 aa
+/dev/sdb: calling ioctl to re-read partition table: Success
+exit=0
+### wipefs --no-act --all /dev/sdb1
+exit=0
+### wipefs --no-act --all /dev/sdb2
+exit=0
+### wipefs --no-act --all /dev/sdb3
+exit=0
+### wipefs --no-act --all /dev/sdc
+/dev/sdc: 8 bytes were erased at offset 0x00000200 (gpt): 45 46 49 20 50 41 52 54
+/dev/sdc: 8 bytes were erased at offset 0x9fffffe00 (gpt): 45 46 49 20 50 41 52 54
+/dev/sdc: 2 bytes were erased at offset 0x000001fe (PMBR): 55 aa
+/dev/sdc: calling ioctl to re-read partition table: Success
+exit=0
+### wipefs --no-act --all /dev/sdc1
+exit=0
+### wipefs --no-act --all /dev/sdc2
+exit=0
+### wipefs --no-act --all /dev/sdc3
+exit=0

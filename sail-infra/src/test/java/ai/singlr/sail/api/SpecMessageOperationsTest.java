@@ -57,7 +57,6 @@ class SpecMessageOperationsTest {
                 new ShellExecutor(false),
                 ProjectReader.ofCatalog(new ProjectStore(db)),
                 bus,
-                null,
                 new SpecStore(db),
                 new ReviewStore(db))
             .useMessages(new MessageStore(db))
@@ -357,7 +356,6 @@ class SpecMessageOperationsTest {
                 new ShellExecutor(false),
                 ProjectReader.ofCatalog(new ProjectStore(db)),
                 bus,
-                null,
                 new SpecStore(db),
                 new ReviewStore(db))
             .useMessages(new MessageStore(db))

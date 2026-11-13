@@ -264,6 +264,8 @@ public final class ContainerManager {
       return new ContainerState.Running(ipv4);
     } else if ("Stopped".equals(status)) {
       return new ContainerState.Stopped();
+    } else if ("Frozen".equals(status)) {
+      return new ContainerState.Frozen();
     } else {
       return new ContainerState.Error("Unexpected container status: " + status);
     }

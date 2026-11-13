@@ -17,6 +17,7 @@ public enum ErrorCode: String, CaseIterable, Sendable {
     case methodNotAllowed = "method_not_allowed"
     case rateLimited = "rate_limited"
     case preconditionFailed = "precondition_failed"
+    case resyncRequired = "resync_required"
     case projectNotInCatalog = "project_not_in_catalog"
     case projectNotCreated = "project_not_created"
     case projectStopped = "project_stopped"

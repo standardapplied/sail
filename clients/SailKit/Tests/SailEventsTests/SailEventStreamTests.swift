@@ -95,9 +95,11 @@ import Testing
         #expect(all.dropFirst().allSatisfy { $0.spec == "harbor-design" })
     }
 
-    @Test func everyConnectionIsAnnouncedWithTheLastEventReadBeforeItAndEveryFailedOneWithWhy() async throws {
-        let golden = try Goldens.bytes("events/stream.sse")
-        let third = try #require(range(of: "id: 3\n", in: golden))
+    @Test func everyConnectionIsAnnouncedWithTheLastChangeReadBeforeItAndEveryFailedOneWithWhy() async throws {
+        let golden = try Goldens.bytes("events/resumed-stream.sse")
+        let ids = try Goldens.changeIds()
+        let seqs = try Goldens.changeSeqs()
+        let third = try #require(range(of: "event: change\nid: \(ids[2])\n", in: golden))
         let server = try ScriptedStreams([
             .stream([Array(golden[..<third.lowerBound])], .drop),
             .unreachable,
@@ -106,8 +108,10 @@ import Testing
         ])
         let (updates, _) = await read(SailClient(transport: server, token: "tok").events(EventFilter(), sleep: Naps().sleep))
         #expect(updates.prefix(7).map(\.summary) == [
-            "connected after nil", "event 1", "event 2", "failed", "failed", "connected after 2", "event 3",
+            "connected after nil", "change \(seqs[0])", "change \(seqs[1])", "failed", "failed",
+            "connected after \(ids[1])", "change \(seqs[2])",
         ])
+        #expect(await server.requests.map { $0.headers["Last-Event-ID"] }.prefix(4) == [nil, ids[1], ids[1], ids[1]])
         #expect(updates[3] == .connectFailed(.unreachable("no connection")))
         #expect(updates[4] == .connectFailed(.unexpected(route: "GET /v1/events/stream", status: 503)))
     }
@@ -154,7 +158,8 @@ import Testing
 
     @Test func aClientsStreamIsReadWithoutASeamUntilItsReaderIsCancelled() async throws {
         let golden = try Goldens.bytes("events/room-stream.sse")
-        let server = try ScriptedStreams([.stream([Array(golden[..<(try #require(range(of: "id: 2\n", in: golden))).lowerBound])], .close)])
+        let second = try #require(range(of: "data: " + (try dataLines("events/room-stream.sse"))[2], in: golden))
+        let server = try ScriptedStreams([.stream([Array(golden[..<second.lowerBound])], .close)])
         let stream = SailClient(transport: server, token: "tok").events()
         let reader = Task {
             var updates = stream.makeAsyncIterator()
@@ -168,17 +173,6 @@ import Testing
         #expect(await server.requests.map(\.path) == ["/v1/events/stream"])
     }
 
-    @Test func theClientAsksForTheNewestEventsAndReadsTheServersAnswer() async throws {
-        let exchange = try Exchange("events-recent")
-        let server = RecordedServer([exchange])
-        let recent = try await SailClient(transport: server, token: "tok").send(.recentEvents(limit: 3))
-        #expect(recent == RecentEvents(limit: 3, returned: 0, events: []))
-        let request = try #require(await server.requests.first)
-        #expect(request.route == "\(exchange.method) \(exchange.path)")
-        #expect(request.headers["Authorization"] == "Bearer tok")
-        #expect(Endpoint.recentEvents().request.path == "/v1/events/recent")
-    }
-
     @Test func anEventIsBuiltAsItIsReadAndWrittenAsItIsRead() async throws {
         let all = events(in: try await readGolden("events/stream.sse").0)
         let published = try #require(all.first { $0.publisher != nil })
@@ -188,7 +182,7 @@ import Testing
         ))
         let stopped = try #require(all.first { $0.type == .known(.agentSessionStopped) })
         #expect(stopped == Event(
-            version: 1, id: 13, timestamp: stopped.timestamp, project: "harbor", spec: "harbor-docks",
+            version: 1, id: 15, timestamp: stopped.timestamp, project: "harbor", spec: "harbor-docks",
             type: .known(.agentSessionStopped), agent: "sail", host: "box",
             data: ["exit_code": .integer(2), "run_id": .string("run-1"), "source": .string("sync")]
         ))
@@ -196,8 +190,40 @@ import Testing
             timestamp: stopped.timestamp, project: "harbor", type: .unknown("ferry_docked"), agent: "mast", host: "laptop",
             data: ["berth": .object(["north": .integer(4), "tide": .null, "draft": .number(12.5)])]
         )
-        let page = RecentEvents(limit: all.count + 1, returned: all.count + 1, events: all + [nested])
-        #expect(try SailJSON.decode(RecentEvents.self, from: SailJSON.encode(page), route: "cache") == page)
+        let kept = all + [nested]
+        #expect(try SailJSON.decode([Event].self, from: SailJSON.encode(kept), route: "cache") == kept)
+    }
+}
+
+@Suite(.timeLimit(.minutes(1))) struct ResumedStreamTests {
+    @Test func aResumedStreamIsSentEveryChangeSinceInOrderEachAsTheFeedServesIt() async throws {
+        let (updates, ended) = try await readGolden("events/resumed-stream.sse")
+        #expect(ended == nil)
+        let changes = updates.compactMap { if case let .change(change) = $0 { change } else { nil } }
+        #expect(changes.map { String($0.seq) } == (try Goldens.changeSeqs()))
+        #expect(updates.prefix(changes.count + 1).map(\.summary) == ["connected after nil"] + changes.map { "change \($0.seq)" })
+        let page = try SailJSON.decode(ChangePage.self, from: Exchange("changes").body, route: "GET /v1/changes")
+        #expect(changes == page.changes, "the stream's changes are the feed's")
+        #expect(changes.contains { if case .gone = $0.fate { $0.id == "harbor-quay" } else { false } })
+        #expect(changes.contains { if case .erased = $0.fate { $0.id == "harbor-buoys" } else { false } })
+    }
+
+    @Test func aStreamThatCannotResumeIsToldToResyncAndWhereFrom() async throws {
+        let (updates, ended) = try await readGolden("events/resync-stream.sse")
+        #expect(ended == nil)
+        let newest = try #require(Exchange("refusal-resync-required").headers["seq"])
+        #expect(updates.prefix(2).map(\.summary) == ["connected after nil", "resync after \(newest)"])
+    }
+
+    @Test func anEventNamedAsNoneThisClientReadsIsUnreadableAndTheStreamGoesOn() async throws {
+        let (updates, ended) = try await read(stream([Array("event: ferry\ndata: {}\n\n".utf8)]))
+        #expect(ended == nil)
+        #expect(Array(updates.prefix(2)) == [
+            .connected(after: nil),
+            .unreadable(Undecodable(
+                route: "GET /v1/events/stream", field: "(event)", reason: "an event named 'ferry' is not one this client reads"
+            )),
+        ])
     }
 }
 
@@ -231,7 +257,9 @@ extension StreamUpdate {
     var summary: String {
         switch self {
         case let .event(event): "event \(event.id.map(String.init) ?? "unnumbered")"
-        case let .connected(after): "connected after \(after.map(String.init) ?? "nil")"
+        case let .change(change): "change \(change.seq)"
+        case let .resync(after): "resync after \(after)"
+        case let .connected(after): "connected after \(after ?? "nil")"
         case .connectFailed: "failed"
         case .unreadable: "unreadable"
         }

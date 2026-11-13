@@ -219,7 +219,10 @@ class PtyTest {
   /**
    * A host spawning a stand-in that never claims its terminal, and whose child keeps its standard
    * output open too: says what {@code spawn} refused, whether within its bound, whether the
-   * stand-in still runs, and how many descriptors the attempt left open.
+   * stand-in still runs, and how many descriptors the attempt left open. The stand-in sends its own
+   * standard error nowhere: macOS's {@code sh} is bash, which reports a child killed under its
+   * {@code wait} ("Killed: 9") whenever it reaps it before its own kill lands, and that report is
+   * the stand-in's, not the host's.
    */
   static final class UnclaimedTerminalHost {
     public static void main(String[] args) throws Exception {
@@ -233,7 +236,9 @@ class PtyTest {
         var started = System.nanoTime();
         try {
           pty.spawn(
-              List.of("sh", "-c", "sleep 100 & echo $$ $! > " + pid + "; wait"), Map.of(), dir);
+              List.of("sh", "-c", "exec 2> /dev/null; sleep 100 & echo $$ $! > " + pid + "; wait"),
+              Map.of(),
+              dir);
           System.out.println("spawned");
         } catch (IOException refused) {
           System.out.println(refused.getMessage().replace(pty.slavePath(), "<tty>"));

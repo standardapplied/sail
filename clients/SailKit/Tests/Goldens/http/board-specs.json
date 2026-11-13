@@ -1,0 +1,52 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/v1/specs?project=harbor"
+  },
+  "response": {
+    "body": {
+      "schema_version": 1,
+      "specs": [
+        {
+          "agent": "claude-code",
+          "assignee": "uday",
+          "branch": "agent/harbor-docks",
+          "created_at": "2026-11-11T09:00:00.656Z",
+          "created_by": "uday",
+          "depends_on": [
+            "harbor-berths"
+          ],
+          "engagement": {
+            "agent": "claude-code",
+            "agent_name": "Claude Code",
+            "engaged_at": "2026-11-11T09:00:00.656Z",
+            "mode": "read_only",
+            "model": "opus"
+          },
+          "id": "harbor-docks",
+          "last_activity_at": "2026-11-11T09:00:00.656Z",
+          "model": "opus",
+          "needs_reply": true,
+          "priority": 2,
+          "project": "harbor",
+          "question_message_id": "00000000-0000-7000-8000-000000000003",
+          "reasoning_effort": "high",
+          "repos": [
+            "harbor-api"
+          ],
+          "room_id": "harbor-design",
+          "status": "pending",
+          "title": "Docks take the ferry",
+          "updated_at": "2026-11-11T09:00:00.656Z",
+          "updated_by": "uday",
+          "wake": "mention"
+        }
+      ],
+      "total": 1
+    },
+    "headers": {
+      "seq": "golden.22.000000000022"
+    },
+    "status": 200
+  }
+}

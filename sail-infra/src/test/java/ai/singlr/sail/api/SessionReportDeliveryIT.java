@@ -73,7 +73,6 @@ class SessionReportDeliveryIT {
                 new ShellExecutor(false),
                 ProjectReader.ofCatalog(new ProjectStore(db)),
                 bus,
-                null,
                 new SpecStore(db),
                 new ReviewStore(db),
                 runStore,

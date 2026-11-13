@@ -22,6 +22,8 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.CopyOnWriteArraySet;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Supplier;
 import java.util.function.UnaryOperator;
 import java.util.stream.Collectors;
@@ -51,6 +53,14 @@ import java.util.stream.Collectors;
  * transaction so the journal can never diverge from the row it describes. History is bounded by
  * {@link #compact}, a local rule every box applies identically: the newest {@link
  * #HISTORY_REVISIONS} entries of an entity, its synced base, and every tombstone and erasure.
+ *
+ * <p>The log is also the change feed a client resumes from: {@link #changesAfter} reads the heads
+ * after a seq, filed where the reader may read now, and a client holds that seq as an opaque
+ * position ({@link FeedPositions}). A position stays answerable while every row a reader could hold
+ * at it has a head at or after it, filed where the reader reads it, that tells what became of it.
+ * What breaks that raises a floor ({@link FeedFloors}): history rewritten with no newer entry
+ * ({@link #purge}, {@link #forget}) raises the box's; a row that moves between projects, or a
+ * message deleted where it is filed but not conversed, raises its projects'.
  */
 public final class ChangeLog {
 
@@ -58,6 +68,12 @@ public final class ChangeLog {
   public static final int HISTORY_REVISIONS = 20;
 
   private static final String EMPTY_SNAPSHOT = "{}";
+
+  /**
+   * The types whose state names its own project, filed anew whenever it names another ({@link
+   * #projectOf}): the only rows a reader can lose to a move.
+   */
+  private static final List<String> FILED_ANEW = List.of("spec", "room", "run");
 
   private final Sqlite db;
 
@@ -138,6 +154,12 @@ public final class ChangeLog {
    * null when unknown.
    */
   public record Head(long seq, String entityId, String project) {}
+
+  /**
+   * One head a feed reads ({@link #changesAfter}): its seq, its entity, the kind and the rev of its
+   * entry.
+   */
+  public record Change(long seq, String entityType, String entityId, Kind kind, String rev) {}
 
   /**
    * Runs {@code work} in one transaction on the journal's database, excluding every concurrent
@@ -256,6 +278,9 @@ public final class ChangeLog {
               snapshot,
               deleted ? Kind.TOMBSTONE : Kind.REVISION,
               null);
+          if (deleted) {
+            toldWhereFiled(entityType, entityId, snapshot);
+          }
         });
   }
 
@@ -270,7 +295,8 @@ public final class ChangeLog {
     db.transaction(
         () -> {
           var project = headProject(entityType, entityId).orElse(null);
-          purge(entityType, entityId);
+          var lastState = head(entityType, entityId).map(Entry::snapshot).orElse(EMPTY_SNAPSHOT);
+          dropHistory(entityType, entityId);
           insert(
               entityType,
               entityId,
@@ -282,7 +308,30 @@ public final class ChangeLog {
               EMPTY_SNAPSHOT,
               Kind.ERASURE,
               project);
+          toldWhereFiled(entityType, entityId, lastState);
         });
+  }
+
+  /**
+   * Raises the floor of the project a message is filed under when its deletion or erasure would be
+   * told there to readers who may not read its conversation: a reply stays with the thread it
+   * answers wherever its room moved since, and the feed tells the end of a message to the readers
+   * of where it is filed. Those readers read afresh instead, so no notice of a message they could
+   * never read is theirs. {@code lastState} is the message as it stood.
+   */
+  private void toldWhereFiled(String entityType, String entityId, String lastState) {
+    if (!Erasure.MESSAGE.equals(entityType)) {
+      return;
+    }
+    var filed = headProject(entityType, entityId).orElse(null);
+    var stood = YamlUtil.parseMap(lastState);
+    var conversation =
+        stood.get("room_id") == null && stood.get("spec_id") == null
+            ? null
+            : conversationProject(MessageStore.roomIdOf(stood));
+    if (filed != null && !filed.equals(conversation)) {
+      new FeedFloors(db).raiseOf(filed);
+    }
   }
 
   /**
@@ -290,9 +339,18 @@ public final class ChangeLog {
    * points its head at the newest erasure left — or drops the head when none is. How an entity that
    * belonged to an erased one leaves this box's history when its own erasure has not been recorded
    * here. The head keeps the project it carried: an erasure row names none. Names no actor: it
-   * rewrites history under erasure rather than recording a write.
+   * rewrites history under erasure rather than recording a write, and so raises the floor ({@link
+   * FeedFloors}): no newer entry tells a reader what became of it.
    */
   public void purge(String entityType, String entityId) {
+    db.transaction(
+        () -> {
+          dropHistory(entityType, entityId);
+          new FeedFloors(db).raiseForEveryone();
+        });
+  }
+
+  private void dropHistory(String entityType, String entityId) {
     db.transaction(
         () -> {
           var project = headProject(entityType, entityId).orElse(null);
@@ -322,7 +380,8 @@ public final class ChangeLog {
    * Forgets an entity entirely — every entry of it, erasures included, its head and any offer of it
    * in flight — as if this box had never held it. How a project that left a node's scope leaves the
    * node: main stops sending it, so nothing of it may stay to be offered, paged or matched. Names
-   * no actor: nothing is recorded.
+   * no actor: nothing of the entity is recorded, and the floor ({@link FeedFloors}) rises, as
+   * nothing newer tells a reader it went.
    */
   public void forget(String entityType, String entityId) {
     db.transaction(
@@ -337,6 +396,7 @@ public final class ChangeLog {
               entityType,
               entityId);
           settleOffer(entityType, entityId);
+          new FeedFloors(db).raiseForEveryone();
         });
   }
 
@@ -358,11 +418,30 @@ public final class ChangeLog {
     if (project == null) {
       return;
     }
-    db.execute(
-        "UPDATE change_heads SET project = ? WHERE entity_type = ? AND entity_id = ?",
-        project,
-        entityType,
-        entityId);
+    db.transaction(
+        () -> {
+          var before = headProject(entityType, entityId).orElse(null);
+          db.execute(
+              "UPDATE change_heads SET project = ? WHERE entity_type = ? AND entity_id = ?",
+              project,
+              entityType,
+              entityId);
+          refiled(before, project);
+        });
+  }
+
+  /**
+   * Raises the floors of both projects when a head filed under {@code before} is now filed under
+   * {@code after}: readers of the one it left must drop it, and readers of the one it entered must
+   * read what was said under it, whose entries are older than their positions. A reader of every
+   * project is told the row itself and needs neither.
+   */
+  private void refiled(String before, String after) {
+    if (before != null && after != null && !before.equals(after)) {
+      var floors = new FeedFloors(db);
+      floors.raiseOf(before);
+      floors.raiseOf(after);
+    }
   }
 
   /**
@@ -642,6 +721,8 @@ public final class ChangeLog {
       String carriedProject) {
     db.transaction(
         () -> {
+          var moves = FILED_ANEW.contains(entityType);
+          var before = moves ? headProject(entityType, entityId).orElse(null) : null;
           db.execute(
               "INSERT INTO change_log (entity_type, entity_id, rev, actor, recorded_at, origin,"
                   + " deleted, snapshot, peer, kind) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
@@ -668,7 +749,139 @@ public final class ChangeLog {
               entityId,
               projectOf(entityType, entityId, snapshot),
               carriedProject);
+          if (moves) {
+            refiled(before, headProject(entityType, entityId).orElse(null));
+          }
+          db.afterCommit(db.appended);
         });
+  }
+
+  /**
+   * The newest position of this database: the largest {@code seq} it ever assigned, read from
+   * SQLite's own record of it, so an entry removed since does not lower it. A position above it was
+   * never this database's.
+   */
+  public long newest() {
+    return db.queryOne(
+            "SELECT seq FROM sqlite_sequence WHERE name = 'change_log'", row -> row.integer(0))
+        .orElse(0L);
+  }
+
+  /**
+   * Calls {@code wake} after every commit that appended to this log from this process, until the
+   * returned handle is closed: how a reader waiting for changes is told of one as it lands, the
+   * floor's own entries included ({@link FeedFloors}). A process that is not the box's API server
+   * tells it through the event door, by an announcer watching its own appends.
+   */
+  public Watch watch(Runnable wake) {
+    return db.appended.add(wake);
+  }
+
+  /**
+   * Wakes every watcher of this log ({@link #watch}) as an append of this process would, when the
+   * log grew since the last such wake: how the box's API server is told, by a process that is not
+   * it, that the log grew. A wake with nothing newer wakes no one, so it costs one statement.
+   */
+  public void wake() {
+    if (db.appended.grewTo(newest())) {
+      db.appended.run();
+    }
+  }
+
+  /** A watch on the log's appends ({@link #watch}), until it is closed. */
+  public interface Watch extends AutoCloseable {
+    @Override
+    void close();
+  }
+
+  /** Who waits on a database's appends ({@link #watch}): told once each commit that made one. */
+  static final class Watchers implements Runnable {
+    private final Set<Runnable> waiting = new CopyOnWriteArraySet<>();
+    private final AtomicLong woken = new AtomicLong();
+
+    /** Whether {@code newest} is past the newest seq a wake was last run for, which it now is. */
+    boolean grewTo(long newest) {
+      return woken.getAndAccumulate(newest, Math::max) < newest;
+    }
+
+    Watch add(Runnable wake) {
+      var watching = (Runnable) wake::run;
+      waiting.add(watching);
+      return () -> waiting.remove(watching);
+    }
+
+    @Override
+    public void run() {
+      waiting.forEach(Runnable::run);
+    }
+  }
+
+  /**
+   * The heads of {@code types} after {@code since} filed under a project of {@code scope} ({@link
+   * Access#audience}), ascending by seq and at most {@code limit} of them. Each type's range, and
+   * for a scoped reader each of its projects' ranges of it, is read in seq order through its index
+   * and stops at the limit ({@link SchemaManager#FEED_INDEXES}), so a page costs what it returns,
+   * never what lies after it, nor what is filed where its reader may not read.
+   */
+  public List<Change> changesAfter(
+      Collection<String> types, long since, int limit, ProjectScope scope) {
+    var page = page(types, since, limit, scope);
+    if (page == null) {
+      return List.of();
+    }
+    return db.query(
+        page.sql(),
+        row ->
+            new Change(row.integer(0), row.text(1), row.text(2), Kind.of(row.text(3)), row.text(4)),
+        page.arguments());
+  }
+
+  /** How SQLite reads {@link #changesAfter}'s page: each step of its query plan, in order. */
+  List<String> planOf(Collection<String> types, long since, int limit, ProjectScope scope) {
+    var page = page(types, since, limit, scope);
+    return page == null
+        ? List.of()
+        : db.query("EXPLAIN QUERY PLAN " + page.sql(), row -> row.text(3), page.arguments());
+  }
+
+  /** A statement and the arguments it is bound with. */
+  private record Query(String sql, Object[] arguments) {}
+
+  /** {@link #changesAfter}'s statement, or null when the scope holds no project to read. */
+  private static Query page(Collection<String> types, long since, int limit, ProjectScope scope) {
+    var each = new ArrayList<String>();
+    var arguments = new ArrayList<Object>(List.of(since, limit));
+    for (var type : types) {
+      arguments.add(type);
+      var typed = arguments.size();
+      if (scope.unrestricted()) {
+        each.add(range(typed, null));
+        continue;
+      }
+      for (var project : scope.projects()) {
+        arguments.add(project);
+        each.add(range(typed, arguments.size()));
+      }
+    }
+    return each.isEmpty()
+        ? null
+        : new Query(
+            "SELECT * FROM (" + String.join(" UNION ALL ", each) + ") ORDER BY 1 LIMIT ?2",
+            arguments.toArray());
+  }
+
+  /**
+   * One indexed range of {@link #changesAfter}: the heads of the type bound as argument {@code
+   * type} after {@code ?1}, filed under the project bound as argument {@code project} when it is
+   * set, the first {@code ?2} of them by seq.
+   */
+  private static String range(int type, Integer project) {
+    return """
+        SELECT * FROM (SELECT h.seq, h.entity_type, h.entity_id, l.kind, l.rev
+            FROM change_heads h JOIN change_log l ON l.seq = h.seq
+            WHERE h.entity_type = ?%d%s AND h.seq > ?1
+            ORDER BY h.seq LIMIT ?2)"""
+        .formatted(type, project == null ? "" : " AND h.project = ?" + project);
   }
 
   /** Returns every revision of an entity in chronological order (oldest first). */

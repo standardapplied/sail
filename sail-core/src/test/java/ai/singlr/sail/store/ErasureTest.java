@@ -259,7 +259,13 @@ class ErasureTest {
     assertEquals(0, count("SELECT count(*) FROM room_messages"));
     assertEquals(
         4, count("SELECT count(*) FROM change_log WHERE kind = 'erasure' AND actor = 'uday'"));
-    assertEquals(0, count("SELECT count(*) FROM change_log WHERE kind <> 'erasure'"));
+    assertEquals(
+        0,
+        count(
+            "SELECT count(*) FROM change_log WHERE kind <> 'erasure' AND entity_type <> '"
+                + FeedFloors.TYPE
+                + "'"),
+        "the thread leaves its erasures alone; its latest message going raised its readers' floor");
     assertEquals(0, count("SELECT count(*) FROM events"));
   }
 
@@ -306,7 +312,10 @@ class ErasureTest {
     assertEquals(
         List.of("spec:old:7-mainsrev"),
         db.query(
-            "SELECT entity_type || ':' || entity_id || ':' || rev FROM change_log",
+            "SELECT entity_type || ':' || entity_id || ':' || rev FROM change_log"
+                + " WHERE entity_type <> '"
+                + FeedFloors.TYPE
+                + "'",
             row -> row.text(0)));
     assertFalse(
         erasure.adopt("spec", "old", "7-mainsrev", null), "adopting it twice changes nothing");
@@ -346,7 +355,10 @@ class ErasureTest {
 
     assertEquals(
         Set.of("spec:draft", "room:draft", "message:" + mine.id()), names(discarded.entities()));
-    assertEquals(0, count("SELECT count(*) FROM change_log"));
+    assertEquals(0, count(ENTRIES));
+    assertTrue(
+        new FeedFloors(db).floor(null, ProjectScope.all()) > 0,
+        "no entry tells a reader the draft went");
     spec("draft", null);
     assertTrue(specs.findById("draft").isPresent(), "the id was never spent");
   }
@@ -385,8 +397,7 @@ class ErasureTest {
     assertEquals(List.of("alpha", "beta"), new ChangeLog(db).heldProjects());
     erasure.dropLocal("alpha");
 
-    assertEquals(
-        2, count("SELECT count(*) FROM change_log"), "what is of no known project is left alone");
+    assertEquals(2, count(ENTRIES), "what is of no known project is left alone");
     assertFalse(erasure.isErased(spec("never-held")));
     assertTrue(erasure.isErased(spec("theirs")));
     assertTrue(erasure.isErased(spec("unfiled")));
@@ -468,6 +479,10 @@ class ErasureTest {
         .map(target -> target.type() + ":" + target.id())
         .collect(Collectors.toSet());
   }
+
+  /** The entries of the journal that are some entity's, the change feed's floor left out. */
+  private static final String ENTRIES =
+      "SELECT count(*) FROM change_log WHERE entity_type <> '" + FeedFloors.TYPE + "'";
 
   private long count(String sql) {
     return db.queryOne(sql, row -> row.integer(0)).orElseThrow();

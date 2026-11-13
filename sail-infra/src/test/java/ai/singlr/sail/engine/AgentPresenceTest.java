@@ -63,7 +63,13 @@ class AgentPresenceTest {
   void aContainerIncusCannotReportOnLeavesTheQuestionOpen() throws Exception {
     assertInstanceOf(
         AgentSession.Presence.Unanswered.class,
-        presenceIn(containerListedAs("Frozen")),
+        presenceIn(containerListedAs("Freezing")),
         "an incus outage, or a state it does not name, never reads as every agent gone");
+  }
+
+  @Test
+  void aFrozenContainersAgentIsPausedNotGone() throws Exception {
+    assertInstanceOf(
+        AgentSession.Presence.Unanswered.class, presenceIn(containerListedAs("Frozen")));
   }
 }

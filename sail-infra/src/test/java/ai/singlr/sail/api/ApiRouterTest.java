@@ -1709,41 +1709,6 @@ class ApiRouterTest {
   }
 
   @Test
-  void recentEventsReturnsArray() throws Exception {
-    try (var server = server()) {
-      var response = get(server, "/v1/events/recent", "token");
-      assertEquals(200, response.statusCode());
-      assertTrue(response.body().contains("\"events\""));
-      assertTrue(response.body().contains("\"limit\": 100"));
-    }
-  }
-
-  @Test
-  void recentEventsHonorsLimitQueryParam() throws Exception {
-    try (var server = server()) {
-      var response = get(server, "/v1/events/recent?limit=42", "token");
-      assertEquals(200, response.statusCode());
-      assertTrue(response.body().contains("\"limit\": 42"));
-    }
-  }
-
-  @Test
-  void recentEventsRejectsInvalidLimit() throws Exception {
-    try (var server = server()) {
-      var response = get(server, "/v1/events/recent?limit=99999", "token");
-      assertEquals(422, response.statusCode());
-    }
-  }
-
-  @Test
-  void recentEventsRejectsNonNumericLimit() throws Exception {
-    try (var server = server()) {
-      var response = get(server, "/v1/events/recent?limit=abc", "token");
-      assertEquals(422, response.statusCode());
-    }
-  }
-
-  @Test
   void eventBusStatsReturnsCounts() throws Exception {
     try (var server = server()) {
       var response = get(server, "/v1/events/stats", "token");
@@ -1764,16 +1729,8 @@ class ApiRouterTest {
   @Test
   void deeplyNestedEventsPathReturns404() throws Exception {
     try (var server = server()) {
-      var response = get(server, "/v1/events/recent/extra", "token");
+      var response = get(server, "/v1/events/stats/extra", "token");
       assertEquals(404, response.statusCode());
-    }
-  }
-
-  @Test
-  void recentEventsRejectsPost() throws Exception {
-    try (var server = server()) {
-      var response = post(server, "/v1/events/recent", "token", "{}");
-      assertEquals(405, response.statusCode());
     }
   }
 
@@ -1788,7 +1745,7 @@ class ApiRouterTest {
   @Test
   void eventsEndpointsRequireAuth() throws Exception {
     try (var server = server()) {
-      assertEquals(401, get(server, "/v1/events/recent", null).statusCode());
+      assertEquals(401, get(server, "/v1/changes?since=0", null).statusCode());
       assertEquals(401, get(server, "/v1/events/stats", null).statusCode());
     }
   }
@@ -1796,11 +1753,9 @@ class ApiRouterTest {
   @Test
   void eventModelsCoverConstruction() {
     var pub = new EventPublishResponse(7L, Map.of("k", "v"));
-    var recent = new RecentEventsResponse(10, 2, List.of(Map.of("a", 1)));
     var stat = new SubscriberStatsView("audit", 1024, 0, 0L);
     var stats = new EventBusStatsResponse(5L, 1L, List.of(stat));
     assertEquals(7L, pub.id());
-    assertEquals(2, recent.returned());
     assertEquals(1L, stats.rejectedSubscribers());
     assertEquals("audit", stats.subscribers().getFirst().name());
     var scoped = new SpecEventsResponse("auth", 3L, 100, 1, List.of(Map.of("id", 4)));
@@ -2849,11 +2804,6 @@ class ApiRouterTest {
     @Override
     public Result<EventPublishResponse> publishEvent(Event event) {
       return Result.success(new EventPublishResponse(1L, event.toMap()));
-    }
-
-    @Override
-    public Result<RecentEventsResponse> recentEvents(int limit) {
-      return Result.success(new RecentEventsResponse(limit, 0, List.of()));
     }
 
     @Override

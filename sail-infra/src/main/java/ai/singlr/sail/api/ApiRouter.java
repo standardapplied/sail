@@ -31,6 +31,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
 /**
@@ -153,14 +154,15 @@ public final class ApiRouter implements HttpHandler, RouteTable {
             "/v1/events",
             journal,
             call -> ApiResponse.from(operations.publishEvent(JsonBody.readEvent(call.exchange())))),
-        route(GET, "/v1/events/recent", reads, this::recentEvents),
+        route(GET, "/v1/changes", reads, this::changes),
+        route(POST, "/v1/changes:wake", Gate.WAKES, this::wakeChanges),
         route(GET, "/v1/events/stats", box, this::eventBusStats),
         route(POST, "/v1/specs:prune", Gate.decides(Action.PRUNE), this::prune),
         route(GET, "/v1/specs:measures", reads, this::listMeasures),
         route(GET, "/v1/specs", reads, this::globalSpecs),
         route(POST, "/v1/specs", journal, this::createGlobalSpec),
         route(GET, "/v1/specs/board", reads, this::globalBoard),
-        route(GET, "/v1/specs/{spec}", reads, this::globalSpec),
+        route(GET, "/v1/specs/{spec}", reads, call -> positioned(() -> globalSpec(call))),
         route(PUT, "/v1/specs/{spec}", journal, this::updateGlobalSpec),
         route(DELETE, "/v1/specs/{spec}", journal, this::deleteGlobalSpec),
         route(GET, "/v1/specs/{spec}/content", reads, this::globalSpecContent),
@@ -181,7 +183,7 @@ public final class ApiRouter implements HttpHandler, RouteTable {
             GET,
             "/v1/rooms/{room}",
             reads,
-            call -> ApiResponse.from(operations.room(call.param(ROOM)))),
+            call -> positioned(() -> ApiResponse.from(operations.room(call.param(ROOM))))),
         route(
             DELETE,
             "/v1/rooms/{room}",
@@ -224,7 +226,7 @@ public final class ApiRouter implements HttpHandler, RouteTable {
             GET,
             PROJECT + "/specs",
             reads,
-            call -> ApiResponse.from(operations.specs(call.project()))),
+            call -> positioned(() -> ApiResponse.from(operations.specs(call.project())))),
         route(GET, PROJECT + "/specs/{id}", reads, this::projectSpec),
         route(Route.ANY, PROJECT + "/specs/{id}/{rest...}", unserved, ApiRouter::malformed),
         route(POST, PROJECT + "/dispatch", Gate.decides(Action.DISPATCH), this::dispatch),
@@ -614,7 +616,29 @@ public final class ApiRouter implements HttpHandler, RouteTable {
   private ApiResponse projectSpec(Call call) {
     var id = call.param("id");
     NameValidator.requireValidSpecId(id);
-    return ApiResponse.from(operations.spec(call.project(), id));
+    return positioned(() -> ApiResponse.from(operations.spec(call.project(), id)));
+  }
+
+  /**
+   * What {@code read} answers, with the {@link ChangeFeed#SEQ_HEADER} it was read at: reading the
+   * feed from it then misses nothing the answer does not hold.
+   */
+  private ApiResponse positioned(Supplier<ApiResponse> read) {
+    var positioned = operations.changes().at(read);
+    return positioned.value().withHeader(ChangeFeed.SEQ_HEADER, positioned.position());
+  }
+
+  private ApiResponse changes(Call call) {
+    return ChangeFeed.answer(operations.changes(), call.query());
+  }
+
+  /**
+   * Wakes every stream waiting on the change feed: how a process that wrote the box's database
+   * tells the server, whose streams see only its own commits. It carries nothing back.
+   */
+  private ApiResponse wakeChanges(Call call) {
+    operations.changes().wake();
+    return ApiResponse.ok(Map.of("woken", true));
   }
 
   /** A path below a resource that has none, which names no method that could serve it. */
@@ -666,7 +690,7 @@ public final class ApiRouter implements HttpHandler, RouteTable {
   }
 
   private ApiResponse rooms(Call call) {
-    return ApiResponse.from(operations.rooms(call.query().get("project")));
+    return positioned(() -> ApiResponse.from(operations.rooms(call.query().get("project"))));
   }
 
   private ApiResponse createRoom(Call call) throws IOException {
@@ -699,12 +723,11 @@ public final class ApiRouter implements HttpHandler, RouteTable {
   private ApiResponse roomMessages(Call call) {
     var roomId = call.param(ROOM);
     var params = call.query();
-    return ApiResponse.from(
-        operations.roomMessages(
-            roomId,
-            params.get("before"),
-            params.get("after"),
-            clampedLimit(params.get(LIMIT), DEFAULT_MESSAGES, MAX_MESSAGES)));
+    var limit = clampedLimit(params.get(LIMIT), DEFAULT_MESSAGES, MAX_MESSAGES);
+    return positioned(
+        () ->
+            ApiResponse.from(
+                operations.roomMessages(roomId, params.get("before"), params.get("after"), limit)));
   }
 
   /** A post is the caller's: the message rule decides it as the journal records it. */
@@ -718,7 +741,7 @@ public final class ApiRouter implements HttpHandler, RouteTable {
   }
 
   private ApiResponse globalSpecs(Call call) {
-    return ApiResponse.from(operations.globalSpecs(specFilter(call)));
+    return positioned(() -> ApiResponse.from(operations.globalSpecs(specFilter(call))));
   }
 
   private ApiResponse listMeasures(Call call) {
@@ -745,7 +768,7 @@ public final class ApiRouter implements HttpHandler, RouteTable {
   }
 
   private ApiResponse globalBoard(Call call) {
-    return ApiResponse.from(operations.globalBoard(call.query().get("project")));
+    return positioned(() -> ApiResponse.from(operations.globalBoard(call.query().get("project"))));
   }
 
   private ApiResponse updateGlobalSpec(Call call) throws IOException {
@@ -810,7 +833,7 @@ public final class ApiRouter implements HttpHandler, RouteTable {
 
   /**
    * {@code GET /v1/events?spec=<id>[&since=<eventId>][&limit=]} is the spec-scoped history read:
-   * {@code spec} is required for this route shape (the unscoped firehose stays {@code /recent}),
+   * {@code spec} is required for this route shape (what changed box-wide is {@code /v1/changes}),
    * {@code since} is the exclusive monotonic event-id cursor for gap-fill after an SSE reconnect,
    * and {@code limit} is clamped rather than rejected.
    */
@@ -821,8 +844,8 @@ public final class ApiRouter implements HttpHandler, RouteTable {
       throw new ApiException(
           ErrorCode.INVALID_REQUEST,
           "spec query parameter is required.",
-          "Use GET /v1/events?spec=<id> for a spec's history;"
-              + " the unscoped window is GET /v1/events/recent.");
+          "Use GET /v1/events?spec=<id> for a spec's history, or GET /v1/changes?since=<seq>"
+              + " for what changed.");
     }
     NameValidator.requireValidSpecId(specId);
     return ApiResponse.from(
@@ -830,10 +853,6 @@ public final class ApiRouter implements HttpHandler, RouteTable {
             specId,
             sinceOf(params.get(SINCE)),
             clampedLimit(params.get(LIMIT), DEFAULT_RECENT, MAX_SPEC_EVENTS)));
-  }
-
-  private ApiResponse recentEvents(Call call) {
-    return ApiResponse.from(operations.recentEvents(QueryParameters.from(call.uri()).limit()));
   }
 
   private ApiResponse eventBusStats(Call call) {
@@ -1077,21 +1096,6 @@ public final class ApiRouter implements HttpHandler, RouteTable {
       } catch (NumberFormatException ignored) {
       }
       throw new ApiException(ErrorCode.INVALID_TAIL, "tail must be between 1 and 5000.");
-    }
-
-    int limit() {
-      var value = values.get(LIMIT);
-      if (value == null) {
-        return DEFAULT_RECENT;
-      }
-      try {
-        var limit = Integer.parseInt(value);
-        if (limit >= MIN_TAIL && limit <= MAX_TAIL) {
-          return limit;
-        }
-      } catch (NumberFormatException ignored) {
-      }
-      throw new ApiException(ErrorCode.INVALID_REQUEST, "limit must be between 1 and 5000.");
     }
 
     private static String decode(String value) {

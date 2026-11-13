@@ -88,7 +88,6 @@ class ProjectListCommandTest {
                       db,
                       new ScriptedShellExecutor(),
                       null,
-                      null,
                       SyncScheduler.disabled(),
                       SessionYield.NONE)));
     }
@@ -108,6 +107,15 @@ class ProjectListCommandTest {
         "[{\"name\": \"acme\", \"status\": \"running\", \"ip\": \"10.0.0.5\"}, "
             + "{\"name\": \"billing\", \"status\": \"not_provisioned\"}]",
         json);
+  }
+
+  @Test
+  void aFrozenContainerListsAsFrozen() {
+    var frozen = new ContainerInfo("acme", new ContainerState.Frozen(), null);
+
+    assertEquals(
+        "[{\"name\": \"acme\", \"status\": \"frozen\"}]",
+        ProjectListCommand.renderJson(List.of(frozen)));
   }
 
   @Test

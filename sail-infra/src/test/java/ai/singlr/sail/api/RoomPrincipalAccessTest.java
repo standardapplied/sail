@@ -97,7 +97,6 @@ class RoomPrincipalAccessTest {
                 TestProjects.reading(yaml),
                 (command, logPath) -> 4242L,
                 bus,
-                null,
                 specStore,
                 new ReviewStore(db),
                 runStore,

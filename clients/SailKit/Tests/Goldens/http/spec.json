@@ -52,6 +52,9 @@
         "wake": "mention"
       }
     },
+    "headers": {
+      "seq": "golden.17.000000000017"
+    },
     "status": 200
   }
 }
