@@ -268,6 +268,7 @@ public final class MissedStopReconciler implements AutoCloseable {
       replayed += rescueStrandedReviews(handledThisSweep);
       replayed += finishDeadSessions(handledThisSweep);
       replayed += finalizeInterruptedStops();
+      readUnreadUsage();
     } catch (Exception e) {
       System.err.println("  [reconcile] missed-stop sweep aborted: " + e.getMessage());
     }
@@ -389,6 +390,36 @@ public final class MissedStopReconciler implements AutoCloseable {
    */
   private boolean unwatchedAndGone(RunStore.RunRow run) throws Exception {
     return gone(run) && !coverage.watching(run);
+  }
+
+  /**
+   * Reads again what each finished run this box executed cost, while its report is unread: a
+   * container that was stopped, missing or slow as the run finished, or an operator's stop, which
+   * never waits on one (M3). A report read is recorded and journaled; none, once, when the report
+   * is gone or says nothing; an unanswered read is left for the next sweep, the run's directory
+   * kept by retention meanwhile. Returns how many were recorded.
+   */
+  int readUnreadUsage() {
+    var recorded = 0;
+    for (var run : sessionStore.unread(localHandle.get())) {
+      try {
+        var usage = unitProbe.usage(run);
+        if (usage == null || !sessionStore.recordRead(run.id(), usage)) {
+          continue;
+        }
+        recorded++;
+        if (!usage.reported()) {
+          System.err.println(
+              "  [reconcile] run "
+                  + run.id()
+                  + " finished with no usage its report holds: recorded none");
+        }
+      } catch (RuntimeException e) {
+        System.err.println(
+            "  [reconcile] could not read the usage of run " + run.id() + ": " + e.getMessage());
+      }
+    }
+    return recorded;
   }
 
   /**

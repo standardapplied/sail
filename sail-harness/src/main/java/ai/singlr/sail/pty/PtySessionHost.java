@@ -937,7 +937,8 @@ public final class PtySessionHost implements AutoCloseable {
    * keystroke whose minute is {@code toldIn}, the last one told, costs a clock read and a compare,
    * and the one write a minute runs on its own thread, so input never waits on it. Returns the
    * minute last told. A session bound to no room tells nothing, and nor does a writer who is no
-   * person on a person's own lane ({@link Access#attendee}).
+   * person on a person's own lane ({@link Access#attendee}). A write that fails is logged by its
+   * session and cause alone: no log line ties a person to a minute (M7).
    */
   private long typed(PtySession session, PtyIdentity who, long toldIn) {
     var minute = DateTimeUtils.now().getEpochSecond() / 60;
@@ -958,7 +959,7 @@ public final class PtySessionHost implements AutoCloseable {
               try {
                 events.typed(origin, person.get());
               } catch (RuntimeException failed) {
-                log("typed-not-recorded", who.fde(), origin.name(), failed.toString());
+                log("typed-not-recorded", "-", origin.name(), failed.toString());
               }
             });
     return minute;

@@ -178,7 +178,8 @@ class BuildDispatchCoverageTest {
 
     var thrown = assertThrows(ApiException.class, () -> dispatch(ops));
 
-    assertEquals(ErrorCode.BAD_REQUEST, thrown.failure().errorCode());
+    assertEquals(
+        ErrorCode.INVALID_REQUEST, thrown.failure().errorCode(), "the code the spec door gives");
     assertEquals(
         "Claude Code takes no reasoning effort 'none'; it takes low, medium, high, xhigh. Choose"
             + " one of those, or clear the effort.",

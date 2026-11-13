@@ -36,8 +36,9 @@ import org.junit.jupiter.api.io.TempDir;
  * A change's own record over real sync rounds between main and a node, ada, read on each box
  * through the production computation: the spec's ready, awaiting-merge and done times are the
  * moves' own, the same on every box whichever box made them (M4); a run's usage is its executing
- * box's fact, held as it pushed it (M2); and retention erasing a spec's runs on main changes no
- * measure of it on either box (M14). Every scenario ends converged.
+ * box's fact, held as it pushed it (M2); retention erasing a spec's runs on main changes no measure
+ * of it on either box (M14); and a box that may lack a run says so rather than serve a smaller
+ * exact number. Every scenario ends converged.
  */
 class SpecMeasuresSyncTest {
 
@@ -271,8 +272,110 @@ class SpecMeasuresSyncTest {
     var cost = (Map<?, ?>) before.get("cost");
     assertEquals(Map.of("count", 5L), cost.get("runs"));
     assertEquals(Map.of("count", 1L), cost.get("runs_without_usage"));
-    assertEquals(Map.of("count", 360L * 16), cost.get("tokens"));
-    assertEquals(Map.of("usd", 5.0), cost.get("usd"));
+    assertEquals(
+        Map.of("count", 360L * 16, "at_least", true),
+        cost.get("tokens"),
+        "a review reported nothing, so what the others reported is a lower bound");
+    assertEquals(Map.of("usd", 5.0, "at_least", true), cost.get("usd"));
+  }
+
+  /**
+   * Review 1, major 2: main finishes a run of a spec ada already holds and its retention erases it
+   * before ada's next round, so ada never counts it. Ada adopts an erasure of a run it never saw
+   * finish and serves the spec's run figures as a lower bound; main, which counted it, serves them
+   * exact. No two boxes serve two different exact numbers.
+   */
+  @Test
+  void aRunMadeAndErasedOnMainBetweenTwoOfANodesRoundsIsALowerBoundThereAndExactOnMain() {
+    Acting.as("ada", () -> main.specs.create(draft("g1")));
+    sync();
+    at(10);
+    var missed =
+        finishedRun(
+            main,
+            "g1",
+            "build",
+            new RunUsage("claude-opus-5-5", 1000L, 0L, 0L, 0L, 7.25, RunUsage.Source.RESULT));
+    Acting.system(
+        () ->
+            new Erasure(main.db)
+                .erase(List.of(new Erasure.Target(Erasure.RUN, missed)), SpecPruner.RETENTION));
+    at(20);
+
+    SyncBox.assertConverged(main, ada);
+    at(30);
+    Acting.as("ada", () -> main.specs.create(draft("later")));
+    SyncBox.assertConverged(main, ada);
+
+    var onMain = (Map<?, ?>) measures(main, "g1").get("cost");
+    var onAda = (Map<?, ?>) measures(ada, "g1").get("cost");
+    assertEquals(Map.of("usd", 7.25), onMain.get("usd"));
+    assertEquals(Map.of("count", 1L), onMain.get("runs"));
+    assertEquals(Map.of("usd", 0.0, "at_least", true), onAda.get("usd"));
+    assertEquals(Map.of("count", 0L, "at_least", true), onAda.get("runs"));
+    neverTwoExactNumbers(onMain, onAda);
+    assertEquals(
+        Map.of("count", 0L),
+        ((Map<?, ?>) measures(ada, "later").get("cost")).get("runs"),
+        "a spec made after the erasure could not have lost a run to it");
+  }
+
+  /**
+   * A run ada held while it ran, finished and erased on main between ada's rounds, is one ada knows
+   * the spec of: that spec alone is a lower bound there, and another spec of the project stays
+   * exact.
+   */
+  @Test
+  void aRunHeldRunningThenFinishedAndErasedOnMainBoundsOnlyItsOwnSpecOnTheNode() {
+    Acting.as("ada", () -> main.specs.create(draft("held")));
+    Acting.as("ada", () -> main.specs.create(draft("other")));
+    var runs = new RunStore(main.db);
+    var id = DateTimeUtils.newId().toString();
+    Acting.system(
+        () ->
+            runs.reserveDispatch(
+                id,
+                "acme",
+                "held",
+                main.handle(),
+                "build",
+                List.of(),
+                "claude-code",
+                "b",
+                "t",
+                "/l",
+                "u"));
+    SyncBox.assertConverged(main, ada);
+    assertEquals("running", new RunStore(ada.db).findById(id).orElseThrow().status());
+    at(10);
+    Acting.system(() -> runs.finish(id, "running", "completed", 0, reported(10, 2.0)));
+    Acting.system(
+        () ->
+            new Erasure(main.db)
+                .erase(List.of(new Erasure.Target(Erasure.RUN, id)), SpecPruner.RETENTION));
+    at(20);
+
+    SyncBox.assertConverged(main, ada);
+
+    assertEquals(Map.of("usd", 2.0), ((Map<?, ?>) measures(main, "held").get("cost")).get("usd"));
+    assertEquals(
+        Map.of("usd", 0.0, "at_least", true),
+        ((Map<?, ?>) measures(ada, "held").get("cost")).get("usd"));
+    assertEquals(Map.of("count", 0L), ((Map<?, ?>) measures(ada, "other").get("cost")).get("runs"));
+  }
+
+  /** Every figure both boxes serve exact is the same number on both. */
+  private static void neverTwoExactNumbers(Map<?, ?> one, Map<?, ?> other) {
+    for (var figure : one.keySet()) {
+      if (one.get(figure) instanceof Map<?, ?> a
+          && other.get(figure) instanceof Map<?, ?> b
+          && !a.containsKey("at_least")
+          && !b.containsKey("at_least")
+          && !a.containsKey("unknown")
+          && !b.containsKey("unknown")) {
+        assertEquals(a, b, String.valueOf(figure));
+      }
+    }
   }
 
   /**

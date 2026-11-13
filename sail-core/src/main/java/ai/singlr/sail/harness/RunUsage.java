@@ -8,7 +8,6 @@ package ai.singlr.sail.harness;
 import ai.singlr.sail.config.YamlUtil;
 import java.util.Map;
 import java.util.Objects;
-import java.util.Optional;
 import java.util.function.Predicate;
 
 /**
@@ -33,11 +32,15 @@ public record RunUsage(
   /** The longest line a report is read from: a result line carries the run's final text too. */
   static final int MAX_LINE_CHARS = 16 << 20;
 
-  /** Where a run's usage was read: its log's result line, its transcript, or nowhere. */
+  /**
+   * Where a run's usage was read: its log's result line, its transcript, or nowhere; or a report
+   * read whose share of its session's running total cannot be told ({@link #attributedIn}).
+   */
   public enum Source {
     RESULT("result"),
     TRANSCRIPT("transcript"),
-    NONE("none");
+    NONE("none"),
+    UNATTRIBUTABLE("unattributable");
 
     private final String wire;
 
@@ -67,9 +70,9 @@ public record RunUsage(
     Objects.requireNonNull(source, "source");
   }
 
-  /** Whether the harness reported any usage. */
+  /** Whether this holds figures its harness reported. */
   public boolean reported() {
-    return source != Source.NONE;
+    return source == Source.RESULT || source == Source.TRANSCRIPT;
   }
 
   /** The sum of the four token figures, or null when the harness reported no tokens. */
@@ -84,52 +87,148 @@ public record RunUsage(
   }
 
   /**
-   * This report less {@code earlier}, what the same conversation's other runs already recorded: a
-   * harness resuming a conversation reports the conversation's whole spend, so what this run spent
-   * is the difference. A report below {@code earlier} in any figure is a harness that started
-   * counting over, and it is this run's alone; so is a report with nothing recorded before it.
+   * A harness session's usage on this box: the highest running total it reported, and how much of
+   * that its runs were given as their own. A report below the highest was not one any run's share
+   * can be told from, so what was given falls short of the highest only by the shares taken back
+   * from such runs. {@link #NEW} is a session nothing was reported of yet.
    */
-  public RunUsage beyond(RunUsage earlier) {
-    if (earlier == null || !reported() || !earlier.reported() || below(earlier)) {
-      return this;
+  public record Session(RunUsage highest, RunUsage given) {
+
+    public static final Session NEW = new Session(NONE, NONE);
+
+    public Session {
+      Objects.requireNonNull(highest, "highest");
+      Objects.requireNonNull(given, "given");
     }
+  }
+
+  /** A run's usage after a report, and its session's after it. */
+  public record Attributed(RunUsage own, Session session) {}
+
+  /**
+   * This report, the running total of {@code session}, attributed to the run that holds {@code own}
+   * so far: its share is the report less what the session's other runs were given, so a resumed
+   * session, a run whose sibling was erased and a run reporting after each turn all record what
+   * they spent, and nothing twice. A report below the session's highest in any figure (an earlier
+   * run finishing late, or a harness that started counting over) leaves the run's own share
+   * unknown: it is recorded {@link Source#UNATTRIBUTABLE}, gives back what it was given, and never
+   * leaves that state. A report of nothing changes nothing.
+   */
+  public Attributed attributedIn(Session session, RunUsage own) {
+    var held = own == null ? NONE : own;
+    if (held.source == Source.UNATTRIBUTABLE || !reported()) {
+      return new Attributed(own == null && !reported() ? this : held, session);
+    }
+    if (below(session.highest)) {
+      return new Attributed(
+          new RunUsage(model, null, null, null, null, null, Source.UNATTRIBUTABLE),
+          held.reported() ? new Session(session.highest, session.given.less(held)) : session);
+    }
+    var others = session.given.less(held);
+    var share =
+        new RunUsage(
+            model,
+            less(tokensIn, others.tokensIn),
+            less(tokensOut, others.tokensOut),
+            less(tokensCacheRead, others.tokensCacheRead),
+            less(tokensCacheWrite, others.tokensCacheWrite),
+            less(costUsd, others.costUsd),
+            source);
+    return new Attributed(share, new Session(over(session.highest), others.plus(share)));
+  }
+
+  private boolean below(RunUsage highest) {
+    return lower(tokensIn, highest.tokensIn)
+        || lower(tokensOut, highest.tokensOut)
+        || lower(tokensCacheRead, highest.tokensCacheRead)
+        || lower(tokensCacheWrite, highest.tokensCacheWrite)
+        || (costUsd != null && highest.costUsd != null && costUsd < highest.costUsd);
+  }
+
+  private static boolean lower(Long figure, Long highest) {
+    return figure != null && highest != null && figure < highest;
+  }
+
+  private RunUsage over(RunUsage highest) {
     return new RunUsage(
-        model,
-        less(tokensIn, earlier.tokensIn),
-        less(tokensOut, earlier.tokensOut),
-        less(tokensCacheRead, earlier.tokensCacheRead),
-        less(tokensCacheWrite, earlier.tokensCacheWrite),
-        costUsd == null || earlier.costUsd == null
-            ? costUsd
-            : Double.valueOf(costUsd - earlier.costUsd),
-        source);
+        null,
+        tokensIn == null ? highest.tokensIn : tokensIn,
+        tokensOut == null ? highest.tokensOut : tokensOut,
+        tokensCacheRead == null ? highest.tokensCacheRead : tokensCacheRead,
+        tokensCacheWrite == null ? highest.tokensCacheWrite : tokensCacheWrite,
+        costUsd == null ? highest.costUsd : costUsd,
+        Source.RESULT);
   }
 
-  private boolean below(RunUsage earlier) {
-    return lower(tokensIn, earlier.tokensIn)
-        || lower(tokensOut, earlier.tokensOut)
-        || lower(tokensCacheRead, earlier.tokensCacheRead)
-        || lower(tokensCacheWrite, earlier.tokensCacheWrite)
-        || (costUsd != null && earlier.costUsd != null && costUsd < earlier.costUsd);
+  private RunUsage less(RunUsage other) {
+    return new RunUsage(
+        null,
+        less(tokensIn, other.tokensIn),
+        less(tokensOut, other.tokensOut),
+        less(tokensCacheRead, other.tokensCacheRead),
+        less(tokensCacheWrite, other.tokensCacheWrite),
+        less(costUsd, other.costUsd),
+        Source.RESULT);
   }
 
-  private static boolean lower(Long figure, Long earlier) {
-    return figure != null && earlier != null && figure < earlier;
+  private RunUsage plus(RunUsage other) {
+    return new RunUsage(
+        null,
+        plus(tokensIn, other.tokensIn),
+        plus(tokensOut, other.tokensOut),
+        plus(tokensCacheRead, other.tokensCacheRead),
+        plus(tokensCacheWrite, other.tokensCacheWrite),
+        plus(costUsd, other.costUsd),
+        Source.RESULT);
   }
 
-  private static Long less(Long figure, Long earlier) {
-    return figure == null || earlier == null ? figure : figure - earlier;
+  private static Long less(Long figure, Long taken) {
+    if (figure == null) {
+      return null;
+    }
+    return taken == null ? figure : Long.valueOf(figure - taken);
+  }
+
+  private static Double less(Double figure, Double taken) {
+    if (figure == null) {
+      return null;
+    }
+    return taken == null ? figure : Double.valueOf(figure - taken);
+  }
+
+  private static Long plus(Long figure, Long added) {
+    if (figure == null) {
+      return added;
+    }
+    return added == null ? figure : Long.valueOf(figure + added);
+  }
+
+  private static Double plus(Double figure, Double added) {
+    if (figure == null) {
+      return added;
+    }
+    return added == null ? figure : Double.valueOf(figure + added);
+  }
+
+  /**
+   * What a scan of a harness's file for its report found: the line, nothing ({@link #NOTHING}), or
+   * a last line holding the marker that does not parse ({@link #UNREADABLE}), whose report is not
+   * read rather than taken from an earlier running total.
+   */
+  record Found(Map<String, Object> line, boolean unreadable) {
+    static final Found NOTHING = new Found(null, false);
+    static final Found UNREADABLE = new Found(null, true);
   }
 
   /**
    * The last line of {@code text} holding {@code marker} that parses as a JSON object {@code is}
-   * accepts; empty when there is none. Lines are scanned from the end and only a line holding the
-   * marker is parsed, so a long log costs a parse per candidate, not per line.
+   * accepts; nothing when there is none; unreadable when a line holding the marker after the last
+   * accepted one does not parse. Lines are scanned from the end and only a line holding the marker
+   * is parsed, so a long log costs a parse per candidate, not per line.
    */
-  static Optional<Map<String, Object>> last(
-      String text, String marker, Predicate<Map<String, Object>> is) {
+  static Found last(String text, String marker, Predicate<Map<String, Object>> is) {
     if (text == null) {
-      return Optional.empty();
+      return Found.NOTHING;
     }
     var end = text.length();
     while (end > 0) {
@@ -137,20 +236,23 @@ public record RunUsage(
       var line = text.substring(start, end).strip();
       if (line.contains(marker)) {
         var parsed = parsed(line);
-        if (parsed.isPresent() && is.test(parsed.get())) {
-          return parsed;
+        if (parsed == null) {
+          return Found.UNREADABLE;
+        }
+        if (is.test(parsed)) {
+          return new Found(parsed, false);
         }
       }
       end = start - 1;
     }
-    return Optional.empty();
+    return Found.NOTHING;
   }
 
-  private static Optional<Map<String, Object>> parsed(String line) {
+  private static Map<String, Object> parsed(String line) {
     try {
-      return Optional.of(YamlUtil.parseJsonLine(line, MAX_LINE_CHARS));
+      return YamlUtil.parseJsonLine(line, MAX_LINE_CHARS);
     } catch (IllegalArgumentException unreadable) {
-      return Optional.empty();
+      return null;
     }
   }
 

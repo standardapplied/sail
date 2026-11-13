@@ -25,7 +25,6 @@ import ai.singlr.sail.engine.PromptConversation;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.harness.Harness;
 import ai.singlr.sail.harness.Harnesses;
-import ai.singlr.sail.harness.RunUsage;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.Ownership;
 import ai.singlr.sail.store.DispatchGate;
@@ -489,6 +488,8 @@ public final class LiveMembers implements RoomWakeReactor.Live, AutoCloseable {
         reservation.releaseIfAbsent(runId, seat.project(), unit);
         return;
       }
+      runStore.recordLaunch(
+          runId, member.model(), null, resumed.map(RunStore.RunRow::sessionId).orElse(null));
       handle =
           processes.start(
               seat.project(),
@@ -704,12 +705,12 @@ public final class LiveMembers implements RoomWakeReactor.Live, AutoCloseable {
   /**
    * The one end of a live member's run: {@code running} to {@code status} as a compare-and-set, and
    * the stop its watcher would have published, for whoever wins it. The usage its turns recorded
-   * stays as it is; a member that answered no turn reported none. Finishing the row is what revokes
-   * its credential and frees what it reserved.
+   * stays as it is; a member that answered no turn reported none, decided in the one write that
+   * finishes it ({@link RunStore#finishAsTurnsRecorded}). Finishing the row is what revokes its
+   * credential and frees what it reserved.
    */
   private void finish(RunStore.RunRow run, String status, Integer exitCode, String reason) {
-    var answered = runStore.findById(run.id()).map(RunStore.RunRow::usage).isPresent();
-    if (runStore.finish(run.id(), "running", status, exitCode, answered ? null : RunUsage.NONE)) {
+    if (runStore.finishAsTurnsRecorded(run.id(), status, exitCode)) {
       tellStopped(run, exitCode, reason);
     }
   }
@@ -1035,9 +1036,10 @@ public final class LiveMembers implements RoomWakeReactor.Live, AutoCloseable {
      * line, set on the run as it runs, so its finish records the last of them, once (M1).
      */
     private void spent(String line) {
-      Harnesses.of(run.agent())
-          .usage(line, null)
-          .ifPresent(usage -> runStore.recordUsage(runId, usage));
+      var usage = Harnesses.of(run.agent()).usage(line);
+      if (usage != null && usage.reported()) {
+        runStore.recordUsage(runId, usage);
+      }
     }
 
     /** The turn's result: its text becomes the member's message, and the lane's guard looks. */

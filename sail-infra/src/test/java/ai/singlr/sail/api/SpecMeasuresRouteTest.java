@@ -25,6 +25,7 @@ import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
+import ai.singlr.sail.store.TestRuns;
 import ai.singlr.sail.store.TokenStore;
 import com.sun.net.httpserver.HttpServer;
 import java.net.InetSocketAddress;
@@ -187,7 +188,7 @@ class SpecMeasuresRouteTest {
               "/var/log/" + run,
               "sail-agent-" + run,
               null);
-          runs.complete(run, "completed", 0);
+          TestRuns.complete(runs, run, "completed", 0);
         });
   }
 
@@ -195,7 +196,7 @@ class SpecMeasuresRouteTest {
     Acting.system(
         () -> {
           ReviewRuns.reserve(runs, run, review, "alpha", spec, NODE, lane, "codex", List.of());
-          runs.complete(run, "completed", 0);
+          TestRuns.complete(runs, run, "completed", 0);
         });
   }
 
@@ -378,7 +379,7 @@ class SpecMeasuresRouteTest {
               "/var/log/w1",
               "sail-agent-w1",
               null);
-          runs.complete("w1", "completed", 0);
+          TestRuns.complete(runs, "w1", "completed", 0);
         });
 
     assertEquals(

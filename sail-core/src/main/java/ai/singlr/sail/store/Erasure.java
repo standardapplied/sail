@@ -16,6 +16,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 
 /**
@@ -185,7 +186,8 @@ public final class Erasure {
    * with its own erasure row, in its own page. Returns whether anything changed; an erasure this
    * box already holds changes nothing, and one of an entity this box never held records only the
    * row, filed under the {@code project} main names for it — null when it names none — so it leaves
-   * with that project ({@link #dropLocal}).
+   * with that project ({@link #dropLocal}). A run this box never saw finish is remembered as one
+   * its kept sums lack ({@link RunStore#markUncounted}).
    */
   public boolean adopt(String type, String id, String rev, String project) {
     requireKnownType(type);
@@ -197,11 +199,14 @@ public final class Erasure {
           }
           deferReplyConstraint();
           var root = new Target(type, id);
+          var uncounted =
+              RUN.equals(type) ? runs.uncounted(id) : Optional.<RunStore.Uncounted>empty();
           for (var target : closure(List.of(root), true)) {
             remove(target);
             if (target.equals(root)) {
               changeLog.erase(type, id, rev, ChangeLog.Entry.SYNC);
               changeLog.fileUnder(type, id, project);
+              uncounted.ifPresent(runs::markUncounted);
             } else {
               changeLog.purge(target.type(), target.id());
             }
@@ -411,11 +416,17 @@ public final class Erasure {
       case SPEC -> {
         slackThreads.eraseBySpec(target.id());
         attention.forget(target.id());
+        runs.forgetSessions(target.id());
         yield events.eraseBySpec(target.id());
       }
       case ROOM -> {
         attention.forget(target.id());
+        runs.forgetSessions(target.id());
         yield events.eraseBySpec(target.id());
+      }
+      case RUN -> {
+        runs.forgetUncounted(target.id());
+        yield 0;
       }
       case PROJECT -> {
         runs.eraseLeases(target.id());

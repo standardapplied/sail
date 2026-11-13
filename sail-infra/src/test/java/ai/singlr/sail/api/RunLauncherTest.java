@@ -19,6 +19,7 @@ import ai.singlr.sail.identity.ActingAs;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.Sqlite;
+import ai.singlr.sail.store.TestRuns;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.file.Path;
@@ -223,7 +224,7 @@ class RunLauncherTest {
   @Test
   void aRunFinishedUnderItsLaunchWhoseAgentIsStillRunningIsTornDownAndConflicts() {
     seedRunningRun();
-    Acting.system(() -> assertTrue(runStore.transition(RUN_ID, "running", "stopped")));
+    Acting.system(() -> assertTrue(TestRuns.transition(runStore, RUN_ID, "running", "stopped")));
     var commands = new ArrayList<String>();
 
     var ex =
@@ -263,7 +264,7 @@ class RunLauncherTest {
 
   private ApiException lostLaunch(ShellExec shell) {
     seedRunningRun();
-    Acting.system(() -> assertTrue(runStore.transition(RUN_ID, "running", "stopped")));
+    Acting.system(() -> assertTrue(TestRuns.transition(runStore, RUN_ID, "running", "stopped")));
     return assertThrows(
         ApiException.class, () -> launcher(shell, runStore).finishLaunch(ctx(true), outcome()));
   }

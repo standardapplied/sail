@@ -144,6 +144,50 @@ class GlobalSpecOperationsTest {
         "a spec whose harness is not known here yet is refused at dispatch instead");
   }
 
+  /**
+   * Review 1, minor 4: a spec holding an effort its harness refuses (made where the harness was not
+   * known, or left behind as its project's agent changed) still moves and is retitled; only a
+   * change of its agent or its effort is refused, with the code the dispatch door refuses it with.
+   */
+  @Test
+  void aStoredEffortItsHarnessRefusesBlocksOnlyAChangeOfItsAgentOrEffort() {
+    Acting.by(
+        UDAY_ADMIN, () -> ops.create(createReq(Map.of("id", "free", "reasoning_effort", "none"))));
+    var known =
+        new GlobalSpecOperations(
+            specStore,
+            reviewStore,
+            null,
+            new RunStore(db),
+            () -> null,
+            () -> true,
+            project ->
+                Optional.of(
+                    TestDefinitions.yaml("name: " + project + "\nagent:\n  type: claude-code\n")),
+            () -> new AttentionStore(db));
+
+    Acting.by(
+        UDAY_ADMIN,
+        () -> known.update("free", SpecUpdateRequest.fromMap(Map.of("status", "pending"))));
+    Acting.by(
+        UDAY_ADMIN,
+        () -> known.update("free", SpecUpdateRequest.fromMap(Map.of("title", "Renamed"))));
+    var agent =
+        assertThrows(
+            ApiException.class,
+            () ->
+                Acting.by(
+                    UDAY_ADMIN,
+                    () ->
+                        known.update(
+                            "free", SpecUpdateRequest.fromMap(Map.of("agent", "claude-code")))));
+
+    var spec = specStore.findById("free").orElseThrow();
+    assertEquals(List.of(SpecStatus.PENDING, "Renamed"), List.of(spec.status(), spec.title()));
+    assertEquals(ErrorCode.INVALID_REQUEST, agent.failure().errorCode());
+    assertEquals(null, spec.agent(), "the refused change wrote nothing");
+  }
+
   @Test
   void measuresNeedTheRunsTheReviewsAndTheAttentionAndSayWhichStoreIsMissing() {
     Acting.by(UDAY_ADMIN, () -> ops.create(createReq(Map.of())));

@@ -83,8 +83,13 @@ public record StubHarness(String yamlName, HookFile hooks, OptionalInt loginTunn
   }
 
   @Override
-  public Optional<RunUsage> usage(String agentLog, String transcript) {
-    return Optional.empty();
+  public ReportFile reportFile() {
+    return ReportFile.AGENT_LOG;
+  }
+
+  @Override
+  public RunUsage usage(String report) {
+    return RunUsage.NONE;
   }
 
   @Override

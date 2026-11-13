@@ -40,9 +40,13 @@ import java.util.stream.Collectors;
  * same on every box (M4). Verified is when the latest review of the current dispatch attempt
  * completed, if it passed. Run counts and cost are the sums this box kept of the spec's finished
  * runs, which erasing a run never lowers (M14), and its builds and fixes under way: exact, unless
- * this box first held the change after main erased runs of its project, when they are a lower
- * bound. Human minutes are the distinct (person, minute) pairs this box saw in the spec's
- * conversation, which it names: a lower bound, since a person's reading and thinking leave no row.
+ * this box may lack runs (it first held the change after main erased runs of its project, or main
+ * erased a run it never saw finish), when they are a lower bound. Tokens and dollars are exact only
+ * when every run counted reported them: a lower bound when some did not, or when a run's share of
+ * its harness session could not be told, and unknown when none did. Human minutes are the distinct
+ * (person, minute) pairs this box saw in the spec's own conversation, which it names: always a
+ * lower bound, since a person's reading and thinking leave no row and another box's minutes are not
+ * here.
  */
 record SpecMeasures(
     String specId,
@@ -63,6 +67,7 @@ record SpecMeasures(
   static final String COUNT = "count";
   static final String USD = "usd";
 
+  private static final String RUNS_NOT_REPORTED = "runs_not_reported";
   private static final Moment.Unknown NOT_REACHED = new Moment.Unknown("not_reached");
   private static final Moment.Unknown HIDDEN_MOMENT = new Moment.Unknown(Measure.HIDDEN_ROWS);
   private static final Measure HIDDEN = new Measure.Unknown(Measure.HIDDEN_ROWS, 0);
@@ -225,22 +230,34 @@ record SpecMeasures(
       var tokens =
           kept.tokensIn() + kept.tokensOut() + kept.tokensCacheRead() + kept.tokensCacheWrite();
       var over = over(budget, kept, tokens);
+      var withoutUsage = kept.withoutUsage();
       return new Cost(
           ofRuns(rows, kept.runs()),
-          ofRuns(rows, kept.withoutUsage()),
+          ofRuns(rows, withoutUsage),
           ofRuns(rows, kept.withoutCost()),
-          ofRuns(rows, tokens),
-          ofRuns(rows, kept.tokensIn()),
-          ofRuns(rows, kept.tokensOut()),
-          ofRuns(rows, kept.tokensCacheRead()),
-          ofRuns(rows, kept.tokensCacheWrite()),
-          rows.recorded().erasedBeforeHeld()
-              ? new Measure.AtLeast(Measure.Dollars.of(kept.costUsd()))
-              : Measure.Dollars.of(kept.costUsd()),
+          reported(rows, new Measure.Known(tokens), withoutUsage),
+          reported(rows, new Measure.Known(kept.tokensIn()), withoutUsage),
+          reported(rows, new Measure.Known(kept.tokensOut()), withoutUsage),
+          reported(rows, new Measure.Known(kept.tokensCacheRead()), withoutUsage),
+          reported(rows, new Measure.Known(kept.tokensCacheWrite()), withoutUsage),
+          reported(rows, Measure.Dollars.of(kept.costUsd()), kept.withoutCost()),
           budget,
           over == Over.YES || over == Over.NO_BUDGET || !rows.recorded().erasedBeforeHeld()
               ? over
               : Over.NOT_ALL_HELD);
+    }
+
+    /**
+     * {@code sum}, what the change's runs reported of a figure, as this box can vouch for it:
+     * unknown when every run left it unreported, a lower bound when {@code unreported} runs did or
+     * the box may lack runs ({@link #ofRuns}), and exact only when every run it counts reported it.
+     */
+    private static Measure reported(MeasureRows rows, Measure sum, long unreported) {
+      var runs = rows.recorded().runs().runs();
+      if (unreported > 0 && unreported == runs) {
+        return new Measure.Unknown(RUNS_NOT_REPORTED, (int) unreported);
+      }
+      return unreported > 0 || rows.recorded().erasedBeforeHeld() ? new Measure.AtLeast(sum) : sum;
     }
 
     /**
@@ -282,7 +299,7 @@ record SpecMeasures(
             case YES -> true;
             case NO -> false;
             case NO_BUDGET -> Map.of("unknown", "not_set");
-            case NOT_ALL_REPORTED -> Map.of("unknown", "runs_not_reported");
+            case NOT_ALL_REPORTED -> Map.of("unknown", RUNS_NOT_REPORTED);
             case NOT_ALL_HELD -> Map.of("unknown", "runs_not_held");
             case HIDDEN -> Map.of("unknown", Measure.HIDDEN_ROWS);
           });
@@ -328,8 +345,8 @@ record SpecMeasures(
 
   /**
    * Whether a person's code act is recorded on a done change: a person deciding a human review
-   * stage, in any attempt, or typing in its room's terminal, so none recorded is an upper bound on
-   * changes no person wrote or reviewed line by line.
+   * stage, in any attempt, or typing in a terminal bound to its own conversation, so none recorded
+   * is an upper bound on changes no person wrote or reviewed line by line.
    */
   enum CodeAct {
     NONE_RECORDED,

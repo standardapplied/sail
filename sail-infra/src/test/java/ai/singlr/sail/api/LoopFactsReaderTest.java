@@ -16,6 +16,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import ai.singlr.sail.api.LoopFacts.Pipeline;
 import ai.singlr.sail.config.ReviewPipelineConfig;
 import ai.singlr.sail.identity.Acting;
+import ai.singlr.sail.store.TestRuns;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -79,7 +80,7 @@ class LoopFactsReaderTest {
 
     assertEquals(List.of(), read().openFindings(), "nor one on a review its fix agent serves");
 
-    Acting.system(() -> loop.runs.complete(fix, "stopped", 1));
+    Acting.system(() -> TestRuns.complete(loop.runs, fix, "stopped", 1));
 
     assertEquals(List.of(), read().openFindings(), "nor one on how that fix agent ended");
 
@@ -89,7 +90,7 @@ class LoopFactsReaderTest {
 
     assertEquals(List.of(), read().openFindings(), "nor one on a fix that waits for a live run");
 
-    Acting.system(() -> loop.runs.complete(holder, "stopped", 0));
+    Acting.system(() -> TestRuns.complete(loop.runs, holder, "stopped", 0));
 
     assertThrows(
         IllegalArgumentException.class, this::read, "a fix is due: its findings are weighed");

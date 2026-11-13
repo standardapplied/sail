@@ -268,22 +268,32 @@ class SyncRpcServerTest {
     assertEquals(Remedy.of("upgrade to dev: ", Remedy.sail("upgrade")), refusal.reason());
   }
 
+  /**
+   * Review 1, major 5: a 0.67.0 box speaks protocol 7, whose snapshots carry no cost and no times,
+   * and its database is not converted, so it is refused at the hello and told to reinstall, not to
+   * upgrade; nothing else is exchanged.
+   */
   @Test
-  void aNodeOnAnOlderProtocolIsToldToUpgradeItself() throws Exception {
-    var refusal =
-        assertInstanceOf(
-            SyncWire.Refuse.class,
-            serve(writer(new FakeMain()), new SyncWire.Hello(SyncWire.PROTOCOL - 1, "0.58.0", "b"))
-                .getFirst());
+  void aBoxOnTheProtocolBeforeCostIsRefusedAtTheHelloAndToldToReinstall() throws Exception {
+    assertEquals(8, SyncWire.PROTOCOL);
+    var answers =
+        serve(
+            writer(new FakeMain()),
+            new SyncWire.Hello(7, "0.67.0", "b"),
+            new SyncWire.Pull("spec", 0, 10));
+    var refusal = assertInstanceOf(SyncWire.Refuse.class, answers.getFirst());
     assertEquals(
         Remedy.of(
-            "this main speaks sync protocol "
-                + SyncWire.PROTOCOL
-                + ", not "
-                + (SyncWire.PROTOCOL - 1)
-                + ": upgrade to dev: ",
-            Remedy.sail("upgrade")),
+            "this main speaks sync protocol 8, not 7: reinstall this box on dev, whose database is"
+                + " not converted: move its database aside and run '",
+            Remedy.sail("init"),
+            "', then join again"),
         refusal.reason());
+    assertEquals(List.of(Remedy.sail("init")), refusal.reason().commands());
+    assertEquals(
+        List.of(),
+        answers.stream().filter(SyncWire.Page.class::isInstance).toList(),
+        "nothing is served to it");
   }
 
   @Test

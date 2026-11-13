@@ -82,6 +82,7 @@ class SchemaManagerTest {
             "run_principals",
             "runs",
             "schema_version",
+            "session_usage",
             "sessions",
             "slack_threads",
             "spec_content",
@@ -94,6 +95,7 @@ class SchemaManagerTest {
             "sync_offers",
             "sync_scope",
             "sync_state",
+            "uncounted_runs",
             "webauthn_challenges",
             "webauthn_credentials"),
         tables);

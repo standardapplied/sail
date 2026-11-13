@@ -23,6 +23,7 @@ import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
+import ai.singlr.sail.store.TestRuns;
 import java.nio.file.Path;
 import java.time.Clock;
 import java.time.Duration;
@@ -252,7 +253,7 @@ class RoomWakeReactorTest {
                 "sail-agent-" + id));
     db.execute("UPDATE runs SET started_at = ? WHERE id = ?", startedAt, id);
     if (!"running".equals(status)) {
-      Acting.system(() -> runStore.complete(id, status, 0));
+      Acting.system(() -> TestRuns.complete(runStore, id, status, 0));
     }
     return id;
   }
@@ -276,9 +277,9 @@ class RoomWakeReactorTest {
                 "sail-agent-" + id));
     if (!"running".equals(status)) {
       if ("stopping".equals(status)) {
-        Acting.system(() -> runStore.transition(id, "running", "stopping"));
+        Acting.system(() -> TestRuns.transition(runStore, id, "running", "stopping"));
       } else {
-        Acting.system(() -> runStore.complete(id, status, 0));
+        Acting.system(() -> TestRuns.complete(runStore, id, status, 0));
       }
     }
     return id;
@@ -911,7 +912,7 @@ class RoomWakeReactorTest {
                 null,
                 null,
                 "sail-agent-" + runId));
-    Acting.system(() -> runStore.complete(runId, "completed", 0));
+    Acting.system(() -> TestRuns.complete(runStore, runId, "completed", 0));
 
     reactor().onEvent(roomStop("auth", runId));
 

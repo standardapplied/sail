@@ -25,10 +25,12 @@ import java.util.Map;
  * shared file this box wrote to disk or published), {@code fde_pairings} (the key and token this
  * box made for each FDE's Mast), {@code project_grants} (the projects main granted each scoped
  * FDE), {@code sync_scope} (the scope main last named for this node), {@code catalog} (which
- * database this is, and which of main's a node syncs with) and {@code attention} (the minutes this
- * box saw a person give a conversation). A spec's kept sums of its runs ({@code runs_total} through
- * {@code run_cost_usd}) are box-local columns: each box folds the run rows it holds, so they never
- * join a snapshot either.
+ * database this is, and which of main's a node syncs with), {@code attention} (the minutes this box
+ * saw a person give a conversation), {@code session_usage} (each harness session's highest running
+ * total here and what its runs were given of it, which retention never touches) and {@code
+ * uncounted_runs} (the runs main erased before this box saw them finish). A spec's kept sums of its
+ * runs ({@code runs_total} through {@code run_cost_usd}) are box-local columns: each box folds the
+ * run rows it holds, so they never join a snapshot either.
  */
 public final class SchemaManager {
 
@@ -70,7 +72,8 @@ public final class SchemaManager {
           Map.entry("runs_build", "(%1$s.role = 'build')"),
           Map.entry("runs_fix", "(%1$s.role = 'fix')"),
           Map.entry(
-              "runs_without_usage", "(%1$s.usage_source IS NULL OR %1$s.usage_source = 'none')"),
+              "runs_without_usage",
+              "(%1$s.usage_source IS NULL OR %1$s.usage_source IN ('none', 'unattributable'))"),
           Map.entry("runs_without_cost", "(%1$s.cost_usd IS NULL)"),
           Map.entry("run_tokens_in", "COALESCE(%1$s.tokens_in, 0)"),
           Map.entry("run_tokens_out", "COALESCE(%1$s.tokens_out, 0)"),
@@ -478,7 +481,8 @@ public final class SchemaManager {
               tokens_cache_read INTEGER,
               tokens_cache_write INTEGER,
               cost_usd REAL,
-              usage_source TEXT CHECK (usage_source IN ('result', 'transcript', 'none'))
+              usage_source TEXT
+                  CHECK (usage_source IN ('result', 'transcript', 'none', 'unattributable'))
           )""",
           RUN_COUNTED,
           RUN_RECOUNTED_FROM,
@@ -687,7 +691,28 @@ public final class SchemaManager {
                   CHECK (channel IN ('terminal_input', 'post', 'review_act', 'focus')),
               PRIMARY KEY (person, conversation, minute, channel)
           ) WITHOUT ROWID""",
-          "CREATE INDEX idx_attention_conversation ON attention(conversation)");
+          "CREATE INDEX idx_attention_conversation ON attention(conversation)",
+          """
+          CREATE TABLE session_usage (
+              session_id TEXT PRIMARY KEY,
+              conversation TEXT,
+              highest_tokens_in INTEGER,
+              highest_tokens_out INTEGER,
+              highest_tokens_cache_read INTEGER,
+              highest_tokens_cache_write INTEGER,
+              highest_cost_usd REAL,
+              given_tokens_in INTEGER,
+              given_tokens_out INTEGER,
+              given_tokens_cache_read INTEGER,
+              given_tokens_cache_write INTEGER,
+              given_cost_usd REAL
+          ) WITHOUT ROWID""",
+          "CREATE INDEX idx_session_usage_conversation ON session_usage(conversation)",
+          """
+          CREATE TABLE uncounted_runs (
+              run_id TEXT PRIMARY KEY,
+              spec_id TEXT
+          ) WITHOUT ROWID""");
 
   private final Sqlite db;
 

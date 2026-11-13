@@ -204,12 +204,23 @@ public interface Harness {
                 + ". Choose one of those, or clear the effort.");
   }
 
+  /** The file of a run a harness writes what the run cost in. */
+  enum ReportFile {
+    AGENT_LOG,
+    TRANSCRIPT
+  }
+
+  /** Which of a run's files this harness reports its usage in. */
+  ReportFile reportFile();
+
   /**
-   * What a run cost, as this harness reported it in the run's {@code agentLog} or its {@code
-   * transcript} (either may be null or partial: their last bytes), or empty when it reported
-   * nothing there. The figures are the conversation's running totals as the harness keeps them.
+   * What a run cost, as this harness reported it in {@code report}, its {@link #reportFile} or that
+   * file's last bytes (null when there is none): {@link RunUsage#NONE} when it reported nothing
+   * there, and null when its last report there does not parse, so the report is not read rather
+   * than taken from an earlier one. The figures are the conversation's running totals as the
+   * harness keeps them.
    */
-  Optional<RunUsage> usage(String agentLog, String transcript);
+  RunUsage usage(String report);
 
   /**
    * The local port an interactive session's login flow listens on, which the engineer forwards over

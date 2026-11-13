@@ -39,6 +39,7 @@ import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
 import ai.singlr.sail.store.SyncScope;
 import ai.singlr.sail.store.SyncState;
+import ai.singlr.sail.store.TestRuns;
 import java.io.IOException;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Proxy;
@@ -849,7 +850,7 @@ class ScopedSyncTest {
     assertTrue(nia.specs.findById("alpha-work").isPresent());
     assertTrue(new RunStore(nia.db).findById(run).isPresent());
 
-    Acting.system(() -> new RunStore(nia.db).complete(run, "completed", 0));
+    Acting.system(() -> TestRuns.complete(new RunStore(nia.db), run, "completed", 0));
     var dropped = SyncBox.roundSettling(main, nia);
 
     assertInstanceOf(Settlement.How.Dropped.class, dropped.settled().getFirst().how());
@@ -1343,7 +1344,7 @@ class ScopedSyncTest {
     var runs = new RunStore(box.db);
     var run = DateTimeUtils.newId().toString();
     runs.create(run, project, id, owner, "build", "claude", "b", "t", null, null, "/log", "u");
-    runs.complete(run, "completed", 0);
+    TestRuns.complete(runs, run, "completed", 0);
     var reviews = new ReviewStore(box.db);
     reviews.createStage(reviews.createReview(id, 1), "security", "agent");
     ContentFixtures.put(new FileStore(box.db), project, "notes.md", "shared in " + project);

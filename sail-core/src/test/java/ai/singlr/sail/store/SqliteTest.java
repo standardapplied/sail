@@ -7,6 +7,7 @@ package ai.singlr.sail.store;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -16,6 +17,7 @@ import java.lang.foreign.Arena;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Optional;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -72,6 +74,34 @@ class SqliteTest {
 
     assertTrue(nested.getMessage().contains("outermost"));
     assertEquals(0, db.query("SELECT id FROM t", row -> row.integer(0)).size());
+  }
+
+  /**
+   * A REAL reads back as the double it stored, to the last bit: SQLite's own text form keeps 15
+   * digits and turns 14.762978600000006 into 14.7629786, which a run's dollars must never become.
+   */
+  @Test
+  void aRealReadsBackAsTheExactDoubleItStored() {
+    db.execute("CREATE TABLE t (id INTEGER PRIMARY KEY, usd REAL)");
+    var stored = List.of(14.762978600000006, 0.1 + 0.2, 1e-7, 4.9e-324, 1.0e21);
+    for (var index = 0; index < stored.size(); index++) {
+      db.execute("INSERT INTO t (id, usd) VALUES (?, ?)", index, stored.get(index));
+    }
+    db.execute("INSERT INTO t (id, usd) VALUES (?, NULL)", stored.size());
+
+    var read = db.query("SELECT usd FROM t WHERE usd IS NOT NULL ORDER BY id", row -> row.real(0));
+
+    assertEquals(
+        stored.stream().map(Double::doubleToLongBits).toList(),
+        read.stream().map(Double::doubleToLongBits).toList());
+    assertNull(
+        db.queryOne(
+                "SELECT usd FROM t WHERE id = ?",
+                row -> Optional.ofNullable(row.real(0)),
+                stored.size())
+            .orElseThrow()
+            .orElse(null),
+        "a NULL is no dollars, never zero");
   }
 
   @Test

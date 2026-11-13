@@ -596,8 +596,9 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
    * A spec's own record of its change: when it first entered {@code pending}, last entered {@code
    * awaiting_merge} and last entered {@code done} (null for a move it has not made), the same on
    * every box (M4), and this box's {@link KeptRuns}. {@code erasedBeforeHeld} says the sums may
-   * lack runs: this box heard main erase a run of the spec's project before it first held the spec,
-   * after the spec was made, so a run of it may have gone before this box could count it.
+   * lack runs: after the spec was made, this box heard main erase a run of the spec's project
+   * before it first held the spec, or erase a run it never saw finish (one of this spec, or of a
+   * spec it cannot tell), so a run of it may have gone before this box could count it.
    */
   public record Recorded(
       Instant readyAt,
@@ -620,7 +621,10 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
                         SELECT entity_id, seq FROM compacted_entries WHERE entity_type = 'spec')
                     GROUP BY entity_id) held ON held.entity_id = s.id
                 JOIN change_log e ON e.entity_type = 'run' AND e.kind = 'erasure'
-                    AND e.origin = ? AND e.seq < held.first AND e.recorded_at >= s.created_at
+                    AND e.origin = ? AND e.recorded_at >= s.created_at
+                    AND (e.seq < held.first OR EXISTS (
+                        SELECT 1 FROM uncounted_runs u WHERE u.run_id = e.entity_id
+                            AND (u.spec_id IS NULL OR u.spec_id = s.id)))
                 JOIN change_heads h ON h.entity_type = 'run' AND h.entity_id = e.entity_id
                     AND (h.project IS NULL OR h.project = '' OR h.project = s.project)
                 WHERE s.id IN (SELECT value FROM json_each(?))""",

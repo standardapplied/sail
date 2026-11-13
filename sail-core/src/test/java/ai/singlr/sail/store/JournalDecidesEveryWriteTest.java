@@ -111,6 +111,7 @@ class JournalDecidesEveryWriteTest {
     final String run = DateTimeUtils.newId().toString();
     final String stopping = DateTimeUtils.newId().toString();
     final String unstarted = DateTimeUtils.newId().toString();
+    final String unread = DateTimeUtils.newId().toString();
     String review;
     String stage;
     Finding finding;
@@ -148,6 +149,9 @@ class JournalDecidesEveryWriteTest {
       runs.create(
           unstarted, "acme", "theirs", "bob", "room", "claude-code", "b", "t", 1, 2, "/l", "u");
       runs.updateProcess(unstarted, null, null, null);
+      runs.create(
+          unread, "acme", "theirs", "bob", "room", "claude-code", "b", "t", 1, 2, "/l", "u");
+      runs.complete(unread, "stopped", null);
       review = reviews.createReview("theirs", 1);
       stage = reviews.createStage(review, "codex", "agent");
       reviews.startStage(stage, "codex");
@@ -300,10 +304,12 @@ class JournalDecidesEveryWriteTest {
                     "u",
                     null)),
         owned("RunStore.recordSession", f -> f.runs.recordSession(f.run, "s-1", "startup", "/t")),
-        owned("RunStore.complete", f -> f.runs.complete(f.run, "completed", 0)),
+        owned(
+            "RunStore.finishAsTurnsRecorded",
+            f -> f.runs.finishAsTurnsRecorded(f.run, "completed", 0)),
+        owned("RunStore.recordRead", f -> f.runs.recordRead(f.unread, RunUsage.NONE)),
         owned("RunStore.claimStop", f -> f.runs.claimStop(f.run, "stopping", () -> {})),
         owned("RunStore.releaseStop", f -> f.runs.releaseStop(f.stopping, () -> {})),
-        owned("RunStore.transition", f -> f.runs.transition(f.run, "running", "stopping")),
         owned(
             "RunStore.finish", f -> f.runs.finish(f.run, "running", "completed", 0, RunUsage.NONE)),
         owned(

@@ -26,6 +26,7 @@ import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
+import ai.singlr.sail.store.TestRuns;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermissions;
@@ -160,7 +161,8 @@ class StopGateIT extends AbstractIncusIT {
             received.get(0).agent(),
             "event authorship is the run's minted principal, resolved from the credential");
 
-        assertTrue(Acting.system(() -> runStore.transition("run-1", "running", "completed")));
+        assertTrue(
+            Acting.system(() -> TestRuns.transition(runStore, "run-1", "running", "completed")));
         var codexCredential = reserve(runStore, "run-2", "codex");
         var codexFirst = codexStopAttempt(codexCredential, false);
         assertTrue(codexFirst.ok(), "the first codex stop must exit 0: " + codexFirst.stderr());

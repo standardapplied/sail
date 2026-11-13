@@ -103,7 +103,10 @@ final class MeasuresText {
         : "counted on this box, unknown: " + reason((Map<String, Object>) box);
   }
 
-  /** What a change's runs cost, as the answer says: dollars, tokens, and the runs behind each. */
+  /**
+   * What a change's runs cost, as the answer says: dollars, tokens, and the runs behind each; a
+   * figure some runs left unreported reads as a lower bound, and one none reported as unknown.
+   */
   @SuppressWarnings("unchecked")
   private static String cost(Map<String, Object> cost) {
     var runs = (Map<String, Object>) cost.get("runs");
@@ -114,25 +117,56 @@ final class MeasuresText {
     var bound = Boolean.TRUE.equals(runs.get("at_least")) ? "at least " : "";
     var withoutCost = number(cost, "runs_without_cost");
     var withoutUsage = number(cost, "runs_without_usage");
-    return bound
-        + dollars((Map<String, Object>) cost.get("usd"))
+    return figure(cost, "usd")
         + " over "
         + (all - withoutCost)
         + " of "
+        + bound
         + plural(all, "run")
         + ", "
-        + String.format(Locale.ROOT, "%,d", number(cost, "tokens"))
+        + tokens(cost, all - withoutUsage);
+  }
+
+  /** The tokens of the runs that reported them, by kind; said once when none did. */
+  @SuppressWarnings("unchecked")
+  private static String tokens(Map<String, Object> cost, long reporting) {
+    if (((Map<String, Object>) cost.get("tokens")).containsKey("unknown")) {
+      return "tokens " + figure(cost, "tokens");
+    }
+    return figure(cost, "tokens")
         + " tokens over "
-        + (all - withoutUsage)
+        + reporting
         + " (in "
-        + String.format(Locale.ROOT, "%,d", number(cost, "tokens_in"))
+        + part(cost, "tokens_in")
         + ", out "
-        + String.format(Locale.ROOT, "%,d", number(cost, "tokens_out"))
+        + part(cost, "tokens_out")
         + ", cache read "
-        + String.format(Locale.ROOT, "%,d", number(cost, "tokens_cache_read"))
+        + part(cost, "tokens_cache_read")
         + ", cache write "
-        + String.format(Locale.ROOT, "%,d", number(cost, "tokens_cache_write"))
+        + part(cost, "tokens_cache_write")
         + ")";
+  }
+
+  /** One kind of the tokens, bare: the total before it says whether the kinds are lower bounds. */
+  @SuppressWarnings("unchecked")
+  private static String part(Map<String, Object> cost, String key) {
+    var part = (Map<String, Object>) cost.get(key);
+    return part.containsKey("unknown")
+        ? "unknown"
+        : String.format(Locale.ROOT, "%,d", ((Number) part.get(COUNT)).longValue());
+  }
+
+  /** The figure under {@code key}: dollars or a count, a lower bound, or unknown and why. */
+  @SuppressWarnings("unchecked")
+  private static String figure(Map<String, Object> cost, String key) {
+    var figure = (Map<String, Object>) cost.get(key);
+    if (figure.containsKey("unknown")) {
+      return "unknown (" + reason(figure) + ")";
+    }
+    return (Boolean.TRUE.equals(figure.get("at_least")) ? "at least " : "")
+        + (figure.containsKey("usd")
+            ? dollars(figure)
+            : String.format(Locale.ROOT, "%,d", ((Number) figure.get(COUNT)).longValue()));
   }
 
   @SuppressWarnings("unchecked")

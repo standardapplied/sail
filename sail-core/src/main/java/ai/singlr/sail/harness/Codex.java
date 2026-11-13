@@ -125,39 +125,46 @@ final class Codex implements Harness {
     return EFFORTS;
   }
 
+  @Override
+  public ReportFile reportFile() {
+    return ReportFile.TRANSCRIPT;
+  }
+
   /**
    * The transcript's last {@code token_count}: the thread's running totals, with no dollars, and
    * the model of its last {@code turn_context}. Codex's input count includes its cached part, which
-   * is taken out, so the run's input is what it read uncached.
+   * is taken out, so the run's input is what it read uncached. A last {@code token_count} line that
+   * does not parse leaves the report unread.
    */
   @Override
-  public Optional<RunUsage> usage(String agentLog, String transcript) {
-    return RunUsage.last(transcript, "\"type\":\"token_count\"", Codex::counts)
-        .map(
-            line -> {
-              var total =
-                  RunUsage.map(
-                      RunUsage.map(RunUsage.map(line, "payload"), "info"), "total_token_usage");
-              var input = RunUsage.count(total, "input_tokens");
-              var cached = RunUsage.count(total, "cached_input_tokens");
-              var model =
-                  RunUsage.last(
-                          transcript,
-                          "\"type\":\"turn_context\"",
-                          context -> "turn_context".equals(context.get("type")))
-                      .map(context -> RunUsage.map(context, "payload").get("model"))
-                      .filter(String.class::isInstance)
-                      .map(String.class::cast)
-                      .orElse(null);
-              return new RunUsage(
-                  model,
-                  input == null || cached == null ? input : input - cached,
-                  RunUsage.count(total, "output_tokens"),
-                  cached,
-                  RunUsage.count(total, "cache_write_input_tokens"),
-                  null,
-                  RunUsage.Source.TRANSCRIPT);
-            });
+  public RunUsage usage(String report) {
+    var found = RunUsage.last(report, "\"type\":\"token_count\"", Codex::counts);
+    if (found.unreadable()) {
+      return null;
+    }
+    if (found.line() == null) {
+      return RunUsage.NONE;
+    }
+    var total =
+        RunUsage.map(
+            RunUsage.map(RunUsage.map(found.line(), "payload"), "info"), "total_token_usage");
+    var input = RunUsage.count(total, "input_tokens");
+    var cached = RunUsage.count(total, "cached_input_tokens");
+    var context =
+        RunUsage.last(
+                report,
+                "\"type\":\"turn_context\"",
+                line -> "turn_context".equals(line.get("type")))
+            .line();
+    var model = context == null ? null : RunUsage.map(context, "payload").get("model");
+    return new RunUsage(
+        model instanceof String named ? named : null,
+        input == null || cached == null ? input : input - cached,
+        RunUsage.count(total, "output_tokens"),
+        cached,
+        RunUsage.count(total, "cache_write_input_tokens"),
+        null,
+        RunUsage.Source.TRANSCRIPT);
   }
 
   private static boolean counts(Map<String, Object> line) {

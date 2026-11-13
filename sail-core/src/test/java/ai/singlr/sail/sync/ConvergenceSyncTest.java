@@ -35,6 +35,7 @@ import ai.singlr.sail.store.RoomStore;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.SyncConflicts;
+import ai.singlr.sail.store.TestRuns;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
@@ -879,7 +880,7 @@ class ConvergenceSyncTest {
             Actors.principalOf(runs.findById(runId).orElseThrow()),
             () -> new MessageStore(ada.db).append("s", principal, "working", null));
     Acting.as("ada", () -> new MessageStore(ada.db).append("s", "ada", "note", post.id()));
-    Acting.as("ada", () -> runs.complete(runId, "completed", 0));
+    Acting.as("ada", () -> TestRuns.complete(runs, runId, "completed", 0));
     SyncBox.round(main, ada);
 
     Acting.as("root", () -> new MessageStore(main.db).append("s", "root", "ack", post.id()));
@@ -894,7 +895,7 @@ class ConvergenceSyncTest {
     SyncBox.round(main, ada);
     var runId = run(ada, "ada", "s");
     ada.db.execute("INSERT INTO run_principals (run_id, principal) VALUES (?, 'bob')", runId);
-    Acting.unchecked("ada", () -> new RunStore(ada.db).complete(runId, "completed", 0));
+    Acting.unchecked("ada", () -> TestRuns.complete(new RunStore(ada.db), runId, "completed", 0));
     Acting.unchecked("ada", () -> new MessageStore(ada.db).append("s", "bob", "as bob", null));
 
     SyncBox.round(main, ada);
@@ -913,7 +914,7 @@ class ConvergenceSyncTest {
     ada.db.execute("INSERT INTO run_principals (run_id, principal) VALUES (?, 'bob')", runId);
     var agent = Actors.principalOf(new RunStore(ada.db).findById(runId).orElseThrow());
     Acting.by(agent, () -> ada.specs.setContent("mine", "edited", ""));
-    Acting.unchecked("ada", () -> new RunStore(ada.db).complete(runId, "completed", 0));
+    Acting.unchecked("ada", () -> TestRuns.complete(new RunStore(ada.db), runId, "completed", 0));
 
     SyncBox.round(main, ada);
 

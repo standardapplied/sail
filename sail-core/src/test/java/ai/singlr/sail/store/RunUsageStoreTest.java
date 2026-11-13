@@ -14,8 +14,11 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.harness.RunUsage;
+import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.ActingAs;
+import ai.singlr.sail.sync.SyncBox;
 import java.nio.file.Path;
+import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -25,8 +28,11 @@ import org.junit.jupiter.api.io.TempDir;
 /**
  * What a run's row records of its cost (M1, M2): the usage its finish carries, written in the very
  * update and revision that finish it, nothing written as zeros, the model asked replaced by the one
- * reported, what a resumed conversation's other runs recorded taken off its report, and the model
- * and effort its launch passed.
+ * reported, and the model and effort its launch passed. A report is its harness session's running
+ * total, so a run records its share: the report less what the session's other runs were given, kept
+ * per session where retention never reaches ({@code session_usage}). A report below the session's
+ * highest tells no share and is recorded unattributable (M9). The four histories of the first
+ * review each end with the harness's own total or an honest lower bound.
  */
 @ActingAs
 class RunUsageStoreTest {
@@ -42,7 +48,9 @@ class RunUsageStoreTest {
   void setUp() {
     db = Sqlite.open(tempDir.resolve("test.db"));
     new SchemaManager(db).migrate();
+    HeldProjects.hold(db, "proj", "acme");
     store = new RunStore(db);
+    Acting.as("uday", () -> new SpecStore(db).create(SyncBox.spec("auth", "t", "in_progress")));
   }
 
   @AfterEach
@@ -54,7 +62,7 @@ class RunUsageStoreTest {
     var id = DateTimeUtils.newId().toString();
     store.create(
         id,
-        "acme",
+        "proj",
         "auth",
         "node-a",
         "build",
@@ -79,7 +87,7 @@ class RunUsageStoreTest {
   @Test
   void aFinishRecordsWhatTheHarnessReportedInTheRevisionThatFinishesTheRow() {
     var id = run(null);
-    store.recordLaunch(id, "opus", "high");
+    store.recordLaunch(id, "opus", "high", null);
 
     assertTrue(store.finish(id, "running", "completed", 0, REPORTED));
 
@@ -126,7 +134,7 @@ class RunUsageStoreTest {
   @Test
   void aRunWhoseHarnessReportedNothingRecordsNoneWithNullCounts() {
     var id = run(null);
-    store.recordLaunch(id, "opus", null);
+    store.recordLaunch(id, "opus", null, null);
 
     store.finish(id, "running", "completed", 0, RunUsage.NONE);
 
@@ -151,54 +159,213 @@ class RunUsageStoreTest {
         () -> store.finish(id, "stopped", "stopping", null, RunUsage.NONE));
   }
 
-  /**
-   * A harness resuming a conversation reports its whole spend: what the conversation's earlier runs
-   * here recorded is taken off, so no dollar is counted twice across runs.
-   */
+  private static RunUsage report(long tokens, double usd) {
+    return new RunUsage("m", tokens, tokens, tokens, tokens, usd, RunUsage.Source.RESULT);
+  }
+
+  private void finish(String id, RunUsage usage) {
+    assertTrue(store.finish(id, "running", "completed", 0, usage));
+  }
+
+  private RunUsage usageOf(String id) {
+    return store.findById(id).orElseThrow().usage();
+  }
+
+  private SpecStore.KeptRuns kept() {
+    return new SpecStore(db).recorded(List.of("auth")).get("auth").runs();
+  }
+
+  /** A share that tells: a session given 100 that reports 300 gives its run 200, not 100 or 300. */
   @Test
-  void aResumedConversationsRunRecordsOnlyWhatItSpent() {
+  void aResumedSessionsRunRecordsItsReportLessWhatItsSessionGave() {
     var first = run("sess-1");
-    store.finish(first, "running", "completed", 0, REPORTED);
+    finish(first, report(100, 1.0));
     var other = run("sess-2");
-    store.finish(other, "running", "completed", 0, REPORTED);
+    finish(other, report(70, 0.7));
     var resumed = run("sess-1");
 
-    store.finish(
-        resumed,
-        "running",
-        "completed",
-        0,
-        new RunUsage("claude-opus-5-5", 150L, 260L, 4500L, 40L, 2.0, RunUsage.Source.RESULT));
+    finish(resumed, report(300, 3.0));
+
+    assertEquals(report(200, 2.0), usageOf(resumed));
+    assertEquals(370L, kept().tokensIn());
+  }
+
+  /** Review 1, history 1: the session's earlier run is erased by retention before it resumes. */
+  @Test
+  void aSessionWhoseEarlierRunWasErasedEndsWithItsHarnessesOwnTotal() {
+    var a = run("S1");
+    finish(a, report(100, 1.0));
+    var b = run("S1");
+    finish(b, report(150, 1.5));
+    Acting.system(
+        () -> new Erasure(db).erase(List.of(new Erasure.Target(Erasure.RUN, a)), "retention"));
+    var c = run("S1");
+
+    finish(c, report(180, 1.8));
+
+    assertEquals(30L, usageOf(c).tokensIn());
+    assertEquals(180L, kept().tokensIn(), "the harness's own total, not 280");
+    assertEquals(1.8, kept().costUsd(), 1e-9);
+    assertEquals(0L, kept().withoutUsage());
+  }
+
+  /**
+   * Review 1, history 2: the later run finishes first. The earlier one's report is below what the
+   * session already reported, so its share cannot be told: it is unattributable, adds nothing, and
+   * its spec counts it as a run without usage, so its tokens and dollars are a lower bound.
+   */
+  @Test
+  void anEarlierRunFinishingAfterALaterOneOfItsSessionIsUnattributable() {
+    var a = run("S3");
+    var b = run("S3");
+    finish(b, report(150, 1.5));
+
+    finish(a, report(100, 1.0));
 
     assertEquals(
-        new RunUsage("claude-opus-5-5", 50L, 60L, 1500L, 0L, 0.5, RunUsage.Source.RESULT),
-        store.findById(resumed).orElseThrow().usage());
+        new RunUsage("m", null, null, null, null, null, RunUsage.Source.UNATTRIBUTABLE),
+        usageOf(a));
+    assertEquals(150L, kept().tokensIn());
+    assertEquals(1L, kept().withoutUsage());
+    assertEquals(1L, kept().withoutCost());
+    assertEquals("unattributable", journaled(a).get("usage_source"));
   }
 
-  /** Scenario 5 at the store: each turn's running total is set, not added, and finishes as is. */
+  /**
+   * Review 1, history 3: a resumed run whose hook never reported its session still has it, stamped
+   * at launch from the session it resumed; a run that names no session at all started one, so its
+   * report is its own.
+   */
+  @Test
+  void aResumedRunHasItsSessionFromItsLaunchAndARunWithNoneKeepsItsWholeReport() {
+    var a = run("S4");
+    finish(a, RunUsage.NONE);
+    var b = run("S4");
+    finish(b, report(100, 1.0));
+    var resumed = run(null);
+    store.recordLaunch(resumed, "opus", null, "S4");
+
+    finish(resumed, report(150, 1.5));
+    var fresh = run(null);
+    finish(fresh, report(40, 0.4));
+
+    assertEquals("S4", store.findById(resumed).orElseThrow().sessionId());
+    assertEquals(50L, usageOf(resumed).tokensIn());
+    assertEquals(40L, usageOf(fresh).tokensIn());
+    assertEquals(190L, kept().tokensIn());
+  }
+
+  /**
+   * Review 1, history 4: a harness that restarted its count at zero. Below the session's highest,
+   * its share cannot be told and the spec's figures are a lower bound; above it, the session ends
+   * with the harness's own last total.
+   */
+  @Test
+  void aHarnessThatRestartedAtZeroIsUnattributableBelowTheHighestAndItsOwnTotalAbove() {
+    var a = run("S2");
+    finish(a, report(100, 1.0));
+    var restarted = run("S2");
+    finish(restarted, report(60, 0.6));
+    var b = run("S7");
+    finish(b, report(100, 1.0));
+    var larger = run("S7");
+
+    finish(larger, report(500, 5.0));
+
+    assertEquals(RunUsage.Source.UNATTRIBUTABLE, usageOf(restarted).source());
+    assertEquals(400L, usageOf(larger).tokensIn());
+    assertEquals(600L, kept().tokensIn());
+    assertEquals(1L, kept().withoutUsage());
+  }
+
+  /**
+   * Scenario 5 at the store: each turn's running total sets the share; the finish keeps the last.
+   */
   @Test
   void aLiveRunsTurnsSetItsUsageAndItsFinishKeepsTheLast() {
-    var id = run(null);
-    store.recordUsage(id, REPORTED);
-    var later =
-        new RunUsage("claude-opus-5-5", 300L, 600L, 9000L, 120L, 4.5, RunUsage.Source.RESULT);
-    store.recordUsage(id, later);
-    assertEquals(later, store.findById(id).orElseThrow().usage());
+    var sibling = run("live");
+    finish(sibling, report(100, 1.0));
+    var id = run("live");
+    store.recordUsage(id, report(110, 1.1));
+    store.recordUsage(id, report(160, 1.6));
+    assertEquals(60L, usageOf(id).tokensIn());
 
-    store.finish(id, "running", "completed", 0, null);
-    store.recordUsage(id, REPORTED);
+    assertTrue(store.finishAsTurnsRecorded(id, "completed", 0));
+    store.recordUsage(id, report(900, 9.0));
 
-    assertEquals(later, store.findById(id).orElseThrow().usage(), "only while it runs");
-    assertEquals(4.5, journaled(id).get("cost_usd"));
+    assertEquals(60L, usageOf(id).tokensIn(), "only while it runs");
+    assertEquals(0.6, (Double) journaled(id).get("cost_usd"), 1e-9);
+    assertEquals(160L, kept().tokensIn());
+    assertFalse(store.finishAsTurnsRecorded(id, "failed", 1), "it finishes once");
   }
 
+  /** Review 1, minor 6: a live member that answered no turn finishes with none, in one write. */
   @Test
-  void anOperatorsStopThatFindsNoProcessRecordsTheUsageItRead() {
+  void aLiveRunThatAnsweredNoTurnFinishesWithNone() {
     var id = run(null);
 
-    assertTrue(store.claimStop(id, "stopped", REPORTED, () -> {}));
+    assertTrue(store.finishAsTurnsRecorded(id, "stopped", null));
 
-    assertEquals(REPORTED, store.findById(id).orElseThrow().usage());
+    assertEquals(RunUsage.Source.NONE, usageOf(id).source());
+    assertThrows(
+        IllegalArgumentException.class, () -> store.finishAsTurnsRecorded(id, "stopping", null));
+  }
+
+  /** A member that never started records none, so its directory is not kept for a read. */
+  @Test
+  void aRunEndedUnstartedRecordsNone() {
+    var id = run(null);
+
+    assertTrue(store.transitionUnstarted(id, "stopped"));
+
+    assertEquals(RunUsage.NONE, usageOf(id));
+  }
+
+  /**
+   * An operator's stop leaves the report unread; the sweep reads it later and records it once, in a
+   * revision of its own, as its share of its session; a run still unread is listed for the sweep of
+   * the box that ran it.
+   */
+  @Test
+  void anOperatorsStopLeavesTheReportUnreadForTheSweepToRecordOnce() {
+    var sibling = run("op");
+    finish(sibling, report(100, 1.0));
+    var id = run("op");
+
+    assertTrue(store.claimStop(id, "stopped", () -> {}));
+
+    assertNull(usageOf(id));
     assertEquals(RunStore.STOPPED_BY_OPERATOR, store.findById(id).orElseThrow().stopSource());
+    assertEquals(List.of(id), store.unread("node-a").stream().map(RunStore.RunRow::id).toList());
+    assertEquals(List.of(), store.unread("node-b"));
+    assertTrue(store.recordRead(id, report(130, 1.3)));
+    assertFalse(store.recordRead(id, report(900, 9.0)), "recorded once");
+    assertEquals(30L, usageOf(id).tokensIn());
+    assertEquals(30, journaled(id).get("tokens_in"));
+    assertEquals(List.of(), store.unread("node-a"));
+    assertEquals(130L, kept().tokensIn());
+    assertFalse(store.recordRead(run(null), report(1, 1.0)), "a run still running is not read");
+  }
+
+  /**
+   * A session's usage is box-local and outlives retention's erasure of its runs; it goes with the
+   * conversation it is of.
+   */
+  @Test
+  void aSessionsUsageOutlivesItsRunsAndGoesWithItsConversation() {
+    var a = run("kept");
+    finish(a, report(100, 1.0));
+    Acting.system(
+        () -> new Erasure(db).erase(List.of(new Erasure.Target(Erasure.RUN, a)), "retention"));
+    assertEquals(1, sessions());
+
+    Acting.system(
+        () -> new Erasure(db).erase(List.of(new Erasure.Target(Erasure.SPEC, "auth")), "local"));
+
+    assertEquals(0, sessions());
+  }
+
+  private long sessions() {
+    return db.queryOne("SELECT COUNT(*) FROM session_usage", row -> row.integer(0)).orElseThrow();
   }
 }

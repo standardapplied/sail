@@ -17,6 +17,7 @@ import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.Sqlite;
+import ai.singlr.sail.store.TestRuns;
 import java.nio.file.Path;
 import java.util.Map;
 import org.junit.jupiter.api.AfterEach;
@@ -139,7 +140,7 @@ class RunActivityStamperTest {
   @Test
   void aTerminalRunIsNeverStamped() {
     var id = runningRun();
-    Acting.system(() -> runStore.complete(id, "completed", 0));
+    Acting.system(() -> TestRuns.complete(runStore, id, "completed", 0));
     var revisions = journaledRevisions(id);
 
     stamper.onEvent(

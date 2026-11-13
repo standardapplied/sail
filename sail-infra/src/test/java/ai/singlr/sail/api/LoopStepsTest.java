@@ -21,6 +21,7 @@ import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.store.Finding;
 import ai.singlr.sail.store.ReviewStore;
 import ai.singlr.sail.store.RunStore;
+import ai.singlr.sail.store.TestRuns;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -194,7 +195,7 @@ class LoopStepsTest {
     take(new LoopStep.LaunchReviewer(reviewing(), 0, "codex"));
     var reviewer = loop.onlyLive();
     loop.container.exited(reviewer.id(), log, 0);
-    Acting.system(() -> loop.runs.complete(reviewer.id(), "stopped", 0));
+    Acting.system(() -> TestRuns.complete(loop.runs, reviewer.id(), "stopped", 0));
     return loop.runs.findById(reviewer.id()).orElseThrow();
   }
 
@@ -790,7 +791,7 @@ class LoopStepsTest {
     take(new LoopStep.LaunchFix(review(), findings));
     var fix = loop.onlyLive();
     loop.container.exited(fix.id(), "fixed", 0);
-    Acting.system(() -> loop.runs.complete(fix.id(), "stopped", 0));
+    Acting.system(() -> TestRuns.complete(loop.runs, fix.id(), "stopped", 0));
     return loop.runs.findById(fix.id()).orElseThrow();
   }
 

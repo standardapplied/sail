@@ -26,6 +26,7 @@ import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
+import ai.singlr.sail.store.TestRuns;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -248,7 +249,7 @@ class DispatchLaneParityTest {
 
   private static void completeLatestRun(Lane lane) {
     var run = lane.runStore().listForProject("acme").getFirst();
-    lane.runStore().complete(run.id(), "stopped", 0);
+    TestRuns.complete(lane.runStore(), run.id(), "stopped", 0);
   }
 
   private static Map<String, Object> specRow(Lane lane) {

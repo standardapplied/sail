@@ -23,6 +23,7 @@ import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.store.EventStore;
 import ai.singlr.sail.store.Finding;
 import ai.singlr.sail.store.RunStore;
+import ai.singlr.sail.store.TestRuns;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
@@ -484,7 +485,8 @@ class ReviewLanesTest {
         loop.statusOf(fix.reviewId()),
         "nothing is decided while the halt is under way: one that fails gives the run back");
 
-    Acting.system(() -> assertTrue(loop.runs.transition(fix.id(), "stopping", "stopped")));
+    Acting.system(
+        () -> assertTrue(TestRuns.transition(loop.runs, fix.id(), "stopping", "stopped")));
     loop.onEvent(
         StopOperations.cancelEvent(
             loop.runs.findById(fix.id()).orElseThrow(),
@@ -506,7 +508,8 @@ class ReviewLanesTest {
     loop.container.dirty("api", " M src/Half.java\n");
     Acting.system(() -> assertTrue(loop.runs.claimStop(fix.id(), "stopping", () -> {})));
     loop.container.exited(fix.id(), "half done", 0);
-    Acting.system(() -> assertTrue(loop.runs.transition(fix.id(), "stopping", "stopped")));
+    Acting.system(
+        () -> assertTrue(TestRuns.transition(loop.runs, fix.id(), "stopping", "stopped")));
 
     loop.onEvent(loop.watcherStop(fix.id(), null));
 
@@ -539,7 +542,8 @@ class ReviewLanesTest {
     var reviewer = loop.onlyLive();
     Acting.system(() -> assertTrue(loop.runs.claimStop(reviewer.id(), "stopping", () -> {})));
     loop.container.exited(reviewer.id(), "", 143);
-    Acting.system(() -> assertTrue(loop.runs.transition(reviewer.id(), "stopping", "stopped")));
+    Acting.system(
+        () -> assertTrue(TestRuns.transition(loop.runs, reviewer.id(), "stopping", "stopped")));
 
     loop.onEvent(loop.watcherStop(reviewer.id(), null));
 
@@ -560,7 +564,8 @@ class ReviewLanesTest {
     loop.container.dirty("api", " M src/Half.java\n");
     Acting.system(() -> assertTrue(loop.runs.claimStop(fix.id(), "stopping", () -> {})));
     loop.container.exited(fix.id(), "half done", 0);
-    Acting.system(() -> assertTrue(loop.runs.transition(fix.id(), "stopping", "stopped")));
+    Acting.system(
+        () -> assertTrue(TestRuns.transition(loop.runs, fix.id(), "stopping", "stopped")));
     loop.restart();
 
     assertEquals(1, loop.reconciler(ReviewLoop.LATER).sweep());
@@ -617,7 +622,7 @@ class ReviewLanesTest {
                     Event.WellKnownData.REASON,
                     "time limit (45m)"))
             .withId(903));
-    Acting.system(() -> loop.runs.complete(fix.id(), "stopped", 0));
+    Acting.system(() -> TestRuns.complete(loop.runs, fix.id(), "stopped", 0));
     loop.restart();
 
     assertEquals(1, loop.reconciler(ReviewLoop.LATER).sweep());
@@ -640,7 +645,7 @@ class ReviewLanesTest {
     loop.container.exited(fix.id(), "half done", 0);
     new SpecStoreAuditPersister(new EventStore(loop.db))
         .onEvent(loop.watcherStop(fix.id(), "time limit (45m)").withId(901));
-    Acting.system(() -> loop.runs.complete(fix.id(), "stopped", null));
+    Acting.system(() -> TestRuns.complete(loop.runs, fix.id(), "stopped", null));
     loop.restart();
 
     assertEquals(1, loop.reconciler(ReviewLoop.LATER).sweep());
@@ -740,7 +745,7 @@ class ReviewLanesTest {
     var next =
         Acting.system(
             () -> {
-              loop.runs.complete(fix.id(), "stopped", 0);
+              TestRuns.complete(loop.runs, fix.id(), "stopped", 0);
               var id = loop.reviews.createReview("auth", 2);
               loop.reviews.updateReviewStatus(id, "running");
               return id;
@@ -768,7 +773,7 @@ class ReviewLanesTest {
     loop.container.exited(first.id(), CLEAN_REVIEW, 0);
     Acting.system(
         () -> {
-          loop.runs.complete(first.id(), "stopped", 0);
+          TestRuns.complete(loop.runs, first.id(), "stopped", 0);
           loop.reviews.completeStage(stages.getFirst().id(), "passed");
           loop.reviews.startStage(stages.getLast().id(), "claude-code");
         });
@@ -798,7 +803,7 @@ class ReviewLanesTest {
     loop.container.exited(reviewer.id(), CRITICAL_FINDING, 0);
     Acting.system(
         () -> {
-          loop.runs.complete(reviewer.id(), "stopped", 0);
+          TestRuns.complete(loop.runs, reviewer.id(), "stopped", 0);
           loop.reviews.addFinding(
               stage.id(),
               Finding.create(
@@ -938,7 +943,7 @@ class ReviewLanesTest {
     loop = ReviewLoop.staged(tempDir, "codex");
     loop.built("auth");
     var reviewer = loop.onlyLive();
-    loop.onLaunch(runId -> assertTrue(loop.runs.transition(runId, "running", "stopped")));
+    loop.onLaunch(runId -> assertTrue(TestRuns.transition(loop.runs, runId, "running", "stopped")));
 
     loop.finish(reviewer.id(), CRITICAL_FINDING);
 

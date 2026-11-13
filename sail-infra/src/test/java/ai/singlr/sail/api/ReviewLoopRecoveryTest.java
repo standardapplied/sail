@@ -31,6 +31,7 @@ import ai.singlr.sail.store.Finding;
 import ai.singlr.sail.store.ReviewStore;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.Snapshots;
+import ai.singlr.sail.store.TestRuns;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.time.Duration;
@@ -133,7 +134,7 @@ class ReviewLoopRecoveryTest {
     var build = loop.run(specId, "build");
     Acting.system(
         () -> {
-          loop.runs.complete(build, "stopped", 0);
+          TestRuns.complete(loop.runs, build, "stopped", 0);
           loop.specs.updateStatus(specId, SpecStatus.REVIEW);
           loop.reviews.createReview(specId, 1);
         });
@@ -182,7 +183,7 @@ class ReviewLoopRecoveryTest {
   /** The run ended and its row was completed in place: no stop of it ever reaches the bus. */
   private void endsWithNoStop(String runId) {
     loop.container.exited(runId, "done", 0);
-    Acting.system(() -> loop.runs.complete(runId, "completed", 0));
+    Acting.system(() -> TestRuns.complete(loop.runs, runId, "completed", 0));
   }
 
   /** The room is down: every message written to it fails, as a database error would. */
@@ -304,7 +305,7 @@ class ReviewLoopRecoveryTest {
         runId -> {
           assertTrue(loop.runs.claimStop(runId, "stopping", () -> {}));
           halt(runId);
-          assertTrue(loop.runs.transition(runId, "stopping", "stopped"));
+          assertTrue(TestRuns.transition(loop.runs, runId, "stopping", "stopped"));
           stopped.set(runId);
         });
 
@@ -413,7 +414,7 @@ class ReviewLoopRecoveryTest {
     loop.spec("auth", "api");
     var build = loop.run("auth", "build");
     Acting.system(() -> assertTrue(loop.runs.claimStop(build, "stopping", () -> {})));
-    Acting.system(() -> assertTrue(loop.runs.transition(build, "stopping", "stopped")));
+    Acting.system(() -> assertTrue(TestRuns.transition(loop.runs, build, "stopping", "stopped")));
 
     loop.onEvent(ReviewLoop.buildStop("auth", build));
 
@@ -433,7 +434,7 @@ class ReviewLoopRecoveryTest {
     loop.built("auth");
     var reviewer = loop.onlyLive();
     loop.exitsUnheard(reviewer.id(), "not a verdict", 0);
-    Acting.system(() -> loop.runs.complete(reviewer.id(), "stopped", 0));
+    Acting.system(() -> TestRuns.complete(loop.runs, reviewer.id(), "stopped", 0));
     var reconciler = loop.reconciler(LATER);
 
     assertEquals(1, reconciler.sweep(), "the review whose reviewer's stop was lost is rescued");
@@ -459,7 +460,7 @@ class ReviewLoopRecoveryTest {
     loop.built("auth");
     var reviewer = loop.onlyLive();
     loop.exitsUnheard(reviewer.id(), CLEAN_REVIEW, 0);
-    Acting.system(() -> loop.runs.complete(reviewer.id(), "stopped", 0));
+    Acting.system(() -> TestRuns.complete(loop.runs, reviewer.id(), "stopped", 0));
     loop.restart();
 
     assertEquals(
@@ -487,7 +488,7 @@ class ReviewLoopRecoveryTest {
             .orElseThrow();
     loop.container.exited(billing.id(), CLEAN_REVIEW, 0);
     var billingsStop = loop.watcherStop(billing.id(), null);
-    Acting.system(() -> loop.runs.complete(billing.id(), "stopped", 0));
+    Acting.system(() -> TestRuns.complete(loop.runs, billing.id(), "stopped", 0));
 
     loop.finish(auth.id(), CLEAN_REVIEW);
 
@@ -645,7 +646,7 @@ class ReviewLoopRecoveryTest {
     var chat = loop.liveRun("auth", Lane.ROOM_FULL.wire());
     loop.finish(first.id(), CLEAN_REVIEW);
     loop.container.exited(chat, "replied", 0);
-    Acting.system(() -> loop.runs.complete(chat, "completed", 0));
+    Acting.system(() -> TestRuns.complete(loop.runs, chat, "completed", 0));
 
     assertEquals(
         1,
@@ -990,7 +991,7 @@ class ReviewLoopRecoveryTest {
     loop.built("auth");
     var reviewer = loop.onlyLive();
     loop.container.exited(reviewer.id(), CRITICAL_FINDING, 0);
-    Acting.system(() -> loop.runs.complete(reviewer.id(), "stopped", 0));
+    Acting.system(() -> TestRuns.complete(loop.runs, reviewer.id(), "stopped", 0));
     var chat = chatTurnTakesTheRepo();
     loop.onEvent(loop.watcherStop(reviewer.id(), null));
     assertEquals("failed", loop.statusOf(reviewer.reviewId()));
@@ -1324,7 +1325,7 @@ class ReviewLoopRecoveryTest {
     loop.built("auth");
     var reviewer = loop.onlyLive();
     loop.container.exited(reviewer.id(), CRITICAL_FINDING, 0);
-    Acting.system(() -> loop.runs.complete(reviewer.id(), "stopped", 0));
+    Acting.system(() -> TestRuns.complete(loop.runs, reviewer.id(), "stopped", 0));
     var chat = chatTurnTakesTheRepo();
     loop.onEvent(loop.watcherStop(reviewer.id(), null));
     assertEquals(chat, loop.waitingOn(reviewer.reviewId()));
@@ -1489,7 +1490,7 @@ class ReviewLoopRecoveryTest {
     loop.exitsUnheard(reviewer.id(), CLEAN_REVIEW, 0);
     Acting.system(
         () -> {
-          loop.runs.complete(reviewer.id(), "stopped", 0);
+          TestRuns.complete(loop.runs, reviewer.id(), "stopped", 0);
           loop.reviews.completeStage(
               loop.reviews.stagesForReview(reviewer.reviewId()).getFirst().id(), "passed");
         });
@@ -1558,7 +1559,7 @@ class ReviewLoopRecoveryTest {
     loop.exitsUnheard(reviewer.id(), CLEAN_REVIEW, 0);
     Acting.system(
         () -> {
-          loop.runs.complete(reviewer.id(), "stopped", 0);
+          TestRuns.complete(loop.runs, reviewer.id(), "stopped", 0);
           loop.reviews.completeStage(
               loop.reviews.stagesForReview(reviewer.reviewId()).getFirst().id(), "passed");
         });
@@ -1582,7 +1583,7 @@ class ReviewLoopRecoveryTest {
     loop = ReviewLoop.staged(tempDir, "codex");
     loop.spec("auth", "api");
     var replaced = loop.run("auth", "build");
-    Acting.system(() -> loop.runs.complete(replaced, "stopped", 0));
+    Acting.system(() -> TestRuns.complete(loop.runs, replaced, "stopped", 0));
     var fresh = loop.liveRun("auth", "build");
 
     loop.onEvent(ReviewLoop.buildStop("auth", replaced));
@@ -1634,7 +1635,7 @@ class ReviewLoopRecoveryTest {
     loop.built("auth");
     var reviewer = loop.onlyLive();
     loop.container.exited(reviewer.id(), CRITICAL_FINDING, 0);
-    Acting.system(() -> loop.runs.complete(reviewer.id(), "stopped", 0));
+    Acting.system(() -> TestRuns.complete(loop.runs, reviewer.id(), "stopped", 0));
     var chat = chatTurnTakesTheRepo();
 
     loop.onEvent(loop.watcherStop(reviewer.id(), null));
@@ -1664,7 +1665,7 @@ class ReviewLoopRecoveryTest {
     loop.built("auth");
     var reviewer = loop.onlyLive();
     loop.container.exited(reviewer.id(), CRITICAL_FINDING, 0);
-    Acting.system(() -> loop.runs.complete(reviewer.id(), "stopped", 0));
+    Acting.system(() -> TestRuns.complete(loop.runs, reviewer.id(), "stopped", 0));
     var chat = chatTurnTakesTheRepo();
     loop.onEvent(loop.watcherStop(reviewer.id(), null));
     var reconciler = loop.reconciler(LATER);
@@ -1719,7 +1720,7 @@ class ReviewLoopRecoveryTest {
         .onEvent(loop.watcherStop(fix.id(), null).withId(901));
     Acting.system(
         () -> {
-          loop.runs.complete(fix.id(), "stopped", 0);
+          TestRuns.complete(loop.runs, fix.id(), "stopped", 0);
           loop.specs.updateStatus("auth", SpecStatus.REVIEW);
         });
     loop.restart();
@@ -1808,7 +1809,7 @@ class ReviewLoopRecoveryTest {
     pushed.put("review_id", reviewer.reviewId());
     Acting.system(() -> loop.runs.applyRevision(foreign, pushed, "1-abcdef"));
     loop.exitsUnheard(reviewer.id(), CLEAN_REVIEW, 0);
-    Acting.system(() -> loop.runs.complete(reviewer.id(), "stopped", 0));
+    Acting.system(() -> TestRuns.complete(loop.runs, reviewer.id(), "stopped", 0));
     loop.restart();
 
     assertEquals(
@@ -1891,7 +1892,7 @@ class ReviewLoopRecoveryTest {
   void anUnheardFixStopIsReplayedThoughAFindingOfItsReviewCannotBeRead() {
     var fix = fixing();
     loop.container.exited(fix.id(), "gave up", 1);
-    Acting.system(() -> loop.runs.complete(fix.id(), "stopped", 1));
+    Acting.system(() -> TestRuns.complete(loop.runs, fix.id(), "stopped", 1));
     aFindingCannotBeRead("auth");
     loop.db.execute("UPDATE specs SET status = 'review' WHERE id = 'auth'");
 

@@ -449,7 +449,10 @@ final class GlobalSpecOperations {
             request.dependsOn() != null ? request.dependsOn() : existing.dependsOn(),
             request.repos() != null ? request.repos() : existing.repos(),
             existing.roomIdOrIdentity());
-    requireEffortTaken(updated);
+    if (!Objects.equals(existing.agent(), updated.agent())
+        || !Objects.equals(existing.reasoningEffort(), updated.reasoningEffort())) {
+      requireEffortTaken(updated);
+    }
     var result = specStore.atomically(() -> write(existing, updated, wake));
     if (result.status() != existing.status()) {
       if (attention.get() != null) {
@@ -863,7 +866,11 @@ final class GlobalSpecOperations {
 
   /**
    * Refuses a reasoning effort the spec's harness does not take, naming it (M15): the spec's own
-   * agent, else its project's. A spec whose harness is not known here yet is refused at dispatch.
+   * agent, else its project's. Asked of a spec made, and of an edit that changes its agent or its
+   * effort: a spec that already holds an effort its harness refuses (synced from a box that did not
+   * know the harness, or left behind as its project's agent changed) still moves and is retitled,
+   * and is refused at dispatch, with the same error. A spec whose harness is not known here yet is
+   * refused at dispatch.
    */
   private void requireEffortTaken(SpecStore.SpecRow spec) {
     if (spec.reasoningEffort() == null) {

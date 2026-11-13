@@ -30,6 +30,7 @@ import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.Sqlite;
 import ai.singlr.sail.store.SyncScope;
+import ai.singlr.sail.store.TestRuns;
 import ai.singlr.sail.sync.SyncBox;
 import java.io.IOException;
 import java.nio.file.Files;
@@ -117,7 +118,7 @@ class HandleChangeTest {
   }
 
   private void finish(String id) {
-    Acting.system(() -> runs.complete(id, "completed", 0));
+    Acting.system(() -> TestRuns.complete(runs, id, "completed", 0));
   }
 
   private HostYaml host(SyncConfig sync) {

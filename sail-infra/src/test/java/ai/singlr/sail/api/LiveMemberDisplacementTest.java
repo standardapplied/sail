@@ -21,6 +21,7 @@ import ai.singlr.sail.engine.AgentUnit;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.ActingAs;
 import ai.singlr.sail.store.RunStore;
+import ai.singlr.sail.store.TestRuns;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.time.Duration;
@@ -122,7 +123,7 @@ class LiveMemberDisplacementTest {
     var waiting = room.says(SPEC, "while that runs");
     assertEquals(1, room.processes.starts.size(), "its repos are held: the member stays away");
 
-    Acting.system(() -> room.runs.complete(session.runId(), "completed", 0));
+    Acting.system(() -> TestRuns.complete(room.runs, session.runId(), "completed", 0));
     var next = room.says(SPEC, "and now?");
 
     assertEquals(2, room.processes.starts.size());

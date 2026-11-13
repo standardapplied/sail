@@ -18,6 +18,7 @@ import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.store.FileStore;
 import ai.singlr.sail.store.ReviewRuns;
 import ai.singlr.sail.store.RunStore;
+import ai.singlr.sail.store.TestRuns;
 import java.io.ByteArrayInputStream;
 import java.nio.file.Path;
 import java.time.Duration;
@@ -210,7 +211,9 @@ class OwnWorkSocketTest {
     var another = adHoc(harness);
     run(another, "POST", "/v1/specs", "id=d2&project=acme&title=Theirs");
     Acting.system(
-        () -> runs().complete(runs().findByCredential(another).orElseThrow().id(), "completed", 0));
+        () ->
+            TestRuns.complete(
+                runs(), runs().findByCredential(another).orElseThrow().id(), "completed", 0));
     var agent = agent(lane, harness);
     var made = said(run(agent, "POST", "/v1/specs", "id=d1&project=acme&title=Mine"));
     var others = lane.equals("adhoc") ? "b1" : "d2";

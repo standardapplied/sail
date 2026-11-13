@@ -235,7 +235,9 @@ public final class RunLauncher {
       var command = launchCommand(s);
       runBookkeeping(
           "record the launch of run " + s.runId(),
-          () -> runStore.recordLaunch(s.runId(), s.model(), s.reasoningEffort()));
+          () ->
+              runStore.recordLaunch(
+                  s.runId(), s.model(), s.reasoningEffort(), s.resumeSessionId()));
       listener.launching(s.background(), redactCredential(command, s.runCredential()));
       var exitCode = launcher.launch(command);
       if (s.background()) {

@@ -13,7 +13,6 @@ import ai.singlr.sail.engine.AgentPresence;
 import ai.singlr.sail.engine.AgentSession;
 import ai.singlr.sail.engine.AgentUnit;
 import ai.singlr.sail.engine.HostInfo;
-import ai.singlr.sail.engine.RunUsageReader;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.store.RunStore;
@@ -160,7 +159,6 @@ public final class StopOperations {
   }
 
   private final ShellExec shell;
-  private final RunUsageReader usage;
   private final ProjectLoader projects;
   private final SpecStore specStore;
   private final RunStore runStore;
@@ -177,7 +175,6 @@ public final class StopOperations {
       AgentHalter halter,
       Listener listener) {
     this.shell = Objects.requireNonNull(shell, "shell");
-    this.usage = new RunUsageReader(shell);
     this.projects = new ProjectLoader(shell, definitions);
     this.specStore = Objects.requireNonNull(specStore, "specStore");
     this.runStore = Objects.requireNonNull(runStore, "runStore");
@@ -361,7 +358,6 @@ public final class StopOperations {
         runStore.claimStop(
             run.id(),
             status,
-            STOPPING.equals(status) ? null : usage.read(run),
             () -> {
               if (mayCancel(spec)) {
                 cancelled.set(
@@ -377,9 +373,13 @@ public final class StopOperations {
     return cancelled.get();
   }
 
-  /** Finalizes a claim whose agent is gone; the event is the winner's to publish, exactly once. */
+  /**
+   * Finalizes a claim whose agent is gone; the event is the winner's to publish, exactly once. The
+   * run's report is left unread, for the reconciler's next sweep to read: an operator's stop never
+   * waits on what its container still holds.
+   */
   private void finishStop(RunStore.RunRow run) {
-    if (runStore.finish(run.id(), STOPPING, "stopped", null, usage.read(run))) {
+    if (runStore.finish(run.id(), STOPPING, "stopped", null, null)) {
       events.publish(operatorCancelEvent(run));
     }
   }

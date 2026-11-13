@@ -428,9 +428,12 @@ class SpecMeasuresTest {
         at(Given.done().status(SpecStatus.REVIEW).wire(), "no_recorded_human_code_act"));
   }
 
-  /** Scenario 17. */
+  /**
+   * Scenario 17, as the code is: a terminal input minute in the spec's own conversation (its id);
+   * typing in a room other specs share is not this spec's.
+   */
   @Test
-  void aDoneSpecWithATerminalInputMinuteInItsRoomIsNotCountedAsNoRecordedHumanCodeAct() {
+  void aDoneSpecWithATerminalInputMinuteInItsOwnConversationIsNotCountedAsNoRecordedCodeAct() {
     var typed = Given.done().attended(minute("ada", 20, AttentionStore.Channel.TERMINAL_INPUT));
 
     assertEquals(
@@ -515,7 +518,44 @@ class SpecMeasuresTest {
   void aRunWithoutUsageIsCountedApartAndAddsNothing() {
     var wire = Given.done().kept(new SpecStore.KeptRuns(1, 1, 0, 1, 1, 0, 0, 0, 0, 0)).wire();
 
-    assertEquals(cost(1, 1, 1, 0, 0, 0, 0, 0, NOT_SET, NOT_SET), wire.get("cost"));
+    var none = Map.of("unknown", "runs_not_reported", "missing", 1);
+    var expected = cost(1, 1, 1, 0, 0, 0, 0, 0, NOT_SET, NOT_SET);
+    for (var figure :
+        List.of(
+            "tokens",
+            "tokens_in",
+            "tokens_out",
+            "tokens_cache_read",
+            "tokens_cache_write",
+            "usd")) {
+      expected.put(figure, none);
+    }
+    assertEquals(expected, wire.get("cost"), "no run reported them, so they are not known");
+  }
+
+  /**
+   * Review 1, major 4: dollars or tokens some runs never reported are a lower bound, and unknown
+   * when none did; a listing's medians leave both out and count them, never taking them as $0.
+   */
+  @Test
+  void figuresSomeRunsLeftUnreportedAreLowerBoundsAndTheListingLeavesThemOut() {
+    var codex = Given.done().kept(new SpecStore.KeptRuns(2, 1, 1, 0, 2, 10, 20, 30, 40, 0));
+    var mixed = Given.done().kept(new SpecStore.KeptRuns(3, 2, 1, 1, 2, 10, 500, 11000, 0, 1.0));
+    var whole = Given.done().kept(new SpecStore.KeptRuns(1, 1, 0, 0, 0, 1, 1, 1, 1, 0.5));
+
+    assertEquals(
+        Map.of("unknown", "runs_not_reported", "missing", 2), at(codex.wire(), "cost", "usd"));
+    assertEquals(count(100), at(codex.wire(), "cost", "tokens"));
+    assertEquals(Map.of("usd", 1.0, "at_least", true), at(mixed.wire(), "cost", "usd"));
+    assertEquals(Map.of("count", 11510L, "at_least", true), at(mixed.wire(), "cost", "tokens"));
+    assertEquals(Map.of("count", 500L, "at_least", true), at(mixed.wire(), "cost", "tokens_out"));
+    var wire =
+        SpecMeasuresList.of(
+                List.of(codex.measured(), mixed.measured(), whole.measured()),
+                SpecMeasuresList.Window.parse(null, null))
+            .toMap();
+    assertEquals(spread("usd", 1, 0.5, 0.5, 1, 1, 0), at(wire, "summary", "usd"));
+    assertEquals(spread("count", 2, 4L, 100L, 0, 1, 0), at(wire, "summary", "tokens"));
   }
 
   /** Scenario 13. */
@@ -523,9 +563,10 @@ class SpecMeasuresTest {
   void twoCodexRunsAndThreeClaudeRunsGiveTokensOverFiveAndDollarsOverThree() {
     var kept = new SpecStore.KeptRuns(5, 2, 1, 0, 2, 1000, 200, 30000, 400, 7.2);
 
+    var expected = cost(5, 0, 2, 1000, 200, 30000, 400, 7.2, NOT_SET, NOT_SET);
+    expected.put("usd", Map.of("usd", 7.2, "at_least", true));
     assertEquals(
-        cost(5, 0, 2, 1000, 200, 30000, 400, 7.2, NOT_SET, NOT_SET),
-        Given.done().kept(kept).wire().get("cost"));
+        expected, Given.done().kept(kept).wire().get("cost"), "dollars over the three that said");
   }
 
   /** Scenario 14. */
@@ -618,7 +659,7 @@ class SpecMeasuresTest {
                 .toMap()
                 .get("summary");
     assertEquals(spread("count", 1, 1L, 1L, 0, 1, 0), summary.get("build_runs"));
-    assertEquals(spread("usd", 1, 1.25, 1.25, 0, 1, 0), summary.get("usd"));
+    assertEquals(spread("usd", 0, null, null, 0, 2, 0), summary.get("usd"));
   }
 
   /** Scenario 10, as the measures count it. */
@@ -767,7 +808,10 @@ class SpecMeasuresTest {
 
     assertEquals(spread("usd", 2, 0.5, 9.25, 1, 0), at(wire, "summary", "usd"));
     assertEquals(spread("count", 2, 4L, 20L, 1, 0), at(wire, "summary", "tokens"));
-    assertEquals(spread("count", 3, 0L, 1L, 0, 0), at(wire, "summary", "human_minutes"));
+    assertEquals(
+        spread("count", 3, 0L, 1L, 0, 0, 0),
+        at(wire, "summary", "human_minutes"),
+        "the listing summarizes the minutes this box counted, over every change");
   }
 
   @Test

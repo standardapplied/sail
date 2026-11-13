@@ -214,17 +214,26 @@ final class ClaudeCode implements Harness {
     return EFFORTS;
   }
 
+  @Override
+  public ReportFile reportFile() {
+    return ReportFile.AGENT_LOG;
+  }
+
   /**
    * The last {@code result} line of the log that reports anything: a crashed session's last result
    * may carry every figure zeroed, and the running totals of the one before it are the run's.
    * Tokens are {@code modelUsage}'s, summed over the models it names, since {@code usage} leaves
    * out what subagents spent; the dollars are {@code total_cost_usd}; the model is the one that
-   * cost most. A result with no {@code modelUsage} gives its {@code usage}, and no model.
+   * cost most. A result with no {@code modelUsage} gives its {@code usage}, and no model. A last
+   * result line that does not parse leaves the report unread.
    */
   @Override
-  public Optional<RunUsage> usage(String agentLog, String transcript) {
-    return RunUsage.last(agentLog, "\"type\":\"result\"", ClaudeCode::reports)
-        .map(ClaudeCode::usageOf);
+  public RunUsage usage(String report) {
+    var found = RunUsage.last(report, "\"type\":\"result\"", ClaudeCode::reports);
+    if (found.unreadable()) {
+      return null;
+    }
+    return found.line() == null ? RunUsage.NONE : usageOf(found.line());
   }
 
   private static boolean reports(Map<String, Object> line) {

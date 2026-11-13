@@ -497,11 +497,11 @@ public final class SyncRpcServer {
 
   /**
    * The one place a session's compatibility is decided: the node speaks this main's protocol or is
-   * refused, told to upgrade itself when it speaks an older one and to upgrade main first when it
-   * speaks a newer one. The box id names the node in main's log; who the node is stays the
-   * authenticated principal, which every commit is attributed to, and the welcome names it so the
-   * node stamps its runs with the handle main knows it by. One box syncs as each FDE: a session
-   * from another box than the FDE's is refused before anything is exchanged.
+   * refused, told to reinstall itself when it speaks an older one (its database is not converted)
+   * and to upgrade main first when it speaks a newer one. The box id names the node in main's log;
+   * who the node is stays the authenticated principal, which every commit is attributed to, and the
+   * welcome names it so the node stamps its runs with the handle main knows it by. One box syncs as
+   * each FDE: a session from another box than the FDE's is refused before anything is exchanged.
    */
   private SyncWire.Response onHello(SyncWire.Hello hello) {
     if (welcomed) {
@@ -514,12 +514,15 @@ public final class SyncRpcServer {
     if (hello.protocol() < SyncWire.PROTOCOL) {
       return new SyncWire.Refuse(
           Remedy.of(
-                  "this main speaks sync protocol "
-                      + SyncWire.PROTOCOL
-                      + ", not "
-                      + hello.protocol()
-                      + ": ")
-              .then(upgradeRemedy()));
+              "this main speaks sync protocol "
+                  + SyncWire.PROTOCOL
+                  + ", not "
+                  + hello.protocol()
+                  + ": reinstall this box on "
+                  + version
+                  + ", whose database is not converted: move its database aside and run '",
+              Remedy.sail("init"),
+              "', then join again"));
     }
     if (hello.box() == null || hello.box().isBlank()) {
       return new SyncWire.Refuse(Remedy.of("hello names no box id: ").then(upgradeRemedy()));
