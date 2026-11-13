@@ -556,7 +556,7 @@ class MissedStopReconcilerTest {
             + "\"usage\":{\"input_tokens\":10,\"output_tokens\":5}}\n";
     var answers =
         Map.of(
-            noResult, new ShellExec.Result(1, "", ""),
+            noResult, new ShellExec.Result(0, "", ""),
             cut, new ShellExec.Result(0, result.substring(0, 40) + "\n", ""),
             control, new ShellExec.Result(0, result, ""),
             silent, new ShellExec.Result(1, "", "Error: Instance is not running\n"));

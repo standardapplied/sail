@@ -2594,8 +2594,10 @@ hundred.
   anything (tokens summed over `modelUsage`, so subagents count; dollars from `total_cost_usd`;
   the model that cost most), Codex from its rollout transcript's last `token_count` and
   `turn_context` model (no dollars; its cached input taken out of its input). `RunUsageReader`
-  reads, in the run's container and in one command waiting at most 10 s, the last 16 lines of the
-  one file the harness reports in that hold one of its markers (`tac | grep -m 16 -a -F`), and the finish writes the usage, the reported model and the effort passed in the
+  reads, in the run's container and in one command waiting at most 10 s, for each of its markers the
+  last 16 lines of the one file the harness reports in that hold it (`tac | grep -m 16 -a -F` per
+  marker, so Codex's many `token_count` lines never crowd out its one `turn_context` a turn), and
+  the finish writes the usage, the reported model and the effort passed in the
   update that makes the row terminal: the tracker, the pipeline, the foreground launcher and the
   reconciler finish that way. An operator's stop never waits on a container: it leaves the
   report unread. A harness session's report is its running total, so a run records its share:

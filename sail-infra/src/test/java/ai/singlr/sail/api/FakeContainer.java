@@ -345,7 +345,7 @@ final class FakeContainer implements ShellExec {
     if (!failingFragment.isEmpty() && String.join(" ", inner).contains(failingFragment)) {
       return fail(failingWith);
     }
-    if (inner.get(2).startsWith("tac -- ")) {
+    if (ReportLines.asks(inner)) {
       return ReportLines.answer(files.get(inner.get(4)), inner);
     }
     if (inner.get(2).startsWith("for d in")) {

@@ -12,6 +12,7 @@ import ai.singlr.sail.harness.RunUsage;
 import ai.singlr.sail.store.RunStore;
 import java.io.IOException;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -19,7 +20,7 @@ import java.util.concurrent.TimeoutException;
 
 /**
  * Reads what a finished run cost from its harness's own report, inside the run's container: the
- * last lines of the file its harness reports in ({@link Harness#reportFile}) that hold one of its
+ * last lines of the file its harness reports in ({@link Harness#reportFile}) holding each of its
  * markers ({@link Harness#reportMarkers}), which its harness reads ({@link Harness#usage}). What
  * the container answered is final, so it is recorded: a report that does not parse is none, said
  * once. Only a container that did not answer leaves the report unread: the run's directory is then
@@ -34,14 +35,15 @@ public final class RunUsageReader {
   static final Duration TIMEOUT = Duration.ofSeconds(10);
 
   /**
-   * The last {@code $2} lines of file {@code $1} holding one of the newline-separated markers
-   * {@code $3}, newest first, read from its end and stopping at the last, as text whatever bytes it
-   * holds: grep exits 1, saying nothing, when no line holds one.
+   * For each marker after file {@code $1} and count {@code $2}, the last {@code $2} lines of the
+   * file holding it, newest first: each read from the file's end, stopping at its last, as text
+   * whatever bytes it holds, so a marker written often never crowds out one written seldom. It
+   * exits 0 whatever it found, a file not there included, so only a container that did not answer
+   * fails it.
    */
-  private static final String LAST_MARKED = "tac -- \"$1\" | grep -m \"$2\" -a -F -e \"$3\"";
-
-  /** What {@code tac}, run in the C locale, ends with for a file not there. */
-  private static final String MISSING = "No such file or directory";
+  static final String LAST_MARKED =
+      "f=$1; n=$2; shift 2; for m in \"$@\"; do tac -- \"$f\" | grep -m \"$n\" -a -F -e \"$m\";"
+          + " done; exit 0";
 
   private final ShellExec shell;
 
@@ -51,9 +53,9 @@ public final class RunUsageReader {
 
   /**
    * What run {@code run}'s harness reported: {@link RunUsage#NONE} when its report file is not
-   * there, holds no line with a marker, says nothing or does not parse, or its harness is one this
-   * binary does not know; null, unread, only when the container could not be asked (stopped,
-   * missing, or no answer within {@link #TIMEOUT}).
+   * there or cannot be read, holds no line with a marker, says nothing or does not parse, or its
+   * harness is one this binary does not know; null, unread, only when the container could not be
+   * asked (stopped, missing, or no answer within {@link #TIMEOUT}).
    */
   public RunUsage read(RunStore.RunRow run) {
     Harness harness;
@@ -89,38 +91,30 @@ public final class RunUsageReader {
     return RunUsage.NONE;
   }
 
+  /** Each marker's lines in the file's order, the markers in the reverse of theirs. */
   private static String inFileOrder(String newestFirst) {
     return String.join("\n", newestFirst.lines().toList().reversed());
   }
 
   /**
-   * The last {@link #LINES} lines of {@code path} in {@code container} holding one of {@code
-   * markers}, newest first: empty when none does or the file is not there, and null for any other
-   * failure, which is the container's, not the file's.
+   * The last {@link #LINES} lines of {@code path} in {@code container} holding each of {@code
+   * markers}, newest first: empty when none does or the file is not there, and null when the
+   * container did not answer.
    */
   private String lastMarked(String container, String path, List<String> markers)
       throws IOException, InterruptedException, TimeoutException {
     var read =
         shell.exec(
-            ContainerExec.asDevUser(
-                container,
-                null,
-                Map.of("LC_ALL", "C"),
-                List.of(
-                    "sh",
-                    "-c",
-                    LAST_MARKED,
-                    "sh",
-                    path,
-                    String.valueOf(LINES),
-                    String.join("\n", markers))),
+            ContainerExec.asDevUser(container, null, Map.of("LC_ALL", "C"), command(path, markers)),
             null,
             TIMEOUT);
-    if (read.ok()) {
-      return read.stdout();
-    }
-    var said = Objects.toString(read.stderr(), "").strip();
-    var nothingMarked = said.isEmpty() || (said.startsWith("tac: ") && said.endsWith(MISSING));
-    return read.exitCode() == 1 && nothingMarked ? "" : null;
+    return read.ok() ? read.stdout() : null;
+  }
+
+  private static List<String> command(String path, List<String> markers) {
+    var command =
+        new ArrayList<>(List.of("sh", "-c", LAST_MARKED, "sh", path, String.valueOf(LINES)));
+    command.addAll(markers);
+    return command;
   }
 }
