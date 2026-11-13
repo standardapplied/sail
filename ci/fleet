@@ -68,9 +68,12 @@ Usage:
                                 partition are refused, and its ext4 scratch disk until the row itself
                                 erases it with the wipefs the refusal names, then the scratch pool is
                                 made with Sail's last probe of the disk under a second before its
-                                incus storage create (strace); a workspace of acme created on tank is a
-                                clone of acme's template snapshot with a machine-id of its own, its
-                                create time in the report; observer, left on dir, is unchanged
+                                incus storage create (strace); acme's template is built on tank, a
+                                workspace of it is a clone of its snapshot with a machine-id of its
+                                own (create time in the report), a second is made and stopped,
+                                apply --all leaves both and the template alone, and destroying acme
+                                removes all of them before acme is applied again; observer, left
+                                on dir, is unchanged
   ci/fleet rebuilt RUN VERSION  main is copied by the README's backup line, takes a spec, and is lost; client
                                 writes while it is gone; a new main installs VERSION and inits empty, which
                                 observer refuses as another org; the copy goes in place, every node re-pins
@@ -1142,6 +1145,26 @@ workspace_on() {
   [[ $origin == tank/containers/acme--tmpl@snapshot-v* && -n $template && -n $workspace && $template != "$workspace" ]]
 }
 
+instance_state() {
+  on "$1" "$2" "sudo incus list --format csv -c ns $3" | awk -F, -v name="$3" '$1 == name { print $2 }'
+}
+
+untouched_by_apply_all() {
+  local run=$1 box=$2 before after
+  before="$(instance_state "$run" "$box" acme-fleet-v) $(instance_state "$run" "$box" acme--tmpl) $(on "$run" "$box" "sudo incus exec acme-fleet-w -- hostname")"
+  on "$run" "$box" "sudo sail project apply --all --yes" || return 1
+  after="$(instance_state "$run" "$box" acme-fleet-v) $(instance_state "$run" "$box" acme--tmpl) $(on "$run" "$box" "sudo incus exec acme-fleet-w -- hostname")"
+  echo "stopped workspace, template, workspace hostname: before $before, after $after"
+  [[ $before == "STOPPED STOPPED acme" && $after == "$before" ]]
+}
+
+all_gone() {
+  local run=$1 box=$2 left
+  left=$(on "$run" "$box" "sudo incus list --format csv -c n" | grep -E '^acme(-fleet-w|-fleet-v|--tmpl)?$' || true)
+  echo "acme's instances left: ${left:-none}"
+  [[ -z $left ]]
+}
+
 uncapped_on() {
   on "$1" "$2" "test ! -e /etc/modprobe.d/sail-zfs.conf"
 }
@@ -1178,9 +1201,18 @@ storage() {
   check "$run" "the ZFS cache cap is still in force after the reboot" capped_on "$run" client
   check "$run" "acme runs after the reboot, on devpool" running_on_pool "$run" client acme devpool
   check "$run" "host status names both pools" status_pools "$run" client "devpool:dir tank:zfs"
+  check "$run" "acme's template is built on tank" \
+    allowed "$run" client "sudo sail project template build acme"
   check "$run" "a workspace of acme is a clone of its template's snapshot on tank, with its own machine-id" \
     workspace_on "$run" client
-  check "$run" "the workspace goes" on "$run" client "sudo sail project workspace delete acme fleet-w"
+  check "$run" "a second workspace of acme is made and stopped" \
+    allowed "$run" client "sudo sail project workspace create acme fleet-v && sudo sail project workspace stop acme fleet-v"
+  check "$run" "apply --all leaves the workspaces and the template as they are" \
+    untouched_by_apply_all "$run" client
+  check "$run" "destroying acme removes its container, workspaces and template" \
+    allowed "$run" client "sudo sail project destroy acme --yes"
+  check "$run" "nothing of acme is left in Incus" all_gone "$run" client
+  check "$run" "acme is applied again" allowed "$run" client "sudo sail project apply acme --yes"
   check "$run" "client's test containers go" on "$run" client "sudo incus delete --force zc zt"
   check "$run" "observer, a dir box, has devpool alone" pools_on "$run" observer "devpool:dir"
   check "$run" "observer's host status names devpool alone" status_pools "$run" observer "devpool:dir"

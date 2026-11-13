@@ -57,7 +57,7 @@ class WorkspaceIT extends AbstractIncusIT {
   private static final String POOL = "sail-it-ws";
   private static final String BASE_POOL = "default";
   private static final String PROJECT = "sail-it-ws";
-  private static final String TEMPLATE = Workspaces.templateOf(PROJECT);
+  private static final String TEMPLATE = WorkspaceTemplate.nameOf(PROJECT);
   private static final String FIX = "fix-login";
   private static final String SECOND = "second";
   private static final String SPEC_ID = "sail-it-ws-probe";
@@ -85,7 +85,8 @@ class WorkspaceIT extends AbstractIncusIT {
       """;
 
   private final ContainerManager containers = new ContainerManager(shell);
-  private final Workspaces workspaces = new Workspaces(shell, shell, System::nanoTime);
+  private final Workspaces workspaces =
+      new Workspaces(shell, shell, System::nanoTime, SailPaths.locksDir());
 
   private static ProjectDefinition definition() {
     return new ProjectDefinition(
@@ -102,8 +103,8 @@ class WorkspaceIT extends AbstractIncusIT {
         null);
   }
 
-  private static Workspaces.Source source() {
-    return new Workspaces.Source(
+  private static WorkspaceTemplate.Source source() {
+    return new WorkspaceTemplate.Source(
         BASE_POOL,
         ProjectProvisioner.inputs(definition(), Optional.empty()),
         name -> name.equals(PROJECT),
@@ -132,6 +133,7 @@ class WorkspaceIT extends AbstractIncusIT {
                 "config",
                 "set",
                 TEMPLATE,
+                "user.sail.template.of=" + PROJECT,
                 "user.sail.template.current=v1",
                 "user.sail.template.inputs="
                     + ProjectProvisioner.inputs(definition(), Optional.empty())));
@@ -153,6 +155,7 @@ class WorkspaceIT extends AbstractIncusIT {
   @Test
   void workspacesAreClonesOfTheTemplateEachItsOwnMachineBesideTheProjectsContainer()
       throws Exception {
+    var before = bystander();
     var fix = workspaces.create(definition(), FIX, source(), null);
     var second = workspaces.create(definition(), SECOND, source(), null);
     record("create " + FIX, fix.timings());
@@ -168,11 +171,12 @@ class WorkspaceIT extends AbstractIncusIT {
     }
     assertEquals(
         List.of(PROJECT + " on " + BASE_POOL, TEMPLATE + " on " + POOL),
-        containers.instances().stream()
-            .filter(i -> i.name().equals(PROJECT) || i.name().equals(TEMPLATE))
-            .map(i -> i.name() + " on " + i.pool())
-            .sorted()
-            .toList(),
+        new BoxInstances(shell)
+            .all().stream()
+                .filter(i -> i.name().equals(PROJECT) || i.name().equals(TEMPLATE))
+                .map(i -> i.name() + " on " + i.pool())
+                .sorted()
+                .toList(),
         "the project's own container stays on dir; the template is on the ZFS pool");
 
     assertEquals(
@@ -212,6 +216,13 @@ class WorkspaceIT extends AbstractIncusIT {
           exec(workspace.instance(), List.of("ss", "-lntH")).stdout().contains(":3000 "),
           "each workspace listens on 3000 in its own network");
     }
+    var addresses =
+        workspaces.list(PROJECT).workspaces().stream()
+            .filter(row -> !row.name().equals(Workspaces.DEFAULT))
+            .map(Workspaces.Row::ipv4)
+            .toList();
+    assertEquals(2, new HashSet<>(addresses).size(), "two clones, two addresses: " + addresses);
+    assertEquals(before, bystander(), "the project's own container is untouched");
   }
 
   @Test
@@ -304,6 +315,15 @@ class WorkspaceIT extends AbstractIncusIT {
         "it",
         List.of(),
         List.of());
+  }
+
+  /** The project's own container as Incus holds it: its state, snapshots and configuration. */
+  private String bystander() throws Exception {
+    var state = containers.queryState(PROJECT);
+    var snapshots = new SnapshotManager(shell).list(PROJECT).size();
+    var config = shell.exec(List.of("incus", "config", "show", PROJECT));
+    assertTrue(config.ok(), config.reason());
+    return state + " " + snapshots + "\n" + config.stdout();
   }
 
   private String inWorkspace(Workspaces.Created workspace, String command) throws Exception {

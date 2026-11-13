@@ -26,6 +26,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.TreeMap;
 import java.util.concurrent.TimeoutException;
 import java.util.regex.Pattern;
 
@@ -60,19 +61,21 @@ public final class ProjectProvisioner {
       List.of("curl", "wget", "git", "sudo", "openssh-server", "gh", "ripgrep");
 
   /**
-   * The instance a run provisions, and the pool it is launched on when it does not exist yet: the
-   * project's own container on the base profile's pool ({@link #of}), or another instance, such as
-   * the project's template on the box's ZFS pool.
+   * The instance a run provisions, and how it is launched when it does not exist yet: on {@code
+   * pool} when one is named, carrying {@code keys} from birth. The project's own container is
+   * launched on the base profile's pool with no key ({@link #of}); its template on the box's ZFS
+   * pool with the key that says whose template it is.
    */
-  public record Instance(String name, Optional<String> pool) {
+  public record Instance(String name, Optional<String> pool, Map<String, String> keys) {
     public Instance {
       NameValidator.requireValidProjectName(name);
       Objects.requireNonNull(pool, "pool");
+      keys = Map.copyOf(keys);
     }
 
     /** The project's own container, named after it, on the base profile's pool. */
     public static Instance of(ProjectDefinition config) {
-      return new Instance(config.name(), Optional.empty());
+      return new Instance(config.name(), Optional.empty(), Map.of());
     }
   }
 
@@ -259,6 +262,8 @@ public final class ProjectProvisioner {
     var launch =
         new ArrayList<>(List.of("incus", "launch", image, name, "--profile", host.baseProfile()));
     into.pool().ifPresent(pool -> launch.addAll(List.of("--storage", pool)));
+    new TreeMap<>(into.keys())
+        .forEach((key, value) -> launch.addAll(List.of("-c", key + "=" + value)));
     var result = shell.exec(launch, null, LAUNCH_TIMEOUT);
     if (!result.ok()) {
       throw new IOException("Failed to launch container: " + result.stderr());

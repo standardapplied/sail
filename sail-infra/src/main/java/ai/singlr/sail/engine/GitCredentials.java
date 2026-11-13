@@ -7,10 +7,18 @@ package ai.singlr.sail.engine;
 
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.ProjectDefinition;
+import java.io.IOException;
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
+import java.time.Duration;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.function.ToIntFunction;
 import java.util.regex.Pattern;
 
 /**
@@ -20,6 +28,9 @@ import java.util.regex.Pattern;
  * attacker-influenced URLs out of generated files and shell arguments.
  */
 public final class GitCredentials {
+
+  private static final String REFS = "/info/refs?service=git-upload-pack";
+  private static final Duration PROBE_TIMEOUT = Duration.ofSeconds(10);
 
   private static final Pattern HOST_PATTERN =
       Pattern.compile("^[A-Za-z0-9][A-Za-z0-9.-]*(?::[0-9]{1,5})?$");
@@ -129,6 +140,50 @@ public final class GitCredentials {
       }
     }
     return Map.copyOf(tokens);
+  }
+
+  /**
+   * The https {@code repos} a run cannot clone with {@code tokens}: those whose host has no token
+   * there and that ask for credentials, as {@code status} answers for their smart-HTTP refs (401 or
+   * 403). An answer of anything else, a public repo or a host that cannot be reached, asks for
+   * none, and the clone says what is wrong with it.
+   */
+  public static List<String> askingForAToken(
+      List<ProjectDefinition.Repo> repos,
+      Map<String, String> tokens,
+      ToIntFunction<String> status) {
+    var asking = new ArrayList<String>();
+    for (var repo : repos == null ? List.<ProjectDefinition.Repo>of() : repos) {
+      var hosts = extractHttpsHosts(List.of(repo));
+      if (hosts.isEmpty() || Strings.isNotBlank(resolveTokenForHost(hosts.getFirst(), tokens))) {
+        continue;
+      }
+      var answer = status.applyAsInt(repo.url().replaceAll("/+$", "") + REFS);
+      if (answer == 401 || answer == 403) {
+        asking.add(repo.url());
+      }
+    }
+    return List.copyOf(asking);
+  }
+
+  /** What {@code url} answers a plain GET with, or -1 when it cannot be asked. */
+  public static int httpStatus(String url) {
+    try (var client =
+        HttpClient.newBuilder()
+            .connectTimeout(PROBE_TIMEOUT)
+            .followRedirects(HttpClient.Redirect.NORMAL)
+            .build()) {
+      return client
+          .send(
+              HttpRequest.newBuilder(URI.create(url)).timeout(PROBE_TIMEOUT).GET().build(),
+              HttpResponse.BodyHandlers.discarding())
+          .statusCode();
+    } catch (IOException | IllegalArgumentException e) {
+      return -1;
+    } catch (InterruptedException e) {
+      Thread.currentThread().interrupt();
+      return -1;
+    }
   }
 
   /** Wraps a single token string into a wildcard token map. Returns empty map if null/blank. */

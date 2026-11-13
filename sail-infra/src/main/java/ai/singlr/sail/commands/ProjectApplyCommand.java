@@ -15,6 +15,7 @@ import ai.singlr.sail.config.HostYaml;
 import ai.singlr.sail.config.ProjectDefinition;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.Banner;
+import ai.singlr.sail.engine.BoxInstances;
 import ai.singlr.sail.engine.ContainerExec;
 import ai.singlr.sail.engine.ContainerManager;
 import ai.singlr.sail.engine.ContainerManager.ContainerInfo;
@@ -145,12 +146,7 @@ public final class ProjectApplyCommand implements Runnable {
 
   private void execute() throws Exception {
     var operator = OperatorCommand.here();
-    if (json && dryRun) {
-      throw new IllegalArgumentException(
-          "--json and --dry-run cannot be combined: dry-run narrates the underlying shell"
-              + " commands on stdout, which would corrupt the JSON document. Drop one of the two"
-              + " flags.");
-    }
+    CliCommand.requireJsonOrDryRun(json, dryRun);
     if (all && Strings.isNotBlank(name)) {
       throw new IllegalArgumentException("Pass a project name OR --all, not both.");
     }
@@ -192,6 +188,7 @@ public final class ProjectApplyCommand implements Runnable {
     var shell = new ShellExecutor(dryRun);
     var observed = new ContainerManager(observer);
     var mgr = new ContainerManager(shell);
+    BoxInstances.requireNotTakenFor(config.name(), new BoxInstances(observer).named(config.name()));
     var action = plan(observed.queryState(config.name()));
 
     if (action == Action.STARTED) {
@@ -269,7 +266,7 @@ public final class ProjectApplyCommand implements Runnable {
     var shell = new ShellExecutor(dryRun);
     var mgr = new ContainerManager(shell);
     var devices = new IncusDeviceManager(observer);
-    var targets = targets(new ContainerManager(observer));
+    var targets = targets(new BoxInstances(observer));
 
     if (!json) {
       Banner.printBranding(System.out, Ansi.AUTO);
@@ -390,12 +387,16 @@ public final class ProjectApplyCommand implements Runnable {
   record TargetPlan(Action action, ProjectDefinition config) {}
 
   /**
-   * The containers a bulk apply converges: every one Incus lists whose project the box's person may
-   * read, so a container kept for a project outside their grants is neither changed nor named, as
-   * {@code project list} names it not.
+   * The containers a bulk apply converges: every plain instance Incus lists whose project the box's
+   * person may read, so a container kept for a project outside their grants is neither changed nor
+   * named, as {@code project list} names it not, and a workspace or a template is never taken for a
+   * project.
    */
-  static List<ContainerInfo> targets(ContainerManager containers) throws Exception {
-    return ReadFilter.readable(Actor.reader(), containers.listAll(), ContainerInfo::name);
+  static List<ContainerInfo> targets(BoxInstances instances) throws Exception {
+    return ReadFilter.readable(
+        Actor.reader(),
+        instances.plain().stream().map(BoxInstances.Instance::info).toList(),
+        ContainerInfo::name);
   }
 
   /**

@@ -37,7 +37,7 @@ class ProjectTeardownTest {
     var beta = project("beta");
     var shell = new ScriptedShellExecutor().onOk("incus delete acme --force");
 
-    new ProjectTeardown(shell, projectsDir).tearDown("acme", true);
+    new ProjectTeardown(shell, projectsDir).tearDown("acme", List.of("acme"));
 
     assertEquals(List.of("incus delete acme --force"), shell.invocations());
     assertFalse(Files.exists(acme));
@@ -50,8 +50,8 @@ class ProjectTeardownTest {
     var acme = project("acme");
     var teardown = new ProjectTeardown(shell, projectsDir);
 
-    teardown.tearDown("acme", false);
-    teardown.tearDown("acme", false);
+    teardown.tearDown("acme", List.of());
+    teardown.tearDown("acme", List.of());
 
     assertEquals(List.of(), shell.invocations());
     assertFalse(Files.exists(acme));
@@ -65,7 +65,7 @@ class ProjectTeardownTest {
     var failure =
         assertThrows(
             IOException.class,
-            () -> new ProjectTeardown(shell, projectsDir).tearDown("acme", true));
+            () -> new ProjectTeardown(shell, projectsDir).tearDown("acme", List.of("acme")));
 
     assertEquals("Failed to delete container 'acme': in use", failure.getMessage());
     assertTrue(Files.isDirectory(acme));
@@ -78,7 +78,7 @@ class ProjectTeardownTest {
     var original = System.out;
     System.setOut(new PrintStream(out, true, StandardCharsets.UTF_8));
     try {
-      new ProjectTeardown(new ShellExecutor(true), projectsDir).tearDown("acme", true);
+      new ProjectTeardown(new ShellExecutor(true), projectsDir).tearDown("acme", List.of("acme"));
     } finally {
       System.setOut(original);
     }
@@ -95,8 +95,25 @@ class ProjectTeardownTest {
 
     assertThrows(
         IllegalArgumentException.class,
-        () -> new ProjectTeardown(shell, projectsDir).tearDown("..", true));
+        () -> new ProjectTeardown(shell, projectsDir).tearDown("..", List.of("..")));
     assertEquals(List.of(), shell.invocations());
     assertTrue(Files.isDirectory(projectsDir));
+  }
+
+  @Test
+  void aProjectGoesWithEachOfItsInstancesInTheOrderGivenThenItsDirectory() throws Exception {
+    var shell = new ScriptedShellExecutor(new ShellExec.Result(0, "", ""));
+    Files.createDirectories(projectsDir.resolve("acme"));
+
+    new ProjectTeardown(shell, projectsDir)
+        .tearDown("acme", List.of("acme-w", "acme--tmpl", "acme"));
+
+    assertEquals(
+        List.of(
+            "incus delete acme-w --force",
+            "incus delete acme--tmpl --force",
+            "incus delete acme --force"),
+        shell.invocations());
+    assertFalse(Files.exists(projectsDir.resolve("acme")));
   }
 }

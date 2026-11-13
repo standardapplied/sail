@@ -16,6 +16,7 @@ import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.ProjectDefinition;
 import ai.singlr.sail.config.ProjectDefinition.Section;
 import ai.singlr.sail.config.ProjectDefinitionJson;
+import ai.singlr.sail.engine.NameValidator;
 import ai.singlr.sail.identity.Actor;
 import java.time.Instant;
 import java.util.LinkedHashMap;
@@ -109,6 +110,7 @@ public final class ProjectStore implements ConflictResolver, SyncedStore {
    * that name is already catalogued.
    */
   public ProjectRow create(ProjectDefinition definition) {
+    NameValidator.requireNewProjectName(definition.name());
     var document = ProjectDefinitionJson.write(ProjectDefinitionJson.validated(definition));
     var name = definition.name();
     return db.transaction(

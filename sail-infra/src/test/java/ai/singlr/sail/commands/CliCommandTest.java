@@ -24,6 +24,7 @@ import java.io.PrintStream;
 import java.io.PrintWriter;
 import java.io.StringWriter;
 import java.nio.charset.StandardCharsets;
+import java.util.List;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -71,13 +72,17 @@ class CliCommandTest {
           () ->
               CliCommand.run(
                   CliCommand.DRY_RUN_HINT,
-                  () -> ProjectDestroyCommand.confirm(false, false, false, "gamma", false)));
+                  () ->
+                      ProjectDestroyCommand.confirm(
+                          false, false, false, "gamma", false, List.of())));
       assertThrows(
           CliCommand.Printed.class,
           () ->
               CliCommand.run(
                   CliCommand.DRY_RUN_HINT,
-                  () -> ProjectDestroyCommand.confirm(false, false, true, "gamma", false)));
+                  () ->
+                      ProjectDestroyCommand.confirm(
+                          false, false, true, "gamma", false, List.of())));
     } finally {
       ConsoleStub.restore();
     }
@@ -411,5 +416,19 @@ class CliCommandTest {
     assertEquals(
         "  ✗ Invalid storage backend: 'btrfs'. Must be 'dir' or 'zfs'.\n",
         capturedErr.toString(StandardCharsets.UTF_8));
+  }
+
+  @Test
+  void jsonAndADryRunAreRefusedTogether() {
+    var failure =
+        assertThrows(
+            IllegalArgumentException.class, () -> CliCommand.requireJsonOrDryRun(true, true));
+
+    assertEquals(
+        "--json and --dry-run cannot be combined: dry-run narrates the underlying shell commands"
+            + " on stdout, which would corrupt the JSON document. Drop one of the two flags.",
+        failure.getMessage());
+    CliCommand.requireJsonOrDryRun(true, false);
+    CliCommand.requireJsonOrDryRun(false, true);
   }
 }

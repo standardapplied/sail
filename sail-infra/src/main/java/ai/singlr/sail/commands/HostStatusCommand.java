@@ -10,6 +10,7 @@ import ai.singlr.sail.config.HostYaml;
 import ai.singlr.sail.config.ListenConfig;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.Banner;
+import ai.singlr.sail.engine.BoxInstances;
 import ai.singlr.sail.engine.ContainerManager;
 import ai.singlr.sail.engine.ContainerState;
 import ai.singlr.sail.engine.HostDetector;
@@ -300,7 +301,8 @@ public final class HostStatusCommand implements Runnable {
 
     static Containers of(ShellExec shell) throws InterruptedException {
       try {
-        return new Containers(new ContainerManager(shell).listAll(), null);
+        return new Containers(
+            new BoxInstances(shell).all().stream().map(BoxInstances.Instance::info).toList(), null);
       } catch (IOException | TimeoutException e) {
         return new Containers(List.of(), e.getMessage());
       }

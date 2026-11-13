@@ -9,7 +9,6 @@ import ai.singlr.sail.api.Mappable;
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.common.Remedied;
 import ai.singlr.sail.common.Remedy;
-import ai.singlr.sail.config.HostYaml;
 import ai.singlr.sail.config.ProjectDefinition;
 import java.io.IOException;
 import java.io.OutputStream;
@@ -24,41 +23,27 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import java.util.Optional;
 import java.util.concurrent.TimeoutException;
 import java.util.function.LongSupplier;
-import java.util.function.Predicate;
-import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
  * A project's workspaces on this box. The project's own container, named after it, is its default
  * workspace {@value #DEFAULT}, which nothing here writes to, copies, snapshots or restarts (W1).
- * Every other workspace is an Incus instance cloned from a snapshot of the project's template, the
- * instance {@code <project>--tmpl} the project's own provisioner builds, on the box's ZFS pool. The
- * instance is the record (W3): a workspace is an instance carrying {@value #PROJECT_KEY} and
- * {@value #WORKSPACE_KEY}, and the project and workspace are only ever read from those keys, never
- * split from the instance's name (W4).
+ * Every other workspace is an Incus instance cloned from a snapshot of the project's template
+ * ({@link WorkspaceTemplate}) and told by its keys ({@link BoxInstances}): the one instance named
+ * {@code <project>-<workspace>} that carries that pair (W3, W4). A workspace is whole once it
+ * carries {@value BoxInstances#READY_KEY}, written last (W12): one without it is listed as
+ * incomplete, never started or entered, and replaced by the next create of its name.
  */
 public final class Workspaces {
 
   /** The name the project's own container goes by among its workspaces. */
   public static final String DEFAULT = "main";
 
-  /** The project a workspace instance belongs to. */
-  public static final String PROJECT_KEY = "user.sail.project";
-
-  /** The workspace an instance is. */
-  public static final String WORKSPACE_KEY = "user.sail.workspace";
-
   static final String TEMPLATE_KEY = "user.sail.template";
   static final String CREATED_KEY = "user.sail.created_ms";
-  static final String CURRENT_KEY = "user.sail.template.current";
-  static final String INPUTS_KEY = "user.sail.template.inputs";
 
-  private static final String TEMPLATE_SUFFIX = "--tmpl";
-  private static final int MAX_INSTANCE_NAME = 63;
-  private static final Pattern VERSION = Pattern.compile("v([1-9][0-9]{0,8})");
   private static final Pattern MILLIS = Pattern.compile("[0-9]{1,18}");
   private static final Duration READY_TIMEOUT = Duration.ofMinutes(10);
   private static final long NANOS_PER_MILLI = 1_000_000L;
@@ -127,36 +112,6 @@ public final class Workspaces {
           + AWAIT_BUS;
 
   /**
-   * Provisions the project's template into the instance it is handed, {@code fresh} when that
-   * instance does not exist yet, so no progress recorded for an earlier one is resumed.
-   */
-  @FunctionalInterface
-  public interface Build {
-    void into(ProjectProvisioner.Instance template, boolean fresh) throws Exception;
-  }
-
-  /**
-   * What a project's template is built from on this box: the base profile's pool ({@code host.yaml}
-   * names it), the digest of the definition and key a build provisions from ({@link
-   * ProjectProvisioner#inputs}), whether the catalog holds a project by a name, and the build.
-   */
-  public record Source(String basePool, String inputs, Predicate<String> held, Build build) {
-    public Source {
-      Objects.requireNonNull(basePool, "basePool");
-      Objects.requireNonNull(inputs, "inputs");
-      Objects.requireNonNull(held, "held");
-      Objects.requireNonNull(build, "build");
-    }
-  }
-
-  /**
-   * A project's template as it stands: its instance, the version workspaces clone, the inputs it
-   * was built from, the pool it is on, and whether this call built it.
-   */
-  public record Template(
-      String project, String instance, String version, String inputs, String pool, boolean built) {}
-
-  /**
    * What each phase took, in milliseconds, measured on {@link System#nanoTime}: the clone ({@code
    * null} for a start), the start, the readiness that follows it, and the whole.
    */
@@ -164,7 +119,11 @@ public final class Workspaces {
 
   /** A workspace made: its instance, the template version it was cloned from, and its times. */
   public record Created(
-      String project, String workspace, String instance, Template template, Timings timings) {}
+      String project,
+      String workspace,
+      String instance,
+      WorkspaceTemplate.Template template,
+      Timings timings) {}
 
   /** What a start, stop or delete did. */
   public enum Change {
@@ -180,8 +139,9 @@ public final class Workspaces {
       String project, String workspace, String instance, Change change, Timings timings) {}
 
   /**
-   * One workspace as Incus has it: its name, instance and state, the template version it was cloned
-   * from (none for the default workspace), when it was created and its IPv4 address.
+   * One workspace as Incus has it: its name, instance and state ({@code incomplete} for one that
+   * was never made whole), the template version it was cloned from (none for the default
+   * workspace), when it was created and its IPv4 address.
    */
   public record Row(
       String name, String instance, String state, String template, String createdAt, String ipv4)
@@ -206,51 +166,45 @@ public final class Workspaces {
   private final ShellExec observer;
   private final ShellExec shell;
   private final LongSupplier nanos;
-  private final ContainerManager observed;
+  private final Path locks;
+  private final BoxInstances box;
   private final ContainerManager containers;
 
   /**
    * @param observer reads Incus, always for real
    * @param shell makes every change, narrating it instead in a dry run
    * @param nanos the clock phases are measured on, {@code System::nanoTime} outside tests
+   * @param locks the box's lock directory
    */
-  public Workspaces(ShellExec observer, ShellExec shell, LongSupplier nanos) {
+  public Workspaces(ShellExec observer, ShellExec shell, LongSupplier nanos, Path locks) {
     this.observer = Objects.requireNonNull(observer, "observer");
     this.shell = Objects.requireNonNull(shell, "shell");
     this.nanos = Objects.requireNonNull(nanos, "nanos");
-    this.observed = new ContainerManager(observer);
+    this.locks = Objects.requireNonNull(locks, "locks");
+    this.box = new BoxInstances(observer);
     this.containers = new ContainerManager(shell);
-  }
-
-  /** The name of project {@code project}'s template instance. */
-  public static String templateOf(String project) {
-    return project + TEMPLATE_SUFFIX;
-  }
-
-  /**
-   * Builds {@code config}'s template unless its current version was built from {@code source}'s
-   * inputs, which leaves it as it is (W7: a version is current only once it is whole).
-   */
-  public Template template(ProjectDefinition config, Source source) throws Exception {
-    NameValidator.requireValidProjectName(config.name());
-    var pool = choose(zfsPools(), source.basePool());
-    return template(config, source, pool, requireTemplateName(config.name(), source));
   }
 
   /**
    * Creates workspace {@code name} of {@code config}'s project: a clone of its template's current
-   * version, built first when there is none or it is stale, then started and made its own.
+   * version, built first when there is none or it is stale, then started, made its own, and marked
+   * whole. An incomplete workspace of that name is deleted and made again.
    */
-  public Created create(ProjectDefinition config, String name, Source source, Path files)
+  public Created create(
+      ProjectDefinition config, String name, WorkspaceTemplate.Source source, Path files)
       throws Exception {
     var project = config.name();
     var instance = requireNewName(project, name);
-    var zfs = zfsPools();
-    var pool = choose(zfs, source.basePool());
-    var template = requireTemplateName(project, source);
-    requireUnclaimed(project, name, instance, source);
-    var built = template(config, source, pool, template);
-    requireOnZfs(zfs, built);
+    var zfs = WorkspaceTemplate.requireZfs(observer);
+    var template = WorkspaceTemplate.requireName(project, source);
+    var instances = box.all();
+    var incomplete = requireUnclaimed(project, name, instance, source, instances);
+    var built =
+        new WorkspaceTemplate(observer, shell, locks)
+            .ensure(config, source, template, zfs, instances);
+    if (incomplete) {
+      containers.forceDelete(instance);
+    }
     var started = nanos.getAsLong();
     clone(project, name, instance, built);
     try {
@@ -275,37 +229,42 @@ public final class Workspaces {
     }
   }
 
-  /** Project {@code project}'s workspaces: its default one, then every clone, by name. */
+  /**
+   * Project {@code project}'s workspaces: its default one, then every workspace, by name. A box
+   * with no ZFS pool has only the default one, which is answered as on any other box.
+   */
   public Listing list(String project) throws IOException, InterruptedException, TimeoutException {
     NameValidator.requireValidProjectName(project);
-    zfsPools();
-    var instances = observed.instances();
+    var instances = box.all();
     var rows = new ArrayList<Row>();
     rows.add(
         instances.stream()
-            .filter(i -> i.name().equals(project) && i.key(WORKSPACE_KEY).isEmpty())
+            .filter(i -> i.name().equals(project) && i.plain())
             .findFirst()
-            .map(i -> row(DEFAULT, i, null, fromIncus(i.createdAt())))
+            .map(i -> row(DEFAULT, i, word(i.state()), null, fromIncus(i.createdAt())))
             .orElse(
                 new Row(
                     DEFAULT, project, word(new ContainerState.NotCreated()), null, null, null)));
     instances.stream()
-        .filter(i -> isWorkspaceOf(i, project))
-        .sorted(Comparator.comparing(i -> i.key(WORKSPACE_KEY).orElseThrow()))
+        .filter(i -> i.kind() instanceof BoxInstances.Workspace w && w.project().equals(project))
+        .sorted(Comparator.comparing(BoxInstances.Instance::name))
         .map(
-            i ->
-                row(
-                    i.key(WORKSPACE_KEY).orElseThrow(),
-                    i,
-                    i.key(TEMPLATE_KEY).orElse(null),
-                    i.key(CREATED_KEY).map(Workspaces::fromMillis).orElse(null)))
+            i -> {
+              var workspace = (BoxInstances.Workspace) i.kind();
+              return row(
+                  workspace.workspace(),
+                  i,
+                  workspace.ready() ? word(i.state()) : "incomplete",
+                  i.key(TEMPLATE_KEY).orElse(null),
+                  i.key(CREATED_KEY).map(Workspaces::fromMillis).orElse(null));
+            })
         .forEach(rows::add);
     return new Listing(project, List.copyOf(rows));
   }
 
   /** Starts workspace {@code name}, stopped or frozen, and says what its resume took. */
   public Changed start(String project, String name) throws Exception {
-    var found = existing(project, name, "project start");
+    var found = whole(project, name, "project start", true);
     if (found.state() instanceof ContainerState.Running) {
       return new Changed(project, name, found.name(), Change.ALREADY_RUNNING, null);
     }
@@ -325,7 +284,7 @@ public final class Workspaces {
 
   /** Stops workspace {@code name} when its processes run. */
   public Changed stop(String project, String name) throws Exception {
-    var found = existing(project, name, "project stop");
+    var found = existing(project, name, "project stop", true);
     if (!found.state().live()) {
       return new Changed(project, name, found.name(), Change.ALREADY_STOPPED, null);
     }
@@ -333,16 +292,16 @@ public final class Workspaces {
     return new Changed(project, name, found.name(), Change.STOPPED, null);
   }
 
-  /** Deletes workspace {@code name}, and with its instance the workspace (W3). */
+  /** Deletes workspace {@code name}, whole or not, and with its instance the workspace (W3). */
   public Changed delete(String project, String name) throws Exception {
-    var found = existing(project, name, "project destroy");
+    var found = existing(project, name, "project destroy", true);
     containers.forceDelete(found.name());
     return new Changed(project, name, found.name(), Change.DELETED, null);
   }
 
   /** The instance of workspace {@code name}, when it runs: where a shell opens. */
   public String running(String project, String name) throws Exception {
-    var found = existing(project, name, "project shell");
+    var found = whole(project, name, "project shell", false);
     return switch (found.state()) {
       case ContainerState.Running ignored -> found.name();
       case ContainerState.Stopped ignored -> throw notRunning(project, name, "stopped");
@@ -359,71 +318,8 @@ public final class Workspaces {
     };
   }
 
-  private Template template(ProjectDefinition config, Source source, String pool, String template)
-      throws Exception {
-    if (shell.isDryRun()) {
-      return buildIfStale(config, source, pool, template);
-    }
-    try (var held = ContainerConfig.hold(SailPaths.locksDir(), template)) {
-      return buildIfStale(config, source, pool, template);
-    }
-  }
-
-  private Template buildIfStale(
-      ProjectDefinition config, Source source, String pool, String template) throws Exception {
-    var project = config.name();
-    var found = observed.instances().stream().filter(i -> i.name().equals(template)).findFirst();
-    var versions =
-        found.isPresent()
-            ? new SnapshotManager(observer)
-                .list(template).stream()
-                    .map(SnapshotManager.SnapshotInfo::name)
-                    .map(VERSION::matcher)
-                    .filter(Matcher::matches)
-                    .map(matcher -> Integer.parseInt(matcher.group(1)))
-                    .toList()
-            : List.<Integer>of();
-    var at = found.map(ContainerManager.Instance::pool).orElse(pool);
-    var current = found.flatMap(i -> i.key(CURRENT_KEY));
-    if (current.isPresent()
-        && found.get().key(INPUTS_KEY).equals(Optional.of(source.inputs()))
-        && versions.stream().anyMatch(n -> current.get().equals("v" + n))) {
-      return new Template(project, template, current.get(), source.inputs(), at, false);
-    }
-    var version = "v" + (versions.stream().mapToInt(Integer::intValue).max().orElse(0) + 1);
-    if (found.isPresent() && !(found.get().state() instanceof ContainerState.Running)) {
-      containers.start(template);
-    }
-    source
-        .build()
-        .into(new ProjectProvisioner.Instance(template, Optional.of(pool)), found.isEmpty());
-    containers.stop(template);
-    var snapshots = new SnapshotManager(shell);
-    snapshots.create(template, version);
-    var recorded =
-        new ContainerConfig(shell, SailPaths.locksDir())
-            .set(
-                template, List.of(CURRENT_KEY + "=" + version, INPUTS_KEY + "=" + source.inputs()));
-    if (!recorded.ok()) {
-      var failure =
-          new IOException(
-              "Failed to record "
-                  + version
-                  + " as "
-                  + project
-                  + "'s current template, so it was removed and the version before stays current: "
-                  + recorded.reason());
-      try {
-        snapshots.delete(template, version);
-      } catch (IOException | TimeoutException removal) {
-        failure.addSuppressed(removal);
-      }
-      throw failure;
-    }
-    return new Template(project, template, version, source.inputs(), at, true);
-  }
-
-  private void clone(String project, String name, String instance, Template template)
+  private void clone(
+      String project, String name, String instance, WorkspaceTemplate.Template template)
       throws IOException, InterruptedException, TimeoutException {
     var copied =
         shell.exec(
@@ -433,9 +329,9 @@ public final class Workspaces {
                 template.instance() + "/" + template.version(),
                 instance,
                 "-c",
-                PROJECT_KEY + "=" + project,
+                BoxInstances.PROJECT_KEY + "=" + project,
                 "-c",
-                WORKSPACE_KEY + "=" + name,
+                BoxInstances.WORKSPACE_KEY + "=" + name,
                 "-c",
                 TEMPLATE_KEY + "=" + template.version(),
                 "-c",
@@ -468,7 +364,17 @@ public final class Workspaces {
     }
     new ProjectApplier(observer, shell, DISCARD)
         .applyWorkspaceFiles(instance, files, ProjectDefinition.USER);
-    ContainerSetupSweep.reconcile(shell, instance);
+    ContainerSetupSweep.reconcile(shell, instance, locks);
+    var marked =
+        new ContainerConfig(shell, locks)
+            .set(
+                instance,
+                List.of(
+                    BoxInstances.READY_KEY + "=" + DateTimeUtils.toMillis(DateTimeUtils.now())));
+    if (!marked.ok()) {
+      throw new IOException(
+          "Workspace '" + name + "' could not be marked whole: " + marked.reason());
+    }
   }
 
   private void awaitReady(String instance)
@@ -477,12 +383,12 @@ public final class Workspaces {
     if (!ready.ok()) {
       throw new IOException("Workspace '" + instance + "' did not come up: " + ready.reason());
     }
-    ContainerSetupSweep.reconcile(shell, instance);
+    ContainerSetupSweep.reconcile(shell, instance, locks);
   }
 
   /**
-   * Deletes {@code instance}, made by the create that {@code failure} ended, so none is left half
-   * made.
+   * Deletes {@code instance}, made by the create that {@code failure} ended; one left by a create
+   * that could not get here carries no ready mark and is replaced by the next create.
    */
   private void discard(String instance, Exception failure) throws InterruptedException {
     try {
@@ -490,46 +396,6 @@ public final class Workspaces {
     } catch (IOException | TimeoutException removal) {
       failure.addSuppressed(removal);
     }
-  }
-
-  /**
-   * The ZFS pool templates and workspaces are made on: the base profile's pool when it is ZFS, else
-   * the one ZFS pool beside it. Refused before anything changes on a box with none (W8), and where
-   * several sit beside a base pool that is not ZFS, since nothing says which is meant.
-   */
-  private static String choose(List<String> zfs, String basePool) {
-    if (zfs.contains(basePool)) {
-      return basePool;
-    }
-    if (zfs.size() == 1) {
-      return zfs.getFirst();
-    }
-    throw Remedied.state(
-        "Incus has the ZFS pools "
-            + String.join(", ", zfs)
-            + " and the base profile's pool '"
-            + basePool
-            + "' is none of them, so Sail cannot tell which one workspaces go on.",
-        Remedy.of(
-            "Keep one ZFS pool beside the base profile's, or put the base profile on the one to use."));
-  }
-
-  private List<String> zfsPools() throws IOException, InterruptedException, TimeoutException {
-    var zfs =
-        new IncusStorage(observer)
-            .pools().stream()
-                .filter(pool -> HostYaml.BACKEND_ZFS.equals(pool.driver()))
-                .map(IncusStorage.Pool::name)
-                .toList();
-    if (zfs.isEmpty()) {
-      throw Remedied.state(
-          "This box has no ZFS pool, and a workspace is a ZFS clone of its project's template.",
-          Remedy.of(
-              "Add one beside the box's pool with: ",
-              Remedy.sail("host init", "--storage", "zfs", "--pool", "tank", "--disk", "<device>"),
-              ", or with --pool-file-size <size> in place of --disk to try ZFS in a file."));
-    }
-    return zfs;
   }
 
   /**
@@ -551,9 +417,15 @@ public final class Workspaces {
               Remedy.sail("project workspace create", project, "fix-login"),
               "."));
     }
+    if (name.endsWith("-")) {
+      throw new IllegalArgumentException(
+          "Workspace '"
+              + name
+              + "' ends in '-', and Incus names no instance so. Give the workspace another name.");
+    }
     var instance = project + "-" + name;
-    requireLength(instance, "Workspace '" + name + "' of " + project);
-    if (instance.endsWith(TEMPLATE_SUFFIX)) {
+    WorkspaceTemplate.requireLength(instance, "Workspace '" + name + "' of " + project);
+    if (instance.endsWith(BoxInstances.TEMPLATE_SUFFIX)) {
       throw new IllegalArgumentException(
           "Workspace '"
               + name
@@ -566,37 +438,51 @@ public final class Workspaces {
     return instance;
   }
 
-  private static String requireTemplateName(String project, Source source) {
-    var template = templateOf(project);
-    requireLength(template, project + "'s template");
-    if (source.held().test(template)) {
-      throw new IllegalArgumentException(
-          project
-              + "'s template would be the instance '"
-              + template
-              + "', which is the name of project '"
-              + template
-              + "' on this box, so "
-              + project
-              + " has no workspaces here.");
-    }
-    return template;
-  }
-
-  private void requireUnclaimed(String project, String name, String instance, Source source)
-      throws IOException, InterruptedException, TimeoutException {
-    var taken = observed.instances().stream().filter(i -> i.name().equals(instance)).findFirst();
-    if (taken.isPresent()
-        && isWorkspaceOf(taken.get(), project)
-        && taken.get().key(WORKSPACE_KEY).orElseThrow().equals(name)) {
+  /**
+   * Refuses a name already taken; answers whether the instance there is this workspace left
+   * incomplete, which the create deletes and makes again.
+   */
+  private static boolean requireUnclaimed(
+      String project,
+      String name,
+      String instance,
+      WorkspaceTemplate.Source source,
+      List<BoxInstances.Instance> instances) {
+    var strays =
+        instances.stream()
+            .filter(
+                i ->
+                    i.kind() instanceof BoxInstances.Stray(var p, var w)
+                        && project.equals(p)
+                        && name.equals(w))
+            .map(BoxInstances.Instance::name)
+            .toList();
+    if (!strays.isEmpty()) {
       throw new IllegalStateException(
-          "Workspace '"
+          "Instance "
+              + String.join(", ", strays)
+              + " carries the keys of workspace '"
               + name
               + "' of "
               + project
-              + " exists already, as the instance '"
-              + instance
-              + "'.");
+              + " under another name. Delete it or its keys before creating the workspace.");
+    }
+    var taken = instances.stream().filter(i -> i.name().equals(instance)).findFirst();
+    if (taken.isPresent()
+        && taken.get().kind() instanceof BoxInstances.Workspace(var p, var w, var ready)
+        && p.equals(project)
+        && w.equals(name)) {
+      if (ready) {
+        throw new IllegalStateException(
+            "Workspace '"
+                + name
+                + "' of "
+                + project
+                + " exists already, as the instance '"
+                + instance
+                + "'.");
+      }
+      return true;
     }
     if (taken.isPresent()) {
       throw new IllegalArgumentException(
@@ -620,22 +506,36 @@ public final class Workspaces {
               + instance
               + "'. Give the workspace another name.");
     }
+    return false;
   }
 
-  private static void requireOnZfs(List<String> zfs, Template template) {
-    if (!zfs.contains(template.pool())) {
+  /** As {@link #existing}, refused when the workspace was never made whole (W12). */
+  private BoxInstances.Instance whole(
+      String project, String name, String projectVerb, boolean changes)
+      throws IOException, InterruptedException, TimeoutException {
+    var found = existing(project, name, projectVerb, changes);
+    if (!((BoxInstances.Workspace) found.kind()).ready()) {
       throw Remedied.state(
-          template.instance()
-              + " is on pool '"
-              + template.pool()
-              + "', which is not ZFS, so a copy of it would be a full copy, not a clone.",
+          "Workspace '"
+              + name
+              + "' of "
+              + project
+              + " was never made whole: a create of it did not finish.",
           Remedy.of(
-              "Delete it so the next create builds it on ZFS: ",
-              Remedy.program("incus", "delete", "--force", template.instance())));
+              "Create it again, which replaces it: ",
+              Remedy.sail("project workspace create", project, name),
+              "."));
     }
+    return found;
   }
 
-  private ContainerManager.Instance existing(String project, String name, String projectVerb)
+  /**
+   * Workspace {@code name} of {@code project}: the one instance named {@code <project>-<name>}
+   * carrying that pair. Any other instance carrying the pair is refused with it, naming each (W4).
+   * A verb that {@code changes} it is refused first on a box with no ZFS pool (W8).
+   */
+  private BoxInstances.Instance existing(
+      String project, String name, String projectVerb, boolean changes)
       throws IOException, InterruptedException, TimeoutException {
     NameValidator.requireValidProjectName(project);
     requireWorkspaceName(name);
@@ -645,19 +545,44 @@ public final class Workspaces {
               + DEFAULT
               + "' is "
               + project
-              + "'s default workspace, the project's own container, which workspace commands leave alone.",
+              + "'s default workspace, the project's own container, which workspace commands leave"
+              + " alone.",
           Remedy.of("Use: ", Remedy.sail(projectVerb, project), "."));
     }
-    zfsPools();
-    return observed.instances().stream()
-        .filter(i -> isWorkspaceOf(i, project) && i.key(WORKSPACE_KEY).orElseThrow().equals(name))
-        .findFirst()
-        .orElseThrow(() -> absent(project, name));
-  }
-
-  private static boolean isWorkspaceOf(ContainerManager.Instance instance, String project) {
-    return instance.key(PROJECT_KEY).equals(Optional.of(project))
-        && instance.key(WORKSPACE_KEY).isPresent();
+    if (changes) {
+      WorkspaceTemplate.requireZfs(observer);
+    }
+    var carrying =
+        box.all().stream()
+            .filter(
+                i ->
+                    switch (i.kind()) {
+                      case BoxInstances.Workspace w ->
+                          w.project().equals(project) && w.workspace().equals(name);
+                      case BoxInstances.Stray s ->
+                          project.equals(s.project()) && name.equals(s.workspace());
+                      default -> false;
+                    })
+            .toList();
+    if (carrying.isEmpty()) {
+      throw absent(project, name);
+    }
+    if (carrying.size() > 1 || !(carrying.getFirst().kind() instanceof BoxInstances.Workspace)) {
+      throw new IllegalStateException(
+          (carrying.size() == 1 ? "Instance " : "Instances ")
+              + String.join(", ", carrying.stream().map(BoxInstances.Instance::name).toList())
+              + (carrying.size() == 1 ? " carries" : " carry")
+              + " the keys of workspace '"
+              + name
+              + "' of "
+              + project
+              + ", which only "
+              + project
+              + "-"
+              + name
+              + " may: nothing is done to any of them. Delete the copies, or their keys, first.");
+    }
+    return carrying.getFirst();
   }
 
   private static void requireWorkspaceName(String name) {
@@ -666,20 +591,6 @@ public final class Workspaces {
           "Invalid workspace name: '"
               + name
               + "'. Must match [a-z0-9][a-z0-9-]*, as a project name does.");
-    }
-  }
-
-  private static void requireLength(String instance, String what) {
-    if (instance.length() > MAX_INSTANCE_NAME) {
-      throw new IllegalArgumentException(
-          what
-              + " would be the instance '"
-              + instance
-              + "', "
-              + instance.length()
-              + " characters, and Incus names an instance in at most "
-              + MAX_INSTANCE_NAME
-              + ". Use a shorter name.");
     }
   }
 
@@ -696,9 +607,13 @@ public final class Workspaces {
   }
 
   private static Row row(
-      String name, ContainerManager.Instance instance, String template, String createdAt) {
+      String name,
+      BoxInstances.Instance instance,
+      String state,
+      String template,
+      String createdAt) {
     var ipv4 = instance.state() instanceof ContainerState.Running running ? running.ipv4() : null;
-    return new Row(name, instance.name(), word(instance.state()), template, createdAt, ipv4);
+    return new Row(name, instance.name(), state, template, createdAt, ipv4);
   }
 
   private static String word(ContainerState state) {

@@ -13,8 +13,10 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.config.ProjectDefinition;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.function.ToIntFunction;
 import org.junit.jupiter.api.Test;
 
 class GitCredentialsTest {
@@ -26,6 +28,40 @@ class GitCredentialsTest {
     assertEquals(Map.of("*", "tok"), GitCredentials.known(repos, "tok"));
     assertEquals(Map.of(), GitCredentials.known(repos, null));
     assertEquals(Map.of(), GitCredentials.known(null, " "));
+  }
+
+  @Test
+  void aRepoWhoseHostHasNoTokenAndThatAsksForCredentialsIsNamed() {
+    var repos =
+        List.of(
+            new ProjectDefinition.Repo("https://github.com/acme/private.git", "private", null),
+            new ProjectDefinition.Repo("https://github.com/acme/public.git/", "public", null),
+            new ProjectDefinition.Repo("https://git.example.com/a/b.git", "b", null),
+            new ProjectDefinition.Repo("https://git.example.com/a/down.git", "down", null));
+    var asked = new ArrayList<String>();
+    ToIntFunction<String> status =
+        url -> {
+          asked.add(url);
+          return url.contains("private") ? 401 : url.contains("down") ? -1 : 200;
+        };
+
+    assertEquals(
+        List.of("https://github.com/acme/private.git"),
+        GitCredentials.askingForAToken(repos, Map.of(), status));
+    assertEquals(
+        "https://github.com/acme/public.git/info/refs?service=git-upload-pack", asked.get(1));
+    assertEquals(
+        List.of(),
+        GitCredentials.askingForAToken(repos, Map.of("github.com", "tok"), url -> 401).stream()
+            .filter(url -> url.contains("github.com"))
+            .toList());
+    assertEquals(List.of(), GitCredentials.askingForAToken(null, Map.of(), url -> 401));
+  }
+
+  @Test
+  void aUrlNoServerAnswersHasNoStatus() {
+    assertEquals(-1, GitCredentials.httpStatus("http://127.0.0.1:1/info/refs"));
+    assertEquals(-1, GitCredentials.httpStatus("not a url"));
   }
 
   @Test

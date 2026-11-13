@@ -7,6 +7,7 @@ package ai.singlr.sail.commands;
 
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.Banner;
+import ai.singlr.sail.engine.BoxInstances;
 import ai.singlr.sail.engine.ContainerExec;
 import ai.singlr.sail.engine.ContainerManager;
 import ai.singlr.sail.engine.ContainerState;
@@ -80,7 +81,8 @@ public final class SwitchCommand implements Runnable {
       }
     }
 
-    var containers = mgr.listAll();
+    var containers =
+        new BoxInstances(shell).all().stream().map(BoxInstances.Instance::info).toList();
     var running =
         containers.stream().filter(c -> c.state() instanceof ContainerState.Running).toList();
     var others = running.stream().filter(c -> !c.name().equals(name)).toList();

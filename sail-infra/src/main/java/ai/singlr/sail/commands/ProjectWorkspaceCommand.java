@@ -7,7 +7,6 @@ package ai.singlr.sail.commands;
 
 import ai.singlr.sail.engine.Banner;
 import ai.singlr.sail.engine.OperatorCommand;
-import ai.singlr.sail.engine.PairingTrust;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.Workspaces;
 import java.util.ArrayList;
@@ -27,7 +26,8 @@ import picocli.CommandLine.Spec;
  * A project's workspaces on this box: clones of its template, each its own container with its own
  * tree, services and ports. The project's own container is its default workspace, {@code main},
  * which these verbs list and otherwise leave alone. Every verb first reads the project from the
- * catalog as the box's person, as {@code project apply} does.
+ * catalog as the box's person, as {@code project apply} does; the verbs that make or delete one are
+ * root's, as apply and destroy are.
  */
 @Command(
     name = "workspace",
@@ -88,34 +88,33 @@ public final class ProjectWorkspaceCommand implements Runnable {
 
     private void execute() throws Exception {
       var operator = operator();
-      ProjectTemplateCommand.requireOneOutput(json, dryRun);
-      var config = ProjectTemplateCommand.buildable(project, operator);
+      WorkspaceVerbs.requireRoot(dryRun, spec);
+      CliCommand.requireJsonOrDryRun(json, dryRun);
+      var config = WorkspaceVerbs.buildable(project, operator);
       if (!json) {
         Banner.printBranding(System.out, Ansi.AUTO);
         System.out.println();
       }
-      try (var held = dryRun ? null : PairingTrust.hold(SailPaths.controlPlaneDb())) {
-        var created =
-            ProjectTemplateCommand.workspaces(dryRun)
-                .create(
-                    config,
-                    name,
-                    ProjectTemplateCommand.source(config, gitToken, dryRun, json, operator, spec),
-                    SailPaths.projectFilesDir(config.name()));
-        if (json) {
-          System.out.println(CliJson.stringify(created));
-          return;
-        }
-        if (created.template().built()) {
-          System.out.println(
-              Ansi.AUTO.string(
-                  "  @|bold,green ✓|@ " + ProjectTemplateCommand.templateLine(created.template())));
-        }
-        System.out.println(Ansi.AUTO.string("  @|bold,green ✓|@ " + createdLine(created)));
-        System.out.println(
-            "    Open a shell in it: "
-                + operator.sail("project workspace shell " + project + " " + name));
+      var created =
+          WorkspaceVerbs.workspaces(dryRun)
+              .create(
+                  config,
+                  name,
+                  WorkspaceVerbs.source(config, gitToken, dryRun, json, operator),
+                  SailPaths.projectFilesDir(config.name()));
+      if (json) {
+        System.out.println(CliJson.stringify(created));
+        return;
       }
+      if (created.template().built()) {
+        System.out.println(
+            Ansi.AUTO.string(
+                "  @|bold,green ✓|@ " + WorkspaceVerbs.templateLine(created.template())));
+      }
+      System.out.println(Ansi.AUTO.string("  @|bold,green ✓|@ " + createdLine(created)));
+      System.out.println(
+          "    Open a shell in it: "
+              + operator.sail("project workspace shell " + project + " " + name));
     }
   }
 
@@ -138,8 +137,8 @@ public final class ProjectWorkspaceCommand implements Runnable {
     }
 
     private void execute() throws Exception {
-      ProjectTemplateCommand.readable(project, operator());
-      var listing = ProjectTemplateCommand.workspaces(false).list(project);
+      WorkspaceVerbs.readable(project, operator());
+      var listing = WorkspaceVerbs.workspaces(false).list(project);
       if (json) {
         System.out.println(CliJson.stringify(listing));
         return;
@@ -169,8 +168,8 @@ public final class ProjectWorkspaceCommand implements Runnable {
     }
 
     private void execute() throws Exception {
-      ProjectTemplateCommand.readable(project, operator());
-      ShellCommand.open(ProjectTemplateCommand.workspaces(false).running(project, name));
+      WorkspaceVerbs.readable(project, operator());
+      ShellCommand.open(WorkspaceVerbs.workspaces(false).running(project, name));
     }
   }
 
@@ -185,7 +184,7 @@ public final class ProjectWorkspaceCommand implements Runnable {
 
     @Override
     public void run() {
-      target.change(Workspaces::start);
+      target.change(null, (workspaces, named) -> workspaces.start(named.project, named.name));
     }
   }
 
@@ -197,52 +196,98 @@ public final class ProjectWorkspaceCommand implements Runnable {
 
     @Override
     public void run() {
-      target.change(Workspaces::stop);
+      target.change(null, (workspaces, named) -> workspaces.stop(named.project, named.name));
     }
   }
 
   /** {@code sail project workspace delete <project> <name>}. */
   @Command(
       name = "delete",
-      description = "Delete a workspace and everything in it; the default workspace is refused.",
+      description =
+          "Delete a workspace and everything in it, its uncommitted work included; the default"
+              + " workspace is refused.",
       mixinStandardHelpOptions = true)
   public static final class Delete implements Runnable {
 
+    @Spec private CommandSpec spec;
+
     @Mixin private Target target;
+
+    @Option(names = "--yes", description = "Skip the confirmation prompt.")
+    private boolean yes;
 
     @Override
     public void run() {
-      target.change(Workspaces::delete);
+      target.change(
+          spec,
+          (workspaces, named) -> {
+            confirm(yes, named);
+            return workspaces.delete(named.project, named.name);
+          });
     }
+  }
+
+  /**
+   * Returns when a delete may go on: asked, defaulting to no, where nobody can answer and under
+   * {@code --json} refused; {@code --yes} or a dry run asks nothing.
+   */
+  static void confirm(boolean yes, Target named) {
+    if (yes || named.dryRun) {
+      return;
+    }
+    if (named.json) {
+      throw new CliCommand.Refused("--json requires --yes (nobody answers a prompt through JSON).");
+    }
+    ConsoleHelper.confirmDestructive(
+        deletePrompt(named.project, named.name), "Not deleted", "--yes");
+  }
+
+  /** What a delete asks. */
+  static String deletePrompt(String project, String name) {
+    return "Delete workspace "
+        + name
+        + " of "
+        + project
+        + " (instance "
+        + project
+        + "-"
+        + name
+        + ") and everything in it, its uncommitted work included? This cannot be undone.";
   }
 
   /** What a lifecycle verb does to the workspace it names. */
   @FunctionalInterface
   interface Verb {
-    Workspaces.Changed apply(Workspaces workspaces, String project, String name) throws Exception;
+    Workspaces.Changed apply(Workspaces workspaces, Target named) throws Exception;
   }
 
   /** The workspace a lifecycle verb names, and how it says what it did. */
   public static final class Target {
 
     @Parameters(index = "0", description = "Project name, as the catalog holds it.")
-    private String project;
+    String project;
 
     @Parameters(index = "1", description = "Workspace name.")
-    private String name;
+    String name;
 
     @Option(names = "--json", description = "Output in JSON format.")
-    private boolean json;
+    boolean json;
 
     @Option(names = "--dry-run", description = "Print commands instead of executing them.")
-    private boolean dryRun;
+    boolean dryRun;
 
-    void change(Verb verb) {
+    /**
+     * Runs {@code verb}, refusing a caller who is not root first when {@code rootOnly} is given.
+     */
+    void change(CommandSpec rootOnly, Verb verb) {
       CliCommand.run(
           () -> {
-            ProjectTemplateCommand.requireOneOutput(json, dryRun);
-            ProjectTemplateCommand.readable(project, operator());
-            var changed = verb.apply(ProjectTemplateCommand.workspaces(dryRun), project, name);
+            if (rootOnly != null) {
+              WorkspaceVerbs.requireRoot(dryRun, rootOnly);
+            }
+            CliCommand.requireJsonOrDryRun(json, dryRun);
+            WorkspaceVerbs.readable(project, operator());
+            var changed = verb.apply(WorkspaceVerbs.workspaces(dryRun), this);
             if (json) {
               System.out.println(CliJson.stringify(changed));
               return;

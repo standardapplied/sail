@@ -279,21 +279,45 @@ sail project workspace list web                      # main, then every workspac
 sail project workspace shell web fix-login
 sail project workspace stop web fix-login
 sail project workspace start web fix-login           # says how long it took to be ready
-sail project workspace delete web fix-login
+sudo sail project workspace delete web fix-login     # asks first; --yes to skip
 sudo sail project template build web                 # build the template now; a no-op when it is current
 ```
 
 The template is the container `web--tmpl`, provisioned as `project apply` provisions `web`, kept
-stopped, one snapshot per version (`v1`, `v2`, ...): a workspace is a ZFS clone of the current
-one, with a machine-id and SSH host keys of its own, `web` as its hostname so the in-container
-`spec` and portal work as in `main`, and every repo fetched and on the branch named after the
-workspace (the remote's when it has one). `create` says each phase it took, `Created fix-login
-from v1 in 1.4 s (clone 0.2 s, start 0.9 s, ready 0.3 s)`. An edited definition is built as the
-next version at the next `create`; workspaces made from an older one keep running on it. On a
-box without ZFS every workspace verb names `sudo sail host init --storage zfs` to add a pool,
-and `main` is never touched: `delete main` names `project destroy`. Deleting an old template
-version by hand (`sudo incus snapshot delete web--tmpl v1`) leaves its workspaces running; its
-space is freed when the last of them goes.
+stopped, with one snapshot per version (`v1`, `v2`, ...). A workspace is a ZFS clone of the
+current version. It gets:
+- a machine-id and SSH host keys of its own;
+- `web` as its hostname, so the in-container `spec` and portal work as they do in `main`;
+- every repo fetched and on the branch named after the workspace (the remote's, when it has one).
+
+`create` says how long each phase took, for example `Created fix-login from v1 in 1.4 s (clone 0.2 s,
+start 0.9 s, ready 0.3 s)`.
+
+A workspace counts as whole only once its create finished. One whose create was interrupted is
+listed as `incomplete`, is not started or entered, and is replaced by the next `create` of its
+name. `delete` asks before it removes a workspace and its uncommitted work.
+
+An edited definition is built as the next version at the next `create`. Workspaces made from an
+older version keep running on it. A stale template is converged on its disk, as `apply` converges
+a container, so what the definition dropped stays in it.
+
+On a box without ZFS, `list` shows `main` alone, and the verbs that make or change a workspace
+name `sudo sail host init --storage zfs` to add a pool. `main` is never touched: `delete main`
+names `project destroy`.
+
+`sudo sail project destroy web` removes the template and every workspace with the container,
+naming each in its prompt. A project that leaves a box's scope takes them with it the same way.
+`project list`, `project apply --all`, `snaps prune` and the sync round never take a workspace or
+a template for a project.
+
+Know what a clone carries. The template is provisioned like your own container, so every
+workspace holds your GitHub token, your git identity and your workstation key. A key line removed
+by a revocation stays in the template's existing versions until it is rebuilt
+(`sudo sail project template build web` after the next definition change). A new pairing reaches
+your workspaces but not the template.
+
+Deleting an old template version by hand (`sudo incus snapshot delete web--tmpl v1`) leaves its
+workspaces running. Its space is freed when the last of them goes.
 
 ## Specs and agents
 

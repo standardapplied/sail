@@ -68,22 +68,28 @@ public final class ContainerSetupSweep {
     }
   }
 
-  private static boolean isWorkspaceOf(
-      ContainerManager.Instance instance, Collection<String> projects) {
-    return instance.key(Workspaces.WORKSPACE_KEY).isPresent()
-        && instance.key(Workspaces.PROJECT_KEY).filter(projects::contains).isPresent();
+  /**
+   * Whether {@code instance} is a project's own container or a whole workspace of a project in
+   * {@code projects}: a template, a stray and a half-made workspace are never reconciled.
+   */
+  private static boolean swept(BoxInstances.Instance instance, Collection<String> projects) {
+    return switch (instance.kind()) {
+      case BoxInstances.Plain ignored -> projects.contains(instance.name());
+      case BoxInstances.Workspace workspace ->
+          workspace.ready() && projects.contains(workspace.project());
+      case BoxInstances.Template ignored -> false;
+      case BoxInstances.Stray ignored -> false;
+    };
   }
 
   private static Collection<String> running(ShellExec shell, Collection<String> projects)
       throws InterruptedException {
     try {
-      return new ContainerManager(shell)
-          .instances().stream()
-              .filter(
-                  instance ->
-                      projects.contains(instance.name()) || isWorkspaceOf(instance, projects))
+      return new BoxInstances(shell)
+          .all().stream()
+              .filter(instance -> swept(instance, projects))
               .filter(instance -> instance.state() instanceof ContainerState.Running)
-              .map(ContainerManager.Instance::name)
+              .map(BoxInstances.Instance::name)
               .toList();
     } catch (IOException | TimeoutException | RuntimeException e) {
       System.err.println("sail setup sweep: could not list containers (" + e.getMessage() + ").");

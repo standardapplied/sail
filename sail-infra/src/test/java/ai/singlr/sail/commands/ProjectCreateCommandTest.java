@@ -14,6 +14,7 @@ import ai.singlr.sail.config.ProjectDefinition;
 import ai.singlr.sail.config.ProjectDefinitionJson;
 import ai.singlr.sail.config.TestDefinitions;
 import ai.singlr.sail.engine.ProjectCatalog;
+import ai.singlr.sail.engine.ScriptedShellExecutor;
 import ai.singlr.sail.gen.ServicePresets;
 import ai.singlr.sail.harness.Harnesses;
 import ai.singlr.sail.identity.Actor;
@@ -129,7 +130,8 @@ class ProjectCreateCommandTest {
         new ProjectCreateCommand(
             () -> new ByteArrayInputStream(stdin.getBytes(StandardCharsets.UTF_8)),
             () -> false,
-            mutations());
+            mutations(),
+            new ScriptedShellExecutor().onOk("incus list --format json", "[]"));
     new CommandLine(command).parseArgs(args);
     return command.definition(new PrintStream(asked, true, StandardCharsets.UTF_8), Ansi.OFF);
   }
@@ -264,10 +266,48 @@ class ProjectCreateCommandTest {
   }
 
   private static CommandRun create(ProjectMutations mutations, String... args) {
+    return createBeside(mutations, "[]", args);
+  }
+
+  private static CommandRun createBeside(
+      ProjectMutations mutations, String instances, String... args) {
     return CommandRun.of(
         new ProjectCreateCommand(
-            () -> new ByteArrayInputStream(new byte[0]), () -> false, mutations),
+            () -> new ByteArrayInputStream(new byte[0]),
+            () -> false,
+            mutations,
+            new ScriptedShellExecutor().onOk("incus list --format json", instances)),
         args);
+  }
+
+  @Test
+  void aProjectTakesNeitherATemplatesNameNorTheInstanceOfAWorkspace() {
+    var mutations = mutations();
+    var workspace =
+        """
+        [{"name": "acme-fix", "status": "Running",
+          "config": {"user.sail.project": "acme", "user.sail.workspace": "fix"}}]
+        """;
+
+    var template = create(mutations, "acme--tmpl", "--image", "x/1");
+    var taken = createBeside(mutations, workspace, "acme-fix", "--image", "x/1");
+
+    assertEquals(
+        new CommandRun(
+            1,
+            "",
+            "  ✗ Invalid project name: 'acme--tmpl'. A name ending '--tmpl' is kept for a project's"
+                + " template; give the project another name.\n"),
+        template);
+    assertEquals(
+        new CommandRun(
+            1,
+            "",
+            "  ✗ Instance 'acme-fix' is workspace 'fix' of project acme, not a project's container:"
+                + " project acme-fix may not take it.\n"),
+        taken);
+    assertTrue(mutations.catalog().read("acme-fix").isEmpty());
+    assertTrue(mutations.catalog().read("acme--tmpl").isEmpty());
   }
 
   private ProjectMutations mutations() {

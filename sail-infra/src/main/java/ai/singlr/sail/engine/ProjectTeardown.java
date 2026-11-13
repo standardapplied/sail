@@ -10,13 +10,15 @@ import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Comparator;
+import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.TimeoutException;
 
 /**
- * Takes a project off this box: its container and its {@code ~/.sail/projects/<name>} directory,
- * never a row. What {@code sail project destroy} without {@code --purge} does, and what a scoped
- * node does to a project main no longer grants it.
+ * Takes a project off this box: its instances (its container, its workspaces and its template, as
+ * {@link BoxInstances} tells them) and its {@code ~/.sail/projects/<name>} directory, never a row.
+ * What {@code sail project destroy} without {@code --purge} does, and what a scoped node does to a
+ * project main no longer grants it (W11).
  */
 public final class ProjectTeardown {
 
@@ -29,14 +31,15 @@ public final class ProjectTeardown {
   }
 
   /**
-   * Force-deletes the container {@code name} when {@code containerPresent}, then the project's
-   * directory when there is one. A dry run prints both instead.
+   * Force-deletes each of project {@code name}'s {@code instances}, in order, then its directory
+   * when there is one. A dry run prints both instead.
    */
-  public void tearDown(String name, boolean containerPresent)
+  public void tearDown(String name, List<String> instances)
       throws IOException, InterruptedException, TimeoutException {
     NameValidator.requireValidProjectName(name);
-    if (containerPresent) {
-      new ContainerManager(shell).forceDelete(name);
+    var containers = new ContainerManager(shell);
+    for (var instance : instances) {
+      containers.forceDelete(instance);
     }
     var dir = projectsDir.resolve(name);
     if (!Files.exists(dir)) {

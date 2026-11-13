@@ -7,6 +7,7 @@ package ai.singlr.sail.commands;
 
 import ai.singlr.sail.SailVersion;
 import ai.singlr.sail.common.Secrets;
+import ai.singlr.sail.engine.WorkspaceTemplate;
 import ai.singlr.sail.engine.Workspaces;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.pty.Pty;
@@ -350,7 +351,7 @@ public final class PtySelfTestCommand implements Callable<Integer> {
     var listing = new SessionCommand.Ls.Listing(1, "boot", List.of(info), PtyEventDrops.Drops.NONE);
     var preview = new DispatchCommand.DispatchPreview("box", "spec", "title", "foreground", "task");
     var idle = new DispatchCommand.NoDispatch("box", false, "no_pending_specs");
-    var template = new Workspaces.Template("p", "p--tmpl", "v1", "i", "tank", true);
+    var template = new WorkspaceTemplate.Template("p", "p--tmpl", "v1", "i", "tank", true);
     var created =
         new Workspaces.Created("p", "w", "p-w", template, new Workspaces.Timings(1L, 2, 3, 6));
     var changed = new Workspaces.Changed("p", "w", "p-w", Workspaces.Change.STOPPED, null);

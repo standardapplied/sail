@@ -274,7 +274,8 @@ class ProjectProvisionerTest {
             shell, tracker(), ProvisionListener.NOOP, Optional.empty(), OperatorCommand.PLAIN);
 
     provisioner.provision(
-        new ProjectProvisioner.Instance("simple--tmpl", Optional.of("tank")),
+        new ProjectProvisioner.Instance(
+            "simple--tmpl", Optional.of("tank"), Map.of("user.sail.template.of", "simple")),
         minimalConfig(),
         hostYaml(),
         null,
@@ -293,7 +294,9 @@ class ProjectProvisionerTest {
                     "--profile",
                     "singlr-base",
                     "--storage",
-                    "tank")),
+                    "tank",
+                    "-c",
+                    "user.sail.template.of=simple")),
         String.join("\n", script.invocations()));
     assertEquals(
         List.of(),

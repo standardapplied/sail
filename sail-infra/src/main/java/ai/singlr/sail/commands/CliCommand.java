@@ -33,6 +33,18 @@ public final class CliCommand {
 
   private CliCommand() {}
 
+  /**
+   * Refuses {@code --json} with {@code --dry-run}: dry-run narrates the shell commands on stdout,
+   * which would corrupt the JSON document.
+   */
+  static void requireJsonOrDryRun(boolean json, boolean dryRun) {
+    if (json && dryRun) {
+      throw new IllegalArgumentException(
+          "--json and --dry-run cannot be combined: dry-run narrates the underlying shell commands"
+              + " on stdout, which would corrupt the JSON document. Drop one of the two flags.");
+    }
+  }
+
   static void run(CheckedRunnable runnable) {
     run(System.err, null, runnable);
   }

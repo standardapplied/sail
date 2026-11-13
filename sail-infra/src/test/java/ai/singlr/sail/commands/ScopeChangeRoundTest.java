@@ -386,6 +386,52 @@ class ScopeChangeRoundTest {
   }
 
   @Test
+  void aScopedRoundLeavesTheWorkspacesAndTemplateOfAProjectInScopeAlone() throws Exception {
+    narrowTo("acme");
+    round();
+    incus.sail("acme");
+    incus.keyed("acme-fix-login", workspace("acme", "fix-login"));
+    incus.keyed("acme--tmpl", "\"user.sail.template.of\":\"acme\"");
+    incus.invocations.clear();
+
+    assertEquals(List.of(), round());
+
+    assertEquals(List.of("acme", "acme--tmpl", "acme-fix-login"), incus.names());
+    assertEquals(List.of("incus list --format json"), incus.invocations);
+  }
+
+  @Test
+  void aProjectThatLeavesTheBoxTakesItsWorkspacesAndTemplateWithIt() throws Exception {
+    round();
+    incus.sail("acme");
+    incus.sail("beta");
+    incus.keyed("beta-w", workspace("beta", "w"));
+    incus.keyed("beta--tmpl", "\"user.sail.template.of\":\"beta\"");
+    incus.keyed("acme-fix", workspace("acme", "fix"));
+    narrowTo("acme");
+    incus.invocations.clear();
+
+    var said = round();
+
+    assertEquals(
+        List.of(
+            "  ⚠ project beta: its container deleted, workspace and uncommitted work included"
+                + WHY,
+            "  ⚠ project beta: its workspace w deleted, uncommitted work included" + WHY,
+            "  ⚠ project beta: its template deleted" + WHY),
+        said.stream().filter(line -> line.contains("deleted")).toList());
+    assertEquals(List.of("acme", "acme-fix"), incus.names());
+  }
+
+  private static String workspace(String project, String name) {
+    return "\"user.sail.project\":\""
+        + project
+        + "\",\"user.sail.workspace\":\""
+        + name
+        + "\",\"user.sail.ready\":\"1\"";
+  }
+
+  @Test
   void anUnscopedRoundNeverAsksIncus() throws Exception {
     round();
     incus.sail("acme");
@@ -431,6 +477,7 @@ class ScopeChangeRoundTest {
    */
   private static final class Incus implements ShellExec {
     private final Map<String, Boolean> containers = new LinkedHashMap<>();
+    private final Map<String, String> keys = new LinkedHashMap<>();
     final List<String> invocations = new ArrayList<>();
     final Set<String> busy = new HashSet<>();
     boolean reachable = true;
@@ -441,6 +488,12 @@ class ScopeChangeRoundTest {
 
     void foreign(String name) {
       containers.put(name, false);
+    }
+
+    /** A workspace or template of Sail's, told by {@code config}, its keys as JSON members. */
+    void keyed(String name, String config) {
+      containers.put(name, true);
+      keys.put(name, config);
     }
 
     List<String> names() {
@@ -460,7 +513,11 @@ class ScopeChangeRoundTest {
             containers.keySet().stream()
                 .map(
                     name ->
-                        "{\"name\":\"" + name + "\",\"status\":\"Running\",\"type\":\"container\"}")
+                        "{\"name\":\""
+                            + name
+                            + "\",\"status\":\"Running\",\"type\":\"container\",\"config\":{"
+                            + keys.getOrDefault(name, "")
+                            + "}}")
                 .collect(Collectors.joining(",", "[", "]")),
             "");
       }

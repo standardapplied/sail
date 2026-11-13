@@ -7,10 +7,12 @@ package ai.singlr.sail.commands;
 
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.Banner;
+import ai.singlr.sail.engine.BoxInstances;
 import ai.singlr.sail.engine.ContainerManager;
 import ai.singlr.sail.engine.ContainerState;
 import ai.singlr.sail.engine.ContainerStateGuard;
 import ai.singlr.sail.engine.NameValidator;
+import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.ShellExecutor;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -48,7 +50,7 @@ public final class DownCommand implements Runnable {
       NameValidator.requireValidProjectName(name);
       stopOne(mgr, name);
     } else {
-      stopAll(mgr);
+      stopAll(mgr, shell);
     }
   }
 
@@ -84,8 +86,9 @@ public final class DownCommand implements Runnable {
     }
   }
 
-  private void stopAll(ContainerManager mgr) throws Exception {
-    var containers = mgr.listAll();
+  private void stopAll(ContainerManager mgr, ShellExec shell) throws Exception {
+    var containers =
+        new BoxInstances(shell).all().stream().map(BoxInstances.Instance::info).toList();
     var running = containers.stream().filter(c -> c.state().live()).toList();
 
     if (running.isEmpty()) {

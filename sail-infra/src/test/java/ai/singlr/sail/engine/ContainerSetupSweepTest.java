@@ -49,17 +49,24 @@ class ContainerSetupSweepTest {
   }
 
   @Test
-  void sweepAlsoRefreshesTheRunningWorkspacesOfAHeldProjectAndNoTemplate() throws Exception {
+  void sweepAlsoRefreshesTheRunningWholeWorkspacesOfAHeldProjectAndNoTemplateCopyOrHalfMadeOne()
+      throws Exception {
     var shell =
         new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
             .onOk(
                 "incus list --format json",
                 """
                 [{"name": "acme-fix", "status": "Running",
-                  "config": {"user.sail.project": "acme", "user.sail.workspace": "fix"}},
+                  "config": {"user.sail.project": "acme", "user.sail.workspace": "fix",
+                             "user.sail.ready": "1"}},
+                 {"name": "acme-half", "status": "Running",
+                  "config": {"user.sail.project": "acme", "user.sail.workspace": "half"}},
+                 {"name": "acme-copy", "status": "Running",
+                  "config": {"user.sail.project": "acme", "user.sail.workspace": "fix",
+                             "user.sail.ready": "1"}},
                  {"name": "acme-down", "status": "Stopped",
                   "config": {"user.sail.project": "acme", "user.sail.workspace": "down"}},
-                 {"name": "acme--tmpl", "status": "Running", "config": {"user.sail.template.current": "v1"}},
+                 {"name": "acme--tmpl", "status": "Running", "config": {"user.sail.template.of": "acme"}},
                  {"name": "bravo-fix", "status": "Running",
                   "config": {"user.sail.project": "bravo", "user.sail.workspace": "fix"}},
                  {"name": "acme-half", "status": "Running", "config": {"user.sail.project": "acme"}}]

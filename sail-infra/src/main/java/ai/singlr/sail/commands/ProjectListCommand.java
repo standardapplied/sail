@@ -10,7 +10,7 @@ import ai.singlr.sail.api.HostOperations;
 import ai.singlr.sail.api.OperationsFactory;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.Banner;
-import ai.singlr.sail.engine.ContainerManager;
+import ai.singlr.sail.engine.BoxInstances;
 import ai.singlr.sail.engine.ContainerManager.ContainerInfo;
 import ai.singlr.sail.engine.ContainerState;
 import ai.singlr.sail.engine.OperatorCommand;
@@ -43,7 +43,9 @@ public final class ProjectListCommand implements Runnable {
 
   private void execute() throws Exception {
     var operator = OperatorCommand.here();
-    var containers = new ContainerManager(new ShellExecutor(false)).listAll();
+    var containers =
+        new BoxInstances(new ShellExecutor(false))
+            .plain().stream().map(BoxInstances.Instance::info).toList();
     var projects = merge(containers, catalogNames(() -> OperationsFactory.open(operator::warn)));
 
     if (json) {

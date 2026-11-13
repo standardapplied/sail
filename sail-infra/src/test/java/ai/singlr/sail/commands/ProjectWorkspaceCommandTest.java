@@ -10,6 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.Sail;
+import ai.singlr.sail.engine.WorkspaceTemplate;
 import ai.singlr.sail.engine.Workspaces;
 import java.util.List;
 import org.junit.jupiter.api.Test;
@@ -17,8 +18,8 @@ import picocli.CommandLine;
 
 class ProjectWorkspaceCommandTest {
 
-  private static final Workspaces.Template V1 =
-      new Workspaces.Template("acme", "acme--tmpl", "v1", "a1b2", "tank", true);
+  private static final WorkspaceTemplate.Template V1 =
+      new WorkspaceTemplate.Template("acme", "acme--tmpl", "v1", "a1b2", "tank", true);
 
   @Test
   void aCreateSaysEachPhaseItTookInSeconds() {
@@ -93,26 +94,12 @@ class ProjectWorkspaceCommandTest {
 
   @Test
   void aTemplateBuildSaysWhetherItBuiltAnything() {
-    assertEquals(
-        "Built acme's template v1 on tank (acme--tmpl).", ProjectTemplateCommand.templateLine(V1));
+    assertEquals("Built acme's template v1 on tank (acme--tmpl).", WorkspaceVerbs.templateLine(V1));
     assertEquals(
         "acme's template v1 is current: it was built from the definition as it is, so nothing was"
             + " done.",
-        ProjectTemplateCommand.templateLine(
-            new Workspaces.Template("acme", "acme--tmpl", "v1", "a1b2", "tank", false)));
-  }
-
-  @Test
-  void jsonAndADryRunAreRefusedTogether() {
-    var failure =
-        assertThrows(
-            IllegalArgumentException.class,
-            () -> ProjectTemplateCommand.requireOneOutput(true, true));
-
-    assertEquals(
-        "--json and --dry-run cannot be combined: dry-run narrates the underlying shell commands"
-            + " on stdout, which would corrupt the JSON document. Drop one of the two flags.",
-        failure.getMessage());
+        WorkspaceVerbs.templateLine(
+            new WorkspaceTemplate.Template("acme", "acme--tmpl", "v1", "a1b2", "tank", false)));
   }
 
   @Test
@@ -133,5 +120,27 @@ class ProjectWorkspaceCommandTest {
     assertEquals(
         List.of("build"),
         List.copyOf(project.getSubcommands().get("template").getSubcommands().keySet()));
+  }
+
+  @Test
+  void aDeleteAsksNamingTheWorkspaceItsInstanceAndTheWorkItLoses() {
+    assertEquals(
+        "Delete workspace fix-login of acme (instance acme-fix-login) and everything in it, its"
+            + " uncommitted work included? This cannot be undone.",
+        ProjectWorkspaceCommand.deletePrompt("acme", "fix-login"));
+  }
+
+  @Test
+  void aDeleteThroughJsonNeedsYes() {
+    var named = new ProjectWorkspaceCommand.Target();
+    named.project = "acme";
+    named.name = "fix-login";
+    named.json = true;
+
+    assertEquals(
+        "--json requires --yes (nobody answers a prompt through JSON).",
+        assertThrows(CliCommand.Refused.class, () -> ProjectWorkspaceCommand.confirm(false, named))
+            .getMessage());
+    ProjectWorkspaceCommand.confirm(true, named);
   }
 }

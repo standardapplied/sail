@@ -9,7 +9,7 @@ import ai.singlr.sail.api.HostCatalog;
 import ai.singlr.sail.api.OperationsFactory;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.Banner;
-import ai.singlr.sail.engine.ContainerManager;
+import ai.singlr.sail.engine.BoxInstances;
 import ai.singlr.sail.engine.ContainerState;
 import ai.singlr.sail.engine.NameValidator;
 import ai.singlr.sail.engine.OperatorCommand;
@@ -17,7 +17,9 @@ import ai.singlr.sail.engine.ProjectTeardown;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ShellExecutor;
 import java.nio.file.Files;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.List;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
 import picocli.CommandLine.Model.CommandSpec;
@@ -72,13 +74,16 @@ public final class ProjectDestroyCommand implements Runnable {
     }
 
     var shell = new ShellExecutor(dryRun);
-    var mgr = new ContainerManager(shell);
-    var state = mgr.queryState(name);
+    var instances = new BoxInstances(shell).all();
+    var own = instances.stream().filter(instance -> instance.name().equals(name)).findFirst();
+    BoxInstances.requireNotTakenFor(name, own);
+    var state = own.map(BoxInstances.Instance::state).orElse(new ContainerState.NotCreated());
+    var others = others(name, instances);
     var projectDir = SailPaths.projectDir(name);
-    var containerPresent = !(state instanceof ContainerState.NotCreated);
+    var containerPresent = own.isPresent();
     var dirPresent = Files.exists(projectDir);
 
-    if (!containerPresent && !dirPresent && !purge) {
+    if (!containerPresent && others.isEmpty() && !dirPresent && !purge) {
       emitNothingToDo();
       return;
     }
@@ -92,15 +97,24 @@ public final class ProjectDestroyCommand implements Runnable {
       System.out.println(Ansi.AUTO.string("  @|bold Purging erases everywhere:|@ " + erases));
     }
 
-    if (containerPresent || purge) {
-      confirm(yes, dryRun, json, name, purge);
+    if (containerPresent || !others.isEmpty() || purge) {
+      confirm(yes, dryRun, json, name, purge, others.stream().map(Other::said).toList());
     }
 
-    if (containerPresent && !json) {
-      System.out.println();
-      System.out.println(Ansi.AUTO.string("  @|bold Deleting container|@ " + name + "..."));
+    var deleted = new ArrayList<String>();
+    for (var other : others) {
+      deleted.add(other.instance());
     }
-    new ProjectTeardown(shell, SailPaths.projectsDir()).tearDown(name, containerPresent);
+    if (containerPresent) {
+      deleted.add(name);
+    }
+    if (!json) {
+      for (var instance : deleted) {
+        System.out.println();
+        System.out.println(Ansi.AUTO.string("  @|bold Deleting container|@ " + instance + "..."));
+      }
+    }
+    new ProjectTeardown(shell, SailPaths.projectsDir()).tearDown(name, deleted);
     var destroyed = purge ? purgeFromCatalog(erases, operator) : null;
 
     emitResult(containerPresent, dirPresent, destroyed);
@@ -111,24 +125,53 @@ public final class ProjectDestroyCommand implements Runnable {
    * nobody can answer ({@link ConsoleHelper#confirmDestructive}) and under {@code --json}; {@code
    * --yes} or a dry run asks nothing.
    */
-  static void confirm(boolean yes, boolean dryRun, boolean json, String name, boolean purge) {
+  static void confirm(
+      boolean yes, boolean dryRun, boolean json, String name, boolean purge, List<String> also) {
     if (yes || dryRun) {
       return;
     }
     if (json) {
       throw new CliCommand.Refused("--json requires --yes (nobody answers a prompt through JSON).");
     }
-    ConsoleHelper.confirmDestructive(confirmPrompt(name, purge), "Not destroyed", "--yes");
+    ConsoleHelper.confirmDestructive(confirmPrompt(name, purge, also), "Not destroyed", "--yes");
   }
 
-  static String confirmPrompt(String name, boolean purge) {
+  /**
+   * What destroy asks: the project, then each of its workspaces and its template ({@code also}),
+   * every one of which goes with it (W11).
+   */
+  static String confirmPrompt(String name, boolean purge, List<String> also) {
+    var with =
+        also.isEmpty() ? "" : " with " + String.join(", ", also) + " and their uncommitted work";
     if (purge) {
       return "Destroy project "
           + name
+          + with
           + " and erase it everywhere — its specs, rooms, runs, files and history, on every box?"
           + " This cannot be undone.";
     }
-    return "Destroy project " + name + "? This cannot be undone.";
+    return "Destroy project " + name + with + "? This cannot be undone.";
+  }
+
+  /** One of the project's instances besides its own container, and how the prompt names it. */
+  record Other(String instance, String said) {}
+
+  /** Project {@code name}'s workspaces, then its template, as the box's instances tell them. */
+  static List<Other> others(String name, List<BoxInstances.Instance> instances) {
+    var others = new ArrayList<Other>();
+    for (var instance : instances) {
+      if (instance.kind() instanceof BoxInstances.Workspace workspace
+          && workspace.project().equals(name)) {
+        others.add(new Other(instance.name(), "workspace " + workspace.workspace()));
+      }
+    }
+    for (var instance : instances) {
+      if (instance.kind() instanceof BoxInstances.Template template
+          && template.project().equals(name)) {
+        others.add(new Other(instance.name(), "template " + instance.name()));
+      }
+    }
+    return others;
   }
 
   /** What the purge will erase, rehearsed through the one prune method before anything goes. */

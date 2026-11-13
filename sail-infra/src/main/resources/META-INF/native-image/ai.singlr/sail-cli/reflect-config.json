@@ -25,7 +25,7 @@
     "allRecordComponents": true
   },
   {
-    "name": "ai.singlr.sail.engine.Workspaces$Template",
+    "name": "ai.singlr.sail.engine.WorkspaceTemplate$Template",
     "allDeclaredMethods": true,
     "allRecordComponents": true
   },

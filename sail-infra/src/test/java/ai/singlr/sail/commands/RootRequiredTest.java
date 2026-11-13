@@ -70,7 +70,10 @@ class RootRequiredTest {
           Map.entry(
               "project resources set",
               List.of("gamma", "--cpu", "4", "--memory", "8GiB", "--disk", "40GiB", "--json")),
-          Map.entry("project demo", List.of("--json")));
+          Map.entry("project demo", List.of("--json")),
+          Map.entry("project template build", List.of("gamma", "--json")),
+          Map.entry("project workspace create", List.of("gamma", "w", "--json")),
+          Map.entry("project workspace delete", List.of("gamma", "w", "--yes", "--json")));
 
   @BeforeEach
   void asACallerWhoIsNotRoot() {

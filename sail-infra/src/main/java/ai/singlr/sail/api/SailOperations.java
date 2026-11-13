@@ -27,6 +27,7 @@ import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.AgentReporter;
 import ai.singlr.sail.engine.AgentSession;
 import ai.singlr.sail.engine.AgentUnit;
+import ai.singlr.sail.engine.BoxInstances;
 import ai.singlr.sail.engine.CliOperator;
 import ai.singlr.sail.engine.ConflictOperations;
 import ai.singlr.sail.engine.ConnectEnvironment;
@@ -35,6 +36,7 @@ import ai.singlr.sail.engine.ContainerManager;
 import ai.singlr.sail.engine.ContainerState;
 import ai.singlr.sail.engine.HostInfo;
 import ai.singlr.sail.engine.NameValidator;
+import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.SharedProjectFiles;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.ShellExecutor;
@@ -1373,10 +1375,7 @@ public final class SailOperations implements HostOperations {
     return safe(() -> snapshotOps.list(readable(project)));
   }
 
-  /**
-   * Read in scope, as the snapshot list is; a box with no ZFS pool, where no workspace can be, is a
-   * conflict naming the command that adds one.
-   */
+  /** Read in scope, as the snapshot list is; a box with no ZFS pool lists its default one. */
   @Override
   public Result<WorkspaceListResponse> workspaces(String project) {
     return safe(
@@ -1385,9 +1384,9 @@ public final class SailOperations implements HostOperations {
           try {
             return new WorkspaceListResponse(
                 readable,
-                new Workspaces(shell, shell, System::nanoTime).list(readable).workspaces());
-          } catch (Remedied.State noZfs) {
-            throw ApiException.of(ErrorCode.CONFLICT, noZfs);
+                new Workspaces(shell, shell, System::nanoTime, SailPaths.locksDir())
+                    .list(readable)
+                    .workspaces());
           } catch (Exception unread) {
             if (unread instanceof InterruptedException) {
               Thread.currentThread().interrupt();
@@ -1579,8 +1578,9 @@ public final class SailOperations implements HostOperations {
 
   /**
    * The full project roster, mirroring {@code sail project list}: every catalogued project plus any
-   * container without a catalog entry. Catalogued-but-unprovisioned projects surface as {@code
-   * not_created}; a live container's state wins over the catalog placeholder.
+   * plain container without a catalog entry, never a workspace or a template.
+   * Catalogued-but-unprovisioned projects surface as {@code not_created}; a live container's state
+   * wins over the catalog placeholder.
    */
   private ProjectListResponse projectsValue() {
     var statuses = new TreeMap<String, String>();
@@ -1603,7 +1603,7 @@ public final class SailOperations implements HostOperations {
 
   private List<ContainerManager.ContainerInfo> listContainers() {
     try {
-      return new ContainerManager(shell).listAll();
+      return new BoxInstances(shell).plain().stream().map(BoxInstances.Instance::info).toList();
     } catch (Exception e) {
       throw new ApiException(ErrorCode.COMMAND_FAILED, "Failed to list project containers.", e);
     }

@@ -393,4 +393,18 @@ class NameValidatorTest {
         IllegalArgumentException.class,
         () -> NameValidator.requireValidSessionName("a".repeat(81)));
   }
+
+  @Test
+  void aNewProjectTakesNoNameKeptForATemplate() {
+    NameValidator.requireNewProjectName("acme-tmpl");
+
+    assertEquals(
+        "Invalid project name: 'acme--tmpl'. A name ending '--tmpl' is kept for a project's"
+            + " template; give the project another name.",
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> NameValidator.requireNewProjectName("acme--tmpl"))
+            .getMessage());
+    assertThrows(IllegalArgumentException.class, () -> NameValidator.requireNewProjectName("A"));
+  }
 }

@@ -9,6 +9,7 @@ import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.Banner;
+import ai.singlr.sail.engine.BoxInstances;
 import ai.singlr.sail.engine.ContainerManager;
 import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.engine.SnapshotManager;
@@ -86,7 +87,7 @@ public final class SnapsPruneCommand implements Runnable {
     if (name != null) {
       targets = List.of(name);
     } else {
-      targets = mgr.listAll().stream().map(ContainerManager.ContainerInfo::name).toList();
+      targets = new BoxInstances(shell).plain().stream().map(BoxInstances.Instance::name).toList();
     }
 
     if (!json) {
