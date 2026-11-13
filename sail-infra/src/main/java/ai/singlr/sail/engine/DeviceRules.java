@@ -338,16 +338,29 @@ final class DeviceRules {
       reasons.add(
           one.device().path()
               + " is "
-              + Strings.gibibytes(one.device().size())
+              + size(one.device(), other.device())
               + " and "
               + other.device().path()
               + " "
-              + Strings.gibibytes(other.device().size())
-              + ", and zpool create refuses, without the force Sail never passes, a mirror whose"
-              + " devices differ by more than 16 MiB: name two devices of one size, such as a"
-              + " partition of that size on each disk");
+              + size(other.device(), one.device())
+              + ", "
+              + String.format(Locale.ROOT, "%.1f MiB", sizes / (double) (1L << 20))
+              + " apart, and zpool create refuses, without the force Sail never passes, a mirror"
+              + " whose devices differ by more than 16 MiB: name two devices of one size, such as"
+              + " a partition of that size on each disk");
     }
     return reasons;
+  }
+
+  /**
+   * {@code device}'s size as a refusal names it beside {@code twin}'s: in bytes when both round
+   * alike.
+   */
+  private static String size(BlockDevice device, BlockDevice twin) {
+    var rounded = Strings.gibibytes(device.size());
+    return rounded.equals(Strings.gibibytes(twin.size()))
+        ? rounded + " (" + device.size() + " bytes)"
+        : rounded;
   }
 
   /** The NVMe controller {@code disk} is a namespace of, by its kernel name. */

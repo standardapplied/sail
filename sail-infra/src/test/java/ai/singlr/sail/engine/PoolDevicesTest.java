@@ -930,15 +930,44 @@ class PoolDevicesTest {
   void devicesOfSizesZpoolMirrorsOnlyWithForceAreRefusedAndANearMatchSaysWhatGoesUnused()
       throws Exception {
     var layouts = "handwritten-mirror-layouts.lsblk.json";
-    assertEquals(
-        "/dev/sdh and /dev/sdi cannot be a mirror: /dev/sdh is 40.0 GiB and /dev/sdi 60.0 GiB, and"
-            + " zpool create refuses, without the force Sail never passes, a mirror whose devices"
+    var refuses =
+        ", and zpool create refuses, without the force Sail never passes, a mirror whose devices"
             + " differ by more than 16 MiB: name two devices of one size, such as a partition of"
-            + " that size on each disk.",
+            + " that size on each disk.";
+    assertEquals(
+        "/dev/sdh and /dev/sdi cannot be a mirror: /dev/sdh is 40.0 GiB and /dev/sdi 60.0 GiB,"
+            + " 20480.0 MiB apart"
+            + refuses,
         mirrorRefusal(layouts, "/dev/sdh", "/dev/sdi"));
+    assertEquals(
+        "/dev/sdj and /dev/sdk cannot be a mirror: /dev/sdj is 20.0 GiB (21474836480 bytes) and"
+            + " /dev/sdk 20.0 GiB (21492662272 bytes), 17.0 MiB apart"
+            + refuses,
+        mirrorRefusal(layouts, "/dev/sdj", "/dev/sdk"),
+        "a pair only just past zpool's 16 MiB is refused, its sizes in bytes as they round alike");
+    assertEquals(
+        "/dev/sdj and /dev/sdl cannot be a mirror: /dev/sdj is 20.0 GiB and /dev/sdl 20.1 GiB,"
+            + " 100.0 MiB apart"
+            + refuses,
+        mirrorRefusal(layouts, "/dev/sdj", "/dev/sdl"));
     assertEquals(
         "zfs on a mirror of /dev/sdf and /dev/sdg, 8.0 MiB of /dev/sdg unused",
         devices(names(new Box(layouts)).shell()).mirror("/dev/sdf", "/dev/sdg").said());
+  }
+
+  @Test
+  void aSecondDeviceSomethingHoldsExclusivelyIsRefusedNamingWhatItsOwnProbesFound() {
+    var shell = spares().holds("/dev/sdk", EXT4).busy("/dev/sdk").shell();
+
+    var refused =
+        assertThrows(
+            IllegalArgumentException.class, () -> devices(shell).mirror("/dev/sdh", "/dev/sdk"));
+
+    assertEquals(
+        "/dev/sdk is refused: /dev/sdk holds ext4 and is held exclusively by something Sail cannot"
+            + " name: a mount in another namespace, an array, a pool, or a process that opened it"
+            + " exclusively.",
+        refused.getMessage());
   }
 
   private static String mirrorRefusal(String layout, String one, String other) {

@@ -271,6 +271,60 @@
          "wwn": null,
          "serial": "sail-mirror-i",
          "maj:min": "8:128"
+      },
+      {
+         "path": "/dev/sdj",
+         "kname": "sdj",
+         "type": "disk",
+         "fstype": null,
+         "pttype": null,
+         "parttype": null,
+         "mountpoints": [
+            null
+         ],
+         "size": 21474836480,
+         "start": null,
+         "model": "PersistentDisk",
+         "rm": false,
+         "wwn": null,
+         "serial": "sail-mirror-j",
+         "maj:min": "8:144"
+      },
+      {
+         "path": "/dev/sdk",
+         "kname": "sdk",
+         "type": "disk",
+         "fstype": null,
+         "pttype": null,
+         "parttype": null,
+         "mountpoints": [
+            null
+         ],
+         "size": 21492662272,
+         "start": null,
+         "model": "PersistentDisk",
+         "rm": false,
+         "wwn": null,
+         "serial": "sail-mirror-k",
+         "maj:min": "8:160"
+      },
+      {
+         "path": "/dev/sdl",
+         "kname": "sdl",
+         "type": "disk",
+         "fstype": null,
+         "pttype": null,
+         "parttype": null,
+         "mountpoints": [
+            null
+         ],
+         "size": 21579694080,
+         "start": null,
+         "model": "PersistentDisk",
+         "rm": false,
+         "wwn": null,
+         "serial": "sail-mirror-l",
+         "maj:min": "8:176"
       }
    ]
 }

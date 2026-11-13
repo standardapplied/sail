@@ -130,9 +130,9 @@ class IncusStorageTest {
 
     assertEquals(
         List.of("Pending", "Created"), pools.stream().map(IncusStorage.Pool::status).toList());
-    pools.getLast().requireCreated();
+    pools.getLast().requireFinished();
     assertTrue(
-        assertThrows(IllegalStateException.class, () -> pools.getFirst().requireCreated())
+        assertThrows(IllegalStateException.class, () -> pools.getFirst().requireFinished())
             .getMessage()
             .startsWith("Incus's pool 'tank' is Pending, not Created: "));
   }

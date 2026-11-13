@@ -255,10 +255,11 @@ public final class WorkspaceTemplate {
 
   /**
    * Refuses a change on {@code pool}, when it is a mirror, unless ZFS says it is online or
-   * degraded, naming its state and the {@code zpool status} that says more; a degraded mirror is
-   * said once, on stderr, with the {@code zpool replace} that mends it. A pool of one device or a
-   * file, whose health {@code host status} shows, is left to Incus as it always was, and so is a
-   * mirror whose health zpool cannot tell.
+   * degraded, naming its state and the {@code zpool status} that says more; a mirror whose health
+   * zpool does not tell (it cannot be run, does not answer in time or fails) is refused as one
+   * whose health Sail cannot tell. A degraded mirror is said once, on stderr, with the {@code zpool
+   * replace} that mends it. A pool of one device or a file, whose health {@code host status} shows,
+   * is left to Incus as it always was.
    */
   static void requireUsable(ShellExec observer, String pool)
       throws IOException, InterruptedException, TimeoutException {
@@ -273,18 +274,21 @@ public final class WorkspaceTemplate {
     }
     var zpool = Objects.requireNonNullElse(held.get().zpool(), pool);
     var health = PoolHealth.of(observer, zpool);
-    if (health.isPresent() && !health.get().usable()) {
+    if (health.isEmpty() || !health.get().usable()) {
       throw new IllegalStateException(
           "Pool "
               + pool
-              + " is "
-              + health.get().said()
-              + ", as zpool status says, so no workspace or template is changed on it. See sudo"
-              + " zpool status "
+              + (health.isEmpty()
+                  ? " is a mirror whose health Sail cannot tell: zpool cannot be run"
+                  : health.get().answered()
+                      ? " is " + health.get().said() + ", as zpool status says"
+                      : " is a mirror whose health Sail cannot tell: zpool status "
+                          + health.get().state())
+              + ", so no workspace or template is changed on it. See sudo zpool status "
               + zpool
               + ".");
     }
-    if (health.isPresent() && health.get().degraded()) {
+    if (health.get().degraded()) {
       System.err.println("  ! " + health.get().degradedNotice(zpool));
     }
   }

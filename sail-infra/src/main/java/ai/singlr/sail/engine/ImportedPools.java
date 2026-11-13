@@ -54,6 +54,14 @@ final class ImportedPools {
     return uses;
   }
 
+  /** The names of the zpools this box has imported; none where ZFS is not installed. */
+  Set<String> names() throws IOException, InterruptedException, TimeoutException {
+    if (!shell.exec(List.of("which", "zpool")).ok()) {
+      return Set.of();
+    }
+    return Set.copyOf(listed(List.of("zpool", "list", "-H", "-o", "name")));
+  }
+
   /**
    * The pools {@code zpool import} lists as there to import, from what it reads on this box's
    * devices; it imports nothing. None where ZFS is not installed or it lists none.

@@ -715,6 +715,48 @@ class WorkspacesTest {
   }
 
   @Test
+  void aMirrorWhoseHealthZpoolDoesNotTellRefusesEveryChangeAndChangesNothing() {
+    var scripted =
+        incus(
+            DIR_AND_MIRROR,
+            list(template("v1", INPUTS), workspace("acme", "fix-login", "Running", "v1")),
+            snapshots("v1"));
+    var hanging = new TimingOutShell(scripted, "zpool status");
+    var workspaces = new Workspaces(hanging, hanging, ticks(), locks());
+    var refusal =
+        "Pool tank is a mirror whose health Sail cannot tell: zpool status did not answer within"
+            + " 10 s, so no workspace or template is changed on it. See sudo zpool status tank.";
+
+    for (Executable verb :
+        List.<Executable>of(
+            () -> workspaces.create(acme(), "second", source(), tempDir.resolve("no-files")),
+            () -> workspaces.stop("acme", "fix-login"))) {
+      assertEquals(refusal, assertThrows(IllegalStateException.class, verb).getMessage());
+    }
+    assertEquals(
+        "Pool tank is a mirror whose health Sail cannot tell: zpool cannot be run, so no workspace"
+            + " or template is changed on it. See sudo zpool status tank.",
+        assertThrows(
+                IllegalStateException.class,
+                () ->
+                    workspaces(
+                            incus(
+                                    DIR_AND_MIRROR,
+                                    list(workspace("acme", "fix-login", "Running", "v1")),
+                                    "[]")
+                                .onThrow("zpool", new IOException("no zpool")),
+                            ticks())
+                        .stop("acme", "fix-login"))
+            .getMessage());
+    assertEquals(
+        List.of(),
+        scripted.arguments().stream()
+            .filter(a -> a.getFirst().equals("incus"))
+            .filter(a -> List.of("copy", "stop", "start", "delete", "launch").contains(a.get(1)))
+            .toList());
+  }
+
+  @Test
   void stopStopsALiveWorkspaceAndLeavesAStoppedOne() throws Exception {
     var shell =
         incus(

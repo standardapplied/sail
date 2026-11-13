@@ -767,6 +767,63 @@ class HostInitCommandTest {
     }
   }
 
+  @Test
+  void aReRunFindingAPoolIncusMadeInAnotherStatusKeepsItAsBefore() throws Exception {
+    for (var status : List.of("Unavailable", "Unknown")) {
+      var single =
+          new ScriptedShellExecutor()
+              .onOk(
+                  "incus storage list",
+                  "[{\"name\": \"tank\", \"driver\": \"zfs\", \"status\": \""
+                      + status
+                      + "\", \"config\": {\"source\": \"tank\", \"volatile.initial_source\":"
+                      + " \"/dev/sdb\", \"zfs.pool_name\": \"tank\"}}]")
+              .onOk("realpath -e -- /dev/sdb", "/dev/sdb\n");
+      var mirror =
+          new ScriptedShellExecutor()
+              .onOk(
+                  "incus storage list",
+                  "[{\"name\": \"tank\", \"driver\": \"zfs\", \"status\": \""
+                      + status
+                      + "\", \"config\": {\"source\": \"tank\", \"volatile.initial_source\":"
+                      + " \"mirror="
+                      + MIRROR_A
+                      + ","
+                      + MIRROR_B
+                      + "\", \"zfs.pool_name\": \"tank\"}}]")
+              .onOk("realpath -e -- " + MIRROR_A, "/dev/sdb5\n")
+              .onOk("realpath -e -- " + MIRROR_B, "/dev/sdc5\n")
+              .onOk("realpath -e -- /dev/sdb5", "/dev/sdb5\n")
+              .onOk("realpath -e -- /dev/sdc5", "/dev/sdc5\n");
+      var dir =
+          new ScriptedShellExecutor()
+              .onOk(
+                  "incus storage list",
+                  "[{\"name\": \"devpool\", \"driver\": \"dir\", \"status\": \""
+                      + status
+                      + "\", \"config\": {\"source\": \"/var/lib/incus/storage-pools/devpool\"}}]");
+
+      assertEquals(
+          new PoolSource.Zpool("tank"),
+          source(single, "--storage", "zfs", "--pool", "tank", "--disk", "/dev/sdb"),
+          status);
+      assertEquals(
+          new PoolSource.Zpool("tank"),
+          source(
+              mirror,
+              "--storage",
+              "zfs",
+              "--pool",
+              "tank",
+              "--disk",
+              "/dev/sdc5",
+              "--disk",
+              "/dev/sdb5"),
+          status);
+      assertEquals(new PoolSource.Dir(), source(dir, "--storage", "dir"), status);
+    }
+  }
+
   /** A box whose lsblk prints {@code layout}, /dev/sdb resolving and every probe answering free. */
   private static ScriptedShellExecutor spare(String layout) {
     return new ScriptedShellExecutor()

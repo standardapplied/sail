@@ -72,10 +72,17 @@ own disks are mirrored.
 two disks carry the system in RAID1 and a spare partition each. Each device must pass every rule
 one device passes; a refusal names which one and why, and nothing is made unless both pass. The
 two must be on two physical disks: two partitions of one disk, two paths to one disk (one WWN or
-serial) and two namespaces of one NVMe controller are refused. They must be of one size, give or
+serial) and two namespaces of one NVMe controller are refused, so two NVMe persistent disks of a
+cloud VM that shows every disk as a namespace of one controller (as GCP does) cannot be mirrored;
+use SCSI-attached disks there. They must be of one size, give or
 take the 16 MiB `zpool create` allows without force (Sail never forces): make the spare
 partitions the same size; within that, the output says how much of the larger goes unused. Incus
-makes the mirror in one `zpool create ... mirror <a> <b>`, which takes both devices or neither.
+makes the mirror in one `zpool create ... mirror <a> <b>`. Every refusal, by Sail or by zpool's
+own checks of both devices, leaves both untouched. A failure while zpool labels them (a device
+gone, or held, between its checks and its writes) can leave the first with its start zeroed or a
+new empty partition table, and no pool: both were blank, so nothing is lost, and a re-run says
+what it finds there. A zpool already imported under the pool's name is refused before Incus is
+asked, since zpool would label the devices before finding the name taken.
 A mirror keeps every container through the loss of either device: `sudo sail host status` then
 says the pool is `DEGRADED` and names the device that is gone, and workspace and template verbs
 go on, saying once that the pool is degraded. It does not protect against losing both, against a
@@ -85,13 +92,19 @@ zpool replace <pool> <missing device> <new device>`, which ZFS resilvers. A pool
 `ONLINE` nor `DEGRADED` (both devices gone, `FAULTED`, `SUSPENDED`, or not imported) refuses
 workspace and template verbs, naming its state and `sudo zpool status <pool>`. Re-running the
 command that made a mirror, in either order of its two `--disk` flags, is a no-op; naming one of
-the two, or another pair, is refused by name. The mirror needs an Incus with the
+the two, or another pair, is refused by name. On disks with no hardware identity Incus records
+their kernel names (`/dev/sdb`), which can move across a reboot: a re-run compares what those
+names resolve to now. After your own `zpool replace`, Incus still names the old device, so re-run
+`host init` without `--disk`. The mirror needs an Incus with the
 `storage_zfs_vdev` API extension (6.0.1 and later, as Sail installs it); Ubuntu's own Incus 6.0.0
-is refused before anything is made. A pool Incus did not finish making, which it lists as
-`Pending` or `Errored` (incusd stopped mid-create), is never taken for one that exists: `host
-init` names the status and how to clear it (`sudo incus storage delete <pool>`; for a `Pending`
-pool that leaves the zpool Incus made, for you to destroy with `sudo zpool destroy <zpool>` once
-`sudo zfs list -r <zpool>` shows nothing wanted). A file is slower
+is refused before anything is made, in a dry run too. A pool Incus did not finish making, which it
+lists as `Pending` or `Errored` (incusd stopped mid-create), is never taken for one that exists:
+`host init` names the status and how to clear it (`sudo incus storage delete <pool>`; for a
+`Pending` pool that leaves the zpool Incus made, for you to destroy with `sudo zpool destroy
+<zpool>` once `sudo zfs list -r <zpool>` shows nothing wanted). A pool in any other status was
+made and is kept: one Incus reports `Unavailable` (made, and failed to start) is kept, and `host
+init` says so and points at `sudo incus storage show <pool>` and `sudo zpool status <pool>`,
+changing nothing. A file is slower
 than a disk and meant for trials. `host init` caps the ZFS cache at a tenth of memory, at most
 16 GiB (`/etc/modprobe.d/sail-zfs.conf`), and says so; a cap you set yourself is kept, in your own
 file or edited into Sail's, and a cap Sail wrote before yours is removed so yours is the one that

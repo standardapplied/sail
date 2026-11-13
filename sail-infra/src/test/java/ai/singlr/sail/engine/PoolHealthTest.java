@@ -10,6 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.IOException;
+import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -80,9 +81,48 @@ class PoolHealthTest {
         Optional.empty(),
         PoolHealth.of(
             new ScriptedShellExecutor().onThrow("zpool", new IOException("no zpool")), "devpool"));
-    assertEquals(
-        Optional.empty(), PoolHealth.of(new ScriptedShellExecutor().onOk("zpool status"), "x"));
     assertFalse(PoolHealth.of(gone, "devpool").orElseThrow().usable());
+  }
+
+  @Test
+  void aDegradedPoolWhoseMissingDeviceZpoolDoesNotListByPathStaysDegraded() {
+    var unnamed =
+        DeviceFixtures.read("handwritten-mirror-degraded-removed.zpool-status.txt")
+            .replace(
+                "/dev/disk/by-id/wwn-0x5000c500e5f6a7b8-part5", "wwn-0x5000c500e5f6a7b8-part5");
+
+    var health = PoolHealth.parsed(unnamed).orElseThrow();
+
+    assertEquals(new PoolHealth("DEGRADED", Map.of()), health);
+    assertTrue(health.degraded());
+  }
+
+  @Test
+  void aZpoolThatDoesNotAnswerInTenSecondsOrFailsIsSaidSoAndNoneWhereItCannotRun()
+      throws Exception {
+    var hanging = new TimingOutShell(new ScriptedShellExecutor(), "zpool status");
+
+    var timedOut = PoolHealth.of(hanging, "devpool").orElseThrow();
+
+    assertEquals(new PoolHealth("did not answer within 10 s", Map.of()), timedOut);
+    assertEquals(List.of(Duration.ofSeconds(10)), hanging.deadlines());
+    assertFalse(timedOut.answered() || timedOut.usable());
+    assertEquals(
+        new PoolHealth("did not answer (permission denied)", Map.of()),
+        PoolHealth.of(new ScriptedShellExecutor().onFail("zpool status", "permission denied"), "x")
+            .orElseThrow());
+    assertEquals(
+        new PoolHealth("did not answer with a state", Map.of()),
+        PoolHealth.of(new ScriptedShellExecutor().onOk("zpool status", "garbled\n"), "x")
+            .orElseThrow());
+    assertEquals(
+        Optional.empty(),
+        PoolHealth.of(
+            new ScriptedShellExecutor()
+                .on(
+                    "zpool status",
+                    new ShellExec.Result(127, "", "env: 'zpool': No such file or directory")),
+            "x"));
   }
 
   @Test

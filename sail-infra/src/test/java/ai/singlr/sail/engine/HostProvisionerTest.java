@@ -1765,13 +1765,137 @@ class HostProvisionerTest {
           "Incus's pool 'devpool' is Errored, not Created: Incus did not finish making it, so it is"
               + " not taken for a pool that exists and nothing is made over it. Remove Incus's"
               + " record of it with sudo incus storage delete devpool, which also destroys zpool"
-              + " devpool if it holds only Incus's own datasets, then run this again.",
+              + " devpool if its record names it and it holds only Incus's own datasets, then run"
+              + " this again.",
           refused.getMessage());
       assertNoPoolCreated(shell);
       assertTrue(
           shell.invocations().stream().noneMatch(c -> c.startsWith("incus profile")),
           shell.invocations().toString());
     }
+  }
+
+  @Test
+  void aMirrorWhoseSecondNameNowNamesAnotherDiskIsRefusedAndUntouched() {
+    var shell =
+        mirrorBox(
+            new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
+                .onceOnOk("incus storage list --format json", "[]"),
+            VDEVS);
+    var first =
+        new PoolSource.Mirror(
+            SDB_SDC.one(),
+            new PoolSource.Device("/dev/sdc", "WWN-B 8:32 42949672960"),
+            42949672960L,
+            42949672960L);
+
+    var refused = assertThrows(IllegalStateException.class, () -> provision(shell, first, null));
+
+    assertEquals(
+        "/dev/sdc is not the device first cleared: it was WWN-B 8:32 42949672960, it is now"
+            + " spare-sdc 8:32 42949672960.",
+        refused.getMessage());
+    assertNoPoolCreated(shell);
+  }
+
+  @Test
+  void aPoolIncusMadeAndReportsInAnotherStatusIsKeptAsBeforeAndUnavailableIsSaid()
+      throws Exception {
+    for (var driver : List.of("zfs single", "zfs mirror", "dir")) {
+      for (var status : List.of("Unavailable", "Unknown")) {
+        var source =
+            driver.equals("zfs single")
+                ? "/dev/sdb"
+                : driver.equals("dir")
+                    ? "/var/lib/incus/storage-pools/devpool"
+                    : "mirror=/dev/sdb,/dev/sdc";
+        var shell =
+            new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
+                .onOk(
+                    "incus storage list",
+                    "[{\"name\": \"devpool\", \"driver\": \""
+                        + driver.split(" ")[0]
+                        + "\", \"status\": \""
+                        + status
+                        + "\", \"config\": {\"source\": \"devpool\", \"volatile.initial_source\":"
+                        + " \""
+                        + source
+                        + "\", \"zfs.pool_name\": \"devpool\"}}]")
+                .onOk("incus profile device list", "root\neth0\n")
+                .onOk("incus profile device get singlr-base root pool", "devpool\n");
+        var steps = new ArrayList<String>();
+        var asked =
+            driver.equals("dir") ? DIR : driver.equals("zfs single") ? SDB : (PoolSource) SDB_SDC;
+
+        provision(shell, asked, new RecordingListener(steps));
+
+        var kept = "done:5/8:devpool (" + driver.split(" ")[0] + " on " + IncusStorage.said(source);
+        assertTrue(
+            steps.contains(
+                kept
+                    + (status.equals("Unavailable")
+                        ? ", already exists; Incus reports it Unavailable: see sudo incus storage"
+                            + " show devpool"
+                            + (driver.equals("dir") ? "" : " and sudo zpool status devpool")
+                            + ", nothing was changed)"
+                        : ", already exists)")),
+            driver + " " + status + " " + steps);
+        assertNoPoolCreated(shell);
+      }
+    }
+  }
+
+  @Test
+  void aZpoolImportedUnderThePoolsNameIsRefusedBeforeIncusIsAskedForOneDeviceOrTwo() {
+    for (var source : List.<PoolSource>of(SDB, SDB_SDC)) {
+      var shell =
+          mirrorBox(
+              new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
+                  .onceOnOk("incus storage list --format json", "[]")
+                  .onOk("zpool list -H -o name", "rpool\ndevpool\n"),
+              VDEVS);
+
+      var refused = assertThrows(IllegalStateException.class, () -> provision(shell, source, null));
+
+      assertEquals(
+          "zpool devpool is already imported on this box, and Incus holds no pool of that name, so"
+              + " none is made under it. Nothing was written. Export or rename that zpool"
+              + " yourself, or name another pool with --pool <name>.",
+          refused.getMessage());
+      assertNoPoolCreated(shell);
+    }
+  }
+
+  @Test
+  void aMirrorDryRunOnAnIncusThatCannotMirrorIsRefusedAndSaysNoCreate() {
+    var reads =
+        new ScriptedShellExecutor()
+            .onOk("which incus", "/usr/bin/incus\n")
+            .onOk("incus storage list", "[]")
+            .onOk("incus query /1.0", "{\"api_extensions\": [\"storage_zfs\"]}");
+    var steps = new ArrayList<String>();
+
+    var refused =
+        assertThrows(
+            IllegalStateException.class,
+            () ->
+                new HostProvisioner(
+                        new ShellExecutor(true),
+                        reads,
+                        new RecordingListener(steps),
+                        OperatorCommand.SUDO)
+                    .provision(
+                        SDB_SDC,
+                        "devpool",
+                        "incusbr0",
+                        null,
+                        MEMORY_MB,
+                        tempDir.resolve("host.yaml"),
+                        tempDir.resolve("sail.db")));
+
+    assertTrue(refused.getMessage().contains("lacks the storage_zfs_vdev"), refused.getMessage());
+    assertTrue(
+        steps.stream().noneMatch(step -> step.contains("would create devpool")), steps.toString());
   }
 
   private HostYaml provision(ShellExec shell, PoolSource source, ProvisionListener listener)

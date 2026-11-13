@@ -15,6 +15,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.TimeoutException;
 
 /**
@@ -55,6 +56,13 @@ public final class IncusStorage {
     /** Incus's status of a pool it finished making ({@code api.StoragePoolStatusCreated}). */
     public static final String CREATED = "Created";
 
+    /**
+     * Incus's status of a pool it made that failed to start ({@code StoragePoolStatusUnvailable}).
+     */
+    static final String UNAVAILABLE = "Unavailable";
+
+    private static final Set<String> UNFINISHED = Set.of("Pending", "Errored");
+
     /** A pool Incus finished making. */
     public Pool(
         String name,
@@ -73,10 +81,12 @@ public final class IncusStorage {
      * is made. Incus's {@code incus storage delete} of a {@code Pending} pool removes only its
      * record and runs no driver delete ({@code storagePoolDelete}), so a zpool it made stays for
      * the operator to destroy; of an {@code Errored} one it runs the driver's delete, which
-     * destroys the zpool when it holds only Incus's own datasets.
+     * destroys the zpool its record names when it holds only Incus's own datasets. Every other
+     * status, {@code Unavailable} (made, and failed to start) and {@code Unknown} among them, is a
+     * pool that was made, kept as it is.
      */
-    public void requireCreated() {
-      if (CREATED.equals(status)) {
+    public void requireFinished() {
+      if (!UNFINISHED.contains(status)) {
         return;
       }
       var zfs = HostYaml.BACKEND_ZFS.equals(driver);
@@ -103,9 +113,25 @@ public final class IncusStorage {
               + (zfs && !pending
                   ? ", which also destroys zpool "
                       + zpool
-                      + " if it holds only Incus's own datasets"
+                      + " if its record names it and it holds only Incus's own datasets"
                   : "")
               + ", then run this again.");
+    }
+
+    /**
+     * What a re-run that keeps this pool says of how Incus has it: for one Incus reports
+     * unavailable, that it does and where to look, since nothing is changed; nothing otherwise.
+     */
+    public String standing() {
+      if (!UNAVAILABLE.equals(status)) {
+        return "";
+      }
+      return "; Incus reports it Unavailable: see sudo incus storage show "
+          + name
+          + (HostYaml.BACKEND_ZFS.equals(driver)
+              ? " and sudo zpool status " + Objects.requireNonNullElse(zpool, name)
+              : "")
+          + ", nothing was changed";
     }
 
     /** Refuses a pool of {@code driver} under this pool's name, which Incus has with another. */

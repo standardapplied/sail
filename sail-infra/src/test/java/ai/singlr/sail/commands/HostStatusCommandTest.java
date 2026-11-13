@@ -18,6 +18,7 @@ import ai.singlr.sail.engine.HostDetector;
 import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.ScriptedShellExecutor;
 import ai.singlr.sail.engine.ShellExec;
+import ai.singlr.sail.engine.TimingOutShell;
 import java.io.ByteArrayOutputStream;
 import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
@@ -383,6 +384,25 @@ class HostStatusCommandTest {
     assertEquals(
         List.of(CONTINUED + "health not imported"),
         rows(mirror("cannot open 'devpool': no such pool"), "health "));
+  }
+
+  @Test
+  void aZpoolThatDoesNotAnswerIsSaidSoAndTheStatusGoesOn() throws Exception {
+    var hanging =
+        new TimingOutShell(mirror("handwritten-mirror-online.zpool-status.txt"), "zpool status");
+    var out = new ByteArrayOutputStream();
+
+    HostStatusCommand.report(
+        RECORDED_AT_INIT,
+        HOST,
+        hanging,
+        false,
+        OperatorCommand.SUDO,
+        new PrintStream(out, true, StandardCharsets.UTF_8));
+
+    var text = out.toString(StandardCharsets.UTF_8);
+    assertTrue(text.contains(CONTINUED + "health did not answer within 10 s"), text);
+    assertTrue(text.contains("Containers:"), text);
   }
 
   @Test

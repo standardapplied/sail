@@ -1004,18 +1004,23 @@ never with `-f`: Sail never passes `source.wipe`.
 - **Z1. What `host init` reports as done is what Incus has.** The base profile's root disk is
   converged (added when missing, an existing one kept) and the pool it names must be one Incus
   lists, else init fails; `host.yaml` states that pool, its driver and its source
-  (`pool_source`) as Incus has them. A pool Incus lists under the name in any status but
-  `Created` is one it did not finish making (incusd stopped between its driver's create, a zfs
-  pool's `zpool create`, and marking the pool created: `storagePoolCreateLocal`): a re-run never
-  answers "already exists" for it and makes nothing over it, refused at the flags and again at step
-  5, naming the status and the remedy Incus's `storagePoolDelete` gives: `incus storage delete`
-  of a `Pending` pool removes only Incus's record and runs no driver delete, so a zpool it made is
-  left for the operator to see (`zfs list -r`) and destroy (`zpool destroy`); of an `Errored` one it
-  runs the driver's delete, which destroys the zpool when it holds only Incus's own datasets.
+  (`pool_source`) as Incus has them. A pool Incus lists under the name as `Pending` or `Errored`
+  is one it did not finish making (incusd stopped between its driver's create, a zfs pool's `zpool
+  create`, and marking the pool created: `storagePoolCreateLocal`): a re-run never answers
+  "already exists" for it and makes nothing over it, refused at the flags and again at step 5, for
+  every driver, naming the status and the remedy Incus's `storagePoolDelete` gives: `incus storage
+  delete` of a `Pending` pool removes only Incus's record and runs no driver delete, so a zpool it
+  made is left for the operator to see (`zfs list -r`) and destroy (`zpool destroy`); of an
+  `Errored` one it runs the driver's delete, which destroys the zpool its record names when it
+  holds only Incus's own datasets. Every other status is a pool Incus made, kept as 0.67.0 kept
+  it; one Incus reports `Unavailable` (made, and failed to start) is kept with step 5 saying so
+  and naming `incus storage show` and, for zfs, `zpool status`, nothing changed.
   *`HostProvisionerTest.aZfsPoolOnAWholeDiskIsIncussOwnAndTheProfilePutsContainersOnIt`,
   `HostProvisionerTest.aProfileThatNamesAPoolIncusLacksIsRefused`,
   `HostProvisionerTest.aPoolIncusLeftUnfinishedIsNeverTakenAsMadeNorMadeOver`,
   `HostInitCommandTest.aReRunFindingAPoolIncusDidNotFinishSaysSoAndTakesItForNoPool`,
+  `HostInitCommandTest.aReRunFindingAPoolIncusMadeInAnotherStatusKeepsItAsBefore`,
+  `HostProvisionerTest.aPoolIncusMadeAndReportsInAnotherStatusIsKeptAsBeforeAndUnavailableIsSaid`,
   `HostProvisionerIT`.*
 - **Z2. Sail erases nothing.** No command of Sail wipes, repartitions or overwrites a signature:
   it never passes `source.wipe`, so Incus never runs `zpool create -f` (Incus runs `-f`, after
@@ -1134,22 +1139,31 @@ never with `-f`: Sail never passes `source.wipe`.
   refused before the devices are cleared again), which Incus turns into one `zpool create -m none
   -O compression=on <pool> mirror <a> <b>`, never `-f`. Sail makes no zpool and hands Incus no
   existing one. Zpool checks both devices (`is_device_in_use`, `check_replication`) before it
-  labels either (`make_disks`), and the kernel creates no pool unless both open, so a refusal at
-  any point leaves neither device labelled and no path makes a one-device pool where a mirror was
-  asked for; a failure after the create is Incus's own revert, which destroys the whole pool.
+  labels either (`make_disks`), and the kernel creates no pool unless both open, so every refusal,
+  Sail's or zpool's checks', leaves both devices untouched, and no path makes a one-device pool
+  where a mirror was asked for. A failure inside `make_disks`, which writes the devices one after
+  the other (a partition's first 4 KiB zeroed, a whole disk given a new table), can leave the
+  first written and the second not, with no pool: both were cleared blank, so nothing is lost,
+  and a re-run refuses what it finds by name. A failure after the create is Incus's own revert,
+  which destroys the whole pool. Because `make_disks` writes before the kernel finds a pool name
+  taken, a zpool already imported under the pool's name is refused at step 5 before Incus is
+  asked (`zpool list -H -o name`), for one device and a mirror.
   Each device is cleared by `PoolDevices.cleared`'s one decision, every rule asked once of each:
   the names resolved, lsblk read once and judged per device, the pair judged, the `/proc` walk read
   once and matched per device, each device's listings and pool reads, then each device's
   exclusive probes, then each by-id path; so at the re-check before the create the probes of both
-  are the last commands, and the window before Incus's `zpool create` is one device's plus the
-  other's probe. The pair is refused when it is not two physical disks (one device, partitions of
+  are the last commands, then the by-id `realpath`s, and the window before Incus's `zpool create`
+  is one device's plus the other's probe and those `realpath`s. The pair is refused when it is not two physical disks (one device, partitions of
   one disk, disks with one WWN or one serial, NVMe namespaces `nvme<C>n<N>` of one controller), or
   when the sizes differ by more than the 16 MiB `zpool create` mirrors without force (`ZPOOL_FUZZ`):
   a pair the spec wanted taken at 40 and 60 GiB cannot be made without force, so it is refused
   naming both sizes; within the 16 MiB the output says how much of the larger goes unused. A
   re-run compares the `--disk` devices and Incus's `volatile.initial_source` as sets of the devices
   `realpath -e` resolves them to: either flag order is a no-op, one of the two or another pair is
-  refused naming the flags, a member that resolves to nothing is named as gone.
+  refused naming the flags, a member that resolves to nothing is named as gone. On disks with no
+  hardware identity Incus records kernel names, which can move across a reboot; a re-run compares
+  what they resolve to now. The NVMe rule refuses two persistent disks of a cloud VM that shows
+  every disk as a namespace of one controller (GCP); SCSI-attached disks there are separate.
   `host.yaml`'s `pool_source` is Incus's string, `mirror=<a>,<b>`, said as `a mirror of <a> and
   <b>`. *`PoolDevicesTest.twoBlankDisksAreAMirrorOfTwoDevicesEachClearedAsOneIs`,
   `PoolDevicesTest.twoPartitionsOfOneDiskAreRefusedAsAMirrorBeforeAnyProbe`,
@@ -1160,17 +1174,23 @@ never with `-f`: Sail never passes `source.wipe`.
 - **Z7. What Sail says of a pool's health is what ZFS says now.** `PoolHealth` reads `zpool status
   -P <zpool>` in the C locale: the ` state:` line is the pool's, and each leaf of the config table
   not ONLINE (a path, or the GUID of a device absent at import, named by the path it `was`) is
-  named with its state; "no such pool" is not imported; an answer zpool cannot give says nothing.
+  named with its state; "no such pool" is not imported. zpool is given 10 s: one that does not
+  answer in time, fails, or says no state is "did not answer" and why; one that cannot be run
+  (ZFS not installed) says nothing.
   `host status` puts it in rows under each zfs pool's (`health <state>`, each device not online
   with its state, and the `zpool replace` pointer when DEGRADED; the banner's rows a pool may run
   to) and `--json` carries `health` and `unhealthy`. The verbs that change a workspace or a
   template (create, start, stop, delete, template build) read the health of the mirror they act
-  on: DEGRADED goes on, said once on stderr; any other state is refused naming it and `sudo zpool
-  status <pool>`. A pool of one device or a file is left to Incus there as in 0.67.0, its
+  on: DEGRADED goes on, said once on stderr; any other state, and a mirror whose health zpool does
+  not tell (it cannot be run, does not answer or fails), is refused naming it and `sudo zpool
+  status <pool>`, never waved through. A pool of one device or a file is left to Incus there as in 0.67.0, its
   health shown by `host status`. Sail replaces and resilvers nothing. *`PoolHealthTest`,
   `HostStatusCommandTest.aDegradedMirrorNamesTheMissingDeviceAndTheReplaceThatMendsIt`,
   `WorkspacesTest.aFaultedPoolRefusesEveryVerbThatChangesAWorkspaceOrTemplateAndChangesNothing`,
-  `PoolDevicesIT`.*
+  `WorkspacesTest.aMirrorWhoseHealthZpoolDoesNotTellRefusesEveryChangeAndChangesNothing`,
+  `PoolDevicesIT`.* CI's incus suites run Zabbly's current stable Incus, unpinned, as a new box
+  installs it; Ubuntu's own 6.0.0, which a box keeps when it came with it, is covered only by the
+  unit tests of the mirror's refusal of it (`IncusStorageTest`, `HostProvisionerTest`).
 
 Incus finds the ZFS tools when a pool is created, not only when it starts (its driver looks
 them up on each load until one succeeds; only `incus info`'s list of supported drivers is read

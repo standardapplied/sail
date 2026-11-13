@@ -6,6 +6,7 @@
 package ai.singlr.sail.engine;
 
 import java.io.IOException;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;
@@ -19,10 +20,12 @@ import java.util.stream.IntStream;
 
 /**
  * A zpool's health as {@code zpool status -P} says it now: the pool's state (ONLINE, DEGRADED,
- * FAULTED, SUSPENDED, ...; {@value #NOT_IMPORTED} when zpool has no such pool) and each of its
- * devices that is not online, by path, with its state. A device absent when the pool was imported
- * is listed by its GUID and named by the path zpool says it {@code was}. Sail reads it and repairs
- * nothing: a device is replaced with {@code zpool replace}, by the operator.
+ * FAULTED, SUSPENDED, ...; {@value #NOT_IMPORTED} when zpool has no such pool, and {@value
+ * #UNANSWERED} and why when zpool did not answer within {@link #BOUND} or failed, so the health
+ * cannot be told) and each of its devices that is not online, by path, with its state. A device
+ * absent when the pool was imported is listed by its GUID and named by the path zpool says it
+ * {@code was}. Sail reads it and repairs nothing: a device is replaced with {@code zpool replace},
+ * by the operator.
  *
  * @param state the pool's state, as zpool prints it
  * @param unhealthy each device that is not online, by path, and its state
@@ -32,11 +35,20 @@ public record PoolHealth(String state, Map<String, String> unhealthy) {
   /** The state of a pool zpool has not imported. */
   public static final String NOT_IMPORTED = "not imported";
 
+  /** The start of the state of a pool zpool did not answer for. */
+  public static final String UNANSWERED = "did not answer";
+
+  /** How long zpool is given to answer: a suspended pool can hang it. */
+  static final Duration BOUND = Duration.ofSeconds(10);
+
   private static final String ONLINE = "ONLINE";
   private static final String DEGRADED = "DEGRADED";
   private static final Set<String> SOUND = Set.of(ONLINE, "AVAIL", "INUSE");
   private static final Pattern LEAF = Pattern.compile("/.*|[0-9]+");
   private static final String STATE = "state: ";
+  private static final int MISSING = 127;
+  private static final List<String> MISSING_WORDS =
+      List.of("command not found", "No such file or directory");
 
   public PoolHealth {
     unhealthy = Collections.unmodifiableMap(new LinkedHashMap<>(unhealthy));
@@ -48,21 +60,40 @@ public record PoolHealth(String state, Map<String, String> unhealthy) {
   }
 
   /**
-   * What zpool says of {@code zpool} now; none when it cannot say, as where ZFS is not installed.
+   * What zpool says of {@code zpool} now, given {@link #BOUND} to say it: none where zpool cannot
+   * be run, as where ZFS is not installed; {@value #UNANSWERED} and why where it ran and did not
+   * answer in time, failed, or said no state.
    */
   public static Optional<PoolHealth> of(ShellExec shell, String zpool) throws InterruptedException {
     ShellExec.Result said;
     try {
-      said = shell.exec(status(zpool));
-    } catch (IOException | TimeoutException e) {
+      said = shell.exec(status(zpool), null, BOUND);
+    } catch (TimeoutException e) {
+      return Optional.of(unanswered("within " + BOUND.toSeconds() + " s"));
+    } catch (IOException e) {
+      return Optional.empty();
+    }
+    if (!said.ok() && said.stderr().contains("no such pool")) {
+      return Optional.of(new PoolHealth(NOT_IMPORTED, Map.of()));
+    }
+    if (!said.ok()
+        && (said.exitCode() == MISSING
+            || MISSING_WORDS.stream().anyMatch(said.stderr()::contains))) {
       return Optional.empty();
     }
     if (!said.ok()) {
-      return said.stderr().contains("no such pool")
-          ? Optional.of(new PoolHealth(NOT_IMPORTED, Map.of()))
-          : Optional.empty();
+      return Optional.of(unanswered("(" + said.reason() + ")"));
     }
-    return parsed(said.stdout());
+    return Optional.of(parsed(said.stdout()).orElseGet(() -> unanswered("with a state")));
+  }
+
+  private static PoolHealth unanswered(String why) {
+    return new PoolHealth(UNANSWERED + " " + why, Map.of());
+  }
+
+  /** Whether zpool answered with the pool's health. */
+  public boolean answered() {
+    return !state.startsWith(UNANSWERED);
   }
 
   /**

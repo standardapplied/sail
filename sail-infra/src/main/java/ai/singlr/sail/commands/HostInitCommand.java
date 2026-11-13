@@ -344,7 +344,7 @@ public final class HostInitCommand implements Runnable {
     held.ifPresent(
         found -> {
           found.requireDriver(storage);
-          found.requireCreated();
+          found.requireFinished();
         });
     if (!zfs) {
       return new PoolSource.Dir();
