@@ -7,14 +7,18 @@ package ai.singlr.sail.engine;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.TimeoutException;
 import java.util.stream.Collectors;
 
 /**
  * The zpools this box has imported, read pool by pool: every vdev line of {@code zpool list -vHP
- * <pool>} is a member, whatever class (log, cache, spare, special, dedup) it is listed under.
+ * <pool>} is a member, whatever class (log, cache, spare, special, dedup) it is listed under. A
+ * zpool that does not answer within {@link Zpool#BOUND} refuses, never reads as no pools, since
+ * what it would have said decides whether a device is free.
  */
 final class ImportedPools {
 
@@ -54,6 +58,14 @@ final class ImportedPools {
     return uses;
   }
 
+  /** The names of the zpools this box has imported; none where ZFS is not installed. */
+  Set<String> names() throws IOException, InterruptedException, TimeoutException {
+    if (!shell.exec(List.of("which", "zpool")).ok()) {
+      return Set.of();
+    }
+    return Set.copyOf(listed(List.of("zpool", "list", "-H", "-o", "name")));
+  }
+
   /**
    * The pools {@code zpool import} lists as there to import, from what it reads on this box's
    * devices; it imports nothing. None where ZFS is not installed or it lists none.
@@ -62,7 +74,7 @@ final class ImportedPools {
     if (!shell.exec(List.of("which", "zpool")).ok()) {
       return Set.of();
     }
-    var listed = shell.exec(List.of("zpool", "import"));
+    var listed = read(List.of("zpool", "import"));
     return (listed.stdout() + "\n" + listed.stderr())
         .lines()
         .map(String::strip)
@@ -71,10 +83,35 @@ final class ImportedPools {
         .collect(Collectors.toSet());
   }
 
-  /** The vdev paths of a pool's {@code zpool list -vHP} lines: each line that names a path. */
+  /** The class {@link #classes} lists a pool's data vdevs under: those before any header. */
+  static final String DATA = "";
+
+  /**
+   * The vdev names of a pool's {@code zpool list -vH} lines by the class each is listed under, in
+   * zpool's order: its data vdevs under {@link #DATA}, and each other under the header zpool prints
+   * above it ({@code special}, {@code logs}, {@code cache}, {@code spare}, {@code dedup}), a line
+   * that, unlike a vdev's row, does not start with a tab, its name padded with spaces. A vdev's
+   * name is its row's first tab-separated field; the pool's own line, first, is no vdev.
+   */
+  static Map<String, List<String>> classes(List<String> lines) {
+    var classes = new LinkedHashMap<String, List<String>>();
+    var listed = new ArrayList<String>();
+    classes.put(DATA, listed);
+    for (var line : lines.stream().filter(line -> !line.isBlank()).skip(1).toList()) {
+      if (line.startsWith("\t")) {
+        listed.add(line.strip().split("\t")[0]);
+      } else {
+        listed = new ArrayList<>();
+        classes.put(line.strip().split("\\s+")[0], listed);
+      }
+    }
+    return classes;
+  }
+
+  /** The vdev paths of a pool's {@code zpool list -vHP} lines, of every class. */
   static List<String> vdevs(List<String> lines) {
-    return lines.stream()
-        .map(line -> line.strip().split("\t")[0])
+    return classes(lines).values().stream()
+        .flatMap(List::stream)
         .filter(name -> name.startsWith("/"))
         .toList();
   }
@@ -91,10 +128,25 @@ final class ImportedPools {
 
   private List<String> listed(List<String> command)
       throws IOException, InterruptedException, TimeoutException {
-    var listed = shell.exec(command);
+    var listed = read(command);
     if (!listed.ok()) {
       throw new IOException("Cannot list the imported pools: " + listed.reason());
     }
     return listed.stdout().lines().filter(line -> !line.isBlank()).toList();
+  }
+
+  /** What zpool answers to {@code command}, refused where it does not answer in time. */
+  private ShellExec.Result read(List<String> command) throws IOException, InterruptedException {
+    try {
+      return Zpool.read(shell, command);
+    } catch (TimeoutException e) {
+      throw new IllegalStateException(
+          "zpool "
+              + Zpool.NO_ANSWER
+              + " ("
+              + String.join(" ", command)
+              + "), so Sail cannot tell whether a device is in use or a zpool's name is taken."
+              + " Nothing was written; run this again once zpool answers.");
+    }
   }
 }

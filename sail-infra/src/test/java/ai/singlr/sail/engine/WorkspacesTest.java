@@ -14,7 +14,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.ProjectDefinition;
 import ai.singlr.sail.config.YamlUtil;
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -636,6 +638,125 @@ class WorkspacesTest {
 
     assertEquals(Workspaces.Change.ALREADY_RUNNING, changed.change());
     assertFalse(shell.invocations().stream().anyMatch(c -> c.startsWith("incus start")));
+  }
+
+  private static final String DIR_AND_MIRROR =
+      """
+      [{"name": "devpool", "driver": "dir", "config": {"source": "/var/lib/incus/storage-pools/devpool"}},
+       {"name": "tank", "driver": "zfs", "config": {"source": "tank", "zfs.pool_name": "tank",
+        "volatile.initial_source": "mirror=/dev/disk/by-id/wwn-0x5000c500a1b2c3d4-part5,/dev/disk/by-id/wwn-0x5000c500e5f6a7b8-part5"}}]
+      """;
+
+  /** What {@code verb} printed on stderr while it ran. */
+  private static String stderrOf(Executable verb) throws Throwable {
+    var err = System.err;
+    var said = new ByteArrayOutputStream();
+    System.setErr(new PrintStream(said, true, StandardCharsets.UTF_8));
+    try {
+      verb.execute();
+    } finally {
+      System.setErr(err);
+    }
+    return said.toString(StandardCharsets.UTF_8);
+  }
+
+  @Test
+  void aWorkspaceOnADegradedPoolIsMadeAndThePoolIsSaidDegradedOnce() throws Throwable {
+    var shell =
+        incus(DIR_AND_MIRROR, list(template("v1", INPUTS)), snapshots("v1"))
+            .onOk(
+                "zpool status -P tank",
+                DeviceFixtures.read("handwritten-mirror-degraded-removed.zpool-status.txt")
+                    .replace("devpool", "tank"));
+
+    var said =
+        stderrOf(
+            () ->
+                workspaces(shell, ticks(0, 1, 2, 3, 4, 5, 6, 7))
+                    .create(acme(), "fix-login", source(), tempDir.resolve("no-files")));
+
+    assertTrue(indexOf(shell, copyArgv("v1")) >= 0, String.join("\n", shell.invocations()));
+    assertEquals(1, said.split("Pool tank is DEGRADED", -1).length - 1, said);
+    assertTrue(
+        said.contains(
+            "sudo zpool replace tank /dev/disk/by-id/wwn-0x5000c500e5f6a7b8-part5 <new device>"),
+        said);
+  }
+
+  @Test
+  void aFaultedPoolRefusesEveryVerbThatChangesAWorkspaceOrTemplateAndChangesNothing() {
+    var shell =
+        incus(
+                DIR_AND_MIRROR,
+                list(template("v1", INPUTS), workspace("acme", "fix-login", "Running", "v1")),
+                snapshots("v1"))
+            .onOk(
+                "zpool status -P tank",
+                DeviceFixtures.read("handwritten-mirror-faulted.zpool-status.txt")
+                    .replace("devpool", "tank"));
+    var workspaces = workspaces(shell, ticks());
+    var refusal =
+        "Pool tank is FAULTED (/dev/disk/by-id/wwn-0x5000c500a1b2c3d4-part5 is UNAVAIL,"
+            + " /dev/disk/by-id/wwn-0x5000c500e5f6a7b8-part5 is UNAVAIL), as zpool status says, so"
+            + " no workspace or template is changed on it. See sudo zpool status tank.";
+
+    for (Executable verb :
+        List.<Executable>of(
+            () -> workspaces.create(acme(), "second", source(), tempDir.resolve("no-files")),
+            () -> templates(shell).ensure(acme(), source()),
+            () -> workspaces.stop("acme", "fix-login"),
+            () -> workspaces.start("acme", "fix-login"),
+            () -> workspaces.delete("acme", "fix-login"))) {
+      assertEquals(refusal, assertThrows(IllegalStateException.class, verb).getMessage());
+    }
+    assertEquals(
+        List.of(),
+        shell.arguments().stream()
+            .filter(a -> a.getFirst().equals("incus"))
+            .filter(a -> List.of("copy", "stop", "start", "delete", "launch").contains(a.get(1)))
+            .toList());
+  }
+
+  @Test
+  void aMirrorWhoseHealthZpoolDoesNotTellRefusesEveryChangeAndChangesNothing() {
+    var scripted =
+        incus(
+            DIR_AND_MIRROR,
+            list(template("v1", INPUTS), workspace("acme", "fix-login", "Running", "v1")),
+            snapshots("v1"));
+    var hanging = new TimingOutShell(scripted, "zpool status");
+    var workspaces = new Workspaces(hanging, hanging, ticks(), locks());
+    var refusal =
+        "Pool tank is a mirror whose health Sail cannot tell: zpool status did not answer within"
+            + " 10 s, so no workspace or template is changed on it. See sudo zpool status tank.";
+
+    for (Executable verb :
+        List.<Executable>of(
+            () -> workspaces.create(acme(), "second", source(), tempDir.resolve("no-files")),
+            () -> workspaces.stop("acme", "fix-login"))) {
+      assertEquals(refusal, assertThrows(IllegalStateException.class, verb).getMessage());
+    }
+    assertEquals(
+        "Pool tank is a mirror whose health Sail cannot tell: zpool cannot be run, so no workspace"
+            + " or template is changed on it. See sudo zpool status tank.",
+        assertThrows(
+                IllegalStateException.class,
+                () ->
+                    workspaces(
+                            incus(
+                                    DIR_AND_MIRROR,
+                                    list(workspace("acme", "fix-login", "Running", "v1")),
+                                    "[]")
+                                .onThrow("zpool", new IOException("no zpool")),
+                            ticks())
+                        .stop("acme", "fix-login"))
+            .getMessage());
+    assertEquals(
+        List.of(),
+        scripted.arguments().stream()
+            .filter(a -> a.getFirst().equals("incus"))
+            .filter(a -> List.of("copy", "stop", "start", "delete", "launch").contains(a.get(1)))
+            .toList());
   }
 
   @Test

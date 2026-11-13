@@ -19,6 +19,7 @@ import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -118,6 +119,27 @@ class ShellExecutorTest {
                 TimeoutException.class,
                 () ->
                     executor.exec(List.of("sh", "-c", "sleep 30"), null, Duration.ofMillis(200))));
+  }
+
+  @Test
+  void aCommandThatTimesOutLeavesNoProcessItStartedRunning(@TempDir Path dir) throws Exception {
+    var pid = dir.resolve("child.pid");
+    var executor = new ShellExecutor(false);
+
+    assertThrows(
+        TimeoutException.class,
+        () ->
+            executor.exec(
+                List.of("bash", "-c", "sleep 300 & echo $! > \"$1\"; wait", "bash", pid.toString()),
+                null,
+                Duration.ofSeconds(1)));
+
+    var child = ProcessHandle.of(Long.parseLong(Files.readString(pid).strip()));
+    if (child.isPresent()) {
+      child.get().onExit().get(10, TimeUnit.SECONDS);
+    }
+    assertFalse(
+        child.map(ProcessHandle::isAlive).orElse(false), "the timed-out command's child runs on");
   }
 
   @Test

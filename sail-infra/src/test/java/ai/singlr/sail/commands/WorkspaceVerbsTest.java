@@ -79,7 +79,7 @@ class WorkspaceVerbsTest {
     assertEquals(
         "The template cannot clone https://github.com/acme/app.git: it asks for credentials and no"
             + " token was given for its host. Pass one with --git-token <token>, or keep"
-            + " GITHUB_TOKEN through sudo with sudo -E.",
+            + " GITHUB_TOKEN through sudo with sudo --preserve-env=GITHUB_TOKEN.",
         failure.getMessage());
     WorkspaceVerbs.requireTokens(acme(), Map.of("*", "tok"), url -> true);
     WorkspaceVerbs.requireTokens(acme(), Map.of(), url -> false);

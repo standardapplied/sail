@@ -1,0 +1,16 @@
+  pool: devpool
+ state: DEGRADED
+status: One or more devices could not be used because the label is missing or
+	invalid.  Sufficient replicas exist for the pool to continue
+	functioning in a degraded state.
+action: Replace the device using 'zpool replace'.
+   see: https://openzfs.github.io/openzfs-docs/msg/ZFS-8000-4J
+config:
+
+	NAME                                            STATE     READ WRITE CKSUM
+	devpool                                         DEGRADED     0     0     0
+	  mirror-0                                      DEGRADED     0     0     0
+	    /dev/disk/by-id/wwn-0x5000c500a1b2c3d4-part5  ONLINE       0     0     0
+	    7209354717441361920                         UNAVAIL      0     0     0  was /dev/disk/by-id/wwn-0x5000c500e5f6a7b8-part5
+
+errors: No known data errors

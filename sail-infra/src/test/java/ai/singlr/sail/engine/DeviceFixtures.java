@@ -30,7 +30,26 @@ public final class DeviceFixtures {
   /** What {@code wipefs} lists on a device that holds nothing: nothing at all. */
   public static final String NOTHING_HELD = "";
 
+  /** The third mirror proof's pool zg: its two data disks, by the by-id names ZFS lists. */
+  public static final String K1 =
+      "/dev/disk/by-id/scsi-0Google_PersistentDisk_sail-fleet-mirrorproof-p3h-k1";
+
+  public static final String K2 =
+      "/dev/disk/by-id/scsi-0Google_PersistentDisk_sail-fleet-mirrorproof-p3h-k2";
+
   private DeviceFixtures() {}
+
+  /**
+   * {@code shell} answering {@code zpool list -vHP <zpool>} with the fixture {@code paths} and
+   * {@code zpool list -vH <zpool>}, the listing {@link PoolMembers} reads names from, with {@code
+   * names}.
+   */
+  public static ScriptedShellExecutor zpoolLists(
+      ScriptedShellExecutor shell, String zpool, String paths, String names) {
+    return shell
+        .onOk("zpool list -vHP " + zpool, read(paths))
+        .onOk("zpool list -vH " + zpool, read(names));
+  }
 
   /** The fixture {@code name}. */
   public static String read(String name) {

@@ -12,6 +12,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.config.YamlUtil;
 import java.io.IOException;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Comparator;
@@ -496,6 +497,19 @@ class PoolDevicesTest {
   }
 
   @Test
+  void aZpoolThatDoesNotAnswerRefusesTheDeviceAfterOneBoundAndIsNeverTakenForNoPools() {
+    var hanging = new TimingOutShell(imported().shell(), "zpool ");
+
+    assertEquals(
+        "zpool did not answer within 10 s (zpool list -H -o name), so Sail cannot tell whether a"
+            + " device is in use or a zpool's name is taken. Nothing was written; run this again"
+            + " once zpool answers.",
+        assertThrows(IllegalStateException.class, () -> devices(hanging).cleared("/dev/sdb"))
+            .getMessage());
+    assertEquals(List.of(Duration.ofSeconds(10)), hanging.deadlines());
+  }
+
+  @Test
   void aPoolWithFilesInItsTopDatasetIsRefusedAndNeverHandedOver() {
     var shell = imported().shell();
 
@@ -548,14 +562,14 @@ class PoolDevicesTest {
 
     assertEquals(
         "/dev/sda5 is refused: /dev/sda5 is a device of zpool oldtank, which is not imported:"
-            + " import it with sudo zpool import oldtank, or clear it yourself with sudo zpool"
-            + " labelclear /dev/sda5.",
+            + " import it with sudo zpool import oldtank, or, if nothing on it is wanted, clear it"
+            + " yourself with sudo zpool labelclear -f /dev/sda5.",
         refused);
     assertFalse(refused.contains("wipefs"), refused);
     assertEquals(
         "/dev/sdb is refused: /dev/sdb1 is a device of zpool exported, which is not imported:"
-            + " import it with sudo zpool import exported, or clear it yourself with sudo zpool"
-            + " labelclear /dev/sdb1.",
+            + " import it with sudo zpool import exported, or, if nothing on it is wanted, clear it"
+            + " yourself with sudo zpool labelclear -f /dev/sdb1.",
         refusal(
             names(new Box(PROBES))
                 .holds("/dev/sdb1", LISTED + "sdb1 0x3f000 zfs_member 1234567890 exported\n")
@@ -567,7 +581,8 @@ class PoolDevicesTest {
   void aPoolMemberOnlyLsblkShowsIsRefusedWithNoErase() {
     assertEquals(
         "/dev/sdd1 is refused: /dev/sdd1 is a device of a zpool, which is not imported: import it"
-            + " with sudo zpool import, or clear it yourself with sudo zpool labelclear /dev/sdd1.",
+            + " with sudo zpool import, or, if nothing on it is wanted, clear it yourself with sudo"
+            + " zpool labelclear -f /dev/sdd1.",
         refusal("gcp2/a-layout-final.lsblk.json", "/dev/sdd1"));
   }
 
@@ -790,6 +805,302 @@ class PoolDevicesTest {
     for (var layout : RAID_LAYOUTS) {
       assertEquals(List.of(), devices(gcp(layout).shell()).candidates(), layout);
     }
+  }
+
+  @Test
+  void twoBlankDisksAreAMirrorOfTwoDevicesEachClearedAsOneIs() throws Exception {
+    var shell = gcp(BLANK).shell();
+
+    var mirror = devices(shell).mirror("/dev/sdb", "/dev/sdc");
+
+    assertEquals(
+        new PoolSource.Mirror(
+            devices(gcp(BLANK).shell()).cleared("/dev/sdb"),
+            devices(gcp(BLANK).shell()).cleared("/dev/sdc"),
+            42949672960L,
+            42949672960L),
+        mirror);
+    assertEquals("zfs on a mirror of /dev/sdb and /dev/sdc", mirror.said());
+    assertEquals(
+        List.of(
+            "realpath -e -- /dev/sdb",
+            "realpath -e -- /dev/sdc",
+            LSBLK,
+            "bash -c " + PoolDevices.OPEN_FILES,
+            "wipefs -- /dev/sdb",
+            "which zpool",
+            "wipefs -- /dev/sdc",
+            "which zpool",
+            String.join(" ", PoolDevices.exclusiveOpen("/dev/sdb")),
+            String.join(" ", PoolDevices.exclusiveOpen("/dev/sdc"))),
+        shell.invocations(),
+        "lsblk and the walk are read once, every slow read of both comes before either device's"
+            + " probe, and the probes of both are the last commands");
+  }
+
+  @Test
+  void blankPartitionsBesideARaid1OnTwoDisksAreAMirrorAndNothingIsWritten() throws Exception {
+    var shell = names(new Box("gcp4/b-local-nvme-ssd.lsblk.json")).shell();
+
+    var mirror = devices(shell).mirror("/dev/sdb2", "/dev/sdc2");
+
+    assertEquals(
+        List.of("/dev/sdb2", "/dev/sdc2"),
+        mirror.devices().stream().map(PoolSource.Device::path).toList());
+    assertEquals("zfs on a mirror of /dev/sdb2 and /dev/sdc2", mirror.said());
+    assertEquals(
+        List.of(),
+        shell.arguments().stream()
+            .filter(argv -> argv.getFirst().equals("wipefs"))
+            .filter(argv -> argv.contains("--all") && !argv.contains("--no-act"))
+            .toList(),
+        "every probe of either device only reads");
+  }
+
+  @Test
+  void theOwnersTwoRaid1DisksOfferNoDeviceToAMirror() {
+    var refused =
+        assertThrows(
+                IllegalArgumentException.class,
+                () ->
+                    devices(names(new Box(DEVBOX)).shell())
+                        .mirror("/dev/nvme0n1p4", "/dev/nvme1n1p4"))
+            .getMessage();
+
+    assertTrue(refused.startsWith("/dev/nvme0n1p4 is refused: "), refused);
+    assertTrue(refused.contains("/dev/md2 is mounted at /;"), refused);
+  }
+
+  @Test
+  void twoPartitionsOfOneDiskAreRefusedAsAMirrorBeforeAnyProbe() {
+    var shell = names(new Box(HOLDERS)).shell();
+
+    var refused =
+        assertThrows(
+            IllegalArgumentException.class, () -> devices(shell).mirror("/dev/sdg1", "/dev/sdg2"));
+
+    assertEquals(
+        "/dev/sdg1 and /dev/sdg2 cannot be a mirror: both are on /dev/sdg, and a mirror on one"
+            + " disk dies with it.",
+        refused.getMessage());
+    assertEquals(
+        List.of("realpath -e -- /dev/sdg1", "realpath -e -- /dev/sdg2", LSBLK),
+        shell.invocations());
+    assertEquals(
+        "/dev/sdg1 and /dev/sdg1 cannot be a mirror: both name /dev/sdg1.",
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> devices(names(new Box(HOLDERS)).shell()).mirror("/dev/sdg1", "/dev/sdg1"))
+            .getMessage());
+  }
+
+  @Test
+  void twoNamesOfOnePhysicalDiskAreRefusedAsAMirror() {
+    var layouts = "handwritten-mirror-layouts.lsblk.json";
+    assertEquals(
+        "/dev/nvme0n2 and /dev/nvme0n3 cannot be a mirror: /dev/nvme0n2 and /dev/nvme0n3 are"
+            + " namespaces of one NVMe controller, nvme0, which dies with both.",
+        mirrorRefusal(layouts, "/dev/nvme0n2", "/dev/nvme0n3"));
+    assertEquals(
+        "/dev/sdb and /dev/sdc cannot be a mirror: /dev/sdb and /dev/sdc have one WWN,"
+            + " 0x5000c500a1b2c3d4: they are two paths to one disk.",
+        mirrorRefusal(layouts, "/dev/sdb", "/dev/sdc"));
+    assertEquals(
+        "/dev/sdd and /dev/sde cannot be a mirror: /dev/sdd and /dev/sde report one serial,"
+            + " ZA1B2C3E: they are one disk seen twice.",
+        mirrorRefusal(layouts, "/dev/sdd", "/dev/sde"));
+  }
+
+  @Test
+  void aBlankDeviceBesideOneHoldingExt4IsRefusedNamingTheSecondAndWhatItHolds() {
+    var shell = spares().shell();
+
+    var refused =
+        assertThrows(
+            IllegalArgumentException.class, () -> devices(shell).mirror("/dev/sdh", "/dev/sdd"));
+
+    assertEquals(
+        "/dev/sdd holds ext4. Sail erases nothing: if nothing on it is wanted, erase it yourself"
+            + " with sudo wipefs --all /dev/sdd, then run this again.",
+        refused.getMessage());
+    assertNothingWritten(shell);
+  }
+
+  @Test
+  void aDeviceAProcessHoldsRefusesTheMirrorNamingTheHolderBeforeEitherIsProbed() {
+    var shell = spares().open(4242, "python3", "/dev/sdk").shell();
+
+    var refused =
+        assertThrows(
+            IllegalArgumentException.class, () -> devices(shell).mirror("/dev/sdh", "/dev/sdk"));
+
+    assertEquals(
+        "/dev/sdk is refused: process 4242 (python3) has /dev/sdk open.", refused.getMessage());
+    assertTrue(
+        shell.invocations().stream()
+            .noneMatch(c -> c.startsWith("wipefs") && c.endsWith("/dev/sdk")),
+        "the held device is never probed: " + shell.invocations());
+  }
+
+  @Test
+  void devicesOfSizesZpoolMirrorsOnlyWithForceAreRefusedAndANearMatchSaysWhatGoesUnused()
+      throws Exception {
+    var layouts = "handwritten-mirror-layouts.lsblk.json";
+    var refuses =
+        ", and zpool create refuses, without the force Sail never passes, a mirror whose devices"
+            + " differ by more than 16 MiB: name two devices of one size, such as a partition of"
+            + " that size on each disk.";
+    assertEquals(
+        "/dev/sdh and /dev/sdi cannot be a mirror: /dev/sdh is 40.0 GiB and /dev/sdi 60.0 GiB,"
+            + " 20480.0 MiB apart"
+            + refuses,
+        mirrorRefusal(layouts, "/dev/sdh", "/dev/sdi"));
+    assertEquals(
+        "/dev/sdj and /dev/sdk cannot be a mirror: /dev/sdj is 20.0 GiB (21474836480 bytes) and"
+            + " /dev/sdk 20.0 GiB (21492662272 bytes), 17.0 MiB apart"
+            + refuses,
+        mirrorRefusal(layouts, "/dev/sdj", "/dev/sdk"),
+        "a pair only just past zpool's 16 MiB is refused, its sizes in bytes as they round alike");
+    assertEquals(
+        "/dev/sdj and /dev/sdl cannot be a mirror: /dev/sdj is 20.0 GiB and /dev/sdl 20.1 GiB,"
+            + " 100.0 MiB apart"
+            + refuses,
+        mirrorRefusal(layouts, "/dev/sdj", "/dev/sdl"));
+    assertEquals(
+        "zfs on a mirror of /dev/sdf and /dev/sdg, 8.0 MiB of /dev/sdg unused",
+        devices(names(new Box(layouts)).shell()).mirror("/dev/sdf", "/dev/sdg").said());
+  }
+
+  @Test
+  void aWholeDiskBesideAPartitionIsSaidAsZfsSizesItNotByTheirRawBytes() throws Exception {
+    var layouts = "handwritten-mirror-layouts.lsblk.json";
+
+    var mirror = devices(names(new Box(layouts)).shell()).mirror("/dev/sdm", "/dev/sdn1");
+
+    assertEquals(
+        "zfs on a mirror of /dev/sdm and /dev/sdn1, a whole disk and a partition: ZFS sizes it to"
+            + " the smaller of the partition and the disk's first partition, about 9 MiB less than"
+            + " the disk",
+        mirror.said(),
+        "equal raw sizes, yet ZFS partitions the whole disk, so no figure of what goes unused is"
+            + " true");
+  }
+
+  private static final String LEFT = "gcp5/d-225-destroyed-mirror-on-two-whole-disks.lsblk.json";
+
+  /** The proof's two whole disks after the destroyed mirror zpend, with their real listings. */
+  private static Box leftovers(String layout) {
+    var box = names(new Box(layout));
+    for (var disk : List.of("sdf", "sdg")) {
+      box.holds("/dev/" + disk, fixture("gcp5/d-225-wipefs-" + disk + ".txt"));
+      if (layout.equals(LEFT)) {
+        box.holds("/dev/" + disk + "1", fixture("gcp5/d-225-wipefs-" + disk + "1.txt"));
+      }
+    }
+    return box;
+  }
+
+  @Test
+  void theRemedyForWhatAZpoolLeftNamesBothDisksAndEndsInAMirrorAfterOneRefusal() throws Exception {
+    var refused =
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> devices(leftovers(LEFT).shell()).mirror("/dev/sdf", "/dev/sdg"))
+            .getMessage();
+
+    assertEquals(
+        "/dev/sdf holds only what a zpool left: its data partition /dev/sdf1, carrying the labels"
+            + " of zpool zpend, which cannot be imported, and its reserved partition /dev/sdf9. Sail"
+            + " erases nothing: if nothing on it is wanted, return it to blank yourself with sudo"
+            + " zpool labelclear /dev/sdf1, then sudo wipefs --all /dev/sdf, then run this again.\n"
+            + "/dev/sdg holds only what a zpool left: its data partition /dev/sdg1, carrying the labels"
+            + " of zpool zpend, which cannot be imported, and its reserved partition /dev/sdg9. Sail"
+            + " erases nothing: if nothing on it is wanted, return it to blank yourself with sudo"
+            + " zpool labelclear /dev/sdg1, then sudo wipefs --all /dev/sdg, then run this again.",
+        refused);
+    var made =
+        devices(
+                names(new Box("gcp5/handwritten-d-225-after-the-printed-remedy.lsblk.json"))
+                    .shell())
+            .mirror("/dev/sdf", "/dev/sdg");
+    assertEquals("zfs on a mirror of /dev/sdf and /dev/sdg", made.said());
+  }
+
+  @Test
+  void aDiskWhoseZpoolLabelsAreClearedNeedsOnlyItsTableErased() {
+    assertEquals(
+        "/dev/sdf holds only what a zpool left: its data partition /dev/sdf1, which carries"
+            + " nothing, and its reserved partition /dev/sdf9. Sail erases nothing: if nothing on it"
+            + " is wanted, return it to blank yourself with sudo wipefs --all /dev/sdf, then run this"
+            + " again.",
+        refusal(leftovers("gcp5/d-226-labels-cleared.lsblk.json"), "/dev/sdf"));
+  }
+
+  @Test
+  void theLeftoversOfAPoolZpoolCanStillImportAreNeverOfferedAnErase() {
+    var refused = refusal(leftovers(LEFT).importable("zpend"), "/dev/sdf");
+
+    assertEquals(
+        "/dev/sdf is refused: /dev/sdf1 is a device of zpool zpend, which is not imported: import it"
+            + " with sudo zpool import zpend, or, if nothing on it is wanted, clear it yourself with"
+            + " sudo zpool labelclear -f /dev/sdf1.",
+        refused);
+  }
+
+  @Test
+  void oneRefusalNamesWhatIsWrongWithEachDeviceInTheOrderNamed() {
+    var refused =
+        assertThrows(
+                IllegalArgumentException.class,
+                () ->
+                    devices(
+                            spares()
+                                .holds("/dev/sdh", EXT4)
+                                .open(4242, "python3", "/dev/sdk")
+                                .shell())
+                        .mirror("/dev/sdh", "/dev/sdk"))
+            .getMessage();
+
+    assertEquals(
+        "/dev/sdh holds ext4. Sail erases nothing: if nothing on it is wanted, erase it yourself"
+            + " with sudo wipefs --all /dev/sdh, then run this again.\n/dev/sdk is refused: process"
+            + " 4242 (python3) has /dev/sdk open.",
+        refused);
+  }
+
+  @Test
+  void aSecondDeviceSomethingHoldsExclusivelyIsRefusedNamingWhatItsOwnProbesFound() {
+    var shell = spares().holds("/dev/sdk", EXT4).busy("/dev/sdk").shell();
+
+    var refused =
+        assertThrows(
+            IllegalArgumentException.class, () -> devices(shell).mirror("/dev/sdh", "/dev/sdk"));
+
+    assertEquals(
+        "/dev/sdk is refused: /dev/sdk holds ext4 and is held exclusively by something Sail cannot"
+            + " name: a mount in another namespace, an array, a pool, or a process that opened it"
+            + " exclusively.",
+        refused.getMessage());
+  }
+
+  private static String mirrorRefusal(String layout, String one, String other) {
+    return assertThrows(
+            IllegalArgumentException.class,
+            () -> devices(names(new Box(layout)).shell()).mirror(one, other))
+        .getMessage();
+  }
+
+  private static void assertNothingWritten(ScriptedShellExecutor shell) {
+    assertEquals(
+        List.of(),
+        shell.arguments().stream()
+            .filter(argv -> !argv.getFirst().equals("wipefs") || !argv.contains("--no-act"))
+            .filter(
+                argv ->
+                    argv.getFirst().equals("wipefs") && argv.contains("--all")
+                        || argv.getFirst().equals("zpool") && argv.contains("create")
+                        || argv.contains("storage") && argv.contains("create"))
+            .toList());
   }
 
   private static PoolDevices devices(ShellExec shell) {
@@ -1017,8 +1328,8 @@ class PoolDevicesTest {
             "/dev/sdb"));
     assertEquals(
         "/dev/sdd is refused: /dev/sdd1 is a device of zpool handpool, which is not imported:"
-            + " import it with sudo zpool import handpool, or clear it yourself with sudo zpool"
-            + " labelclear /dev/sdd1.",
+            + " import it with sudo zpool import handpool, or, if nothing on it is wanted, clear it"
+            + " yourself with sudo zpool labelclear -f /dev/sdd1.",
         refusal(
             names(new Box("gcp3/c-layout-exported-pool.lsblk.json"))
                 .holds("/dev/sdd1", LISTED + "sdd1 0x3f000 zfs_member 1234567890 handpool\n")

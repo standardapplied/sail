@@ -82,7 +82,7 @@ public final class HostProvisioner {
    * Runs all provisioning steps and writes host.yaml.
    *
    * @param source what the storage pool is made from; a device as {@link PoolDevices#cleared}
-   *     cleared it
+   *     cleared it, or two as {@link PoolDevices#mirror} did
    * @param pool the storage pool name (e.g. {@code devpool})
    * @param bridge the network bridge name (e.g. {@code incusbr0})
    * @param serverIp the server's public IP address (for SSH config generation), may be null
@@ -289,7 +289,15 @@ public final class HostProvisioner {
     if (existing.isPresent()) {
       var held = existing.get();
       held.requireDriver(source.driver());
-      stepDone(5, pool + " (" + held.driver() + " on " + held.source() + ", already exists)");
+      held.requireFinished();
+      stepDone(
+          5,
+          pool
+              + " ("
+              + held.driver()
+              + " on "
+              + PoolMembers.of(reads, held).requireAnswered().said()
+              + ", already exists)");
       return;
     }
     var restarted = make(pool, source);
@@ -303,10 +311,19 @@ public final class HostProvisioner {
    * since the operator named it, or while Incus restarted. An incusd that started before the ZFS
    * tools were installed and does not see them is restarted only when it runs no container, since a
    * restart ends every {@code incus exec} into one; otherwise the operator is told to restart it.
-   * Returns what the step says it did.
+   * Before any of it, a mirror needs an Incus that makes one (a dry run asks the Incus the box has,
+   * when it has one), and a device's pool a name no imported zpool has, since zpool labels the
+   * devices before it finds the name taken. Returns what the step says it did.
    */
   private String make(String pool, PoolSource source)
       throws IOException, InterruptedException, TimeoutException {
+    if (source instanceof PoolSource.Mirror
+        && (!shell.isDryRun() || read(List.of("which", "incus")).ok())) {
+      new IncusStorage(reads).requireMirrors();
+    }
+    if (source instanceof PoolSource.Device || source instanceof PoolSource.Mirror) {
+      requireUnnamed(pool);
+    }
     clearedAgain(source);
     var made = storage.create(pool, source);
     var unseen = !made.ok() && IncusStorage.zfsUnseen(made);
@@ -322,21 +339,53 @@ public final class HostProvisioner {
     return unseen ? "; restarted Incus, which ran no container, to see ZFS" : "";
   }
 
-  /** Refuses a device that is no longer the one first cleared, or no longer carries nothing. */
+  /**
+   * Refuses a device, or either device of a mirror, that is no longer the one first cleared, or no
+   * longer carries nothing; a mirror's two are cleared again together, so the last look at each is
+   * right before the create.
+   */
   private void clearedAgain(PoolSource source)
       throws IOException, InterruptedException, TimeoutException {
-    if (!(source instanceof PoolSource.Device device) || shell.isDryRun()) {
+    if (shell.isDryRun()) {
       return;
     }
-    var now = devices.cleared(device.path());
-    if (!now.equals(source)) {
+    switch (source) {
+      case PoolSource.Device device -> requireSame(device, devices.cleared(device.path()));
+      case PoolSource.Mirror mirror -> {
+        var now = devices.mirror(mirror.one().path(), mirror.other().path());
+        requireSame(mirror.one(), now.one());
+        requireSame(mirror.other(), now.other());
+      }
+      default -> {}
+    }
+  }
+
+  private static void requireSame(PoolSource.Device first, PoolSource.Device now) {
+    if (!now.equals(first)) {
       throw new IllegalStateException(
-          device.path()
+          first.path()
               + " is not the device first cleared: it was "
-              + device.identity()
+              + first.identity()
               + ", it is now "
               + now.identity()
               + ".");
+    }
+  }
+
+  /**
+   * Refuses pool {@code pool} when an imported zpool already has its name, which is no pool Incus
+   * holds (step 5 found none): {@code zpool create} would label the devices before it found the
+   * name taken.
+   */
+  private void requireUnnamed(String pool)
+      throws IOException, InterruptedException, TimeoutException {
+    if (new ImportedPools(reads).names().contains(pool)) {
+      throw new IllegalStateException(
+          "zpool "
+              + pool
+              + " is already imported on this box, and Incus holds no pool of that name, so none"
+              + " is made under it. Nothing was written. Export or rename that zpool yourself, or"
+              + " name another pool with --pool <name>.");
     }
   }
 
@@ -450,8 +499,8 @@ public final class HostProvisioner {
 
   /** The pool a dry run would have made, as {@code host.yaml} would state it. */
   private static IncusStorage.Pool planned(String pool, PoolSource source) {
-    var from = source instanceof PoolSource.Device device ? device.path() : null;
-    return new IncusStorage.Pool(pool, source.driver(), from, null, null, Optional.empty());
+    return new IncusStorage.Pool(
+        pool, source.driver(), IncusStorage.sourceOf(source), null, null, Optional.empty());
   }
 
   private void cacheImage() throws IOException, InterruptedException, TimeoutException {

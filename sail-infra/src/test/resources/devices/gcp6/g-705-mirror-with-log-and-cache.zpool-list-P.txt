@@ -1,0 +1,8 @@
+zg	9.50G	2.11M	9.50G	-	-	0%	0%	1.00x	ONLINE	-
+	mirror-0	9.50G	2.11M	9.50G	-	-	0%	0.02%	-	ONLINE
+	/dev/disk/by-id/scsi-0Google_PersistentDisk_sail-fleet-mirrorproof-p3h-k1-part1	9.99G	-	-	-	-	-	-	-	ONLINE
+	/dev/disk/by-id/scsi-0Google_PersistentDisk_sail-fleet-mirrorproof-p3h-k2-part1	9.99G	-	-	-	-	-	-	-	ONLINE
+logs                                                                                     -      -      -        -         -      -      -      -         -
+	/dev/sde1	9.99G	0	9.50G	-	-	0%	0.00%	-	ONLINE
+cache                                                                                    -      -      -        -         -      -      -      -         -
+	/dev/sdf1	9.99G	0	9.99G	-	-	0%	0.00%	-	ONLINE

@@ -1,0 +1,11 @@
+  pool: devpool
+ state: ONLINE
+config:
+
+	NAME                                            STATE     READ WRITE CKSUM
+	devpool                                         ONLINE       0     0     0
+	  mirror-0                                      ONLINE       0     0     0
+	    /dev/disk/by-id/wwn-0x5000c500a1b2c3d4-part5  ONLINE       0     0     0
+	    /dev/disk/by-id/wwn-0x5000c500e5f6a7b8-part5  ONLINE       0     0     0
+
+errors: No known data errors

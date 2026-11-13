@@ -5,13 +5,16 @@
 
 package ai.singlr.sail.engine;
 
+import ai.singlr.sail.common.Strings;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.regex.Pattern;
 import java.util.stream.Stream;
 
 /** What lsblk and the probes show that keeps a pool off a device, each said as a reason. */
@@ -33,7 +36,13 @@ final class DeviceRules {
   private static final String SWAP = "[SWAP]";
   private static final long SECTOR = 512;
   private static final String ZFS = "zfs_member";
+  private static final String ZFS_DATA = "6a898cc3-1dd2-11b2-99a6-080020736631";
+  private static final String ZFS_RESERVED = "6a945a3b-1dd2-11b2-99a6-080020736631";
+  private static final long ZFS_RESERVED_BYTES = 8L << 20;
+  private static final Set<String> LEFT = Set.of("gpt", "PMBR");
   private static final Set<String> HELD = Set.of("bcache", "ceph_bluestore", "crypto_LUKS");
+  private static final long MIRROR_FUZZ = 16L << 20;
+  private static final Pattern NVME_NAMESPACE = Pattern.compile("(nvme[0-9]+)n[0-9]+");
   private static final Map<String, String> MEMBERS =
       Map.of(
           "linux_raid_member",
@@ -206,6 +215,68 @@ final class DeviceRules {
     return List.copyOf(uses);
   }
 
+  /**
+   * What returns {@code device} to blank when it holds only what a zpool left on a whole disk:
+   * zpool's own layout ({@code make_disks}), a GPT with a ZFS data partition and its 8 MiB reserved
+   * partition, the data partition carrying nothing or the labels of a zpool {@code zpool import}
+   * does not list (destroyed), and nothing else on the disk. None for any other device, whose rules
+   * say what it holds. The commands are in the order to run them: {@code zpool labelclear} of the
+   * labels, which needs the partition, then {@code wipefs --all} of the disk's table.
+   */
+  static Optional<String> zpoolLeftovers(
+      BlockDevice device,
+      Map<String, List<String>> signatures,
+      Map<String, String> pools,
+      Set<String> importable) {
+    var partitions = device.children();
+    if (!BlockDevice.DISK.equals(device.type())
+        || device.fstype() != null
+        || !"gpt".equals(device.pttype())
+        || partitions.size() != 2
+        || partitions.stream().anyMatch(part -> !part.partition() || !part.children().isEmpty())
+        || !LEFT.containsAll(signatures.getOrDefault(device.path(), List.of()))) {
+      return Optional.empty();
+    }
+    var data = partitions.stream().filter(part -> typedAs(part, ZFS_DATA)).findFirst();
+    var reserved =
+        partitions.stream()
+            .filter(part -> typedAs(part, ZFS_RESERVED) && part.size() == ZFS_RESERVED_BYTES)
+            .findFirst();
+    if (data.isEmpty()
+        || reserved.isEmpty()
+        || reserved.get().fstype() != null
+        || !signatures.getOrDefault(reserved.get().path(), List.of()).isEmpty()
+        || !Set.of(ZFS).containsAll(signatures.getOrDefault(data.get().path(), List.of()))
+        || (data.get().fstype() != null && !ZFS.equals(data.get().fstype()))) {
+      return Optional.empty();
+    }
+    var labelled =
+        ZFS.equals(data.get().fstype())
+            || signatures.getOrDefault(data.get().path(), List.of()).contains(ZFS);
+    var pool = pools.get(data.get().path());
+    if (labelled && (pool == null || importable.contains(pool))) {
+      return Optional.empty();
+    }
+    return Optional.of(
+        "holds only what a zpool left: its data partition "
+            + data.get().path()
+            + (labelled
+                ? ", carrying the labels of zpool " + pool + ", which cannot be imported,"
+                : ", which carries nothing,")
+            + " and its reserved partition "
+            + reserved.get().path()
+            + ". Sail erases nothing: if nothing on it is wanted, return it to blank yourself with "
+            + (labelled ? "sudo zpool labelclear " + data.get().path() + ", then " : "")
+            + "sudo wipefs --all "
+            + device.path()
+            + ", then run this again");
+  }
+
+  private static boolean typedAs(BlockDevice partition, String type) {
+    return partition.parttype() != null
+        && type.equals(partition.parttype().toLowerCase(Locale.ROOT));
+  }
+
   /** Whether {@code type} marks a device as part of something Sail must not take apart. */
   static boolean member(String type) {
     return type != null && (type.endsWith("_member") || HELD.contains(type));
@@ -229,7 +300,7 @@ final class DeviceRules {
           + (pool == null ? "a zpool" : "zpool " + pool)
           + ", which is not imported: import it with sudo zpool import"
           + (pool == null ? "" : " " + pool)
-          + ", or clear it yourself with sudo zpool labelclear "
+          + ", or, if nothing on it is wanted, clear it yourself with sudo zpool labelclear -f "
           + path;
     }
     return path
@@ -286,6 +357,82 @@ final class DeviceRules {
           .forEach(type -> holds.add(type + on));
     }
     return List.copyOf(holds);
+  }
+
+  /**
+   * Why the devices at {@code one} and {@code other} cannot be a mirror: they are not on two
+   * physical disks, since a mirror on one disk dies with it (the same device, partitions of one
+   * disk, two paths to one disk by its WWN or serial, or two namespaces of one NVMe controller); or
+   * their sizes differ by more than the 16 MiB {@code zpool create} mirrors without force ({@code
+   * ZPOOL_FUZZ}, OpenZFS {@code zpool_vdev.c}), which Sail never passes.
+   */
+  static List<String> mirrorable(BlockTree.Place one, BlockTree.Place other) {
+    var reasons = new ArrayList<String>();
+    var disk = one.disk();
+    var twin = other.disk();
+    if (one.device() == other.device()) {
+      reasons.add("both name " + one.device().path());
+    } else if (disk == twin) {
+      reasons.add("both are on " + disk.path() + ", and a mirror on one disk dies with it");
+    } else if (disk.wwn() != null && disk.wwn().equals(twin.wwn())) {
+      reasons.add(
+          disk.path()
+              + " and "
+              + twin.path()
+              + " have one WWN, "
+              + disk.wwn()
+              + ": they are two paths to one disk");
+    } else if (disk.serial() != null && disk.serial().equals(twin.serial())) {
+      reasons.add(
+          disk.path()
+              + " and "
+              + twin.path()
+              + " report one serial, "
+              + disk.serial()
+              + ": they are one disk seen twice");
+    } else if (controller(disk).isPresent() && controller(disk).equals(controller(twin))) {
+      reasons.add(
+          disk.path()
+              + " and "
+              + twin.path()
+              + " are namespaces of one NVMe controller, "
+              + controller(disk).get()
+              + ", which dies with both");
+    }
+    var sizes = Math.abs(one.device().size() - other.device().size());
+    if (reasons.isEmpty() && sizes > MIRROR_FUZZ) {
+      reasons.add(
+          one.device().path()
+              + " is "
+              + size(one.device(), other.device())
+              + " and "
+              + other.device().path()
+              + " "
+              + size(other.device(), one.device())
+              + ", "
+              + String.format(Locale.ROOT, "%.1f MiB", sizes / (double) (1L << 20))
+              + " apart, and zpool create refuses, without the force Sail never passes, a mirror"
+              + " whose devices differ by more than 16 MiB: name two devices of one size, such as"
+              + " a partition of that size on each disk");
+    }
+    return reasons;
+  }
+
+  /**
+   * {@code device}'s size as a refusal names it beside {@code twin}'s: in bytes when both round
+   * alike.
+   */
+  private static String size(BlockDevice device, BlockDevice twin) {
+    var rounded = Strings.gibibytes(device.size());
+    return rounded.equals(Strings.gibibytes(twin.size()))
+        ? rounded + " (" + device.size() + " bytes)"
+        : rounded;
+  }
+
+  /** The NVMe controller {@code disk} is a namespace of, by its kernel name. */
+  private static Optional<String> controller(BlockDevice disk) {
+    var matched = NVME_NAMESPACE.matcher(Objects.requireNonNullElse(disk.kname(), ""));
+    return matched.matches() ? Optional.of(matched.group(1)) : Optional.empty();
   }
 
   /** What a device that is neither a disk nor a partition is, as a refusal names it. */

@@ -13,12 +13,16 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import ai.singlr.sail.config.HostYaml;
 import ai.singlr.sail.config.ListenConfig;
 import ai.singlr.sail.config.YamlUtil;
+import ai.singlr.sail.engine.DeviceFixtures;
 import ai.singlr.sail.engine.HostDetector;
 import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.ScriptedShellExecutor;
+import ai.singlr.sail.engine.ShellExec;
+import ai.singlr.sail.engine.TimingOutShell;
 import java.io.ByteArrayOutputStream;
 import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -299,6 +303,217 @@ class HostStatusCommandTest {
         rows(shell, "Pool:", "Note:"));
   }
 
+  private static final String A = "/dev/disk/by-id/wwn-0x5000c500a1b2c3d4-part5";
+  private static final String B = "/dev/disk/by-id/wwn-0x5000c500e5f6a7b8-part5";
+
+  /** A row under a pool's first, as the banner prints it. */
+  private static final String CONTINUED = "  │" + " ".repeat(15);
+
+  /** A box whose Incus holds devpool, a mirror of A and B, and whose zpool says {@code status}. */
+  private static ScriptedShellExecutor mirror(String status) {
+    return new ScriptedShellExecutor()
+        .onOk("incus list", "[]")
+        .onOk(
+            "incus storage list",
+            "[{\"name\": \"devpool\", \"driver\": \"zfs\", \"config\": {\"source\": \"devpool\","
+                + " \"volatile.initial_source\": \"mirror="
+                + A
+                + ","
+                + B
+                + "\", \"zfs.pool_name\": \"devpool\"}}]")
+        .onOk(
+            "incus query /1.0/storage-pools/devpool/resources",
+            "{\"space\": {\"used\": 4294967296, \"total\": 21474836480}}")
+        .on(
+            "zpool status -P devpool",
+            status.startsWith("cannot")
+                ? new ShellExec.Result(1, "", status)
+                : new ShellExec.Result(0, DeviceFixtures.read(status), ""));
+  }
+
+  @Test
+  void aMirrorIsSaidAsItsTwoDevicesWithItsHealthAsZfsSaysIt() throws Exception {
+    var online = mirror("handwritten-mirror-online.zpool-status.txt");
+
+    var rows = rows(online, "Pool:", "health ");
+    assertEquals(2, rows.size(), rows.toString());
+    assertTrue(
+        rows.getFirst().startsWith("  │  Pool:        devpool (zfs, a mirror of " + A),
+        rows.toString());
+    assertEquals(CONTINUED + "health ONLINE", rows.getLast());
+    var pool = ((List<?>) json(online).get("pools")).getFirst();
+    assertEquals(
+        Map.of(
+            "name",
+            "devpool",
+            "driver",
+            "zfs",
+            "source",
+            "mirror=" + A + "," + B,
+            "used_bytes",
+            4294967296L,
+            "total_bytes",
+            21474836480L,
+            "health",
+            "ONLINE",
+            "unhealthy",
+            List.of()),
+        pool);
+  }
+
+  @Test
+  void aDegradedMirrorNamesTheMissingDeviceAndTheReplaceThatMendsIt() throws Exception {
+    var degraded = mirror("handwritten-mirror-degraded-at-import.zpool-status.txt");
+
+    var rows = rows(degraded, "health ", " UNAVAIL", "zpool replace");
+    assertEquals(
+        List.of(CONTINUED + "health DEGRADED", CONTINUED + B + " UNAVAIL"), rows.subList(0, 2));
+    assertTrue(
+        rows.get(2).startsWith(CONTINUED + "replace " + B + ": sudo zpool replace devpool"),
+        rows.toString());
+    var pool = (Map<?, ?>) ((List<?>) json(degraded).get("pools")).getFirst();
+    assertEquals("DEGRADED", pool.get("health"));
+    assertEquals(List.of(Map.of("device", B, "state", "UNAVAIL")), pool.get("unhealthy"));
+  }
+
+  @Test
+  void aDeviceTakenOfflineNamesTheOnlineThatBringsItBack() throws Exception {
+    assertEquals(
+        List.of(
+            CONTINUED + "health DEGRADED",
+            CONTINUED + "/dev/sdc1 OFFLINE",
+            CONTINUED + "bring /dev/sdc1 back: sudo zpool online devpool /dev/sdc1"),
+        rows(
+            mirror("gcp5/e-501-mirror-offline.zpool-status.txt"), "health ", " OFFLINE", "zpool "));
+  }
+
+  @Test
+  void aFaultedOrUnimportedPoolIsSaidSo() throws Exception {
+    assertEquals(
+        List.of(
+            CONTINUED + "health FAULTED", CONTINUED + A + " UNAVAIL", CONTINUED + B + " UNAVAIL"),
+        rows(mirror("handwritten-mirror-faulted.zpool-status.txt"), "health ", " UNAVAIL"));
+    assertEquals(
+        List.of(CONTINUED + "health not imported"),
+        rows(mirror("cannot open 'devpool': no such pool"), "health "));
+  }
+
+  @Test
+  void aZpoolThatDoesNotAnswerIsSaidSoAndTheStatusGoesOn() throws Exception {
+    var hanging =
+        new TimingOutShell(mirror("handwritten-mirror-online.zpool-status.txt"), "zpool status");
+    var out = new ByteArrayOutputStream();
+
+    HostStatusCommand.report(
+        RECORDED_AT_INIT,
+        HOST,
+        hanging,
+        false,
+        OperatorCommand.SUDO,
+        new PrintStream(out, true, StandardCharsets.UTF_8));
+
+    var text = out.toString(StandardCharsets.UTF_8);
+    assertTrue(text.contains(CONTINUED + "health did not answer within 10 s"), text);
+    assertTrue(text.contains("Containers:"), text);
+  }
+
+  @Test
+  void aZpoolThatHangsCostsOneBoundPerPoolAndThePoolIsSaidAsIncusRecordedIt() throws Exception {
+    var hanging =
+        new TimingOutShell(
+            new ScriptedShellExecutor()
+                .onOk("incus list", "[]")
+                .onOk(
+                    "incus storage list",
+                    "[{\"name\": \"devpool\", \"driver\": \"zfs\", \"config\": {\"source\":"
+                        + " \"devpool\", \"volatile.initial_source\": \"mirror="
+                        + A
+                        + ","
+                        + B
+                        + "\", \"zfs.pool_name\": \"devpool\"}}, {\"name\": \"zg\", \"driver\":"
+                        + " \"zfs\", \"config\": {\"source\": \"zg\", \"volatile.initial_source\":"
+                        + " \"/dev/sdd\", \"zfs.pool_name\": \"zg\"}}]"),
+            "zpool ");
+
+    var text = report(hanging, false);
+
+    assertEquals(List.of(Duration.ofSeconds(10), Duration.ofSeconds(10)), hanging.deadlines());
+    assertTrue(
+        text.contains(
+            "Pool:        zg (zfs, /dev/sdd (as Incus recorded at creation: zpool zg did not answer"
+                + " within"),
+        text);
+    assertEquals(
+        2, text.split(CONTINUED + "health did not answer within 10 s", -1).length - 1, text);
+    var zg =
+        (Map<?, ?>) ((List<?>) YamlUtil.parseMap(report(hanging, true)).get("pools")).getLast();
+    assertEquals(List.of("/dev/sdd"), zg.get("devices"));
+    assertEquals("incus record, zpool did not answer", zg.get("devices_from"));
+    assertEquals("did not answer within 10 s", zg.get("health"));
+    assertTrue(text.contains("Containers:"), text);
+  }
+
+  @Test
+  void aPoolIsSaidOnTheDevicesZfsListsNowNotTheNamesIncusRecorded() throws Exception {
+    var replaced =
+        mirror("handwritten-mirror-online.zpool-status.txt")
+            .onOk(
+                "zpool list -vHP devpool",
+                "devpool\t19.5G\t1M\t19.5G\t-\t-\t0%\t0%\t1.00x\tONLINE\t-\n"
+                    + "\tmirror-0\t19.5G\t1M\t19.5G\t-\t-\t0%\t0.00%\t-\tONLINE\n"
+                    + "\t/dev/sdb1\t20.0G\t-\t-\t-\t-\t-\t-\t-\tONLINE\n"
+                    + "\t/dev/sdk1\t20.0G\t-\t-\t-\t-\t-\t-\t-\tONLINE\n")
+            .onOk(
+                "zpool list -vH devpool",
+                "devpool\t19.5G\t1M\t19.5G\t-\t-\t0%\t0%\t1.00x\tONLINE\t-\n"
+                    + "\tmirror-0\t19.5G\t1M\t19.5G\t-\t-\t0%\t0.00%\t-\tONLINE\n"
+                    + "\tsdb\t20.0G\t-\t-\t-\t-\t-\t-\t-\tONLINE\n"
+                    + "\tsdk\t20.0G\t-\t-\t-\t-\t-\t-\t-\tONLINE\n");
+
+    assertEquals(
+        List.of(
+            "  │  Pool:        devpool (zfs, a mirror of /dev/sdb and /dev/sdk): 16.0 GiB free of"
+                + " 20.0 GiB"),
+        rows(replaced, "Pool:"));
+    var pool = (Map<?, ?>) ((List<?>) json(replaced).get("pools")).getFirst();
+    assertEquals(List.of("/dev/sdb", "/dev/sdk"), pool.get("devices"));
+    assertEquals("zfs", pool.get("devices_from"));
+    assertEquals(Map.of(), pool.get("auxiliary_devices"));
+    assertEquals("mirror=" + A + "," + B, pool.get("source"));
+  }
+
+  @Test
+  void aMirrorWithALogAndACacheDeviceIsSaidOnItsTwoDisksPlusThoseDevices() throws Exception {
+    var shell =
+        DeviceFixtures.zpoolLists(
+                new ScriptedShellExecutor(),
+                "zg",
+                "gcp6/g-705-mirror-with-log-and-cache.zpool-list-P.txt",
+                "gcp6/handwritten-g-705-mirror-with-log-and-cache.zpool-list.txt")
+            .onOk("incus list", "[]")
+            .onOk(
+                "incus storage list",
+                "[{\"name\": \"zg\", \"driver\": \"zfs\", \"config\": {\"source\": \"zg\","
+                    + " \"volatile.initial_source\": \"mirror=/dev/sdd,/dev/sde\","
+                    + " \"zfs.pool_name\": \"zg\"}}]")
+            .onOk(
+                "incus query /1.0/storage-pools/zg/resources",
+                "{\"space\": {\"used\": 4294967296, \"total\": 21474836480}}");
+
+    var rows = rows(shell, "Pool:", "plus ");
+    assertEquals(2, rows.size(), rows.toString());
+    assertTrue(
+        rows.getFirst().startsWith("  │  Pool:        zg (zfs, a mirror of /dev/disk/by-id/"),
+        rows.toString());
+    assertEquals(
+        CONTINUED + "plus a log device /dev/sde and a cache device /dev/sdf", rows.getLast());
+    var pool = (Map<?, ?>) ((List<?>) json(shell).get("pools")).getFirst();
+    assertEquals(List.of(DeviceFixtures.K1, DeviceFixtures.K2), pool.get("devices"));
+    assertEquals(
+        Map.of("logs", List.of("/dev/sde"), "cache", List.of("/dev/sdf")),
+        pool.get("auxiliary_devices"));
+  }
+
   @Test
   void storageIncusCannotListIsSaidAndNeverReadAsNoPools() throws Exception {
     var shell =
@@ -335,7 +550,7 @@ class HostStatusCommandTest {
     return report(shell, false);
   }
 
-  private static String report(ScriptedShellExecutor shell, boolean json) throws Exception {
+  private static String report(ShellExec shell, boolean json) throws Exception {
     var out = new ByteArrayOutputStream();
     HostStatusCommand.report(
         RECORDED_AT_INIT,

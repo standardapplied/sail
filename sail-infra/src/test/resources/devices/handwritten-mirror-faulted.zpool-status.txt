@@ -1,0 +1,13 @@
+  pool: devpool
+ state: FAULTED
+status: One or more devices could not be opened.  There are insufficient
+	replicas for the pool to continue functioning.
+action: Attach the missing device and online it using 'zpool online'.
+   see: https://openzfs.github.io/openzfs-docs/msg/ZFS-8000-3C
+config:
+
+	NAME                                            STATE     READ WRITE CKSUM
+	devpool                                         UNAVAIL      0     0     0  insufficient replicas
+	  mirror-0                                      UNAVAIL      0     0     0  insufficient replicas
+	    /dev/disk/by-id/wwn-0x5000c500a1b2c3d4-part5  UNAVAIL      0     0     0  cannot open
+	    /dev/disk/by-id/wwn-0x5000c500e5f6a7b8-part5  UNAVAIL      0     0     0  cannot open

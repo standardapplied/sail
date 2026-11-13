@@ -12,6 +12,7 @@ import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.TimeoutException;
@@ -42,6 +43,11 @@ import java.util.stream.Stream;
  * anything holds the device exclusively. The walk of {@code /proc} takes seconds, so it runs before
  * the device is probed, and the probes are the last look at the device before Incus is handed it. A
  * consumer that does not keep the device open while Sail looks is not seen.
+ *
+ * <p>Two devices for a mirror are each cleared by the same rules, in the same order, read together:
+ * lsblk and the walk once for both, then the reads of each, then the probes of each, so the last
+ * look at both comes right before the pool is made. They are taken only on two physical disks and
+ * of sizes {@code zpool create} mirrors without force ({@link DeviceRules#mirrorable}).
  */
 public final class PoolDevices {
 
@@ -120,40 +126,243 @@ public final class PoolDevices {
    */
   public PoolSource.Device cleared(String named)
       throws IOException, InterruptedException, TimeoutException {
-    var path = resolved("--disk", named);
-    var place = BlockTree.locate(BlockTree.read(shell), path, label(named, path));
-    var label = label(named, place.device().path());
-    refuseAny(label, DeviceRules.refusals(place.device(), place.disk()));
-    refuseAny(label, openBy(place.device().path(), numbers(place)));
-    var members = place.device().members();
+    return cleared(List.of(named)).getFirst().device();
+  }
+
+  /**
+   * The devices {@code one} and {@code other} name, as Incus may be handed them for a mirror: each
+   * cleared as {@link #cleared(String)} clears one, on two physical disks, of sizes {@code zpool
+   * create} mirrors without force. Refused, with nothing written to either, otherwise.
+   */
+  public PoolSource.Mirror mirror(String one, String other)
+      throws IOException, InterruptedException, TimeoutException {
+    var cleared = cleared(List.of(one, other));
+    return new PoolSource.Mirror(
+        cleared.getFirst().device(),
+        cleared.getLast().device(),
+        cleared.getFirst().size(),
+        cleared.getLast().size(),
+        cleared.getFirst().whole() != cleared.getLast().whole());
+  }
+
+  /** A device cleared, its size in bytes, and whether it is a whole disk. */
+  private record Cleared(PoolSource.Device device, long size, boolean whole) {}
+
+  /** A device named, where it sits, and how a refusal names it. */
+  private record Named(String path, BlockTree.Place place, String label) {}
+
+  /**
+   * Each of {@code named} cleared, every rule asked once of each device, in phases: lsblk is read
+   * once and its rules, then the pair's, judge every device before the {@code /proc} walk, read
+   * once; the probes of every device follow, so the last look at each device comes after the slow
+   * reads of all of them, right before the pool is made. A device refused at one phase is asked
+   * nothing more, while the other goes on, so one refusal names what is wrong with each, in the
+   * order named, with every command for both.
+   */
+  private List<Cleared> cleared(List<String> named)
+      throws IOException, InterruptedException, TimeoutException {
+    var refusals = new Refusals(named.size());
+    var paths = new ArrayList<String>();
+    for (var i = 0; i < named.size(); i++) {
+      var one = named.get(i);
+      paths.add(refusals.ask(i, () -> resolved("--disk", one)));
+    }
+    var devices = new ArrayList<Named>();
+    var tree = refusals.anyAlive() ? BlockTree.read(shell) : List.<BlockDevice>of();
+    for (var i = 0; i < named.size(); i++) {
+      var one = named.get(i);
+      var path = paths.get(i);
+      var device =
+          refusals.ask(
+              i,
+              () -> {
+                var place = BlockTree.locate(tree, path, label(one, path));
+                return new Named(path, place, label(one, place.device().path()));
+              });
+      devices.add(device);
+      if (device != null) {
+        refusals.ask(
+            i,
+            () -> {
+              refuseAny(
+                  device.label(),
+                  DeviceRules.refusals(device.place().device(), device.place().disk()));
+              return device;
+            });
+      }
+    }
+    if (devices.size() == 2 && devices.getFirst() != null && devices.getLast() != null) {
+      refusals.pair(pairRefusal(devices.getFirst(), devices.getLast()));
+    }
+    var walked = refusals.anyAlive() ? walk() : List.<String>of();
+    for (var i = 0; i < devices.size(); i++) {
+      var device = devices.get(i);
+      refusals.check(
+          i,
+          () ->
+              refuseAny(
+                  device.label(),
+                  openBy(device.place().device().path(), numbers(device.place()), walked)));
+    }
+    var probed = new ArrayList<Probed>();
+    for (var i = 0; i < devices.size(); i++) {
+      var device = devices.get(i);
+      probed.add(refusals.ask(i, () -> probe(device)));
+    }
+    for (var i = 0; i < devices.size(); i++) {
+      var device = devices.get(i);
+      var signatures = probed.get(i) == null ? null : probed.get(i).signatures();
+      refusals.check(i, () -> refuseAny(device.label(), held(device.place().device(), signatures)));
+    }
+    for (var i = 0; i < devices.size(); i++) {
+      var device = devices.get(i);
+      var found = probed.get(i);
+      refusals.check(i, () -> refuseHolding(device, found));
+    }
+    refusals.refuseAny();
+    var cleared = new ArrayList<Cleared>();
+    for (var device : devices) {
+      var place = device.place();
+      cleared.add(
+          new Cleared(
+              new PoolSource.Device(persistent(place, device.path()), place.identity()),
+              place.device().size(),
+              place.device() == place.disk()));
+    }
+    return cleared;
+  }
+
+  /** A check of one device that refuses it by throwing, or answers what the next one needs. */
+  @FunctionalInterface
+  private interface Check<T> {
+    T ask() throws IOException, InterruptedException, TimeoutException;
+  }
+
+  /** A check of one device that answers nothing. */
+  @FunctionalInterface
+  private interface Rule {
+    void check() throws IOException, InterruptedException, TimeoutException;
+  }
+
+  /**
+   * Why each device named is refused, kept per device so the other goes on; a device refused is
+   * asked nothing more. A pair that cannot be a mirror ends every check at once.
+   */
+  private static final class Refusals {
+    private final String[] reasons;
+    private String pair;
+
+    Refusals(int devices) {
+      this.reasons = new String[devices];
+    }
+
+    /** What {@code check} answers for device {@code i}; null once the device is refused. */
+    <T> T ask(int i, Check<T> check) throws IOException, InterruptedException, TimeoutException {
+      if (reasons[i] != null || pair != null) {
+        return null;
+      }
+      try {
+        return check.ask();
+      } catch (IllegalArgumentException refused) {
+        reasons[i] = refused.getMessage();
+        return null;
+      }
+    }
+
+    void check(int i, Rule rule) throws IOException, InterruptedException, TimeoutException {
+      ask(
+          i,
+          () -> {
+            rule.check();
+            return Boolean.TRUE;
+          });
+    }
+
+    void pair(Optional<String> refused) {
+      pair = refused.orElse(null);
+      refuseAny();
+    }
+
+    boolean anyAlive() {
+      return pair == null && Stream.of(reasons).anyMatch(Objects::isNull);
+    }
+
+    /** Refuses with what is wrong with each device, in the order named, and with the pair. */
+    void refuseAny() {
+      var all =
+          Stream.concat(Stream.of(reasons), Stream.ofNullable(pair))
+              .filter(Objects::nonNull)
+              .toList();
+      if (!all.isEmpty()) {
+        throw new IllegalArgumentException(String.join("\n", all));
+      }
+    }
+  }
+
+  /** What the probes read of a device, and what returns it to blank when a zpool left it. */
+  private record Probed(Map<String, List<String>> signatures, Optional<String> leftovers) {}
+
+  /**
+   * What {@code wipefs} lists on {@code device} and each of its partitions, refused when any is a
+   * device of an imported pool or a member of anything other than a zpool whose whole-disk layout
+   * is all the device holds ({@link DeviceRules#zpoolLeftovers}).
+   */
+  private Probed probe(Named device) throws IOException, InterruptedException, TimeoutException {
+    var place = device.place();
     var signatures = new LinkedHashMap<String, List<String>>();
     var labels = new LinkedHashMap<String, String>();
-    for (var member : members) {
+    for (var member : place.device().members()) {
       var rows = listing(member.path());
       signatures.put(member.path(), rows.stream().map(row -> row[2]).distinct().toList());
       rows.stream()
           .filter(row -> row[2].equals("zfs_member") && row.length > 4)
           .forEach(row -> labels.put(member.path(), row[4]));
     }
-    refuseAny(label, pools.refusals(signatures.keySet(), place.beside()));
-    refuseAny(
-        label,
-        DeviceRules.memberships(
-            place.device(), signatures, labels, labels.isEmpty() ? Set.of() : pools.importable()));
-    refuseAny(label, held(place.device(), signatures));
-    refuseAny(label, DeviceRules.partitionTypes(place.device()));
-    var holds = DeviceRules.holds(place.device(), signatures);
+    refuseAny(device.label(), pools.refusals(signatures.keySet(), place.beside()));
+    var importable = labels.isEmpty() ? Set.<String>of() : pools.importable();
+    var leftovers = DeviceRules.zpoolLeftovers(place.device(), signatures, labels, importable);
+    if (leftovers.isEmpty()) {
+      refuseAny(
+          device.label(), DeviceRules.memberships(place.device(), signatures, labels, importable));
+    }
+    return new Probed(signatures, leftovers);
+  }
+
+  /**
+   * Refuses {@code device} for what a zpool left on it, naming the commands that return it to
+   * blank; else for a partition type a pool may not take, or for anything the probes found on it,
+   * naming the erase the operator may run.
+   */
+  private static void refuseHolding(Named device, Probed probed) {
+    if (probed.leftovers().isPresent()) {
+      throw new IllegalArgumentException(device.label() + " " + probed.leftovers().get() + ".");
+    }
+    refuseAny(device.label(), DeviceRules.partitionTypes(device.place().device()));
+    var holds = DeviceRules.holds(device.place().device(), probed.signatures());
     if (!holds.isEmpty()) {
       throw new IllegalArgumentException(
-          label
+          device.label()
               + " holds "
               + String.join(", ", holds)
               + ". Sail erases nothing: if nothing on it is wanted, erase it yourself with sudo"
               + " wipefs --all "
-              + path
+              + device.path()
               + ", then run this again.");
     }
-    return new PoolSource.Device(persistent(place, path), place.identity());
+  }
+
+  /** Why two devices cannot be a mirror: not on two disks, or of sizes zpool refuses. */
+  private static Optional<String> pairRefusal(Named one, Named other) {
+    var reasons = DeviceRules.mirrorable(one.place(), other.place());
+    return reasons.isEmpty()
+        ? Optional.empty()
+        : Optional.of(
+            one.label()
+                + " and "
+                + other.label()
+                + " cannot be a mirror: "
+                + String.join("; ", reasons)
+                + ".");
   }
 
   /**
@@ -266,12 +475,23 @@ public final class PoolDevices {
    */
   List<String> openBy(String device, Map<String, String> numbers)
       throws IOException, InterruptedException, TimeoutException {
+    return openBy(device, numbers, walk());
+  }
+
+  /** The lines {@link #OPEN_FILES} prints: every block device each process has open. */
+  private List<String> walk() throws IOException, InterruptedException, TimeoutException {
     var walked = shell.exec(List.of("bash", "-c", OPEN_FILES));
     if (!walked.ok()) {
       throw new IOException("Cannot read which processes have devices open: " + walked.reason());
     }
+    return walked.stdout().lines().toList();
+  }
+
+  /** As {@link #openBy(String, Map)}, from the lines of a walk already made. */
+  private List<String> openBy(String device, Map<String, String> numbers, List<String> walked)
+      throws IOException, InterruptedException, TimeoutException {
     var uses = new LinkedHashSet<String>();
-    for (var line : walked.stdout().lines().toList()) {
+    for (var line : walked) {
       var fields = line.split("\t", 2);
       if (fields.length < 2) {
         continue;
