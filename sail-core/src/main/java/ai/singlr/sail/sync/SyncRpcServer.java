@@ -491,17 +491,32 @@ public final class SyncRpcServer {
     return Remedy.of("upgrade to " + version + ": ", Remedy.sail("upgrade"));
   }
 
+  private Remedy olderRemedy(int protocol) {
+    var spoken = "this main speaks sync protocol " + SyncWire.PROTOCOL + ", not " + protocol + ": ";
+    if (protocol == SyncWire.CONVERTED_PROTOCOL) {
+      return Remedy.of(spoken).then(upgradeRemedy());
+    }
+    return Remedy.of(
+        spoken
+            + "reinstall this box on "
+            + version
+            + ", whose database is not converted: move its database aside and run '",
+        Remedy.sail("init"),
+        "', then join again");
+  }
+
   private static SyncWire.Refuse helloRequired() {
     return new SyncWire.Refuse("hello required");
   }
 
   /**
    * The one place a session's compatibility is decided: the node speaks this main's protocol or is
-   * refused, told to reinstall itself when it speaks an older one (its database is not converted)
-   * and to upgrade main first when it speaks a newer one. The box id names the node in main's log;
-   * who the node is stays the authenticated principal, which every commit is attributed to, and the
-   * welcome names it so the node stamps its runs with the handle main knows it by. One box syncs as
-   * each FDE: a session from another box than the FDE's is refused before anything is exchanged.
+   * refused: told to upgrade when it speaks Sail 0.58.0's, whose database an upgrade converts, to
+   * reinstall itself when it speaks any other older one (its database is not converted), and to
+   * upgrade main first when it speaks a newer one. The box id names the node in main's log; who the
+   * node is stays the authenticated principal, which every commit is attributed to, and the welcome
+   * names it so the node stamps its runs with the handle main knows it by. One box syncs as each
+   * FDE: a session from another box than the FDE's is refused before anything is exchanged.
    */
   private SyncWire.Response onHello(SyncWire.Hello hello) {
     if (welcomed) {
@@ -512,17 +527,7 @@ public final class SyncRpcServer {
           "main is " + version + ", this node is " + hello.version() + ": upgrade main first");
     }
     if (hello.protocol() < SyncWire.PROTOCOL) {
-      return new SyncWire.Refuse(
-          Remedy.of(
-              "this main speaks sync protocol "
-                  + SyncWire.PROTOCOL
-                  + ", not "
-                  + hello.protocol()
-                  + ": reinstall this box on "
-                  + version
-                  + ", whose database is not converted: move its database aside and run '",
-              Remedy.sail("init"),
-              "', then join again"));
+      return new SyncWire.Refuse(olderRemedy(hello.protocol()));
     }
     if (hello.box() == null || hello.box().isBlank()) {
       return new SyncWire.Refuse(Remedy.of("hello names no box id: ").then(upgradeRemedy()));

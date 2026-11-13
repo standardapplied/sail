@@ -297,6 +297,24 @@ class SyncRpcServerTest {
   }
 
   @Test
+  void aBoxOn058WhoseDatabaseAnUpgradeConvertsIsToldToUpgradeNotToReinstall() throws Exception {
+    var answers =
+        serve(
+            writer(new FakeMain()),
+            new SyncWire.Hello(SyncWire.CONVERTED_PROTOCOL, "0.58.0", "b"),
+            new SyncWire.Pull("spec", 0, 10));
+    var refusal = assertInstanceOf(SyncWire.Refuse.class, answers.getFirst());
+    assertEquals(
+        Remedy.of(
+            "this main speaks sync protocol 8, not 4: upgrade to dev: ", Remedy.sail("upgrade")),
+        refusal.reason());
+    assertEquals(
+        List.of(),
+        answers.stream().filter(SyncWire.Page.class::isInstance).toList(),
+        "nothing is served to it");
+  }
+
+  @Test
   void aNodeOnANewerProtocolIsToldToUpgradeMainFirst() throws Exception {
     var server =
         new SyncRpcServer(

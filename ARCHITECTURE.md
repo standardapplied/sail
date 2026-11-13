@@ -495,9 +495,10 @@ is an earlier offer's when the recorded one never reached it.
 ### The wire: sync protocol 8
 
 A session opens with `hello` (protocol, build, box id) and is `welcome`d or `refuse`d once: a node
-on another protocol is refused, told to reinstall itself when its protocol is older (protocol 8's
-run and spec snapshots carry cost and times, and the database before it is not converted) and to
-upgrade main first when it is newer. The `welcome` always names the handle main authenticated the
+on another protocol is refused: told to upgrade when it speaks Sail 0.58.0's protocol 4, whose
+database an upgrade converts, to reinstall itself when its protocol is any other older one
+(protocol 8's run and spec snapshots carry cost and times, and the database before it is not
+converted), and to upgrade main first when it is newer. The `welcome` always names the handle main authenticated the
 session as and main's `limits.file_max`, and a welcome missing either is a protocol failure; the
 node enforces the lower of its own limit and main's before a file ever reaches a sync, and a node
 whose configured sync handle is blank or another does nothing that round (`NodeRound.begin`). It
