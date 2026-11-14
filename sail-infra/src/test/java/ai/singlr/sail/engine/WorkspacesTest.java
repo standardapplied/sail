@@ -2098,6 +2098,54 @@ class WorkspacesTest {
         after.invocations().stream().anyMatch(c -> c.startsWith("incus copy acme--tmpl/v1 ")));
   }
 
+  /**
+   * A spec's workspace name another project's instance holds ({@code acme-x-y}: spec {@code x-y} of
+   * acme, workspace {@code y} of {@code acme-x}) is refused naming that owner and the spec's id,
+   * the one thing a spec's run can change.
+   */
+  @Test
+  void aSpecsWorkspaceNameAnotherProjectHoldsIsRefusedNamingItsOwnerAndTheSpecsId() {
+    var shell =
+        incus(
+            DIR_AND_ZFS,
+            list(
+                template("v1", INPUTS),
+                instance(
+                    "acme-x-y",
+                    "Running",
+                    "tank",
+                    "\"user.sail.project\": \"acme-x\", \"user.sail.workspace\": \"y\","
+                        + " \"user.sail.ready\": \"1\"")),
+            snapshots("v1"));
+    var place = (RunPlace.SpecWorkspace) RunPlace.of("acme", "x-y");
+
+    var refused =
+        assertThrows(
+            IllegalArgumentException.class,
+            () -> workspaces(shell, ticks()).checkSpec(place, INPUTS, name -> false));
+
+    assertEquals(
+        "Spec x-y's workspace of acme would be the instance 'acme-x-y', which is workspace 'y' of"
+            + " acme-x, so no run of the spec goes there. Give the spec another id.",
+        refused.getMessage());
+  }
+
+  /** A box with no handle of its own makes a workspace no one's, never an owner that is blank. */
+  @Test
+  void aWorkspaceMadeOnABoxWithNoHandleCarriesNoOwner() throws Exception {
+    var shell = incus(DIR_AND_ZFS, list(template("v1", INPUTS)), snapshots("v1"));
+
+    workspaces(shell, ticks(0, 1, 2, 3, 4, 5, 6, 7))
+        .create(acme(), "fix-login", source(), tempDir.resolve("no-files"), "");
+
+    var copy =
+        shell.invocations().stream()
+            .filter(c -> c.startsWith("incus copy "))
+            .findFirst()
+            .orElseThrow();
+    assertFalse(copy.contains("user.sail.owner"), copy);
+  }
+
   /** A shell that answers as {@code before} until {@code built} is set, then as {@code after}. */
   private static ShellExec switching(AtomicBoolean built, ShellExec before, ShellExec after) {
     return new ShellExec() {

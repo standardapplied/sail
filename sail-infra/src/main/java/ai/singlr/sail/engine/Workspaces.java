@@ -9,6 +9,7 @@ import ai.singlr.sail.api.Mappable;
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.common.Remedied;
 import ai.singlr.sail.common.Remedy;
+import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.ProjectDefinition;
 import java.io.IOException;
 import java.io.OutputStream;
@@ -457,7 +458,7 @@ public final class Workspaces {
       containers.start(found.name());
       awaitReady(found.name());
     }
-    if (!owner.equals(found.key(BoxInstances.OWNER_KEY).orElse(""))) {
+    if (Strings.isNotBlank(owner) && !owner.equals(found.key(BoxInstances.OWNER_KEY).orElse(""))) {
       var owned =
           new ContainerConfig(shell, locks)
               .set(found.name(), List.of(BoxInstances.OWNER_KEY + "=" + owner));
@@ -536,7 +537,9 @@ public final class Workspaces {
       throws Exception {
     var project = config.name();
     var copyKeys = new ArrayList<>(keys);
-    copyKeys.add(BoxInstances.OWNER_KEY + "=" + owner);
+    if (Strings.isNotBlank(owner)) {
+      copyKeys.add(BoxInstances.OWNER_KEY + "=" + owner);
+    }
     clone(project, name, instance, built, copyKeys);
     try {
       var cloned = nanos.getAsLong();
@@ -1013,8 +1016,31 @@ public final class Workspaces {
       }
       return taken;
     }
+    if (taken.isPresent() || held.test(instance)) {
+      throw new IllegalArgumentException(
+          "Spec "
+              + place.specId()
+              + "'s workspace of "
+              + project
+              + " would be the instance '"
+              + instance
+              + "', which is "
+              + (taken.isPresent()
+                  ? whatItIs(taken.get())
+                  : "the container of project '" + instance + "'")
+              + ", so no run of the spec goes there. Give the spec another id.");
+    }
     requireUnclaimed(project, name, instance, held, instances);
     return Optional.empty();
+  }
+
+  /** What an instance a spec's workspace name collides with is, in words that name its owner. */
+  private static String whatItIs(BoxInstances.Instance taken) {
+    return switch (taken.kind()) {
+      case BoxInstances.Workspace(var p, var w, var ready) -> "workspace '" + w + "' of " + p;
+      case BoxInstances.Template(var of) -> "the template of " + of;
+      default -> "an instance Incus already has";
+    };
   }
 
   /** As {@link #existing}, refused when the workspace was never made whole (W12). */

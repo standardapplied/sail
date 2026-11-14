@@ -89,6 +89,25 @@ class AgentPresenceTest {
         "the project's container is never asked about a spec's run");
   }
 
+  /**
+   * An instance of a spec workspace's name that another project holds ({@code p-a-b}: spec {@code
+   * a-b} of {@code p}, workspace {@code b} of {@code p-a}) is no workspace of this run's: its state
+   * says nothing of the run, which has no workspace and runs no agent.
+   */
+  @Test
+  void anotherProjectsInstanceOfTheWorkspacesNameIsNotTheRunsWorkspace() throws Exception {
+    var place = RunPlace.of("p", "a-b");
+    var others =
+        new ScriptedShellExecutor()
+            .onOk(
+                "incus list",
+                "[{\"name\": \"p-a-b\", \"status\": \"Running\", \"state\": {},"
+                    + " \"config\": {\"user.sail.project\": \"p-a\", \"user.sail.workspace\":"
+                    + " \"b\", \"user.sail.ready\": \"1\"}}]");
+
+    assertEquals(new ContainerState.NotCreated(), new AgentPresence(others).state(place));
+  }
+
   @Test
   void aFrozenContainersAgentIsPausedNotGone() throws Exception {
     assertInstanceOf(

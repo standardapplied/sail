@@ -71,12 +71,25 @@ public final class AgentPresence {
     };
   }
 
-  /** A spec's workspace's state as incus lists it by name, an error where it does not answer. */
+  /**
+   * A spec's workspace's state as incus lists it by name, an error where it does not answer: the
+   * one instance of its name whose keys name its project, workspace and spec, so another project's
+   * instance of the same name is no workspace of this run's, and reads as none.
+   */
   private ContainerState workspaceState(RunPlace.SpecWorkspace workspace)
       throws InterruptedException {
     try {
       return instances
           .lookup(workspace.instance(), Duration.ofSeconds(BoxInstances.LOOKUP_SECONDS))
+          .filter(
+              found ->
+                  found.kind() instanceof BoxInstances.Workspace(var project, var name, var ready)
+                      && project.equals(workspace.project())
+                      && name.equals(workspace.workspace())
+                      && found
+                          .key(BoxInstances.SPEC_KEY)
+                          .filter(workspace.specId()::equals)
+                          .isPresent())
           .map(BoxInstances.Instance::state)
           .orElse(new ContainerState.NotCreated());
     } catch (IOException | TimeoutException unanswered) {

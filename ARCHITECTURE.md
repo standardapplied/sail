@@ -1585,8 +1585,8 @@ addresses the run's container as `place.instance()` and none by the project's na
 (`RunPlaceSweepTest`). The workspace is named after the spec id, `<p>-<id>`, when that fits Incus's
 63 characters, is not `main`, does not end in `-` and is no template's name; otherwise the id is
 cut to fit, any trailing `-` dropped, and `-` with six hex characters of its SHA-256 added. A
-project name of more than 54 characters leaves no room for a cut id and is refused naming that
-limit. The name is never parsed back: the instance carries `user.sail.spec`, and is found only as
+project name of more than 54 characters leaves no room for a cut id, so a spec whose id needs the
+cut is refused naming that limit; one whose `<p>-<id>` fits keeps its id. The name is never parsed back: the instance carries `user.sail.spec`, and is found only as
 the one whose name and keys match.
 
 - **Checked before the reservation.** `RunPlaces.check` reads the box and refuses before anything is
