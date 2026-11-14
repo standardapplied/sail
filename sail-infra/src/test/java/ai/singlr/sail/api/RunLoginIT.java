@@ -64,9 +64,11 @@ class RunLoginIT extends AbstractIncusIT {
   private static final Actor OPERATOR = new Actor(HANDLE, Role.ADMIN, Actor.Lane.CLI);
 
   /**
-   * Notes what it started with, then fires each of Sail's hooks as a harness does (a tool event,
-   * the session report, the room relay, the stop gate) while it samples every process's command
-   * line in the container for its own run credential, then says it started and stays up a while.
+   * Notes what it started with, then fires each of Sail's installed hooks as a harness does (a tool
+   * event, the session report, the room relay, the stop gate) while it samples every process's
+   * command line in the container for its own run credential, then says it started and stays up a
+   * while. The hooks run as copies that differ only in their socket, the stub's: the launch mounts
+   * the host's socket directory over {@code /var/lib/sail/run}, hiding anything listening there.
    */
   private static final String FAKE_AGENT =
       """
@@ -90,7 +92,13 @@ class RunLoginIT extends AbstractIncusIT {
           sleep 0.05
         done
       ) &
-      bin="$HOME/.sail/bin"
+      bin="$HOME/.sail/it-hooks"
+      mkdir -p "$bin"
+      for hook in sail-event.sh sail-session-report sail-room-relay sail-stop-gate; do
+        sed 's|/var/lib/sail/run/api.sock|/run/sail-it-stub/api.sock|g' \\
+          "$HOME/.sail/bin/$hook" > "$bin/$hook"
+        chmod 0755 "$bin/$hook"
+      done
       "$bin/sail-event.sh" agent_tool_started
       printf '{"session_id":"conv-1","source":"startup"}' | "$bin/sail-session-report" codex
       printf '{}' | "$bin/sail-room-relay"
@@ -110,7 +118,7 @@ class RunLoginIT extends AbstractIncusIT {
   private static final String STUB_API =
       """
       import http.server, os, socketserver, time
-      PATH = "/var/lib/sail/run/api.sock"
+      PATH = "/run/sail-it-stub/api.sock"
       class Handler(http.server.BaseHTTPRequestHandler):
           def answer(self):
               length = int(self.headers.get("Content-Length") or 0)
@@ -154,7 +162,7 @@ class RunLoginIT extends AbstractIncusIT {
                     + " userdel -r ubuntu 2>/dev/null || true;"
                     + " id -u dev >/dev/null 2>&1 || useradd -m -u 1000 -s /bin/bash dev;"
                     + " mkdir -p /home/dev/.sail/bin /home/dev/workspace/app"
-                    + " /home/dev/workspace/web /var/lib/sail/run;"
+                    + " /home/dev/workspace/web /run/sail-it-stub;"
                     + " echo 'export CODEX_ACCESS_TOKEN=container-token' >> /home/dev/.profile;"
                     + " chown -R dev:dev /home/dev;"
                     + " for i in $(seq 1 30); do"
@@ -181,7 +189,7 @@ class RunLoginIT extends AbstractIncusIT {
                 "sh",
                 "-c",
                 "systemd-run --quiet --unit=sail-it-stub-api python3 /root/stub.py &&"
-                    + " timeout 30 sh -c 'until test -S /var/lib/sail/run/api.sock; do sleep 0.2;"
+                    + " timeout 30 sh -c 'until test -S /run/sail-it-stub/api.sock; do sleep 0.2;"
                     + " done'"));
     assertTrue(stub.ok(), "the stub API never listened: " + stub.stderr());
     stateDir = Files.createTempDirectory("run-login-it");
@@ -394,7 +402,7 @@ class RunLoginIT extends AbstractIncusIT {
             List.of(
                 "sh",
                 "-c",
-                "ls -l /var/lib/sail/run; systemctl status --no-pager sail-it-stub-api 2>&1 |"
+                "ls -l /run/sail-it-stub; systemctl status --no-pager sail-it-stub-api 2>&1 |"
                     + " tail -5; tail -20 "
                     + AgentUnit.forRun(runId).logPath()))
         .stdout();
