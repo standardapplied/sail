@@ -10,13 +10,14 @@ readonly DEPS=libghostty-vt-$VERSION-deps.tar.gz
 readonly DEPS_SHA256=91a4e10960a52bf5bf4b15aa2a2cddaff8a89d6cd903d3055bda4fd17de3356d
 readonly ZIG=zig-x86_64-linux-$ZIG_VERSION.tar.xz
 readonly ZIG_SHA256=3581863e3cbcfd0fce0efc682ce7e9e93da96668a977791d356a26d2a7e9b17a
-readonly STAMP="libghostty-vt $VERSION ($SOURCE_SHA256 $DEPS_SHA256) zig $ZIG_VERSION ($ZIG_SHA256) static"
+readonly STAMP="libghostty-vt $VERSION ($SOURCE_SHA256 $DEPS_SHA256) zig $ZIG_VERSION ($ZIG_SHA256) static baseline"
 
 usage() {
   cat >&2 <<'USAGE'
 Usage: scripts/libghostty-vt INSTALL_DIR [DOWNLOAD_DIR]
 
-Builds libghostty-vt from its release tarballs with the pinned Zig, offline, and installs its
+Builds libghostty-vt from its release tarballs with the pinned Zig, offline, for the baseline
+x86_64 CPU (a cache built on one runner then runs on any), and installs its
 static library, headers and pkg-config file into INSTALL_DIR. Every download, kept in
 DOWNLOAD_DIR (default INSTALL_DIR/downloads) and fetched only when absent, is checked against its
 pinned sha256 before it is used. Then build SailKit with PKG_CONFIG_PATH=INSTALL_DIR/lib/pkgconfig.
@@ -73,7 +74,7 @@ rm -rf "$PREFIX/include" "$PREFIX/lib" "$PREFIX/.built"
 (
   cd "$WORK/libghostty-vt-$VERSION"
   ZIG_GLOBAL_CACHE_DIR=$WORK/cache "$WORK/zig-x86_64-linux-$ZIG_VERSION/zig" build \
-    --prefix "$PREFIX" --system "$WORK/libghostty-vt-$VERSION-deps" -Doptimize=ReleaseFast
+    --prefix "$PREFIX" --system "$WORK/libghostty-vt-$VERSION-deps" -Doptimize=ReleaseFast -Dcpu=baseline
 )
 rm -rf "$PREFIX"/lib/libghostty-vt.so* "$PREFIX/lib/cmake" "$PREFIX/lib/pkgconfig/libghostty-vt-static.pc"
 [[ -f $PREFIX/lib/libghostty-vt.a && -f $PREFIX/include/ghostty/vt.h ]] \

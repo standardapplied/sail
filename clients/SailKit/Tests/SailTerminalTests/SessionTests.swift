@@ -171,19 +171,25 @@ import Testing
         try peer.send(output("\u{1b}[?2004hready"))
         try await watch.text("ready")
         let text = String(repeating: "line of text\n", count: 12000)
+        let expected = Array("\u{1b}[200~\(text)\u{1b}[201~".utf8)
+        let reading = Task {
+            var received: [UInt8] = []
+            var sequences: [Int64] = []
+            var largest = 0
+            while received.count < expected.count {
+                guard case let .input(sequence, bytes) = try await peer.read() else { continue }
+                largest = max(largest, bytes.count)
+                sequences.append(sequence)
+                received += bytes
+            }
+            return (received, sequences, largest)
+        }
         guard case .send = session.paste(text) else {
             Issue.record("a paste into a program that asked was not sent")
             return
         }
-        var received: [UInt8] = []
-        var sequences: [Int64] = []
-        let expected = Array("\u{1b}[200~\(text)\u{1b}[201~".utf8)
-        while received.count < expected.count {
-            guard case let .input(sequence, bytes) = try await peer.read() else { continue }
-            #expect(bytes.count <= 64 * 1024)
-            sequences.append(sequence)
-            received += bytes
-        }
+        let (received, sequences, largest) = try await reading.value
+        #expect(largest <= 64 * 1024)
         #expect(received == expected)
         #expect(sequences == Array(1 ... Int64(sequences.count)))
         #expect(sequences.count == 3)

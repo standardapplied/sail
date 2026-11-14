@@ -109,9 +109,17 @@ struct RealLocalHost {
         let process = LocalHostProcess(binary: binary)
         try await process.start()
         defer { process.stop() }
-        let folder = environment["SAIL_LOCAL_FOLDER"] ?? FileManager.default.temporaryDirectory.resolvingSymlinksInPath().path
+        let folder = try environment["SAIL_LOCAL_FOLDER"] ?? physical(FileManager.default.temporaryDirectory.path)
         let address = try environment["SAIL_LOCAL_SOCKET"].map { HostAddress.unix(path: $0) } ?? HostAddress.local()
         try await body(RealLocalHost(process: process, address: address, folder: folder))
+    }
+
+    /// `path` with every link resolved, as a shell's `pwd` prints it (Foundation's own resolving
+    /// keeps `/var` for `/private/var`).
+    private static func physical(_ path: String) throws -> String {
+        guard let resolved = realpath(path, nil) else { throw HostError("\(path) does not resolve") }
+        defer { free(resolved) }
+        return String(cString: resolved)
     }
 
     func open(

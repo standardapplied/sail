@@ -32,6 +32,7 @@ import Testing
     /// arrow's release are Kitty's encodings; after the pop, the legacy ones.
     @Test func keysAreEncodedInTheProtocolTheProgramPushed() throws {
         let screen = try screen()
+        screen.setOptionAsAlt(.both)
         let control = KeyInput(key: .c, modifiers: .control, text: "c", unshifted: "c")
         let alt = KeyInput(key: .x, modifiers: .alt, text: "x", unshifted: "x")
         let arrowUp = KeyInput(key: .arrowUp, action: .release)
