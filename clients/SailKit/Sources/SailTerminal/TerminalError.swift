@@ -19,6 +19,8 @@ public enum TerminalError: Error, Equatable, Sendable, CustomStringConvertible {
     case timedOut(String)
     /// The host closed the connection.
     case closed
+    /// What was asked is not one this session's door admits.
+    case unsupported(String)
 
     public var description: String {
         switch self {
@@ -31,6 +33,7 @@ public enum TerminalError: Error, Equatable, Sendable, CustomStringConvertible {
         case let .protocolViolation(what): "the terminal host broke the protocol: \(what)"
         case let .timedOut(what): "the terminal host did not answer \(what) in time"
         case .closed: "the terminal host closed the connection"
+        case let .unsupported(what): what
         }
     }
 }

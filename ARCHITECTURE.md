@@ -3727,17 +3727,29 @@ against them before it is used. Both expose one module, `GhosttyVt`. The termina
 - **T2. The screen is libghostty-vt's.** No escape sequence is parsed and no input encoded in Swift:
   keys, pastes, focus and mouse come from its encoders, each synced from the terminal first.
 - **T3. Nothing is lost or reordered.** One thread per connection reads the host's frames and feeds
-  the screen in order; a host's resize lands after the bytes before it.
+  the screen in order; a host's resize lands after the bytes before it. The terminal and its render
+  state share one lock, so a program's synchronized output (mode 2026) holds the frame: the render
+  state is captured as the hold begins, from inside the write, and kept until the hold ends or
+  has lasted 1 s; a renderer never draws a half-finished update. A change of the default colours
+  or the palette redraws every row.
 - **T4. Secrets stay secret.** A ticket is presented once; a reconnect asks for a new one. No ticket,
   token or terminal byte is logged, written to a file or put on a command line (the probe takes its
   token from an environment variable it is named).
 - **T5. A replay starts from a clean screen**, and what a replay provokes (a query, a bell, OSC 52)
   is history, answered by nobody.
 - **T6. A lost session is said, not hidden.** A new boot id ends it as "the host restarted"; a
-  refused attach ends it in the host's words; after 5 failed reconnects in a row (0.5, 1, 2, 4 and
-  8 s apart) it parks, saying why, until the app calls `reconnectNow()`.
+  refused attach ends it in the host's words; a frame the protocol does not allow ends it naming
+  the frame; after 5 failed reconnects in a row (0.5, 1, 2, 4 and 8 s apart) it parks, saying why,
+  until the app calls `reconnectNow()`. A connection lost within 5 s of attaching is a failed
+  attempt, so a host that attaches and drops parks the session too. A dead TCP peer is found
+  within 10 s, typing or not (keepalive, and `TCP_USER_TIMEOUT` / `TCP_RXT_CONNDROPTIME`), and
+  `reconnectNow()` while attached sends the host its unchanged size so a connection that died
+  during sleep is found at once. A connect attempt a detach or a close overtook stands down
+  before it sends anything for the session.
 - **T7. No keystroke reaches a screen the person cannot see.** Input while not attached is
-  dropped and counted, never queued.
+  dropped and counted, never queued; input written into a connection that then died is counted
+  dropped when the next attach's replay shows the host never applied it. A connection without the
+  write token sends none of the terminal's own answers.
 - **T8. Bounded memory.** Frames are checked before allocation, the screen is fed on the reading
   thread with no queue in between, a host's `Paused` never stops the reading, and the app's event
   stream keeps the newest 256.

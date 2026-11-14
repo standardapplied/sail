@@ -2,7 +2,7 @@ extension Screen {
     /// The screen as a fixture's golden holds it: the frame (``ScreenFrame/dump``), what feeding it
     /// produced, and what three fixed inputs encode to in the modes the stream left (Ctrl-C, a
     /// two-line paste, a focus loss), so a golden also pins the modes a stream sets.
-    public func dump(after effects: Effects) throws(ScreenError) -> String {
+    package func dump(after effects: Effects) throws(ScreenError) -> String {
         var lines = [try frame().dump]
         if !effects.reply.isEmpty {
             lines.append("reply \(hex(effects.reply))")
@@ -23,11 +23,11 @@ extension Screen {
 extension ScreenFrame {
     /// The frame as text: its size, cursor and colours, then each row that holds anything, as its
     /// text between bars and the runs of cells whose look differs from the defaults.
-    public var dump: String {
+    package var dump: String {
         var lines = [
             "size \(size)",
             "cursor \(cursor.dump)",
-            "colors fg \(colors.foreground) bg \(colors.background)" + (colors.cursor.map { " cursor \($0)" } ?? ""),
+            "colors fg \(colors.foreground) bg \(colors.background) cursor \(colors.cursor)",
         ]
         for (y, row) in rows.enumerated() {
             let text = Screen.text(of: [row])
@@ -62,10 +62,11 @@ extension ScreenFrame {
         if cell.background != colors.background { parts.append("bg \(cell.background)") }
         let names: [(CellAttributes, String)] = [
             (.bold, "bold"), (.italic, "italic"), (.dim, "dim"), (.inverse, "inverse"), (.invisible, "invisible"),
-            (.strikethrough, "strikethrough"),
+            (.strikethrough, "strikethrough"), (.blink, "blink"), (.overline, "overline"),
         ]
         parts += names.filter { cell.attributes.contains($0.0) }.map(\.1)
         if cell.underline != .none { parts.append("underline \(cell.underline)") }
+        if let color = cell.underlineColor { parts.append("underline-color \(color)") }
         switch cell.width {
         case .narrow: break
         case .wide: parts.append("wide")

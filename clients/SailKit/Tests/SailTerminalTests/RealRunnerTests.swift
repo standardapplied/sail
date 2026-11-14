@@ -16,7 +16,7 @@ import Testing
 @Suite(.serialized, .timeLimit(.minutes(3)), .enabled(if: RealRunner.api != nil))
 struct RealRunnerTests {
     /// Scenario 2.
-    @Test(.enabled(if: RealRunner.project != nil))
+    @Test(.enabled(if: RealRunner.project != nil && RealRunner.environment["SAIL_BOX_SOCKET"] == nil))
     func anOpenTicketOpensASessionInTheProjectsContainer() async throws {
         let runner = try RealRunner()
         let (session, watch) = try await runner.ours()
@@ -31,11 +31,8 @@ struct RealRunnerTests {
         let runner = try RealRunner()
         let (session, watch) = try await runner.ours()
         let ticket = try await runner.client.ticket(for: .attach(session: session.state.session))
-        let address = try HostAddress(ticketAddress: ticket.address)
-        try await onThread { try Connection.open(to: address, token: ticket.ticket, timeout: 10).close() }
-        await #expect(throws: TerminalError.self) {
-            try await onThread { try Connection.open(to: address, token: ticket.ticket, timeout: 10).close() }
-        }
+        try await present(ticket)
+        await #expect(throws: TerminalError.self) { try await present(ticket) }
         "echo still-here\r".forEach { session.send(.typing($0)) }
         try await watch.until(within: 30, "echoed") { try session.screen.text().contains("\nstill-here") }
         #expect(session.state.phase == .attached)
@@ -43,18 +40,15 @@ struct RealRunnerTests {
     }
 
     /// Scenario 4: a ticket older than its life is refused. The host's clock cannot be moved from
-    /// here, so this waits for the ticket's own expiry.
-    @Test func aTicketOlderThanThirtySecondsIsRefused() async throws {
+    /// here, so this waits for the ticket's own expiry; it asks an open ticket, which needs the
+    /// project only in the catalog, so CI runs it while the project's container is still being
+    /// made.
+    @Test(.enabled(if: RealRunner.project != nil))
+    func aTicketOlderThanThirtySecondsIsRefused() async throws {
         let runner = try RealRunner()
-        let (session, _) = try await runner.ours()
-        let ticket = try await runner.client.ticket(for: .attach(session: session.state.session))
-        let address = try HostAddress(ticketAddress: ticket.address)
-        let wait = max(0, ticket.expiresAt.timeIntervalSinceNow) + 2
-        try await Task.sleep(for: .seconds(wait))
-        await #expect(throws: TerminalError.self) {
-            try await onThread { try Connection.open(to: address, token: ticket.ticket, timeout: 10).close() }
-        }
-        session.close()
+        let ticket = try await runner.client.ticket(for: .open(project: try #require(RealRunner.project)))
+        try await Task.sleep(for: .seconds(max(0, ticket.expiresAt.timeIntervalSinceNow) + 2))
+        await #expect(throws: TerminalError.self) { try await present(ticket) }
     }
 
     /// Scenarios 5 and 6: a dropped connection asks a new attach ticket, attaches and replays the
@@ -88,6 +82,16 @@ struct RealRunnerTests {
     }
 }
 
+/// Presents `ticket` on a connection of its own, and closes it once welcomed.
+func present(_ ticket: TerminalTicket) async throws {
+    let address = try HostAddress(ticketAddress: ticket.address)
+    try await onThread {
+        let connection = try Connection.connect(to: address, timeout: 10)
+        defer { connection.close() }
+        _ = try connection.admit(token: ticket.ticket)
+    }
+}
+
 /// The runner the suite reaches, and the session it opens there for each test.
 struct RealRunner {
     static let environment = ProcessInfo.processInfo.environment
@@ -111,7 +115,7 @@ struct RealRunner {
     func ours() async throws -> (TerminalSession, Watch) {
         let name = "test-" + UUID().uuidString.prefix(8).lowercased()
         let size = TerminalSize(columns: 100, rows: 30)
-        if let project = Self.project {
+        if let project = Self.project, Self.environment["SAIL_BOX_SOCKET"] == nil {
             let create = SessionCreate(session: name, command: [], workingDirectory: "/tmp", project: project, room: "", size: size)
             let session = TerminalSession(open: create, door: .runner(counter), screen: try screen(columns: 100, rows: 30))
             let watch = Watch(session)

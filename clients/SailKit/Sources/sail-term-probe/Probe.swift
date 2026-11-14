@@ -32,7 +32,10 @@ struct Probe {
             return true
         case let .bench(path):
             let report = Report(steps: [], latency: nil, droppedInputs: nil, budgets: try Bench.run())
-            report.budgets.forEach { print("\($0.name): \(String(format: "%.3f", $0.milliseconds)) (limit \($0.limit)) \($0.met ? "met" : "MISSED")") }
+            report.budgets.forEach { budget in
+                let verdict = budget.reported ? "" : " (limit \(budget.limit)) \(budget.met ? "met" : "MISSED")"
+                print("\(budget.name): \(String(format: "%.3f", budget.milliseconds))\(verdict)")
+            }
             try report.write(to: path)
             return report.passed
         case let .run(run):
@@ -95,14 +98,16 @@ struct Probe {
     }
 }
 
-/// The raw output of a session, kept in a file the person named: how the vim and less fixtures are
-/// recorded. Nothing else the probe does writes a terminal byte anywhere.
-private final class Capture: Sendable {
+/// The raw output of a session, kept in a new file the person named, readable by them alone: how
+/// the vim and less fixtures are recorded. Nothing else the probe does writes a terminal byte
+/// anywhere.
+final class Capture: Sendable {
     private let file: FileHandle
 
     init(path: String) throws {
-        guard FileManager.default.createFile(atPath: path, contents: nil) else { throw ProbeError("cannot write \(path)") }
-        file = try FileHandle(forWritingTo: URL(filePath: path))
+        let descriptor = open(path, O_WRONLY | O_CREAT | O_EXCL, 0o600)
+        guard descriptor >= 0 else { throw ProbeError("cannot make \(path), which must not exist yet: \(String(cString: strerror(errno)))") }
+        file = FileHandle(fileDescriptor: descriptor, closeOnDealloc: true)
     }
 
     func append(_ bytes: [UInt8]) {

@@ -1,7 +1,8 @@
 import GhosttyVt
 
 /// The render state of one screen and the rows read out of it, kept between frames so an update
-/// reads again only the rows libghostty-vt marked dirty. It lives inside the screen's render lock.
+/// reads again only the rows libghostty-vt marked dirty, or every row when the colours changed. It
+/// lives inside the screen's lock, with the terminal.
 final class RenderCache {
     private let state: Owned
     private let rowIterator: Owned
@@ -13,6 +14,10 @@ final class RenderCache {
     /// What changed since the last frame was handed out, across every update in between.
     private var unseen = ScreenFrame.Change.all
     private var grapheme = [UInt8](repeating: 0, count: 64)
+    private var palette: [RGB] = []
+    /// The colours of the last update, byte for byte, palette included.
+    private var colorPrint: [UInt8] = []
+    private let paletteCursor: RGB
 
     init(palette: Palette) throws(ScreenError) {
         state = try Owned.make("ghostty_render_state_new", { ghostty_render_state_new(nil, $0) }) { ghostty_render_state_free($0) }
@@ -22,19 +27,18 @@ final class RenderCache {
         rowCells = try Owned.make("ghostty_render_state_row_cells_new", { ghostty_render_state_row_cells_new(nil, $0) }) {
             ghostty_render_state_row_cells_free($0)
         }
-        colors = DefaultColors(foreground: palette.foreground, background: palette.background, cursor: nil)
+        colors = DefaultColors(foreground: palette.foreground, background: palette.background, cursor: palette.cursor)
+        paletteCursor = palette.cursor
     }
 
-    /// The render state, for `ghostty_render_state_begin_update` under the terminal's lock.
-    var handle: RenderStateHandle {
-        RenderStateHandle(pointer: state.pointer)
+    /// The render state, which a render hold's start updates from inside the terminal's write.
+    var pointer: GhosttyRenderState {
+        state.pointer
     }
 
-    /// Completes an update whose begin phase answered `begun`, outside the terminal's lock.
-    func finishUpdate(begun: GhosttyResult) throws(ScreenError) {
-        try require("ghostty_render_state_begin_update", begun)
-        try require("ghostty_render_state_end_update", ghostty_render_state_end_update(state.pointer))
-        try absorb()
+    /// Copies what the terminal has now into the render state.
+    func update(from terminal: GhosttyTerminal) throws(ScreenError) {
+        try require("ghostty_render_state_update", ghostty_render_state_update(state.pointer, terminal))
     }
 
     /// The frame as it stands, with everything that changed since the frame before.
@@ -46,18 +50,19 @@ final class RenderCache {
         )
     }
 
-    private func absorb() throws(ScreenError) {
+    /// Reads into the rows what the render state holds that the rows do not.
+    func absorb() throws(ScreenError) {
         var dirty = GHOSTTY_RENDER_STATE_DIRTY_FALSE
         try get(GHOSTTY_RENDER_STATE_DATA_DIRTY, &dirty)
         var width: UInt16 = 0
         var height: UInt16 = 0
         try get(GHOSTTY_RENDER_STATE_DATA_COLS, &width)
         try get(GHOSTTY_RENDER_STATE_DATA_ROWS, &height)
-        try readColors()
+        let recoloured = try readColors()
         try readCursor()
         let resized = Int(width) != columns || Int(height) != rows.count
-        guard dirty != GHOSTTY_RENDER_STATE_DIRTY_FALSE || resized else { return }
-        let full = dirty == GHOSTTY_RENDER_STATE_DIRTY_FULL || resized
+        guard dirty != GHOSTTY_RENDER_STATE_DIRTY_FALSE || resized || recoloured else { return }
+        let full = dirty == GHOSTTY_RENDER_STATE_DIRTY_FULL || resized || recoloured
         columns = Int(width)
         if resized {
             rows = Array(repeating: ScreenFrame.Row(cells: []), count: Int(height))
@@ -99,7 +104,7 @@ final class RenderCache {
         if Self.isBlank(raw) {
             return Cell(
                 grapheme: "", width: .narrow, foreground: colors.foreground, background: colors.background, attributes: [],
-                underline: .none, selected: selected
+                underline: .none, underlineColor: nil, selected: selected
             )
         }
         var wide = GHOSTTY_CELL_WIDE_NARROW
@@ -119,7 +124,8 @@ final class RenderCache {
         }
         return Cell(
             grapheme: try readGrapheme(), width: CellWidth(wide), foreground: foreground, background: background,
-            attributes: attributes, underline: Underline(style.flags), selected: selected
+            attributes: attributes, underline: Underline(style.flags), underlineColor: color(style.underline_color),
+            selected: selected
         )
     }
 
@@ -153,14 +159,30 @@ final class RenderCache {
         return String(decoding: grapheme[..<buffer.len], as: UTF8.self)
     }
 
-    private func readColors() throws(ScreenError) {
+    /// Reads the default colours and the palette: whether any differ from the last update's (an
+    /// OSC 10, 11 or 4, or their resets), which every cell drawn in a default colour depends on.
+    private func readColors() throws(ScreenError) -> Bool {
         var read = GhosttyRenderStateColors()
         read.size = MemoryLayout<GhosttyRenderStateColors>.size
         try get(GHOSTTY_RENDER_STATE_DATA_COLORS, &read)
+        let print = withUnsafeBytes(of: &read) { Array($0) }
+        guard print != colorPrint else { return false }
+        colorPrint = print
         colors = DefaultColors(
             foreground: RGB(read.foreground), background: RGB(read.background),
-            cursor: read.cursor_has_value ? RGB(read.cursor) : nil
+            cursor: read.cursor_has_value ? RGB(read.cursor) : paletteCursor
         )
+        palette = withUnsafeBytes(of: &read.palette) { Array($0.bindMemory(to: GhosttyColorRgb.self)).map(RGB.init) }
+        return true
+    }
+
+    /// The colour a style's colour names, nil when it names none.
+    private func color(_ color: GhosttyStyleColor) -> RGB? {
+        switch Int(color.tag) {
+        case Int(GHOSTTY_STYLE_COLOR_RGB.rawValue): RGB(color.value.rgb)
+        case Int(GHOSTTY_STYLE_COLOR_PALETTE.rawValue): palette.indices.contains(Int(color.value.palette)) ? palette[Int(color.value.palette)] : nil
+        default: nil
+        }
     }
 
     private func readCursor() throws(ScreenError) {
@@ -193,13 +215,6 @@ final class RenderCache {
     }
 }
 
-/// The render state's pointer carried into the terminal's lock for the begin phase of an update.
-/// It is `@unchecked Sendable` because pointers are not `Sendable`: the render lock is held across
-/// the whole update, so no other thread touches the render state while the terminal's lock is.
-struct RenderStateHandle: @unchecked Sendable {
-    let pointer: GhosttyRenderState
-}
-
 extension RGB {
     init(_ color: GhosttyColorRgb) {
         self.init(red: color.r, green: color.g, blue: color.b)
@@ -211,11 +226,11 @@ extension RGB {
 }
 
 private extension CellAttributes {
-    /// The attributes a style's flags hold (`style.h`: bit 0 bold, 1 italic, 2 faint, 4 inverse,
-    /// 5 invisible, 6 strikethrough), packed in the order of ``CellAttributes``.
+    /// The attributes a style's flags hold (`style.h`: bit 0 bold, 1 italic, 2 faint, 3 blink,
+    /// 4 inverse, 5 invisible, 6 strikethrough, 7 overline), packed in the order of ``CellAttributes``.
     init(_ flags: GhosttyStyleFlags) {
         let bits = UInt8(truncatingIfNeeded: flags)
-        self.init(rawValue: (bits & 0b111) | (bits >> 1 & 0b111000))
+        self.init(rawValue: (bits & 0b111) | (bits >> 1 & 0b111000) | (bits << 3 & 0b0100_0000) | (bits & 0b1000_0000))
     }
 }
 

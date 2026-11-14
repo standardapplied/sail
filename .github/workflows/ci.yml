@@ -199,7 +199,7 @@ jobs:
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: ~/.cache/sailkit/libghostty-vt
-          key: libghostty-vt-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('clients/SailKit/scripts/libghostty-vt') }}
+          key: libghostty-vt-install-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('clients/SailKit/scripts/libghostty-vt') }}
 
       - name: Keep SwiftPM's downloads
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
@@ -209,7 +209,7 @@ jobs:
 
       - name: Build the tests and the probe
         run: |
-          scripts/libghostty-vt "$HOME/.cache/sailkit/libghostty-vt"
+          scripts/libghostty-vt "$HOME/.cache/sailkit/libghostty-vt" "$RUNNER_TEMP/libghostty-vt-downloads"
           export PKG_CONFIG_PATH="$HOME/.cache/sailkit/libghostty-vt/lib/pkgconfig"
           echo "PKG_CONFIG_PATH=$PKG_CONFIG_PATH" >> "$GITHUB_ENV"
           swift build --build-tests
@@ -234,24 +234,30 @@ jobs:
       - name: Set up incus
         uses: ./.github/actions/incus
 
-      - name: A box with a project, its API and terminal door on loopback
+      # One step, so the tokens never leave it. The expired-ticket scenario waits 32 s for a
+      # ticket's life to pass: it asks an open ticket as soon as the project is in the catalog and
+      # waits while the project's container is made.
+      - name: A box with a project, and the runner's door through tickets
         run: |
           sudo install -m 755 "$RUNNER_TEMP/native/sail" /usr/local/bin/sail
           sudo -H sail init --as-main --handle ada --name 'Ada E2E' --email ada@e2e.example
           echo '{"name":"term","resources":{"cpu":2,"memory":"2GB","disk":"10GB"}}' | sudo -H sail project create term --definition -
-          sudo -H sail project apply term --yes
           sudo -H sail host config set api-listen 127.0.0.1:7071
           sudo -H sail host config set terminal-listen 127.0.0.1:7072
           sudo systemctl restart sail-api sail-pty-host
+          healthy=false
           for attempt in $(seq 1 60); do
-            curl -sf http://127.0.0.1:7071/v1/health > /dev/null && break
+            if curl -sf http://127.0.0.1:7071/v1/health > /dev/null; then
+              healthy=true
+              break
+            fi
             sleep 1
           done
+          if [[ $healthy != true ]]; then
+            echo "::error::the API on 127.0.0.1:7071 never answered its health check"
+            exit 1
+          fi
           sudo -H sail fde add eng --role member --name 'Eng E2E' --email eng@e2e.example
-          sudo -H sail host status
-
-      - name: The runner's door, through tickets
-        run: |
           token=$(sudo -H sail server token create e2e-ada member --fde ada 2> /dev/null | sed -n 2p | tr -d ' ')
           other=$(sudo -H sail server token create e2e-eng member --fde eng 2> /dev/null | sed -n 2p | tr -d ' ')
           echo "::add-mask::$token"
@@ -260,9 +266,17 @@ jobs:
             echo "::error::the box minted no token"
             exit 1
           fi
-          SAIL_API=http://127.0.0.1:7071 SAIL_TOKEN=$token SAIL_OTHER_TOKEN=$other SAIL_PROJECT=term \
-            swift test --filter RealRunnerTests
-          SAIL_E2E_TOKEN=$token "$PROBE" --api http://127.0.0.1:7071 --token-env SAIL_E2E_TOKEN --project term \
+          export SAIL_API=http://127.0.0.1:7071 SAIL_TOKEN=$token SAIL_OTHER_TOKEN=$other SAIL_PROJECT=term
+          swift test --filter RealRunnerTests/aTicketOlderThanThirtySecondsIsRefused > "$RUNNER_TEMP/expiry.log" 2>&1 &
+          expiry=$!
+          sudo -H sail project apply term --yes
+          sudo -H sail host status
+          expired=0
+          wait "$expiry" || expired=$?
+          cat "$RUNNER_TEMP/expiry.log"
+          [[ $expired == 0 ]]
+          swift test --filter RealRunnerTests --skip aTicketOlderThanThirtySecondsIsRefused
+          SAIL_E2E_TOKEN=$token "$PROBE" --api "$SAIL_API" --token-env SAIL_E2E_TOKEN --project term \
             --script Tests/Probe/runner.json --report "$RUNNER_TEMP/reports/runner.json" \
             > "$RUNNER_TEMP/probe.out" 2> "$RUNNER_TEMP/probe.err" &
           probe=$!
@@ -281,7 +295,7 @@ jobs:
           fi
           rm "$RUNNER_TEMP/argv.txt"
           [[ $status == 0 ]]
-          SAIL_E2E_TOKEN=$token "$PROBE" --api http://127.0.0.1:7071 --token-env SAIL_E2E_TOKEN --project term \
+          SAIL_E2E_TOKEN=$token "$PROBE" --api "$SAIL_API" --token-env SAIL_E2E_TOKEN --project term \
             --script Tests/Probe/measure.json --report "$RUNNER_TEMP/reports/runner-measure.json"
 
       - name: Leave the probe's reports

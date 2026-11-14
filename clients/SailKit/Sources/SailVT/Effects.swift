@@ -46,9 +46,15 @@ final class EffectSink {
     var clipboardPolicy = ClipboardWritePolicy.allow
     var size = GhosttySizeReportSize()
     let isDark: Bool
+    /// The render state a hold's start is captured into, set once the screen has one.
+    var renderState: GhosttyRenderState?
+    /// When the program's current render hold (synchronized output, mode 2026) began, nil with none.
+    var heldSince: ContinuousClock.Instant?
+    let now: @Sendable () -> ContinuousClock.Instant
 
-    init(isDark: Bool) {
+    init(isDark: Bool, now: @escaping @Sendable () -> ContinuousClock.Instant) {
         self.isDark = isDark
+        self.now = now
     }
 
     func take() -> (reply: [UInt8], events: [ScreenEvent], title: Bool, workingDirectory: Bool) {
@@ -108,6 +114,15 @@ final class EffectSink {
             reply.result = GHOSTTY_CLIPBOARD_READ_RESULT_DENIED
             read.pointee.reply?(read, &reply)
         }
+        let hold: GhosttyTerminalRenderHoldFn = { terminal, userdata, held in
+            guard let sink = EffectSink.from(userdata) else { return }
+            if held, let terminal, let state = sink.renderState {
+                _ = ghostty_render_state_update(state, terminal)
+                sink.heldSince = sink.now()
+            } else if !held {
+                sink.heldSince = nil
+            }
+        }
         let notification: GhosttyTerminalDesktopNotificationFn = { _, userdata, note in
             guard let sink = EffectSink.from(userdata), let note, !sink.replaying else { return }
             sink.events.append(.notification(title: string(note.pointee.title), body: string(note.pointee.body)))
@@ -121,6 +136,7 @@ final class EffectSink {
         try set(terminal, GHOSTTY_TERMINAL_OPT_CLIPBOARD_WRITE, unsafeBitCast(clipboardWrite, to: UnsafeRawPointer.self))
         try set(terminal, GHOSTTY_TERMINAL_OPT_CLIPBOARD_READ, unsafeBitCast(clipboardRead, to: UnsafeRawPointer.self))
         try set(terminal, GHOSTTY_TERMINAL_OPT_DESKTOP_NOTIFICATION, unsafeBitCast(notification, to: UnsafeRawPointer.self))
+        try set(terminal, GHOSTTY_TERMINAL_OPT_RENDER_HOLD, unsafeBitCast(hold, to: UnsafeRawPointer.self))
     }
 
     private static func from(_ userdata: UnsafeMutableRawPointer?) -> EffectSink? {

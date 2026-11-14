@@ -62,8 +62,8 @@ public struct ScreenFrame: Equatable, Sendable {
     public var rows: [Row]
     public var cursor: Cursor
     public var colors: DefaultColors
-    /// Which rows' cells changed since the last ``Screen/frame()``; the cursor and colours are
-    /// always current.
+    /// Which rows' cells changed since the last ``Screen/frame()``: every row (`.all`) after a resize
+    /// or when the default colours or the palette changed. The cursor and colours are always current.
     public var changed: Change
 
     public struct Row: Equatable, Sendable {
@@ -99,11 +99,13 @@ public struct Cell: Equatable, Sendable {
     public var background: RGB
     public var attributes: CellAttributes
     public var underline: Underline
+    /// The underline's own colour (SGR 58), nil to draw it in the foreground.
+    public var underlineColor: RGB?
     public var selected: Bool
 
     public init(
         grapheme: String, width: CellWidth, foreground: RGB, background: RGB, attributes: CellAttributes,
-        underline: Underline, selected: Bool
+        underline: Underline, underlineColor: RGB?, selected: Bool
     ) {
         self.grapheme = grapheme
         self.width = width
@@ -111,6 +113,7 @@ public struct Cell: Equatable, Sendable {
         self.background = background
         self.attributes = attributes
         self.underline = underline
+        self.underlineColor = underlineColor
         self.selected = selected
     }
 }
@@ -138,6 +141,8 @@ public struct CellAttributes: OptionSet, Hashable, Sendable {
     public static let inverse = CellAttributes(rawValue: 1 << 3)
     public static let invisible = CellAttributes(rawValue: 1 << 4)
     public static let strikethrough = CellAttributes(rawValue: 1 << 5)
+    public static let blink = CellAttributes(rawValue: 1 << 6)
+    public static let overline = CellAttributes(rawValue: 1 << 7)
 }
 
 public enum Underline: Equatable, Sendable {
@@ -166,10 +171,10 @@ public enum CursorStyle: Equatable, Sendable {
 public struct DefaultColors: Equatable, Sendable {
     public var foreground: RGB
     public var background: RGB
-    /// The cursor colour a program set, nil when it set none: draw the palette's.
-    public var cursor: RGB?
+    /// The cursor's colour: the one a program set, else the palette's.
+    public var cursor: RGB
 
-    public init(foreground: RGB, background: RGB, cursor: RGB?) {
+    public init(foreground: RGB, background: RGB, cursor: RGB) {
         self.foreground = foreground
         self.background = background
         self.cursor = cursor

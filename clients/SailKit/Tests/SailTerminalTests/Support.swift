@@ -156,3 +156,25 @@ func residentBytes() -> Int? {
     else { return nil }
     return pages * Int(sysconf(Int32(_SC_PAGESIZE)))
 }
+
+/// A session attached to a fake host; its connections count as stable at once unless
+/// `stableAfter` says otherwise.
+func attachedLocally(
+    columns: Int = 80, rows: Int = 24, stableAfter: Duration = .zero,
+    sleep: @escaping @Sendable (Duration) async throws -> Void = Naps().sleep
+) async throws -> (FakeHost, TerminalSession, FakeHost.Peer, Watch) {
+    let host = try FakeHost()
+    let size = TerminalSize(columns: Int32(columns), rows: Int32(rows))
+    let create = SessionCreate(session: "work", command: [], workingDirectory: "/tmp", project: "", room: "", size: size)
+    let session = TerminalSession(
+        open: create, door: .local(host.address), screen: try screen(columns: columns, rows: rows), timeout: 5,
+        stableAfter: stableAfter, sleep: sleep
+    )
+    let watch = Watch(session)
+    session.start()
+    let peer = try await host.accept()
+    try await peer.welcome()
+    _ = try await peer.acceptAttach(columns: size.columns, rows: size.rows)
+    try await watch.until("took the attach's prologue") { watch.seen.contains(.writerChanged("ada")) }
+    return (host, session, peer, watch)
+}

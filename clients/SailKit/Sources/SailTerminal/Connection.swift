@@ -1,9 +1,10 @@
 import SailTerminalWire
 import Synchronization
 
-/// One connection to a terminal host, admitted: the magic exchanged both ways, a `Hello` sent with
-/// the connection's token, and the host's `Welcome` read. One thread reads it; any thread writes,
-/// a frame at a time, never interleaved.
+/// One connection to a terminal host: connected, then admitted (the magic exchanged both ways, a
+/// `Hello` sent with the connection's token, the host's `Welcome` read). One thread reads it; any
+/// thread writes, a frame at a time, never interleaved; any thread may close it, which ends a
+/// read or a handshake in progress.
 final class Connection: Sendable {
     /// The most input one `Input` frame carries; longer input is split, in order.
     static let inputChunk = 64 * 1024
@@ -11,33 +12,32 @@ final class Connection: Sendable {
     private let socket: Socket
     private let writes = Mutex(())
     private let reading = Mutex(Reading())
-    /// The boot id of the run of the host that welcomed this connection.
-    let hostBootID: String
 
-    private init(socket: Socket, hostBootID: String) {
+    private init(socket: Socket) {
         self.socket = socket
-        self.hostBootID = hostBootID
     }
 
-    /// Connects to `address` and is admitted with `token`, each step answered within `timeout`
-    /// seconds; refused in the host's words, or naming which side is older when the magic differs.
-    static func open(to address: HostAddress, token: String, timeout: Int) throws(TerminalError) -> Connection {
+    /// A connection to `address`, made within `timeout` seconds; each later answer is waited for
+    /// as long, until ``stream()``.
+    static func connect(to address: HostAddress, timeout: Int) throws(TerminalError) -> Connection {
         let socket = try Socket.connect(to: address, timeout: timeout)
         socket.setReadTimeout(seconds: timeout)
+        return Connection(socket: socket)
+    }
+
+    /// Is admitted with `token`: the boot id of the run of the host that welcomed it. Refused in
+    /// the host's words, or naming which side is older when the magic differs.
+    func admit(token: String) throws(TerminalError) -> String {
         try socket.send(Handshake.magic)
-        var reading = Reading()
-        let peer = try reading.magic(from: socket)
+        let peer = try reading.withLock { (reading: inout Reading) throws(TerminalError) in try reading.magic(from: socket) }
         do throws(TerminalWireError) {
             try Handshake.check(peer: peer)
         } catch {
             throw Self.violation(error)
         }
-        try socket.send(try encoded(.hello(token: token)))
-        switch try reading.next(from: socket) {
-        case let .welcome(hostBootID):
-            let connection = Connection(socket: socket, hostBootID: hostBootID)
-            connection.reading.withLock { $0 = reading }
-            return connection
+        try send(.hello(token: token))
+        switch try next() {
+        case let .welcome(hostBootID): return hostBootID
         case let .refused(refusal): throw .refused(refusal)
         case nil: throw .closed
         case let other?: throw .protocolViolation("it answered a hello with \(other.name)")
@@ -109,6 +109,7 @@ final class Connection: Sendable {
 private struct Reading: Sendable {
     private var frames = FrameReader()
     private var ready: [Frame] = []
+    private var head = 0
     private var unread: [UInt8] = []
     private var buffer = [UInt8](repeating: 0, count: 64 * 1024)
 
@@ -128,12 +129,15 @@ private struct Reading: Sendable {
             try frame(unread)
             unread = []
         }
-        while ready.isEmpty {
+        while head == ready.count {
+            ready.removeAll(keepingCapacity: true)
+            head = 0
             let count = try socket.receive(into: &buffer)
             guard count > 0 else { return nil }
             try frame(buffer[..<count])
         }
-        return ready.removeFirst()
+        defer { head += 1 }
+        return ready[head]
     }
 
     private mutating func frame(_ bytes: some Sequence<UInt8>) throws(TerminalError) {

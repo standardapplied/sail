@@ -17,7 +17,7 @@ final class TerminalCore {
         terminal.pointer
     }
 
-    init(size: GridSize, scrollbackBytes: Int, palette: Palette) throws(ScreenError) {
+    init(size: GridSize, scrollbackBytes: Int, palette: Palette, now: @escaping @Sendable () -> ContinuousClock.Instant) throws(ScreenError) {
         terminal = try Owned.make("ghostty_terminal_new", {
             ghostty_terminal_new(nil, $0, UInt16(size.columns), UInt16(size.rows))
         }) { ghostty_terminal_free($0) }
@@ -25,7 +25,7 @@ final class TerminalCore {
         keyEvent = try Owned.make("ghostty_key_event_new", { ghostty_key_event_new(nil, $0) }) { ghostty_key_event_free($0) }
         mouseEncoder = try Owned.make("ghostty_mouse_encoder_new", { ghostty_mouse_encoder_new(nil, $0) }) { ghostty_mouse_encoder_free($0) }
         mouseEvent = try Owned.make("ghostty_mouse_event_new", { ghostty_mouse_event_new(nil, $0) }) { ghostty_mouse_event_free($0) }
-        sink = EffectSink(isDark: palette.isDark)
+        sink = EffectSink(isDark: palette.isDark, now: now)
         self.size = size
         try sink.install(on: terminal.pointer)
         var scrollback = scrollbackBytes
@@ -59,6 +59,25 @@ final class TerminalCore {
         )
     }
 
+    /// Starts the terminal again from nothing: every mode and the screen (`ghostty_terminal_reset`),
+    /// and the colours a program set with OSC 10, 11 and 12, which a reset keeps; their own resets
+    /// (OSC 110, 111, 112) are fed for that, through libghostty-vt's parser.
+    func restart() {
+        ghostty_terminal_reset(handle)
+        let resets = Array("\u{1b}]110\u{07}\u{1b}]111\u{07}\u{1b}]112\u{07}".utf8)
+        resets.withUnsafeBufferPointer { ghostty_terminal_vt_write(handle, $0.baseAddress, $0.count) }
+    }
+
+    /// Whether the program's render hold has lasted `limit` or longer; such a hold is ended here,
+    /// as the terminal has no clock to end it.
+    func holdOutlasted(_ limit: Duration) -> Bool {
+        guard let since = sink.heldSince, sink.now() - since >= limit else { return false }
+        var mode = GhosttyTerminalModeConfig(mode: ghostty_mode_new(2026, false), value: false)
+        _ = ghostty_terminal_set(handle, GHOSTTY_TERMINAL_OPT_MODE, &mode)
+        sink.heldSince = nil
+        return true
+    }
+
     func scrollToBottom() {
         var bottom = GhosttyTerminalScrollViewport()
         bottom.tag = GHOSTTY_TERMINAL_SCROLL_VIEWPORT_BOTTOM
@@ -85,14 +104,21 @@ final class TerminalCore {
         }
     }
 
+    /// Pastes as text (`GHOSTTY_PASTE_SOURCE_TEXT`), never as a Kitty paste event (OSC 5522):
+    /// this screen answers every clipboard read denied, and installing that read callback is what
+    /// turns paste events on, so an event's follow-up read would be denied and the paste lost. A
+    /// text paste is still framed by mode 2004. Serving the follow-up read needs the app's clipboard
+    /// here, which spec 2 or 3 brings.
     func paste(_ text: String, confirmed: Bool) -> PasteOutcome {
         var data = Array(text.utf8)
         var mime = Array("text/plain".utf8)
         let wasReplaying = sink.replaying
+        let earlier = sink.reply
         sink.replaying = false
+        sink.reply = []
         defer {
             sink.replaying = wasReplaying
-            sink.reply = []
+            sink.reply = earlier
         }
         let result = data.withUnsafeMutableBufferPointer { data in
             mime.withUnsafeMutableBufferPointer { mime in
@@ -133,7 +159,7 @@ final class TerminalCore {
     }
 
     func encode(_ mouse: MouseInput) -> [UInt8] {
-        if let button = mouse.button, mouse.action == .press {
+        if let button = mouse.button, !button.isWheel, mouse.action == .press {
             heldButtons.insert(button)
         } else if let button = mouse.button, mouse.action == .release {
             heldButtons.remove(button)
@@ -145,8 +171,8 @@ final class TerminalCore {
         surface.size = MemoryLayout<GhosttyMouseEncoderSize>.size
         surface.cell_width = max(cellPixels.width, 1)
         surface.cell_height = max(cellPixels.height, 1)
-        surface.screen_width = surface.cell_width * UInt32(size.columns)
-        surface.screen_height = surface.cell_height * UInt32(size.rows)
+        surface.screen_width = surface.cell_width.multipliedReportingOverflow(by: UInt32(size.columns)).partialValue
+        surface.screen_height = surface.cell_height.multipliedReportingOverflow(by: UInt32(size.rows)).partialValue
         _ = ghostty_mouse_encoder_set(encoder, GHOSTTY_MOUSE_ENCODER_OPT_SIZE, &surface)
         var held = !heldButtons.isEmpty
         _ = ghostty_mouse_encoder_set(encoder, GHOSTTY_MOUSE_ENCODER_OPT_ANY_BUTTON_PRESSED, &held)
@@ -301,6 +327,13 @@ private extension MouseAction {
 }
 
 private extension MouseButton {
+    var isWheel: Bool {
+        switch self {
+        case .wheelUp, .wheelDown, .wheelLeft, .wheelRight: true
+        case .left, .right, .middle: false
+        }
+    }
+
     var ghostty: GhosttyMouseButton {
         switch self {
         case .left: GHOSTTY_MOUSE_BUTTON_LEFT

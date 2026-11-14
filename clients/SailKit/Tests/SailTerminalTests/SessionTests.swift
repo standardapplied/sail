@@ -281,7 +281,7 @@ import Testing
         let (host, session, peer, watch) = try await attachedLocally()
         session.takeWrite()
         #expect(try await peer.read() == .takeWrite)
-        session.kill()
+        try session.kill()
         #expect(try await peer.read() == .kill(session: "work"))
         session.detach()
         #expect(try await peer.read() == .detach)
@@ -337,24 +337,5 @@ import Testing
         _ = try await peer.hello()
         try peer.send(.refused(HostRefusal(message: "That token is not this machine's person.", remedy: nil)))
         try await watch.phase(.ended(.refused("That token is not this machine's person.")))
-    }
-
-    private func attachedLocally(
-        columns: Int = 80, rows: Int = 24, sleep: @escaping @Sendable (Duration) async throws -> Void = Naps().sleep
-    ) async throws -> (FakeHost, TerminalSession, FakeHost.Peer, Watch) {
-        let host = try FakeHost()
-        let size = TerminalSize(columns: Int32(columns), rows: Int32(rows))
-        var create = create
-        create.size = size
-        let session = TerminalSession(
-            open: create, door: .local(host.address), screen: try screen(columns: columns, rows: rows), timeout: 5, sleep: sleep
-        )
-        let watch = Watch(session)
-        session.start()
-        let peer = try await host.accept()
-        try await peer.welcome()
-        _ = try await peer.acceptAttach(columns: size.columns, rows: size.rows)
-        try await watch.until("took the attach's prologue") { watch.seen.contains(.writerChanged("ada")) }
-        return (host, session, peer, watch)
     }
 }

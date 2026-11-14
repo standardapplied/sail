@@ -10,8 +10,13 @@ import Darwin
 final class Socket: Sendable {
     /// How long a write may wait for a peer that stopped reading before the connection is given up.
     static let sendTimeout = 10
-    /// TCP keepalive: probes after 10 s of silence, 5 s apart, 3 unanswered and the peer is dead.
-    static let keepalive = (idle: Int32(10), interval: Int32(5), count: Int32(3))
+    /// How long a TCP peer may leave what was sent unacknowledged, or a quiet connection
+    /// unanswered, before it is taken for dead: the bound of a dead connection's discovery, typing
+    /// or not.
+    static let deadAfter = 10
+    /// TCP keepalive on a quiet connection: probes after 4 s of silence, 2 s apart, 3 unanswered
+    /// and the peer is dead, about ``deadAfter`` in all.
+    static let keepalive = (idle: Int32(4), interval: Int32(2), count: Int32(3))
 
     private let descriptor: Int32
 
@@ -64,6 +69,14 @@ final class Socket: Sendable {
     func setReadTimeout(seconds: Int?) {
         var limit = timeval(tv_sec: seconds ?? 0, tv_usec: 0)
         setsockopt(descriptor, SOL_SOCKET, SO_RCVTIMEO, &limit, socklen_t(MemoryLayout<timeval>.size))
+    }
+
+    /// The socket's TCP retransmit-drop timeout as the system holds it, in the system's own unit.
+    var retransmitDrop: Int32 {
+        var value: Int32 = 0
+        var size = socklen_t(MemoryLayout<Int32>.size)
+        getsockopt(descriptor, Int32(IPPROTO_TCP), Self.retransmitDrop, &value, &size)
+        return value
     }
 
     /// Ends both directions: a blocked read returns, and the peer sees the end of the stream.
@@ -153,6 +166,7 @@ final class Socket: Sendable {
             (Int32(IPPROTO_TCP), Self.keepaliveIdle, Self.keepalive.idle),
             (Int32(IPPROTO_TCP), TCP_KEEPINTVL, Self.keepalive.interval),
             (Int32(IPPROTO_TCP), TCP_KEEPCNT, Self.keepalive.count),
+            (Int32(IPPROTO_TCP), Self.retransmitDrop, Self.retransmitDropValue),
         ]
         for (level, option, value) in options {
             on = value
@@ -169,6 +183,10 @@ final class Socket: Sendable {
     #if canImport(Glibc)
     private static let streamType = Int32(SOCK_STREAM.rawValue)
     private static let keepaliveIdle = TCP_KEEPIDLE
+    /// `TCP_USER_TIMEOUT` (tcp(7)): milliseconds sent data may stay unacknowledged before the
+    /// connection is closed with `ETIMEDOUT`; it also decides keepalive's verdict.
+    private static let retransmitDrop = Int32(TCP_USER_TIMEOUT)
+    private static let retransmitDropValue = Int32(deadAfter * 1000)
 
     private static func write(_ descriptor: Int32, _ bytes: UnsafeRawPointer, _ count: Int) -> Int {
         Glibc.send(descriptor, bytes, count, Int32(MSG_NOSIGNAL))
@@ -184,6 +202,10 @@ final class Socket: Sendable {
     #else
     private static let streamType = SOCK_STREAM
     private static let keepaliveIdle = TCP_KEEPALIVE
+    /// `TCP_RXT_CONNDROPTIME` (xnu `netinet/tcp.h`, set in `tcp_usrreq.c` as seconds): the time
+    /// after which retransmissions stop and the connection is dropped.
+    private static let retransmitDrop = Int32(TCP_RXT_CONNDROPTIME)
+    private static let retransmitDropValue = Int32(deadAfter)
 
     private static func write(_ descriptor: Int32, _ bytes: UnsafeRawPointer, _ count: Int) -> Int {
         Darwin.send(descriptor, bytes, count, 0)

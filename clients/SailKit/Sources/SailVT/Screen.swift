@@ -5,96 +5,139 @@ import Synchronization
 /// bytes a key, a paste, a focus change or the mouse encode to. No escape sequence is parsed and
 /// no input is encoded here; this is libghostty-vt's, driven in order.
 ///
-/// Bytes are fed from one thread and frames read from another: the terminal has its lock, and a
-/// frame holds it only while the render state copies what it needs (`begin_update`); reading the
-/// rows out happens under the render state's own lock, while the terminal goes on.
+/// Bytes are fed from one thread and frames read from another, under one lock for the terminal and
+/// its render state. One lock is what a render hold needs: when a program starts synchronized
+/// output (mode 2026), the render state is updated from inside the terminal's write, on the feeding
+/// thread, so it keeps the last finished frame until the program ends the hold, or the hold has
+/// lasted ``holdLimit``. Bytes are fed in slices of ``feedSlice``, so a frame waits at most one
+/// slice for the lock.
 public final class Screen: Sendable {
-    private let terminal: Mutex<TerminalCore>
-    private let render: Mutex<RenderCache>
+    /// The longest a program may hold the screen still; then the hold is ended and frames go on.
+    public static let holdLimit = Duration.seconds(1)
+    /// The most bytes fed under one taking of the lock.
+    public static let feedSlice = 16 * 1024
+    /// The largest pixel size of one cell this screen takes.
+    public static let largestCellPixels = 4096
+
+    private let parts: Mutex<Parts>
+
+    private struct Parts {
+        let core: TerminalCore
+        let cache: RenderCache
+    }
 
     /// A screen of `size` keeping about `scrollbackBytes` of history, in `palette`'s colours.
     /// Refused when the loaded libghostty-vt is not 1.x from 1.0.1.
-    public init(size: GridSize, scrollbackBytes: Int, palette: Palette) throws(ScreenError) {
+    public convenience init(size: GridSize, scrollbackBytes: Int, palette: Palette) throws(ScreenError) {
+        try self.init(size: size, scrollbackBytes: scrollbackBytes, palette: palette, now: { ContinuousClock.now })
+    }
+
+    /// As the public one, its render holds timed on `now`.
+    package init(
+        size: GridSize, scrollbackBytes: Int, palette: Palette, now: @escaping @Sendable () -> ContinuousClock.Instant
+    ) throws(ScreenError) {
         try LibraryVersion.check(LibraryVersion.loaded)
         guard scrollbackBytes >= 0 else { throw .invalid("a scrollback of \(scrollbackBytes) bytes is not one") }
         guard palette.ansi.count == 16 else { throw .invalid("a palette names 16 colours, not \(palette.ansi.count)") }
-        terminal = Mutex(try TerminalCore(size: try Self.checked(size), scrollbackBytes: scrollbackBytes, palette: palette))
-        render = Mutex(try RenderCache(palette: palette))
+        let core = try TerminalCore(size: try Self.checked(size), scrollbackBytes: scrollbackBytes, palette: palette, now: now)
+        let cache = try RenderCache(palette: palette)
+        core.sink.renderState = cache.pointer
+        parts = Mutex(Parts(core: core, cache: cache))
     }
 
     /// Takes the next bytes of the program's output, in order, and answers what they provoked.
     public func feed(_ bytes: [UInt8]) -> Effects {
-        terminal.withLock { core in
-            bytes.withUnsafeBufferPointer { ghostty_terminal_vt_write(core.handle, $0.baseAddress, $0.count) }
-            return core.drain()
+        var effects = Effects()
+        for start in stride(from: 0, to: bytes.count, by: Self.feedSlice) {
+            let fed = parts.withLock { parts in
+                bytes[start ..< min(bytes.count, start + Self.feedSlice)].withUnsafeBufferPointer {
+                    ghostty_terminal_vt_write(parts.core.handle, $0.baseAddress, $0.count)
+                }
+                return parts.core.drain()
+            }
+            effects.reply += fed.reply
+            effects.events += fed.events
         }
+        return effects
     }
 
-    /// Resizes the grid at once; text reflows as libghostty-vt reflows it.
-    public func resize(_ size: GridSize) throws(ScreenError) {
+    /// Resizes the grid at once; text reflows as libghostty-vt reflows it. What the resize owes
+    /// the program (an in-band size report, mode 2048) is answered.
+    @discardableResult
+    public func resize(_ size: GridSize) throws(ScreenError) -> Effects {
         let size = try Self.checked(size)
-        try terminal.withLock { (core: inout TerminalCore) throws(ScreenError) in try core.resize(size) }
-    }
-
-    /// The pixel size of one cell, which size reports and pixel mouse reports need.
-    public func setCellPixels(width: Int, height: Int) throws(ScreenError) {
-        guard width >= 0, height >= 0 else { throw .invalid("a cell of \(width)x\(height) pixels is not one") }
-        try terminal.withLock { (core: inout TerminalCore) throws(ScreenError) in
-            core.cellPixels = (UInt32(width), UInt32(height))
-            try core.resize(core.size)
+        return try parts.withLock { (parts: inout Parts) throws(ScreenError) -> Effects in
+            try parts.core.resize(size)
+            return parts.core.drain()
         }
     }
 
-    /// A replay of the session's history follows: the terminal starts again from nothing, and what
-    /// the replay provokes is history, so nothing is answered, rung or written for it.
+    /// The pixel size of one cell, which size reports and pixel mouse reports need; at most
+    /// ``largestCellPixels`` a side.
+    @discardableResult
+    public func setCellPixels(width: Int, height: Int) throws(ScreenError) -> Effects {
+        guard (0 ... Self.largestCellPixels).contains(width), (0 ... Self.largestCellPixels).contains(height) else {
+            throw .invalid("a cell of \(width)x\(height) pixels is not one: each side is 0 through \(Self.largestCellPixels)")
+        }
+        return try parts.withLock { (parts: inout Parts) throws(ScreenError) -> Effects in
+            parts.core.cellPixels = (UInt32(width), UInt32(height))
+            try parts.core.resize(parts.core.size)
+            return parts.core.drain()
+        }
+    }
+
+    /// A replay of the session's history follows: the terminal starts again from nothing, the
+    /// colours a program set included, and what the replay provokes is history, so nothing is
+    /// answered, rung or written for it.
     public func beginReplay() {
-        terminal.withLock { core in
-            ghostty_terminal_reset(core.handle)
-            core.sink.replaying = true
+        parts.withLock { parts in
+            parts.core.sink.replaying = true
+            parts.core.restart()
+            _ = parts.core.drain()
         }
     }
 
     /// The replay is over: what follows is live, and the view returns to the bottom.
     public func endReplay() {
-        terminal.withLock { core in
-            core.sink.replaying = false
-            core.scrollToBottom()
+        parts.withLock { parts in
+            parts.core.sink.replaying = false
+            parts.core.scrollToBottom()
         }
     }
 
     /// Back to a blank terminal, every mode reset.
     public func reset() {
-        terminal.withLock { ghostty_terminal_reset($0.handle) }
+        parts.withLock { _ = $0.core.restart() }
     }
 
     public func scrollToBottom() {
-        terminal.withLock { $0.scrollToBottom() }
+        parts.withLock { $0.core.scrollToBottom() }
     }
 
     /// Whether a program may write the clipboard; allowed until the app says otherwise.
     public func setClipboardWrites(_ policy: ClipboardWritePolicy) {
-        terminal.withLock { $0.sink.clipboardPolicy = policy }
+        parts.withLock { $0.core.sink.clipboardPolicy = policy }
     }
 
     /// Which option keys type as alt; libghostty-vt cannot know it from the terminal.
     public func setOptionAsAlt(_ optionAsAlt: OptionAsAlt) {
-        terminal.withLock { $0.optionAsAlt = optionAsAlt }
+        parts.withLock { $0.core.optionAsAlt = optionAsAlt }
     }
 
     /// What a renderer draws now, and which rows changed since the last frame.
     public func frame() throws(ScreenError) -> ScreenFrame {
-        try render.withLock { (cache: inout RenderCache) throws(ScreenError) in
-            try refresh(cache)
-            return cache.frame()
+        try parts.withLock { (parts: inout Parts) throws(ScreenError) in
+            try Self.refresh(parts)
+            return parts.cache.frame()
         }
     }
 
     /// The viewport as plain text: each row's graphemes, trailing blanks dropped, then trailing
     /// blank rows. Reading it leaves the next frame's changes as they were.
     public func text() throws(ScreenError) -> String {
-        try render.withLock { (cache: inout RenderCache) throws(ScreenError) in
-            try refresh(cache)
-            return Self.text(of: cache.rows)
+        try parts.withLock { (parts: inout Parts) throws(ScreenError) in
+            try Self.refresh(parts)
+            return Self.text(of: parts.cache.rows)
         }
     }
 
@@ -114,52 +157,57 @@ public final class Screen: Sendable {
     /// The bytes `key` sends, encoded by libghostty-vt from the terminal's modes as they are now
     /// (cursor keys, keypad, the Kitty flags a program pushed); empty for a key that sends none.
     public func encode(_ key: KeyInput) -> [UInt8] {
-        terminal.withLock { $0.encode(key) }
+        parts.withLock { $0.core.encode(key) }
     }
 
     /// The bytes pasting `text` sends: bracketed when the program asked (mode 2004). Text that
     /// could run commands in a program that did not ask is answered ``PasteOutcome/needsConfirmation``
     /// and sent only when `confirmed`.
     public func paste(_ text: String, confirmed: Bool = false) -> PasteOutcome {
-        terminal.withLock { $0.paste(text, confirmed: confirmed) }
+        parts.withLock { $0.core.paste(text, confirmed: confirmed) }
     }
 
     /// The focus report for the view gaining or losing focus; empty unless the program asked for
     /// focus reports (mode 1004).
     public func focus(_ focused: Bool) -> [UInt8] {
-        terminal.withLock { $0.focus(focused) }
+        parts.withLock { $0.core.focus(focused) }
     }
 
     /// The bytes a pointer event sends; empty unless the program tracks the mouse.
     public func encode(_ mouse: MouseInput) -> [UInt8] {
-        terminal.withLock { $0.encode(mouse) }
+        parts.withLock { $0.core.encode(mouse) }
     }
 
     /// Scrolls `lines` (up is negative) at a pointer place: the wheel's report to a program that
     /// tracks the mouse, arrow keys to a full-screen program that asked for alternate scroll (mode
     /// 1007), or else the viewport through its history, which sends nothing.
     public func scroll(lines: Int, x: Double, y: Double) -> [UInt8] {
-        terminal.withLock { $0.scroll(lines: lines, x: x, y: y) }
+        parts.withLock { $0.core.scroll(lines: lines, x: x, y: y) }
     }
 
     /// Selects what `request` names; false when there is nothing there to select.
     @discardableResult
     public func select(_ request: SelectionRequest) -> Bool {
-        terminal.withLock { $0.select(request) }
+        parts.withLock { $0.core.select(request) }
     }
 
     public func clearSelection() {
-        terminal.withLock { _ = ghostty_terminal_set($0.handle, GHOSTTY_TERMINAL_OPT_SELECTION, nil) }
+        parts.withLock { _ = ghostty_terminal_set($0.core.handle, GHOSTTY_TERMINAL_OPT_SELECTION, nil) }
     }
 
     /// The selected text, wrapped lines joined; nil with no selection.
     public func selectedText() -> String? {
-        terminal.withLock { $0.selectedText() }
+        parts.withLock { $0.core.selectedText() }
     }
 
-    private func refresh(_ cache: RenderCache) throws(ScreenError) {
-        let state = cache.handle
-        try cache.finishUpdate(begun: terminal.withLock { ghostty_render_state_begin_update(state.pointer, $0.handle) })
+    /// Brings the rows up to date, unless the program holds the screen still: then the rows keep
+    /// the frame captured when the hold began, until it ends or outlasts ``holdLimit``.
+    private static func refresh(_ parts: Parts) throws(ScreenError) {
+        _ = parts.core.holdOutlasted(holdLimit)
+        if parts.core.sink.heldSince == nil {
+            try parts.cache.update(from: parts.core.handle)
+        }
+        try parts.cache.absorb()
     }
 
     private static func checked(_ size: GridSize) throws(ScreenError) -> GridSize {

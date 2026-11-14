@@ -130,7 +130,8 @@ struct RealLocalHost {
             room: "", size: TerminalSize(columns: 100, rows: 30)
         )
         let session = TerminalSession(
-            open: create, door: .local(address), screen: try screen(columns: 100, rows: 30), timeout: 10, sleep: sleep
+            open: create, door: .local(address), screen: try screen(columns: 100, rows: 30), timeout: 10, stableAfter: .zero,
+            sleep: sleep
         )
         let watch = Watch(session)
         session.start()

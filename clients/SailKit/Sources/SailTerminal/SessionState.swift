@@ -6,7 +6,9 @@ public struct SessionState: Equatable, Sendable {
     public var phase: SessionPhase
     /// The session's name on its host: the one it was opened or attached as.
     public var session: String
-    /// Input handed in while the session was not attached: dropped, never queued, and counted.
+    /// Input handed in that never reached the program: handed in while not attached (dropped, never
+    /// queued), or written into a connection that died before the host applied it, as the replay
+    /// of the next attach shows.
     public var droppedInputs: Int
     /// The boot id of the run of the host the session lives on, once a host welcomed it.
     public var hostBootID: String?
@@ -51,6 +53,8 @@ public enum SessionEnd: Equatable, Sendable, CustomStringConvertible {
     case refused(String)
     /// The host ended the session, for this reason.
     case ended(String)
+    /// The host sent what the protocol does not allow, which asking again would not mend.
+    case protocolViolation(String)
     /// The app closed it.
     case closed
 
@@ -59,6 +63,7 @@ public enum SessionEnd: Equatable, Sendable, CustomStringConvertible {
         case .hostRestarted: "the host restarted, which ends every session it held"
         case let .refused(words): words
         case let .ended(reason): "the session ended: \(reason)"
+        case let .protocolViolation(what): "the terminal host broke the protocol: \(what)"
         case .closed: "closed"
         }
     }
@@ -72,6 +77,9 @@ public enum SessionEvent: Equatable, Sendable {
     case writerChanged(String)
     case paused
     case continued
+    /// A replay of the session's history began; `safe` is false when it starts inside an escape
+    /// sequence, so the screen may be wrong until the program next redraws.
+    case replay(safe: Bool)
     /// The host refused a frame of this client's while attached (input without the write token, say).
     case refused(HostRefusal)
     case screen(ScreenEvent)

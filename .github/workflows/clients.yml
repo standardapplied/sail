@@ -1,10 +1,19 @@
 name: Clients
 
+# Only a change to the clients or to this workflow can change these lanes' result: the macOS lane
+# tests against the pinned darwin release, not this commit's server (the terminal end to end job in
+# ci.yml runs the clients against this commit's own hosts on every change).
 on:
   pull_request:
+    paths:
+      - clients/**
+      - .github/workflows/clients.yml
   push:
     branches:
       - main
+    paths:
+      - clients/**
+      - .github/workflows/clients.yml
 
 permissions:
   contents: read
@@ -52,12 +61,12 @@ jobs:
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: ~/.cache/sailkit/libghostty-vt
-          key: libghostty-vt-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('clients/SailKit/scripts/libghostty-vt') }}
+          key: libghostty-vt-install-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('clients/SailKit/scripts/libghostty-vt') }}
 
       - name: libghostty-vt
         if: runner.os == 'Linux'
         run: |
-          scripts/libghostty-vt "$HOME/.cache/sailkit/libghostty-vt"
+          scripts/libghostty-vt "$HOME/.cache/sailkit/libghostty-vt" "$RUNNER_TEMP/libghostty-vt-downloads"
           echo "PKG_CONFIG_PATH=$HOME/.cache/sailkit/libghostty-vt/lib/pkgconfig" >> "$GITHUB_ENV"
 
       - name: Keep SwiftPM's downloads
@@ -85,16 +94,14 @@ jobs:
       - name: Test
         run: swift test
 
-      - name: Probe this machine's own host
+      # The scenarios ran in the Test step; this measures the echo through this machine's own host,
+      # with the debug probe the build already made (the budget is far above its cost).
+      - name: Echo latency through this machine's own host
         if: runner.os == 'macOS'
         run: |
-          swift build -c release --product sail-term-probe
-          probe="$(swift build -c release --show-bin-path)/sail-term-probe"
           mkdir -p "$RUNNER_TEMP/reports"
-          for script in local measure; do
-            "$probe" --local --host-binary "$SAIL_BINARY" --folder /tmp --script "Tests/Probe/$script.json" \
-              --report "$RUNNER_TEMP/reports/macos-$script.json"
-          done
+          "$(swift build --show-bin-path)/sail-term-probe" --local --host-binary "$SAIL_BINARY" --folder /tmp \
+            --script Tests/Probe/measure.json --report "$RUNNER_TEMP/reports/macos-measure.json"
 
       - name: Leave the probe's reports
         if: always() && runner.os == 'macOS'

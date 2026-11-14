@@ -51,6 +51,11 @@ struct Budget: Encodable {
         milliseconds <= limit
     }
 
+    /// A number measured and reported, held to no limit.
+    var reported: Bool {
+        limit == .infinity
+    }
+
     private enum Keys: String, CodingKey {
         case name, milliseconds, limit, met
     }
@@ -59,7 +64,7 @@ struct Budget: Encodable {
         var fields = encoder.container(keyedBy: Keys.self)
         try fields.encode(name, forKey: .name)
         try fields.encode(milliseconds, forKey: .milliseconds)
-        try fields.encode(limit, forKey: .limit)
+        try fields.encodeIfPresent(reported ? nil : limit, forKey: .limit)
         try fields.encode(met, forKey: .met)
     }
 }
