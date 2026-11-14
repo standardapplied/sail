@@ -3708,8 +3708,9 @@ no pairing is removed through the gateway as before, and no key file is touched.
     dispatch is refused so, `RunLogins.forRun` says it once in the spec's room with the same
     remedy, once per spec per cause until a run of that spec starts with a login. The line is
     posted as this box's machinery (`Actor.system`), whoever's request met the refusal, as the
-    loop narrates, and reaches main as every narration of the box does: once the box holds a run
-    in that conversation, since main takes a box's `sail` post only there. No other narration
+    loop narrates. On a node the message is posted locally and reaches main as any node narration
+    does, so for a spec with no run on that node it stays on the node (the person who asked is
+    told on their terminal). No other narration
     quotes the refusal: a refused review, fix or resume leaves the loop owed what it was
     (`RunLogins.wantsALogin`), and storing a login, or making one the default
     (`LoopTrigger.LoginStored`), takes that step on the box that drives the loop: the reviewer of a
