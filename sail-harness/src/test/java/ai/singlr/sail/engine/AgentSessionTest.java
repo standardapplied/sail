@@ -1045,7 +1045,8 @@ class AgentSessionTest {
     for (var joined : List.of(String.join(" ", fresh), String.join(" ", resumed))) {
       assertFalse(joined.contains("--dangerously-skip-permissions"), joined);
       assertTrue(joined.contains("--tools \"Bash,Read,Grep,Glob\""), joined);
-      assertTrue(joined.contains("\"Bash(spec:*)\""), joined);
+      assertTrue(joined.contains("\"Bash(spec comment:*)\""), joined);
+      assertFalse(joined.contains("\"Bash(spec:*)\""), joined);
     }
     var build =
         String.join(

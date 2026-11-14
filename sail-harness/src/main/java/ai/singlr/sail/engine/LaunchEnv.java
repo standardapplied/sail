@@ -49,8 +49,10 @@ public record LaunchEnv(String runCredential, LoginStore.Login stored) {
 
   /**
    * The file's content: one {@code NAME=value} line each, the run credential's first. A run on a
-   * stored login also sets empty every other variable its harness takes a credential from, so none
-   * its container exports outranks the login it records.
+   * stored login also sets empty every other variable its harness takes a credential from and every
+   * switch that sends it to a cloud provider's account ({@link
+   * ai.singlr.sail.harness.Harness#credentialSwitches}), so nothing its container exports outranks
+   * the login it records.
    */
   public String lines() {
     var lines =
@@ -59,10 +61,14 @@ public record LaunchEnv(String runCredential, LoginStore.Login stored) {
       return lines.toString();
     }
     var own = stored.kind().variable();
-    for (var variable : Harnesses.of(stored.row().harness()).loginVariables()) {
+    var harness = Harnesses.of(stored.row().harness());
+    for (var variable : harness.loginVariables()) {
       if (!variable.equals(own)) {
         lines.append(variable).append("=\n");
       }
+    }
+    for (var variable : harness.credentialSwitches()) {
+      lines.append(variable).append("=\n");
     }
     return lines.append(own).append('=').append(stored.value()).append('\n').toString();
   }

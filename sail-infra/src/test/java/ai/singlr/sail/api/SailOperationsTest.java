@@ -72,6 +72,8 @@ import java.util.function.Supplier;
 import java.util.stream.Collectors;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 @ActingAs
 class SailOperationsTest {
@@ -573,16 +575,67 @@ class SailOperationsTest {
 
   @Test
   void aDryRunIsRefusedAsTheDispatchWouldBeWhenThePersonStoredNoLogin() throws Exception {
-    var yaml = tempDir.resolve("sail-" + System.nanoTime() + ".yaml");
-    Files.writeString(yaml, baseYaml());
+    var db = dryRunDatabase();
+    var store = new SpecStore(db);
+    new FdeStore(db).add(LOCAL_HANDLE, null, null, "admin");
+    var observer = shell().on("incus list ^acme$", RUNNING_JSON);
+
+    var error =
+        dispatch(dryRunOperations(db, observer), "acme", request("auth", "background", true));
+
+    assertError(ErrorCode.LOGIN_NOT_STORED, error);
+    assertEquals(SpecStatus.PENDING, store.findById("auth").orElseThrow().status());
+    assertTrue(
+        observer.invocations().stream().anyMatch(call -> call.startsWith("incus list")),
+        "the dry run read the container's state from a shell that runs it");
+  }
+
+  /**
+   * A dry run on the CLI's shell (one that executes nothing, its probes on a real observer) with
+   * the person's login stored says the dispatch would go ahead, and writes nothing: the spec, its
+   * branch, its reviews, its runs, its room and the journal are as they were, a restart's included.
+   */
+  @ParameterizedTest
+  @ValueSource(booleans = {false, true})
+  void aDryRunThatWouldDispatchWritesNothing(boolean restart) throws Exception {
+    var db = dryRunDatabase();
+    var store = new SpecStore(db);
+    TestLogins.store(db, LOCAL_HANDLE);
+    new FdeStore(db).update(LOCAL_HANDLE, null, null, "admin");
+    if (restart) {
+      Acting.system(() -> store.updateStatus("auth", SpecStatus.REVIEW));
+      var reviews = new ReviewStore(db);
+      reviews.startStage(
+          reviews.createStage(reviews.createReview("auth", 1), "codex", "agent"), "codex");
+    }
+    Acting.system(() -> new MessageStore(db).append("auth", LOCAL_HANDLE, "go", null));
+    var before = stateOf(db, "auth");
+
+    var result =
+        dispatch(
+            dryRunOperations(db, shell().on("incus list ^acme$", RUNNING_JSON)),
+            "acme",
+            new DispatchRequest("auth", "background", true, null, restart));
+
+    assertEquals(true, get(result, "dispatched"), result.toString());
+    assertEquals(before, stateOf(db, "auth"), "a dry run changes nothing");
+  }
+
+  private Sqlite dryRunDatabase() throws Exception {
     var db = Sqlite.open(tempDir.resolve("specs-" + System.nanoTime() + ".db"));
     new SchemaManager(db).migrate();
     HeldProjects.hold(db, "acme");
-    var store = new SpecStore(db);
-    seedAuthBillingSetup(store);
-    var fdeStore = new FdeStore(db);
-    fdeStore.add(LOCAL_HANDLE, null, null, "admin");
-    var observer = shell().on("incus list ^acme$", RUNNING_JSON);
+    seedAuthBillingSetup(new SpecStore(db));
+    return db;
+  }
+
+  /**
+   * Operations over a shell that, as the CLI's dry run, executes nothing but probes on {@code
+   * observer}.
+   */
+  private SailOperations dryRunOperations(Sqlite db, FakeShell observer) throws Exception {
+    var yaml = tempDir.resolve("sail-" + System.nanoTime() + ".yaml");
+    Files.writeString(yaml, baseYaml());
     var dryRun =
         new ShellExec() {
           @Override
@@ -605,26 +658,29 @@ class SailOperationsTest {
             return observer;
           }
         };
-    var operations =
-        new SailOperations(
-            dryRun,
-            TestProjects.reading(yaml),
-            null,
-            store,
-            new ReviewStore(db),
-            new RunStore(db),
-            new ProjectStore(db),
-            SyncScheduler.disabled(),
-            fdeStore,
-            SessionYield.NONE);
+    return new SailOperations(
+        dryRun,
+        TestProjects.reading(yaml),
+        null,
+        new SpecStore(db),
+        new ReviewStore(db),
+        new RunStore(db),
+        new ProjectStore(db),
+        SyncScheduler.disabled(),
+        new FdeStore(db),
+        SessionYield.NONE);
+  }
 
-    var error = dispatch(operations, "acme", request("auth", "background", true));
-
-    assertError(ErrorCode.LOGIN_NOT_STORED, error);
-    assertEquals(SpecStatus.PENDING, store.findById("auth").orElseThrow().status());
-    assertTrue(
-        observer.invocations().stream().anyMatch(call -> call.startsWith("incus list")),
-        "the dry run read the container's state from a shell that runs it");
+  /**
+   * What a dispatch of {@code specId} may write, read back: the spec, reviews, runs, room, journal.
+   */
+  private static List<Object> stateOf(Sqlite db, String specId) {
+    return List.of(
+        new SpecStore(db).findById(specId).orElseThrow().toString(),
+        new ReviewStore(db).reviewsForSpec(specId).toString(),
+        new RunStore(db).listForSpec(specId).toString(),
+        new MessageStore(db).list(specId, null, 100).toString(),
+        db.queryOne("SELECT count(*) FROM change_log", row -> row.text(0)).orElse(""));
   }
 
   @Test
@@ -633,7 +689,7 @@ class SailOperationsTest {
     var operations =
         operationsWithStore(
             multiRepoYaml(),
-            shell()
+            launching(shell())
                 .on("incus list ^acme$", RUNNING_JSON)
                 .on("cat /home/dev/.sail/agent.pid", new ShellExec.Result(1, "", "missing")),
             store -> {
@@ -643,7 +699,7 @@ class SailOperationsTest {
 
     var result =
         dispatch(
-            operations, "acme", new DispatchRequest("auth", "background", true, List.of("web")));
+            operations, "acme", new DispatchRequest("auth", "background", false, List.of("web")));
 
     assertEquals(true, get(result, "dispatched"));
     var persisted = stores[0].findById("auth").orElseThrow();
@@ -729,7 +785,7 @@ class SailOperationsTest {
     var operations =
         operationsWithStore(
             multiRepoYaml(),
-            shell()
+            launching(shell())
                 .on("incus list ^acme$", RUNNING_JSON)
                 .on("cat /home/dev/.sail/agent.pid", "123")
                 .on("kill -0 123", new ShellExec.Result(1, "", "no such process")),
@@ -743,7 +799,7 @@ class SailOperationsTest {
         dispatch(
             operations,
             "acme",
-            new DispatchRequest("web-work", "background", true, List.of("web")));
+            new DispatchRequest("web-work", "background", false, List.of("web")));
 
     assertEquals(true, get(result, "dispatched"));
     assertEquals(List.of("web"), stores[0].findById("web-work").orElseThrow().repos());
@@ -755,7 +811,7 @@ class SailOperationsTest {
     var operations =
         operationsWithStores(
             multiRepoYaml(),
-            shell().on("incus list ^acme$", RUNNING_JSON),
+            launching(shell()).on("incus list ^acme$", RUNNING_JSON),
             null,
             store -> {
               stores[0] = store;
@@ -781,7 +837,7 @@ class SailOperationsTest {
         dispatch(
             operations,
             "acme",
-            new DispatchRequest("web-work", "background", true, List.of("web")));
+            new DispatchRequest("web-work", "background", false, List.of("web")));
 
     assertEquals(true, get(result, "dispatched"));
     assertEquals(List.of("web"), stores[0].findById("web-work").orElseThrow().repos());
@@ -2302,7 +2358,7 @@ class SailOperationsTest {
   }
 
   @Test
-  void dispatchDryRunWithRestartClaimsTheSpecLikeAnyDispatchDryRun() throws Exception {
+  void aDryRunWithRestartSaysTheRestartAndLeavesTheSpecAsItWas() throws Exception {
     var stores = new SpecStore[1];
     var operations =
         operationsWithStore(
@@ -2330,11 +2386,11 @@ class SailOperationsTest {
         dispatch(operations, "acme", new DispatchRequest("auth", "background", true, null, true));
 
     assertEquals(true, get(result, "dispatched"));
-    assertEquals(true, get(result, "restarted"));
+    assertEquals(true, get(result, "restarted"), "it says the restart a real dispatch would make");
     assertEquals(
-        SpecStatus.IN_PROGRESS,
+        SpecStatus.REVIEW,
         stores[0].findById("auth").orElseThrow().status(),
-        "a dry run claims the spec — dispatch's existing dry-run semantics, unchanged by restart");
+        "a dry run rehearses the claim and writes nothing, a restart's included");
   }
 
   @Test
@@ -2634,7 +2690,7 @@ class SailOperationsTest {
     var operations =
         operationsWithStore(
             branchYaml(),
-            shell()
+            launching(shell())
                 .on("incus list ^acme$", RUNNING_JSON)
                 .on("cat /home/dev/.sail/agent.pid", new ShellExec.Result(1, "", "missing")),
             store -> {
@@ -2642,7 +2698,7 @@ class SailOperationsTest {
               seedAuthBillingSetup(store);
             });
 
-    dispatch(operations, "acme", request("auth", "background", true));
+    dispatch(operations, "acme", request("auth", "background", false));
 
     assertEquals("sail/auth", stores[0].findById("auth").orElseThrow().branch());
   }
@@ -2652,7 +2708,7 @@ class SailOperationsTest {
     var operations =
         operations(
             branchYaml(),
-            shell()
+            launching(shell())
                 .on("incus list ^acme$", RUNNING_JSON)
                 .on("cat /home/dev/.sail/agent.pid", new ShellExec.Result(1, "", "missing"))
                 .on("mkdir -p /home/dev/workspace/specs", "")
@@ -2660,7 +2716,7 @@ class SailOperationsTest {
                 .on("git -C /home/dev/workspace/app rev-parse --is-inside-work-tree", "true\n")
                 .on("git -C /home/dev/workspace/app checkout -b sail/auth", ""));
 
-    var result = dispatch(operations, "acme", request("auth", "background", true));
+    var result = dispatch(operations, "acme", request("auth", "background", false));
 
     assertEquals(true, get(result, "branch_created"));
     assertTrue(get(result, "spec").toString().contains("sail/auth"));
@@ -2720,7 +2776,7 @@ class SailOperationsTest {
     var operations =
         operations(
             branchYaml(),
-            shell()
+            launching(shell())
                 .on("incus list ^acme$", RUNNING_JSON)
                 .on("cat /home/dev/.sail/agent.pid", new ShellExec.Result(1, "", "missing"))
                 .on("mkdir -p /home/dev/workspace/specs", "")
@@ -2730,7 +2786,7 @@ class SailOperationsTest {
                     "git -C /home/dev/workspace/app checkout -b sail/auth",
                     new ShellExec.Result(1, "", "exists")));
 
-    var error = dispatch(operations, "acme", request("auth", "background", true));
+    var error = dispatch(operations, "acme", request("auth", "background", false));
 
     assertError(ErrorCode.BRANCH_CREATE_FAILED, error);
   }
@@ -2740,7 +2796,7 @@ class SailOperationsTest {
     var operations =
         operations(
             snapshotYaml(),
-            shell()
+            launching(shell())
                 .on("incus list ^acme$", RUNNING_JSON)
                 .on("cat /home/dev/.sail/agent.pid", new ShellExec.Result(1, "", "missing"))
                 .on("mkdir -p /home/dev/workspace/specs", "")
@@ -2748,7 +2804,7 @@ class SailOperationsTest {
                 .on("incus snapshot list acme --format json", "[]")
                 .on("incus snapshot create acme", ""));
 
-    var result = dispatch(operations, "acme", request("auth", "background", true));
+    var result = dispatch(operations, "acme", request("auth", "background", false));
 
     assertFalse(get(result, "snapshot").toString().isBlank());
   }
@@ -2776,7 +2832,7 @@ class SailOperationsTest {
     var operations =
         operations(
             snapshotYaml(),
-            shell()
+            launching(shell())
                 .on("incus list ^acme$", RUNNING_JSON)
                 .on("cat /home/dev/.sail/agent.pid", new ShellExec.Result(1, "", "missing"))
                 .on("mkdir -p /home/dev/workspace/specs", "")
@@ -2786,7 +2842,7 @@ class SailOperationsTest {
                     "[{\"name\": \"snap\", \"created_at\": \"bad\"}]")
                 .on("incus snapshot create acme", ""));
 
-    var result = dispatch(operations, "acme", request("auth", "background", true));
+    var result = dispatch(operations, "acme", request("auth", "background", false));
 
     assertFalse(get(result, "snapshot").toString().isBlank());
   }
@@ -2796,7 +2852,7 @@ class SailOperationsTest {
     var operations =
         operations(
             snapshotYaml(),
-            shell()
+            launching(shell())
                 .on("incus list ^acme$", RUNNING_JSON)
                 .on("cat /home/dev/.sail/agent.pid", new ShellExec.Result(1, "", "missing"))
                 .on("mkdir -p /home/dev/workspace/specs", "")
@@ -2804,7 +2860,7 @@ class SailOperationsTest {
                 .on("incus snapshot list acme --format json", "[]")
                 .on("incus snapshot create acme", new ShellExec.Result(1, "", "no space")));
 
-    var error = dispatch(operations, "acme", request("auth", "background", true));
+    var error = dispatch(operations, "acme", request("auth", "background", false));
 
     assertError(ErrorCode.SNAPSHOT_FAILED, error);
   }
@@ -3249,7 +3305,7 @@ class SailOperationsTest {
   void dispatchPublishesSnapshotCreatedWithBus() throws Exception {
     try (var bus = new EventBus()) {
       var shell =
-          shell()
+          launching(shell())
               .on("incus list ^acme$", RUNNING_JSON)
               .on("cat /home/dev/.sail/agent.pid", new ShellExec.Result(1, "", "missing"))
               .on("mkdir -p /home/dev/workspace/specs", "")
@@ -3260,7 +3316,7 @@ class SailOperationsTest {
           operationsWithStores(
               snapshotYaml(), shell, bus, SailOperationsTest::seedAuthBillingSetup, s -> {});
 
-      var result = dispatch(operations, "acme", request("auth", "background", true));
+      var result = dispatch(operations, "acme", request("auth", "background", false));
 
       assertTrue(result.isSuccess());
       assertFalse(get(result, "snapshot").toString().isBlank());
@@ -3841,6 +3897,16 @@ class SailOperationsTest {
 
   private SailOperations operations(FakeShell shell) throws Exception {
     return operations(baseYaml(), shell);
+  }
+
+  /** {@code shell}, also answering what a live background launch runs in the container. */
+  private static FakeShell launching(FakeShell shell) {
+    return shell
+        .on("mkdir -p /home/dev/workspace/specs", "")
+        .on("printf '%s'", "")
+        .on("mkdir -p /home/dev/.sail", "")
+        .on("systemd-run --user", "")
+        .on("claude", "");
   }
 
   private static FakeShell shell() {

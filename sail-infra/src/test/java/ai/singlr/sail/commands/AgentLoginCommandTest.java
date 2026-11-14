@@ -159,8 +159,11 @@ class AgentLoginCommandTest {
             "kind",
             "token",
             "default",
+            true,
+            "replaces",
             true),
-        YamlUtil.parseMap(again.out()));
+        YamlUtil.parseMap(again.out()),
+        "it would replace the default stored a moment ago");
     var uday = new FdeStore(db).byHandle("uday").orElseThrow().id();
     assertEquals(
         List.of("default"),

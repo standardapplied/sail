@@ -58,6 +58,7 @@ class SocketPreambleTest {
     assertEquals(
         """
         sail_curl() {
+          case $CREDENTIAL in *[!A-Za-z0-9_]*) echo "sail_curl: a malformed credential" >&2; return 2 ;; esac
           { printf 'header = "Authorization: Bearer %s"\\n' "$CREDENTIAL" \\
             | curl --config /dev/fd/3 "$@" 3<&0 <&4 4<&-; } 4<&0
         }
@@ -96,6 +97,32 @@ class SocketPreambleTest {
             "--silent -X POST --data-binary @- http://sail/x" + FakeCurl.presenting(CREDENTIAL)),
         Files.readAllLines(home.resolve("curl.log")));
     assertEquals("the body", Files.readString(home.resolve("curl.stdin")));
+  }
+
+  @ParameterizedTest
+  @ValueSource(strings = {"sh", "bash"})
+  void aCredentialThatCouldCarryAConfigLineIsRefusedBeforeCurlRuns(String shell) throws Exception {
+    var bin = Files.createDirectories(home.resolve("bin"));
+    executable(bin.resolve("curl"), FakeCurl.script(""));
+    var script =
+        "CREDENTIAL=\"$(printf 'x\\noutput = \\\"injected')\"\n"
+            + SocketPreamble.credentialCurl()
+            + "sail_curl --silent http://sail/x; echo \"rc=$?\"\n";
+
+    var process =
+        new ProcessBuilder(shell, "-c", script)
+            .directory(home.toFile())
+            .redirectErrorStream(true)
+            .redirectOutput(home.resolve("out").toFile());
+    process.environment().put("HOME", home.toString());
+    process.environment().put("PATH", bin + ":/usr/bin:/bin");
+    var ran = process.start();
+    assertTrue(ran.waitFor(30, TimeUnit.SECONDS));
+
+    assertTrue(
+        Files.readString(home.resolve("out")).contains("rc=2"),
+        Files.readString(home.resolve("out")));
+    assertFalse(Files.exists(home.resolve("curl.argv")), "curl never ran");
   }
 
   private static void executable(Path path, String content) throws IOException {

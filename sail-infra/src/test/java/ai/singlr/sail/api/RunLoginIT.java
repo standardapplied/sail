@@ -18,6 +18,7 @@ import ai.singlr.sail.engine.AgentUnit;
 import ai.singlr.sail.engine.ContainerExec;
 import ai.singlr.sail.engine.ContainerFilePush;
 import ai.singlr.sail.engine.SailEventHelper;
+import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.SailRoomRelay;
 import ai.singlr.sail.engine.SailSessionReport;
 import ai.singlr.sail.engine.SailStopGate;
@@ -95,7 +96,7 @@ class RunLoginIT extends AbstractIncusIT {
       bin="$HOME/.sail/it-hooks"
       mkdir -p "$bin"
       for hook in sail-event.sh sail-session-report sail-room-relay sail-stop-gate; do
-        sed 's|/var/lib/sail/run/api.sock|/run/sail-it-stub/api.sock|g' \\
+        sed 's|__API_SOCKET__|/run/sail-it-stub/api.sock|g' \\
           "$HOME/.sail/bin/$hook" > "$bin/$hook"
         chmod 0755 "$bin/$hook"
       done
@@ -172,7 +173,11 @@ class RunLoginIT extends AbstractIncusIT {
                     + " timeout 60 sh -c 'until test -S /run/user/1000/bus; do sleep 1; done'"));
     assertTrue(setup.ok(), "container provisioning failed: " + setup.stderr());
     ContainerFilePush.push(
-        shell, CONTAINER, "/usr/local/bin/codex", FAKE_AGENT, List.of("--mode", "0755"));
+        shell,
+        CONTAINER,
+        "/usr/local/bin/codex",
+        FAKE_AGENT.replace("__API_SOCKET__", SailPaths.apiSocketContainerPath().toString()),
+        List.of("--mode", "0755"));
     var hooks =
         Map.of(
             SailEventHelper.SCRIPT_PATH, SailEventHelper.scriptContent(),

@@ -440,6 +440,18 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
     return db.transaction(work);
   }
 
+  /**
+   * Runs {@code work} as {@link #atomically} would and rolls it back ({@link Sqlite#rehearse}): a
+   * dry run meets every refusal the real write would, and writes nothing.
+   */
+  public void rehearse(Runnable work) {
+    db.rehearse(
+        () -> {
+          work.run();
+          return null;
+        });
+  }
+
   public void updateStatus(String id, SpecStatus status) {
     db.transaction(
         () -> {

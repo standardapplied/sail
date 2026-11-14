@@ -5,65 +5,44 @@
 
 package ai.singlr.sail.engine;
 
+import ai.singlr.sail.common.PrivateDirectory;
 import java.io.IOException;
-import java.nio.file.FileAlreadyExistsException;
+import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
-import java.nio.file.attribute.PosixFilePermission;
-import java.nio.file.attribute.PosixFilePermissions;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Set;
 import java.util.concurrent.TimeoutException;
 import java.util.stream.Stream;
 
 /**
  * Writes content to a file inside an Incus container via {@code incus file push}, avoiding shell
- * injection. Content is staged to a host-side file in this account's own {@code 0700} staging
- * directory ({@link #staging}), pushed with the caller-supplied flags (mode, ownership), then
- * deleted whether or not the push succeeds; what a push killed midway leaves there is removed by
- * {@link #removeStaged}. Content may be a secret: a run's credential and its person's login.
+ * injection. Content is staged to a host-side file in the box's own {@code 0700} staging directory
+ * beside its database ({@link #staging}), pushed with the caller-supplied flags (mode, ownership),
+ * then deleted whether or not the push succeeds; what a push killed midway leaves there is removed
+ * by {@link #removeStaged}. Content may be a secret: a run's credential and its person's login.
  */
 public final class ContainerFilePush {
-
-  private static final Set<PosixFilePermission> OWNER_ONLY =
-      PosixFilePermissions.fromString("rwx------");
 
   private ContainerFilePush() {}
 
   /**
-   * The directory content is staged in on its way into a container: one per account under the
-   * system temporary directory, {@code 0700} and this account's, never a link.
-   *
-   * @throws IOException when it is a link, someone else's, or readable by anyone else
+   * The directory content is staged in on its way into a container ({@link SailPaths#stagingDir}),
+   * this account's alone ({@link PrivateDirectory}).
    */
   static Path staging() throws IOException {
-    return staging(Path.of(System.getProperty("java.io.tmpdir")));
+    return staging(SailPaths.stagingDir());
   }
 
-  static Path staging(Path tmp) throws IOException {
-    var dir = tmp.resolve("sail-staging-" + System.getProperty("user.name"));
+  static Path staging(Path dir) throws IOException {
+    Files.createDirectories(dir.getParent());
     try {
-      Files.createDirectory(dir, PosixFilePermissions.asFileAttribute(OWNER_ONLY));
-    } catch (FileAlreadyExistsException present) {
-      requirePrivate(dir);
-    }
-    return dir;
-  }
-
-  private static void requirePrivate(Path dir) throws IOException {
-    var owner = Files.getOwner(dir, LinkOption.NOFOLLOW_LINKS).getName();
-    if (Files.isSymbolicLink(dir)
-        || !owner.equals(System.getProperty("user.name"))
-        || !Files.getPosixFilePermissions(dir, LinkOption.NOFOLLOW_LINKS).equals(OWNER_ONLY)) {
-      throw new IOException(
-          "The staging directory "
-              + dir
-              + " is not this account's own 0700 directory, so nothing is staged in it: remove it"
-              + " and retry.");
+      return PrivateDirectory.ensure(dir);
+    } catch (UncheckedIOException refused) {
+      throw refused.getCause();
     }
   }
 

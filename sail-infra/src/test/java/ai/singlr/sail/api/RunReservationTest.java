@@ -238,11 +238,10 @@ class RunReservationTest {
    * met, and said again only after a run of the spec has started with a login since.
    */
   @Test
-  void aMissingLoginIsSaidInTheSpecsRoomOncePerCauseUntilARunStarts() {
+  void aMissingLoginIsToldToTheSpecsRoomWithItsRemedyEachTimeForTheRoomToSayOnce() {
     var said = new ArrayList<String>();
     var fdes = new FdeStore(db);
     var node = fdes.byHandle("node").orElseThrow().id();
-    var stored = fdes.logins().defaultFor(node, Harnesses.of("codex")).orElseThrow().value();
     fdes.logins().forget(node);
     var r =
         new RunReservation(
@@ -257,32 +256,9 @@ class RunReservationTest {
     assertThrows(ApiException.class, () -> reserve(r));
     assertThrows(ApiException.class, () -> reserve(r));
 
-    assertEquals(1, said.size(), said.toString());
+    assertEquals(2, said.size(), "no process keeps what it told: the room decides " + said);
     assertTrue(said.getFirst().startsWith("spec: No Codex CLI login stored for node"), said.get(0));
     assertTrue(said.getFirst().endsWith("then sail agent login codex --kind token."), said.get(0));
-
-    fdes.logins().store(node, Harnesses.of("codex"), null, null, stored);
-    reserve(r);
-    Acting.system(() -> TestRuns.complete(runStore, RUN_ID, "completed", 0));
-    fdes.logins().forget(node);
-    assertThrows(
-        ApiException.class,
-        () ->
-            r.reserve(
-                DateTimeUtils.newId().toString(),
-                "acme",
-                "spec",
-                "node",
-                "node",
-                "adhoc",
-                List.of(),
-                "codex",
-                null,
-                "task",
-                AgentUnit.forRun(DateTimeUtils.newId().toString()),
-                CONFIG));
-
-    assertEquals(2, said.size(), "a run of the spec started since, so the refusal is said again");
   }
 
   /** A run acting for no one on this box's roster has no stored login to start with. */

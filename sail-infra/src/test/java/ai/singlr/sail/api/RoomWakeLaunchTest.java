@@ -580,6 +580,76 @@ class RoomWakeLaunchTest {
     assertTrue(said.getFirst().body().startsWith("No Claude Code login stored for uday"));
   }
 
+  /**
+   * "Once" is the room's, not a process's: three CLI attempts, each its own process, and a restart
+   * between them say the refusal once; once a run of the spec started on a stored login, a refusal
+   * after the login is removed is said again.
+   */
+  @Test
+  void aRefusalIsSaidOnceAcrossProcessesAndRestartsAndAgainAfterARunStarted() throws Exception {
+    var first = operations(liveAgentShell());
+    createSpec(HANDLE, "auth", HANDLE);
+    var fdes = new FdeStore(db);
+    var person = fdes.byHandle(HANDLE).orElseThrow().id();
+    fdes.logins().forget(person);
+
+    assertThrows(ApiException.class, () -> dispatchAsThePerson(first));
+    for (var attempt = 0; attempt < 2; attempt++) {
+      var process = anotherProcess(liveAgentShell());
+      assertThrows(ApiException.class, () -> dispatchAsThePerson(process));
+    }
+    assertEquals(1, sailLines("auth").size(), sailLines("auth").toString());
+
+    TestLogins.store(db, HANDLE);
+    var started = dispatchAsThePerson(anotherProcess(liveAgentShell()));
+    Acting.system(() -> TestRuns.complete(runStore, started.runId(), "completed", 0));
+    Acting.system(() -> specStore.updateStatus("auth", SpecStatus.PENDING));
+    fdes.logins().forget(person);
+    assertThrows(ApiException.class, () -> dispatchAsThePerson(anotherProcess(liveAgentShell())));
+
+    assertEquals(2, sailLines("auth").size(), "a run started since, so it is said again");
+  }
+
+  /** Operations over this test's database as a second process, or a restarted one, opens them. */
+  private DispatchOperations anotherProcess(ShellExec shell) throws IOException {
+    var yaml = tempDir.resolve("sail-" + System.nanoTime() + ".yaml");
+    Files.writeString(yaml, YAML);
+    return new DispatchOperations(
+            shell,
+            TestProjects.reading(yaml),
+            new SpecStore(db),
+            new ReviewStore(db),
+            new RunStore(db),
+            new FdeStore(db),
+            events::add,
+            new WatcherSpawner(shell, (command, logPath) -> 4242L),
+            (project, config) -> "",
+            command -> 0,
+            DispatchOperations.Listener.NONE,
+            SessionYield.NONE)
+        .useMessages(new MessageStore(db))
+        .useRooms(new RoomStore(db));
+  }
+
+  private DispatchOperations.Dispatched dispatchAsThePerson(DispatchOperations ops) {
+    return (DispatchOperations.Dispatched)
+        Actor.call(
+            new Actor(HANDLE, Role.MEMBER, Actor.Lane.CLI),
+            () ->
+                ops.dispatch(
+                    "acme",
+                    new DispatchOperations.Request("auth", "background", false, null, false),
+                    HANDLE));
+  }
+
+  private List<String> sailLines(String room) {
+    return messageStore.list(room, null, 50).stream()
+        .filter(row -> MessageStore.SAIL_AUTHOR.equals(row.author()))
+        .map(MessageStore.MessageRow::body)
+        .filter(body -> body.startsWith("No Claude Code login"))
+        .toList();
+  }
+
   @Test
   void aWakeRecordsThePersonWhoseMessageWokeItAndSailsOwnLinesWakeNoOne() throws Exception {
     var ops = operations(liveAgentShell());

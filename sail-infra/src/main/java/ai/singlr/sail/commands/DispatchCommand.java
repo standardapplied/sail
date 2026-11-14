@@ -261,13 +261,15 @@ public final class DispatchCommand implements Runnable {
   /**
    * Renders the executor's progress for the terminal, and — the claim being the moment the spec
    * flips {@code in_progress} — pushes the claim to main synchronously so a short-lived CLI process
-   * never exits before its most important write propagates.
+   * never exits before its most important write propagates; a dry run wrote nothing to push.
    */
   private DispatchOperations.Listener renderer(SyncScheduler sync) {
     return new DispatchOperations.Listener() {
       @Override
       public void claimed(Spec taskSpec, String task) {
-        sync.syncNow();
+        if (!dryRun) {
+          sync.syncNow();
+        }
         if (json) {
           System.out.println(
               CliJson.stringify(

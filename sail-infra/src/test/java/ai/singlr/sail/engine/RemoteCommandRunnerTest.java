@@ -192,6 +192,10 @@ class RemoteCommandRunnerTest {
     assertTrue(RemoteCommandRunner.interactive("agent", "login", "codex", "--name", "work"));
     assertTrue(RemoteCommandRunner.interactive("agent", "login", "--kind", "api-key", "codex"));
     assertTrue(RemoteCommandRunner.interactive("agent", "login", "--name", "work", "claude-code"));
+    assertTrue(
+        RemoteCommandRunner.interactive("agent", "login", "claude-code", "--name", "use"),
+        "a login named use is a name, not the verb");
+    assertTrue(RemoteCommandRunner.interactive("agent", "login", "--name", "list", "codex"));
     assertTrue(RemoteCommandRunner.interactive("shell", "acme"));
     for (var args :
         List.of(

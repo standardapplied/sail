@@ -43,7 +43,10 @@ final class ClaudeCode implements Harness {
 
   /**
    * What makes a session read-only, as argv: ambient settings and MCP configs excluded, the tool
-   * set cut, and the two allow-rules. Every read-only lane is built from this one list.
+   * set cut, the allow-rules naming only the {@code spec} subcommands a room member uses (it reads
+   * and it comments) and {@code cd}, and deny-rules refusing either file-reading flag of {@code
+   * spec} anywhere in a command, so no glob or trailing flag hands it a file such as {@code
+   * /proc/self/environ}. Every read-only lane is built from this one list.
    */
   private static final List<String> READ_ONLY_ARGS =
       List.of(
@@ -53,8 +56,16 @@ final class ClaudeCode implements Harness {
           "--tools",
           "Bash,Read,Grep,Glob",
           "--allowedTools",
-          "Bash(spec:*)",
-          "Bash(cd:*)");
+          "Bash(spec show:*)",
+          "Bash(spec list:*)",
+          "Bash(spec board:*)",
+          "Bash(spec comments:*)",
+          "Bash(spec comment:*)",
+          "Bash(spec whoami:*)",
+          "Bash(cd:*)",
+          "--disallowedTools",
+          "Bash(spec *--body-file*)",
+          "Bash(spec *--plan-file*)");
 
   @Override
   public String yamlName() {
@@ -316,6 +327,15 @@ final class ClaudeCode implements Harness {
   @Override
   public List<String> loginVariables() {
     return List.of("ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN");
+  }
+
+  /**
+   * The Bedrock, Vertex and Foundry switches: set, Claude Code sends its requests to that cloud on
+   * the container's own account, whatever login it holds; empty, it is off.
+   */
+  @Override
+  public List<String> credentialSwitches() {
+    return List.of("CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX", "CLAUDE_CODE_USE_FOUNDRY");
   }
 
   @Override

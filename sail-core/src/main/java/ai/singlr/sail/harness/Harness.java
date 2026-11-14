@@ -245,6 +245,15 @@ public interface Harness {
   }
 
   /**
+   * The variables that, set, make this harness take its credential from somewhere else than any
+   * login, a cloud provider's account: a run started with a stored login has each set empty, since
+   * runs do not take a cloud provider's credentials and the run records the login it was given.
+   */
+  default List<String> credentialSwitches() {
+    return List.of();
+  }
+
+  /**
    * The kind of login this harness declares as {@code kind}, its first when {@code kind} is blank.
    *
    * @throws IllegalArgumentException naming the kinds it declares, when it declares no such kind

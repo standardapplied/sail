@@ -73,7 +73,6 @@ class ReviewLanesTest {
     fdes.logins().forget(fdes.byHandle(ReviewLoop.HANDLE).orElseThrow().id());
 
     loop.built("auth");
-    loop.onEvent(ReviewLoop.buildStop("auth", loop.run("auth", "build")));
 
     assertEquals(
         List.of(

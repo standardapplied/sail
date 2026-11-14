@@ -16,8 +16,6 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
-import java.util.Set;
-import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Which login a run starts its harness with, decided by the one fact a run is placed by, whether it
@@ -32,7 +30,6 @@ final class RunLogins {
 
   private final FdeStore fdes;
   private final RunLauncher.Room room;
-  private final Set<String> told = ConcurrentHashMap.newKeySet();
 
   RunLogins(FdeStore fdes, RunLauncher.Room room) {
     this.fdes = fdes;
@@ -54,18 +51,14 @@ final class RunLogins {
   }
 
   /**
-   * {@link #resolve}, saying a refusal in the spec's room the first time it is met for this cause,
-   * and forgetting what was said once a run of the spec has its login.
+   * {@link #resolve}, telling the spec's room a refusal with its remedy; the room says it once
+   * ({@link RunLauncher.Room#tell}), however many processes meet it.
    */
   Optional<LoginStore.Login> forRun(String specId, String owner, String agent) {
     try {
-      var login = resolve(specId, owner, agent);
-      told.removeIf(cause -> cause.startsWith(specId + "\n"));
-      return login;
+      return resolve(specId, owner, agent);
     } catch (ApiException refused) {
-      if (told.add(specId + "\n" + refused.getMessage())) {
-        room.tell(specId, refused.getMessage() + " " + refused.failure().remedy().plain());
-      }
+      room.tell(specId, refused.getMessage() + " " + refused.failure().remedy().plain());
       throw refused;
     }
   }

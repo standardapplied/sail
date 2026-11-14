@@ -10,6 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.common.PrivateDirectory;
 import ai.singlr.sail.harness.Harness;
 import ai.singlr.sail.harness.Harnesses;
 import java.io.UncheckedIOException;
@@ -79,26 +80,12 @@ class LoginStoreTest {
     store().store(UDAY, CLAUDE, null, null, TOKEN);
     store().store(UDAY, CODEX, null, null, KEY);
 
-    var self = LoginStore.ProcessOwner.CURRENT.orElseThrow();
+    var self = PrivateDirectory.ProcessOwner.CURRENT.orElseThrow();
     for (var each : List.of(logins, person, person.resolve("claude-code"), codex)) {
       assertEquals(0700, (int) Files.getAttribute(each, "unix:mode") & 07777, each.toString());
       assertEquals(self.uid(), Files.getAttribute(each, "unix:uid"), each.toString());
       assertEquals(self.gid(), Files.getAttribute(each, "unix:gid"), each.toString());
     }
-  }
-
-  @Test
-  void theProcessIdsAreTheEffectiveOnesItsStatusNames() throws Exception {
-    var status =
-        Files.writeString(
-            dir.resolve("status"), "Name:\tsail\nUid:\t1000\t0\t0\t0\nGid:\t1000\t27\t27\t27\n");
-
-    assertEquals(new LoginStore.ProcessOwner(0, 27), LoginStore.ProcessOwner.read(status));
-    assertThrows(
-        IllegalStateException.class,
-        () -> LoginStore.ProcessOwner.read(Files.writeString(dir.resolve("none"), "Name:\tx\n")));
-    assertThrows(
-        UncheckedIOException.class, () -> LoginStore.ProcessOwner.read(dir.resolve("missing")));
   }
 
   @Test

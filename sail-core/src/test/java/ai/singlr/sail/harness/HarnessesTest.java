@@ -237,7 +237,9 @@ class HarnessesTest {
     assertTrue(cmd.contains("--settings /home/dev/.sail/claude-settings.json"), cmd);
     assertFalse(cmd.contains("--dangerously-skip-permissions"), cmd);
     assertTrue(cmd.contains("--tools \"Bash,Read,Grep,Glob\""), cmd);
-    assertTrue(cmd.contains("\"Bash(spec:*)\""), cmd);
+    assertTrue(cmd.contains("\"Bash(spec comment:*)\""), cmd);
+    assertTrue(cmd.contains("--disallowedTools \"Bash(spec *--body-file*)\""), cmd);
+    assertFalse(cmd.contains("\"Bash(spec:*)\""), cmd);
     assertTrue(cmd.contains("\"Bash(cd:*)\""), cmd);
     assertFalse(
         cmd.contains("git"),

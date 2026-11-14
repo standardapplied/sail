@@ -54,7 +54,8 @@ public final class RunLauncher {
 
   /**
    * Where a launch says what it skipped, or why it could not start: the spec's room, when the run
-   * serves a spec.
+   * serves a spec. A line is said once: not again while it is the newest thing Sail said in the
+   * room and no run of the spec has started since, whichever process or restart meets it again.
    */
   @FunctionalInterface
   public interface Room {

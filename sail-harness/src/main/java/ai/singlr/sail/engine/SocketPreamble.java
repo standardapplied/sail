@@ -23,11 +23,14 @@ public final class SocketPreamble {
    * The one way a helper sends {@code $CREDENTIAL}: {@code sail_curl} runs {@code curl} with its
    * arguments and hands it the {@code Authorization} header as a config on file descriptor 3, fed
    * by the shell's built-in {@code printf} through a pipe, so the credential is in no process's
-   * argv and in no file; the caller's stdin stays curl's, for a body sent as {@code @-}.
+   * argv and in no file; the caller's stdin stays curl's, for a body sent as {@code @-}. A
+   * credential with anything but letters, digits and {@code _} (every one Sail mints) is refused
+   * before curl runs, so none can carry a config line of its own.
    */
   private static final String CREDENTIAL_CURL =
       """
       sail_curl() {
+        case $CREDENTIAL in *[!A-Za-z0-9_]*) echo "sail_curl: a malformed credential" >&2; return 2 ;; esac
         { printf 'header = "Authorization: Bearer %s"\\n' "$CREDENTIAL" \\
           | curl --config /dev/fd/3 "$@" 3<&0 <&4 4<&-; } 4<&0
       }

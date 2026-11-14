@@ -78,8 +78,16 @@ class LiveMemberLanesTest {
             "--tools",
             "Bash,Read,Grep,Glob",
             "--allowedTools",
-            "Bash(spec:*)",
-            "Bash(cd:*)"),
+            "Bash(spec show:*)",
+            "Bash(spec list:*)",
+            "Bash(spec board:*)",
+            "Bash(spec comments:*)",
+            "Bash(spec comment:*)",
+            "Bash(spec whoami:*)",
+            "Bash(cd:*)",
+            "--disallowedTools",
+            "Bash(spec *--body-file*)",
+            "Bash(spec *--plan-file*)"),
         started.command());
     assertEquals("/home/dev/workspace", started.workDir());
     assertEquals("room", run.role());

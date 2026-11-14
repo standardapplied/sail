@@ -99,7 +99,8 @@ public final class AgentLoginCommand implements Runnable {
 
   /**
    * What storing would do, read from the logins stored now, reading no value and storing nothing:
-   * the login becomes the default when its harness has none, or when it is the default already.
+   * the login becomes the default when its harness has none, or when it is the default already, and
+   * replaces the one stored under its name, when there is one.
    */
   @SuppressWarnings("unchecked")
   private void rehearse(String harness, String name, String kind) throws Exception {
@@ -113,6 +114,10 @@ public final class AgentLoginCommand implements Runnable {
               .map(login -> login.get("name"))
               .findFirst();
       var becomesDefault = current.isEmpty() || current.get().equals(name);
+      var replaces =
+          logins.stream()
+              .anyMatch(
+                  login -> harness.equals(login.get("harness")) && name.equals(login.get("name")));
       if (json) {
         var shown = new LinkedHashMap<String, Object>();
         shown.put("dry_run", true);
@@ -120,6 +125,7 @@ public final class AgentLoginCommand implements Runnable {
         shown.put("name", name);
         shown.put("kind", kind);
         shown.put("default", becomesDefault);
+        shown.put("replaces", replaces);
         System.out.println(YamlUtil.dumpJson(shown));
         return;
       }
@@ -131,7 +137,9 @@ public final class AgentLoginCommand implements Runnable {
               + "' ("
               + kind
               + (becomesDefault ? ", the default" : ", not the default")
-              + "); nothing was stored.");
+              + ")"
+              + (replaces ? ", replacing the one stored under that name" : "")
+              + "; nothing was stored.");
     }
   }
 

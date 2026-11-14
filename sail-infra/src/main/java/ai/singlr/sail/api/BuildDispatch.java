@@ -176,25 +176,16 @@ public final class BuildDispatch {
     if (request.dryRun()) {
       requireNoRepoOverlap(project, localHandle, taskSpec.id(), taskSpec.repos());
       runReservation.unreserved(taskSpec.id(), localHandle, agentType);
-      commit(claim);
-      var prepared =
-          prepare(
-              project,
-              loaded.config(),
-              targetRepos,
-              resolution,
-              taskSpec,
-              branch,
-              task,
-              request.mode());
+      specStore.rehearse(claim);
+      listener.claimed(taskSpec, task);
       return new DispatchOperations.Dispatched(
           taskSpec,
           branch,
           agentType,
           task,
           null,
-          prepared.snapshot(),
-          prepared.branchCreated(),
+          "",
+          false,
           resolution.restarted(),
           null,
           null,
@@ -430,6 +421,8 @@ public final class BuildDispatch {
    * in_progress} with its resolved repos and branch, and supersede stale reviews. On the live lane
    * it commits in the transaction that reserves the run ({@link #reserveRun}), so a claim the
    * journal refuses leaves no run, and two concurrent dispatches can never both mutate spec state.
+   * On the dry lane it is rehearsed and rolled back ({@link SpecStore#rehearse}): a dry run meets
+   * the refusals the claim would and writes nothing.
    */
   private void claim(SpecResolution resolution, Spec taskSpec, String branch) {
     if (resolution.restarted()) {
@@ -451,9 +444,10 @@ public final class BuildDispatch {
   }
 
   /**
-   * What follows a claim that landed, identical on the dry and live lanes: publish the lifecycle
-   * events, snapshot as configured, and check out the work branch, racing no other dispatch's
-   * checkouts in a shared repo.
+   * What follows a claim that landed, on the live lane only (a dry run stops at its rehearsed claim
+   * and changes nothing in the database, the container or a room): publish the lifecycle events,
+   * snapshot as configured, and check out the work branch, racing no other dispatch's checkouts in
+   * a shared repo.
    */
   private PreparedClaim prepare(
       String project,

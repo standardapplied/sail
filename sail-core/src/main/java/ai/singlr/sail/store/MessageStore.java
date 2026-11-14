@@ -362,6 +362,19 @@ public final class MessageStore implements ConflictResolver, SyncedStore {
         limit);
   }
 
+  /**
+   * The newest message {@code author} posted in {@code roomId}, by mint order, or empty for none.
+   */
+  public Optional<MessageRow> newestBy(String roomId, String author) {
+    return db.queryOne(
+        "SELECT "
+            + COLUMNS
+            + " FROM room_messages WHERE room_id = ?1 AND author = ?2 ORDER BY id DESC LIMIT 1",
+        MessageStore::map,
+        roomId,
+        author);
+  }
+
   /** The id of the room's newest message, or empty for a silent room. */
   public Optional<String> newestId(String roomId) {
     return db.queryOne(

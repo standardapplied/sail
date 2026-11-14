@@ -37,8 +37,9 @@ public final class RemoteCommandRunner {
   private static final List<String> LOCAL_TERMINAL_HOST = List.of("_pty-host", "--local");
   private static final Set<String> INTERACTIVE_COMMANDS = Set.of("shell", "exec");
   private static final List<String> LOGIN = List.of("agent", "login");
-  private static final Set<String> LOGIN_VERBS =
-      Set.of("list", "use", "remove", "--help", "-h", "--dry-run");
+  private static final Set<String> LOGIN_VERBS = Set.of("list", "use", "remove");
+  private static final Set<String> LOGIN_NO_VALUE = Set.of("--help", "-h", "--dry-run");
+  private static final Set<String> LOGIN_VALUED_OPTIONS = Set.of("--name", "--kind", "--fde");
   private static final Set<String> HOST_ONLY_COMMANDS = Set.of("host");
   private static final Set<String> GATEWAY_COMMANDS =
       Stream.concat(SshGateway.API_COMMANDS.stream(), SshGateway.ADMIN_COMMANDS.stream())
@@ -189,16 +190,28 @@ public final class RemoteCommandRunner {
   }
 
   /**
-   * Whether {@code args} store a login: {@code agent login} followed by anything but one of its
-   * verbs, its help or a dry run, whatever order its options come in, so its value is never typed
-   * on this machine's echoing terminal.
+   * Whether {@code args} store a login: {@code agent login} whose first positional word, past its
+   * options and their values, is not one of its verbs, and that asks for neither its help nor a dry
+   * run, so its value is never typed on this machine's echoing terminal. A login named {@code use}
+   * is a name, not the verb.
    */
   private static boolean storesALogin(String... args) {
     if (args.length < 3 || !List.of(args).subList(0, 2).equals(LOGIN)) {
       return false;
     }
     var rest = List.of(args).subList(2, args.length);
-    return rest.stream().noneMatch(LOGIN_VERBS::contains);
+    if (rest.stream().anyMatch(LOGIN_NO_VALUE::contains)) {
+      return false;
+    }
+    for (var i = 0; i < rest.size(); i++) {
+      var word = rest.get(i);
+      if (LOGIN_VALUED_OPTIONS.contains(word)) {
+        i++;
+      } else if (!word.startsWith("-")) {
+        return !LOGIN_VERBS.contains(word);
+      }
+    }
+    return false;
   }
 
   /** Whether {@code args} run on this machine, never forwarded to the server. */

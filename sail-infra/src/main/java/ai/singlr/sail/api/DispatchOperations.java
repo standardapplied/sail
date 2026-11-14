@@ -283,13 +283,11 @@ public final class DispatchOperations {
   }
 
   /**
-   * Says {@code body} in the room of {@code specId} as sail, best-effort: a line telling of what a
-   * launch skipped must never fail the launch. Silent on a box that keeps no messages.
-   */
-  /**
    * Says {@code body} in {@code specId}'s room as Sail's own machinery, whoever's request is being
    * served, as the loop narrates: the line is Sail's, posted as {@link Actor#system} on this box
-   * and carried to main as every narration of this box is.
+   * and carried to main as every narration of this box is, and said once ({@link
+   * #saidSinceItsNewestRun}). Best-effort: a line telling of what a launch skipped or why it could
+   * not start must never fail the launch. Silent on a box that keeps no messages.
    */
   private void tellRoom(String specId, String body) {
     var messages = messageStore;
@@ -298,13 +296,38 @@ public final class DispatchOperations {
     }
     try {
       var room = specStore.findById(specId).map(SpecStore.SpecRow::roomIdOrIdentity).orElse(specId);
+      var line = MessageStore.fitted(body);
       Actor.run(
           Actor.system(),
-          () -> messages.append(room, MessageStore.SAIL_AUTHOR, MessageStore.fitted(body), null));
+          () -> {
+            if (!saidSinceItsNewestRun(messages, room, specId, line)) {
+              messages.append(room, MessageStore.SAIL_AUTHOR, line, null);
+            }
+          });
     } catch (RuntimeException e) {
       System.err.println(
           "  [api] Warning: could not post to the room of spec " + specId + ": " + e.getMessage());
     }
+  }
+
+  /**
+   * Whether {@code line} is the newest thing Sail said in {@code room} and no run of {@code specId}
+   * has started since: the room itself remembers what it was told, so no process keeps it.
+   */
+  private boolean saidSinceItsNewestRun(
+      MessageStore messages, String room, String specId, String line) {
+    return messages
+        .newestBy(room, MessageStore.SAIL_AUTHOR)
+        .filter(said -> said.body().equals(line))
+        .filter(
+            said ->
+                runStore == null
+                    || runStore.listForSpec(specId).stream()
+                        .noneMatch(
+                            run ->
+                                run.startedAt() != null
+                                    && !run.startedAt().isBefore(said.createdAt())))
+        .isPresent();
   }
 
   public DispatchOperations useMessages(MessageStore messages) {

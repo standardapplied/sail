@@ -49,6 +49,7 @@ class LaunchEnvTest {
 
     assertEquals(
         "SAIL_RUN_CREDENTIAL=cred-1\nANTHROPIC_AUTH_TOKEN=\nANTHROPIC_API_KEY=\n"
+            + "CLAUDE_CODE_USE_BEDROCK=\nCLAUDE_CODE_USE_VERTEX=\nCLAUDE_CODE_USE_FOUNDRY=\n"
             + "CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-x\n",
         env.lines(),
         "every other variable Claude Code takes a credential from is set empty");
@@ -117,13 +118,15 @@ class LaunchEnvTest {
 
     var seen =
         run(
-            "export ANTHROPIC_API_KEY=sk-ant-api03-container ANTHROPIC_AUTH_TOKEN=gw; "
+            "export ANTHROPIC_API_KEY=sk-ant-api03-container ANTHROPIC_AUTH_TOKEN=gw"
+                + " CLAUDE_CODE_USE_BEDROCK=1; "
                 + LaunchEnv.wrap(
                     file.toString(),
-                    "sh -c 'printf \"[%s][%s][%s]\" \"$ANTHROPIC_API_KEY\" \"$ANTHROPIC_AUTH_TOKEN\""
+                    "sh -c 'printf \"[%s][%s][%s][%s]\" \"$ANTHROPIC_API_KEY\""
+                        + " \"$ANTHROPIC_AUTH_TOKEN\" \"$CLAUDE_CODE_USE_BEDROCK\""
                         + " \"$CLAUDE_CODE_OAUTH_TOKEN\"'"));
 
-    assertEquals("0:[][][sk-ant-oat01-stored]\n", seen);
+    assertEquals("0:[][][][sk-ant-oat01-stored]\n", seen);
   }
 
   /** A profile's {@code set -x} never traces a value the file holds. */
