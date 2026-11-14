@@ -1311,21 +1311,28 @@ class SailOperationsTest {
 
   @Test
   void agentStatusReturnsRunningSessionDetails() throws Exception {
-    var operations =
-        opsWithRun(
-            shell()
-                .on("incus list ^acme$", RUNNING_JSON)
-                .on("cat /home/dev/.sail/runs/" + R1 + "/agent.pid", "123")
-                .on("kill -0 123", "")
-                .on(
-                    "cat /home/dev/.sail/runs/" + R1 + "/agent-session.json",
-                    "{\"task\": \"work\", \"started_at\": \"2026-01-01T00:00:00Z\", \"branch\": \"sail/auth\"}"));
+    var shell =
+        shell()
+            .on("incus list ^acme$", RUNNING_JSON)
+            .on("cat /home/dev/.sail/runs/" + R1 + "/agent.pid", "123")
+            .on("kill -0 123", "")
+            .on(
+                "cat /home/dev/.sail/runs/" + R1 + "/agent-session.json",
+                "{\"task\": \"work\", \"started_at\": \"2026-01-01T00:00:00Z\", \"branch\": \"sail/auth\"}");
+    var operations = opsWithRun(shell);
 
     var result = operations.agentStatus("acme", "node-a");
 
     assertEquals(true, get(result, "agent_running"));
     assertEquals(123, get(result, "pid"));
     assertEquals("work", get(result, "task"));
+    assertEquals(
+        List.of(),
+        shell.invocations().stream()
+            .filter(command -> command.startsWith("incus exec "))
+            .filter(command -> !command.startsWith("incus exec acme-auth "))
+            .toList(),
+        "spec auth's run is asked about in its own workspace");
   }
 
   @Test
@@ -1394,16 +1401,19 @@ class SailOperationsTest {
 
   @Test
   void runLogAllowsTheRunSpecAssignee() throws Exception {
-    var operations =
-        opsWithLocalRunAndSpec(
-            shell()
-                .on("incus list ^acme$", RUNNING_JSON)
-                .on("tail -n 2 -- " + RUN_LOG, "one\ntwo\n"));
+    var shell =
+        shell().on("incus list ^acme$", RUNNING_JSON).on("tail -n 2 -- " + RUN_LOG, "one\ntwo\n");
+    var operations = opsWithLocalRunAndSpec(shell);
 
     var assignee = new Actor(LOCAL_HANDLE, Role.MEMBER, Actor.Lane.API);
     var result = Acting.by(assignee, () -> operations.runLog(R1, 2, "node-a"));
 
     assertEquals(List.of("one", "two"), get(result, "lines"));
+    assertTrue(
+        shell.invocations().stream()
+            .anyMatch(
+                command -> command.startsWith("incus exec acme-auth ") && command.contains("tail")),
+        "spec auth's log is read in its own workspace: " + shell.invocations());
   }
 
   @Test

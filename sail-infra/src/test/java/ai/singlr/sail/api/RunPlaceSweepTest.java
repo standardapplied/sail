@@ -18,20 +18,23 @@ import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
 
 /**
- * R1: no class on a run's path addresses a container by its project's name. Every run-path call of
- * {@code ContainerExec}, {@code AgentSession}, {@code AgentPresence}, {@code SnapshotManager} or
- * {@code ContainerManager} takes the run's {@link ai.singlr.sail.engine.RunPlace} or its instance,
- * never {@code project}, {@code run.project()}, {@code s.project()} or a lane's own {@code
- * project()} accessor. The forms looked for are those calls with such a name as their first
- * argument, the receiver written out or held in a field or local named for it. A container named by
- * a variable of another name, a call built by reflection or a helper that takes the name and passes
- * it on under another is beyond what this sweep can see.
+ * R1: no class on a run's path, nor any door that reads or attaches to a run (its status, log,
+ * report and conversation), addresses a container by its project's name. Every such call of {@code
+ * ContainerExec}, {@code AgentSession}, {@code AgentPresence}, {@code SnapshotManager}, {@code
+ * ContainerManager}, a git-activity read or an attach's tty takes the run's {@link
+ * ai.singlr.sail.engine.RunPlace} or its instance, never {@code project}, {@code name}, {@code
+ * run.project()}, {@code s.project()} or a lane's own {@code project()} accessor. The forms looked
+ * for are those calls with such a name as their first argument, the receiver written out or held in
+ * a field or local named for it. A container named by a variable of another name, a call built by
+ * reflection or a helper that takes the name and passes it on under another is beyond what this
+ * sweep can see.
  */
 class RunPlaceSweepTest {
 
   private static final String PROJECT =
-      "(?:project|run\\.project\\(\\)|s\\.project\\(\\)|seat\\.project\\(\\)"
-          + "|invocation\\.project\\(\\)|ctx\\.project\\(\\)|session\\.project\\(\\))";
+      "(?:project|name|projectName|run\\.project\\(\\)|s\\.project\\(\\)"
+          + "|seat\\.project\\(\\)|invocation\\.project\\(\\)|ctx\\.project\\(\\)"
+          + "|session\\.project\\(\\)|container\\.name\\(\\))";
 
   private static final List<Pattern> FORMS =
       List.of(
@@ -54,11 +57,16 @@ class RunPlaceSweepTest {
                   + "\\s*[,)]"),
           Pattern.compile(
               "(?:killAgent|queryStatus|readProcessStartTicks|answeredExitStatus|unitActive"
-                  + "|removeLaunchFiles|writeTaskFile|writeSession|ensureDirectory)\\(\\s*"
+                  + "|removeLaunchFiles|writeTaskFile|writeSession|ensureDirectory"
+                  + "|queryGitActivity|buildIncusExecWithTty|querySession)\\(\\s*"
+                  + "(?:agentSession,\\s*)?"
                   + PROJECT
                   + "\\s*,"));
 
-  /** The run-path classes the spec names, each of which a spec's run passes through. */
+  /**
+   * The run-path classes the spec names, each of which a spec's run passes through, and the doors
+   * that read or attach to a run where it lives.
+   */
   private static final List<Path> RUN_PATH =
       Stream.concat(
               Stream.of(
@@ -76,13 +84,19 @@ class RunPlaceSweepTest {
                       "RoomWakeLauncher",
                       "BuildDispatch",
                       "WorkBranch",
-                      "RunPlaces")
+                      "RunPlaces",
+                      "SailOperations")
                   .map(name -> Path.of("src/main/java/ai/singlr/sail/api", name + ".java")),
               Stream.of(
                   Path.of("src/main/java/ai/singlr/sail/engine/AgentPresence.java"),
                   Path.of("src/main/java/ai/singlr/sail/engine/WatcherSpawner.java"),
                   Path.of("src/main/java/ai/singlr/sail/commands/AgentWatchCommand.java"),
                   Path.of("src/main/java/ai/singlr/sail/commands/AgentLogCommand.java"),
+                  Path.of("src/main/java/ai/singlr/sail/commands/AgentAttachCommand.java"),
+                  Path.of("src/main/java/ai/singlr/sail/commands/AgentStatusCommand.java"),
+                  Path.of("src/main/java/ai/singlr/sail/commands/AgentReportCommand.java"),
+                  Path.of(
+                      "..", "sail-harness/src/main/java/ai/singlr/sail/engine/AgentReporter.java"),
                   Path.of(
                       "..", "sail-harness/src/main/java/ai/singlr/sail/engine/RunUsageReader.java"),
                   Path.of(
@@ -104,7 +118,11 @@ class RunPlaceSweepTest {
             "new AgentPresence(shell).of(s.project(), unit)",
             "new SnapshotManager(shell).create(project, label)",
             "containers.queryState(seat.project())",
-            "readProcessStartTicks(ctx.project(), pid)");
+            "readProcessStartTicks(ctx.project(), pid)",
+            "buildIncusExecWithTty(name, command)",
+            "checker.queryGitActivity(projectName, repoPath, started)",
+            "querySession(agentSession, project, unit)",
+            "new ContainerManager(shell).queryState(name)");
     var addressedByPlace =
         List.of(
             "ContainerExec.asDevUser(place.instance(), List.of(\"cat\", path))",
@@ -112,7 +130,9 @@ class RunPlaceSweepTest {
             "presence.gone(place, unit)",
             "new SnapshotManager(shell).create(instance, label)",
             "containers.queryState(container.project())",
-            "ContainerExec.asDevUser(projectContainer, List.of())");
+            "ContainerExec.asDevUser(projectContainer, List.of())",
+            "buildIncusExecWithTty(place.instance(), command)",
+            "checker.queryGitActivity(probe.instance(), repoPath, started)");
     for (var line : addressedByProject) {
       assertTrue(FORMS.stream().anyMatch(form -> form.matcher(line).find()), line);
     }

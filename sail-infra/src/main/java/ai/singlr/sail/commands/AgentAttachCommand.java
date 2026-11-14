@@ -14,7 +14,7 @@ import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.Lane;
 import ai.singlr.sail.config.ProjectDefinition;
 import ai.singlr.sail.config.YamlUtil;
-import ai.singlr.sail.engine.ContainerManager;
+import ai.singlr.sail.engine.AgentPresence;
 import ai.singlr.sail.engine.ContainerStateGuard;
 import ai.singlr.sail.engine.NameValidator;
 import ai.singlr.sail.engine.NodeIdentity;
@@ -32,6 +32,7 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Optional;
 import java.util.Set;
 import java.util.function.Function;
 import java.util.function.Supplier;
@@ -53,8 +54,11 @@ import picocli.CommandLine.Parameters;
  *       to it. The conversation outlives the terminal: {@code Ctrl-]} detaches, running attach
  *       again joins the live session rather than forking a second agent, and a dispatch that
  *       reserves the run's repos ends it with a reason in the stream.
- *   <li><b>Completed run without a session:</b> attaches a fresh conversation over a raw tty,
- *       loudly.
+ *   <li><b>Completed run of a spec with a recorded session:</b> resumes it the same way in the
+ *       spec's own workspace, where its run lived and its conversation is, over a raw tty: the
+ *       host's sessions open only in the project's container (W10).
+ *   <li><b>Completed run without a session:</b> attaches a fresh conversation over a raw tty in the
+ *       place the run lived, loudly.
  *   <li><b>Live run:</b> refuses — attaching would fork a second concurrent agent over the same
  *       conversation and worktree. The refusal names the real lanes: reply in the spec room to
  *       steer it mid-run, or stop it first.
@@ -139,11 +143,15 @@ public final class AgentAttachCommand implements Runnable {
     }
     var harness = run != null ? Harnesses.of(run.agent()) : resolveHarness(operator);
     var command = buildResumeCommand(harness, sessionId);
-    if (sessionId == null) {
-      attachFresh(run, harness, buildIncusExecWithTty(name, command), operator);
+    var place = placeOf(run, name);
+    if (sessionId != null) {
+      requireNoLiveConflict(run, besides(run, latest.running()), place);
+    }
+    var direct = direct(run, name, sessionId, command);
+    if (direct.isPresent()) {
+      attachDirect(run, harness, sessionId, place, direct.get(), member, operator);
       return;
     }
-    requireNoLiveConflict(run, besides(run, latest.running()), name);
     var plan = new ResumePlan(SessionYield.resumeSession(run.id()), command, name, latest.room());
     if (json) {
       System.out.println(YamlUtil.dumpJson(plan(run, harness, sessionId, plan)));
@@ -158,7 +166,7 @@ public final class AgentAttachCommand implements Runnable {
           "Attaching needs an interactive terminal to open session '" + plan.session() + "'.");
     }
     announceResume(run, harness, sessionId, plan);
-    requireRunning(operator);
+    requireRunning(place);
     if (member) {
       endMember(run, operator);
     }
@@ -261,7 +269,7 @@ public final class AgentAttachCommand implements Runnable {
               + operator.sail("agent attach")
               + " again.");
     }
-    requireNoLiveConflict(planned, latest.running(), project);
+    requireNoLiveConflict(planned, latest.running(), RunPlace.of(project, null));
   }
 
   /**
@@ -269,25 +277,19 @@ public final class AgentAttachCommand implements Runnable {
    * on its repos, so any live run the gate would refuse a build of that spec over those repos — a
    * build, a full room turn — refuses the resume. This is the exact mirror of the rule a
    * reservation uses to yield a live resume session, so the two sides can never disagree. A resumed
-   * conversation runs in the project's own container, where a terminal opens, so only the runs that
-   * live there are in its way.
+   * conversation runs in {@code place}, so only the runs that live there are in its way.
    */
   static void requireNoLiveConflict(
-      RunStore.RunRow run, List<DispatchGate.RunningRun> running, String project) {
-    DispatchGate.decide(
-            RunPlace.of(project, null),
-            run.conversationId(),
-            Lane.BUILD.wire(),
-            run.repos(),
-            running)
+      RunStore.RunRow run, List<DispatchGate.RunningRun> running, RunPlace place) {
+    DispatchGate.decide(place, run.conversationId(), Lane.BUILD.wire(), run.repos(), running)
         .ifPresent(
             conflict -> {
-              throw new IllegalStateException(conflictRefusal(run, conflict, project));
+              throw new IllegalStateException(conflictRefusal(run, conflict, place));
             });
   }
 
   private static String conflictRefusal(
-      RunStore.RunRow run, DispatchGate.Conflict conflict, String project) {
+      RunStore.RunRow run, DispatchGate.Conflict conflict, RunPlace place) {
     var live = conflict.run();
     return "Run "
         + live.runId()
@@ -295,7 +297,7 @@ public final class AgentAttachCommand implements Runnable {
         + live.role()
         + ") is live in "
         + (conflict.overlap().isEmpty()
-            ? "container '" + project + "'"
+            ? "container '" + place.instance() + "'"
             : "repo(s) " + conflict.overlap())
         + " — resuming run "
         + run.id()
@@ -329,20 +331,62 @@ public final class AgentAttachCommand implements Runnable {
     }
   }
 
-  private void attachFresh(
-      RunStore.RunRow run, Harness harness, List<String> command, OperatorCommand operator)
+  /**
+   * Where {@code run} of {@code project} lived, and so where its conversation is: none, the
+   * project's container.
+   */
+  static RunPlace placeOf(RunStore.RunRow run, String project) {
+    return run == null ? RunPlace.of(project, null) : run.place();
+  }
+
+  /**
+   * The raw-tty command that attaches to {@code run}'s conversation, {@code command}, in the place
+   * it lived, when the attach does not go through a host session: a fresh conversation (no {@code
+   * sessionId}), or a spec's run resumed in its workspace, where no host session opens (W10). Empty
+   * for a recorded conversation of the project's container, which a host session resumes.
+   */
+  static Optional<List<String>> direct(
+      RunStore.RunRow run, String project, String sessionId, List<String> command) {
+    var place = placeOf(run, project);
+    return sessionId == null || place instanceof RunPlace.SpecWorkspace
+        ? Optional.of(buildIncusExecWithTty(place.instance(), command))
+        : Optional.empty();
+  }
+
+  /**
+   * Attaches this terminal to {@code exec}, a raw tty in {@code place}'s instance: a fresh
+   * conversation, or a spec run's recorded one resumed in its workspace, its room's live member
+   * ended first.
+   */
+  private void attachDirect(
+      RunStore.RunRow run,
+      Harness harness,
+      String sessionId,
+      RunPlace place,
+      List<String> exec,
+      boolean member,
+      OperatorCommand operator)
       throws Exception {
     if (json) {
-      System.out.println(YamlUtil.dumpJson(plan(run, harness, null, command)));
+      var map = plan(run, harness, sessionId, exec);
+      map.put("instance", place.instance());
+      System.out.println(YamlUtil.dumpJson(map));
       return;
     }
     if (dryRun) {
-      System.out.println(String.join(" ", command));
+      System.out.println(String.join(" ", exec));
       return;
     }
-    announceFresh(run);
-    requireRunning(operator);
-    var process = new ProcessBuilder(command).inheritIO().start();
+    if (sessionId == null) {
+      announceFresh(run);
+    } else {
+      announceResume(run, harness, sessionId, place.instance());
+    }
+    requireRunning(place);
+    if (member) {
+      endMember(run, operator);
+    }
+    var process = new ProcessBuilder(exec).inheritIO().start();
     var exitCode = process.waitFor();
     if (exitCode != 0) {
       System.err.println(
@@ -350,9 +394,9 @@ public final class AgentAttachCommand implements Runnable {
     }
   }
 
-  private void requireRunning(OperatorCommand operator) throws Exception {
-    var state = new ContainerManager(new ShellExecutor(false)).queryState(name);
-    ContainerStateGuard.requireRunning(state, name);
+  private static void requireRunning(RunPlace place) throws Exception {
+    var state = new AgentPresence(new ShellExecutor(false)).state(place);
+    ContainerStateGuard.requireRunning(state, place.instance());
   }
 
   /**
@@ -466,6 +510,11 @@ public final class AgentAttachCommand implements Runnable {
                   + run.conversationId()
                   + " is not on this box; the session opens without a room."));
     }
+    announceResume(run, harness, sessionId, name);
+  }
+
+  private static void announceResume(
+      RunStore.RunRow run, Harness harness, String sessionId, String instance) {
     System.out.println(
         Ansi.AUTO.string(
             "  @|faint Resuming "
@@ -475,7 +524,7 @@ public final class AgentAttachCommand implements Runnable {
                 + " of run "
                 + run.id()
                 + " in "
-                + name
+                + instance
                 + "...|@"));
   }
 

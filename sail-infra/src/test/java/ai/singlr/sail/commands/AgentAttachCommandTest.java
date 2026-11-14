@@ -39,6 +39,7 @@ import java.io.IOException;
 import java.nio.file.Path;
 import java.time.Instant;
 import java.util.List;
+import java.util.Optional;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
@@ -276,12 +277,16 @@ class AgentAttachCommandTest {
       assertDoesNotThrow(
           () ->
               AgentAttachCommand.requireNoLiveConflict(
-                  member, AgentAttachCommand.besides(member, List.of(itself)), "acme"));
+                  member,
+                  AgentAttachCommand.besides(member, List.of(itself)),
+                  RunPlace.of("acme", null)));
       assertThrows(
           IllegalStateException.class,
           () ->
               AgentAttachCommand.requireNoLiveConflict(
-                  member, AgentAttachCommand.besides(member, List.of(itself, build)), "acme"),
+                  member,
+                  AgentAttachCommand.besides(member, List.of(itself, build)),
+                  RunPlace.of("acme", null)),
           "any other run over its repos still refuses");
 
       Acting.system(() -> runs.finish(id, "running", "stopped", 0, null));
@@ -397,12 +402,22 @@ class AgentAttachCommandTest {
   }
 
   private static RunStore.RunRow row(String id, String status, List<String> repos) {
+    return row(id, "spec-" + id, "build", status, repos);
+  }
+
+  /** An ad hoc run, of no spec: one of the project's own container. */
+  private static RunStore.RunRow adhocRow(String id) {
+    return row(id, null, "adhoc", "completed", List.of());
+  }
+
+  private static RunStore.RunRow row(
+      String id, String specId, String role, String status, List<String> repos) {
     return new RunStore.RunRow(
         id,
         "acme",
-        "spec-" + id,
+        specId,
         "it",
-        "build",
+        role,
         "codex",
         null,
         "t",
@@ -430,6 +445,47 @@ class AgentAttachCommandTest {
         null,
         null,
         null);
+  }
+
+  /**
+   * A spec's run lived in its own workspace, so its conversation is resumed there, over a raw tty;
+   * a fresh attach goes where the run lived; only a recorded conversation of the project's own
+   * container is a host session's.
+   */
+  @Test
+  void aSpecsConversationIsAttachedInItsWorkspaceAndOnlyTheProjectContainersInAHostSession() {
+    var command = AgentAttachCommand.buildResumeCommand(Harnesses.of("claude-code"), "abc");
+    var specRun = row("r1", "completed");
+    var adhoc = adhocRow("r2");
+
+    assertEquals(
+        Optional.of(AgentAttachCommand.buildIncusExecWithTty("acme-spec-r1", command)),
+        AgentAttachCommand.direct(specRun, "acme", "abc", command));
+    assertEquals(
+        Optional.of(AgentAttachCommand.buildIncusExecWithTty("acme-spec-r1", command)),
+        AgentAttachCommand.direct(specRun, "acme", null, command));
+    assertEquals(
+        Optional.of(AgentAttachCommand.buildIncusExecWithTty("acme", command)),
+        AgentAttachCommand.direct(null, "acme", null, command));
+    assertEquals(Optional.empty(), AgentAttachCommand.direct(adhoc, "acme", "abc", command));
+  }
+
+  /** A run of a spec's workspace is in the way of resuming another of that spec, and no other. */
+  @Test
+  void aResumeInASpecsWorkspaceIsRefusedOnlyByARunLiveInIt() {
+    var completed = row("r1", "completed", List.of("app"));
+    var place = AgentAttachCommand.placeOf(completed, "acme");
+    var inIt = new DispatchGate.RunningRun("b", "spec-r1", "build", List.of("app"), place);
+    var inTheContainer = running("adhoc", "adhoc", List.of());
+
+    assertDoesNotThrow(
+        () -> AgentAttachCommand.requireNoLiveConflict(completed, List.of(inTheContainer), place));
+    assertTrue(
+        assertThrows(
+                IllegalStateException.class,
+                () -> AgentAttachCommand.requireNoLiveConflict(completed, List.of(inIt), place))
+            .getMessage()
+            .startsWith("Run b (build) is live in container 'acme-spec-r1'"));
   }
 
   @Test

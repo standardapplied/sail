@@ -1631,11 +1631,16 @@ the one whose name and keys match.
   workspace's. `sail project workspace list` shows each workspace's spec and owner; `stop` and
   `delete` refuse a workspace a live run of its spec is in, and `project destroy` takes the run
   workspaces with the rest (W11).
-- **Stop, log and watch by place.** `sail agent stop` and `watch` take `--spec`; a stop of a project
-  with several live runs and no spec named is refused, naming each spec and the `--spec` form.
-  `agent log` reads the newest run of its lane in the place that run lives. The watcher is told the
-  spec on its command line, so it probes the run's own workspace. A resumed
-  terminal conversation (`agent attach`) opens in the project's container.
+- **Every door that reads or attaches to a run goes where it lives.** `sail agent stop` and `watch`
+  take `--spec`; a stop of a project with several live runs and no spec named is refused, naming
+  each spec and the `--spec` form. The watcher is told the spec on its command line, so it probes
+  the run's own workspace. `agent log` and `GET /v1/runs/{run}/log` read the run's log, `agent
+  status` and `GET /v1/projects/{p}/agent` its session and commits, and `agent report` (`POST /v1/projects/{p}/agent/report`) its session,
+  commits and guardrail, each in the run's place. `agent attach` resumes a spec's run's
+  conversation in its workspace over a raw tty (the terminal host opens sessions only in the
+  project's container, W10), refused while a run of that spec is live there; a recorded
+  conversation of the project's container is resumed in a host session as before. Each door is in
+  `RunPlaceSweepTest`.
 
 **Sail writes no context file.** How a codebase is built, tested and verified is the
 repository's own `AGENTS.md` to say, which both harnesses read natively (Claude Code from the

@@ -10,13 +10,14 @@ import ai.singlr.sail.api.OperationsFactory;
 import ai.singlr.sail.config.ProjectDefinition;
 import ai.singlr.sail.config.Spec;
 import ai.singlr.sail.config.YamlUtil;
+import ai.singlr.sail.engine.AgentPresence;
 import ai.singlr.sail.engine.AgentReporter;
 import ai.singlr.sail.engine.Banner;
-import ai.singlr.sail.engine.ContainerManager;
 import ai.singlr.sail.engine.ContainerStateGuard;
 import ai.singlr.sail.engine.NameValidator;
 import ai.singlr.sail.engine.NodeIdentity;
 import ai.singlr.sail.engine.OperatorCommand;
+import ai.singlr.sail.engine.RunPlace;
 import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.store.RunStore;
 import java.util.List;
@@ -71,17 +72,14 @@ public final class AgentReportCommand implements Runnable {
       operations.catalog().readable(name);
     }
     var shell = new ShellExecutor(false);
-    var mgr = new ContainerManager(shell);
+    var session = latestSession(name, operator);
+    var place = session == null ? RunPlace.of(name, null) : session.place();
 
-    ContainerStateGuard.requireCreated(mgr.queryState(name), name);
+    ContainerStateGuard.requireCreated(new AgentPresence(shell).state(place), place.instance());
 
     var reporter = new AgentReporter(shell);
     var report =
-        reporter.generate(
-            name,
-            definition(operator),
-            projectSpecs(name, operator),
-            latestSession(name, operator));
+        reporter.generate(name, definition(operator), projectSpecs(name, operator), session);
 
     if (json) {
       System.out.println(YamlUtil.dumpJson(report.toMap()));

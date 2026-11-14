@@ -13,6 +13,7 @@ import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.ProjectDefinition;
 import ai.singlr.sail.config.SpecCatalog;
 import ai.singlr.sail.config.YamlUtil;
+import ai.singlr.sail.engine.AgentPresence;
 import ai.singlr.sail.engine.AgentSession;
 import ai.singlr.sail.engine.Banner;
 import ai.singlr.sail.engine.BoxInstances;
@@ -24,9 +25,11 @@ import ai.singlr.sail.engine.GuardrailChecker;
 import ai.singlr.sail.engine.NameValidator;
 import ai.singlr.sail.engine.NodeIdentity;
 import ai.singlr.sail.engine.OperatorCommand;
+import ai.singlr.sail.engine.RunPlace;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.store.RunStore;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -113,6 +116,8 @@ public final class AgentStatusCommand implements Runnable {
                       new Probe(
                           container.name(),
                           sessionOrNull(operations, container.name()),
+                          activePlace(operations, container.name(), NodeIdentity.handle())
+                              .instance(),
                           repoPathsOrDefault(definitions, container.name())))
               .toList();
     }
@@ -133,7 +138,8 @@ public final class AgentStatusCommand implements Runnable {
             elapsed = formatElapsed(Duration.between(started, DateTimeUtils.now()));
             for (var repoPath : probe.repoPaths()) {
               try {
-                commits += checker.queryGitActivity(projectName, repoPath, started).commitCount();
+                commits +=
+                    checker.queryGitActivity(probe.instance(), repoPath, started).commitCount();
               } catch (Exception ignored) {
               }
             }
@@ -192,10 +198,12 @@ public final class AgentStatusCommand implements Runnable {
     try (var operations = this.operations.apply(operator)) {
       operations.catalog().readable(name);
     }
-    var mgr = new ContainerManager(shell);
-
-    var state = mgr.queryState(name);
-    ContainerStateGuard.requireRunning(state, name);
+    RunPlace place;
+    try (var operations = this.operations.apply(operator)) {
+      place = activePlace(operations, name, NodeIdentity.handle());
+    }
+    var state = new AgentPresence(shell).state(place);
+    ContainerStateGuard.requireRunning(state, place.instance());
 
     AgentSession.SessionInfo info;
     ProjectDefinition config;
@@ -213,7 +221,7 @@ public final class AgentStatusCommand implements Runnable {
         var since =
             !info.startedAt().isBlank() ? Instant.parse(info.startedAt()) : DateTimeUtils.now();
         for (var repoPath : repoPaths) {
-          var activity = checker.queryGitActivity(name, repoPath, since);
+          var activity = checker.queryGitActivity(place.instance(), repoPath, since);
           commitCount += activity.commitCount();
           if (activity.lastCommitEpoch() > 0) {
             var minutesAgo =
@@ -269,7 +277,8 @@ public final class AgentStatusCommand implements Runnable {
   }
 
   /** What the listing reads of one running project before anything long-running starts. */
-  private record Probe(String project, AgentSession.SessionInfo info, List<String> repoPaths) {}
+  private record Probe(
+      String project, AgentSession.SessionInfo info, String instance, List<String> repoPaths) {}
 
   static List<String> repoPathsOrDefault(ProjectReader definitions, String projectName) {
     try {
@@ -280,6 +289,19 @@ public final class AgentStatusCommand implements Runnable {
     } catch (Exception ignored) {
       return DEFAULT_REPO_PATHS;
     }
+  }
+
+  /**
+   * Where {@code project}'s active run on {@code node}, this box, lives, whose session the status
+   * shows: a spec's workspace, or the project's container when the run names no spec or there is
+   * none.
+   */
+  static RunPlace activePlace(HostOperations operations, String project, String node) {
+    return operations
+        .dispatching()
+        .activeRun(project, node)
+        .map(RunStore.RunRow::place)
+        .orElse(RunPlace.of(project, null));
   }
 
   private static AgentSession.SessionInfo sessionOrNull(

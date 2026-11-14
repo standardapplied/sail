@@ -118,13 +118,15 @@ public final class AgentReporter {
    * task file, git activity, guardrail trigger file, and rollback file. All queries are
    * best-effort: failures produce degraded output rather than errors.
    *
-   * @param containerName the Incus container name
+   * @param project the project the report is of
    * @param config the project's ProjectDefinition config
+   * @param session the project's latest run, whose place (a spec's workspace, or the project's
+   *     container) is the instance its session, commits and guardrail are read in
    */
   public Report generate(
-      String containerName, ProjectDefinition config, List<Spec> specs, RunStore.RunRow session)
+      String project, ProjectDefinition config, List<Spec> specs, RunStore.RunRow session)
       throws IOException, InterruptedException, TimeoutException {
-    return generate(containerName, config, specs, session, SailPaths.projectDir(containerName));
+    return generate(project, config, specs, session, SailPaths.projectDir(project));
   }
 
   /**
@@ -158,12 +160,14 @@ public final class AgentReporter {
    * wall-clock since dispatch (the agent-session file records only the start).
    */
   Report generate(
-      String containerName,
+      String project,
       ProjectDefinition config,
       List<Spec> specs,
       RunStore.RunRow session,
       Path stateDir)
       throws IOException, InterruptedException, TimeoutException {
+    var containerName =
+        session == null ? RunPlace.of(project, null).instance() : session.place().instance();
 
     var agentSession = new AgentSession(shell);
     var info = session == null ? null : agentSession.queryStatus(containerName, unitOf(session));
@@ -251,7 +255,7 @@ public final class AgentReporter {
     }
 
     return new Report(
-        containerName,
+        project,
         sessionStatus,
         startedAt,
         endedAt,

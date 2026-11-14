@@ -58,7 +58,12 @@ public final class AgentPresence {
     };
   }
 
-  private ContainerState state(RunPlace place)
+  /**
+   * The state of the instance a run that lives in {@code place} is in: the project's own container
+   * through the door that refuses any other instance of its name (W10), a spec's workspace as incus
+   * lists it by its own name, an error where incus does not answer.
+   */
+  public ContainerState state(RunPlace place)
       throws IOException, InterruptedException, TimeoutException {
     return switch (place) {
       case RunPlace.ProjectContainer container -> containers.queryState(container.project());

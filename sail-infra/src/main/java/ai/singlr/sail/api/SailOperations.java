@@ -36,6 +36,7 @@ import ai.singlr.sail.engine.ContainerManager;
 import ai.singlr.sail.engine.ContainerState;
 import ai.singlr.sail.engine.HostInfo;
 import ai.singlr.sail.engine.NameValidator;
+import ai.singlr.sail.engine.RunPlace;
 import ai.singlr.sail.engine.SharedProjectFiles;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.ShellExecutor;
@@ -1707,9 +1708,11 @@ public final class SailOperations implements HostOperations {
             .map(
                 run ->
                     AgentRunView.from(
-                        run, querySession(agentSession, project, StopOperations.runUnit(run))))
+                        run, querySession(agentSession, run.place(), StopOperations.runUnit(run))))
             .toList();
-    var newest = querySession(agentSession, project, StopOperations.runUnit(running.getFirst()));
+    var newest =
+        querySession(
+            agentSession, running.getFirst().place(), StopOperations.runUnit(running.getFirst()));
     return AgentStatusResponse.from(project, newest, runs);
   }
 
@@ -1730,7 +1733,7 @@ public final class SailOperations implements HostOperations {
     var logPath = AgentUnit.readableLogPath(run.id(), run.logPath());
     var cmd =
         ContainerExec.asDevUser(
-            run.project(), List.of("tail", "-n", String.valueOf(tail), "--", logPath));
+            run.place().instance(), List.of("tail", "-n", String.valueOf(tail), "--", logPath));
     var result = exec(cmd);
     if (!result.ok()) {
       if (result.stderr().contains("No such file")) {
@@ -1773,9 +1776,9 @@ public final class SailOperations implements HostOperations {
   }
 
   private AgentSession.SessionInfo querySession(
-      AgentSession session, String project, AgentUnit unit) {
+      AgentSession session, RunPlace place, AgentUnit unit) {
     try {
-      return session.queryStatus(project, unit);
+      return session.queryStatus(place.instance(), unit);
     } catch (Exception e) {
       throw new ApiException(ErrorCode.AGENT_STATUS_FAILED, "Failed to query agent status.", e);
     }

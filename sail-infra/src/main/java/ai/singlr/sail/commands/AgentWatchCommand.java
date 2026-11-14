@@ -342,9 +342,8 @@ public final class AgentWatchCommand implements Runnable {
     if (!(place() instanceof RunPlace.ProjectContainer)) {
       return;
     }
-    var mgr = new ContainerManager(shell);
-    var state = mgr.queryState(name);
-    ContainerStateGuard.requireRunning(state, name);
+    var instance = place().instance();
+    ContainerStateGuard.requireRunning(new ContainerManager(shell).queryState(instance), instance);
   }
 
   /** The project's notifications as the catalog holds them when the watch starts. */

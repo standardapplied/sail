@@ -13,9 +13,9 @@ import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.config.Lane;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.AgentLogRenderer;
+import ai.singlr.sail.engine.AgentPresence;
 import ai.singlr.sail.engine.AgentUnit;
 import ai.singlr.sail.engine.ContainerExec;
-import ai.singlr.sail.engine.ContainerManager;
 import ai.singlr.sail.engine.ContainerStateGuard;
 import ai.singlr.sail.engine.NameValidator;
 import ai.singlr.sail.engine.NodeIdentity;
@@ -97,9 +97,7 @@ public final class AgentLogCommand implements Runnable {
     var run = resolveRun(name, lane(), operator);
     var shell = new ShellExecutor(false);
     var place = run.map(RunStore.RunRow::place).orElse(RunPlace.of(name, null));
-    if (place instanceof RunPlace.ProjectContainer) {
-      ContainerStateGuard.requireRunning(new ContainerManager(shell).queryState(name), name);
-    }
+    ContainerStateGuard.requireRunning(new AgentPresence(shell).state(place), place.instance());
 
     if (run.isEmpty()) {
       printNoLog(operator);

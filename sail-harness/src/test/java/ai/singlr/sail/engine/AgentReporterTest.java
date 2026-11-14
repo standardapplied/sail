@@ -115,6 +115,28 @@ class AgentReporterTest {
     assertNotNull(report.duration());
   }
 
+  /** A spec's run lived in its workspace, so its session, commits and guardrail are read there. */
+  @Test
+  void aSpecsRunIsReportedFromItsOwnWorkspace(@TempDir java.nio.file.Path stateDir)
+      throws Exception {
+    var session =
+        sessionRow(RUN_UNIT.unitName(), "completed", 0, Instant.now().minusSeconds(60), null);
+    var shell = new ScriptedShellExecutor();
+
+    var report =
+        new AgentReporter(shell).generate(CONTAINER, buildConfig(), List.of(), session, stateDir);
+
+    assertEquals(CONTAINER, report.name());
+    var execs =
+        shell.invocations().stream().filter(command -> command.startsWith("incus exec ")).toList();
+    assertFalse(execs.isEmpty());
+    assertEquals(
+        List.of(),
+        execs.stream()
+            .filter(command -> !command.startsWith("incus exec " + CONTAINER + "-auth "))
+            .toList());
+  }
+
   @Test
   void runningSessionReportsRunning(@TempDir java.nio.file.Path stateDir) throws Exception {
     var startedAt = Instant.now().minusSeconds(1800).toString();
