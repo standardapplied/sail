@@ -43,8 +43,9 @@ enum Step: Decodable, Equatable, CustomStringConvertible {
     /// Keeps the screen's text under a name, for ``same(_:)``: taken while the program is at rest,
     /// or a replay shows what it wrote since.
     case snapshot(String)
-    /// A replay begun since the last drop or attach (the first attach's, with neither) shows the
-    /// text kept under the name, within 5 s: the screen before the replay arrives proves nothing.
+    /// A replay finished since the last drop or attach (the first attach's, with neither) shows
+    /// the text kept under the name, within 5 s: the screen before the replay arrives, or partway
+    /// through it, proves nothing.
     case same(String)
     /// Drops the connection; the session reconnects.
     case drop

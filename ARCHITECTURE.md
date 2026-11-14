@@ -3724,8 +3724,9 @@ against them before it is used. Both expose one module, `GhosttyVt`. The termina
 - **T1. One session code for every host.** A session reaches this machine's own host (the unix
   socket under the account's home, a blank `Hello`) or a runner's TCP door (a fresh ticket from
   `POST /v1/terminal/tickets` for every connection) through one `Door`; nothing else differs.
-  `SessionListing.sessions(at:)` lists a host's sessions page by page, a cursor that does not move
-  forward or more than 10,000 sessions being a protocol violation.
+  `SessionListing.sessions(at:)` lists a host's sessions page by page, each answer awaited at most
+  its timeout (1 s or more), a cursor that does not move forward or more than 10,000 sessions being
+  a protocol violation.
 - **T2. The screen is libghostty-vt's.** No escape sequence is parsed and no input encoded in Swift:
   keys, pastes, focus and mouse come from its encoders, each synced from the terminal first.
 - **T3. Nothing is lost or reordered.** One thread per connection reads the host's frames and feeds
@@ -3735,9 +3736,13 @@ against them before it is used. Both expose one module, `GhosttyVt`. The termina
   has lasted 1 s, when the session ticks the screen so a renderer drawing only on change draws
   again; a renderer never draws a half-finished update. A change of the default colours or the
   palette redraws every row. Output is fed in 16 KiB slices, each under its own taking of the lock,
-  and before each slice the feeder yields to a reader that has announced itself, so a frame waits
-  behind at most the one slice already being fed, however many feeds follow back to back
-  (`FairnessTests` counts the slices; the bench times the wait on Linux and macOS).
+  and every other caller (a frame, a key's encoding, a paste) takes turns with the feeder: a turn
+  falls due after 32 slices or 5 ms, and then the feeder lets in every ticket taken so far before
+  its next slice (with no feed running, a caller takes a due turn itself). So a caller waits
+  behind at most 32 slices however many feeds follow back to back, and callers that read as fast
+  as they can still leave output the lock between their turns; a frame with nothing new fed
+  takes no turn while the lock is free (`FairnessTests` counts slices and turns; the bench times
+  frames, keys and the output rate under polling readers, on Linux and macOS).
 - **T4. Secrets stay secret.** A ticket is presented once; a reconnect asks for a new one. No ticket,
   token or terminal byte is logged, written to a file or put on a command line (the probe takes its
   token from an environment variable it is named).
@@ -3754,9 +3759,11 @@ against them before it is used. Both expose one module, `GhosttyVt`. The termina
   attachment still gets all five waits. A dead TCP peer with anything unacknowledged in flight is
   found within 10 s (`TCP_USER_TIMEOUT` / `TCP_RXT_CONNDROPTIME`); a quiet one within 45 s, by
   keepalive probes after 30 s idle, 5 s apart, 3 of them, so an idle session costs one probe every
-  30 s and the radio may sleep between. `reconnectNow()` while attached sends the host the pty size
-  as this client knows it (kept on every resize it sends or receives), so a connection that died
-  during sleep is found at once without resizing anything; the protocol has no no-op frame, and an
+  30 s and the radio may sleep between. The client keeps its view's size apart from the pty's: the
+  pty's is the size the host announced or this client sent while it held the write token (the
+  host ignores a reader's resize), and a granted `takeWrite()` sends the view's size once, so the
+  new writer's pty takes it. `reconnectNow()` while attached sends the pty's size, so a connection
+  that died during sleep is found at once without resizing anything; the protocol has no no-op frame, and an
   empty `Input` would count as typing. A connect attempt a detach or a close overtook stands down
   before it sends anything for the session, and `kill()` while not attached throws.
 - **T7. No keystroke reaches a screen the person cannot see.** Input while not attached is

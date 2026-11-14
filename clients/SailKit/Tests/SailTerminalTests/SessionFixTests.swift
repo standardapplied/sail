@@ -295,6 +295,62 @@ import Testing
         _ = host
     }
 
+    /// Fix 3 (the reviewer's n6): a reader's resize is the view's alone, since the host ignores it,
+    /// so the wake probe sends the size the pty has and resizes nothing.
+    @Test func aReadersWakeProbeSendsThePtysSizeNotItsView() async throws {
+        let timeline = Timeline()
+        let (host, session, peer) = try await attachedToRead(sleep: timeline.sleep)
+        try session.resize(GridSize(columns: 100, rows: 30))
+        try await timeline.until(held: [TerminalSession.resizeHold])
+        timeline.passAll()
+        #expect(try await peer.read() == .resize(TerminalSize(columns: 100, rows: 30)))
+        session.reconnectNow()
+        #expect(try await peer.read() == .resize(TerminalSize(columns: 80, rows: 24)))
+        session.close()
+        _ = host
+    }
+
+    /// Fix 3: once the host grants this client's `TakeWrite`, the view's size goes to it once, so the
+    /// new writer's pty takes its size, and the wake probe then sends that size.
+    @Test func takingTheWriteTokenSendsTheViewsSizeOnce() async throws {
+        let timeline = Timeline()
+        let (host, session, peer) = try await attachedToRead(sleep: timeline.sleep)
+        try session.resize(GridSize(columns: 100, rows: 30))
+        try await timeline.until(held: [TerminalSession.resizeHold])
+        timeline.passAll()
+        #expect(try await peer.read() == .resize(TerminalSize(columns: 100, rows: 30)))
+        session.takeWrite()
+        #expect(try await peer.read() == .takeWrite)
+        try peer.send(.writerChanged(fde: "ada"))
+        #expect(try await peer.read() == .resize(TerminalSize(columns: 100, rows: 30)))
+        try peer.send(.writerChanged(fde: "eng"))
+        session.send(KeyInput(key: .q, text: "q"))
+        guard case .input = try await peer.read() else { throw HostError("a second size went to the host") }
+        session.reconnectNow()
+        #expect(try await peer.read() == .resize(TerminalSize(columns: 100, rows: 30)))
+        session.close()
+        _ = host
+    }
+
+    /// A session attached read-only at 80x24 to a session another FDE writes.
+    private func attachedToRead(
+        sleep: @escaping @Sendable (Duration) async throws -> Void
+    ) async throws -> (FakeHost, TerminalSession, FakeHost.Peer) {
+        let host = try FakeHost()
+        let session = TerminalSession(
+            attach: "theirs", write: false, door: .local(host.address), screen: try screen(columns: 80, rows: 24), timeout: 5,
+            stableAfter: .zero, sleep: sleep
+        )
+        let watch = Watch(session)
+        session.start()
+        let peer = try await host.accept()
+        try await peer.welcome()
+        #expect(try await peer.read() == .attach(session: "theirs", write: false))
+        try peer.send([.accepted, .resized(TerminalSize(columns: 80, rows: 24)), .replayBegin(safe: true), .replayEnd, .writerChanged(fde: "eng")])
+        try await watch.until("took the prologue") { watch.seen.contains(.writerChanged("eng")) }
+        return (host, session, peer)
+    }
+
     /// Fix 2: a render hold left open when the output stops ticks the screen at its limit, so a
     /// renderer that draws only on a tick shows what the program left.
     @Test func aHoldLeftOpenTicksTheScreenAtItsLimit() async throws {
@@ -372,5 +428,49 @@ import Testing
         _ = try await peer.read()
         try peer.send(.sessions(SessionPage(sessions: [Self.info("a")], next: "a")))
         await #expect(throws: TerminalError.protocolViolation("its listing went back to 'a' after 'a'")) { try await listed.value }
+    }
+
+    @Test func aTimeoutOfLessThanOneSecondIsRefusedBeforeConnecting() async throws {
+        let host = try FakeHost()
+        for timeout in [0, -1, Int.min] {
+            await #expect(throws: TerminalError.unsupported("a listing waits 1 s or more for each answer, not \(timeout) s")) {
+                try await SessionListing.sessions(at: host.address, timeout: timeout)
+            }
+        }
+    }
+
+    @Test func aRefusalIsThrownInTheHostsWords() async throws {
+        let host = try FakeHost()
+        let listed = Task { try await SessionListing.sessions(at: host.address, timeout: 5) }
+        let peer = try await host.accept()
+        try await peer.welcome()
+        _ = try await peer.read()
+        let refusal = HostRefusal(message: "Listing is not allowed here.", remedy: nil)
+        try peer.send(.refused(refusal))
+        await #expect(throws: TerminalError.refused(refusal)) { try await listed.value }
+    }
+
+    @Test func anAnswerThatIsNotAPageIsAProtocolViolation() async throws {
+        let host = try FakeHost()
+        let listed = Task { try await SessionListing.sessions(at: host.address, timeout: 5) }
+        let peer = try await host.accept()
+        try await peer.welcome()
+        _ = try await peer.read()
+        try peer.send(.accepted)
+        await #expect(throws: TerminalError.protocolViolation("it answered ListSessions with Accepted")) { try await listed.value }
+    }
+
+    @Test func aListingPastTheLargestIsAProtocolViolation() async throws {
+        let host = try FakeHost()
+        let listed = Task { try await SessionListing.sessions(at: host.address, timeout: 5) }
+        let peer = try await host.accept()
+        try await peer.welcome()
+        let pages = SessionListing.largest / Int(SessionListing.pageSize) + 1
+        for page in 0 ..< pages {
+            _ = try await peer.read()
+            let names = (0 ..< Int(SessionListing.pageSize)).map { String(format: "s%03d-%03d", page, $0) }
+            try peer.send(.sessions(SessionPage(sessions: names.map(Self.info), next: names.last ?? "")))
+        }
+        await #expect(throws: TerminalError.protocolViolation("it listed more than \(SessionListing.largest) sessions")) { try await listed.value }
     }
 }

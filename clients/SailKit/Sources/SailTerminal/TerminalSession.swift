@@ -66,9 +66,12 @@ public final class TerminalSession: Sendable {
         var inFlight: Connection?
         var supervisor: Task<Void, Never>?
         var resizeTimer: Task<Void, Never>?
+        /// The size of the app's view of the screen.
         var viewSize: TerminalSize?
-        /// The pty's size as far as this client knows: the last size the host announced or this
-        /// client sent. A writer's pty has exactly it; a reader's `Resize` the host ignores.
+        /// The pty's size as this client knows it: the last size the host announced, or this client
+        /// sent while writing. The host applies a writer's `Resize` and ignores a reader's, so the
+        /// pty has exactly this size, unless the client is a reader that thinks it writes, and a
+        /// reader's `Resize` changes nothing.
         var ptySize: TerminalSize?
         var holdTimer: Task<Void, Never>?
         var focused = true
@@ -76,10 +79,15 @@ public final class TerminalSession: Sendable {
         var closed = false
         /// Which supervisor is the session's: one left behind by a detach stays out.
         var generation = 0
-        /// The terminal's own answers are not sent: the attach is read-only, or the host said this
-        /// connection does not hold the write token, until it next says who does.
-        var repliesMuted = false
+        /// This client holds the write token as far as it knows: it attached to write, or took the
+        /// token since, and the host has not refused its input as a reader's. A reader sends none
+        /// of the terminal's own answers.
+        var writing = true
+        /// A `TakeWrite` was sent and the host's grant, a `WriterChanged`, is still to come.
+        var takingWrite = false
         var replaying = false
+        /// Replays this session has finished.
+        var replays = 0
         /// The numbers of inputs written but not yet named applied by an `Output`.
         var unconfirmed: [Int64] = []
         /// The inputs left unconfirmed by a lost connection are accounted for by the next replay.
@@ -175,9 +183,10 @@ public final class TerminalSession: Sendable {
     }
 
     /// Skips a reconnect's wait, or leaves the park and tries at once. While attached it asks the
-    /// connection to prove itself: the pty's size as this client last knew it goes to the host,
-    /// which changes nothing there (`TIOCSWINSZ` to the size a pty has raises no `SIGWINCH`), but
-    /// leaves data the peer must acknowledge, so a connection that died while the machine slept is
+    /// connection to prove itself: the pty's size as this client knows it (the size the host last
+    /// announced, or this client sent while writing) goes to the host, which changes nothing there
+    /// (a writer's pty has that size, `TIOCSWINSZ` to it raises no `SIGWINCH`, and a reader's
+    /// `Resize` is ignored), but leaves data the peer must acknowledge, so a connection that died while the machine slept is
     /// found dead within ``Socket/deadAfter`` seconds. The protocol has no frame that does nothing
     /// at all: an empty `Input` would count as typing in a room-bound session. The app calls it on
     /// wake and on a network change.
@@ -289,6 +298,12 @@ public final class TerminalSession: Sendable {
         previous?.cancel()
     }
 
+    /// How many replays the session has finished, each onto a screen cleared for it: a screen read
+    /// once the count rose shows the whole replay. For the probe.
+    package var replays: Int {
+        core.withLock { $0.replays }
+    }
+
     /// Drops the connection as a broken network would; the session reconnects. For the probe.
     package func dropConnection() {
         core.withLock { $0.connection }?.close()
@@ -300,9 +315,14 @@ public final class TerminalSession: Sendable {
         self.tap.withLock { $0 = tap }
     }
 
-    /// Asks the host for the write token.
+    /// Asks the host for the write token, which it grants to any attached client; once granted, the
+    /// view's size goes to the host, so the pty takes the new writer's size.
     public func takeWrite() {
-        guard let connection = core.withLock({ $0.connection }) else { return }
+        let connection = core.withLock { core -> Connection? in
+            if core.connection != nil { core.takingWrite = true }
+            return core.connection
+        }
+        guard let connection else { return }
         send(.takeWrite, on: connection)
     }
 
@@ -439,7 +459,8 @@ public final class TerminalSession: Sendable {
             core.connection = connection
             core.inFlight = nil
             core.state.paused = false
-            core.repliesMuted = !write
+            core.writing = write
+            core.takingWrite = false
             core.accounting = !core.unconfirmed.isEmpty
             core.numbered = false
             return nil
@@ -512,21 +533,19 @@ public final class TerminalSession: Sendable {
             armHoldTick()
         case let .replayBegin(safe):
             screen.beginReplay()
-            core.withLock { core in
-                core.replaying = true
-                core.state.replays += 1
-            }
+            core.withLock { $0.replaying = true }
             emit(.replay(safe: safe))
         case .replayEnd:
             screen.endReplay()
             let (focused, refit) = core.withLock { core in
                 core.replaying = false
+                core.replays += 1
                 if core.accounting {
                     core.state.possiblyLostInputs += core.unconfirmed.count
                     core.unconfirmed = []
                     core.accounting = false
                 }
-                let refit = core.viewSize.flatMap { $0 == core.ptySize ? nil : $0 }
+                let refit = core.writing ? core.viewSize.flatMap { $0 == core.ptySize ? nil : $0 } : nil
                 if refit != nil { core.ptySize = refit }
                 return (core.focused, refit)
             }
@@ -547,9 +566,21 @@ public final class TerminalSession: Sendable {
             emit(.resized(size))
             screenSink.yield()
         case let .writerChanged(fde):
-            core.withLock { core in
+            let fit = core.withLock { core -> TerminalSize? in
                 core.state.writer = fde
-                if case let .attach(_, write) = core.intent { core.repliesMuted = !write }
+                guard core.takingWrite else {
+                    if case let .attach(_, write) = core.intent { core.writing = write }
+                    return nil
+                }
+                core.takingWrite = false
+                core.writing = true
+                if case let .attach(session, _) = core.intent { core.intent = .attach(session: session, write: true) }
+                guard let view = core.viewSize, view != core.ptySize else { return nil }
+                core.ptySize = view
+                return view
+            }
+            if let fit {
+                send(.resize(fit), on: connection)
             }
             emit(.writerChanged(fde))
         case .paused:
@@ -561,7 +592,7 @@ public final class TerminalSession: Sendable {
         case let .sessionEnded(reason):
             return .finished(.ended(reason))
         case let .refused(refusal):
-            if refusal.message == Self.notWriter { core.withLock { $0.repliesMuted = true } }
+            if refusal.message == Self.notWriter { core.withLock { $0.writing = false } }
             emit(.refused(refusal))
         case .accepted:
             if core.withLock({ $0.detaching }) { return .detached }
@@ -606,7 +637,7 @@ public final class TerminalSession: Sendable {
                 if handedIn != nil { core.state.droppedInputs += 1 }
                 return nil
             }
-            return handedIn == nil && core.repliesMuted ? nil : connection
+            return handedIn == nil && !core.writing ? nil : connection
         }
         guard let connection else { return }
         do throws(TerminalError) {
@@ -633,7 +664,7 @@ public final class TerminalSession: Sendable {
 
     private func sendViewSize() {
         let (connection, size) = core.withLock { core in
-            if core.connection != nil { core.ptySize = core.viewSize }
+            if core.connection != nil, core.writing { core.ptySize = core.viewSize }
             return (core.connection, core.viewSize)
         }
         guard let connection, let size else { return }

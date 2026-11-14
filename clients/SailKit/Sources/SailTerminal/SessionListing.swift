@@ -8,9 +8,11 @@ public enum SessionListing {
     /// The most sessions a listing takes before it calls the host's paging broken.
     public static let largest = 10_000
 
-    /// Every session the local host at `address` lists, in name order. A page whose cursor does not
-    /// move forward, or a listing past ``largest``, is a protocol violation.
+    /// Every session the local host at `address` lists, in name order, each answer awaited at most
+    /// `timeout` seconds (1 or more: nothing waits for ever). A page whose cursor does not move
+    /// forward, or a listing past ``largest``, is a protocol violation.
     public static func sessions(at address: HostAddress, timeout: Int = 10) async throws(TerminalError) -> [SessionInfo] {
+        guard timeout >= 1 else { throw .unsupported("a listing waits 1 s or more for each answer, not \(timeout) s") }
         let result: Result<[SessionInfo], TerminalError> = await withCheckedContinuation { answer in
             Thread {
                 answer.resume(returning: Result { () throws(TerminalError) in try list(at: address, timeout: timeout) })

@@ -50,7 +50,7 @@ struct Runner {
         return Report(steps: results, latency: session.latencyReport, droppedInputs: session.state.droppedInputs, budgets: budgets)
     }
 
-    /// The screens a script kept, and how many replays the session had begun when it last
+    /// The screens a script kept, and how many replays the session had finished when it last
     /// reconnected: a screen compared after a reconnect is the replay's, never the one before it.
     private struct Kept {
         var screens: [String: String] = [:]
@@ -72,17 +72,17 @@ struct Runner {
             guard let screen = kept.screens[name] else { throw ProbeError("no snapshot is named \(name)") }
             let replays = kept.replays
             try await follower.until("showed the screen kept as \(name) from a replay") {
-                try session.state.replays > replays && session.screen.text() == screen
+                try session.replays > replays && session.screen.text() == screen
             }
         case .drop:
-            kept.replays = session.state.replays
+            kept.replays = session.replays
             session.dropConnection()
             try await follower.until("lost its connection") { session.state.phase != .attached }
         case .detach:
             session.detach()
             try await follower.phase(.detached)
         case .attach:
-            kept.replays = session.state.replays
+            kept.replays = session.replays
             session.attach()
             try await follower.attached(within: 30)
         case .killHost:

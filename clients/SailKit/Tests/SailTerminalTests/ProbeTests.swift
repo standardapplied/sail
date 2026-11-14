@@ -32,6 +32,15 @@ import Testing
         #expect(steps.map(\.ok) == [true, true, true, true, true, false])
     }
 
+    /// Fix 3: a replay is compared once it has ended, never partway through, where a screen can
+    /// match the kept one for a moment.
+    @Test func aSameWaitsForTheReplayToEnd() async throws {
+        let steps = try await reconnected { peer in
+            try peer.send([.accepted, .resized(TerminalSize(columns: 20, rows: 3)), .replayBegin(safe: true), output("kept")])
+        }
+        #expect(steps.map(\.ok) == [true, true, true, true, true, false])
+    }
+
     @Test func aSameAfterAReconnectPassesOnAReplayOfTheKeptScreen() async throws {
         let steps = try await reconnected { peer in
             try peer.send([
