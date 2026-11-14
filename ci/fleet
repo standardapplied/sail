@@ -18,11 +18,18 @@ readonly SCHEMA_CHANGED_IN=0.68.0
 usage() {
   cat >&2 <<'EOF'
 Usage:
-  ci/fleet run VERSION [--upgrade-to TARGET]
-                                a fresh fleet on release VERSION (e.g. 0.59.0), every scenario, then down;
-                                with --upgrade-to, projects and conflicts run on VERSION, the fleet is
-                                upgraded to TARGET, main first (a release version, or a native binary
-                                file for sail upgrade --binary), and every other scenario runs on TARGET
+  ci/fleet run VERSION [--upgrade-to TARGET] [--group GROUP]...
+                                fresh fleets on release VERSION (e.g. 0.59.0), one per group of scenarios
+                                (access, storage, rebuilt), all at once, every scenario, one report;
+                                a fleet goes down when all its checks pass and is kept when one fails;
+                                --group runs only the groups named; with --upgrade-to, projects (and, in
+                                its group, conflicts) run on VERSION, each fleet is upgraded to TARGET,
+                                main first (a release version, or a native binary file for sail upgrade
+                                --binary), and every other scenario runs on TARGET
+  FLEET_SERIAL=1 ci/fleet run VERSION [--upgrade-to TARGET]
+                                the gate of record for a version being cut: one fleet, every scenario in
+                                order, so each one meets everything the ones before it wrote; the parallel
+                                default is the fast check while working
   ci/fleet up RUN               create the run's four VMs and wait until each answers ssh
   ci/fleet install RUN VERSION  install release VERSION on every box from the README's install line;
                                 VERSION may be a candidate binary, put in place by sail upgrade --binary
@@ -33,6 +40,10 @@ Usage:
   ci/fleet conflicts RUN        the same field changed on main and offline on eng parks a conflict that
                                 resolves the same everywhere; different fields merge; a conversation
                                 reads the same on every box
+  ci/fleet containers RUN       apply acme on client and observer
+  ci/fleet furnish RUN          give acme what the scenarios before storage give it in order: the
+                                loop's repo, runtimes and agent install, and a shared file
+  ci/fleet eng-acme RUN         apply acme on eng, as access does before the loop in order
   ci/fleet inside RUN           apply acme on client and observer; each role at the in-container spec
                                 CLI and at the HTTP API Mast calls; from main, over client's private address,
                                 a ticket from the API opens a session over TCP that echoes a line, and the
@@ -93,10 +104,22 @@ Usage:
                                 across a release whose schema no older database opens (0.68.0),
                                 where boxes are installed fresh (run passes its VERSION as FROM)
   ci/fleet ssh RUN BOX COMMAND  run COMMAND on BOX as the operator account
-  ci/fleet down [RUN]           delete the run's VMs, or every fleet VM when RUN is left out
+  ci/fleet list                 every fleet VM and detached fleet disk in the project, with its age
+  ci/fleet down [RUN]           delete the run's VMs and its detached disks (a parallel run's id takes
+                                down all its groups), or every fleet VM when RUN is left out; exits 1
+                                naming what is left when a delete fails
 
-Each step logs to $FLEET_RUNS/RUN/ (default ~/.sail-fleet); report.txt holds one line per check.
-FLEET_KEEP=1 leaves a failed run's VMs up for diagnosis; FLEET_KEEP=always leaves any run's up.
+Each step logs to $FLEET_RUNS/RUN/ (default ~/.sail-fleet); report.txt holds one line per check,
+and how long each box's init took to install Incus.
+A scenario subcommand runs every check of the scenario on a standing fleet and exits 1 on a FAIL;
+run again, it gives what it creates a suffix of its attempt. Most scenarios run again on the
+fleet they ran on; not storage, which deletes its own disk, nor up, install, join or projects:
+those need a fresh fleet, ci/fleet run VERSION --group GROUP. doors does not run again once access
+has written beta's specs, nor conflicts while an earlier attempt's conflict is still parked. A
+rerun is for diagnosis and for proving a fix: it does not clear the run's FAIL, and a release
+passes only on a run whose report has 0 FAIL. A kept fleet names its run id, when its VMs delete
+themselves, and the commands that go on from what failed. FLEET_KEEP=always leaves every fleet up;
+FLEET_KEEP=0 takes down even a failed one.
 FLEET_LOOP=0 skips the agent loop, which needs the fleet-* secrets and spends model tokens;
 FLEET_LOOP_AGENTS names the agents it installs, builder first (default: claude-code; add codex to have it review).
 EOF
@@ -115,16 +138,90 @@ from_caller() {
 
 gc() { gcloud --project "$PROJECT" --quiet "$@"; }
 
+readonly SSH_OPTIONS="-o ConnectTimeout=15 -o ServerAliveInterval=30 -o BatchMode=yes"
+
+first_contact() {
+  # shellcheck disable=SC2086
+  gc compute ssh "$(vm "$1" "$2")" --zone "$ZONE" --command true -- $SSH_OPTIONS
+}
+
+# gcloud spends seconds of API calls on every ssh, more than most checks spend on the box. So each
+# box's ssh command is asked of gcloud once, after its first contact has recorded the host key, and
+# every command after that runs over one shared connection with that same key and host-key check.
+route() {
+  local run=$1 box=$2 file line
+  file="$(log_dir "$run")/route-$box"
+  if [[ ! -s $file ]]; then
+    line=$(gc compute ssh "$(vm "$run" "$box")" --zone "$ZONE" --dry-run --command true) || return 1
+    [[ $line == *" -o StrictHostKeyChecking=yes "* && $line == *" -- true" && $line != *StrictHostKeyChecking=no* \
+      && $line != *accept-new* && $line != *UserKnownHostsFile=/dev/null* ]] || {
+      echo "ci/fleet: gcloud offers no checked ssh to $box: $line" >&2
+      return 1
+    }
+    line=${line% -- true}
+    printf '%s\n' "${line#* }" > "$file.$BASHPID" && mv "$file.$BASHPID" "$file"
+  fi
+  cat "$file"
+}
+
+# ssh adds 17 characters to the control path while it makes the connection, and refuses one over 107.
+shared_connection() {
+  local path
+  path="$(log_dir "$1")/ssh-$2"
+  ((${#path} <= 90)) || { echo "ci/fleet: the ssh control path $path is too long: give FLEET_RUNS a shorter directory." >&2; return 1; }
+  echo "$path"
+}
+
 on() {
-  local run=$1 box=$2
+  local run=$1 box=$2 options socket destination
   shift 2
-  gc compute ssh "$(vm "$run" "$box")" --zone "$ZONE" --command "$*" \
-    -- -o ConnectTimeout=15 -o ServerAliveInterval=30 -o BatchMode=yes
+  options=$(route "$run" "$box") || return 1
+  socket=$(shared_connection "$run" "$box") || return 1
+  destination=${options##* }
+  options=${options% *}
+  # shellcheck disable=SC2086
+  ssh $options $SSH_OPTIONS -o ControlMaster=auto -o ControlPersist=10m \
+    -o ControlPath="$socket" "$destination" -- "$*"
+}
+
+forget_route() {
+  local socket
+  socket=$(shared_connection "$1" "$2") || socket=""
+  [[ -S $socket ]] && { ssh -o ControlPath="$socket" -O exit "$2" 2> /dev/null || true; }
+  rm -f "$(log_dir "$1")/route-$2"
 }
 
 log_dir() {
   mkdir -p "$RUNS/$1"
   echo "$RUNS/$1"
+}
+
+# Runs the probe until it holds, says it never will (status 2), or SECONDS have gone by, EVERY
+# seconds apart. A probe may set its caller's locals (said, after, last) for the caller to report.
+until_true() {
+  local deadline=$((SECONDS + $1)) every=$2 verdict
+  shift 2
+  while :; do
+    "$@" && return 0 || verdict=$?
+    [[ $verdict != 2 && $SECONDS -lt $deadline ]] || return 1
+    sleep "$every"
+  done
+}
+
+# A scenario run again on a fleet where it ran before gives what it creates a suffix of its
+# attempt, so its creates never meet the ones its earlier attempt left there.
+attempt() {
+  local file n
+  file="$(log_dir "$1")/attempts-$2"
+  n=$(($(cat "$file" 2> /dev/null || echo 0) + 1))
+  echo "$n" > "$file"
+  [[ $n == 1 ]] || echo "-a$n"
+}
+
+suffix_of() {
+  local n
+  n=$(cat "$(log_dir "$1")/attempts-$2" 2> /dev/null || echo 1)
+  [[ $n == 1 ]] || echo "-a$n"
 }
 
 check() {
@@ -159,25 +256,33 @@ create_vm() {
 }
 
 answers_ssh() {
-  local attempt
-  for attempt in $(seq 1 30); do
-    on "$1" "$2" true > /dev/null 2>&1 && return 0
-    sleep 5
-  done
+  forget_route "$1" "$2"
+  until_true 300 3 first_contact "$1" "$2" > /dev/null 2>&1 && return 0
   echo "ci/fleet: $2 never answered ssh." >&2
   return 1
 }
 
 up() {
-  local run=${1:-} box
+  local run=${1:-} box pid pids="" failed=0
   [[ -n $run ]] || usage
   for box in $BOXES; do
     create_vm "$run" "$box" &
+    pids="$pids $!"
   done
-  wait
+  for pid in $pids; do
+    wait "$pid" || failed=1
+  done
+  [[ $failed == 0 ]] || { echo "ci/fleet: a VM of $run was not created." >&2; return 1; }
+  note_expiry "$run"
+  pids=""
   for box in $BOXES; do
-    answers_ssh "$run" "$box" || exit 1
+    answers_ssh "$run" "$box" &
+    pids="$pids $!"
   done
+  for pid in $pids; do
+    wait "$pid" || failed=1
+  done
+  return $failed
 }
 
 install_box() {
@@ -207,14 +312,32 @@ install() {
 }
 
 init_main() {
-  on "$1" main "sudo sail init --as-main --handle uday --name 'Uday Fleet' --email uday@fleet.example"
+  on "$1" main "sudo sail init --as-main --handle uday --name 'Uday Fleet' --email uday@fleet.example" \
+    | tee "$(log_dir "$1")/init-main.out"
 }
 
-join_node() {
-  local run=$1 box=$2 handle=$3 role=$4 scoped=$5 main_ip=$6 dir
-  dir=$(log_dir "$run")
+# init's download of Incus from Zabbly sometimes stalls for minutes: the report says how long each
+# box's took, so a slow run explains itself.
+incus_took() {
+  local seconds
+  seconds=$(sed 's/\x1b\[[0-9;]*[A-Za-z]//g' "$(log_dir "$1")/init-$2.out" 2> /dev/null | tr '\r' '\n' \
+    | grep -F 'Installing Incus' | grep -oE '\([0-9]+s\)$' | tail -1 | tr -dc '0-9') || true
+  echo "init on $2 installed Incus in ${seconds:-?} s" | tee -a "$(log_dir "$1")/report.txt"
+}
+
+init_node() {
+  local run=$1 box=$2 handle=$3 main_ip=$4
   on "$run" "$box" "sudo sail init --main $main_ip --handle $handle --name '${handle^} Fleet' --email $handle@fleet.example" \
-    | tee "$dir/init-$box.out"
+    > "$(log_dir "$run")/init-$box.out" 2>&1
+}
+
+# The node's init ran in the background, beside the other nodes' inits: this waits for it.
+join_node() {
+  local run=$1 box=$2 role=$3 scoped=$4 init=$5 dir inited=0
+  dir=$(log_dir "$run")
+  wait "$init" || inited=1
+  cat "$dir/init-$box.out"
+  [[ $inited == 0 ]] || return 1
   local line
   line=$(grep -m1 -oE "sudo sail fde add .*" "$dir/init-$box.out" | sed -E "s/--role [a-z]+/--role $role/")
   if [[ -z $line ]]; then
@@ -232,11 +355,20 @@ join() {
   local run=${1:-}
   [[ -n $run ]] || usage
   check "$run" "init main as uday (admin)" init_main "$run"
-  local main_ip
+  local main_ip eng client observer box
   main_ip=$(internal_ip "$run" main)
-  check "$run" "join eng (member, every project)" join_node "$run" eng eng member all "$main_ip"
-  check "$run" "join client (member, scoped)" join_node "$run" client client member scoped "$main_ip"
-  check "$run" "join observer (viewer, scoped)" join_node "$run" observer obs viewer scoped "$main_ip"
+  init_node "$run" eng eng "$main_ip" &
+  eng=$!
+  init_node "$run" client client "$main_ip" &
+  client=$!
+  init_node "$run" observer obs "$main_ip" &
+  observer=$!
+  check "$run" "join eng (member, every project)" join_node "$run" eng member all "$eng"
+  check "$run" "join client (member, scoped)" join_node "$run" client member scoped "$client"
+  check "$run" "join observer (viewer, scoped)" join_node "$run" observer viewer scoped "$observer"
+  for box in $BOXES; do
+    incus_took "$run" "$box"
+  done
   check "$run" "main's roster has every FDE with its role" roster "$run"
 }
 
@@ -332,31 +464,24 @@ sync_all() {
   done
 }
 
+main_holds() { on "$1" main "sudo sail spec show $2 --no-sync" > /dev/null 2>&1 && return 0; return 1; }
+
 reaches_main_unasked() {
-  local run=$1 spec=$2 attempt
-  for attempt in $(seq 1 10); do
-    if on "$run" main "sudo sail spec show $spec --no-sync" > /dev/null 2>&1; then
-      echo "on main after about $((attempt * 3)) s"
-      return 0
-    fi
-    sleep 3
-  done
-  echo "not on main after 30 s"
+  local start=$SECONDS
+  if until_true 30 1 main_holds "$1" "$2"; then
+    echo "on main after $((SECONDS - start)) s"
+    return 0
+  fi
+  echo "not on main after $((SECONDS - start)) s"
   return 1
 }
 
 readonly VIEWER_POSTS='Your credential is read-only and cannot post in rooms.'
 readonly VIEWER_FIX='Ask an admin for a member or admin credential.'
-readonly E1_IS_ENGS="Spec 'e1' is assigned to 'eng', not you."
 readonly ASK_ENG='Ask eng to make this change, or have an admin do it.'
-readonly R1_IS_ENGS="'r1' belongs to eng: only eng or an admin may start work there, not you."
 readonly ASK_ADMIN_TO_ASSIGN='Ask an admin to assign it to you.'
-readonly E1_ADMIN_ONLY="Reassigning spec 'e1' moves work between FDEs and is an admin-only action (currently 'eng')."
 readonly ASK_AN_ADMIN='Ask an admin to reassign it. You may grab a spec only while it is unassigned.'
-readonly E1_NOT_CLIENTS="Event type 'review_completed' makes this box act on 'e1' (owned by 'eng'), which you may not drive."
 readonly ASK_E1S_OWNER='Only its owner or an admin may publish it.'
-readonly E1_RUNS_ON_ENG="Spec 'e1' is assigned to 'eng', which runs on that FDE's devbox, not this node ('uday')."
-readonly E1_IS_A_DRAFT="Spec 'e1' is a draft. A spec is dispatched only when pending."
 readonly ADMIN_MANAGES_PEOPLE='Only an admin may manage people.'
 readonly ASK_AN_ADMIN_TO_DO_IT='Ask an admin to do it.'
 readonly MAIN_IS_UDAYS="Box 'uday' belongs to 'uday', not you."
@@ -365,31 +490,39 @@ readonly AGENT_VERB_RUNS_AS_THE_BOX="'agent stop' reads this box's control plane
 readonly FOLLOW_WITH_SPEC="Follow the work with 'sail spec' and the board, or SSH to the host directly to run it."
 readonly NO_SYNC_SESSION='sync: main serves no session whose token is missing, invalid or expired'
 readonly CONTAINER_CANNOT_APPROVE='The credential in a project container cannot approve specs.'
-readonly PROMOTE_FROM_OUTSIDE="Do it from outside the container: 'sail spec update e21 --status <status>' on the host, or Mast."
 readonly CONTAINER_CANNOT_SHARE='The credential in a project container cannot share files and skills in projects.'
 readonly SHARE_FROM_OUTSIDE="Do it from outside the container: 'sail project skills add --container <folder> -p acme' or 'sail project skills rm <skill> -p acme' on the host, or Mast."
 readonly FLEET_SKILL='mkdir -p /home/dev/fleet-skill && printf -- "---\\nname: fleet-skill\\ndescription: A fleet check.\\n---\\nCheck.\\n" > /home/dev/fleet-skill/SKILL.md'
 
+assigned_to_eng() { echo "Spec '$1' is assigned to 'eng', not you."; }
+born_in_engs_room() { echo "'$1' belongs to eng: only eng or an admin may start work there, not you."; }
+reassigning_is_admin_only() { echo "Reassigning spec '$1' moves work between FDEs and is an admin-only action (currently 'eng')."; }
+not_clients_to_drive() { echo "Event type 'review_completed' makes this box act on '$1' (owned by 'eng'), which you may not drive."; }
+runs_on_engs_box() { echo "Spec '$1' is assigned to 'eng', which runs on that FDE's devbox, not this node ('uday')."; }
+is_a_draft() { echo "Spec '$1' is a draft. A spec is dispatched only when pending."; }
+promote_from_outside() { echo "Do it from outside the container: 'sail spec update $1 --status <status>' on the host, or Mast."; }
+
 doors() {
-  local run=${1:-} before
+  local run=${1:-} before x
   [[ -n $run ]] || usage
+  x=$(attempt "$run" doors)
   before=$(spec_ids "$run" main)
   check "$run" "client creates a spec with no sync" \
-    allowed "$run" client "sudo sail spec create -p acme --id unasked --title 'reaches main by itself'"
-  check "$run" "it reaches main within 30 s, no sail sync asked" reaches_main_unasked "$run" unasked
+    allowed "$run" client "sudo sail spec create -p acme --id unasked$x --title 'reaches main by itself'"
+  check "$run" "it reaches main within 30 s, no sail sync asked" reaches_main_unasked "$run" "unasked$x"
   check "$run" "observer (viewer) cannot create a spec" \
-    refused "$run" observer "credential is read-only" "sudo sail spec create -p acme --id obs-try --title 'viewer writes'"
+    refused "$run" observer "credential is read-only" "sudo sail spec create -p acme --id obs-try$x --title 'viewer writes'"
   check "$run" "client creates a spec in acme" \
-    allowed "$run" client "sudo sail spec create -p acme --id client-acme --title 'client in acme'"
+    allowed "$run" client "sudo sail spec create -p acme --id client-acme$x --title 'client in acme'"
   check "$run" "client cannot create a spec in beta, which it was never granted" \
-    refused "$run" client "sudo sail fde grant client beta" "sudo sail spec create -p beta --id client-beta --title 'client in beta'"
+    refused "$run" client "sudo sail fde grant client beta" "sudo sail spec create -p beta --id client-beta$x --title 'client in beta'"
   check "$run" "eng creates a spec in gamma" \
-    allowed "$run" eng "sudo sail spec create -p gamma --id eng-gamma --title 'eng in gamma'"
+    allowed "$run" eng "sudo sail spec create -p gamma --id eng-gamma$x --title 'eng in gamma'"
   check "$run" "every node syncs twice" sync_all "$run"
-  check "$run" "matrix 1: obs reads acme's spec client-acme [CLI]" allowed "$run" observer "sudo sail spec show client-acme"
+  check "$run" "matrix 1: obs reads acme's spec client-acme [CLI]" allowed "$run" observer "sudo sail spec show client-acme$x"
   check "$run" "matrix 2: obs comments on client-acme, refused read-only, naming the fix [CLI]" \
-    naming "$VIEWER_FIX" refused "$run" observer "$VIEWER_POSTS" "sudo sail spec comment client-acme --body 'a viewer speaks'"
-  local added="acme/client-acme acme/unasked gamma/eng-gamma"
+    naming "$VIEWER_FIX" refused "$run" observer "$VIEWER_POSTS" "sudo sail spec comment client-acme$x --body 'a viewer speaks'"
+  local added="acme/client-acme$x acme/unasked$x gamma/eng-gamma$x"
   check "$run" "main holds the three new specs" specs_on "$run" main "$(union $before $added)"
   check "$run" "eng holds the three new specs" specs_on "$run" eng "$(union $before $added)"
   check "$run" "client holds the acme specs alone" specs_on "$run" client "$(in_acme $before $added)"
@@ -546,7 +679,7 @@ parks_one_conflict() {
   grep -qF "1 conflict(s) need your decision" <<< "$out" || return 1
   listed=$(on "$1" eng "sudo sail conflicts --json")
   echo "$listed"
-  grep -qF '"entity": "shared", "fields": ["title"]' <<< "$listed"
+  grep -qF "\"entity\": \"$2\", \"fields\": [\"title\"]" <<< "$listed"
 }
 
 merges_without_conflict() {
@@ -567,55 +700,80 @@ conversation_matches() {
 }
 
 conflicts() {
-  local run=${1:-}
+  local run=${1:-} shared
   [[ -n $run ]] || usage
+  shared=shared$(attempt "$run" conflicts)
   check "$run" "client creates spec shared in acme and syncs" \
-    allowed "$run" client "sudo sail spec create -p acme --id shared --title 'first title' && sudo sail sync"
-  check "$run" "main assigns shared to eng" allowed "$run" main "sudo sail spec update shared --assignee eng"
+    allowed "$run" client "sudo sail spec create -p acme --id $shared --title 'first title' && sudo sail sync"
+  check "$run" "main assigns shared to eng" allowed "$run" main "sudo sail spec update $shared --assignee eng"
   check "$run" "eng renames shared without syncing" \
-    allowed "$run" eng "sudo sail sync && sudo sail spec update shared --title \"eng's title\" --no-sync"
-  check "$run" "main renames shared too" allowed "$run" main "sudo sail spec update shared --title \"uday's title\""
-  check "$run" "eng's sync parks one conflict on the title and names the next step" parks_one_conflict "$run"
-  check "$run" "eng takes main's side" allowed "$run" eng "sudo sail conflicts resolve shared --theirs && sudo sail sync"
+    allowed "$run" eng "sudo sail sync && sudo sail spec update $shared --title \"eng's title\" --no-sync"
+  check "$run" "main renames shared too" allowed "$run" main "sudo sail spec update $shared --title \"uday's title\""
+  check "$run" "eng's sync parks one conflict on the title and names the next step" parks_one_conflict "$run" "$shared"
+  check "$run" "eng takes main's side" allowed "$run" eng "sudo sail conflicts resolve $shared --theirs && sudo sail sync"
   check "$run" "every node syncs twice" sync_all "$run"
-  check "$run" "every box holds main's title" everywhere "$run" shared title "uday's title"
-  check "$run" "every box credits it to uday" everywhere "$run" shared updated_by uday
+  check "$run" "every box holds main's title" everywhere "$run" "$shared" title "uday's title"
+  check "$run" "every box credits it to uday" everywhere "$run" "$shared" updated_by uday
   check "$run" "eng renames shared without syncing again" \
-    allowed "$run" eng "sudo sail spec update shared --title 'eng renamed it' --no-sync"
-  check "$run" "main changes only its priority" allowed "$run" main "sudo sail spec update shared --priority 7"
+    allowed "$run" eng "sudo sail spec update $shared --title 'eng renamed it' --no-sync"
+  check "$run" "main changes only its priority" allowed "$run" main "sudo sail spec update $shared --priority 7"
   check "$run" "eng's sync merges the two with no conflict" merges_without_conflict "$run"
   check "$run" "every node syncs twice more" sync_all "$run"
-  check "$run" "every box holds eng's title" everywhere "$run" shared title "eng renamed it"
-  check "$run" "every box holds main's priority" everywhere "$run" shared priority 7
-  check "$run" "uday comments on shared" allowed "$run" main "sudo sail spec comment shared --body 'uday: first word'"
+  check "$run" "every box holds eng's title" everywhere "$run" "$shared" title "eng renamed it"
+  check "$run" "every box holds main's priority" everywhere "$run" "$shared" priority 7
+  check "$run" "uday comments on shared" allowed "$run" main "sudo sail spec comment $shared --body 'uday: first word'"
   check "$run" "eng, its assignee, comments" \
-    allowed "$run" eng "sudo sail sync && sudo sail spec comment shared --body 'eng: second word'"
+    allowed "$run" eng "sudo sail sync && sudo sail spec comment $shared --body 'eng: second word'"
   check "$run" "every node syncs twice to hear it" sync_all "$run"
-  check "$run" "the conversation reads the same on every box" conversation_matches "$run" shared
+  check "$run" "the conversation reads the same on every box" conversation_matches "$run" "$shared"
+}
+
+containers() {
+  check "$1" "client applies acme" apply_project "$1" client acme
+  check "$1" "observer applies acme" apply_project "$1" observer acme
+}
+
+# In order, storage builds its template and workspaces from an acme that the loop gave a repo,
+# runtimes and an agent, and that files gave a shared file: on a fleet of its own it gets them
+# first, by the same checks, so the same provisioning is proven. access's fleet-skill is shared
+# and unshared again before storage in order, so there is no skill to give it.
+furnish() {
+  local run=${1:-}
+  [[ -n $run ]] || usage
+  loop_config "$run"
+  check "$run" "main shares notes.md in acme" share "$run" main acme notes.md "acme notes v1"
+  check "$run" "every node syncs twice" sync_all "$run"
+}
+
+# In order, the loop re-applies an acme that access applied on eng.
+eng-acme() {
+  local run=${1:-}
+  [[ -n $run ]] || usage
+  check "$run" "eng applies acme" apply_project "$run" eng acme
 }
 
 inside() {
-  local run=${1:-}
+  local run=${1:-} x
   [[ -n $run ]] || usage
-  check "$run" "client applies acme" apply_project "$run" client acme
-  check "$run" "observer applies acme" apply_project "$run" observer acme
+  x=$(attempt "$run" inside)
+  containers "$run"
   check "$run" "inside client's acme, spec whoami is client, a member" \
     container_allows "$run" client acme "spec whoami | grep -q '\"handle\": \"client\", \"role\": \"member\"'"
   check "$run" "inside client's acme, client creates a spec" \
-    container_allows "$run" client acme "spec create --id from-container --title 'made inside acme'"
+    container_allows "$run" client acme "spec create --id from-container$x --title 'made inside acme'"
   check "$run" "inside observer's acme, spec whoami is obs, a viewer" \
     container_allows "$run" observer acme "spec whoami | grep -q '\"handle\": \"obs\", \"role\": \"viewer\"'"
   check "$run" "inside observer's acme, the viewer cannot create a spec" \
-    container_refuses "$run" observer acme "read_only_credential" "spec create --id viewer-inside --title 'a viewer inside'"
+    container_refuses "$run" observer acme "read_only_credential" "spec create --id viewer-inside$x --title 'a viewer inside'"
   check "$run" "matrix 2: obs comments on client-acme, refused read-only, naming the fix [socket]" \
-    naming "$VIEWER_FIX" container_refuses "$run" observer acme "$VIEWER_POSTS" "spec comment client-acme --body 'a viewer comments'"
+    naming "$VIEWER_FIX" container_refuses "$run" observer acme "$VIEWER_POSTS" "spec comment client-acme$(suffix_of "$run" doors) --body 'a viewer comments'"
   check "$run" "matrix 1: obs reads acme's specs [HTTP]" http_door "$run" observer obs 200 GET "/v1/specs?project=acme"
   check "$run" "over HTTP, the viewer cannot create a spec" \
-    http_door "$run" observer obs 403 POST /v1/specs '{"project":"acme","id":"http-viewer","title":"over http"}'
+    http_door "$run" observer obs 403 POST /v1/specs '{"project":"acme","id":"http-viewer'"$x"'","title":"over http"}'
   check "$run" "over HTTP, client creates a spec in acme" \
-    http_door "$run" client client 201 POST /v1/specs '{"project":"acme","id":"http-client","title":"over http"}'
+    http_door "$run" client client 201 POST /v1/specs '{"project":"acme","id":"http-client'"$x"'","title":"over http"}'
   check "$run" "over HTTP, client cannot create a spec in beta" \
-    http_door "$run" client client 404 POST /v1/specs '{"project":"beta","id":"http-beta","title":"over http"}'
+    http_door "$run" client client 404 POST /v1/specs '{"project":"beta","id":"http-beta'"$x"'","title":"over http"}'
   check "$run" "from main, over client's private address, a ticket opens a session over TCP that echoes a line, and is refused a second time" \
     direct_terminal "$run"
 }
@@ -713,37 +871,39 @@ says_in_order() {
 }
 
 rooms() {
-  local run=${1:-}
+  local run=${1:-} x room
   [[ -n $run ]] || usage
+  x=$(attempt "$run" rooms)
+  room=acme-chat$x
   check "$run" "over HTTP, client opens room acme-chat in acme" \
-    http_door "$run" client client 201 POST /v1/rooms '{"id":"acme-chat","project":"acme","title":"acme chat"}'
+    http_door "$run" client client 201 POST /v1/rooms '{"id":"'"$room"'","project":"acme","title":"acme chat"}'
   check "$run" "over HTTP, client cannot open a room in beta" \
-    http_door "$run" client client 404 POST /v1/rooms '{"id":"beta-chat","project":"beta","title":"beta chat"}'
+    http_door "$run" client client 404 POST /v1/rooms '{"id":"beta-chat'"$x"'","project":"beta","title":"beta chat"}'
   check "$run" "over HTTP, the viewer cannot open a room" \
-    http_door "$run" observer obs 403 POST /v1/rooms '{"id":"obs-chat","project":"acme","title":"obs chat"}'
+    http_door "$run" observer obs 403 POST /v1/rooms '{"id":"obs-chat'"$x"'","project":"acme","title":"obs chat"}'
   check "$run" "client opens the conversation" \
-    allowed "$run" client "sudo sail spec comment acme-chat --body 'client: first word' && sudo sail sync"
+    allowed "$run" client "sudo sail spec comment $room --body 'client: first word' && sudo sail sync"
   check "$run" "uday, an admin, answers on main" \
-    allowed "$run" main "sudo sail spec comment acme-chat --body 'uday: second word'"
+    allowed "$run" main "sudo sail spec comment $room --body 'uday: second word'"
   check "$run" "eng, a member who does not own the room, posts in it" \
-    allowed "$run" eng "sudo sail sync && sudo sail spec comment acme-chat --body 'eng: third word'"
+    allowed "$run" eng "sudo sail sync && sudo sail spec comment $room --body 'eng: third word'"
   check "$run" "observer cannot post at the CLI" \
-    refused "$run" observer "credential is read-only" "sudo sail sync && sudo sail spec comment acme-chat --body 'obs: a word'"
+    refused "$run" observer "credential is read-only" "sudo sail sync && sudo sail spec comment $room --body 'obs: a word'"
   check "$run" "matrix 2: obs posts in acme-chat, refused read-only, naming the fix [HTTP]" \
-    naming "$VIEWER_FIX" http_door "$run" observer obs 403 POST /v1/rooms/acme-chat/messages '{"body":"obs over http"}' "$VIEWER_POSTS"
+    naming "$VIEWER_FIX" http_door "$run" observer obs 403 POST "/v1/rooms/$room/messages" '{"body":"obs over http"}' "$VIEWER_POSTS"
   check "$run" "client answers after hearing uday" \
-    allowed "$run" client "sudo sail sync && sudo sail spec comment acme-chat --body 'client: fourth word'"
+    allowed "$run" client "sudo sail sync && sudo sail spec comment $room --body 'client: fourth word'"
   check "$run" "client, shared's creator, comments though eng holds it" \
-    allowed "$run" client "sudo sail spec comment shared --body 'client: a word'"
+    allowed "$run" client "sudo sail spec comment shared$(suffix_of "$run" conflicts) --body 'client: a word'"
   check "$run" "every node syncs twice" sync_all "$run"
   check "$run" "observer reads the four words in order" \
-    says_in_order "$run" observer acme-chat "client: first word|uday: second word|eng: third word|client: fourth word"
-  check "$run" "the room reads the same on every box" conversation_matches "$run" acme-chat
-  check "$run" "client's database has no trace of beta-chat or obs-chat" holds_no_trace_of "$run" client beta-chat obs-chat
+    says_in_order "$run" observer "$room" "client: first word|uday: second word|eng: third word|client: fourth word"
+  check "$run" "the room reads the same on every box" conversation_matches "$run" "$room"
+  check "$run" "client's database has no trace of beta-chat or obs-chat" holds_no_trace_of "$run" client "beta-chat$x" "obs-chat$x"
   local position
-  position=$(feed_position "$run" client /v1/rooms/acme-chat/messages)
+  position=$(feed_position "$run" client "/v1/rooms/$room/messages")
   check "$run" "client posts a fifth word and syncs" \
-    allowed "$run" client "sudo sail spec comment acme-chat --body 'client: fifth word' && sudo sail sync"
+    allowed "$run" client "sudo sail spec comment $room --body 'client: fifth word' && sudo sail sync"
   check "$run" "main's feed tells client the fifth word, past the position its read of the room answered" \
     feed_tells "$run" client "$position" "client: fifth word"
 }
@@ -762,108 +922,113 @@ while_cut_off() {
   return $status
 }
 
+# One sync can push several specs and say every denial at once, so what each sync said is kept
+# for the checks of the specs it pushed alongside.
+denial_said() {
+  local run=$1 box=$2 spec=$3 reason=$4 heard denial
+  heard="$(log_dir "$run")/heard-$box"
+  said=$({
+    on "$run" "$box" "sudo sail sync" 2>&1
+    on "$run" "$box" "sudo journalctl -u sail-api --since '-15min' --no-pager -o cat"
+  })
+  printf '%s\n' "$said" >> "$heard"
+  denial=$(grep -F "spec $spec: main denied this change" "$heard" | grep -F "$reason" | grep -F "Yours is in its history" | sort -u)
+  [[ -n $denial ]] && echo "$denial"
+}
+
 denied_at_sync() {
-  local run=$1 box=$2 spec=$3 reason=$4 said denial
-  for _ in $(seq 1 10); do
-    said=$({
-      on "$run" "$box" "sudo sail sync" 2>&1
-      on "$run" "$box" "sudo journalctl -u sail-api --since '-15min' --no-pager -o cat"
-    })
-    denial=$(grep -F "spec $spec: main denied this change" <<< "$said" | grep -F "$reason" | grep -F "Yours is in its history")
-    if [[ -n $denial ]]; then
-      echo "$denial"
-      return 0
-    fi
-    sleep 3
-  done
+  local said=""
+  until_true 120 3 denial_said "$@" && return 0
   echo "$said" | tail -20
-  echo "no denial of $spec naming: $reason"
+  echo "no denial of $3 naming: $4"
   return 1
 }
 
 access() {
-  local run=${1:-} n door
+  local run=${1:-} n door x
   [[ -n $run ]] || usage
+  x=$(attempt "$run" access)
+  local e1=e1$x r1=r1$x r1_task=r1-task$x c7=c7$x
   check "$run" "over HTTP, eng opens room r1 in acme" \
-    http_door "$run" eng eng 201 POST /v1/rooms '{"id":"r1","project":"acme","title":"eng room"}'
+    http_door "$run" eng eng 201 POST /v1/rooms '{"id":"'"$r1"'","project":"acme","title":"eng room"}'
   check "$run" "eng writes e1 for itself, r1-task in r1, open-cli, open-http and open-socket unassigned, and b1 to b3 in beta" \
-    allowed "$run" eng "sudo sail spec create -p acme --id e1 --title 'eng owns e1' --assignee eng && sudo sail spec create -p acme --id r1-task --title 'born in r1' --room r1 && for door in cli http socket; do sudo sail spec create -p acme --id open-\$door --title 'open to claim' || exit 1; done && for n in 1 2 3; do sudo sail spec create -p beta --id b\$n --title 'held in beta' || exit 1; done"
+    allowed "$run" eng "sudo sail spec create -p acme --id $e1 --title 'eng owns e1' --assignee eng && sudo sail spec create -p acme --id $r1_task --title 'born in r1' --room $r1 && for door in cli http socket; do sudo sail spec create -p acme --id open-\$door$x --title 'open to claim' || exit 1; done && for n in 1 2 3; do sudo sail spec create -p beta --id b\$n$x --title 'held in beta' || exit 1; done"
   check "$run" "client writes c7 in acme, unassigned, and syncs" \
-    allowed "$run" client "sudo sail spec create -p acme --id c7 --title 'client wrote c7' && sudo sail sync"
+    allowed "$run" client "sudo sail spec create -p acme --id $c7 --title 'client wrote c7' && sudo sail sync"
   check "$run" "every node syncs twice" sync_all "$run"
-  check "$run" "matrix 1: obs reads e1 inside its acme [socket]" container_allows "$run" observer acme "spec show e1 > /dev/null"
+  check "$run" "matrix 1: obs reads e1 inside its acme [socket]" container_allows "$run" observer acme "spec show $e1 > /dev/null"
   check "$run" "matrix 3: client reads beta's b1 on main, which holds it, and it is not found [HTTP]" \
-    http_token_door "$run" main client member 404 GET /v1/specs/b1 '' "Spec 'b1' was not found."
+    http_token_door "$run" main client member 404 GET "/v1/specs/b1$x" '' "Spec 'b1$x' was not found."
   check "$run" "client reads acme's e1 on main with the same token [HTTP]" \
-    http_token_door "$run" main client member 200 GET /v1/specs/e1 '' '"id": "e1"'
-  check "$run" "client's box holds nothing of beta's b1 [CLI]" refused "$run" client "Spec 'b1' was not found." "sudo sail spec show b1"
+    http_token_door "$run" main client member 200 GET "/v1/specs/$e1" '' "\"id\": \"$e1\""
+  check "$run" "client's box holds nothing of beta's b1 [CLI]" refused "$run" client "Spec 'b1$x' was not found." "sudo sail spec show b1$x"
   check "$run" "client's box holds nothing of beta's b1 [HTTP]" \
-    http_door "$run" client client 404 GET /v1/specs/b1 '' "Spec 'b1' was not found."
+    http_door "$run" client client 404 GET "/v1/specs/b1$x" '' "Spec 'b1$x' was not found."
   check "$run" "client's box holds nothing of beta's b1 [socket]" \
-    container_refuses "$run" client acme "Spec 'b1' was not found." "spec show b1"
-  check "$run" "matrix 6: client comments on e1 [CLI]" allowed "$run" client "sudo sail spec comment e1 --body 'client: a word on e1'"
+    container_refuses "$run" client acme "Spec 'b1$x' was not found." "spec show b1$x"
+  check "$run" "matrix 6: client comments on e1 [CLI]" allowed "$run" client "sudo sail spec comment $e1 --body 'client: a word on e1'"
   check "$run" "matrix 6: client comments on e1 [HTTP]" \
-    http_door "$run" client client 201 POST /v1/rooms/e1/messages '{"body":"client over http on e1"}'
+    http_door "$run" client client 201 POST "/v1/rooms/$e1/messages" '{"body":"client over http on e1"}'
   check "$run" "matrix 6: client comments on e1 [socket]" \
-    container_allows "$run" client acme "spec comment e1 --body 'client inside acme on e1'"
+    container_allows "$run" client acme "spec comment $e1 --body 'client inside acme on e1'"
   check "$run" "matrix 7: client edits e1's title, refused naming eng [CLI]" \
-    naming "$ASK_ENG" refused "$run" client "$E1_IS_ENGS" "sudo sail spec update e1 --title 'client retitles e1'"
+    naming "$ASK_ENG" refused "$run" client "$(assigned_to_eng "$e1")" "sudo sail spec update $e1 --title 'client retitles e1'"
   check "$run" "matrix 7: client edits e1's title, refused naming eng [HTTP]" \
-    naming "$ASK_ENG" http_door "$run" client client 403 PUT /v1/specs/e1 '{"title":"client retitles e1"}' "$E1_IS_ENGS"
+    naming "$ASK_ENG" http_door "$run" client client 403 PUT "/v1/specs/$e1" '{"title":"client retitles e1"}' "$(assigned_to_eng "$e1")"
   check "$run" "matrix 7: client edits e1's title, refused naming eng [socket]" \
-    naming "$ASK_ENG" container_refuses "$run" client acme "$E1_IS_ENGS" "spec update e1 --title 'client retitles e1'"
-  check "$run" "matrix 8: client claims open-cli, unassigned [CLI]" allowed "$run" client "sudo sail spec update open-cli --assignee client"
+    naming "$ASK_ENG" container_refuses "$run" client acme "$(assigned_to_eng "$e1")" "spec update $e1 --title 'client retitles e1'"
+  check "$run" "matrix 8: client claims open-cli, unassigned [CLI]" allowed "$run" client "sudo sail spec update open-cli$x --assignee client"
   check "$run" "matrix 8: client claims open-http, unassigned [HTTP]" \
-    http_door "$run" client client 200 PUT /v1/specs/open-http '{"assignee":"client"}'
+    http_door "$run" client client 200 PUT "/v1/specs/open-http$x" '{"assignee":"client"}'
   check "$run" "matrix 8: client claims open-socket, unassigned [socket]" \
-    container_allows "$run" client acme "spec update open-socket --assignee client"
+    container_allows "$run" client acme "spec update open-socket$x --assignee client"
   check "$run" "matrix 8: client claims r1-task, born in r1, refused naming eng [CLI]" \
-    naming "$ASK_ADMIN_TO_ASSIGN" refused "$run" client "$R1_IS_ENGS" "sudo sail spec update r1-task --assignee client"
+    naming "$ASK_ADMIN_TO_ASSIGN" refused "$run" client "$(born_in_engs_room "$r1")" "sudo sail spec update $r1_task --assignee client"
   check "$run" "matrix 8: client claims r1-task, born in r1, refused naming eng [HTTP]" \
-    naming "$ASK_ADMIN_TO_ASSIGN" http_door "$run" client client 403 PUT /v1/specs/r1-task '{"assignee":"client"}' "$R1_IS_ENGS"
+    naming "$ASK_ADMIN_TO_ASSIGN" http_door "$run" client client 403 PUT "/v1/specs/$r1_task" '{"assignee":"client"}' "$(born_in_engs_room "$r1")"
   check "$run" "matrix 8: client claims r1-task, born in r1, refused naming eng [socket]" \
-    naming "$ASK_ADMIN_TO_ASSIGN" container_refuses "$run" client acme "$R1_IS_ENGS" "spec update r1-task --assignee client"
+    naming "$ASK_ADMIN_TO_ASSIGN" container_refuses "$run" client acme "$(born_in_engs_room "$r1")" "spec update $r1_task --assignee client"
   check "$run" "matrix 9: client reassigns e1 to itself, refused admin-only [CLI]" \
-    naming "$ASK_AN_ADMIN" refused "$run" client "$E1_ADMIN_ONLY" "sudo sail spec update e1 --assignee client"
+    naming "$ASK_AN_ADMIN" refused "$run" client "$(reassigning_is_admin_only "$e1")" "sudo sail spec update $e1 --assignee client"
   check "$run" "matrix 9: client reassigns e1 to itself, refused admin-only [HTTP]" \
-    naming "$ASK_AN_ADMIN" http_door "$run" client client 403 PUT /v1/specs/e1 '{"assignee":"client"}' "$E1_ADMIN_ONLY"
+    naming "$ASK_AN_ADMIN" http_door "$run" client client 403 PUT "/v1/specs/$e1" '{"assignee":"client"}' "$(reassigning_is_admin_only "$e1")"
   check "$run" "matrix 9: client reassigns e1 to itself, refused admin-only [socket]" \
-    naming "$ASK_AN_ADMIN" container_refuses "$run" client acme "$E1_ADMIN_ONLY" "spec update e1 --assignee client"
+    naming "$ASK_AN_ADMIN" container_refuses "$run" client acme "$(reassigning_is_admin_only "$e1")" "spec update $e1 --assignee client"
   check "$run" "matrix 22: client retells review_completed on e1, refused: not eng's or an admin's [HTTP]" \
     naming "$ASK_E1S_OWNER" http_door "$run" client client 403 POST /v1/events \
-    '{"ts":"2026-11-10T00:00:00Z","project":"acme","spec":"e1","type":"review_completed","agent":"claude-code","host":"client","data":{"source":"sync"}}' \
-    "$E1_NOT_CLIENTS"
+    '{"ts":"2026-11-10T00:00:00Z","project":"acme","spec":"'"$e1"'","type":"review_completed","agent":"claude-code","host":"client","data":{"source":"sync"}}' \
+    "$(not_clients_to_drive "$e1")"
   check "$run" "matrix 5: client's box takes acme spec b1 on an id beta holds [CLI]" \
-    allowed "$run" client "sudo sail spec create -p acme --id b1 --title 'client takes a taken id'"
+    allowed "$run" client "sudo sail spec create -p acme --id b1$x --title 'client takes a taken id'"
   check "$run" "matrix 5: client's box takes acme spec b2 on an id beta holds [HTTP]" \
-    http_door "$run" client client 201 POST /v1/specs '{"project":"acme","id":"b2","title":"client takes a taken id"}'
+    http_door "$run" client client 201 POST /v1/specs '{"project":"acme","id":"b2'"$x"'","title":"client takes a taken id"}'
   check "$run" "matrix 5: client's box takes acme spec b3 on an id beta holds [socket]" \
-    container_allows "$run" client acme "spec create --id b3 --title 'client takes a taken id'"
+    container_allows "$run" client acme "spec create --id b3$x --title 'client takes a taken id'"
   for n in 1 2 3; do
-    check "$run" "matrix 5: main refuses client's b$n, already exists [sync]" denied_at_sync "$run" client "b$n" "Spec 'b$n' already exists."
-    check "$run" "matrix 5: client's box withdraws b$n into its history" lost_but_in_history "$run" "b$n" client
+    check "$run" "matrix 5: main refuses client's b$n, already exists [sync]" denied_at_sync "$run" client "b$n$x" "Spec 'b$n$x' already exists."
+    check "$run" "matrix 5: client's box withdraws b$n into its history" lost_but_in_history "$run" "b$n$x" client
   done
   check "$run" "while client cannot reach main, uday gives c7 to eng and client renames c7" \
-    while_cut_off "$run" client "sudo sail spec update c7 --assignee eng" "sudo sail spec update c7 --title 'client renamed c7' --no-sync"
+    while_cut_off "$run" client "sudo sail spec update $c7 --assignee eng" "sudo sail spec update $c7 --title 'client renamed c7' --no-sync"
   check "$run" "matrix 7: main refuses client's edit of c7, which eng now holds, naming eng [sync]" \
-    denied_at_sync "$run" client c7 "Spec 'c7' is assigned to 'eng', not you."
+    denied_at_sync "$run" client "$c7" "$(assigned_to_eng "$c7")"
   check "$run" "every node syncs twice" sync_all "$run"
-  check "$run" "every box holds c7 with the title main kept" everywhere "$run" c7 title "client wrote c7"
+  check "$run" "every box holds c7 with the title main kept" everywhere "$run" "$c7" title "client wrote c7"
   for door in cli http socket; do
-    check "$run" "every box holds open-$door claimed by client" everywhere "$run" "open-$door" assignee client
+    check "$run" "every box holds open-$door claimed by client" everywhere "$run" "open-$door$x" assignee client
   done
   check "$run" "main gives acme an agent, so dispatching it is decided" \
     on "$run" main "echo '{\"type\":\"claude-code\"}' | sudo sail project config set acme agent -"
   check "$run" "every node syncs twice" sync_all "$run"
   check "$run" "matrix 10: uday's dispatch of e1 on main is placement: e1 runs on eng's box [CLI]" \
-    refused "$run" main "$E1_RUNS_ON_ENG" "sudo sail spec dispatch -p acme --spec e1 --dry-run --no-snapshot"
+    refused "$run" main "$(runs_on_engs_box "$e1")" "sudo sail spec dispatch -p acme --spec $e1 --dry-run --no-snapshot"
   check "$run" "matrix 10: uday's dispatch of e1 on main is placement: e1 runs on eng's box [HTTP]" \
-    http_token_door "$run" main uday admin 403 POST /v1/projects/acme/dispatch '{"spec_id":"e1","dry_run":true}' "$E1_RUNS_ON_ENG"
+    http_token_door "$run" main uday admin 403 POST /v1/projects/acme/dispatch '{"spec_id":"'"$e1"'","dry_run":true}' "$(runs_on_engs_box "$e1")"
   check "$run" "eng applies acme" apply_project "$run" eng acme
   check "$run" "matrix 10: eng's dispatch of e1 on its box is eng's to make, and stops at the fact that e1 is a draft [HTTP]" \
-    http_token_door "$run" eng eng member 409 POST /v1/projects/acme/dispatch '{"spec_id":"e1","dry_run":true}' "$E1_IS_A_DRAFT"
+    http_token_door "$run" eng eng member 409 POST /v1/projects/acme/dispatch '{"spec_id":"'"$e1"'","dry_run":true}' "$(is_a_draft "$e1")"
   check "$run" "matrix 10: eng's dispatch of e1 on its box is eng's to make, and stops at the fact that e1 is a draft [CLI]" \
-    refused "$run" eng "$E1_IS_A_DRAFT" "sudo sail spec dispatch -p acme --spec e1 --dry-run --no-snapshot"
+    refused "$run" eng "$(is_a_draft "$e1")" "sudo sail spec dispatch -p acme --spec $e1 --dry-run --no-snapshot"
   check "$run" "matrix 25: eng adds a person at its node's CLI, refused admin-only [CLI]" \
     naming "$ASK_AN_ADMIN_TO_DO_IT" refused "$run" eng "$ADMIN_MANAGES_PEOPLE" "sudo sail fde add zed --name Zed"
   check "$run" "matrix 25: eng adds a person at main's gateway, refused admin-only [gateway]" \
@@ -885,7 +1050,7 @@ access() {
   check "$run" "eng triggers a sync round on main, uday's box: refused [HTTP]" \
     naming "$ASK_UDAY_TO_OPERATE" http_token_door "$run" main eng member 403 POST /v1/sync '{}' "$MAIN_IS_UDAYS"
   check "$run" "eng triggers a sync round on its own box [HTTP]" http_token_door "$run" eng eng member 200 POST /v1/sync '{}'
-  container_lane "$run"
+  container_lane "$run" "$e1" "e21$x"
 }
 
 # Rows 20 and 21 of the matrix: the box credential in a project container, which whatever runs
@@ -894,22 +1059,21 @@ access() {
 # positive control beside it: the same credential writing what it may, or the same act from
 # outside the container.
 container_lane() {
-  local run=${1:-}
-  [[ -n $run ]] || usage
+  local run=$1 e1=$2 e21=$3
   check "$run" "eng writes e21 for itself, a draft [CLI]" \
-    allowed "$run" eng "sudo sail spec create -p acme --id e21 --title 'eng owns e21' --assignee eng"
+    allowed "$run" eng "sudo sail spec create -p acme --id $e21 --title 'eng owns e21' --assignee eng"
   check "$run" "matrix 20: eng's in-container credential comments on e1 as eng [socket]" \
-    container_allows "$run" eng acme "spec comment e1 --body 'eng inside acme on e1'"
+    container_allows "$run" eng acme "spec comment $e1 --body 'eng inside acme on e1'"
   check "$run" "matrix 21: eng's in-container credential retitles e1, which eng owns: the control [socket]" \
-    container_allows "$run" eng acme "spec update e1 --title 'eng retitles e1 inside acme'"
+    container_allows "$run" eng acme "spec update $e1 --title 'eng retitles e1 inside acme'"
   check "$run" "matrix 21: eng's in-container credential reassigns e1 to client, refused admin-only, role before lane [socket]" \
-    naming "$ASK_AN_ADMIN" container_refuses "$run" eng acme "$E1_ADMIN_ONLY" "spec update e1 --assignee client"
+    naming "$ASK_AN_ADMIN" container_refuses "$run" eng acme "$(reassigning_is_admin_only "$e1")" "spec update $e1 --assignee client"
   check "$run" "matrix 21: eng's in-container credential sets e21 ready, refused naming the container lane [socket]" \
-    naming "$PROMOTE_FROM_OUTSIDE" container_refuses "$run" eng acme "$CONTAINER_CANNOT_APPROVE" "spec update e21 --status pending"
+    naming "$(promote_from_outside "$e21")" container_refuses "$run" eng acme "$CONTAINER_CANNOT_APPROVE" "spec update $e21 --status pending"
   check "$run" "matrix 21: eng sets e21 ready from the host: the control [CLI]" \
-    allowed "$run" eng "sudo sail spec update e21 --status pending"
+    allowed "$run" eng "sudo sail spec update $e21 --status pending"
   check "$run" "matrix 21: eng's in-container credential marks e21 done, refused naming the container lane [socket]" \
-    naming "$PROMOTE_FROM_OUTSIDE" container_refuses "$run" eng acme "$CONTAINER_CANNOT_APPROVE" "spec update e21 --status done"
+    naming "$(promote_from_outside "$e21")" container_refuses "$run" eng acme "$CONTAINER_CANNOT_APPROVE" "spec update $e21 --status done"
   check "$run" "matrix 21: eng's in-container credential shares a skill, refused naming the container lane [socket]" \
     naming "$SHARE_FROM_OUTSIDE" container_refuses "$run" eng acme "$CONTAINER_CANNOT_SHARE" "$FLEET_SKILL && skill add /home/dev/fleet-skill"
   check "$run" "skill add from the host shares the folder in eng's acme container: the control [CLI]" \
@@ -1009,17 +1173,17 @@ portal() {
     container_refuses "$run" eng beta "" "curl -sf localhost:8080/ > /dev/null"
 }
 
-session_is() {
-  local run=$1 box=$2 name=$3 expected=$4 attempt state
-  for attempt in $(seq 1 10); do
-    state=$(on "$run" "$box" "sudo sail session ls" | awk -v n="$name" '$1 == n {print $2}')
-    echo "$name: ${state:-absent}"
-    [[ $state == "$expected" ]] && return 0
-    sleep 3
-  done
-  return 1
+session_state_is() {
+  local state
+  state=$(on "$1" "$2" "sudo sail session ls" | awk -v n="$3" '$1 == n {print $2}')
+  echo "$3: ${state:-absent}"
+  [[ $state == "$4" ]]
 }
 
+session_is() { until_true 75 2 session_state_is "$@"; }
+
+# The detach key has to reach attach after it holds the terminal, and the writing end of the pipe
+# sees no sign of that, so it waits 3 s.
 opens_session() {
   local run=$1 box=$2 name=$3
   on "$run" "$box" "sudo sail session new $name --project acme --command bash -c 'while :; do date; sleep 1; done'" || return 1
@@ -1036,28 +1200,29 @@ held_everywhere() {
 }
 
 resilience() {
-  local run=${1:-}
+  local run=${1:-} x
   [[ -n $run ]] || usage
+  x=$(attempt "$run" resilience)
   check "$run" "every box holds incus, and needrestart may not restart it" held_everywhere "$run"
-  check "$run" "client opens a ticking session in acme, attaches and detaches" opens_session "$run" client ticker
-  check "$run" "the session is live" session_is "$run" client ticker live
+  check "$run" "client opens a ticking session in acme, attaches and detaches" opens_session "$run" client "ticker$x"
+  check "$run" "the session is live" session_is "$run" client "ticker$x" live
   check "$run" "incus upgrade's dry run changes nothing" allowed "$run" client "sudo sail host incus upgrade --dry-run"
-  check "$run" "the session is still live after the dry run" session_is "$run" client ticker live
+  check "$run" "the session is still live after the dry run" session_is "$run" client "ticker$x" live
   check "$run" "sail-api restarts on client" on "$run" client "sudo systemctl restart sail-api"
   check "$run" "client writes a spec with no sync after the restart" \
-    allowed "$run" client "sudo sail spec create -p acme --id after-api --title 'after sail-api restarted'"
-  check "$run" "it reaches main within 30 s, no sail sync asked" reaches_main_unasked "$run" after-api
+    allowed "$run" client "sudo sail spec create -p acme --id after-api$x --title 'after sail-api restarted'"
+  check "$run" "it reaches main within 30 s, no sail sync asked" reaches_main_unasked "$run" "after-api$x"
   check "$run" "the pty host restarts on client" on "$run" client "sudo systemctl restart sail-pty-host"
-  check "$run" "the session outlives the pty host's restart" session_is "$run" client ticker live
+  check "$run" "the session outlives the pty host's restart" session_is "$run" client "ticker$x" live
   check "$run" "incus restarts on client" on "$run" client "sudo systemctl restart incus"
-  check "$run" "the session incus ended reads as ended" session_is "$run" client ticker ended
-  check "$run" "client opens a new session in acme, attaches and detaches" opens_session "$run" client ticker2
-  check "$run" "the new session is live" session_is "$run" client ticker2 live
+  check "$run" "the session incus ended reads as ended" session_is "$run" client "ticker$x" ended
+  check "$run" "client opens a new session in acme, attaches and detaches" opens_session "$run" client "ticker2$x"
+  check "$run" "the new session is live" session_is "$run" client "ticker2$x" live
   check "$run" "inside client's acme, spec whoami still answers" \
     container_allows "$run" client acme "spec whoami | grep -q '\"handle\": \"client\"'"
   check "$run" "client writes a spec with no sync after incus restarted" \
-    allowed "$run" client "sudo sail spec create -p acme --id after-incus --title 'after incus restarted'"
-  check "$run" "that one reaches main within 30 s too" reaches_main_unasked "$run" after-incus
+    allowed "$run" client "sudo sail spec create -p acme --id after-incus$x --title 'after incus restarted'"
+  check "$run" "that one reaches main within 30 s too" reaches_main_unasked "$run" "after-incus$x"
 }
 
 pools_on() {
@@ -1109,16 +1274,17 @@ capped_on() {
 
 # A box that is stopping its containers still answers ssh for a while after the reboot is asked,
 # so the wait is for a new boot id, never for an answer alone.
+booted_anew() {
+  after=$(on "$1" "$2" "cat /proc/sys/kernel/random/boot_id" 2> /dev/null) || after=
+  [[ -n $after && $after != "$3" ]]
+}
+
 reboots() {
-  local before after attempt
+  local before after=""
   before=$(on "$1" "$2" "cat /proc/sys/kernel/random/boot_id")
   [[ -n $before ]] || { echo "no boot id before the reboot"; return 1; }
   on "$1" "$2" "sudo systemctl reboot" || true
-  for attempt in $(seq 1 60); do
-    sleep 5
-    after=$(on "$1" "$2" "cat /proc/sys/kernel/random/boot_id" 2> /dev/null) || after=
-    [[ -n $after && $after != "$before" ]] && break
-  done
+  until_true 600 5 booted_anew "$1" "$2" "$before"
   echo "boot id $before, then $after"
   [[ -n $after && $after != "$before" ]]
 }
@@ -1186,15 +1352,16 @@ healthy_on() {
   [[ $said == "ONLINE " ]]
 }
 
+degraded_naming() {
+  said=$(pool_health "$1" "$2" "$3")
+  echo "$3: $said"
+  [[ $said == DEGRADED* && $said == *"$4"* ]]
+}
+
 degraded_on() {
-  local run=$1 box=$2 pool=$3 gone=$4 attempt said
+  local run=$1 box=$2 pool=$3 gone=$4 said=""
   on "$run" "$box" "sudo zpool reopen $pool" || true
-  for attempt in $(seq 1 12); do
-    said=$(pool_health "$run" "$box" "$pool")
-    echo "$pool: $said"
-    [[ $said == DEGRADED* && $said == *"$gone"* ]] && break
-    sleep 5
-  done
+  until_true 120 3 degraded_naming "$run" "$box" "$pool" "$gone"
   on "$run" "$box" "sudo sail host status"
   [[ $said == DEGRADED* && $said == *"$gone"* ]]
 }
@@ -1266,6 +1433,10 @@ uncapped_on() {
 storage() {
   local run=${1:-}
   [[ -n $run ]] || usage
+  if [[ -n $(attempt "$run" storage) ]]; then
+    echo "ci/fleet: storage ran on $run before and deleted client's second scratch disk, so it runs once per fleet: ci/fleet run VERSION --group storage" >&2
+    return 1
+  fi
   local scratch=/dev/disk/by-id/google-scratch scratch2=/dev/disk/by-id/google-scratch2 disk partition gone
   disk=$(root_disk "$run" client)
   partition=$(root_partition "$run" client)
@@ -1303,7 +1474,7 @@ storage() {
   check "$run" "the ZFS cache cap is in force" capped_on "$run" client
   check "$run" "client reboots" reboots "$run" client
   check "$run" "the ZFS cache cap is still in force after the reboot" capped_on "$run" client
-  check "$run" "acme runs after the reboot, on devpool" running_on_pool "$run" client acme devpool
+  check "$run" "acme runs after the reboot, on devpool" until_true 120 3 running_on_pool "$run" client acme devpool
   check "$run" "host status names every pool" status_pools "$run" client "devpool:dir tank:zfs twin:zfs"
   check "$run" "the mirror is ONLINE after the reboot" healthy_on "$run" client twin
   gone=$(on "$run" client "realpath $scratch2")
@@ -1363,11 +1534,16 @@ holds_spec() {
 }
 
 loses_main() {
+  forget_route "$1" main
   gc compute instances delete "$(vm "$1" main)" --zone "$ZONE"
 }
 
+note_expiry() {
+  date -u -d "+${MAX_RUN%h} hours" '+%H:%M UTC on %b %d' > "$(log_dir "$1")/expires"
+}
+
 brings_up_main() {
-  create_vm "$1" main && answers_ssh "$1" main
+  create_vm "$1" main && note_expiry "$1" && answers_ssh "$1" main
 }
 
 pins_main() {
@@ -1418,23 +1594,27 @@ lost_but_in_history() {
 }
 
 rebuilt() {
-  local run=${1:-} version copy main_ip box
+  local run=${1:-} version copy main_ip box x shared room
   version=$(from_caller "${2:-}")
   [[ -n $run && -n $version ]] || usage
+  x=$(attempt "$run" rebuilt)
+  shared=shared$(suffix_of "$run" conflicts)
+  room=acme-chat$(suffix_of "$run" rooms)
   copy="$(log_dir "$run")/main.db.copy"
   trap "rm -f $(printf %q "$copy")" EXIT
   check "$run" "every node syncs twice before main is copied" sync_all "$run"
   check "$run" "main is copied by the README's backup line, and the copy is kept off the box" copies_main "$run" "$copy"
   check "$run" "main takes a spec after its copy" \
-    allowed "$run" main "sudo sail spec create -p acme --id after-copy --title 'main took this after its copy'"
+    allowed "$run" main "sudo sail spec create -p acme --id after-copy$x --title 'main took this after its copy'"
   check "$run" "every node syncs twice to pull it" sync_all "$run"
-  check "$run" "every node holds it" holds_spec "$run" after-copy eng client observer
+  check "$run" "every node holds it" holds_spec "$run" "after-copy$x" eng client observer
   check "$run" "main is lost: its VM is deleted" loses_main "$run"
   check "$run" "client writes a spec while main is gone" \
-    allowed "$run" client "sudo sail spec create -p acme --id while-main-gone --title 'client wrote this while main was gone'"
+    allowed "$run" client "sudo sail spec create -p acme --id while-main-gone$x --title 'client wrote this while main was gone'"
   check "$run" "a new main comes up in its place" brings_up_main "$run"
   check "$run" "install $version on the new main" install_box "$run" main "$version"
   check "$run" "the new main inits empty, as uday" init_main "$run"
+  incus_took "$run" main
   main_ip=$(internal_ip "$run" main)
   check "$run" "observer pins the empty main and checks its fingerprint" pins_main "$run" observer "$main_ip"
   check "$run" "the empty main admits obs as a viewer" admits_on_empty_main "$run" observer viewer
@@ -1443,26 +1623,30 @@ rebuilt() {
   check "$run" "the copy goes in place by the README, and migrate re-issues the API token" restores_copy "$run" "$copy"
   rm -f "$copy"
   check "$run" "spec list works on the new main" allowed "$run" main "sudo sail spec list --all-projects"
+  if [[ -s $(log_dir "$run")/loop-spec ]]; then
+    check "$run" "the restored main's measures of the loop's spec still count its reviews and build runs" \
+      measures_match_the_rows "$run" "$(cat "$(log_dir "$run")/loop-spec")"
+  fi
   check "$run" "main's roster is the copy's" roster "$run"
   for box in eng client observer; do
     check "$run" "$box pins the new main and checks its fingerprint" pins_main "$run" "$box" "$main_ip"
   done
   for box in eng client observer; do
-    check "$run" "$box drops after-copy, which main lost, and says so" drops_what_main_lost "$run" "$box" after-copy
+    check "$run" "$box drops after-copy, which main lost, and says so" drops_what_main_lost "$run" "$box" "after-copy$x"
   done
   check "$run" "every node syncs twice" sync_all "$run"
-  check "$run" "main holds the spec client wrote while it was gone" holds_spec "$run" while-main-gone main eng observer
+  check "$run" "main holds the spec client wrote while it was gone" holds_spec "$run" "while-main-gone$x" main eng observer
   check "$run" "after-copy is gone from every box, and stays in each node's history" \
-    lost_but_in_history "$run" after-copy eng client observer
+    lost_but_in_history "$run" "after-copy$x" eng client observer
   check "$run" "eng still holds every project" holds "$run" eng "acme beta demo gamma"
   check "$run" "client still holds acme alone" holds "$run" client "acme"
   check "$run" "observer still holds acme and beta" holds "$run" observer "acme beta"
-  check "$run" "every box still holds shared with eng's title" everywhere "$run" shared title "eng renamed it"
-  check "$run" "acme-chat still reads the same on every box" conversation_matches "$run" acme-chat
+  check "$run" "every box still holds shared with eng's title" everywhere "$run" "$shared" title "eng renamed it"
+  check "$run" "acme-chat still reads the same on every box" conversation_matches "$run" "$room"
   check "$run" "every box still reads client's notes.md" file_everywhere "$run" acme notes.md "acme notes v2" main eng client observer
   check "$run" "client writes a spec with no sync after the rebuild" \
-    allowed "$run" client "sudo sail spec create -p acme --id after-rebuild --title 'after main was rebuilt'"
-  check "$run" "it reaches the new main within 30 s, no sail sync asked" reaches_main_unasked "$run" after-rebuild
+    allowed "$run" client "sudo sail spec create -p acme --id after-rebuild$x --title 'after main was rebuilt'"
+  check "$run" "it reaches the new main within 30 s, no sail sync asked" reaches_main_unasked "$run" "after-rebuild$x"
 }
 
 secret() { gc secrets versions access latest --secret "$1"; }
@@ -1471,20 +1655,23 @@ place_secret() {
   secret "$3" | on "$1" "$2" "sudo sh -c 'umask 077; mkdir -p /root/.fleet; cat > /root/.fleet/$4; test -s /root/.fleet/$4'"
 }
 
+# A parallel run writes each group's output beside the groups' log dirs, so that log is read too.
 no_secret_in_logs() {
-  local run=$1 dir name leaked=0
+  local run=$1 dir name value leaked=0
   dir=$(log_dir "$run")
   for name in $SECRETS; do
-    if grep -rqF -f <(secret "$name") "$dir"; then
-      echo "$name appears in $dir: its logs are deleted"
+    value=$(secret "$name")
+    [[ -n $value ]] || { echo "$name read empty: nothing to look for"; return 1; }
+    if grep -rqF -f <(printf '%s\n' "$value") "$dir" ${group_log:+"$group_log"}; then
+      echo "$name appears in $dir${group_log:+ or $group_log}: its logs are deleted"
       leaked=1
     fi
   done
   if [[ $leaked == 1 ]]; then
-    rm -f "$dir"/*.log "$dir"/report.txt
+    rm -f "$dir"/*.log "$dir"/report.txt ${group_log:+"$group_log"}
     return 1
   fi
-  echo "no secret appears in $dir"
+  echo "no secret appears in $dir${group_log:+ or $group_log}"
 }
 
 registers_container_key() {
@@ -1565,15 +1752,18 @@ install_list() {
   echo "$json"
 }
 
+status_is() {
+  local status
+  status=$(spec_field "$1" "$2" "$3" status)
+  [[ $status != "$last" ]] && echo "$(date -u +%H:%M:%S) $status" && last=$status
+  [[ $status == "$4" ]] && return 0
+  [[ $status == cancelled || $status == archived ]] && return 2
+  return 1
+}
+
 reaches_status() {
-  local run=$1 box=$2 spec=$3 wanted=$4 minutes=$5 status last="" i
-  for i in $(seq 1 $((minutes * 2))); do
-    status=$(spec_field "$run" "$box" "$spec" status)
-    [[ $status != "$last" ]] && echo "$(date -u +%H:%M:%S) $status" && last=$status
-    [[ $status == "$wanted" ]] && return 0
-    [[ $status == cancelled || $status == archived ]] && return 1
-    sleep 30
-  done
+  local run=$1 box=$2 spec=$3 wanted=$4 minutes=$5 last=""
+  until_true $((minutes * 60)) 10 status_is "$run" "$box" "$spec" "$wanted" && return 0
   echo "not $wanted after $minutes min"
   return 1
 }
@@ -1585,17 +1775,18 @@ opened_a_pull_request() {
   [[ -n $listed ]]
 }
 
+asked_its_question() {
+  said=$(on "$1" "$2" "sudo sail spec comments $3 --no-sync")
+  grep -q "ended on its question" <<< "$said"
+}
+
 waits_on_its_question() {
-  local run=$1 box=$2 spec=$3 minutes=$4 said i
-  for i in $(seq 1 $((minutes * 2))); do
-    said=$(on "$run" "$box" "sudo sail spec comments $spec --no-sync")
-    if grep -q "ended on its question" <<< "$said"; then
-      echo "$said" | tail -6
-      [[ $(spec_field "$run" "$box" "$spec" status) == in_progress ]]
-      return
-    fi
-    sleep 30
-  done
+  local run=$1 box=$2 spec=$3 minutes=$4 said=""
+  if until_true $((minutes * 60)) 10 asked_its_question "$run" "$box" "$spec"; then
+    echo "$said" | tail -6
+    [[ $(spec_field "$run" "$box" "$spec" status) == in_progress ]]
+    return
+  fi
   echo "no question held the build after $minutes min"
   return 1
 }
@@ -1675,14 +1866,19 @@ that `mvn -q verify` builds and tests every module and that the build needs JDK 
 `mvn -q verify` yourself and say in the pull request that it passed. Change only pom.xml and
 README.md.'
 
+loop_config() {
+  check "$1" "main gives acme the nocaptcha repo, JDK 21 and Maven" \
+    on "$1" main "echo '[{\"url\":\"https://github.com/$LOOP_REPO.git\",\"path\":\"nocaptcha\"}]' | sudo sail project config set acme repos - && echo '{\"jdk\":21,\"maven\":\"3.9.9\"}' | sudo sail project config set acme runtimes -"
+  check "$1" "main installs $LOOP_AGENTS, the first to build and the next to review, naming no flag" \
+    on "$1" main "echo '{\"type\":\"${LOOP_AGENTS%% *}\",\"install\":[$(install_list)]}' | sudo sail project config set acme agent -"
+}
+
 loop() {
   local run=${1:-} spec
   [[ -n $run ]] || usage
   spec="loop-$(date -u +%H%M%S)"
-  check "$run" "main gives acme the nocaptcha repo, JDK 21 and Maven" \
-    on "$run" main "echo '[{\"url\":\"https://github.com/$LOOP_REPO.git\",\"path\":\"nocaptcha\"}]' | sudo sail project config set acme repos - && echo '{\"jdk\":21,\"maven\":\"3.9.9\"}' | sudo sail project config set acme runtimes -"
-  check "$run" "main installs $LOOP_AGENTS, the first to build and the next to review, naming no flag" \
-    on "$run" main "echo '{\"type\":\"${LOOP_AGENTS%% *}\",\"install\":[$(install_list)]}' | sudo sail project config set acme agent -"
+  echo "$spec" > "$(log_dir "$run")/loop-spec"
+  loop_config "$run"
   check "$run" "every node syncs twice" sync_all "$run"
   check "$run" "eng holds the forge token where only root reads it" place_secret "$run" eng fleet-github-token gh
   check "$run" "eng registers its workstation key" registers_container_key "$run" eng
@@ -1749,9 +1945,10 @@ crosses_the_schema() {
 }
 
 upgrade() {
-  local run=${1:-} target box expected from=${3:-}
+  local run=${1:-} target box expected from=${3:-} shared
   target=$(from_caller "${2:-}")
   [[ -n $run && -n $target ]] || usage
+  shared=shared$(suffix_of "$run" conflicts)
   if [[ -n $from ]] && crosses_the_schema "$from" "$target"; then
     echo "No box upgrades from $from to $target: its database schema changed in $SCHEMA_CHANGED_IN and boxes are installed fresh. Run: ci/fleet run $target" >&2
     exit 2
@@ -1770,27 +1967,80 @@ upgrade() {
   check "$run" "eng still holds every project" holds "$run" eng "acme beta demo gamma"
   check "$run" "client still holds acme alone" holds "$run" client "acme"
   check "$run" "observer still holds acme and beta" holds "$run" observer "acme beta"
-  check "$run" "every box still holds shared with eng's title" everywhere "$run" shared title "eng renamed it"
-  check "$run" "every box still holds its priority" everywhere "$run" shared priority 7
-  check "$run" "its conversation still reads the same on every box" conversation_matches "$run" shared
+  [[ -f $(log_dir "$run")/attempts-conflicts ]] || return 0
+  check "$run" "every box still holds shared with eng's title" everywhere "$run" "$shared" title "eng renamed it"
+  check "$run" "every box still holds its priority" everywhere "$run" "$shared" priority 7
+  check "$run" "its conversation still reads the same on every box" conversation_matches "$run" "$shared"
+}
+
+fleet_vms() {
+  local filter="labels.purpose=sail-fleet"
+  [[ -n $1 ]] && filter="$filter AND labels.run ~ \"^$1(-[a-z]+)?\$\""
+  gc compute instances list --filter="$filter" --format="value(name,creationTimestamp.date('%s'))"
+}
+
+detached_disks() {
+  gc compute disks list --filter="name ~ \"^sail-fleet-${1:+$1(-[a-z]+)?-}\" AND -users:*" \
+    --format="value(name,creationTimestamp.date('%s'))"
+}
+
+aged() {
+  local kind=$1 name made now
+  now=$(date +%s)
+  while read -r name made; do
+    made=${made%%.*}
+    [[ -z $name ]] || echo "$kind $name, made $(((now - made) / 3600)) h $(((now - made) / 60 % 60)) min ago"
+  done
+}
+
+list() {
+  local vms disks
+  vms=$(fleet_vms "") || return 1
+  disks=$(detached_disks "") || return 1
+  [[ -n $vms$disks ]] || { echo "No fleet VMs and no detached fleet disks."; return 0; }
+  aged VM <<< "$vms"
+  aged "detached disk" <<< "$disks"
 }
 
 down() {
-  local run=${1:-} filter="labels.purpose=sail-fleet"
-  [[ -n $run ]] && filter="$filter AND labels.run=$run"
-  local names disks
-  names=$(gc compute instances list --filter="$filter" --format='value(name)')
-  if [[ -z $names ]]; then
-    echo "No fleet VMs to delete."
-  else
-    gc compute instances delete $names --zone "$ZONE" > /dev/null
-    echo "Deleted: $names"
+  local run=${1:-} names disks socket left
+  for socket in "$RUNS/${run:-}"*/ssh-*; do
+    [[ -S $socket ]] && { ssh -o ControlPath="$socket" -O exit fleet 2> /dev/null || true; }
+  done
+  names=$(fleet_vms "$run" | awk '{print $1}') || return 1
+  if [[ -n $names ]]; then
+    gc compute instances delete $names --zone "$ZONE" > /dev/null && echo "Deleted: $names"
   fi
-  disks=$(gc compute disks list --filter="name ~ ^sail-fleet-${run:-.*}-client-scratch2\$ AND -users:*" --format='value(name)')
-  [[ -z $disks ]] || { gc compute disks delete $disks --zone "$ZONE" > /dev/null; echo "Deleted: $disks"; }
+  disks=$(detached_disks "$run" | awk '{print $1}') || return 1
+  if [[ -n $disks ]]; then
+    gc compute disks delete $disks --zone "$ZONE" > /dev/null && echo "Deleted: $disks"
+  fi
+  left=$({ fleet_vms "$run" | aged VM; detached_disks "$run" | aged "detached disk"; }) || left="what is left could not be listed"
+  [[ -z $left ]] && return 0
+  echo "ci/fleet: ${run:-the fleet} is not down, and this still bills:" >&2
+  echo "$left" >&2
+  return 1
+}
+
+readonly ALL_GROUPS="access storage rebuilt"
+
+# Each group needs only a joined fleet with its projects, and keeps to itself whatever would break
+# a neighbour: resilience restarts client's services, storage reboots client and deletes a disk,
+# rebuilt replaces main. So each group runs on a fleet of its own, all of them at once. rebuilt
+# comes after the loop, so the copy it restores holds the loop's runs, events and measures.
+scenarios_of() {
+  case $1 in
+    access) echo "doors inside access resilience" ;;
+    storage) echo "furnish containers storage" ;;
+    rebuilt) echo "conflicts rooms files portal eng-acme loop rebuilt" ;;
+    serial) echo "doors inside conflicts rooms access files portal resilience loop storage rebuilt" ;;
+    *) echo "ci/fleet: there is no group '$1'; the groups are: $ALL_GROUPS." >&2; return 2 ;;
+  esac
 }
 
 status=0
+failed_at=""
+group_log=""
 
 step() {
   [[ $status == 0 ]] || return 0
@@ -1798,50 +2048,211 @@ step() {
   if grep -q '^FAIL' "$RUNS/$2/report.txt" 2>/dev/null; then
     status=1
   fi
+  [[ $status == 0 ]] || failed_at=$1
+}
+
+plan_of() {
+  local target=$1 scenario
+  shift
+  echo up install join projects
+  if [[ -n $target ]]; then
+    [[ " $* " == *" conflicts "* ]] && echo conflicts
+    echo upgrade
+  fi
+  for scenario in "$@"; do
+    [[ -n $target && $scenario == conflicts ]] && continue
+    [[ $scenario == loop && ${FLEET_LOOP:-1} == 0 ]] && continue
+    echo "$scenario"
+  done
+}
+
+step_on() {
+  local name=$1 run=$2 version=$3 target=$4
+  case $name in
+    install) step install "$run" "$version" ;;
+    upgrade) step upgrade "$run" "$target" "$version" ;;
+    rebuilt) step rebuilt "$run" "${target:-$version}" ;;
+    *) step "$name" "$run" ;;
+  esac
+}
+
+once_per_fleet() {
+  case $1 in
+    up | install | join | projects | storage) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+again() {
+  local name=$1 run=$2 version=$3 target=$4 group=$5
+  if once_per_fleet "$name"; then
+    echo "  $name runs once per fleet: ci/fleet down $run, then ci/fleet run $version${target:+ --upgrade-to $target}${group:+ --group $group}"
+    return
+  fi
+  case $name in
+    rebuilt) echo "  ci/fleet rebuilt $run ${target:-$version}" ;;
+    upgrade) echo "  ci/fleet upgrade $run $target $version" ;;
+    *) echo "  ci/fleet $name $run" ;;
+  esac
+}
+
+readonly RERUN_PROVES='A rerun is for diagnosis and for proving a fix: it does not clear the FAIL, and a release passes only on a run whose report has 0 FAIL.'
+
+kept_notice() {
+  local expires
+  expires=$(cat "$(log_dir "$1")/expires" 2> /dev/null) || expires="$MAX_RUN after they were made"
+  echo "KEPT $1: its VMs bill until they delete themselves at about $expires, and a detached disk never does. Tear it down: ci/fleet down $1"
+}
+
+keep() {
+  local run=$1 version=$2 target=$3 group=$4 plan=$5 name reached=""
+  {
+    if [[ -n $failed_at ]]; then
+      echo "$failed_at failed on $run. To go on from it on this fleet:"
+      for name in $plan; do
+        [[ $name == "$failed_at" ]] && reached=1
+        [[ -n $reached ]] || continue
+        again "$name" "$run" "$version" "$target" "$group"
+        once_per_fleet "$name" && break
+      done
+      echo "$RERUN_PROVES"
+    fi
+    kept_notice "$run"
+  } | tee "$(log_dir "$run")/kept.txt"
+}
+
+fleet() {
+  local run=$1 version=$2 target=$3 group=$4 plan name
+  shift 4
+  plan=$(plan_of "$target" "$@")
+  status=0
+  failed_at=""
+  for name in $plan; do
+    step_on "$name" "$run" "$version" "$target"
+  done
+  if [[ ${FLEET_KEEP:-} == always || ( $status != 0 && ${FLEET_KEEP:-} != 0 ) ]]; then
+    keep "$run" "$version" "$target" "$group" "$plan"
+  else
+    down "$run" || { echo "ci/fleet: $run was not taken down." >&2; return 1; }
+  fi
+  return $status
+}
+
+counts() {
+  local lines passed failed
+  lines=$(cat "$1" 2> /dev/null) || lines=""
+  passed=$(grep -c '^PASS' <<< "$lines") || true
+  failed=$(grep -c '^FAIL' <<< "$lines") || true
+  echo "$passed PASS, $failed FAIL"
+}
+
+# A group can fail with no FAIL in its report (its subshell died, or its teardown failed): its
+# status, kept beside the report, still makes a FAIL line there.
+merge() {
+  local id=$1 group report ended
+  shift
+  for group in "$@"; do
+    report="$RUNS/$id-$group/report.txt"
+    ended=$(cat "$RUNS/$id/$group.status")
+    echo "--- group $group, run $id-$group: $(counts "$report")"
+    cat "$report" 2> /dev/null || true
+    if [[ $ended != 0 ]] && ! grep -qs '^FAIL' "$report"; then
+      echo "FAIL group $group ended with status $ended though no check failed: its setup, its teardown or the script did (see $RUNS/$id/$group.log); ci/fleet list shows what it left"
+    fi
+    cat "$RUNS/$id-$group/kept.txt" 2> /dev/null || true
+  done > "$RUNS/$id/report.txt"
+}
+
+in_parallel() {
+  local id=$1 version=$2 target=$3 group pid ended failed=0
+  local -a pids=()
+  shift 3
+  for group in "$@"; do
+    (
+      group_log="$RUNS/$id/$group.log"
+      if fleet "$id-$group" "$version" "$target" "$group" $(scenarios_of "$group") > "$group_log" 2>&1; then
+        echo "$(date -u +%H:%M:%S) group $group passed, run $id-$group: $(counts "$RUNS/$id-$group/report.txt")"
+      else
+        echo "$(date -u +%H:%M:%S) group $group FAILED, run $id-$group: $(counts "$RUNS/$id-$group/report.txt"); see $group_log"
+        exit 1
+      fi
+    ) &
+    pids+=("$!")
+  done
+  for group in "$@"; do
+    pid=${pids[0]}
+    pids=("${pids[@]:1}")
+    ended=0
+    wait "$pid" || ended=$?
+    echo "$ended" > "$RUNS/$id/$group.status"
+    [[ $ended == 0 ]] || failed=1
+  done
+  merge "$id" "$@"
+  return $failed
+}
+
+groups_from() {
+  local group seen=" "
+  for group in "$@"; do
+    [[ " $ALL_GROUPS " == *" $group "* ]] || { echo "ci/fleet: there is no group '$group'; the groups are: $ALL_GROUPS." >&2; return 2; }
+    [[ $seen != *" $group "* ]] || { echo "ci/fleet: group $group is named twice." >&2; return 2; }
+    seen="$seen$group "
+  done
+  seen=${seen# }
+  echo "${seen% }"
 }
 
 run() {
-  local version=${1:-} target=""
+  local version=${1:-} target="" groups="" group
   [[ -n $version ]] || usage
-  if [[ ${2:-} == --upgrade-to ]]; then
-    target=${3:-}
-    [[ -n $target ]] || usage
-  fi
+  shift
+  while [[ $# -gt 0 ]]; do
+    case $1 in
+      --upgrade-to) target=${2:-}; [[ -n $target ]] || usage; shift 2 ;;
+      --group) [[ -n ${2:-} ]] || usage; groups="$groups $2"; shift 2 ;;
+      *) usage ;;
+    esac
+  done
   if [[ -n $target ]] && crosses_the_schema "$version" "$target"; then
     echo "No box upgrades from $version to $target: its database schema changed in $SCHEMA_CHANGED_IN and boxes are installed fresh. Run: ci/fleet run $target" >&2
     exit 2
   fi
-  local id
-  id="r$(date -u +%Y%m%d-%H%M%S)"
-  echo "Fleet run $id on $version${target:+, upgraded to $target}; logs in $RUNS/$id"
-  status=0
-  step up "$id"
-  step install "$id" "$version"
-  step join "$id"
-  step projects "$id"
-  if [[ -n $target ]]; then
-    step conflicts "$id"
-    step upgrade "$id" "$target" "$version"
+  if [[ ${FLEET_SERIAL:-0} == 1 && -n $groups ]]; then
+    echo "ci/fleet: FLEET_SERIAL=1 runs every scenario on one fleet, so it takes no --group." >&2
+    exit 2
   fi
-  step doors "$id"
-  step inside "$id"
-  [[ -n $target ]] || step conflicts "$id"
-  step rooms "$id"
-  step access "$id"
-  step files "$id"
-  step portal "$id"
-  step resilience "$id"
-  [[ ${FLEET_LOOP:-1} == 0 ]] || step loop "$id"
-  step storage "$id"
-  step rebuilt "$id" "${target:-$version}"
-  if [[ ${FLEET_KEEP:-0} != always && ( $status == 0 || ${FLEET_KEEP:-0} != 1 ) ]]; then
-    down "$id"
+  groups=$(groups_from ${groups:-$ALL_GROUPS}) || exit 2
+  local id result=0 kept
+  id="r$(date -u +%Y%m%d-%H%M%S)"
+  mkdir -p "$RUNS/$id"
+  if [[ ${FLEET_SERIAL:-0} == 1 ]]; then
+    echo "Fleet run $id on $version${target:+, upgraded to $target}, one fleet; logs in $RUNS/$id"
+    fleet "$id" "$version" "$target" "" $(scenarios_of serial) || result=1
   else
-    echo "Kept $id for diagnosis: ci/fleet down $id when done."
+    echo "Fleet run $id on $version${target:+, upgraded to $target}: groups $groups at once, each on a fleet of its own; each group logs to $RUNS/$id/GROUP.log"
+    in_parallel "$id" "$version" "$target" $groups || result=1
   fi
   echo "--- $RUNS/$id/report.txt"
   cat "$RUNS/$id/report.txt"
-  return $status
+  echo "Fleet run $id: $(counts "$RUNS/$id/report.txt")"
+  for kept in "$RUNS/$id"/kept.txt "$RUNS/$id"-*/kept.txt; do
+    [[ -f $kept ]] && tail -1 "$kept"
+  done
+  return $result
+}
+
+# A scenario on its own, on a standing fleet: every check runs, as in a run, and the count of
+# this attempt's checks decides the exit.
+alone() {
+  local run=${2:-} report before result=0 this
+  [[ -n $run ]] || usage
+  report="$(log_dir "$run")/report.txt"
+  before=$(wc -l < "$report" 2> /dev/null || echo 0)
+  "$@" || result=1
+  this=$(tail -n +$((before + 1)) "$report")
+  echo "$1 on $run: $(counts <(echo "$this"))"
+  grep -q '^FAIL' <(head -n "$before" "$report") && echo "$run's report still holds its earlier FAIL. $RERUN_PROVES"
+  ! grep -q '^FAIL' <<< "$this" && [[ $result == 0 ]]
 }
 
 case ${1:-} in
@@ -1849,19 +2260,8 @@ case ${1:-} in
   up) shift; up "$@" ;;
   install) shift; install "$@" ;;
   join) shift; join "$@" ;;
-  projects) shift; projects "$@" ;;
-  doors) shift; doors "$@" ;;
-  upgrade) shift; upgrade "$@" ;;
-  inside) shift; inside "$@" ;;
-  conflicts) shift; conflicts "$@" ;;
-  rooms) shift; rooms "$@" ;;
-  access) shift; access "$@" ;;
-  files) shift; files "$@" ;;
-  portal) shift; portal "$@" ;;
-  resilience) shift; resilience "$@" ;;
-  storage) shift; storage "$@" ;;
-  loop) shift; loop "$@" ;;
-  rebuilt) shift; rebuilt "$@" ;;
+  projects | doors | upgrade | inside | conflicts | rooms | access | files | portal | resilience | containers | furnish | eng-acme | storage | loop | rebuilt) alone "$@" ;;
+  list) list ;;
   ssh) shift; [[ $# -ge 3 ]] || usage; r=$1 b=$2; shift 2; on "$r" "$b" "$@" ;;
   down) shift; down "$@" ;;
   *) usage ;;

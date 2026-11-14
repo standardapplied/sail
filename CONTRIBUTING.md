@@ -33,29 +33,48 @@ failed tests. Details in ARCHITECTURE's "Continuous integration".
 
 ## The GCP fleet
 
-`ci/fleet` proves a release on real boxes: four Ubuntu 24.04 VMs in GCP, a main and three FDE
-nodes (eng, a member of every project; client, a member scoped to `acme`; observer, a viewer
-scoped to `acme` and `beta`), driven only by the README's commands and the ones sail prints.
+`ci/fleet` proves a release on real boxes in GCP, each fleet a main and three FDE nodes on
+Ubuntu 24.04 (eng, a member of every project; client, a member scoped to `acme`; observer, a
+viewer scoped to `acme` and `beta`), driven only by the README's commands and the ones sail prints.
 
 ```bash
-ci/fleet run 0.59.0          # create, install, init, join, check, delete; non-zero on any failure
+FLEET_SERIAL=1 ci/fleet run 0.59.0   # the gate of record for a version being cut: one fleet, every scenario in order
+ci/fleet run 0.59.0                  # the fast check while working: three fleets (12 VMs) at once, one report
+ci/fleet run 0.59.0 --group storage  # only the groups named (access, storage, rebuilt), each on a fresh fleet
 ci/fleet run 0.59.0 --upgrade-to ./sail   # seed projects and a conflict on 0.59.0, upgrade to a candidate binary, check the rest on it
-FLEET_KEEP=1 ci/fleet run 0.59.0   # leave a failed fleet up to look at it
+ci/fleet rooms <run>                 # run one scenario again on a standing fleet
 ci/fleet ssh <run> client 'sudo sail sync status --json'
-ci/fleet down                # delete every fleet VM
+ci/fleet list                        # every fleet VM and detached fleet disk in the project, with its age
+ci/fleet down <run>                  # delete a run's VMs and detached disks (a parallel run's id takes all its fleets)
 ```
+
+A version is cut only on a `FLEET_SERIAL=1` run whose report has 0 FAIL: there every scenario
+meets everything the ones before it wrote, which the parallel groups only re-create in part.
+
+A fleet whose checks all pass is deleted; a fleet with a failed check is kept. It ends its output
+with `KEPT <run>`: when its VMs delete themselves, that a detached disk never does, and the
+`ci/fleet down <run>` that tears it down. Before that it names the scenario that failed and
+the commands that go on from it on that fleet. A scenario run again gives what it creates a
+suffix of its attempt; storage and the setup steps need a fresh fleet (`--group`). A rerun is for
+diagnosis and for proving a fix: it never clears the run's FAIL. `FLEET_KEEP=always` keeps every
+fleet, `FLEET_KEEP=0` deletes even a failed one. A teardown that leaves anything fails the run
+and names what still bills.
 
 It needs `gcloud` signed in to a project (`FLEET_PROJECT`, default `sail-mast-511621`). Every
 VM is labelled `purpose=sail-fleet` and deletes itself after six hours whatever happens to the
-run. Each check is a line in `~/.sail-fleet/<run>/report.txt`, beside the log of what it ran.
+run. Each check is a line in `~/.sail-fleet/<run>/report.txt`, beside the log of what it ran;
+a parallel run's `~/.sail-fleet/<run>/report.txt` merges its fleets' reports, and each fleet's
+output is in `~/.sail-fleet/<run>/<group>.log`.
 
 The scenarios: the roster and each node's projects, each role's spec writes at the node CLI, the
 in-container `spec` CLI and the HTTP API Mast calls, a conflict parked and resolved the same
 everywhere, a room's conversation and who may post in it, shared files reaching exactly the nodes
 granted their project, a project's app served and reached at every door, never by a viewer,
-sail-api, the pty host and incus restarted under a live session, and the agent loop: on eng, a
+sail-api, the pty host and incus restarted under a live session, the agent loop (on eng, a
 spec in acme on `standardapplied/nocaptcha` built and reviewed to `awaiting_merge`, its pull
-request closed after.
+request closed after), ZFS pools, a mirror and workspaces made from a template on client, and
+main lost and rebuilt from the README's backup line. The report also says how long each box's
+init took to install Incus, so a slow run explains itself.
 
 The agent loop reads `fleet-anthropic-key`, `fleet-openai-key` and `fleet-github-token` from
 Secret Manager at run time, places them only through each harness's own login (a `~/.profile`
