@@ -142,8 +142,8 @@ extension TerminalView {
         guard let grid = lastFrame?.size ?? grid else { return nil }
         let point = convert(event.locationInWindow, from: nil)
         let scale = renderer.faces.scale
-        let x = point.x * scale
-        let y = point.y * scale
+        let x = Double(point.x) * scale
+        let y = Double(point.y) * scale
         return (metrics.cell(atX: x, y: y, in: grid), x - Double(metrics.padding.width), y - Double(metrics.padding.height))
     }
 

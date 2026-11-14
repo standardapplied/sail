@@ -87,7 +87,8 @@ public final class PreviewApp: NSObject, NSApplicationDelegate, NSWindowDelegate
         let remembered = fresh ? nil : UserDefaults.standard.string(forKey: Self.sessionKey)
         let listed = (try? await SessionListing.sessions(at: host.address)) ?? []
         let grid = terminal.metrics.grid(fitting: PixelSize(
-            width: Int(terminal.bounds.width * terminal.metrics.scale), height: Int(terminal.bounds.height * terminal.metrics.scale)
+            width: Int(Double(terminal.bounds.width) * terminal.metrics.scale),
+            height: Int(Double(terminal.bounds.height) * terminal.metrics.scale)
         ))
         let screen: Screen
         do {

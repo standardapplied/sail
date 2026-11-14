@@ -40,7 +40,7 @@ public final class TerminalView: NSView {
     private var tasks: [Task<Void, Never>] = []
 
     public init(fonts: TerminalFonts, points: Double = FontLadder.standard) throws(RenderError) {
-        let scale = NSScreen.main?.backingScaleFactor ?? 2
+        let scale = NSScreen.main.map { Double($0.backingScaleFactor) } ?? 2
         renderer = try TerminalRenderer(fonts: fonts, points: points, scale: scale)
         fontPoints = points
         super.init(frame: NSRect(x: 0, y: 0, width: 640, height: 400))
@@ -158,7 +158,7 @@ public final class TerminalView: NSView {
 
     override public func viewDidChangeBackingProperties() {
         super.viewDidChangeBackingProperties()
-        let scale = window?.backingScaleFactor ?? renderer.faces.scale
+        let scale = window.map { Double($0.backingScaleFactor) } ?? renderer.faces.scale
         if scale != renderer.faces.scale {
             setFont(points: fontPoints, scale: scale)
         }
@@ -195,7 +195,9 @@ public final class TerminalView: NSView {
 
     private var pixelSize: PixelSize {
         let scale = renderer.faces.scale
-        return PixelSize(width: max(1, Int((bounds.width * scale).rounded())), height: max(1, Int((bounds.height * scale).rounded())))
+        return PixelSize(
+            width: max(1, Int((Double(bounds.width) * scale).rounded())), height: max(1, Int((Double(bounds.height) * scale).rounded()))
+        )
     }
 
     private func configureLayer(scale: Double) {

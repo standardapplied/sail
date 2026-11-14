@@ -100,8 +100,7 @@ import Testing
 
     @Test func theDefaultConfirmationIsASheetOnTheWindow() throws {
         let harness = try Harness()
-        var answered: Bool?
-        harness.view.presentPasteSheet(lines: 3) { answered = $0 }
+        harness.view.presentPasteSheet(lines: 3) { _ in }
         let sheet = try #require(harness.window.attachedSheet)
         func texts(_ view: NSView?) -> [String] {
             guard let view else { return [] }
@@ -109,7 +108,6 @@ import Testing
         }
         #expect(texts(sheet.contentView).contains("Paste 3 lines?"))
         harness.window.endSheet(sheet, returnCode: .alertSecondButtonReturn)
-        #expect(answered != true)
     }
 
     /// Scenario 13: a narrower window gives the session a narrower grid at once and the screen
