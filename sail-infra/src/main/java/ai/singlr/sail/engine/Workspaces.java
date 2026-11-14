@@ -248,15 +248,17 @@ public final class Workspaces {
   /**
    * What a spec's run would enter, read before anything of the run is reserved: the spec's place,
    * the template version a new workspace of it clones, the workspace when there is one (whole, or
-   * left by a create that did not finish), whether the template is older than the definition, and
-   * the space of the pool it clones onto, when Incus says.
+   * left by a create that did not finish), whether the template is older than the definition, the
+   * space of the pool it clones onto, when Incus says, and what is said of that pool when it is a
+   * degraded mirror.
    */
   public record SpecCheck(
       RunPlace.SpecWorkspace place,
       WorkspaceTemplate.Template template,
       Optional<BoxInstances.Instance> found,
       boolean stale,
-      Optional<IncusStorage.Space> space) {
+      Optional<IncusStorage.Space> space,
+      Optional<String> degraded) {
 
     /** Whether the spec's workspace is there and whole, so a run reuses it. */
     public boolean whole() {
@@ -381,10 +383,11 @@ public final class Workspaces {
         new WorkspaceTemplate(observer, shell, locks)
             .current(place.project(), zfs)
             .orElseThrow(() -> noTemplate(place.project()));
-    WorkspaceTemplate.requireUsable(observer, template.pool());
+    var degraded = WorkspaceTemplate.usable(observer, template.pool());
     var found = requireTheSpecs(place, held, box.all());
     var space = new IncusStorage(observer).find(template.pool()).flatMap(IncusStorage.Pool::space);
-    return new SpecCheck(place, template, found, !inputs.equals(template.inputs()), space);
+    return new SpecCheck(
+        place, template, found, !inputs.equals(template.inputs()), space, degraded);
   }
 
   /**

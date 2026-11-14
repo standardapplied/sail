@@ -98,7 +98,8 @@ public final class DispatchOperations {
       String workspace,
       boolean reused,
       Workspaces.Timings timings,
-      boolean stale) {
+      boolean stale,
+      String degraded) {
 
     /** The workspace a dry run's checks found, as a dispatch would use it. */
     static WorkspaceUse wouldEnter(Workspaces.SpecCheck check) {
@@ -107,7 +108,8 @@ public final class DispatchOperations {
           check.place().workspace(),
           check.whole(),
           null,
-          !check.whole() && check.stale());
+          !check.whole() && check.stale(),
+          check.degraded().orElse(null));
     }
 
     /** The workspace a run entered. */
@@ -121,7 +123,8 @@ public final class DispatchOperations {
                       ((RunPlace.SpecWorkspace) entered.place()).workspace(),
                       workspace instanceof Workspaces.Reused,
                       workspace instanceof Workspaces.Made made ? made.created().timings() : null,
-                      entered.stale()))
+                      entered.stale(),
+                      entered.degraded()))
           .orElse(null);
     }
   }

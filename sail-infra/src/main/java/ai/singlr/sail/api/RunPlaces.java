@@ -54,8 +54,12 @@ final class RunPlaces {
     }
   }
 
-  /** Where a reserved run went in, and how: none for the project's container. */
-  record Entered(RunPlace place, Optional<Workspaces.Entered> workspace, boolean stale) {}
+  /**
+   * Where a reserved run went in, and how: none for the project's container; whether its new
+   * workspace cloned a template older than the definition, and what was said of a degraded pool.
+   */
+  record Entered(
+      RunPlace place, Optional<Workspaces.Entered> workspace, boolean stale, String degraded) {}
 
   private final ProjectLoader projects;
   private final Workspaces workspaces;
@@ -92,13 +96,32 @@ final class RunPlaces {
     return checkSpec(project, config, specId, boxHandle);
   }
 
-  /** As {@link #check}, for a run that names spec {@code specId}: its workspace. */
+  /**
+   * As {@link #check}, for a run that names spec {@code specId}: its workspace. A refusal is said
+   * in the spec's room too, in the same words, once ({@link RunLauncher.Room#tell}), so a room's
+   * lane that cannot start is never silent there.
+   */
   InWorkspace checkSpec(String project, ProjectDefinition config, String specId, String boxHandle) {
-    var check = checked(workspaceOf(project, specId), config);
-    if (!check.running()) {
-      requireRoom(check, config, boxHandle);
+    try {
+      var check = checked(workspaceOf(project, specId), config);
+      if (!check.running()) {
+        requireRoom(check, config, boxHandle);
+      }
+      return new InWorkspace(check);
+    } catch (ApiException refused) {
+      throw told(specId, refused);
     }
-    return new InWorkspace(check);
+  }
+
+  /** Says {@code refused} in spec {@code specId}'s room, in the words its caller is given. */
+  private ApiException told(String specId, ApiException refused) {
+    var remedy = refused.failure().remedy();
+    room.tell(
+        specId,
+        remedy == null || remedy.isEmpty()
+            ? refused.getMessage()
+            : refused.getMessage() + " " + remedy.plain());
+    return refused;
   }
 
   /**
@@ -111,15 +134,23 @@ final class RunPlaces {
    */
   Entered enter(Checked checked, ProjectDefinition config, String owner) {
     return switch (checked) {
-      case InContainer container -> new Entered(container.place(), Optional.empty(), false);
+      case InContainer container -> new Entered(container.place(), Optional.empty(), false, null);
       case InWorkspace(var check) -> {
-        var entered = entered(check, config, owner);
+        var specId = check.place().specId();
+        Workspaces.Entered entered;
+        try {
+          entered = entered(check, config, owner);
+        } catch (ApiException refused) {
+          throw told(specId, refused);
+        }
         var stale = entered instanceof Workspaces.Made && check.stale();
         if (stale) {
           var notice = new WorkspaceTemplate.Stale(check.place().project());
-          room.tell(check.place().specId(), Remedied.message(notice.reason(), notice.remedy()));
+          room.tell(specId, Remedied.message(notice.reason(), notice.remedy()));
         }
-        yield new Entered(check.place(), Optional.of(entered), stale);
+        check.degraded().ifPresent(degraded -> room.tell(specId, degraded));
+        yield new Entered(
+            check.place(), Optional.of(entered), stale, check.degraded().orElse(null));
       }
     };
   }

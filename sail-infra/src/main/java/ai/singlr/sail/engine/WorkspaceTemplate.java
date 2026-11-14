@@ -323,6 +323,15 @@ public final class WorkspaceTemplate {
    */
   static void requireUsable(ShellExec observer, String pool)
       throws IOException, InterruptedException, TimeoutException {
+    usable(observer, pool).ifPresent(degraded -> System.err.println("  ! " + degraded));
+  }
+
+  /**
+   * As {@link #requireUsable}, answering what it would say of a degraded mirror instead of saying
+   * it: what a door that answers in its own words (a dispatch's answer, a spec's room) says once.
+   */
+  static Optional<String> usable(ShellExec observer, String pool)
+      throws IOException, InterruptedException, TimeoutException {
     var held =
         pool == null
             ? Optional.<IncusStorage.Pool>empty()
@@ -330,7 +339,7 @@ public final class WorkspaceTemplate {
                 .find(pool)
                 .filter(found -> IncusStorage.devices(found.source()).size() == 2);
     if (held.isEmpty()) {
-      return;
+      return Optional.empty();
     }
     var zpool = Objects.requireNonNullElse(held.get().zpool(), pool);
     var health = PoolHealth.of(observer, zpool);
@@ -348,9 +357,9 @@ public final class WorkspaceTemplate {
               + zpool
               + ".");
     }
-    if (health.get().degraded()) {
-      System.err.println("  ! " + health.get().degradedNotice(zpool));
-    }
+    return health.get().degraded()
+        ? Optional.of(health.get().degradedNotice(zpool))
+        : Optional.empty();
   }
 
   /** {@code project}'s template instance name, when it is one Incus can have and no project's. */

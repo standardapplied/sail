@@ -14,6 +14,7 @@ import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.ProjectDefinition;
 import ai.singlr.sail.config.TestDefinitions;
 import ai.singlr.sail.config.YamlUtil;
+import ai.singlr.sail.engine.DeviceFixtures;
 import ai.singlr.sail.engine.RunPlace;
 import ai.singlr.sail.engine.ScriptedShellExecutor;
 import ai.singlr.sail.engine.ShellExec;
@@ -215,7 +216,7 @@ class RunPlacesTest {
 
     assertEquals(new RunPlaces.InContainer(new RunPlace.ProjectContainer("acme")), checked);
     assertEquals(
-        new RunPlaces.Entered(checked.place(), Optional.empty(), false),
+        new RunPlaces.Entered(checked.place(), Optional.empty(), false, null),
         places.enter(checked, config(), "eng"));
   }
 
@@ -259,6 +260,36 @@ class RunPlacesTest {
     assertInstanceOf(Workspaces.Reused.class, entered.workspace().orElseThrow());
     assertEquals(false, entered.stale());
     assertEquals(List.of(), told);
+  }
+
+  /** Scenario 14: a degraded mirror is said in the spec's room and carried to the answer. */
+  @Test
+  void aWorkspaceMadeOnADegradedMirrorSaysSoInTheRoomAndTheAnswer() throws Exception {
+    var mirror =
+        """
+        [{"name": "tank", "driver": "zfs", "config": {"source": "tank", "zfs.pool_name": "tank",
+          "volatile.initial_source": "mirror=/dev/disk/by-id/wwn-0x5000c500a1b2c3d4-part5,/dev/disk/by-id/wwn-0x5000c500e5f6a7b8-part5"}}]
+        """;
+    var incus =
+        TestWorkspaces.incus(definitions(), "acme")
+            .onOk("incus storage list --format json", mirror)
+            .onOk(
+                "zpool status -P tank",
+                DeviceFixtures.read("handwritten-mirror-degraded-removed.zpool-status.txt")
+                    .replace("devpool", "tank"));
+    var told = new ArrayList<String>();
+    var places =
+        new RunPlaces(
+            new ProjectLoader(new ScriptedShellExecutor(), definitions()),
+            TestWorkspaces.over(incus),
+            null,
+            new ScriptedShellExecutor(),
+            (specId, body) -> told.add(body));
+
+    var entered = places.enter(places.checkSpec("acme", config(), "auth", "eng"), config(), "eng");
+
+    assertTrue(entered.degraded().startsWith("Pool tank is DEGRADED"), entered.degraded());
+    assertEquals(List.of(entered.degraded()), told);
   }
 
   @Test

@@ -1964,7 +1964,10 @@ class WorkspacesTest {
             .formatted(spec, owner));
   }
 
-  /** Scenario 14: a spec's run on a degraded mirror goes on, and the pool is said degraded once. */
+  /**
+   * Scenario 14: a spec's run on a degraded mirror goes on, and what is said of the pool is carried
+   * to the dispatch's answer and the spec's room, which say it once, not printed here.
+   */
   @Test
   void aSpecsRunOnADegradedPoolIsMadeAndThePoolIsSaidDegradedOnce() throws Throwable {
     var shell =
@@ -1974,20 +1977,25 @@ class WorkspacesTest {
                 DeviceFixtures.read("handwritten-mirror-degraded-removed.zpool-status.txt")
                     .replace("devpool", "tank"));
     var workspaces = workspaces(shell, ticks(0, 1, 2, 3, 4, 5, 6, 7));
+    var checked = new AtomicReference<Workspaces.SpecCheck>();
 
     var said =
         stderrOf(
-            () ->
-                workspaces.enterSpec(
-                    workspaces.checkSpec(FIX, INPUTS, name -> false),
-                    acme(),
-                    "uday",
-                    tempDir.resolve("no-files")));
+            () -> {
+              checked.set(workspaces.checkSpec(FIX, INPUTS, name -> false));
+              workspaces.enterSpec(checked.get(), acme(), "uday", tempDir.resolve("no-files"));
+            });
 
     assertTrue(
         shell.invocations().stream().anyMatch(c -> c.startsWith("incus copy acme--tmpl/v1 ")),
         String.join("\n", shell.invocations()));
-    assertEquals(1, said.split("Pool tank is DEGRADED", -1).length - 1, said);
+    assertEquals("", said);
+    var degraded = checked.get().degraded().orElseThrow();
+    assertTrue(degraded.startsWith("Pool tank is DEGRADED"), degraded);
+    assertTrue(
+        degraded.contains(
+            "sudo zpool replace tank /dev/disk/by-id/wwn-0x5000c500e5f6a7b8-part5 <new device>"),
+        degraded);
   }
 
   /**

@@ -298,6 +298,9 @@ public final class DispatchCommand implements Runnable {
               + workspace.instance()
               + ")"
               + (workspace.stale() ? ", from a template older than the definition." : "."));
+      if (workspace.degraded() != null) {
+        System.out.println("  " + workspace.degraded());
+      }
     }
     if (dispatched.restarted()) {
       System.out.println("  Would restart the spec first: its status would go back to pending.");
@@ -339,6 +342,9 @@ public final class DispatchCommand implements Runnable {
           System.out.println(
               Ansi.AUTO.string(
                   "  @|yellow !|@ " + operator.render(new WorkspaceTemplate.Stale(name))));
+        }
+        if (workspace.degraded() != null) {
+          System.out.println(Ansi.AUTO.string("  @|yellow !|@ " + workspace.degraded()));
         }
       }
 

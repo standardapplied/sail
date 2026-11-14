@@ -984,7 +984,7 @@ class BuildDispatchCoverageTest {
 
     var said = assertInstanceOf(DispatchOperations.Dispatched.class, dry);
     assertEquals(
-        new DispatchOperations.WorkspaceUse("acme-auth", "auth", false, null, false),
+        new DispatchOperations.WorkspaceUse("acme-auth", "auth", false, null, false, null),
         said.workspace());
     assertEquals(List.of(), new RunStore(db).listForProject("acme"));
     assertFalse(box.invocations().stream().anyMatch(command -> command.startsWith("incus copy")));
@@ -1011,7 +1011,7 @@ class BuildDispatchCoverageTest {
 
     var said = assertInstanceOf(DispatchOperations.Dispatched.class, dry);
     assertEquals(
-        new DispatchOperations.WorkspaceUse("acme-auth", "auth", true, null, false),
+        new DispatchOperations.WorkspaceUse("acme-auth", "auth", true, null, false, null),
         said.workspace());
     assertTrue(said.branchCreated(), "the reused tree has no sail/auth yet");
     assertTrue(

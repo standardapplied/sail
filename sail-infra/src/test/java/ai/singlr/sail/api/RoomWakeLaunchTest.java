@@ -26,6 +26,7 @@ import ai.singlr.sail.engine.ScriptedShellExecutor;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.StageSkill;
 import ai.singlr.sail.engine.WatcherSpawner;
+import ai.singlr.sail.engine.Workspaces;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.Actors;
@@ -131,6 +132,17 @@ class RoomWakeLaunchTest {
       boolean withRunStore,
       DispatchOperations.AgentLauncher launcher)
       throws IOException {
+    return operations(shell, yamlContent, withRunStore, launcher, null);
+  }
+
+  /** As above, on a box whose workspaces are {@code workspaces}, or a ready box when null. */
+  private DispatchOperations operations(
+      ShellExec shell,
+      String yamlContent,
+      boolean withRunStore,
+      DispatchOperations.AgentLauncher launcher,
+      Workspaces workspaces)
+      throws IOException {
     var yaml = tempDir.resolve("sail-" + System.nanoTime() + ".yaml");
     Files.writeString(yaml, yamlContent);
     db = Sqlite.open(tempDir.resolve("wake-" + System.nanoTime() + ".db"));
@@ -150,7 +162,9 @@ class RoomWakeLaunchTest {
             new FdeStore(db),
             events::add,
             new WatcherSpawner(shell, (command, logPath) -> 4242L),
-            TestWorkspaces.ready(TestProjects.reading(yaml), "acme"),
+            workspaces != null
+                ? workspaces
+                : TestWorkspaces.ready(TestProjects.reading(yaml), "acme"),
             launcher,
             DispatchOperations.Listener.NONE,
             SessionYield.NONE)
@@ -549,6 +563,41 @@ class RoomWakeLaunchTest {
                 + " Or: Create an"
                 + " API key in the Claude Console, then sail agent login claude-code --kind"
                 + " api-key."),
+        messageStore.list("auth", null, 20).stream().map(MessageStore.MessageRow::body).toList());
+    assertEquals(List.of(), runStore.listForSpec("auth"));
+  }
+
+  /**
+   * M2: a wake refused because the project has no template yet is said in the spec's room, in the
+   * words the CLI and the API give, once, as a refusal for want of a login is; nothing is reserved.
+   */
+  @Test
+  void aWakeRefusedForWantOfATemplateSaysSoInTheRoomOnce() throws Exception {
+    var noTemplate =
+        TestWorkspaces.over(
+            new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
+                .onOk("incus storage list --format json", TestWorkspaces.POOL)
+                .onOk("incus list --format json", "[]"));
+    var ops =
+        operations(
+            liveAgentShell(),
+            YAML,
+            true,
+            command -> {
+              launched.set(command);
+              return 0;
+            },
+            noTemplate);
+    seedSpec("auth");
+
+    for (var attempt = 0; attempt < 2; attempt++) {
+      var refused =
+          assertThrows(ApiException.class, () -> ops.startRoomRun("acme", "auth", HANDLE));
+      assertEquals(ErrorCode.CONFLICT, refused.failure().errorCode());
+    }
+
+    assertEquals(
+        List.of("acme has no template yet: sail project template build acme"),
         messageStore.list("auth", null, 20).stream().map(MessageStore.MessageRow::body).toList());
     assertEquals(List.of(), runStore.listForSpec("auth"));
   }

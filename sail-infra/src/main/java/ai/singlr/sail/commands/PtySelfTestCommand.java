@@ -95,7 +95,8 @@ public final class PtySelfTestCommand implements Callable<Integer> {
           "clone_ms",
           "change",
           "created_at",
-          "owner");
+          "owner",
+          "degraded");
 
   @Override
   public Integer call() {
@@ -477,7 +478,8 @@ public final class PtySelfTestCommand implements Callable<Integer> {
             "spec",
             false,
             new Workspaces.Timings(1L, 2, 3, 6, Map.of("bus", 1L)),
-            true);
+            true,
+            "Pool tank is DEGRADED");
     var preview =
         new DispatchCommand.DispatchPreview(
             false, "box", "spec", "title", "foreground", "task", made);
