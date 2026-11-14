@@ -1,0 +1,9 @@
+size 20x2
+cursor 6,0 block visible steady
+colors fg #f6f1e9 bg #0a0e11 cursor #fc4926
+row 0 |titled|
+event title("a title")
+event workingDirectory("file://host/tmp/work")
+input ctrl-c 03
+input paste needs confirmation
+input focus-lost 1b5b4f

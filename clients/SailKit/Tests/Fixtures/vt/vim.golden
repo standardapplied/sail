@@ -1,0 +1,58 @@
+size 80x24
+cursor 7,1 block visible steady
+colors fg #f6f1e9 bg #0a0e11 cursor #fc4926
+row 0 |  1 The terminal core keeps the exact screen.|
+  0-3 fg #e6ba69
+row 1 |  2 It is libghostty-vt underneath.|
+  0-3 fg #e6ba69
+row 2 |  3|
+  0-3 fg #e6ba69
+row 3 |  4         Tabs, 漢字 and café too.|
+  0-3 fg #e6ba69
+  18 wide
+  19 spacer-tail
+  20 wide
+  21 spacer-tail
+row 4 |  5 fn main() { println!("hello"); }|
+  0-3 fg #e6ba69
+row 5 |~|
+  0-79 fg #aec8e8
+row 6 |~|
+  0-79 fg #aec8e8
+row 7 |~|
+  0-79 fg #aec8e8
+row 8 |~|
+  0-79 fg #aec8e8
+row 9 |~|
+  0-79 fg #aec8e8
+row 10 |~|
+  0-79 fg #aec8e8
+row 11 |~|
+  0-79 fg #aec8e8
+row 12 |~|
+  0-79 fg #aec8e8
+row 13 |~|
+  0-79 fg #aec8e8
+row 14 |~|
+  0-79 fg #aec8e8
+row 15 |~|
+  0-79 fg #aec8e8
+row 16 |~|
+  0-79 fg #aec8e8
+row 17 |~|
+  0-79 fg #aec8e8
+row 18 |~|
+  0-79 fg #aec8e8
+row 19 |~|
+  0-79 fg #aec8e8
+row 20 |~|
+  0-79 fg #aec8e8
+row 21 |~|
+  0-79 fg #aec8e8
+row 22 |~|
+  0-79 fg #aec8e8
+row 23 |"sample.txt" 5L, 137B                                         2,4           All|
+reply 1b5b323b32521b5b333b31521b5b3e313b303b30631b5d31303b7267623a663666362f663166312f65396539071b5d31313b7267623a306130612f306530652f31313131071b5b3f31323b322479
+input ctrl-c 1b5b32373b353b39397e
+input paste 1b5b3230307e780a791b5b3230317e
+input focus-lost 1b5b4f

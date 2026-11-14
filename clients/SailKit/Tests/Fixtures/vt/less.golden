@@ -1,0 +1,30 @@
+size 80x24
+cursor 1,23 block visible steady
+colors fg #f6f1e9 bg #0a0e11 cursor #fc4926
+row 0 |line 24|
+row 1 |line 25|
+row 2 |line 26|
+row 3 |line 27|
+row 4 |line 28|
+row 5 |line 29|
+row 6 |line 30|
+row 7 |line 31|
+row 8 |line 32|
+row 9 |line 33|
+row 10 |line 34|
+row 11 |line 35|
+row 12 |line 36|
+row 13 |line 37|
+row 14 |line 38|
+row 15 |line 39|
+row 16 |line 40|
+row 17 |line 41|
+row 18 |line 42|
+row 19 |line 43|
+row 20 |line 44|
+row 21 |line 45|
+row 22 |line 46|
+row 23 |:|
+input ctrl-c 03
+input paste needs confirmation
+input focus-lost -

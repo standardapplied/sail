@@ -1,0 +1,24 @@
+size 40x5
+cursor 19,3 block visible steady
+colors fg #f6f1e9 bg #0a0e11 cursor #fc4926
+row 0 |bold italic strike|
+  0-3 bold
+  5-10 italic
+  12-17 strikethrough
+row 1 |one two curly dots dash|
+  0-2 underline single
+  4-6 underline double
+  8-12 underline curly
+  14-17 underline dotted
+  19-22 underline dashed
+row 2 |inverse dim hidden|
+  0-6 fg #0a0e11 bg #f6f1e9 inverse
+  8-10 fg #8c8b88 dim
+  12-17 invisible
+row 3 |dimred invgreen all|
+  0-5 fg #804a45 dim
+  7-14 fg #0a0e11 bg #86b89a inverse
+  16-18 bold italic underline single
+input ctrl-c 03
+input paste needs confirmation
+input focus-lost -

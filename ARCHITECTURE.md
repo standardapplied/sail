@@ -3823,11 +3823,87 @@ no pairing is removed through the gateway as before, and no key file is touched.
   escape hatches; the environment, a token file or a prompt with echo off are the documented
   ways.
 
+## Native clients
+
+`clients/SailKit` is the Swift package the native apps share: portable, Foundation only, built and
+tested on Linux and macOS by the `Clients` workflow (`.github/workflows/clients.yml`). Its HTTP
+client (`SailAPI`), event stream (`SailEvents`) and frame codec (`SailTerminalWire`) read shapes the
+server's own tests write (`ClientGoldensTest`). Its terminal core is two targets: `SailVT`, the
+screen of one session, and `SailTerminal`, the session client, with the `sail-term-probe` CLI that
+drives them with no window.
+
+The screen is libghostty-vt 1.0.1 (MIT, C ABI stable within 1.x). Apple platforms take its
+xcframework through a SwiftPM `binaryTarget` pinned by checksum in `Package.swift`; Linux builds it
+from the release's source and deps tarballs with Zig 0.17.1, offline, through
+`clients/SailKit/scripts/libghostty-vt`, which holds the three pins and checks every download
+against them before it is used. Both expose one module, `GhosttyVt`. The terminal core holds these:
+
+- **T1. One session code for every host.** A session reaches this machine's own host (the unix
+  socket under the account's home, a blank `Hello`) or a runner's TCP door (a fresh ticket from
+  `POST /v1/terminal/tickets` for every connection) through one `Door`; nothing else differs.
+  `SessionListing.sessions(at:)` lists a host's sessions page by page, each answer awaited at most
+  its timeout (1 s or more), a cursor that does not move forward or more than 10,000 sessions being
+  a protocol violation.
+- **T2. The screen is libghostty-vt's.** No escape sequence is parsed and no input encoded in Swift:
+  keys, pastes, focus and mouse come from its encoders, each synced from the terminal first.
+- **T3. Nothing is lost or reordered.** One thread per connection reads the host's frames and feeds
+  the screen in order; a host's resize lands after the bytes before it. The terminal and its render
+  state share one lock, so a program's synchronized output (mode 2026) holds the frame: the render
+  state is captured as the hold begins, from inside the write, and kept until the hold ends or
+  has lasted 1 s, when the session ticks the screen so a renderer drawing only on change draws
+  again; a renderer never draws a half-finished update. A change of the default colours or the
+  palette redraws every row. Output is fed in 16 KiB slices, each under its own taking of the lock,
+  and before each slice the feeder yields to a reader that has announced itself, so a frame waits
+  behind at most the one slice already being fed, however many feeds follow back to back
+  (`FairnessTests` counts the slices; the bench times the wait on Linux and macOS). `frame()` is
+  meant to be called once per display refresh: a reader polling in a tight loop slows output (one
+  such reader to about 32 MiB/s, two to about 0.33 MiB/s). The encoders take the lock without the
+  hand-off: through a session a key waits at most about 0.25 ms at p95, and with `feed()` called
+  back to back with no gap, up to 372 ms at p95.
+- **T4. Secrets stay secret.** A ticket is presented once; a reconnect asks for a new one. No ticket,
+  token or terminal byte is logged, written to a file or put on a command line (the probe takes its
+  token from an environment variable it is named).
+- **T5. A replay starts from a clean screen**, and what a replay provokes (a query, a bell, OSC 52)
+  is history, answered by nobody.
+- **T6. A lost session is said, not hidden.** A new boot id ends it as "the host restarted"; a
+  refused attach ends it in the host's words; a frame the protocol does not allow ends it naming
+  the frame, as does an applied input number no client could have sent (below -1, or above
+  `Int64.max - 2^32`, which leaves every client room to number its input without overflow); no
+  integer from a frame is added to, multiplied or used as a size, count or index before it is
+  bounded. After 5 failed reconnects in a row (0.5, 1, 2, 4 and 8 s apart) it parks, saying why,
+  until the app calls `reconnectNow()`. A connection lost within 5 s of attaching is a failed
+  attempt, so a host that attaches and drops parks the session too; the first drop after a stable
+  attachment still gets all five waits. A dead TCP peer with anything unacknowledged in flight is
+  found within 10 s (`TCP_USER_TIMEOUT` / `TCP_RXT_CONNDROPTIME`); a quiet one within 45 s, by
+  keepalive probes after 30 s idle, 5 s apart, 3 of them, so an idle session costs one probe every
+  30 s and the radio may sleep between. The client keeps its view's size apart from the pty's: the
+  pty's is the size the host announced or this client sent while it held the write token (the
+  host ignores a reader's resize), and a granted `takeWrite()` sends the view's size once, so the
+  new writer's pty takes it. `reconnectNow()` while attached sends the pty's size, so a connection
+  that died during sleep is found at once without resizing anything; the protocol has no no-op
+  frame, and an empty `Input` would count as typing. A connect attempt a detach or a close overtook stands down
+  before it sends anything for the session, and `kill()` while not attached throws.
+- **T7. No keystroke reaches a screen the person cannot see.** Input while not attached is
+  dropped and counted exactly (`droppedInputs`), never queued; input written into a connection
+  that then died is estimated lost (`possiblyLostInputs`) when the next attach shows the host's
+  applied number below it, an estimate since other writers share the session's number. A
+  connection without the write token sends none of the terminal's own answers; the host's refusal
+  carries no code, so that is known from its words.
+- **T8. Bounded memory.** Frames are checked before allocation, the screen is fed on the reading
+  thread with no queue in between, a host's `Paused` never stops the reading, and the app's event
+  stream keeps the newest 256.
+- **T9. The core is the pinned one.** A library of another major version, or older than 1.0.1, is
+  refused when a screen is made.
+- **T10. Its own overhead is small**, measured in CI: a key to its bytes written, an output frame to
+  the screen updated, a 20 MiB stream's rate, a frame and its wait for the lock while 1 MiB and
+  13 KiB outputs are fed back to back, and the loopback echo through both hosts
+  (`sail-term-probe --bench` and its `measure` step, on Linux and macOS).
+
 ## Continuous integration
 
 One workflow, `.github/workflows/ci.yml`, runs on a pull request, on a push to main and on
-`workflow_dispatch`. Every job starts at once except the two native suites, which wait only for
-the one native build:
+`workflow_dispatch`. Every job starts at once except the two native suites and the terminal end
+to end, which wait only for the one native build:
 
 | Check | What it runs | What it needs |
 |---|---|---|
@@ -3837,6 +3913,7 @@ the one native build:
 | `Native fleet sync tests (part i of 3)` | `ci/check methods NativeFleetIT i 3`: every third test of `NativeFleetIT`, sync end to end on native binaries in Podman boxes | `native-binaries` |
 | `Multi-node control-plane integration tests` | every `*IT` that runs without incus | the runner's systemd user manager |
 | `Native upgrade tests` | `UpgradeE2EIT`: the pinned release upgraded to this commit's binary on a real incus | incus and `native-binaries` |
+| `Terminal end to end` | SailKit's terminal tests and `sail-term-probe`'s scripts against this commit's `sail _pty-host --local` and a box's ticketed TCP door (Incus, a project, the API and terminal door on loopback); its reports are the artifact `terminal-e2e-reports` | `native-binaries` and incus |
 | `Incus-backed integration tests (shard i of 4)` | `ci/check its i 4 NativeFleetIT UpgradeE2EIT`: that shard's `*IT` classes on a real incus | incus |
 | `CI passed` | nothing: it fails unless every job above succeeded | every job |
 

@@ -1,0 +1,85 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+readonly VERSION=1.0.1
+readonly ZIG_VERSION=0.17.1
+readonly RELEASES=https://release.files.ghostty.org/libghostty-vt/$VERSION
+readonly SOURCE=libghostty-vt-$VERSION.tar.gz
+readonly SOURCE_SHA256=333dfce97641ef9b536bb9e08907ad86abaaada50e8f7417b70d9284adef37aa
+readonly DEPS=libghostty-vt-$VERSION-deps.tar.gz
+readonly DEPS_SHA256=91a4e10960a52bf5bf4b15aa2a2cddaff8a89d6cd903d3055bda4fd17de3356d
+readonly ZIG=zig-x86_64-linux-$ZIG_VERSION.tar.xz
+readonly ZIG_SHA256=3581863e3cbcfd0fce0efc682ce7e9e93da96668a977791d356a26d2a7e9b17a
+readonly STAMP="libghostty-vt $VERSION ($SOURCE_SHA256 $DEPS_SHA256) zig $ZIG_VERSION ($ZIG_SHA256) static baseline"
+
+usage() {
+  cat >&2 <<'USAGE'
+Usage: scripts/libghostty-vt INSTALL_DIR [DOWNLOAD_DIR]
+
+Builds libghostty-vt from its release tarballs with the pinned Zig, offline, for the baseline
+x86_64 CPU (a cache built on one runner then runs on any), and installs its
+static library, headers and pkg-config file into INSTALL_DIR. Every download, kept in
+DOWNLOAD_DIR (default INSTALL_DIR/downloads) and fetched only when absent, is checked against its
+pinned sha256 before it is used. Then build SailKit with PKG_CONFIG_PATH=INSTALL_DIR/lib/pkgconfig.
+USAGE
+  exit 2
+}
+
+fail() {
+  echo "scripts/libghostty-vt: $*" >&2
+  exit 1
+}
+
+absolute() {
+  mkdir -p "$1"
+  (cd "$1" && pwd -P)
+}
+
+fetch() {
+  local name=$1 url=$2 pin=$3 path=$DOWNLOADS/$1 actual
+  if [[ ! -f $path ]]; then
+    curl -fsSL --retry 3 -o "$path.part" "$url" || fail "could not download $url."
+    mv "$path.part" "$path"
+  fi
+  actual=$(sha256sum "$path" | cut -d' ' -f1)
+  [[ $actual == "$pin" ]] \
+    || fail "$path has sha256 $actual, not the pinned $pin: refusing to build. Delete it to download it again."
+}
+
+[[ $# -ge 1 && $# -le 2 ]] || usage
+[[ $(uname -s) == Linux && $(uname -m) == x86_64 ]] \
+  || fail "this builds for Linux x86_64 only; Apple platforms take the xcframework through SwiftPM."
+PREFIX=$(absolute "$1")
+DOWNLOADS=$(absolute "${2:-$PREFIX/downloads}")
+readonly PREFIX DOWNLOADS
+
+if [[ -f $PREFIX/.built && $(< "$PREFIX/.built") == "$STAMP" ]]; then
+  echo "libghostty-vt $VERSION is installed in $PREFIX"
+  exit 0
+fi
+
+fetch "$SOURCE" "$RELEASES/$SOURCE" "$SOURCE_SHA256"
+fetch "$DEPS" "$RELEASES/$DEPS" "$DEPS_SHA256"
+fetch "$ZIG" "https://ziglang.org/download/$ZIG_VERSION/$ZIG" "$ZIG_SHA256"
+
+WORK=$(mktemp -d)
+readonly WORK
+trap 'rm -rf "$WORK"' EXIT
+tar -xJf "$DOWNLOADS/$ZIG" -C "$WORK"
+tar -xzf "$DOWNLOADS/$SOURCE" -C "$WORK"
+tar -xzf "$DOWNLOADS/$DEPS" -C "$WORK"
+mkdir "$WORK/cache"
+
+rm -rf "$PREFIX/include" "$PREFIX/lib" "$PREFIX/.built"
+(
+  cd "$WORK/libghostty-vt-$VERSION"
+  ZIG_GLOBAL_CACHE_DIR=$WORK/cache "$WORK/zig-x86_64-linux-$ZIG_VERSION/zig" build \
+    --prefix "$PREFIX" --system "$WORK/libghostty-vt-$VERSION-deps" -Doptimize=ReleaseFast -Dcpu=baseline
+)
+rm -rf "$PREFIX"/lib/libghostty-vt.so* "$PREFIX/lib/cmake" "$PREFIX/lib/pkgconfig/libghostty-vt-static.pc"
+[[ -f $PREFIX/lib/libghostty-vt.a && -f $PREFIX/include/ghostty/vt.h ]] \
+  || fail "the build installed no static library or headers in $PREFIX."
+grep -qx "Version: $VERSION" "$PREFIX/lib/pkgconfig/libghostty-vt.pc" \
+  || fail "$PREFIX/lib/pkgconfig/libghostty-vt.pc is not version $VERSION."
+echo "$STAMP" > "$PREFIX/.built"
+echo "libghostty-vt $VERSION is installed in $PREFIX"
