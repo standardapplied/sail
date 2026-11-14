@@ -64,14 +64,14 @@ import Testing
         #expect(atlas.slot(of: "in flight") != nil && atlas.slot(of: "this frame") != nil)
     }
 
-    @Test func aTouchedItemIsUsedByThatFrame() throws {
+    @Test func anItemUsedAgainIsUsedByThatFrame() throws {
         var atlas = try Atlas<String>(cell: cell, initialSide: 20, largestSide: 20)
         for item in ["a", "b", "c", "d"] {
             _ = atlas.place(item, wide: false, frame: 1, completed: 0)
         }
-        let touched = atlas.touch("a", frame: 3)
-        let missing = atlas.touch("z", frame: 3)
-        #expect(touched && !missing)
+        let used = atlas.use("a", frame: 3)
+        let missing = atlas.use("z", frame: 3)
+        #expect(used == AtlasSlot(x: 0, y: 0, width: 10, height: 10) && missing == nil)
         _ = atlas.place("e", wide: false, frame: 3, completed: 2)
         #expect(atlas.slot(of: "a") != nil)
     }

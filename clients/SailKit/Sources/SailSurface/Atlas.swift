@@ -66,9 +66,8 @@ public struct Atlas<Item: Hashable & Sendable>: Sendable {
     /// The slot of `item`, one cell wide or two (`wide`), marked used by `frame`; `completed` is
     /// the newest frame whose GPU work is done, all before it done too.
     public mutating func place(_ item: Item, wide: Bool, frame: UInt64, completed: UInt64) -> Placement {
-        if let entry = slots[item] {
-            slots[item]?.lastUsed = frame
-            return .found(entry.slot)
+        if let slot = use(item, frame: frame) {
+            return .found(slot)
         }
         let width = wide ? 2 * cell.width : cell.width
         if let slot = newSlot(width: width) {
@@ -87,13 +86,12 @@ public struct Atlas<Item: Hashable & Sendable>: Sendable {
         return .full
     }
 
-    /// Marks `item` used by `frame`, as a row drawn again from its cache uses it; false when the
-    /// item is not in the atlas.
-    @discardableResult
-    public mutating func touch(_ item: Item, frame: UInt64) -> Bool {
-        guard slots[item] != nil else { return false }
-        slots[item]?.lastUsed = frame
-        return true
+    /// The slot of `item`, marked used by `frame` (a row drawn again from its cache uses it); nil
+    /// when the item is not in the atlas. One lookup: a frame asks this of every cell.
+    public mutating func use(_ item: Item, frame: UInt64) -> AtlasSlot? {
+        guard let index = slots.index(forKey: item) else { return nil }
+        slots.values[index].lastUsed = frame
+        return slots.values[index].slot
     }
 
     public func slot(of item: Item) -> AtlasSlot? {

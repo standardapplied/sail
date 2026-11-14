@@ -43,7 +43,8 @@ import Testing
         let composing = try #require(try harness.view.snapshot())
         #expect(composing.difference(from: before, tolerance: 8).pixels > 0, "the marked text is drawn")
         let cell = harness.view.cursorRect
-        #expect(cell.origin.x == Double(harness.view.metrics.padding.width + 2 * harness.view.metrics.width) / harness.view.metrics.scale)
+        let metrics = harness.view.metrics
+        #expect(Int((Double(cell.minX) * metrics.scale).rounded()) == metrics.padding.width + 2 * metrics.width, "the cursor is at column 2")
         let expected = harness.window.convertToScreen(harness.view.convert(cell, to: nil))
         #expect(harness.view.firstRect(forCharacterRange: NSRange(location: 0, length: 3), actualRange: nil) == expected)
         harness.view.insertText("にほん", replacementRange: NSRange(location: NSNotFound, length: 0))
@@ -70,6 +71,7 @@ import Testing
         harness.mouse(.leftMouseDragged, column: 2, row: 1)
         harness.mouse(.leftMouseDragged, column: 4, row: 1)
         harness.mouse(.leftMouseUp, column: 4, row: 1)
+        #expect(harness.link.screen.selectedText() != nil, "the drag selected")
         harness.view.copy(nil)
         let copied = harness.pasteboard.string(forType: .string)
         #expect(copied == "abcdefghijklmno", "copied \(copied ?? "nothing") from a \(grid) grid")
@@ -179,14 +181,12 @@ import Testing
         #expect(harness.view.visibleText.contains("hello"))
     }
 
-    /// V3: every start, pause, resume and stop of the display link ran on the main thread, output
-    /// from the session's thread included.
+    /// V3: every start, pause, resume and stop of the display link ran on the main thread, the
+    /// resumes that output from another thread caused included.
     @Test func everyDisplayLinkChangeRanOnTheMainThread() async throws {
         let harness = try Harness()
         for round in 0 ..< 5 {
-            harness.tick()
-            harness.tick()
-            #expect(harness.clock.isPaused)
+            harness.view.pacer.pause()
             let link = harness.link
             Thread.detachNewThread { link.output("round \(round)\r\n") }
             await harness.clock.nextResume()

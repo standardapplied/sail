@@ -25,7 +25,7 @@
   {"name": "back-at-bottom", "line": "late-42", "seconds": 5},
   {"name": "clear-line", "press": "u", "modifiers": ["control"]},
   {"name": "narrower", "resize": [700, 640]},
-  {"name": "ask-columns", "type": "tput cols\r"},
+  {"name": "ask-columns-once-the-size-held", "type": "sleep 0.5; tput cols\r"},
   {"name": "columns-reached-host", "gridColumns": true, "seconds": 5},
   {"name": "bigger-1", "font": "bigger"},
   {"name": "bigger-2", "font": "bigger"},

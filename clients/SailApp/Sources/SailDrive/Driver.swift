@@ -55,10 +55,16 @@ final class Driver {
         preview.terminal
     }
 
+    /// Runs the script once. App Nap is held off for the run: it slows a window that is not in
+    /// front, and the keys must go one each `interval`.
     func start() {
         guard !started else { return }
         started = true
-        Task { await run() }
+        let activity = ProcessInfo.processInfo.beginActivity(options: [.userInitiated, .latencyCritical], reason: "driving the preview")
+        Task {
+            await run()
+            ProcessInfo.processInfo.endActivity(activity)
+        }
     }
 
     private func run() async {

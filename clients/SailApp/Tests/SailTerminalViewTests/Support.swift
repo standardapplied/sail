@@ -167,6 +167,8 @@ struct Harness {
         flush()
     }
 
+    /// A mouse event at a cell, handed to the view as AppKit hands it: a window of a test process,
+    /// which is never the active app, takes a first click to activate itself instead.
     func mouse(_ type: NSEvent.EventType, column: Int, row: Int, clicks: Int = 1) {
         let metrics = view.metrics
         let origin = metrics.origin(of: CellPoint(x: column, y: row))
@@ -177,7 +179,12 @@ struct Harness {
             with: type, location: view.convert(point, to: nil), modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
             windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: clicks, pressure: 1
         ) else { return }
-        window.sendEvent(event)
+        switch type {
+        case .leftMouseDown: view.mouseDown(with: event)
+        case .leftMouseDragged: view.mouseDragged(with: event)
+        case .leftMouseUp: view.mouseUp(with: event)
+        default: window.sendEvent(event)
+        }
     }
 }
 

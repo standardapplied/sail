@@ -33,6 +33,11 @@ final class AtlasTexture {
         texture = try Self.texture(device, format, side: sides.initial)
     }
 
+    /// The slot of `item` when it is in this atlas, marked used by `frame`.
+    func use(_ item: AtlasItem, frame: UInt64) -> AtlasSlot? {
+        atlas.use(item, frame: frame)
+    }
+
     /// The slot of `item`, its pixels drawn by `draw` when it is new; nil when the atlas has no
     /// room that no frame in flight uses.
     func place(_ item: AtlasItem, frame: UInt64, completed: UInt64, draw: () -> [UInt8]) -> AtlasSlot? {
@@ -114,7 +119,15 @@ final class GlyphStore: GlyphSource {
         alpha.uploaded + colour.uploaded
     }
 
+    /// An item already drawn costs one lookup (text and sprites are in the alpha atlas); only a new
+    /// one asks Core Text which atlas it belongs in.
     func place(_ item: AtlasItem) -> GlyphPlace? {
+        if let slot = alpha.use(item, frame: frame) {
+            return GlyphPlace(slot: slot, colour: false)
+        }
+        if case .glyph = item, let slot = colour.use(item, frame: frame) {
+            return GlyphPlace(slot: slot, colour: true)
+        }
         let cells = item.wide ? 2 : 1
         let done = completed()
         let slot: AtlasSlot?
