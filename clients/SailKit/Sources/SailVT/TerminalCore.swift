@@ -245,7 +245,7 @@ final class TerminalCore {
         return String(decoding: UnsafeBufferPointer(start: bytes, count: length), as: UTF8.self)
     }
 
-    private var tracksMouse: Bool {
+    var tracksMouse: Bool {
         var tracking = false
         return ghostty_terminal_get(handle, GHOSTTY_TERMINAL_DATA_MOUSE_TRACKING, &tracking) == GHOSTTY_SUCCESS && tracking
     }

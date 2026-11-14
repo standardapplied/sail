@@ -5,6 +5,12 @@ on:
   push:
     branches:
       - main
+  workflow_dispatch:
+    inputs:
+      record-goldens:
+        description: Draw the golden frames afresh and upload them for review, comparing none
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -104,3 +110,190 @@ jobs:
           name: sailkit-macos-probe-reports
           if-no-files-found: ignore
           path: ${{ runner.temp }}/reports
+
+  # Whether this change can affect the app lane: SailApp's whole input is under clients/ (its one
+  # dependency is ../SailKit by path) and this workflow. A job skipped by `if:` reports success,
+  # unlike a workflow-level path filter, so a required check is never left waiting. An unknown
+  # base (a new branch, a forced push) runs the lane.
+  changes:
+    name: What the change touches
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      app: ${{ steps.diff.outputs.app }}
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          fetch-depth: 0
+
+      - id: diff
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          if [[ $EVENT == workflow_dispatch ]] || ! git cat-file -e "${BASE}^{commit}" 2>/dev/null; then
+            echo "app=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          changed=$(git diff --name-only "$BASE" HEAD)
+          if grep -qE '^(clients/|\.github/workflows/clients\.yml$)' <<< "$changed"; then
+            echo "app=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "app=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  # The macOS app: the Metal device first; the renderer's goldens and the view's input tests; the
+  # preview driven against the pinned darwin sail's own local host; the D3 answer for spec 3; then
+  # the shipped bundle signed and notarized when the signing secrets exist, ad hoc otherwise.
+  app:
+    name: SailApp on macOS
+    needs: changes
+    if: needs.changes.outputs.app == 'true'
+    runs-on: macos-15
+    timeout-minutes: 45
+    defaults:
+      run:
+        working-directory: clients/SailApp
+    env:
+      DARWIN_SAIL_TAG: v0.68.0
+      DARWIN_SAIL_SHA256: bdae9ab430aecdefe6c4780fb8dacaa91838587b1f2215d361f31060c5f7f8d3
+      SIGNING: ${{ secrets.APPLE_CERTIFICATE != '' && secrets.APPLE_API_KEY_P8_BASE64 != '' }}
+      SAIL_FRAMES_OUT: ${{ runner.temp }}/frames
+      SAIL_RECORD_GOLDENS: ${{ inputs.record-goldens && '1' || '0' }}
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Xcode
+        run: sudo xcode-select --switch /Applications/Xcode_26.3.app
+
+      - name: A Metal device
+        run: |
+          cat > "$RUNNER_TEMP/device.swift" <<'SWIFT'
+          import Metal
+          guard let device = MTLCreateSystemDefaultDevice() else {
+              print("This runner has no Metal device. The app lane needs one: run it on GitHub's larger macOS runner (macos-15-xlarge).")
+              exit(1)
+          }
+          print("Metal device: \(device.name)")
+          SWIFT
+          swift "$RUNNER_TEMP/device.swift"
+          sw_vers -productVersion
+
+      - name: Keep SwiftPM's downloads
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: ~/Library/Caches/org.swift.swiftpm
+          key: swiftpm-app-${{ runner.os }}-${{ hashFiles('clients/SailKit/Package.swift', 'clients/SailApp/Package.swift') }}
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@398d4b0eeef1380460a10c8013a76f728fb906ac # v3
+
+      - name: The pinned darwin sail, checked by its checksum and its signature
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/sail"
+          gh release download "$DARWIN_SAIL_TAG" --repo "$GITHUB_REPOSITORY" --dir "$RUNNER_TEMP/sail" \
+            --pattern sail-darwin-arm64 --pattern sail-darwin-arm64.cosign.bundle
+          echo "$DARWIN_SAIL_SHA256  $RUNNER_TEMP/sail/sail-darwin-arm64" | shasum -a 256 -c -
+          cosign verify-blob --bundle "$RUNNER_TEMP/sail/sail-darwin-arm64.cosign.bundle" \
+            --certificate-identity-regexp '^https://github.com/standardapplied/sail/.github/workflows/release.yml@.*' \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com "$RUNNER_TEMP/sail/sail-darwin-arm64"
+          chmod +x "$RUNNER_TEMP/sail/sail-darwin-arm64"
+          echo "SAIL_BINARY=$RUNNER_TEMP/sail/sail-darwin-arm64" >> "$GITHUB_ENV"
+
+      - name: Build
+        run: swift build --build-tests
+
+      - name: Test
+        run: swift test
+
+      - name: Release build, the shipped app and the drive build
+        if: ${{ !cancelled() }}
+        run: |
+          swift build -c release
+          ci/bundle SailTerminalPreview "$RUNNER_TEMP/app/Sail Terminal Preview.app" "$SAIL_BINARY"
+          ci/bundle SailDrive "$RUNNER_TEMP/drive/Sail Terminal Preview.app" "$SAIL_BINARY" sh.standardapplied.sail.terminal-preview.drive
+          ci/sign "$RUNNER_TEMP/drive/Sail Terminal Preview.app"
+
+      - name: The bundled sail runs under the hardened runtime from inside the bundle
+        if: ${{ !cancelled() }}
+        run: |
+          selftest=$("$RUNNER_TEMP/drive/Sail Terminal Preview.app/Contents/Helpers/sail" _pty-selftest)
+          echo "$selftest"
+          grep -qx 'local-selftest: ok' <<< "$selftest"
+
+      - name: Drive the preview against this Mac's own host
+        if: ${{ !cancelled() }}
+        run: ci/drive "$RUNNER_TEMP/drive/Sail Terminal Preview.app" "$RUNNER_TEMP/drive-out"
+
+      # D3 of the plan: whether the control plane serves from the darwin binary in a temp data dir.
+      # The answer is reported for spec 3; it fails nothing.
+      - name: D3, the control plane on macOS (reported only)
+        if: ${{ !cancelled() }}
+        continue-on-error: true
+        run: |
+          mkdir -p "$RUNNER_TEMP/drive-out"
+          home=$(mktemp -d)
+          HOME=$home "$SAIL_BINARY" server start --port 7979 > "$RUNNER_TEMP/drive-out/d3-server.log" 2>&1 &
+          server=$!
+          answer="no answer within 60 s"
+          for _ in $(seq 1 60); do
+            if body=$(curl -fsS http://127.0.0.1:7979/v1/health 2>/dev/null); then answer="GET /v1/health answered: $body"; break; fi
+            sleep 1
+          done
+          kill "$server" 2>/dev/null || true
+          echo "D3: $answer" | tee "$RUNNER_TEMP/drive-out/d3.txt"
+
+      - name: Sign the shipped app
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+        run: ci/sign "$RUNNER_TEMP/app/Sail Terminal Preview.app"
+
+      - name: Notarize and staple
+        if: env.SIGNING == 'true'
+        env:
+          APPLE_API_KEY_P8_BASE64: ${{ secrets.APPLE_API_KEY_P8_BASE64 }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+        run: ci/notarize "$RUNNER_TEMP/app/Sail Terminal Preview.app" "$RUNNER_TEMP/Sail-Terminal-Preview-${GITHUB_SHA:0:8}.zip"
+
+      - name: Check the artifact is the real thing
+        run: |
+          app="$RUNNER_TEMP/app/Sail Terminal Preview.app"
+          codesign --verify --deep --strict --verbose=2 "$app"
+          codesign -d --verbose=2 "$app" 2>&1 | grep -E 'flags=.*runtime'
+          codesign -d --verbose=2 "$app/Contents/Helpers/sail" 2>&1 | grep -E 'flags=.*runtime'
+          test "$(plutil -extract CFBundleExecutable raw "$app/Contents/Info.plist")" = SailTerminalPreview
+          if strings "$app/Contents/MacOS/SailTerminalPreview" | grep -q SailDrive; then echo "the drive harness is in the shipped app" >&2; exit 1; fi
+          selftest=$("$app/Contents/Helpers/sail" _pty-selftest)
+          grep -qx 'local-selftest: ok' <<< "$selftest"
+          if [[ $SIGNING == true ]]; then
+            spctl -a -vv -t exec "$app" 2>&1 | tee /dev/stderr | grep -q 'source=Notarized Developer ID'
+            xcrun stapler validate "$app"
+          else
+            ditto -c -k --keepParent "$app" "$RUNNER_TEMP/Sail-Terminal-Preview-unsigned-${GITHUB_SHA:0:8}.zip"
+            echo "No signing secrets: the app is signed ad hoc and uploaded as unsigned."
+          fi
+
+      - name: Leave the app
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: Sail-Terminal-Preview-${{ env.SIGNING == 'true' && '' || 'unsigned-' }}${{ github.sha }}
+          path: ${{ runner.temp }}/Sail-Terminal-Preview-*.zip
+          retention-days: 14
+          if-no-files-found: error
+
+      - name: Leave the frames, the drive's images and reports
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: sailapp-frames-and-drive-${{ github.sha }}
+          if-no-files-found: ignore
+          retention-days: 14
+          path: |
+            ${{ runner.temp }}/frames
+            ${{ runner.temp }}/drive-out
+

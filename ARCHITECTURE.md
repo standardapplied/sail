@@ -3782,6 +3782,59 @@ against them before it is used. Both expose one module, `GhosttyVt`. The termina
   13 KiB outputs are fed back to back, and the loopback echo through both hosts
   (`sail-term-probe --bench` and its `measure` step, on Linux and macOS).
 
+### The terminal view on the Mac
+
+`clients/SailApp` is the macOS package (macOS 15, arm64, SailKit by path, no Xcode project). The
+part of the view that needs no Apple framework lives in SailKit's `SailSurface`, tested on Linux:
+cell metrics and the font ladder (10 to 32 pt, 15 by default, padding 10 and 8 pt), the instance
+layout of a frame (rows rebuilt only when the frame says they changed; selection inverted; the
+cursor block, bar, underline, or hollow without focus; composing text at the cursor), the glyph
+atlas's slots (cell-sized, packed in shelves, the side doubling to 8192, least recently used given
+up only once every frame that used it completed), the three instance buffers (`FrameLedger`), box
+drawing, blocks, underline styles and cursors drawn as pixel sprites, the Mac key-code table and
+the typing rules, pointer and wheel gestures, and the latency marks. `SailApp` holds the rest:
+`SailLook` (JetBrains Mono 2.304, vendored with its OFL and pinned by checksum, and the few Mast
+tokens the view uses), `SailRenderer` (Metal and Core Text, no AppKit), `SailTerminalView` (the
+`NSView`), `SailPreview` (the preview app), and two executables: `SailTerminalPreview`, shipped,
+and `SailDrive`, the drive harness, never shipped. `ci/bundle` assembles a `.app` from `swift build
+-c release` (the bundled `sail` in `Contents/Helpers`), `ci/sign` signs with the hardened runtime
+(Developer ID from a keychain made for the run and deleted after it, or ad hoc without the
+secrets), `ci/notarize` notarizes and staples, `ci/drive` runs the drive scripts.
+
+- **V1. Output shows on the next frame.** The session's screen tick resumes the view's display link;
+  the first refresh after reads the frame and draws it. Nothing holds output to batch it. A refresh
+  that finds nothing changed pauses the link.
+- **V2. One screen, one source.** The view draws only what `Screen.frame()` says and sends only what
+  the screen's encoders make; no source of the app spells an escape sequence (a sweep test).
+- **V3. Display-link changes happen on the main thread**, through one pacer that records each one.
+- **V4. Composition never leaks.** While text is marked no key is sent; the commit is sent once, as
+  itself. Dead keys and input methods go through `NSTextInputClient`, as Ghostty's view does.
+- **V5. A frame in flight is never written.** Frame `n` writes instance buffer `n % 3` only once the
+  frame that last read it completed, else it is not drawn this refresh; an atlas slot is reused only
+  once every frame that used it completed, and growing the atlas makes a new texture.
+- **V6. The artifact is the real thing**: signed with Developer ID and the hardened runtime,
+  notarized and stapled, the bundled `sail` signed the same way and running `_pty-selftest` from
+  inside the bundle; the drive build is never uploaded.
+- **V7. Secrets stay in CI's keychain**, made for the signing step and deleted when it ends.
+
+Input goes to the session on a serial queue of the view's, in order, never on the main thread,
+since a send waits for a slow host. Programs may not write the clipboard; it changes only on the
+person's ⌘C, and a paste that could run commands in a program that did not ask for pastes is asked
+about first, naming its line count. The renderer draws one render pass a frame: backgrounds, then
+glyphs and decorations from two atlases (one-channel coverage tinted per cell, and BGRA for emoji),
+each an instanced draw of pixel rectangles that read their atlas texels exactly. Grapheme
+clustering (mode 2027) stays off, so an emoji sequence draws one wide cell per member, as shells'
+`wcwidth` counts it.
+
+The `SailApp on macOS` job in `clients.yml` proves it on GitHub's standard `macos-15` runner, whose
+paravirtual Metal device renders offscreen and reads back exactly: the renderer's golden frames
+(every SailKit fixture at scale 2, dark and light; a pixel differs past 8 of 255 on a channel, a
+frame fails past 0.1% of its pixels, emoji 48 and 5%), the view's input tests with synthesized
+events, the preview driven against the pinned darwin `sail`'s local host with its latency budgets,
+and the bundle signed and checked. Goldens are recorded only by the workflow's `record-goldens`
+input, never by a pull request's run. The job runs only when `clients/` or the workflow changed
+(a job skipped by `if:` reports success, so no required check waits on it).
+
 ## Continuous integration
 
 One workflow, `.github/workflows/ci.yml`, runs on a pull request, on a push to main and on

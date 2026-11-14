@@ -1,0 +1,41 @@
+#!/usr/bin/env bash
+# Signs APP with the hardened runtime: the bundled sail first, then the app. With APPLE_CERTIFICATE
+# (a base64 p12), APPLE_CERTIFICATE_PASSWORD and APPLE_SIGNING_IDENTITY set, with that Developer
+# ID from a keychain made for this run and deleted when it ends; without them, ad hoc, so the
+# hardened runtime still applies to everything the lane runs.
+set -euo pipefail
+
+[[ $# -eq 1 ]] || { echo "usage: ci/sign APP" >&2; exit 2; }
+readonly app=$1
+[[ -d $app/Contents/Helpers ]] || { echo "ci/sign: $app is not a bundle ci/bundle made" >&2; exit 1; }
+
+identity=-
+timestamp=--timestamp=none
+keychain=()
+if [[ -n ${APPLE_CERTIFICATE:-} ]]; then
+  : "${APPLE_CERTIFICATE_PASSWORD:?ci/sign: APPLE_CERTIFICATE_PASSWORD is not set}"
+  : "${APPLE_SIGNING_IDENTITY:?ci/sign: APPLE_SIGNING_IDENTITY is not set}"
+  readonly temp=${RUNNER_TEMP:?ci/sign: RUNNER_TEMP is not set}
+  readonly chain=$temp/sail-signing.keychain-db
+  password=$(uuidgen)
+  security create-keychain -p "$password" "$chain"
+  trap 'security delete-keychain "$chain" 2>/dev/null || true' EXIT
+  security set-keychain-settings -lut 1800 "$chain"
+  security unlock-keychain -p "$password" "$chain"
+  (
+    umask 077
+    printf '%s' "$APPLE_CERTIFICATE" | base64 --decode > "$temp/signing.p12"
+  )
+  security import "$temp/signing.p12" -k "$chain" -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign >/dev/null
+  rm -f "$temp/signing.p12"
+  security set-key-partition-list -S apple-tool:,apple: -s -k "$password" "$chain" >/dev/null
+  security list-keychains -d user -s "$chain" $(security list-keychains -d user | tr -d '"')
+  identity=$APPLE_SIGNING_IDENTITY
+  timestamp=--timestamp
+  keychain=(--keychain "$chain")
+fi
+
+codesign --force --options runtime "$timestamp" ${keychain[@]+"${keychain[@]}"} --sign "$identity" "$app/Contents/Helpers/sail"
+codesign --force --options runtime "$timestamp" ${keychain[@]+"${keychain[@]}"} --sign "$identity" "$app"
+codesign --verify --deep --strict "$app"
+echo "ci/sign: $app signed $([[ $identity == - ]] && echo "ad hoc" || echo "with Developer ID")"

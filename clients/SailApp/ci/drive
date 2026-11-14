@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+# Runs the drive build against this Mac's own host: Tests/Drive/first.json, then the app quit and
+# opened again for Tests/Drive/second.json. Each run's images, texts and report land in OUT.
+set -euo pipefail
+
+[[ $# -eq 2 ]] || { echo "usage: ci/drive DRIVE_APP OUT" >&2; exit 2; }
+readonly app=$1 out=$2
+cd "$(dirname "$0")/.."
+readonly drive=$app/Contents/MacOS/SailDrive
+[[ -x $drive ]] || { echo "ci/drive: $app holds no SailDrive" >&2; exit 1; }
+
+for run in first second; do
+  echo "ci/drive: $run"
+  perl -e 'alarm shift; exec @ARGV' 600 "$drive" --drive "Tests/Drive/$run.json" --out "$out/$run"
+done
