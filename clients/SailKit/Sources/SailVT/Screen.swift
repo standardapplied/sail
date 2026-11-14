@@ -23,8 +23,12 @@ import Synchronization
 /// were waiting have taken the lock, then goes on. So a caller waits behind at most
 /// ``handOffEvery`` slices however many feeds follow back to back (`Mutex` alone would let the
 /// feeder take the lock straight back), and callers that come back as fast as they can still leave
-/// output the lock for that many slices between hand-offs. A caller waits blocked, never spinning,
-/// and with no feed running the gate is open. A `frame()` or `text()` with no output fed
+/// output the lock for that many slices between hand-offs. A caller waits blocked at the gate.
+/// Between two feeds the gate is open for an instant, so a caller that finds it open outside a
+/// hand-off takes the lock only once no feed has run for ``idleAfter``, and otherwise goes back to
+/// the gate: back-to-back feeds are one run to the callers, and with output stopped nobody waits
+/// longer than that. The feeding thread's own calls (a replay's start, the hold's remaining time)
+/// wait for nothing. A `frame()` or `text()` with no output fed
 /// since the last one, no feed running and nobody waiting takes the lock without announcing,
 /// when it is free.
 public final class Screen: Sendable {
@@ -36,6 +40,9 @@ public final class Screen: Sendable {
     /// 7.5 ms on a macOS runner, against a frame's 0.6 and 1.4 ms, and less than a 120 Hz frame's
     /// 8.3 ms, so a renderer drawing at that rate finds a hand-off due.
     public static let handOffEvery = 64
+    /// How long no feed must have run before a caller outside a hand-off takes the lock: longer
+    /// than the gap between back-to-back feeds, short against a key's 1 ms budget.
+    public static let idleAfter = Duration.microseconds(50)
     /// The largest pixel size of one cell this screen takes.
     public static let largestCellPixels = 4096
 
@@ -48,8 +55,14 @@ public final class Screen: Sendable {
     /// Slices fed so far, and at the last hand-off.
     private let slicesFed = Atomic<Int>(0)
     private let handedOffAt = Atomic<Int>(-handOffEvery)
-    /// Feeds running.
+    /// Feeds running, the thread that fed last, and nanoseconds from ``origin`` to the end of the
+    /// last feed.
     private let feeders = Atomic<Int>(0)
+    private let feederThread = Atomic<UInt>(0)
+    private let fedUntil = Atomic<Int>(Int.min / 2)
+    private let origin = ContinuousClock.now
+    /// The feeder is handing off now.
+    private let handingOff = Atomic<Bool>(false)
     /// Slices fed when the last frame or text was read.
     private let readAt = Atomic<Int>(-1)
     /// Hand-offs so far, which the tests bound.
@@ -88,8 +101,12 @@ public final class Screen: Sendable {
     /// Output is fed from one thread at a time, as it arrives in order: a second feed while a
     /// first runs is not handed the lock, and waits for the first to end.
     public func feed(_ bytes: [UInt8]) -> Effects {
+        feederThread.store(Self.thread(), ordering: .sequentiallyConsistent)
         feeders.add(1, ordering: .sequentiallyConsistent)
-        defer { feeders.subtract(1, ordering: .sequentiallyConsistent) }
+        defer {
+            fedUntil.store(elapsed(), ordering: .sequentiallyConsistent)
+            feeders.subtract(1, ordering: .sequentiallyConsistent)
+        }
         var effects = Effects()
         var start = 0
         while start < bytes.count {
@@ -288,9 +305,11 @@ public final class Screen: Sendable {
         let fed = slicesFed.load(ordering: .sequentiallyConsistent)
         let owed = waiting.load(ordering: .sequentiallyConsistent)
         let due = served.load(ordering: .sequentiallyConsistent) + owed
+        handingOff.store(true, ordering: .sequentiallyConsistent)
         while served.load(ordering: .sequentiallyConsistent) < due, waiting.load(ordering: .sequentiallyConsistent) > 0 {
             sched_yield()
         }
+        handingOff.store(false, ordering: .sequentiallyConsistent)
         handedOffAt.store(fed, ordering: .sequentiallyConsistent)
         handOffs.add(1, ordering: .sequentiallyConsistent)
     }
@@ -300,19 +319,54 @@ public final class Screen: Sendable {
             && waiting.load(ordering: .sequentiallyConsistent) > 0
     }
 
-    /// Runs `body` under the lock as an announced caller, through the gate, which the feeder opens
-    /// at its next hand-off.
+    /// Runs `body` under the lock as an announced caller: at the feeder's next hand-off, or once
+    /// no feed has run for ``idleAfter``; at once on the feeding thread.
     private func ahead<Value: Sendable, Failure: Error>(_ body: (Parts, Wait) throws(Failure) -> Value) throws(Failure) -> Value {
         let asked = ContinuousClock.now
         waiting.add(1, ordering: .sequentiallyConsistent)
         let fedBefore = slicesFed.load(ordering: .sequentiallyConsistent)
-        gate.withLock { _ in }
+        if feederThread.load(ordering: .sequentiallyConsistent) != Self.thread() {
+            awaitPassage()
+        }
         return try parts.withLock { (parts: inout Parts) throws(Failure) -> Value in
             waiting.subtract(1, ordering: .sequentiallyConsistent)
             served.add(1, ordering: .sequentiallyConsistent)
             let wait = Wait(time: ContinuousClock.now - asked, slices: slicesFed.load(ordering: .sequentiallyConsistent) - fedBefore, announced: true)
             return try body(parts, wait)
         }
+    }
+
+    /// Waits blocked at the gate while the feeder runs, and passes when it hands off, or once no feed
+    /// has run for ``idleAfter``.
+    private func awaitPassage() {
+        let idle = Self.nanoseconds(Self.idleAfter)
+        while true {
+            gate.withLock { _ in }
+            if handingOff.load(ordering: .sequentiallyConsistent) { return }
+            if feeders.load(ordering: .sequentiallyConsistent) == 0,
+               elapsed() - fedUntil.load(ordering: .sequentiallyConsistent) >= idle
+            {
+                return
+            }
+            sched_yield()
+        }
+    }
+
+    private func elapsed() -> Int {
+        Self.nanoseconds(ContinuousClock.now - origin)
+    }
+
+    private static func nanoseconds(_ duration: Duration) -> Int {
+        let (seconds, attoseconds) = duration.components
+        return Int(seconds) &* 1_000_000_000 &+ Int(attoseconds / 1_000_000_000)
+    }
+
+    private static func thread() -> UInt {
+        #if canImport(Darwin)
+        UInt(bitPattern: pthread_self())
+        #else
+        UInt(pthread_self())
+        #endif
     }
 
     /// A frame's or text's read: with no output fed since the last read, no feed running, nobody
