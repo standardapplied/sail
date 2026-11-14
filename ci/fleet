@@ -109,7 +109,8 @@ Usage:
                                 down all its groups), or every fleet VM when RUN is left out; exits 1
                                 naming what is left when a delete fails
 
-Each step logs to $FLEET_RUNS/RUN/ (default ~/.sail-fleet); report.txt holds one line per check.
+Each step logs to $FLEET_RUNS/RUN/ (default ~/.sail-fleet); report.txt holds one line per check,
+and how long each box's init took to install Incus.
 A scenario subcommand runs every check of the scenario on a standing fleet and exits 1 on a FAIL;
 run again, it gives what it creates a suffix of its attempt. Most scenarios run again on the
 fleet they ran on; not storage, which deletes its own disk, nor up, install, join or projects:
@@ -272,7 +273,7 @@ up() {
     wait "$pid" || failed=1
   done
   [[ $failed == 0 ]] || { echo "ci/fleet: a VM of $run was not created." >&2; return 1; }
-  date -u -d "+${MAX_RUN%h} hours" '+%H:%M UTC on %b %d' > "$(log_dir "$run")/expires"
+  note_expiry "$run"
   pids=""
   for box in $BOXES; do
     answers_ssh "$run" "$box" &
@@ -734,7 +735,8 @@ containers() {
 
 # In order, storage builds its template and workspaces from an acme that the loop gave a repo,
 # runtimes and an agent, and that files gave a shared file: on a fleet of its own it gets them
-# first, by the same checks, so the same provisioning is proven.
+# first, by the same checks, so the same provisioning is proven. access's fleet-skill is shared
+# and unshared again before storage in order, so there is no skill to give it.
 furnish() {
   local run=${1:-}
   [[ -n $run ]] || usage
@@ -1536,8 +1538,12 @@ loses_main() {
   gc compute instances delete "$(vm "$1" main)" --zone "$ZONE"
 }
 
+note_expiry() {
+  date -u -d "+${MAX_RUN%h} hours" '+%H:%M UTC on %b %d' > "$(log_dir "$1")/expires"
+}
+
 brings_up_main() {
-  create_vm "$1" main && answers_ssh "$1" main
+  create_vm "$1" main && note_expiry "$1" && answers_ssh "$1" main
 }
 
 pins_main() {
@@ -1617,6 +1623,10 @@ rebuilt() {
   check "$run" "the copy goes in place by the README, and migrate re-issues the API token" restores_copy "$run" "$copy"
   rm -f "$copy"
   check "$run" "spec list works on the new main" allowed "$run" main "sudo sail spec list --all-projects"
+  if [[ -s $(log_dir "$run")/loop-spec ]]; then
+    check "$run" "the restored main's measures of the loop's spec still count its reviews and build runs" \
+      measures_match_the_rows "$run" "$(cat "$(log_dir "$run")/loop-spec")"
+  fi
   check "$run" "main's roster is the copy's" roster "$run"
   for box in eng client observer; do
     check "$run" "$box pins the new main and checks its fingerprint" pins_main "$run" "$box" "$main_ip"
@@ -1846,6 +1856,7 @@ loop() {
   local run=${1:-} spec
   [[ -n $run ]] || usage
   spec="loop-$(date -u +%H%M%S)"
+  echo "$spec" > "$(log_dir "$run")/loop-spec"
   loop_config "$run"
   check "$run" "every node syncs twice" sync_all "$run"
   check "$run" "eng holds the forge token where only root reads it" place_secret "$run" eng fleet-github-token gh
