@@ -213,9 +213,9 @@ public final class TerminalRenderer {
             builtGeneration = store.generation
         }
         let instances = builder.build(frame, overlay: overlay, glyphs: store)
-        let glyphs = instances.glyphs + instances.decorations
-        guard let solidBuffer = write(instances.backgrounds, into: &buffers[slot.buffer].solids),
-              let glyphBuffer = write(glyphs, into: &buffers[slot.buffer].glyphs)
+        let glyphCount = instances.glyphs.count + instances.decorations.count
+        guard let solidBuffer = write([instances.backgrounds], into: &buffers[slot.buffer].solids),
+              let glyphBuffer = write([instances.glyphs, instances.decorations], into: &buffers[slot.buffer].glyphs)
         else { return false }
         let pass = MTLRenderPassDescriptor()
         guard let attachment = pass.colorAttachments[0] else { return false }
@@ -233,29 +233,34 @@ public final class TerminalRenderer {
             encoder.setVertexBytes(&viewport, length: MemoryLayout<SIMD2<Float>>.size, index: 1)
             encoder.drawPrimitives(type: .triangleStrip, vertexStart: 0, vertexCount: 4, instanceCount: instances.backgrounds.count)
         }
-        if !glyphs.isEmpty {
+        if glyphCount > 0 {
             encoder.setRenderPipelineState(glyphPipeline)
             encoder.setVertexBuffer(glyphBuffer, offset: 0, index: 0)
             encoder.setVertexBytes(&viewport, length: MemoryLayout<SIMD2<Float>>.size, index: 1)
             encoder.setFragmentTexture(store.alpha.texture, index: 0)
             encoder.setFragmentTexture(store.colour.texture, index: 1)
-            encoder.drawPrimitives(type: .triangleStrip, vertexStart: 0, vertexCount: 4, instanceCount: glyphs.count)
+            encoder.drawPrimitives(type: .triangleStrip, vertexStart: 0, vertexCount: 4, instanceCount: glyphCount)
         }
         encoder.endEncoding()
         return true
     }
 
-    /// Copies `instances` into the frame's buffer, made larger first when they do not fit. The
-    /// frame that last read this buffer has completed, so replacing or writing it is safe.
-    private func write<Instance>(_ instances: [Instance], into buffer: inout (any MTLBuffer)?) -> (any MTLBuffer)? {
-        let length = max(4096, instances.count * MemoryLayout<Instance>.stride)
+    /// Copies the parts one after another into the frame's buffer, made larger first when they do
+    /// not fit. The frame that last read this buffer has completed, so replacing or writing it is
+    /// safe.
+    private func write<Instance>(_ parts: [[Instance]], into buffer: inout (any MTLBuffer)?) -> (any MTLBuffer)? {
+        let length = max(4096, parts.reduce(0) { $0 + $1.count } * MemoryLayout<Instance>.stride)
         if buffer.map({ $0.length < length }) ?? true {
             buffer = device.makeBuffer(length: length.nextPowerOfTwo, options: .storageModeShared)
         }
         guard let buffer else { return nil }
-        instances.withUnsafeBytes { raw in
-            guard let base = raw.baseAddress else { return }
-            buffer.contents().copyMemory(from: base, byteCount: raw.count)
+        var offset = 0
+        for part in parts {
+            part.withUnsafeBytes { raw in
+                guard let base = raw.baseAddress else { return }
+                (buffer.contents() + offset).copyMemory(from: base, byteCount: raw.count)
+                offset += raw.count
+            }
         }
         return buffer
     }

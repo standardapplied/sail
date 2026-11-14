@@ -52,6 +52,82 @@ public enum AtlasItem: Hashable, Sendable {
         case let .glyph(_, _, wide), let .sprite(_, wide): wide
         }
     }
+
+    static let denseCount = 1400
+
+    /// A small number standing for the item when it is one of the common ones (a one-byte grapheme,
+    /// a box-drawing character, a line or a cursor), so a frame can remember its place in an array.
+    var denseIndex: Int? {
+        switch self {
+        case let .glyph(text, style, wide):
+            guard text.utf8.count == 1, let byte = text.utf8.first, byte < 0x80 else { return nil }
+            return (Int(byte) << 3) | (style.rawValue << 1) | (wide ? 1 : 0)
+        case let .sprite(sprite, wide):
+            return Self.denseIndex(of: sprite).map { 1024 + ($0 << 1) | (wide ? 1 : 0) }
+        }
+    }
+
+    private static func denseIndex(of sprite: Sprite) -> Int? {
+        switch sprite {
+        case let .box(scalar): (0x2500 ... 0x259F).contains(scalar) ? Int(scalar - 0x2500) : nil
+        case .underline(.none): 160
+        case .underline(.single): 161
+        case .underline(.double): 162
+        case .underline(.curly): 163
+        case .underline(.dotted): 164
+        case .underline(.dashed): 165
+        case .strikethrough: 166
+        case .overline: 167
+        case .cursor(.block): 168
+        case .cursor(.hollow): 169
+        case .cursor(.bar): 170
+        case .cursor(.underline): 171
+        }
+    }
+}
+
+/// The places one build has asked for. The first ask of an item in a frame marks it used by the
+/// frame, so every later cell with the same item takes the answer without a lookup: a full screen
+/// asks once per distinct item, not once per cell.
+struct PlaceMemo {
+    private var asked = [Bool](repeating: false, count: AtlasItem.denseCount)
+    private var dense = [GlyphPlace?](repeating: nil, count: AtlasItem.denseCount)
+    private var other: [AtlasItem: GlyphPlace?] = [:]
+
+    mutating func place(_ item: AtlasItem, glyphs: some GlyphSource) -> GlyphPlace? {
+        place(item, index: item.denseIndex, glyphs: glyphs)
+    }
+
+    mutating func place(_ item: AtlasItem, index: Int?, glyphs: some GlyphSource) -> GlyphPlace? {
+        if let index {
+            if !asked[index] {
+                asked[index] = true
+                dense[index] = glyphs.place(item)
+            }
+            return dense[index]
+        }
+        if let known = other[item] { return known }
+        let place = glyphs.place(item)
+        other[item] = place
+        return place
+    }
+}
+
+/// The distinct items one row uses, kept so a row drawn again from its cache marks them used.
+struct DistinctItems: Sendable {
+    private(set) var items: [AtlasItem] = []
+    private var dense = [Bool](repeating: false, count: AtlasItem.denseCount)
+    private var other: Set<AtlasItem> = []
+
+    mutating func add(_ item: AtlasItem, index: Int?) {
+        if let index {
+            guard !dense[index] else { return }
+            dense[index] = true
+        } else {
+            guard other.insert(item).inserted else { return }
+        }
+        items.append(item)
+    }
 }
 
 /// Where a glyph source drew an item, and in which atlas.
@@ -107,7 +183,7 @@ public struct InstanceBuilder: Sendable {
         var backgrounds: [SolidInstance] = []
         var glyphs: [GlyphInstance] = []
         var decorations: [GlyphInstance] = []
-        var items: [AtlasItem] = []
+        var items = DistinctItems()
     }
 
     public init(metrics: CellMetrics) {
@@ -134,17 +210,18 @@ public struct InstanceBuilder: Sendable {
         }
         size = frame.size
         rebuilt = []
+        var memo = PlaceMemo()
         for y in frame.rows.indices {
-            if dirty.contains(y) || !rows[y].items.allSatisfy({ glyphs.place($0) != nil }) {
-                rows[y] = layout(row: frame.rows[y], at: y, defaults: frame.colors, glyphs: glyphs)
+            if dirty.contains(y) || !rows[y].items.items.allSatisfy({ memo.place($0, glyphs: glyphs) != nil }) {
+                rows[y] = layout(row: frame.rows[y], at: y, defaults: frame.colors, memo: &memo, glyphs: glyphs)
                 rebuilt.append(y)
             }
         }
         var instances = FrameInstances(
             clear: Self.color(frame.colors.background),
-            backgrounds: rows.flatMap(\.backgrounds),
-            glyphs: rows.flatMap(\.glyphs),
-            decorations: rows.flatMap(\.decorations)
+            backgrounds: Self.joined(rows.map(\.backgrounds)),
+            glyphs: Self.joined(rows.map(\.glyphs)),
+            decorations: Self.joined(rows.map(\.decorations))
         )
         if overlay.marked.isEmpty {
             instances.decorations += cursor(frame, focused: overlay.focused, glyphs: glyphs)
@@ -154,7 +231,9 @@ public struct InstanceBuilder: Sendable {
         return instances
     }
 
-    private func layout(row: ScreenFrame.Row, at y: Int, defaults: DefaultColors, glyphs: some GlyphSource) -> RowInstances {
+    private func layout(
+        row: ScreenFrame.Row, at y: Int, defaults: DefaultColors, memo: inout PlaceMemo, glyphs: some GlyphSource
+    ) -> RowInstances {
         var laid = RowInstances()
         for (x, cell) in row.cells.enumerated() {
             let (foreground, background) = cell.selected ? (cell.background, cell.foreground) : (cell.foreground, cell.background)
@@ -172,24 +251,24 @@ public struct InstanceBuilder: Sendable {
             guard cell.width == .narrow || cell.width == .wide else { continue }
             let wide = cell.width == .wide
             let ink = Self.color(foreground)
-            if !cell.attributes.contains(.invisible), let item = Self.item(for: cell.grapheme, style: FontStyle(cell.attributes), wide: wide),
-               let place = glyphs.place(item)
-            {
-                laid.items.append(item)
-                laid.glyphs.append(GlyphInstance(rect: rect(origin, cells: wide ? 2 : 1), slot: Self.origin(place.slot), colour: place.colour, color: ink))
+            let area = rect(origin, cells: wide ? 2 : 1)
+            if !cell.attributes.contains(.invisible), let item = Self.item(for: cell.grapheme, style: FontStyle(cell.attributes), wide: wide) {
+                let index = item.denseIndex
+                if let place = memo.place(item, index: index, glyphs: glyphs) {
+                    laid.items.add(item, index: index)
+                    laid.glyphs.append(GlyphInstance(rect: area, slot: Self.origin(place.slot), colour: place.colour, color: ink))
+                }
             }
-            var lines: [(Sprite, SIMD4<Float>)] = []
-            if cell.underline != .none {
-                lines.append((.underline(cell.underline), cell.underlineColor.map(Self.color) ?? ink))
-            }
-            if cell.attributes.contains(.strikethrough) { lines.append((.strikethrough, ink)) }
-            if cell.attributes.contains(.overline) { lines.append((.overline, ink)) }
-            for (sprite, color) in lines {
+            func line(_ sprite: Sprite, _ color: SIMD4<Float>) {
                 let item = AtlasItem.sprite(sprite, wide: wide)
-                guard let place = glyphs.place(item) else { continue }
-                laid.items.append(item)
-                laid.decorations.append(GlyphInstance(rect: rect(origin, cells: wide ? 2 : 1), slot: Self.origin(place.slot), colour: false, color: color))
+                let index = item.denseIndex
+                guard let place = memo.place(item, index: index, glyphs: glyphs) else { return }
+                laid.items.add(item, index: index)
+                laid.decorations.append(GlyphInstance(rect: area, slot: Self.origin(place.slot), colour: false, color: color))
             }
+            if cell.underline != .none { line(.underline(cell.underline), cell.underlineColor.map(Self.color) ?? ink) }
+            if cell.attributes.contains(.strikethrough) { line(.strikethrough, ink) }
+            if cell.attributes.contains(.overline) { line(.overline, ink) }
         }
         return laid
     }
@@ -252,6 +331,16 @@ public struct InstanceBuilder: Sendable {
     static func item(for grapheme: String, style: FontStyle, wide: Bool) -> AtlasItem? {
         guard !grapheme.isEmpty, grapheme != " " else { return nil }
         return Sprite.drawing(grapheme).map { .sprite($0, wide: wide) } ?? .glyph(grapheme, style, wide: wide)
+    }
+
+    /// The arrays one after another, in one allocation.
+    static func joined<Element>(_ parts: [[Element]]) -> [Element] {
+        var all: [Element] = []
+        all.reserveCapacity(parts.reduce(0) { $0 + $1.count })
+        for part in parts {
+            all.append(contentsOf: part)
+        }
+        return all
     }
 
     static func origin(_ slot: AtlasSlot) -> SIMD2<Float> {

@@ -20,6 +20,24 @@ import Testing
         #expect(builder.rebuilt.isEmpty)
     }
 
+    /// A frame asks the glyph source once per distinct item, however many cells use it, and a frame
+    /// that lays nothing out still asks for every item its cached rows show, so each stays marked
+    /// used by the frames that draw it (V5).
+    @Test func eachDistinctItemIsAskedOncePerFrameCachedRowsIncluded() throws {
+        let screen = try screen(10, 2).fed("aaaaaaaaaa\u{1b}[4mbb\u{1b}[?25l")
+        var builder = try InstanceBuilder(metrics: metrics(points: 15))
+        let glyphs = Glyphs()
+        _ = builder.build(try screen.frame(), overlay: Overlay(), glyphs: glyphs)
+        let first = glyphs.asked
+        #expect(first.filter { $0 == .glyph("a", .regular, wide: false) }.count == 1)
+        #expect(first.filter { $0 == .sprite(.underline(.single), wide: false) }.count == 1)
+        glyphs.forget()
+        _ = builder.build(try screen.frame(), overlay: Overlay(), glyphs: glyphs)
+        #expect(builder.rebuilt.isEmpty)
+        #expect(Set(glyphs.asked) == Set(first), "the cached rows' items are asked again, once each")
+        #expect(glyphs.asked.count == Set(first).count)
+    }
+
     @Test func invalidatingLaysOutEveryRowAgain() throws {
         let screen = try screen(10, 2).fed("ab")
         var builder = try InstanceBuilder(metrics: metrics(points: 15))

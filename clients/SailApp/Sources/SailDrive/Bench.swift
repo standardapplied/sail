@@ -16,6 +16,7 @@ enum Bench {
         let screen = try Screen(size: grid, scrollbackBytes: 1 << 20, palette: .dark)
         let size = pixels(renderer.metrics)
         var timings: [Double] = []
+        var reads: [Double] = []
         for round in 0 ..< 65 {
             var text = "\u{1b}[H"
             for row in 0 ..< grid.rows {
@@ -27,8 +28,10 @@ enum Bench {
             let read = ContinuousClock.now - started
             _ = try renderer.image(of: frame, overlay: Overlay(), size: size)
             timings.append(milliseconds(read + renderer.lastEncodeTime))
+            reads.append(milliseconds(read))
         }
         let warm = Array(timings.dropFirst(5)).sorted()
+        let warmReads = Array(reads.dropFirst(5)).sorted()
 
         let fresh = try TerminalRenderer(fonts: TerminalFonts(directory: fonts), points: 15, scale: 2)
         let wide = try Screen(size: grid, scrollbackBytes: 1 << 20, palette: .dark)
@@ -40,6 +43,7 @@ enum Bench {
             "full redraw 200x60 cpu p50 ms": warm[warm.count / 2],
             "full redraw 200x60 cpu p95 ms": warm[Int((0.95 * Double(warm.count)).rounded(.up)) - 1],
             "full redraw 200x60 cpu max ms": warm.last ?? 0,
+            "of which reading the frame p95 ms": warmReads[Int((0.95 * Double(warmReads.count)).rounded(.up)) - 1],
             "first CJK frame cpu ms": milliseconds(fresh.lastEncodeTime),
             "first CJK frame atlas bytes": Double(fresh.atlasUploadBytes - before),
         ]

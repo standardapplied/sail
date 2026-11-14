@@ -309,33 +309,3 @@ jobs:
           path: |
             ${{ runner.temp }}/frames
             ${{ runner.temp }}/drive-out
-
-  mutants:
-    name: SailApp mutants (temporary)
-    needs: changes
-    if: needs.changes.outputs.app == 'true'
-    runs-on: macos-15
-    timeout-minutes: 30
-    defaults:
-      run:
-        working-directory: clients/SailApp
-    env:
-      DARWIN_SAIL_TAG: v0.68.0
-      DARWIN_SAIL_SHA256: bdae9ab430aecdefe6c4780fb8dacaa91838587b1f2215d361f31060c5f7f8d3
-    steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-      - run: sudo xcode-select --switch /Applications/Xcode_26.3.app
-      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
-        with:
-          path: ~/Library/Caches/org.swift.swiftpm
-          key: swiftpm-app-${{ runner.os }}-${{ hashFiles('clients/SailKit/Package.swift', 'clients/SailApp/Package.swift') }}
-      - env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          mkdir -p "$RUNNER_TEMP/sail"
-          gh release download "$DARWIN_SAIL_TAG" --repo "$GITHUB_REPOSITORY" --dir "$RUNNER_TEMP/sail" --pattern sail-darwin-arm64
-          echo "$DARWIN_SAIL_SHA256  $RUNNER_TEMP/sail/sail-darwin-arm64" | shasum -a 256 -c -
-          chmod +x "$RUNNER_TEMP/sail/sail-darwin-arm64"
-          echo "SAIL_BINARY=$RUNNER_TEMP/sail/sail-darwin-arm64" >> "$GITHUB_ENV"
-      - run: ci/mutants
-
