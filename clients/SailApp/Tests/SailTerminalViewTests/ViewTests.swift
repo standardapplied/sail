@@ -376,6 +376,7 @@ import Testing
     /// it waits, and the window being seen again resumes it.
     @Test func noDrawablePausesTheLinkUntilTheWindowIsSeenAgain() throws {
         let harness = try Harness()
+        harness.view.isOnScreen = { _ in true }
         harness.tick()
         harness.tick()
         try #require(harness.clock.isPaused)
@@ -390,7 +391,6 @@ import Testing
         harness.view.drawNowIfIdle()
         #expect(harness.view.latency.refresh.count == refreshes, "output did not ask for a drawable again")
         #expect(harness.clock.isPaused)
-        #expect(harness.window.occlusionState.contains(.visible), "the test window is on screen")
         NotificationCenter.default.post(name: NSWindow.didChangeOcclusionStateNotification, object: harness.window)
         #expect(!harness.clock.isPaused, "the window seen again resumed the link")
         harness.view.nextDrawable = { $0.nextDrawable() }

@@ -37,6 +37,8 @@ public final class TerminalView: NSView {
     var pointer = Pointer()
     /// The layer's next drawable; a test hands out none.
     var nextDrawable: (CAMetalLayer) -> (any CAMetalDrawable)? = { $0.nextDrawable() }
+    /// Whether a window is on screen; a test, whose windows the window server never shows, says.
+    var isOnScreen: (NSWindow) -> Bool = { $0.occlusionState.contains(.visible) }
     /// The last refresh found no drawable.
     private var awaitingDrawable = false
     /// The cell the pointer last moved into with no button held.
@@ -291,7 +293,7 @@ public final class TerminalView: NSView {
     private func drawableUnavailable() {
         awaitingDrawable = true
         pacer.pause()
-        guard window?.occlusionState.contains(.visible) == true else { return }
+        guard let window, isOnScreen(window) else { return }
         DispatchQueue.main.asyncAfter(deadline: .now() + Self.drawableRetry) { [weak self] in
             MainActor.assumeIsolated {
                 guard let self, self.awaitingDrawable else { return }
@@ -308,7 +310,7 @@ public final class TerminalView: NSView {
 
     /// The window was seen again: a view that paused for want of a drawable asks for one again.
     @objc private func visibilityChanged() {
-        guard awaitingDrawable, window?.occlusionState.contains(.visible) == true else { return }
+        guard awaitingDrawable, let window, isOnScreen(window) else { return }
         needFrame()
     }
 
