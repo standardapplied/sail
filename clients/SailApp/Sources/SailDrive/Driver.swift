@@ -232,9 +232,10 @@ final class Driver {
     /// output to frame committed p50 ≤ 1 refresh and p95 ≤ 2; output to glass p50 ≤ 2 and p95 ≤ 3.
     private func measure(_ keys: Int, interval: Int, name: String) async -> (Bool, String) {
         terminal.resetLatency()
-        for _ in 0 ..< keys {
+        let start = ContinuousClock.now
+        for index in 1 ... max(1, keys) {
             key("x")
-            try? await Task.sleep(for: .milliseconds(interval))
+            try? await Task.sleep(until: start + .milliseconds(interval * index), clock: .continuous)
         }
         try? await Task.sleep(for: .milliseconds(500))
         let figures = terminal.latency

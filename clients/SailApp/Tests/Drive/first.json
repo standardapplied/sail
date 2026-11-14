@@ -37,7 +37,7 @@
   {"name": "pasted", "line": "pasted-3", "seconds": 10},
   {"name": "flood-latency-from-zero", "resetLatency": true},
   {"name": "flood", "type": "clear; head -c 20971520 /dev/zero | tr '\\0' x | fold -w 150; echo flood-$((1+1))\r"},
-  {"name": "flood-done", "line": "flood-2", "after": "xxxxxxxxxxxxxxxxxxxx", "seconds": 180},
+  {"name": "flood-done-its-last-20-bytes-then-the-marker", "line": "xxxxxxxxxxxxxxxxxxxxflood-2", "seconds": 180},
   {"name": "flood-frames", "gapUnder": 100},
   {"name": "kill-host", "killHost": true},
   {"name": "host-restarted", "banner": "The host restarted", "seconds": 40},
