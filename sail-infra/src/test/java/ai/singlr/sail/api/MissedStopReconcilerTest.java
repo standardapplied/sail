@@ -486,26 +486,69 @@ class MissedStopReconcilerTest {
     assertEquals(List.of("test-project", "test-project"), asked);
   }
 
+  /** A stopped container answers without running the tidy: it is asked again on a later pass. */
   @Test
-  void aPassAsksOnlyTheContainersARunStartedOrFinishedInSinceTheLastOne() {
+  void aStoppedContainerIsAskedAgainOnALaterPass() {
+    session(null, "node-a", "adhoc");
+    var asked = new AtomicInteger();
+    var stopped =
+        new ShellExec() {
+          @Override
+          public Result exec(List<String> command) {
+            if (command.stream().anyMatch(arg -> arg.contains("launch.env"))) {
+              asked.incrementAndGet();
+            }
+            return new Result(1, "", "Error: Instance is not running");
+          }
+
+          @Override
+          public Result exec(List<String> command, Path workDir, Duration timeout) {
+            return exec(command);
+          }
+
+          @Override
+          public boolean isDryRun() {
+            return false;
+          }
+        };
+    var clock = new ManualClock(Instant.now().plus(Duration.ofMinutes(10)), Duration.ofMinutes(10));
+    var reconciler = reconciler(MissedStopReconciler.systemdUnitProbe(stopped), clock::instant);
+
+    reconciler.removeLeftovers();
+    clock.advance(Duration.ofMinutes(10));
+    reconciler.removeLeftovers();
+
+    assertEquals(2, asked.get());
+  }
+
+  /**
+   * A container is asked on every pass until one runs more than two minutes after its last run
+   * finished, so a launch file too young for the tidy's one-minute age filter on one pass is
+   * removed on a later one.
+   */
+  @Test
+  void aContainerIsAskedUntilAPassRunsTwoMinutesAfterItsLastRunFinished() {
     var run = session(null, "node-a", "adhoc");
-    var asked = new ArrayList<String>();
+    Acting.system(() -> TestRuns.complete(sessionStore, run, "failed", 1));
+    var finished = sessionStore.findById(run).orElseThrow().completedAt();
+    var clock = new ManualClock(finished.plusSeconds(30), Duration.ofMinutes(4));
+    var asked = new ArrayList<Duration>();
     var probe =
         new CountingProbe(true) {
           @Override
           public void removeLaunchFiles(String project, List<String> liveRuns) {
-            asked.add(project + " " + liveRuns);
+            asked.add(Duration.between(finished, clock.instant()));
           }
         };
-    var reconciler = reconciler(probe, Instant::now);
+    var reconciler = reconciler(probe, clock::instant);
 
-    reconciler.removeLeftovers();
-    reconciler.removeLeftovers();
-    Acting.system(() -> TestRuns.complete(sessionStore, run, "failed", 1));
-    reconciler.removeLeftovers();
-    reconciler.removeLeftovers();
+    for (var pass = 0; pass < 4; pass++) {
+      reconciler.removeLeftovers();
+      clock.advance(Duration.ofMinutes(1));
+    }
 
-    assertEquals(List.of("test-project [" + run + "]", "test-project []"), asked);
+    assertEquals(
+        List.of(Duration.ofSeconds(30), Duration.ofSeconds(90), Duration.ofSeconds(150)), asked);
   }
 
   @Test

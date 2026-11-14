@@ -90,6 +90,13 @@ public final class MissedStopReconciler implements AutoCloseable {
    */
   public static final Duration LAUNCH_GRACE = Duration.ofMinutes(2);
 
+  /**
+   * How far before each pass the next one still asks a container a run started or finished in:
+   * further back than the launch-file tidy's one-minute age filter, so a file too young to remove
+   * on one pass is seen again on a later one.
+   */
+  static final Duration TIDY_LOOKBACK = Duration.ofMinutes(2);
+
   private static final SpecStore.SpecFilter IN_PROGRESS =
       new SpecStore.SpecFilter(null, "in_progress", null, null, null);
 
@@ -119,7 +126,8 @@ public final class MissedStopReconciler implements AutoCloseable {
 
     /**
      * Removes from {@code project}'s container the launch file of every run not in {@code live}
-     * ({@link AgentSession#removeLaunchFiles}); nothing, by default.
+     * ({@link AgentSession#removeLaunchFiles}), throwing when the container did not run it;
+     * nothing, by default.
      */
     default void removeLaunchFiles(String project, List<String> live) throws Exception {}
   }
@@ -167,7 +175,7 @@ public final class MissedStopReconciler implements AutoCloseable {
     this.coverage = coverage;
     this.localHandle = localHandle;
     this.clock = clock;
-    this.fdes = fdes;
+    this.fdes = Objects.requireNonNull(fdes, "fdes");
     this.strandedReviews =
         new StrandedReviewRescue(
             specStore,
@@ -230,7 +238,9 @@ public final class MissedStopReconciler implements AutoCloseable {
 
       @Override
       public void removeLaunchFiles(String project, List<String> live) throws Exception {
-        agentSession.removeLaunchFiles(project, live);
+        if (!agentSession.removeLaunchFiles(project, live)) {
+          throw new IOException("Container '" + project + "' did not tidy its launch files.");
+        }
       }
     };
   }
@@ -298,10 +308,10 @@ public final class MissedStopReconciler implements AutoCloseable {
    * not live, which a launch that died before its wrapper read it left in its container (HL4), and
    * the logins of every person the roster no longer holds, which a removal that crashed before
    * deleting them left on this runner (HL9), and what a push killed midway left in the host's
-   * staging directory. Only a container that had a run start or finish since the last pass is asked
-   * (every one, on the first pass after a start): a launch that dies leaves its file with a run
-   * that finishes, by its launch's cleanup or by this sweep. A container that does not answer is
-   * tried again on a later pass.
+   * staging directory. Only a container that had a run start or finish since {@link #TIDY_LOOKBACK}
+   * before the last pass is asked (every one, on the first pass after a start): a launch that dies
+   * leaves its file with a run that finishes, by its launch's cleanup or by this sweep. A container
+   * that does not answer, or does not run the tidy (a stopped one), is tried again on a later pass.
    */
   void removeLeftovers() {
     var pass = clock.get();
@@ -319,14 +329,12 @@ public final class MissedStopReconciler implements AutoCloseable {
       }
     }
     if (tidied) {
-      tidiedSince = pass;
+      tidiedSince = pass.minus(TIDY_LOOKBACK);
     }
     ContainerFilePush.removeStaged(Duration.ofMinutes(1));
-    if (fdes != null) {
-      var swept = fdes.logins().sweep(id -> fdes.byId(id).isPresent());
-      if (swept > 0) {
-        System.err.println("  [reconcile] removed the logins of " + swept + " people removed");
-      }
+    var swept = fdes.logins().sweep(id -> fdes.byId(id).isPresent());
+    if (swept > 0) {
+      System.err.println("  [reconcile] removed the logins of " + swept + " people removed");
     }
   }
 

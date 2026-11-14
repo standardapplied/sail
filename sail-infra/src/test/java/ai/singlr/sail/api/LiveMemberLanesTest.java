@@ -87,7 +87,13 @@ class LiveMemberLanesTest {
             "Bash(cd:*)",
             "--disallowedTools",
             "Bash(spec *--body-file*)",
-            "Bash(spec *--plan-file*)"),
+            "Bash(spec *--plan-file*)",
+            "Bash(printenv:*)",
+            "Bash(env:*)",
+            "Bash(set:*)",
+            "Bash(export:*)",
+            "Bash(declare:*)",
+            "Read(//proc/**)"),
         started.command());
     assertEquals("/home/dev/workspace", started.workDir());
     assertEquals("room", run.role());

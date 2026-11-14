@@ -52,7 +52,9 @@ public final class AgentLoginCommand implements Runnable {
   @Option(names = "--name", description = "The login's name (default: default).")
   private String name;
 
-  @Option(names = "--kind", description = "The login's kind: token or api-key.")
+  @Option(
+      names = "--kind",
+      description = "The login's kind: token or api-key for claude-code, api-key for codex.")
   private String kind;
 
   @Option(names = "--json", description = "Output in JSON format.")
