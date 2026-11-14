@@ -16,6 +16,7 @@ import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.Engagement;
 import ai.singlr.sail.config.Roster;
 import ai.singlr.sail.config.SpecStatus;
+import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.engine.ConnectEnvironment;
 import ai.singlr.sail.engine.ContainerSailSetup;
 import ai.singlr.sail.engine.ProjectSkillInstaller;
@@ -27,6 +28,7 @@ import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.Actors;
 import ai.singlr.sail.identity.Role;
+import ai.singlr.sail.store.Decidability;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.HeldProjects;
 import ai.singlr.sail.store.MessageStore;
@@ -36,9 +38,11 @@ import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
+import ai.singlr.sail.store.Standing;
 import ai.singlr.sail.store.TestLogins;
 import ai.singlr.sail.store.TestRuns;
 import ai.singlr.sail.sync.NodeRound;
+import ai.singlr.sail.sync.Settlement;
 import ai.singlr.sail.sync.SyncBox;
 import ai.singlr.sail.sync.SyncWire;
 import ai.singlr.sail.sync.SyncedEntities;
@@ -608,6 +612,69 @@ class RoomWakeLaunchTest {
     assertThrows(ApiException.class, () -> dispatchAsThePerson(anotherProcess(liveAgentShell())));
 
     assertEquals(2, sailLines("auth").size(), "a run started since, so it is said again");
+  }
+
+  /**
+   * On a node, Sail posts only what its own sync keeps: with no run of the box's FDE in the
+   * conversation the refusal is not posted at all (the person is told on their terminal) and the
+   * next round withdraws nothing; with one, it is posted once and the next round keeps it.
+   */
+  @Test
+  void onANodeTheRefusalIsPostedOnlyWhereItsOwnSyncWouldKeepIt() throws Exception {
+    var first = operations(liveAgentShell());
+    createSpec(HANDLE, "auth", HANDLE);
+    var fdes = new FdeStore(db);
+    fdes.logins().forget(fdes.byHandle(HANDLE).orElseThrow().id());
+    var node = new SyncConfig(SyncConfig.ROLE_NODE, "main.example", HANDLE);
+
+    var refused =
+        assertThrows(
+            ApiException.class,
+            () -> dispatchAsThePerson(anotherProcess(liveAgentShell()).useBox(() -> node)));
+
+    assertEquals(ErrorCode.LOGIN_NOT_STORED, refused.failure().errorCode());
+    assertEquals(List.of(), sailLines("auth"), "no run of uday here supports a post");
+    assertEquals(List.of(), withdrawnMessages(), "and the next round withdraws nothing");
+    var unsupported =
+        Acting.system(() -> messageStore.append("auth", MessageStore.SAIL_AUTHOR, "probe", null));
+    assertTrue(
+        messageStore.standingOnNode("auth", MessageStore.SAIL_AUTHOR, HANDLE)
+            instanceof Standing.Gone);
+    assertTrue(
+        withdrawnMessages().stream().anyMatch(settled -> settled.contains(unsupported.id())),
+        "the rule asked is the one the round withdraws by");
+
+    Acting.system(
+        () ->
+            runStore.reserveDispatch(
+                DateTimeUtils.newId().toString(),
+                "acme",
+                "auth",
+                HANDLE,
+                "build",
+                List.of(),
+                "claude-code",
+                null,
+                "task",
+                "/tmp/r.log",
+                "sail-agent-r"));
+    assertThrows(
+        ApiException.class,
+        () -> dispatchAsThePerson(anotherProcess(liveAgentShell()).useBox(() -> node)));
+
+    assertEquals(1, sailLines("auth").size(), "a run of uday here supports it");
+    assertEquals(List.of(), withdrawnMessages(), "and the next round keeps it");
+    assertEquals(1, sailLines("auth").size());
+    assertNotNull(first);
+  }
+
+  /** The messages the node's next settlement round withdraws. */
+  private List<String> withdrawnMessages() {
+    return new Settlement(db, Decidability.onNode(db), HANDLE)
+        .settle().stream()
+            .filter(settled -> "message".equals(settled.type()))
+            .map(Object::toString)
+            .toList();
   }
 
   /** Operations over this test's database as a second process, or a restarted one, opens them. */

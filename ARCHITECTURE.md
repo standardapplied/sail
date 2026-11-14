@@ -3711,9 +3711,10 @@ no pairing is removed through the gateway as before, and no key file is touched.
     dispatch is refused so, `RunLogins.forRun` says it once in the spec's room with the same
     remedy, once per spec per cause until a run of that spec starts with a login. The line is
     posted as this box's machinery (`Actor.system`), whoever's request met the refusal, as the
-    loop narrates. On a node the message is posted locally and reaches main as any node narration
-    does, so for a spec with no run on that node it stays on the node (the person who asked is
-    told on their terminal). No other narration
+    loop narrates. It is posted only where it would stand: on main, and on a node holding a run of
+    its FDE in that conversation, it is posted once; on a node with none, where its own sync would
+    withdraw it (`MessageStore.standingOnNode`, the rule that sync settles posts by), it is not
+    posted at all, and the person who asked is told on their terminal. No other narration
     quotes the refusal: a refused review, fix or resume leaves the loop owed what it was
     (`RunLogins.wantsALogin`), and storing a login, or making one the default
     (`LoopTrigger.LoginStored`), takes that step on the box that drives the loop: the reviewer of a
@@ -3763,7 +3764,8 @@ no pairing is removed through the gateway as before, and no key file is touched.
     defence is the harness's own permission rules: a read-only room member runs no command but
     the `spec` subcommands it uses (`show`, `list`, `board`, `comments`, `comment`, `whoami`) and
     `cd`, never with `spec`'s file-reading flags (`--body-file`, `--plan-file`, refused anywhere in
-    a command), reads outside its workspace only on approval it cannot get, and is denied
+    a command, so a room reply whose command line merely mentions `--body-file` is refused too and
+    the agent rephrases it), reads outside its workspace only on approval it cannot get, and is denied
     `launch.env`; a full-permission run has no such rule. Neither harness can hide the variable from the commands
     it runs here: Claude Code's `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB` and Codex's sandbox both need
     bubblewrap, which needs unprivileged user namespaces, and an Incus container on an Ubuntu 24.04

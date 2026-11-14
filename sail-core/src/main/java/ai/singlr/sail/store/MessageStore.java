@@ -363,6 +363,19 @@ public final class MessageStore implements ConflictResolver, SyncedStore {
   }
 
   /**
+   * How a node's own sync would stand a post {@code author} writes in {@code roomId} now on this
+   * box, whose FDE is {@code boxHandle}: the rule its sync settles every post by ({@link
+   * Decidability#onNode}), so a post that stands {@link Standing.Gone} is one that sync withdraws
+   * at its next round.
+   */
+  public Standing standingOnNode(String roomId, String author, String boxHandle) {
+    var post = new LinkedHashMap<String, Object>();
+    post.put("room_id", roomId);
+    post.put("author", author);
+    return Decidability.onNode(db).standing(ENTITY, "unposted", post, boxHandle);
+  }
+
+  /**
    * The newest message {@code author} posted in {@code roomId}, by mint order, or empty for none.
    */
   public Optional<MessageRow> newestBy(String roomId, String author) {

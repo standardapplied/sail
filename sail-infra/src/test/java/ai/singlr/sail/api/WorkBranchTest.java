@@ -77,6 +77,30 @@ class WorkBranchTest {
   }
 
   @Test
+  void aBranchIsSaidToBeCreatedOnlyWhereARepoLacksItAndNeverWithNoBranch() throws Exception {
+    var main = Files.createDirectories(tempDir.resolve("app"));
+    git(main, "init", "-q", "-b", "main");
+    git(
+        main,
+        "-c",
+        "user.email=t@t",
+        "-c",
+        "user.name=t",
+        "commit",
+        "-q",
+        "--allow-empty",
+        "-m",
+        "c");
+    var config = TestDefinitions.map(Map.of("name", "acme"));
+    var reads = new WorkBranch(new LocalGit(tempDir), DispatchOperations.Listener.NONE);
+    var repos = WorkBranch.repos(config, "app");
+
+    assertTrue(reads.wouldCreate("acme", repos, "sail/new"));
+    assertFalse(reads.wouldCreate("acme", repos, "main"), "the repo has it");
+    assertFalse(reads.wouldCreate("acme", repos, null), "no work branch is none to create");
+  }
+
+  @Test
   void aDirectoryGitSaysIsNoWorkTreeGetsNoBranch() throws Exception {
     var main = Files.createDirectories(tempDir.resolve("app"));
     git(main, "init", "-q", "-b", "main");

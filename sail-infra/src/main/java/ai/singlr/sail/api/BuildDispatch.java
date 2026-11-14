@@ -185,7 +185,7 @@ public final class BuildDispatch {
           task,
           null,
           "",
-          false,
+          workBranch.wouldCreate(project, targetRepos, branch),
           resolution.restarted(),
           null,
           null,

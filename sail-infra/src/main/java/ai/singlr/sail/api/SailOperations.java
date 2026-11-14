@@ -736,6 +736,7 @@ public final class SailOperations implements HostOperations {
             hooks.dispatchListener(),
             sessionYield);
     this.dispatchOps.liveMembers().useRoom(this::postAsRun);
+    this.dispatchOps.useBox(this::box);
     this.stopOps =
         specStore != null && runStore != null
             ? new StopOperations(
