@@ -79,7 +79,7 @@ class LoginStoreTest {
     store().store(UDAY, CLAUDE, null, null, TOKEN);
     store().store(UDAY, CODEX, null, null, KEY);
 
-    var self = LoginStore.ProcessOwner.CURRENT;
+    var self = LoginStore.ProcessOwner.CURRENT.orElseThrow();
     for (var each : List.of(logins, person, person.resolve("claude-code"), codex)) {
       assertEquals(0700, (int) Files.getAttribute(each, "unix:mode") & 07777, each.toString());
       assertEquals(self.uid(), Files.getAttribute(each, "unix:uid"), each.toString());

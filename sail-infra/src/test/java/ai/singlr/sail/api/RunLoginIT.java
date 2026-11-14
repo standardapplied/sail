@@ -180,7 +180,7 @@ class RunLoginIT extends AbstractIncusIT {
             List.of(
                 "sh",
                 "-c",
-                "nohup python3 /root/stub.py > /root/stub.out 2>&1 < /dev/null &"
+                "systemd-run --quiet --unit=sail-it-stub-api python3 /root/stub.py &&"
                     + " timeout 30 sh -c 'until test -S /var/lib/sail/run/api.sock; do sleep 0.2;"
                     + " done'"));
     assertTrue(stub.ok(), "the stub API never listened: " + stub.stderr());
@@ -253,7 +253,11 @@ class RunLoginIT extends AbstractIncusIT {
                     "POST /v1/run/session run-credential",
                     "GET /v1/run/messages run-credential",
                     "POST /v1/run/messages run-credential")),
-            shape + ": every hook reached the API presenting the run credential: " + requests);
+            shape
+                + ": every hook reached the API presenting the run credential: "
+                + requests
+                + "\n"
+                + stubDiagnosis(runId));
         assertTrue(
             requests.stream().filter("GET /v1/run/messages run-credential"::equals).count() >= 2,
             shape + ": the relay and the stop gate both read the room: " + requests);
@@ -381,6 +385,19 @@ class RunLoginIT extends AbstractIncusIT {
             + runId
             + " never started its agent; its log: "
             + asDev(List.of("cat", AgentUnit.forRun(runId).logPath())).stdout());
+  }
+
+  /** What a test that saw no hook reach the stub API prints: the socket, the stub and the run. */
+  private String stubDiagnosis(String runId) throws Exception {
+    return exec(
+            CONTAINER,
+            List.of(
+                "sh",
+                "-c",
+                "ls -l /var/lib/sail/run; systemctl status --no-pager sail-it-stub-api 2>&1 |"
+                    + " tail -5; tail -20 "
+                    + AgentUnit.forRun(runId).logPath()))
+        .stdout();
   }
 
   private ShellExec.Result asDev(List<String> argv) throws Exception {

@@ -410,19 +410,27 @@ public final class LoginStore {
           throw new IOException(dir + " is not a directory.");
         }
       }
-      var self = ProcessOwner.CURRENT;
-      Files.setAttribute(dir, "unix:uid", self.uid(), LinkOption.NOFOLLOW_LINKS);
-      Files.setAttribute(dir, "unix:gid", self.gid(), LinkOption.NOFOLLOW_LINKS);
+      if (ProcessOwner.CURRENT.isPresent()) {
+        var self = ProcessOwner.CURRENT.get();
+        Files.setAttribute(dir, "unix:uid", self.uid(), LinkOption.NOFOLLOW_LINKS);
+        Files.setAttribute(dir, "unix:gid", self.gid(), LinkOption.NOFOLLOW_LINKS);
+      }
       Files.setAttribute(dir, "unix:mode", OWNER_ONLY_MODE, LinkOption.NOFOLLOW_LINKS);
     } catch (IOException e) {
       throw new UncheckedIOException("Could not make " + dir + " a private directory.", e);
     }
   }
 
-  /** This process's effective user and group ids, from {@code /proc/self/status}. */
+  /**
+   * This process's effective user and group ids, from {@code /proc/self/status}: on Linux, where
+   * every box runs. A system without it (a macOS test run) has none, and a directory there keeps
+   * the owner it was made with; its mode is still set.
+   */
   record ProcessOwner(int uid, int gid) {
 
-    static final ProcessOwner CURRENT = read(Path.of("/proc/self/status"));
+    private static final Path STATUS = Path.of("/proc/self/status");
+    static final Optional<ProcessOwner> CURRENT =
+        Files.isReadable(STATUS) ? Optional.of(read(STATUS)) : Optional.empty();
 
     static ProcessOwner read(Path status) {
       try {
