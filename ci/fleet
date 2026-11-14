@@ -123,16 +123,66 @@ from_caller() {
 
 gc() { gcloud --project "$PROJECT" --quiet "$@"; }
 
+readonly SSH_OPTIONS="-o ConnectTimeout=15 -o ServerAliveInterval=30 -o BatchMode=yes"
+
+first_contact() {
+  # shellcheck disable=SC2086
+  gc compute ssh "$(vm "$1" "$2")" --zone "$ZONE" --command true -- $SSH_OPTIONS
+}
+
+# gcloud spends seconds of API calls on every ssh, more than most checks spend on the box. So each
+# box's ssh command is asked of gcloud once, after its first contact has recorded the host key, and
+# every command after that runs over one shared connection with that same key and host-key check.
+route() {
+  local run=$1 box=$2 file line
+  file="$(log_dir "$run")/route-$box"
+  if [[ ! -s $file ]]; then
+    line=$(gc compute ssh "$(vm "$run" "$box")" --zone "$ZONE" --dry-run --command true) || return 1
+    [[ $line == *" -o StrictHostKeyChecking=yes "* && $line == *" -- true" ]] || {
+      echo "ci/fleet: gcloud offers no checked ssh to $box: $line" >&2
+      return 1
+    }
+    line=${line% -- true}
+    printf '%s\n' "${line#* }" > "$file.$$" && mv "$file.$$" "$file"
+  fi
+  cat "$file"
+}
+
+shared_connection() { echo "$(log_dir "$1")/ssh-$2"; }
+
 on() {
-  local run=$1 box=$2
+  local run=$1 box=$2 options destination
   shift 2
-  gc compute ssh "$(vm "$run" "$box")" --zone "$ZONE" --command "$*" \
-    -- -o ConnectTimeout=15 -o ServerAliveInterval=30 -o BatchMode=yes
+  options=$(route "$run" "$box") || return 1
+  destination=${options##* }
+  options=${options% *}
+  # shellcheck disable=SC2086
+  ssh $options $SSH_OPTIONS -o ControlMaster=auto -o ControlPersist=10m \
+    -o ControlPath="$(shared_connection "$run" "$box")" "$destination" -- "$*"
+}
+
+forget_route() {
+  local socket
+  socket=$(shared_connection "$1" "$2")
+  [[ -S $socket ]] && { ssh -o ControlPath="$socket" -O exit "$2" 2> /dev/null || true; }
+  rm -f "$(log_dir "$1")/route-$2"
 }
 
 log_dir() {
   mkdir -p "$RUNS/$1"
   echo "$RUNS/$1"
+}
+
+# Runs the probe until it holds, says it never will (status 2), or SECONDS have gone by, EVERY
+# seconds apart.
+until_true() {
+  local deadline=$((SECONDS + $1)) every=$2 verdict
+  shift 2
+  while :; do
+    "$@" && return 0 || verdict=$?
+    [[ $verdict != 2 && $SECONDS -lt $deadline ]] || return 1
+    sleep "$every"
+  done
 }
 
 # A scenario run again on a fleet where it ran before gives what it creates a suffix of its
@@ -183,11 +233,8 @@ create_vm() {
 }
 
 answers_ssh() {
-  local attempt
-  for attempt in $(seq 1 30); do
-    on "$1" "$2" true > /dev/null 2>&1 && return 0
-    sleep 5
-  done
+  forget_route "$1" "$2"
+  until_true 300 3 first_contact "$1" "$2" > /dev/null 2>&1 && return 0
   echo "ci/fleet: $2 never answered ssh." >&2
   return 1
 }
@@ -203,9 +250,15 @@ up() {
     wait "$pid" || failed=1
   done
   [[ $failed == 0 ]] || { echo "ci/fleet: a VM of $run was not created." >&2; return 1; }
+  pids=""
   for box in $BOXES; do
-    answers_ssh "$run" "$box" || return 1
+    answers_ssh "$run" "$box" &
+    pids="$pids $!"
   done
+  for pid in $pids; do
+    wait "$pid" || failed=1
+  done
+  return $failed
 }
 
 install_box() {
@@ -238,11 +291,19 @@ init_main() {
   on "$1" main "sudo sail init --as-main --handle uday --name 'Uday Fleet' --email uday@fleet.example"
 }
 
-join_node() {
-  local run=$1 box=$2 handle=$3 role=$4 scoped=$5 main_ip=$6 dir
-  dir=$(log_dir "$run")
+init_node() {
+  local run=$1 box=$2 handle=$3 main_ip=$4
   on "$run" "$box" "sudo sail init --main $main_ip --handle $handle --name '${handle^} Fleet' --email $handle@fleet.example" \
-    | tee "$dir/init-$box.out"
+    > "$(log_dir "$run")/init-$box.out" 2>&1
+}
+
+# The node's init ran in the background, beside the other nodes' inits: this waits for it.
+join_node() {
+  local run=$1 box=$2 role=$3 scoped=$4 init=$5 dir inited=0
+  dir=$(log_dir "$run")
+  wait "$init" || inited=1
+  cat "$dir/init-$box.out"
+  [[ $inited == 0 ]] || return 1
   local line
   line=$(grep -m1 -oE "sudo sail fde add .*" "$dir/init-$box.out" | sed -E "s/--role [a-z]+/--role $role/")
   if [[ -z $line ]]; then
@@ -260,11 +321,17 @@ join() {
   local run=${1:-}
   [[ -n $run ]] || usage
   check "$run" "init main as uday (admin)" init_main "$run"
-  local main_ip
+  local main_ip eng client observer
   main_ip=$(internal_ip "$run" main)
-  check "$run" "join eng (member, every project)" join_node "$run" eng eng member all "$main_ip"
-  check "$run" "join client (member, scoped)" join_node "$run" client client member scoped "$main_ip"
-  check "$run" "join observer (viewer, scoped)" join_node "$run" observer obs viewer scoped "$main_ip"
+  init_node "$run" eng eng "$main_ip" &
+  eng=$!
+  init_node "$run" client client "$main_ip" &
+  client=$!
+  init_node "$run" observer obs "$main_ip" &
+  observer=$!
+  check "$run" "join eng (member, every project)" join_node "$run" eng member all "$eng"
+  check "$run" "join client (member, scoped)" join_node "$run" client member scoped "$client"
+  check "$run" "join observer (viewer, scoped)" join_node "$run" observer viewer scoped "$observer"
   check "$run" "main's roster has every FDE with its role" roster "$run"
 }
 
@@ -360,16 +427,15 @@ sync_all() {
   done
 }
 
+main_holds() { on "$1" main "sudo sail spec show $2 --no-sync" > /dev/null 2>&1; }
+
 reaches_main_unasked() {
-  local run=$1 spec=$2 attempt
-  for attempt in $(seq 1 10); do
-    if on "$run" main "sudo sail spec show $spec --no-sync" > /dev/null 2>&1; then
-      echo "on main after about $((attempt * 3)) s"
-      return 0
-    fi
-    sleep 3
-  done
-  echo "not on main after 30 s"
+  local start=$SECONDS
+  if until_true 30 1 main_holds "$1" "$2"; then
+    echo "on main after $((SECONDS - start)) s"
+    return 0
+  fi
+  echo "not on main after $((SECONDS - start)) s"
   return 1
 }
 
@@ -800,22 +866,21 @@ while_cut_off() {
   return $status
 }
 
+denial_said() {
+  local run=$1 box=$2 spec=$3 reason=$4 denial
+  said=$({
+    on "$run" "$box" "sudo sail sync" 2>&1
+    on "$run" "$box" "sudo journalctl -u sail-api --since '-15min' --no-pager -o cat"
+  })
+  denial=$(grep -F "spec $spec: main denied this change" <<< "$said" | grep -F "$reason" | grep -F "Yours is in its history")
+  [[ -n $denial ]] && echo "$denial"
+}
+
 denied_at_sync() {
-  local run=$1 box=$2 spec=$3 reason=$4 said denial
-  for _ in $(seq 1 10); do
-    said=$({
-      on "$run" "$box" "sudo sail sync" 2>&1
-      on "$run" "$box" "sudo journalctl -u sail-api --since '-15min' --no-pager -o cat"
-    })
-    denial=$(grep -F "spec $spec: main denied this change" <<< "$said" | grep -F "$reason" | grep -F "Yours is in its history")
-    if [[ -n $denial ]]; then
-      echo "$denial"
-      return 0
-    fi
-    sleep 3
-  done
+  local said=""
+  until_true 120 3 denial_said "$@" && return 0
   echo "$said" | tail -20
-  echo "no denial of $spec naming: $reason"
+  echo "no denial of $3 naming: $4"
   return 1
 }
 
@@ -1048,17 +1113,17 @@ portal() {
     container_refuses "$run" eng beta "" "curl -sf localhost:8080/ > /dev/null"
 }
 
-session_is() {
-  local run=$1 box=$2 name=$3 expected=$4 attempt state
-  for attempt in $(seq 1 10); do
-    state=$(on "$run" "$box" "sudo sail session ls" | awk -v n="$name" '$1 == n {print $2}')
-    echo "$name: ${state:-absent}"
-    [[ $state == "$expected" ]] && return 0
-    sleep 3
-  done
-  return 1
+session_state_is() {
+  local state
+  state=$(on "$1" "$2" "sudo sail session ls" | awk -v n="$3" '$1 == n {print $2}')
+  echo "$3: ${state:-absent}"
+  [[ $state == "$4" ]]
 }
 
+session_is() { until_true 75 2 session_state_is "$@"; }
+
+# The detach key has to reach attach after it holds the terminal, and the writing end of the pipe
+# sees no sign of that, so it waits 3 s.
 opens_session() {
   local run=$1 box=$2 name=$3
   on "$run" "$box" "sudo sail session new $name --project acme --command bash -c 'while :; do date; sleep 1; done'" || return 1
@@ -1149,16 +1214,17 @@ capped_on() {
 
 # A box that is stopping its containers still answers ssh for a while after the reboot is asked,
 # so the wait is for a new boot id, never for an answer alone.
+booted_anew() {
+  after=$(on "$1" "$2" "cat /proc/sys/kernel/random/boot_id" 2> /dev/null) || after=
+  [[ -n $after && $after != "$3" ]]
+}
+
 reboots() {
-  local before after attempt
+  local before after=""
   before=$(on "$1" "$2" "cat /proc/sys/kernel/random/boot_id")
   [[ -n $before ]] || { echo "no boot id before the reboot"; return 1; }
   on "$1" "$2" "sudo systemctl reboot" || true
-  for attempt in $(seq 1 60); do
-    sleep 5
-    after=$(on "$1" "$2" "cat /proc/sys/kernel/random/boot_id" 2> /dev/null) || after=
-    [[ -n $after && $after != "$before" ]] && break
-  done
+  until_true 600 5 booted_anew "$1" "$2" "$before"
   echo "boot id $before, then $after"
   [[ -n $after && $after != "$before" ]]
 }
@@ -1226,15 +1292,16 @@ healthy_on() {
   [[ $said == "ONLINE " ]]
 }
 
+degraded_naming() {
+  said=$(pool_health "$1" "$2" "$3")
+  echo "$3: $said"
+  [[ $said == DEGRADED* && $said == *"$4"* ]]
+}
+
 degraded_on() {
-  local run=$1 box=$2 pool=$3 gone=$4 attempt said
+  local run=$1 box=$2 pool=$3 gone=$4 said=""
   on "$run" "$box" "sudo zpool reopen $pool" || true
-  for attempt in $(seq 1 12); do
-    said=$(pool_health "$run" "$box" "$pool")
-    echo "$pool: $said"
-    [[ $said == DEGRADED* && $said == *"$gone"* ]] && break
-    sleep 5
-  done
+  until_true 120 3 degraded_naming "$run" "$box" "$pool" "$gone"
   on "$run" "$box" "sudo sail host status"
   [[ $said == DEGRADED* && $said == *"$gone"* ]]
 }
@@ -1407,6 +1474,7 @@ holds_spec() {
 }
 
 loses_main() {
+  forget_route "$1" main
   gc compute instances delete "$(vm "$1" main)" --zone "$ZONE"
 }
 
@@ -1591,15 +1659,18 @@ install_list() {
   echo "$json"
 }
 
+status_is() {
+  local status
+  status=$(spec_field "$1" "$2" "$3" status)
+  [[ $status != "$last" ]] && echo "$(date -u +%H:%M:%S) $status" && last=$status
+  [[ $status == "$4" ]] && return 0
+  [[ $status == cancelled || $status == archived ]] && return 2
+  return 1
+}
+
 reaches_status() {
-  local run=$1 box=$2 spec=$3 wanted=$4 minutes=$5 status last="" i
-  for i in $(seq 1 $((minutes * 2))); do
-    status=$(spec_field "$run" "$box" "$spec" status)
-    [[ $status != "$last" ]] && echo "$(date -u +%H:%M:%S) $status" && last=$status
-    [[ $status == "$wanted" ]] && return 0
-    [[ $status == cancelled || $status == archived ]] && return 1
-    sleep 30
-  done
+  local run=$1 box=$2 spec=$3 wanted=$4 minutes=$5 last=""
+  until_true $((minutes * 60)) 10 status_is "$run" "$box" "$spec" "$wanted" && return 0
   echo "not $wanted after $minutes min"
   return 1
 }
@@ -1611,17 +1682,18 @@ opened_a_pull_request() {
   [[ -n $listed ]]
 }
 
+asked_its_question() {
+  said=$(on "$1" "$2" "sudo sail spec comments $3 --no-sync")
+  grep -q "ended on its question" <<< "$said"
+}
+
 waits_on_its_question() {
-  local run=$1 box=$2 spec=$3 minutes=$4 said i
-  for i in $(seq 1 $((minutes * 2))); do
-    said=$(on "$run" "$box" "sudo sail spec comments $spec --no-sync")
-    if grep -q "ended on its question" <<< "$said"; then
-      echo "$said" | tail -6
-      [[ $(spec_field "$run" "$box" "$spec" status) == in_progress ]]
-      return
-    fi
-    sleep 30
-  done
+  local run=$1 box=$2 spec=$3 minutes=$4 said=""
+  if until_true $((minutes * 60)) 10 asked_its_question "$run" "$box" "$spec"; then
+    echo "$said" | tail -6
+    [[ $(spec_field "$run" "$box" "$spec" status) == in_progress ]]
+    return
+  fi
   echo "no question held the build after $minutes min"
   return 1
 }
@@ -1802,8 +1874,11 @@ upgrade() {
 }
 
 down() {
-  local run=${1:-} filter="labels.purpose=sail-fleet" names disks
+  local run=${1:-} filter="labels.purpose=sail-fleet" names disks socket
   [[ -n $run ]] && filter="$filter AND labels.run ~ ^$run(-[a-z]+)?\$"
+  for socket in "$RUNS/${run:-}"*/ssh-*; do
+    [[ -S $socket ]] && { ssh -o ControlPath="$socket" -O exit fleet 2> /dev/null || true; }
+  done
   names=$(gc compute instances list --filter="$filter" --format='value(name)')
   if [[ -z $names ]]; then
     echo "No fleet VMs to delete."
@@ -1982,7 +2057,7 @@ run() {
     fleet "$id" "$version" "$target" "" $(scenarios_of serial) || result=1
   else
     groups=${groups:-$ALL_GROUPS}
-    echo "Fleet run $id on $version${target:+, upgraded to $target}: groups$groups at once, each on a fleet of its own; each group logs to $RUNS/$id/GROUP.log"
+    echo "Fleet run $id on $version${target:+, upgraded to $target}: groups ${groups# } at once, each on a fleet of its own; each group logs to $RUNS/$id/GROUP.log"
     in_parallel "$id" "$version" "$target" $groups || result=1
   fi
   echo "--- $RUNS/$id/report.txt"
