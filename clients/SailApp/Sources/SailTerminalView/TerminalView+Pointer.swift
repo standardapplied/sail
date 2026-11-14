@@ -114,7 +114,8 @@ extension TerminalView {
     }
 
     /// The paste sheet: the line count, the risk in a sentence, Paste in the accent, and Cancel the
-    /// default, so Return does not run what the sheet warns of.
+    /// default, so Return does not run what the sheet warns of. The keys are given once the sheet is
+    /// laid out, which gives the first button Return.
     func presentPasteSheet(lines: Int, answer: @escaping @MainActor (Bool) -> Void) {
         guard let window else {
             answer(false)
@@ -125,13 +126,13 @@ extension TerminalView {
         alert.informativeText = "The program in this terminal did not ask for pastes, so each line may run as a command as it arrives."
         let paste = alert.addButton(withTitle: "Paste")
         let cancel = alert.addButton(withTitle: "Cancel")
-        paste.keyEquivalent = ""
-        cancel.keyEquivalent = "\r"
         paste.bezelColor = NSColor(Look.dark.accent)
         paste.attributedTitle = NSAttributedString(string: "Paste", attributes: [.foregroundColor: NSColor(Look.dark.onAccent)])
         alert.beginSheetModal(for: window) { response in
             MainActor.assumeIsolated { answer(response == .alertFirstButtonReturn) }
         }
+        paste.keyEquivalent = ""
+        cancel.keyEquivalent = "\r"
     }
 
     private func report(_ event: NSEvent, _ action: MouseAction, _ button: MouseButton) {

@@ -216,8 +216,9 @@ import Testing
             guard let view else { return [] }
             return ((view as? NSButton).map { [$0] } ?? []) + view.subviews.flatMap(buttons)
         }
+        let keys = buttons(sheet.contentView).map { "\($0.title)=\($0.keyEquivalent.unicodeScalars.map(\.value))" }
         let returnKey = buttons(sheet.contentView).filter { $0.keyEquivalent == "\r" }.map(\.title)
-        #expect(returnKey == ["Cancel"], "Return cancels the paste the sheet warns of")
+        #expect(returnKey == ["Cancel"], "Return cancels the paste the sheet warns of; the buttons' keys: \(keys)")
         harness.window.endSheet(sheet, returnCode: .alertSecondButtonReturn)
     }
 
