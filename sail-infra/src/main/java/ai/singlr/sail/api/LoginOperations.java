@@ -73,11 +73,26 @@ public final class LoginOperations {
     return new LoginResponse(view(person, row), null);
   }
 
-  /** Removes {@code fde}'s login {@code name} of {@code harness}, the caller's when blank. */
+  /**
+   * Removes {@code fde}'s login {@code name} of {@code harness}, the caller's when blank; a login
+   * not stored is nothing to remove, said so.
+   */
   LoginResponse remove(String harness, String name, String fde) {
     var person = whose(fde);
     var known = Harnesses.of(harness);
-    var row = found(() -> logins().remove(person.id(), known, name));
+    var removed = logins().remove(person.id(), known, name);
+    if (removed.isEmpty()) {
+      return new LoginResponse(
+          null,
+          "No "
+              + known.displayName()
+              + " login named '"
+              + LoginStore.requireName(name)
+              + "' is stored for "
+              + person.handle()
+              + "; nothing was removed.");
+    }
+    var row = removed.get();
     announce(REMOVED, person, row);
     return new LoginResponse(view(person, row), liveOn(person, known, row.name()));
   }

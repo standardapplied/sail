@@ -72,7 +72,8 @@ class ContainerAgentProcessTest {
             "--",
             "bash",
             "-lc",
-            "f=/home/dev/.sail/runs/r/launch.env; while IFS= read -r kv; do export \"$kv\"; done <"
+            "f=/home/dev/.sail/runs/r/launch.env; set +x; while IFS= read -r kv; do export \"$kv\";"
+                + " done <"
                 + " \"$f\" || exit 1; rm -f \"$f\"; printf '%s\\n' \"$$\" > \"$1\"; exec \"${@:3}\" 2>>"
                 + " \"$2\"",
             "bash",

@@ -1554,11 +1554,6 @@ record SpecMessageView(
 }
 
 /**
- * What a focus heartbeat recorded: the conversation, the minute the server stamped, and whether
- * this minute of the caller's was new, false for a caller who is not a person or a minute already
- * recorded.
- */
-/**
  * One stored harness login as every door shows it: whose it is, its harness, name and kind, whether
  * it is the default, when it was stored and the first eight hex digits of its value's SHA-256.
  * Never the value.
@@ -1599,13 +1594,16 @@ record LoginList(String fde, List<LoginView> logins) implements Mappable {
 
 /**
  * A login a door stored, made the default or removed, with what is said once of live runs that
- * started with it ({@code note}, null when none did).
+ * started with it ({@code note}, null when none did); no login and a note for a removal of one that
+ * was not stored.
  */
 record LoginResponse(LoginView login, String note) implements Mappable {
   @Override
   public Map<String, Object> toMap() {
     var m = new LinkedHashMap<String, Object>();
-    m.put("login", login.toMap());
+    if (login != null) {
+      m.put("login", login.toMap());
+    }
     if (note != null) {
       m.put("note", note);
     }
@@ -1613,6 +1611,11 @@ record LoginResponse(LoginView login, String note) implements Mappable {
   }
 }
 
+/**
+ * What a focus heartbeat recorded: the conversation, the minute the server stamped, and whether
+ * this minute of the caller's was new, false for a caller who is not a person or a minute already
+ * recorded.
+ */
 record AttentionResponse(String conversation, Instant minute, boolean recorded)
     implements Mappable {
   @Override

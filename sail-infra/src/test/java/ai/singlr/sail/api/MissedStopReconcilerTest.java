@@ -466,17 +466,46 @@ class MissedStopReconcilerTest {
   @Test
   void aContainerThatCannotBeToldIsLeftForTheNextPass() {
     var live = session(null, "node-a", "adhoc");
+    var asked = new ArrayList<String>();
     var probe =
         new CountingProbe(true) {
           @Override
           public void removeLaunchFiles(String project, List<String> liveRuns) throws Exception {
-            throw new IOException("Error: Instance is not running");
+            asked.add(project);
+            if (asked.size() == 1) {
+              throw new IOException("Error: Instance is not running");
+            }
           }
         };
+    var reconciler = reconciler(probe, Instant::now);
 
-    reconciler(probe, PAST_GRACE).sweep();
+    reconciler.sweep();
+    reconciler.removeLeftovers();
 
     assertEquals("running", sessionStore.findById(live).orElseThrow().status());
+    assertEquals(List.of("test-project", "test-project"), asked);
+  }
+
+  @Test
+  void aPassAsksOnlyTheContainersARunStartedOrFinishedInSinceTheLastOne() {
+    var run = session(null, "node-a", "adhoc");
+    var asked = new ArrayList<String>();
+    var probe =
+        new CountingProbe(true) {
+          @Override
+          public void removeLaunchFiles(String project, List<String> liveRuns) {
+            asked.add(project + " " + liveRuns);
+          }
+        };
+    var reconciler = reconciler(probe, Instant::now);
+
+    reconciler.removeLeftovers();
+    reconciler.removeLeftovers();
+    Acting.system(() -> TestRuns.complete(sessionStore, run, "failed", 1));
+    reconciler.removeLeftovers();
+    reconciler.removeLeftovers();
+
+    assertEquals(List.of("test-project [" + run + "]", "test-project []"), asked);
   }
 
   @Test

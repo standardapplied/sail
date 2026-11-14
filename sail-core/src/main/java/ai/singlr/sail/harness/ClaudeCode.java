@@ -304,12 +304,18 @@ final class ClaudeCode implements Harness {
         new LoginKind(
             "token",
             "CLAUDE_CODE_OAUTH_TOKEN",
-            Remedy.of(
-                "Run ",
-                Remedy.program("claude", "setup-token"),
-                " in any terminal with a browser")),
+            Remedy.of("Run claude setup-token on a machine where Claude Code is signed in")),
         new LoginKind(
             "api-key", "ANTHROPIC_API_KEY", Remedy.of("Create an API key in the Claude Console")));
+  }
+
+  /**
+   * Its kinds' variables and {@code ANTHROPIC_AUTH_TOKEN}, a gateway's token, which outranks both.
+   * Claude Code takes an empty variable as unset.
+   */
+  @Override
+  public List<String> loginVariables() {
+    return List.of("ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN");
   }
 
   @Override

@@ -12,6 +12,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.api.DispatchOperations;
 import ai.singlr.sail.api.OperationsFactory;
+import ai.singlr.sail.api.RunLauncher;
 import ai.singlr.sail.api.RunReservation;
 import ai.singlr.sail.api.SessionYield;
 import ai.singlr.sail.common.DateTimeUtils;
@@ -96,7 +97,8 @@ class AgentResumeSessionIT extends AbstractIncusIT {
               DispatchOperations.Listener.NONE,
               hostYield,
               RunReservation.Displaceable.NONE,
-              new FdeStore(db));
+              new FdeStore(db),
+              RunLauncher.Room.NONE);
 
       try (var host =
           new PtySessionHost(

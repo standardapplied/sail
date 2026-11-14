@@ -14806,33 +14806,33 @@ remove bob's claude-code login as agent viewer ada-agent beta	denied READ_ONLY_C
 remove bob's claude-code login as agent viewer bob-agent acme	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot manage people. | Ask an admin for a member or admin credential.
 remove bob's claude-code login as agent viewer bob-agent all	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot manage people. | Ask an admin for a member or admin credential.
 remove bob's claude-code login as agent viewer bob-agent beta	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot manage people. | Ask an admin for a member or admin credential.
-remove bob's claude-code login as api admin root all	denied NOT_FOUND 404 No Claude Code login named 'work' is stored. | 
+remove bob's claude-code login as api admin root all	ok LoginResponse
 remove bob's claude-code login as api member ada acme	denied FORBIDDEN_ADMIN_ONLY 403 Only an admin may manage people. | Ask an admin to do it.
 remove bob's claude-code login as api member ada all	denied FORBIDDEN_ADMIN_ONLY 403 Only an admin may manage people. | Ask an admin to do it.
 remove bob's claude-code login as api member ada beta	denied FORBIDDEN_ADMIN_ONLY 403 Only an admin may manage people. | Ask an admin to do it.
-remove bob's claude-code login as api member bob acme	denied NOT_FOUND 404 No Claude Code login named 'work' is stored. | 
-remove bob's claude-code login as api member bob all	denied NOT_FOUND 404 No Claude Code login named 'work' is stored. | 
-remove bob's claude-code login as api member bob beta	denied NOT_FOUND 404 No Claude Code login named 'work' is stored. | 
+remove bob's claude-code login as api member bob acme	ok LoginResponse
+remove bob's claude-code login as api member bob all	ok LoginResponse
+remove bob's claude-code login as api member bob beta	ok LoginResponse
 remove bob's claude-code login as api member machine all	denied FORBIDDEN_ADMIN_ONLY 403 Only an admin may manage people. | Ask an admin to do it.
 remove bob's claude-code login as api viewer ada acme	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot manage people. | Ask an admin for a member or admin credential.
 remove bob's claude-code login as api viewer ada all	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot manage people. | Ask an admin for a member or admin credential.
 remove bob's claude-code login as api viewer ada beta	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot manage people. | Ask an admin for a member or admin credential.
-remove bob's claude-code login as api viewer bob acme	denied NOT_FOUND 404 No Claude Code login named 'work' is stored. | 
-remove bob's claude-code login as api viewer bob all	denied NOT_FOUND 404 No Claude Code login named 'work' is stored. | 
-remove bob's claude-code login as api viewer bob beta	denied NOT_FOUND 404 No Claude Code login named 'work' is stored. | 
-remove bob's claude-code login as cli admin root all	denied NOT_FOUND 404 No Claude Code login named 'work' is stored. | 
+remove bob's claude-code login as api viewer bob acme	ok LoginResponse
+remove bob's claude-code login as api viewer bob all	ok LoginResponse
+remove bob's claude-code login as api viewer bob beta	ok LoginResponse
+remove bob's claude-code login as cli admin root all	ok LoginResponse
 remove bob's claude-code login as cli member ada acme	denied FORBIDDEN_ADMIN_ONLY 403 Only an admin may manage people. | Ask an admin to do it.
 remove bob's claude-code login as cli member ada all	denied FORBIDDEN_ADMIN_ONLY 403 Only an admin may manage people. | Ask an admin to do it.
 remove bob's claude-code login as cli member ada beta	denied FORBIDDEN_ADMIN_ONLY 403 Only an admin may manage people. | Ask an admin to do it.
-remove bob's claude-code login as cli member bob acme	denied NOT_FOUND 404 No Claude Code login named 'work' is stored. | 
-remove bob's claude-code login as cli member bob all	denied NOT_FOUND 404 No Claude Code login named 'work' is stored. | 
-remove bob's claude-code login as cli member bob beta	denied NOT_FOUND 404 No Claude Code login named 'work' is stored. | 
+remove bob's claude-code login as cli member bob acme	ok LoginResponse
+remove bob's claude-code login as cli member bob all	ok LoginResponse
+remove bob's claude-code login as cli member bob beta	ok LoginResponse
 remove bob's claude-code login as cli viewer ada acme	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot manage people. | Ask an admin for a member or admin credential.
 remove bob's claude-code login as cli viewer ada all	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot manage people. | Ask an admin for a member or admin credential.
 remove bob's claude-code login as cli viewer ada beta	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot manage people. | Ask an admin for a member or admin credential.
-remove bob's claude-code login as cli viewer bob acme	denied NOT_FOUND 404 No Claude Code login named 'work' is stored. | 
-remove bob's claude-code login as cli viewer bob all	denied NOT_FOUND 404 No Claude Code login named 'work' is stored. | 
-remove bob's claude-code login as cli viewer bob beta	denied NOT_FOUND 404 No Claude Code login named 'work' is stored. | 
+remove bob's claude-code login as cli viewer bob acme	ok LoginResponse
+remove bob's claude-code login as cli viewer bob all	ok LoginResponse
+remove bob's claude-code login as cli viewer bob beta	ok LoginResponse
 remove bob's claude-code login as container admin root all	denied AGENT_LANE_FORBIDDEN 403 The credential in a project container cannot manage people. | Do it from outside the container: with sail on the host, or in Mast.
 remove bob's claude-code login as container member ada acme	denied FORBIDDEN_ADMIN_ONLY 403 Only an admin may manage people. | Ask an admin to do it.
 remove bob's claude-code login as container member ada all	denied FORBIDDEN_ADMIN_ONLY 403 Only an admin may manage people. | Ask an admin to do it.
@@ -14864,33 +14864,33 @@ remove my claude-code login as agent viewer ada-agent beta	denied AGENT_LANE_FOR
 remove my claude-code login as agent viewer bob-agent acme	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot keep harness logins. | Only an operator lane (CLI or API token) may do this.
 remove my claude-code login as agent viewer bob-agent all	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot keep harness logins. | Only an operator lane (CLI or API token) may do this.
 remove my claude-code login as agent viewer bob-agent beta	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot keep harness logins. | Only an operator lane (CLI or API token) may do this.
-remove my claude-code login as api admin root all	denied NOT_FOUND 404 No Claude Code login named 'work' is stored. | 
-remove my claude-code login as api member ada acme	denied NOT_FOUND 404 No Claude Code login named 'work' is stored. | 
-remove my claude-code login as api member ada all	denied NOT_FOUND 404 No Claude Code login named 'work' is stored. | 
-remove my claude-code login as api member ada beta	denied NOT_FOUND 404 No Claude Code login named 'work' is stored. | 
-remove my claude-code login as api member bob acme	denied NOT_FOUND 404 No Claude Code login named 'work' is stored. | 
-remove my claude-code login as api member bob all	denied NOT_FOUND 404 No Claude Code login named 'work' is stored. | 
-remove my claude-code login as api member bob beta	denied NOT_FOUND 404 No Claude Code login named 'work' is stored. | 
+remove my claude-code login as api admin root all	ok LoginResponse
+remove my claude-code login as api member ada acme	ok LoginResponse
+remove my claude-code login as api member ada all	ok LoginResponse
+remove my claude-code login as api member ada beta	ok LoginResponse
+remove my claude-code login as api member bob acme	ok LoginResponse
+remove my claude-code login as api member bob all	ok LoginResponse
+remove my claude-code login as api member bob beta	ok LoginResponse
 remove my claude-code login as api member machine all	denied FORBIDDEN 403 This credential acts for no person, so it keeps no logins. | Use a token of your own, or sail on the host.
-remove my claude-code login as api viewer ada acme	denied NOT_FOUND 404 No Claude Code login named 'work' is stored. | 
-remove my claude-code login as api viewer ada all	denied NOT_FOUND 404 No Claude Code login named 'work' is stored. | 
-remove my claude-code login as api viewer ada beta	denied NOT_FOUND 404 No Claude Code login named 'work' is stored. | 
-remove my claude-code login as api viewer bob acme	denied NOT_FOUND 404 No Claude Code login named 'work' is stored. | 
-remove my claude-code login as api viewer bob all	denied NOT_FOUND 404 No Claude Code login named 'work' is stored. | 
-remove my claude-code login as api viewer bob beta	denied NOT_FOUND 404 No Claude Code login named 'work' is stored. | 
-remove my claude-code login as cli admin root all	denied NOT_FOUND 404 No Claude Code login named 'work' is stored. | 
-remove my claude-code login as cli member ada acme	denied NOT_FOUND 404 No Claude Code login named 'work' is stored. | 
-remove my claude-code login as cli member ada all	denied NOT_FOUND 404 No Claude Code login named 'work' is stored. | 
-remove my claude-code login as cli member ada beta	denied NOT_FOUND 404 No Claude Code login named 'work' is stored. | 
-remove my claude-code login as cli member bob acme	denied NOT_FOUND 404 No Claude Code login named 'work' is stored. | 
-remove my claude-code login as cli member bob all	denied NOT_FOUND 404 No Claude Code login named 'work' is stored. | 
-remove my claude-code login as cli member bob beta	denied NOT_FOUND 404 No Claude Code login named 'work' is stored. | 
-remove my claude-code login as cli viewer ada acme	denied NOT_FOUND 404 No Claude Code login named 'work' is stored. | 
-remove my claude-code login as cli viewer ada all	denied NOT_FOUND 404 No Claude Code login named 'work' is stored. | 
-remove my claude-code login as cli viewer ada beta	denied NOT_FOUND 404 No Claude Code login named 'work' is stored. | 
-remove my claude-code login as cli viewer bob acme	denied NOT_FOUND 404 No Claude Code login named 'work' is stored. | 
-remove my claude-code login as cli viewer bob all	denied NOT_FOUND 404 No Claude Code login named 'work' is stored. | 
-remove my claude-code login as cli viewer bob beta	denied NOT_FOUND 404 No Claude Code login named 'work' is stored. | 
+remove my claude-code login as api viewer ada acme	ok LoginResponse
+remove my claude-code login as api viewer ada all	ok LoginResponse
+remove my claude-code login as api viewer ada beta	ok LoginResponse
+remove my claude-code login as api viewer bob acme	ok LoginResponse
+remove my claude-code login as api viewer bob all	ok LoginResponse
+remove my claude-code login as api viewer bob beta	ok LoginResponse
+remove my claude-code login as cli admin root all	ok LoginResponse
+remove my claude-code login as cli member ada acme	ok LoginResponse
+remove my claude-code login as cli member ada all	ok LoginResponse
+remove my claude-code login as cli member ada beta	ok LoginResponse
+remove my claude-code login as cli member bob acme	ok LoginResponse
+remove my claude-code login as cli member bob all	ok LoginResponse
+remove my claude-code login as cli member bob beta	ok LoginResponse
+remove my claude-code login as cli viewer ada acme	ok LoginResponse
+remove my claude-code login as cli viewer ada all	ok LoginResponse
+remove my claude-code login as cli viewer ada beta	ok LoginResponse
+remove my claude-code login as cli viewer bob acme	ok LoginResponse
+remove my claude-code login as cli viewer bob all	ok LoginResponse
+remove my claude-code login as cli viewer bob beta	ok LoginResponse
 remove my claude-code login as container admin root all	denied AGENT_LANE_FORBIDDEN 403 The credential in a project container cannot keep harness logins. | Do it from outside the container: 'sail agent login <harness>' on the host, or Mast.
 remove my claude-code login as container member ada acme	denied AGENT_LANE_FORBIDDEN 403 The credential in a project container cannot keep harness logins. | Do it from outside the container: 'sail agent login <harness>' on the host, or Mast.
 remove my claude-code login as container member ada all	denied AGENT_LANE_FORBIDDEN 403 The credential in a project container cannot keep harness logins. | Do it from outside the container: 'sail agent login <harness>' on the host, or Mast.

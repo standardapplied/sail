@@ -12,9 +12,11 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.harness.Harness;
 import ai.singlr.sail.harness.Harnesses;
+import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermissions;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.NoSuchElementException;
 import java.util.Optional;
@@ -62,6 +64,49 @@ class LoginStoreTest {
     assertEquals(8, stored.fingerprint().length());
     assertTrue(stored.fingerprint().matches("[0-9a-f]{8}"));
     assertFalse(stored.toString().contains(TOKEN));
+  }
+
+  @Test
+  @EnabledOnOs(OS.LINUX)
+  void underASetgidParentEveryDirectoryIsStillThisAccountsAloneAndOneFoundOtherwiseIsRepaired()
+      throws Exception {
+    Files.setAttribute(dir, "unix:mode", 02770);
+    var logins = dir.resolve("logins");
+    var person = logins.resolve(UDAY);
+    var codex = Files.createDirectories(person.resolve("codex"));
+    Files.setAttribute(codex, "unix:mode", 02755);
+
+    store().store(UDAY, CLAUDE, null, null, TOKEN);
+    store().store(UDAY, CODEX, null, null, KEY);
+
+    var self = LoginStore.ProcessOwner.CURRENT;
+    for (var each : List.of(logins, person, person.resolve("claude-code"), codex)) {
+      assertEquals(0700, (int) Files.getAttribute(each, "unix:mode") & 07777, each.toString());
+      assertEquals(self.uid(), Files.getAttribute(each, "unix:uid"), each.toString());
+      assertEquals(self.gid(), Files.getAttribute(each, "unix:gid"), each.toString());
+    }
+  }
+
+  @Test
+  void theProcessIdsAreTheEffectiveOnesItsStatusNames() throws Exception {
+    var status =
+        Files.writeString(
+            dir.resolve("status"), "Name:\tsail\nUid:\t1000\t0\t0\t0\nGid:\t1000\t27\t27\t27\n");
+
+    assertEquals(new LoginStore.ProcessOwner(0, 27), LoginStore.ProcessOwner.read(status));
+    assertThrows(
+        IllegalStateException.class,
+        () -> LoginStore.ProcessOwner.read(Files.writeString(dir.resolve("none"), "Name:\tx\n")));
+    assertThrows(
+        UncheckedIOException.class, () -> LoginStore.ProcessOwner.read(dir.resolve("missing")));
+  }
+
+  @Test
+  void aLinkWhereADirectoryBelongsIsRefused() throws Exception {
+    Files.createSymbolicLink(
+        dir.resolve("logins"), Files.createDirectory(dir.resolve("elsewhere")));
+
+    assertThrows(UncheckedIOException.class, () -> store().store(UDAY, CLAUDE, null, null, TOKEN));
   }
 
   @Test
@@ -146,7 +191,7 @@ class LoginStoreTest {
     store.store(UDAY, CLAUDE, null, null, TOKEN);
     store.store(UDAY, CLAUDE, "personal", null, KEY);
 
-    var removed = store.remove(UDAY, CLAUDE, "default");
+    var removed = store.remove(UDAY, CLAUDE, "default").orElseThrow();
 
     assertTrue(removed.isDefault());
     assertEquals(List.of("claude-code/personal token"), described(store.list(UDAY)));
@@ -158,16 +203,17 @@ class LoginStoreTest {
   }
 
   @Test
-  void usingOrRemovingALoginNotStoredIsRefusedNamingIt() {
+  void usingALoginNotStoredIsRefusedNamingItAndRemovingOneIsNothingToDo() {
     var store = store();
     store.store(UDAY, CLAUDE, null, null, TOKEN);
 
+    assertEquals(Optional.empty(), store.remove(UDAY, CLAUDE, "work"));
+    assertEquals(Optional.empty(), new LoginStore(null).remove(UDAY, CLAUDE, "work"));
+    assertTrue(store.remove(UDAY, CLAUDE, "default").isPresent());
+    assertEquals(Optional.empty(), store.remove(UDAY, CLAUDE, "default"), "removing twice is once");
     for (var asked :
         List.<Runnable>of(
-            () -> store.use(UDAY, CLAUDE, "work"),
-            () -> store.remove(UDAY, CLAUDE, "work"),
-            () -> store.use(ANA, CLAUDE, "default"),
-            () -> new LoginStore(null).remove(UDAY, CLAUDE, "work"))) {
+            () -> store.use(UDAY, CLAUDE, "work"), () -> store.use(ANA, CLAUDE, "default"))) {
       var refused = assertThrows(NoSuchElementException.class, asked::run);
       assertTrue(
           refused.getMessage().startsWith("No Claude Code login named '"), refused.getMessage());
@@ -270,9 +316,32 @@ class LoginStoreTest {
     assertFalse(Files.exists(dir.resolve("logins").resolve(UDAY)));
     store.store(UDAY, CLAUDE, null, null, TOKEN);
 
-    assertEquals(1, store.sweep(Set.of(ANA)));
-    assertEquals(0, store.sweep(Set.of(ANA)));
+    assertEquals(1, store.sweep(Set.of(ANA)::contains));
+    assertEquals(0, store.sweep(Set.of(ANA)::contains));
     assertEquals(List.of(), store.list(UDAY));
+    assertEquals(1, store.list(ANA).size());
+  }
+
+  /**
+   * The sweep asks of each person just before deleting, under the lock a store takes: a person the
+   * roster holds by then keeps their logins, whatever was read of the roster before.
+   */
+  @Test
+  void theSweepAsksOfEachPersonAsItReachesThemSoOneAddedSinceIsKept() {
+    var store = store();
+    store.store(UDAY, CLAUDE, null, null, TOKEN);
+    store.store(ANA, CLAUDE, null, null, KEY);
+    var asked = new ArrayList<String>();
+
+    var swept =
+        store.sweep(
+            id -> {
+              asked.add(id);
+              return id.equals(ANA);
+            });
+
+    assertEquals(1, swept);
+    assertEquals(List.of(ANA, UDAY), asked);
     assertEquals(1, store.list(ANA).size());
   }
 
@@ -283,7 +352,7 @@ class LoginStoreTest {
 
       assertEquals(List.of(), store.list(UDAY));
       assertEquals(Optional.empty(), store.defaultFor(UDAY, CLAUDE));
-      assertEquals(0, store.sweep(Set.of()));
+      assertEquals(0, store.sweep(id -> false));
       store.forget(UDAY);
       var refused =
           assertThrows(

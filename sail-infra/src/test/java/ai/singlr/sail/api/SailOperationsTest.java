@@ -572,6 +572,38 @@ class SailOperationsTest {
   }
 
   @Test
+  void aDryRunIsRefusedAsTheDispatchWouldBeWhenThePersonStoredNoLogin() throws Exception {
+    var yaml = tempDir.resolve("sail-" + System.nanoTime() + ".yaml");
+    Files.writeString(yaml, baseYaml());
+    var db = Sqlite.open(tempDir.resolve("specs-" + System.nanoTime() + ".db"));
+    new SchemaManager(db).migrate();
+    HeldProjects.hold(db, "acme");
+    var store = new SpecStore(db);
+    seedAuthBillingSetup(store);
+    var fdeStore = new FdeStore(db);
+    fdeStore.add(LOCAL_HANDLE, null, null, "admin");
+    var operations =
+        new SailOperations(
+            shell()
+                .on("incus list ^acme$", RUNNING_JSON)
+                .on("cat /home/dev/.sail/agent.pid", new ShellExec.Result(1, "", "missing")),
+            TestProjects.reading(yaml),
+            null,
+            store,
+            new ReviewStore(db),
+            new RunStore(db),
+            new ProjectStore(db),
+            SyncScheduler.disabled(),
+            fdeStore,
+            SessionYield.NONE);
+
+    var error = dispatch(operations, "acme", request("auth", "background", true));
+
+    assertError(ErrorCode.LOGIN_NOT_STORED, error);
+    assertEquals(SpecStatus.PENDING, store.findById("auth").orElseThrow().status());
+  }
+
+  @Test
   void dispatchPersistsResolvedRepoOverridesOnTheSpec() throws Exception {
     var stores = new SpecStore[1];
     var operations =

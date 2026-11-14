@@ -37,6 +37,7 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -164,7 +165,8 @@ class RunReservationTest {
         DispatchOperations.Listener.NONE,
         sessionYield,
         RunReservation.Displaceable.NONE,
-        new FdeStore(db));
+        new FdeStore(db),
+        RunLauncher.Room.NONE);
   }
 
   private LaunchEnv reserve(RunReservation r) {
@@ -201,7 +203,7 @@ class RunReservationTest {
 
     var refused = assertThrows(ApiException.class, () -> reserve(r));
 
-    assertEquals(ErrorCode.AGENT_NOT_CONFIGURED, refused.failure().errorCode());
+    assertEquals(ErrorCode.LOGIN_NOT_STORED, refused.failure().errorCode());
     assertEquals(
         "No Codex CLI login stored for node, so a run of a spec cannot start: a login made by hand"
             + " in the project's container is not used by runs.",
@@ -229,6 +231,58 @@ class RunReservationTest {
                 AgentUnit.forRun(RUN_ID),
                 CONFIG));
     assertTrue(runStore.findById(RUN_ID).isEmpty(), "no review row either");
+  }
+
+  /**
+   * A refusal for want of a login is said in the spec's room once per cause, however often it is
+   * met, and said again only after a run of the spec has started with a login since.
+   */
+  @Test
+  void aMissingLoginIsSaidInTheSpecsRoomOncePerCauseUntilARunStarts() {
+    var said = new ArrayList<String>();
+    var fdes = new FdeStore(db);
+    var node = fdes.byHandle("node").orElseThrow().id();
+    var stored = fdes.logins().defaultFor(node, Harnesses.of("codex")).orElseThrow().value();
+    fdes.logins().forget(node);
+    var r =
+        new RunReservation(
+            runStore,
+            quietShell(),
+            DispatchOperations.Listener.NONE,
+            sessionYield,
+            RunReservation.Displaceable.NONE,
+            fdes,
+            (spec, body) -> said.add(spec + ": " + body));
+
+    assertThrows(ApiException.class, () -> reserve(r));
+    assertThrows(ApiException.class, () -> reserve(r));
+
+    assertEquals(1, said.size(), said.toString());
+    assertTrue(said.getFirst().startsWith("spec: No Codex CLI login stored for node"), said.get(0));
+    assertTrue(said.getFirst().endsWith("then sail agent login codex --kind token."), said.get(0));
+
+    fdes.logins().store(node, Harnesses.of("codex"), null, null, stored);
+    reserve(r);
+    Acting.system(() -> TestRuns.complete(runStore, RUN_ID, "completed", 0));
+    fdes.logins().forget(node);
+    assertThrows(
+        ApiException.class,
+        () ->
+            r.reserve(
+                DateTimeUtils.newId().toString(),
+                "acme",
+                "spec",
+                "node",
+                "node",
+                "adhoc",
+                List.of(),
+                "codex",
+                null,
+                "task",
+                AgentUnit.forRun(DateTimeUtils.newId().toString()),
+                CONFIG));
+
+    assertEquals(2, said.size(), "a run of the spec started since, so the refusal is said again");
   }
 
   /** A run acting for no one on this box's roster has no stored login to start with. */
@@ -513,16 +567,75 @@ class RunReservationTest {
   }
 
   @Test
-  void anAbsentAgentReleasesTheReservation() {
+  void anAbsentAgentReleasesTheReservationAndItsLaunchFileLeavesTheContainer() {
     reserve(reservation(quietShell(), runStore));
+    var commands = new ArrayList<String>();
+    var shell = answeringShell();
+    ShellExec recording =
+        new ShellExec() {
+          @Override
+          public ShellExec.Result exec(List<String> command)
+              throws IOException, InterruptedException, TimeoutException {
+            commands.add(String.join(" ", command));
+            return shell.exec(command);
+          }
 
-    reservation(answeringShell(), runStore)
-        .releaseIfAbsent(RUN_ID, "acme", AgentUnit.forRun(RUN_ID));
+          @Override
+          public ShellExec.Result exec(List<String> command, Path workDir, Duration timeout)
+              throws IOException, InterruptedException, TimeoutException {
+            return exec(command);
+          }
+
+          @Override
+          public boolean isDryRun() {
+            return false;
+          }
+        };
+
+    reservation(recording, runStore).releaseIfAbsent(RUN_ID, "acme", AgentUnit.forRun(RUN_ID));
 
     assertEquals(
         "failed",
         runStore.findById(RUN_ID).orElseThrow().status(),
         "a container that answers and names no process for the run frees it");
+    assertTrue(
+        commands.getLast().endsWith("rm -f " + AgentUnit.forRun(RUN_ID).launchEnvPath()),
+        commands.toString());
+  }
+
+  @Test
+  void aLaunchFileThatCannotBeRemovedNowIsLeftToTheSweepAndTheReleaseStands() {
+    reserve(reservation(quietShell(), runStore));
+    var shell = answeringShell();
+    ShellExec refusingRemoval =
+        new ShellExec() {
+          @Override
+          public ShellExec.Result exec(List<String> command)
+              throws IOException, InterruptedException, TimeoutException {
+            if (command.contains("rm")) {
+              throw new IOException("container gone");
+            }
+            return shell.exec(command);
+          }
+
+          @Override
+          public ShellExec.Result exec(List<String> command, Path workDir, Duration timeout)
+              throws IOException, InterruptedException, TimeoutException {
+            return exec(command);
+          }
+
+          @Override
+          public boolean isDryRun() {
+            return false;
+          }
+        };
+
+    assertDoesNotThrow(
+        () ->
+            reservation(refusingRemoval, runStore)
+                .releaseIfAbsent(RUN_ID, "acme", AgentUnit.forRun(RUN_ID)));
+
+    assertEquals("failed", runStore.findById(RUN_ID).orElseThrow().status());
   }
 
   @Test
@@ -535,7 +648,8 @@ class RunReservationTest {
                     DispatchOperations.Listener.NONE,
                     SessionYield.NONE,
                     RunReservation.Displaceable.NONE,
-                    null)
+                    null,
+                    RunLauncher.Room.NONE)
                 .releaseIfAbsent(RUN_ID, "acme", AgentUnit.forRun(RUN_ID)));
   }
 
@@ -579,7 +693,8 @@ class RunReservationTest {
         DispatchOperations.Listener.NONE,
         sessionYield,
         displaceable,
-        new FdeStore(db));
+        new FdeStore(db),
+        RunLauncher.Room.NONE);
   }
 
   private LaunchEnv claim(RunReservation reservation, String role) {

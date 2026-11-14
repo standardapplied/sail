@@ -236,6 +236,15 @@ public interface Harness {
   List<LoginKind> loginKinds();
 
   /**
+   * Every variable this harness takes a credential from, its kinds' and any that outranks them: a
+   * run started with a stored login has each but its own kind's set empty, so no credential its
+   * container exports outranks the login the run records.
+   */
+  default List<String> loginVariables() {
+    return loginKinds().stream().map(LoginKind::variable).toList();
+  }
+
+  /**
    * The kind of login this harness declares as {@code kind}, its first when {@code kind} is blank.
    *
    * @throws IllegalArgumentException naming the kinds it declares, when it declares no such kind

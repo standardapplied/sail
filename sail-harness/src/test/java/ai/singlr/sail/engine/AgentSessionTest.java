@@ -710,7 +710,8 @@ class AgentSessionTest {
   private static final String READS_LAUNCH_ENV =
       "f=/home/dev/.sail/runs/"
           + RUN_ID
-          + "/launch.env; while IFS= read -r kv; do export \"$kv\"; done < \"$f\" || exit 1;"
+          + "/launch.env; set +x; while IFS= read -r kv; do export \"$kv\"; done < \"$f\" ||"
+          + " exit 1;"
           + " rm -f \"$f\"; exec ";
 
   private static final List<String> AS_DEV =

@@ -48,7 +48,10 @@ class LaunchEnvTest {
     var env = new LaunchEnv("cred-1", token("sk-ant-oat01-x"));
 
     assertEquals(
-        "SAIL_RUN_CREDENTIAL=cred-1\nCLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-x\n", env.lines());
+        "SAIL_RUN_CREDENTIAL=cred-1\nANTHROPIC_AUTH_TOKEN=\nANTHROPIC_API_KEY=\n"
+            + "CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-x\n",
+        env.lines(),
+        "every other variable Claude Code takes a credential from is set empty");
     assertEquals(new RunStore.RunLogin("work", "token"), env.login());
     assertEquals("LaunchEnv[login=RunLogin[name=work, kind=token]]", env.toString());
     assertFalse(env.toString().contains("cred-1"));
@@ -70,8 +73,8 @@ class LaunchEnvTest {
     var read =
         "f=/home/dev/.sail/runs/"
             + RUN_ID
-            + "/launch.env; while IFS= read -r kv; do export \"$kv\"; done < \"$f\" || exit 1;"
-            + " rm -f \"$f\"";
+            + "/launch.env; set +x; while IFS= read -r kv; do export \"$kv\"; done < \"$f\" ||"
+            + " exit 1; rm -f \"$f\"";
 
     assertEquals("/home/dev/.sail/runs/" + RUN_ID + "/launch.env", path);
     assertEquals(read, LaunchEnv.read(path));
@@ -100,6 +103,40 @@ class LaunchEnvTest {
     assertEquals("0:cred=1|$(touch " + marker + ")|gone\n", shown);
     assertFalse(Files.exists(marker), "a line is assigned, never evaluated");
     assertFalse(Files.exists(file));
+  }
+
+  /**
+   * The reviewer's probe as a unit test: a key the container's profile exports beside a stored
+   * token is set empty by the file, so the harness sees the stored token alone.
+   */
+  @Test
+  @EnabledOnOs(OS.LINUX)
+  void aCredentialTheContainerExportsIsSetEmptySoTheStoredLoginIsTheOneSeen() throws Exception {
+    var file = dir.resolve("launch.env");
+    Files.writeString(file, new LaunchEnv("c", token("sk-ant-oat01-stored")).lines());
+
+    var seen =
+        run(
+            "export ANTHROPIC_API_KEY=sk-ant-api03-container ANTHROPIC_AUTH_TOKEN=gw; "
+                + LaunchEnv.wrap(
+                    file.toString(),
+                    "sh -c 'printf \"[%s][%s][%s]\" \"$ANTHROPIC_API_KEY\" \"$ANTHROPIC_AUTH_TOKEN\""
+                        + " \"$CLAUDE_CODE_OAUTH_TOKEN\"'"));
+
+    assertEquals("0:[][][sk-ant-oat01-stored]\n", seen);
+  }
+
+  /** A profile's {@code set -x} never traces a value the file holds. */
+  @Test
+  @EnabledOnOs(OS.LINUX)
+  void tracingAProfileTurnedOnPrintsNoValue() throws Exception {
+    var file = dir.resolve("launch.env");
+    Files.writeString(file, new LaunchEnv("cred-secret-9", token("sk-ant-oat01-traced")).lines());
+
+    var shown = run("set -x; " + LaunchEnv.wrap(file.toString(), "true"));
+
+    assertFalse(shown.contains("cred-secret-9"), shown);
+    assertFalse(shown.contains("sk-ant-oat01-traced"), shown);
   }
 
   @Test

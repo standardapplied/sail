@@ -11,6 +11,7 @@ import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.AgentPresence;
 import ai.singlr.sail.engine.AgentSession;
 import ai.singlr.sail.engine.AgentUnit;
+import ai.singlr.sail.engine.ContainerFilePush;
 import ai.singlr.sail.engine.GuardrailTrigger;
 import ai.singlr.sail.engine.RunUsageReader;
 import ai.singlr.sail.engine.ShellExec;
@@ -144,6 +145,7 @@ public final class MissedStopReconciler implements AutoCloseable {
   private final Supplier<Instant> clock;
   private final FdeStore fdes;
   private final PeriodicPass pass;
+  private volatile Instant tidiedSince = Instant.EPOCH;
   private final StrandedReviewRescue strandedReviews;
 
   public MissedStopReconciler(
@@ -295,14 +297,20 @@ public final class MissedStopReconciler implements AutoCloseable {
    * Removes what may outlive a run but must not: the launch file of every run of this box that is
    * not live, which a launch that died before its wrapper read it left in its container (HL4), and
    * the logins of every person the roster no longer holds, which a removal that crashed before
-   * deleting them left on this runner (HL9). A container that does not answer is tried again on the
-   * next pass.
+   * deleting them left on this runner (HL9), and what a push killed midway left in the host's
+   * staging directory. Only a container that had a run start or finish since the last pass is asked
+   * (every one, on the first pass after a start): a launch that dies leaves its file with a run
+   * that finishes, by its launch's cleanup or by this sweep. A container that does not answer is
+   * tried again on a later pass.
    */
   void removeLeftovers() {
-    for (var project : sessionStore.liveRunsByProject(localHandle.get()).entrySet()) {
+    var pass = clock.get();
+    var tidied = true;
+    for (var project : sessionStore.liveRunsByProject(localHandle.get(), tidiedSince).entrySet()) {
       try {
         unitProbe.removeLaunchFiles(project.getKey(), project.getValue());
       } catch (Exception e) {
+        tidied = false;
         System.err.println(
             "  [reconcile] could not tidy the launch files of "
                 + project.getKey()
@@ -310,8 +318,12 @@ public final class MissedStopReconciler implements AutoCloseable {
                 + e.getMessage());
       }
     }
+    if (tidied) {
+      tidiedSince = pass;
+    }
+    ContainerFilePush.removeStaged(Duration.ofMinutes(1));
     if (fdes != null) {
-      var swept = fdes.logins().sweep(fdes.list().stream().map(FdeStore.Fde::id).toList());
+      var swept = fdes.logins().sweep(id -> fdes.byId(id).isPresent());
       if (swept > 0) {
         System.err.println("  [reconcile] removed the logins of " + swept + " people removed");
       }

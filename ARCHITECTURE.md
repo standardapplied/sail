@@ -3692,28 +3692,64 @@ no pairing is removed through the gateway as before, and no key file is touched.
     gateway lane, Mast); listing or removing another person's is Manage people. No agent and no
     credential in a container keeps any. No door answers a value: a login is shown by name, kind,
     date and fingerprint (the first eight hex of its SHA-256), and each change is announced
-    (`login_stored`, `login_default`, `login_removed`) with the same facts.
+    (`login_stored`, `login_default`, `login_removed`) with the same facts. Removing a login not
+    stored removes nothing and says so; `sail agent login --dry-run` says what it would store
+    (harness, name, kind, default or not) without reading a value or storing one. A thin client
+    runs every storing `sail agent login` over a terminal (`ssh -t`), so a typed value is never
+    echoed; piped input is said to be read from stdin.
   - *How it reaches a run.* `RunReservation` resolves the default login of the person the run
     acts for (`run.owner()`; an admin's dispatch of another person's spec spends that person's
-    login) before anything is reserved, and refuses a spec run whose person has none, naming how to
-    make each kind and the command that stores it; there is no fallback to another login, another
-    person's or the container's. After the reservation, `RunLauncher.stage` pushes the run's
+    login) before anything is reserved, and refuses a spec run whose person has none
+    (`login_not_stored`), naming how to make each kind and the command that stores it; there is no
+    fallback to another login, another person's or the container's. A dry-run dispatch is refused
+    the same way. When a run Sail launches itself (a room wake, a resumed build, a review, a fix) or
+    a person's dispatch is refused so, `RunLogins.forRun` says it once in the spec's room with the
+    same remedy, once per spec per cause until a run of that spec starts with a login. After the reservation, `RunLauncher.stage` pushes the run's
     `launch.env` (`/home/dev/.sail/runs/<run>/launch.env`, `0600`, the dev user's) through
     `ContainerFilePush.pushAsDev`, one `NAME=value` line each: `SAIL_RUN_CREDENTIAL` and, for a
-    spec run, the variable the login's kind names. Every launch shape (the background unit, the
+    spec run, every other credential variable the harness reads (`Harness.loginVariables`) set
+    empty and then the variable the login's kind names, so a credential the container's profile
+    exports cannot outrank the stored login (each harness treats an empty variable as unset). A
+    repo's own `apiKeyHelper` still outranks a token; that is the follow-up spec's `OVERRIDDEN`
+    case, refused saying so. Every launch shape (the background unit, the
     foreground task, the live member) starts with the same fixed text, `LaunchEnv.read`, which
-    exports each line as it is (`export "$kv"` evaluates nothing), removes the file and only then
+    turns tracing off (`set +x`, so a profile's `set -x` prints no value), exports each line as it
+    is (`export "$kv"` evaluates nothing), removes the file and only then
     starts the harness, in the innermost shell, after every profile it sources; with no file it
-    ends the launch. Nothing of either secret is an argument, an `--env` or a `--setenv`. The room
-    lane's read-deny rules name `launch.env`. The missed-stop reconciler's 60-second pass removes
-    the `launch.env` of every run of the box that is not live (a launch that died before its
-    wrapper ran) and the logins of every person the roster no longer holds; `FdeStore.delete`
-    removes a person's logins once the removal commits.
+    ends the launch. Nothing of either secret is an argument, an `--env` or a `--setenv`, and
+    no in-container helper or hook (the spec, skill and portal helpers, the event helper, the
+    session report, the room relay, the stop gate) puts a credential in an argv: each sends it
+    through the one function `SocketPreamble.credentialCurl` defines, `sail_curl`, which hands
+    curl the `Authorization` header as a config on descriptor 3, written by the shell's built-in
+    `printf` into a pipe, so it is in no process's argv, no environment of a process it starts
+    and no file, and the caller's stdin stays curl's for a body. The room
+    lane's read-deny rules name `launch.env`. On the host the file is staged in the account's own
+    `0700` staging directory (`ContainerFilePush.staging`, refused when it is a link, another's or
+    readable by others) and deleted whether or not the push succeeds; a launch released before its
+    agent started (`RunReservation.releaseIfAbsent`) removes its `launch.env` at once. The
+    missed-stop reconciler's 60-second pass is the net for a crash: it removes the `launch.env` of
+    every run of the box that is not live, asking only the containers a run started or finished in
+    since its last complete pass; what a killed push left in the staging directory; and the logins
+    of every person the roster no longer holds, under the store's write lock, asking the roster of
+    each just before deleting, so a person added meanwhile keeps theirs. `FdeStore.delete` removes
+    a person's logins once the removal commits.
   - *What a run records.* `login` (the name, or `container`), `login_kind`, and `dispatched_by`
     (the person whose request launched it, none for the loop, a room wake or a resumed build), at
     its launch, synced with the run.
-  - *What it cannot hide.* A full-permission agent can read its own environment, and so can any
-    process of the dev user in its container, a terminal included. Entering a workspace where
+  - *What it cannot hide.* A run's harness holds its person's login in its environment for the
+    run's whole life. Whoever can prompt an agent acting for a person (a room's members, a spec's
+    author, a repo's files the agent reads) can try to make it reveal that login, and Sail's
+    defence is the harness's own permission rules: a read-only room member runs no command but
+    `spec` and `cd`, reads outside its workspace only on approval it cannot get, and is denied
+    `launch.env`; a full-permission run has no such rule. Neither harness can hide the variable from the commands
+    it runs here: Claude Code's `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB` and Codex's sandbox both need
+    bubblewrap, which needs unprivileged user namespaces, and an Incus container on an Ubuntu 24.04
+    host is refused them (`kernel.apparmor_restrict_unprivileged_userns=1`: `bwrap: setting up uid
+    map: Permission denied`). While a run lives, the container's dev user, the agent and everything
+    it starts can read the stored login and the run credential from the harness's
+    `/proc/<pid>/environ`: that is a fact of the design, not a gap in it. A full-permission agent
+    can read its own environment, and so can any process of the dev user in its container, a
+    terminal included. Entering a workspace where
     another person's run is live lets you read that run's login: only that workspace's owner and
     admins may. On today's box that holds by placement: one person, and terminals open only for the
     box's person or an admin.

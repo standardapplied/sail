@@ -13,6 +13,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.attribute.FileTime;
+import java.nio.file.attribute.PosixFilePermissions;
+import java.time.Duration;
+import java.time.Instant;
 import java.util.Arrays;
 import java.util.List;
 import org.junit.jupiter.api.Test;
@@ -22,7 +26,7 @@ class ContainerFilePushTest {
 
   private static Path stagedTempFile(String invocation) {
     return Arrays.stream(invocation.split(" "))
-        .filter(token -> token.contains("sail-push-"))
+        .filter(token -> token.contains("sail-staging-"))
         .map(Path::of)
         .findFirst()
         .orElseThrow();
@@ -117,5 +121,50 @@ class ContainerFilePushTest {
 
     var staged = stagedTempFile(shell.invocations().getFirst());
     assertFalse(Files.exists(staged), "Temp file should be deleted even when the push fails");
+  }
+
+  @Test
+  void contentIsStagedOnlyInsideThisAccountsOwn0700Directory() throws Exception {
+    var shell = new ScriptedShellExecutor().onOk("incus file push");
+    ContainerFilePush.push(shell, "acme", "/tmp/x", "secret", List.of());
+
+    var dir = stagedTempFile(shell.invocations().getFirst()).getParent();
+    assertEquals(ContainerFilePush.staging(), dir);
+    assertEquals("rwx------", PosixFilePermissions.toString(Files.getPosixFilePermissions(dir)));
+  }
+
+  @Test
+  void aStagingDirectoryOthersCanReadIsRefusedNotUsed(@TempDir Path tmp) throws Exception {
+    var dir = ContainerFilePush.staging(tmp);
+    Files.setPosixFilePermissions(dir, PosixFilePermissions.fromString("rwxr-xr-x"));
+
+    var refused = assertThrows(IOException.class, () -> ContainerFilePush.staging(tmp));
+
+    assertTrue(
+        refused.getMessage().contains("is not this account's own 0700"), refused.getMessage());
+  }
+
+  @Test
+  void aStagingDirectoryThatIsALinkIsRefused(@TempDir Path tmp) throws Exception {
+    var elsewhere = Files.createDirectory(tmp.resolve("elsewhere"));
+    Files.setPosixFilePermissions(elsewhere, PosixFilePermissions.fromString("rwx------"));
+    Files.createSymbolicLink(
+        tmp.resolve("sail-staging-" + System.getProperty("user.name")), elsewhere);
+
+    assertThrows(IOException.class, () -> ContainerFilePush.staging(tmp));
+  }
+
+  @Test
+  void whatAKilledPushLeftIsRemovedOnceItIsOldAndAPushInFlightIsKept(@TempDir Path tmp)
+      throws Exception {
+    var dir = ContainerFilePush.staging(tmp);
+    var left = Files.writeString(dir.resolve("push-left.tmp"), "secret");
+    Files.setLastModifiedTime(left, FileTime.from(Instant.now().minus(Duration.ofMinutes(5))));
+    var inFlight = Files.writeString(dir.resolve("push-now.tmp"), "secret");
+
+    assertEquals(1, ContainerFilePush.removeStaged(dir, Duration.ofMinutes(1)));
+
+    assertFalse(Files.exists(left));
+    assertTrue(Files.exists(inFlight));
   }
 }

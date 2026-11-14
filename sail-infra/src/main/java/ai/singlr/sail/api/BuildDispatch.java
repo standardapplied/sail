@@ -175,6 +175,7 @@ public final class BuildDispatch {
     Runnable claim = () -> claim(resolution, taskSpec, branch);
     if (request.dryRun()) {
       requireNoRepoOverlap(project, localHandle, taskSpec.id(), taskSpec.repos());
+      runReservation.unreserved(taskSpec.id(), localHandle, agentType);
       commit(claim);
       var prepared =
           prepare(

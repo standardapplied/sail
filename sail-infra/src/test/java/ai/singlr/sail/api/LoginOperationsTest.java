@@ -46,11 +46,16 @@ class LoginOperationsTest {
 
       var stored = Actor.call(UDAY, () -> doors.store("codex", null, null, "sk-proj-1"));
       var removed = Actor.call(UDAY, () -> doors.remove("codex", "default", null));
+      var again = Actor.call(UDAY, () -> doors.remove("codex", "default", null));
 
       assertEquals("default", stored.login().name());
       assertNull(stored.note());
       assertNull(removed.note());
-      assertEquals(2, events.size());
+      assertNull(again.login());
+      assertEquals(
+          "No Codex CLI login named 'default' is stored for uday; nothing was removed.",
+          again.note());
+      assertEquals(2, events.size(), "removing nothing announces nothing");
     }
   }
 

@@ -7,6 +7,7 @@ package ai.singlr.sail.api;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.common.DateTimeUtils;
@@ -218,6 +219,9 @@ class LoginRoutesTest {
 
     assertEquals(200, removed.status(), removed.body());
     assertEquals(List.of("personal api-key default"), named(ask(sam, "GET", "/v1/logins", null)));
+    var removedAgain = ask(sam, "DELETE", "/v1/logins/claude-code/default", null);
+    assertEquals(200, removedAgain.status(), removedAgain.body());
+    assertNull(removedAgain.map().get("login"));
     assertEquals(
         List.of("login_stored", "login_stored", "login_default", "login_removed"),
         events.stream().map(Event::type).toList());

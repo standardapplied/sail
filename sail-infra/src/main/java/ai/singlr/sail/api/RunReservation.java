@@ -12,6 +12,7 @@ import ai.singlr.sail.config.ProjectDefinition;
 import ai.singlr.sail.config.RunStatus;
 import ai.singlr.sail.engine.AgentPresence;
 import ai.singlr.sail.engine.AgentUnit;
+import ai.singlr.sail.engine.ContainerExec;
 import ai.singlr.sail.engine.LaunchEnv;
 import ai.singlr.sail.engine.RunRetention;
 import ai.singlr.sail.engine.ShellExec;
@@ -74,20 +75,24 @@ public final class RunReservation {
   private final Displaceable displaceable;
   private final RunLogins logins;
 
-  /** {@code fdes} is the roster whose people's stored logins spec runs start with. */
+  /**
+   * {@code fdes} is the roster whose people's stored logins spec runs start with; {@code room} is
+   * where a spec run refused for want of one is said.
+   */
   public RunReservation(
       RunStore runStore,
       ShellExec shell,
       DispatchOperations.Listener listener,
       SessionYield sessionYield,
       Displaceable displaceable,
-      FdeStore fdes) {
+      FdeStore fdes,
+      RunLauncher.Room room) {
     this.runStore = runStore;
     this.shell = shell;
     this.listener = listener;
     this.sessionYield = Objects.requireNonNull(sessionYield, "sessionYield");
     this.displaceable = Objects.requireNonNull(displaceable, "displaceable");
-    this.logins = new RunLogins(fdes);
+    this.logins = new RunLogins(fdes, room);
   }
 
   /**
@@ -207,7 +212,7 @@ public final class RunReservation {
       AgentUnit unit,
       ProjectDefinition config,
       Runnable alongside) {
-    var login = logins.resolve(specId, boxHandle, agentType);
+    var login = logins.forRun(specId, boxHandle, agentType);
     return claim(
         runId,
         project,
@@ -263,7 +268,7 @@ public final class RunReservation {
       String task,
       AgentUnit unit,
       ProjectDefinition config) {
-    var login = logins.resolve(specId, boxHandle, agentType);
+    var login = logins.forRun(specId, boxHandle, agentType);
     return claim(
         runId,
         project,
@@ -410,9 +415,10 @@ public final class RunReservation {
   }
 
   /**
-   * What a run of {@code specId} acting for {@code owner} starts {@code agent} with on a box that
-   * keeps no run aggregate, so mints no credential: the login alone, resolved as a reservation
-   * resolves it.
+   * What a run of {@code specId} acting for {@code owner} would start {@code agent} with, minting
+   * no credential and saying nothing in a room: the login alone, resolved as a reservation resolves
+   * it, refused as a reservation would be. What a box that keeps no run aggregate starts a run
+   * with, and what a dry run checks.
    */
   public LaunchEnv unreserved(String specId, String owner, String agent) {
     return new LaunchEnv(null, logins.resolve(specId, owner, agent).orElse(null));
@@ -427,13 +433,30 @@ public final class RunReservation {
    * leaves a live agent, and failing the run would free the repo under it and admit an overlapping
    * session. An agent the container gives no answer about ({@link AgentPresence}) is treated as
    * live for the same reason — the missed-stop reconciler releases a genuinely dead run on its next
-   * pass.
+   * pass. A run released so has its launch file removed too.
    */
   public void releaseIfAbsent(String runId, String project, AgentUnit unit) {
     if (agentLive(project, unit)) {
       return;
     }
     failRun(runId);
+    removeLaunchFile(project, unit);
+  }
+
+  /**
+   * Removes the launch file of a run whose agent is proven absent, best-effort: its secrets leave
+   * the container now rather than at the next sweep, which stays the net for a crash.
+   */
+  private void removeLaunchFile(String project, AgentUnit unit) {
+    try {
+      shell.exec(ContainerExec.asDevUser(project, List.of("rm", "-f", unit.launchEnvPath())));
+    } catch (Exception e) {
+      System.err.println(
+          "  [api] Warning: could not remove the launch file of "
+              + unit.unitName()
+              + ": "
+              + e.getMessage());
+    }
   }
 
   /**

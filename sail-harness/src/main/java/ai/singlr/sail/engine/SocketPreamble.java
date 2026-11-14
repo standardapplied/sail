@@ -19,6 +19,20 @@ import ai.singlr.sail.common.Remedy;
  */
 public final class SocketPreamble {
 
+  /**
+   * The one way a helper sends {@code $CREDENTIAL}: {@code sail_curl} runs {@code curl} with its
+   * arguments and hands it the {@code Authorization} header as a config on file descriptor 3, fed
+   * by the shell's built-in {@code printf} through a pipe, so the credential is in no process's
+   * argv and in no file; the caller's stdin stays curl's, for a body sent as {@code @-}.
+   */
+  private static final String CREDENTIAL_CURL =
+      """
+      sail_curl() {
+        { printf 'header = "Authorization: Bearer %s"\\n' "$CREDENTIAL" \\
+          | curl --config /dev/fd/3 "$@" 3<&0 <&4 4<&-; } 4<&0
+      }
+      """;
+
   private static final String LOOKUP =
       """
       SOCKET="__SAIL_API_SOCKET__"
@@ -27,7 +41,8 @@ public final class SocketPreamble {
       if [ -z "$CREDENTIAL" ] && [ -r "$BOX_CREDENTIAL_FILE" ]; then
         CREDENTIAL="$(tr -d '[:space:]' < "$BOX_CREDENTIAL_FILE")"
       fi
-      """;
+      """
+          + CREDENTIAL_CURL;
 
   private static final String PREAMBLE =
       """
@@ -39,8 +54,8 @@ public final class SocketPreamble {
 
       api() {
         local status=0
-        curl --silent --fail-with-body --max-time 20 --unix-socket "$SOCKET" \\
-          -H "Authorization: Bearer $CREDENTIAL" "$@" || status=$?
+        sail_curl --silent --fail-with-body --max-time 20 --unix-socket "$SOCKET" "$@" \\
+          || status=$?
         echo
         case $status in
           0) ;;
@@ -55,10 +70,19 @@ public final class SocketPreamble {
   /**
    * The POSIX lines that set {@code SOCKET} and the {@code CREDENTIAL} a helper presents: the run
    * credential injected at launch, else the box's ambient credential beside the socket when it is
-   * readable, else none. They fail nothing; each helper decides what a missing one means.
+   * readable, else none; then {@link #credentialCurl}. They fail nothing; each helper decides what
+   * a missing one means.
    */
   public static String credentialLookup() {
     return LOOKUP.replace("__SAIL_API_SOCKET__", SailPaths.apiSocketContainerPath().toString());
+  }
+
+  /**
+   * The POSIX function {@code sail_curl}, every helper's only way to send {@code $CREDENTIAL}: it
+   * never reaches an argv, an environment variable of a process it starts, or a file.
+   */
+  public static String credentialCurl() {
+    return CREDENTIAL_CURL;
   }
 
   /** The preamble of the helper named {@code tool}, whose name prefixes every refusal it prints. */

@@ -449,7 +449,12 @@ public final class RunStore implements ConflictResolver, SyncedStore {
    * restore) that owns the whole container right now.
    */
   public sealed interface Reservation {
-    record Reserved(String credential) implements Reservation {}
+    record Reserved(String credential) implements Reservation {
+      @Override
+      public String toString() {
+        return "Reserved[credential=<hidden>]";
+      }
+    }
 
     record Conflicted(DispatchGate.Conflict conflict) implements Reservation {}
 
@@ -1523,15 +1528,20 @@ public final class RunStore implements ConflictResolver, SyncedStore {
   }
 
   /**
-   * Every project this box executed a run in, each with the ids of its runs there still running or
-   * stopping: what a container may hold a live run's files of.
+   * Every project this box executed a run in that started or finished at {@code since} or later,
+   * each with the ids of its runs there still running or stopping: what a container may hold a file
+   * of a run that is no longer live in. A project with no such run is not named, so a pass over
+   * them asks no idle container anything.
    */
-  public Map<String, List<String>> liveRunsByProject(String localHandle) {
+  public Map<String, List<String>> liveRunsByProject(String localHandle, Instant since) {
     var byProject = new TreeMap<String, List<String>>();
     db.query(
-            "SELECT project, id, status FROM runs WHERE COALESCE(node, '') = ? ORDER BY id",
+            "SELECT project, id, status FROM runs WHERE COALESCE(node, '') = ?1 AND project IN"
+                + " (SELECT project FROM runs WHERE COALESCE(node, '') = ?1 AND (started_at >= ?2"
+                + " OR completed_at >= ?2)) ORDER BY id",
             row -> List.of(row.text(0), row.text(1), row.text(2)),
-            ownerKey(localHandle))
+            ownerKey(localHandle),
+            since)
         .forEach(
             run -> {
               var live = byProject.computeIfAbsent(run.get(0), project -> new ArrayList<>());

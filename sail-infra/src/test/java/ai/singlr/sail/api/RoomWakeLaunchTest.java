@@ -518,6 +518,35 @@ class RoomWakeLaunchTest {
     }
   }
 
+  /**
+   * A wake Sail starts on its own for a person who stored no login is refused before anything is
+   * reserved, and the spec's room says why and what fixes it, once, however often it is woken.
+   */
+  @Test
+  void aWakeRefusedForWantOfALoginSaysSoInTheRoomOnce() throws Exception {
+    var ops = operations(liveAgentShell());
+    seedSpec("auth");
+    var fdes = new FdeStore(db);
+    fdes.logins().forget(fdes.byHandle(HANDLE).orElseThrow().id());
+
+    for (var attempt = 0; attempt < 2; attempt++) {
+      var refused =
+          assertThrows(ApiException.class, () -> ops.startRoomRun("acme", "auth", HANDLE));
+      assertEquals(ErrorCode.LOGIN_NOT_STORED, refused.failure().errorCode());
+    }
+
+    assertEquals(
+        List.of(
+            "No Claude Code login stored for uday, so a run of a spec cannot start: a login made by"
+                + " hand in the project's container is not used by runs. Run claude setup-token on"
+                + " a machine where Claude Code is signed in, then sail agent login claude-code."
+                + " Or: Create an"
+                + " API key in the Claude Console, then sail agent login claude-code --kind"
+                + " api-key."),
+        messageStore.list("auth", null, 20).stream().map(MessageStore.MessageRow::body).toList());
+    assertEquals(List.of(), runStore.listForSpec("auth"));
+  }
+
   @Test
   void aWakeMintsARoomRunAndSeedsTheLedgerWithTheRenderedMessages() throws Exception {
     var ops = operations(liveAgentShell());

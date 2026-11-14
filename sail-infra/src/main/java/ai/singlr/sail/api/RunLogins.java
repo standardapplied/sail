@@ -14,21 +14,46 @@ import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.LoginStore;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Which login a run starts its harness with, decided by the one fact a run is placed by, whether it
  * names a spec (HL1): a run that does starts with the default login the person it acts for stored
  * for its harness, and is refused before anything is reserved when there is none (HL6); a run that
  * names none (an ad-hoc run, a spec-less room's member) uses whatever login its container has.
- * There is no fallback to another login, another person's, or the container's.
+ * There is no fallback to another login, another person's, or the container's. A refusal of a run
+ * is said in its spec's room once per cause, until the spec's runs start again, so a person who
+ * stored no login learns it where the work is, however often Sail itself tries.
  */
 final class RunLogins {
 
   private final FdeStore fdes;
+  private final RunLauncher.Room room;
+  private final Set<String> told = ConcurrentHashMap.newKeySet();
 
-  RunLogins(FdeStore fdes) {
+  RunLogins(FdeStore fdes, RunLauncher.Room room) {
     this.fdes = fdes;
+    this.room = Objects.requireNonNull(room, "room");
+  }
+
+  /**
+   * {@link #resolve}, saying a refusal in the spec's room the first time it is met for this cause,
+   * and forgetting what was said once a run of the spec has its login.
+   */
+  Optional<LoginStore.Login> forRun(String specId, String owner, String agent) {
+    try {
+      var login = resolve(specId, owner, agent);
+      told.removeIf(cause -> cause.startsWith(specId + "\n"));
+      return login;
+    } catch (ApiException refused) {
+      if (told.add(specId + "\n" + refused.getMessage())) {
+        room.tell(specId, refused.getMessage() + " " + refused.failure().remedy().plain());
+      }
+      throw refused;
+    }
   }
 
   /**
@@ -58,7 +83,7 @@ final class RunLogins {
 
   private static ApiException noneStored(Harness harness, String owner) {
     return new ApiException(
-        ErrorCode.AGENT_NOT_CONFIGURED,
+        ErrorCode.LOGIN_NOT_STORED,
         "No "
             + harness.displayName()
             + " login stored for "
@@ -71,7 +96,7 @@ final class RunLogins {
   private static ApiException noDefault(
       Harness harness, String owner, List<LoginStore.Row> others) {
     return new ApiException(
-        ErrorCode.AGENT_NOT_CONFIGURED,
+        ErrorCode.LOGIN_NOT_STORED,
         owner
             + " has no default "
             + harness.displayName()

@@ -51,9 +51,12 @@ public final class RunLauncher {
   private final Supplier<ProjectSkills> projectSkills;
   private final Room room;
 
-  /** Where a launch says what it skipped: the spec's room, when the run serves a spec. */
+  /**
+   * Where a launch says what it skipped, or why it could not start: the spec's room, when the run
+   * serves a spec.
+   */
   @FunctionalInterface
-  interface Room {
+  public interface Room {
     void tell(String specId, String body);
 
     Room NONE = (specId, body) -> {};

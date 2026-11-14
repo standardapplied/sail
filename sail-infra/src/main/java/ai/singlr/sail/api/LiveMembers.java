@@ -463,6 +463,10 @@ public final class LiveMembers implements RoomWakeReactor.Live, AutoCloseable {
             config);
     AgentProcess.Handle handle;
     try {
+      if (resumed.isPresent() && terminalHolds(resumed.get())) {
+        reservation.releaseIfAbsent(runId, seat.project(), unit);
+        return;
+      }
       launcher.stage(
           new RunLauncher.LaunchSpec(
               seat.project(),

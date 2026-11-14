@@ -783,15 +783,14 @@ class SailStopGateTest {
     Files.createDirectories(bin);
     writeExecutable(
         bin.resolve("curl"),
-        """
-        #!/bin/sh
-        printf '%s\\n' "$*" >> "$HOME/curl.log"
+        FakeCurl.script(
+            """
         case "$*" in
           *"-X POST"*) cat "$HOME/ack.code" 2>/dev/null || printf '%s' "200" ;;
           *) cat "$HOME/inbox.json" 2>/dev/null ;;
         esac
         exit 0
-        """);
+        """));
     return bin;
   }
 }

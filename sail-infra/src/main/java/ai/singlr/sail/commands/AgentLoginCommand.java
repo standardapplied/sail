@@ -58,6 +58,11 @@ public final class AgentLoginCommand implements Runnable {
   @Option(names = "--json", description = "Output in JSON format.")
   private boolean json;
 
+  @Option(
+      names = "--dry-run",
+      description = "Say what would be stored (harness, name, kind, default) and store nothing.")
+  private boolean dryRun;
+
   @Mixin private ConnectionOptions connection;
 
   @Override
@@ -73,6 +78,10 @@ public final class AgentLoginCommand implements Runnable {
     var known = Harnesses.of(harness);
     var named = LoginStore.requireName(name);
     var declared = known.loginKind(kind);
+    if (dryRun) {
+      rehearse(known.yamlName(), named, declared.kind());
+      return;
+    }
     var value = read(known.displayName(), declared.kind(), declared.howToMake().plain());
     var body = new LinkedHashMap<String, Object>();
     body.put("kind", declared.kind());
@@ -89,6 +98,44 @@ public final class AgentLoginCommand implements Runnable {
   }
 
   /**
+   * What storing would do, read from the logins stored now, reading no value and storing nothing:
+   * the login becomes the default when its harness has none, or when it is the default already.
+   */
+  @SuppressWarnings("unchecked")
+  private void rehearse(String harness, String name, String kind) throws Exception {
+    var config = connection.resolve();
+    try (var client = new SailApiClient(config.serverUrl(), config.token())) {
+      var logins = (List<Map<String, Object>>) client.get("/v1/logins").get("logins");
+      var current =
+          logins.stream()
+              .filter(login -> harness.equals(login.get("harness")))
+              .filter(login -> Boolean.TRUE.equals(login.get("default")))
+              .map(login -> login.get("name"))
+              .findFirst();
+      var becomesDefault = current.isEmpty() || current.get().equals(name);
+      if (json) {
+        var shown = new LinkedHashMap<String, Object>();
+        shown.put("dry_run", true);
+        shown.put("harness", harness);
+        shown.put("name", name);
+        shown.put("kind", kind);
+        shown.put("default", becomesDefault);
+        System.out.println(YamlUtil.dumpJson(shown));
+        return;
+      }
+      System.out.println(
+          "  Would store "
+              + harness
+              + " login '"
+              + name
+              + "' ("
+              + kind
+              + (becomesDefault ? ", the default" : ", not the default")
+              + "); nothing was stored.");
+    }
+  }
+
+  /**
    * The login's value: typed at a terminal with echo off, after saying how to make one, or the
    * whole of stdin, its one trailing newline dropped. More than a login may hold is refused unread.
    */
@@ -97,6 +144,7 @@ public final class AgentLoginCommand implements Runnable {
       System.out.println("  " + howToMake + ", then paste it here.");
       return ConsoleHelper.readPassword("  " + harness + " " + kind + " (input hidden): ");
     }
+    System.err.println("  Reading the " + harness + " " + kind + " from stdin.");
     return trimmed(System.in);
   }
 
@@ -115,6 +163,10 @@ public final class AgentLoginCommand implements Runnable {
   @SuppressWarnings("unchecked")
   private static void printChange(String what, Map<String, Object> result) {
     var login = (Map<String, Object>) result.get("login");
+    if (login == null) {
+      System.out.println("  " + result.get("note"));
+      return;
+    }
     System.out.println(
         Ansi.AUTO.string(
             "  @|green ✓|@ "

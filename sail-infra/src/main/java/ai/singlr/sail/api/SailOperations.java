@@ -656,32 +656,6 @@ public final class SailOperations implements HostOperations {
       RunStore runStore,
       ProjectStore projectStore,
       Supplier<ConnectEnvironment> connectEnvironment,
-      SyncScheduler syncScheduler) {
-    this(
-        shell,
-        definitions,
-        watcherFallback,
-        eventBus,
-        specStore,
-        reviewStore,
-        runStore,
-        projectStore,
-        connectEnvironment,
-        syncScheduler,
-        null,
-        SessionYield.NONE);
-  }
-
-  SailOperations(
-      ShellExec shell,
-      ProjectReader definitions,
-      WatcherSpawner.ProcessSpawner watcherFallback,
-      EventBus eventBus,
-      SpecStore specStore,
-      ReviewStore reviewStore,
-      RunStore runStore,
-      ProjectStore projectStore,
-      Supplier<ConnectEnvironment> connectEnvironment,
       SyncScheduler syncScheduler,
       FdeStore fdeStore,
       SessionYield sessionYield) {

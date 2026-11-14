@@ -10,6 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.harness.Harness.Launch;
 import java.util.List;
 import java.util.stream.Stream;
@@ -160,9 +161,17 @@ class HarnessContractTest {
     for (var kind : kinds) {
       assertTrue(kind.variable().matches("[A-Z][A-Z0-9_]*"), kind.variable());
       assertFalse(kind.howToMake().isEmpty(), kind.kind());
+      assertTrue(
+          kind.howToMake().parts().stream().allMatch(Remedy.Words.class::isInstance),
+          "a login is made where the person's harness is signed in, not on the box, so no door"
+              + " renders its making as a command of the box's account (sudo): "
+              + kind.howToMake());
       assertEquals(kind, harness.loginKind(kind.kind()));
     }
     assertEquals(kinds.getFirst(), harness.loginKind(null));
+    assertTrue(
+        harness.loginVariables().containsAll(kinds.stream().map(LoginKind::variable).toList()),
+        "a run on a stored login sets empty every other variable its harness reads");
     assertEquals(kinds.getFirst(), harness.loginKind(" "));
   }
 

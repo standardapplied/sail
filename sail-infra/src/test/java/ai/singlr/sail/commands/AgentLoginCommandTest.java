@@ -123,6 +123,61 @@ class AgentLoginCommandTest {
   }
 
   @Test
+  void aPipedValueIsSaidToBeReadFromStdinSoAPersonWaitingKnowsWhy() {
+    var stored = sail(KEY, "login", "codex", "--kind", "api-key");
+
+    assertEquals(0, stored.exit(), stored.err());
+    assertEquals("  Reading the Codex CLI api-key from stdin.\n", stored.err());
+  }
+
+  @Test
+  void aDryRunSaysWhatWouldBeStoredReadsNoValueAndStoresNothing() throws Exception {
+    var first = sail(KEY, "login", "claude-code", "--dry-run");
+    var unread = System.in.available();
+    sail(KEY, "login", "claude-code");
+    var second =
+        sail(KEY, "login", "claude-code", "--name", "work", "--kind", "api-key", "--dry-run");
+    var again = sail(KEY, "login", "claude-code", "--dry-run", "--json");
+
+    assertEquals(0, first.exit(), first.err());
+    assertEquals(
+        "  Would store claude-code login 'default' (token, the default); nothing was stored.\n",
+        first.out());
+    assertEquals(KEY.length(), unread, "a dry run reads no value");
+    assertEquals("", first.err());
+    assertEquals(
+        "  Would store claude-code login 'work' (api-key, not the default); nothing was stored.\n",
+        second.out());
+    assertEquals(
+        Map.of(
+            "dry_run",
+            true,
+            "harness",
+            "claude-code",
+            "name",
+            "default",
+            "kind",
+            "token",
+            "default",
+            true),
+        YamlUtil.parseMap(again.out()));
+    var uday = new FdeStore(db).byHandle("uday").orElseThrow().id();
+    assertEquals(
+        List.of("default"),
+        new FdeStore(db).logins().list(uday).stream().map(row -> row.name()).toList());
+  }
+
+  @Test
+  void removingALoginNotStoredSaysThereWasNothingToRemove() {
+    var removed = sail("", "login", "remove", "codex", "work");
+
+    assertEquals(0, removed.exit(), removed.err());
+    assertEquals(
+        "  No Codex CLI login named 'work' is stored for uday; nothing was removed.\n",
+        removed.out());
+  }
+
+  @Test
   void aValueBreakingTheRulesIsRefusedNamingTheRuleAndNothingIsStored() {
     var refused = sail("has a space", "login", "codex");
     var unknown = sail(KEY, "login", "gemini");

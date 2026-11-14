@@ -98,9 +98,8 @@ public final class SailSessionReport {
       ' 2>/dev/null || true)"
       [ -n "$BODY" ] || exit 0
 
-      curl --silent --output /dev/null --max-time 5 \\
+      sail_curl --silent --output /dev/null --max-time 5 \\
         --unix-socket "$SOCKET" \\
-        -H "Authorization: Bearer $CREDENTIAL" \\
         -X POST --data "$BODY" \\
         http://sail/v1/run/session 2>/dev/null || true
       exit 0

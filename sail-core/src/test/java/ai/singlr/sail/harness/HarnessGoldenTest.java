@@ -319,7 +319,8 @@ class HarnessGoldenTest {
   void eachHarnessReadsItsStaticLoginsFromTheVariablesItsReleaseDocuments() {
     assertEquals(
         List.of(
-            "token CLAUDE_CODE_OAUTH_TOKEN Run claude setup-token in any terminal with a browser",
+            "token CLAUDE_CODE_OAUTH_TOKEN Run claude setup-token on a machine where Claude Code is"
+                + " signed in",
             "api-key ANTHROPIC_API_KEY Create an API key in the Claude Console"),
         described(CLAUDE_CODE));
     assertEquals(
@@ -328,6 +329,11 @@ class HarnessGoldenTest {
             "token CODEX_ACCESS_TOKEN Create a Codex access token at"
                 + " chatgpt.com/admin/access-tokens (ChatGPT Business and Enterprise)"),
         described(CODEX));
+    assertEquals(
+        List.of("ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN"),
+        CLAUDE_CODE.loginVariables(),
+        "every variable Claude Code takes a credential from, the gateway token outranking both");
+    assertEquals(List.of("CODEX_API_KEY", "CODEX_ACCESS_TOKEN"), CODEX.loginVariables());
   }
 
   private static List<String> described(Harness harness) {

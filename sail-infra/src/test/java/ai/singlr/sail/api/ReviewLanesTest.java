@@ -21,6 +21,7 @@ import ai.singlr.sail.engine.AgentUnit;
 import ai.singlr.sail.harness.RunUsage;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.store.EventStore;
+import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.Finding;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.TestLogins;
@@ -56,6 +57,31 @@ class ReviewLanesTest {
   @AfterEach
   void tearDown() {
     loop.close();
+  }
+
+  /**
+   * A reviewer the loop launches for a person who stored no login is refused before it reserves,
+   * and the spec's room says why and the command that fixes it, once, however often the loop
+   * retries.
+   */
+  @Test
+  void aReviewerRefusedForWantOfALoginSaysSoInTheRoomOnce() {
+    loop = ReviewLoop.staged(tempDir, "codex", "claude-code");
+    var fdes = new FdeStore(loop.db);
+    fdes.logins().forget(fdes.byHandle(ReviewLoop.HANDLE).orElseThrow().id());
+
+    loop.built("auth");
+    loop.onEvent(ReviewLoop.buildStop("auth", loop.run("auth", "build")));
+
+    assertEquals(
+        List.of(
+            "No Codex CLI login stored for node-a, so a run of a spec cannot start: a login made"
+                + " by hand in the project's container is not used by runs. Create an API key at"
+                + " platform.openai.com/api-keys, then sail agent login codex. Or: Create a Codex"
+                + " access token at chatgpt.com/admin/access-tokens (ChatGPT Business and"
+                + " Enterprise), then sail agent login codex --kind token."),
+        loop.roomLines("auth", "No Codex CLI login"));
+    assertTrue(loop.container.live().isEmpty(), "no reviewer started");
   }
 
   @Test

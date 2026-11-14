@@ -307,9 +307,9 @@ class DoorParityTest {
   @Test
   void row10EngDispatchesE1FromHisBoxAndUdaysBoxIsNotWhereItRuns() throws Exception {
     var dryRun = "{\"spec_id\": \"e1\", \"dry_run\": true}";
+    TestLogins.store(db, "eng");
     var web = web("eng", "eng", "POST", "/v1/projects/acme/dispatch", dryRun);
     db.execute("UPDATE specs SET status = 'pending' WHERE id = 'e1'");
-    TestLogins.store(db, "eng");
     assertEveryDoor(Expected.ALLOWED, web, dispatch("eng"));
     assertEveryDoor(
         Expected.refused(

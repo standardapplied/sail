@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.engine;
 
+import ai.singlr.sail.harness.Harnesses;
 import ai.singlr.sail.store.LoginStore;
 import ai.singlr.sail.store.RunStore;
 import java.util.Objects;
@@ -25,11 +26,13 @@ public record LaunchEnv(String runCredential, LoginStore.Login stored) {
 
   /**
    * Reads the file its first word names line by line, exports each line as it is ({@code export
-   * "$kv"} assigns and evaluates nothing) and removes the file. A missing file ends the launch, so
-   * a harness never starts without its credential or its person's login.
+   * "$kv"} assigns and evaluates nothing) and removes the file, with tracing off so a profile's
+   * {@code set -x} prints no value. A missing file ends the launch, so a harness never starts
+   * without its credential or its person's login.
    */
   private static final String READ =
-      "f=@FILE@; while IFS= read -r kv; do export \"$kv\"; done < \"$f\" || exit 1; rm -f \"$f\"";
+      "f=@FILE@; set +x; while IFS= read -r kv; do export \"$kv\"; done < \"$f\" || exit 1;"
+          + " rm -f \"$f\"";
 
   public LaunchEnv {
     if (runCredential != null && (runCredential.contains("\n") || runCredential.contains("\r"))) {
@@ -44,10 +47,24 @@ public record LaunchEnv(String runCredential, LoginStore.Login stored) {
         : new RunStore.RunLogin(stored.row().name(), stored.kind().kind());
   }
 
-  /** The file's content: one {@code NAME=value} line each, the run credential's first. */
+  /**
+   * The file's content: one {@code NAME=value} line each, the run credential's first. A run on a
+   * stored login also sets empty every other variable its harness takes a credential from, so none
+   * its container exports outranks the login it records.
+   */
   public String lines() {
-    var lines = RUN_CREDENTIAL + "=" + Objects.toString(runCredential, "") + "\n";
-    return stored == null ? lines : lines + stored.kind().variable() + "=" + stored.value() + "\n";
+    var lines =
+        new StringBuilder(RUN_CREDENTIAL + "=" + Objects.toString(runCredential, "") + "\n");
+    if (stored == null) {
+      return lines.toString();
+    }
+    var own = stored.kind().variable();
+    for (var variable : Harnesses.of(stored.row().harness()).loginVariables()) {
+      if (!variable.equals(own)) {
+        lines.append(variable).append("=\n");
+      }
+    }
+    return lines.append(own).append('=').append(stored.value()).append('\n').toString();
   }
 
   /**

@@ -17,6 +17,10 @@ import ai.singlr.sail.engine.AbstractIncusIT;
 import ai.singlr.sail.engine.AgentUnit;
 import ai.singlr.sail.engine.ContainerExec;
 import ai.singlr.sail.engine.ContainerFilePush;
+import ai.singlr.sail.engine.SailEventHelper;
+import ai.singlr.sail.engine.SailRoomRelay;
+import ai.singlr.sail.engine.SailSessionReport;
+import ai.singlr.sail.engine.SailStopGate;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.WatcherSpawner;
 import ai.singlr.sail.harness.Harnesses;
@@ -37,6 +41,7 @@ import java.security.MessageDigest;
 import java.time.Duration;
 import java.util.HexFormat;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.atomic.AtomicBoolean;
 import org.junit.jupiter.api.AfterEach;
@@ -58,7 +63,11 @@ class RunLoginIT extends AbstractIncusIT {
   private static final String KEY = "sk-proj-it-fake-0123456789abcdef";
   private static final Actor OPERATOR = new Actor(HANDLE, Role.ADMIN, Actor.Lane.CLI);
 
-  /** Writes what it started with, then stays up a while, as an agent does. */
+  /**
+   * Notes what it started with, then fires each of Sail's hooks as a harness does (a tool event,
+   * the session report, the room relay, the stop gate) while it samples every process's command
+   * line in the container for its own run credential, then says it started and stays up a while.
+   */
   private static final String FAKE_AGENT =
       """
       #!/usr/bin/env bash
@@ -66,10 +75,67 @@ class RunLoginIT extends AbstractIncusIT {
       {
         printf 'key=%s\\n' "$(printf %s "$CODEX_API_KEY" | sha256sum | cut -d' ' -f1)"
         case "$SAIL_RUN_CREDENTIAL" in sailrun_*) echo cred=minted ;; *) echo cred=missing ;; esac
+        printf 'access=[%s]\n' "$CODEX_ACCESS_TOKEN"
         test -e "$f" && echo file=present || echo file=gone
       } > "$HOME/.sail/started-$SAIL_RUN_ID.tmp"
+      hits="$HOME/.sail/argv-hits-$SAIL_RUN_ID"
+      done="$HOME/.sail/hooks-done-$SAIL_RUN_ID"
+      : > "$hits"
+      (
+        while [ ! -e "$done" ]; do
+          for p in $(printf '%s\\n' "$SAIL_RUN_CREDENTIAL" | grep -laF -f - /proc/[0-9]*/cmdline 2>/dev/null); do
+            tr '\\0' ' ' < "$p" >> "$hits"
+            echo >> "$hits"
+          done
+          sleep 0.05
+        done
+      ) &
+      bin="$HOME/.sail/bin"
+      "$bin/sail-event.sh" agent_tool_started
+      printf '{"session_id":"conv-1","source":"startup"}' | "$bin/sail-session-report" codex
+      printf '{}' | "$bin/sail-room-relay"
+      printf '{"stop_hook_active":false}' | "$bin/sail-stop-gate" > /dev/null
+      : > "$done"
+      wait
       mv "$HOME/.sail/started-$SAIL_RUN_ID.tmp" "$HOME/.sail/started-$SAIL_RUN_ID"
       sleep "${FAKE_AGENT_SECONDS:-20}"
+      """;
+
+  /**
+   * The host API as the hooks reach it over the socket, slow enough that each curl is alive while
+   * sampled: it notes each request's method, path and whether it presented a run credential, and
+   * answers every read of the run's messages with one message, so the relay and the stop gate
+   * acknowledge it too.
+   */
+  private static final String STUB_API =
+      """
+      import http.server, os, socketserver, time
+      PATH = "/var/lib/sail/run/api.sock"
+      class Handler(http.server.BaseHTTPRequestHandler):
+          def answer(self):
+              length = int(self.headers.get("Content-Length") or 0)
+              self.rfile.read(length)
+              auth = self.headers.get("Authorization") or ""
+              with open("/root/stub.log", "a") as log:
+                  log.write("%s %s %s\\n" % (self.command, self.path.split("?")[0],
+                      "run-credential" if auth.startswith("Bearer sailrun_") else "none"))
+              time.sleep(1)
+              body = b'{"messages":[{"id":"m1","author":"ana","body":"hi"}]}'
+              self.send_response(200)
+              self.send_header("Content-Length", str(len(body)))
+              self.end_headers()
+              self.wfile.write(body)
+          do_GET = answer
+          do_POST = answer
+          def log_message(self, *args):
+              pass
+      class Server(socketserver.ThreadingMixIn, socketserver.UnixStreamServer):
+          daemon_threads = True
+      if os.path.exists(PATH):
+          os.remove(PATH)
+      server = Server(PATH, Handler)
+      os.chmod(PATH, 0o666)
+      server.serve_forever()
       """;
 
   private Path stateDir;
@@ -87,7 +153,9 @@ class RunLoginIT extends AbstractIncusIT {
                 "set -e;"
                     + " userdel -r ubuntu 2>/dev/null || true;"
                     + " id -u dev >/dev/null 2>&1 || useradd -m -u 1000 -s /bin/bash dev;"
-                    + " mkdir -p /home/dev/.sail /home/dev/workspace/app /home/dev/workspace/web;"
+                    + " mkdir -p /home/dev/.sail/bin /home/dev/workspace/app"
+                    + " /home/dev/workspace/web /var/lib/sail/run;"
+                    + " echo 'export CODEX_ACCESS_TOKEN=container-token' >> /home/dev/.profile;"
                     + " chown -R dev:dev /home/dev;"
                     + " for i in $(seq 1 30); do"
                     + " loginctl enable-linger dev 2>/dev/null && break; sleep 1; done;"
@@ -96,6 +164,26 @@ class RunLoginIT extends AbstractIncusIT {
     assertTrue(setup.ok(), "container provisioning failed: " + setup.stderr());
     ContainerFilePush.push(
         shell, CONTAINER, "/usr/local/bin/codex", FAKE_AGENT, List.of("--mode", "0755"));
+    var hooks =
+        Map.of(
+            SailEventHelper.SCRIPT_PATH, SailEventHelper.scriptContent(),
+            SailSessionReport.SCRIPT_PATH, SailSessionReport.scriptContent(),
+            SailRoomRelay.SCRIPT_PATH, SailRoomRelay.scriptContent(),
+            SailStopGate.SCRIPT_PATH, SailStopGate.scriptContent());
+    for (var hook : hooks.entrySet()) {
+      ContainerFilePush.pushAsDev(shell, CONTAINER, hook.getKey(), hook.getValue(), "0755");
+    }
+    ContainerFilePush.push(shell, CONTAINER, "/root/stub.py", STUB_API, List.of("--mode", "0600"));
+    var stub =
+        exec(
+            CONTAINER,
+            List.of(
+                "sh",
+                "-c",
+                "nohup python3 /root/stub.py > /root/stub.out 2>&1 < /dev/null &"
+                    + " timeout 30 sh -c 'until test -S /var/lib/sail/run/api.sock; do sleep 0.2;"
+                    + " done'"));
+    assertTrue(stub.ok(), "the stub API never listened: " + stub.stderr());
     stateDir = Files.createTempDirectory("run-login-it");
   }
 
@@ -135,9 +223,11 @@ class RunLoginIT extends AbstractIncusIT {
         var runId = dispatched.runId();
 
         assertEquals(
-            "key=" + sha256(KEY) + "\ncred=minted\nfile=gone\n",
+            "key=" + sha256(KEY) + "\ncred=minted\naccess=[]\nfile=gone\n",
             asDev(List.of("cat", "/home/dev/.sail/started-" + runId)).stdout(),
-            shape + ": the agent had the key and its credential, and the file was gone");
+            shape
+                + ": the agent had the key and its credential, the container's own token was set"
+                + " empty, and the file was gone");
         assertFalse(
             asDev(List.of("test", "-e", AgentUnit.forRun(runId).launchEnvPath())).ok(),
             shape + ": no launch.env is left");
@@ -147,6 +237,29 @@ class RunLoginIT extends AbstractIncusIT {
             shape + ": no host command line held the key or a run credential");
         var inContainer = asDev(List.of("ps", "-eo", "args")).stdout();
         assertFalse(inContainer.contains(KEY) || inContainer.contains("sailrun_"), inContainer);
+        assertEquals(
+            "",
+            asDev(List.of("cat", "/home/dev/.sail/argv-hits-" + runId)).stdout(),
+            shape + ": no process in the container held the run credential while every hook ran");
+        var requests =
+            exec(CONTAINER, List.of("sh", "-c", "cat /root/stub.log; : > /root/stub.log"))
+                .stdout()
+                .lines()
+                .toList();
+        assertTrue(
+            requests.containsAll(
+                List.of(
+                    "POST /v1/events run-credential",
+                    "POST /v1/run/session run-credential",
+                    "GET /v1/run/messages run-credential",
+                    "POST /v1/run/messages run-credential")),
+            shape + ": every hook reached the API presenting the run credential: " + requests);
+        assertTrue(
+            requests.stream().filter("GET /v1/run/messages run-credential"::equals).count() >= 2,
+            shape + ": the relay and the stop gate both read the room: " + requests);
+        assertTrue(
+            requests.stream().allMatch(line -> line.endsWith(" run-credential")),
+            requests.toString());
         var run = runs.findById(runId).orElseThrow();
         assertEquals(new RunStore.RunLogin("default", "api-key"), run.login());
         assertEquals(HANDLE, run.dispatchedBy());
@@ -177,7 +290,7 @@ class RunLoginIT extends AbstractIncusIT {
       var refused =
           assertThrows(ApiException.class, () -> dispatch(operations(db), "spec-bg", "background"));
 
-      assertEquals(ErrorCode.AGENT_NOT_CONFIGURED, refused.failure().errorCode());
+      assertEquals(ErrorCode.LOGIN_NOT_STORED, refused.failure().errorCode());
       assertEquals(List.of(), new RunStore(db).listForProject(CONTAINER));
       assertEquals(
           "",

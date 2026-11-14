@@ -190,6 +190,8 @@ class RemoteCommandRunnerTest {
   void onlyStoringALoginAndAnInteractiveShellAskForTheBoxsTerminal() {
     assertTrue(RemoteCommandRunner.interactive("agent", "login", "claude-code"));
     assertTrue(RemoteCommandRunner.interactive("agent", "login", "codex", "--name", "work"));
+    assertTrue(RemoteCommandRunner.interactive("agent", "login", "--kind", "api-key", "codex"));
+    assertTrue(RemoteCommandRunner.interactive("agent", "login", "--name", "work", "claude-code"));
     assertTrue(RemoteCommandRunner.interactive("shell", "acme"));
     for (var args :
         List.of(
@@ -197,6 +199,8 @@ class RemoteCommandRunnerTest {
             new String[] {"agent", "login", "use", "codex", "work"},
             new String[] {"agent", "login", "remove", "codex", "work"},
             new String[] {"agent", "login", "--help"},
+            new String[] {"agent", "login", "codex", "--dry-run"},
+            new String[] {"agent", "login", "--json", "list"},
             new String[] {"agent", "login"},
             new String[] {"agent", "sessions", "acme"})) {
       assertFalse(RemoteCommandRunner.interactive(args), String.join(" ", args));

@@ -14,6 +14,7 @@ import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.FileAlreadyExistsException;
 import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
@@ -23,13 +24,13 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
 import java.util.ArrayList;
-import java.util.Collection;
 import java.util.Comparator;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.NoSuchElementException;
 import java.util.Optional;
 import java.util.Set;
+import java.util.function.Predicate;
 import java.util.regex.Pattern;
 import java.util.stream.Stream;
 
@@ -58,6 +59,7 @@ public final class LoginStore {
   private static final Set<PosixFilePermission> DIRECTORY =
       PosixFilePermissions.fromString("rwx------");
   private static final Set<PosixFilePermission> FILE = PosixFilePermissions.fromString("rw-------");
+  private static final int OWNER_ONLY_MODE = 0700;
   private static final Object WRITES = new Object();
 
   /**
@@ -154,19 +156,21 @@ public final class LoginStore {
 
   /**
    * Removes {@code fdeId}'s login {@code name} for {@code harness}, and the default with it when it
-   * was the default: no other login becomes the default on its own.
-   *
-   * @throws NoSuchElementException when no such login is stored
+   * was the default: no other login becomes the default on its own. Empty when no such login was
+   * stored, so removing twice removes once.
    */
-  public Row remove(String fdeId, Harness harness, String name) {
+  public Optional<Row> remove(String fdeId, Harness harness, String name) {
     var named = requireName(name);
     synchronized (WRITES) {
-      var removed = requireStored(fdeId, harness, named);
       var dir = dirOf(fdeId, harness);
-      delete(dir.resolve(named));
-      if (removed.isDefault()) {
-        delete(dir.resolve(DEFAULT_FILE));
-      }
+      var removed = dir == null ? Optional.<Row>empty() : row(dir, harness, named);
+      removed.ifPresent(
+          row -> {
+            delete(dir.resolve(named));
+            if (row.isDefault()) {
+              delete(dir.resolve(DEFAULT_FILE));
+            }
+          });
       return removed;
     }
   }
@@ -199,21 +203,25 @@ public final class LoginStore {
   }
 
   /**
-   * Deletes the logins of every person {@code fdeIds} does not name: the people removed while a
-   * removal's own deletion did not run. Returns how many people's logins it deleted.
+   * Deletes the logins of every person {@code held} says this box no longer holds: the people
+   * removed while a removal's own deletion did not run. Each is asked just before its logins are
+   * deleted, under the lock every store takes, and a login is stored only for a person the roster
+   * holds, so a person added since is never swept. Returns how many people's logins it deleted.
    */
-  public int sweep(Collection<String> fdeIds) {
+  public int sweep(Predicate<String> held) {
     if (root == null || !Files.isDirectory(root)) {
       return 0;
     }
-    var swept = 0;
-    for (var person : children(root)) {
-      if (!fdeIds.contains(person.getFileName().toString())) {
-        deleteTree(person);
-        swept++;
+    synchronized (WRITES) {
+      var swept = 0;
+      for (var person : children(root)) {
+        if (!held.test(person.getFileName().toString())) {
+          deleteTree(person);
+          swept++;
+        }
       }
+      return swept;
     }
-    return swept;
   }
 
   /** The first eight hex digits of the SHA-256 of {@code value}. */
@@ -388,21 +396,50 @@ public final class LoginStore {
     }
   }
 
+  /**
+   * Makes {@code dir} a directory of this process's own user and group, mode exactly {@code 0700},
+   * whatever a parent's setgid bit or group would give it, repairing one found otherwise; a link is
+   * refused.
+   */
   private static void privateDirectory(Path dir) {
     try {
-      Files.createDirectory(dir, PosixFilePermissions.asFileAttribute(DIRECTORY));
-    } catch (FileAlreadyExistsException present) {
-      setPrivate(dir);
+      try {
+        Files.createDirectory(dir, PosixFilePermissions.asFileAttribute(DIRECTORY));
+      } catch (FileAlreadyExistsException present) {
+        if (Files.isSymbolicLink(dir) || !Files.isDirectory(dir, LinkOption.NOFOLLOW_LINKS)) {
+          throw new IOException(dir + " is not a directory.");
+        }
+      }
+      var self = ProcessOwner.CURRENT;
+      Files.setAttribute(dir, "unix:uid", self.uid(), LinkOption.NOFOLLOW_LINKS);
+      Files.setAttribute(dir, "unix:gid", self.gid(), LinkOption.NOFOLLOW_LINKS);
+      Files.setAttribute(dir, "unix:mode", OWNER_ONLY_MODE, LinkOption.NOFOLLOW_LINKS);
     } catch (IOException e) {
-      throw new UncheckedIOException("Could not create " + dir + ".", e);
+      throw new UncheckedIOException("Could not make " + dir + " a private directory.", e);
     }
   }
 
-  private static void setPrivate(Path dir) {
-    try {
-      Files.setPosixFilePermissions(dir, DIRECTORY);
-    } catch (IOException e) {
-      throw new UncheckedIOException("Could not make " + dir + " private.", e);
+  /** This process's effective user and group ids, from {@code /proc/self/status}. */
+  record ProcessOwner(int uid, int gid) {
+
+    static final ProcessOwner CURRENT = read(Path.of("/proc/self/status"));
+
+    static ProcessOwner read(Path status) {
+      try {
+        var lines = Files.readAllLines(status);
+        return new ProcessOwner(effective(lines, "Uid:"), effective(lines, "Gid:"));
+      } catch (IOException e) {
+        throw new UncheckedIOException("Could not read this process's ids from " + status + ".", e);
+      }
+    }
+
+    private static int effective(List<String> lines, String field) {
+      return lines.stream()
+          .filter(line -> line.startsWith(field))
+          .map(line -> Integer.parseInt(line.substring(field.length()).trim().split("\\s+")[1]))
+          .findFirst()
+          .orElseThrow(
+              () -> new IllegalStateException("No " + field + " line in /proc/self/status."));
     }
   }
 
