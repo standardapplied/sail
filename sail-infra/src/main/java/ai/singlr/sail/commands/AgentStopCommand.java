@@ -58,6 +58,13 @@ public final class AgentStopCommand implements Runnable {
               + " each in its own workspace.")
   private String specId;
 
+  @Option(
+      names = "--run",
+      description =
+          "Stop this run, by its id: how a run of no spec, such as an ad-hoc session, is named when"
+              + " the project has several live runs.")
+  private String runId;
+
   @Option(names = "--dry-run", description = "Print what would be stopped instead of stopping.")
   private boolean dryRun;
 
@@ -89,7 +96,7 @@ public final class AgentStopCommand implements Runnable {
     try (var operations =
         OperationsFactory.open(
             shell, hooks(shell, this::publishLifecycle, listener()), SessionYield.NONE)) {
-      var outcome = stopAsOperator(operations, name, specId, handle, dryRun);
+      var outcome = stopAsOperator(operations, target(), handle, dryRun);
       render(outcome);
       if (!dryRun && outcome.mutated()) {
         sync.syncNow();
@@ -98,17 +105,24 @@ public final class AgentStopCommand implements Runnable {
   }
 
   /**
-   * Stops {@code project}'s run, spec {@code specId}'s when it names one, as this box's operator; a
-   * preview decided as the real stop is.
+   * What this stop names: a run by its id, or the project's run, spec {@code --spec}'s when given.
    */
+  StopOperations.Target target() {
+    if (runId == null) {
+      return new StopOperations.ProjectTarget(name, specId);
+    }
+    if (specId != null) {
+      throw new CliCommand.Refused("Name a run with --run or a spec with --spec, not both.");
+    }
+    return new StopOperations.RunTarget(runId);
+  }
+
+  /** Stops {@code target} as this box's operator; a preview decided as the real stop is. */
   static StopOperations.Outcome stopAsOperator(
-      HostOperations operations, String project, String specId, String handle, boolean dryRun) {
+      HostOperations operations, StopOperations.Target target, String handle, boolean dryRun) {
     return Actor.call(
         operations.identity().operator(),
-        () ->
-            operations
-                .dispatching()
-                .stop(new StopOperations.ProjectTarget(project, specId), handle, dryRun));
+        () -> operations.dispatching().stop(target, handle, dryRun));
   }
 
   /**

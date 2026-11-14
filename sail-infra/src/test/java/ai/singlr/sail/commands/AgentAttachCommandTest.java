@@ -470,6 +470,27 @@ class AgentAttachCommandTest {
     assertEquals(Optional.empty(), AgentAttachCommand.direct(adhoc, "acme", "abc", command));
   }
 
+  /**
+   * A held terminal's process is the hold's, by the hold's pid file, so the hold is live exactly
+   * while the conversation is, and the missed-stop sweep ends a hold whose terminal died
+   * unobserved.
+   */
+  @Test
+  void aHeldTerminalRecordsItsProcessAsTheHoldsThenResumesTheConversation() {
+    var hold = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+
+    assertEquals(
+        List.of(
+            "bash",
+            "-lc",
+            "mkdir -p /home/dev/.sail/runs/"
+                + hold
+                + " && echo $$ > "
+                + AgentUnit.forRun(hold).pidPath()
+                + " && cd ~/workspace && exec claude --resume abc"),
+        AgentAttachCommand.held(hold, Harnesses.of("claude-code"), "abc"));
+  }
+
   /** A run of a spec's workspace is in the way of resuming another of that spec, and no other. */
   @Test
   void aResumeInASpecsWorkspaceIsRefusedOnlyByARunLiveInIt() {

@@ -6,15 +6,19 @@
 package ai.singlr.sail.commands;
 
 import ai.singlr.sail.api.ApiException;
+import ai.singlr.sail.api.Event;
 import ai.singlr.sail.api.HostOperations;
 import ai.singlr.sail.api.LiveMembers;
 import ai.singlr.sail.api.OperationsFactory;
+import ai.singlr.sail.api.RunStops;
+import ai.singlr.sail.api.SailEventPublisher;
 import ai.singlr.sail.api.SessionYield;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.Lane;
 import ai.singlr.sail.config.ProjectDefinition;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.AgentPresence;
+import ai.singlr.sail.engine.AgentUnit;
 import ai.singlr.sail.engine.ContainerStateGuard;
 import ai.singlr.sail.engine.NameValidator;
 import ai.singlr.sail.engine.NodeIdentity;
@@ -24,6 +28,7 @@ import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.engine.Stty;
 import ai.singlr.sail.harness.Harness;
 import ai.singlr.sail.harness.Harnesses;
+import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.store.DispatchGate;
 import ai.singlr.sail.store.RoomStore;
 import ai.singlr.sail.store.RunStore;
@@ -386,12 +391,98 @@ public final class AgentAttachCommand implements Runnable {
     if (member) {
       endMember(run, operator);
     }
-    var process = new ProcessBuilder(exec).inheritIO().start();
-    var exitCode = process.waitFor();
+    if (!(place instanceof RunPlace.SpecWorkspace)) {
+      exitedWith(new ProcessBuilder(exec).inheritIO().start().waitFor());
+      return;
+    }
+    var hold = hold(run, operator);
+    Integer exitCode = null;
+    try {
+      exitCode =
+          exitedWith(
+              new ProcessBuilder(
+                      buildIncusExecWithTty(place.instance(), held(hold, harness, sessionId)))
+                  .inheritIO()
+                  .start()
+                  .waitFor());
+    } finally {
+      release(run, hold, exitCode, operator);
+    }
+  }
+
+  private static int exitedWith(int exitCode) {
     if (exitCode != 0) {
       System.err.println(
           Ansi.AUTO.string("  @|yellow ⚠|@ Agent session exited with code " + exitCode));
     }
+    return exitCode;
+  }
+
+  /**
+   * Holds spec run {@code run}'s workspace for this terminal ({@link
+   * HostDispatching#holdForTerminal}).
+   */
+  private String hold(RunStore.RunRow run, OperatorCommand operator) {
+    try (var operations = this.operations.apply(operator)) {
+      return Actor.call(
+          operations.identity().operator(),
+          () -> operations.dispatching().holdForTerminal(run, NodeIdentity.handle()));
+    }
+  }
+
+  /**
+   * Ends the hold once the terminal's process is gone and publishes its stop, which resumes a
+   * reviewer, fix or build that waited on it. A stop the server cannot be told of is said here; the
+   * missed-stop sweep tells it once the hold's pid file names no live process.
+   */
+  private void release(
+      RunStore.RunRow run, String hold, Integer exitCode, OperatorCommand operator) {
+    try (var operations = this.operations.apply(operator)) {
+      Actor.run(
+          operations.identity().operator(),
+          () -> operations.dispatching().releaseTerminal(hold, exitCode));
+    }
+    try {
+      SailEventPublisher.localDefault()
+          .publish(
+              RunStops.of(
+                  Event.WellKnownData.SOURCE_WATCHER,
+                  run.project(),
+                  run.specId(),
+                  run.agent(),
+                  hold,
+                  DispatchGate.ROOM_FULL_ROLE,
+                  exitCode,
+                  null));
+    } catch (Exception e) {
+      if (e instanceof InterruptedException) {
+        Thread.currentThread().interrupt();
+      }
+      System.err.println(
+          Ansi.AUTO.string(
+              "  @|yellow ⚠|@ Could not tell sail-api the terminal ended ("
+                  + e.getMessage()
+                  + "); a review waiting on it goes on at the next stop in "
+                  + run.project()
+                  + "."));
+    }
+  }
+
+  /**
+   * The command a held terminal runs: it records its process as the hold's, so the hold is live
+   * exactly while the conversation is, then resumes {@code sessionId} (or opens a fresh one) from
+   * the workspace root.
+   */
+  static List<String> held(String hold, Harness harness, String sessionId) {
+    return List.of(
+        "bash",
+        "-lc",
+        "mkdir -p "
+            + AgentUnit.runDir(hold)
+            + " && echo $$ > "
+            + AgentUnit.forRun(hold).pidPath()
+            + " && cd ~/workspace && exec "
+            + harness.attach(sessionId));
   }
 
   private static void requireRunning(RunPlace place) throws Exception {

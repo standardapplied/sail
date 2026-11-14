@@ -825,6 +825,67 @@ class StopOperationsTest {
     assertEquals("running", runStore.findById(R2).orElseThrow().status());
   }
 
+  /**
+   * M4: an ad hoc run beside a spec's is named by its id, and each printed command stops its run.
+   */
+  @Test
+  void aSpecsRunAndAnAdhocRunLiveAreEachNamedByTheCommandThatStopsIt() throws Exception {
+    var shell =
+        liveAgentShell()
+            .on("cat /home/dev/.sail/runs/" + R2 + "/agent.pid", "124")
+            .on("kill -0 124", "")
+            .on("cat /home/dev/.sail/runs/" + R2 + "/agent-session.json", "{\"task\": \"look\"}");
+    var ops = stopOps(shell, killingHalter(shell), StopOperations.Listener.NONE);
+    seedSpec("auth", SpecStatus.IN_PROGRESS, LOCAL_HANDLE);
+    seedRun(123, UNIT);
+    Acting.system(
+        () ->
+            runStore.create(
+                R2,
+                "acme",
+                null,
+                LOCAL_HANDLE,
+                "adhoc",
+                "codex",
+                null,
+                "look around",
+                124,
+                null,
+                "/home/dev/.sail/runs/" + R2 + "/agent.log",
+                "sail-agent-" + R2));
+
+    var refused =
+        assertThrows(
+            ApiException.class,
+            () ->
+                Actor.call(
+                    ADMIN,
+                    () ->
+                        ops.stop(
+                            new StopOperations.ProjectTarget("acme", null), LOCAL_HANDLE, false)));
+
+    assertEquals(
+        "Name the one to stop: sail agent stop acme --run "
+            + R2
+            + ", sail agent stop acme --spec auth.",
+        refused.failure().remedy().plain());
+    var adhoc =
+        assertInstanceOf(
+            StopOperations.Stopped.class,
+            Actor.call(
+                ADMIN, () -> ops.stop(new StopOperations.RunTarget(R2), LOCAL_HANDLE, true)));
+    assertEquals(R2, adhoc.runId());
+    var spec =
+        assertInstanceOf(
+            StopOperations.Stopped.class,
+            Actor.call(
+                ADMIN,
+                () ->
+                    ops.stop(
+                        new StopOperations.ProjectTarget("acme", "auth"), LOCAL_HANDLE, true)));
+    assertEquals(R1, spec.runId());
+  }
+
   @Test
   void aProjectOutsideTheCallersScopeIsNotInTheCatalogWhetherOrNotItRuns() throws Exception {
     var ops = stopOps(liveAgentShell(), failingHalter(), StopOperations.Listener.NONE);

@@ -251,15 +251,21 @@ public final class StopOperations {
             .map(run -> Strings.isBlank(run.specId()) ? "an ad-hoc run " + run.id() : run.specId())
             .distinct()
             .toList();
-    var named = live.stream().map(RunStore.RunRow::specId).filter(Strings::isNotBlank).distinct();
     var forms = new ArrayList<Object>(List.of("Name the one to stop: "));
-    named.forEach(
-        spec -> {
-          if (forms.size() > 1) {
-            forms.add(", ");
-          }
-          forms.add(Remedy.sail("agent stop", project, "--spec", spec));
-        });
+    live.stream()
+        .map(
+            run ->
+                Strings.isBlank(run.specId())
+                    ? List.of("--run", run.id())
+                    : List.of("--spec", run.specId()))
+        .distinct()
+        .forEach(
+            selector -> {
+              if (forms.size() > 1) {
+                forms.add(", ");
+              }
+              forms.add(Remedy.sail("agent stop", project, selector.get(0), selector.get(1)));
+            });
     forms.add(".");
     return new ApiException(
         ErrorCode.CONFLICT,

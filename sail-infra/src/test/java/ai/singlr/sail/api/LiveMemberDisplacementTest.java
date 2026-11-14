@@ -342,6 +342,33 @@ class LiveMemberDisplacementTest {
     assertEquals(List.of(room.promptOf(SPEC, during, after)), room.processes.latest().written);
   }
 
+  /**
+   * B1: a terminal resuming a read-only member's conversation in the spec's workspace holds it as a
+   * host session holds one in the project's container: the room's next message starts no second
+   * process on that session, and once the terminal ends the member resumes it.
+   */
+  @Test
+  void aTerminalHoldingTheSpecsWorkspaceOnTheMembersSessionStartsNoSecondProcessUntilItEnds() {
+    var process = room.prompted(SPEC, "read-only", "first");
+    room.says(process, Lines.init("sess-1"), Lines.delta("One"), Lines.result("One"));
+    process.onClose(() -> process.exits(0));
+    room.sail.dispatching().endLiveMember(process.runId, "displaced by a terminal");
+    room.awaitStopped(process);
+    var hold = room.sail.dispatching().holdForTerminal(room.run(process.runId), HANDLE);
+
+    room.says(SPEC, "is the terminal still open?");
+
+    assertEquals(1, room.processes.starts.size(), "one process on a conversation, never two");
+
+    room.sail.dispatching().releaseTerminal(hold, 0);
+    room.says(SPEC, "and now?");
+
+    assertEquals(2, room.processes.starts.size());
+    assertTrue(
+        room.processes.starts.getLast().command().contains("sess-1"),
+        String.valueOf(room.processes.starts.getLast().command()));
+  }
+
   @Test
   void aTerminalThatOpensWhileTheMemberClaimsStillFindsNoSecondProcess() {
     var open = new ArrayList<String>();

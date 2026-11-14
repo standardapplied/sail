@@ -21,6 +21,7 @@ import ai.singlr.sail.api.OperationsFactory;
 import ai.singlr.sail.api.ProjectReader;
 import ai.singlr.sail.api.SailOperations;
 import ai.singlr.sail.api.SessionYield;
+import ai.singlr.sail.api.StopOperations;
 import ai.singlr.sail.api.SyncScheduler;
 import ai.singlr.sail.api.TestWorkspaces;
 import ai.singlr.sail.config.SpecStatus;
@@ -354,12 +355,16 @@ class DispatchCommandWiringTest {
     var stop =
         assertThrows(
             ApiException.class,
-            () -> AgentStopCommand.stopAsOperator(operations, "acme", null, HANDLE, false));
+            () ->
+                AgentStopCommand.stopAsOperator(
+                    operations, new StopOperations.ProjectTarget("acme", null), HANDLE, false));
     assertEquals(ErrorCode.READ_ONLY_CREDENTIAL, stop.failure().errorCode());
     var preview =
         assertThrows(
             ApiException.class,
-            () -> AgentStopCommand.stopAsOperator(operations, "acme", null, HANDLE, true));
+            () ->
+                AgentStopCommand.stopAsOperator(
+                    operations, new StopOperations.ProjectTarget("acme", null), HANDLE, true));
     assertEquals(stop.getMessage(), preview.getMessage(), "a preview is refused as the stop is");
     var dispatch =
         assertThrows(

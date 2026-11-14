@@ -23,6 +23,7 @@ import ai.singlr.sail.api.SailEventPublisher;
 import ai.singlr.sail.api.SailOperations;
 import ai.singlr.sail.api.SessionYield;
 import ai.singlr.sail.api.SpecLifecycleReactor;
+import ai.singlr.sail.api.StopOperations;
 import ai.singlr.sail.api.SyncRequest;
 import ai.singlr.sail.api.SyncScheduler;
 import ai.singlr.sail.api.TestAuth;
@@ -139,13 +140,13 @@ class EventPublishersTest {
     assertInstanceOf(
         DispatchOperations.Dispatched.class,
         DispatchCommand.dispatchAsOperator(cli, "acme", request(false), ME));
-    AgentStopCommand.stopAsOperator(cli, "acme", null, ME, false);
+    AgentStopCommand.stopAsOperator(cli, new StopOperations.ProjectTarget("acme", null), ME, false);
     Acting.system(
         () -> box.specs.updateReposAndStatus("auth", List.of("app"), SpecStatus.REVIEW, "x"));
     assertInstanceOf(
         DispatchOperations.Dispatched.class,
         DispatchCommand.dispatchAsOperator(cli, "acme", request(true), ME));
-    AgentStopCommand.stopAsOperator(cli, "acme", null, ME, false);
+    AgentStopCommand.stopAsOperator(cli, new StopOperations.ProjectTarget("acme", null), ME, false);
     Actor.call(
         live.identity().operator(),
         () ->
