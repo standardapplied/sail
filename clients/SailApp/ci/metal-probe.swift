@@ -90,7 +90,7 @@ final class InputView: NSView, NSTextInputClient {
         log.append("handled=\(handled) context=\(inputContext != nil)")
     }
     func insertText(_ string: Any, replacementRange: NSRange) { log.append("insert(\(string))"); marked = NSAttributedString() }
-    func doCommand(by selector: Selector) { log.append("command(\(selector))") }
+    override func doCommand(by selector: Selector) { log.append("command(\(selector))") }
     func setMarkedText(_ string: Any, selectedRange: NSRange, replacementRange: NSRange) {
         marked = (string as? NSAttributedString) ?? NSAttributedString(string: string as? String ?? "")
         log.append("marked(\(marked.string))")
