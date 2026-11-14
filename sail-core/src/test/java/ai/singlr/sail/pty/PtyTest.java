@@ -244,14 +244,15 @@ class PtyTest {
           System.out.println(refused.getMessage().replace(pty.slavePath(), "<tty>"));
           var bound = Pty.CLAIM_WAIT.plusSeconds(5).toNanos();
           System.out.println("within the bound: " + (System.nanoTime() - started < bound));
+          var running =
+              Arrays.stream(Files.readString(pid).strip().split(" "))
+                  .map(Long::parseLong)
+                  .anyMatch(
+                      each -> ProcessHandle.of(each).map(ProcessHandle::isAlive).orElse(false));
+          System.out.println("stand-in or its child running: " + running);
           System.out.println("open beside the master: " + (descriptors() - before - 1));
         }
       }
-      var running =
-          Arrays.stream(Files.readString(pid).strip().split(" "))
-              .map(Long::parseLong)
-              .anyMatch(each -> ProcessHandle.of(each).map(ProcessHandle::isAlive).orElse(false));
-      System.out.println("stand-in or its child running: " + running);
       System.out.println("descriptors left open: " + (descriptors() - before));
     }
 
@@ -268,8 +269,8 @@ class PtyTest {
         """
         The session shim did not claim <tty> within 10 s, so it was stopped.
         within the bound: true
-        open beside the master: 0
         stand-in or its child running: false
+        open beside the master: 0
         descriptors left open: 0
         """,
         said(UnclaimedTerminalHost.class));
