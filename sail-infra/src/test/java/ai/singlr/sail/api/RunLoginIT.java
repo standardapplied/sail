@@ -87,7 +87,7 @@ class RunLoginIT extends AbstractIncusIT {
                 "set -e;"
                     + " userdel -r ubuntu 2>/dev/null || true;"
                     + " id -u dev >/dev/null 2>&1 || useradd -m -u 1000 -s /bin/bash dev;"
-                    + " mkdir -p /home/dev/.sail /home/dev/workspace;"
+                    + " mkdir -p /home/dev/.sail /home/dev/workspace/app /home/dev/workspace/web;"
                     + " chown -R dev:dev /home/dev;"
                     + " for i in $(seq 1 30); do"
                     + " loginctl enable-linger dev 2>/dev/null && break; sleep 1; done;"
@@ -127,7 +127,7 @@ class RunLoginIT extends AbstractIncusIT {
         DispatchOperations.Dispatched dispatched;
         try {
           dispatched = dispatch(ops, spec, shape);
-          awaitInContainer("test -s /home/dev/.sail/started-" + dispatched.runId());
+          awaitStarted(dispatched.runId());
         } finally {
           sampling.set(false);
           sampler.join(Duration.ofSeconds(30));
@@ -255,10 +255,19 @@ class RunLoginIT extends AbstractIncusIT {
     }
   }
 
-  private void awaitInContainer(String condition) throws Exception {
+  /** Waits, in the container and bounded, for the fake agent of {@code runId} to report. */
+  private void awaitStarted(String runId) throws Exception {
+    var started = "/home/dev/.sail/started-" + runId;
     var waited =
-        asDev(List.of("timeout", "60", "sh", "-c", "until " + condition + "; do sleep 0.2; done"));
-    assertTrue(waited.ok(), "never true in " + CONTAINER + ": " + condition);
+        asDev(
+            List.of(
+                "timeout", "60", "sh", "-c", "until test -s " + started + "; do sleep 0.2; done"));
+    assertTrue(
+        waited.ok(),
+        "run "
+            + runId
+            + " never started its agent; its log: "
+            + asDev(List.of("cat", AgentUnit.forRun(runId).logPath())).stdout());
   }
 
   private ShellExec.Result asDev(List<String> argv) throws Exception {
