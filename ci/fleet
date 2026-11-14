@@ -2112,8 +2112,8 @@ counts() {
   echo "$passed PASS, $failed FAIL"
 }
 
-# A group's subshell can die before its checks finish (an exit, an unset variable): its status,
-# kept beside the report, still makes a FAIL line there.
+# A group can fail with no FAIL in its report (its subshell died, or its teardown failed): its
+# status, kept beside the report, still makes a FAIL line there.
 merge() {
   local id=$1 group report ended
   shift
@@ -2123,7 +2123,7 @@ merge() {
     echo "--- group $group, run $id-$group: $(counts "$report")"
     cat "$report" 2> /dev/null || true
     if [[ $ended != 0 ]] && ! grep -qs '^FAIL' "$report"; then
-      echo "FAIL group $group ended with status $ended before its checks finished (see $RUNS/$id/$group.log)"
+      echo "FAIL group $group ended with status $ended though no check failed: its setup, its teardown or the script did (see $RUNS/$id/$group.log); ci/fleet list shows what it left"
     fi
     cat "$RUNS/$id-$group/kept.txt" 2> /dev/null || true
   done > "$RUNS/$id/report.txt"
