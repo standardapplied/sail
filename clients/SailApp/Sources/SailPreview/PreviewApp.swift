@@ -209,6 +209,11 @@ public final class PreviewApp: NSObject, NSApplicationDelegate, NSWindowDelegate
         output → on glass  p50 \(ms(figures.outputToPresented.p50))  p95 \(ms(figures.outputToPresented.p95)) ms
         display \(hertz) Hz · \(terminal.drawableCount) drawables
         """
+        guard figures.keyToEchoEstimated.count > 0 else { return }
+        latency.stringValue += """
+
+        estimated, the display gave no time: key → echo  p50 \(ms(figures.keyToEchoEstimated.p50))  p95 \(ms(figures.keyToEchoEstimated.p95)) ms  (\(figures.keyToEchoEstimated.count) keys)
+        """
     }
 
     /// `text` as a sentence: a capital first, a full stop last.

@@ -5,7 +5,8 @@ import SailSurface
 import SailTerminal
 import SailVT
 
-/// The renderer's CPU side, measured in the release build the app ships: a full 200x60 redraw
+/// The renderer's CPU side, measured in the release build the app ships on the main thread's own
+/// CPU clock (a shared runner's other work would otherwise be counted): a full 200x60 redraw
 /// (reading the frame, laying out every row, writing the buffers, encoding the pass) 60 times with
 /// every row changed; and a screen of 600 distinct CJK characters drawn as the display draws it, a
 /// share of new glyphs a frame: the first frame's time, how many frames until every glyph shows,
@@ -25,9 +26,9 @@ enum Bench {
                 text += "\u{1b}[\(31 + (row + round) % 7)m" + String(repeating: "lorem ipsum \(round) dolor sit amet ", count: 7).prefix(grid.columns)
             }
             _ = screen.feed(Array(text.utf8))
-            let started = ContinuousClock.now
+            let started = Duration.threadCPU
             let frame = try screen.frame()
-            let read = ContinuousClock.now - started
+            let read = Duration.threadCPU - started
             _ = try renderer.image(of: frame, overlay: Overlay(), size: size)
             if round >= 5 {
                 redraws.append(read + renderer.lastEncodeTime)

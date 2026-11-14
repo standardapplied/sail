@@ -43,13 +43,14 @@ extension TerminalView: @preconcurrency NSTextInputClient {
 
     public func insertText(_ string: Any, replacementRange _: NSRange) {
         let text = Self.plain(string)
+        let wasComposing = composition.isComposing
         composition.unmark()
         if committedDuringKey != nil {
             committedDuringKey?.append(text)
         } else if let key = Typing.inserted(text) {
             send(key, at: CACurrentMediaTime())
         }
-        needFrame()
+        if wasComposing { needFrame() }
     }
 
     public func setMarkedText(_ string: Any, selectedRange _: NSRange, replacementRange _: NSRange) {

@@ -212,6 +212,12 @@ import Testing
             return ((view as? NSTextField).map { [$0.stringValue] } ?? []) + view.subviews.flatMap(texts)
         }
         #expect(texts(sheet.contentView).contains("Paste 3 lines?"))
+        func buttons(_ view: NSView?) -> [NSButton] {
+            guard let view else { return [] }
+            return ((view as? NSButton).map { [$0] } ?? []) + view.subviews.flatMap(buttons)
+        }
+        let returnKey = buttons(sheet.contentView).filter { $0.keyEquivalent == "\r" }.map(\.title)
+        #expect(returnKey == ["Cancel"], "Return cancels the paste the sheet warns of")
         harness.window.endSheet(sheet, returnCode: .alertSecondButtonReturn)
     }
 
@@ -284,6 +290,22 @@ import Testing
         await harness.clock.nextResume()
         #expect(!harness.clock.isPaused)
         #expect(harness.view.visibleText.contains("hello"), "drawn as it arrived, before the next refresh")
+    }
+
+    /// A key that changes nothing on screen leaves an idle view idle, so its echo is drawn the
+    /// moment it arrives rather than at the next display callback.
+    @Test func aKeysEchoIsDrawnAsItArrives() async throws {
+        let harness = try Harness()
+        await Task.yield()
+        harness.tick()
+        harness.tick()
+        #expect(harness.clock.isPaused)
+        harness.key("e", code: 0x0E)
+        for _ in 0 ..< 10 { await Task.yield() }
+        #expect(harness.clock.isPaused, "the key itself asked for no frame")
+        harness.link.output("e")
+        await harness.clock.nextResume()
+        #expect(harness.view.visibleText.contains("e"), "drawn as it arrived, before the next refresh")
     }
 
     /// V3: every start, pause, resume and stop of the display link ran on the main thread, the

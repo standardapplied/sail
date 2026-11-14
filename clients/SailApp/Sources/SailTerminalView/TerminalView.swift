@@ -30,7 +30,7 @@ public final class TerminalView: NSView {
     let marks = ViewMarks()
     let input = DispatchQueue(label: "sh.standardapplied.sail.terminal.input", qos: .userInteractive)
     var makeClock: @MainActor (TerminalView) -> any FrameClock = { view in
-        DisplayLinkClock(view: view) { [weak view] target in view?.refresh(target: target) }
+        DisplayLinkClock(view: view) { [weak view] target in _ = view?.refresh(target: target) }
     }
     var composition = Composition()
     var committedDuringKey: [String]?
@@ -118,7 +118,7 @@ public final class TerminalView: NSView {
         tasks.append(Task.detached { [weak self] in
             for await updated in changes {
                 marks.output(at: CACurrentMediaTime() - (ContinuousClock.now - updated).seconds)
-                await self?.outputArrived()
+                await self?.drawNowIfIdle()
             }
         })
         let events = link.events
@@ -260,12 +260,13 @@ public final class TerminalView: NSView {
         pacer.resume()
     }
 
-    /// Output reached the screen. A paused link means the view is idle (the typing-echo case):
-    /// the frame is drawn now, then the link resumes, so the echo meets the next display refresh
-    /// rather than the one after.
-    private func outputArrived() {
-        guard pacer.isIdle else { return }
-        refresh(target: CACurrentMediaTime() + refreshInterval)
+    /// Output reached the screen, or a key was written (which returns a scrolled-back view to the
+    /// bottom). A paused link means the view is idle, the typing-echo case: the screen is read now
+    /// and drawn if it changed, and only a frame drawn resumes the link, so a key that changed
+    /// nothing leaves the view idle and its echo is drawn the moment it arrives, meeting the next
+    /// display refresh rather than the one after.
+    private func drawNowIfIdle() {
+        guard pacer.isIdle, refresh(target: CACurrentMediaTime() + refreshInterval) else { return }
         pacer.resume()
     }
 
@@ -278,39 +279,44 @@ public final class TerminalView: NSView {
     }
 
     /// One display refresh, for the frame meant to reach the display at `target`: read the screen;
-    /// draw when it or the view changed, else pause until something does.
-    func refresh(target: Double) {
+    /// draw when it or the view changed, else pause until something does. True when the link is
+    /// wanted for the next refresh: a frame was drawn, or every buffer was still in flight.
+    @discardableResult
+    func refresh(target: Double) -> Bool {
         guard let link else {
             pacer.pause()
-            return
+            return false
         }
         let read = CACurrentMediaTime()
         defer { marks.refreshed(since: read) }
         guard let frame = try? link.screen.frame() else {
             pacer.pause()
-            return
+            return false
         }
         let changed = needsDraw || frame.changed != .nothing || frame.cursor != lastFrame?.cursor || frame.colors != lastFrame?.colors
             || frame.size != lastFrame?.size
         guard changed, let metalLayer else {
             marks.unchanged(read: read)
             pacer.pause()
-            return
+            return false
         }
         switch renderer.draw(frame, overlay: overlay, in: metalLayer, presented: { [marks] in marks.presented(frame: $0, at: $1) }) {
         case let .drawn(number):
             marks.committed(frame: number, read: read, target: target)
             lastFrame = frame
             needsDraw = !renderer.lastFrameComplete
+            return true
         case .busy:
             marks.skipped(read: read)
             renderer.invalidate()
             needsDraw = true
+            return true
         case .unavailable:
             marks.skipped(read: read)
             renderer.invalidate()
             needsDraw = true
             pacer.pause()
+            return false
         }
     }
 
@@ -363,7 +369,7 @@ public final class TerminalView: NSView {
             link.screen.scrollToBottom()
             link.send(key)
             marks.keyWritten(event: event, interval: interval)
-            Task { @MainActor in self?.needFrame() }
+            Task { @MainActor in self?.drawNowIfIdle() }
         }
     }
 

@@ -1,3 +1,4 @@
+import Darwin
 import Dispatch
 import Metal
 import QuartzCore
@@ -15,7 +16,8 @@ import Synchronization
 public final class TerminalRenderer {
     public let device: any MTLDevice
     public private(set) var faces: TerminalFaces
-    /// The CPU time of the last frame: instances laid out, buffers written, the pass encoded.
+    /// The CPU time the last frame took on its thread: instances laid out, buffers written, the
+    /// pass encoded. The thread's own clock, so time the machine gave other work is not counted.
     public private(set) var lastEncodeTime = Duration.zero
 
     private let fonts: TerminalFonts
@@ -216,8 +218,8 @@ public final class TerminalRenderer {
         _ frame: ScreenFrame, overlay: Overlay, into target: any MTLTexture, commandBuffer: any MTLCommandBuffer,
         slot: (frame: UInt64, buffer: Int), newItems: Int
     ) -> Bool {
-        let started = ContinuousClock.now
-        defer { lastEncodeTime = ContinuousClock.now - started }
+        let started = Duration.threadCPU
+        defer { lastEncodeTime = Duration.threadCPU - started }
         store.begin(slot.frame, newItems: newItems)
         if store.generation != builtGeneration {
             builder.invalidate()
@@ -327,5 +329,12 @@ public enum RenderError: Error, Equatable, CustomStringConvertible {
 extension Int {
     var nextPowerOfTwo: Int {
         self <= 1 ? 1 : 1 << (Int.bitWidth - (self - 1).leadingZeroBitCount)
+    }
+}
+
+extension Duration {
+    /// The CPU time the calling thread has run so far.
+    public static var threadCPU: Duration {
+        .nanoseconds(Int64(clamping: clock_gettime_nsec_np(CLOCK_THREAD_CPUTIME_ID)))
     }
 }

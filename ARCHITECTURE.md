@@ -3922,8 +3922,9 @@ secrets), `ci/notarize` notarizes and staples, `ci/drive` runs the drive scripts
 
 - **V1. Output shows on the next frame.** Output that finds the view idle (its display link
   paused) is drawn at once and the link resumed, so an echo meets the next display refresh;
-  otherwise the next refresh draws it. Nothing holds output to batch it. A refresh that finds
-  nothing changed, or no drawable, pauses the link.
+  otherwise the next refresh draws it. A key that changes nothing on screen asks for no frame,
+  so the view is still idle when its echo comes. Nothing holds output to batch it. A refresh that
+  finds nothing changed, or no drawable, pauses the link.
 - **V2. One screen, one source.** The view draws only what `Screen.frame()` says and sends only what
   the screen's encoders make; no source of the app spells an escape sequence (a sweep test).
 - **V3. Display-link changes happen on the main thread**, through one pacer that records each one.
