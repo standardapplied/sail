@@ -271,7 +271,7 @@ public final class AgentAttachCommand implements Runnable {
    */
   static void requireNoLiveConflict(
       RunStore.RunRow run, List<DispatchGate.RunningRun> running, String project) {
-    DispatchGate.decide(run.conversationId(), Lane.BUILD.wire(), run.repos(), running)
+    DispatchGate.decide(run.place(), run.conversationId(), Lane.BUILD.wire(), run.repos(), running)
         .ifPresent(
             conflict -> {
               throw new IllegalStateException(conflictRefusal(run, conflict, project));

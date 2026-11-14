@@ -38,6 +38,14 @@ public final class BoxInstances {
   /** The project a template instance is the template of, set when it is launched. */
   public static final String TEMPLATE_OF_KEY = "user.sail.template.of";
 
+  /** The spec whose runs live in a workspace: set at the copy, on a spec's workspace only. */
+  public static final String SPEC_KEY = "user.sail.spec";
+
+  /**
+   * The person a workspace belongs to: set at the copy, and set again when its runs change hands.
+   */
+  public static final String OWNER_KEY = "user.sail.owner";
+
   /** Written last when a workspace is made, so one without it is not whole (W12). */
   public static final String READY_KEY = "user.sail.ready";
 

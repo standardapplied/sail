@@ -6,6 +6,7 @@
 package ai.singlr.sail.commands;
 
 import ai.singlr.sail.SailVersion;
+import ai.singlr.sail.api.DispatchOperations;
 import ai.singlr.sail.common.Secrets;
 import ai.singlr.sail.engine.WorkspaceTemplate;
 import ai.singlr.sail.engine.Workspaces;
@@ -88,10 +89,13 @@ public final class PtySelfTestCommand implements Callable<Integer> {
           "spec_title",
           "dry_run",
           "would_create_branch",
+          "would_reuse_workspace",
+          "reused",
           "dispatched",
           "clone_ms",
           "change",
-          "created_at");
+          "created_at",
+          "owner");
 
   @Override
   public Integer call() {
@@ -467,11 +471,30 @@ public final class PtySelfTestCommand implements Callable<Integer> {
     var info =
         new PtyMessage.SessionInfo("probe", "instance", true, 0, "fde", "", List.of("bash", "-l"));
     var listing = new SessionCommand.Ls.Listing(1, "boot", List.of(info), PtyEventDrops.Drops.NONE);
+    var made =
+        new DispatchOperations.WorkspaceUse(
+            "box-spec",
+            "spec",
+            false,
+            new Workspaces.Timings(1L, 2, 3, 6, Map.of("bus", 1L)),
+            true);
     var preview =
-        new DispatchCommand.DispatchPreview(false, "box", "spec", "title", "foreground", "task");
+        new DispatchCommand.DispatchPreview(
+            false, "box", "spec", "title", "foreground", "task", made);
     var dry =
         new DispatchCommand.DryDispatch(
-            true, "box", "spec", "title", "background", "claude-code", "b", true, false, "task");
+            true,
+            "box",
+            "spec",
+            "title",
+            "background",
+            "claude-code",
+            "b",
+            true,
+            false,
+            "box-spec",
+            true,
+            "task");
     var idle = new DispatchCommand.NoDispatch("box", false, "no_pending_specs");
     var template = new WorkspaceTemplate.Template("p", "p--tmpl", "v1", "i", "tank", true);
     var created =
@@ -480,7 +503,10 @@ public final class PtySelfTestCommand implements Callable<Integer> {
     var changed = new Workspaces.Changed("p", "w", "p-w", Workspaces.Change.STOPPED, null);
     var rows =
         new Workspaces.Listing(
-            "p", List.of(new Workspaces.Row("w", "p-w", "running", "v1", "2026-11-12", null)));
+            "p",
+            List.of(
+                new Workspaces.Row(
+                    "w", "p-w", "running", "v1", "2026-11-12", null, "spec", "eng")));
     return CliJson.stringify(List.of(listing, preview, dry, idle, created, changed, rows));
   }
 }

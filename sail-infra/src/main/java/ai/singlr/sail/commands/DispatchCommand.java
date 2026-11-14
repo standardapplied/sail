@@ -22,14 +22,18 @@ import ai.singlr.sail.engine.Banner;
 import ai.singlr.sail.engine.GuardrailWatcher;
 import ai.singlr.sail.engine.NameValidator;
 import ai.singlr.sail.engine.OperatorCommand;
+import ai.singlr.sail.engine.RunPlace;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.ShellExecutor;
-import ai.singlr.sail.engine.SnapshotManager;
 import ai.singlr.sail.engine.WatcherSpawner;
+import ai.singlr.sail.engine.WorkspaceTemplate;
+import ai.singlr.sail.engine.Workspaces;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.store.Sqlite;
 import java.util.List;
+import java.util.Locale;
 import java.util.Objects;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BiFunction;
 import java.util.function.Function;
 import java.util.function.Supplier;
@@ -86,14 +90,6 @@ public final class DispatchCommand implements Runnable {
 
   @Option(names = "--json", description = "Output in JSON format.")
   private boolean json;
-
-  @Option(
-      names = "--snapshot",
-      negatable = true,
-      description =
-          "Take a container snapshot before dispatch. Use --no-snapshot to skip. If neither is"
-              + " passed, prompts interactively (defaults to no); skips silently in --json mode.")
-  private Boolean snapshot;
 
   @Option(
       names = "--restart",
@@ -162,7 +158,7 @@ public final class DispatchCommand implements Runnable {
             new OperationHooks(
                 this::publishLifecycle,
                 new WatcherSpawner(shell, WatcherSpawner::spawnProcess),
-                snapshotter(shell),
+                Workspaces.onThisBox(shell),
                 DispatchOperations.terminalLauncher(),
                 renderer(sync),
                 StopOperations.Listener.NONE))) {
@@ -180,7 +176,7 @@ public final class DispatchCommand implements Runnable {
       ShellExec shell,
       DispatchOperations.EventSink events,
       WatcherSpawner watcherSpawner,
-      DispatchOperations.Snapshotter snapshotter,
+      Workspaces workspaces,
       DispatchOperations.AgentLauncher launcher,
       DispatchOperations.Listener listener,
       SessionYield sessionYield,
@@ -189,7 +185,7 @@ public final class DispatchCommand implements Runnable {
         db,
         shell,
         new OperationHooks(
-            events, watcherSpawner, snapshotter, launcher, listener, StopOperations.Listener.NONE),
+            events, watcherSpawner, workspaces, launcher, listener, StopOperations.Listener.NONE),
         sessionYield);
   }
 
@@ -220,7 +216,10 @@ public final class DispatchCommand implements Runnable {
         if (!background) {
           if (dispatched.exitCode() != null && dispatched.exitCode() != 0) {
             throw AgentLogCommand.agentExited(
-                shell, name, dispatched.runId(), dispatched.exitCode());
+                shell,
+                RunPlace.of(name, dispatched.taskSpec().id()),
+                dispatched.runId(),
+                dispatched.exitCode());
           }
           return;
         }
@@ -242,8 +241,9 @@ public final class DispatchCommand implements Runnable {
 
   /**
    * What a real dispatch would do, said in the conditional, and that nothing was changed: the spec,
-   * the agent and lane, the branch and whether it would be created, and whether the spec would be
-   * restarted. No launch banner and no command for a run that does not exist.
+   * the agent and lane, the workspace it would make or reuse, the branch and whether it would be
+   * created, and whether the spec would be restarted. No launch banner and no command for a run
+   * that does not exist.
    */
   private void printDryRun(DispatchOperations.Dispatched dispatched) {
     var spec = dispatched.taskSpec();
@@ -261,6 +261,8 @@ public final class DispatchCommand implements Runnable {
                   dispatched.branch(),
                   dispatched.branchCreated(),
                   dispatched.restarted(),
+                  instanceOf(dispatched.workspace()),
+                  dispatched.workspace() != null && dispatched.workspace().reused(),
                   dispatched.task())));
       return;
     }
@@ -285,29 +287,36 @@ public final class DispatchCommand implements Runnable {
             + ", "
             + branch
             + ".");
+    if (dispatched.workspace() != null) {
+      var workspace = dispatched.workspace();
+      System.out.println(
+          "  Would "
+              + (workspace.reused() ? "reuse" : "make")
+              + " workspace "
+              + workspace.workspace()
+              + " ("
+              + workspace.instance()
+              + ")"
+              + (workspace.stale() ? ", from a template older than the definition." : "."));
+    }
     if (dispatched.restarted()) {
       System.out.println("  Would restart the spec first: its status would go back to pending.");
     }
   }
 
-  /**
-   * The CLI lane's snapshot decision: fully per-dispatch opt-in via {@code --snapshot} / {@code
-   * --no-snapshot}, prompting interactively when neither is passed, and never on a dry run.
-   */
-  private DispatchOperations.Snapshotter snapshotter(ShellExec shell) {
-    return (project, config) -> {
-      if (dryRun || !SnapshotDecision.shouldSnapshot(snapshot, config, json)) {
-        return "";
-      }
-      var snapMgr = new SnapshotManager(shell);
-      var label = SnapshotManager.defaultLabel();
-      try {
-        SnapshotDecision.create(System.out, snapMgr, name, label, json);
-      } catch (Exception e) {
-        throw new IllegalStateException("Failed to create snapshot: " + e.getMessage(), e);
-      }
-      return label;
-    };
+  private static String instanceOf(DispatchOperations.WorkspaceUse workspace) {
+    return workspace == null ? null : workspace.instance();
+  }
+
+  /** What a dispatch says of the workspace its run went into. */
+  static String workspaceLine(DispatchOperations.WorkspaceUse workspace) {
+    return workspace.reused()
+        ? "Workspace " + workspace.workspace() + " reused"
+        : "Workspace "
+            + workspace.workspace()
+            + " made in "
+            + String.format(Locale.ROOT, "%.1f", workspace.timings().totalMs() / 1000.0)
+            + " s";
   }
 
   /**
@@ -317,7 +326,21 @@ public final class DispatchCommand implements Runnable {
    * nothing and says what it would do once it is done ({@link #printDryRun}).
    */
   private DispatchOperations.Listener renderer(SyncScheduler sync) {
+    var entered = new AtomicReference<DispatchOperations.WorkspaceUse>();
     return new DispatchOperations.Listener() {
+      @Override
+      public void workspaceEntered(DispatchOperations.WorkspaceUse workspace) {
+        entered.set(workspace);
+        if (json) {
+          return;
+        }
+        System.out.println(Ansi.AUTO.string("  @|green ✓|@ " + workspaceLine(workspace)));
+        if (workspace.stale()) {
+          System.out.println(
+              Ansi.AUTO.string("  @|yellow !|@ " + WorkspaceTemplate.staleNotice(name)));
+        }
+      }
+
       @Override
       public void claimed(Spec taskSpec, String task) {
         if (dryRun) {
@@ -333,7 +356,8 @@ public final class DispatchCommand implements Runnable {
                       taskSpec.id(),
                       taskSpec.title(),
                       background ? "background" : "foreground",
-                      task)));
+                      task,
+                      entered.get())));
           return;
         }
         System.out.println(Ansi.AUTO.string("  @|bold Dispatching spec:|@ " + taskSpec.id()));
@@ -436,8 +460,15 @@ public final class DispatchCommand implements Runnable {
     }
   }
 
+  /** What a dispatch says when it claims its spec, with the workspace its run went into. */
   record DispatchPreview(
-      boolean dryRun, String name, String specId, String specTitle, String mode, String task) {}
+      boolean dryRun,
+      String name,
+      String specId,
+      String specTitle,
+      String mode,
+      String task,
+      DispatchOperations.WorkspaceUse workspace) {}
 
   /** What a dry run says, in JSON: what a real dispatch would do. */
   record DryDispatch(
@@ -450,6 +481,8 @@ public final class DispatchCommand implements Runnable {
       String branch,
       boolean wouldCreateBranch,
       boolean wouldRestart,
+      String workspace,
+      boolean wouldReuseWorkspace,
       String task) {}
 
   record NoDispatch(String name, boolean dispatched, String reason) {}

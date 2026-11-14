@@ -11,6 +11,7 @@ import ai.singlr.sail.config.ProjectDefinition;
 import ai.singlr.sail.engine.AgentUnit;
 import ai.singlr.sail.engine.ContainerExec;
 import ai.singlr.sail.engine.LaunchEnv;
+import ai.singlr.sail.engine.RunPlace;
 import ai.singlr.sail.engine.RunUsageReader;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.StreamJsonResult;
@@ -18,6 +19,8 @@ import ai.singlr.sail.harness.RunUsage;
 import ai.singlr.sail.store.RunStore;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
+import java.util.Optional;
 
 /**
  * The review and fix lanes: a thin lane over the launch seams every lane shares. A reviewer or a
@@ -32,10 +35,12 @@ import java.util.List;
 final class ReviewLaneLauncher implements ReviewLanes {
 
   private final ProjectLoader projects;
+  private final RunPlaces places;
   private final RunStore runStore;
   private final RunReservation runReservation;
   private final RunLauncher runLauncher;
   private final ShellExec shell;
+  private final WorkBranch workBranch;
   private final Builds builds;
 
   /** The dispatch machinery's resume of a build, which this lane hands its builds to. */
@@ -45,12 +50,16 @@ final class ReviewLaneLauncher implements ReviewLanes {
 
   ReviewLaneLauncher(
       ProjectLoader projects,
+      RunPlaces places,
       RunStore runStore,
       RunReservation runReservation,
       RunLauncher runLauncher,
       ShellExec shell,
+      WorkBranch workBranch,
       Builds builds) {
     this.projects = projects;
+    this.places = places;
+    this.workBranch = workBranch;
     this.runStore = runStore;
     this.runReservation = runReservation;
     this.runLauncher = runLauncher;
@@ -66,7 +75,8 @@ final class ReviewLaneLauncher implements ReviewLanes {
   @Override
   public Launch launch(Invocation invocation, String boxHandle, Runnable claimed) {
     var project = invocation.project();
-    var config = projects.loadRunning(project).config();
+    var config = projects.definition(project);
+    var checked = places.check(project, config, invocation.specId(), boxHandle);
     var runId = DateTimeUtils.newId().toString();
     var unit = AgentUnit.forRun(runId);
     var claim =
@@ -86,20 +96,32 @@ final class ReviewLaneLauncher implements ReviewLanes {
     return switch (claim) {
       case RunReservation.Claim.Held held -> new Launch.Deferred(held.conflict().run());
       case RunReservation.Claim.Claimed reserved ->
-          launchClaimed(invocation, runId, unit, config, reserved.env(), claimed);
+          launchClaimed(
+              invocation, checked, runId, unit, config, reserved.env(), claimed, boxHandle);
     };
   }
 
   private Launch launchClaimed(
       Invocation invocation,
+      RunPlaces.Checked checked,
       String runId,
       AgentUnit unit,
       ProjectDefinition config,
       LaunchEnv env,
-      Runnable claimed) {
-    var project = invocation.project();
+      Runnable claimed,
+      String boxHandle) {
     var role = invocation.lane().wire();
     try {
+      var place = (RunPlace.SpecWorkspace) places.enter(checked, config, boxHandle).place();
+      workBranch.enter(
+          place,
+          Objects.requireNonNullElse(config.repos(), List.<ProjectDefinition.Repo>of()).stream()
+              .filter(repo -> invocation.repos().contains(repo.path()))
+              .toList(),
+          invocation.branch(),
+          false,
+          true,
+          Optional.empty());
       claimed.run();
       if (!invocation.shown().isEmpty()) {
         runStore.markDelivered(runId, invocation.shown());
@@ -107,7 +129,7 @@ final class ReviewLaneLauncher implements ReviewLanes {
       var launch =
           runLauncher.launchSession(
               new RunLauncher.LaunchSpec(
-                  project,
+                  place,
                   config,
                   ContainerExec.DEV_WORKSPACE,
                   true,
@@ -126,11 +148,11 @@ final class ReviewLaneLauncher implements ReviewLanes {
                   null));
       runLauncher.finishLaunch(
           new RunLauncher.RunContext(
-              project, unit, runId, invocation.specId(), invocation.agent(), role, true),
+              place, unit, runId, invocation.specId(), invocation.agent(), role, true),
           launch);
       return new Launch.Started();
     } catch (RuntimeException e) {
-      runReservation.releaseIfAbsent(runId, project, unit);
+      runReservation.releaseIfAbsent(runId, checked.place(), unit);
       throw e;
     }
   }
@@ -140,7 +162,8 @@ final class ReviewLaneLauncher implements ReviewLanes {
     var log =
         shell.exec(
             ContainerExec.asDevUser(
-                run.project(), List.of("cat", AgentUnit.readableLogPath(run.id(), run.logPath()))));
+                run.place().instance(),
+                List.of("cat", AgentUnit.readableLogPath(run.id(), run.logPath()))));
     return log.ok() ? StreamJsonResult.extract(log.stdout()) : "";
   }
 
@@ -158,23 +181,24 @@ final class ReviewLaneLauncher implements ReviewLanes {
    */
   @Override
   public List<Rescue> ensureCommitted(
-      String project, List<String> repos, String branch, String commitMessage) throws Exception {
+      RunPlace place, List<String> repos, String branch, String commitMessage) throws Exception {
     if (Strings.isBlank(branch)) {
       return List.of();
     }
+    var container = place.instance();
     var rescued = new ArrayList<Rescue>();
     for (var repo : repos) {
       var dir = ContainerExec.DEV_WORKSPACE + "/" + repo;
-      if (!onBranch(project, dir, branch)) {
+      if (!onBranch(container, dir, branch)) {
         continue;
       }
-      var porcelain = git(project, dir, "status", "--porcelain");
+      var porcelain = git(container, dir, "status", "--porcelain");
       if (porcelain.isBlank()) {
         continue;
       }
-      git(project, dir, "add", "-A");
-      git(project, dir, "commit", "-m", commitMessage);
-      var push = shell.exec(ContainerExec.asDevUser(project, List.of("git", "-C", dir, "push")));
+      git(container, dir, "add", "-A");
+      git(container, dir, "commit", "-m", commitMessage);
+      var push = shell.exec(ContainerExec.asDevUser(container, List.of("git", "-C", dir, "push")));
       if (!push.ok()) {
         System.err.println(
             "review-pipeline: push failed for " + dir + " on " + branch + ": " + push.stderr());
@@ -198,18 +222,18 @@ final class ReviewLaneLauncher implements ReviewLanes {
         .toList();
   }
 
-  private boolean onBranch(String project, String dir, String branch) throws Exception {
+  private boolean onBranch(String container, String dir, String branch) throws Exception {
     var result =
         shell.exec(
             ContainerExec.asDevUser(
-                project, List.of("git", "-C", dir, "rev-parse", "--abbrev-ref", "HEAD")));
+                container, List.of("git", "-C", dir, "rev-parse", "--abbrev-ref", "HEAD")));
     return result.ok() && branch.equals(result.stdout().strip());
   }
 
-  private String git(String project, String dir, String... args) throws Exception {
+  private String git(String container, String dir, String... args) throws Exception {
     var command = new ArrayList<>(List.of("git", "-C", dir));
     command.addAll(List.of(args));
-    var result = shell.exec(ContainerExec.asDevUser(project, command));
+    var result = shell.exec(ContainerExec.asDevUser(container, command));
     if (!result.ok()) {
       throw new IllegalStateException(
           "git " + args[0] + " failed in " + dir + ": " + result.stderr());

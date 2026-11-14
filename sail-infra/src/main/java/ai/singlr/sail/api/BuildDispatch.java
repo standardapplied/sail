@@ -8,6 +8,7 @@ package ai.singlr.sail.api;
 import ai.singlr.sail.access.Access;
 import ai.singlr.sail.access.ReadFilter;
 import ai.singlr.sail.common.DateTimeUtils;
+import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.BranchPolicy;
 import ai.singlr.sail.config.Lane;
@@ -19,6 +20,7 @@ import ai.singlr.sail.engine.AgentUnit;
 import ai.singlr.sail.engine.DispatchRepos;
 import ai.singlr.sail.engine.HostInfo;
 import ai.singlr.sail.engine.LaunchEnv;
+import ai.singlr.sail.engine.RunPlace;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.WorkPrompt;
 import ai.singlr.sail.identity.Actor;
@@ -35,12 +37,13 @@ import java.util.function.Supplier;
 
 /**
  * The build lane — {@code sail dispatch}: the spec → review → fix loop's entry point. Resolves the
- * spec (honoring {@code restart} and {@link LaunchAdmission}), atomically reserves the run against
- * its target repos through {@link RunReservation}, claims the spec {@code in_progress} with its
- * repos and branch, supersedes stale reviews, publishes the lifecycle events, snapshots and checks
- * out the work branch, and launches through {@link RunLauncher}. The one lane that mutates spec
- * state and a working tree; every other lane launches around it. Dry and live share the
- * claim/branch phase, so a preview reports exactly what a live dispatch would do.
+ * spec (honoring {@code restart} and {@link LaunchAdmission}), checks the spec's workspace can be
+ * had ({@link RunPlaces#check}), atomically reserves the run through {@link RunReservation}, claims
+ * the spec {@code in_progress} with its repos and branch, supersedes stale reviews, then reuses or
+ * makes the spec's workspace, publishes the lifecycle events, enters the work branch there ({@link
+ * WorkBranch#enter}) and launches through {@link RunLauncher}. The one lane that mutates spec
+ * state; every other lane launches around it. A dry run meets every refusal before the reservation
+ * and rehearses the claim, then stops: it reserves, makes and checks out nothing.
  */
 public final class BuildDispatch {
 
@@ -52,7 +55,7 @@ public final class BuildDispatch {
   private final LaunchAdmission admission;
   private final RunReservation runReservation;
   private final RunLauncher runLauncher;
-  private final DispatchOperations.Snapshotter snapshotter;
+  private final RunPlaces places;
   private final DispatchOperations.Listener listener;
   private final DispatchOperations.EventSink events;
   private final WorkBranch workBranch;
@@ -66,7 +69,7 @@ public final class BuildDispatch {
       LaunchAdmission admission,
       RunReservation runReservation,
       RunLauncher runLauncher,
-      DispatchOperations.Snapshotter snapshotter,
+      RunPlaces places,
       DispatchOperations.Listener listener,
       DispatchOperations.EventSink events,
       ShellExec shell) {
@@ -78,7 +81,7 @@ public final class BuildDispatch {
     this.admission = admission;
     this.runReservation = runReservation;
     this.runLauncher = runLauncher;
-    this.snapshotter = snapshotter;
+    this.places = places;
     this.listener = listener;
     this.events = events;
     this.workBranch = new WorkBranch(shell, listener);
@@ -104,17 +107,15 @@ public final class BuildDispatch {
     }
   }
 
-  /** What the claim/branch phase produced: the snapshot label and whether a branch was set up. */
-  private record PreparedClaim(String snapshot, boolean branchCreated) {}
-
   /**
    * Executes one dispatch: resolve the spec (honoring {@code restart}), enforce {@link
    * LaunchAdmission}, refuse while an ad-hoc agent is live, atomically reserve the run against the
    * target repo set (the binding concurrency gate) and, in the same transaction, claim the spec
    * {@code in_progress} with its resolved repos and branch persisted, then publish the lifecycle
-   * events, snapshot and branch as configured, launch, and arm the guardrail watcher. Every refusal
-   * fires before any mutation, and the admission's before the container is asked whether it runs,
-   * so who may dispatch the spec, and on which box, does not depend on the container's state.
+   * events, enter the spec's workspace and its branch, launch, and arm the guardrail watcher. Every
+   * refusal that needs no workspace fires before any mutation, and the admission's before Incus is
+   * asked about the workspace, so who may dispatch the spec, and on which box, does not depend on
+   * the box's state (R3).
    */
   public DispatchOperations.Outcome dispatch(
       String project, DispatchOperations.Request request, String localHandle) {
@@ -149,17 +150,16 @@ public final class BuildDispatch {
               + "' would close a review outside your project scope.",
           "Ask an admin to dispatch it.");
     }
-    var loaded = projects.running(project, config);
     if (nextSpec == null) {
       return new DispatchOperations.NoSpecs();
     }
 
-    var targetRepos = DispatchRepos.resolve(loaded.config(), nextSpec, request.repos());
+    var targetRepos = DispatchRepos.resolve(config, nextSpec, request.repos());
     var taskSpec = DispatchRepos.withTargetRepos(nextSpec, targetRepos);
-    var branch = BranchPolicy.branchName(loaded.config(), nextSpec);
+    var branch = BranchPolicy.branchName(config, nextSpec);
     var specBody = specStore.getContent(nextSpec.id()).map(SpecStore.SpecContent::body).orElse("");
     var room = room(nextSpec.id());
-    var agentType = taskSpec.agent() != null ? taskSpec.agent() : loaded.config().agent().type();
+    var agentType = taskSpec.agent() != null ? taskSpec.agent() : config.agent().type();
     if (Strings.isBlank(agentType)) {
       throw new ApiException(
           ErrorCode.BAD_REQUEST,
@@ -171,10 +171,11 @@ public final class BuildDispatch {
         WorkPrompt.build(
             taskSpec, specBody.isBlank() ? nextSpec.title() : specBody, room, List.of());
     var task = built.prompt();
+    var checked = places.check(project, config, nextSpec.id(), localHandle);
 
     Runnable claim = () -> claim(resolution, taskSpec, branch);
     if (request.dryRun()) {
-      requireNoRepoOverlap(project, localHandle, taskSpec.id(), taskSpec.repos());
+      requireNoRepoOverlap(checked.place(), localHandle, taskSpec.id(), taskSpec.repos());
       runReservation.unreserved(taskSpec.id(), localHandle, agentType);
       specStore.rehearse(claim);
       listener.claimed(taskSpec, task);
@@ -184,8 +185,8 @@ public final class BuildDispatch {
           agentType,
           task,
           null,
-          "",
-          workBranch.wouldCreate(project, targetRepos, branch),
+          DispatchOperations.WorkspaceUse.wouldEnter(checked),
+          wouldCreate(checked, targetRepos, branch),
           resolution.restarted(),
           null,
           null,
@@ -206,24 +207,19 @@ public final class BuildDispatch {
             branch,
             task,
             unit,
-            loaded.config(),
+            config,
             claim);
     try {
+      var entered = places.enter(checked, config, localHandle);
+      var workspace = DispatchOperations.WorkspaceUse.entered(entered);
+      listener.workspaceEntered(workspace);
       seedRoomDelivery(runId, built.renderedMessages());
-      var prepared =
-          prepare(
-              project,
-              loaded.config(),
-              targetRepos,
-              resolution,
-              taskSpec,
-              branch,
-              task,
-              request.mode());
+      var branchCreated =
+          prepare(entered.place(), targetRepos, resolution, taskSpec, branch, task, request.mode());
       var launch =
           runLauncher.launchAgent(
-              project,
-              loaded.config(),
+              entered.place(),
+              config,
               targetRepos,
               task,
               branch,
@@ -236,7 +232,13 @@ public final class BuildDispatch {
       var status =
           runLauncher.finishLaunch(
               new RunLauncher.RunContext(
-                  project, unit, runId, nextSpec.id(), agentType, Lane.BUILD.wire(), background),
+                  entered.place(),
+                  unit,
+                  runId,
+                  nextSpec.id(),
+                  agentType,
+                  Lane.BUILD.wire(),
+                  background),
               launch);
       return new DispatchOperations.Dispatched(
           taskSpec,
@@ -244,16 +246,27 @@ public final class BuildDispatch {
           agentType,
           task,
           runId,
-          prepared.snapshot(),
-          prepared.branchCreated(),
+          workspace,
+          branchCreated,
           resolution.restarted(),
           status,
           background ? null : launch.exitCode(),
           launch.watcher());
     } catch (RuntimeException e) {
-      runReservation.releaseIfAbsent(runId, project, unit);
+      runReservation.releaseIfAbsent(runId, checked.place(), unit);
       throw e;
     }
+  }
+
+  /**
+   * Whether a dispatch would cut a new branch, read only: in the spec's workspace when it runs, on
+   * the observer, and for a workspace not made or not running yet, whenever the run names a branch.
+   */
+  private boolean wouldCreate(
+      RunPlaces.Checked checked, List<ProjectDefinition.Repo> targetRepos, String branch) {
+    return checked instanceof RunPlaces.InWorkspace(var check) && check.running()
+        ? workBranch.wouldCreate(check.place().instance(), targetRepos, branch)
+        : Strings.isNotBlank(branch);
   }
 
   /**
@@ -266,7 +279,7 @@ public final class BuildDispatch {
    * for it.
    */
   ReviewLanes.Launch resume(String project, String specId, String localHandle) {
-    var loaded = projects.loadRunning(project);
+    var config = projects.definition(project);
     var row =
         specStore
             .findById(specId)
@@ -276,7 +289,7 @@ public final class BuildDispatch {
                     new ApiException(
                         ErrorCode.SPEC_NOT_READY,
                         "Spec '" + specId + "' is not in progress, so it has no build to resume."));
-    if (loaded.config().agent() == null) {
+    if (config.agent() == null) {
       throw new ApiException(
           ErrorCode.AGENT_NOT_CONFIGURED, "The project's definition sets no agent.");
     }
@@ -287,12 +300,13 @@ public final class BuildDispatch {
           "Spec '" + specId + "' is assigned to " + row.assignee() + ", not " + localHandle + ".");
     }
     var spec = row.toSpec();
-    var targetRepos = DispatchRepos.resolve(loaded.config(), spec, List.of());
-    var agentType = spec.agent() != null ? spec.agent() : loaded.config().agent().type();
+    var targetRepos = DispatchRepos.resolve(config, spec, List.of());
+    var agentType = spec.agent() != null ? spec.agent() : config.agent().type();
     LaunchAdmission.requireEffort(LaunchAdmission.resolveAgent(agentType), spec.reasoningEffort());
     var body = specStore.getContent(specId).map(SpecStore.SpecContent::body).orElse("");
     var built =
         WorkPrompt.build(spec, body.isBlank() ? spec.title() : body, room(specId), List.of());
+    var checked = places.check(project, config, specId, localHandle);
     var runId = DateTimeUtils.newId().toString();
     var unit = AgentUnit.forRun(runId);
     var claim =
@@ -306,18 +320,19 @@ public final class BuildDispatch {
             row.branch(),
             built.prompt(),
             unit,
-            loaded.config());
+            config);
     if (claim instanceof RunReservation.Claim.Held held) {
       return new ReviewLanes.Launch.Deferred(held.conflict().run());
     }
     var env = ((RunReservation.Claim.Claimed) claim).env();
     try {
+      var entered = places.enter(checked, config, localHandle);
       seedRoomDelivery(runId, built.renderedMessages());
-      workBranch.resume(project, targetRepos, row.branch());
+      enterBranch(entered.place(), targetRepos, row.branch(), true, Optional.empty());
       var launch =
           runLauncher.launchAgent(
-              project,
-              loaded.config(),
+              entered.place(),
+              config,
               targetRepos,
               built.prompt(),
               row.branch(),
@@ -329,13 +344,27 @@ public final class BuildDispatch {
               null);
       runLauncher.finishLaunch(
           new RunLauncher.RunContext(
-              project, unit, runId, specId, agentType, Lane.BUILD.wire(), true),
+              entered.place(), unit, runId, specId, agentType, Lane.BUILD.wire(), true),
           launch);
       return new ReviewLanes.Launch.Started();
     } catch (RuntimeException e) {
-      runReservation.releaseIfAbsent(runId, project, unit);
+      runReservation.releaseIfAbsent(runId, checked.place(), unit);
       throw e;
     }
+  }
+
+  /**
+   * Puts the build's repos on {@code branch} in its spec's workspace by the one rule ({@link
+   * WorkBranch#enter}); answers whether a repo is on it.
+   */
+  private boolean enterBranch(
+      RunPlace place,
+      List<ProjectDefinition.Repo> targetRepos,
+      String branch,
+      boolean restart,
+      Optional<Remedy.Command> redispatch) {
+    return place instanceof RunPlace.SpecWorkspace workspace
+        && workBranch.enter(workspace, targetRepos, branch, true, restart, redispatch);
   }
 
   /** The newest messages of {@code specId}'s room that steer its agent: what its prompt shows. */
@@ -444,20 +473,20 @@ public final class BuildDispatch {
   }
 
   /**
-   * What follows a claim that landed, on the live lane only (a dry run stops at its rehearsed claim
-   * and changes nothing in the database, the container or a room): publish the lifecycle events,
-   * snapshot as configured, and check out the work branch, racing no other dispatch's checkouts in
-   * a shared repo.
+   * What follows a claim that landed and the workspace it entered, on the live lane only (a dry run
+   * stops at its rehearsed claim and changes nothing in the database, Incus or a room): publish the
+   * lifecycle events and enter the work branch in the spec's workspace. Answers whether a repo is
+   * on the branch.
    */
-  private PreparedClaim prepare(
-      String project,
-      ProjectDefinition config,
+  private boolean prepare(
+      RunPlace place,
       List<ProjectDefinition.Repo> targetRepos,
       SpecResolution resolution,
       Spec taskSpec,
       String branch,
       String task,
       String mode) {
+    var project = place.project();
     listener.claimed(taskSpec, task);
     if (resolution.restarted()) {
       publish(
@@ -471,19 +500,12 @@ public final class BuildDispatch {
         taskSpec.id(),
         Event.WellKnownTypes.SPEC_DISPATCHED,
         DispatchEvents.dispatchedData(branch, mode));
-    var snapshot = snapshotter.snapshot(project, config);
-    if (!snapshot.isEmpty()) {
-      publish(project, null, Event.WellKnownTypes.SNAPSHOT_CREATED, Map.of("label", snapshot));
-    }
-    var branchCreated =
-        workBranch.checkout(
-            project,
-            config,
-            targetRepos,
-            branch,
-            Optional.of(RestartResolution.redispatch(project, taskSpec.id())),
-            resolution.ontoExistingBranch());
-    return new PreparedClaim(snapshot, branchCreated);
+    return enterBranch(
+        place,
+        targetRepos,
+        branch,
+        resolution.ontoExistingBranch(),
+        Optional.of(RestartResolution.redispatch(project, taskSpec.id())));
   }
 
   /**
@@ -493,9 +515,9 @@ public final class BuildDispatch {
    * gated atomically inside {@link #reserveRun} instead.
    */
   private void requireNoRepoOverlap(
-      String project, String localHandle, String specId, List<String> targetRepos) {
+      RunPlace place, String localHandle, String specId, List<String> targetRepos) {
     DispatchGate.decide(
-            specId, Lane.BUILD.wire(), targetRepos, runningLocalRuns(project, localHandle))
+            place, specId, Lane.BUILD.wire(), targetRepos, runningLocalRuns(place, localHandle))
         .ifPresent(
             conflict -> {
               throw RunReservation.overlapRefusal(conflict);
@@ -508,14 +530,17 @@ public final class BuildDispatch {
    * reservation, so the dry lane counts a mid-stop run as occupying its repos. A box that keeps no
    * run aggregate has nothing to consult and allows the dispatch.
    */
-  private List<DispatchGate.RunningRun> runningLocalRuns(String project, String localHandle) {
+  private List<DispatchGate.RunningRun> runningLocalRuns(RunPlace place, String localHandle) {
     if (runStore == null) {
       return List.of();
     }
-    return runStore.listForProject(project).stream()
+    return runStore.listForProject(place.project()).stream()
         .filter(DispatchOperations::ownsLiveAgent)
         .filter(run -> run.ownedBy(localHandle))
-        .map(run -> new DispatchGate.RunningRun(run.id(), run.specId(), run.role(), run.repos()))
+        .map(
+            run ->
+                new DispatchGate.RunningRun(
+                    run.id(), run.specId(), run.role(), run.repos(), run.place()))
         .toList();
   }
 

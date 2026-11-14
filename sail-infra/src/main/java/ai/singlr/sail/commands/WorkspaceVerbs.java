@@ -29,6 +29,8 @@ import ai.singlr.sail.engine.WorkspaceTemplate;
 import ai.singlr.sail.engine.Workspaces;
 import ai.singlr.sail.engine.WorkstationIdentity;
 import ai.singlr.sail.ssh.SshPublicKey;
+import ai.singlr.sail.store.RunStore;
+import ai.singlr.sail.store.Sqlite;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -91,11 +93,31 @@ final class WorkspaceVerbs {
 
   /** The workspaces of this box, reading Incus for real and changing it unless {@code dryRun}. */
   static Workspaces workspaces(boolean dryRun) {
-    return new Workspaces(
-        new ShellExecutor(false),
-        new ShellExecutor(dryRun),
-        System::nanoTime,
-        SailPaths.locksDir());
+    return Workspaces.onThisBox(new ShellExecutor(dryRun));
+  }
+
+  /**
+   * Whether a run of {@code project}'s spec, the one a workspace is, is live on this box, as its
+   * run store says: what refuses a stop or delete of that workspace. A box whose catalog this
+   * account cannot read has no run of it.
+   */
+  static Predicate<String> liveRun(String project) {
+    return spec -> {
+      var database = SailPaths.controlPlaneDb();
+      if (!Files.isReadable(database)) {
+        return false;
+      }
+      try (var db = Sqlite.open(database)) {
+        return new RunStore(db)
+            .liveForProjectOnNode(project, HostSync.handle()).stream()
+                .anyMatch(run -> spec.equals(run.specId()));
+      }
+    };
+  }
+
+  /** The person a workspace made on this box belongs to: the box's own, by its handle. */
+  static String owner() {
+    return Objects.toString(HostSync.handle(), "");
   }
 
   /**

@@ -12,6 +12,7 @@ import ai.singlr.sail.config.Lane;
 import ai.singlr.sail.config.ProjectDefinition;
 import ai.singlr.sail.engine.AgentUnit;
 import ai.singlr.sail.engine.LaunchEnv;
+import ai.singlr.sail.engine.RunPlace;
 import ai.singlr.sail.harness.Harnesses;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.store.RunStore;
@@ -68,6 +69,7 @@ public final class AdhocRunner {
       DispatchOperations.AdhocPreparer preparer) {
     var loaded = projects.loadRunning(project);
     var config = loaded.config();
+    var place = RunPlace.of(project, null);
     var agentType = config.agent() != null ? config.agent().type() : Harnesses.DEFAULT.yamlName();
     var runId = DateTimeUtils.newId().toString();
     var unit = AgentUnit.forRun(runId);
@@ -79,7 +81,7 @@ public final class AdhocRunner {
           background,
           RunLauncher.launchCommand(
               new RunLauncher.LaunchSpec(
-                  project,
+                  place,
                   config,
                   workDir,
                   fullPermissions,
@@ -107,7 +109,7 @@ public final class AdhocRunner {
       var launch =
           runLauncher.launchSession(
               new RunLauncher.LaunchSpec(
-                  project,
+                  place,
                   config,
                   workDir,
                   fullPermissions,
@@ -127,12 +129,12 @@ public final class AdhocRunner {
       var status =
           runLauncher.finishLaunch(
               new RunLauncher.RunContext(
-                  project, unit, runId, null, agentType, Lane.ADHOC.wire(), background),
+                  place, unit, runId, null, agentType, Lane.ADHOC.wire(), background),
               launch);
       return new DispatchOperations.AdhocSession(
           runId, branch, status, background ? null : launch.exitCode(), launch.watcher());
     } catch (RuntimeException e) {
-      runReservation.releaseIfAbsent(runId, project, unit);
+      runReservation.releaseIfAbsent(runId, place, unit);
       throw e;
     }
   }

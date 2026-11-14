@@ -9,6 +9,7 @@ import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.ProjectDefinition;
 import ai.singlr.sail.engine.ContainerExec;
+import ai.singlr.sail.engine.RunPlace;
 import ai.singlr.sail.engine.ShellExec;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -168,55 +169,127 @@ public final class WorkBranch {
   }
 
   /**
-   * Puts every target repo that exists in the container back on {@code branch}, which a build
-   * already made, as a build that goes on after its question needs. A repo still on the branch is
-   * left as that build left it, uncommitted work and all. A repo another run moved is checked out
-   * only when its tree is clean: what is uncommitted there is that run's, and is never carried onto
-   * this branch or discarded, so the resume fails loud instead.
+   * Enters a run into its spec's workspace {@code instance}: the one branch rule for a workspace
+   * made for the run and one reused (R11). For each target repo that is a work tree, with B the
+   * run's {@code branch}: a non-restart build whose B is already there, locally or on the remote,
+   * is refused naming {@code redispatch}; a repo on B is left as it is, uncommitted work and all; a
+   * repo elsewhere with uncommitted work is refused naming where it is, since in a spec's own
+   * workspace that work is the spec's, never carried onto B or discarded; a clean one is put on B,
+   * the local one, else the remote's, else, for a build only, a new one from the latest base. A
+   * lane other than a build with no B anywhere stays where it is, and so does every repo of a lane
+   * with no B but a build, which with no B ({@code agent.auto_branch: false}) puts each repo on its
+   * base branch, tracking the remote. Answers whether a repo is on B now.
    */
-  public void resume(String project, List<ProjectDefinition.Repo> targetRepos, String branch) {
-    if (Strings.isBlank(branch)) {
-      return;
-    }
+  public boolean enter(
+      RunPlace.SpecWorkspace place,
+      List<ProjectDefinition.Repo> targetRepos,
+      String branch,
+      boolean build,
+      boolean restart,
+      Optional<Remedy.Command> redispatch) {
+    var instance = place.instance();
+    var entered = false;
     for (var repo : targetRepos) {
       var repoDir = "/home/" + ProjectDefinition.USER + "/workspace/" + repo.path();
-      if (!insideWorkTree(project, repoDir)) {
+      if (!insideWorkTree(instance, repoDir)) {
         continue;
       }
-      var on = git(project, repoDir, "rev-parse", "--abbrev-ref", "HEAD");
-      if (on.ok() && branch.equals(on.stdout().strip())) {
+      var named = Strings.isNotBlank(branch);
+      var local = named && hasRef(instance, repoDir, "refs/heads/" + branch);
+      var remote = named && !local && onRemote(instance, repoDir, branch);
+      if (build && !restart && (local || remote)) {
+        RestartResolution.branchCheckoutArgs(repoDir, branch, true, false, redispatch);
+      }
+      var base = build ? baseBranch(instance, repoDir, repo) : "";
+      var target = named ? branch : base;
+      if (Strings.isBlank(target) || (named && !local && !remote && !build)) {
         continue;
       }
-      var dirty = git(project, repoDir, "status", "--porcelain");
-      if (!dirty.ok()) {
-        throw resumeRefused(branch, repo, dirty.reason());
+      var on = git(instance, repoDir, "rev-parse", "--abbrev-ref", "HEAD");
+      if (on.ok() && target.equals(on.stdout().strip())) {
+        listener.branchReady(target, repo.path(), true);
+        entered = entered || named;
+        continue;
       }
-      if (!dirty.stdout().isBlank()) {
-        throw resumeRefused(
-            branch,
-            repo,
-            "it holds uncommitted work of "
-                + on.stdout().strip()
-                + ", which is never carried onto "
-                + branch);
+      requireClean(place, repoDir, repo, target, on);
+      var existing = !named || local || remote;
+      var moved =
+          existing
+              ? git(instance, repoDir, "switch", "--quiet", target)
+              : exec(
+                  ContainerExec.asDevUser(
+                      instance,
+                      RestartResolution.freshBranchArgs(
+                          repoDir, branch, base, fetchLatestBase(instance, repoDir, base))));
+      if (!moved.ok()) {
+        throw new ApiException(
+            ErrorCode.BRANCH_CREATE_FAILED,
+            "Failed to put repo '"
+                + repo.path()
+                + "' on branch '"
+                + target
+                + "' in "
+                + instance
+                + ": "
+                + moved.reason());
       }
-      var checkedOut = git(project, repoDir, "checkout", branch, "--");
-      if (!checkedOut.ok()) {
-        throw resumeRefused(branch, repo, checkedOut.reason());
-      }
+      listener.branchReady(target, repo.path(), existing);
+      entered = entered || named;
     }
+    if (Strings.isNotBlank(branch) && build && !entered) {
+      listener.branchUnavailable(branch);
+    }
+    return entered;
   }
 
-  private static ApiException resumeRefused(
-      String branch, ProjectDefinition.Repo repo, String why) {
-    return new ApiException(
+  /**
+   * Refuses to move a repo off where it is, {@code on}, while it holds uncommitted work: in a
+   * spec's own workspace that work is the spec's, so it is never carried onto {@code target} or
+   * discarded.
+   */
+  private void requireClean(
+      RunPlace.SpecWorkspace place,
+      String repoDir,
+      ProjectDefinition.Repo repo,
+      String target,
+      ShellExec.Result on) {
+    var instance = place.instance();
+    var dirty = git(instance, repoDir, "status", "--porcelain");
+    if (dirty.ok() && dirty.stdout().isBlank()) {
+      return;
+    }
+    var where = on.ok() ? on.stdout().strip() : "an unknown branch";
+    throw new ApiException(
         ErrorCode.BRANCH_CREATE_FAILED,
-        "Failed to check out branch '"
-            + branch
-            + "' in repo '"
+        "Repo '"
             + repo.path()
-            + "' to resume its build: "
-            + why);
+            + "' in "
+            + instance
+            + " is on "
+            + ("HEAD".equals(where) ? "a detached HEAD" : "branch '" + where + "'")
+            + (dirty.ok()
+                ? " with uncommitted work, which is never carried onto '"
+                    + target
+                    + "' or discarded."
+                : ", and whether it holds uncommitted work could not be read: " + dirty.reason()),
+        Remedy.of(
+            "Commit or stash it in the workspace (",
+            Remedy.sail("project workspace shell", place.project(), place.workspace()),
+            "), then run it again."));
+  }
+
+  /** Whether {@code ref} names a commit in {@code repoDir}. */
+  private boolean hasRef(String instance, String repoDir, String ref) {
+    return git(instance, repoDir, "rev-parse", "--verify", "--quiet", ref).ok();
+  }
+
+  /**
+   * Whether origin has {@code branch}, asked of origin itself (best-effort: a repo that cannot
+   * reach it answers from what it last fetched).
+   */
+  private boolean onRemote(String instance, String repoDir, String branch) {
+    git(instance, repoDir, "fetch", "--quiet", "origin", branch);
+    return hasRef(instance, repoDir, "refs/remotes/origin/" + branch);
   }
 
   private ShellExec.Result git(String project, String repoDir, String... args) {

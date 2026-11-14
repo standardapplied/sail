@@ -84,6 +84,19 @@ public final class WorkspaceTemplate {
     this.locks = Objects.requireNonNull(locks, "locks");
   }
 
+  /**
+   * What a workspace made from {@code project}'s template is told when the template is older than
+   * the project's definition: it was cloned as it is, since only a person can build it again.
+   */
+  public static String staleNotice(String project) {
+    return "This spec's workspace was made from "
+        + project
+        + "'s template as it was last built, which is older than the project's definition: run"
+        + " sudo sail project template build "
+        + project
+        + " to build it again for the next workspace.";
+  }
+
   /** The name of project {@code project}'s template instance. */
   public static String nameOf(String project) {
     return project + BoxInstances.TEMPLATE_SUFFIX;
@@ -192,6 +205,39 @@ public final class WorkspaceTemplate {
     }
     new SnapshotManager(shell).create(template, version);
     return new Template(project, template, version, source.inputs(), pool, true);
+  }
+
+  /**
+   * Project {@code project}'s template as its workspaces clone it now, read from {@code instances}
+   * and built by nothing: its current version when one is recorded and its snapshot exists, on a
+   * ZFS pool among {@code zfs}; empty when the project has no such template. What a dispatch
+   * clones, since only a person can build a template (its repos' tokens are theirs to give); {@code
+   * inputs()} is what it was built from, which a definition edited since no longer matches.
+   */
+  Optional<Template> current(
+      String project, List<BoxInstances.Instance> instances, List<String> zfs)
+      throws IOException, InterruptedException, TimeoutException {
+    var template = nameOf(project);
+    var found =
+        instances.stream()
+            .filter(i -> i.name().equals(template))
+            .filter(i -> i.kind() instanceof BoxInstances.Template(var of) && of.equals(project))
+            .filter(i -> zfs.contains(i.pool()))
+            .findFirst();
+    var version = found.flatMap(i -> i.key(CURRENT_KEY));
+    if (version.isEmpty()
+        || new SnapshotManager(observer)
+            .list(template).stream().noneMatch(s -> s.name().equals(version.get()))) {
+      return Optional.empty();
+    }
+    return Optional.of(
+        new Template(
+            project,
+            template,
+            version.get(),
+            found.get().key(INPUTS_KEY).orElse(""),
+            found.get().pool(),
+            false));
   }
 
   /**

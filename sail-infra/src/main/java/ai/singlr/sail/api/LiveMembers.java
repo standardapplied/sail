@@ -22,6 +22,7 @@ import ai.singlr.sail.engine.HostInfo;
 import ai.singlr.sail.engine.LiveMemberPrompt;
 import ai.singlr.sail.engine.LiveStream;
 import ai.singlr.sail.engine.PromptConversation;
+import ai.singlr.sail.engine.RunPlace;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.harness.Harness;
 import ai.singlr.sail.harness.Harnesses;
@@ -142,6 +143,8 @@ public final class LiveMembers implements RoomWakeReactor.Live, AutoCloseable {
   public record Reclaimed(int ended, List<String> held) {}
 
   private final ProjectLoader projects;
+  private final RunPlaces places;
+  private final WorkBranch workBranch;
   private final SpecStore specStore;
   private final Supplier<RoomStore> rooms;
   private final Supplier<MessageStore> messages;
@@ -169,6 +172,7 @@ public final class LiveMembers implements RoomWakeReactor.Live, AutoCloseable {
 
   LiveMembers(
       ProjectLoader projects,
+      RunPlaces places,
       SpecStore specStore,
       Supplier<RoomStore> rooms,
       Supplier<MessageStore> messages,
@@ -180,6 +184,7 @@ public final class LiveMembers implements RoomWakeReactor.Live, AutoCloseable {
       DispatchOperations.EventSink events,
       SessionYield terminals) {
     this.projects = projects;
+    this.places = places;
     this.specStore = specStore;
     this.rooms = rooms;
     this.messages = messages;
@@ -191,6 +196,7 @@ public final class LiveMembers implements RoomWakeReactor.Live, AutoCloseable {
     this.events = events;
     this.terminals = terminals;
     this.processes = new ContainerAgentProcess(shell);
+    this.workBranch = new WorkBranch(shell, DispatchOperations.Listener.NONE);
   }
 
   /** Wires the door replies are posted through; returns {@code this}. */
@@ -267,6 +273,11 @@ public final class LiveMembers implements RoomWakeReactor.Live, AutoCloseable {
     /** What the run serves, as its stop names it: the spec, or the room when there is none. */
     String conversation() {
       return spec != null ? spec.id() : roomId;
+    }
+
+    /** Where the member's runs live: its spec's workspace, or the project's container. */
+    RunPlace place() {
+      return RunPlace.of(project, spec != null ? spec.id() : null);
     }
   }
 
@@ -407,7 +418,7 @@ public final class LiveMembers implements RoomWakeReactor.Live, AutoCloseable {
   }
 
   private void start(Seat seat, String localHandle) {
-    var config = projects.loadRunning(seat.project()).config();
+    var config = projects.definition(seat.project());
     if (config.agent() == null) {
       throw new ApiException(
           ErrorCode.AGENT_NOT_CONFIGURED, "The project's definition sets no agent.");
@@ -445,6 +456,9 @@ public final class LiveMembers implements RoomWakeReactor.Live, AutoCloseable {
         full
             ? AgentSession.launchWorkDir(ProjectDefinition.USER, repos)
             : "/home/" + ProjectDefinition.USER + "/workspace";
+    var checked =
+        places.check(
+            seat.project(), config, seat.spec() != null ? seat.spec().id() : null, localHandle);
     var runId = DateTimeUtils.newId().toString();
     var unit = AgentUnit.live(runId);
     var env =
@@ -462,14 +476,19 @@ public final class LiveMembers implements RoomWakeReactor.Live, AutoCloseable {
             unit,
             config);
     AgentProcess.Handle handle;
+    var place = checked.place();
     try {
       if (resumed.isPresent() && terminalHolds(resumed.get())) {
-        reservation.releaseIfAbsent(runId, seat.project(), unit);
+        reservation.releaseIfAbsent(runId, place, unit);
         return;
+      }
+      places.enter(checked, config, localHandle);
+      if (place instanceof RunPlace.SpecWorkspace workspace) {
+        workBranch.enter(workspace, repos, branch, false, true, Optional.empty());
       }
       launcher.stage(
           new RunLauncher.LaunchSpec(
-              seat.project(),
+              place,
               config,
               workDir,
               full,
@@ -487,10 +506,10 @@ public final class LiveMembers implements RoomWakeReactor.Live, AutoCloseable {
               null,
               RunLauncher.wokenBy(unread)));
       if (!full) {
-        guard.captureRoomBaseline(seat.project(), config, runId);
+        guard.captureRoomBaseline(place, config, runId);
       }
       if (resumed.isPresent() && terminalHolds(resumed.get())) {
-        reservation.releaseIfAbsent(runId, seat.project(), unit);
+        reservation.releaseIfAbsent(runId, place, unit);
         return;
       }
       runStore.recordLaunch(
@@ -503,7 +522,7 @@ public final class LiveMembers implements RoomWakeReactor.Live, AutoCloseable {
               RunLauncher.wokenBy(unread)));
       handle =
           processes.start(
-              seat.project(),
+              place.instance(),
               workDir,
               environment(seat.conversation(), member.agent(), runId, role),
               command,
@@ -511,7 +530,7 @@ public final class LiveMembers implements RoomWakeReactor.Live, AutoCloseable {
               unit.logPath(),
               unit.launchEnvPath());
     } catch (IOException | RuntimeException failed) {
-      reservation.releaseIfAbsent(runId, seat.project(), unit);
+      reservation.releaseIfAbsent(runId, place, unit);
       throw failed instanceof RuntimeException refused
           ? refused
           : new ApiException(
@@ -708,9 +727,9 @@ public final class LiveMembers implements RoomWakeReactor.Live, AutoCloseable {
   private boolean halted(RunStore.RunRow run) {
     var unit = AgentUnit.recorded(run.id(), run.unit());
     try {
-      return new AgentSession(shell).killAgent(run.project(), unit)
+      return new AgentSession(shell).killAgent(run.place().instance(), unit)
               instanceof AgentSession.Halt.Ended
-          || new AgentPresence(shell).gone(run.project(), unit);
+          || new AgentPresence(shell).gone(run.place(), unit);
     } catch (Exception unanswered) {
       return false;
     }
@@ -883,7 +902,7 @@ public final class LiveMembers implements RoomWakeReactor.Live, AutoCloseable {
      */
     private void arm() {
       if (!full && !guarded) {
-        guard.captureRoomBaseline(seat.project(), config, runId);
+        guard.captureRoomBaseline(seat.place(), config, runId);
         guarded = true;
       }
     }
@@ -1199,7 +1218,7 @@ public final class LiveMembers implements RoomWakeReactor.Live, AutoCloseable {
         return shell
             .exec(
                 ContainerExec.asDevUser(
-                    seat.project(), List.of("tail", "-c", LOG_TAIL_BYTES, unit.logPath())))
+                    seat.place().instance(), List.of("tail", "-c", LOG_TAIL_BYTES, unit.logPath())))
             .stdout()
             .strip();
       } catch (Exception unanswered) {

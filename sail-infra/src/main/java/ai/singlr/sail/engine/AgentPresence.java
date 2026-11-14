@@ -6,6 +6,7 @@
 package ai.singlr.sail.engine;
 
 import java.io.IOException;
+import java.time.Duration;
 import java.util.concurrent.TimeoutException;
 
 /**
@@ -23,30 +24,58 @@ public final class AgentPresence {
 
   private final AgentSession session;
   private final ContainerManager containers;
+  private final BoxInstances instances;
 
   public AgentPresence(ShellExec shell) {
     this.session = new AgentSession(shell);
     this.containers = new ContainerManager(shell);
+    this.instances = new BoxInstances(shell);
   }
 
   /** Whether the run's agent is known gone: the one answer anything is finished or freed on. */
-  public boolean gone(String project, AgentUnit unit)
+  public boolean gone(RunPlace place, AgentUnit unit)
       throws IOException, InterruptedException, TimeoutException {
-    return of(project, unit) instanceof AgentSession.Presence.Gone;
+    return of(place, unit) instanceof AgentSession.Presence.Gone;
   }
 
-  public AgentSession.Presence of(String project, AgentUnit unit)
+  /**
+   * Whether the agent of a run that lives in {@code place} is there: its instance's answer, or,
+   * where it gave none, incus's word on the instance, the project's own container through the door
+   * that refuses any other instance of its name (W10), a spec's workspace by its own name.
+   */
+  public AgentSession.Presence of(RunPlace place, AgentUnit unit)
       throws IOException, InterruptedException, TimeoutException {
-    var inside = session.presence(project, unit);
+    var inside = session.presence(place.instance(), unit);
     if (!(inside instanceof AgentSession.Presence.Unanswered)) {
       return inside;
     }
-    return switch (containers.queryState(project)) {
+    return switch (state(place)) {
       case ContainerState.Stopped stopped -> new AgentSession.Presence.Gone();
       case ContainerState.NotCreated absent -> new AgentSession.Presence.Gone();
       case ContainerState.Running running -> inside;
       case ContainerState.Frozen frozen -> inside;
       case ContainerState.Error unknown -> inside;
     };
+  }
+
+  private ContainerState state(RunPlace place)
+      throws IOException, InterruptedException, TimeoutException {
+    return switch (place) {
+      case RunPlace.ProjectContainer container -> containers.queryState(container.project());
+      case RunPlace.SpecWorkspace workspace -> workspaceState(workspace);
+    };
+  }
+
+  /** A spec's workspace's state as incus lists it by name, an error where it does not answer. */
+  private ContainerState workspaceState(RunPlace.SpecWorkspace workspace)
+      throws InterruptedException {
+    try {
+      return instances
+          .lookup(workspace.instance(), Duration.ofSeconds(BoxInstances.LOOKUP_SECONDS))
+          .map(BoxInstances.Instance::state)
+          .orElse(new ContainerState.NotCreated());
+    } catch (IOException | TimeoutException unanswered) {
+      return new ContainerState.Error(unanswered.getMessage());
+    }
   }
 }

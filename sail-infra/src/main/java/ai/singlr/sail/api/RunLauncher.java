@@ -18,6 +18,7 @@ import ai.singlr.sail.engine.ContainerSailSetup;
 import ai.singlr.sail.engine.HostInfo;
 import ai.singlr.sail.engine.LaunchEnv;
 import ai.singlr.sail.engine.ProjectSkillInstaller;
+import ai.singlr.sail.engine.RunPlace;
 import ai.singlr.sail.engine.RunUsageReader;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.WatcherSpawner;
@@ -109,10 +110,12 @@ public final class RunLauncher {
    * when only the launch command is built. The run's unit and files are {@link AgentUnit#forRun} of
    * {@code runId}: one shape for every lane, so no launch names its own. {@code env} is the run's
    * credential and login, which reach its container only as its {@code launch.env}; {@code
-   * dispatchedBy} is the person whose request launched it, null for Sail's own machinery.
+   * dispatchedBy} is the person whose request launched it, null for Sail's own machinery. {@code
+   * place} is where the run lives ({@link RunPlace}): every file is staged and the process started
+   * in its instance, and the project is its project.
    */
   record LaunchSpec(
-      String project,
+      RunPlace place,
       ProjectDefinition config,
       String workDir,
       boolean fullPermissions,
@@ -131,7 +134,12 @@ public final class RunLauncher {
       String dispatchedBy) {
 
     LaunchSpec {
+      Objects.requireNonNull(place, "place");
       Objects.requireNonNull(env, "env");
+    }
+
+    String project() {
+      return place.project();
     }
 
     AgentUnit unit() {
@@ -145,9 +153,10 @@ public final class RunLauncher {
    * the reserve→launch→verify→publish sequence whose four hand-copied variants hosted the #142/#148
    * field bugs — differing only in the {@code specId}/{@code role} it carries. A background run
    * (room, background dispatch/ad-hoc) skips the foreground completion via {@code background}.
+   * {@code place} is where the run lives, whose instance the tail probes.
    */
   record RunContext(
-      String project,
+      RunPlace place,
       AgentUnit unit,
       String runId,
       String specId,
@@ -156,7 +165,7 @@ public final class RunLauncher {
       boolean background) {}
 
   LaunchOutcome launchAgent(
-      String project,
+      RunPlace place,
       ProjectDefinition config,
       List<ProjectDefinition.Repo> targetRepos,
       String task,
@@ -169,7 +178,7 @@ public final class RunLauncher {
       String dispatchedBy) {
     return launchSession(
         new LaunchSpec(
-            project,
+            place,
             config,
             AgentSession.launchWorkDir(ProjectDefinition.USER, targetRepos),
             true,
@@ -202,19 +211,19 @@ public final class RunLauncher {
    * launch is not a failure ({@link #endedOnItsOwn}).
    */
   AgentSession.SessionInfo finishLaunch(RunContext ctx, LaunchOutcome launch) {
-    var status = querySession(new AgentSession(shell), ctx.project(), ctx.unit());
-    if (!updateRunProcess(ctx.runId(), ctx.project(), status, launch.watcher())) {
+    var status = querySession(new AgentSession(shell), ctx.place(), ctx.unit());
+    if (!updateRunProcess(ctx.runId(), ctx.place(), status, launch.watcher())) {
       if (endedOnItsOwn(ctx)) {
         return status;
       }
-      throw launchLostToCancel(ctx.runId(), ctx.project(), ctx.unit());
+      throw launchLostToCancel(ctx.runId(), ctx.place(), ctx.unit());
     }
     if (!ctx.background()) {
       completeForegroundRun(ctx.runId(), launch.exitCode());
     }
     if (status != null && status.running()) {
       publishAgentSessionStarted(
-          ctx.project(),
+          ctx.place().project(),
           ctx.specId(),
           ctx.agentType(),
           status.pid(),
@@ -245,13 +254,14 @@ public final class RunLauncher {
   }
 
   private void staged(LaunchSpec s) throws IOException, InterruptedException, TimeoutException {
-    ensureSailSetup(s.project());
+    var instance = s.place().instance();
+    ensureSailSetup(instance);
     installSkills(s);
     var session = new AgentSession(shell);
-    session.ensureDirectory(s.project());
-    session.writeTaskFile(s.project(), s.task(), s.unit());
+    session.ensureDirectory(instance);
+    session.writeTaskFile(instance, s.task(), s.unit());
     session.writeSession(
-        s.project(),
+        instance,
         s.task(),
         Objects.requireNonNullElse(s.branch(), ""),
         s.specId(),
@@ -260,8 +270,7 @@ public final class RunLauncher {
         s.role(),
         s.repoPaths(),
         s.unit());
-    ContainerFilePush.pushAsDev(
-        shell, s.project(), s.unit().launchEnvPath(), s.env().lines(), "0600");
+    ContainerFilePush.pushAsDev(shell, instance, s.unit().launchEnvPath(), s.env().lines(), "0600");
   }
 
   LaunchOutcome launchSession(LaunchSpec s) {
@@ -298,7 +307,7 @@ public final class RunLauncher {
     var harness = Harnesses.of(s.agentType());
     return s.background()
         ? AgentSession.buildBackgroundLaunchCommand(
-            s.project(),
+            s.place().instance(),
             ProjectDefinition.USER,
             s.workDir(),
             s.fullPermissions(),
@@ -312,7 +321,7 @@ public final class RunLauncher {
             s.role(),
             s.resumeSessionId())
         : AgentSession.buildForegroundTaskCommand(
-            s.project(),
+            s.place().instance(),
             ProjectDefinition.USER,
             s.workDir(),
             s.fullPermissions(),
@@ -340,7 +349,7 @@ public final class RunLauncher {
     }
     return Optional.of(
         watcherSpawner.spawnForRun(
-            s.project(),
+            s.place(),
             s.runId(),
             s.unit().unitName(),
             startedAt(s.runId()),
@@ -365,14 +374,14 @@ public final class RunLauncher {
    * credential, so an agent left with stale unauthenticated helpers would run apparently normally
    * while every spec operation 401s and every lifecycle event is silently dropped.
    */
-  private void ensureSailSetup(String project) {
+  private void ensureSailSetup(String instance) {
     try {
-      var result = ContainerSailSetup.ensureInstalled(shell, project);
+      var result = ContainerSailSetup.ensureInstalled(shell, instance);
       listener.sailSetupUpdated(result == ContainerSailSetup.Result.UPDATED);
     } catch (Exception e) {
       throw new ApiException(
           ErrorCode.AGENT_LAUNCH_FAILED,
-          "Failed to install the authenticated sail helpers in " + project + ".",
+          "Failed to install the authenticated sail helpers in " + instance + ".",
           "Repair the container's sail socket mount and retry the dispatch.",
           e);
     }
@@ -391,13 +400,17 @@ public final class RunLauncher {
     try {
       report =
           ProjectSkillInstaller.installProject(
-              shell, s.project(), s.project(), Harnesses.of(s.agentType()), projectSkills.get());
+              shell,
+              s.place().project(),
+              s.place().instance(),
+              Harnesses.of(s.agentType()),
+              projectSkills.get());
     } catch (IllegalStateException changed) {
       throw ApiException.of(ErrorCode.AGENT_LAUNCH_FAILED, changed);
     } catch (Exception e) {
       throw new ApiException(
           ErrorCode.AGENT_LAUNCH_FAILED,
-          "Failed to install the project's skills in " + s.project() + ".",
+          "Failed to install the project's skills in " + s.place().instance() + ".",
           "Check the container is running and retry.",
           e);
     }
@@ -408,7 +421,7 @@ public final class RunLauncher {
 
   private boolean updateRunProcess(
       String runId,
-      String project,
+      RunPlace place,
       AgentSession.SessionInfo status,
       Optional<WatcherSpawner.Spawned> watcher) {
     if (runStore == null) {
@@ -419,8 +432,7 @@ public final class RunLauncher {
             ? (int) fallback.pid()
             : null;
     Integer pid = status != null ? status.pid() : null;
-    var pidTicks =
-        status != null && status.running() ? readStartTicks(project, status.pid()) : null;
+    var pidTicks = status != null && status.running() ? readStartTicks(place, status.pid()) : null;
     try {
       return runStore.updateProcess(runId, pid, pidTicks, watcherPid);
     } catch (RuntimeException e) {
@@ -430,9 +442,9 @@ public final class RunLauncher {
     }
   }
 
-  private Long readStartTicks(String project, int pid) {
+  private Long readStartTicks(RunPlace place, int pid) {
     try {
-      return new AgentSession(shell).readProcessStartTicks(project, pid);
+      return new AgentSession(shell).readProcessStartTicks(place.instance(), pid);
     } catch (Exception e) {
       return null;
     }
@@ -453,7 +465,7 @@ public final class RunLauncher {
       return false;
     }
     try {
-      return new AgentPresence(shell).gone(ctx.project(), ctx.unit());
+      return new AgentPresence(shell).gone(ctx.place(), ctx.unit());
     } catch (Exception e) {
       throw new ApiException(ErrorCode.AGENT_STATUS_FAILED, "Failed to query agent status.", e);
     }
@@ -466,10 +478,10 @@ public final class RunLauncher {
    * says what the halt did ({@link AgentSession.Halt}): an agent that survived it, or that the
    * container gave no answer about, is named as still to be stopped, never as torn down.
    */
-  private ApiException launchLostToCancel(String runId, String project, AgentUnit unit) {
+  private ApiException launchLostToCancel(String runId, RunPlace place, AgentUnit unit) {
     AgentSession.Halt halt;
     try {
-      halt = new AgentSession(shell).killAgent(project, unit);
+      halt = new AgentSession(shell).killAgent(place.instance(), unit);
     } catch (Exception e) {
       System.err.println(
           "  [api] Warning: could not halt cancelled launch " + runId + ": " + e.getMessage());
@@ -565,9 +577,9 @@ public final class RunLauncher {
   }
 
   private AgentSession.SessionInfo querySession(
-      AgentSession session, String project, AgentUnit unit) {
+      AgentSession session, RunPlace place, AgentUnit unit) {
     try {
-      return session.queryStatus(project, unit);
+      return session.queryStatus(place.instance(), unit);
     } catch (Exception e) {
       throw new ApiException(ErrorCode.AGENT_STATUS_FAILED, "Failed to query agent status.", e);
     }

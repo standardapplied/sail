@@ -9,6 +9,7 @@ import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.Lane;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.engine.JudgePrompt;
+import ai.singlr.sail.engine.RunPlace;
 import ai.singlr.sail.engine.WorkPrompt;
 import ai.singlr.sail.harness.Harnesses;
 import ai.singlr.sail.store.Finding;
@@ -491,7 +492,9 @@ final class LoopSteps {
     var spec = facts.rows().spec().orElseThrow();
     try {
       var message = commitMessage(reviewStore.openFindingsForReview(step.review().id()));
-      var rescued = lanes.ensureCommitted(facts.project(), spec.repos(), spec.branch(), message);
+      var rescued =
+          lanes.ensureCommitted(
+              RunPlace.of(facts.project(), facts.specId()), spec.repos(), spec.branch(), message);
       if (!rescued.isEmpty()) {
         narrator.publishGuardrail(
             facts.project(),

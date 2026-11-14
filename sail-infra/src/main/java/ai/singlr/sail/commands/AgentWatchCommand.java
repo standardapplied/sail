@@ -26,6 +26,7 @@ import ai.singlr.sail.engine.ContainerManager;
 import ai.singlr.sail.engine.ContainerStateGuard;
 import ai.singlr.sail.engine.GuardrailChecker;
 import ai.singlr.sail.engine.NameValidator;
+import ai.singlr.sail.engine.RunPlace;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.engine.WebhookNotifier;
@@ -75,6 +76,12 @@ public final class AgentWatchCommand implements Runnable {
       required = true,
       description = "Run id of the agent session to supervise.")
   private String runId;
+
+  @Option(
+      names = "--spec",
+      description =
+          "The spec the run works, whose workspace it lives in (none for a spec-less run).")
+  private String specId;
 
   @Option(
       names = "--unit",
@@ -144,6 +151,11 @@ public final class AgentWatchCommand implements Runnable {
         : AgentUnit.recorded(runId, unitName);
   }
 
+  /** Where the watched run lives: its spec's workspace, or the project's container. */
+  private RunPlace place() {
+    return RunPlace.of(name, specId);
+  }
+
   private Guardrails guardrails() {
     return Guardrails.of(maxDuration, maxIdle, action);
   }
@@ -155,11 +167,11 @@ public final class AgentWatchCommand implements Runnable {
    * then nothing is left to watch; one whose unit says nothing of it never ran.
    */
   boolean watchable(ShellExec shell, RunWatch.StopPublisher publisher) throws Exception {
-    if (!new AgentPresence(shell).gone(name, resolveUnit())) {
+    if (!new AgentPresence(shell).gone(place(), resolveUnit())) {
       return true;
     }
     if (RunWatch.stopIfAlreadyEnded(
-        name, runId, resolveUnit(), new AgentSession(shell), publisher)) {
+        place(), runId, resolveUnit(), new AgentSession(shell), publisher)) {
       return false;
     }
     throw Remedied.state(
@@ -203,7 +215,7 @@ public final class AgentWatchCommand implements Runnable {
       RunWatch.Narrator narrator,
       Supplier<Instant> clock) {
     return new RunWatch(
-        name,
+        place(),
         runId,
         resolveUnit(),
         guardrails(),
@@ -322,7 +334,14 @@ public final class AgentWatchCommand implements Runnable {
     };
   }
 
+  /**
+   * Refuses a watch of a spec-less run whose project's container is not running. A spec's run is in
+   * its own workspace, which {@link #watchable} asks about.
+   */
   private void requireRunning(ShellExecutor shell) throws Exception {
+    if (!(place() instanceof RunPlace.ProjectContainer)) {
+      return;
+    }
     var mgr = new ContainerManager(shell);
     var state = mgr.queryState(name);
     ContainerStateGuard.requireRunning(state, name);

@@ -24,9 +24,11 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.concurrent.TimeoutException;
 import java.util.function.Consumer;
 import java.util.function.LongSupplier;
+import java.util.function.Predicate;
 import java.util.regex.Pattern;
 
 /**
@@ -117,11 +119,12 @@ public final class Workspaces {
 
   /**
    * What makes a fresh clone a workspace of its own, run as root with the project ({@code $1}), the
-   * workspace ({@code $2}) and each repository's path and base branch after them, none of them ever
-   * part of the text: a machine-id of its own, the project's name as its hostname (which the
-   * in-container helpers read the project from; Incus rewrote it to the instance's name on the
-   * copy), SSH host keys of its own made under that name, every repository fetched and switched to
-   * the workspace's branch (the remote's when it has one, else a new one from the base), sshd
+   * workspace ({@code $2}), the branch its repositories go on ({@code $3}, empty for none) and each
+   * repository's path and base branch after them, none of them ever part of the text: a machine-id
+   * of its own, the project's name as its hostname (which the in-container helpers read the project
+   * from; Incus rewrote it to the instance's name on the copy), SSH host keys of its own made under
+   * that name, every repository fetched and switched to the branch (the remote's when it has one,
+   * else a new one from the base) or, with no branch, left detached at the fetched base, sshd
    * restarted onto the new keys once systemd answers (it does not yet when {@code incus start}
    * returns, and it boots while the repositories are fetched), and the bus. It prints {@code
    * sail-step <step> <epoch ms>} as each step ends, which the create reads as the steps' times.
@@ -129,8 +132,8 @@ public final class Workspaces {
   static final String PREPARE =
       """
       set -eu
-      project=$1 workspace=$2
-      shift 2
+      project=$1 workspace=$2 branch=$3
+      shift 3
       step() { printf 'sail-step %s %s\\n' "$1" "$(date +%s%3N)"; }
       step start
       rm -f /etc/machine-id
@@ -157,14 +160,16 @@ public final class Workspaces {
             repo=/home/dev/workspace/$1 base=$2
             shift 2
             fetch "$repo"
-            if as_dev git -C "$repo" show-ref --verify --quiet "refs/remotes/origin/$workspace"; then
-              as_dev git -C "$repo" switch --quiet -C "$workspace" "origin/$workspace"
+            if [ -z "$base" ]; then
+              base=$(as_dev git -C "$repo" symbolic-ref --short refs/remotes/origin/HEAD)
+              base=${base#origin/}
+            fi
+            if [ -z "$branch" ]; then
+              as_dev git -C "$repo" switch --quiet --detach "origin/$base"
+            elif as_dev git -C "$repo" show-ref --verify --quiet "refs/remotes/origin/$branch"; then
+              as_dev git -C "$repo" switch --quiet -C "$branch" "origin/$branch"
             else
-              if [ -z "$base" ]; then
-                base=$(as_dev git -C "$repo" symbolic-ref --short refs/remotes/origin/HEAD)
-                base=${base#origin/}
-              fi
-              as_dev git -C "$repo" switch --quiet --no-track -c "$workspace" "origin/$base"
+              as_dev git -C "$repo" switch --quiet --no-track -c "$branch" "origin/$base"
             fi
           done
           step repos
@@ -180,8 +185,9 @@ public final class Workspaces {
 
   /**
    * What each phase took, in milliseconds, measured on {@link System#nanoTime}: the clone ({@code
-   * null} for a start), the start, the readiness that follows it, and the whole; and each step of
-   * the readiness by name, in the order they ran.
+   * null} for a start), counted from when the create asked for the runner's create lock so a wait
+   * behind another create is in it, the start, the readiness that follows it, and the whole; and
+   * each step of the readiness by name, in the order they ran.
    */
   public record Timings(
       Long cloneMs, long startMs, long readyMs, long totalMs, Map<String, Long> readySteps) {}
@@ -210,10 +216,18 @@ public final class Workspaces {
   /**
    * One workspace as Incus has it: its name, instance and state ({@code incomplete} for one that
    * was never made whole), the template version it was cloned from (none for the default
-   * workspace), when it was created and its IPv4 address.
+   * workspace), when it was created, its IPv4 address, the spec whose runs live in it (none for a
+   * person's) and the person it belongs to (none for the default workspace).
    */
   public record Row(
-      String name, String instance, String state, String template, String createdAt, String ipv4)
+      String name,
+      String instance,
+      String state,
+      String template,
+      String createdAt,
+      String ipv4,
+      String spec,
+      String owner)
       implements Mappable {
 
     @Override
@@ -225,9 +239,72 @@ public final class Workspaces {
       map.put("template", template);
       map.put("created_at", createdAt);
       map.put("ipv4", ipv4);
+      map.put("spec", spec);
+      map.put("owner", owner);
       return map;
     }
   }
+
+  /**
+   * What a spec's run would enter, read before anything of the run is reserved: the spec's place,
+   * the template version a new workspace of it clones, the workspace when there is one (whole, or
+   * left by a create that did not finish), whether the template is older than the definition, and
+   * the space of the pool it clones onto, when Incus says.
+   */
+  public record SpecCheck(
+      RunPlace.SpecWorkspace place,
+      WorkspaceTemplate.Template template,
+      Optional<BoxInstances.Instance> found,
+      boolean stale,
+      Optional<IncusStorage.Space> space) {
+
+    /** Whether the spec's workspace is there and whole, so a run reuses it. */
+    public boolean whole() {
+      return found.map(i -> ((BoxInstances.Workspace) i.kind()).ready()).orElse(false);
+    }
+
+    /** Whether the spec's workspace is whole and its processes run. */
+    public boolean running() {
+      return whole() && found.get().state() instanceof ContainerState.Running;
+    }
+  }
+
+  /** How a spec's run entered its workspace. */
+  public sealed interface Entered {
+    /** The instance the run goes on in. */
+    String instance();
+  }
+
+  /** The spec's whole workspace, as it was, {@code started} when it had to be. */
+  public record Reused(String instance, boolean started) implements Entered {}
+
+  /** A workspace made for the spec, and what making it took. */
+  public record Made(Created created) implements Entered {
+    @Override
+    public String instance() {
+      return created.instance();
+    }
+  }
+
+  /**
+   * The box made no workspace because another create held its create lock past {@link
+   * #CREATE_WAIT}: the box makes one at a time, and says when it is busy rather than queueing
+   * without end (R6).
+   */
+  public static final class Busy extends IllegalStateException {
+    Busy() {
+      super(
+          "This box has been making another workspace for "
+              + CREATE_WAIT.toSeconds()
+              + " s, and makes one at a time.");
+    }
+  }
+
+  /** How long a create waits for another to finish before the box is {@link Busy}. */
+  public static final Duration CREATE_WAIT = Duration.ofSeconds(60);
+
+  /** The box-wide lock every create holds around its clone, start and prepare (D7). */
+  static final String CREATE_LOCK = "workspace-create.lock";
 
   /** A project's workspaces, its default one first. */
   public record Listing(String project, List<Row> workspaces) {}
@@ -255,49 +332,178 @@ public final class Workspaces {
   }
 
   /**
-   * Creates workspace {@code name} of {@code config}'s project: a clone of its template's current
-   * version, built first when there is none or it is stale, then started, made its own, and marked
-   * whole. One create of a workspace runs at a time, under its lock: of two of one name, the second
-   * finds the first's workspace and is refused. An instance a create of it did not finish is
-   * deleted and made again.
+   * This box's workspaces over {@code shell}, read through its observer, on the real clock and
+   * under the box's lock directory: what every door of the box uses.
+   */
+  public static Workspaces onThisBox(ShellExec shell) {
+    return new Workspaces(shell.observer(), shell, System::nanoTime, SailPaths.locksDir());
+  }
+
+  /**
+   * Creates workspace {@code name} of {@code config}'s project for {@code owner}, the person it
+   * belongs to: a clone of its template's current version, built first when there is none or it is
+   * stale, then started, made its own with every repo on a branch of its name, and marked whole.
+   * One create of a workspace runs at a time, under its lock: of two of one name, the second finds
+   * the first's workspace and is refused. An instance a create of it did not finish is deleted and
+   * made again.
    */
   public Created create(
-      ProjectDefinition config, String name, WorkspaceTemplate.Source source, Path files)
+      ProjectDefinition config,
+      String name,
+      WorkspaceTemplate.Source source,
+      Path files,
+      String owner)
       throws Exception {
     var project = config.name();
     var instance = requireNewName(project, name);
     var zfs = WorkspaceTemplate.requireZfs(observer);
     var template = WorkspaceTemplate.requireName(project, source);
-    if (shell.isDryRun()) {
-      return create(config, name, instance, template, zfs, source, files);
-    }
-    try (var held = FileMutex.acquire(locks.resolve(instance + ".workspace.lock"))) {
-      return create(config, name, instance, template, zfs, source, files);
+    try (var held = nameLock(instance)) {
+      var unfinished = requireUnclaimed(project, name, instance, source.held(), box.all());
+      var built =
+          new WorkspaceTemplate(observer, shell, locks).ensure(config, source, template, zfs);
+      return make(config, name, instance, built, List.of(), owner, name, unfinished, files);
     }
   }
 
-  private Created create(
+  /**
+   * What a run of {@code place}'s spec would enter, read and refused before anything is reserved
+   * (R3): a box with no ZFS pool is refused naming the command that adds one, a project with no
+   * current template naming the command that builds it, a pool ZFS says is neither online nor
+   * degraded naming {@code zpool status}, and a name another workspace holds naming that workspace.
+   * The template is never built here: a stale one is cloned as it is, and said to be stale.
+   */
+  public SpecCheck checkSpec(RunPlace.SpecWorkspace place, String inputs, Predicate<String> held)
+      throws IOException, InterruptedException, TimeoutException {
+    var zfs = WorkspaceTemplate.requireZfs(observer);
+    var instances = box.all();
+    var template =
+        new WorkspaceTemplate(observer, shell, locks)
+            .current(place.project(), instances, zfs)
+            .orElseThrow(() -> noTemplate(place.project()));
+    WorkspaceTemplate.requireUsable(observer, template.pool());
+    var found = requireTheSpecs(place, held, instances);
+    var space = new IncusStorage(observer).find(template.pool()).flatMap(IncusStorage.Pool::space);
+    return new SpecCheck(place, template, found, !inputs.equals(template.inputs()), space);
+  }
+
+  /**
+   * Puts a spec's run into the workspace {@code check} found, or makes it, for {@code owner}, the
+   * person the run acts for: a whole one is started when stopped and kept as it is, tree and all;
+   * otherwise a clone of the checked template carrying the spec and the owner is made, with every
+   * repo left detached at its fetched base, under the box's create lock. Either way the workspace
+   * is {@code owner}'s before anything of the run is staged (R12). A create that cannot have the
+   * create lock within {@link #CREATE_WAIT} is {@link Busy}.
+   */
+  public Entered enterSpec(SpecCheck check, ProjectDefinition config, String owner, Path files)
+      throws Exception {
+    var place = check.place();
+    if (check.whole()) {
+      return reuse(check.found().get(), owner);
+    }
+    try (var held = nameLock(place.instance())) {
+      var found = requireTheSpecs(place, name -> false, box.all());
+      if (found.map(i -> ((BoxInstances.Workspace) i.kind()).ready()).orElse(false)) {
+        return reuse(found.get(), owner);
+      }
+      return new Made(
+          make(
+              config,
+              place.workspace(),
+              place.instance(),
+              check.template(),
+              List.of(BoxInstances.SPEC_KEY + "=" + place.specId()),
+              owner,
+              "",
+              found.isPresent(),
+              files));
+    }
+  }
+
+  private Reused reuse(BoxInstances.Instance found, String owner) throws Exception {
+    var started = !(found.state() instanceof ContainerState.Running);
+    if (started) {
+      containers.start(found.name());
+      awaitReady(found.name());
+    }
+    if (!owner.equals(found.key(BoxInstances.OWNER_KEY).orElse(""))) {
+      var owned =
+          new ContainerConfig(shell, locks)
+              .set(found.name(), List.of(BoxInstances.OWNER_KEY + "=" + owner));
+      if (!owned.ok()) {
+        throw new IOException(
+            "Workspace "
+                + found.name()
+                + " could not be made "
+                + owner
+                + "'s, so no run of theirs goes in it: "
+                + owned.reason());
+      }
+    }
+    return new Reused(found.name(), started);
+  }
+
+  /** The lock one create of {@code instance} holds; none in a dry run, which makes nothing. */
+  private FileMutex nameLock(String instance) throws IOException {
+    return shell.isDryRun() ? null : FileMutex.acquire(locks.resolve(instance + ".workspace.lock"));
+  }
+
+  /**
+   * Makes {@code instance}, workspace {@code name}: under the box's create lock, which it waits for
+   * no longer than {@link #CREATE_WAIT}, the clone of {@code built} with the workspace's keys,
+   * {@code keys} and the owner's added, its start, and its prepare onto {@code branch} (empty for
+   * none). One a create did not finish ({@code unfinished}) is deleted first.
+   */
+  private Created make(
       ProjectDefinition config,
       String name,
       String instance,
-      String template,
-      List<String> zfs,
-      WorkspaceTemplate.Source source,
+      WorkspaceTemplate.Template built,
+      List<String> keys,
+      String owner,
+      String branch,
+      boolean unfinished,
       Path files)
       throws Exception {
     var project = config.name();
-    var unfinished = requireUnclaimed(project, name, instance, source, box.all());
-    var built = new WorkspaceTemplate(observer, shell, locks).ensure(config, source, template, zfs);
     if (unfinished) {
       containers.forceDelete(instance);
     }
     var started = nanos.getAsLong();
-    clone(project, name, instance, built);
+    try (var held = createLock(started)) {
+      return made(config, name, instance, built, keys, owner, branch, files, started);
+    }
+  }
+
+  private FileMutex createLock(long started) throws IOException, InterruptedException {
+    if (shell.isDryRun()) {
+      return null;
+    }
+    return FileMutex.acquireUntil(
+            locks.resolve(CREATE_LOCK), started + CREATE_WAIT.toNanos(), nanos)
+        .orElseThrow(Busy::new);
+  }
+
+  private Created made(
+      ProjectDefinition config,
+      String name,
+      String instance,
+      WorkspaceTemplate.Template built,
+      List<String> keys,
+      String owner,
+      String branch,
+      Path files,
+      long started)
+      throws Exception {
+    var project = config.name();
+    var copyKeys = new ArrayList<>(keys);
+    copyKeys.add(BoxInstances.OWNER_KEY + "=" + owner);
+    clone(project, name, instance, built, copyKeys);
     try {
       var cloned = nanos.getAsLong();
       containers.start(instance);
       var running = nanos.getAsLong();
-      var steps = prepare(config, name, instance, files);
+      var steps = prepare(config, name, branch, instance, files);
       var ready = nanos.getAsLong();
       return new Created(
           project,
@@ -331,7 +537,14 @@ public final class Workspaces {
             .map(i -> row(DEFAULT, i, word(i.state()), null, fromIncus(i.createdAt())))
             .orElse(
                 new Row(
-                    DEFAULT, project, word(new ContainerState.NotCreated()), null, null, null)));
+                    DEFAULT,
+                    project,
+                    word(new ContainerState.NotCreated()),
+                    null,
+                    null,
+                    null,
+                    null,
+                    null)));
     instances.stream()
         .filter(i -> i.kind() instanceof BoxInstances.Workspace w && w.project().equals(project))
         .sorted(Comparator.comparing(BoxInstances.Instance::name))
@@ -373,9 +586,13 @@ public final class Workspaces {
             Map.of()));
   }
 
-  /** Stops workspace {@code name} when its processes run. */
-  public Changed stop(String project, String name) throws Exception {
+  /**
+   * Stops workspace {@code name} when its processes run, unless a run of the spec it is lives in it
+   * ({@code live} says of a spec), which is refused naming the stop that ends the run.
+   */
+  public Changed stop(String project, String name, Predicate<String> live) throws Exception {
     var found = existing(project, name, "project stop", true);
+    requireNoLiveRun(project, name, found, live);
     if (!found.state().live()) {
       return new Changed(project, name, found.name(), Change.ALREADY_STOPPED, null);
     }
@@ -383,18 +600,17 @@ public final class Workspaces {
     return new Changed(project, name, found.name(), Change.STOPPED, null);
   }
 
-  /** Deletes workspace {@code name}, whole or not, and with its instance the workspace (W3). */
-  public Changed delete(String project, String name) throws Exception {
-    return delete(project, name, instance -> {});
-  }
-
   /**
-   * As {@link #delete(String, String)}, once {@code confirm}, handed the workspace's instance,
-   * returns: it is asked only of a workspace that exists, so a missing one or the default one is
-   * refused before anything is asked.
+   * Deletes workspace {@code name}, whole or not, and with its instance the workspace (W3), once
+   * {@code confirm}, handed the workspace's instance, returns: it is asked only of a workspace that
+   * exists and holds no live run ({@code live} says of a spec), so a missing one, the default one
+   * or one a run of its spec lives in is refused before anything is asked.
    */
-  public Changed delete(String project, String name, Consumer<String> confirm) throws Exception {
+  public Changed delete(
+      String project, String name, Predicate<String> live, Consumer<String> confirm)
+      throws Exception {
     var found = existing(project, name, "project destroy", true);
+    requireNoLiveRun(project, name, found, live);
     confirm.accept(found.name());
     containers.forceDelete(found.name());
     return new Changed(project, name, found.name(), Change.DELETED, null);
@@ -419,11 +635,44 @@ public final class Workspaces {
     };
   }
 
+  /**
+   * Refuses a change to {@code found}, workspace {@code name}, when it is a spec's workspace and a
+   * run of that spec is {@code live}: the run would die under it.
+   */
+  private static void requireNoLiveRun(
+      String project, String name, BoxInstances.Instance found, Predicate<String> live) {
+    var spec = found.key(BoxInstances.SPEC_KEY);
+    if (spec.isPresent() && live.test(spec.get())) {
+      throw Remedied.state(
+          "Workspace '"
+              + name
+              + "' of "
+              + project
+              + " holds a live run of spec "
+              + spec.get()
+              + ", which would die with it.",
+          Remedy.of(
+              "Stop the run first: ",
+              Remedy.sail("agent stop", project, "--spec", spec.get()),
+              "."));
+    }
+  }
+
+  private static IllegalStateException noTemplate(String project) {
+    return Remedied.state(
+        project + " has no template yet",
+        Remedy.of(Remedy.sail("project template build", project)));
+  }
+
   private void clone(
-      String project, String name, String instance, WorkspaceTemplate.Template template)
+      String project,
+      String name,
+      String instance,
+      WorkspaceTemplate.Template template,
+      List<String> keys)
       throws IOException, InterruptedException, TimeoutException {
-    var copied =
-        shell.exec(
+    var argv =
+        new ArrayList<>(
             List.of(
                 "incus",
                 "copy",
@@ -439,6 +688,12 @@ public final class Workspaces {
                 CREATED_KEY + "=" + DateTimeUtils.toMillis(DateTimeUtils.now()),
                 "-c",
                 CREATING_KEY + "=1"));
+    keys.forEach(
+        key -> {
+          argv.add("-c");
+          argv.add(key);
+        });
+    var copied = shell.exec(argv);
     if (!copied.ok()) {
       throw new IOException(
           "Failed to clone "
@@ -459,10 +714,11 @@ public final class Workspaces {
    * write.
    */
   private Map<String, Long> prepare(
-      ProjectDefinition config, String name, String instance, Path files)
+      ProjectDefinition config, String name, String branch, String instance, Path files)
       throws IOException, InterruptedException, TimeoutException {
     var argv =
-        new ArrayList<>(List.of("bash", "-c", PREPARE, "sail-workspace", config.name(), name));
+        new ArrayList<>(
+            List.of("bash", "-c", PREPARE, "sail-workspace", config.name(), name, branch));
     for (var repo : Objects.requireNonNullElse(config.repos(), List.<ProjectDefinition.Repo>of())) {
       argv.add(repo.path());
       argv.add(Objects.requireNonNullElse(repo.branch(), ""));
@@ -602,7 +858,7 @@ public final class Workspaces {
       String project,
       String name,
       String instance,
-      WorkspaceTemplate.Source source,
+      Predicate<String> held,
       List<BoxInstances.Instance> instances) {
     var strays =
         instances.stream()
@@ -653,7 +909,7 @@ public final class Workspaces {
               + instance
               + "', which Incus already has. Give the workspace another name.");
     }
-    if (source.held().test(instance)) {
+    if (held.test(instance)) {
       throw new IllegalArgumentException(
           "Workspace '"
               + name
@@ -666,6 +922,60 @@ public final class Workspaces {
               + "'. Give the workspace another name.");
     }
     return false;
+  }
+
+  /**
+   * Spec {@code place}'s workspace when there is one, whole or left by a create that did not
+   * finish; none when its name is free. The name is the spec's only when the instance of it carries
+   * the spec's own key: a person's workspace of that name, or another spec's whose cut name
+   * collides, is refused naming it, and so is any other instance or project of the name (W4).
+   */
+  private static Optional<BoxInstances.Instance> requireTheSpecs(
+      RunPlace.SpecWorkspace place, Predicate<String> held, List<BoxInstances.Instance> instances) {
+    var project = place.project();
+    var name = place.workspace();
+    var instance = place.instance();
+    var taken = instances.stream().filter(i -> i.name().equals(instance)).findFirst();
+    if (taken.isPresent()
+        && taken.get().kind() instanceof BoxInstances.Workspace(var p, var w, var ready)
+        && p.equals(project)
+        && w.equals(name)) {
+      var spec = taken.get().key(BoxInstances.SPEC_KEY);
+      if (spec.isEmpty()) {
+        throw Remedied.state(
+            "Workspace '"
+                + name
+                + "' of "
+                + project
+                + " is a person's, not spec "
+                + place.specId()
+                + "'s, so no run of the spec goes in it.",
+            Remedy.of(
+                "Delete it if it is not wanted (",
+                Remedy.sail("project workspace delete", project, name),
+                "), then dispatch again."));
+      }
+      if (!spec.get().equals(place.specId())) {
+        throw new IllegalStateException(
+            "Workspace '"
+                + name
+                + "' of "
+                + project
+                + " is spec "
+                + spec.get()
+                + "'s, whose workspace name spec "
+                + place.specId()
+                + "'s is too, so no run of "
+                + place.specId()
+                + " goes in it. Give one of the two specs another id.");
+      }
+      if (!ready && taken.get().key(CREATING_KEY).isEmpty()) {
+        throw markTakenOff(project, name);
+      }
+      return taken;
+    }
+    requireUnclaimed(project, name, instance, held, instances);
+    return Optional.empty();
   }
 
   /** As {@link #existing}, refused when the workspace was never made whole (W12). */
@@ -794,7 +1104,15 @@ public final class Workspaces {
       String template,
       String createdAt) {
     var ipv4 = instance.state() instanceof ContainerState.Running running ? running.ipv4() : null;
-    return new Row(name, instance.name(), state, template, createdAt, ipv4);
+    return new Row(
+        name,
+        instance.name(),
+        state,
+        template,
+        createdAt,
+        ipv4,
+        instance.key(BoxInstances.SPEC_KEY).orElse(null),
+        instance.key(BoxInstances.OWNER_KEY).orElse(null));
   }
 
   private static String word(ContainerState state) {

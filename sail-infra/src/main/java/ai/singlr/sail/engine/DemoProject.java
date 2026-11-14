@@ -47,7 +47,7 @@ public final class DemoProject {
               },
               "redis": {"image": "redis:7", "ports": [6379]}
             },
-            "agent": {"type": "claude-code", "auto_snapshot": true, "auto_branch": true}
+            "agent": {"type": "claude-code", "auto_branch": true}
           }
           """);
 

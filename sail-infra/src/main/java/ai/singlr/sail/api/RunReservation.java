@@ -14,6 +14,7 @@ import ai.singlr.sail.engine.AgentPresence;
 import ai.singlr.sail.engine.AgentUnit;
 import ai.singlr.sail.engine.ContainerExec;
 import ai.singlr.sail.engine.LaunchEnv;
+import ai.singlr.sail.engine.RunPlace;
 import ai.singlr.sail.engine.RunRetention;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.harness.RunUsage;
@@ -345,7 +346,7 @@ public final class RunReservation {
       throw new ApiException(
           ErrorCode.COMMAND_FAILED, "Could not lock project '" + project + "' to dispatch.", e);
     }
-    whenClaimed(claim, () -> pruneRuns(project));
+    whenClaimed(claim, () -> pruneRuns(RunPlace.of(project, specId)));
     return claim;
   }
 
@@ -410,8 +411,10 @@ public final class RunReservation {
       String specId, String role, List<String> repos, RunStore.RunRow resumed) {
     var conversation =
         new DispatchGate.RunningRun(
-            resumed.id(), resumed.specId(), Lane.BUILD.wire(), resumed.repos());
-    return DispatchGate.decide(specId, role, repos, List.of(conversation)).isPresent();
+            resumed.id(), resumed.specId(), Lane.BUILD.wire(), resumed.repos(), resumed.place());
+    return DispatchGate.decide(
+            RunPlace.of(resumed.project(), specId), specId, role, repos, List.of(conversation))
+        .isPresent();
   }
 
   /**
@@ -435,21 +438,22 @@ public final class RunReservation {
    * live for the same reason — the missed-stop reconciler releases a genuinely dead run on its next
    * pass. A run released so has its launch file removed too.
    */
-  public void releaseIfAbsent(String runId, String project, AgentUnit unit) {
-    if (agentLive(project, unit)) {
+  public void releaseIfAbsent(String runId, RunPlace place, AgentUnit unit) {
+    if (agentLive(place, unit)) {
       return;
     }
     failRun(runId);
-    removeLaunchFile(project, unit);
+    removeLaunchFile(place, unit);
   }
 
   /**
    * Removes the launch file of a run whose agent is proven absent, best-effort: its secrets leave
    * the container now rather than at the next sweep, which stays the net for a crash.
    */
-  private void removeLaunchFile(String project, AgentUnit unit) {
+  private void removeLaunchFile(RunPlace place, AgentUnit unit) {
     try {
-      shell.exec(ContainerExec.asDevUser(project, List.of("rm", "-f", unit.launchEnvPath())));
+      shell.exec(
+          ContainerExec.asDevUser(place.instance(), List.of("rm", "-f", unit.launchEnvPath())));
     } catch (Exception e) {
       System.err.println(
           "  [api] Warning: could not remove the launch file of "
@@ -468,16 +472,23 @@ public final class RunReservation {
     return config.agent() == null ? null : config.lifetimeFor(Lane.of(role).orElse(null));
   }
 
-  private void pruneRuns(String project) {
+  /**
+   * Prunes the oldest run directories of {@code place}'s instance, of the runs that lived there.
+   */
+  private void pruneRuns(RunPlace place) {
     try {
-      var runs = runStore.listForProject(project);
+      var runs =
+          runStore.listForProject(place.project()).stream()
+              .filter(run -> run.place().equals(place))
+              .toList();
       var ids = runs.stream().map(RunStore.RunRow::id).toList();
       var kept =
           runs.stream()
               .filter(run -> DispatchOperations.ownsLiveAgent(run) || usageUnread(run))
               .map(RunStore.RunRow::id)
               .collect(Collectors.toUnmodifiableSet());
-      var pruned = RunRetention.prune(shell, project, ids, kept, RunRetention.DEFAULT_KEEP);
+      var pruned =
+          RunRetention.prune(shell, place.instance(), ids, kept, RunRetention.DEFAULT_KEEP);
       listener.runsPruned(pruned.size());
     } catch (Exception e) {
       System.err.println("  [api] Warning: could not prune runs: " + e.getMessage());
@@ -503,9 +514,9 @@ public final class RunReservation {
         () -> runStore.finish(runId, "running", "failed", null, RunUsage.NONE));
   }
 
-  private boolean agentLive(String project, AgentUnit unit) {
+  private boolean agentLive(RunPlace place, AgentUnit unit) {
     try {
-      return !new AgentPresence(shell).gone(project, unit);
+      return !new AgentPresence(shell).gone(place, unit);
     } catch (Exception e) {
       return true;
     }

@@ -13,10 +13,10 @@ import java.io.PrintStream;
 import picocli.CommandLine.Help.Ansi;
 
 /**
- * Resolves whether to take a snapshot before a state-mutating command (dispatch, agent launch, run)
- * and runs the snapshot with progress feedback. The CLI uses {@code --snapshot} / {@code
- * --no-snapshot} (picocli {@code negatable = true}) to skip the prompt; without those flags the
- * user is always prompted in interactive mode.
+ * Resolves whether to take a snapshot before {@code sail agent run}, which runs in the project's
+ * own container, and runs the snapshot with progress feedback. The CLI uses {@code --snapshot} /
+ * {@code --no-snapshot} (picocli {@code negatable = true}) to skip the prompt; without those flags
+ * the user is always prompted in interactive mode.
  */
 final class SnapshotDecision {
 
@@ -26,8 +26,7 @@ final class SnapshotDecision {
    * Returns true if a snapshot should be taken now. {@code override} is the value of {@code
    * --snapshot} / {@code --no-snapshot} ({@code null} means neither was passed). When no override
    * is set the user is prompted (defaults to no); non-interactive mode (JSON output or piped stdin)
-   * skips silently. The {@code agent.auto_snapshot} setting in the definition is no longer
-   * consulted — snapshotting is fully opt-in per-dispatch via the flag.
+   * skips silently: snapshotting is opt-in per run via the flag.
    *
    * @param config kept for API consistency across call sites; currently unused
    */

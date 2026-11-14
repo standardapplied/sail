@@ -377,7 +377,6 @@ public final class Banner {
     }
     if (config.agent() != null) {
       w = Math.max(w, rowWidth("Agent:", Objects.requireNonNullElse(config.agent().type(), "-")));
-      w = Math.max(w, rowWidth("Auto-snap:", String.valueOf(config.agent().autoSnapshot())));
       w = Math.max(w, rowWidth("Auto-branch:", String.valueOf(config.agent().autoBranch())));
     }
     w = boxWidth(w);
@@ -447,8 +446,6 @@ public final class Banner {
           Objects.requireNonNullElse(config.agent().type(), "-"),
           null,
           null);
-      labelRow(
-          out, ansi, w, "Auto-snap:", String.valueOf(config.agent().autoSnapshot()), null, null);
       labelRow(
           out, ansi, w, "Auto-branch:", String.valueOf(config.agent().autoBranch()), null, null);
       emptyRow(out, ansi, w);

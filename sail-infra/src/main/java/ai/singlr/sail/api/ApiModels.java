@@ -203,17 +203,16 @@ record ProjectDefinitionResponse(
   }
 }
 
-record AgentConfigView(String type, boolean autoSnapshot, boolean autoBranch) implements Mappable {
+record AgentConfigView(String type, boolean autoBranch) implements Mappable {
   static AgentConfigView from(ProjectDefinition config) {
     var agent = config.agent();
-    return new AgentConfigView(agent.type(), agent.autoSnapshot(), agent.autoBranch());
+    return new AgentConfigView(agent.type(), agent.autoBranch());
   }
 
   @Override
   public Map<String, Object> toMap() {
     var m = new LinkedHashMap<String, Object>();
     m.put("type", type);
-    m.put("auto_snapshot", autoSnapshot);
     m.put("auto_branch", autoBranch);
     return m;
   }
@@ -270,7 +269,7 @@ record DispatchResponse(
     String reason,
     DispatchedSpecView spec,
     AgentStatusView agent,
-    String snapshot,
+    String workspace,
     boolean branchCreated,
     boolean restarted)
     implements Mappable {
@@ -282,7 +281,7 @@ record DispatchResponse(
     m.put("reason", reason);
     m.put("spec", spec);
     m.put("agent", agent);
-    m.put("snapshot", snapshot);
+    m.put("workspace", workspace);
     m.put("branch_created", branchCreated);
     m.put("restarted", restarted);
     return m;

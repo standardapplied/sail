@@ -36,7 +36,6 @@ import ai.singlr.sail.engine.ContainerManager;
 import ai.singlr.sail.engine.ContainerState;
 import ai.singlr.sail.engine.HostInfo;
 import ai.singlr.sail.engine.NameValidator;
-import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.SharedProjectFiles;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.ShellExecutor;
@@ -677,7 +676,7 @@ public final class SailOperations implements HostOperations {
               if (eventBus != null) eventBus.publish(event);
             },
             new WatcherSpawner(shell, watcherFallback),
-            DispatchOperations.autoSnapshotter(shell),
+            Workspaces.onThisBox(shell),
             DispatchOperations.shellLauncher(shell),
             DispatchOperations.Listener.NONE,
             StopOperations.Listener.NONE));
@@ -731,7 +730,7 @@ public final class SailOperations implements HostOperations {
             fdeStore,
             hooks.events(),
             this.watcherSpawner,
-            hooks.snapshotter(),
+            hooks.workspaces(),
             hooks.launcher(),
             hooks.dispatchListener(),
             sessionYield);
@@ -1376,10 +1375,7 @@ public final class SailOperations implements HostOperations {
           var readable = readable(project);
           try {
             return new WorkspaceListResponse(
-                readable,
-                new Workspaces(shell, shell, System::nanoTime, SailPaths.locksDir())
-                    .list(readable)
-                    .workspaces());
+                readable, Workspaces.onThisBox(shell).list(readable).workspaces());
           } catch (Exception unread) {
             if (unread instanceof InterruptedException) {
               Thread.currentThread().interrupt();
@@ -1681,7 +1677,7 @@ public final class SailOperations implements HostOperations {
               null,
               DispatchedSpecView.from(dispatched.taskSpec(), dispatched.branch()),
               AgentStatusView.from(dispatched.agentType(), request.mode(), dispatched.session()),
-              dispatched.snapshotLabel(),
+              dispatched.workspace() == null ? null : dispatched.workspace().instance(),
               dispatched.branchCreated(),
               dispatched.restarted());
     };

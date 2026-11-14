@@ -13,6 +13,7 @@ import ai.singlr.sail.engine.AgentSession;
 import ai.singlr.sail.engine.AgentUnit;
 import ai.singlr.sail.engine.ContainerFilePush;
 import ai.singlr.sail.engine.GuardrailTrigger;
+import ai.singlr.sail.engine.RunPlace;
 import ai.singlr.sail.engine.RunUsageReader;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.harness.RunUsage;
@@ -102,10 +103,11 @@ public final class MissedStopReconciler implements AutoCloseable {
    */
   @FunctionalInterface
   public interface UnitProbe {
-    boolean active(String project, String runId, String unit) throws Exception;
+    /** Whether the run's agent is there, in the place it lives ({@link RunPlace}). */
+    boolean active(RunPlace place, String runId, String unit) throws Exception;
 
-    /** How the run ended, as far as its container still says; nothing, by default. */
-    default Ending ending(String project, String runId, String unit) throws Exception {
+    /** How the run ended, as far as its instance still says; nothing, by default. */
+    default Ending ending(RunPlace place, String runId, String unit) throws Exception {
       return Ending.UNKNOWN;
     }
 
@@ -118,10 +120,10 @@ public final class MissedStopReconciler implements AutoCloseable {
     }
 
     /**
-     * Removes from {@code project}'s container the launch file of every run not in {@code live}
-     * ({@link AgentSession#removeLaunchFiles}); nothing, by default.
+     * Removes from {@code instance} the launch file of every run not in {@code live} ({@link
+     * AgentSession#removeLaunchFiles}); nothing, by default.
      */
-    default void removeLaunchFiles(String project, List<String> live) throws Exception {}
+    default void removeLaunchFiles(String instance, List<String> live) throws Exception {}
   }
 
   /**
@@ -193,13 +195,13 @@ public final class MissedStopReconciler implements AutoCloseable {
     var usage = new RunUsageReader(shell);
     return new UnitProbe() {
       @Override
-      public boolean active(String project, String runId, String unit) throws Exception {
-        return switch (presence.of(project, AgentUnit.recorded(runId, unit))) {
+      public boolean active(RunPlace place, String runId, String unit) throws Exception {
+        return switch (presence.of(place, AgentUnit.recorded(runId, unit))) {
           case AgentSession.Presence.Running running -> true;
           case AgentSession.Presence.Gone gone -> false;
           case AgentSession.Presence.Unanswered silent ->
               throw new IOException(
-                  "Container '" + project + "' gave no answer about run " + runId + ".");
+                  "Container '" + place.instance() + "' gave no answer about run " + runId + ".");
         };
       }
 
@@ -209,15 +211,15 @@ public final class MissedStopReconciler implements AutoCloseable {
        * the run when it ended it for a limit. A trigger that only notified ended nothing.
        */
       @Override
-      public Ending ending(String project, String runId, String unit) throws Exception {
+      public Ending ending(RunPlace place, String runId, String unit) throws Exception {
         var recorded = AgentUnit.recorded(runId, unit);
         var exitCode =
             agentSession
-                .answeredExitStatus(project, recorded)
+                .answeredExitStatus(place.instance(), recorded)
                 .map(AgentSession.ExitState::exitCode)
                 .filter(code -> code != 0);
         var limit =
-            GuardrailTrigger.read(shell, project, recorded)
+            GuardrailTrigger.read(shell, place.instance(), recorded)
                 .filter(GuardrailTrigger::stops)
                 .map(GuardrailTrigger::cause);
         return new Ending(exitCode.orElse(null), limit.orElse(null));
@@ -229,8 +231,8 @@ public final class MissedStopReconciler implements AutoCloseable {
       }
 
       @Override
-      public void removeLaunchFiles(String project, List<String> live) throws Exception {
-        agentSession.removeLaunchFiles(project, live);
+      public void removeLaunchFiles(String instance, List<String> live) throws Exception {
+        agentSession.removeLaunchFiles(instance, live);
       }
     };
   }
@@ -306,14 +308,14 @@ public final class MissedStopReconciler implements AutoCloseable {
   void removeLeftovers() {
     var pass = clock.get();
     var tidied = true;
-    for (var project : sessionStore.liveRunsByProject(localHandle.get(), tidiedSince).entrySet()) {
+    for (var place : sessionStore.liveRunsByPlace(localHandle.get(), tidiedSince).entrySet()) {
       try {
-        unitProbe.removeLaunchFiles(project.getKey(), project.getValue());
+        unitProbe.removeLaunchFiles(place.getKey(), place.getValue());
       } catch (Exception e) {
         tidied = false;
         System.err.println(
             "  [reconcile] could not tidy the launch files of "
-                + project.getKey()
+                + place.getKey()
                 + ": "
                 + e.getMessage());
       }
@@ -435,7 +437,7 @@ public final class MissedStopReconciler implements AutoCloseable {
    * run the sweep could not observe is never finished, nor its stop replayed.
    */
   private boolean gone(RunStore.RunRow run) throws Exception {
-    return !unitProbe.active(run.project(), run.id(), Objects.toString(run.unit(), ""));
+    return !unitProbe.active(run.place(), run.id(), Objects.toString(run.unit(), ""));
   }
 
   /**
@@ -489,7 +491,7 @@ public final class MissedStopReconciler implements AutoCloseable {
         continue;
       }
       try {
-        if (unitProbe.active(run.project(), run.id(), StopOperations.runUnit(run).unitName())) {
+        if (unitProbe.active(run.place(), run.id(), StopOperations.runUnit(run).unitName())) {
           continue;
         }
         if (sessionStore.finish(run.id(), "stopping", "stopped", null, unitProbe.usage(run))) {
@@ -696,7 +698,7 @@ public final class MissedStopReconciler implements AutoCloseable {
    */
   private Ending endingOf(RunStore.RunRow run) {
     try {
-      return unitProbe.ending(run.project(), run.id(), Objects.toString(run.unit(), ""));
+      return unitProbe.ending(run.place(), run.id(), Objects.toString(run.unit(), ""));
     } catch (Exception unreadable) {
       if (unreadable instanceof InterruptedException) {
         Thread.currentThread().interrupt();

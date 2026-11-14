@@ -1318,12 +1318,20 @@ public final class RunStore implements ConflictResolver, SyncedStore {
    * project-targeted stop retry resumes it. Node-scoped like {@link #latestForProjectOnNode}.
    */
   public Optional<RunRow> runningForProjectOnNode(String project, String localHandle) {
-    return db.queryOne(
+    return liveForProjectOnNode(project, localHandle).stream().findFirst();
+  }
+
+  /**
+   * Every run of {@code project} live on this box ({@code running} or {@code stopping}), newest
+   * first: one per place at most of a spec's runs and as many as the project's container holds.
+   */
+  public List<RunRow> liveForProjectOnNode(String project, String localHandle) {
+    return db.query(
         "SELECT "
             + COLUMNS
             + " FROM runs WHERE project = ? AND status IN ('running', 'stopping')"
             + " AND IFNULL(node, '') = ?"
-            + " ORDER BY id DESC LIMIT 1",
+            + " ORDER BY id DESC",
         this::mapRow,
         project,
         ownerKey(localHandle));
@@ -1357,6 +1365,22 @@ public final class RunStore implements ConflictResolver, SyncedStore {
 
   private static String ownerKey(String localHandle) {
     return Strings.isBlank(localHandle) ? "" : localHandle;
+  }
+
+  /**
+   * How many spec workspaces this box's live runs are in: the distinct specs, of every project, of
+   * its {@code running} and {@code stopping} runs. What a box counts against its cap before it
+   * makes one more.
+   */
+  public int liveSpecWorkspaces(String localHandle) {
+    return db.queryOne(
+            "SELECT COUNT(DISTINCT project || '/' || spec_id) FROM runs"
+                + " WHERE status IN ('running', 'stopping') AND IFNULL(spec_id, '') <> ''"
+                + " AND IFNULL(node, '') = ?",
+            row -> row.integer(0),
+            ownerKey(localHandle))
+        .orElse(0L)
+        .intValue();
   }
 
   public List<RunRow> listForProject(String project) {
@@ -1556,28 +1580,31 @@ public final class RunStore implements ConflictResolver, SyncedStore {
   }
 
   /**
-   * Every project this box executed a run in that started or finished at {@code since} or later,
-   * each with the ids of its runs there still running or stopping: what a container may hold a file
-   * of a run that is no longer live in. A project with no such run is not named, so a pass over
-   * them asks no idle container anything.
+   * Every place this box executed a run in ({@link RunPlace}: a spec's workspace, or a project's
+   * container) where a run started or finished at {@code since} or later, by its instance, each
+   * with the ids of its runs there still running or stopping: what an instance may hold a file of a
+   * run that is no longer live in. A place with no such run is not named, so a pass over them asks
+   * no idle instance anything.
    */
-  public Map<String, List<String>> liveRunsByProject(String localHandle, Instant since) {
-    var byProject = new TreeMap<String, List<String>>();
+  public Map<String, List<String>> liveRunsByPlace(String localHandle, Instant since) {
+    var byPlace = new TreeMap<String, List<String>>();
     db.query(
-            "SELECT project, id, status FROM runs WHERE COALESCE(node, '') = ?1 AND project IN"
-                + " (SELECT project FROM runs WHERE COALESCE(node, '') = ?1 AND (started_at >= ?2"
-                + " OR completed_at >= ?2)) ORDER BY id",
-            row -> List.of(row.text(0), row.text(1), row.text(2)),
+            "SELECT project, spec_id, id, status FROM runs WHERE COALESCE(node, '') = ?1 AND"
+                + " (project, IFNULL(spec_id, '')) IN (SELECT project, IFNULL(spec_id, '') FROM"
+                + " runs WHERE COALESCE(node, '') = ?1 AND (started_at >= ?2 OR completed_at >="
+                + " ?2)) ORDER BY id",
+            row ->
+                List.of(RunPlace.of(row.text(0), row.text(1)).instance(), row.text(2), row.text(3)),
             ownerKey(localHandle),
             since)
         .forEach(
             run -> {
-              var live = byProject.computeIfAbsent(run.get(0), project -> new ArrayList<>());
+              var live = byPlace.computeIfAbsent(run.get(0), place -> new ArrayList<>());
               if (List.of("running", "stopping").contains(run.get(2))) {
                 live.add(run.get(1));
               }
             });
-    return Collections.unmodifiableMap(byProject);
+    return Collections.unmodifiableMap(byPlace);
   }
 
   /** The finished runs this box executed whose report was not read, oldest first. */

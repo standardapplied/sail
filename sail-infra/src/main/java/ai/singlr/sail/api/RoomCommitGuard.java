@@ -10,6 +10,7 @@ import ai.singlr.sail.config.ProjectDefinition;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.ContainerExec;
 import ai.singlr.sail.engine.HostInfo;
+import ai.singlr.sail.engine.RunPlace;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.webauthn.Hashes;
@@ -59,7 +60,7 @@ public final class RoomCommitGuard {
    * worktree state cannot be read at launch records no fingerprint and is exempt from the dirty
    * check rather than misjudged by it.
    */
-  public void captureRoomBaseline(String project, ProjectDefinition config, String runId) {
+  public void captureRoomBaseline(RunPlace place, ProjectDefinition config, String runId) {
     if (runStore == null) {
       return;
     }
@@ -70,11 +71,11 @@ public final class RoomCommitGuard {
         var head =
             exec(
                 ContainerExec.asDevUser(
-                    project, List.of("git", "-C", repoDir, "rev-parse", "HEAD")));
+                    place.instance(), List.of("git", "-C", repoDir, "rev-parse", "HEAD")));
         if (head.ok() && !head.stdout().isBlank()) {
           var entry = new LinkedHashMap<String, Object>();
           entry.put("head", head.stdout().trim());
-          var state = worktreeFingerprint(project, repoDir);
+          var state = worktreeFingerprint(place.instance(), repoDir);
           if (state != null) {
             entry.put("state", state);
           }
@@ -98,7 +99,7 @@ public final class RoomCommitGuard {
    * is as visible as dirtying a clean one, which a bare {@code git status --porcelain} digest is
    * blind to. Null when the worktree cannot be read, which exempts the repo from the dirty check.
    */
-  private String worktreeFingerprint(String project, String repoDir) {
+  private String worktreeFingerprint(String container, String repoDir) {
     var script =
         """
         set -e
@@ -106,7 +107,7 @@ public final class RoomCommitGuard {
         git -C "$1" ls-files --others --exclude-standard -z | while IFS= read -r -d '' path; do printf '%s\\0' "$path"; git -C "$1" hash-object -- "$path"; done
         """;
     var result =
-        exec(ContainerExec.asDevUser(project, List.of("bash", "-c", script, "bash", repoDir)));
+        exec(ContainerExec.asDevUser(container, List.of("bash", "-c", script, "bash", repoDir)));
     return result.ok() ? digest(result.stdout()) : null;
   }
 
@@ -131,6 +132,7 @@ public final class RoomCommitGuard {
     }
     var run = runStore.findById(runId).orElse(null);
     var specId = run != null ? run.specId() : null;
+    var place = RunPlace.of(project, specId);
     var baseline = YamlUtil.parseMap(recorded);
     var roomStarted = run != null ? run.startedAt() : null;
     var roomNode = run != null ? run.node() : null;
@@ -138,6 +140,7 @@ public final class RoomCommitGuard {
     var others =
         runStore.listForProject(project).stream()
             .filter(candidate -> !candidate.id().equals(runId))
+            .filter(candidate -> candidate.place().equals(place))
             .filter(candidate -> !candidate.readOnlyLane())
             .filter(candidate -> sameNode(roomNode, candidate))
             .filter(candidate -> overlapsRoomInterval(candidate, roomStarted, guardAt))
@@ -150,13 +153,13 @@ public final class RoomCommitGuard {
             .flatMap(candidate -> candidate.repos().stream())
             .collect(Collectors.toSet());
     var moved = new ArrayList<String>();
-    var config = projects.loadRunning(project).config();
+    var config = projects.definition(project);
     for (var entry : baseline.entrySet()) {
       var repo = entry.getKey();
       if (reserved.contains(repo)) {
         continue;
       }
-      var violation = repoViolation(project, config, repo, entry.getValue());
+      var violation = repoViolation(place.instance(), config, repo, entry.getValue());
       if (violation != null) {
         moved.add(violation);
       }
@@ -219,7 +222,7 @@ public final class RoomCommitGuard {
    */
   @SuppressWarnings("unchecked")
   private String repoViolation(
-      String project, ProjectDefinition config, String repo, Object recorded) {
+      String container, ProjectDefinition config, String repo, Object recorded) {
     if (!(recorded instanceof Map<?, ?> state)) {
       return null;
     }
@@ -227,7 +230,8 @@ public final class RoomCommitGuard {
     var before = Objects.toString(entry.get("head"), "");
     var repoDir = "/home/" + ProjectDefinition.USER + "/workspace/" + repo;
     var current =
-        exec(ContainerExec.asDevUser(project, List.of("git", "-C", repoDir, "rev-parse", "HEAD")));
+        exec(
+            ContainerExec.asDevUser(container, List.of("git", "-C", repoDir, "rev-parse", "HEAD")));
     if (!current.ok() || current.stdout().isBlank()) {
       return null;
     }
@@ -236,7 +240,7 @@ public final class RoomCommitGuard {
       var files =
           exec(
               ContainerExec.asDevUser(
-                  project,
+                  container,
                   List.of("git", "-C", repoDir, "diff", "--name-only", before, head, "--")));
       var fileList =
           files.ok() && !files.stdout().isBlank()
@@ -248,14 +252,14 @@ public final class RoomCommitGuard {
     if (recordedState == null) {
       return null;
     }
-    var fingerprint = worktreeFingerprint(project, repoDir);
+    var fingerprint = worktreeFingerprint(container, repoDir);
     if (fingerprint == null || fingerprint.equals(recordedState.toString())) {
       return null;
     }
     var status =
         exec(
             ContainerExec.asDevUser(
-                project, List.of("git", "-C", repoDir, "status", "--porcelain")));
+                container, List.of("git", "-C", repoDir, "status", "--porcelain")));
     var dirty =
         status.ok()
             ? status

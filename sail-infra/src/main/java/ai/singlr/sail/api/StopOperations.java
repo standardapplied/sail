@@ -7,17 +7,21 @@ package ai.singlr.sail.api;
 
 import ai.singlr.sail.access.Access;
 import ai.singlr.sail.access.Action;
+import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.engine.AgentPresence;
 import ai.singlr.sail.engine.AgentSession;
 import ai.singlr.sail.engine.AgentUnit;
 import ai.singlr.sail.engine.HostInfo;
+import ai.singlr.sail.engine.RunPlace;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SpecStore;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -74,8 +78,11 @@ public final class StopOperations {
   /** Stop the exact run {@code runId}, the API lane's address. */
   public record RunTarget(String runId) implements Target {}
 
-  /** Stop {@code project}'s active run — or its ad-hoc session — the CLI lane's address. */
-  public record ProjectTarget(String project) implements Target {}
+  /**
+   * Stop {@code project}'s live run — the CLI lane's address: spec {@code specId}'s when it names
+   * one, else the project's one live run, refused when it has several.
+   */
+  public record ProjectTarget(String project, String specId) implements Target {}
 
   /** What a stop produced; each lane renders it without duplicating any decision. */
   public sealed interface Outcome permits Stopped, NotRunning, AlreadyTerminal {
@@ -126,7 +133,7 @@ public final class StopOperations {
   /** How the kill runs — the only side effect that differs from a store write — and what it did. */
   @FunctionalInterface
   public interface AgentHalter {
-    AgentSession.Halt halt(String project, AgentUnit unit) throws Exception;
+    AgentSession.Halt halt(String container, AgentUnit unit) throws Exception;
   }
 
   /** The real halter: {@link AgentSession#killAgent} — SIGTERM, wait, SIGKILL, and its answer. */
@@ -145,7 +152,7 @@ public final class StopOperations {
     if (run == null) {
       return null;
     }
-    return new AgentSession(shell).queryStatus(project, runUnit(run));
+    return new AgentSession(shell).queryStatus(run.place().instance(), runUnit(run));
   }
 
   /**
@@ -193,7 +200,8 @@ public final class StopOperations {
   public Outcome stop(Target target, String localHandle, boolean dryRun) {
     return switch (target) {
       case RunTarget run -> stopRun(run.runId(), localHandle, dryRun);
-      case ProjectTarget project -> stopProject(project.project(), localHandle, dryRun);
+      case ProjectTarget project ->
+          stopProject(project.project(), project.specId(), localHandle, dryRun);
     };
   }
 
@@ -212,20 +220,57 @@ public final class StopOperations {
   }
 
   /**
-   * A project-targeted stop resolves the newest active session run — build or ad-hoc, the two are
-   * mutually exclusive by reservation — and applies the one resolved-run procedure, decided as a
-   * stop by run id is: a project outside the caller's scope is not in the catalog, and its run is
-   * authorized before the container is asked about. A project with no active run on this box has
-   * nothing to stop.
+   * A project-targeted stop resolves the live run it names — spec {@code specId}'s, or the
+   * project's only one — and applies the one resolved-run procedure, decided as a stop by run id
+   * is: a project outside the caller's scope is not in the catalog, and its run is authorized
+   * before the container is asked about. Specs run at once, each in its own workspace, so with no
+   * spec named and several runs live the stop is refused naming each run's spec and the form that
+   * stops one. A project, or spec, with no live run on this box has nothing to stop.
    */
-  private Outcome stopProject(String project, String localHandle, boolean dryRun) {
+  private Outcome stopProject(String project, String specId, String localHandle, boolean dryRun) {
     ProjectGate.requireReads(project);
-    var run = runStore.runningForProjectOnNode(project, localHandle).orElse(null);
+    var live =
+        runStore.liveForProjectOnNode(project, localHandle).stream()
+            .filter(run -> Strings.isBlank(specId) || specId.equals(run.specId()))
+            .toList();
+    if (live.size() > 1 && Strings.isBlank(specId)) {
+      throw severalLive(project, live);
+    }
+    var run = live.isEmpty() ? null : live.getFirst();
     if (run != null) {
       authorize(run);
     }
     projects.requireExists(project);
     return run == null ? new NotRunning(null, null, false, false) : stopResolved(run, dryRun);
+  }
+
+  /** The refusal of a stop that names no spec while {@code live}, several runs, run at once. */
+  private static ApiException severalLive(String project, List<RunStore.RunRow> live) {
+    var specs =
+        live.stream()
+            .map(run -> Strings.isBlank(run.specId()) ? "an ad-hoc run " + run.id() : run.specId())
+            .distinct()
+            .toList();
+    var named = live.stream().map(RunStore.RunRow::specId).filter(Strings::isNotBlank).distinct();
+    var forms = new ArrayList<Object>(List.of("Name the one to stop: "));
+    named.forEach(
+        spec -> {
+          if (forms.size() > 1) {
+            forms.add(", ");
+          }
+          forms.add(Remedy.sail("agent stop", project, "--spec", spec));
+        });
+    forms.add(".");
+    return new ApiException(
+        ErrorCode.CONFLICT,
+        "Project "
+            + project
+            + " has "
+            + live.size()
+            + " live runs on this box, of "
+            + String.join(", ", specs)
+            + ", so no one of them is the project's run.",
+        Remedy.of(forms.toArray()));
   }
 
   /**
@@ -260,7 +305,7 @@ public final class StopOperations {
       return new NotRunning(run.id(), run.specId(), true, false);
     }
     var unit = runUnit(run);
-    var agent = probe(run.project(), unit).orElse(null);
+    var agent = probe(run.place(), unit).orElse(null);
     if (agent == null) {
       if (dryRun) {
         return new NotRunning(run.id(), specIdOf(run), previewCancel(run, spec), true);
@@ -312,7 +357,7 @@ public final class StopOperations {
    */
   private Outcome resumeStop(RunStore.RunRow run, boolean dryRun) {
     var unit = runUnit(run);
-    var agent = probe(run.project(), unit).orElse(null);
+    var agent = probe(run.place(), unit).orElse(null);
     if (agent == null) {
       if (!dryRun) {
         finishStop(run);
@@ -451,7 +496,7 @@ public final class StopOperations {
     }
     try {
       return !run.pidTicks()
-          .equals(new AgentSession(shell).readProcessStartTicks(run.project(), livePid));
+          .equals(new AgentSession(shell).readProcessStartTicks(run.place().instance(), livePid));
     } catch (Exception e) {
       return true;
     }
@@ -595,10 +640,10 @@ public final class StopOperations {
    * container that gave no answer fails the stop here, before anything is claimed or recorded: an
    * agent nobody can ask about is not an agent that is not running.
    */
-  private Optional<AgentSession.SessionInfo> probe(String project, AgentUnit unit) {
+  private Optional<AgentSession.SessionInfo> probe(RunPlace place, AgentUnit unit) {
     AgentSession.Presence presence;
     try {
-      presence = new AgentPresence(shell).of(project, unit);
+      presence = new AgentPresence(shell).of(place, unit);
     } catch (Exception e) {
       throw new ApiException(ErrorCode.AGENT_STATUS_FAILED, "Failed to query agent status.", e);
     }
@@ -623,7 +668,7 @@ public final class StopOperations {
   private void haltOrFail(RunStore.RunRow run, AgentUnit unit, int pid, Runnable survived) {
     AgentSession.Halt halt;
     try {
-      halt = halter.halt(run.project(), unit);
+      halt = halter.halt(run.place().instance(), unit);
     } catch (Exception e) {
       throw new ApiException(ErrorCode.AGENT_STOP_FAILED, "Failed to stop agent.", e);
     }

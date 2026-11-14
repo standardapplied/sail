@@ -58,7 +58,7 @@ public record GuardrailTrigger(
   }
 
   /** Writes this record beside the run {@code unit} names. */
-  public void write(ShellExec shell, String project, AgentUnit unit)
+  public void write(ShellExec shell, String container, AgentUnit unit)
       throws IOException, InterruptedException, TimeoutException {
     var map = new LinkedHashMap<String, Object>();
     map.put("triggered_at", triggeredAt);
@@ -68,7 +68,7 @@ public record GuardrailTrigger(
     map.put("cause", cause);
     shell.exec(
         ContainerExec.asDevUser(
-            project,
+            container,
             List.of(
                 "bash",
                 "-c",
@@ -79,10 +79,10 @@ public record GuardrailTrigger(
   }
 
   /** The record beside the run {@code unit} names, or empty when no limit of its was crossed. */
-  public static Optional<GuardrailTrigger> read(ShellExec shell, String project, AgentUnit unit)
+  public static Optional<GuardrailTrigger> read(ShellExec shell, String container, AgentUnit unit)
       throws IOException, InterruptedException, TimeoutException {
     var result =
-        shell.exec(ContainerExec.asDevUser(project, List.of("cat", unit.guardrailTriggerPath())));
+        shell.exec(ContainerExec.asDevUser(container, List.of("cat", unit.guardrailTriggerPath())));
     if (!result.ok() || Strings.isBlank(result.stdout())) {
       return Optional.empty();
     }

@@ -503,14 +503,13 @@ public record ProjectDefinition(
   }
 
   /**
-   * How the project's agents work: the harness, its branches and snapshots, what it installs, the
-   * limits a run is held to and where its events are sent.
+   * How the project's agents work: the harness, its branches, what it installs, the limits a run is
+   * held to and where its events are sent.
    */
   public record Agent(
       String type,
       boolean autoBranch,
       String branchPrefix,
-      boolean autoSnapshot,
       List<String> install,
       Map<String, String> config,
       Guardrails guardrails,
@@ -522,44 +521,24 @@ public record ProjectDefinition(
         String type,
         boolean autoBranch,
         String branchPrefix,
-        boolean autoSnapshot,
         List<String> install,
         Map<String, String> config,
         Guardrails guardrails,
         Notifications notifications,
         Member member) {
       this(
-          type,
-          autoBranch,
-          branchPrefix,
-          autoSnapshot,
-          install,
-          config,
-          guardrails,
-          notifications,
-          member,
-          null);
+          type, autoBranch, branchPrefix, install, config, guardrails, notifications, member, null);
     }
 
     public Agent(
         String type,
         boolean autoBranch,
         String branchPrefix,
-        boolean autoSnapshot,
         List<String> install,
         Map<String, String> config,
         Guardrails guardrails,
         Notifications notifications) {
-      this(
-          type,
-          autoBranch,
-          branchPrefix,
-          autoSnapshot,
-          install,
-          config,
-          guardrails,
-          notifications,
-          null);
+      this(type, autoBranch, branchPrefix, install, config, guardrails, notifications, null);
     }
 
     /**
@@ -568,23 +547,14 @@ public record ProjectDefinition(
     public static final String DEFAULT_BRANCH_PREFIX = "agent/";
 
     private static final boolean DEFAULT_AUTO_BRANCH = true;
-    private static final boolean DEFAULT_AUTO_SNAPSHOT = true;
 
     /**
      * The agent section {@code project create} writes for {@code type}: branches under {@link
-     * #DEFAULT_BRANCH_PREFIX} and a snapshot before a run, the values a definition that leaves out
-     * {@code auto_branch}, {@code branch_prefix} or {@code auto_snapshot} also means.
+     * #DEFAULT_BRANCH_PREFIX}, the values a definition that leaves out {@code auto_branch} or
+     * {@code branch_prefix} also means.
      */
     public static Agent created(String type, List<String> install) {
-      return new Agent(
-          type,
-          DEFAULT_AUTO_BRANCH,
-          DEFAULT_BRANCH_PREFIX,
-          DEFAULT_AUTO_SNAPSHOT,
-          install,
-          null,
-          null,
-          null);
+      return new Agent(type, DEFAULT_AUTO_BRANCH, DEFAULT_BRANCH_PREFIX, install, null, null, null);
     }
 
     static Agent fromMap(Map<String, Object> map) {
@@ -595,7 +565,6 @@ public record ProjectDefinition(
               "type",
               "auto_branch",
               "branch_prefix",
-              "auto_snapshot",
               "install",
               "config",
               "guardrails",
@@ -610,7 +579,6 @@ public record ProjectDefinition(
               Fields.bool(map, "auto_branch", "agent.auto_branch", DEFAULT_AUTO_BRANCH),
               Objects.requireNonNullElse(
                   Fields.text(map, "branch_prefix", "agent.branch_prefix"), DEFAULT_BRANCH_PREFIX),
-              Fields.bool(map, "auto_snapshot", "agent.auto_snapshot", DEFAULT_AUTO_SNAPSHOT),
               Fields.textList(map, "install", "agent.install"),
               Fields.textMap(map, "config", "agent.config"),
               Guardrails.fromBlock(map.get("guardrails"), Guardrails.BUILD_BLOCK).orElse(null),
@@ -703,7 +671,6 @@ public record ProjectDefinition(
       map.put("type", type);
       map.put("auto_branch", autoBranch);
       if (branchPrefix != null) map.put("branch_prefix", branchPrefix);
-      map.put("auto_snapshot", autoSnapshot);
       if (install != null) map.put("install", new ArrayList<>(install));
       if (config != null) map.put("config", new LinkedHashMap<>(config));
       if (guardrails != null) map.put("guardrails", guardrails.toMap());

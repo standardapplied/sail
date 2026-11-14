@@ -101,7 +101,8 @@ public final class ProjectWorkspaceCommand implements Runnable {
                   config,
                   name,
                   WorkspaceVerbs.source(config, gitToken, dryRun, json, operator),
-                  SailPaths.projectFilesDir(config.name()));
+                  SailPaths.projectFilesDir(config.name()),
+                  WorkspaceVerbs.owner());
       if (json) {
         System.out.println(CliJson.stringify(created));
         return;
@@ -196,7 +197,10 @@ public final class ProjectWorkspaceCommand implements Runnable {
 
     @Override
     public void run() {
-      target.change(null, (workspaces, named) -> workspaces.stop(named.project, named.name));
+      target.change(
+          null,
+          (workspaces, named) ->
+              workspaces.stop(named.project, named.name, WorkspaceVerbs.liveRun(named.project)));
     }
   }
 
@@ -221,7 +225,11 @@ public final class ProjectWorkspaceCommand implements Runnable {
       target.change(
           spec,
           (workspaces, named) ->
-              workspaces.delete(named.project, named.name, instance -> confirm(yes, named)));
+              workspaces.delete(
+                  named.project,
+                  named.name,
+                  WorkspaceVerbs.liveRun(named.project),
+                  instance -> confirm(yes, named)));
     }
   }
 
@@ -340,9 +348,11 @@ public final class ProjectWorkspaceCommand implements Runnable {
 
   /** A listing as the table {@code workspace list} prints. */
   static List<String> lines(Workspaces.Listing listing) {
-    var format = "  %-24s %-11s %-9s %-24s %s";
+    var format = "  %-24s %-11s %-9s %-24s %-16s %-24s %s";
     var lines = new ArrayList<String>();
-    lines.add(String.format(Locale.ROOT, format, "NAME", "STATE", "TEMPLATE", "CREATED", "IPV4"));
+    lines.add(
+        String.format(
+            Locale.ROOT, format, "NAME", "STATE", "TEMPLATE", "CREATED", "IPV4", "SPEC", "OWNER"));
     for (var row : listing.workspaces()) {
       lines.add(
           String.format(
@@ -352,7 +362,9 @@ public final class ProjectWorkspaceCommand implements Runnable {
               row.state(),
               Objects.requireNonNullElse(row.template(), "-"),
               Objects.requireNonNullElse(row.createdAt(), "-"),
-              Objects.requireNonNullElse(row.ipv4(), "-")));
+              Objects.requireNonNullElse(row.ipv4(), "-"),
+              Objects.requireNonNullElse(row.spec(), "-"),
+              Objects.requireNonNullElse(row.owner(), "-")));
     }
     return lines;
   }

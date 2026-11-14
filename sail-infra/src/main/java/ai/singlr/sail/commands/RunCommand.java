@@ -29,11 +29,13 @@ import ai.singlr.sail.engine.GuardrailWatcher;
 import ai.singlr.sail.engine.NameValidator;
 import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.ProjectSkillInstaller;
+import ai.singlr.sail.engine.RunPlace;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.engine.SnapshotManager;
 import ai.singlr.sail.engine.WatcherSpawner;
+import ai.singlr.sail.engine.Workspaces;
 import ai.singlr.sail.harness.Harness;
 import ai.singlr.sail.harness.Harnesses;
 import ai.singlr.sail.identity.Actor;
@@ -336,7 +338,7 @@ public final class RunCommand implements Runnable {
         new OperationHooks(
             this::publishLifecycle,
             new WatcherSpawner(shell, WatcherSpawner::spawnProcess),
-            (project, config) -> "",
+            Workspaces.onThisBox(shell),
             terminal,
             listener(launchCommand),
             StopOperations.Listener.NONE));
@@ -433,7 +435,8 @@ public final class RunCommand implements Runnable {
       return;
     }
     if (session.exitCode() != null && session.exitCode() != 0) {
-      throw AgentLogCommand.agentExited(shell, name, session.runId(), session.exitCode());
+      throw AgentLogCommand.agentExited(
+          shell, RunPlace.of(name, null), session.runId(), session.exitCode());
     }
   }
 

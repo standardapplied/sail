@@ -22,6 +22,7 @@ import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.engine.WatcherSpawner;
+import ai.singlr.sail.engine.Workspaces;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.store.Sqlite;
 import java.util.LinkedHashMap;
@@ -49,6 +50,13 @@ public final class AgentStopCommand implements Runnable {
       arity = "0..1",
       description = "Project name (default: the current project).")
   private String name;
+
+  @Option(
+      names = "--spec",
+      description =
+          "Stop this spec's run. Needed when the project has several live runs: specs run at once,"
+              + " each in its own workspace.")
+  private String specId;
 
   @Option(names = "--dry-run", description = "Print what would be stopped instead of stopping.")
   private boolean dryRun;
@@ -81,7 +89,7 @@ public final class AgentStopCommand implements Runnable {
     try (var operations =
         OperationsFactory.open(
             shell, hooks(shell, this::publishLifecycle, listener()), SessionYield.NONE)) {
-      var outcome = stopAsOperator(operations, name, handle, dryRun);
+      var outcome = stopAsOperator(operations, name, specId, handle, dryRun);
       render(outcome);
       if (!dryRun && outcome.mutated()) {
         sync.syncNow();
@@ -89,15 +97,18 @@ public final class AgentStopCommand implements Runnable {
     }
   }
 
-  /** Stops {@code project}'s run as this box's operator, a preview decided as the real stop is. */
+  /**
+   * Stops {@code project}'s run, spec {@code specId}'s when it names one, as this box's operator; a
+   * preview decided as the real stop is.
+   */
   static StopOperations.Outcome stopAsOperator(
-      HostOperations operations, String project, String handle, boolean dryRun) {
+      HostOperations operations, String project, String specId, String handle, boolean dryRun) {
     return Actor.call(
         operations.identity().operator(),
         () ->
             operations
                 .dispatching()
-                .stop(new StopOperations.ProjectTarget(project), handle, dryRun));
+                .stop(new StopOperations.ProjectTarget(project, specId), handle, dryRun));
   }
 
   /**
@@ -118,7 +129,7 @@ public final class AgentStopCommand implements Runnable {
     return new OperationHooks(
         events,
         new WatcherSpawner(shell, WatcherSpawner::spawnProcess),
-        DispatchOperations.autoSnapshotter(shell),
+        Workspaces.onThisBox(shell),
         DispatchOperations.shellLauncher(shell),
         DispatchOperations.Listener.NONE,
         listener);

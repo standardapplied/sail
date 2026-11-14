@@ -20,6 +20,7 @@ import ai.singlr.sail.engine.ContainerStateGuard;
 import ai.singlr.sail.engine.NameValidator;
 import ai.singlr.sail.engine.NodeIdentity;
 import ai.singlr.sail.engine.OperatorCommand;
+import ai.singlr.sail.engine.RunPlace;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.store.RunStore;
@@ -93,20 +94,22 @@ public final class AgentLogCommand implements Runnable {
     var operator = OperatorCommand.here();
     name = CurrentProject.require(name);
     NameValidator.requireValidProjectName(name);
-    var logPath = resolveLogPath(name, lane(), operator);
+    var run = resolveRun(name, lane(), operator);
     var shell = new ShellExecutor(false);
-    var mgr = new ContainerManager(shell);
+    var place = run.map(RunStore.RunRow::place).orElse(RunPlace.of(name, null));
+    if (place instanceof RunPlace.ProjectContainer) {
+      ContainerStateGuard.requireRunning(new ContainerManager(shell).queryState(name), name);
+    }
 
-    var state = mgr.queryState(name);
-    ContainerStateGuard.requireRunning(state, name);
-
-    if (logPath == null) {
+    if (run.isEmpty()) {
       printNoLog(operator);
       return;
     }
+    var logPath = logPathFrom(run);
+    var instance = place.instance();
 
     if (follow) {
-      var tailCmd = ContainerExec.asDevUser(name, List.of("tail", "-f", logPath));
+      var tailCmd = ContainerExec.asDevUser(instance, List.of("tail", "-f", logPath));
       var pb = new ProcessBuilder(tailCmd);
       pb.redirectErrorStream(true);
       var process = pb.start();
@@ -125,7 +128,8 @@ public final class AgentLogCommand implements Runnable {
         process.destroyForcibly();
       }
     } else {
-      var cmd = ContainerExec.asDevUser(name, List.of("tail", "-n", String.valueOf(tail), logPath));
+      var cmd =
+          ContainerExec.asDevUser(instance, List.of("tail", "-n", String.valueOf(tail), logPath));
       var result = shell.exec(cmd);
       if (!result.ok()) {
         if (result.stderr().contains("No such file")) {
@@ -160,33 +164,33 @@ public final class AgentLogCommand implements Runnable {
   }
 
   /**
-   * The log file to tail, or null when the project has no run to show: the newest run this box
+   * The run whose log to tail, none when the project has no run to show: the newest run this box
    * executed, in {@code lane} when one is asked for, read as this box's operator as every log door
    * admits a reader. Every agent sail starts is a run with its own log ({@code
-   * ~/.sail/runs/<id>/agent.log}) — a build, a reviewer and a fix agent alike — so a lane only
-   * selects which run, never another file shape. A refusal is said; a store that cannot answer
-   * shows no log.
+   * ~/.sail/runs/<id>/agent.log}) in the place it lives — a build, a reviewer and a fix agent
+   * alike, in their spec's workspace — so a lane only selects which run, never another file shape.
+   * A refusal is said; a store that cannot answer shows no log.
    */
-  private String resolveLogPath(String project, Optional<Lane> lane, OperatorCommand operator) {
+  private Optional<RunStore.RunRow> resolveRun(
+      String project, Optional<Lane> lane, OperatorCommand operator) {
     try (var operations = this.operations.apply(operator)) {
-      return logPath(operations, project, NodeIdentity.handle(), lane);
+      return newestRun(operations, project, NodeIdentity.handle(), lane);
     } catch (ApiException refused) {
       throw refused;
     } catch (RuntimeException e) {
-      return null;
+      return Optional.empty();
     }
   }
 
   /**
-   * The log path of {@code project}'s newest run in {@code lane} on the box {@code node}, decided
-   * as {@code operations}' operator, or null when there is none.
+   * {@code project}'s newest run in {@code lane} on the box {@code node}, decided as {@code
+   * operations}' operator, or none.
    */
-  static String logPath(
+  static Optional<RunStore.RunRow> newestRun(
       HostOperations operations, String project, String node, Optional<Lane> lane) {
     var dispatching = operations.dispatching();
-    return logPathFrom(
-        lane.map(only -> dispatching.latestOperable(project, node, only))
-            .orElseGet(() -> dispatching.latestOperable(project, node)));
+    return lane.map(only -> dispatching.latestOperable(project, node, only))
+        .orElseGet(() -> dispatching.latestOperable(project, node));
   }
 
   /** The run's own log path, derived from its id, or null when there is no run. */
@@ -223,20 +227,20 @@ public final class AgentLogCommand implements Runnable {
    * and the last line the agent wrote to run {@code runId}'s log, which is where a harness says why
    * it would not start, then the command that shows the whole log.
    */
-  static ApiException agentExited(ShellExec shell, String project, String runId, int exitCode) {
-    var said = lastLine(shell, project, AgentUnit.forRun(runId).logPath());
+  static ApiException agentExited(ShellExec shell, RunPlace place, String runId, int exitCode) {
+    var said = lastLine(shell, place.instance(), AgentUnit.forRun(runId).logPath());
     return new ApiException(
         ErrorCode.AGENT_LAUNCH_FAILED,
         "The agent exited " + exitCode + said.map(line -> ": " + line).orElse("."),
-        Remedy.of("Full log: ", Remedy.sail("agent log", project)));
+        Remedy.of("Full log: ", Remedy.sail("agent log", place.project())));
   }
 
-  private static Optional<String> lastLine(ShellExec shell, String project, String logPath) {
+  private static Optional<String> lastLine(ShellExec shell, String container, String logPath) {
     try {
       var tail =
           shell.exec(
               ContainerExec.asDevUser(
-                  project, List.of("tail", "-n", String.valueOf(EXIT_TAIL), logPath)));
+                  container, List.of("tail", "-n", String.valueOf(EXIT_TAIL), logPath)));
       if (!tail.ok()) {
         return Optional.empty();
       }
