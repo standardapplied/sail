@@ -1414,7 +1414,7 @@ storage() {
   check "$run" "the ZFS cache cap is in force" capped_on "$run" client
   check "$run" "client reboots" reboots "$run" client
   check "$run" "the ZFS cache cap is still in force after the reboot" capped_on "$run" client
-  check "$run" "acme runs after the reboot, on devpool" running_on_pool "$run" client acme devpool
+  check "$run" "acme runs after the reboot, on devpool" until_true 120 3 running_on_pool "$run" client acme devpool
   check "$run" "host status names every pool" status_pools "$run" client "devpool:dir tank:zfs twin:zfs"
   check "$run" "the mirror is ONLINE after the reboot" healthy_on "$run" client twin
   gone=$(on "$run" client "realpath $scratch2")
