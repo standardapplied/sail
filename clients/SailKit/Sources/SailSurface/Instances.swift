@@ -171,19 +171,21 @@ public struct FrameInstances: Equatable, Sendable {
 }
 
 /// Lays a ``ScreenFrame`` out as instances, keeping each row's and rebuilding only the rows the
-/// frame says changed. The cursor and the composing text are laid out fresh every frame.
+/// frame says changed. The cursor and the composing text are laid out fresh every frame, and
+/// placed before the rows, so a frame's share of new glyphs never leaves them out.
 public struct InstanceBuilder: Sendable {
     public let metrics: CellMetrics
     /// The rows the last ``build(_:overlay:glyphs:)`` laid out again.
     public private(set) var rebuilt: [Int] = []
 
-    /// Whether the last build drew every item: false when one found no atlas slot this frame (the
-    /// atlas full of frames in flight, or new glyphs past the frame's share), so the caller draws
-    /// again at the next refresh.
+    /// Whether the last build drew every item, the cursor and the composing text included: false
+    /// when one found no atlas slot this frame (the atlas full of frames in flight, or new glyphs
+    /// past the frame's share), so the caller draws again at the next refresh.
     public var complete: Bool {
-        !rows.contains { $0.incomplete }
+        overlayComplete && !rows.contains { $0.incomplete }
     }
 
+    private var overlayComplete = true
     private var rows: [RowInstances] = []
     private var size: GridSize?
 
@@ -220,6 +222,8 @@ public struct InstanceBuilder: Sendable {
         }
         size = frame.size
         rebuilt = []
+        let overlaid = overlay.marked.isEmpty ? cursor(frame, focused: overlay.focused, glyphs: glyphs) : composing(overlay.marked, frame, glyphs: glyphs)
+        overlayComplete = overlaid.complete
         var memo = PlaceMemo()
         for y in frame.rows.indices {
             if dirty.contains(y) || rows[y].incomplete || !rows[y].items.entries.allSatisfy({ memo.place($0.item, glyphs: glyphs) == $0.place }) {
@@ -233,11 +237,7 @@ public struct InstanceBuilder: Sendable {
             glyphs: Self.joined(rows.map(\.glyphs)),
             decorations: Self.joined(rows.map(\.decorations))
         )
-        if overlay.marked.isEmpty {
-            instances.decorations += cursor(frame, focused: overlay.focused, glyphs: glyphs)
-        } else {
-            instances.decorations += composing(overlay.marked, frame, glyphs: glyphs)
-        }
+        instances.decorations += overlaid.drawn
         return instances
     }
 
@@ -288,10 +288,13 @@ public struct InstanceBuilder: Sendable {
         return laid
     }
 
-    private func cursor(_ frame: ScreenFrame, focused: Bool, glyphs: some GlyphSource) -> [GlyphInstance] {
+    /// What the cursor or the composing text draws, and whether every item of it found a slot.
+    private typealias Overlaid = (drawn: [GlyphInstance], complete: Bool)
+
+    private func cursor(_ frame: ScreenFrame, focused: Bool, glyphs: some GlyphSource) -> Overlaid {
         guard frame.cursor.visible, let position = frame.cursor.position, frame.rows.indices.contains(position.y),
               frame.rows[position.y].cells.indices.contains(position.x)
-        else { return [] }
+        else { return ([], true) }
         let cell = frame.rows[position.y].cells[position.x]
         let wide = cell.width == .wide
         let shape: CursorShape = switch (focused, frame.cursor.style) {
@@ -302,23 +305,23 @@ public struct InstanceBuilder: Sendable {
         }
         let origin = metrics.origin(of: position)
         let area = rect(origin, cells: wide ? 2 : 1)
-        guard let block = glyphs.place(.sprite(.cursor(shape), wide: wide)) else { return [] }
-        var drawn = [GlyphInstance(rect: area, slot: Self.origin(block.slot), colour: false, color: Self.color(frame.colors.cursor))]
-        if shape == .block, !cell.attributes.contains(.invisible),
-           let item = Self.item(for: cell.grapheme, style: FontStyle(cell.attributes), wide: wide), let place = glyphs.place(item)
-        {
-            let under = cell.selected ? cell.foreground : cell.background
-            drawn.append(GlyphInstance(rect: area, slot: Self.origin(place.slot), colour: place.colour, color: Self.color(under)))
-        }
-        return drawn
+        guard let block = glyphs.place(.sprite(.cursor(shape), wide: wide)) else { return ([], false) }
+        let drawn = [GlyphInstance(rect: area, slot: Self.origin(block.slot), colour: false, color: Self.color(frame.colors.cursor))]
+        guard shape == .block, !cell.attributes.contains(.invisible),
+              let item = Self.item(for: cell.grapheme, style: FontStyle(cell.attributes), wide: wide)
+        else { return (drawn, true) }
+        guard let place = glyphs.place(item) else { return (drawn, false) }
+        let under = cell.selected ? cell.foreground : cell.background
+        return (drawn + [GlyphInstance(rect: area, slot: Self.origin(place.slot), colour: place.colour, color: Self.color(under))], true)
     }
 
     /// The composing text, from the cursor to the row's end at most: the default background, the
     /// text in the default foreground, underlined.
-    private func composing(_ marked: String, _ frame: ScreenFrame, glyphs: some GlyphSource) -> [GlyphInstance] {
+    private func composing(_ marked: String, _ frame: ScreenFrame, glyphs: some GlyphSource) -> Overlaid {
         let start = frame.cursor.position ?? CellPoint(x: 0, y: 0)
         var x = start.x
         var drawn: [GlyphInstance] = []
+        var complete = true
         let ink = Self.color(frame.colors.foreground)
         for grapheme in marked {
             let text = String(grapheme)
@@ -331,12 +334,15 @@ public struct InstanceBuilder: Sendable {
                 (.sprite(.underline(.single), wide: wide), ink),
             ]
             for case let (item?, color) in layers {
-                guard let place = glyphs.place(item) else { continue }
+                guard let place = glyphs.place(item) else {
+                    complete = false
+                    continue
+                }
                 drawn.append(GlyphInstance(rect: area, slot: Self.origin(place.slot), colour: place.colour, color: color))
             }
             x += wide ? 2 : 1
         }
-        return drawn
+        return (drawn, complete)
     }
 
     private func rect(_ origin: (x: Int, y: Int), cells: Int) -> SIMD4<Float> {

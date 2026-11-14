@@ -30,12 +30,17 @@ extension TerminalView {
         addTrackingArea(NSTrackingArea(rect: .zero, options: [.mouseMoved, .activeInKeyWindow, .inVisibleRect], owner: self, userInfo: nil))
     }
 
-    /// The pointer moving with no button held: reported to a program that asked for every motion
-    /// (mode 1003); the encoder sends nothing otherwise.
+    /// The pointer moving into another cell with no button held, as xterm and Ghostty report it:
+    /// sent, from the input queue, only while a program tracks the mouse, and the encoder sends it
+    /// only to one that asked for every motion (mode 1003).
     override public func mouseMoved(with event: NSEvent) {
-        guard let link, let place = place(of: event) else { return }
+        guard let link, let place = place(of: event), place.cell != hovered else { return }
+        hovered = place.cell
         let mouse = MouseInput(action: .motion, button: nil, x: place.x, y: place.y, modifiers: Self.modifiers(event))
-        input.async { link.send(mouse) }
+        input.async {
+            guard link.screen.tracksMouse else { return }
+            link.send(mouse)
+        }
     }
 
     override public func rightMouseDown(with event: NSEvent) {
@@ -75,14 +80,18 @@ extension TerminalView {
         pasteboard.setString(text, forType: .string)
     }
 
-    /// ⌘V: the pasteboard's text through the screen's paste encoder; text that could run commands
-    /// in a program that did not ask for pastes is sent only once the person confirms.
+    /// ⌘V: the pasteboard's text through the screen's paste encoder, from the input queue, the view
+    /// back at the bottom first and drawn there; text that could run commands in a program that did
+    /// not ask for pastes is sent only once the person confirms.
     @objc public func paste(_: Any?) {
         guard let link, let text = pasteboard.string(forType: .string), !text.isEmpty else { return }
-        link.screen.scrollToBottom()
         input.async { [weak self] in
-            guard link.paste(text, confirmed: false) == .needsConfirmation else { return }
-            Task { @MainActor in self?.askToPaste(text, into: link) }
+            link.screen.scrollToBottom()
+            let outcome = link.paste(text, confirmed: false)
+            Task { @MainActor in
+                self?.drawNowIfIdle()
+                if outcome == .needsConfirmation { self?.askToPaste(text, into: link) }
+            }
         }
     }
 
@@ -114,8 +123,9 @@ extension TerminalView {
     }
 
     /// The paste sheet: the line count, the risk in a sentence, Paste in the accent, and Cancel the
-    /// default, so Return does not run what the sheet warns of. The keys are given once the sheet is
-    /// laid out, which gives the first button Return.
+    /// default, so Return does not run what the sheet warns of, and Escape cancels too. The keys are
+    /// given once the sheet is laid out, which gives the first button Return and Cancel Escape; a
+    /// button answers one key, so Escape is watched for while the sheet is up.
     func presentPasteSheet(lines: Int, answer: @escaping @MainActor (Bool) -> Void) {
         guard let window else {
             answer(false)
@@ -128,12 +138,33 @@ extension TerminalView {
         let cancel = alert.addButton(withTitle: "Cancel")
         paste.bezelColor = NSColor(Look.dark.accent)
         paste.attributedTitle = NSAttributedString(string: "Paste", attributes: [.foregroundColor: NSColor(Look.dark.onAccent)])
-        alert.beginSheetModal(for: window) { response in
-            MainActor.assumeIsolated { answer(response == .alertFirstButtonReturn) }
+        alert.beginSheetModal(for: window) { [weak self] response in
+            MainActor.assumeIsolated {
+                self?.stopWatchingEscape()
+                answer(response == .alertFirstButtonReturn)
+            }
         }
         paste.keyEquivalent = ""
         cancel.keyEquivalent = "\r"
+        watchEscape(cancelling: alert.window, on: window)
     }
+
+    private func watchEscape(cancelling sheet: NSWindow, on window: NSWindow) {
+        stopWatchingEscape()
+        let escape: UInt16 = 0x35
+        escapeWatch = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak sheet, weak window] event in
+            guard event.keyCode == escape, let sheet, event.window === sheet else { return event }
+            MainActor.assumeIsolated { window?.endSheet(sheet, returnCode: .alertSecondButtonReturn) }
+            return nil
+        }
+    }
+
+    private func stopWatchingEscape() {
+        guard let watch = escapeWatch else { return }
+        NSEvent.removeMonitor(watch)
+        escapeWatch = nil
+    }
+
 
     private func report(_ event: NSEvent, _ action: MouseAction, _ button: MouseButton) {
         guard let link, link.screen.tracksMouse, !event.modifierFlags.contains(.shift), let place = place(of: event) else { return }

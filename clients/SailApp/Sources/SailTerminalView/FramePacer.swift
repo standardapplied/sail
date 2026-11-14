@@ -59,7 +59,7 @@ final class FramePacer {
     private(set) var records: [Record] = []
     private var clock: (any FrameClock)?
 
-    /// The view has a clock and it is paused: nothing has asked for a frame since the last one.
+    /// The view has a clock and it is paused: a refresh found nothing to draw, or no drawable.
     var isIdle: Bool {
         clock?.isPaused == true
     }

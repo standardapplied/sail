@@ -3924,7 +3924,8 @@ secrets), `ci/notarize` notarizes and staples, `ci/drive` runs the drive scripts
   paused) is drawn at once and the link resumed, so an echo meets the next display refresh;
   otherwise the next refresh draws it. A key that changes nothing on screen asks for no frame,
   so the view is still idle when its echo comes. Nothing holds output to batch it. A refresh that
-  finds nothing changed, or no drawable, pauses the link.
+  finds nothing changed, or no drawable, pauses the link; a view paused for want of a drawable is
+  not idle, and asks again when its window is seen again, or after 0.25 s while it is visible.
 - **V2. One screen, one source.** The view draws only what `Screen.frame()` says and sends only what
   the screen's encoders make; no source of the app spells an escape sequence (a sweep test).
 - **V3. Display-link changes happen on the main thread**, through one pacer that records each one.
@@ -3944,19 +3945,24 @@ person's ⌘C, and a paste that could run commands in a program that did not ask
 about first, naming its line count. The renderer draws one render pass a frame: backgrounds, then
 glyphs and decorations from two atlases (one-channel coverage tinted per cell, and BGRA for emoji),
 each an instanced draw of pixel rectangles that read their atlas texels exactly; a frame on the
-display rasterizes at most 32 new glyphs and the next refreshes draw the rest. Grapheme clustering
+display rasterizes at most 32 new glyphs and the next refreshes draw the rest, the cursor and
+composing text placed first; a frame with anything left undrawn is drawn again. Grapheme clustering
 (mode 2027) is on in every SailVT screen from its creation and survives every reset, so an emoji
 sequence, a flag or a skin-toned emoji is one two-cell cluster, as Ghostty draws it. A view draws
 one session for the session's life (its streams have one reader); a ⌘ chord no menu takes sends
-nothing.
+nothing; motion with no button held is sent once per cell, and only while a program tracks the
+mouse; a Shift-click or a drag after a double or triple click extends by whole words or lines.
 
 The `SailApp on macOS` job in `clients.yml` proves it on GitHub's standard `macos-15` runner, whose
 paravirtual Metal device renders offscreen and reads back exactly: the renderer's golden frames
 (every SailKit fixture at scale 2, dark and light; a pixel differs past 8 of 255 on a channel, a
 frame fails past 0.1% of its pixels; emoji cells are left out of that and must hold colour), the
-view's input tests with synthesized events, the preview driven against the pinned darwin `sail`'s
+view's input tests with synthesized events (every suite `swift test list` names, each in its own
+bounded run by `ci/test-suites`, which fails when a listed suite passes no test), the preview driven against the pinned darwin `sail`'s
 local host with its latency budgets (the drive waits, at every step, until the view has drawn the
-screen's text), and the bundle checked on every build. With all six signing secrets (`ci/signing`
+screen's text in full; the renderer bench takes 300 full redraws, drawn offscreen with nothing read
+back, on the drawing thread's CPU clock with the wall clock beside it), and the bundle checked on
+every build. With all six signing secrets (`ci/signing`
 decides, and fails on some but not all) it is signed with Developer ID, notarized, stapled and
 assessed by Gatekeeper; without them it is uploaded as an unsigned build and the signed-only check
 is skipped. Goldens are recorded only by the workflow's `record-goldens`

@@ -5,6 +5,7 @@ import SailRenderer
 import SailSurface
 @testable import SailTerminalView
 import SailVT
+import Synchronization
 import Testing
 
 @MainActor
@@ -109,23 +110,33 @@ import Testing
     }
 
     /// The pointer moving with no button reaches a program that asked for every motion (1003).
-    @Test func hoverIsReportedOnlyWhenAsked() throws {
+    /// Motion with no button is reported once per cell entered, and only to a program that asked
+    /// for every motion.
+    @Test func hoverIsReportedOncePerCellAndOnlyWhenAsked() throws {
         let harness = try Harness()
         harness.tick()
-        let point = harness.view.convert(NSPoint(x: 40, y: 40), to: nil)
-        func move() {
+        let metrics = harness.view.metrics
+        func move(_ column: Int, nudge: Double = 0) -> String {
+            let before = harness.link.bytes.count
+            let origin = metrics.origin(of: CellPoint(x: column, y: 1))
+            let point = NSPoint(
+                x: (Double(origin.x) + Double(metrics.width) / 2) / metrics.scale + nudge,
+                y: (Double(origin.y) + Double(metrics.height) / 2) / metrics.scale
+            )
             guard let event = NSEvent.mouseEvent(
-                with: .mouseMoved, location: point, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
-                windowNumber: harness.window.windowNumber, context: nil, eventNumber: 0, clickCount: 0, pressure: 0
-            ) else { return }
+                with: .mouseMoved, location: harness.view.convert(point, to: nil), modifierFlags: [],
+                timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: harness.window.windowNumber, context: nil, eventNumber: 0,
+                clickCount: 0, pressure: 0
+            ) else { return "" }
             harness.view.mouseMoved(with: event)
             harness.flush()
+            return String(decoding: harness.link.bytes.dropFirst(before), as: UTF8.self)
         }
-        move()
-        #expect(harness.link.bytes.isEmpty)
+        #expect(move(2).isEmpty, "no program asked")
         harness.link.output("\u{1b}[?1003h\u{1b}[?1006h")
-        move()
-        #expect(String(decoding: harness.link.bytes, as: UTF8.self).hasPrefix("\u{1b}[<35;"))
+        #expect(move(4) == "\u{1b}[<35;5;2M", "a new cell")
+        #expect(move(4, nudge: 1).isEmpty, "the same cell")
+        #expect(move(6) == "\u{1b}[<35;7;2M", "another cell")
     }
 
     /// M3: a view draws a session for its life. Detaching ends its reading of the session's
@@ -143,6 +154,18 @@ import Testing
         dropped = nil
         for await _ in other.readerGone {}
         #expect(dropped == nil)
+    }
+
+    /// Attaching a session a view already drew stops the process with the precondition's sentence,
+    /// rather than drawing a screen that never changes.
+    @Test func attachingASessionAViewDrewStopsTheProcess() async {
+        await #expect(processExitsWith: .failure) {
+            try await MainActor.run {
+                let harness = try Harness()
+                let other = try TerminalView(fonts: TerminalFonts(directory: Harness.fonts))
+                other.attach(harness.link)
+            }
+        }
     }
 
     private static func differing(_ one: RenderedImage, _ other: RenderedImage, in area: (x: Range<Int>, y: Range<Int>)) -> Int {
@@ -220,6 +243,44 @@ import Testing
         let returnKey = buttons(sheet.contentView).filter { $0.keyEquivalent == "\r" }.map(\.title)
         #expect(returnKey == ["Cancel"], "Return cancels the paste the sheet warns of; the buttons' keys: \(keys)")
         harness.window.endSheet(sheet, returnCode: .alertSecondButtonReturn)
+    }
+
+    /// Escape cancels the paste sheet, though Return is Cancel's key.
+    @Test func escapeCancelsThePasteSheet() async throws {
+        let harness = try Harness()
+        let answers = Mutex<[Bool]>([])
+        harness.view.presentPasteSheet(lines: 2) { answer in answers.withLock { $0.append(answer) } }
+        let sheet = try #require(harness.window.attachedSheet)
+        let escape = try #require(NSEvent.keyEvent(
+            with: .keyDown, location: .zero, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: sheet.windowNumber,
+            context: nil, characters: "\u{1b}", charactersIgnoringModifiers: "\u{1b}", isARepeat: false, keyCode: 0x35
+        ))
+        NSApp.sendEvent(escape)
+        await harness.drainMain()
+        #expect(harness.window.attachedSheet == nil)
+        #expect(answers.withLock { $0 } == [false])
+    }
+
+    /// ⌘V while scrolled back returns the view to the bottom and draws it there, the screen's lock
+    /// taken only on the input queue.
+    @Test func aPasteWhileScrolledBackDrawsTheBottom() async throws {
+        let harness = try Harness()
+        await harness.drainMain()
+        _ = harness.link.screen.feed(Array((1 ... 200).map { "line \($0)" }.joined(separator: "\r\n").utf8))
+        harness.tick()
+        _ = harness.link.screen.scroll(lines: -50, x: 0, y: 0)
+        harness.view.needFrame()
+        harness.tick()
+        harness.tick()
+        #expect(harness.clock.isPaused)
+        #expect(!harness.view.visibleText.contains("line 200"))
+        harness.pasteboard.clearContents()
+        harness.pasteboard.setString("x", forType: .string)
+        harness.view.paste(nil)
+        harness.flush()
+        await harness.drainMain()
+        #expect(harness.view.visibleText.contains("line 200"))
+        #expect(harness.link.bytes.contains(UInt8(ascii: "x")))
     }
 
     /// Scenario 13: a narrower window gives the session a narrower grid at once and the screen
@@ -301,12 +362,36 @@ import Testing
         harness.tick()
         harness.tick()
         #expect(harness.clock.isPaused)
+        let refreshes = harness.view.latency.refresh.count
         harness.key("e", code: 0x0E)
-        for _ in 0 ..< 10 { await Task.yield() }
+        await harness.drainMain()
+        #expect(harness.view.latency.refresh.count == refreshes + 1, "the key's hop read the screen")
         #expect(harness.clock.isPaused, "the key itself asked for no frame")
         harness.link.output("e")
         await harness.clock.nextResume()
         #expect(harness.view.visibleText.contains("e"), "drawn as it arrived, before the next refresh")
+    }
+
+    /// No drawable pauses the link rather than spin; output does not ask for a drawable again while
+    /// it waits, and the window being seen again resumes it.
+    @Test func noDrawablePausesTheLinkUntilTheWindowIsSeenAgain() throws {
+        let harness = try Harness()
+        harness.tick()
+        harness.view.nextDrawable = { _ in nil }
+        harness.view.needFrame()
+        harness.tick()
+        #expect(harness.clock.isPaused, "no drawable came, so the link paused")
+        let refreshes = harness.view.latency.refresh.count
+        harness.link.output("more")
+        harness.view.drawNowIfIdle()
+        #expect(harness.view.latency.refresh.count == refreshes, "output did not ask for a drawable again")
+        #expect(harness.clock.isPaused)
+        #expect(harness.window.occlusionState.contains(.visible), "the test window is on screen")
+        NotificationCenter.default.post(name: NSWindow.didChangeOcclusionStateNotification, object: harness.window)
+        #expect(!harness.clock.isPaused, "the window seen again resumed the link")
+        harness.view.nextDrawable = { $0.nextDrawable() }
+        harness.tick()
+        #expect(harness.view.visibleText.contains("more"))
     }
 
     /// V3: every start, pause, resume and stop of the display link ran on the main thread, the

@@ -137,6 +137,9 @@ public final class PreviewApp: NSObject, NSApplicationDelegate, NSWindowDelegate
         banner.shown
     }
 
+    /// The latency overlay's lines, every one shown.
+    public static let latencyLines = 4
+
     /// What the latency overlay says now, nil when it is hidden.
     public var latencyShown: String? {
         latency.isHidden ? nil : latency.stringValue
@@ -185,7 +188,7 @@ public final class PreviewApp: NSObject, NSApplicationDelegate, NSWindowDelegate
         latency.drawsBackground = true
         latency.backgroundColor = NSColor(look.surface)
         latency.isBezeled = false
-        latency.maximumNumberOfLines = 3
+        latency.maximumNumberOfLines = Self.latencyLines
         latency.isHidden = true
         latency.translatesAutoresizingMaskIntoConstraints = false
         content.addSubview(latency)
@@ -206,13 +209,9 @@ public final class PreviewApp: NSObject, NSApplicationDelegate, NSWindowDelegate
         }
         latency.stringValue = """
         key → echo on glass  p50 \(ms(figures.keyToEcho.p50))  p95 \(ms(figures.keyToEcho.p95)) ms  (\(figures.keyToEcho.count) keys)
+        estimated, no display time: key → echo  p50 \(ms(figures.keyToEchoEstimated.p50))  p95 \(ms(figures.keyToEchoEstimated.p95)) ms  (\(figures.keyToEchoEstimated.count) keys)
         output → on glass  p50 \(ms(figures.outputToPresented.p50))  p95 \(ms(figures.outputToPresented.p95)) ms
         display \(hertz) Hz · \(terminal.drawableCount) drawables
-        """
-        guard figures.keyToEchoEstimated.count > 0 else { return }
-        latency.stringValue += """
-
-        estimated, the display gave no time: key → echo  p50 \(ms(figures.keyToEchoEstimated.p50))  p95 \(ms(figures.keyToEchoEstimated.p95)) ms  (\(figures.keyToEchoEstimated.count) keys)
         """
     }
 

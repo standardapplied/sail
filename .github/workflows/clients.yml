@@ -114,9 +114,11 @@ jobs:
           path: ${{ runner.temp }}/reports
 
   # Whether this change can affect the client lanes: SailKit's and SailApp's whole input is under
-  # clients/ (SailApp's one dependency is ../SailKit by path) and this workflow. A job skipped by `if:` reports success,
-  # unlike a workflow-level path filter, so a required check is never left waiting. An unknown
-  # base (a new branch, a forced push) runs the lane.
+  # clients/ (SailApp's one dependency is ../SailKit by path) and this workflow. A job skipped by
+  # `if:` reports success, unlike a workflow-level path filter, so a required check is not left
+  # waiting; a skipped matrix job reports under its unexpanded name (`SailKit on ${{ matrix.name }}`),
+  # so a required check on a SailKit leg would name that. An unknown base (a new branch, a forced
+  # push) runs the lane.
   changes:
     name: What the change touches
     runs-on: ubuntu-24.04
@@ -175,7 +177,9 @@ jobs:
           APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
           APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
           APPLE_API_KEY_P8_BASE64: ${{ secrets.APPLE_API_KEY_P8_BASE64 }}
-        run: echo "SIGNING=$(ci/signing)" | tee -a "$GITHUB_ENV"
+        run: |
+          mode=$(ci/signing)
+          echo "SIGNING=$mode" | tee -a "$GITHUB_ENV"
 
       - name: A Metal device
         run: |
@@ -216,22 +220,13 @@ jobs:
       - name: Build
         run: swift build --build-tests
 
-      # Each suite in its own run, through a pty so its lines are not buffered away, and bounded:
-      # a test stuck in a synchronous wait cannot be stopped by its time limit.
+      # Every suite the package lists, each in its own bounded run (ci/test-suites): a suite added
+      # later runs without a list to edit, and one that runs no test fails the step.
       - name: Test
         timeout-minutes: 15
         env:
           SAIL_FRAMES_OUT: ${{ runner.temp }}/frames
-        run: |
-          failed=0
-          for suite in SailTerminalViewTests.SweepTests SailRendererTests.GoldenTests SailRendererTests.RendererTests SailTerminalViewTests.ViewTests; do
-            echo "::group::$suite"
-            log="$RUNNER_TEMP/$suite.log"
-            perl -e 'alarm shift; exec @ARGV' 240 script -q "$log" swift test --skip-build --filter "${suite//./\\.}" || failed=1
-            grep -Eq 'Test run with [1-9][0-9]* tests? in .* passed' "$log" || { echo "$suite ran no test" >&2; failed=1; }
-            echo "::endgroup::"
-          done
-          exit $failed
+        run: ci/test-suites "$RUNNER_TEMP/test-logs"
 
       - name: Release build, the shipped app and the drive build
         if: ${{ !cancelled() }}
@@ -354,3 +349,33 @@ jobs:
           path: |
             ${{ runner.temp }}/frames
             ${{ runner.temp }}/drive-out
+
+  mutants:
+    name: SailApp mutants (temporary)
+    needs: changes
+    if: needs.changes.outputs.clients == 'true'
+    runs-on: macos-15
+    timeout-minutes: 45
+    defaults:
+      run:
+        working-directory: clients/SailApp
+    env:
+      DARWIN_SAIL_TAG: v0.68.0
+      DARWIN_SAIL_SHA256: bdae9ab430aecdefe6c4780fb8dacaa91838587b1f2215d361f31060c5f7f8d3
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - run: sudo xcode-select --switch /Applications/Xcode_26.3.app
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: ~/Library/Caches/org.swift.swiftpm
+          key: swiftpm-app-${{ runner.os }}-${{ hashFiles('clients/SailKit/Package.swift', 'clients/SailApp/Package.swift') }}
+      - env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/sail"
+          gh release download "$DARWIN_SAIL_TAG" --repo "$GITHUB_REPOSITORY" --dir "$RUNNER_TEMP/sail" --pattern sail-darwin-arm64
+          echo "$DARWIN_SAIL_SHA256  $RUNNER_TEMP/sail/sail-darwin-arm64" | shasum -a 256 -c -
+          chmod +x "$RUNNER_TEMP/sail/sail-darwin-arm64"
+          echo "SAIL_BINARY=$RUNNER_TEMP/sail/sail-darwin-arm64" >> "$GITHUB_ENV"
+      - run: ci/mutants
+

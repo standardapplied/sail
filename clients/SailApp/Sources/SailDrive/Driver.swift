@@ -74,12 +74,13 @@ final class Driver {
             let name = step.name ?? "step"
             let began = ContinuousClock.now
             var (ok, detail) = await perform(step, name: name)
-            let drew = await waitUntil(Self.drawDeadline) { self.terminal.visibleText == self.screenText }
+            let drew = await waitUntil(Self.drawDeadline) { self.terminal.visibleText == self.screenText && self.terminal.isDrawnInFull }
             if ok, !drew {
                 ok = false
-                detail = "the view never drew the screen: it shows \(terminal.visibleText.count) characters, the screen holds \(screenText.count)"
+                detail = "the view never drew the screen in full: it shows \(terminal.visibleText.count) characters, the screen holds "
+                    + "\(screenText.count), every glyph drawn: \(terminal.isDrawnInFull)"
             }
-            let seconds = (ContinuousClock.now - began).seconds
+            let seconds = (ContinuousClock.now - began) / .seconds(1)
             results.append(Result(index: index, name: name, ok: ok, seconds: seconds, detail: detail))
             save(index: index, name: name)
             print("drive \(index) \(name): \(ok ? "ok" : "FAILED") in \(String(format: "%.2f", seconds)) s \(detail)")
@@ -183,10 +184,7 @@ final class Driver {
             return (found, "the window's title is '\(preview.window.title)'")
         }
         if step.latencyOverlay == true {
-            guard let toggle = Keys.named("l", modifiers: ["command", "option"]) else { return (false, "no ⌥⌘L") }
-            send(toggle)
-            let shown = preview.latencyShown ?? ""
-            return (shown.contains("key → echo on glass"), shown.isEmpty ? "no overlay" : shown.replacingOccurrences(of: "\n", with: " | "))
+            return await latencyOverlay(within: step.seconds ?? 5)
         }
         if step.resetLatency == true {
             terminal.resetLatency()
@@ -224,8 +222,8 @@ final class Driver {
         }
         if step.still == true {
             let before = screenText
-            let outputs = terminal.latency.outputs
-            let more = await waitUntil(step.seconds ?? 5) { self.terminal.latency.outputs > outputs }
+            let updates = terminal.latency.screenUpdates
+            let more = await waitUntil(step.seconds ?? 5) { self.terminal.latency.screenUpdates > updates }
             let stayed = screenText == before
             return (stayed && more, more ? (stayed ? "the view stayed while output came" : "the view moved when output came") : "no output came")
         }
@@ -299,6 +297,26 @@ final class Driver {
         screenText.split(separator: "\n", omittingEmptySubsequences: false).map { $0.trimmingCharacters(in: .whitespaces) }
     }
 
+    /// ⌥⌘L once the keys typed so far have an echo counted (a key is counted when the frame showing
+    /// its echo reaches the display): every line of the overlay shown, and a key count above zero.
+    private func latencyOverlay(within seconds: Double) async -> (Bool, String) {
+        let began = ContinuousClock.now
+        let counted = await waitUntil(seconds) { self.terminal.latency.keyToEcho.count + self.terminal.latency.keyToEchoEstimated.count > 0 }
+        let waited = (ContinuousClock.now - began) / .milliseconds(1)
+        guard let toggle = Keys.named("l", modifiers: ["command", "option"]) else { return (false, "no ⌥⌘L") }
+        send(toggle)
+        let shown = preview.latencyShown ?? ""
+        let lines = shown.split(separator: "\n")
+        let keys = shown.components(separatedBy: "(").dropFirst().compactMap { part in Int(part.prefix(while: \.isNumber)) }.reduce(0, +)
+        let figures = terminal.latency
+        let ok = counted && keys > 0 && lines.count <= PreviewApp.latencyLines && shown.contains("key → echo on glass")
+        let measured = "keys written \(figures.keyToWritten.count), echoes counted on glass \(figures.keyToEcho.count) and estimated "
+            + "\(figures.keyToEchoEstimated.count), presents reported \(figures.reportedPresents) and not \(figures.unreportedPresents), "
+            + "told before their commit \(figures.presentedBeforeCommit), "
+            + "waited \(String(format: "%.0f", waited)) ms"
+        return (ok, "\(measured); \(lines.count) lines of \(PreviewApp.latencyLines): \(lines.joined(separator: " | "))")
+    }
+
     private func waitUntil(_ seconds: Double, _ condition: @MainActor () -> Bool) async -> Bool {
         let deadline = ContinuousClock.now + .seconds(seconds)
         while !condition() {
@@ -357,12 +375,5 @@ final class Driver {
             try? png.write(to: out.appending(path: stem + ".png"))
         }
         try? screenText.write(to: out.appending(path: stem + ".txt"), atomically: true, encoding: .utf8)
-    }
-}
-
-extension Duration {
-    var seconds: Double {
-        let (whole, fraction) = components
-        return Double(whole) + Double(fraction) / 1e18
     }
 }

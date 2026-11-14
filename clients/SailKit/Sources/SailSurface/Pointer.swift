@@ -13,11 +13,17 @@ public struct Pointer: Equatable, Sendable {
         case nothing
     }
 
-    /// Where a drag selects from.
-    private var anchor: CellPoint?
-    /// Where a Shift-click extends from: the last selection's start, by any number of clicks.
+    /// Where the last selection started, and whether by cells, words or lines: a drag or a
+    /// Shift-click extends from it by the same unit.
     private var start: CellPoint?
+    private var unit = Unit.cell
+    /// A button is down over the text: a drag extends the selection.
+    private var selecting = false
     private var reporting = false
+
+    private enum Unit: Equatable, Sendable {
+        case cell, word, line
+    }
 
     public init() {}
 
@@ -27,34 +33,46 @@ public struct Pointer: Equatable, Sendable {
             return .report
         }
         reporting = false
+        selecting = true
         switch clicks {
         case 2:
-            anchor = nil
             start = cell
+            unit = .word
             return .select(.word(at: cell))
         case 3...:
-            anchor = nil
             start = cell
+            unit = .line
             return .select(.line(at: cell))
         default:
             if shift, let start {
-                return .select(.range(from: start, to: cell))
+                return .select(extending(from: start, to: cell))
             }
-            anchor = cell
             start = cell
+            unit = .cell
             return .clearSelection
         }
     }
 
     public mutating func dragged(to cell: CellPoint) -> Action {
         if reporting { return .report }
-        guard let anchor else { return .nothing }
-        return .select(.range(from: anchor, to: cell))
+        guard selecting, let start else { return .nothing }
+        return .select(extending(from: start, to: cell))
     }
 
     public mutating func up() -> Action {
-        defer { reporting = false }
+        defer {
+            reporting = false
+            selecting = false
+        }
         return reporting ? .report : .nothing
+    }
+
+    private func extending(from start: CellPoint, to cell: CellPoint) -> SelectionRequest {
+        switch unit {
+        case .cell: .range(from: start, to: cell)
+        case .word: .words(from: start, to: cell)
+        case .line: .lines(from: start, to: cell)
+        }
     }
 }
 

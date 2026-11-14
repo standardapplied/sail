@@ -155,6 +155,14 @@ struct Harness {
         Self.flush(view)
     }
 
+    /// Waits until every block already on the main queue has run, the view's hops back from its
+    /// input queue among them: the main queue runs its blocks in order.
+    func drainMain() async {
+        await withCheckedContinuation { continuation in
+            DispatchQueue.main.async { continuation.resume() }
+        }
+    }
+
     private static func flush(_ view: TerminalView) {
         view.input.sync {}
     }

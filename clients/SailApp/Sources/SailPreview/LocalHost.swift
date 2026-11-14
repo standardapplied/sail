@@ -8,7 +8,8 @@ import Synchronization
 /// outlives the app (spec 3 replaces this with a LaunchAgent). A host the preview started and that
 /// then dies is started again at once, unless it died within ``shortestLife`` of starting. Its
 /// standard error goes to a file only its owner reads, so when it refuses to start, its own last
-/// sentence is what the person is told.
+/// sentence is what the person is told; the host appends to it, and the file is emptied each time
+/// the app finds the host serving, so it holds at most what one run of the app saw.
 public final class LocalHost: Sendable {
     public static let startDeadline = Duration.seconds(15)
     public static let shortestLife = Duration.seconds(2)
@@ -35,7 +36,10 @@ public final class LocalHost: Sendable {
 
     /// Returns once a host answers, starting the bundled one when none does.
     public func ensureServing() async throws(PreviewError) {
-        if await answers() { return }
+        if await answers() {
+            _ = truncate(log, 0)
+            return
+        }
         guard let binary else { throw .host("no terminal host answers at \(address), and this build carries none to start") }
         if startedPID == nil {
             try start(binary)
@@ -82,7 +86,7 @@ public final class LocalHost: Sendable {
         posix_spawnattr_setflags(&attributes, Int16(POSIX_SPAWN_SETSID))
         posix_spawn_file_actions_addopen(&actions, 0, "/dev/null", O_RDONLY, 0)
         posix_spawn_file_actions_addopen(&actions, 1, "/dev/null", O_WRONLY, 0)
-        posix_spawn_file_actions_addopen(&actions, 2, log, O_WRONLY | O_CREAT | O_TRUNC, 0o600)
+        posix_spawn_file_actions_addopen(&actions, 2, log, O_WRONLY | O_CREAT | O_TRUNC | O_APPEND, 0o600)
         let words = [binary, "_pty-host", "--local"]
         let settings = ProcessInfo.processInfo.environment.map { "\($0.key)=\($0.value)" }
         let arguments: [UnsafeMutablePointer<CChar>?] = words.map { strdup($0) } + [nil]

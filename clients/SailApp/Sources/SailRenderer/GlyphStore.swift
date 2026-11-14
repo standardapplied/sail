@@ -121,14 +121,14 @@ final class GlyphStore: GlyphSource {
         alpha.uploaded + colour.uploaded
     }
 
-    /// An item already drawn costs one lookup (text and sprites are in the alpha atlas); only a new
-    /// one asks Core Text which atlas it belongs in.
     /// Starts `frame`, which may draw `newItems` new items; the rest wait for a later frame.
     func begin(_ frame: UInt64, newItems: Int) {
         self.frame = frame
         newAllowed = newItems
     }
 
+    /// An item already drawn costs one lookup (text and sprites are in the alpha atlas); only a new
+    /// one asks Core Text which atlas it belongs in.
     func place(_ item: AtlasItem) -> GlyphPlace? {
         if let slot = alpha.use(item, frame: frame) {
             return GlyphPlace(slot: slot, colour: false)

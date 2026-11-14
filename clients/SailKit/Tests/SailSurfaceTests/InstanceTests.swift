@@ -78,6 +78,38 @@ import Testing
         #expect(builder.complete)
     }
 
+    /// The cursor is placed before the rows spend the frame's share of new glyphs, so it is drawn
+    /// in the first frame.
+    @Test func theCursorIsPlacedBeforeTheRowsSpendTheShare() throws {
+        let glyphs = try AtlasGlyphs(side: 1024)
+        glyphs.room = 2
+        var builder = try InstanceBuilder(metrics: metrics(points: 15))
+        let drawn = builder.build(try screen(10, 2).fed("ab").frame(), overlay: Overlay(), glyphs: glyphs)
+        #expect(drawn.decorations.count == 1, "the cursor")
+        #expect(!builder.complete, "one of the two letters waits for the next frame")
+    }
+
+    /// A frame whose cursor or composing text found no slot is not complete, so the caller draws
+    /// again at the next refresh.
+    @Test(arguments: ["", "にほ"]) func anOverlayWithoutASlotLeavesTheFrameIncomplete(marked: String) throws {
+        let glyphs = try AtlasGlyphs(side: 1024)
+        var builder = try InstanceBuilder(metrics: metrics(points: 15))
+        let screen = try screen(10, 2).fed("ab\u{1b}[?25l")
+        _ = builder.build(try screen.frame(), overlay: Overlay(), glyphs: glyphs)
+        #expect(builder.complete)
+        glyphs.frame = 2
+        glyphs.room = 0
+        _ = screen.feed(Array("\u{1b}[?25h".utf8))
+        let drawn = builder.build(try screen.frame(), overlay: Overlay(marked: marked), glyphs: glyphs)
+        #expect(drawn.decorations.isEmpty)
+        #expect(!builder.complete, "the \(marked.isEmpty ? "cursor" : "composing text") found no slot")
+        glyphs.frame = 3
+        glyphs.room = .max
+        let later = builder.build(try screen.frame(), overlay: Overlay(marked: marked), glyphs: glyphs)
+        #expect(!later.decorations.isEmpty)
+        #expect(builder.complete)
+    }
+
     @Test func invalidatingLaysOutEveryRowAgain() throws {
         let screen = try screen(10, 2).fed("ab")
         var builder = try InstanceBuilder(metrics: metrics(points: 15))

@@ -35,9 +35,10 @@ public struct LatencyMarks: Sendable {
     private var keyToEchoEstimated: [Double] = []
     private var refreshes: [Double] = []
     private var late = 0
-    private var outputs = 0
+    private var screenUpdates = 0
     private var reported = 0
     private var unreported = 0
+    private var presentedBeforeCommit = 0
 
     public init() {}
 
@@ -48,9 +49,10 @@ public struct LatencyMarks: Sendable {
         if awaitingEcho.count > Self.capacity { awaitingEcho.removeFirst() }
     }
 
-    /// The session's screen took output at `time`.
+    /// The session's screen took output at `time`: one tick of its screen updates, which may hold
+    /// several reads of output when the view had not yet taken the tick before.
     public mutating func output(at time: Double) {
-        outputs += 1
+        screenUpdates += 1
         let echoed = awaitingEcho.filter { $0.written <= time }.map(\.event)
         awaitingEcho.removeAll { $0.written <= time }
         pending.append(Output(time: time, keys: echoed))
@@ -68,7 +70,10 @@ public struct LatencyMarks: Sendable {
         }
         committed[frame] = (time, (committed[frame]?.outputs ?? []) + drawn)
         lastFrame = (frame, time)
-        if let presented = presentedAt[frame] { settle(frame, presented) }
+        if let presented = presentedAt[frame] {
+            presentedBeforeCommit += 1
+            settle(frame, presented)
+        }
     }
 
     /// A refresh that read the screen at `read` found nothing to draw: output told before then was
@@ -85,16 +90,12 @@ public struct LatencyMarks: Sendable {
         lastCallback = read
     }
 
-    /// `frame` reached the display at `time`; zero when the display reported no time.
+    /// `frame` reached the display at `time`; zero when the display reported no time. Metal can
+    /// tell this before the frame's commit is marked (a frame dropped at once): its estimate is
+    /// then made when the commit is.
     public mutating func presented(frame: UInt64, at time: Double) {
-        let presented: (time: Double, reported: Bool)
-        if time > 0 {
-            reported += 1
-            presented = (time, true)
-        } else {
-            unreported += 1
-            presented = (targets[frame] ?? 0, false)
-        }
+        let presented = (time: max(time, 0), reported: time > 0)
+        if presented.reported { reported += 1 } else { unreported += 1 }
         presentedAt[frame] = presented
         presentedAt = presentedAt.filter { $0.key + 8 > frame }
         settle(frame, presented)
@@ -110,8 +111,9 @@ public struct LatencyMarks: Sendable {
             keyToWritten: Self.percentiles(keyToWritten), outputToCommitted: Self.percentiles(outputToCommitted),
             outputToPresented: Self.percentiles(outputToPresented), outputToPresentedEstimated: Self.percentiles(outputToPresentedEstimated),
             outputToShown: Self.percentiles(outputToShown), keyToEcho: Self.percentiles(keyToEcho),
-            keyToEchoEstimated: Self.percentiles(keyToEchoEstimated), refresh: Self.percentiles(refreshes), outputs: outputs,
-            lateOutputs: late, reportedPresents: reported, unreportedPresents: unreported
+            keyToEchoEstimated: Self.percentiles(keyToEchoEstimated), refresh: Self.percentiles(refreshes), screenUpdates: screenUpdates,
+            lateOutputs: late, reportedPresents: reported, unreportedPresents: unreported,
+            presentedBeforeCommit: presentedBeforeCommit
         )
     }
 
@@ -125,15 +127,15 @@ public struct LatencyMarks: Sendable {
 
     private mutating func settle(_ frame: UInt64, _ presented: (time: Double, reported: Bool)) {
         guard let drawn = committed.removeValue(forKey: frame) else { return }
+        let shown = presented.reported ? presented.time : targets[frame] ?? drawn.time
         for output in drawn.outputs {
             Self.keep((presented.reported ? presented.time : drawn.time) - output.time, in: &outputToShown)
-            guard presented.time > 0 else { continue }
-            let echoes = output.keys.map { presented.time - $0 }
+            let echoes = output.keys.map { shown - $0 }
             if presented.reported {
-                Self.keep(presented.time - output.time, in: &outputToPresented)
+                Self.keep(shown - output.time, in: &outputToPresented)
                 echoes.forEach { Self.keep($0, in: &keyToEcho) }
             } else {
-                Self.keep(presented.time - output.time, in: &outputToPresentedEstimated)
+                Self.keep(shown - output.time, in: &outputToPresentedEstimated)
                 echoes.forEach { Self.keep($0, in: &keyToEchoEstimated) }
             }
         }
@@ -165,10 +167,12 @@ public struct LatencyFigures: Equatable, Sendable, Codable {
     public var keyToEchoEstimated: Percentiles
     /// One refresh's time on the main thread.
     public var refresh: Percentiles
-    /// Outputs told so far.
-    public var outputs: Int
+    /// Screen-update ticks told so far; one tick may hold several reads of output.
+    public var screenUpdates: Int
     /// Output a refresh saw and could not draw, drawn by a later one.
     public var lateOutputs: Int
     public var reportedPresents: Int
     public var unreportedPresents: Int
+    /// Frames Metal told presented before their commit was marked.
+    public var presentedBeforeCommit: Int
 }

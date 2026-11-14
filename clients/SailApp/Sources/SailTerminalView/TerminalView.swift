@@ -35,6 +35,14 @@ public final class TerminalView: NSView {
     var composition = Composition()
     var committedDuringKey: [String]?
     var pointer = Pointer()
+    /// The layer's next drawable; a test hands out none.
+    var nextDrawable: (CAMetalLayer) -> (any CAMetalDrawable)? = { $0.nextDrawable() }
+    /// The last refresh found no drawable.
+    private var awaitingDrawable = false
+    /// The cell the pointer last moved into with no button held.
+    var hovered: CellPoint?
+    /// Watches for Escape while the paste sheet is up.
+    var escapeWatch: Any?
     var gatherer = ScrollGatherer()
     private(set) var focused = false
     private(set) var lastFrame: ScreenFrame?
@@ -117,7 +125,7 @@ public final class TerminalView: NSView {
         let marks = marks
         tasks.append(Task.detached { [weak self] in
             for await updated in changes {
-                marks.output(at: CACurrentMediaTime() - (ContinuousClock.now - updated).seconds)
+                marks.output(at: CACurrentMediaTime() - (ContinuousClock.now - updated) / .seconds(1))
                 await self?.drawNowIfIdle()
             }
         })
@@ -150,7 +158,8 @@ public final class TerminalView: NSView {
         lastFrame = nil
     }
 
-    /// The last frame drawn, offscreen at the view's pixel size: what the person saw.
+    /// The last frame drawn, offscreen at the view's pixel size, every glyph it holds drawn: what
+    /// the person saw once ``isDrawnInFull``.
     public func snapshot() throws(RenderError) -> RenderedImage? {
         guard let lastFrame else { return nil }
         return try renderer.image(of: lastFrame, overlay: overlay, size: pixelSize)
@@ -159,6 +168,12 @@ public final class TerminalView: NSView {
     /// The visible text of the last frame drawn.
     public var visibleText: String {
         lastFrame.map { Screen.text(of: $0.rows) } ?? ""
+    }
+
+    /// Whether the last frame drawn showed every glyph, the cursor and composing text it holds:
+    /// false while new glyphs wait for later refreshes.
+    public var isDrawnInFull: Bool {
+        renderer.lastFrameComplete
     }
 
     override public func viewDidMoveToWindow() {
@@ -264,11 +279,28 @@ public final class TerminalView: NSView {
     /// bottom). A paused link means the view is idle, the typing-echo case: the screen is read now
     /// and drawn if it changed, and only a frame drawn resumes the link, so a key that changed
     /// nothing leaves the view idle and its echo is drawn the moment it arrives, meeting the next
-    /// display refresh rather than the one after.
-    private func drawNowIfIdle() {
-        guard pacer.isIdle, refresh(target: CACurrentMediaTime() + refreshInterval) else { return }
+    /// display refresh rather than the one after. A view paused for want of a drawable is not
+    /// idle: output does not ask for one again (an occluded window's ask can block for a second).
+    func drawNowIfIdle() {
+        guard pacer.isIdle, !awaitingDrawable, refresh(target: CACurrentMediaTime() + refreshInterval) else { return }
         pacer.resume()
     }
+
+    /// No drawable came: the link pauses until the window is seen again or the view changes, and
+    /// a visible window asks once more after ``drawableRetry``.
+    private func drawableUnavailable() {
+        awaitingDrawable = true
+        pacer.pause()
+        guard window?.occlusionState.contains(.visible) == true else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.drawableRetry) { [weak self] in
+            MainActor.assumeIsolated {
+                guard let self, self.awaitingDrawable else { return }
+                self.needFrame()
+            }
+        }
+    }
+
+    static let drawableRetry = 0.25
 
     private var refreshInterval: Double {
         1 / Double(max(1, window?.screen?.maximumFramesPerSecond ?? 60))
@@ -300,8 +332,9 @@ public final class TerminalView: NSView {
             pacer.pause()
             return false
         }
-        switch renderer.draw(frame, overlay: overlay, in: metalLayer, presented: { [marks] in marks.presented(frame: $0, at: $1) }) {
+        switch renderer.draw(frame, overlay: overlay, from: { nextDrawable(metalLayer) }, presented: { [marks] in marks.presented(frame: $0, at: $1) }) {
         case let .drawn(number):
+            awaitingDrawable = false
             marks.committed(frame: number, read: read, target: target)
             lastFrame = frame
             needsDraw = !renderer.lastFrameComplete
@@ -315,7 +348,7 @@ public final class TerminalView: NSView {
             marks.skipped(read: read)
             renderer.invalidate()
             needsDraw = true
-            pacer.pause()
+            drawableUnavailable()
             return false
         }
     }
@@ -387,12 +420,5 @@ public final class TerminalView: NSView {
 
     override public func accessibilityValue() -> Any? {
         visibleText
-    }
-}
-
-extension Duration {
-    var seconds: Double {
-        let (whole, fraction) = components
-        return Double(whole) + Double(fraction) / 1e18
     }
 }

@@ -19,6 +19,9 @@ public final class TerminalRenderer {
     /// The CPU time the last frame took on its thread: instances laid out, buffers written, the
     /// pass encoded. The thread's own clock, so time the machine gave other work is not counted.
     public private(set) var lastEncodeTime = Duration.zero
+    /// The same work on the wall clock, which counts whatever else the machine ran meanwhile.
+    public private(set) var lastEncodeWallTime = Duration.zero
+    private var offscreen: (any MTLTexture)?
 
     private let fonts: TerminalFonts
     private let queue: any MTLCommandQueue
@@ -124,13 +127,15 @@ public final class TerminalRenderer {
         builder.invalidate()
     }
 
-    /// Draws `frame` into the layer's next drawable and presents it; `presented` is told the
-    /// frame's number and when it reached the display (zero when it was dropped).
+    /// Draws `frame` into the drawable `next` gives (a layer's next one) and presents it, asking
+    /// for it only once a buffer is free; `presented` is told the frame's number and when it
+    /// reached the display (zero when it was dropped).
     public func draw(
-        _ frame: ScreenFrame, overlay: Overlay, in layer: CAMetalLayer, presented: @escaping @Sendable (UInt64, Double) -> Void
+        _ frame: ScreenFrame, overlay: Overlay, from next: () -> (any CAMetalDrawable)?,
+        presented: @escaping @Sendable (UInt64, Double) -> Void
     ) -> DrawOutcome {
         guard let slot = ledger.begin() else { return .busy }
-        guard let drawable = layer.nextDrawable(), let commandBuffer = queue.makeCommandBuffer(),
+        guard let drawable = next(), let commandBuffer = queue.makeCommandBuffer(),
               encode(frame, overlay: overlay, into: drawable.texture, commandBuffer: commandBuffer, slot: slot, newItems: Self.newItemsPerFrame)
         else {
             ledger.complete(slot.frame)
@@ -163,12 +168,16 @@ public final class TerminalRenderer {
     public func image(of frame: ScreenFrame, overlay: Overlay, size: PixelSize, newItems: Int = .max) throws(RenderError) -> RenderedImage {
         let done = DispatchSemaphore(value: 0)
         let (commandBuffer, readback) = try submitOffscreen(frame, overlay: overlay, size: size, newItems: newItems) { done.signal() }
-        guard done.wait(timeout: .now() + Self.offscreenDeadline) == .success else {
-            throw .unavailable("the GPU did not finish an offscreen frame within \(Int(Self.offscreenDeadline)) s")
-        }
-        if let error = commandBuffer.error { throw .unavailable("the offscreen frame failed on the GPU: \(error)") }
+        try finished(commandBuffer, done)
         let bytes = [UInt8](UnsafeRawBufferPointer(start: readback.contents(), count: size.width * size.height * 4))
         return RenderedImage(width: size.width, height: size.height, bgra: bytes)
+    }
+
+    /// `frame` drawn offscreen at `size` pixels as ``image(of:overlay:size:newItems:)`` draws it,
+    /// into a target kept between calls, with nothing read back: the CPU side's cost alone.
+    public func drawOffscreen(_ frame: ScreenFrame, overlay: Overlay, size: PixelSize, newItems: Int = .max) throws(RenderError) {
+        let done = DispatchSemaphore(value: 0)
+        try finished(submit(frame, overlay: overlay, size: size, readback: nil, newItems: newItems) { done.signal() }, done)
     }
 
     /// Encodes and commits `frame` offscreen, after `wait` (when given) reaches `value`: so a test
@@ -179,31 +188,47 @@ public final class TerminalRenderer {
         newItems: Int = .max, completed: @escaping @Sendable () -> Void = {}
     ) throws(RenderError) -> (any MTLCommandBuffer, any MTLBuffer) {
         guard size.width > 0, size.height > 0 else { throw .unavailable("an image of \(size.width)x\(size.height) pixels has nothing to draw into") }
-        let descriptor = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .bgra8Unorm, width: size.width, height: size.height, mipmapped: false)
-        descriptor.usage = [.renderTarget]
-        descriptor.storageMode = .private
+        guard let readback = device.makeBuffer(length: size.width * size.height * 4, options: .storageModeShared) else {
+            throw .unavailable("no buffer of \(size.width)x\(size.height) pixels could be made to read the frame back into")
+        }
+        return (try submit(frame, overlay: overlay, size: size, readback: readback, wait: wait, newItems: newItems, completed: completed), readback)
+    }
+
+    private func finished(_ commandBuffer: any MTLCommandBuffer, _ done: DispatchSemaphore) throws(RenderError) {
+        guard done.wait(timeout: .now() + Self.offscreenDeadline) == .success else {
+            throw .unavailable("the GPU did not finish an offscreen frame within \(Int(Self.offscreenDeadline)) s")
+        }
+        if let error = commandBuffer.error { throw .unavailable("the offscreen frame failed on the GPU: \(error)") }
+    }
+
+    private func submit(
+        _ frame: ScreenFrame, overlay: Overlay, size: PixelSize, readback: (any MTLBuffer)?, wait: (event: any MTLEvent, value: UInt64)? = nil,
+        newItems: Int, completed: @escaping @Sendable () -> Void
+    ) throws(RenderError) -> any MTLCommandBuffer {
+        guard size.width > 0, size.height > 0 else { throw .unavailable("an image of \(size.width)x\(size.height) pixels has nothing to draw into") }
         guard let slot = ledger.begin() else { throw .unavailable("every frame buffer is in flight") }
-        guard let target = device.makeTexture(descriptor: descriptor),
-              let readback = device.makeBuffer(length: size.width * size.height * 4, options: .storageModeShared),
-              let commandBuffer = queue.makeCommandBuffer()
-        else {
+        guard let target = offscreenTarget(size), let commandBuffer = queue.makeCommandBuffer() else {
             ledger.complete(slot.frame)
             throw .unavailable("no offscreen target of \(size.width)x\(size.height) pixels could be made")
         }
         if let wait { commandBuffer.encodeWaitForEvent(wait.event, value: wait.value) }
         builder.invalidate()
-        guard encode(frame, overlay: overlay, into: target, commandBuffer: commandBuffer, slot: slot, newItems: newItems),
-              let blit = commandBuffer.makeBlitCommandEncoder()
-        else {
+        guard encode(frame, overlay: overlay, into: target, commandBuffer: commandBuffer, slot: slot, newItems: newItems) else {
             ledger.complete(slot.frame)
             throw .unavailable("the offscreen frame could not be encoded")
         }
-        blit.copy(
-            from: target, sourceSlice: 0, sourceLevel: 0, sourceOrigin: MTLOrigin(x: 0, y: 0, z: 0),
-            sourceSize: MTLSize(width: size.width, height: size.height, depth: 1), to: readback, destinationOffset: 0,
-            destinationBytesPerRow: size.width * 4, destinationBytesPerImage: size.width * size.height * 4
-        )
-        blit.endEncoding()
+        if let readback {
+            guard let blit = commandBuffer.makeBlitCommandEncoder() else {
+                ledger.complete(slot.frame)
+                throw .unavailable("the offscreen frame could not be read back")
+            }
+            blit.copy(
+                from: target, sourceSlice: 0, sourceLevel: 0, sourceOrigin: MTLOrigin(x: 0, y: 0, z: 0),
+                sourceSize: MTLSize(width: size.width, height: size.height, depth: 1), to: readback, destinationOffset: 0,
+                destinationBytesPerRow: size.width * 4, destinationBytesPerImage: size.width * size.height * 4
+            )
+            blit.endEncoding()
+        }
         let ledger = ledger
         let number = slot.frame
         commandBuffer.addCompletedHandler { _ in
@@ -211,15 +236,29 @@ public final class TerminalRenderer {
             completed()
         }
         commandBuffer.commit()
-        return (commandBuffer, readback)
+        return commandBuffer
+    }
+
+    /// The offscreen target of `size`, made once and kept until a frame of another size: frames on
+    /// the one queue draw into it in turn.
+    private func offscreenTarget(_ size: PixelSize) -> (any MTLTexture)? {
+        if let target = offscreen, target.width == size.width, target.height == size.height { return target }
+        let descriptor = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .bgra8Unorm, width: size.width, height: size.height, mipmapped: false)
+        descriptor.usage = [.renderTarget]
+        descriptor.storageMode = .private
+        offscreen = device.makeTexture(descriptor: descriptor)
+        return offscreen
     }
 
     private func encode(
         _ frame: ScreenFrame, overlay: Overlay, into target: any MTLTexture, commandBuffer: any MTLCommandBuffer,
         slot: (frame: UInt64, buffer: Int), newItems: Int
     ) -> Bool {
-        let started = Duration.threadCPU
-        defer { lastEncodeTime = Duration.threadCPU - started }
+        let started = (cpu: Duration.threadCPU, wall: ContinuousClock.now)
+        defer {
+            lastEncodeTime = Duration.threadCPU - started.cpu
+            lastEncodeWallTime = ContinuousClock.now - started.wall
+        }
         store.begin(slot.frame, newItems: newItems)
         if store.generation != builtGeneration {
             builder.invalidate()

@@ -148,18 +148,30 @@ import Testing
         #expect(screen.selectedText() == "abcdefghijklmno")
     }
 
-    @Test func doubleAndTripleClicksSelectAWordAndALine() {
+    /// A double click selects a word and a triple click a line; a drag from either extends it by
+    /// whole words or lines, and nothing is selected by moving with no button down.
+    @Test func doubleAndTripleClicksSelectAWordAndALineAndADragExtendsByThem() {
         var pointer = Pointer()
         #expect(pointer.down(at: a, clicks: 2, shift: false, programTracksMouse: false) == .select(.word(at: a)))
+        #expect(pointer.dragged(to: b) == .select(.words(from: a, to: b)))
         #expect(pointer.down(at: a, clicks: 3, shift: false, programTracksMouse: false) == .select(.line(at: a)))
-        #expect(pointer.dragged(to: b) == .nothing)
+        #expect(pointer.dragged(to: b) == .select(.lines(from: a, to: b)))
+        #expect(pointer.up() == .nothing)
+        #expect(pointer.dragged(to: a) == .nothing)
     }
 
+    /// Shift-click extends the selection by the unit it was made in, and a drag goes on extending.
     @Test func shiftClickExtendsAfterADoubleOrTripleClick() {
-        for clicks in [2, 3] {
+        let c = CellPoint(x: 9, y: 4)
+        for (clicks, by, dragged) in [
+            (2, SelectionRequest.words(from: a, to: b), SelectionRequest.words(from: a, to: c)),
+            (3, .lines(from: a, to: b), .lines(from: a, to: c)),
+        ] {
             var pointer = Pointer()
             _ = pointer.down(at: a, clicks: clicks, shift: false, programTracksMouse: false)
-            #expect(pointer.down(at: b, clicks: 1, shift: true, programTracksMouse: false) == .select(.range(from: a, to: b)), "after \(clicks) clicks")
+            _ = pointer.up()
+            #expect(pointer.down(at: b, clicks: 1, shift: true, programTracksMouse: false) == .select(by), "after \(clicks) clicks")
+            #expect(pointer.dragged(to: c) == .select(dragged), "a drag after the shift-click, after \(clicks) clicks")
         }
     }
 
@@ -198,6 +210,22 @@ import Testing
         #expect(abs(figures.outputToCommitted.p50 - 6) < 1e-6)
         #expect(abs(figures.outputToPresented.p50 - 21) < 1e-6)
         #expect(abs(figures.keyToEcho.p50 - 25) < 1e-6)
+    }
+
+    /// Metal can tell a dropped frame's presentation before its commit is marked: the key's echo
+    /// is still estimated, at the refresh the frame was drawn for.
+    @Test func aFrameToldPresentedBeforeItsCommitStillEstimatesItsEcho() {
+        var marks = LatencyMarks()
+        marks.keyWritten(event: 1.000, written: 1.001)
+        marks.output(at: 1.004)
+        marks.presented(frame: 1, at: 0)
+        marks.committed(frame: 1, at: 1.010, read: 1.008, target: 1.0267)
+        let figures = marks.figures
+        #expect(figures.keyToEchoEstimated.count == 1)
+        #expect(abs(figures.keyToEchoEstimated.p50 - 26.7) < 1e-6)
+        #expect(abs(figures.outputToPresentedEstimated.p50 - 22.7) < 1e-6)
+        #expect(figures.keyToEcho.count == 0, "nothing was measured on the display")
+        #expect(figures.presentedBeforeCommit == 1)
     }
 
     @Test func outputSeenAfterTheReadWaitsForTheNextFrameOrIsPutToTheOneThatShowedIt() {
