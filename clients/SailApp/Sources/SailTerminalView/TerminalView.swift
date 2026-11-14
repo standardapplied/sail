@@ -306,8 +306,10 @@ public final class TerminalView: NSView {
         1 / Double(max(1, window?.screen?.maximumFramesPerSecond ?? 60))
     }
 
+    /// The window was seen again: a view that paused for want of a drawable asks for one again.
     @objc private func visibilityChanged() {
-        if window?.occlusionState.contains(.visible) == true { needFrame() }
+        guard awaitingDrawable, window?.occlusionState.contains(.visible) == true else { return }
+        needFrame()
     }
 
     /// One display refresh, for the frame meant to reach the display at `target`: read the screen;

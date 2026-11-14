@@ -344,10 +344,10 @@ import Testing
     /// the link after the pause.
     @Test func outputIsDrawnOnTheFirstRefreshAfterIt() async throws {
         let harness = try Harness()
-        await Task.yield()
+        await harness.drainMain()
         harness.tick()
         harness.tick()
-        #expect(harness.clock.isPaused, "nothing changed, so the link paused")
+        try #require(harness.clock.isPaused, "nothing changed, so the link paused")
         harness.link.output("hello")
         await harness.clock.nextResume()
         #expect(!harness.clock.isPaused)
@@ -358,15 +358,15 @@ import Testing
     /// moment it arrives rather than at the next display callback.
     @Test func aKeysEchoIsDrawnAsItArrives() async throws {
         let harness = try Harness()
-        await Task.yield()
+        await harness.drainMain()
         harness.tick()
         harness.tick()
-        #expect(harness.clock.isPaused)
+        try #require(harness.clock.isPaused)
         let refreshes = harness.view.latency.refresh.count
         harness.key("e", code: 0x0E)
         await harness.drainMain()
         #expect(harness.view.latency.refresh.count == refreshes + 1, "the key's hop read the screen")
-        #expect(harness.clock.isPaused, "the key itself asked for no frame")
+        try #require(harness.clock.isPaused, "the key itself asked for no frame")
         harness.link.output("e")
         await harness.clock.nextResume()
         #expect(harness.view.visibleText.contains("e"), "drawn as it arrived, before the next refresh")
@@ -377,6 +377,10 @@ import Testing
     @Test func noDrawablePausesTheLinkUntilTheWindowIsSeenAgain() throws {
         let harness = try Harness()
         harness.tick()
+        harness.tick()
+        try #require(harness.clock.isPaused)
+        NotificationCenter.default.post(name: NSWindow.didChangeOcclusionStateNotification, object: harness.window)
+        #expect(harness.clock.isPaused, "the window seen again asks no frame of a view that has its drawables")
         harness.view.nextDrawable = { _ in nil }
         harness.view.needFrame()
         harness.tick()

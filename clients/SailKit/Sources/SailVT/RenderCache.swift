@@ -111,10 +111,15 @@ final class RenderCache {
         try require("ghostty_cell_get", ghostty_cell_get(raw, GHOSTTY_CELL_DATA_WIDE, &wide))
         var style = GhosttyStyle()
         try cellGet(cells, GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_STYLE, &style)
-        var foreground = colors.foreground
+        var tag = GHOSTTY_CELL_CONTENT_CODEPOINT
+        try require("ghostty_cell_get", ghostty_cell_get(raw, GHOSTTY_CELL_DATA_CONTENT_TAG, &tag))
+        var foreground = color(style.fg_color) ?? colors.foreground
         var background = colors.background
-        try optionalColor(cells, GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_FG_COLOR, into: &foreground)
-        try optionalColor(cells, GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_BG_COLOR, into: &background)
+        if tag == GHOSTTY_CELL_CONTENT_CODEPOINT || tag == GHOSTTY_CELL_CONTENT_CODEPOINT_GRAPHEME {
+            background = color(style.bg_color) ?? colors.background
+        } else {
+            try optionalColor(cells, GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_BG_COLOR, into: &background)
+        }
         let attributes = CellAttributes(style.flags)
         if attributes.contains(.inverse) {
             swap(&foreground, &background)
@@ -123,7 +128,7 @@ final class RenderCache {
             foreground = foreground.blended(toward: background, by: Palette.dimming)
         }
         return Cell(
-            grapheme: try readGrapheme(), width: CellWidth(wide), foreground: foreground, background: background,
+            grapheme: try readText(raw, tag), width: CellWidth(wide), foreground: foreground, background: background,
             attributes: attributes, underline: Underline(style.flags), underlineColor: color(style.underline_color),
             selected: selected
         )
@@ -141,6 +146,20 @@ final class RenderCache {
             && ghostty_cell_get(raw, GHOSTTY_CELL_DATA_HAS_STYLING, &styled) == GHOSTTY_SUCCESS && !styled
             && ghostty_cell_get(raw, GHOSTTY_CELL_DATA_CONTENT_TAG, &tag) == GHOSTTY_SUCCESS && tag == GHOSTTY_CELL_CONTENT_CODEPOINT
     }
+
+    /// The cell's text. A cell holding one codepoint (most of any screen) is read from the cell
+    /// itself, ASCII from a table, which costs a fraction of reading its grapheme as UTF-8.
+    private func readText(_ raw: GhosttyCell, _ tag: GhosttyCellContentTag) throws(ScreenError) -> String {
+        var codepoint: UInt32 = 0
+        guard tag == GHOSTTY_CELL_CONTENT_CODEPOINT, ghostty_cell_get(raw, GHOSTTY_CELL_DATA_CODEPOINT, &codepoint) == GHOSTTY_SUCCESS
+        else { return try readGrapheme() }
+        if codepoint < 128 { return Self.ascii[Int(codepoint)] }
+        guard let scalar = Unicode.Scalar(codepoint) else { return try readGrapheme() }
+        return String(Character(scalar))
+    }
+
+    /// Each ASCII codepoint as text, the empty cell's 0 as none.
+    private static let ascii: [String] = (0 ..< 128).map { $0 == 0 ? "" : String(Character(Unicode.Scalar(UInt8($0)))) }
 
     private func readGrapheme() throws(ScreenError) -> String {
         var buffer = GhosttyBuffer()
