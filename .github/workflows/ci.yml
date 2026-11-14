@@ -238,8 +238,8 @@ jobs:
         run: |
           sudo install -m 755 "$RUNNER_TEMP/native/sail" /usr/local/bin/sail
           sudo -H sail init --as-main --handle ada --name 'Ada E2E' --email ada@e2e.example
-          echo '{"name":"demo","resources":{"cpu":2,"memory":"2GB","disk":"10GB"}}' | sudo -H sail project create demo --definition -
-          sudo -H sail project apply demo
+          echo '{"name":"term","resources":{"cpu":2,"memory":"2GB","disk":"10GB"}}' | sudo -H sail project create term --definition -
+          sudo -H sail project apply term
           sudo -H sail host config set api-listen 127.0.0.1:7071
           sudo -H sail host config set terminal-listen 127.0.0.1:7072
           sudo systemctl restart sail-api sail-pty-host
@@ -260,9 +260,9 @@ jobs:
             echo "::error::the box minted no token"
             exit 1
           fi
-          SAIL_API=http://127.0.0.1:7071 SAIL_TOKEN=$token SAIL_OTHER_TOKEN=$other SAIL_PROJECT=demo \
+          SAIL_API=http://127.0.0.1:7071 SAIL_TOKEN=$token SAIL_OTHER_TOKEN=$other SAIL_PROJECT=term \
             swift test --filter RealRunnerTests
-          SAIL_E2E_TOKEN=$token "$PROBE" --api http://127.0.0.1:7071 --token-env SAIL_E2E_TOKEN --project demo \
+          SAIL_E2E_TOKEN=$token "$PROBE" --api http://127.0.0.1:7071 --token-env SAIL_E2E_TOKEN --project term \
             --script Tests/Probe/runner.json --report "$RUNNER_TEMP/reports/runner.json" \
             > "$RUNNER_TEMP/probe.out" 2> "$RUNNER_TEMP/probe.err" &
           probe=$!
@@ -281,7 +281,7 @@ jobs:
           fi
           rm "$RUNNER_TEMP/argv.txt"
           [[ $status == 0 ]]
-          SAIL_E2E_TOKEN=$token "$PROBE" --api http://127.0.0.1:7071 --token-env SAIL_E2E_TOKEN --project demo \
+          SAIL_E2E_TOKEN=$token "$PROBE" --api http://127.0.0.1:7071 --token-env SAIL_E2E_TOKEN --project term \
             --script Tests/Probe/measure.json --report "$RUNNER_TEMP/reports/runner-measure.json"
 
       - name: Leave the probe's reports

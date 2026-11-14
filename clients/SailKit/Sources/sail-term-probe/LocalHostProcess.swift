@@ -71,8 +71,10 @@ final class LocalHostProcess: Sendable {
         defer { posix_spawn_file_actions_destroy(&actions) }
         posix_spawn_file_actions_adddup2(&actions, descriptor, 2)
         posix_spawn_file_actions_addopen(&actions, 1, "/dev/null", O_WRONLY, 0)
-        let arguments = [binary, "_pty-host", "--local"].map { strdup($0) } + [nil]
-        let environment = ProcessInfo.processInfo.environment.map { strdup("\($0.key)=\($0.value)") } + [nil]
+        let words: [String] = [binary, "_pty-host", "--local"]
+        let settings: [String] = ProcessInfo.processInfo.environment.map { "\($0.key)=\($0.value)" }
+        let arguments: [UnsafeMutablePointer<CChar>?] = words.map { strdup($0) } + [nil]
+        let environment: [UnsafeMutablePointer<CChar>?] = settings.map { strdup($0) } + [nil]
         defer { (arguments + environment).forEach { free($0) } }
         var pid: pid_t = 0
         let spawned = posix_spawn(&pid, binary, &actions, nil, arguments, environment)
