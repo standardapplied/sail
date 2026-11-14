@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+# Notarizes a Developer ID signed APP with the App Store Connect key (APPLE_API_KEY_P8_BASE64,
+# APPLE_API_KEY, APPLE_API_ISSUER), staples the ticket, and zips the stapled app to ZIP.
+set -euo pipefail
+
+[[ $# -eq 2 ]] || { echo "usage: ci/notarize APP ZIP" >&2; exit 2; }
+readonly app=$1 zip=$2
+[[ $("$(dirname "$0")/signing") == on ]] || { echo "ci/notarize: signing is off; an unsigned build is not notarized" >&2; exit 1; }
+readonly temp=${RUNNER_TEMP:?ci/notarize: RUNNER_TEMP is not set}
+readonly key=$temp/notary-key.p8
+trap 'rm -f "$key" "$temp/notarize.zip"' EXIT
+(
+  umask 077
+  printf '%s' "$APPLE_API_KEY_P8_BASE64" | base64 --decode > "$key"
+)
+
+ditto -c -k --keepParent "$app" "$temp/notarize.zip"
+result=$(xcrun notarytool submit "$temp/notarize.zip" --key "$key" --key-id "$APPLE_API_KEY" --issuer "$APPLE_API_ISSUER" \
+  --wait --timeout 30m --output-format json)
+status=$(plutil -extract status raw - <<< "$result")
+id=$(plutil -extract id raw - <<< "$result")
+if [[ $status != Accepted ]]; then
+  echo "ci/notarize: Apple answered $status for submission $id" >&2
+  xcrun notarytool log "$id" --key "$key" --key-id "$APPLE_API_KEY" --issuer "$APPLE_API_ISSUER" >&2 || true
+  exit 1
+fi
+xcrun stapler staple "$app"
+xcrun stapler validate "$app"
+ditto -c -k --keepParent "$app" "$zip"
+echo "ci/notarize: $app notarized ($id) and stapled; $zip"
