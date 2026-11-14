@@ -168,9 +168,12 @@ import Testing
         #expect(harness.link.bytes == Array("\u{1b}[O\u{1b}[I".utf8))
     }
 
-    /// V1: output resumes a paused display link, and the first refresh after draws it.
+    /// V1: output resumes a paused display link, and the first refresh after draws it. The yield
+    /// lets the view's own pending work (its first layout) run first, so only the output can resume
+    /// the link after the pause.
     @Test func outputIsDrawnOnTheFirstRefreshAfterIt() async throws {
         let harness = try Harness()
+        await Task.yield()
         harness.tick()
         harness.tick()
         #expect(harness.clock.isPaused, "nothing changed, so the link paused")

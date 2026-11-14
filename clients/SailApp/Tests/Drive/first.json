@@ -42,6 +42,7 @@
   {"name": "kill-host", "killHost": true},
   {"name": "host-restarted", "banner": "The host restarted", "seconds": 40},
   {"name": "new-session", "newSession": true},
+  {"name": "new-session-attached", "attached": true, "seconds": 20},
   {"name": "new-session-works", "type": "echo after-$((2+3))\r"},
   {"name": "after-restart", "line": "after-5", "seconds": 30}
 ]}

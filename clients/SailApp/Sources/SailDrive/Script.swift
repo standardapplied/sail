@@ -59,10 +59,16 @@ struct Step: Decodable {
     /// Measures the renderer's CPU side in this release build: a full 200x60 redraw's p95 must be
     /// 4 ms or less.
     var bench: Bool?
+    /// The window's title must become this.
+    var title: String?
+    /// ⌥⌘L, then the latency overlay must show its figures.
+    var latencyOverlay: Bool?
     /// Starts the latency from nothing.
     var resetLatency: Bool?
     /// Kills the host the preview started, as a crash would.
     var killHost: Bool?
+    /// Waits until the session is attached.
+    var attached: Bool?
     /// Opens a new session, as the banner's button does.
     var newSession: Bool?
     /// The view's font size must be this many points.

@@ -137,6 +137,11 @@ public final class PreviewApp: NSObject, NSApplicationDelegate, NSWindowDelegate
         banner.shown
     }
 
+    /// What the latency overlay says now, nil when it is hidden.
+    public var latencyShown: String? {
+        latency.isHidden ? nil : latency.stringValue
+    }
+
     private func handle(_ event: SessionEvent) {
         switch event {
         case .phase(.attached):

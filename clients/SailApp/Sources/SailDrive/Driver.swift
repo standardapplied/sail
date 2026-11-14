@@ -2,6 +2,7 @@ import AppKit
 import SailPreview
 import SailRenderer
 import SailSurface
+import SailTerminal
 import SailTerminalView
 import SailVT
 
@@ -170,6 +171,16 @@ final class Driver {
             let p95 = bench["full redraw 200x60 cpu p95 ms"] ?? .infinity
             return (p95 <= 4, bench.sorted { $0.key < $1.key }.map { "\($0.key) \(String(format: "%.2f", $0.value))" }.joined(separator: ", "))
         }
+        if let title = step.title {
+            let found = await waitUntil(step.seconds ?? 5) { self.preview.window.title == title }
+            return (found, "the window's title is '\(preview.window.title)'")
+        }
+        if step.latencyOverlay == true {
+            guard let toggle = Keys.named("l", modifiers: ["command", "option"]) else { return (false, "no ⌥⌘L") }
+            send(toggle)
+            let shown = preview.latencyShown ?? ""
+            return (shown.contains("key → echo on glass"), shown.isEmpty ? "no overlay" : shown.replacingOccurrences(of: "\n", with: " | "))
+        }
         if step.resetLatency == true {
             terminal.resetLatency()
             return (true, "")
@@ -219,6 +230,10 @@ final class Driver {
             guard preview.host.startedPID != nil else { return (false, "the preview started no host to kill") }
             preview.host.crash()
             return (true, "")
+        }
+        if step.attached == true {
+            let attached = await waitUntil(step.seconds ?? 20) { self.preview.session?.state.phase == .attached }
+            return (attached, "the session is \(preview.session.map { "\($0.state.phase)" } ?? "none")")
         }
         if step.newSession == true {
             await preview.open(fresh: true)

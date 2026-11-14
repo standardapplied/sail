@@ -2,5 +2,8 @@
   {"name": "reattached-earlier-output", "line": "after-5", "seconds": 30},
   {"name": "still-live", "type": "echo again-$((3+4))\r"},
   {"name": "answers", "line": "again-7", "seconds": 10},
+  {"name": "program-sets-the-title", "type": "printf '\\033]0;drive-title\\007'\r"},
+  {"name": "window-title", "title": "drive-title"},
+  {"name": "latency-overlay", "latencyOverlay": true},
   {"name": "renderer-bench", "bench": true}
 ]}
