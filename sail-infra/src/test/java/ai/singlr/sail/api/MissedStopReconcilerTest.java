@@ -35,7 +35,10 @@ import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
 import ai.singlr.sail.store.TestLogins;
 import ai.singlr.sail.store.TestRuns;
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.io.PrintStream;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Instant;
@@ -519,6 +522,50 @@ class MissedStopReconcilerTest {
     reconciler.removeLeftovers();
 
     assertEquals(2, asked.get());
+  }
+
+  /**
+   * A container that stays stopped is said once, not on every pass; once its tidy succeeds, a later
+   * failure is said again.
+   */
+  @Test
+  void aContainerThatKeepsFailingTheTidyIsSaidOnceUntilItSucceeds() {
+    session(null, "node-a", "adhoc");
+    var stopped = new AtomicBoolean(true);
+    var probe =
+        new CountingProbe(true) {
+          @Override
+          public void removeLaunchFiles(String project, List<String> liveRuns) throws Exception {
+            if (stopped.get()) {
+              throw new IOException("Container 'test-project' did not tidy its launch files.");
+            }
+          }
+        };
+    var reconciler = reconciler(probe, Instant::now);
+    var err = System.err;
+    var printed = new ByteArrayOutputStream();
+    System.setErr(new PrintStream(printed, true, StandardCharsets.UTF_8));
+    try {
+      reconciler.removeLeftovers();
+      reconciler.removeLeftovers();
+      reconciler.removeLeftovers();
+      assertEquals(1, tidyFailures(printed), "three passes over a stopped container say it once");
+      stopped.set(false);
+      reconciler.removeLeftovers();
+      stopped.set(true);
+      reconciler.removeLeftovers();
+    } finally {
+      System.setErr(err);
+    }
+    assertEquals(2, tidyFailures(printed), "a failure after a success is said again");
+  }
+
+  private static long tidyFailures(ByteArrayOutputStream printed) {
+    return printed
+        .toString(StandardCharsets.UTF_8)
+        .lines()
+        .filter(line -> line.contains("could not tidy the launch files of test-project"))
+        .count();
   }
 
   /**

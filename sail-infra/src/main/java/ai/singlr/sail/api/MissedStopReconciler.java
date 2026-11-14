@@ -33,6 +33,7 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Supplier;
 import java.util.stream.Stream;
 
@@ -154,6 +155,7 @@ public final class MissedStopReconciler implements AutoCloseable {
   private final FdeStore fdes;
   private final PeriodicPass pass;
   private volatile Instant tidiedSince = Instant.EPOCH;
+  private final Set<String> untidied = ConcurrentHashMap.newKeySet();
   private final StrandedReviewRescue strandedReviews;
 
   public MissedStopReconciler(
@@ -311,7 +313,8 @@ public final class MissedStopReconciler implements AutoCloseable {
    * staging directory. Only a container that had a run start or finish since {@link #TIDY_LOOKBACK}
    * before the last pass is asked (every one, on the first pass after a start): a launch that dies
    * leaves its file with a run that finishes, by its launch's cleanup or by this sweep. A container
-   * that does not answer, or does not run the tidy (a stopped one), is tried again on a later pass.
+   * that does not answer, or does not run the tidy (a stopped one), is tried again on a later pass,
+   * and said once: not again until its tidy has succeeded.
    */
   void removeLeftovers() {
     var pass = clock.get();
@@ -319,13 +322,16 @@ public final class MissedStopReconciler implements AutoCloseable {
     for (var project : sessionStore.liveRunsByProject(localHandle.get(), tidiedSince).entrySet()) {
       try {
         unitProbe.removeLaunchFiles(project.getKey(), project.getValue());
+        untidied.remove(project.getKey());
       } catch (Exception e) {
         tidied = false;
-        System.err.println(
-            "  [reconcile] could not tidy the launch files of "
-                + project.getKey()
-                + ": "
-                + e.getMessage());
+        if (untidied.add(project.getKey())) {
+          System.err.println(
+              "  [reconcile] could not tidy the launch files of "
+                  + project.getKey()
+                  + ": "
+                  + e.getMessage());
+        }
       }
     }
     if (tidied) {
