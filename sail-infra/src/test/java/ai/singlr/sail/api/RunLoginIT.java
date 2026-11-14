@@ -120,7 +120,7 @@ class RunLoginIT extends AbstractIncusIT {
       var ops = operations(db);
 
       for (var shape : List.of("background", "foreground")) {
-        var spec = "spec-" + shape.substring(0, 2);
+        var spec = shape.equals("background") ? "spec-bg" : "spec-fg";
         var sampled = new ConcurrentLinkedQueue<String>();
         var sampling = new AtomicBoolean(true);
         var sampler = Thread.ofVirtual().start(() -> sample(sampling, sampled));
