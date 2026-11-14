@@ -51,20 +51,23 @@ import Testing
         #expect(steps.map(\.ok) == [true, true, true, true, true, true])
     }
 
-    /// Runs snapshot, drop, attached, same against a fake host whose reattach `answer` gives.
+    /// Runs snapshot, drop, attached, same against a fake host whose reattach `answer` gives. The
+    /// session's answer timeout and the script's waits are the fake host's own bound: the host's
+    /// side is a task on the cooperative pool, which the suite's CPU-heavy tests can hold past 5 s
+    /// on a 3-core runner, and a session that waits 5 s for the welcome closes the connection.
     private func reconnected(answer: (FakeHost.Peer) async throws -> Void) async throws -> [StepResult] {
         let host = try FakeHost()
         let create = SessionCreate(
             session: "work", command: [], workingDirectory: "/tmp", project: "", room: "", size: TerminalSize(columns: 20, rows: 3)
         )
         let session = TerminalSession(
-            open: create, door: .local(host.address), screen: try screen(columns: 20, rows: 3), timeout: 5, stableAfter: .zero,
+            open: create, door: .local(host.address), screen: try screen(columns: 20, rows: 3), timeout: FakeHost.deadline, stableAfter: .zero,
             sleep: Naps().sleep
         )
         let runner = Runner(session: session, host: nil, echoBudget: 10) { _ in }
         let script = try JSONDecoder().decode(Script.self, from: Data("""
-            {"size": [20, 3], "steps": [{"wait": "kept", "within": 5}, {"snapshot": "before"}, {"drop": true},
-              {"phase": "attached", "within": 5}, {"same": "before"}]}
+            {"size": [20, 3], "steps": [{"wait": "kept", "within": \(FakeHost.deadline)}, {"snapshot": "before"}, {"drop": true},
+              {"phase": "attached", "within": \(FakeHost.deadline)}, {"same": "before"}]}
             """.utf8))
         session.start()
         let first = try await host.accept()

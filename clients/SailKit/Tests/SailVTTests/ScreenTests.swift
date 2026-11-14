@@ -144,6 +144,21 @@ import Testing
         #expect(!screen.select(.word(at: CellPoint(x: 25, y: 0))))
     }
 
+    /// A selection extended by words or lines takes whole ones at both ends, in either direction.
+    @Test func aSelectionExtendsByWholeWordsOrLines() throws {
+        let screen = try screen(columns: 20, rows: 3)
+        _ = screen.feed(Array("hello brave world\r\nsecond line".utf8))
+        let brave = CellPoint(x: 7, y: 0)
+        let line = CellPoint(x: 9, y: 1)
+        for (from, to) in [(brave, line), (line, brave)] {
+            #expect(screen.select(.words(from: from, to: to)))
+            #expect(screen.selectedText() == "brave world\nsecond line")
+            #expect(screen.select(.lines(from: from, to: to)))
+            #expect(screen.selectedText() == "hello brave world\nsecond line")
+        }
+        #expect(!screen.select(.words(from: brave, to: CellPoint(x: 25, y: 0))))
+    }
+
     @Test func theMouseIsReportedOnlyToAProgramThatTracksIt() throws {
         let screen = try screen(columns: 20, rows: 5)
         try screen.setCellPixels(width: 10, height: 20)

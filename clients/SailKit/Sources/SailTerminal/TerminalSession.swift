@@ -41,8 +41,10 @@ public final class TerminalSession: Sendable {
     public let screen: Screen
     /// What the session tells the app, the newest ``eventBacklog`` kept for a slow reader.
     public let events: AsyncStream<SessionEvent>
-    /// A tick each time the screen took output; ticks the app has not read yet are one tick.
-    public let screenChanges: AsyncStream<Void>
+    /// A tick each time the screen changed, carrying when it took the output; ticks the app has not
+    /// read yet are one tick, the earliest. One reader for the session's life: a stream whose reader
+    /// stops is over.
+    public let screenChanges: AsyncStream<ContinuousClock.Instant>
 
     private let door: Door
     private let core: Mutex<Core>
@@ -54,7 +56,7 @@ public final class TerminalSession: Sendable {
     private let timeout: Int
     private let stableAfter: Duration
     private let eventSink: AsyncStream<SessionEvent>.Continuation
-    private let screenSink: AsyncStream<Void>.Continuation
+    private let screenSink: AsyncStream<ContinuousClock.Instant>.Continuation
     private let clock = ContinuousClock()
 
     private struct Core {
@@ -150,7 +152,7 @@ public final class TerminalSession: Sendable {
         }
         core = Mutex(initial)
         (events, eventSink) = AsyncStream.makeStream(of: SessionEvent.self, bufferingPolicy: .bufferingNewest(Self.eventBacklog))
-        (screenChanges, screenSink) = AsyncStream.makeStream(of: Void.self, bufferingPolicy: .bufferingNewest(1))
+        (screenChanges, screenSink) = AsyncStream.makeStream(of: ContinuousClock.Instant.self, bufferingPolicy: .bufferingOldest(1))
     }
 
     public var state: SessionState {
@@ -296,6 +298,12 @@ public final class TerminalSession: Sendable {
             return core.resizeTimer
         }
         previous?.cancel()
+    }
+
+    /// The pixel size of one cell, which changes with the font; what that owes the program (an
+    /// in-band size report, mode 2048) is sent at once.
+    public func setCellPixels(width: Int, height: Int) throws(ScreenError) {
+        sendInput(try screen.setCellPixels(width: width, height: height).reply, handedIn: nil)
     }
 
     /// How many replays the session has finished, each onto a screen cleared for it: a screen read
@@ -525,11 +533,12 @@ public final class TerminalSession: Sendable {
             }
             account(applied)
             tap.withLock { $0 }?(bytes)
-            let effects = screen.feed(bytes)
-            latency.withLock { $0.screenUpdated(at: clock.now) }
+            let effects = Signposts.outputToScreen { screen.feed(bytes) }
+            let updated = clock.now
+            latency.withLock { $0.screenUpdated(at: updated) }
             sendInput(effects.reply, handedIn: nil)
             effects.events.forEach { emit(.screen($0)) }
-            screenSink.yield()
+            screenSink.yield(updated)
             armHoldTick()
         case let .replayBegin(safe):
             screen.beginReplay()
@@ -555,7 +564,7 @@ public final class TerminalSession: Sendable {
             if let refit {
                 send(.resize(refit), on: connection)
             }
-            screenSink.yield()
+            screenSink.yield(clock.now)
         case let .resized(size):
             let grid = GridSize(columns: Int(size.columns), rows: Int(size.rows))
             guard Self.fits(grid), let effects = try? screen.resize(grid) else {
@@ -564,7 +573,7 @@ public final class TerminalSession: Sendable {
             core.withLock { $0.ptySize = size }
             sendInput(effects.reply, handedIn: nil)
             emit(.resized(size))
-            screenSink.yield()
+            screenSink.yield(clock.now)
         case let .writerChanged(fde):
             let fit = core.withLock { core -> TerminalSize? in
                 core.state.writer = fde
@@ -683,7 +692,7 @@ public final class TerminalSession: Sendable {
                     } catch {
                         return
                     }
-                    self.screenSink.yield()
+                    self.screenSink.yield(self.clock.now)
                 }
             }
             return core.holdTimer
