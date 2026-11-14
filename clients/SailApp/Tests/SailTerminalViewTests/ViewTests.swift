@@ -387,6 +387,7 @@ import Testing
         try #require(harness.clock.isPaused)
         NotificationCenter.default.post(name: NSWindow.didChangeOcclusionStateNotification, object: harness.window)
         #expect(harness.clock.isPaused, "the window seen again asks no frame of a view that has its drawables")
+        harness.view.isOnScreen = { _ in false }
         harness.view.nextDrawable = { _ in nil }
         harness.view.needFrame()
         harness.tick()
@@ -396,6 +397,9 @@ import Testing
         harness.view.drawNowIfIdle()
         #expect(harness.view.latency.refresh.count == refreshes, "output did not ask for a drawable again")
         #expect(harness.clock.isPaused)
+        NotificationCenter.default.post(name: NSWindow.didChangeOcclusionStateNotification, object: harness.window)
+        #expect(harness.clock.isPaused, "a notification while the window is still off screen")
+        harness.view.isOnScreen = { _ in true }
         NotificationCenter.default.post(name: NSWindow.didChangeOcclusionStateNotification, object: harness.window)
         #expect(!harness.clock.isPaused, "the window seen again resumed the link")
         harness.view.nextDrawable = { $0.nextDrawable() }

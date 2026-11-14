@@ -44,6 +44,8 @@ public final class TerminalView: NSView {
     private var awaitingDrawable = false
     /// An ask for a drawable is under way off the main thread.
     private var askingForDrawable = false
+    /// Whether the window was on screen when last looked at while a drawable was awaited.
+    private var wasOnScreen = false
     /// A drawable that ask brought, for the next frame.
     private var broughtDrawable: (any CAMetalDrawable)?
     /// The cell the pointer last moved into with no button held.
@@ -304,7 +306,9 @@ public final class TerminalView: NSView {
     }
 
     private func askForDrawable() {
-        guard awaitingDrawable, !askingForDrawable, let window, isOnScreen(window), let metalLayer else { return }
+        guard awaitingDrawable, !askingForDrawable, let metalLayer else { return }
+        wasOnScreen = window.map(isOnScreen) ?? false
+        guard wasOnScreen else { return }
         askingForDrawable = true
         let ask = DrawableAsk(view: self, layer: metalLayer, next: nextDrawable)
         DispatchQueue.global(qos: .userInitiated).asyncAfter(deadline: .now() + Self.drawableRetry) {
@@ -333,9 +337,12 @@ public final class TerminalView: NSView {
         1 / Double(max(1, window?.screen?.maximumFramesPerSecond ?? 60))
     }
 
-    /// The window was seen again: a view that paused for want of a drawable asks for one again.
+    /// The window was seen again, having been off screen: a view that paused for want of a
+    /// drawable asks for one again. A notification that changes nothing the view saw does nothing.
     @objc private func visibilityChanged() {
-        guard awaitingDrawable, let window, isOnScreen(window) else { return }
+        let onScreen = window.map(isOnScreen) ?? false
+        defer { wasOnScreen = onScreen }
+        guard awaitingDrawable, onScreen, !wasOnScreen else { return }
         awaitingDrawable = false
         needFrame()
     }
