@@ -18,11 +18,13 @@ import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.AgentUnit;
+import ai.singlr.sail.harness.Harnesses;
 import ai.singlr.sail.harness.RunUsage;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.store.EventStore;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.Finding;
+import ai.singlr.sail.store.MessageStore;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.TestLogins;
 import ai.singlr.sail.store.TestRuns;
@@ -81,7 +83,79 @@ class ReviewLanesTest {
                 + " access token at chatgpt.com/admin/access-tokens (ChatGPT Business and"
                 + " Enterprise), then sail agent login codex --kind token."),
         loop.roomLines("auth", "No Codex CLI login"));
+    assertEquals(
+        List.of(),
+        loop.messages.list("auth", null, 100).stream()
+            .filter(row -> MessageStore.SAIL_AUTHOR.equals(row.author()))
+            .map(MessageStore.MessageRow::body)
+            .filter(body -> body.contains("No Codex CLI login") && !body.startsWith("No Codex"))
+            .toList(),
+        "no other narration quotes the refusal");
     assertTrue(loop.container.live().isEmpty(), "no reviewer started");
+    var review = loop.reviewOf("auth");
+    assertEquals("running", loop.statusOf(review), "a review owed its reviewer, not errored");
+
+    var said = sailLines("auth").size();
+    var reconciler = loop.reconciler(() -> Instant.now().plus(Duration.ofMinutes(5)));
+    for (var pass = 0; pass <= LoopDecision.MAX_ERRORED_RETRIES; pass++) {
+      reconciler.sweep();
+    }
+    assertEquals(said, sailLines("auth").size(), "each pass's refusal says nothing more");
+    assertEquals("running", loop.statusOf(review), "and never escalates");
+
+    TestLogins.store(loop.db, ReviewLoop.HANDLE);
+    loop.onEvent(loginStored());
+
+    assertEquals("review", loop.onlyLive().role(), "storing the login launches it");
+  }
+
+  @Test
+  void aFixRefusedForWantOfALoginSaysOnlyThatAndIsLaunchedOnceTheLoginIsStored() {
+    loop = ReviewLoop.staged(tempDir, "codex", "claude-code");
+    loop.built("auth");
+    var reviewer = loop.onlyLive();
+    var fdes = new FdeStore(loop.db);
+    var person = fdes.byHandle(ReviewLoop.HANDLE).orElseThrow().id();
+    fdes.logins().remove(person, Harnesses.of("claude-code"), "default");
+    var before = sailLines("auth").size();
+
+    loop.finish(reviewer.id(), CRITICAL_FINDING);
+    var reconciler = loop.reconciler(() -> Instant.now().plus(Duration.ofMinutes(5)));
+    for (var pass = 0; pass <= LoopDecision.MAX_ERRORED_RETRIES; pass++) {
+      reconciler.sweep();
+    }
+
+    var said = sailLines("auth").subList(before, sailLines("auth").size());
+    assertEquals(
+        1,
+        said.stream().filter(line -> line.contains("No Claude Code login")).count(),
+        "the refusal is said once and quoted by nothing else: " + said);
+    assertTrue(
+        said.stream().noneMatch(line -> line.contains("fix iteration failed")), said.toString());
+    assertTrue(loop.container.live().isEmpty(), "no fix started");
+    assertEquals(SpecStatus.REVIEW, loop.specStatus("auth"), "not handed to a person");
+
+    TestLogins.store(loop.db, ReviewLoop.HANDLE);
+    loop.onEvent(loginStored());
+
+    assertEquals("fix", loop.onlyLive().role(), "storing the login launches the fix");
+  }
+
+  private static Event loginStored() {
+    return Event.of(
+        Event.SAIL_AGENT,
+        null,
+        LoginOperations.STORED,
+        ReviewLoop.HANDLE,
+        "host",
+        Map.of("person", ReviewLoop.HANDLE, "harness", "claude-code"));
+  }
+
+  private List<String> sailLines(String specId) {
+    return loop.messages.list(specId, null, 100).stream()
+        .filter(row -> MessageStore.SAIL_AUTHOR.equals(row.author()))
+        .map(MessageStore.MessageRow::body)
+        .toList();
   }
 
   @Test

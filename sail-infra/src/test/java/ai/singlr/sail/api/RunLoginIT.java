@@ -161,8 +161,9 @@ class RunLoginIT extends AbstractIncusIT {
                 "set -e;"
                     + " userdel -r ubuntu 2>/dev/null || true;"
                     + " id -u dev >/dev/null 2>&1 || useradd -m -u 1000 -s /bin/bash dev;"
-                    + " mkdir -p /home/dev/.sail/bin /home/dev/workspace/app"
+                    + " mkdir -p /home/dev/.sail/bin /home/dev/.sail/runs /home/dev/workspace/app"
                     + " /home/dev/workspace/web /run/sail-it-stub;"
+                    + " for i in 1 2 3 4 5 6; do mkdir -p /home/dev/workspace/r$i; done;"
                     + " echo 'export CODEX_ACCESS_TOKEN=container-token' >> /home/dev/.profile;"
                     + " chown -R dev:dev /home/dev;"
                     + " for i in $(seq 1 30); do"
@@ -293,6 +294,63 @@ class RunLoginIT extends AbstractIncusIT {
     }
   }
 
+  /**
+   * However wide the dev user's home, another user of the container never sees a run's {@code
+   * launch.env}: through six launches, a second user samples every run directory's mode and tries
+   * the file in each, and every directory it sees is {@code 0700} with no file seen, let alone
+   * read. {@code incus file push} writes the file before it sets its {@code 0600}, so only the
+   * directory keeps it.
+   */
+  @Test
+  void anotherUserOfTheContainerNeverSeesALaunchFileAtAnyInstant() throws Exception {
+    var opened =
+        exec(
+            CONTAINER,
+            List.of(
+                "sh",
+                "-c",
+                "useradd -m other && chmod 0755 /home/dev /home/dev/.sail /home/dev/.sail/runs"
+                    + " && systemd-run --quiet --unit=sail-it-other-sampler --uid=other sh -c "
+                    + "'while [ ! -e /tmp/sampler-stop ]; do"
+                    + " for d in /home/dev/.sail/runs/*/; do"
+                    + " [ -d \"$d\" ] || continue;"
+                    + " echo \"dir $(stat -c %a \"$d\" 2>/dev/null) $d\";"
+                    + " if [ -e \"$d/launch.env\" ]; then echo \"file $d\";"
+                    + " head -c1 \"$d/launch.env\" > /dev/null 2>&1 && echo \"READ $d\"; fi;"
+                    + " done >> /tmp/samples; sleep 0.005; done'"));
+    assertTrue(opened.ok(), "the second user's sampler never started: " + opened.stderr());
+    try (var db = database()) {
+      var fdes = new FdeStore(db);
+      var id = fdes.add(HANDLE, null, null, "admin").id();
+      fdes.logins().store(id, Harnesses.of("codex"), null, "api-key", KEY);
+      var ops = operations(db);
+      var runs = new java.util.ArrayList<String>();
+      for (var i = 1; i <= 6; i++) {
+        seedSpec(new SpecStore(db), "spec-m" + i, "r" + i);
+        var runId = dispatch(ops, "spec-m" + i, "background").runId();
+        awaitStarted(runId);
+        runs.add(runId);
+      }
+      exec(CONTAINER, List.of("sh", "-c", "touch /tmp/sampler-stop; sleep 1"));
+
+      var samples = exec(CONTAINER, List.of("sort", "-u", "/tmp/samples")).stdout();
+      for (var runId : runs) {
+        assertTrue(
+            samples.contains("dir 700 /home/dev/.sail/runs/" + runId + "/"),
+            "the second user sampled run " + runId + "'s directory: " + samples);
+      }
+      assertTrue(
+          samples
+              .lines()
+              .filter(line -> line.startsWith("dir "))
+              .allMatch(line -> line.startsWith("dir 700 ")),
+          "every run directory it saw was the dev user's alone: " + samples);
+      assertFalse(
+          samples.contains("file ") || samples.contains("READ "),
+          "no launch.env was ever seen by another user: " + samples);
+    }
+  }
+
   @Test
   void aSpecRunWhosePersonStoredNoLoginIsRefusedWithNoRowAndNoUnit() throws Exception {
     try (var db = database()) {
@@ -330,6 +388,18 @@ class RunLoginIT extends AbstractIncusIT {
             path: app
           - url: https://example.invalid/web.git
             path: web
+          - url: https://example.invalid/r1.git
+            path: r1
+          - url: https://example.invalid/r2.git
+            path: r2
+          - url: https://example.invalid/r3.git
+            path: r3
+          - url: https://example.invalid/r4.git
+            path: r4
+          - url: https://example.invalid/r5.git
+            path: r5
+          - url: https://example.invalid/r6.git
+            path: r6
         agent:
           type: codex
         """

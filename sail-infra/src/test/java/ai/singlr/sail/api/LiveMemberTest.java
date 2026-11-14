@@ -89,6 +89,7 @@ class LiveMemberTest {
         started.secrets().get("CLAUDE_CODE_OAUTH_TOKEN"),
         "a member of a spec's room starts with its person's stored login");
     assertEquals(new RunStore.RunLogin("default", "token"), run.login());
+    assertEquals(LiveRoom.HANDLE, run.dispatchedBy(), "the person whose message woke it");
     assertEquals(null, room.container.file(unit.launchEnvPath()), "read and removed");
     assertEquals(unit.pidPath(), started.pidFile());
     assertEquals(unit.logPath(), started.logFile());

@@ -85,7 +85,7 @@ final class ReviewNarration {
         + " review attempts errored in a row at iteration "
         + iteration
         + ", the last: "
-        + Objects.requireNonNullElse(lastError, "no error recorded")
+        + (lastError == null ? "no error recorded" : clause(lastError))
         + ". Re-dispatch with --restart once that is fixed";
   }
 
@@ -130,8 +130,14 @@ final class ReviewNarration {
   /** Why the build did not go on with the answer, and how a person moves it from here. */
   static String resumeFailed(String why) {
     return "The build could not go on with your answer: "
-        + why
+        + clause(why)
         + ". Re-dispatch it with --restart once that is fixed.";
+  }
+
+  /** {@code why} without the full stop that ends it, for a sentence that goes on after it. */
+  private static String clause(String why) {
+    var text = Objects.requireNonNullElse(why, "").strip();
+    return text.endsWith(".") ? text.substring(0, text.length() - 1) : text;
   }
 
   private static String firstLine(String text) {
@@ -157,7 +163,7 @@ final class ReviewNarration {
 
   /** Why a review whose fix iteration failed, for {@code why}, is a person's. */
   static String fixFailed(String why) {
-    return "fix iteration failed — " + why + "; triage and re-dispatch";
+    return "fix iteration failed — " + clause(why) + "; triage and re-dispatch";
   }
 
   /** Why a review whose {@code agent} an operator stopped is a person's. */

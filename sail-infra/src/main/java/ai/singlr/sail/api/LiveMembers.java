@@ -485,7 +485,7 @@ public final class LiveMembers implements RoomWakeReactor.Live, AutoCloseable {
               env,
               role,
               null,
-              null));
+              RunLauncher.wokenBy(unread)));
       if (!full) {
         guard.captureRoomBaseline(seat.project(), config, runId);
       }
@@ -500,7 +500,7 @@ public final class LiveMembers implements RoomWakeReactor.Live, AutoCloseable {
               null,
               resumed.map(RunStore.RunRow::sessionId).orElse(null),
               env.login(),
-              null));
+              RunLauncher.wokenBy(unread)));
       handle =
           processes.start(
               seat.project(),

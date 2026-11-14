@@ -13,6 +13,7 @@ import ai.singlr.sail.engine.AgentSession;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.SnapshotManager;
 import ai.singlr.sail.engine.WatcherSpawner;
+import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.MessageStore;
 import ai.singlr.sail.store.ReviewStore;
@@ -285,6 +286,11 @@ public final class DispatchOperations {
    * Says {@code body} in the room of {@code specId} as sail, best-effort: a line telling of what a
    * launch skipped must never fail the launch. Silent on a box that keeps no messages.
    */
+  /**
+   * Says {@code body} in {@code specId}'s room as Sail's own machinery, whoever's request is being
+   * served, as the loop narrates: the line is Sail's, posted as {@link Actor#system} on this box
+   * and carried to main as every narration of this box is.
+   */
   private void tellRoom(String specId, String body) {
     var messages = messageStore;
     if (messages == null || specStore == null) {
@@ -292,7 +298,9 @@ public final class DispatchOperations {
     }
     try {
       var room = specStore.findById(specId).map(SpecStore.SpecRow::roomIdOrIdentity).orElse(specId);
-      messages.append(room, MessageStore.SAIL_AUTHOR, MessageStore.fitted(body), null);
+      Actor.run(
+          Actor.system(),
+          () -> messages.append(room, MessageStore.SAIL_AUTHOR, MessageStore.fitted(body), null));
     } catch (RuntimeException e) {
       System.err.println(
           "  [api] Warning: could not post to the room of spec " + specId + ": " + e.getMessage());

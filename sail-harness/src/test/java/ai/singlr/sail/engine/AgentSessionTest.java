@@ -23,6 +23,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.FileTime;
+import java.nio.file.attribute.PosixFilePermissions;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -1103,18 +1104,34 @@ class AgentSessionTest {
   }
 
   @Test
-  void writeTaskFileCreatesTheRunScopedParentDirectoryBeforeWriting() throws Exception {
+  void writeTaskFileMakesTheRunsDirectoryTheDevUsersAloneBeforeWriting(@TempDir Path home)
+      throws Exception {
     var shell = new ScriptedShellExecutor(new ShellExec.Result(0, "", ""));
     var unit = AgentUnit.forRun("0197a2f0-0000-7000-8000-000000000001");
 
     new AgentSession(shell).writeTaskFile("acme", "do it", unit);
 
-    var cmd = shell.invocations().getFirst();
+    var argv = shell.arguments().getFirst();
+    var script = argv.get(argv.indexOf("-c") + 1);
     assertTrue(
-        cmd.contains("mkdir -p \"$(dirname \"$2\")\" && printf"),
-        "the run directory must exist before the redirect: dispatch stages the task before the"
-            + " launch script's own mkdir runs");
-    assertTrue(cmd.contains(unit.taskPath()));
+        script.startsWith("install -d -m 0700 \"$(dirname \"$2\")\" && printf"),
+        "the run directory is private before the redirect, and before launch.env is pushed into"
+            + " it: dispatch stages the task first");
+    assertEquals(unit.taskPath(), argv.getLast());
+    var found = Files.createDirectories(home.resolve("runs/r1"));
+    Files.setPosixFilePermissions(found, PosixFilePermissions.fromString("rwxr-xr-x"));
+    for (var task : List.of(home.resolve("runs/r1/task.md"), home.resolve("runs/r2/task.md"))) {
+      var ran =
+          new ProcessBuilder("bash", "-c", script, "bash", "do it", task.toString())
+              .redirectErrorStream(true)
+              .start();
+      assertTrue(ran.waitFor(30, TimeUnit.SECONDS));
+      assertEquals(0, ran.exitValue(), new String(ran.getInputStream().readAllBytes()));
+      assertEquals(
+          "rwx------",
+          PosixFilePermissions.toString(Files.getPosixFilePermissions(task.getParent())));
+      assertEquals("do it", Files.readString(task));
+    }
   }
 
   @Test

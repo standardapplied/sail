@@ -59,6 +59,12 @@ sealed interface LoopTrigger {
   record Freed() implements LoopTrigger {}
 
   /**
+   * A person stored a login, or made one the default: a launch refused for want of one (a reviewer,
+   * a fix, a resume) is owed again.
+   */
+  record LoginStored() implements LoopTrigger {}
+
+  /**
    * A step left the review with something owed and nothing new to decide on: a gate just failed.
    * The loop goes on from what the rows owe, as it does for a late or replayed stop.
    */

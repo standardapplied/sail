@@ -3702,11 +3702,23 @@ no pairing is removed through the gateway as before, and no key file is touched.
     login) before anything is reserved, and refuses a spec run whose person has none
     (`login_not_stored`), naming how to make each kind and the command that stores it; there is no
     fallback to another login, another person's or the container's. A dry-run dispatch is refused
-    the same way. When a run Sail launches itself (a room wake, a resumed build, a review, a fix) or
-    a person's dispatch is refused so, `RunLogins.forRun` says it once in the spec's room with the
-    same remedy, once per spec per cause until a run of that spec starts with a login. After the reservation, `RunLauncher.stage` pushes the run's
+    the same way: its read-only probes (the container's state) run on the shell's observer
+    (`ShellExec.observer`), which executes even in a dry run, so it reaches the login check. When
+    a run Sail launches itself (a room wake, a resumed build, a review, a fix) or a person's
+    dispatch is refused so, `RunLogins.forRun` says it once in the spec's room with the same
+    remedy, once per spec per cause until a run of that spec starts with a login. The line is
+    posted as this box's machinery (`Actor.system`), whoever's request met the refusal, as the
+    loop narrates, and reaches main as every narration of the box does: once the box holds a run
+    in that conversation, since main takes a box's `sail` post only there. No other narration
+    quotes the refusal: a refused review, fix or resume leaves the loop owed what it was
+    (`RunLogins.wantsALogin`), and storing a login, or making one the default
+    (`LoopTrigger.LoginStored`), takes that step on the box that drives the loop: the reviewer of a
+    review no run serves, an owed fix, or the answered build's resume. After the reservation,
+    `RunLauncher.stage` pushes the run's
     `launch.env` (`/home/dev/.sail/runs/<run>/launch.env`, `0600`, the dev user's) through
-    `ContainerFilePush.pushAsDev`, one `NAME=value` line each: `SAIL_RUN_CREDENTIAL` and, for a
+    `ContainerFilePush.pushAsDev` into the run's directory, which the run's task file made the dev
+    user's alone (`0700`, `AgentSession.writeTaskFile`) before anything was pushed into it, since
+    `incus file push` writes a file before it sets its mode; one `NAME=value` line each: `SAIL_RUN_CREDENTIAL` and, for a
     spec run, every other credential variable the harness reads (`Harness.loginVariables`) set
     empty and then the variable the login's kind names, so a credential the container's profile
     exports cannot outrank the stored login (each harness treats an empty variable as unset). A
@@ -3734,8 +3746,9 @@ no pairing is removed through the gateway as before, and no key file is touched.
     each just before deleting, so a person added meanwhile keeps theirs. `FdeStore.delete` removes
     a person's logins once the removal commits.
   - *What a run records.* `login` (the name, or `container`), `login_kind`, and `dispatched_by`
-    (the person whose request launched it, none for the loop, a room wake or a resumed build), at
-    its launch, synced with the run.
+    (the person whose request launched it: a dispatch's caller, or for a room's run the person whose
+    message woke it, `RunLauncher.wokenBy`; none for Sail's own machinery, the loop's reviews,
+    fixes and resumed builds), at its launch, synced with the run.
   - *What it cannot hide.* A run's harness holds its person's login in its environment for the
     run's whole life. Whoever can prompt an agent acting for a person (a room's members, a spec's
     author, a repo's files the agent reads) can try to make it reveal that login, and Sail's

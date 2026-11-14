@@ -40,6 +40,20 @@ final class RunLogins {
   }
 
   /**
+   * Whether {@code failure}, or what it wraps, is a run refused for want of a stored login: what
+   * {@link #forRun} has already said in the spec's room, so no lane that met it says more.
+   */
+  static boolean wantsALogin(Throwable failure) {
+    for (var cause = failure; cause != null; cause = cause.getCause()) {
+      if (cause instanceof ApiException refused
+          && refused.failure().errorCode() == ErrorCode.LOGIN_NOT_STORED) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /**
    * {@link #resolve}, saying a refusal in the spec's room the first time it is met for this cause,
    * and forgetting what was said once a run of the spec has its login.
    */

@@ -547,6 +547,58 @@ class RoomWakeLaunchTest {
     assertEquals(List.of(), runStore.listForSpec("auth"));
   }
 
+  /**
+   * A person's own dispatch, refused for want of their login, is said in the spec's room by Sail as
+   * the loop narrates there: posted as this box's machinery, whoever asked, as on a node where the
+   * person's own credential may not write as {@code sail}.
+   */
+  @Test
+  void aPersonsDispatchRefusedForWantOfALoginIsSaidInTheRoomBySail() throws Exception {
+    var ops = operations(liveAgentShell());
+    createSpec(HANDLE, "auth", HANDLE);
+    var fdes = new FdeStore(db);
+    fdes.logins().forget(fdes.byHandle(HANDLE).orElseThrow().id());
+    var person = new Actor(HANDLE, Role.MEMBER, Actor.Lane.CLI);
+
+    var refused =
+        assertThrows(
+            ApiException.class,
+            () ->
+                Actor.call(
+                    person,
+                    () ->
+                        ops.dispatch(
+                            "acme",
+                            new DispatchOperations.Request(
+                                "auth", "background", false, null, false),
+                            HANDLE)));
+
+    assertEquals(ErrorCode.LOGIN_NOT_STORED, refused.failure().errorCode());
+    var said = messageStore.list("auth", null, 20);
+    assertEquals(1, said.size(), said.toString());
+    assertEquals(MessageStore.SAIL_AUTHOR, said.getFirst().author());
+    assertTrue(said.getFirst().body().startsWith("No Claude Code login stored for uday"));
+  }
+
+  @Test
+  void aWakeRecordsThePersonWhoseMessageWokeItAndSailsOwnLinesWakeNoOne() throws Exception {
+    var ops = operations(liveAgentShell());
+    seedSpec("auth");
+    Acting.system(() -> messageStore.append("auth", "uday", "what did you ship?", null));
+    Acting.system(() -> messageStore.append("auth", "sail", "Review passed.", null));
+
+    var woken = runStore.findById(ops.startRoomRun("acme", "auth", HANDLE)).orElseThrow();
+
+    assertEquals("uday", woken.dispatchedBy(), "a person's message woke it");
+    assertEquals(
+        null,
+        RunLauncher.wokenBy(
+            List.of(
+                messageStore.list("auth", null, 20).getLast(),
+                Acting.system(() -> messageStore.append("auth", "claude/room-r1", "Done.", null)))),
+        "Sail's own line and an agent's wake no one");
+  }
+
   @Test
   void aWakeMintsARoomRunAndSeedsTheLedgerWithTheRenderedMessages() throws Exception {
     var ops = operations(liveAgentShell());

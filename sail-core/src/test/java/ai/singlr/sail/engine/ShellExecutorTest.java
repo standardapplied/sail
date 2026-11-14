@@ -7,6 +7,7 @@ package ai.singlr.sail.engine;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -25,6 +26,18 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 class ShellExecutorTest {
+
+  @Test
+  void aDryRunsObserverRunsItsProbeAndARealShellIsItsOwnObserver() throws Exception {
+    var dryRun = new ShellExecutor(true);
+    var real = new ShellExecutor(false);
+
+    var probe = dryRun.observer().exec(List.of("echo", "really-ran"));
+
+    assertEquals("really-ran", probe.stdout().strip());
+    assertFalse(dryRun.observer().isDryRun());
+    assertSame(real, real.observer());
+  }
 
   @Test
   void aFailuresReasonIsWhatItSaidOrItsExitCodeWhenItSaidNothing() {

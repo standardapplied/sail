@@ -177,7 +177,7 @@ public final class RoomWakeLauncher {
                   env,
                   role,
                   resumeSessionId,
-                  null));
+                  RunLauncher.wokenBy(room)));
       runLauncher.finishLaunch(
           new RunLauncher.RunContext(project, unit, runId, specId, agentType, role, true), launch);
       return runId;
@@ -289,7 +289,7 @@ public final class RoomWakeLauncher {
                   env,
                   role,
                   null,
-                  null));
+                  RunLauncher.wokenBy(conversation)));
       runLauncher.finishLaunch(
           new RunLauncher.RunContext(project, unit, runId, roomId, agentType, role, true), launch);
       return runId;

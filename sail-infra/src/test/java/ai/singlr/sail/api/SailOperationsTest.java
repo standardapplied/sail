@@ -582,11 +582,32 @@ class SailOperationsTest {
     seedAuthBillingSetup(store);
     var fdeStore = new FdeStore(db);
     fdeStore.add(LOCAL_HANDLE, null, null, "admin");
+    var observer = shell().on("incus list ^acme$", RUNNING_JSON);
+    var dryRun =
+        new ShellExec() {
+          @Override
+          public Result exec(List<String> command) {
+            return new Result(0, "", "");
+          }
+
+          @Override
+          public Result exec(List<String> command, Path workDir, Duration timeout) {
+            return exec(command);
+          }
+
+          @Override
+          public boolean isDryRun() {
+            return true;
+          }
+
+          @Override
+          public ShellExec observer() {
+            return observer;
+          }
+        };
     var operations =
         new SailOperations(
-            shell()
-                .on("incus list ^acme$", RUNNING_JSON)
-                .on("cat /home/dev/.sail/agent.pid", new ShellExec.Result(1, "", "missing")),
+            dryRun,
             TestProjects.reading(yaml),
             null,
             store,
@@ -601,6 +622,9 @@ class SailOperationsTest {
 
     assertError(ErrorCode.LOGIN_NOT_STORED, error);
     assertEquals(SpecStatus.PENDING, store.findById("auth").orElseThrow().status());
+    assertTrue(
+        observer.invocations().stream().anyMatch(call -> call.startsWith("incus list")),
+        "the dry run read the container's state from a shell that runs it");
   }
 
   @Test

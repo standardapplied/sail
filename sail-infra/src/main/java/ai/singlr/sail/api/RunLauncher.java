@@ -22,6 +22,7 @@ import ai.singlr.sail.engine.RunUsageReader;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.WatcherSpawner;
 import ai.singlr.sail.harness.Harnesses;
+import ai.singlr.sail.store.MessageStore;
 import ai.singlr.sail.store.RunStore;
 import java.io.IOException;
 import java.util.LinkedHashMap;
@@ -82,6 +83,21 @@ public final class RunLauncher {
   }
 
   record LaunchOutcome(int exitCode, Optional<WatcherSpawner.Spawned> watcher) {}
+
+  /**
+   * Who woke a room's run, as its {@code dispatchedBy}: the author of the newest of {@code
+   * messages} (the room as the run is shown it, oldest first) that a person wrote, or null when
+   * every one is Sail's own or an agent's.
+   */
+  static String wokenBy(List<MessageStore.MessageRow> messages) {
+    for (var i = messages.size() - 1; i >= 0; i--) {
+      var author = messages.get(i).author();
+      if (RoomWakePolicy.humanAuthor(author)) {
+        return author;
+      }
+    }
+    return null;
+  }
 
   /**
    * Everything one agent launch needs, in one value so the launch seam is a single parameter rather
@@ -212,8 +228,10 @@ public final class RunLauncher {
    * Stages everything a run needs in its container before its process starts: sail's helpers and
    * settings files, the skills its harness reads, the run's own task and session files, which are
    * what let the {@code spec} CLI speak for it, and last its {@code launch.env}, {@code 0600} and
-   * the dev user's, which its wrapper reads and removes before its harness starts. A live member,
-   * which is started over pipes rather than as a unit, stages exactly as a launched run does.
+   * the dev user's in the run's directory, which the task file made the dev user's alone ({@code
+   * 0700}) before anything was pushed into it ({@link AgentSession#writeTaskFile}), and which its
+   * wrapper reads and removes before its harness starts. A live member, which is started over pipes
+   * rather than as a unit, stages exactly as a launched run does.
    */
   void stage(LaunchSpec s) {
     try {

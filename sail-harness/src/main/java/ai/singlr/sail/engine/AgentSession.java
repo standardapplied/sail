@@ -71,9 +71,12 @@ public final class AgentSession {
   /**
    * Writes the task/prompt file for the given role's unit (build task or review prompt). Uses
    * printf with a positional argument to avoid heredoc injection (content containing the delimiter
-   * could escape the heredoc). Creates the file's parent directory first: a run-scoped unit lives
-   * under {@code ~/.sail/runs/<runId>/}, which does not exist yet when the launcher stages the task
-   * before launch.
+   * could escape the heredoc). Makes the file's parent directory first, the dev user's alone
+   * ({@code 0700}, set on a directory found otherwise too): a run-scoped unit lives under {@code
+   * ~/.sail/runs/<runId>/}, which does not exist yet when the launcher stages the task, and the
+   * run's {@code launch.env} is pushed into it after, by {@code incus file push}, which writes a
+   * file before it sets its mode: only a directory no other user may enter keeps the secrets from
+   * them at every instant.
    */
   public void writeTaskFile(String containerName, String task, AgentUnit unit)
       throws IOException, InterruptedException, TimeoutException {
@@ -83,7 +86,7 @@ public final class AgentSession {
             List.of(
                 "bash",
                 "-c",
-                "mkdir -p \"$(dirname \"$2\")\" && printf '%s' \"$1\" > \"$2\"",
+                "install -d -m 0700 \"$(dirname \"$2\")\" && printf '%s' \"$1\" > \"$2\"",
                 "bash",
                 task,
                 unit.taskPath()));
