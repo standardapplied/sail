@@ -769,6 +769,63 @@ class StopOperationsTest {
   }
 
   @Test
+  void aProjectTargetWithTwoSpecsLiveIsRefusedNamingEachAndTheSpecFormStopsOne() throws Exception {
+    var shell = liveAgentShell();
+    var ops = stopOps(shell, killingHalter(shell), StopOperations.Listener.NONE);
+    seedSpec("auth", SpecStatus.IN_PROGRESS, LOCAL_HANDLE);
+    seedSpec("billing", SpecStatus.IN_PROGRESS, LOCAL_HANDLE);
+    seedRun(123, UNIT);
+    Acting.system(
+        () ->
+            runStore.create(
+                R2,
+                "acme",
+                "billing",
+                LOCAL_HANDLE,
+                "build",
+                "codex",
+                "feat/billing",
+                "do it",
+                124,
+                null,
+                "/home/dev/.sail/runs/" + R2 + "/agent.log",
+                "sail-agent-" + R2));
+
+    var refused =
+        assertThrows(
+            ApiException.class,
+            () ->
+                Actor.call(
+                    ADMIN,
+                    () ->
+                        ops.stop(
+                            new StopOperations.ProjectTarget("acme", null), LOCAL_HANDLE, false)));
+
+    assertEquals(ErrorCode.CONFLICT, refused.failure().errorCode());
+    assertEquals(
+        "Project acme has 2 live runs on this box, of billing, auth, so no one of them is the"
+            + " project's run.",
+        refused.getMessage());
+    assertEquals(
+        "Name the one to stop: sail agent stop acme --spec billing, sail agent stop acme --spec"
+            + " auth.",
+        refused.failure().remedy().plain());
+    assertEquals("running", runStore.findById(R1).orElseThrow().status());
+    assertEquals("running", runStore.findById(R2).orElseThrow().status());
+
+    var stopped =
+        assertInstanceOf(
+            StopOperations.Stopped.class,
+            Actor.call(
+                ADMIN,
+                () ->
+                    ops.stop(
+                        new StopOperations.ProjectTarget("acme", "auth"), LOCAL_HANDLE, false)));
+    assertEquals(R1, stopped.runId());
+    assertEquals("running", runStore.findById(R2).orElseThrow().status());
+  }
+
+  @Test
   void aProjectOutsideTheCallersScopeIsNotInTheCatalogWhetherOrNotItRuns() throws Exception {
     var ops = stopOps(liveAgentShell(), failingHalter(), StopOperations.Listener.NONE);
     var outside = ADMIN.withScope(ProjectScope.of(List.of("beta")));
@@ -1355,7 +1412,12 @@ class StopOperationsTest {
             .on(
                 "incus list ^acme$",
                 """
-                [{"name": "acme", "status": "Stopped", "state": {}}]
+                [{"name": "acme", "status": "Running", "state": {}}]
+                """)
+            .on(
+                "incus list ^acme-auth$",
+                """
+                [{"name": "acme-auth", "status": "Stopped", "state": {}}]
                 """);
     var ops = stopOps(shell, failingHalter(), StopOperations.Listener.NONE);
     seedSpec("auth", SpecStatus.IN_PROGRESS, LOCAL_HANDLE);
@@ -1368,7 +1430,7 @@ class StopOperationsTest {
     assertEquals(
         "stopped",
         runStore.findById(R1).orElseThrow().status(),
-        "a stopped container runs no agent: that is incus's answer, and it is one");
+        "a stopped workspace runs no agent: that is incus's answer, and it is one");
     assertEquals(SpecStatus.CANCELLED, specStore.findById("auth").orElseThrow().status());
   }
 

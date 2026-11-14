@@ -660,7 +660,7 @@ public final class Workspaces {
 
   private static IllegalStateException noTemplate(String project) {
     return Remedied.state(
-        project + " has no template yet",
+        project + " has no template yet:",
         Remedy.of(Remedy.sail("project template build", project)));
   }
 

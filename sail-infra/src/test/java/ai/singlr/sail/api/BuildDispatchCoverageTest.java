@@ -14,6 +14,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.engine.ContainerSailSetup;
+import ai.singlr.sail.engine.ScriptedShellExecutor;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.WatcherSpawner;
 import ai.singlr.sail.identity.Acting;
@@ -275,7 +276,7 @@ class BuildDispatchCoverageTest {
 
     assertEquals(ErrorCode.BRANCH_CREATE_FAILED, thrown.failure().errorCode());
     assertEquals(
-        "Failed to create branch 'sail/auth' in repo 'app':"
+        "Failed to put repo 'app' on branch 'sail/auth' in acme-auth:"
             + " fatal: cannot lock ref 'refs/heads/sail/auth'",
         thrown.getMessage());
   }
@@ -462,7 +463,7 @@ class BuildDispatchCoverageTest {
   void aResumedBuildRunsOnTheTreeItsBuildLeftAndRecordsNoRestart() throws IOException {
     var db = inProgress(seedDb());
     Acting.system(() -> new SpecStore(db).setContent("auth", "", ""));
-    var shell = happyPath();
+    var shell = happyPath().on(REPO + " rev-parse --abbrev-ref HEAD", "main\n");
     var events = new CopyOnWriteArrayList<Event>();
     var ops = ops(shell, YAML, db, new RunStore(db), events);
 
@@ -482,7 +483,7 @@ class BuildDispatchCoverageTest {
   @Test
   void aResumeAnotherRunHoldsTheClaimOfIsDeferredAndWritesNothing() throws IOException {
     var db = inProgress(seedDb());
-    var ops = ops(happyPath(), YAML, db);
+    var ops = ops(happyPath().on(REPO + " rev-parse --abbrev-ref HEAD", "main\n"), YAML, db);
     resume(ops);
     var runs = new RunStore(db);
     var holder = runs.latestLoopRun("auth").orElseThrow();
@@ -533,18 +534,19 @@ class BuildDispatchCoverageTest {
     var shell =
         happyPath()
             .on(REPO + " rev-parse --abbrev-ref HEAD", "sail/other\n")
+            .on(REPO + " rev-parse --verify --quiet refs/heads/sail/auth", "")
             .on(REPO + " status --porcelain", "")
-            .on(REPO + " checkout sail/auth --", "");
+            .on(REPO + " switch --quiet sail/auth", "");
     var ops = ops(shell, YAML, db);
 
     assertInstanceOf(ReviewLanes.Launch.Started.class, resume(ops));
 
-    assertTrue(ranContaining(shell, REPO + " checkout sail/auth --"));
+    assertTrue(ranContaining(shell, REPO + " switch --quiet sail/auth"));
   }
 
   @ParameterizedTest
   @CsvSource({
-    "' M README.md',0,it holds uncommitted work of sail/other",
+    "' M README.md',0,is on branch 'sail/other' with uncommitted work",
     "'',1,error: pathspec",
   })
   void aResumeOverATreeItCannotTakeFailsLoudAndLeavesNoRun(
@@ -554,9 +556,10 @@ class BuildDispatchCoverageTest {
         happyPath()
             .on("tr -d '[:space:]'", "gone\n")
             .on(REPO + " rev-parse --abbrev-ref HEAD", "sail/other\n")
+            .on(REPO + " rev-parse --verify --quiet refs/heads/sail/auth", "")
             .on(REPO + " status --porcelain", status + "\n");
     if (checkoutExit != 0) {
-      shell.refuse(REPO + " checkout sail/auth --", "error: pathspec 'sail/auth' did not match");
+      shell.refuse(REPO + " switch --quiet sail/auth", "error: pathspec 'sail/auth' did not match");
     }
     var runs = new RunStore(db);
     var ops = ops(shell, YAML, db, runs);
@@ -809,7 +812,8 @@ class BuildDispatchCoverageTest {
           return entry.getValue();
         }
       }
-      return new Result(1, "", "no script for " + joined);
+      return ScriptedShellExecutor.reachableContainer(joined)
+          .orElseGet(() -> new Result(1, "", "no script for " + joined));
     }
 
     @Override

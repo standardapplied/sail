@@ -771,9 +771,7 @@ class DoorParityTest {
                     tempDir,
                     config),
             () -> person);
-    var ran =
-        SailCli.run(
-            command, "-p", "acme", "--spec", "e1", "--background", "--no-sync", "--no-snapshot");
+    var ran = SailCli.run(command, "-p", "acme", "--spec", "e1", "--background", "--no-sync");
     return hostCli(ran);
   }
 

@@ -15,6 +15,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.config.Lane;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.engine.RunPlace;
 import ai.singlr.sail.harness.RunUsage;
@@ -200,8 +201,9 @@ class LoopStepsTest {
     return loop.runs.findById(reviewer.id()).orElseThrow();
   }
 
+  /** A full chat turn of the spec, at work in its workspace over the repos its loop would claim. */
   private String holder() {
-    return loop.liveRun("billing", "build");
+    return loop.liveRun(SPEC, Lane.ROOM_FULL.wire());
   }
 
   @Test

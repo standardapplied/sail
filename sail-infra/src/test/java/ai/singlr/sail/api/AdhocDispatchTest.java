@@ -15,6 +15,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.engine.ContainerSailSetup;
 import ai.singlr.sail.engine.ProjectSkillInstaller;
+import ai.singlr.sail.engine.RunPlace;
 import ai.singlr.sail.engine.SailSkills;
 import ai.singlr.sail.engine.ScriptedShellExecutor;
 import ai.singlr.sail.engine.ShellExec;
@@ -408,34 +409,29 @@ class AdhocDispatchTest {
   }
 
   @Test
-  void anAdhocSessionBlocksDispatchAndDispatchBlocksAdhoc() throws Exception {
+  void anAdhocSessionAndASpecsDispatchRunAtOnceEachInItsOwnPlace() throws Exception {
     var ops = operations(liveAgentShell());
     seedSpec("auth");
-    ops.startAdhoc("acme", background("task"), HANDLE);
+    var adhoc = ops.startAdhoc("acme", background("task"), HANDLE);
 
-    var refusal =
-        assertThrows(
-            ApiException.class,
+    var dispatched =
+        Actor.call(
+            ADMIN,
             () ->
-                Actor.call(
-                    ADMIN,
-                    () ->
-                        ops.dispatch(
-                            "acme",
-                            new DispatchOperations.Request(
-                                "auth", "background", false, null, false),
-                            HANDLE)));
+                ops.dispatch(
+                    "acme",
+                    new DispatchOperations.Request("auth", "background", false, null, false),
+                    HANDLE));
 
-    assertEquals(ErrorCode.AGENT_ALREADY_RUNNING, refusal.failure().errorCode());
-    assertTrue(refusal.getMessage().contains("Ad-hoc agent run"), refusal.getMessage());
-    assertEquals(
-        SpecStatus.PENDING,
-        specStore.findById("auth").orElseThrow().status(),
-        "the refused dispatch never claims the spec");
+    var build = ((DispatchOperations.Dispatched) dispatched).runId();
+    assertEquals(RunPlace.of("acme", null), runStore.findById(adhoc.runId()).orElseThrow().place());
+    assertEquals(RunPlace.of("acme", "auth"), runStore.findById(build).orElseThrow().place());
+    assertEquals("running", runStore.findById(adhoc.runId()).orElseThrow().status());
+    assertEquals("running", runStore.findById(build).orElseThrow().status());
   }
 
   @Test
-  void aRunningDispatchBlocksTheAdhocLaunch() throws Exception {
+  void aSpecsRunningDispatchNeverBlocksAnAdhocLaunchButAnotherAdhocDoes() throws Exception {
     var ops = operations(liveAgentShell());
     seedSpec("auth");
     runStore.reserveDispatch(
@@ -451,10 +447,12 @@ class AdhocDispatchTest {
         "/log",
         "sail-agent-x");
 
+    ops.startAdhoc("acme", background("task"), HANDLE);
     var refusal =
         assertThrows(ApiException.class, () -> ops.startAdhoc("acme", background("task"), HANDLE));
 
     assertEquals(ErrorCode.AGENT_ALREADY_RUNNING, refusal.failure().errorCode());
+    assertTrue(refusal.getMessage().contains("Ad-hoc agent run"), refusal.getMessage());
   }
 
   @Test

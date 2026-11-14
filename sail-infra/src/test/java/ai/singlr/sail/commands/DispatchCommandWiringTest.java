@@ -181,8 +181,7 @@ class DispatchCommandWiringTest {
                         hooks.stopListener()),
                     SessionYield.NONE),
             () -> HANDLE);
-    var all =
-        new ArrayList<>(List.of("-p", "acme", "--spec", "auth", "--no-sync", "--no-snapshot"));
+    var all = new ArrayList<>(List.of("-p", "acme", "--spec", "auth", "--no-sync"));
     all.addAll(List.of(args));
     return SailCli.run(command, all.toArray(String[]::new));
   }
@@ -271,7 +270,9 @@ class DispatchCommandWiringTest {
     assertEquals(
         "  Dry run: nothing was changed.\n"
             + "  Would dispatch spec auth (Add auth) to claude-code in the background, on branch"
-            + " sail/auth, which it would create.\n",
+            + " sail/auth, which it would create.\n"
+            + "  Would make workspace auth (acme-auth), from a template older than the"
+            + " definition.\n",
         afterBranding(plain.out()));
     assertEquals(SpecStatus.PENDING, new SpecStore(db).findById("auth").orElseThrow().status());
 
@@ -292,6 +293,8 @@ class DispatchCommandWiringTest {
         "  Dry run: nothing was changed.\n"
             + "  Would dispatch spec auth (Add auth) to claude-code in the background, on branch"
             + " sail/auth, which it would check out.\n"
+            + "  Would make workspace auth (acme-auth), from a template older than the"
+            + " definition.\n"
             + "  Would restart the spec first: its status would go back to pending.\n",
         afterBranding(restart.out()));
     assertEquals(SpecStatus.REVIEW, new SpecStore(db).findById("auth").orElseThrow().status());
@@ -312,6 +315,8 @@ class DispatchCommandWiringTest {
     assertEquals("sail/auth", said.get("branch"));
     assertEquals(false, said.get("would_create_branch"), "the branch exists");
     assertEquals(true, said.get("would_restart"));
+    assertEquals("acme-auth", said.get("workspace"));
+    assertEquals(false, said.get("would_reuse_workspace"));
   }
 
   /** {@code out} past the CLI's branding, which every non-JSON run prints first. */
@@ -414,7 +419,7 @@ class DispatchCommandWiringTest {
             .anyMatch(
                 command ->
                     command.startsWith("incus file push")
-                        && command.contains("acme/home/dev/.claude/.sail-stage-build-e2e.")
+                        && command.contains("acme-auth/home/dev/.claude/.sail-stage-build-e2e.")
                         && command.endsWith("/SKILL.md")),
         "the project's skill is installed from its files: " + shell.invocations);
   }
@@ -502,7 +507,7 @@ class DispatchCommandWiringTest {
         dispatch(
             shell()
                 .on("git -C /home/dev/workspace/app rev-parse --verify --quiet refs/heads/", "")
-                .on("git -C /home/dev/workspace/app checkout -f sail/auth", ""),
+                .on("git -C /home/dev/workspace/app switch --quiet sail/auth", ""),
             0,
             "--background",
             "--restart");
@@ -537,7 +542,7 @@ class DispatchCommandWiringTest {
         cliOperations(
             shell()
                 .on("git -C /home/dev/workspace/app rev-parse --verify --quiet refs/heads/x", "")
-                .on("git -C /home/dev/workspace/app checkout -f x", ""),
+                .on("git -C /home/dev/workspace/app switch --quiet x", ""),
             events);
     new FdeStore(db).add(HANDLE, null, null, "admin");
     TestLogins.store(db, HANDLE);
@@ -585,6 +590,7 @@ class DispatchCommandWiringTest {
      * as already installed, and the skills folder as holding nothing else of sail's.
      */
     StubShell() {
+      scripts.putAll(TestWorkspaces.answers("acme"));
       on("incus config device add", "");
       on("incus file push", "");
       on("cat " + ContainerSailSetup.STAMP_PATH, ContainerSailSetup.fingerprint());

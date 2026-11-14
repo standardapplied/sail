@@ -12,6 +12,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.engine.ConnectEnvironment;
 import ai.singlr.sail.engine.ContainerSailSetup;
+import ai.singlr.sail.engine.ScriptedShellExecutor;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.WatcherSpawner;
 import ai.singlr.sail.identity.Acting;
@@ -82,7 +83,6 @@ class DispatchLaneParityTest {
         type: claude-code
         auto_branch: true
         branch_prefix: sail/
-        auto_snapshot: false
       """;
 
   @TempDir Path tempDir;
@@ -302,6 +302,7 @@ class DispatchLaneParityTest {
 
     /** Every launch reconciles the in-container sail helpers; answer as already installed. */
     StubShell() {
+      scripts.putAll(TestWorkspaces.answers("acme"));
       on("incus config device add", "");
       on("incus file push", "");
       on("cat " + ContainerSailSetup.STAMP_PATH, ContainerSailSetup.fingerprint());
@@ -320,7 +321,8 @@ class DispatchLaneParityTest {
           return entry.getValue();
         }
       }
-      return new Result(1, "", "no script for " + joined);
+      return ScriptedShellExecutor.reachableContainer(joined)
+          .orElseGet(() -> new Result(1, "", "no script for " + joined));
     }
 
     @Override

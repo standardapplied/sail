@@ -139,19 +139,32 @@ class SnapshotOperationsTest {
   }
 
   @Test
-  void restoreRefusesWhileASpecRunIsLiveAndNamesWhatItWouldDiscard() throws Exception {
+  void aSpecsLiveRunNeverHoldsUpARestoreOfTheProjectsContainer() throws Exception {
     var runs = runStore();
     runs.reserveDispatch(
         "r-7", "acme", "auth", "uday", "build", List.of(), "claude-code", null, "t", "l", "u");
+    var ops = ops(shell(RUNNING_JSON), runs, new DirectExecutorService());
+
+    assertEquals("accepted", ops.restore("acme", "my-checkpoint", "uday").status());
+    assertEquals("running", runs.findById("r-7").orElseThrow().status());
+  }
+
+  @Test
+  void restoreRefusesWhileARoomTurnIsLiveInTheContainerAndNamesWhatItWouldDiscard()
+      throws Exception {
+    var runs = runStore();
+    runs.reserveDispatch(
+        "r-7", "acme", null, "uday", "room", List.of(), "claude-code", null, "t", "l", "u");
     var ops = ops(shell(RUNNING_JSON), runs, new DirectExecutorService());
 
     var error =
         assertThrows(ApiException.class, () -> ops.restore("acme", "my-checkpoint", "uday"));
 
     assertEquals(ErrorCode.AGENT_ALREADY_RUNNING, error.failure().errorCode());
-    assertTrue(error.getMessage().contains("r-7"));
-    assertTrue(error.getMessage().contains("spec 'auth'"));
-    assertTrue(error.getMessage().contains("would discard its live work"));
+    assertEquals(
+        "Agent run r-7 is occupying this container; restoring snapshot 'my-checkpoint' would"
+            + " discard its live work.",
+        error.getMessage());
     assertTrue(events.isEmpty());
   }
 
@@ -166,7 +179,7 @@ class SnapshotOperationsTest {
         assertThrows(ApiException.class, () -> ops.restore("acme", "my-checkpoint", "uday"));
 
     assertEquals(ErrorCode.AGENT_ALREADY_RUNNING, error.failure().errorCode());
-    assertTrue(error.getMessage().contains("Ad-hoc agent run r-9 is occupying this container"));
+    assertTrue(error.getMessage().contains("Agent run r-9 is occupying this container"));
   }
 
   @Test
@@ -300,9 +313,10 @@ class SnapshotOperationsTest {
         "a lease release that fails must never wedge the in-flight claim");
   }
 
+  /** An ad-hoc run of the project's own container, the place a restore rolls back. */
   private static RunStore.Reservation reserve(RunStore runs, String id) {
     return runs.reserveDispatch(
-        id, "acme", "auth", "uday", "build", List.of(), "claude-code", null, "t", "l", "u");
+        id, "acme", "", "uday", "adhoc", List.of(), "claude-code", null, "t", "l", "u");
   }
 
   @Test

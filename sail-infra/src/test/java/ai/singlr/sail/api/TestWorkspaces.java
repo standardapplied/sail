@@ -15,6 +15,9 @@ import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
 
 /**
  * A box's workspaces as a test's dispatches meet them: one ZFS pool, {@code tank}, and for each
@@ -46,6 +49,26 @@ public final class TestWorkspaces {
     } catch (IOException e) {
       throw new UncheckedIOException(e);
     }
+  }
+
+  /**
+   * What a test's own stub shell answers, by the fragment of a command it matches, to be a box
+   * holding a current template of {@code project} that makes a spec's workspace when asked: the
+   * pool, the template and its snapshot, and every change a create makes, done.
+   */
+  public static Map<String, ShellExec.Result> answers(String project) {
+    var answers = new LinkedHashMap<String, ShellExec.Result>();
+    answers.put("incus storage list --format json", new ShellExec.Result(0, POOL, ""));
+    answers.put(
+        "incus list --format json", new ShellExec.Result(0, "[" + template(project, "") + "]", ""));
+    answers.put(
+        "incus snapshot list " + project + "--tmpl --format json",
+        new ShellExec.Result(
+            0, "[{\"name\": \"v1\", \"created_at\": \"2026-11-12T08:00:00Z\"}]", ""));
+    for (var change : List.of("incus copy", "incus start", "incus config set", "sail-workspace")) {
+      answers.put(change, new ShellExec.Result(0, "", ""));
+    }
+    return answers;
   }
 
   /** The scripted Incus of {@link #ready}: a ZFS pool and a current template of each project. */

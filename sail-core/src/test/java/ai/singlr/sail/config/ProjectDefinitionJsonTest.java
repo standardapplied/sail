@@ -75,7 +75,6 @@ class ProjectDefinitionJsonTest {
                 "type": "claude-code",
                 "auto_branch": false,
                 "branch_prefix": "sail/",
-                "auto_snapshot": false,
                 "install": ["claude-code", "codex"],
                 "config": {"effort": "high"},
                 "guardrails": {"max_duration": "2h", "max_idle": "10m", "action": "snapshot-and-stop"},

@@ -84,14 +84,17 @@ class ProjectWorkspaceCommandTest {
                     "v1",
                     "2026-11-12T10:00:00.000Z",
                     null,
-                    null,
-                    null)));
+                    "fix-login",
+                    "uday")));
 
     assertEquals(
         List.of(
-            "  NAME                     STATE       TEMPLATE  CREATED                  IPV4",
-            "  main                     running     -         -                        10.0.0.2",
-            "  fix-login                frozen      v1        2026-11-12T10:00:00.000Z -"),
+            "  NAME                     STATE       TEMPLATE  CREATED                  IPV4"
+                + "             SPEC                     OWNER",
+            "  main                     running     -         -                        10.0.0.2"
+                + "         -                        -",
+            "  fix-login                frozen      v1        2026-11-12T10:00:00.000Z -"
+                + "                fix-login                uday"),
         ProjectWorkspaceCommand.lines(listing));
   }
 

@@ -7,10 +7,12 @@ package ai.singlr.sail.api;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.config.ProjectDefinition;
 import ai.singlr.sail.config.TestDefinitions;
+import ai.singlr.sail.engine.RunPlace;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.ShellExecutor;
 import java.io.IOException;
@@ -145,6 +147,162 @@ class WorkBranchTest {
     assertEquals("web/./ui", only(WorkBranch.repos(config, "./web/ui/src")));
     assertEquals("docs", only(WorkBranch.repos(config, "web/../docs/")));
     assertEquals(3, WorkBranch.repos(config, "web/..").size());
+  }
+
+  private static final RunPlace.SpecWorkspace PLACE =
+      (RunPlace.SpecWorkspace) RunPlace.of("acme", "a");
+
+  /**
+   * A spec's fresh workspace as PREPARE leaves it: repo {@code app} cloned from a bare origin
+   * holding {@code main} and every branch of {@code remote}, fetched, and detached at {@code
+   * origin/main}.
+   */
+  private List<ProjectDefinition.Repo> freshWorkspace(String... remote) throws Exception {
+    var origin = Files.createDirectories(tempDir.resolve("origin.git"));
+    git(origin, "init", "-q", "--bare", "-b", "main");
+    var seed = Files.createDirectories(tempDir.resolve("seed"));
+    git(seed, "init", "-q", "-b", "main");
+    commit(seed, "first");
+    git(seed, "remote", "add", "origin", origin.toString());
+    git(seed, "push", "-q", "origin", "main");
+    for (var branch : remote) {
+      git(seed, "switch", "-q", "-c", branch);
+      commit(seed, "on " + branch);
+      git(seed, "push", "-q", "origin", branch);
+      git(seed, "switch", "-q", "main");
+    }
+    git(tempDir, "clone", "-q", origin.toString(), tempDir.resolve("app").toString());
+    git(tempDir.resolve("app"), "switch", "-q", "--detach", "origin/main");
+    return List.of(new ProjectDefinition.Repo(origin.toString(), "app", null));
+  }
+
+  private static void commit(Path repo, String message) throws Exception {
+    git(
+        repo,
+        "-c",
+        "user.email=t@t",
+        "-c",
+        "user.name=t",
+        "-c",
+        "commit.gpgsign=false",
+        "-c",
+        "core.hooksPath=/dev/null",
+        "commit",
+        "-q",
+        "--allow-empty",
+        "-m",
+        message);
+  }
+
+  private WorkBranch enter() {
+    return new WorkBranch(new LocalGit(tempDir), DispatchOperations.Listener.NONE);
+  }
+
+  private String head() throws Exception {
+    return git(tempDir.resolve("app"), "rev-parse", "--abbrev-ref", "HEAD");
+  }
+
+  @Test
+  void aBuildEntersAFreshWorkspaceOnANewBranchFromTheLatestBase() throws Exception {
+    var repos = freshWorkspace();
+
+    assertTrue(enter().enter(PLACE, repos, "agent/a", true, false, Optional.empty()));
+
+    assertEquals("agent/a", head());
+    assertEquals(
+        git(tempDir.resolve("app"), "rev-parse", "origin/main"),
+        git(tempDir.resolve("app"), "rev-parse", "HEAD"));
+  }
+
+  @Test
+  void aRoomTurnOnASpecNeverDispatchedLeavesTheReposDetachedAndMakesNoBranch() throws Exception {
+    var repos = freshWorkspace();
+
+    assertFalse(enter().enter(PLACE, repos, "", false, true, Optional.empty()));
+    assertFalse(enter().enter(PLACE, repos, "agent/a", false, true, Optional.empty()));
+
+    assertEquals("HEAD", head(), "a non-build lane with no branch anywhere stays where it is");
+    assertEquals("", git(tempDir.resolve("app"), "branch", "--list", "agent/a"));
+  }
+
+  @Test
+  void aBuildThatIsNoRestartIsRefusedWhenTheRemoteHasItsBranchAndNothingIsCheckedOut()
+      throws Exception {
+    var repos = freshWorkspace("agent/a");
+    var redispatch = Optional.of(RestartResolution.redispatch("acme", "a"));
+
+    var refused =
+        assertThrows(
+            ApiException.class,
+            () -> enter().enter(PLACE, repos, "agent/a", true, false, redispatch));
+
+    assertEquals("Branch 'agent/a' already exists.", refused.getMessage());
+    assertEquals(
+        "To dispatch onto it, run sail spec dispatch -p acme --spec a --restart, or delete it"
+            + " first.",
+        refused.remedy().plain());
+    assertEquals("HEAD", head());
+  }
+
+  @Test
+  void aRestartOntoABranchOnlyTheRemoteHasTracksIt() throws Exception {
+    var repos = freshWorkspace("agent/a");
+
+    assertTrue(enter().enter(PLACE, repos, "agent/a", true, true, Optional.empty()));
+
+    assertEquals("agent/a", head());
+    assertEquals(
+        "origin/agent/a",
+        git(tempDir.resolve("app"), "rev-parse", "--abbrev-ref", "agent/a@{upstream}"));
+  }
+
+  @Test
+  void aRestartFindsItsUncommittedWorkOnTheBranchAndKeepsIt() throws Exception {
+    var repos = freshWorkspace();
+    var app = tempDir.resolve("app");
+    git(app, "switch", "-q", "-c", "agent/a");
+    Files.writeString(app.resolve("work.txt"), "half done");
+
+    assertTrue(enter().enter(PLACE, repos, "agent/a", true, true, Optional.empty()));
+
+    assertEquals("agent/a", head());
+    assertEquals("half done", Files.readString(app.resolve("work.txt")));
+    assertEquals("?? work.txt", git(app, "status", "--porcelain"));
+  }
+
+  @Test
+  void aRepoElsewhereWithUncommittedWorkIsRefusedAndKeepsIt() throws Exception {
+    var repos = freshWorkspace("agent/a");
+    var app = tempDir.resolve("app");
+    git(app, "switch", "-q", "-c", "other");
+    Files.writeString(app.resolve("work.txt"), "the spec's");
+
+    var refused =
+        assertThrows(
+            ApiException.class,
+            () -> enter().enter(PLACE, repos, "agent/a", true, true, Optional.empty()));
+
+    assertEquals(
+        "Repo 'app' in acme-a is on branch 'other' with uncommitted work, which is never carried"
+            + " onto 'agent/a' or discarded.",
+        refused.getMessage());
+    assertEquals(
+        "Commit or stash it in the workspace (sail project workspace shell acme a), then run it"
+            + " again.",
+        refused.remedy().plain());
+    assertEquals("other", head());
+    assertEquals("the spec's", Files.readString(app.resolve("work.txt")));
+  }
+
+  @Test
+  void aBuildWithNoBranchPutsEachRepoOnItsBaseTrackingTheRemote() throws Exception {
+    var repos = freshWorkspace();
+
+    assertFalse(enter().enter(PLACE, repos, null, true, false, Optional.empty()));
+
+    assertEquals("main", head());
+    assertEquals(
+        "origin/main", git(tempDir.resolve("app"), "rev-parse", "--abbrev-ref", "main@{upstream}"));
   }
 
   private static String only(List<ProjectDefinition.Repo> repos) {

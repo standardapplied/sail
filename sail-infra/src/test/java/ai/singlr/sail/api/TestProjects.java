@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.api;
 
+import ai.singlr.sail.config.ProjectDefinition;
 import ai.singlr.sail.config.TestDefinitions;
 import ai.singlr.sail.config.YamlUtil;
 import java.nio.file.Files;
@@ -17,7 +18,8 @@ public final class TestProjects {
   private TestProjects() {}
 
   /**
-   * A reader answering every project name with the definition in {@code file}: empty while the file
+   * A reader answering the project the definition in {@code file} names with that definition, and
+   * every other name with none, as a catalog holding that one project would: empty while the file
    * is absent, and {@link ProjectReader.Unreadable} for one that does not parse.
    */
   public static ProjectReader reading(Path file) {
@@ -25,11 +27,13 @@ public final class TestProjects {
       if (!Files.exists(file)) {
         return Optional.empty();
       }
+      ProjectDefinition definition;
       try {
-        return Optional.of(TestDefinitions.map(YamlUtil.parseFile(file)));
+        definition = TestDefinitions.map(YamlUtil.parseFile(file));
       } catch (Exception e) {
         throw new ProjectReader.Unreadable(project, e);
       }
+      return Optional.of(definition).filter(held -> held.name().equals(project));
     };
   }
 }

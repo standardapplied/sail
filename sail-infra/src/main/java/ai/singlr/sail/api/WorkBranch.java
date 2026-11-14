@@ -77,7 +77,7 @@ public final class WorkBranch {
    * dispatches the spec onto the branch; a run with no spec to re-dispatch is told to delete it.
    */
   public boolean checkout(
-      String project,
+      String container,
       ProjectDefinition config,
       List<ProjectDefinition.Repo> targetRepos,
       String branch,
@@ -89,12 +89,12 @@ public final class WorkBranch {
     var created = false;
     for (var repo : targetRepos) {
       var repoDir = "/home/" + ProjectDefinition.USER + "/workspace/" + repo.path();
-      if (!insideWorkTree(project, repoDir)) {
+      if (!insideWorkTree(container, repoDir)) {
         continue;
       }
       var branchExists =
           exec(ContainerExec.asDevUser(
-                  project,
+                  container,
                   List.of(
                       "git",
                       "-C",
@@ -109,12 +109,12 @@ public final class WorkBranch {
         checkoutArgs =
             RestartResolution.branchCheckoutArgs(repoDir, branch, true, restart, redispatch);
       } else {
-        var base = baseBranch(project, repoDir, repo);
+        var base = baseBranch(container, repoDir, repo);
         checkoutArgs =
             RestartResolution.freshBranchArgs(
-                repoDir, branch, base, fetchLatestBase(project, repoDir, base));
+                repoDir, branch, base, fetchLatestBase(container, repoDir, base));
       }
-      var result = exec(ContainerExec.asDevUser(project, checkoutArgs));
+      var result = exec(ContainerExec.asDevUser(container, checkoutArgs));
       if (!result.ok()) {
         throw new ApiException(
             ErrorCode.BRANCH_CREATE_FAILED,
@@ -141,18 +141,18 @@ public final class WorkBranch {
    * tree that does not have it yet. Read only, on the shell's observer, so a dry run can say it.
    */
   public boolean wouldCreate(
-      String project, List<ProjectDefinition.Repo> targetRepos, String branch) {
+      String container, List<ProjectDefinition.Repo> targetRepos, String branch) {
     if (Strings.isBlank(branch)) {
       return false;
     }
     var reads = new WorkBranch(shell.observer(), listener);
     for (var repo : targetRepos) {
       var repoDir = "/home/" + ProjectDefinition.USER + "/workspace/" + repo.path();
-      if (reads.insideWorkTree(project, repoDir)
+      if (reads.insideWorkTree(container, repoDir)
           && !reads
               .exec(
                   ContainerExec.asDevUser(
-                      project,
+                      container,
                       List.of(
                           "git",
                           "-C",
@@ -292,21 +292,21 @@ public final class WorkBranch {
     return hasRef(instance, repoDir, "refs/remotes/origin/" + branch);
   }
 
-  private ShellExec.Result git(String project, String repoDir, String... args) {
+  private ShellExec.Result git(String container, String repoDir, String... args) {
     var command = new ArrayList<>(List.of("git", "-C", repoDir));
     command.addAll(List.of(args));
-    return exec(ContainerExec.asDevUser(project, command));
+    return exec(ContainerExec.asDevUser(container, command));
   }
 
   /**
    * Whether {@code repoDir} lies in a git work tree. Git answers rather than a {@code .git}
    * directory, which a linked worktree or a submodule holds as a file.
    */
-  private boolean insideWorkTree(String project, String repoDir) {
+  private boolean insideWorkTree(String container, String repoDir) {
     var probe =
         exec(
             ContainerExec.asDevUser(
-                project, List.of("git", "-C", repoDir, "rev-parse", "--is-inside-work-tree")));
+                container, List.of("git", "-C", repoDir, "rev-parse", "--is-inside-work-tree")));
     return probe.ok() && "true".equals(probe.stdout().strip());
   }
 
@@ -317,14 +317,14 @@ public final class WorkBranch {
    * — keeps a new branch off the mainline even when a prior dispatch left the checkout on an
    * earlier work branch.
    */
-  private String baseBranch(String project, String repoDir, ProjectDefinition.Repo repo) {
+  private String baseBranch(String container, String repoDir, ProjectDefinition.Repo repo) {
     if (Strings.isNotBlank(repo.branch())) {
       return repo.branch();
     }
     var result =
         exec(
             ContainerExec.asDevUser(
-                project,
+                container,
                 List.of("git", "-C", repoDir, "rev-parse", "--abbrev-ref", "origin/HEAD")));
     if (!result.ok()) {
       return "";
@@ -339,15 +339,15 @@ public final class WorkBranch {
    * is available to branch from afterwards, so an offline box, a repo with no {@code origin}, or a
    * detached base falls back to the local {@code HEAD} instead of failing the dispatch.
    */
-  private boolean fetchLatestBase(String project, String repoDir, String base) {
+  private boolean fetchLatestBase(String container, String repoDir, String base) {
     if (Strings.isBlank(base) || "HEAD".equals(base)) {
       return false;
     }
     exec(
         ContainerExec.asDevUser(
-            project, List.of("git", "-C", repoDir, "fetch", "--quiet", "origin", base)));
+            container, List.of("git", "-C", repoDir, "fetch", "--quiet", "origin", base)));
     return exec(ContainerExec.asDevUser(
-            project,
+            container,
             List.of(
                 "git",
                 "-C",

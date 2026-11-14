@@ -160,7 +160,7 @@ public final class DispatchCommand implements Runnable {
                 new WatcherSpawner(shell, WatcherSpawner::spawnProcess),
                 Workspaces.onThisBox(shell),
                 DispatchOperations.terminalLauncher(),
-                renderer(sync),
+                renderer(sync, operator),
                 StopOperations.Listener.NONE))) {
       render(dispatchAsOperator(operations, name, request, localHandle), shell, operator);
     }
@@ -325,7 +325,7 @@ public final class DispatchCommand implements Runnable {
    * never exits before its most important write propagates. A dry run claimed nothing: it pushes
    * nothing and says what it would do once it is done ({@link #printDryRun}).
    */
-  private DispatchOperations.Listener renderer(SyncScheduler sync) {
+  private DispatchOperations.Listener renderer(SyncScheduler sync, OperatorCommand operator) {
     var entered = new AtomicReference<DispatchOperations.WorkspaceUse>();
     return new DispatchOperations.Listener() {
       @Override
@@ -337,7 +337,8 @@ public final class DispatchCommand implements Runnable {
         System.out.println(Ansi.AUTO.string("  @|green ✓|@ " + workspaceLine(workspace)));
         if (workspace.stale()) {
           System.out.println(
-              Ansi.AUTO.string("  @|yellow !|@ " + WorkspaceTemplate.staleNotice(name)));
+              Ansi.AUTO.string(
+                  "  @|yellow !|@ " + operator.render(new WorkspaceTemplate.Stale(name))));
         }
       }
 

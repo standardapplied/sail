@@ -104,7 +104,7 @@ class LegacyConversionTest {
        "services": {"meilisearch": {"image": "getmeili/meilisearch:latest", "ports": [7700],
          "environment": {"MEILI_NO_ANALYTICS": "true"}}},
        "agent": {"type": "claude-code", "auto_branch": true, "branch_prefix": "agent/",
-         "auto_snapshot": false, "install": ["claude-code", "codex"],
+         "install": ["claude-code", "codex"],
          "guardrails": {"max_idle": "45m"}, "notifications": {"slack": {"channel": "C0BELHHT26A"}}},
        "pipeline": {"max_iterations": 6, "stages": [{"name": "codeandsecurity", "type": "agent",
          "agent": "codex", "gate": "all_clear"}]}}""";

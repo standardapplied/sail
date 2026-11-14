@@ -1831,7 +1831,11 @@ class MissedStopReconcilerTest {
     var adhoc = session(null, "node-a", "adhoc");
     var claim = session(null, "node-a", "adhoc");
     Acting.system(() -> TestRuns.transition(sessionStore, claim, "running", "stopping"));
-    var frozen = incus("[{\"name\": \"test-project\", \"status\": \"Frozen\"}]", "frozen");
+    var frozen =
+        incus(
+            "[{\"name\": \"test-project\", \"status\": \"Frozen\"},"
+                + " {\"name\": \"test-project-auth\", \"status\": \"Frozen\"}]",
+            "frozen");
 
     assertEquals(0, reconciler(MissedStopReconciler.systemdUnitProbe(frozen), PAST_GRACE).sweep());
 

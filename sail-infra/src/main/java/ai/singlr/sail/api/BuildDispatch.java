@@ -186,7 +186,7 @@ public final class BuildDispatch {
           task,
           null,
           DispatchOperations.WorkspaceUse.wouldEnter(checked),
-          wouldCreate(checked, targetRepos, branch),
+          wouldCreate(checked, targetRepos, branch, resolution.ontoExistingBranch()),
           resolution.restarted(),
           null,
           null,
@@ -260,13 +260,17 @@ public final class BuildDispatch {
 
   /**
    * Whether a dispatch would cut a new branch, read only: in the spec's workspace when it runs, on
-   * the observer, and for a workspace not made or not running yet, whenever the run names a branch.
+   * the observer; for a workspace not made or not running yet, whenever the run names a branch it
+   * would not land on as one that is there already, as a restart does.
    */
   private boolean wouldCreate(
-      RunPlaces.Checked checked, List<ProjectDefinition.Repo> targetRepos, String branch) {
+      RunPlaces.Checked checked,
+      List<ProjectDefinition.Repo> targetRepos,
+      String branch,
+      boolean ontoExisting) {
     return checked instanceof RunPlaces.InWorkspace(var check) && check.running()
         ? workBranch.wouldCreate(check.place().instance(), targetRepos, branch)
-        : Strings.isNotBlank(branch);
+        : Strings.isNotBlank(branch) && !ontoExisting;
   }
 
   /**

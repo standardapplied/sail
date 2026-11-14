@@ -20,7 +20,9 @@ import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.engine.ConnectEnvironment;
 import ai.singlr.sail.engine.ContainerSailSetup;
 import ai.singlr.sail.engine.ProjectSkillInstaller;
+import ai.singlr.sail.engine.RunPlace;
 import ai.singlr.sail.engine.SailSkills;
+import ai.singlr.sail.engine.ScriptedShellExecutor;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.StageSkill;
 import ai.singlr.sail.engine.WatcherSpawner;
@@ -839,16 +841,14 @@ class RoomWakeLaunchTest {
   }
 
   @Test
-  void aHeldContainerLeaseRefusesTheWake() throws Exception {
+  void aSpecsWakeGoesOnInItsWorkspaceWhileTheProjectsContainerIsRestored() throws Exception {
     var ops = operations(liveAgentShell());
     seedSpec("auth");
     Acting.system(() -> runStore.acquireContainerLease("acme", HANDLE, "restore"));
 
-    var refusal = assertThrows(ApiException.class, () -> ops.startRoomRun("acme", "auth", HANDLE));
+    var runId = ops.startRoomRun("acme", "auth", HANDLE);
 
-    assertEquals(ErrorCode.CONFLICT, refusal.failure().errorCode());
-    assertTrue(
-        refusal.getMessage().contains("snapshot restore is in progress"), refusal.getMessage());
+    assertEquals(RunPlace.of("acme", "auth"), runStore.findById(runId).orElseThrow().place());
   }
 
   @Test
@@ -858,7 +858,7 @@ class RoomWakeLaunchTest {
     var live = DateTimeUtils.newId().toString();
     db.execute(
         "INSERT INTO runs (id, project, spec_id, node, role, agent, status, started_at, repos)"
-            + " VALUES (?, 'acme', 'other', ?, 'build', 'claude-code', 'running', 't0',"
+            + " VALUES (?, 'acme', 'auth', ?, 'build', 'claude-code', 'running', 't0',"
             + " '[\"app\"]')",
         live,
         HANDLE);
@@ -1330,7 +1330,7 @@ class RoomWakeLaunchTest {
     var live = DateTimeUtils.newId().toString();
     db.execute(
         "INSERT INTO runs (id, project, spec_id, node, role, agent, status, started_at, repos)"
-            + " VALUES (?, 'acme', 'other', ?, 'build', 'claude-code', 'running', 't0',"
+            + " VALUES (?, 'acme', 'auth', ?, 'build', 'claude-code', 'running', 't0',"
             + " '[\"app\"]')",
         live,
         HANDLE);
@@ -1410,7 +1410,7 @@ class RoomWakeLaunchTest {
     var build = DateTimeUtils.newId().toString();
     db.execute(
         "INSERT INTO runs (id, project, spec_id, node, role, agent, status, started_at,"
-            + " completed_at, repos) VALUES (?, 'acme', 'other', ?, 'build', 'claude-code',"
+            + " completed_at, repos) VALUES (?, 'acme', 'auth', ?, 'build', 'claude-code',"
             + " 'completed', ?, ?, '[\"app\"]')",
         build,
         HANDLE,
@@ -1454,7 +1454,7 @@ class RoomWakeLaunchTest {
     var build = DateTimeUtils.newId().toString();
     db.execute(
         "INSERT INTO runs (id, project, spec_id, node, role, agent, status, started_at,"
-            + " completed_at, repos) VALUES (?, 'acme', 'other', ?, 'build', 'claude-code',"
+            + " completed_at, repos) VALUES (?, 'acme', 'auth', ?, 'build', 'claude-code',"
             + " 'completed', ?, ?, '[\"app\"]')",
         build,
         HANDLE,
@@ -1571,6 +1571,7 @@ class RoomWakeLaunchTest {
     private final Map<String, ShellExec.Result> scripts = new LinkedHashMap<>();
 
     StubShell() {
+      scripts.putAll(TestWorkspaces.answers("acme"));
       on("incus config device add", "");
       on("incus file push", "");
       on("cat " + ContainerSailSetup.STAMP_PATH, ContainerSailSetup.fingerprint());
@@ -1593,7 +1594,8 @@ class RoomWakeLaunchTest {
           return entry.getValue();
         }
       }
-      return new ShellExec.Result(1, "", "no script for " + joined);
+      return ScriptedShellExecutor.reachableContainer(joined)
+          .orElseGet(() -> new ShellExec.Result(1, "", "no script for " + joined));
     }
 
     @Override

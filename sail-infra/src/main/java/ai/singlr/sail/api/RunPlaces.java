@@ -120,7 +120,8 @@ final class RunPlaces {
         var entered = entered(check, config, owner);
         var stale = entered instanceof Workspaces.Made && check.stale();
         if (stale) {
-          room.tell(check.place().specId(), WorkspaceTemplate.staleNotice(check.place().project()));
+          var notice = new WorkspaceTemplate.Stale(check.place().project());
+          room.tell(check.place().specId(), Remedied.message(notice.reason(), notice.remedy()));
         }
         yield new Entered(check.place(), Optional.of(entered), stale);
       }

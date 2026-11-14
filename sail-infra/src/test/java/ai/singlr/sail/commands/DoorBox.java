@@ -14,6 +14,7 @@ import ai.singlr.sail.api.SessionYield;
 import ai.singlr.sail.api.SocketDoor;
 import ai.singlr.sail.api.SyncScheduler;
 import ai.singlr.sail.api.TestAuth;
+import ai.singlr.sail.api.TestWorkspaces;
 import ai.singlr.sail.api.WebauthnAuthHandler;
 import ai.singlr.sail.auth.EnrollmentService;
 import ai.singlr.sail.auth.PasskeyService;
@@ -119,7 +120,9 @@ record DoorBox(SyncConfig config, Sqlite db, SailOperations operations, SailApiS
 
   /** An Incus whose one container, acme, runs, and that answers every other command. */
   static ShellExec acmeRuns() {
-    return new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
-        .onOk("incus list", "[{\"name\": \"acme\", \"status\": \"Running\", \"state\": {}}]");
+    var shell = new ScriptedShellExecutor(new ShellExec.Result(0, "", ""));
+    TestWorkspaces.answers("acme").forEach(shell::on);
+    return shell.onOk(
+        "incus list", "[{\"name\": \"acme\", \"status\": \"Running\", \"state\": {}}]");
   }
 }

@@ -75,6 +75,35 @@ class WatcherSpawnerTest {
   }
 
   @Test
+  void aSpecsRunsWatcherNamesTheSpecSoItProbesTheSpecsWorkspace() {
+    var command =
+        WatcherSpawner.watchCommandForRun(
+            RunPlace.of("acme", "fix-login"), RUN_ID, AGENT_UNIT, STARTED_AT, LIMITS);
+
+    assertEquals(
+        List.of(
+            SailPaths.binaryPath().toString(),
+            "agent",
+            "watch",
+            "acme",
+            "--run",
+            RUN_ID,
+            "--unit",
+            AGENT_UNIT,
+            "--started-at",
+            STARTED_AT,
+            "--action",
+            "stop",
+            "--spec",
+            "fix-login",
+            "--max-duration",
+            "45m",
+            "--max-idle",
+            "20m"),
+        command);
+  }
+
+  @Test
   void aLimitTheLaneDoesNotSetIsLeftOffTheWatchCommand() {
     var command =
         WatcherSpawner.watchCommandForRun(

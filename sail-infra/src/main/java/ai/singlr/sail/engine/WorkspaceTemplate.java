@@ -88,13 +88,21 @@ public final class WorkspaceTemplate {
    * What a workspace made from {@code project}'s template is told when the template is older than
    * the project's definition: it was cloned as it is, since only a person can build it again.
    */
-  public static String staleNotice(String project) {
-    return "This spec's workspace was made from "
-        + project
-        + "'s template as it was last built, which is older than the project's definition: run"
-        + " sudo sail project template build "
-        + project
-        + " to build it again for the next workspace.";
+  public record Stale(String project) implements Remedied {
+    @Override
+    public String reason() {
+      return "This spec's workspace was made from "
+          + project
+          + "'s template as it was last built, which is older than the project's definition.";
+    }
+
+    @Override
+    public Remedy remedy() {
+      return Remedy.of(
+          "Build it again for the next workspace: ",
+          Remedy.sail("project template build", project),
+          ".");
+    }
   }
 
   /** The name of project {@code project}'s template instance. */

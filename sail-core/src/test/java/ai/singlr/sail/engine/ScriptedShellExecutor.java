@@ -97,15 +97,19 @@ public final class ScriptedShellExecutor implements ShellExec {
   }
 
   /**
-   * What a container that is up, with no agent in it, answers when it is asked whether a run's
-   * agent is there (the one script {@code AgentSession.presence} believes): {@code gone}. Empty for
-   * any other command. A test's own stub shell falls through to this, so that it models a container
-   * with no agent in it rather than a container nobody can reach — which fails every command too,
-   * and of which nothing may be concluded.
+   * What a container that is up, with no agent in it and nothing uncommitted in its repos, answers
+   * when it is asked whether a run's agent is there (the one script {@code AgentSession.presence}
+   * believes): {@code gone}; and whether a repo holds uncommitted work ({@code git status
+   * --porcelain}): nothing. Empty for any other command. A test's own stub shell falls through to
+   * this, so that it models such a container rather than a container nobody can reach — which fails
+   * every command too, and of which nothing may be concluded.
    */
   public static Optional<Result> reachableContainer(String command) {
-    return command.contains("printf gone") && command.contains("--property=MainPID")
-        ? Optional.of(new Result(0, "gone", ""))
+    if (command.contains("printf gone") && command.contains("--property=MainPID")) {
+      return Optional.of(new Result(0, "gone", ""));
+    }
+    return command.endsWith(" status --porcelain")
+        ? Optional.of(new Result(0, "", ""))
         : Optional.empty();
   }
 

@@ -205,7 +205,7 @@ class RoomCommitGuardTest {
     runStore.create(
         "run-1", "acme", "auth", "node", "room", "codex", "b", "t", null, null, "log", "unit");
     runStore.create(
-        "cand", "acme", "auth2", "node", "build", "codex", "b", "t", null, null, "log2", "unit2");
+        "cand", "acme", "auth", "node", "build", "codex", "b", "t", null, null, "log2", "unit2");
     runStore.saveRoomGuardBaseline("run-1", "{\"app\": {\"head\": \"X\"}}");
     var guard = guard(runStore, throwingShell());
 

@@ -61,7 +61,7 @@ class ProjectEditCommandTest {
                     "acme", ACME, Section.AGENT, "{\"type\": \"codex\", \"build_skill\": \"x\"}"));
     assertEquals(
         "The edited definition is not valid: agent.build_skill is not a key of agent. Its keys"
-            + " are: type, auto_branch, branch_prefix, auto_snapshot, install, config, guardrails,"
+            + " are: type, auto_branch, branch_prefix, install, config, guardrails,"
             + " notifications, member, budget.",
         unknown.getMessage());
     var malformed =

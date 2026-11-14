@@ -661,15 +661,14 @@ class ReviewLoopRecoveryTest {
   @Test
   void aReviewerRefusedItsClaimRecordsTheRunItWaitsOnAndIsLaunchedByThatRunsStop() {
     loop = ReviewLoop.staged(tempDir, "codex");
-    loop.spec("billing", "api");
-    var holder = holderOf("billing", "build");
+    var holder = holderOf("auth", Lane.ROOM_FULL.wire());
 
     var build = loop.built("auth");
 
     var review = loop.reviewOf("auth");
     assertEquals(List.of(holder), loop.container.live(), "auth's reviewer was refused the repo");
     assertEquals(holder, loop.waitingOn(review), "the wait names the run that holds the claim");
-    assertEquals(List.of(waitLine(holder, "build", "billing")), waitsInTheRoom());
+    assertEquals(List.of(waitLine(holder, Lane.ROOM_FULL.wire(), "auth")), waitsInTheRoom());
     assertFalse(
         loop.reviews.comparableSnapshot(review).containsKey("waiting_on"),
         "which run this box waits on is its own bookkeeping, never synced");
@@ -681,10 +680,10 @@ class ReviewLoopRecoveryTest {
         RunStops.of(
             Event.WellKnownData.SOURCE_WATCHER,
             PROJECT,
-            "billing",
+            "auth",
             "claude-code",
             holder,
-            "build",
+            Lane.ROOM_FULL.wire(),
             1,
             null));
 
@@ -700,8 +699,7 @@ class ReviewLoopRecoveryTest {
   @Test
   void aWaitIsSaidOncePerRunWaitedOnHoweverManyStopsFindItStillHeld() {
     loop = ReviewLoop.staged(tempDir, "codex");
-    loop.spec("billing", "api");
-    var holder = holderOf("billing", "build");
+    var holder = holderOf("auth", Lane.ROOM_FULL.wire());
     loop.built("auth");
     var review = loop.reviewOf("auth");
 
@@ -712,7 +710,7 @@ class ReviewLoopRecoveryTest {
 
     assertEquals(holder, loop.waitingOn(review));
     assertEquals(
-        List.of(waitLine(holder, "build", "billing")),
+        List.of(waitLine(holder, Lane.ROOM_FULL.wire(), "auth")),
         waitsInTheRoom(),
         "refused twice by the same run: the wait is recorded once, and said once");
   }
@@ -720,8 +718,7 @@ class ReviewLoopRecoveryTest {
   @Test
   void aWaitingReviewWhoseHolderEndsWithNoStopIsReplayedExactlyOnce() {
     loop = ReviewLoop.staged(tempDir, "codex");
-    loop.spec("billing", SpecStatus.PENDING, "claude-code", null, null, List.of("api"));
-    var holder = holderOf("billing", "build");
+    var holder = holderOf("auth", Lane.ROOM_FULL.wire());
     var build = loop.built("auth");
     var review = loop.reviewOf("auth");
     assertEquals(holder, loop.waitingOn(review));
@@ -745,8 +742,7 @@ class ReviewLoopRecoveryTest {
   @Test
   void aHolderThatOnlyJustEndedIsNotRescuedOverWhileItsOwnStopMayStillBeOnItsWay() {
     loop = ReviewLoop.staged(tempDir, "codex");
-    loop.spec("billing", SpecStatus.PENDING, "claude-code", null, null, List.of("api"));
-    var holder = holderOf("billing", "build");
+    var holder = holderOf("auth", Lane.ROOM_FULL.wire());
     var build = loop.built("auth");
     endsWithNoStop(holder);
     var ended = loop.runs.findById(holder).orElseThrow().completedAt();
@@ -763,7 +759,7 @@ class ReviewLoopRecoveryTest {
   @Test
   void aSpecWhoseRowsCannotBeReadCostsTheWaitingReviewsOfItsProjectNothing() {
     loop = ReviewLoop.staged(tempDir, "codex");
-    var holder = holderOf("billing", "build");
+    var holder = holderOf("auth", Lane.ROOM_FULL.wire());
     loop.built("auth");
     var review = loop.reviewOf("auth");
     assertEquals(holder, loop.waitingOn(review));
@@ -780,7 +776,16 @@ class ReviewLoopRecoveryTest {
     loop.db.execute("UPDATE reviews SET status = 'failed' WHERE spec_id = 'broken'");
     loop.container.exited(holder, "done", 0);
 
-    loop.onEvent(ReviewLoop.buildStop("billing", holder));
+    loop.onEvent(
+        RunStops.of(
+            Event.WellKnownData.SOURCE_WATCHER,
+            PROJECT,
+            "auth",
+            "claude-code",
+            holder,
+            Lane.ROOM_FULL.wire(),
+            0,
+            null));
 
     var reviewer = loop.onlyLive();
     assertEquals("review", reviewer.role(), "the stop that freed the claim launched auth's step");
@@ -875,8 +880,7 @@ class ReviewLoopRecoveryTest {
   void aReplayedStopOfABuildThatHadAlreadyStoppedMovesTheLoopAndIsNotSaidAgain() {
     loop = ReviewLoop.staged(tempDir, "codex");
     var said = loop.narrating();
-    loop.spec("billing", SpecStatus.PENDING, "claude-code", null, null, List.of("api"));
-    var holder = holderOf("billing", "build");
+    var holder = holderOf("auth", Lane.ROOM_FULL.wire());
     var build = loop.built("auth");
     assertEquals(1, said.stopsInSlack(), "the build's stop was said when it stopped");
     assertEquals(1, said.stopsToWebhooks());
@@ -947,8 +951,7 @@ class ReviewLoopRecoveryTest {
   @Test
   void aRefusedReviewersStageStaysPendingAndMainIsToldNoStageStarted() {
     loop = ReviewLoop.staged(tempDir, "codex");
-    loop.spec("billing", "api");
-    holderOf("billing", "build");
+    holderOf("auth", Lane.ROOM_FULL.wire());
 
     loop.built("auth");
 
@@ -1448,8 +1451,7 @@ class ReviewLoopRecoveryTest {
                     "stages",
                     List.of(Map.<String, Object>of("name", "approve", "type", "human")))));
     strandedReviewOf("auth");
-    loop.spec("billing", "api");
-    loop.liveRun("billing", "build");
+    loop.liveRun("auth", Lane.ROOM_FULL.wire());
     var reconciler = loop.reconciler(LATER);
 
     assertEquals(
@@ -1496,8 +1498,7 @@ class ReviewLoopRecoveryTest {
         });
     loop.restart();
     assertEquals("pending", loop.reviews.stagesForReview(reviewer.reviewId()).getLast().status());
-    loop.spec("billing", "api");
-    loop.liveRun("billing", "build");
+    loop.liveRun("auth", Lane.ROOM_FULL.wire());
 
     assertEquals(
         1,
@@ -1516,14 +1517,13 @@ class ReviewLoopRecoveryTest {
   @Test
   void aReviewWaitingToLaunchIsNeverReplayedWhileARunHoldsItsClaim() {
     loop = ReviewLoop.staged(tempDir, "codex");
-    loop.spec("billing", "api");
-    var holder = loop.liveRun("billing", "build");
+    var holder = loop.liveRun("auth", Lane.ROOM_FULL.wire());
     var build = loop.built("auth");
     assertEquals(List.of(holder), loop.container.live(), "auth's reviewer waits for the repo");
     var reconciler = loop.reconciler(LATER);
 
     for (var turn = 1; turn <= 3; turn++) {
-      var chat = loop.liveRun("billing", "room");
+      var chat = loop.liveRun("auth", "room");
       reconciler.sweep();
       loop.settle();
       loop.container.exited(chat, "replied", 0);
@@ -1531,7 +1531,7 @@ class ReviewLoopRecoveryTest {
           RunStops.of(
               Event.WellKnownData.SOURCE_WATCHER,
               PROJECT,
-              "billing",
+              "auth",
               "claude-code",
               chat,
               "room",
@@ -1564,8 +1564,7 @@ class ReviewLoopRecoveryTest {
               loop.reviews.stagesForReview(reviewer.reviewId()).getFirst().id(), "passed");
         });
     loop.restart();
-    loop.spec("billing", "api");
-    loop.liveRun("billing", "build");
+    loop.liveRun("auth", Lane.ROOM_FULL.wire());
 
     assertEquals(1, loop.reconciler(LATER).sweep());
     loop.settle();
@@ -1920,58 +1919,27 @@ class ReviewLoopRecoveryTest {
   }
 
   @Test
-  void aStopThatFreesTheRepoTwoReviewsWaitForWakesTheSpecInReviewBeforeTheOneInProgress() {
-    loop = ReviewLoop.staged(tempDir, "codex");
-    var holder = holderOf("billing", "build");
-    loop.built("auth");
-    loop.built("search");
-    loop.db.execute("UPDATE specs SET status = 'in_progress' WHERE id = 'search'");
-    assertEquals(holder, loop.waitingOn(loop.reviewOf("auth")));
-    assertEquals(holder, loop.waitingOn(loop.reviewOf("search")));
-    loop.container.exited(holder, "done", 0);
-
-    loop.onEvent(ReviewLoop.buildStop("billing", holder));
-
-    var reviewer = loop.onlyLive();
-    assertEquals(loop.reviewOf("auth"), reviewer.reviewId(), "the spec in review goes first");
-    assertEquals(
-        reviewer.id(),
-        loop.waitingOn(loop.reviewOf("search")),
-        "and the spec in progress is woken too: it took its step, and waits on that reviewer now");
-  }
-
-  @Test
-  void aStopWhoseOwnLoopCannotBeDrivenStillWakesTheReviewItFreed() {
-    loop = ReviewLoop.staged(tempDir, "codex");
-    var holder = holderOf("broken", "build");
-    loop.built("auth");
-    var review = loop.reviewOf("auth");
-    assertEquals(holder, loop.waitingOn(review));
-    failedOnAFindingNothingCanRead("broken");
-    loop.container.exited(holder, "done", 0);
-
-    loop.onEvent(ReviewLoop.buildStop("broken", holder));
-
-    assertEquals(1, loop.events("review_pipeline_error").size(), "the stop's own loop failed");
-    assertEquals(
-        review,
-        loop.onlyLive().reviewId(),
-        "and the review that waited on its run took its step all the same");
-  }
-
-  @Test
   void aSpecThatCannotBeDrivenCostsTheWaitingReviewListedAfterItNothing() {
     loop = ReviewLoop.staged(tempDir, "codex");
     failedOnAFindingNothingCanRead("broken");
     loop.db.execute(
         "UPDATE specs SET status = 'review', created_at = 1767225600000 WHERE id = 'broken'");
-    var holder = holderOf("billing", "build");
+    var holder = holderOf("auth", Lane.ROOM_FULL.wire());
     loop.built("auth");
     var review = loop.reviewOf("auth");
     assertEquals(holder, loop.waitingOn(review));
     loop.container.exited(holder, "done", 0);
 
-    loop.onEvent(ReviewLoop.buildStop("billing", holder));
+    loop.onEvent(
+        RunStops.of(
+            Event.WellKnownData.SOURCE_WATCHER,
+            PROJECT,
+            "auth",
+            "claude-code",
+            holder,
+            Lane.ROOM_FULL.wire(),
+            0,
+            null));
 
     assertEquals(
         review,

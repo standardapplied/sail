@@ -341,7 +341,7 @@ class ReviewPipelineControllerTest {
   }
 
   @Test
-  void aContainerLeaseHeldByARestoreErrorsTheReviewInsteadOfLaunchingIntoTheContainer() {
+  void aReviewOfASpecRunsInItsWorkspaceWhileARestoreRollsBackTheProjectsContainer() {
     createSpec("auth", "in_progress");
     Acting.system(() -> runStore.acquireContainerLease("test-project", "node-a", "restore"));
     var launched = new AtomicBoolean();
@@ -355,21 +355,7 @@ class ReviewPipelineControllerTest {
 
     ctrl.onEvent(agentStoppedEvent("auth"));
 
-    assertFalse(launched.get(), "a review agent must never launch into a container mid-restore");
-    assertTrue(
-        loop.container.launched().isEmpty(),
-        "nothing is started in a container a restore is rolling back");
-    var errored = reviewStore.latestReviewForSpec("auth").orElseThrow();
-    assertEquals("failed", errored.status());
-    assertTrue(errored.errored());
-    assertTrue(errored.error().contains("restore"), errored.error());
-    assertTrue(
-        runStore.listForSpec("auth").isEmpty(), "a refused review must not insert a run row");
-
-    Acting.system(() -> runStore.releaseContainerLease("test-project", "node-a"));
-    ctrl.onEvent(agentStoppedEvent("auth"));
-
-    assertTrue(launched.get(), "the replayed stop must review normally once the lease is gone");
+    assertTrue(launched.get(), "a restore rolls back the project's container, not auth's");
     assertEquals(SpecStatus.AWAITING_MERGE, specStore.findById("auth").orElseThrow().status());
   }
 

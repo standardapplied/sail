@@ -128,7 +128,7 @@ class EventPublishersTest {
         cli(
             DispatchCommandWiringTest.shell()
                 .on("git -C /home/dev/workspace/app rev-parse --verify --quiet refs/heads/x", "")
-                .on("git -C /home/dev/workspace/app checkout -f x", ""));
+                .on("git -C /home/dev/workspace/app switch --quiet x", ""));
     var live =
         cli(
             DispatchCommandWiringTest.shell()
@@ -159,11 +159,9 @@ class EventPublishersTest {
     assertEquals(
         List.of(
             Event.WellKnownTypes.SPEC_DISPATCHED,
-            Event.WellKnownTypes.SNAPSHOT_CREATED,
             Event.WellKnownTypes.AGENT_CANCELLED,
             Event.WellKnownTypes.SPEC_RESTARTED,
             Event.WellKnownTypes.SPEC_DISPATCHED,
-            Event.WellKnownTypes.SNAPSHOT_CREATED,
             Event.WellKnownTypes.AGENT_CANCELLED,
             Event.WellKnownTypes.AGENT_SESSION_STARTED),
         types);

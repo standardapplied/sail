@@ -23,14 +23,13 @@ import ai.singlr.sail.engine.ProjectPhase;
 import ai.singlr.sail.engine.ProjectProvisioner;
 import ai.singlr.sail.engine.ProvisionListener;
 import ai.singlr.sail.engine.ProvisionTracker;
+import ai.singlr.sail.engine.RunPlace;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.engine.WorkspaceTemplate;
 import ai.singlr.sail.engine.Workspaces;
 import ai.singlr.sail.engine.WorkstationIdentity;
 import ai.singlr.sail.ssh.SshPublicKey;
-import ai.singlr.sail.store.RunStore;
-import ai.singlr.sail.store.Sqlite;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -98,19 +97,13 @@ final class WorkspaceVerbs {
 
   /**
    * Whether a run of {@code project}'s spec, the one a workspace is, is live on this box, as its
-   * run store says: what refuses a stop or delete of that workspace. A box whose catalog this
-   * account cannot read has no run of it.
+   * runs say: what refuses a stop or delete of that workspace.
    */
   static Predicate<String> liveRun(String project) {
     return spec -> {
-      var database = SailPaths.controlPlaneDb();
-      if (!Files.isReadable(database)) {
-        return false;
-      }
-      try (var db = Sqlite.open(database)) {
-        return new RunStore(db)
-            .liveForProjectOnNode(project, HostSync.handle()).stream()
-                .anyMatch(run -> spec.equals(run.specId()));
+      try (var operations = OperationsFactory.open()) {
+        return operations.dispatching().runningRuns(project, HostSync.handle()).stream()
+            .anyMatch(run -> run.place().equals(RunPlace.of(project, spec)));
       }
     };
   }

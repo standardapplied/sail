@@ -519,7 +519,7 @@ class ReviewLanesTest {
     var reviewer = loop.onlyLive();
     var first = loop.watcherCommandOf(reviewer.id());
     assertTrue(
-        first.endsWith("--action stop --max-duration 45m --max-idle 20m"),
+        first.endsWith("--action stop --spec auth --max-duration 45m --max-idle 20m"),
         "no review_pipeline.guardrails: the review lanes' own defaults, not the build lane's 4h: "
             + first);
 
@@ -539,7 +539,7 @@ class ReviewLanesTest {
     var fix = loop.onlyLive();
     assertEquals("fix", fix.role());
     assertTrue(
-        loop.watcherCommandOf(fix.id()).endsWith("--action stop --max-duration 6h"),
+        loop.watcherCommandOf(fix.id()).endsWith("--action stop --spec auth --max-duration 6h"),
         "the fix run launched after the edit is held to the build lane's new limits, never the"
             + " reviewer's: "
             + loop.watcherCommandOf(fix.id()));
@@ -801,7 +801,7 @@ class ReviewLanesTest {
   }
 
   @Test
-  void aReviewerRefusedTheReposAnotherSpecsRunHoldsWaitsAndStartsWhenThatRunStops() {
+  void aReviewerOfAnotherSpecOverTheSameRepoRunsAtOnceInItsOwnWorkspace() {
     loop = ReviewLoop.staged(tempDir, "codex");
     loop.built("auth", "api");
     var auth = loop.onlyLive();
@@ -809,30 +809,16 @@ class ReviewLanesTest {
     loop.built("billing", "api");
 
     assertEquals(
-        auth.id(), loop.onlyLive().id(), "billing's reviewer was refused the repos auth holds");
-    assertEquals(
-        "running",
-        loop.statusOf(loop.reviewOf("billing")),
-        "a refused claim is a review that waits, not a reviewer that failed");
-    assertTrue(loop.details("review_errored").isEmpty(), loop.details("review_errored").toString());
-    assertEquals(
-        1,
-        loop.events("review_stage_started").size(),
-        "and the room is told a stage started only once a reviewer runs for it");
-    assertEquals(0, loop.reconciler(Instant::now).sweep(), "nothing to rescue while it waits");
+        List.of("auth", "billing"),
+        loop.live().stream().map(RunStore.RunRow::specId).sorted().toList(),
+        "each spec's reviewer works its own workspace's tree: neither waits on the other");
+    assertNull(loop.waitingOn(loop.reviewOf("billing")));
+    assertEquals(2, loop.events("review_stage_started").size());
 
     loop.finish(auth.id(), CLEAN_REVIEW);
 
-    var billing = loop.onlyLive();
-    assertEquals(
-        "billing", billing.specId(), "auth's stop freed the repos: the waiting review starts");
-    assertEquals(loop.reviewOf("billing"), billing.reviewId());
-    assertEquals(2, loop.events("review_stage_started").size());
-
-    loop.finish(billing.id(), CLEAN_REVIEW);
-
-    assertEquals("passed", loop.statusOf(loop.reviewOf("billing")));
-    assertEquals(1, loop.reviews.reviewsForSpec("billing").size(), "in the one review, unretried");
+    assertEquals("passed", loop.statusOf(loop.reviewOf("auth")));
+    assertEquals("running", loop.statusOf(loop.reviewOf("billing")));
   }
 
   private Event replayedStop(RunStore.RunRow run) {
@@ -1185,15 +1171,14 @@ class ReviewLanesTest {
   @Test
   void aFinishedRunWhoseUsageWasNeverReadKeepsItsDirectoryPastTheNewestTwenty() {
     loop = ReviewLoop.staged(tempDir, "codex");
-    loop.spec("auth", "api");
-    var unread = loop.run("auth", "build");
+    var unread = loop.run("next", "build");
     loop.container.wrote(unread, "the only evidence of what it cost");
     Acting.system(() -> loop.runs.finish(unread, "running", "stopped", null, null));
-    var read = loop.run("auth", "build");
+    var read = loop.run("next", "build");
     loop.container.wrote(read, "read");
     Acting.system(() -> loop.runs.finish(read, "running", "stopped", null, RunUsage.NONE));
     for (var newer = 0; newer < 20; newer++) {
-      var run = loop.run("other", "build");
+      var run = loop.run("next", "build");
       loop.container.wrote(run, "newer");
       Acting.system(() -> loop.runs.finish(run, "running", "completed", 0, RunUsage.NONE));
     }

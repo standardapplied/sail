@@ -45,6 +45,14 @@ import org.junit.jupiter.api.io.TempDir;
 class LiveMemberDisplacementTest {
 
   private static final String SPEC = "live-spec";
+
+  /**
+   * A room with no spec: its member lives in the project's own container, as an ad-hoc session
+   * does, so the two claim the same tree. A spec's member lives in the spec's workspace, where a
+   * run of that spec is what claims its repos.
+   */
+  private static final String LOUNGE = "lounge";
+
   private static final String PROJECT = LiveRoom.PROJECT;
   private static final String HANDLE = LiveRoom.HANDLE;
 
@@ -69,6 +77,7 @@ class LiveMemberDisplacementTest {
   void setUp() {
     room = new LiveRoom(dir);
     room.spec(SPEC);
+    room.room(LOUNGE);
   }
 
   @AfterEach
@@ -97,14 +106,18 @@ class LiveMemberDisplacementTest {
   }
 
   private FakeAgentProcess.Fake idleMember() {
-    var process = room.prompted(SPEC, "full", "first");
+    return idleMember(SPEC);
+  }
+
+  private FakeAgentProcess.Fake idleMember(String conversation) {
+    var process = room.prompted(conversation, "full", "first");
     room.says(process, Lines.init("sess-1"), Lines.delta("One"), Lines.result("One"));
     return process;
   }
 
   @Test
   void aClaimOnAnIdleMembersReposEndsItAndTheMemberResumesOnceTheyAreFree() {
-    var process = idleMember();
+    var process = idleMember(LOUNGE);
     process.onClose(() -> process.exits(0));
 
     var session = adhoc();
@@ -120,25 +133,25 @@ class LiveMemberDisplacementTest {
     assertEquals("running", dispatched.status());
     assertEquals("adhoc", dispatched.role());
 
-    var waiting = room.says(SPEC, "while that runs");
+    var waiting = room.says(LOUNGE, "while that runs");
     assertEquals(1, room.processes.starts.size(), "its repos are held: the member stays away");
 
     Acting.system(() -> TestRuns.complete(room.runs, session.runId(), "completed", 0));
-    var next = room.says(SPEC, "and now?");
+    var next = room.says(LOUNGE, "and now?");
 
     assertEquals(2, room.processes.starts.size());
     assertEquals(
         LiveRoom.invocation("--dangerously-skip-permissions", "--resume", "sess-1"),
         room.processes.starts.getLast().command());
     assertEquals(
-        List.of(room.promptOf(SPEC, waiting, next)),
+        List.of(room.promptOf(LOUNGE, waiting, next)),
         room.processes.latest().written,
         "everything it missed, in one prompt");
   }
 
   @Test
   void aClaimDuringATurnWaitsForItsResult() {
-    var process = room.prompted(SPEC, "full", "first");
+    var process = room.prompted(LOUNGE, "full", "first");
     room.says(process, Lines.init("sess-1"), Lines.delta("Nearly"));
     process.onClose(() -> process.says(Lines.delta(" done."), Lines.result("Nearly done.")));
     diesOn(process, AgentProcess.Signal.INT);
@@ -150,7 +163,7 @@ class LiveMemberDisplacementTest {
         List.of(AgentProcess.Signal.INT),
         process.signals,
         "the turn answered, so the process is told to go and goes");
-    assertEquals("claude/" + process.runId + ": Nearly done.", room.conversation(SPEC).getLast());
+    assertEquals("claude/" + process.runId + ": Nearly done.", room.conversation(LOUNGE).getLast());
     assertEquals(
         false, room.data(Event.WellKnownTypes.AGENT_TURN_ENDED).getFirst().get("is_error"));
     assertEquals("stopped", room.run(process.runId).status());
@@ -160,7 +173,7 @@ class LiveMemberDisplacementTest {
   @Test
   void aClaimDuringATurnThatNeverAnswersForcesIt() {
     room.impatient();
-    var process = room.prompted(SPEC, "full", "first");
+    var process = room.prompted(LOUNGE, "full", "first");
     room.says(process, Lines.init("sess-1"), Lines.delta("Half"));
     diesOn(process, AgentProcess.Signal.INT);
 
@@ -170,13 +183,13 @@ class LiveMemberDisplacementTest {
     var why = "displaced by run " + session.runId() + " claiming its repos";
     process.awaitStdinClosed();
     assertEquals(List.of(AgentProcess.Signal.INT), process.signals);
-    var partial = room.messages.list(SPEC, null, 20).getLast();
+    var partial = room.messages.list(LOUNGE, null, 20).getLast();
     assertEquals("Half", partial.body());
     assertEquals(
         List.of(
             LiveRoom.live(
                 room.run(process.runId),
-                SPEC,
+                LOUNGE,
                 1,
                 Map.of("message_id", partial.id(), "is_error", true, "reason", why))),
         room.data(Event.WellKnownTypes.AGENT_TURN_ENDED));
@@ -186,7 +199,7 @@ class LiveMemberDisplacementTest {
   @Test
   void aMemberThatWillNotEndRefusesTheClaimAsAnyHolderDoes() {
     room.impatient();
-    var process = idleMember();
+    var process = idleMember(LOUNGE);
 
     var refused = assertThrows(ApiException.class, this::adhoc);
 
@@ -222,9 +235,9 @@ class LiveMemberDisplacementTest {
 
   @Test
   void aClaimABuildHoldsIsRefusedAndNoMemberIsTouched() {
-    var process = room.prompted(SPEC, "read-only", "first");
+    var process = room.prompted(LOUNGE, "read-only", "first");
     room.says(process, Lines.init("sess-1"), Lines.delta("One"), Lines.result("One"));
-    var build = build("other-spec");
+    var build = build(null);
 
     var refused = assertThrows(ApiException.class, this::adhoc);
 
@@ -237,11 +250,11 @@ class LiveMemberDisplacementTest {
 
   @Test
   void anotherRoomsMemberNeverDisplacesThisOne() {
-    var process = idleMember();
-    room.spec("second-spec");
-    room.engage("second-spec", "claude-code", "full");
+    var process = idleMember(LOUNGE);
+    room.room("second-room");
+    room.engage("second-room", "claude-code", "full");
 
-    room.says("second-spec", "hello over there");
+    room.says("second-room", "hello over there");
 
     assertEquals(1, room.processes.starts.size(), "the repos are held: the second waits");
     assertFalse(process.stdinClosed(), "a conversation never ends another");
@@ -257,7 +270,7 @@ class LiveMemberDisplacementTest {
             Lane.FIX,
             DateTimeUtils.newId().toString(),
             PROJECT,
-            "reviewed-spec",
+            SPEC,
             "claude-code",
             "fix it",
             "feat/test",
