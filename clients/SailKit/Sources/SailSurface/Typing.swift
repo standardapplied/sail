@@ -33,16 +33,30 @@ public struct MacKeyEvent: Equatable, Sendable {
 /// bytes.
 public enum Typing {
     /// What one key event sends, given the text the input method committed while handling it and
-    /// whether text was being composed before or after it. While text is composed nothing is sent;
+    /// whether text was being composed before or after it. A key with ⌘ held that reached the view
+    /// is a shortcut no menu took, and sends nothing, as in every Mac terminal. While text is composed nothing is sent;
     /// committed text is sent once, as the key's text, which the encoder sends as it is whatever
     /// the key (Return committing にほん sends にほん) (V4).
     public static func inputs(for event: MacKeyEvent, committed: [String], composedBefore: Bool, composingNow: Bool) -> [KeyInput] {
+        guard event.modifierFlags & command == 0 else { return [] }
         if !committed.isEmpty {
             return committed.filter { !$0.isEmpty }.map { input(event, text: $0) }
         }
         guard !composedBefore, !composingNow else { return [] }
         return [input(event, text: event.action == .release ? "" : ownText(event))]
     }
+
+    /// A modifier key pressed or released alone (`NSEvent.flagsChanged`): its press while its own
+    /// device bit is now set, else its release. The encoder sends it only to a program that asked for
+    /// every key (the Kitty protocol's flag 8); nil for a key that is no modifier.
+    public static func modifierKey(_ event: MacKeyEvent) -> KeyInput? {
+        guard let bit = modifierBits[event.keyCode] else { return nil }
+        return KeyInput(key: key(event.keyCode), modifiers: modifiers(event.modifierFlags), action: event.modifierFlags & bit != 0 ? .press : .release)
+    }
+
+    private static let modifierBits: [UInt16: UInt] = [
+        0x38: 0x02, 0x3C: 0x04, 0x3B: 0x01, 0x3E: 0x2000, 0x3A: 0x20, 0x3D: 0x40, 0x37: 0x08, 0x36: 0x10, 0x39: 1 << 16,
+    ]
 
     /// Text an input method committed outside a key event (the character viewer, a dictation).
     public static func inserted(_ text: String) -> KeyInput? {
@@ -75,6 +89,8 @@ public enum Typing {
         guard !text.isEmpty, !text.unicodeScalars.contains(where: { (0xF700 ... 0xF8FF).contains($0.value) }) else { return nil }
         return text
     }
+
+    private static let command: UInt = 1 << 20
 
     /// `NSEvent.ModifierFlags` bits, and the device bits that say the right-hand key is held.
     public static func modifiers(_ flags: UInt) -> Modifiers {

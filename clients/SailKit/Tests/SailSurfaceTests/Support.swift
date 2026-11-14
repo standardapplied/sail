@@ -39,6 +39,35 @@ final class Glyphs: GlyphSource {
     }
 }
 
+/// A glyph source over the real atlas bookkeeping, as the renderer's, remembering what each slot
+/// holds; `room` new items a frame at most.
+final class AtlasGlyphs: GlyphSource {
+    var atlas: Atlas<AtlasItem>
+    var frame: UInt64 = 1
+    var completed: UInt64 = 0
+    var room = Int.max
+    private var placedThisFrame = 0
+    private var placedFrame: UInt64 = 0
+    private(set) var holder: [AtlasSlot: AtlasItem] = [:]
+
+    init(side: Int, cell: PixelSize = PixelSize(width: 18, height: 40)) throws {
+        atlas = try Atlas(cell: cell, initialSide: side, largestSide: side)
+    }
+
+    func place(_ item: AtlasItem) -> GlyphPlace? {
+        if let slot = atlas.use(item, frame: frame) { return GlyphPlace(slot: slot, colour: false) }
+        if placedFrame != frame {
+            placedFrame = frame
+            placedThisFrame = 0
+        }
+        guard placedThisFrame < room else { return nil }
+        guard case let .placed(slot, _) = atlas.place(item, wide: item.wide, frame: frame, completed: completed) else { return nil }
+        placedThisFrame += 1
+        holder[slot] = item
+        return GlyphPlace(slot: slot, colour: false)
+    }
+}
+
 func screen(_ columns: Int, _ rows: Int, palette: Palette = .dark) throws -> Screen {
     try Screen(size: GridSize(columns: columns, rows: rows), scrollbackBytes: 1 << 20, palette: palette)
 }

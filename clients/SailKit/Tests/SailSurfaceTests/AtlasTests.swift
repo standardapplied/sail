@@ -43,8 +43,8 @@ import Testing
     /// frames all completed; a slot a frame in flight or the frame being built uses is never taken.
     @Test func aFullAtlasNeverTakesASlotAFrameInFlightUses() throws {
         var atlas = try Atlas<String>(cell: cell, initialSide: 20, largestSide: 20)
-        _ = atlas.place("old", wide: false, frame: 2, completed: 1)
         _ = atlas.place("older", wide: false, frame: 1, completed: 0)
+        _ = atlas.place("old", wide: false, frame: 2, completed: 1)
         _ = atlas.place("in flight", wide: false, frame: 4, completed: 3)
         _ = atlas.place("this frame", wide: false, frame: 5, completed: 3)
         let older = atlas.slot(of: "older")
@@ -58,7 +58,7 @@ import Testing
             Issue.record("the second least recent slot was not taken")
             return
         }
-        #expect(next == AtlasSlot(x: 0, y: 0, width: 10, height: 10))
+        #expect(next == AtlasSlot(x: 10, y: 0, width: 10, height: 10))
         let newest = atlas.place("newest", wide: false, frame: 5, completed: 3)
         #expect(newest == .full)
         #expect(atlas.slot(of: "in flight") != nil && atlas.slot(of: "this frame") != nil)
@@ -74,6 +74,33 @@ import Testing
         #expect(used == AtlasSlot(x: 0, y: 0, width: 10, height: 10) && missing == nil)
         _ = atlas.place("e", wide: false, frame: 3, completed: 2)
         #expect(atlas.slot(of: "a") != nil)
+    }
+
+    /// The slot given up is the least recently used, wherever it sits, and finding it costs the
+    /// same however full the atlas: 2,000 evicting placements in a full 8192 atlas of 18x40 cells
+    /// (46,308 wide slots) took 14.6 s when each scanned the atlas; they must take well under 1 s.
+    @Test func aFullAtlasGivesUpItsLeastRecentlyUsedSlotAtOnce() throws {
+        var atlas = try Atlas<Int>(cell: PixelSize(width: 18, height: 40), initialSide: 8192, largestSide: 8192)
+        var filled = 0
+        while case .placed = atlas.place(filled, wide: true, frame: 1, completed: 0) {
+            filled += 1
+        }
+        #expect(filled == 46308)
+        for item in stride(from: 0, to: filled, by: 2) {
+            _ = atlas.use(item, frame: 2)
+        }
+        let started = ContinuousClock.now
+        var taken: [AtlasSlot] = []
+        for new in 0 ..< 2000 {
+            guard case let .placed(slot, nil) = atlas.place(filled + new, wide: true, frame: 4, completed: 3) else {
+                Issue.record("placement \(new) found no slot")
+                return
+            }
+            taken.append(slot)
+        }
+        #expect(ContinuousClock.now - started < .seconds(1))
+        #expect(atlas.slot(of: 1) == nil && atlas.slot(of: 0) != nil, "the slots used only in frame 1 went first")
+        #expect(Set(taken).count == 2000)
     }
 
     @Test func aWideItemTakesOnlyAWideSlot() throws {

@@ -38,6 +38,46 @@ import Testing
         #expect(glyphs.asked.count == Set(first).count)
     }
 
+    /// A cached row whose item an earlier row's new glyph took (the atlas full) is laid out again,
+    /// so every cell samples the slot holding its own glyph. Four slots hold a, b, c and s; then row
+    /// 0 gains X, which takes c's slot, and row 1's c, drawn again from its cache, finds s's.
+    @Test func aCachedRowWhoseItemMovedIsLaidOutAgain() throws {
+        let metrics = try metrics(points: 15)
+        let glyphs = try AtlasGlyphs(side: 20, cell: PixelSize(width: 10, height: 10))
+        var builder = InstanceBuilder(metrics: metrics)
+        let screen = try screen(4, 3).fed("ab\r\nc\r\ns\u{1b}[?25l")
+        _ = builder.build(try screen.frame(), overlay: Overlay(), glyphs: glyphs)
+        glyphs.completed = 1
+        glyphs.frame = 2
+        _ = screen.fed("\u{1b}[1;3HX\u{1b}[3;1H\u{1b}[K")
+        let frame = try screen.frame()
+        let drawn = builder.build(frame, overlay: Overlay(), glyphs: glyphs)
+        #expect(drawn.glyphs.count == 4)
+        for instance in drawn.glyphs {
+            let column = (Int(instance.rect.x) - metrics.padding.width) / metrics.width
+            let row = (Int(instance.rect.y) - metrics.padding.height) / metrics.height
+            let slot = AtlasSlot(x: Int(instance.slot.x), y: Int(instance.slot.y), width: 10, height: 10)
+            #expect(glyphs.holder[slot] == .glyph(frame.rows[row].cells[column].grapheme, .regular, wide: false), "cell \(column),\(row)")
+        }
+        #expect(builder.rebuilt.contains(1))
+    }
+
+    /// A glyph that found no slot (more new glyphs than the frame's share) is drawn on a later
+    /// frame: the build says it was not complete, and the row is laid out again.
+    @Test func aGlyphWithoutASlotIsDrawnOnALaterFrame() throws {
+        let glyphs = try AtlasGlyphs(side: 1024)
+        glyphs.room = 2
+        var builder = try InstanceBuilder(metrics: metrics(points: 15))
+        let screen = try screen(10, 2).fed("abcd\u{1b}[?25l")
+        let first = builder.build(try screen.frame(), overlay: Overlay(), glyphs: glyphs)
+        #expect(first.glyphs.count == 2)
+        #expect(!builder.complete)
+        glyphs.frame = 2
+        let second = builder.build(try screen.frame(), overlay: Overlay(), glyphs: glyphs)
+        #expect(second.glyphs.count == 4)
+        #expect(builder.complete)
+    }
+
     @Test func invalidatingLaysOutEveryRowAgain() throws {
         let screen = try screen(10, 2).fed("ab")
         var builder = try InstanceBuilder(metrics: metrics(points: 15))
@@ -58,15 +98,18 @@ import Testing
         ])
     }
 
-    /// Scenario 3: an emoji ZWJ sequence, without grapheme clustering, is one wide cell per member,
-    /// each from the colour atlas.
-    @Test func emojiSpanTwoCellsFromTheColourAtlas() throws {
-        let screen = try screen(20, 2).fed("👨\u{200D}👩")
+    /// Scenario 3: an emoji ZWJ family, a flag and a skin-toned emoji are each one cluster across
+    /// two cells, from the colour atlas.
+    @Test(arguments: ["👨\u{200D}👩\u{200D}👧", "🇯🇵", "👍🏽"])
+    func anEmojiSequenceIsOneClusterAcrossTwoCellsFromTheColourAtlas(_ sequence: String) throws {
+        let screen = try screen(20, 2).fed(sequence + "\u{1b}[?25l")
         var builder = try InstanceBuilder(metrics: metrics(points: 15))
-        let drawn = builder.build(try screen.frame(), overlay: Overlay(), glyphs: Glyphs(colourFromScalar: 0x1F000))
-        let emoji = drawn.glyphs.filter { $0.colour == 1 }
-        #expect(emoji.count == 2)
-        #expect(emoji.allSatisfy { $0.rect.z == 36 })
+        let glyphs = Glyphs(colourFromScalar: 0x1F000)
+        let drawn = builder.build(try screen.frame(), overlay: Overlay(), glyphs: glyphs)
+        #expect(drawn.glyphs.count == 1)
+        #expect(drawn.glyphs.first?.colour == 1)
+        #expect(drawn.glyphs.first?.rect.z == 36)
+        #expect(glyphs.asked == [.glyph(sequence, .regular, wide: true)])
     }
 
     @Test func aSelectedCellIsDrawnInverted() throws {

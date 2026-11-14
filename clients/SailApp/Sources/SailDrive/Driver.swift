@@ -73,7 +73,12 @@ final class Driver {
             let index = offset + 1
             let name = step.name ?? "step"
             let began = ContinuousClock.now
-            let (ok, detail) = await perform(step, name: name)
+            var (ok, detail) = await perform(step, name: name)
+            let drew = await waitUntil(Self.drawDeadline) { self.terminal.visibleText == self.screenText }
+            if ok, !drew {
+                ok = false
+                detail = "the view never drew the screen: it shows \(terminal.visibleText.count) characters, the screen holds \(screenText.count)"
+            }
             let seconds = (ContinuousClock.now - began).seconds
             results.append(Result(index: index, name: name, ok: ok, seconds: seconds, detail: detail))
             save(index: index, name: name)
@@ -88,7 +93,8 @@ final class Driver {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         try? encoder.encode(report).write(to: out.appending(path: "report.json"))
-        exit(passed ? 0 : 1)
+        guard passed else { exit(1) }
+        NSApp.terminate(nil)
     }
 
     private func perform(_ step: Step, name: String) async -> (Bool, String) {
@@ -153,8 +159,9 @@ final class Driver {
             send(paste)
             guard let confirm = step.confirm else { return (true, "") }
             let asked = await waitUntil(step.seconds ?? 5) { self.preview.window.attachedSheet != nil }
-            guard asked, let answer = Keys.named(confirm ? "enter" : "escape", modifiers: []) else { return (false, "no confirmation was asked") }
-            send(answer)
+            guard asked, let sheet = preview.window.attachedSheet, let button = Self.button(confirm ? "Paste" : "Cancel", in: sheet.contentView)
+            else { return (false, "no confirmation was asked") }
+            button.performClick(nil)
             return (true, confirm ? "pasted after the sheet" : "cancelled at the sheet")
         }
         if let count = step.drawables {
@@ -203,9 +210,9 @@ final class Driver {
             let found = await waitUntil(step.seconds ?? 10) { self.lines.contains(columns) }
             return (found, "the grid is \(columns) columns")
         }
-        if let limit = step.gapUnder {
-            let gap = terminal.latency.largestPresentGap
-            return (gap <= limit, "the longest gap between frames drawing output was \(String(format: "%.1f", gap)) ms")
+        if let limit = step.shownWithin {
+            let waited = terminal.latency.outputToShown.max
+            return (waited <= limit, "the longest any output waited to be shown was \(String(format: "%.1f", waited)) ms")
         }
         if let text = step.text {
             let found = await waitUntil(step.seconds ?? 10) { self.screenText.contains(text) }
@@ -217,9 +224,8 @@ final class Driver {
         }
         if step.still == true {
             let before = screenText
-            let outputs = terminal.latency.outputToCommitted.count + terminal.latency.outputToPresented.count
-            try? await Task.sleep(for: .seconds(step.seconds ?? 3))
-            let more = terminal.latency.outputToCommitted.count + terminal.latency.outputToPresented.count > outputs
+            let outputs = terminal.latency.outputs
+            let more = await waitUntil(step.seconds ?? 5) { self.terminal.latency.outputs > outputs }
             let stayed = screenText == before
             return (stayed && more, more ? (stayed ? "the view stayed while output came" : "the view moved when output came") : "no output came")
         }
@@ -243,8 +249,10 @@ final class Driver {
     }
 
     /// `keys` presses of "x" one each `interval` ms, the line cleared after, and the latency
-    /// against the budgets: key to bytes written p95 ≤ 2 ms; key to echo on glass p95 ≤ 50 ms;
-    /// output to frame committed p50 ≤ 1 refresh and p95 ≤ 2; output to glass p50 ≤ 2 and p95 ≤ 3.
+    /// against the spec's budgets: key to bytes written p95 ≤ 2 ms; output to frame committed p50 ≤ 1
+    /// refresh and p95 ≤ 2; and, on frames the display reported a presentation time for (the CI
+    /// display reports few or none), output to presented p50 ≤ 1 refresh and p95 ≤ 2, and key to echo
+    /// on the display p95 ≤ 50 ms. Estimated presentation times are reported, never gated.
     private func measure(_ keys: Int, interval: Int, name: String) async -> (Bool, String) {
         terminal.resetLatency()
         let start = ContinuousClock.now
@@ -252,22 +260,35 @@ final class Driver {
             key("x")
             try? await Task.sleep(until: start + .milliseconds(interval * index), clock: .continuous)
         }
-        try? await Task.sleep(for: .milliseconds(500))
+        _ = await waitUntil(5) {
+            let figures = self.terminal.latency
+            return figures.keyToEcho.count + figures.keyToEchoEstimated.count >= keys
+        }
         let figures = terminal.latency
         if let clear = Keys.named("u", modifiers: ["control"]) { send(clear) }
         let refresh = 1000 / Double(max(1, preview.window.screen?.maximumFramesPerSecond ?? 60))
+        let measured = figures.outputToPresented.count > 0
         let budgets = [
             "key to bytes written p95 <= 2 ms": figures.keyToWritten.p95 <= 2,
-            "key to echo on glass p95 <= 50 ms": figures.keyToEcho.p95 <= 50,
             "output to committed p50 <= 1 refresh": figures.outputToCommitted.p50 <= refresh,
             "output to committed p95 <= 2 refreshes": figures.outputToCommitted.p95 <= 2 * refresh,
-            "output to glass p50 <= 2 refreshes": figures.outputToPresented.p50 <= 2 * refresh,
-            "output to glass p95 <= 3 refreshes": figures.outputToPresented.p95 <= 3 * refresh,
-            "every echo measured": figures.keyToEcho.count >= keys * 9 / 10,
+            "output to presented p50 <= 1 refresh (reported presents only)": !measured || figures.outputToPresented.p50 <= refresh,
+            "output to presented p95 <= 2 refreshes (reported presents only)": !measured || figures.outputToPresented.p95 <= 2 * refresh,
+            "key to echo presented p95 <= 50 ms (reported presents only)": figures.keyToEcho.count == 0 || figures.keyToEcho.p95 <= 50,
+            "every echo measured": figures.keyToEcho.count + figures.keyToEchoEstimated.count >= keys * 9 / 10,
         ]
         measures.append(Measure(name: name, drawables: terminal.drawableCount, keys: keys, figures: figures, budgets: budgets))
         let missed = budgets.filter { !$0.value }.keys.sorted()
         return (missed.isEmpty, missed.isEmpty ? "within every budget" : "missed: \(missed.joined(separator: "; "))")
+    }
+
+    /// How long a step's screen may take to be drawn by the view before the step fails.
+    static let drawDeadline = 5.0
+
+    private static func button(_ title: String, in view: NSView?) -> NSButton? {
+        guard let view else { return nil }
+        if let button = view as? NSButton, button.title == title { return button }
+        return view.subviews.lazy.compactMap { button(title, in: $0) }.first
     }
 
     private var screenText: String {

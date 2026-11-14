@@ -5,9 +5,7 @@ set -euo pipefail
 
 [[ $# -eq 2 ]] || { echo "usage: ci/notarize APP ZIP" >&2; exit 2; }
 readonly app=$1 zip=$2
-: "${APPLE_API_KEY_P8_BASE64:?ci/notarize: APPLE_API_KEY_P8_BASE64 is not set}"
-: "${APPLE_API_KEY:?ci/notarize: APPLE_API_KEY is not set}"
-: "${APPLE_API_ISSUER:?ci/notarize: APPLE_API_ISSUER is not set}"
+[[ $("$(dirname "$0")/signing") == on ]] || { echo "ci/notarize: signing is off; an unsigned build is not notarized" >&2; exit 1; }
 readonly temp=${RUNNER_TEMP:?ci/notarize: RUNNER_TEMP is not set}
 readonly key=$temp/notary-key.p8
 trap 'rm -f "$key" "$temp/notarize.zip"' EXIT

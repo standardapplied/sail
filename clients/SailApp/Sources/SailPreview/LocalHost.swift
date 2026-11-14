@@ -6,18 +6,26 @@ import Synchronization
 /// This Mac's own terminal host for the preview: the one already answering at the person's
 /// socket, or else the bundled `sail _pty-host --local`, started in a session of its own so it
 /// outlives the app (spec 3 replaces this with a LaunchAgent). A host the preview started and that
-/// then dies is started again at once, unless it died within ``shortestLife`` of starting.
+/// then dies is started again at once, unless it died within ``shortestLife`` of starting. Its
+/// standard error goes to a file only its owner reads, so when it refuses to start, its own last
+/// sentence is what the person is told.
 public final class LocalHost: Sendable {
     public static let startDeadline = Duration.seconds(15)
     public static let shortestLife = Duration.seconds(2)
 
     public let address: HostAddress
     private let binary: String?
+    private let log: String
     private let child = Mutex<pid_t?>(nil)
 
-    public init(binary: String?) throws(TerminalError) {
-        address = try HostAddress.local()
+    public convenience init(binary: String?) throws(TerminalError) {
+        try self.init(binary: binary, address: HostAddress.local(), log: FileManager.default.temporaryDirectory.appending(path: "sail-terminal-host.log").path)
+    }
+
+    init(binary: String?, address: HostAddress, log: String) {
+        self.address = address
         self.binary = binary
+        self.log = log
     }
 
     /// The pid of the host the preview started, nil when it found one serving.
@@ -35,9 +43,21 @@ public final class LocalHost: Sendable {
         let deadline = ContinuousClock.now + Self.startDeadline
         while ContinuousClock.now < deadline {
             if await answers() { return }
+            guard startedPID != nil else {
+                throw .host("this Mac's terminal host stopped as it started\(said)")
+            }
             try? await Task.sleep(for: .milliseconds(100))
         }
-        throw .host("the bundled terminal host did not answer at \(address) within \(Self.startDeadline)")
+        throw .host("the bundled terminal host did not answer at \(address) within \(Self.startDeadline)\(said)")
+    }
+
+    /// The host's last line on standard error, as a clause: ", saying …", or nothing.
+    private var said: String {
+        let text = (try? String(contentsOfFile: log, encoding: .utf8)) ?? ""
+        guard let line = text.split(whereSeparator: \.isNewline).last.map({ $0.trimmingCharacters(in: .whitespaces) }), !line.isEmpty else {
+            return ""
+        }
+        return ", saying: \(line.prefix(300))"
     }
 
     /// Kills the host the preview started, as a crash would; it is started again.
@@ -60,9 +80,9 @@ public final class LocalHost: Sendable {
             posix_spawn_file_actions_destroy(&actions)
         }
         posix_spawnattr_setflags(&attributes, Int16(POSIX_SPAWN_SETSID))
-        for descriptor: Int32 in [0, 1, 2] {
-            posix_spawn_file_actions_addopen(&actions, descriptor, "/dev/null", descriptor == 0 ? O_RDONLY : O_WRONLY, 0)
-        }
+        posix_spawn_file_actions_addopen(&actions, 0, "/dev/null", O_RDONLY, 0)
+        posix_spawn_file_actions_addopen(&actions, 1, "/dev/null", O_WRONLY, 0)
+        posix_spawn_file_actions_addopen(&actions, 2, log, O_WRONLY | O_CREAT | O_TRUNC, 0o600)
         let words = [binary, "_pty-host", "--local"]
         let settings = ProcessInfo.processInfo.environment.map { "\($0.key)=\($0.value)" }
         let arguments: [UnsafeMutablePointer<CChar>?] = words.map { strdup($0) } + [nil]

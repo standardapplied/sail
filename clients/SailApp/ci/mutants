@@ -1,0 +1,36 @@
+#!/usr/bin/env bash
+# Temporary (fix round 1): the macOS-only mutants must turn their checks red. Removed after.
+set -uo pipefail
+cd "$(dirname "$0")/.."
+missed=0
+
+restore() { mv "$1.orig" "$1"; touch "$1"; }
+
+echo "--- re-attaching a session a view already drew"
+file=Sources/SailTerminalView/TerminalView.swift
+cp "$file" "$file.orig"
+perl -0pi -e 's/        !attached\.contains\(link\)/        true/' "$file"
+if cmp -s "$file" "$file.orig"; then echo "NOT APPLIED  re-attach"; missed=1
+elif swift build --build-tests > /dev/null 2>&1 && perl -e 'alarm shift; exec @ARGV' 200 swift test --skip-build --filter 'SailTerminalViewTests\.ViewTests/aSessionIsDrawnByOneViewForLife' > "$RUNNER_TEMP/m.log" 2>&1; then
+  echo "GREEN        re-attach"; missed=1
+else
+  echo "RED          re-attach: $(grep -m1 -E 'recorded an issue' "$RUNNER_TEMP/m.log" | cut -c1-160)"
+fi
+restore "$file"
+
+echo "--- a view that never redraws, driven"
+cp "$file" "$file.orig"
+perl -0pi -e 's/(    func refresh\(target: Double\) \{\n)/$1        return\n/' "$file"
+if cmp -s "$file" "$file.orig"; then echo "NOT APPLIED  never redraws"; missed=1; else
+  app="$RUNNER_TEMP/mutant/Sail Terminal Preview.app"
+  swift build -c release > /dev/null 2>&1 && ci/bundle SailDrive "$app" "$SAIL_BINARY" sh.standardapplied.sail.terminal-preview.mutant > /dev/null && ci/sign "$app" > /dev/null
+  printf '%s\n' '{"steps": [' '  {"name": "type-echo-hi", "type": "echo hi\r"},' '  {"name": "shows-hi", "line": "hi", "seconds": 30}' ']}' > "$RUNNER_TEMP/mutant.json"
+  perl -e 'alarm shift; exec @ARGV' 200 "$app/Contents/MacOS/SailDrive" --drive "$RUNNER_TEMP/mutant.json" --out "$RUNNER_TEMP/mutant-out" > "$RUNNER_TEMP/m.log" 2>&1
+  if grep -q 'FAILED.*the view never drew the screen' "$RUNNER_TEMP/m.log"; then
+    echo "RED          never redraws: $(grep -m1 FAILED "$RUNNER_TEMP/m.log" | cut -c1-160)"
+  else
+    echo "MISSED       never redraws:"; cat "$RUNNER_TEMP/m.log"; missed=1
+  fi
+fi
+restore "$file"
+exit $missed

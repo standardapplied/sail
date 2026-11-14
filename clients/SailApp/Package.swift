@@ -43,7 +43,7 @@ let package = Package(
         ),
         .testTarget(
             name: "SailTerminalViewTests",
-            dependencies: ["SailTerminalView", "SailRenderer", "SailLook", kit("SailSurface"), kit("SailTerminal"), kit("SailVT")],
+            dependencies: ["SailTerminalView", "SailPreview", "SailRenderer", "SailLook", kit("SailSurface"), kit("SailTerminal"), kit("SailVT")],
             swiftSettings: strict
         ),
     ],

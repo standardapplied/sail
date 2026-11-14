@@ -24,6 +24,20 @@ extension TerminalView {
         apply(pointer.up(), MouseInput(action: .release, button: .left, x: place.x, y: place.y, modifiers: Self.modifiers(event)))
     }
 
+    override public func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        trackingAreas.forEach(removeTrackingArea)
+        addTrackingArea(NSTrackingArea(rect: .zero, options: [.mouseMoved, .activeInKeyWindow, .inVisibleRect], owner: self, userInfo: nil))
+    }
+
+    /// The pointer moving with no button held: reported to a program that asked for every motion
+    /// (mode 1003); the encoder sends nothing otherwise.
+    override public func mouseMoved(with event: NSEvent) {
+        guard let link, let place = place(of: event) else { return }
+        let mouse = MouseInput(action: .motion, button: nil, x: place.x, y: place.y, modifiers: Self.modifiers(event))
+        input.async { link.send(mouse) }
+    }
+
     override public func rightMouseDown(with event: NSEvent) {
         report(event, .press, .right)
     }
@@ -84,10 +98,12 @@ extension TerminalView {
         setFontSize(FontLadder.standard)
     }
 
-    /// How many lines `text` pastes: a trailing line break ends the last line and starts none.
+    /// How many lines `text` pastes, a line ending in CR, LF or CR LF alike (each runs a command);
+    /// a trailing line break ends the last line and starts none.
     static func lines(in text: String) -> Int {
-        let lines = text.split(separator: "\n", omittingEmptySubsequences: false).count
-        return text.hasSuffix("\n") ? lines - 1 : lines
+        let breaks = text.unicodeScalars.filter { $0 == "\r" || $0 == "\n" }.count - text.components(separatedBy: "\r\n").count + 1
+        let last = text.unicodeScalars.last
+        return breaks + (last == "\r" || last == "\n" ? 0 : 1)
     }
 
     private func askToPaste(_ text: String, into link: any TerminalLink) {
@@ -97,7 +113,8 @@ extension TerminalView {
         }
     }
 
-    /// The paste sheet: the line count, the risk in a sentence, Paste in the accent.
+    /// The paste sheet: the line count, the risk in a sentence, Paste in the accent, and Cancel the
+    /// default, so Return does not run what the sheet warns of.
     func presentPasteSheet(lines: Int, answer: @escaping @MainActor (Bool) -> Void) {
         guard let window else {
             answer(false)
@@ -107,7 +124,9 @@ extension TerminalView {
         alert.messageText = lines == 1 ? "Paste this line?" : "Paste \(lines) lines?"
         alert.informativeText = "The program in this terminal did not ask for pastes, so each line may run as a command as it arrives."
         let paste = alert.addButton(withTitle: "Paste")
-        alert.addButton(withTitle: "Cancel")
+        let cancel = alert.addButton(withTitle: "Cancel")
+        paste.keyEquivalent = ""
+        cancel.keyEquivalent = "\r"
         paste.bezelColor = NSColor(Look.dark.accent)
         paste.attributedTitle = NSAttributedString(string: "Paste", attributes: [.foregroundColor: NSColor(Look.dark.onAccent)])
         alert.beginSheetModal(for: window) { response in

@@ -129,7 +129,7 @@ public final class TerminalRenderer {
     ) -> DrawOutcome {
         guard let slot = ledger.begin() else { return .busy }
         guard let drawable = layer.nextDrawable(), let commandBuffer = queue.makeCommandBuffer(),
-              encode(frame, overlay: overlay, into: drawable.texture, commandBuffer: commandBuffer, slot: slot)
+              encode(frame, overlay: overlay, into: drawable.texture, commandBuffer: commandBuffer, slot: slot, newItems: Self.newItemsPerFrame)
         else {
             ledger.complete(slot.frame)
             return .unavailable
@@ -143,13 +143,24 @@ public final class TerminalRenderer {
         return .drawn(number)
     }
 
+    /// How many new glyphs a frame drawn on the display rasterizes at most (Core Text, on the main
+    /// thread, about half a millisecond each on the CI runner): the rest are drawn by the next
+    /// refreshes, so a screen of new text never stalls one frame.
+    public static let newItemsPerFrame = 32
+
+    /// Whether the last frame drew every glyph; false while new glyphs wait for the next refresh.
+    public var lastFrameComplete: Bool {
+        builder.complete
+    }
+
     /// How long an offscreen frame may take on the GPU before reading it back is given up.
     public static let offscreenDeadline = 10.0
 
-    /// `frame` drawn offscreen at `size` pixels and read back, every row laid out afresh.
-    public func image(of frame: ScreenFrame, overlay: Overlay, size: PixelSize) throws(RenderError) -> RenderedImage {
+    /// `frame` drawn offscreen at `size` pixels and read back, every row laid out afresh, drawing at
+    /// most `newItems` new glyphs (all of them unless told).
+    public func image(of frame: ScreenFrame, overlay: Overlay, size: PixelSize, newItems: Int = .max) throws(RenderError) -> RenderedImage {
         let done = DispatchSemaphore(value: 0)
-        let (commandBuffer, readback) = try submitOffscreen(frame, overlay: overlay, size: size) { done.signal() }
+        let (commandBuffer, readback) = try submitOffscreen(frame, overlay: overlay, size: size, newItems: newItems) { done.signal() }
         guard done.wait(timeout: .now() + Self.offscreenDeadline) == .success else {
             throw .unavailable("the GPU did not finish an offscreen frame within \(Int(Self.offscreenDeadline)) s")
         }
@@ -163,7 +174,7 @@ public final class TerminalRenderer {
     /// is free again. Returns the command buffer and the buffer the pixels are read back into.
     func submitOffscreen(
         _ frame: ScreenFrame, overlay: Overlay, size: PixelSize, wait: (event: any MTLEvent, value: UInt64)? = nil,
-        completed: @escaping @Sendable () -> Void = {}
+        newItems: Int = .max, completed: @escaping @Sendable () -> Void = {}
     ) throws(RenderError) -> (any MTLCommandBuffer, any MTLBuffer) {
         guard size.width > 0, size.height > 0 else { throw .unavailable("an image of \(size.width)x\(size.height) pixels has nothing to draw into") }
         let descriptor = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .bgra8Unorm, width: size.width, height: size.height, mipmapped: false)
@@ -179,7 +190,7 @@ public final class TerminalRenderer {
         }
         if let wait { commandBuffer.encodeWaitForEvent(wait.event, value: wait.value) }
         builder.invalidate()
-        guard encode(frame, overlay: overlay, into: target, commandBuffer: commandBuffer, slot: slot),
+        guard encode(frame, overlay: overlay, into: target, commandBuffer: commandBuffer, slot: slot, newItems: newItems),
               let blit = commandBuffer.makeBlitCommandEncoder()
         else {
             ledger.complete(slot.frame)
@@ -203,11 +214,11 @@ public final class TerminalRenderer {
 
     private func encode(
         _ frame: ScreenFrame, overlay: Overlay, into target: any MTLTexture, commandBuffer: any MTLCommandBuffer,
-        slot: (frame: UInt64, buffer: Int)
+        slot: (frame: UInt64, buffer: Int), newItems: Int
     ) -> Bool {
         let started = ContinuousClock.now
         defer { lastEncodeTime = ContinuousClock.now - started }
-        store.frame = slot.frame
+        store.begin(slot.frame, newItems: newItems)
         if store.generation != builtGeneration {
             builder.invalidate()
             builtGeneration = store.generation

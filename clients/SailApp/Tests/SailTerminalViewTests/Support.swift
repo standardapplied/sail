@@ -11,16 +11,21 @@ import Synchronization
 /// libghostty-vt's, as a session would send them.
 final class FakeLink: TerminalLink {
     let screen: Screen
-    let screenChanges: AsyncStream<Void>
+    let screenChanges: AsyncStream<ContinuousClock.Instant>
     let events: AsyncStream<SessionEvent>
-    let changesSink: AsyncStream<Void>.Continuation
+    let changesSink: AsyncStream<ContinuousClock.Instant>.Continuation
+    /// Ends when the screen stream's reader stops.
+    let readerGone: AsyncStream<Void>
     private let sent = Mutex<[UInt8]>([])
     private let sizes = Mutex<[GridSize]>([])
     private let focus = Mutex(true)
 
     init(columns: Int = 80, rows: Int = 24) throws {
         screen = try Screen(size: GridSize(columns: columns, rows: rows), scrollbackBytes: 1 << 20, palette: .dark)
-        (screenChanges, changesSink) = AsyncStream.makeStream(of: Void.self, bufferingPolicy: .bufferingNewest(1))
+        (screenChanges, changesSink) = AsyncStream.makeStream(of: ContinuousClock.Instant.self, bufferingPolicy: .bufferingOldest(1))
+        let (gone, goneSink) = AsyncStream.makeStream(of: Void.self)
+        readerGone = gone
+        changesSink.onTermination = { _ in goneSink.finish() }
         events = AsyncStream { _ in }
     }
 
@@ -39,7 +44,7 @@ final class FakeLink: TerminalLink {
     /// Output from the program: fed to the screen, and the screen's tick told.
     func output(_ text: String) {
         _ = screen.feed(Array(text.utf8))
-        changesSink.yield()
+        changesSink.yield(.now)
     }
 
     func send(_ key: KeyInput) {
@@ -66,6 +71,10 @@ final class FakeLink: TerminalLink {
             return current != focused
         }
         if changed { record(screen.focus(focused)) }
+    }
+
+    func setCellPixels(width: Int, height: Int) throws(ScreenError) {
+        record(try screen.setCellPixels(width: width, height: height).reply)
     }
 
     func resize(_ size: GridSize) throws(ScreenError) {

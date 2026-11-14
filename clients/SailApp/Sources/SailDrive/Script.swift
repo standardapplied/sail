@@ -48,11 +48,12 @@ struct Step: Decodable {
     var text: String?
     var banner: String?
     var seconds: Double?
-    /// The visible text stays what it was when the step began while `seconds` pass and the
-    /// screen takes output.
+    /// The visible text stays what it was when the step began while output reaches the screen,
+    /// waited for at most `seconds`.
     var still: Bool?
-    /// No gap between frames that drew output while more waited was longer than this many ms.
-    var gapUnder: Double?
+    /// No output waited longer than this many ms to be shown: to the frame that showed it, on the
+    /// display where it reported the time, else committed.
+    var shownWithin: Double?
     /// Types `measure` keys, one each `interval` ms (50 by default), and records the latency.
     var measure: Int?
     var interval: Int?

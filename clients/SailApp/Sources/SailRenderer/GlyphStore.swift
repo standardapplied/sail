@@ -99,7 +99,9 @@ final class GlyphStore: GlyphSource {
     let alpha: AtlasTexture
     let colour: AtlasTexture
     /// The frame being built, which marks every slot it uses.
-    var frame: UInt64 = 0
+    private(set) var frame: UInt64 = 0
+    /// How many more new items this frame may draw into the atlases.
+    private var newAllowed = Int.max
     /// The newest frame the GPU finished, every earlier one finished too.
     var completed: @Sendable () -> UInt64 = { 0 }
     private(set) var unplaced = 0
@@ -121,6 +123,12 @@ final class GlyphStore: GlyphSource {
 
     /// An item already drawn costs one lookup (text and sprites are in the alpha atlas); only a new
     /// one asks Core Text which atlas it belongs in.
+    /// Starts `frame`, which may draw `newItems` new items; the rest wait for a later frame.
+    func begin(_ frame: UInt64, newItems: Int) {
+        self.frame = frame
+        newAllowed = newItems
+    }
+
     func place(_ item: AtlasItem) -> GlyphPlace? {
         if let slot = alpha.use(item, frame: frame) {
             return GlyphPlace(slot: slot, colour: false)
@@ -128,6 +136,8 @@ final class GlyphStore: GlyphSource {
         if case .glyph = item, let slot = colour.use(item, frame: frame) {
             return GlyphPlace(slot: slot, colour: true)
         }
+        guard newAllowed > 0 else { return nil }
+        newAllowed -= 1
         let cells = item.wide ? 2 : 1
         let done = completed()
         let slot: AtlasSlot?

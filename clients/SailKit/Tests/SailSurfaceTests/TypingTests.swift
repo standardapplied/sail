@@ -63,6 +63,37 @@ import Testing
         #expect(Typing.inputs(for: release, committed: [], composedBefore: false, composingNow: false).first?.text == "")
     }
 
+    /// A ⌘ chord no menu took reaches the view and sends nothing: ⌘K is not "k".
+    @Test func aCommandChordSendsNothing() throws {
+        let screen = try screen(20, 2)
+        for (code, letter) in [(UInt16(0x28), "k"), (0x0D, "w"), (0x00, "a")] {
+            let press = MacKeyEvent(keyCode: code, modifierFlags: 1 << 20, characters: letter, charactersWithoutControl: letter, unmodified: letter)
+            #expect(Typing.inputs(for: press, committed: [], composedBefore: false, composingNow: false).isEmpty)
+            #expect(Typing.inputs(for: press, committed: [letter], composedBefore: false, composingNow: false).flatMap { screen.encode($0) }.isEmpty)
+            var release = press
+            release.action = .release
+            #expect(Typing.inputs(for: release, committed: [], composedBefore: false, composingNow: false).isEmpty)
+        }
+        let shiftCommand = MacKeyEvent(keyCode: 0x28, modifierFlags: 1 << 20 | 1 << 17, characters: "K", charactersWithoutControl: "K", unmodified: "k")
+        #expect(Typing.inputs(for: shiftCommand, committed: [], composedBefore: false, composingNow: false).isEmpty)
+    }
+
+    /// A modifier alone reaches only a program that asked for every key (Kitty flag 8).
+    @Test func aModifierAloneIsReportedOnlyWhenAsked() throws {
+        let screen = try screen(20, 2)
+        let shiftDown = MacKeyEvent(keyCode: 0x38, modifierFlags: 1 << 17 | 0x02)
+        let shiftUp = MacKeyEvent(keyCode: 0x38, modifierFlags: 0)
+        let press = try #require(Typing.modifierKey(shiftDown))
+        let release = try #require(Typing.modifierKey(shiftUp))
+        #expect(press.key == .shiftLeft && press.action == .press)
+        #expect(release.action == .release)
+        #expect(Typing.modifierKey(MacKeyEvent(keyCode: 0x00)) == nil)
+        #expect(screen.encode(press).isEmpty && screen.encode(release).isEmpty)
+        _ = screen.fed("\u{1b}[>10u")
+        #expect(!screen.encode(press).isEmpty)
+        #expect(!screen.encode(release).isEmpty)
+    }
+
     @Test func theRightHandModifiersAreTold() {
         #expect(Typing.modifiers(1 << 17 | 0x04) == [.shift, .rightShift])
         #expect(Typing.modifiers(1 << 18 | 0x2000) == [.control, .rightControl])
@@ -124,6 +155,14 @@ import Testing
         #expect(pointer.dragged(to: b) == .nothing)
     }
 
+    @Test func shiftClickExtendsAfterADoubleOrTripleClick() {
+        for clicks in [2, 3] {
+            var pointer = Pointer()
+            _ = pointer.down(at: a, clicks: clicks, shift: false, programTracksMouse: false)
+            #expect(pointer.down(at: b, clicks: 1, shift: true, programTracksMouse: false) == .select(.range(from: a, to: b)), "after \(clicks) clicks")
+        }
+    }
+
     @Test func aProgramThatTracksTheMouseGetsItUnlessShiftIsHeld() {
         var pointer = Pointer()
         #expect(pointer.down(at: a, clicks: 1, shift: false, programTracksMouse: true) == .report)
@@ -176,7 +215,10 @@ import Testing
         #expect(marks.figures.outputToCommitted.count == 1)
         marks.presented(frame: 2, at: 0)
         #expect(marks.figures.unreportedPresents == 2)
-        #expect(abs(marks.figures.outputToPresented.max - (1.0517 - 1.020) * 1000) < 1e-6, "a frame with no reported time shows at its refresh's target")
+        #expect(marks.figures.reportedPresents == 1)
+        #expect(marks.figures.outputToPresented.count == 1, "a frame with no reported time is not measured on the display")
+        #expect(abs(marks.figures.outputToPresentedEstimated.max - (1.0517 - 1.020) * 1000) < 1e-6, "it is estimated at its refresh's target")
+        #expect(abs(marks.figures.outputToShown.max - (1.035 - 1.020) * 1000) < 1e-6, "and shown when committed")
     }
 
     @Test func outputACallbackCouldNotDrawIsLate() {
@@ -197,17 +239,22 @@ import Testing
         #expect(abs(marks.figures.refresh.max - 4) < 1e-9)
     }
 
-    @Test func theLongestGapBetweenFramesWhileOutputWaitedIsKept() {
+    /// Scenario 19's metric: output that waited through a stall of the main thread is seen however
+    /// the frames before it went. A gap counted only between frames that each drew output missed
+    /// this 480 ms wait (it reported 0); each output's time to the frame that showed it does not.
+    @Test func outputWaitingThroughAStallIsSeen() {
         var marks = LatencyMarks()
         marks.output(at: 1.000)
-        marks.committed(frame: 1, at: 1.001, read: 1.001, target: 1.0177)
-        marks.output(at: 1.005)
+        marks.committed(frame: 1, at: 1.001, read: 1.0005, target: 1.016)
         marks.presented(frame: 1, at: 1.016)
-        marks.committed(frame: 2, at: 1.090, read: 1.089, target: 1.1067)
-        marks.presented(frame: 2, at: 1.120)
-        marks.output(at: 2.000)
-        marks.committed(frame: 3, at: 2.001, read: 2.001, target: 2.0177)
-        marks.presented(frame: 3, at: 2.016)
-        #expect(abs(marks.figures.largestPresentGap - 104) < 1e-6)
+        marks.output(at: 1.020)
+        marks.committed(frame: 2, at: 1.5, read: 1.49, target: 1.5)
+        marks.presented(frame: 2, at: 1.5)
+        #expect(abs(marks.figures.outputToShown.max - 480) < 1e-6)
+        var unreported = LatencyMarks()
+        unreported.output(at: 1.020)
+        unreported.committed(frame: 1, at: 1.5, read: 1.49, target: 1.516)
+        unreported.presented(frame: 1, at: 0)
+        #expect(abs(unreported.figures.outputToShown.max - 480) < 1e-6, "committed, where the display tells no time")
     }
 }

@@ -59,8 +59,9 @@ final class FramePacer {
     private(set) var records: [Record] = []
     private var clock: (any FrameClock)?
 
-    var isRunning: Bool {
-        clock.map { !$0.isPaused } ?? false
+    /// The view has a clock and it is paused: nothing has asked for a frame since the last one.
+    var isIdle: Bool {
+        clock?.isPaused == true
     }
 
     func start(_ clock: any FrameClock) {

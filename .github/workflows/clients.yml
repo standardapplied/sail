@@ -26,6 +26,8 @@ jobs:
   # host from the pinned darwin release.
   sailkit:
     name: SailKit on ${{ matrix.name }}
+    needs: changes
+    if: needs.changes.outputs.clients == 'true'
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 20
     strategy:
@@ -111,8 +113,8 @@ jobs:
           if-no-files-found: ignore
           path: ${{ runner.temp }}/reports
 
-  # Whether this change can affect the app lane: SailApp's whole input is under clients/ (its one
-  # dependency is ../SailKit by path) and this workflow. A job skipped by `if:` reports success,
+  # Whether this change can affect the client lanes: SailKit's and SailApp's whole input is under
+  # clients/ (SailApp's one dependency is ../SailKit by path) and this workflow. A job skipped by `if:` reports success,
   # unlike a workflow-level path filter, so a required check is never left waiting. An unknown
   # base (a new branch, a forced push) runs the lane.
   changes:
@@ -120,7 +122,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     outputs:
-      app: ${{ steps.diff.outputs.app }}
+      clients: ${{ steps.diff.outputs.clients }}
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
@@ -132,23 +134,24 @@ jobs:
           BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
         run: |
           if [[ $EVENT == workflow_dispatch ]] || ! git cat-file -e "${BASE}^{commit}" 2>/dev/null; then
-            echo "app=true" >> "$GITHUB_OUTPUT"
+            echo "clients=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
           changed=$(git diff --name-only "$BASE" HEAD)
           if grep -qE '^(clients/|\.github/workflows/clients\.yml$)' <<< "$changed"; then
-            echo "app=true" >> "$GITHUB_OUTPUT"
+            echo "clients=true" >> "$GITHUB_OUTPUT"
           else
-            echo "app=false" >> "$GITHUB_OUTPUT"
+            echo "clients=false" >> "$GITHUB_OUTPUT"
           fi
 
   # The macOS app: the Metal device first; the renderer's goldens and the view's input tests; the
   # preview driven against the pinned darwin sail's own local host; the D3 answer for spec 3; then
-  # the shipped bundle signed and notarized when the signing secrets exist, ad hoc otherwise.
+  # the shipped bundle signed with Developer ID and notarized when all six signing secrets exist
+  # (ci/signing says so), and otherwise an unsigned build, signed ad hoc and named unsigned.
   app:
     name: SailApp on macOS
     needs: changes
-    if: needs.changes.outputs.app == 'true'
+    if: needs.changes.outputs.clients == 'true'
     runs-on: macos-15
     timeout-minutes: 45
     defaults:
@@ -157,13 +160,22 @@ jobs:
     env:
       DARWIN_SAIL_TAG: v0.68.0
       DARWIN_SAIL_SHA256: bdae9ab430aecdefe6c4780fb8dacaa91838587b1f2215d361f31060c5f7f8d3
-      SIGNING: ${{ secrets.APPLE_CERTIFICATE != '' && secrets.APPLE_API_KEY_P8_BASE64 != '' }}
       SAIL_RECORD_GOLDENS: ${{ inputs.record-goldens && '1' || '0' }}
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
       - name: Xcode
         run: sudo xcode-select --switch /Applications/Xcode_26.3.app
+
+      - name: Signing on or off (all six secrets, or none)
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          APPLE_API_KEY_P8_BASE64: ${{ secrets.APPLE_API_KEY_P8_BASE64 }}
+        run: echo "SIGNING=$(ci/signing)" | tee -a "$GITHUB_ENV"
 
       - name: A Metal device
         run: |
@@ -216,7 +228,7 @@ jobs:
             echo "::group::$suite"
             log="$RUNNER_TEMP/$suite.log"
             perl -e 'alarm shift; exec @ARGV' 240 script -q "$log" swift test --skip-build --filter "${suite//./\\.}" || failed=1
-            grep -q 'Test run with .* passed' "$log" || failed=1
+            grep -Eq 'Test run with [1-9][0-9]* tests? in .* passed' "$log" || { echo "$suite ran no test" >&2; failed=1; }
             echo "::endgroup::"
           done
           exit $failed
@@ -258,44 +270,77 @@ jobs:
           kill "$server" 2>/dev/null || true
           echo "D3: $answer" | tee "$RUNNER_TEMP/drive-out/d3.txt"
 
-      - name: Sign the shipped app
+      - name: Sign the shipped app with Developer ID
+        if: env.SIGNING == 'on'
         env:
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          APPLE_API_KEY_P8_BASE64: ${{ secrets.APPLE_API_KEY_P8_BASE64 }}
+        run: ci/sign "$RUNNER_TEMP/app/Sail Terminal Preview.app"
+
+      - name: Sign the unsigned build ad hoc (no signing secrets)
+        if: env.SIGNING == 'off'
         run: ci/sign "$RUNNER_TEMP/app/Sail Terminal Preview.app"
 
       - name: Notarize and staple
-        if: env.SIGNING == 'true'
+        if: env.SIGNING == 'on'
         env:
-          APPLE_API_KEY_P8_BASE64: ${{ secrets.APPLE_API_KEY_P8_BASE64 }}
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
           APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
           APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          APPLE_API_KEY_P8_BASE64: ${{ secrets.APPLE_API_KEY_P8_BASE64 }}
         run: ci/notarize "$RUNNER_TEMP/app/Sail Terminal Preview.app" "$RUNNER_TEMP/Sail-Terminal-Preview-${GITHUB_SHA:0:8}.zip"
 
-      - name: Check the artifact is the real thing
+      # Checked on every build: the bundle's shape, the hardened runtime, no harness in the shipped
+      # binary, and the bundled sail running from inside it.
+      - name: Check the bundle (every build)
         run: |
           app="$RUNNER_TEMP/app/Sail Terminal Preview.app"
+          test "$(plutil -extract CFBundleExecutable raw "$app/Contents/Info.plist")" = SailTerminalPreview
+          test -x "$app/Contents/MacOS/SailTerminalPreview" && test -x "$app/Contents/Helpers/sail"
+          for font in Regular Bold Italic BoldItalic; do test -f "$app/Contents/Resources/Fonts/JetBrainsMono-$font.ttf"; done
+          test -f "$app/Contents/Resources/Fonts/OFL.txt" && test -f "$app/Contents/Resources/Acknowledgements.txt"
           codesign --verify --deep --strict --verbose=2 "$app"
           codesign -d --verbose=2 "$app" 2>&1 | grep -E 'flags=.*runtime'
           codesign -d --verbose=2 "$app/Contents/Helpers/sail" 2>&1 | grep -E 'flags=.*runtime'
-          test "$(plutil -extract CFBundleExecutable raw "$app/Contents/Info.plist")" = SailTerminalPreview
           if strings "$app/Contents/MacOS/SailTerminalPreview" | grep -q SailDrive; then echo "the drive harness is in the shipped app" >&2; exit 1; fi
           selftest=$("$app/Contents/Helpers/sail" _pty-selftest)
           grep -qx 'local-selftest: ok' <<< "$selftest"
-          if [[ $SIGNING == true ]]; then
-            spctl -a -vv -t exec "$app" 2>&1 | tee /dev/stderr | grep -q 'source=Notarized Developer ID'
-            xcrun stapler validate "$app"
-          else
-            ditto -c -k --keepParent "$app" "$RUNNER_TEMP/Sail-Terminal-Preview-unsigned-${GITHUB_SHA:0:8}.zip"
-            echo "No signing secrets: the app is signed ad hoc and uploaded as unsigned."
-          fi
 
-      - name: Leave the app
+      # Checked only when signed: skipped, not passed, on an unsigned build.
+      - name: Check Developer ID, the stapled notarization and Gatekeeper (signed builds only)
+        if: env.SIGNING == 'on'
+        run: |
+          app="$RUNNER_TEMP/app/Sail Terminal Preview.app"
+          codesign -d --verbose=2 "$app" 2>&1 | grep -q '^Authority=Developer ID Application'
+          codesign -d --verbose=2 "$app/Contents/Helpers/sail" 2>&1 | grep -q '^Authority=Developer ID Application'
+          xcrun stapler validate "$app"
+          spctl -a -vv -t exec "$app" 2>&1 | tee /dev/stderr | grep -q 'source=Notarized Developer ID'
+
+      - name: Zip the unsigned build
+        if: env.SIGNING == 'off'
+        run: ditto -c -k --keepParent "$RUNNER_TEMP/app/Sail Terminal Preview.app" "$RUNNER_TEMP/Sail-Terminal-Preview-unsigned-${GITHUB_SHA:0:8}.zip"
+
+      - name: Leave the notarized app
+        if: env.SIGNING == 'on'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: Sail-Terminal-Preview-${{ env.SIGNING == 'true' && '' || 'unsigned-' }}${{ github.sha }}
+          name: Sail-Terminal-Preview-${{ github.sha }}
           path: ${{ runner.temp }}/Sail-Terminal-Preview-*.zip
+          retention-days: 14
+          if-no-files-found: error
+
+      - name: Leave the unsigned build
+        if: env.SIGNING == 'off'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: Sail-Terminal-Preview-unsigned-${{ github.sha }}
+          path: ${{ runner.temp }}/Sail-Terminal-Preview-unsigned-*.zip
           retention-days: 14
           if-no-files-found: error
 
@@ -309,3 +354,33 @@ jobs:
           path: |
             ${{ runner.temp }}/frames
             ${{ runner.temp }}/drive-out
+
+  mutants:
+    name: SailApp mutants (temporary)
+    needs: changes
+    if: needs.changes.outputs.clients == 'true'
+    runs-on: macos-15
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: clients/SailApp
+    env:
+      DARWIN_SAIL_TAG: v0.68.0
+      DARWIN_SAIL_SHA256: bdae9ab430aecdefe6c4780fb8dacaa91838587b1f2215d361f31060c5f7f8d3
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - run: sudo xcode-select --switch /Applications/Xcode_26.3.app
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: ~/Library/Caches/org.swift.swiftpm
+          key: swiftpm-app-${{ runner.os }}-${{ hashFiles('clients/SailKit/Package.swift', 'clients/SailApp/Package.swift') }}
+      - env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/sail"
+          gh release download "$DARWIN_SAIL_TAG" --repo "$GITHUB_REPOSITORY" --dir "$RUNNER_TEMP/sail" --pattern sail-darwin-arm64
+          echo "$DARWIN_SAIL_SHA256  $RUNNER_TEMP/sail/sail-darwin-arm64" | shasum -a 256 -c -
+          chmod +x "$RUNNER_TEMP/sail/sail-darwin-arm64"
+          echo "SAIL_BINARY=$RUNNER_TEMP/sail/sail-darwin-arm64" >> "$GITHUB_ENV"
+      - run: ci/mutants
+

@@ -31,6 +31,8 @@ final class TerminalCore {
         var scrollback = scrollbackBytes
         try set(terminal.pointer, GHOSTTY_TERMINAL_OPT_SCROLLBACK_MAX_BYTES, &scrollback)
         try paint(palette)
+        var clustering = GhosttyTerminalModeConfig(mode: ghostty_mode_new(2027, false), value: true)
+        try set(terminal.pointer, GHOSTTY_TERMINAL_OPT_MODE_DEFAULT, &clustering)
         try resize(size)
     }
 

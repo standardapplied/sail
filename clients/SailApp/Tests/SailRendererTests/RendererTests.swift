@@ -27,11 +27,11 @@ import Testing
         image.write("box-edges-\(Int(points))pt")
     }
 
-    /// Scenario 3: a wide CJK character covers both its cells; an emoji comes from the colour
-    /// atlas and spans two cells in colour.
+    /// Scenario 3: a wide CJK character covers both its cells; an emoji ZWJ family is one cluster
+    /// from the colour atlas, across two cells in colour and no more.
     @Test func wideCharactersSpanTwoCellsAndEmojiAreInColour() throws {
         let renderer = try makeRenderer()
-        let screen = try makeScreen(6, 1, "漢😀\u{1b}[?25l")
+        let screen = try makeScreen(6, 1, "漢👨\u{200D}👩\u{200D}👧\u{1b}[?25l")
         let image = try renderer.image(of: screen)
         image.write("wide-and-emoji")
         let cell = renderer.metrics
@@ -46,7 +46,8 @@ import Testing
             }
         }
         #expect(inked(columns: 0 ... 0) && inked(columns: 1 ... 1), "漢 inks both its cells")
-        #expect(inked(columns: 2 ... 2) && inked(columns: 3 ... 3), "😀 inks both its cells")
+        #expect(inked(columns: 2 ... 2) && inked(columns: 3 ... 3), "the family inks both its cells")
+        #expect(!inked(columns: 4 ... 5), "and only those two")
         let emojiPixels = (cell.padding.width + 2 * cell.width ..< cell.padding.width + 4 * cell.width).flatMap { x in
             (cell.padding.height ..< cell.padding.height + cell.height).map { image.rgb(x, $0) }
         }

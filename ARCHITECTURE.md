@@ -3790,7 +3790,9 @@ cell metrics and the font ladder (10 to 32 pt, 15 by default, padding 10 and 8 p
 layout of a frame (rows rebuilt only when the frame says they changed; selection inverted; the
 cursor block, bar, underline, or hollow without focus; composing text at the cursor), the glyph
 atlas's slots (cell-sized, packed in shelves, the side doubling to 8192, least recently used given
-up only once every frame that used it completed), the three instance buffers (`FrameLedger`), box
+up only once every frame that used it completed, found in constant time from a list kept in order
+of last use; a cached row is laid out again when any of its items moved or found no slot), the
+three instance buffers (`FrameLedger`), box
 drawing, blocks, underline styles and cursors drawn as pixel sprites, the Mac key-code table and
 the typing rules, pointer and wheel gestures, and the latency marks. `SailApp` holds the rest:
 `SailLook` (JetBrains Mono 2.304, vendored with its OFL and pinned by checksum, and the few Mast
@@ -3801,9 +3803,10 @@ and `SailDrive`, the drive harness, never shipped. `ci/bundle` assembles a `.app
 (Developer ID from a keychain made for the run and deleted after it, or ad hoc without the
 secrets), `ci/notarize` notarizes and staples, `ci/drive` runs the drive scripts.
 
-- **V1. Output shows on the next frame.** The session's screen tick resumes the view's display link;
-  the first refresh after reads the frame and draws it. Nothing holds output to batch it. A refresh
-  that finds nothing changed pauses the link.
+- **V1. Output shows on the next frame.** Output that finds the view idle (its display link
+  paused) is drawn at once and the link resumed, so an echo meets the next display refresh;
+  otherwise the next refresh draws it. Nothing holds output to batch it. A refresh that finds
+  nothing changed, or no drawable, pauses the link.
 - **V2. One screen, one source.** The view draws only what `Screen.frame()` says and sends only what
   the screen's encoders make; no source of the app spells an escape sequence (a sweep test).
 - **V3. Display-link changes happen on the main thread**, through one pacer that records each one.
@@ -3822,18 +3825,25 @@ since a send waits for a slow host. Programs may not write the clipboard; it cha
 person's ⌘C, and a paste that could run commands in a program that did not ask for pastes is asked
 about first, naming its line count. The renderer draws one render pass a frame: backgrounds, then
 glyphs and decorations from two atlases (one-channel coverage tinted per cell, and BGRA for emoji),
-each an instanced draw of pixel rectangles that read their atlas texels exactly. Grapheme
-clustering (mode 2027) stays off, so an emoji sequence draws one wide cell per member, as shells'
-`wcwidth` counts it.
+each an instanced draw of pixel rectangles that read their atlas texels exactly; a frame on the
+display rasterizes at most 32 new glyphs and the next refreshes draw the rest. Grapheme clustering
+(mode 2027) is on in every SailVT screen from its creation and survives every reset, so an emoji
+sequence, a flag or a skin-toned emoji is one two-cell cluster, as Ghostty draws it. A view draws
+one session for the session's life (its streams have one reader); a ⌘ chord no menu takes sends
+nothing.
 
 The `SailApp on macOS` job in `clients.yml` proves it on GitHub's standard `macos-15` runner, whose
 paravirtual Metal device renders offscreen and reads back exactly: the renderer's golden frames
 (every SailKit fixture at scale 2, dark and light; a pixel differs past 8 of 255 on a channel, a
-frame fails past 0.1% of its pixels, emoji 48 and 5%), the view's input tests with synthesized
-events, the preview driven against the pinned darwin `sail`'s local host with its latency budgets,
-and the bundle signed and checked. Goldens are recorded only by the workflow's `record-goldens`
-input, never by a pull request's run. The job runs only when `clients/` or the workflow changed
-(a job skipped by `if:` reports success, so no required check waits on it).
+frame fails past 0.1% of its pixels; emoji cells are left out of that and must hold colour), the
+view's input tests with synthesized events, the preview driven against the pinned darwin `sail`'s
+local host with its latency budgets (the drive waits, at every step, until the view has drawn the
+screen's text), and the bundle checked on every build. With all six signing secrets (`ci/signing`
+decides, and fails on some but not all) it is signed with Developer ID, notarized, stapled and
+assessed by Gatekeeper; without them it is uploaded as an unsigned build and the signed-only check
+is skipped. Goldens are recorded only by the workflow's `record-goldens`
+input, never by a pull request's run. This job and the SailKit jobs run only when `clients/` or
+the workflow changed (a job skipped by `if:` reports success, so no required check waits on it).
 
 ## Continuous integration
 

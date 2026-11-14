@@ -13,7 +13,10 @@ public struct Pointer: Equatable, Sendable {
         case nothing
     }
 
+    /// Where a drag selects from.
     private var anchor: CellPoint?
+    /// Where a Shift-click extends from: the last selection's start, by any number of clicks.
+    private var start: CellPoint?
     private var reporting = false
 
     public init() {}
@@ -27,15 +30,18 @@ public struct Pointer: Equatable, Sendable {
         switch clicks {
         case 2:
             anchor = nil
+            start = cell
             return .select(.word(at: cell))
         case 3...:
             anchor = nil
+            start = cell
             return .select(.line(at: cell))
         default:
-            if shift, let anchor {
-                return .select(.range(from: anchor, to: cell))
+            if shift, let start {
+                return .select(.range(from: start, to: cell))
             }
             anchor = cell
+            start = cell
             return .clearSelection
         }
     }

@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+# Prints "on" when all six signing secrets are set and "off" when none is; with some but not all,
+# fails naming the missing ones (never a value). The workflow and ci/sign both ask it.
+set -euo pipefail
+
+names=(APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_SIGNING_IDENTITY APPLE_API_KEY APPLE_API_ISSUER APPLE_API_KEY_P8_BASE64)
+missing=()
+for name in "${names[@]}"; do
+  [[ -n ${!name:-} ]] || missing+=("$name")
+done
+if [[ ${#missing[@]} -eq 0 ]]; then
+  echo on
+elif [[ ${#missing[@]} -eq ${#names[@]} ]]; then
+  echo off
+else
+  echo "ci/signing: signing needs all six secrets; set or remove them together. Missing: ${missing[*]}" >&2
+  exit 1
+fi

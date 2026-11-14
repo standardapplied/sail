@@ -1,5 +1,7 @@
 import AppKit
 import Foundation
+import SailLook
+import SailRenderer
 import SailSurface
 @testable import SailTerminalView
 import SailVT
@@ -41,9 +43,13 @@ import Testing
         #expect(harness.view.hasMarkedText())
         harness.tick()
         let composing = try #require(try harness.view.snapshot())
-        #expect(composing.difference(from: before, tolerance: 8).pixels > 0, "the marked text is drawn")
-        let cell = harness.view.cursorRect
         let metrics = harness.view.metrics
+        let cursor = metrics.origin(of: CellPoint(x: 2, y: 0))
+        let atCursor = (x: cursor.x ..< cursor.x + 6 * metrics.width, y: cursor.y ..< cursor.y + metrics.height)
+        #expect(Self.differing(composing, before, in: atCursor) > 0, "the marked text is drawn in the cursor's cells")
+        let all = (x: 0 ..< composing.width, y: 0 ..< composing.height)
+        #expect(Self.differing(composing, before, in: all) == Self.differing(composing, before, in: atCursor), "and nowhere else")
+        let cell = harness.view.cursorRect
         #expect(Int((Double(cell.minX) * metrics.scale).rounded()) == metrics.padding.width + 2 * metrics.width, "the cursor is at column 2")
         let expected = harness.window.convertToScreen(harness.view.convert(cell, to: nil))
         #expect(harness.view.firstRect(forCharacterRange: NSRange(location: 0, length: 3), actualRange: nil) == expected)
@@ -51,6 +57,103 @@ import Testing
         harness.flush()
         #expect(harness.link.bytes == Array("にほん".utf8))
         #expect(!harness.view.hasMarkedText())
+    }
+
+    /// A commit the input method makes inside a key event (Return committing a composition, a dead
+    /// key's second press) is sent once, as the committed text, and the key itself is not.
+    @Test func aCommitInsideAKeyEventIsSentOnceAsItsText() throws {
+        let harness = try Harness()
+        harness.view.setMarkedText("にほ", selectedRange: NSRange(location: 2, length: 0), replacementRange: NSRange(location: NSNotFound, length: 0))
+        harness.key("にほん", code: 0x00, ignoring: "a")
+        #expect(harness.link.bytes == Array("にほん".utf8))
+        #expect(!harness.view.hasMarkedText())
+    }
+
+    /// M1: a ⌘ chord no menu took reaches the view and sends nothing.
+    @Test func aCommandChordNoMenuTookSendsNothing() throws {
+        let harness = try Harness()
+        harness.key("k", code: 0x28, flags: .command)
+        harness.key("a", code: 0x00, flags: .command)
+        #expect(harness.link.bytes.isEmpty)
+    }
+
+    /// A key release goes only to the encoder: it neither returns a scrolled-back view to the
+    /// bottom nor sends anything to a program that did not ask for releases; a press does both.
+    @Test func aReleaseLeavesTheViewWhereItWasScrolled() throws {
+        let harness = try Harness()
+        harness.link.output((1 ... 200).map { "line \($0)" }.joined(separator: "\r\n"))
+        _ = harness.link.screen.scroll(lines: -50, x: 0, y: 0)
+        let scrolled = try harness.link.screen.text()
+        for type in [NSEvent.EventType.keyUp] {
+            guard let event = NSEvent.keyEvent(
+                with: type, location: .zero, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+                windowNumber: harness.window.windowNumber, context: nil, characters: "x", charactersIgnoringModifiers: "x", isARepeat: false, keyCode: 0x07
+            ) else { continue }
+            harness.window.sendEvent(event)
+        }
+        harness.flush()
+        #expect(try harness.link.screen.text() == scrolled)
+        #expect(harness.link.bytes.isEmpty)
+        harness.key("x", code: 0x07)
+        #expect(try harness.link.screen.text().contains("line 200"))
+    }
+
+    /// A new font's cell size reaches a program that asked for in-band size reports (mode 2048).
+    @Test func aNewCellSizeIsReportedToTheProgram() throws {
+        let harness = try Harness()
+        harness.link.output("\u{1b}[?2048h")
+        harness.link.forget()
+        harness.view.increaseFontSize(nil)
+        harness.flush()
+        #expect(String(decoding: harness.link.bytes, as: UTF8.self).hasPrefix("\u{1b}[48;"))
+    }
+
+    /// The pointer moving with no button reaches a program that asked for every motion (1003).
+    @Test func hoverIsReportedOnlyWhenAsked() throws {
+        let harness = try Harness()
+        harness.tick()
+        let point = harness.view.convert(NSPoint(x: 40, y: 40), to: nil)
+        func move() {
+            guard let event = NSEvent.mouseEvent(
+                with: .mouseMoved, location: point, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+                windowNumber: harness.window.windowNumber, context: nil, eventNumber: 0, clickCount: 0, pressure: 0
+            ) else { return }
+            harness.view.mouseMoved(with: event)
+            harness.flush()
+        }
+        move()
+        #expect(harness.link.bytes.isEmpty)
+        harness.link.output("\u{1b}[?1003h\u{1b}[?1006h")
+        move()
+        #expect(String(decoding: harness.link.bytes, as: UTF8.self).hasPrefix("\u{1b}[<35;"))
+    }
+
+    /// M3: a view draws a session for its life. Detaching ends its reading of the session's
+    /// streams, and the session cannot be attached again; a view that is dropped stops reading too.
+    @Test func aSessionIsDrawnByOneViewForLife() async throws {
+        let harness = try Harness()
+        #expect(!TerminalView.canAttach(harness.link))
+        harness.view.detach()
+        for await _ in harness.link.readerGone {}
+        #expect(!TerminalView.canAttach(harness.link))
+        let other = try FakeLink()
+        #expect(TerminalView.canAttach(other))
+        var dropped: TerminalView? = try TerminalView(fonts: TerminalFonts(directory: Harness.fonts))
+        dropped?.attach(other)
+        dropped = nil
+        for await _ in other.readerGone {}
+        #expect(dropped == nil)
+    }
+
+    private static func differing(_ one: RenderedImage, _ other: RenderedImage, in area: (x: Range<Int>, y: Range<Int>)) -> Int {
+        var count = 0
+        for y in area.y where y < one.height {
+            for x in area.x where x < one.width {
+                let base = (y * one.width + x) * 4
+                if one.bgra[base ..< base + 3] != other.bgra[base ..< base + 3] { count += 1 }
+            }
+        }
+        return count
     }
 
     /// Scenario 9: a drag across a wrapped line and ⌘C put the text on the pasteboard with the
@@ -180,8 +283,7 @@ import Testing
         harness.link.output("hello")
         await harness.clock.nextResume()
         #expect(!harness.clock.isPaused)
-        harness.tick()
-        #expect(harness.view.visibleText.contains("hello"))
+        #expect(harness.view.visibleText.contains("hello"), "drawn as it arrived, before the next refresh")
     }
 
     /// V3: every start, pause, resume and stop of the display link ran on the main thread, the
@@ -223,6 +325,8 @@ import Testing
         #expect(TerminalView.lines(in: "one") == 1)
         #expect(TerminalView.lines(in: "one\n") == 1)
         #expect(TerminalView.lines(in: "one\ntwo\nthree") == 3)
+        #expect(TerminalView.lines(in: "one\rtwo\rthree") == 3)
+        #expect(TerminalView.lines(in: "one\r\ntwo\r\n") == 2)
     }
 }
 

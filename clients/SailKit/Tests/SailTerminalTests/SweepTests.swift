@@ -12,7 +12,7 @@ import Testing
         .appending(path: "Sources")
 
     static let allowedImports: Set = [
-        "Foundation", "Glibc", "Darwin", "GhosttyVt", "Synchronization", "SailAPI", "SailTerminalWire", "SailVT",
+        "Foundation", "Glibc", "Darwin", "GhosttyVt", "Synchronization", "SailAPI", "SailTerminalWire", "SailVT", "os",
     ]
 
     static var writing: Regex<AnyRegexOutput> { try! Regex(#"\b(print|debugPrint|NSLog|os_log|fputs|fprintf|puts)\s*\(|\bLogger\b|\bFileHandle\b|\bstandardError\b|\bstandardOutput\b|\bwrite\s*\(\s*(1|2)\s*,"#).wordBoundaryKind(.simple) }

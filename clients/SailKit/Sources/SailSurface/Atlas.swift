@@ -14,11 +14,12 @@ public struct AtlasSlot: Hashable, Sendable {
 }
 
 /// The bookkeeping of one glyph atlas: square, its side doubling from `initialSide` up to
-/// `largestSide` (a power of two times it), holding slots one cell or two cells wide in shelves one cell high. Each slot
-/// remembers the last frame that used it; when the atlas is full and at its largest, the slot
-/// least recently used is given to the new item, but never one a frame still in flight on the GPU
-/// uses, nor one the frame being built uses: a slot is taken only once every frame that used it
-/// has completed.
+/// `largestSide` (a power of two times it), holding slots one cell or two cells wide in shelves one
+/// cell high. Each slot remembers the last frame that used it, and the slots of each width are kept
+/// in the order they were last used, least recent first. When the atlas is full and at its largest,
+/// the least recently used slot is given to the new item, but never one a frame still in flight on
+/// the GPU uses, nor one the frame being built uses: a slot is taken only once every frame that used
+/// it has completed. Taking a slot and marking one used are each constant time.
 public struct Atlas<Item: Hashable & Sendable>: Sendable {
     public static var standardLargestSide: Int { 8192 }
 
@@ -26,13 +27,26 @@ public struct Atlas<Item: Hashable & Sendable>: Sendable {
     public let largestSide: Int
     public private(set) var side: Int
 
-    private var slots: [Item: Entry] = [:]
+    private var index: [Item: Int] = [:]
+    private var nodes: [Node] = []
+    private var lists = [List(), List()]
     private var shelves: [Int] = []
-    private var lastAdded = 0
+    /// The newest frame told so far: frames only move forward, so a frame number below it is taken
+    /// as it, which keeps each list in the order of last use and only ever delays a reuse.
+    private var newestFrame: UInt64 = 0
 
-    private struct Entry: Sendable {
+    private struct Node: Sendable {
+        var item: Item
         let slot: AtlasSlot
         var lastUsed: UInt64
+        var previous: Int?
+        var next: Int?
+    }
+
+    /// Slots of one width, least recently used at the head.
+    private struct List: Sendable {
+        var head: Int?
+        var tail: Int?
     }
 
     /// Where `place` put an item.
@@ -60,7 +74,7 @@ public struct Atlas<Item: Hashable & Sendable>: Sendable {
     }
 
     public var count: Int {
-        slots.count
+        index.count
     }
 
     /// The slot of `item`, one cell wide or two (`wide`), marked used by `frame`; `completed` is
@@ -69,38 +83,78 @@ public struct Atlas<Item: Hashable & Sendable>: Sendable {
         if let slot = use(item, frame: frame) {
             return .found(slot)
         }
+        let frame = moved(to: frame)
         let width = wide ? 2 * cell.width : cell.width
         if let slot = newSlot(width: width) {
-            return keep(item, slot, frame: frame, grewTo: nil)
+            keep(item, in: slot, frame: frame)
+            return .placed(slot, grewTo: nil)
         }
         if side < largestSide {
             side *= 2
             if let slot = newSlot(width: width) {
-                return keep(item, slot, frame: frame, grewTo: side)
+                keep(item, in: slot, frame: frame)
+                return .placed(slot, grewTo: side)
             }
         }
-        if let (victim, entry) = leastRecentlyUsed(width: width, completed: completed, before: frame) {
-            slots[victim] = nil
-            return keep(item, entry.slot, frame: frame, grewTo: nil)
-        }
-        return .full
+        let list = wide ? 1 : 0
+        guard let head = lists[list].head, nodes[head].lastUsed <= completed, nodes[head].lastUsed < frame else { return .full }
+        index[nodes[head].item] = nil
+        nodes[head].item = item
+        index[item] = head
+        markUsed(head, frame: frame)
+        return .placed(nodes[head].slot, grewTo: nil)
     }
 
     /// The slot of `item`, marked used by `frame` (a row drawn again from its cache uses it); nil
-    /// when the item is not in the atlas. One lookup: a frame asks this of every cell.
+    /// when the item is not in the atlas. One lookup: a frame asks this of every distinct item.
     public mutating func use(_ item: Item, frame: UInt64) -> AtlasSlot? {
-        guard let index = slots.index(forKey: item) else { return nil }
-        slots.values[index].lastUsed = frame
-        return slots.values[index].slot
+        guard let node = index[item] else { return nil }
+        markUsed(node, frame: moved(to: frame))
+        return nodes[node].slot
     }
 
     public func slot(of item: Item) -> AtlasSlot? {
-        slots[item]?.slot
+        index[item].map { nodes[$0].slot }
     }
 
-    private mutating func keep(_ item: Item, _ slot: AtlasSlot, frame: UInt64, grewTo: Int?) -> Placement {
-        slots[item] = Entry(slot: slot, lastUsed: frame)
-        return .placed(slot, grewTo: grewTo)
+    private mutating func moved(to frame: UInt64) -> UInt64 {
+        newestFrame = max(newestFrame, frame)
+        return newestFrame
+    }
+
+    private mutating func keep(_ item: Item, in slot: AtlasSlot, frame: UInt64) {
+        nodes.append(Node(item: item, slot: slot, lastUsed: frame))
+        index[item] = nodes.count - 1
+        append(nodes.count - 1)
+    }
+
+    /// Records the use and moves the slot to its list's tail, the most recently used end.
+    private mutating func markUsed(_ node: Int, frame: UInt64) {
+        guard nodes[node].lastUsed != frame else { return }
+        nodes[node].lastUsed = frame
+        unlink(node)
+        append(node)
+    }
+
+    private func list(of node: Int) -> Int {
+        nodes[node].slot.width == cell.width ? 0 : 1
+    }
+
+    private mutating func unlink(_ node: Int) {
+        let list = list(of: node)
+        let (previous, next) = (nodes[node].previous, nodes[node].next)
+        if let previous { nodes[previous].next = next } else { lists[list].head = next }
+        if let next { nodes[next].previous = previous } else { lists[list].tail = previous }
+        nodes[node].previous = nil
+        nodes[node].next = nil
+    }
+
+    private mutating func append(_ node: Int) {
+        let list = list(of: node)
+        nodes[node].previous = lists[list].tail
+        nodes[node].next = nil
+        if let tail = lists[list].tail { nodes[tail].next = node } else { lists[list].head = node }
+        lists[list].tail = node
     }
 
     /// Room never used yet: on a shelf with space left, or a new shelf below the last.
@@ -112,12 +166,5 @@ public struct Atlas<Item: Hashable & Sendable>: Sendable {
         guard (shelves.count + 1) * cell.height <= side, width <= side else { return nil }
         shelves.append(width)
         return AtlasSlot(x: 0, y: (shelves.count - 1) * cell.height, width: width, height: cell.height)
-    }
-
-    private func leastRecentlyUsed(width: Int, completed: UInt64, before frame: UInt64) -> (Item, Entry)? {
-        slots
-            .filter { $0.value.slot.width == width && $0.value.lastUsed <= completed && $0.value.lastUsed < frame }
-            .min { $0.value.lastUsed < $1.value.lastUsed }
-            .map { ($0.key, $0.value) }
     }
 }

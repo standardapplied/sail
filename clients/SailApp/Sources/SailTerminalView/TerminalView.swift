@@ -95,21 +95,29 @@ public final class TerminalView: NSView {
         renderer.metrics
     }
 
-    /// Draws `link`'s screen and types into it, in place of any link before. Programs may not write
-    /// the clipboard (it changes only on the person's action) and Option types characters.
+    /// Draws `link`'s screen and types into it, in place of any link before. A link is drawn by one
+    /// view for its life, since its streams have one reader: move the view, not the session.
+    /// Programs may not write the clipboard (it changes only on the person's action) and Option
+    /// types characters.
     public func attach(_ link: any TerminalLink) {
+        precondition(
+            Self.canAttach(link),
+            "this terminal session was already drawn by a view, and its screen and event streams end with that view: open or attach a new session, or move the view"
+        )
+        Self.attached.add(link)
         detach()
         self.link = link
         link.screen.setClipboardWrites(.deny)
         link.screen.setOptionAsAlt(.none)
-        _ = try? link.screen.setCellPixels(width: metrics.width, height: metrics.height)
+        let cell = (width: metrics.width, height: metrics.height)
+        input.async { try? link.setCellPixels(width: cell.width, height: cell.height) }
         grid = nil
         layoutGrid()
         let changes = link.screenChanges
         let marks = marks
         tasks.append(Task.detached { [weak self] in
-            for await _ in changes {
-                marks.output()
+            for await updated in changes {
+                marks.output(at: CACurrentMediaTime() - (ContinuousClock.now - updated).seconds)
                 await self?.outputArrived()
             }
         })
@@ -124,7 +132,16 @@ public final class TerminalView: NSView {
         needFrame()
     }
 
-    /// Stops drawing the session and typing into it; the session itself is the caller's.
+    /// Whether `link` may be attached: no view has drawn it before.
+    public static func canAttach(_ link: any TerminalLink) -> Bool {
+        !attached.contains(link)
+    }
+
+    /// Every link a view has attached, held weakly: its streams are spent.
+    private static let attached = NSHashTable<AnyObject>.weakObjects()
+
+    /// Stops drawing the session and typing into it, for good: the session itself is the caller's,
+    /// and no view can attach it again.
     public func detach() {
         tasks.forEach { $0.cancel() }
         tasks = []
@@ -154,6 +171,9 @@ public final class TerminalView: NSView {
         for name in [NSWindow.didBecomeKeyNotification, NSWindow.didResignKeyNotification] {
             NotificationCenter.default.addObserver(self, selector: #selector(keyWindowChanged), name: name, object: window)
         }
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(visibilityChanged), name: NSWindow.didChangeOcclusionStateNotification, object: window
+        )
         pacer.start(makeClock(self))
         viewDidChangeBackingProperties()
     }
@@ -189,7 +209,8 @@ public final class TerminalView: NSView {
         }
         fontPoints = points
         if let link {
-            _ = try? link.screen.setCellPixels(width: metrics.width, height: metrics.height)
+            let cell = (width: metrics.width, height: metrics.height)
+            input.async { try? link.setCellPixels(width: cell.width, height: cell.height) }
         }
         layoutGrid()
         needFrame()
@@ -239,8 +260,21 @@ public final class TerminalView: NSView {
         pacer.resume()
     }
 
+    /// Output reached the screen. A paused link means the view is idle (the typing-echo case):
+    /// the frame is drawn now, then the link resumes, so the echo meets the next display refresh
+    /// rather than the one after.
     private func outputArrived() {
+        guard pacer.isIdle else { return }
+        refresh(target: CACurrentMediaTime() + refreshInterval)
         pacer.resume()
+    }
+
+    private var refreshInterval: Double {
+        1 / Double(max(1, window?.screen?.maximumFramesPerSecond ?? 60))
+    }
+
+    @objc private func visibilityChanged() {
+        if window?.occlusionState.contains(.visible) == true { needFrame() }
     }
 
     /// One display refresh, for the frame meant to reach the display at `target`: read the screen;
@@ -267,11 +301,16 @@ public final class TerminalView: NSView {
         case let .drawn(number):
             marks.committed(frame: number, read: read, target: target)
             lastFrame = frame
-            needsDraw = false
-        case .busy, .unavailable:
+            needsDraw = !renderer.lastFrameComplete
+        case .busy:
             marks.skipped(read: read)
             renderer.invalidate()
             needsDraw = true
+        case .unavailable:
+            marks.skipped(read: read)
+            renderer.invalidate()
+            needsDraw = true
+            pacer.pause()
         }
     }
 
@@ -308,19 +347,28 @@ public final class TerminalView: NSView {
         needFrame()
     }
 
-    /// Sends what `key` encodes to, on the input queue; a key typed while scrolled back returns the
-    /// view to the bottom first. `event` is the key's time on the host clock.
-    func send(_ key: KeyInput, at event: Double) {
+    /// Sends what `key` encodes to, on the input queue, so the main thread never takes the
+    /// screen's lock for a key; a press typed while scrolled back returns the view to the bottom
+    /// first. A release or a modifier alone (`typed` false) only goes to the encoder, which sends
+    /// it to a program that asked for such reports. `event` is the key's time on the host clock.
+    func send(_ key: KeyInput, at event: Double, typed: Bool = true) {
         guard let link else { return }
-        link.screen.scrollToBottom()
-        let marks = marks
-        let measured = key.action != .release
-        let interval = marks.keyBegan()
-        input.async {
-            link.send(key)
-            if measured { marks.keyWritten(event: event, interval: interval) }
+        guard typed, key.action != .release else {
+            input.async { link.send(key) }
+            return
         }
-        needFrame()
+        let marks = marks
+        let interval = marks.keyBegan()
+        input.async { [weak self] in
+            link.screen.scrollToBottom()
+            link.send(key)
+            marks.keyWritten(event: event, interval: interval)
+            Task { @MainActor in self?.needFrame() }
+        }
+    }
+
+    isolated deinit {
+        tasks.forEach { $0.cancel() }
     }
 
     override public func isAccessibilityElement() -> Bool {
@@ -333,5 +381,12 @@ public final class TerminalView: NSView {
 
     override public func accessibilityValue() -> Any? {
         visibleText
+    }
+}
+
+extension Duration {
+    var seconds: Double {
+        let (whole, fraction) = components
+        return Double(whole) + Double(fraction) / 1e18
     }
 }
