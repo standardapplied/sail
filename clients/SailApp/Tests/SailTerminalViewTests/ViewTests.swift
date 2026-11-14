@@ -195,7 +195,7 @@ import Testing
         let records = harness.view.pacer.records
         #expect(records.contains { $0.change == .start } && records.contains { $0.change == .stop })
         #expect(records.contains { $0.change == .pause } && records.contains { $0.change == .resume })
-        #expect(records.allSatisfy(\.onMainThread))
+        #expect(records.allSatisfy { $0.onMainThread })
     }
 
     @Test func theViewIsATextAreaShowingTheVisibleText() throws {

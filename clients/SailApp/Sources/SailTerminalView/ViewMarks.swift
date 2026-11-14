@@ -38,14 +38,19 @@ final class ViewMarks: Sendable {
         marks.withLock { $0.output(at: now) }
     }
 
-    func committed(frame: UInt64, read: Double) {
+    func committed(frame: UInt64, read: Double, target: Double) {
         let now = CACurrentMediaTime()
         let interval = Self.signposter.beginInterval("frame committed to presented")
         onGlass.withLock { open in
             open[frame] = interval
             open = open.filter { $0.key + 64 > frame }
         }
-        marks.withLock { $0.committed(frame: frame, at: now, read: read) }
+        marks.withLock { $0.committed(frame: frame, at: now, read: read, target: target) }
+    }
+
+    func refreshed(since read: Double) {
+        let now = CACurrentMediaTime()
+        marks.withLock { $0.refreshed(taking: now - read) }
     }
 
     func unchanged(read: Double) {

@@ -152,7 +152,7 @@ import Testing
         var marks = LatencyMarks()
         marks.keyWritten(event: 1.000, written: 1.001)
         marks.output(at: 1.004)
-        marks.committed(frame: 1, at: 1.010, read: 1.008)
+        marks.committed(frame: 1, at: 1.010, read: 1.008, target: 1.0267)
         marks.presented(frame: 1, at: 1.025)
         let figures = marks.figures
         #expect(abs(figures.keyToWritten.p95 - 1) < 1e-6)
@@ -163,40 +163,50 @@ import Testing
 
     @Test func outputSeenAfterTheReadWaitsForTheNextFrameOrIsPutToTheOneThatShowedIt() {
         var marks = LatencyMarks()
-        marks.committed(frame: 1, at: 1.002, read: 1.000)
+        marks.committed(frame: 1, at: 1.002, read: 1.000, target: 1.0187)
         marks.output(at: 1.001)
         marks.presented(frame: 1, at: 1.016)
         marks.unchanged(read: 1.017)
         #expect(marks.figures.outputToPresented.count == 1)
         #expect(marks.figures.outputToCommitted.count == 0)
         marks.output(at: 1.020)
-        marks.committed(frame: 2, at: 1.035, read: 1.033)
+        marks.committed(frame: 2, at: 1.035, read: 1.033, target: 1.0517)
         marks.presented(frame: 3, at: 0)
-        #expect(marks.figures.droppedFrames == 1)
+        #expect(marks.figures.unreportedPresents == 1)
         #expect(marks.figures.outputToCommitted.count == 1)
+        marks.presented(frame: 2, at: 0)
+        #expect(marks.figures.unreportedPresents == 2)
+        #expect(abs(marks.figures.outputToPresented.max - (1.0517 - 1.020) * 1000) < 1e-6, "a frame with no reported time shows at its refresh's target")
     }
 
     @Test func outputACallbackCouldNotDrawIsLate() {
         var marks = LatencyMarks()
         marks.output(at: 1.000)
         marks.skipped(read: 1.005)
-        marks.committed(frame: 1, at: 1.022, read: 1.021)
+        marks.committed(frame: 1, at: 1.022, read: 1.021, target: 1.0387)
         #expect(marks.figures.lateOutputs == 1)
         marks.output(at: 1.030)
-        marks.committed(frame: 2, at: 1.040, read: 1.038)
+        marks.committed(frame: 2, at: 1.040, read: 1.038, target: 1.0567)
         #expect(marks.figures.lateOutputs == 1)
+    }
+
+    @Test func refreshTimesAreKept() {
+        var marks = LatencyMarks()
+        marks.refreshed(taking: 0.002)
+        marks.refreshed(taking: 0.004)
+        #expect(abs(marks.figures.refresh.max - 4) < 1e-9)
     }
 
     @Test func theLongestGapBetweenFramesWhileOutputWaitedIsKept() {
         var marks = LatencyMarks()
         marks.output(at: 1.000)
-        marks.committed(frame: 1, at: 1.001, read: 1.001)
+        marks.committed(frame: 1, at: 1.001, read: 1.001, target: 1.0177)
         marks.output(at: 1.005)
         marks.presented(frame: 1, at: 1.016)
-        marks.committed(frame: 2, at: 1.090, read: 1.089)
+        marks.committed(frame: 2, at: 1.090, read: 1.089, target: 1.1067)
         marks.presented(frame: 2, at: 1.120)
         marks.output(at: 2.000)
-        marks.committed(frame: 3, at: 2.001, read: 2.001)
+        marks.committed(frame: 3, at: 2.001, read: 2.001, target: 2.0177)
         marks.presented(frame: 3, at: 2.016)
         #expect(abs(marks.figures.largestPresentGap - 104) < 1e-6)
     }

@@ -5,7 +5,9 @@ import SailTerminal
 /// committed and then on glass; key event to the frame that shows its echo. A key's echo is the
 /// first output after its bytes were written. Output is drawn by the frame whose read of the
 /// screen came after the output's tick; output read by a frame that drew before its tick was seen
-/// is put to that frame, which did show it.
+/// is put to that frame, which did show it. A frame the display reports no on-glass time for (a
+/// dropped frame, or a virtual display that reports none at all) is taken to reach the glass at the
+/// refresh it was drawn for, and counted.
 public struct LatencyMarks: Sendable {
     public static let capacity = 4096
 
@@ -17,6 +19,7 @@ public struct LatencyMarks: Sendable {
     private var awaitingEcho: [(event: Double, written: Double)] = []
     private var pending: [Output] = []
     private var committed: [UInt64: [Output]] = [:]
+    private var targets: [UInt64: Double] = [:]
     private var presentedAt: [UInt64: Double] = [:]
     private var lastFrame: UInt64?
     private var lastCallback = -Double.infinity
@@ -27,8 +30,9 @@ public struct LatencyMarks: Sendable {
     private var outputToPresented: [Double] = []
     private var keyToEcho: [Double] = []
     private var presentGaps: [Double] = []
+    private var refreshes: [Double] = []
     private var late = 0
-    private var dropped = 0
+    private var unreported = 0
 
     public init() {}
 
@@ -47,8 +51,11 @@ public struct LatencyMarks: Sendable {
         if pending.count > Self.capacity { pending.removeFirst() }
     }
 
-    /// A display callback that read the screen at `read` drew `frame`, committed at `time`.
-    public mutating func committed(frame: UInt64, at time: Double, read: Double) {
+    /// A display callback that read the screen at `read` drew `frame`, committed at `time`, for the
+    /// refresh at `target`.
+    public mutating func committed(frame: UInt64, at time: Double, read: Double, target: Double) {
+        targets[frame] = target
+        targets = targets.filter { $0.key + 64 > frame }
         let drawn = take(through: read)
         for output in drawn {
             Self.keep(time - output.time, in: &outputToCommitted)
@@ -73,23 +80,33 @@ public struct LatencyMarks: Sendable {
         lastCallback = read
     }
 
-    /// `frame` reached the display at `time`; zero when it was dropped.
+    /// `frame` reached the display at `time`; zero when the display reported no time.
     public mutating func presented(frame: UInt64, at time: Double) {
-        guard time > 0 else {
-            dropped += 1
-            committed[frame] = nil
-            return
+        var time = time
+        if time <= 0 {
+            unreported += 1
+            guard let target = targets[frame] else {
+                committed[frame] = nil
+                return
+            }
+            time = target
         }
         presentedAt[frame] = time
         presentedAt = presentedAt.filter { $0.key + 8 > frame }
         settle(frame, presented: time)
     }
 
+    /// How long one display callback took, reading the screen to committing the frame or pausing.
+    public mutating func refreshed(taking seconds: Double) {
+        Self.keep(seconds, in: &refreshes)
+    }
+
     public var figures: LatencyFigures {
         LatencyFigures(
             keyToWritten: Self.percentiles(keyToWritten), outputToCommitted: Self.percentiles(outputToCommitted),
             outputToPresented: Self.percentiles(outputToPresented), keyToEcho: Self.percentiles(keyToEcho),
-            largestPresentGap: (presentGaps.max() ?? 0) * 1000, lateOutputs: late, droppedFrames: dropped
+            refresh: Self.percentiles(refreshes), largestPresentGap: (presentGaps.max() ?? 0) * 1000, lateOutputs: late,
+            unreportedPresents: unreported
         )
     }
 
@@ -132,9 +149,12 @@ public struct LatencyFigures: Equatable, Sendable, Codable {
     public var outputToCommitted: Percentiles
     public var outputToPresented: Percentiles
     public var keyToEcho: Percentiles
+    /// One display callback's time on the main thread.
+    public var refresh: Percentiles
     /// The longest time between two frames that drew output while more output was waiting.
     public var largestPresentGap: Double
     /// Output a display callback saw and could not draw, drawn by a later one.
     public var lateOutputs: Int
-    public var droppedFrames: Int
+    /// Frames the display reported no on-glass time for, taken to show at their refresh's target.
+    public var unreportedPresents: Int
 }

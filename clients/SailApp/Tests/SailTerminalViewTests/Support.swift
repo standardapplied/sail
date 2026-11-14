@@ -1,4 +1,5 @@
 import AppKit
+import QuartzCore
 import SailLook
 import SailSurface
 import SailTerminal
@@ -151,7 +152,7 @@ struct Harness {
 
     /// One display refresh, when the link runs.
     func tick() {
-        if !clock.isPaused { view.refresh() }
+        if !clock.isPaused { view.refresh(target: CACurrentMediaTime() + 1.0 / 60) }
     }
 
     func key(_ characters: String, code: UInt16, ignoring: String? = nil, flags: NSEvent.ModifierFlags = []) {

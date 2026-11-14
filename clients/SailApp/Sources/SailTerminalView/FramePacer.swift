@@ -1,7 +1,8 @@
 import AppKit
 import QuartzCore
 
-/// A clock that calls the view once per display refresh while not paused.
+/// A clock that calls the view once per display refresh while not paused, with the time that
+/// refresh's frame is meant to reach the display.
 @MainActor
 public protocol FrameClock: AnyObject {
     var isPaused: Bool { get set }
@@ -15,9 +16,9 @@ public protocol FrameClock: AnyObject {
 @MainActor
 final class DisplayLinkClock: NSObject, FrameClock {
     private var link: CADisplayLink?
-    private let tick: @MainActor () -> Void
+    private let tick: @MainActor (Double) -> Void
 
-    init(view: NSView, tick: @escaping @MainActor () -> Void) {
+    init(view: NSView, tick: @escaping @MainActor (Double) -> Void) {
         self.tick = tick
         super.init()
         let link = view.displayLink(target: self, selector: #selector(fire(_:)))
@@ -26,8 +27,8 @@ final class DisplayLinkClock: NSObject, FrameClock {
         self.link = link
     }
 
-    @objc private func fire(_: CADisplayLink) {
-        tick()
+    @objc private func fire(_ link: CADisplayLink) {
+        tick(link.targetTimestamp)
     }
 
     var isPaused: Bool {

@@ -29,7 +29,9 @@ public final class TerminalView: NSView {
     let pacer = FramePacer()
     let marks = ViewMarks()
     let input = DispatchQueue(label: "sh.standardapplied.sail.terminal.input", qos: .userInteractive)
-    var makeClock: @MainActor (TerminalView) -> any FrameClock = { view in DisplayLinkClock(view: view) { [weak view] in view?.refresh() } }
+    var makeClock: @MainActor (TerminalView) -> any FrameClock = { view in
+        DisplayLinkClock(view: view) { [weak view] target in view?.refresh(target: target) }
+    }
     var composition = Composition()
     var committedDuringKey: [String]?
     var pointer = Pointer()
@@ -241,14 +243,15 @@ public final class TerminalView: NSView {
         pacer.resume()
     }
 
-    /// One display refresh: read the screen; draw when it or the view changed, else pause until
-    /// something does.
-    func refresh() {
+    /// One display refresh, for the frame meant to reach the display at `target`: read the screen;
+    /// draw when it or the view changed, else pause until something does.
+    func refresh(target: Double) {
         guard let link else {
             pacer.pause()
             return
         }
         let read = CACurrentMediaTime()
+        defer { marks.refreshed(since: read) }
         guard let frame = try? link.screen.frame() else {
             pacer.pause()
             return
@@ -260,10 +263,9 @@ public final class TerminalView: NSView {
             pacer.pause()
             return
         }
-        let marks = marks
-        switch renderer.draw(frame, overlay: overlay, in: metalLayer, presented: { marks.presented(frame: $0, at: $1) }) {
+        switch renderer.draw(frame, overlay: overlay, in: metalLayer, presented: { [marks] in marks.presented(frame: $0, at: $1) }) {
         case let .drawn(number):
-            marks.committed(frame: number, read: read)
+            marks.committed(frame: number, read: read, target: target)
             lastFrame = frame
             needsDraw = false
         case .busy, .unavailable:
