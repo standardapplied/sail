@@ -511,8 +511,11 @@ public final class TerminalSession: Sendable {
             screenSink.yield()
             armHoldTick()
         case let .replayBegin(safe):
-            core.withLock { $0.replaying = true }
             screen.beginReplay()
+            core.withLock { core in
+                core.replaying = true
+                core.state.replays += 1
+            }
             emit(.replay(safe: safe))
         case .replayEnd:
             screen.endReplay()

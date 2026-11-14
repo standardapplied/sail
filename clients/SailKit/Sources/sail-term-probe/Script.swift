@@ -40,9 +40,11 @@ enum Step: Decodable, Equatable, CustomStringConvertible {
     /// Waits until the screen's text matches the pattern, within the seconds given (default 10).
     case wait(pattern: String, within: Int)
     case resize(columns: Int, rows: Int)
-    /// Keeps the screen's text under a name, for ``same(_:)``.
+    /// Keeps the screen's text under a name, for ``same(_:)``: taken while the program is at rest,
+    /// or a replay shows what it wrote since.
     case snapshot(String)
-    /// The screen's text is the one kept under the name.
+    /// A replay begun since the last drop or attach (the first attach's, with neither) shows the
+    /// text kept under the name, within 5 s: the screen before the replay arrives proves nothing.
     case same(String)
     /// Drops the connection; the session reconnects.
     case drop

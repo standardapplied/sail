@@ -23,6 +23,9 @@ public struct SessionState: Equatable, Sendable {
     /// The host stopped sending live output to this client, which fell behind; it catches up with
     /// a replay.
     public var paused: Bool
+    /// How many replays the session has begun, each counted once the screen was cleared for it:
+    /// a screen read after the count rose is that replay's, as the probe's `same` step needs.
+    package var replays = 0
 
     public init(
         phase: SessionPhase, session: String, droppedInputs: Int = 0, possiblyLostInputs: Int = 0, hostBootID: String? = nil,

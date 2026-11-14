@@ -24,7 +24,7 @@ struct Runner {
         var results: [StepResult] = [] {
             didSet { results.last.map(progress) }
         }
-        var snapshots: [String: String] = [:]
+        var kept = Kept()
         var budgets: [Budget] = []
         do {
             try await follower.attached(within: 30)
@@ -39,7 +39,7 @@ struct Runner {
                 if case let .measure(keys) = step {
                     budgets = try await measure(keys)
                 } else {
-                    try await take(step, snapshots: &snapshots)
+                    try await take(step, kept: &kept)
                 }
                 results.append(StepResult(step: "\(step)", ok: true, milliseconds: (clock.now - started).milliseconds, detail: nil))
             } catch {
@@ -50,7 +50,14 @@ struct Runner {
         return Report(steps: results, latency: session.latencyReport, droppedInputs: session.state.droppedInputs, budgets: budgets)
     }
 
-    private func take(_ step: Step, snapshots: inout [String: String]) async throws {
+    /// The screens a script kept, and how many replays the session had begun when it last
+    /// reconnected: a screen compared after a reconnect is the replay's, never the one before it.
+    private struct Kept {
+        var screens: [String: String] = [:]
+        var replays = 0
+    }
+
+    private func take(_ step: Step, kept: inout Kept) async throws {
         switch step {
         case let .type(text):
             text.forEach { session.send(.typing($0)) }
@@ -60,17 +67,22 @@ struct Runner {
         case let .resize(columns, rows):
             try session.resize(GridSize(columns: columns, rows: rows))
         case let .snapshot(name):
-            snapshots[name] = try session.screen.text()
+            kept.screens[name] = try session.screen.text()
         case let .same(name):
-            guard let kept = snapshots[name] else { throw ProbeError("no snapshot is named \(name)") }
-            try await follower.until("showed the screen kept as \(name)") { try session.screen.text() == kept }
+            guard let screen = kept.screens[name] else { throw ProbeError("no snapshot is named \(name)") }
+            let replays = kept.replays
+            try await follower.until("showed the screen kept as \(name) from a replay") {
+                try session.state.replays > replays && session.screen.text() == screen
+            }
         case .drop:
+            kept.replays = session.state.replays
             session.dropConnection()
             try await follower.until("lost its connection") { session.state.phase != .attached }
         case .detach:
             session.detach()
             try await follower.phase(.detached)
         case .attach:
+            kept.replays = session.state.replays
             session.attach()
             try await follower.attached(within: 30)
         case .killHost:
