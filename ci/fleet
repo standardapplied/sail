@@ -866,13 +866,17 @@ while_cut_off() {
   return $status
 }
 
+# One sync can push several specs and say every denial at once, so what each sync said is kept
+# for the checks of the specs it pushed alongside.
 denial_said() {
-  local run=$1 box=$2 spec=$3 reason=$4 denial
+  local run=$1 box=$2 spec=$3 reason=$4 heard denial
+  heard="$(log_dir "$run")/heard-$box"
   said=$({
     on "$run" "$box" "sudo sail sync" 2>&1
     on "$run" "$box" "sudo journalctl -u sail-api --since '-15min' --no-pager -o cat"
   })
-  denial=$(grep -F "spec $spec: main denied this change" <<< "$said" | grep -F "$reason" | grep -F "Yours is in its history")
+  printf '%s\n' "$said" >> "$heard"
+  denial=$(grep -F "spec $spec: main denied this change" "$heard" | grep -F "$reason" | grep -F "Yours is in its history" | sort -u)
   [[ -n $denial ]] && echo "$denial"
 }
 
