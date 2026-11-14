@@ -1,0 +1,11 @@
+size 20x5
+cursor 4,4 block visible steady
+colors fg #f6f1e9 bg #0a0e11 cursor #fc4926
+row 0 |uvwxyz0123456789|
+row 1 |second line|
+row 2 |ends exactly at twen|
+row 3 |ty|
+row 4 |last|
+input ctrl-c 03
+input paste needs confirmation
+input focus-lost -

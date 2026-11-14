@@ -1,0 +1,22 @@
+size 40x3
+cursor 21,1 block visible steady
+colors fg #f6f1e9 bg #0a0e11 cursor #fc4926
+row 0 |family 👨‍👩‍👧 end|
+  7 wide
+  8 spacer-tail
+  9 wide
+  10 spacer-tail
+  11 wide
+  12 spacer-tail
+row 1 |flag 🇯🇵 thumbs 👍🏽|
+  5 wide
+  6 spacer-tail
+  7 wide
+  8 spacer-tail
+  17 wide
+  18 spacer-tail
+  19 wide
+  20 spacer-tail
+input ctrl-c 03
+input paste needs confirmation
+input focus-lost -

@@ -1,0 +1,38 @@
+size 20x7
+cursor 7,5 block visible steady
+colors fg #f6f1e9 bg #0a0e11 cursor #fc4926
+row 0 |krgybmcw|
+  0 fg #12171b
+  1 fg #e07b6f
+  2 fg #86b89a
+  3 fg #d2a24c
+  4 fg #93b3d7
+  5 fg #d08fa6
+  6 fg #7fbfca
+  7 fg #c9c4bc
+row 1 |krgybmcw|
+  0 fg #4a5560
+  1 fg #f0968a
+  2 fg #a3d1b3
+  3 fg #e6ba69
+  4 fg #aec8e8
+  5 fg #e3a8bc
+  6 fg #9cd4de
+row 2 ||
+  0 bg #e07b6f
+  1 bg #86b89a
+  2 bg #93b3d7
+  3 bg #f0968a
+row 3 |abcd|
+  0 fg #ff0000
+  1 fg #00ff00
+  2 fg #080808
+  3 fg #080808 bg #0000ff
+row 4 |tuv|
+  0 fg #0a141e
+  1 fg #0a141e bg #fa8000
+  2 fg #ffffff bg #000000
+row 5 |default|
+input ctrl-c 03
+input paste needs confirmation
+input focus-lost -
