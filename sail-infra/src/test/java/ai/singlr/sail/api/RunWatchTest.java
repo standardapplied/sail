@@ -345,6 +345,34 @@ class RunWatchTest {
             + Duration.between(START, publishedAt.getFirst()));
   }
 
+  /** Scenario 36: a snapshot-and-stop limit snapshots the instance the run lives in, alone. */
+  @Test
+  void aSnapshotAndStopLimitSnapshotsTheSpecsWorkspaceAndNotTheProjectsContainer()
+      throws Exception {
+    var place = RunPlace.of(PROJECT, "fix-login");
+
+    new RunWatch(
+            place,
+            RUN,
+            UNIT,
+            new Guardrails(null, "20m", "snapshot-and-stop"),
+            START,
+            false,
+            container,
+            feed,
+            this::publish,
+            narrator(),
+            time::get)
+        .run();
+
+    var snapshots = container.commandsContaining("incus snapshot create");
+    assertEquals(1, snapshots.size(), snapshots.toString());
+    assertTrue(
+        snapshots.getFirst().startsWith("incus snapshot create " + place.instance() + " guardrail-"),
+        snapshots.getFirst());
+    assertEquals(1, published.size());
+  }
+
   @Test
   void aRunThatSurvivesTheKillIsNeverReportedEndedAndIsKilledAgainAtTheNextPoll() throws Exception {
     container.survivesKill(true);

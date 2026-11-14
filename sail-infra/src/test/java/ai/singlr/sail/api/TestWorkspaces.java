@@ -6,6 +6,7 @@
 package ai.singlr.sail.api;
 
 import ai.singlr.sail.engine.ProjectProvisioner;
+import ai.singlr.sail.engine.RunPlace;
 import ai.singlr.sail.engine.ScriptedShellExecutor;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.Workspaces;
@@ -13,11 +14,13 @@ import ai.singlr.sail.engine.WorkstationIdentity;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.function.LongSupplier;
 
 /**
  * A box's workspaces as a test's dispatches meet them: one ZFS pool, {@code tank}, and for each
@@ -44,11 +47,33 @@ public final class TestWorkspaces {
   /** The workspaces of a box whose Incus is {@code incus}. */
   public static Workspaces over(ShellExec incus) {
     try {
-      return new Workspaces(
-          incus, incus, System::nanoTime, Files.createTempDirectory("sail-test-locks"));
+      return over(incus, System::nanoTime, Files.createTempDirectory("sail-test-locks"));
     } catch (IOException e) {
       throw new UncheckedIOException(e);
     }
+  }
+
+  /**
+   * The workspaces of a box whose Incus is {@code incus}, on {@code nanos}, locked in {@code
+   * locks}.
+   */
+  public static Workspaces over(ShellExec incus, LongSupplier nanos, Path locks) {
+    return new Workspaces(incus, incus, nanos, locks);
+  }
+
+  /**
+   * Spec {@code spec}'s whole workspace of {@code project} as Incus lists it: {@code status}, owned
+   * by {@code owner}, on the pool every template of these boxes is on.
+   */
+  public static String specWorkspace(String project, String spec, String status, String owner) {
+    var place = (RunPlace.SpecWorkspace) RunPlace.of(project, spec);
+    return """
+        {"name": "%s", "status": "%s", "type": "container",
+         "config": {"user.sail.project": "%s", "user.sail.workspace": "%s",
+                    "user.sail.ready": "1762941601000", "user.sail.spec": "%s",
+                    "user.sail.owner": "%s"},
+         "expanded_devices": {"root": {"path": "/", "pool": "tank", "type": "disk"}}}"""
+        .formatted(place.instance(), status, project, place.workspace(), spec, owner);
   }
 
   /**
@@ -76,18 +101,22 @@ public final class TestWorkspaces {
     var templates = new ArrayList<String>();
     var shell = new ScriptedShellExecutor(new ShellExec.Result(0, "", ""));
     for (var project : Arrays.asList(projects)) {
-      templates.add(
-          template(
-              project,
-              ProjectProvisioner.inputs(
-                  definitions.require(project), WorkstationIdentity.registered())));
-      shell.onOk(
-          "incus snapshot list " + project + "--tmpl --format json",
-          "[{\"name\": \"v1\", \"created_at\": \"2026-11-12T08:00:00Z\"}]");
+      templates.add(currentTemplate(definitions, project));
+      shell.onOk("incus snapshot list " + project + "--tmpl --format json", V1);
     }
     return shell
         .onOk("incus storage list --format json", POOL)
         .onOk("incus list --format json", "[" + String.join(",", templates) + "]");
+  }
+
+  /** A template's one version, as Incus lists its snapshots. */
+  public static final String V1 = "[{\"name\": \"v1\", \"created_at\": \"2026-11-12T08:00:00Z\"}]";
+
+  /** {@code project}'s template, current at {@code v1} and built from its definition as it is. */
+  public static String currentTemplate(ProjectReader definitions, String project) {
+    return template(
+        project,
+        ProjectProvisioner.inputs(definitions.require(project), WorkstationIdentity.registered()));
   }
 
   /**

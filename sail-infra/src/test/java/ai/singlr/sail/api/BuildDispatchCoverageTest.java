@@ -12,11 +12,16 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.common.DateTimeUtils;
+import ai.singlr.sail.config.Lane;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.engine.ContainerSailSetup;
+import ai.singlr.sail.engine.FileMutex;
+import ai.singlr.sail.engine.RunPlace;
 import ai.singlr.sail.engine.ScriptedShellExecutor;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.WatcherSpawner;
+import ai.singlr.sail.engine.Workspaces;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.ActingAs;
 import ai.singlr.sail.identity.Actor;
@@ -31,6 +36,7 @@ import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
 import ai.singlr.sail.store.TestLogins;
+import ai.singlr.sail.store.TestRuns;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -40,6 +46,9 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Supplier;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -114,6 +123,9 @@ class BuildDispatchCoverageTest {
       """;
 
   @TempDir Path tempDir;
+
+  /** The box's workspaces when a test sets them; a ZFS box with acme's current template if not. */
+  private Workspaces workspaces;
 
   private static void asks(Sqlite db, String effort) {
     var row = auth("acme");
@@ -638,6 +650,317 @@ class BuildDispatchCoverageTest {
     return Actor.call(Actor.system(), () -> ops.reviewLanes().resumeBuild("acme", "auth", HANDLE));
   }
 
+  /** The definition {@link #YAML} as a catalog holds it. */
+  private ProjectReader definitions() throws IOException {
+    var yaml = tempDir.resolve("definition.yaml");
+    Files.writeString(yaml, YAML);
+    return TestProjects.reading(yaml);
+  }
+
+  /**
+   * A ZFS box's Incus whose list holds {@code before} for a spec's first two reads (its check, and
+   * the create's own under the workspace's lock) and {@code after} for every read since.
+   */
+  private static ScriptedShellExecutor incus(String before, String after) {
+    return new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
+        .onOk("incus storage list --format json", TestWorkspaces.POOL)
+        .onceOnOk("incus list --format", "[" + before + "]")
+        .onceOnOk("incus list --format j", "[" + before + "]")
+        .onOk("incus list --format json", "[" + after + "]")
+        .onOk("incus snapshot list acme--tmpl --format json", TestWorkspaces.V1);
+  }
+
+  private static RecordingShell launching() {
+    return happyPath()
+        .on(REPO + " rev-parse --verify --quiet refs/remotes/origin/main", "")
+        .on(REPO + " checkout -b sail/auth origin/main", "")
+        .on(REPO + " checkout -b sail/billing origin/main", "");
+  }
+
+  /** Scenario 1: the spec's workspace is cloned for it, and its run lives in it alone. */
+  @Test
+  void aSpecsDispatchMakesItsWorkspaceAndLaunchesItsRunThereAndNowhereElse() throws IOException {
+    var db = seedDb();
+    var template = TestWorkspaces.currentTemplate(definitions(), "acme");
+    var box = incus(template, template);
+    workspaces = TestWorkspaces.over(box);
+    var shell = launching();
+    var launched = new CopyOnWriteArrayList<List<String>>();
+    var ops =
+        ops(
+            shell,
+            YAML,
+            db,
+            new RunStore(db),
+            new CopyOnWriteArrayList<>(),
+            command -> {
+              launched.add(command);
+              return 0;
+            });
+
+    var dispatched = assertInstanceOf(DispatchOperations.Dispatched.class, dispatch(ops));
+
+    assertEquals("acme-auth", dispatched.workspace().instance());
+    assertFalse(dispatched.workspace().reused());
+    assertFalse(dispatched.workspace().stale());
+    assertTrue(
+        box.invocations().stream()
+            .anyMatch(
+                command ->
+                    command.startsWith("incus copy acme--tmpl/v1 acme-auth")
+                        && command.endsWith("-c user.sail.spec=auth -c user.sail.owner=" + HANDLE)),
+        String.join("\n", box.invocations()));
+    assertEquals(
+        List.of("acme-auth"),
+        launched.stream().map(command -> command.get(command.indexOf("exec") + 1)).toList());
+    assertTrue(
+        shell.executed.stream().noneMatch(command -> command.startsWith("incus exec acme --")),
+        "nothing of a spec's run is in the project's container: " + shell.executed);
+    assertEquals(
+        RunPlace.of("acme", "auth"), new RunStore(db).listForSpec("auth").getFirst().place());
+  }
+
+  /** Scenario 2: two specs over one repo run at once, each in its own workspace (R5). */
+  @Test
+  void twoSpecsOverOneRepoBothRunAtOnce() throws IOException {
+    var db = seedDb();
+    Acting.system(() -> Acting.as("me", () -> new SpecStore(db).create(spec("billing", "acme"))));
+    var ops = ops(launching(), YAML, db);
+
+    dispatch(ops);
+    Actor.call(
+        ADMIN,
+        () ->
+            ops.dispatch(
+                "acme",
+                new DispatchOperations.Request("billing", "background", false, null, false),
+                HANDLE));
+
+    assertEquals(
+        List.of("acme-auth:running:[app]", "acme-billing:running:[app]"),
+        new RunStore(db)
+            .listForProject("acme").stream()
+                .map(run -> run.place().instance() + ":" + run.status() + ":" + run.repos())
+                .sorted()
+                .toList());
+  }
+
+  /** Scenario 3: a reviewer of the spec goes into the workspace its build left, made by no one. */
+  @Test
+  void aReviewerOfTheSpecReusesTheWorkspaceItsBuildMade() throws IOException {
+    var db = seedDb();
+    var template = TestWorkspaces.currentTemplate(definitions(), "acme");
+    var box =
+        incus(
+            template,
+            template + "," + TestWorkspaces.specWorkspace("acme", "auth", "Running", HANDLE));
+    workspaces = TestWorkspaces.over(box);
+    var shell = launching().on(REPO + " rev-parse --abbrev-ref HEAD", "sail/auth\n");
+    var ops = ops(shell, YAML, db);
+    dispatch(ops);
+    Acting.system(
+        () ->
+            TestRuns.complete(
+                new RunStore(db),
+                new RunStore(db).listForSpec("auth").getFirst().id(),
+                "stopped",
+                0));
+
+    var launched =
+        Acting.system(
+            () ->
+                ops.reviewLanes()
+                    .launch(
+                        new ReviewLanes.Invocation(
+                            Lane.REVIEW,
+                            DateTimeUtils.newId().toString(),
+                            "acme",
+                            "auth",
+                            "claude-code",
+                            "review it",
+                            "sail/auth",
+                            List.of("app"),
+                            null,
+                            null,
+                            List.of()),
+                        HANDLE,
+                        () -> {}));
+
+    assertInstanceOf(ReviewLanes.Launch.Started.class, launched);
+    assertEquals(
+        1,
+        box.invocations().stream().filter(command -> command.startsWith("incus copy")).count(),
+        "the build made it; the reviewer reuses it");
+    assertEquals(
+        List.of("acme-auth", "acme-auth"),
+        new RunStore(db).listForSpec("auth").stream().map(run -> run.place().instance()).toList());
+  }
+
+  /** Scenarios 15 and 16, and 22: every refusal of the box comes before the reservation (R3). */
+  @Test
+  void aBoxWithNoRoomOrAPersonsWorkspaceUnderTheNameRefusesBeforeAnythingIsReserved()
+      throws IOException {
+    var db = seedDb();
+    var template = TestWorkspaces.currentTemplate(definitions(), "acme");
+    var full =
+        incus(template, template)
+            .onOk(
+                "incus query /1.0/storage-pools/tank/resources",
+                "{\"space\": {\"used\": 95000000000, \"total\": 100000000000}}");
+    workspaces = TestWorkspaces.over(full);
+    var spaceRefusal = assertThrows(ApiException.class, () -> dispatch(ops(launching(), YAML, db)));
+
+    var persons =
+        "{\"name\": \"acme-auth\", \"status\": \"Running\", \"config\":"
+            + " {\"user.sail.project\": \"acme\", \"user.sail.workspace\": \"auth\","
+            + " \"user.sail.ready\": \"1\"}, \"expanded_devices\": {\"root\": {\"pool\":"
+            + " \"tank\"}}}";
+    workspaces = TestWorkspaces.over(incus(template + "," + persons, template + "," + persons));
+    var nameRefusal = assertThrows(ApiException.class, () -> dispatch(ops(launching(), YAML, db)));
+
+    assertEquals(ErrorCode.RUNNER_BUSY, spaceRefusal.failure().errorCode());
+    assertEquals(
+        "Pool tank has 4.7 GiB free of 93.1 GiB, under the 10% this box keeps free, so no new"
+            + " workspace is made on it.",
+        spaceRefusal.getMessage());
+    assertEquals(ErrorCode.CONFLICT, nameRefusal.failure().errorCode());
+    assertTrue(nameRefusal.getMessage().startsWith("Workspace 'auth' of acme is a person's"));
+    assertEquals(List.of(), new RunStore(db).listForProject("acme"), "nothing was reserved");
+    assertEquals(SpecStatus.PENDING, new SpecStore(db).findById("auth").orElseThrow().status());
+    assertFalse(full.invocations().stream().anyMatch(command -> command.startsWith("incus copy")));
+  }
+
+  /**
+   * Scenario 16: as many live run workspaces as the box's memory holds of the limit, and no more.
+   */
+  @Test
+  void aBoxAtItsCapOfLiveRunWorkspacesIsBusyNamingTheCountAndTheCap() throws IOException {
+    var db = seedDb();
+    Acting.system(
+        () ->
+            new RunStore(db)
+                .reserveDispatch(
+                    DateTimeUtils.newId().toString(),
+                    "acme",
+                    "other",
+                    HANDLE,
+                    "build",
+                    List.of("app"),
+                    "claude-code",
+                    null,
+                    "t",
+                    "l",
+                    "u"));
+    var shell =
+        launching().on("incus query /1.0/resources", "{\"memory\": {\"total\": 6442450944}}");
+    var limited = YAML + "resources:\n  cpu: 2\n  memory: 4GB\n  disk: 50GB\n";
+
+    var refused = assertThrows(ApiException.class, () -> dispatch(ops(shell, limited, db)));
+
+    assertEquals(ErrorCode.RUNNER_BUSY, refused.failure().errorCode());
+    assertEquals(
+        "This box has 1 spec workspace with a live run, as many as its memory holds at acme's 4GB"
+            + " each (a cap of 1), so no new workspace is made.",
+        refused.getMessage());
+    assertEquals(1, new RunStore(db).listForProject("acme").size());
+  }
+
+  /**
+   * Scenario 17: a create that cannot have the box's create lock in time is busy, its run let go.
+   */
+  @Test
+  void aDispatchThatWaitsPastTheCreateLocksLimitIsBusyAndItsRunIsReleased() throws Exception {
+    var db = seedDb();
+    var template = TestWorkspaces.currentTemplate(definitions(), "acme");
+    var locks = Files.createDirectories(tempDir.resolve("locks"));
+    var deadline = Workspaces.CREATE_WAIT.toNanos();
+    var reads = new AtomicInteger();
+    workspaces =
+        TestWorkspaces.over(
+            incus(template, template), () -> reads.getAndIncrement() == 0 ? 0 : deadline, locks);
+    var holding = new CountDownLatch(1);
+    var release = new CountDownLatch(1);
+    var other =
+        Thread.ofVirtual()
+            .start(
+                () -> {
+                  try (var held = FileMutex.acquire(locks.resolve("workspace-create.lock"))) {
+                    holding.countDown();
+                    release.await();
+                  } catch (Exception e) {
+                    throw new IllegalStateException(e);
+                  }
+                });
+    assertTrue(holding.await(30, TimeUnit.SECONDS));
+    try {
+      var refused =
+          assertThrows(
+              ApiException.class,
+              () -> dispatch(ops(launching().on("tr -d '[:space:]'", "gone\n"), YAML, db)));
+
+      assertEquals(ErrorCode.RUNNER_BUSY, refused.failure().errorCode());
+      assertEquals(
+          "This runner is making another workspace; dispatch again in a minute.",
+          refused.getMessage());
+      assertEquals(
+          List.of("failed"),
+          new RunStore(db).listForSpec("auth").stream().map(RunStore.RunRow::status).toList(),
+          "the run it reserved is let go");
+    } finally {
+      release.countDown();
+      other.join();
+    }
+  }
+
+  /** Scenario 11: a template older than the definition is cloned as it is, and said so once. */
+  @Test
+  void aStaleTemplateIsClonedAndTheRoomIsToldOnce() throws IOException {
+    var db = seedDb();
+    var stale = TestWorkspaces.template("acme", "an-older-definition");
+    workspaces = TestWorkspaces.over(incus(stale, stale));
+    var ops = ops(launching(), YAML, db).useMessages(new MessageStore(db));
+
+    var dispatched = assertInstanceOf(DispatchOperations.Dispatched.class, dispatch(ops));
+
+    assertTrue(dispatched.workspace().stale());
+    assertEquals(
+        List.of(
+            "This spec's workspace was made from acme's template as it was last built, which is"
+                + " older than the project's definition. Build it again for the next workspace:"
+                + " sail project template build acme."),
+        new MessageStore(db)
+            .list("auth", null, 20).stream()
+                .filter(message -> MessageStore.SAIL_AUTHOR.equals(message.author()))
+                .map(MessageStore.MessageRow::body)
+                .toList());
+  }
+
+  /** Scenario 35: a dry run says the workspace it would make, and reserves and makes nothing. */
+  @Test
+  void aDryRunSaysTheWorkspaceItWouldMakeAndMakesNothing() throws IOException {
+    var db = seedDb();
+    var template = TestWorkspaces.currentTemplate(definitions(), "acme");
+    var box = incus(template, template);
+    workspaces = TestWorkspaces.over(box);
+
+    var dry =
+        Actor.call(
+            ADMIN,
+            () ->
+                ops(launching(), YAML, db)
+                    .dispatch(
+                        "acme",
+                        new DispatchOperations.Request("auth", "background", true, null, false),
+                        HANDLE));
+
+    var said = assertInstanceOf(DispatchOperations.Dispatched.class, dry);
+    assertEquals(
+        new DispatchOperations.WorkspaceUse("acme-auth", "auth", false, null, false),
+        said.workspace());
+    assertEquals(List.of(), new RunStore(db).listForProject("acme"));
+    assertFalse(box.invocations().stream().anyMatch(command -> command.startsWith("incus copy")));
+  }
+
   private Sqlite seedDb() {
     return seedDb(null);
   }
@@ -738,7 +1061,7 @@ class BuildDispatchCoverageTest {
         new FdeStore(db),
         events::add,
         new WatcherSpawner(happyPath(), (command, logPath) -> 4242L),
-        TestWorkspaces.ready(TestProjects.reading(yaml), "acme"),
+        workspaces != null ? workspaces : TestWorkspaces.ready(TestProjects.reading(yaml), "acme"),
         launcher,
         DispatchOperations.Listener.NONE,
         SessionYield.NONE);
