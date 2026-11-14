@@ -17,6 +17,7 @@ import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.Lane;
 import ai.singlr.sail.config.RunStatus;
 import ai.singlr.sail.config.YamlUtil;
+import ai.singlr.sail.engine.RunPlace;
 import ai.singlr.sail.harness.RunUsage;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.PrincipalHandle;
@@ -159,6 +160,11 @@ public final class RunStore implements ConflictResolver, SyncedStore {
     /** The conversation this run serves — its spec's room, or the room itself when spec-less. */
     public String conversationId() {
       return specId != null ? specId : roomId;
+    }
+
+    /** Where this run lives: its spec's workspace, or the project's container when it has none. */
+    public RunPlace place() {
+      return RunPlace.of(project, specId);
     }
 
     /**
@@ -405,7 +411,7 @@ public final class RunStore implements ConflictResolver, SyncedStore {
     var node = stamp(boxHandle);
     return db.transaction(
         () -> {
-          var lease = activeLease(project, node);
+          var lease = leaseOver(RunPlace.of(project, specId), node);
           if (lease.isPresent()) {
             throw new IllegalStateException(
                 "Refusing to record run "
@@ -484,11 +490,13 @@ public final class RunStore implements ConflictResolver, SyncedStore {
   /**
    * Atomically claims the project's container on this box for one exclusive operation (a snapshot
    * restore): within a single {@code BEGIN IMMEDIATE} transaction, refuses if another lease is held
-   * or any local run of the project is live ({@code running} or {@code stopping}, every role — even
-   * a room wake loses its session when the container is rolled back), then inserts the lease. Every
-   * run insert — {@link #reserveDispatch}, {@link #reserveForReview}, {@link #create} — checks this
-   * lease inside its own transaction, so the two sides can never interleave: a restore is refused
-   * over live work, and no run can start until {@link #releaseContainerLease} runs.
+   * or any local run of the project's container is live ({@code running} or {@code stopping}, every
+   * role — even a room wake loses its session when the container is rolled back), then inserts the
+   * lease. Every insert of a run that lives there — {@link #reserveDispatch}, {@link #create} —
+   * checks this lease inside its own transaction, so the two sides can never interleave: a restore
+   * is refused over live work, and no such run can start until {@link #releaseContainerLease} runs.
+   * A spec's run lives in its own workspace ({@link RunPlace}), which the restore does not touch,
+   * so the lease neither blocks it nor is blocked by it.
    */
   public ContainerLease acquireContainerLease(String project, String localHandle, String action) {
     return db.transaction(
@@ -502,7 +510,8 @@ public final class RunStore implements ConflictResolver, SyncedStore {
                   "SELECT "
                       + COLUMNS
                       + " FROM runs WHERE project = ? AND status IN ('running', 'stopping')"
-                      + " AND IFNULL(node, '') = ? ORDER BY id LIMIT 1",
+                      + " AND IFNULL(spec_id, '') = '' AND IFNULL(node, '') = ?"
+                      + " ORDER BY id LIMIT 1",
                   this::mapRow,
                   project,
                   ownerKey(localHandle));
@@ -581,6 +590,16 @@ public final class RunStore implements ConflictResolver, SyncedStore {
   }
 
   /**
+   * The lease a run in {@code place} would start under: the project's container's, when the run
+   * lives there; none for a spec's workspace, which no snapshot restore rolls back.
+   */
+  private Optional<String> leaseOver(RunPlace place, String node) {
+    return place instanceof RunPlace.ProjectContainer
+        ? activeLease(place.project(), node)
+        : Optional.empty();
+  }
+
+  /**
    * The action of the unexpired container lease on this box's container, or empty. An expired row
    * is pruned on lookup like {@link #findByCredential}'s credential rows.
    */
@@ -611,16 +630,16 @@ public final class RunStore implements ConflictResolver, SyncedStore {
    * run's agent principal (handle, {@code owner}) and its credential are minted inside the same
    * transaction, so a reserved run always carries an attributable identity and a refused one mints
    * nothing. An exclusive container lease (a snapshot restore mid-flight, see {@link
-   * #acquireContainerLease}) refuses every reservation inside the same transaction, so a run can
-   * never start into a container about to be rolled back. Returns the blocking conflict, the held
-   * lease, or the reserved run's credential. A run mid-stop ({@code stopping}) still occupies its
-   * repos — its agent is not verified dead until the claim is finalized — so it conflicts exactly
-   * like a running one. The run is stamped as every run this box executes is ({@link #stamp}), for
-   * {@code boxHandle}. Any database failure propagates — a dispatch must never launch without the
-   * row every later overlap check depends on. {@code maxDuration} is the run's configured hard stop
-   * ({@code guardrails.max_duration}): the credential expires that long plus {@link
-   * #CREDENTIAL_GRACE} after minting, and a null means no hard stop, so the credential lives until
-   * a verified finisher revokes it.
+   * #acquireContainerLease}) refuses every reservation of a run in the project's container inside
+   * the same transaction, so a run can never start into a container about to be rolled back.
+   * Returns the blocking conflict, the held lease, or the reserved run's credential. A run mid-stop
+   * ({@code stopping}) still occupies its repos — its agent is not verified dead until the claim is
+   * finalized — so it conflicts exactly like a running one. The run is stamped as every run this
+   * box executes is ({@link #stamp}), for {@code boxHandle}. Any database failure propagates — a
+   * dispatch must never launch without the row every later overlap check depends on. {@code
+   * maxDuration} is the run's configured hard stop ({@code guardrails.max_duration}): the
+   * credential expires that long plus {@link #CREDENTIAL_GRACE} after minting, and a null means no
+   * hard stop, so the credential lives until a verified finisher revokes it.
    */
   public Reservation reserveDispatch(
       String id,
@@ -813,13 +832,18 @@ public final class RunStore implements ConflictResolver, SyncedStore {
     var node = stamp(boxHandle);
     return db.transaction(
         () -> {
-          var lease = activeLease(project, node);
+          var place = RunPlace.of(project, specId);
+          var lease = leaseOver(place, node);
           if (lease.isPresent()) {
             return new Reservation.LeaseHeld(lease.get());
           }
           var conflict =
               DispatchGate.decide(
-                  specId != null ? specId : roomId, role, reserved, runningOnNode(project, node));
+                  place,
+                  specId != null ? specId : roomId,
+                  role,
+                  reserved,
+                  runningOnNode(project, node));
           if (conflict.isPresent()) {
             return new Reservation.Conflicted(conflict.get());
           }
@@ -1032,12 +1056,16 @@ public final class RunStore implements ConflictResolver, SyncedStore {
    */
   public List<DispatchGate.RunningRun> runningOnNode(String project, String localHandle) {
     return db.query(
-        "SELECT id, IFNULL(spec_id, room_id), role, repos FROM runs"
+        "SELECT id, IFNULL(spec_id, room_id), role, repos, spec_id FROM runs"
             + " WHERE project = ? AND status IN ('running', 'stopping')"
             + " AND IFNULL(node, '') = ?",
         row ->
             new DispatchGate.RunningRun(
-                row.text(0), row.text(1), row.text(2), repoList(row.text(3))),
+                row.text(0),
+                row.text(1),
+                row.text(2),
+                repoList(row.text(3)),
+                RunPlace.of(project, row.text(4))),
         project,
         ownerKey(localHandle));
   }

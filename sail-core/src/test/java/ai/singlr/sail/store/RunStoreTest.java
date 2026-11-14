@@ -17,6 +17,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.Lane;
 import ai.singlr.sail.config.SpecStatus;
+import ai.singlr.sail.engine.RunPlace;
 import ai.singlr.sail.identity.ActingAs;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.PrincipalHandle;
@@ -1006,19 +1007,21 @@ class RunStoreTest {
   void runsMintedInOrderReadInOrderWhateverTheTextOfTheirInstants(String earlier, String later) {
     var first = FixedInstants.at(earlier, () -> newRun("backend", "auth"));
     var second = FixedInstants.at(later, () -> newRun("backend", "auth"));
+    var oldest = FixedInstants.at(earlier, () -> newRun("frontend", ""));
+    FixedInstants.at(later, () -> newRun("frontend", ""));
 
     assertEquals(List.of(second, first), ids(store.listForSpec("auth")));
     assertEquals(List.of(second, first), ids(store.listForProject("backend")));
     assertEquals(List.of(second, first), ids(store.list("backend", "auth")));
-    assertEquals(List.of(second, first), ids(store.list(null, null)));
+    assertEquals(List.of(second, first), ids(store.list("backend", null)));
     assertEquals(second, store.latestForProjectOnNode("backend", "node-a").orElseThrow().id());
     assertEquals(second, store.runningForProjectOnNode("backend", "node-a").orElseThrow().id());
     assertEquals(second, store.latestBuildAttempt("auth").orElseThrow().id());
     assertEquals(second, store.latestLoopRun("auth").orElseThrow().id());
     assertEquals(
-        new RunStore.ContainerLease.BlockedByRun(store.findById(first).orElseThrow()),
-        store.acquireContainerLease("backend", "node-a", "restore"),
-        "the oldest live run is the one a restore names");
+        new RunStore.ContainerLease.BlockedByRun(store.findById(oldest).orElseThrow()),
+        store.acquireContainerLease("frontend", "node-a", "restore"),
+        "the oldest live run of the container is the one a restore names");
   }
 
   @ParameterizedTest
@@ -1482,22 +1485,23 @@ class RunStoreTest {
   }
 
   @Test
-  void anAdhocReservationBlocksAnyDispatch() {
+  void anAdhocReservationBlocksAnyRunOfTheProjectsContainer() {
     reserveAdhoc(DateTimeUtils.newId().toString(), "node-a");
 
-    var conflict =
-        reserve(store, DateTimeUtils.newId().toString(), "auth", "node-a", List.of("app"));
+    var conflict = reserve(store, DateTimeUtils.newId().toString(), "", "node-a", List.of("app"));
 
     assertTrue(conflict.isPresent(), "an ad-hoc session reserves the whole container");
   }
 
   @Test
-  void aRunningDispatchBlocksAnAdhocReservation() {
+  void aSpecsDispatchAndAnAdhocSessionNeverBlockEachOther() {
     reserve(store, DateTimeUtils.newId().toString(), "auth", "node-a", List.of("app"));
 
-    var conflict = reserveAdhoc(DateTimeUtils.newId().toString(), "node-a");
-
-    assertTrue(conflict.isPresent(), "an ad-hoc target overlaps every reserved repo set");
+    assertTrue(reserveAdhoc(DateTimeUtils.newId().toString(), "node-a").isEmpty());
+    assertTrue(
+        reserve(store, DateTimeUtils.newId().toString(), "billing", "node-a", List.of("app"))
+            .isEmpty(),
+        "the spec's workspace is not the container the ad-hoc session holds");
   }
 
   @Test
@@ -1714,18 +1718,36 @@ class RunStoreTest {
   }
 
   @Test
-  void reserveDispatchRefusesAnOverlapAndInsertsNothing() {
+  void reserveDispatchRefusesAnOverlapInTheProjectsContainerAndInsertsNothing() {
     var first = DateTimeUtils.newId().toString();
-    reserve(store, first, "auth", "node-a", List.of("app", "web"));
+    reserve(store, first, "", "node-a", List.of("app", "web"));
 
     var second = DateTimeUtils.newId().toString();
-    var conflict = reserve(store, second, "billing", "node-a", List.of("web", "docs"));
+    var conflict = reserve(store, second, "", "node-a", List.of("web", "docs"));
 
     var blocked = conflict.orElseThrow();
     assertEquals(first, blocked.run().runId());
-    assertEquals("auth", blocked.run().specId());
+    assertEquals(new RunPlace.ProjectContainer("backend"), blocked.run().place());
     assertEquals(List.of("web"), blocked.overlap());
     assertTrue(store.findById(second).isEmpty(), "a refused reservation must not insert a row");
+  }
+
+  @Test
+  void twoSpecsOverOneRepoBothReserveEachInItsOwnWorkspace() {
+    var a = DateTimeUtils.newId().toString();
+    var b = DateTimeUtils.newId().toString();
+
+    assertTrue(reserve(store, a, "a", "node-a", List.of("api")).isEmpty());
+    assertTrue(reserve(store, b, "b", "node-a", List.of("api")).isEmpty());
+
+    assertEquals("running", store.findById(a).orElseThrow().status());
+    assertEquals("running", store.findById(b).orElseThrow().status());
+    assertEquals(RunPlace.of("backend", "b"), store.findById(b).orElseThrow().place());
+    assertEquals(
+        List.of(RunPlace.of("backend", "a"), RunPlace.of("backend", "b")),
+        store.runningOnNode("backend", "node-a").stream()
+            .map(DispatchGate.RunningRun::place)
+            .toList());
   }
 
   @Test
@@ -1749,14 +1771,18 @@ class RunStoreTest {
     var held = assertInstanceOf(RunStore.ContainerLease.BlockedByLease.class, again);
     assertEquals("restore", held.action());
 
+    assertTrue(
+        reserve(store, DateTimeUtils.newId().toString(), "auth", "node-a", List.of("app"))
+            .isEmpty(),
+        "a spec's run lives in its own workspace, which no restore rolls back");
     var refusedId = DateTimeUtils.newId().toString();
     var reservation =
         store.reserveDispatch(
             refusedId,
             "backend",
-            "auth",
+            "",
             "node-a",
-            "build",
+            "adhoc",
             List.of("app"),
             "claude-code",
             "feat/x",
@@ -1770,37 +1796,16 @@ class RunStoreTest {
 
     store.releaseContainerLease("backend", "node-a");
     assertTrue(
-        reserve(store, DateTimeUtils.newId().toString(), "auth", "node-a", List.of("app"))
-            .isEmpty());
+        reserve(store, DateTimeUtils.newId().toString(), "", "node-a", List.of("app")).isEmpty());
   }
 
   @Test
-  void aContainerLeaseBlocksAReviewReservationUntilReleased() {
+  void aContainerLeaseNeverBlocksAReviewWhichLivesInItsSpecsWorkspace() {
     store.acquireContainerLease("backend", "node-a", "restore");
 
     var reviewId = DateTimeUtils.newId().toString();
-    var refused =
-        assertInstanceOf(
-            RunStore.Reservation.LeaseHeld.class,
-            store.reserveForReview(
-                reviewId,
-                reviewId,
-                "backend",
-                "auth",
-                "node-a",
-                Lane.REVIEW,
-                List.of(),
-                "claude-code",
-                "feat/x",
-                "review",
-                "/home/dev/.sail/runs/" + reviewId + "/agent.log",
-                "sail-agent-" + reviewId,
-                null));
-    assertEquals("restore", refused.action());
-    assertTrue(store.findById(reviewId).isEmpty(), "a lease-refused review must not insert a row");
-
-    store.releaseContainerLease("backend", "node-a");
     reserveReview(reviewId, "node-a");
+
     assertEquals("running", store.findById(reviewId).orElseThrow().status());
   }
 
@@ -1808,7 +1813,7 @@ class RunStoreTest {
   void aContainerLeaseRefusesARunRecordedOutsideAReservation() {
     store.acquireContainerLease("backend", "node-a", "restore");
 
-    var refused = assertThrows(IllegalStateException.class, () -> newRun("backend", "auth"));
+    var refused = assertThrows(IllegalStateException.class, () -> newRun("backend", ""));
 
     assertTrue(refused.getMessage().contains("restore"), refused.getMessage());
     assertTrue(
@@ -1844,8 +1849,13 @@ class RunStoreTest {
   }
 
   @Test
-  void aLiveRunBlocksTheContainerLeaseAndNamesItself() {
-    var id = newRun("backend", "auth");
+  void aLiveRunBlocksTheContainerLeaseAndNamesItselfAndASpecsRunNeverDoes() {
+    newRun("backend", "auth");
+    assertInstanceOf(
+        RunStore.ContainerLease.Acquired.class,
+        store.acquireContainerLease("backend", "node-a", "restore"));
+    store.releaseContainerLease("backend", "node-a");
+    var id = newRun("backend", "");
 
     var blocked =
         assertInstanceOf(
@@ -1914,10 +1924,9 @@ class RunStoreTest {
 
   @Test
   void anEmptyRepoSetReservesTheWholeContainer() {
-    reserve(store, DateTimeUtils.newId().toString(), "auth", "node-a", List.of());
+    reserve(store, DateTimeUtils.newId().toString(), "", "node-a", List.of());
 
-    var conflict =
-        reserve(store, DateTimeUtils.newId().toString(), "billing", "node-a", List.of("web"));
+    var conflict = reserve(store, DateTimeUtils.newId().toString(), "", "node-a", List.of("web"));
 
     assertTrue(conflict.isPresent());
     assertEquals(List.of(), conflict.orElseThrow().overlap());
@@ -1925,10 +1934,9 @@ class RunStoreTest {
 
   @Test
   void aLegacyRunningRunWithoutReposBlocksEveryReservation() {
-    newRun("backend", "auth");
+    newRun("backend", "");
 
-    var conflict =
-        reserve(store, DateTimeUtils.newId().toString(), "billing", "node-a", List.of("web"));
+    var conflict = reserve(store, DateTimeUtils.newId().toString(), "", "node-a", List.of("web"));
 
     assertTrue(conflict.isPresent(), "a row the gate cannot scope reads as whole-container");
   }
@@ -1951,7 +1959,7 @@ class RunStoreTest {
     TestRuns.complete(store, first, "stopped", 0);
 
     var conflict =
-        reserve(store, DateTimeUtils.newId().toString(), "billing", "node-a", List.of("app"));
+        reserve(store, DateTimeUtils.newId().toString(), "auth", "node-a", List.of("app"));
 
     assertTrue(conflict.isEmpty());
   }
@@ -1961,7 +1969,7 @@ class RunStoreTest {
     reserve(store, DateTimeUtils.newId().toString(), "auth", "raj", List.of("app"));
 
     var conflict =
-        reserve(store, DateTimeUtils.newId().toString(), "billing", "node-a", List.of("app"));
+        reserve(store, DateTimeUtils.newId().toString(), "auth", "node-a", List.of("app"));
 
     assertTrue(conflict.isEmpty());
   }
@@ -1974,7 +1982,7 @@ class RunStoreTest {
     var admitted = new AtomicInteger();
     var threads = new ArrayList<Thread>();
     for (var i = 0; i < contenders; i++) {
-      var spec = "spec-" + i;
+      var spec = "auth";
       threads.add(
           Thread.ofVirtual()
               .start(
@@ -2064,7 +2072,7 @@ class RunStoreTest {
     reservedCredential(DateTimeUtils.newId().toString(), "auth", List.of("app"));
     var second = DateTimeUtils.newId().toString();
 
-    var conflict = reserve(store, second, "billing", "node-a", List.of("app"));
+    var conflict = reserve(store, second, "auth", "node-a", List.of("app"));
 
     assertTrue(conflict.isPresent());
     assertEquals(0, credentialRows(second));
