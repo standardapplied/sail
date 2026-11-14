@@ -89,6 +89,8 @@ class RunLoginIT extends AbstractIncusIT {
                     + " id -u dev >/dev/null 2>&1 || useradd -m -u 1000 -s /bin/bash dev;"
                     + " mkdir -p /home/dev/.sail /home/dev/workspace;"
                     + " chown -R dev:dev /home/dev;"
+                    + " for i in $(seq 1 30); do"
+                    + " loginctl enable-linger dev 2>/dev/null && break; sleep 1; done;"
                     + " loginctl enable-linger dev;"
                     + " timeout 60 sh -c 'until test -S /run/user/1000/bus; do sleep 1; done'"));
     assertTrue(setup.ok(), "container provisioning failed: " + setup.stderr());
