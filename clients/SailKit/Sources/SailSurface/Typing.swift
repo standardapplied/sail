@@ -34,12 +34,11 @@ public struct MacKeyEvent: Equatable, Sendable {
 public enum Typing {
     /// What one key event sends, given the text the input method committed while handling it and
     /// whether text was being composed before or after it. While text is composed nothing is sent;
-    /// text committed out of a composition is sent as itself, once (V4).
+    /// committed text is sent once, as the key's text, which the encoder sends as it is whatever
+    /// the key (Return committing にほん sends にほん) (V4).
     public static func inputs(for event: MacKeyEvent, committed: [String], composedBefore: Bool, composingNow: Bool) -> [KeyInput] {
         if !committed.isEmpty {
-            return committed.filter { !$0.isEmpty }.map { text in
-                composedBefore ? KeyInput(key: .unidentified, text: text) : input(event, text: text)
-            }
+            return committed.filter { !$0.isEmpty }.map { input(event, text: $0) }
         }
         guard !composedBefore, !composingNow else { return [] }
         return [input(event, text: event.action == .release ? "" : ownText(event))]

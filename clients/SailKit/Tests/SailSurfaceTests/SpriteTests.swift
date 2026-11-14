@@ -62,6 +62,8 @@ import Testing
         #expect(corner[outerX, outerY] == 255, "╔'s outer corner is drawn")
         #expect(corner[innerX, innerY] == 255, "╔'s inner corner is drawn")
         #expect(corner[innerX - 1, innerY - 1] == 0, "╔'s gap between its lines stays open")
+        #expect(corner[innerX - 1, innerY] == 0, "╔'s inner across line starts at the inner down line")
+        #expect(corner[innerX, innerY - 1] == 0, "╔'s inner down line starts at the inner across line")
         #expect(corner[outerX - 1, outerY - 1] == 0, "nothing outside the outer corner")
     }
 

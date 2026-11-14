@@ -103,6 +103,20 @@ import Testing
         #expect(pointer.down(at: CellPoint(x: 9, y: 3), clicks: 1, shift: true, programTracksMouse: false) == .select(.range(from: a, to: CellPoint(x: 9, y: 3))))
     }
 
+    /// Scenario 9's portable half: a drag across a wrapped line selects it, and the screen gives
+    /// its text with the wrapped rows joined.
+    @Test func aDragAcrossAWrappedLineSelectsItJoined() throws {
+        let screen = try screen(10, 4).fed("abcdefghijklmno")
+        var pointer = Pointer()
+        _ = pointer.down(at: CellPoint(x: 0, y: 0), clicks: 1, shift: false, programTracksMouse: screen.tracksMouse)
+        guard case let .select(request) = pointer.dragged(to: CellPoint(x: 4, y: 1)) else {
+            Issue.record("a drag selected nothing")
+            return
+        }
+        #expect(screen.select(request))
+        #expect(screen.selectedText() == "abcdefghijklmno")
+    }
+
     @Test func doubleAndTripleClicksSelectAWordAndALine() {
         var pointer = Pointer()
         #expect(pointer.down(at: a, clicks: 2, shift: false, programTracksMouse: false) == .select(.word(at: a)))

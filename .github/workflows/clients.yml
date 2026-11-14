@@ -158,7 +158,6 @@ jobs:
       DARWIN_SAIL_TAG: v0.68.0
       DARWIN_SAIL_SHA256: bdae9ab430aecdefe6c4780fb8dacaa91838587b1f2215d361f31060c5f7f8d3
       SIGNING: ${{ secrets.APPLE_CERTIFICATE != '' && secrets.APPLE_API_KEY_P8_BASE64 != '' }}
-      SAIL_FRAMES_OUT: ${{ runner.temp }}/frames
       SAIL_RECORD_GOLDENS: ${{ inputs.record-goldens && '1' || '0' }}
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
@@ -206,6 +205,8 @@ jobs:
         run: swift build --build-tests
 
       - name: Test
+        env:
+          SAIL_FRAMES_OUT: ${{ runner.temp }}/frames
         run: swift test
 
       - name: Release build, the shipped app and the drive build
