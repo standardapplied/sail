@@ -372,7 +372,9 @@ public final class DispatchOperations {
 
   /**
    * Whether {@code line} is the newest thing Sail said in {@code room} and no run of {@code specId}
-   * has started since: the room itself remembers what it was told, so no process keeps it.
+   * has started since (launched its agent: a run reserved and let go before it did, as a refused
+   * launch's is, started nothing): the room itself remembers what it was told, so no process keeps
+   * it.
    */
   private boolean saidSinceItsNewestRun(
       MessageStore messages, String room, String specId, String line) {
@@ -385,7 +387,8 @@ public final class DispatchOperations {
                     || runStore.listForSpec(specId).stream()
                         .noneMatch(
                             run ->
-                                run.startedAt() != null
+                                run.pid() != null
+                                    && run.startedAt() != null
                                     && !run.startedAt().isBefore(said.createdAt())))
         .isPresent();
   }

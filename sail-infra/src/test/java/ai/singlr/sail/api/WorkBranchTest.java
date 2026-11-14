@@ -146,9 +146,17 @@ class WorkBranchTest {
    * origin/main}.
    */
   private List<ProjectDefinition.Repo> freshWorkspace(String... remote) throws Exception {
-    var origin = Files.createDirectories(tempDir.resolve("origin.git"));
+    return List.of(cloned("app", remote));
+  }
+
+  /**
+   * Repo {@code path} of a spec's fresh workspace, cloned from a bare origin of its own holding
+   * {@code main} and every branch of {@code remote}, fetched, and detached at {@code origin/main}.
+   */
+  private ProjectDefinition.Repo cloned(String path, String... remote) throws Exception {
+    var origin = Files.createDirectories(tempDir.resolve(path + "-origin.git"));
     git(origin, "init", "-q", "--bare", "-b", "main");
-    var seed = Files.createDirectories(tempDir.resolve("seed"));
+    var seed = Files.createDirectories(tempDir.resolve(path + "-seed"));
     git(seed, "init", "-q", "-b", "main");
     commit(seed, "first");
     git(seed, "remote", "add", "origin", origin.toString());
@@ -159,9 +167,9 @@ class WorkBranchTest {
       git(seed, "push", "-q", "origin", branch);
       git(seed, "switch", "-q", "main");
     }
-    git(tempDir, "clone", "-q", origin.toString(), tempDir.resolve("app").toString());
-    git(tempDir.resolve("app"), "switch", "-q", "--detach", "origin/main");
-    return List.of(new ProjectDefinition.Repo(origin.toString(), "app", null));
+    git(tempDir, "clone", "-q", origin.toString(), tempDir.resolve(path).toString());
+    git(tempDir.resolve(path), "switch", "-q", "--detach", "origin/main");
+    return new ProjectDefinition.Repo(origin.toString(), path, null);
   }
 
   private static void commit(Path repo, String message) throws Exception {
@@ -230,6 +238,22 @@ class WorkBranchTest {
             + " first.",
         refused.remedy().plain());
     assertEquals("HEAD", head());
+  }
+
+  /**
+   * Scenario 31 over two repos: the collision the second repo's remote shows refuses the build
+   * before the first repo, which lacks the branch, is given one.
+   */
+  @Test
+  void aCollisionInAnyRepoRefusesTheBuildBeforeAnyRepoIsMoved() throws Exception {
+    var repos = List.of(cloned("api"), cloned("app", "agent/a"));
+
+    assertThrows(
+        ApiException.class,
+        () -> enter().enter(PLACE, repos, "agent/a", true, false, Optional.empty()));
+
+    assertEquals("HEAD", git(tempDir.resolve("api"), "rev-parse", "--abbrev-ref", "HEAD"));
+    assertEquals("", git(tempDir.resolve("api"), "branch", "--list", "agent/a"));
   }
 
   @Test

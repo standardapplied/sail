@@ -22,6 +22,7 @@ import ai.singlr.sail.engine.SharedProjectFiles;
 import ai.singlr.sail.engine.SlackPoster;
 import ai.singlr.sail.engine.StageSkill;
 import ai.singlr.sail.engine.WatcherSpawner;
+import ai.singlr.sail.engine.Workspaces;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.store.EventStore;
 import ai.singlr.sail.store.FdeStore;
@@ -50,6 +51,7 @@ import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 import java.util.function.Function;
+import java.util.function.LongSupplier;
 import java.util.function.Predicate;
 import java.util.function.Supplier;
 import java.util.regex.Pattern;
@@ -100,6 +102,13 @@ final class ReviewLoop implements AutoCloseable {
   final MessageStore messages;
   final FileStore files;
   final FakeContainer container = new FakeContainer(PROJECT);
+
+  /**
+   * Where the box's workspace locks are, which a test holds to keep the box busy: its clock leaps a
+   * whole create wait at each read, so a lock another holds is given up on at once.
+   */
+  final Path locks;
+
   final List<Event> published = new CopyOnWriteArrayList<>();
   final List<List<String>> launchCommands = new CopyOnWriteArrayList<>();
   final AtomicLong syncs = new AtomicLong();
@@ -121,6 +130,12 @@ final class ReviewLoop implements AutoCloseable {
   /** A loop whose pipeline and reviewer are resolved from {@code yaml}, as the server wires it. */
   static ReviewLoop wired(Path dir, String yaml) {
     return new ReviewLoop(dir, yaml, null, null);
+  }
+
+  /** A clock each read of which is a whole create wait past the one before. */
+  private static LongSupplier leaping() {
+    var now = new AtomicLong();
+    return () -> now.addAndGet(Workspaces.CREATE_WAIT.toNanos());
   }
 
   /** A loop whose pipeline is one agent stage per name ({@link #stages}). */
@@ -153,6 +168,7 @@ final class ReviewLoop implements AutoCloseable {
     messages = new MessageStore(db);
     files = new FileStore(db);
     projectsDir = dir.resolve("projects");
+    locks = dir.resolve("locks-" + System.nanoTime());
     start();
   }
 
@@ -174,7 +190,7 @@ final class ReviewLoop implements AutoCloseable {
                 new FdeStore(db),
                 started::publish,
                 new WatcherSpawner(container, null),
-                TestWorkspaces.ready(reader, PROJECT),
+                TestWorkspaces.over(TestWorkspaces.incus(reader, PROJECT), leaping(), locks),
                 this::launch,
                 DispatchOperations.Listener.NONE,
                 SessionYield.NONE)

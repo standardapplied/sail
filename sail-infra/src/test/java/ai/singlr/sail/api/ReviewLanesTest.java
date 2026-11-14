@@ -18,6 +18,7 @@ import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.AgentUnit;
+import ai.singlr.sail.engine.FileMutex;
 import ai.singlr.sail.harness.Harnesses;
 import ai.singlr.sail.harness.RunUsage;
 import ai.singlr.sail.identity.Acting;
@@ -106,6 +107,53 @@ class ReviewLanesTest {
     loop.onEvent(loginStored());
 
     assertEquals("review", loop.onlyLive().role(), "storing the login launches it");
+  }
+
+  /**
+   * A reviewer the loop launches on a box still making another workspace past the wait is busy: the
+   * room says so, the review stays owed its reviewer, never errored, and the next stop in the
+   * project launches it.
+   */
+  @Test
+  void aReviewerOnABusyBoxWaitsForTheNextTriggerAndIsNeverAnErroredReview() throws Exception {
+    loop = ReviewLoop.staged(tempDir, "codex", "claude-code");
+    loop.spec("auth", "api");
+    var build = loop.run("auth", "build");
+    var holding = new java.util.concurrent.CountDownLatch(1);
+    var release = new java.util.concurrent.CountDownLatch(1);
+    var other =
+        Thread.ofVirtual()
+            .start(
+                () -> {
+                  try (var held = FileMutex.acquire(loop.locks.resolve("workspace-create.lock"))) {
+                    holding.countDown();
+                    release.await();
+                  } catch (Exception e) {
+                    throw new IllegalStateException(e);
+                  }
+                });
+    assertTrue(holding.await(30, java.util.concurrent.TimeUnit.SECONDS));
+    try {
+      loop.onEvent(ReviewLoop.buildStop("auth", build));
+    } finally {
+      release.countDown();
+      other.join();
+    }
+
+    assertTrue(loop.container.live().isEmpty(), "no reviewer started");
+    assertEquals("running", loop.statusOf(loop.reviewOf("auth")), "owed its reviewer, not errored");
+    assertEquals(
+        List.of("This runner is making another workspace; dispatch again in a minute."),
+        loop.roomLines("auth", "This runner is making"),
+        "said once, however often the loop meets it");
+
+    loop.spec("billing", "web");
+    loop.onEvent(ReviewLoop.buildStop("billing", loop.run("billing", "adhoc")));
+
+    assertTrue(
+        loop.live().stream()
+            .anyMatch(run -> "auth".equals(run.specId()) && "review".equals(run.role())),
+        "the next stop in the project launches it: " + loop.live());
   }
 
   @Test

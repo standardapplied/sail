@@ -16,6 +16,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.TimeoutException;
+import java.util.function.LongSupplier;
 import java.util.function.Predicate;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -221,14 +222,38 @@ public final class WorkspaceTemplate {
    * empty when the project has no such template. What a dispatch clones, since only a person can
    * build a template (its repos' tokens are theirs to give); {@code inputs()} is what it was built
    * from, which a definition edited since no longer matches. It is read under the template's lock,
-   * so a read while a build is under way waits for it and answers what it built (W7).
+   * so a read while a build is under way waits for it and answers what it built (W7), for at most
+   * {@link Workspaces#CREATE_WAIT} on {@code nanos}; past it, {@link Workspaces.Busy}.
    */
-  Optional<Template> current(String project, List<String> zfs)
+  Optional<Template> current(String project, List<String> zfs, LongSupplier nanos)
       throws IOException, InterruptedException, TimeoutException {
     var template = nameOf(project);
-    try (var held = shell.isDryRun() ? null : ContainerConfig.hold(locks, template)) {
+    if (shell.isDryRun()) {
       return recorded(project, template, zfs);
     }
+    try (var held =
+        FileMutex.acquireUntil(ContainerConfig.lockOf(locks, template), 0, pastTheWait(nanos))
+            .orElseThrow(() -> Workspaces.Busy.building(project))) {
+      return recorded(project, template, zfs);
+    }
+  }
+
+  /**
+   * How far past {@link Workspaces#CREATE_WAIT} {@code nanos} reads, from its first read on: what a
+   * bounded acquire compares with a deadline of 0, reading the clock only while another holds the
+   * lock, so an uncontended read costs no tick of a test's clock.
+   */
+  private static LongSupplier pastTheWait(LongSupplier nanos) {
+    var first = new long[1];
+    var read = new boolean[1];
+    return () -> {
+      var now = nanos.getAsLong();
+      if (!read[0]) {
+        read[0] = true;
+        first[0] = now;
+      }
+      return now - first[0] - Workspaces.CREATE_WAIT.toNanos();
+    };
   }
 
   private Optional<Template> recorded(String project, String template, List<String> zfs)

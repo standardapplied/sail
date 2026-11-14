@@ -139,7 +139,7 @@ final class LoopSteps {
                 deferred.holder().runId());
       }
     } catch (RuntimeException e) {
-      if (RunLogins.wantsALogin(e)) {
+      if (RunLogins.wantsALogin(e) || RunPlaces.busy(e)) {
         return Optional.empty();
       }
       var told = step.told() || wroteARun(facts);
@@ -337,6 +337,12 @@ final class LoopSteps {
    * said once in the room ({@link RunLogins#forRun}) and leaves the review owed what it was, so the
    * loop's next pass launches it once the login is stored.
    */
+  /**
+   * What a review waits on when its lane met a busy box: no run, so the next stop in the project
+   * frees it ({@link LoopTrigger.Freed}), as a stop frees a held claim.
+   */
+  private static final String NO_RUN = "";
+
   private Optional<LoopTrigger> launch(
       Supplier<ReviewLanes.Invocation> invocation,
       ReviewRow review,
@@ -356,6 +362,11 @@ final class LoopSteps {
         }
       }
     } catch (Exception e) {
+      if (RunPlaces.busy(e)) {
+        reviewStore.waitOn(review.id(), NO_RUN, () -> {});
+        syncTrigger.run();
+        return Optional.empty();
+      }
       if (RunLogins.wantsALogin(e)) {
         return Optional.empty();
       }

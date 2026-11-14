@@ -169,6 +169,8 @@ final class RunPlaces {
           place,
           ProjectProvisioner.inputs(config, WorkstationIdentity.registered()),
           projects::held);
+    } catch (Workspaces.Busy busy) {
+      throw busy(busy);
     } catch (IllegalStateException | IllegalArgumentException refused) {
       throw ApiException.of(ErrorCode.CONFLICT, refused);
     } catch (IOException | TimeoutException | InterruptedException e) {
@@ -267,12 +269,27 @@ final class RunPlaces {
     }
   }
 
-  /** {@link ErrorCode#RUNNER_BUSY} while another create holds the box's create lock. */
+  /**
+   * Whether {@code failure}, or what it wraps, is a run refused because the box is busy ({@link
+   * ErrorCode#RUNNER_BUSY}): said in the spec's room already, and a lane that met it waits for the
+   * loop's next trigger, as a held one does, never ending its review in error.
+   */
+  static boolean busy(Throwable failure) {
+    for (var cause = failure; cause != null; cause = cause.getCause()) {
+      if (cause instanceof ApiException refused
+          && refused.failure().errorCode() == ErrorCode.RUNNER_BUSY) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /**
+   * {@link ErrorCode#RUNNER_BUSY} while another create holds the box's create lock, or a build the
+   * template's, in the words {@code busy} says.
+   */
   private static ApiException busy(Workspaces.Busy busy) {
-    return new ApiException(
-        ErrorCode.RUNNER_BUSY,
-        "This runner is making another workspace; dispatch again in a minute.",
-        busy);
+    return new ApiException(ErrorCode.RUNNER_BUSY, busy.getMessage(), busy);
   }
 
   private static ApiException busy(String message, Remedy remedy) {

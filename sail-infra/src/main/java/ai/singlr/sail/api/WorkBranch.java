@@ -167,7 +167,8 @@ public final class WorkBranch {
    * the local one, else the remote's, else, for a build only, a new one from the latest base. A
    * lane other than a build with no B anywhere stays where it is, and so does every repo of a lane
    * with no B but a build, which with no B ({@code agent.auto_branch: false}) puts each repo on its
-   * base branch, tracking the remote. Answers whether a repo is on B now.
+   * base branch, tracking the remote. Every repo is read and every refusal made before any repo is
+   * moved, so a refused run leaves no repo on B. Answers whether a repo is on B now.
    */
   public boolean enter(
       RunPlace.SpecWorkspace place,
@@ -177,13 +178,14 @@ public final class WorkBranch {
       boolean restart,
       Optional<Remedy.Command> redispatch) {
     var instance = place.instance();
+    var named = Strings.isNotBlank(branch);
+    var moves = new ArrayList<Move>();
     var entered = false;
     for (var repo : targetRepos) {
       var repoDir = "/home/" + ProjectDefinition.USER + "/workspace/" + repo.path();
       if (!insideWorkTree(instance, repoDir)) {
         continue;
       }
-      var named = Strings.isNotBlank(branch);
       var local = named && hasRef(instance, repoDir, "refs/heads/" + branch);
       var remote = named && !local && onRemote(instance, repoDir, branch);
       if (build && !restart && (local || remote)) {
@@ -200,29 +202,36 @@ public final class WorkBranch {
         entered = entered || named;
         continue;
       }
-      requireClean(place, repoDir, repo, target, on);
-      var existing = !named || local || remote;
+      moves.add(new Move(repo, repoDir, target, base, !named || local || remote, on));
+    }
+    for (var move : moves) {
+      requireClean(place, move.dir(), move.repo(), move.target(), move.on());
+    }
+    for (var move : moves) {
       var moved =
-          existing
-              ? git(instance, repoDir, "switch", "--quiet", target)
+          move.existing()
+              ? git(instance, move.dir(), "switch", "--quiet", move.target())
               : exec(
                   ContainerExec.asDevUser(
                       instance,
                       RestartResolution.freshBranchArgs(
-                          repoDir, branch, base, fetchLatestBase(instance, repoDir, base))));
+                          move.dir(),
+                          branch,
+                          move.base(),
+                          fetchLatestBase(instance, move.dir(), move.base()))));
       if (!moved.ok()) {
         throw new ApiException(
             ErrorCode.BRANCH_CREATE_FAILED,
             "Failed to put repo '"
-                + repo.path()
+                + move.repo().path()
                 + "' on branch '"
-                + target
+                + move.target()
                 + "' in "
                 + instance
                 + ": "
                 + moved.reason());
       }
-      listener.branchReady(target, repo.path(), existing);
+      listener.branchReady(move.target(), move.repo().path(), move.existing());
       entered = entered || named;
     }
     if (Strings.isNotBlank(branch) && build && !entered) {
@@ -230,6 +239,18 @@ public final class WorkBranch {
     }
     return entered;
   }
+
+  /**
+   * A repo the branch rule moves, decided before any is moved: onto {@code target}, an {@code
+   * existing} branch or a new one from {@code base}, off where it is, {@code on}.
+   */
+  private record Move(
+      ProjectDefinition.Repo repo,
+      String dir,
+      String target,
+      String base,
+      boolean existing,
+      ShellExec.Result on) {}
 
   /**
    * Refuses to move a repo off where it is, {@code on}, while it holds uncommitted work: in a

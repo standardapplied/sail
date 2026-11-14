@@ -289,16 +289,21 @@ public final class Workspaces {
   }
 
   /**
-   * The box made no workspace because another create held its create lock past {@link
-   * #CREATE_WAIT}: the box makes one at a time, and says when it is busy rather than queueing
-   * without end (R6).
+   * The box made no workspace because another create held its create lock, or a build its
+   * template's lock, past {@link #CREATE_WAIT}: the box says when it is busy rather than queueing
+   * without end (R6), in the words its caller is given.
    */
   public static final class Busy extends IllegalStateException {
-    Busy() {
-      super(
-          "This box has been making another workspace for "
-              + CREATE_WAIT.toSeconds()
-              + " s, and makes one at a time.");
+    Busy(String said) {
+      super(said);
+    }
+
+    static Busy creating() {
+      return new Busy("This runner is making another workspace; dispatch again in a minute.");
+    }
+
+    static Busy building(String project) {
+      return new Busy(project + "'s template is being built; dispatch again once it is.");
     }
   }
 
@@ -381,7 +386,7 @@ public final class Workspaces {
     var zfs = WorkspaceTemplate.requireZfs(observer);
     var template =
         new WorkspaceTemplate(observer, shell, locks)
-            .current(place.project(), zfs)
+            .current(place.project(), zfs, nanos)
             .orElseThrow(() -> noTemplate(place.project()));
     var degraded = WorkspaceTemplate.usable(observer, template.pool());
     var found = requireTheSpecs(place, held, box.all());
@@ -484,7 +489,7 @@ public final class Workspaces {
     }
     return FileMutex.acquireUntil(
             locks.resolve(CREATE_LOCK), started + CREATE_WAIT.toNanos(), nanos)
-        .orElseThrow(Busy::new);
+        .orElseThrow(Busy::creating);
   }
 
   private Created made(

@@ -2008,7 +2008,7 @@ class WorkspacesTest {
     var before = incus(DIR_AND_ZFS, list(), snapshots());
     var after = incus(DIR_AND_ZFS, list(template("v1", INPUTS)), snapshots("v1"));
     var shell = switching(built, before, after);
-    var workspaces = workspaces(shell, ticks(0, 1, 2, 3, 4, 5, 6, 7));
+    var workspaces = workspaces(shell, () -> 0L);
     var checked = new AtomicReference<Workspaces.SpecCheck>();
     var failed = new AtomicReference<Exception>();
     Thread checking;
@@ -2024,13 +2024,13 @@ class WorkspacesTest {
                     }
                   });
       var deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(30);
-      while (checking.getState() != Thread.State.WAITING
+      while (checking.getState() != Thread.State.TIMED_WAITING
           && checking.getState() != Thread.State.TERMINATED
           && System.nanoTime() < deadline) {
         Thread.onSpinWait();
       }
       assertEquals(
-          Thread.State.WAITING,
+          Thread.State.TIMED_WAITING,
           checking.getState(),
           "the check waits on the build's lock: " + failed.get());
       built.set(true);
@@ -2039,6 +2039,36 @@ class WorkspacesTest {
 
     assertEquals(null, failed.get());
     assertEquals("v1", checked.get().template().version());
+  }
+
+  /**
+   * R6 for a template build: a spec's run that finds its template's build still under way past
+   * {@link Workspaces#CREATE_WAIT} is busy, naming the build, and makes nothing.
+   */
+  @Test
+  void aSpecsRunWaitingPastTheLimitOnABuildOfItsTemplateIsBusyNamingIt() throws Exception {
+    var shell = incus(DIR_AND_ZFS, list(template("v1", INPUTS)), snapshots("v1"));
+    var workspaces = workspaces(shell, ticks(0, Workspaces.CREATE_WAIT.toNanos()));
+
+    var refused = new AtomicReference<Exception>();
+    try (var build = ContainerConfig.hold(locks(), "acme--tmpl")) {
+      var checking =
+          Thread.ofPlatform()
+              .start(
+                  () -> {
+                    try {
+                      workspaces.checkSpec(FIX, INPUTS, name -> false);
+                    } catch (Exception e) {
+                      refused.set(e);
+                    }
+                  });
+      checking.join(TimeUnit.SECONDS.toMillis(30));
+      assertEquals(Thread.State.TERMINATED, checking.getState());
+    }
+
+    var busy = assertInstanceOf(Workspaces.Busy.class, refused.get());
+    assertEquals("acme's template is being built; dispatch again once it is.", busy.getMessage());
+    assertFalse(shell.invocations().stream().anyMatch(c -> c.startsWith("incus copy")));
   }
 
   /** A shell that answers as {@code before} until {@code built} is set, then as {@code after}. */
