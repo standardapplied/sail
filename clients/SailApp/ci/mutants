@@ -1,0 +1,94 @@
+#!/usr/bin/env python3
+"""Temporary (fix round 2): each macOS-only mutant must turn its check red. Removed after."""
+import os, shutil, subprocess, sys
+
+temp = os.environ["RUNNER_TEMP"]
+os.chdir(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+
+def sh(*command, timeout=900, log="m.log"):
+    path = os.path.join(temp, log)
+    with open(path, "w") as out:
+        try:
+            code = subprocess.run(command, stdout=out, stderr=subprocess.STDOUT, timeout=timeout).returncode
+        except subprocess.TimeoutExpired:
+            code = 124
+    return code, open(path, errors="replace").read()
+
+def tests(test):
+    code, out = sh("swift", "build", "--build-tests", log="b.log")
+    if code != 0:
+        return None, out[-1500:]
+    code, out = sh("swift", "test", "--skip-build", "--filter", test, timeout=300)
+    issue = next((l for l in out.splitlines() if "recorded an issue" in l or "failed" in l), "")
+    return code != 0 and issue != "", issue[:220]
+
+def drive(expect):
+    code, out = sh("swift", "build", "-c", "release", log="b.log")
+    if code != 0:
+        return None, out[-1500:]
+    app = os.path.join(temp, "mutant", "Sail Terminal Preview.app")
+    sh("ci/bundle", "SailDrive", app, os.environ["SAIL_BINARY"], "sh.standardapplied.sail.terminal-preview.mutant", log="bundle.log")
+    sh("ci/sign", app, log="sign.log")
+    script = os.path.join(temp, "mutant.json")
+    open(script, "w").write('{"steps": [{"name": "type", "type": "echo hi\\r"}, {"name": "shows-hi", "line": "hi", "seconds": 30}, '
+                            '{"name": "latency-overlay", "latencyOverlay": true}]}')
+    code, out = sh(os.path.join(app, "Contents/MacOS/SailDrive"), "--drive", script, "--out", os.path.join(temp, "mutant-out"), timeout=200)
+    line = next((l for l in out.splitlines() if "FAILED" in l), "")
+    return expect in line, line[:300] or out[-600:]
+
+def suites(expect):
+    code, out = sh("swift", "build", "--build-tests", log="b.log")
+    if code != 0:
+        return None, out[-1500:]
+    code, out = sh("ci/test-suites", os.path.join(temp, "mutant-suites"), timeout=900)
+    line = next((l for l in out.splitlines() if expect in l), "")
+    return code != 0 and line != "", line[:220]
+
+mutants = [
+    ("draw at once while paused for a drawable", "Sources/SailTerminalView/TerminalView.swift",
+     "guard pacer.isIdle, !awaitingDrawable, refresh(", "guard pacer.isIdle, refresh(",
+     lambda: tests("SailTerminalViewTests\\.ViewTests/noDrawablePausesTheLinkUntilTheWindowIsSeenAgain")),
+    ("the overlay counts only keys measured on the display", "Sources/SailPreview/PreviewApp.swift",
+     "        estimated, no display time: key → echo  p50 \\(ms(figures.keyToEchoEstimated.p50))  p95 \\(ms(figures.keyToEchoEstimated.p95)) ms  (\\(figures.keyToEchoEstimated.count) keys)\n", "",
+     lambda: drive("latency-overlay: FAILED")),
+    ("a listed suite not run", "ci/test-suites",
+     "for suite in $listed; do\n  echo", "for suite in $(grep -v LocalHostTests <<< \"$listed\"); do\n  echo",
+     lambda: suites("SailTerminalViewTests.LocalHostTests is listed but did not pass")),
+    ("attach takes a session a view drew", "Sources/SailTerminalView/TerminalView.swift",
+     "        precondition(\n            Self.canAttach(link),", "        assert(\n            true,",
+     lambda: tests("SailTerminalViewTests\\.ViewTests/attachingASessionAViewDrewStopsTheProcess")),
+    ("hover reported for every pixel", "Sources/SailTerminalView/TerminalView+Pointer.swift",
+     "let place = place(of: event), place.cell != hovered else", "let place = place(of: event) else",
+     lambda: tests("SailTerminalViewTests\\.ViewTests/hoverIsReportedOncePerCellAndOnlyWhenAsked")),
+    ("Escape leaves the paste sheet up", "Sources/SailTerminalView/TerminalView+Pointer.swift",
+     "        watchEscape(cancelling: alert.window, on: window)\n", "",
+     lambda: tests("SailTerminalViewTests\\.ViewTests/escapeCancelsThePasteSheet")),
+    ("a paste while scrolled back draws nothing", "Sources/SailTerminalView/TerminalView+Pointer.swift",
+     "                self?.drawNowIfIdle()\n", "",
+     lambda: tests("SailTerminalViewTests\\.ViewTests/aPasteWhileScrolledBackDrawsTheBottom")),
+]
+
+missed = 0
+for name, path, old, new, check in mutants:
+    source = open(path).read()
+    if source.count(old) != 1:
+        print(f"NOT APPLIED  {name}")
+        missed = 1
+        continue
+    shutil.copy(path, path + ".orig")
+    open(path, "w").write(source.replace(old, new))
+    try:
+        red, detail = check()
+    finally:
+        shutil.move(path + ".orig", path)
+        os.utime(path)
+    if red is None:
+        print(f"BUILD FAILED {name}\n{detail}")
+        missed = 1
+    elif red:
+        print(f"RED          {name}: {detail}")
+    else:
+        print(f"GREEN        {name}: {detail}")
+        missed = 1
+    sys.stdout.flush()
+sys.exit(missed)

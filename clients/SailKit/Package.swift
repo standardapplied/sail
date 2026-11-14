@@ -15,6 +15,8 @@ let package = Package(
         .library(name: "SailTerminalWire", targets: ["SailTerminalWire"]),
         .library(name: "SailVT", targets: ["SailVT"]),
         .library(name: "SailTerminal", targets: ["SailTerminal"]),
+        .library(name: "SailSurface", targets: ["SailSurface"]),
+        .library(name: "SailKitTestSupport", targets: ["SailKitTestSupport"]),
         .executable(name: "sail-term-probe", targets: ["sail-term-probe"]),
     ],
     targets: [
@@ -40,6 +42,7 @@ let package = Package(
             dependencies: ["SailAPI", "SailTerminalWire", "SailVT"],
             swiftSettings: strict
         ),
+        .target(name: "SailSurface", dependencies: ["SailVT", "SailTerminal"], swiftSettings: strict),
         .executableTarget(
             name: "sail-term-probe",
             dependencies: ["SailAPI", "SailTerminal", "SailVT"],
@@ -78,6 +81,11 @@ let package = Package(
         .testTarget(
             name: "SailTerminalTests",
             dependencies: ["SailTerminal", "SailTerminalWire", "SailVT", "sail-term-probe", "SailKitTestSupport"],
+            swiftSettings: strict
+        ),
+        .testTarget(
+            name: "SailSurfaceTests",
+            dependencies: ["SailSurface", "SailVT", "SailKitTestSupport"],
             swiftSettings: strict
         ),
     ],

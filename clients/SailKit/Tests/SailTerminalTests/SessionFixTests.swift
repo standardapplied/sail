@@ -390,6 +390,18 @@ import Testing
         _ = host
     }
 
+    /// A new cell size (the font changed) answers a program's in-band size report at once.
+    @Test func aCellSizeChangeAnswersAnInBandSizeReportAtOnce() async throws {
+        let (host, session, peer, watch) = try await attachedLocally()
+        try peer.send(output("\u{1b}[?2048hready"))
+        try await watch.text("ready")
+        #expect(try await peer.read() == .input(sequence: 1, bytes: Array("\u{1b}[48;24;80;0;0t".utf8)))
+        try session.setCellPixels(width: 18, height: 40)
+        #expect(try await peer.read() == .input(sequence: 2, bytes: Array("\u{1b}[48;24;80;960;1440t".utf8)))
+        session.close()
+        _ = host
+    }
+
     /// MINOR 9: whether a replay starts on a clean boundary is told.
     @Test func aReplaysSafetyIsTold() async throws {
         let (host, session, peer, watch) = try await attachedLocally()

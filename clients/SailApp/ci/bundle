@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+# Assembles a .app from this package's release build: the executable, Info.plist, the fonts and
+# their licence, the acknowledgements, and the bundled sail as Contents/Helpers/sail.
+set -euo pipefail
+
+usage() {
+  echo "usage: ci/bundle PRODUCT APP SAIL_BINARY [IDENTIFIER]" >&2
+  echo "  PRODUCT is SailTerminalPreview (shipped) or SailDrive (CI's drive build)" >&2
+  exit 2
+}
+
+[[ $# -ge 3 ]] || usage
+readonly product=$1 app=$2 sail=$3
+readonly identifier=${4:-sh.standardapplied.sail.terminal-preview}
+cd "$(dirname "$0")/.."
+
+case $product in
+  SailTerminalPreview | SailDrive) ;;
+  *) usage ;;
+esac
+[[ -x $sail ]] || { echo "ci/bundle: $sail is not an executable sail" >&2; exit 1; }
+
+bin=$(swift build -c release --show-bin-path)
+[[ -x $bin/$product ]] || { echo "ci/bundle: $bin/$product is missing: run swift build -c release first" >&2; exit 1; }
+[[ $(lipo -archs "$bin/$product") == arm64 ]] || { echo "ci/bundle: $product is not arm64 only" >&2; exit 1; }
+
+version=$(sed -n 's/^## \([0-9][0-9.]*\).*/\1/p' ../../CHANGELOG.md | head -1)
+rm -rf "$app"
+mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources/Fonts" "$app/Contents/Helpers"
+cp "$bin/$product" "$app/Contents/MacOS/$product"
+cp Fonts/*.ttf Fonts/OFL.txt "$app/Contents/Resources/Fonts/"
+cp ci/Acknowledgements.txt "$app/Contents/Resources/"
+cp "$sail" "$app/Contents/Helpers/sail"
+chmod 755 "$app/Contents/MacOS/$product" "$app/Contents/Helpers/sail"
+sed -e "s/@EXECUTABLE@/$product/" -e "s/@IDENTIFIER@/$identifier/" -e "s/@VERSION@/${version:-0.0.0}/" \
+  -e "s/@BUILD@/${GITHUB_RUN_NUMBER:-0}/" ci/Info.plist > "$app/Contents/Info.plist"
+plutil -lint "$app/Contents/Info.plist" >/dev/null
+echo "ci/bundle: $app ($product, $identifier, version ${version:-0.0.0})"

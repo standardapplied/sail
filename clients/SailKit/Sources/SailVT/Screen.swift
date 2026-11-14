@@ -217,6 +217,12 @@ public final class Screen: Sendable {
         parts.withLock { $0.core.encode(mouse) }
     }
 
+    /// Whether the program asked for mouse reports: a view gives it the pointer instead of
+    /// selecting.
+    public var tracksMouse: Bool {
+        parts.withLock { $0.core.tracksMouse }
+    }
+
     /// Scrolls `lines` (up is negative) at a pointer place: the wheel's report to a program that
     /// tracks the mouse, arrow keys to a full-screen program that asked for alternate scroll (mode
     /// 1007), or else the viewport through its history, which sends nothing.

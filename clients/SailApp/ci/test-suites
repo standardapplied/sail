@@ -1,0 +1,37 @@
+#!/usr/bin/env bash
+# Runs every test suite the package lists (swift test list), each in its own process bounded at
+# 240 s, since a test stuck in a synchronous wait cannot be stopped by its own time limit; on macOS
+# through a pty, so its lines are not buffered away. Fails when the package lists no suite, when a
+# suite fails or runs no test, and when a listed suite left no passing run in its log.
+set -uo pipefail
+
+[[ $# -eq 1 ]] || { echo "usage: ci/test-suites LOGDIR" >&2; exit 2; }
+readonly logs=$1
+mkdir -p "$logs"
+
+listed=$(swift test list --skip-build | sed -nE 's#^([A-Za-z0-9_]+\.[A-Za-z0-9_]+)/.*#\1#p' | sort -u)
+[[ -n $listed ]] || { echo "ci/test-suites: the package lists no test suite" >&2; exit 1; }
+
+failed=0
+for suite in $listed; do
+  echo "::group::$suite"
+  log=$logs/$suite.log
+  filter="^${suite//./\\.}/"
+  if [[ $(uname) == Darwin ]]; then
+    perl -e 'alarm shift; exec @ARGV' 240 script -q "$log" swift test --skip-build --filter "$filter" || failed=1
+  else
+    perl -e 'alarm shift; exec @ARGV' 240 swift test --skip-build --filter "$filter" > "$log" 2>&1 || failed=1
+    cat "$log"
+  fi
+  echo "::endgroup::"
+done
+
+for suite in $listed; do
+  log=$logs/$suite.log
+  if ! grep -Eq "Suite ${suite#*.} passed" "$log" 2> /dev/null || ! grep -Eq 'Test run with [1-9][0-9]* tests? in .* passed' "$log"; then
+    echo "ci/test-suites: $suite is listed but did not pass a run of at least one test" >&2
+    failed=1
+  fi
+done
+echo "ci/test-suites: $(wc -w <<< "$listed" | tr -d ' ') suites: $(tr '\n' ' ' <<< "$listed")"
+exit $failed

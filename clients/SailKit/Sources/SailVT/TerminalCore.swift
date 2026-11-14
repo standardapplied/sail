@@ -31,6 +31,8 @@ final class TerminalCore {
         var scrollback = scrollbackBytes
         try set(terminal.pointer, GHOSTTY_TERMINAL_OPT_SCROLLBACK_MAX_BYTES, &scrollback)
         try paint(palette)
+        var clustering = GhosttyTerminalModeConfig(mode: ghostty_mode_new(2027, false), value: true)
+        try set(terminal.pointer, GHOSTTY_TERMINAL_OPT_MODE_DEFAULT, &clustering)
         try resize(size)
     }
 
@@ -205,25 +207,43 @@ final class TerminalCore {
     }
 
     func select(_ request: SelectionRequest) -> Bool {
+        let made: GhosttySelection? = switch request {
+        case let .word(point): extent(point, line: false)
+        case let .line(point): extent(point, line: true)
+        case let .range(from, to): gridRef(from).flatMap { start in gridRef(to).map { GhosttySelection(start: start, end: $0, rectangle: false) } }
+        case let .words(from, to): spanning(from, to, line: false)
+        case let .lines(from, to): spanning(from, to, line: true)
+        }
+        guard var selection = made else { return false }
+        return ghostty_terminal_set(handle, GHOSTTY_TERMINAL_OPT_SELECTION, &selection) == GHOSTTY_SUCCESS
+    }
+
+    /// The word or line at `point`; nil when the cell is outside the viewport or holds none.
+    private func extent(_ point: CellPoint, line: Bool) -> GhosttySelection? {
+        guard let ref = gridRef(point) else { return nil }
         var selection = GhosttySelection()
-        switch request {
-        case let .word(point):
-            guard let ref = gridRef(point) else { return false }
-            var options = GhosttyTerminalSelectWordOptions()
-            options.size = MemoryLayout<GhosttyTerminalSelectWordOptions>.size
-            options.ref = ref
-            guard ghostty_terminal_select_word(handle, &options, &selection) == GHOSTTY_SUCCESS else { return false }
-        case let .line(point):
-            guard let ref = gridRef(point) else { return false }
+        if line {
             var options = GhosttyTerminalSelectLineOptions()
             options.size = MemoryLayout<GhosttyTerminalSelectLineOptions>.size
             options.ref = ref
-            guard ghostty_terminal_select_line(handle, &options, &selection) == GHOSTTY_SUCCESS else { return false }
-        case let .range(from, to):
-            guard let start = gridRef(from), let end = gridRef(to) else { return false }
-            selection = GhosttySelection(start: start, end: end, rectangle: false)
+            guard ghostty_terminal_select_line(handle, &options, &selection) == GHOSTTY_SUCCESS else { return nil }
+        } else {
+            var options = GhosttyTerminalSelectWordOptions()
+            options.size = MemoryLayout<GhosttyTerminalSelectWordOptions>.size
+            options.ref = ref
+            guard ghostty_terminal_select_word(handle, &options, &selection) == GHOSTTY_SUCCESS else { return nil }
         }
-        return ghostty_terminal_set(handle, GHOSTTY_TERMINAL_OPT_SELECTION, &selection) == GHOSTTY_SUCCESS
+        return selection
+    }
+
+    /// From the start of the earlier cell's word (or line) to the end of the later one's, in either
+    /// order; a cell holding no word stands for itself.
+    private func spanning(_ from: CellPoint, _ to: CellPoint, line: Bool) -> GhosttySelection? {
+        guard let fromRef = gridRef(from), let toRef = gridRef(to) else { return nil }
+        let (first, firstRef, last, lastRef) = (from.y, from.x) <= (to.y, to.x) ? (from, fromRef, to, toRef) : (to, toRef, from, fromRef)
+        let start = extent(first, line: line)?.start ?? firstRef
+        let end = extent(last, line: line)?.end ?? lastRef
+        return GhosttySelection(start: start, end: end, rectangle: false)
     }
 
     func selectedText() -> String? {
@@ -245,7 +265,7 @@ final class TerminalCore {
         return String(decoding: UnsafeBufferPointer(start: bytes, count: length), as: UTF8.self)
     }
 
-    private var tracksMouse: Bool {
+    var tracksMouse: Bool {
         var tracking = false
         return ghostty_terminal_get(handle, GHOSTTY_TERMINAL_DATA_MOUSE_TRACKING, &tracking) == GHOSTTY_SUCCESS && tracking
     }
