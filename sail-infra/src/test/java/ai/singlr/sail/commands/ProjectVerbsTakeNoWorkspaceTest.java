@@ -36,7 +36,9 @@ import picocli.CommandLine;
  * W10 for every verb that addresses a container by a project's name: each passes through the one
  * guard, {@code ContainerManager.queryState} or {@code queryInfo} (which refuse an instance of that
  * name that is a workspace, a template or a copy, {@code ContainerManagerTest}), or asks {@code
- * BoxInstances.requireNotTakenFor} itself, as the verbs that read no state do.
+ * BoxInstances.requireNotTakenFor} itself, as the verbs that read no state do. The verbs that read
+ * or attach to a run ask {@code AgentPresence.state} of the run's place, which passes the project's
+ * container through {@code queryState} and finds a spec's workspace by its own name.
  */
 class ProjectVerbsTakeNoWorkspaceTest {
 
@@ -68,10 +70,10 @@ class ProjectVerbsTakeNoWorkspaceTest {
           Map.entry(ProjectDestroyCommand.class, "requireNotTakenFor("),
           Map.entry(ProjectCreateCommand.class, "requireNotTakenFor("),
           Map.entry(RunCommand.class, "queryState("),
-          Map.entry(AgentAttachCommand.class, "queryState("),
-          Map.entry(AgentLogCommand.class, "queryState("),
-          Map.entry(AgentReportCommand.class, "queryState("),
-          Map.entry(AgentStatusCommand.class, "queryState("),
+          Map.entry(AgentAttachCommand.class, "AgentPresence("),
+          Map.entry(AgentLogCommand.class, "AgentPresence("),
+          Map.entry(AgentReportCommand.class, "AgentPresence("),
+          Map.entry(AgentStatusCommand.class, "AgentPresence("),
           Map.entry(AgentSweepCommand.class, "queryState("),
           Map.entry(AgentWatchCommand.class, "queryState("));
 
