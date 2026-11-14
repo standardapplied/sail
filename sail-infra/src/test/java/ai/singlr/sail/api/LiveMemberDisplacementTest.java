@@ -441,11 +441,12 @@ class LiveMemberDisplacementTest {
     var cli = room.elsewhere().dispatching();
     room.processes.onStart(starting -> starting.onClose(() -> starting.exits(0)));
     room.live.useProcesses(
-        (container, workDir, env, command, pidFile, logFile) -> {
+        (container, workDir, env, command, pidFile, logFile, launchEnvFile) -> {
           assertTrue(
               cli.endLiveMember(env.get("SAIL_RUN_ID"), "displaced by a build"),
               "a run that records no process was never prompted, so another process may end it");
-          return room.processes.start(container, workDir, env, command, pidFile, logFile);
+          return room.processes.start(
+              container, workDir, env, command, pidFile, logFile, launchEnvFile);
         });
 
     var first = room.says(SPEC, "first");

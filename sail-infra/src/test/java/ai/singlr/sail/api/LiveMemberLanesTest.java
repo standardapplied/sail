@@ -17,6 +17,7 @@ import ai.singlr.sail.engine.LiveStream;
 import ai.singlr.sail.engine.WatcherSpawner;
 import ai.singlr.sail.identity.ActingAs;
 import ai.singlr.sail.store.EventStore;
+import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.RunStore;
 import java.nio.file.Path;
 import java.time.Duration;
@@ -340,12 +341,13 @@ class LiveMemberLanesTest {
     var reclaimed = new AtomicReference<LiveMembers.Reclaimed>();
     room.processes.onStart(starting -> starting.onClose(() -> starting.exits(0)));
     room.live.useProcesses(
-        (container, workDir, env, command, pidFile, logFile) -> {
+        (container, workDir, env, command, pidFile, logFile, launchEnvFile) -> {
           var restarted = room.elsewhere().liveMembers();
           room.container.unreachable(true);
           reclaimed.set(restarted.reclaim(HANDLE));
           room.container.unreachable(false);
-          return room.processes.start(container, workDir, env, command, pidFile, logFile);
+          return room.processes.start(
+              container, workDir, env, command, pidFile, logFile, launchEnvFile);
         });
 
     room.says(SPEC, "first");
@@ -366,9 +368,10 @@ class LiveMemberLanesTest {
     room.engage(SPEC, "claude-code", "full");
     var reclaimed = new AtomicReference<LiveMembers.Reclaimed>();
     room.live.useProcesses(
-        (container, workDir, env, command, pidFile, logFile) -> {
+        (container, workDir, env, command, pidFile, logFile, launchEnvFile) -> {
           reclaimed.set(room.live.reclaim(HANDLE));
-          return room.processes.start(container, workDir, env, command, pidFile, logFile);
+          return room.processes.start(
+              container, workDir, env, command, pidFile, logFile, launchEnvFile);
         });
 
     var first = room.says(SPEC, "first");
@@ -407,6 +410,7 @@ class LiveMemberLanesTest {
         MissedStopReconciler.systemdUnitProbe(room.shell),
         WatcherCoverage.of(new WatcherSpawner(room.shell, null)),
         () -> HANDLE,
-        () -> Instant.now().plus(Duration.ofMinutes(3)));
+        () -> Instant.now().plus(Duration.ofMinutes(3)),
+        new FdeStore(room.db));
   }
 }

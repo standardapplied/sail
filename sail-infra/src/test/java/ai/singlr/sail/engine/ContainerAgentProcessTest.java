@@ -72,7 +72,9 @@ class ContainerAgentProcessTest {
             "--",
             "bash",
             "-lc",
-            "printf '%s\\n' \"$$\" > \"$1\"; exec \"${@:3}\" 2>> \"$2\"",
+            "f=/home/dev/.sail/runs/r/launch.env; while IFS= read -r kv; do export \"$kv\"; done <"
+                + " \"$f\" || exit 1; rm -f \"$f\"; printf '%s\\n' \"$$\" > \"$1\"; exec \"${@:3}\" 2>>"
+                + " \"$2\"",
             "bash",
             "/home/dev/.sail/runs/r/agent.pid",
             "/home/dev/.sail/runs/r/agent.log",
@@ -85,7 +87,8 @@ class ContainerAgentProcessTest {
             env(),
             List.of("claude", "--print", "a b; c"),
             "/home/dev/.sail/runs/r/agent.pid",
-            "/home/dev/.sail/runs/r/agent.log"));
+            "/home/dev/.sail/runs/r/agent.log",
+            "/home/dev/.sail/runs/r/launch.env"));
   }
 
   @Test
@@ -106,7 +109,8 @@ class ContainerAgentProcessTest {
                 Map.of(),
                 List.of("bash", "-c", echo),
                 pidFile.toString(),
-                logFile.toString());
+                logFile.toString(),
+                launchEnv("SAIL_RUN_CREDENTIAL=c1"));
 
     var announced = handle.stdout().read();
     handle.stdin().write("{\"type\":\"user\"}");
@@ -123,6 +127,38 @@ class ContainerAgentProcessTest {
     assertEquals(OptionalInt.of(4242), handle.pid());
   }
 
+  /** The live member's secrets reach it from its launch.env, removed before it starts. */
+  @Test
+  @EnabledOnOs(OS.LINUX)
+  void theCommandStartsWithTheLaunchFilesValuesAndTheFileGone() throws Exception {
+    var file = launchEnv("SAIL_RUN_CREDENTIAL=c1\nCLAUDE_CODE_OAUTH_TOKEN=t-1");
+    var handle =
+        new ContainerAgentProcess(new ScriptedShellExecutor(), LOCALLY)
+            .start(
+                "acme",
+                dir.toString(),
+                Map.of(),
+                List.of(
+                    "bash",
+                    "-c",
+                    "echo \"$SAIL_RUN_CREDENTIAL $CLAUDE_CODE_OAUTH_TOKEN\"; test -e "
+                        + file
+                        + " && echo present || echo gone"),
+                dir.resolve("agent.pid").toString(),
+                dir.resolve("agent.log").toString(),
+                file);
+
+    assertEquals("c1 t-1", handle.stdout().read());
+    assertEquals("gone", handle.stdout().read());
+    assertEquals(OptionalInt.of(0), handle.waitFor(PATIENCE));
+  }
+
+  private String launchEnv(String lines) throws IOException {
+    var file = dir.resolve("launch.env");
+    Files.writeString(file, lines + "\n");
+    return file.toString();
+  }
+
   @Test
   @EnabledOnOs(OS.LINUX)
   void aProcessStillRunningHasNoExitCodeYet() throws Exception {
@@ -134,7 +170,8 @@ class ContainerAgentProcessTest {
                 Map.of(),
                 List.of("cat"),
                 dir.resolve("agent.pid").toString(),
-                dir.resolve("agent.log").toString());
+                dir.resolve("agent.log").toString(),
+                launchEnv("SAIL_RUN_CREDENTIAL=c1"));
 
     assertEquals(OptionalInt.empty(), handle.waitFor(Duration.ZERO));
     handle.stdin().close();
@@ -143,7 +180,14 @@ class ContainerAgentProcessTest {
 
   private static AgentProcess.Handle idle(ShellExec shell) throws IOException {
     return new ContainerAgentProcess(shell, argv -> List.of("true"))
-        .start("acme", "/w", Map.of(), List.of("claude"), "/p/agent.pid", "/p/agent.log");
+        .start(
+            "acme",
+            "/w",
+            Map.of(),
+            List.of("claude"),
+            "/p/agent.pid",
+            "/p/agent.log",
+            "/p/launch.env");
   }
 
   @Test

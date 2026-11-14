@@ -13,8 +13,10 @@ import ai.singlr.sail.config.Spec;
 import ai.singlr.sail.engine.AgentPresence;
 import ai.singlr.sail.engine.AgentSession;
 import ai.singlr.sail.engine.AgentUnit;
+import ai.singlr.sail.engine.ContainerFilePush;
 import ai.singlr.sail.engine.ContainerSailSetup;
 import ai.singlr.sail.engine.HostInfo;
+import ai.singlr.sail.engine.LaunchEnv;
 import ai.singlr.sail.engine.ProjectSkillInstaller;
 import ai.singlr.sail.engine.RunUsageReader;
 import ai.singlr.sail.engine.ShellExec;
@@ -85,7 +87,9 @@ public final class RunLauncher {
    * room a viewer role and no repo reservation; a reviewer and a fix agent the spec they serve.
    * {@code task}, {@code branch}, and {@code repoPaths} stage the session file and so are unused
    * when only the launch command is built. The run's unit and files are {@link AgentUnit#forRun} of
-   * {@code runId}: one shape for every lane, so no launch names its own.
+   * {@code runId}: one shape for every lane, so no launch names its own. {@code env} is the run's
+   * credential and login, which reach its container only as its {@code launch.env}; {@code
+   * dispatchedBy} is the person whose request launched it, null for Sail's own machinery.
    */
   record LaunchSpec(
       String project,
@@ -101,9 +105,14 @@ public final class RunLauncher {
       List<String> repoPaths,
       boolean background,
       String runId,
-      String runCredential,
+      LaunchEnv env,
       String role,
-      String resumeSessionId) {
+      String resumeSessionId,
+      String dispatchedBy) {
+
+    LaunchSpec {
+      Objects.requireNonNull(env, "env");
+    }
 
     AgentUnit unit() {
       return AgentUnit.forRun(runId);
@@ -136,7 +145,8 @@ public final class RunLauncher {
       Spec spec,
       String agentType,
       String runId,
-      String runCredential) {
+      LaunchEnv env,
+      String dispatchedBy) {
     return launchSession(
         new LaunchSpec(
             project,
@@ -152,9 +162,10 @@ public final class RunLauncher {
             targetRepos.stream().map(ProjectDefinition.Repo::path).toList(),
             background,
             runId,
-            runCredential,
+            env,
             Lane.BUILD.wire(),
-            null));
+            null,
+            dispatchedBy));
   }
 
   /**
@@ -196,9 +207,10 @@ public final class RunLauncher {
 
   /**
    * Stages everything a run needs in its container before its process starts: sail's helpers and
-   * settings files, the skills its harness reads, and the run's own task and session files, which
-   * are what let the {@code spec} CLI speak for it. A live member, which is started over pipes
-   * rather than as a unit, stages exactly as a launched run does.
+   * settings files, the skills its harness reads, the run's own task and session files, which are
+   * what let the {@code spec} CLI speak for it, and last its {@code launch.env}, {@code 0600} and
+   * the dev user's, which its wrapper reads and removes before its harness starts. A live member,
+   * which is started over pipes rather than as a unit, stages exactly as a launched run does.
    */
   void stage(LaunchSpec s) {
     try {
@@ -226,6 +238,8 @@ public final class RunLauncher {
         s.role(),
         s.repoPaths(),
         s.unit());
+    ContainerFilePush.pushAsDev(
+        shell, s.project(), s.unit().launchEnvPath(), s.env().lines(), "0600");
   }
 
   LaunchOutcome launchSession(LaunchSpec s) {
@@ -235,10 +249,8 @@ public final class RunLauncher {
       var command = launchCommand(s);
       runBookkeeping(
           "record the launch of run " + s.runId(),
-          () ->
-              runStore.recordLaunch(
-                  s.runId(), s.model(), s.reasoningEffort(), s.resumeSessionId()));
-      listener.launching(s.background(), redactCredential(command, s.runCredential()));
+          () -> runStore.recordLaunch(s.runId(), launched(s)));
+      listener.launching(s.background(), command);
       var exitCode = launcher.launch(command);
       if (s.background()) {
         if (exitCode != 0) {
@@ -254,19 +266,10 @@ public final class RunLauncher {
     }
   }
 
-  /**
-   * The command as listeners may see it: the plaintext run credential replaced with a marker.
-   * Listeners print launch commands to terminals and logs, and a leaked live credential
-   * authenticates spec and event writes until the run finishes — only the launcher ever receives
-   * the real value.
-   */
-  private static List<String> redactCredential(List<String> command, String runCredential) {
-    if (Strings.isBlank(runCredential)) {
-      return command;
-    }
-    return command.stream()
-        .map(argument -> argument.equals(runCredential) ? "<redacted>" : argument)
-        .toList();
+  /** What run {@code s} is recorded as launched with: its model, effort, session and login. */
+  static RunStore.Launched launched(LaunchSpec s) {
+    return new RunStore.Launched(
+        s.model(), s.reasoningEffort(), s.resumeSessionId(), s.env().login(), s.dispatchedBy());
   }
 
   static List<String> launchCommand(LaunchSpec s) {
@@ -284,7 +287,6 @@ public final class RunLauncher {
             s.agentType(),
             s.unit().logPath(),
             s.runId(),
-            s.runCredential(),
             s.role(),
             s.resumeSessionId())
         : AgentSession.buildForegroundTaskCommand(
@@ -299,7 +301,6 @@ public final class RunLauncher {
             s.agentType(),
             s.unit().logPath(),
             s.runId(),
-            s.runCredential(),
             s.role());
   }
 

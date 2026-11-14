@@ -73,7 +73,7 @@ class AnsweredQuestionLoopTest {
                   }
                 });
     var fdes = new FdeStore(loop.db);
-    fdes.add(ReviewLoop.HANDLE, "Node A", null, "admin");
+    fdes.update(ReviewLoop.HANDLE, "Node A", null, "admin");
     fdes.add("mo", "Mo", null);
     loop.spec(SPEC, "api");
     loop.assign(SPEC, ReviewLoop.HANDLE);

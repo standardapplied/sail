@@ -21,6 +21,8 @@ import ai.singlr.sail.harness.RunUsage;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.ActingAs;
 import ai.singlr.sail.store.MessageStore;
+import ai.singlr.sail.store.RunStore;
+import ai.singlr.sail.store.TestLogins;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
@@ -71,16 +73,23 @@ class LiveMemberTest {
     assertEquals(PROJECT_CONTAINER, started.container());
     assertEquals("/home/dev/workspace/api", started.workDir());
     assertEquals(
-        Set.of("SAIL_SPEC_ID", "SAIL_AGENT", "SAIL_RUN_ID", "SAIL_RUN_CREDENTIAL", "SAIL_RUN_ROLE"),
-        started.env().keySet());
+        Set.of("SAIL_SPEC_ID", "SAIL_AGENT", "SAIL_RUN_ID", "SAIL_RUN_ROLE"),
+        started.env().keySet(),
+        "no secret rides an --env");
     assertEquals(SPEC, started.env().get("SAIL_SPEC_ID"));
     assertEquals("claude-code", started.env().get("SAIL_AGENT"));
     assertEquals(run.id(), started.env().get("SAIL_RUN_ID"));
     assertEquals("room-full", started.env().get("SAIL_RUN_ROLE"));
     assertEquals(
         run.id(),
-        room.runs.findByCredential(started.env().get("SAIL_RUN_CREDENTIAL")).orElseThrow().id(),
+        room.runs.findByCredential(started.secrets().get("SAIL_RUN_CREDENTIAL")).orElseThrow().id(),
         "the process holds its run's own credential, so the spec CLI speaks for it");
+    assertEquals(
+        TestLogins.VALUE,
+        started.secrets().get("CLAUDE_CODE_OAUTH_TOKEN"),
+        "a member of a spec's room starts with its person's stored login");
+    assertEquals(new RunStore.RunLogin("default", "token"), run.login());
+    assertEquals(null, room.container.file(unit.launchEnvPath()), "read and removed");
     assertEquals(unit.pidPath(), started.pidFile());
     assertEquals(unit.logPath(), started.logFile());
     assertEquals("live-" + run.id(), run.unit());

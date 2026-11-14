@@ -25,6 +25,7 @@ import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
+import ai.singlr.sail.store.TestLogins;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
@@ -116,6 +117,7 @@ class ConcurrentDispatchIT extends AbstractIncusIT {
       var reviewStore = new ReviewStore(db);
       var runStore = new RunStore(db);
       new FdeStore(db).add(HANDLE, null, null, "admin");
+      TestLogins.store(db, HANDLE);
       seedSpec(specStore, "spec-app", List.of("app"));
       seedSpec(specStore, "spec-web", List.of("web"));
       var events = new CopyOnWriteArrayList<Event>();

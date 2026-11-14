@@ -229,7 +229,7 @@ public final class DispatchOperations {
             () -> projectSkills,
             this::tellRoom);
     this.runReservation =
-        new RunReservation(runStore, shell, listener, sessionYield, this::endLiveHolder);
+        new RunReservation(runStore, shell, listener, sessionYield, this::endLiveHolder, fdeStore);
     this.adhocRunner =
         new AdhocRunner(
             projects,

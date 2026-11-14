@@ -492,14 +492,15 @@ against exactly that state and main's edits the offer merged in stay. The record
 when main's answer is to that offer: main answers the latest version it took from the box, which
 is an earlier offer's when the recorded one never reached it.
 
-### The wire: sync protocol 8
+### The wire: sync protocol 9
 
 A session opens with `hello` (protocol, build, box id) and is `welcome`d or `refuse`d once: a node
 on another protocol is refused: told to upgrade main first when its protocol is newer and, when
 it is older, to upgrade when its hello names a 0.58 release, whose database an upgrade converts,
-and to reinstall itself otherwise (protocol 8's run and spec snapshots carry cost and times, and
-no other database before it is converted; protocol 4 spans 0.44.1 to 0.58.0, so the version, not
-the protocol, tells). The `welcome` always names the handle main authenticated the
+and to reinstall itself otherwise (protocol 8's run and spec snapshots carry cost and times,
+protocol 9's runs the login they started with and who dispatched them, and no other database
+before it is converted; protocol 4 spans 0.44.1 to 0.58.0, so the version, not the protocol,
+tells). The `welcome` always names the handle main authenticated the
 session as and main's `limits.file_max`, and a welcome missing either is a protocol failure; the
 node enforces the lower of its own limit and main's before a file ever reaches a sync, and a node
 whose configured sync handle is blank or another does nothing that round (`NodeRound.begin`). It
@@ -1555,7 +1556,10 @@ dispatch reads the next ready spec from the database, honoring `depends_on` and 
 marks it `in_progress`, snapshots the container for rollback, creates the work branch, and
 launches the agent headless under `systemd-run --user` with `SAIL_SPEC_ID`, `SAIL_AGENT`,
 `SAIL_RUN_ID`, and the run's `SAIL_RUN_CREDENTIAL` in its environment so in-container hooks
-correlate events back to the spec and authenticate as the run's principal. The agent's
+correlate events back to the spec and authenticate as the run's principal. The credential, and
+the login of the person a spec's run acts for (*Harness logins*, below), are never on a command
+line: the launch pushes them as the run's `launch.env` and the agent's wrapper reads and removes
+it before the harness starts. The agent's
 output streams to the log live (Claude Code via `--output-format stream-json`), which also
 feeds the watcher's liveness signal. Agents inside the container manage specs through a
 dependency-free `spec` shell script that talks to `sail-api` over the bind-mounted Unix
@@ -1591,6 +1595,7 @@ adapter gives, not a name a caller recognises. Adding a harness is adding one ad
 | `interactive(fullPermissions)`, `attach(sessionId)` | the TTY session, fresh or resuming a recorded conversation exactly by id |
 | `efforts()`, `requireEffort(effort)` | the reasoning efforts the harness takes, and the one refusal, naming it, of any other (M15) |
 | `usage(agentLog, transcript)` | what a run cost, from the harness's own report: tokens, dollars and model, or empty for none |
+| `loginKinds()`, `loginKind(kind)` | the static credentials the harness reads from its environment (`LoginKind`: its kind, the variable, how a person makes one), the first its default, and the one refusal of a kind it does not declare |
 | `loginTunnelPort()`, `interactiveTip()` | which port the login flow needs forwarded, what to tell an engineer before an interactive session |
 | `hooks()` | the harness's `HookFile`: which of its events run which of sail's `SailHook`s |
 | `isSafeSessionId(id)`, `requireSafeSessionId(id)` | whether a hook-reported, replicated session id may touch a shell string, and the one check every adapter makes before it does |
@@ -3018,6 +3023,7 @@ a birth, as on main. A door's placement comes after `Access` too. The table is
 | Configure | change a project's definition | no | yes | yes | no | no | no |
 | Prune | erase a spec everywhere, once archived, cancelled or deleted | no | owner | yes | no | no | no |
 | Purge | erase a project everywhere; a retention sweep | no | no | yes | no | no | no |
+| Keep logins | store, replace, choose the default of, list or remove your own harness logins | yes | yes | yes | no | no | no |
 | Manage people | add, change role, grant, remove, pair, mint tokens | no | no | yes | no | no | no |
 | Operate the box | sync now; read sync health and bus stats; point the box at another main | owner | owner | yes | no | no | no |
 
@@ -3663,6 +3669,54 @@ no pairing is removed through the gateway as before, and no key file is touched.
   stragglers. What an agent principal may do is its lane's column of the Access table, its
   person's role capped by the lane, on its own work. Agent-ness is a relationship, not a type: the owner link is
   attribution and its column, never a separate authorization system.
+- **Harness logins.** A run of a spec starts its harness with a login its person stored; a run
+  that names no spec (an ad-hoc run, a spec-less room's member) uses whatever login its container
+  has and records `login = container`. The one fact that decides it is the run's `spec_id`.
+  - *What is stored.* Only static credentials a harness declares (`Harness.loginKinds`): Claude
+    Code's `token` from `claude setup-token` (`CLAUDE_CODE_OAUTH_TOKEN`) or `api-key`
+    (`ANTHROPIC_API_KEY`); Codex's `api-key` (`CODEX_API_KEY`, which `codex exec`, every Sail
+    launch of Codex, reads first) or `token` (`CODEX_ACCESS_TOKEN`). A login a harness refreshes
+    (Claude Code's `/login`, Codex's "Sign in with ChatGPT") rotates a single-use refresh token, so
+    a second copy logs the first out: it is never stored, copied, mounted or adopted, and stays in
+    the shell it was made in. A login is (person, harness, name); the first stored is the
+    default, and a switch applies to launches after it.
+  - *Where.* `LoginStore`, beside the database (`/var/lib/sail/logins/<fde-id>/<harness>/<name>`
+    on a box): `0700` directories, `0600` files, each written whole as a temporary file and renamed,
+    the kind on the first line and the value on the second; `<harness>/.default` names the default
+    and the stored date is the file's modification time. Never in the database, never synced, never
+    hashed (a login must be replayed), keyed by FDE id so a handle given again inherits nothing. A
+    value is one line of printable ASCII with no space, quote, backslash, `$` or backtick, at most
+    16 KiB, so nothing that reads it quotes or evaluates it.
+  - *Who.* Keep logins (the Access table): every person keeps their own, a viewer too, at the
+    host CLI (root, as the box's person, through the API with the host token) or the web API (the
+    gateway lane, Mast); listing or removing another person's is Manage people. No agent and no
+    credential in a container keeps any. No door answers a value: a login is shown by name, kind,
+    date and fingerprint (the first eight hex of its SHA-256), and each change is announced
+    (`login_stored`, `login_default`, `login_removed`) with the same facts.
+  - *How it reaches a run.* `RunReservation` resolves the default login of the person the run
+    acts for (`run.owner()`; an admin's dispatch of another person's spec spends that person's
+    login) before anything is reserved, and refuses a spec run whose person has none, naming how to
+    make each kind and the command that stores it; there is no fallback to another login, another
+    person's or the container's. After the reservation, `RunLauncher.stage` pushes the run's
+    `launch.env` (`/home/dev/.sail/runs/<run>/launch.env`, `0600`, the dev user's) through
+    `ContainerFilePush.pushAsDev`, one `NAME=value` line each: `SAIL_RUN_CREDENTIAL` and, for a
+    spec run, the variable the login's kind names. Every launch shape (the background unit, the
+    foreground task, the live member) starts with the same fixed text, `LaunchEnv.read`, which
+    exports each line as it is (`export "$kv"` evaluates nothing), removes the file and only then
+    starts the harness, in the innermost shell, after every profile it sources; with no file it
+    ends the launch. Nothing of either secret is an argument, an `--env` or a `--setenv`. The room
+    lane's read-deny rules name `launch.env`. The missed-stop reconciler's 60-second pass removes
+    the `launch.env` of every run of the box that is not live (a launch that died before its
+    wrapper ran) and the logins of every person the roster no longer holds; `FdeStore.delete`
+    removes a person's logins once the removal commits.
+  - *What a run records.* `login` (the name, or `container`), `login_kind`, and `dispatched_by`
+    (the person whose request launched it, none for the loop, a room wake or a resumed build), at
+    its launch, synced with the run.
+  - *What it cannot hide.* A full-permission agent can read its own environment, and so can any
+    process of the dev user in its container, a terminal included. Entering a workspace where
+    another person's run is live lets you read that run's login: only that workspace's owner and
+    admins may. On today's box that holds by placement: one person, and terminals open only for the
+    box's person or an admin.
 - **Tokens.** Host-local bearer tokens are SHA-256 hashed at rest, returned in plaintext
   once, and stored `0600` under a `0700` `~/.sail`. They carry a 90-day default expiry, where
   a null TTL means never-expires and is kept only for break-glass and bootstrap, and an

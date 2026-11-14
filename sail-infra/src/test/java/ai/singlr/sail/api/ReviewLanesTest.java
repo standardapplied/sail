@@ -23,6 +23,7 @@ import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.store.EventStore;
 import ai.singlr.sail.store.Finding;
 import ai.singlr.sail.store.RunStore;
+import ai.singlr.sail.store.TestLogins;
 import ai.singlr.sail.store.TestRuns;
 import java.io.IOException;
 import java.io.UncheckedIOException;
@@ -71,12 +72,16 @@ class ReviewLanesTest {
     assertEquals(
         List.of("auth", "codex", first.id(), "review"),
         List.of(
-            launch.get(launch.size() - 5),
             launch.get(launch.size() - 4),
             launch.get(launch.size() - 3),
+            launch.get(launch.size() - 2),
             launch.getLast()),
         "a reviewer runs with the spec, agent, run id and lane every lane's hooks read");
-    assertTrue(launch.get(launch.size() - 2).startsWith("sailrun"), "and its own run credential");
+    var secrets = loop.container.environmentOf(first.id());
+    assertTrue(secrets.get("SAIL_RUN_CREDENTIAL").startsWith("sailrun"), "its own run credential");
+    assertEquals(TestLogins.VALUE, secrets.get("CODEX_API_KEY"), "and the login its person stored");
+    assertFalse(String.join(" ", launch).contains(secrets.get("SAIL_RUN_CREDENTIAL")));
+    assertFalse(String.join(" ", launch).contains(TestLogins.VALUE));
     assertTrue(
         String.join(" ", launch).contains("systemd-run --user"),
         "launched as its run's systemd unit, never a foreground exec the host waits on");

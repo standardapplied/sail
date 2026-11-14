@@ -134,6 +134,7 @@ public final class ApiRouter implements HttpHandler, RouteTable {
     var journal = Gate.JOURNAL;
     var unserved = Gate.UNSERVED;
     var box = Gate.box(operations::boxFde);
+    var keepLogins = Gate.decides(Action.KEEP_LOGINS);
     return List.of(
         route(GET, "/v1/health", Gate.unauthenticated("the liveness probe"), this::health),
         route(Route.ANY, "/v1/health", unserved, ApiRouter::absent),
@@ -204,6 +205,11 @@ public final class ApiRouter implements HttpHandler, RouteTable {
         route(GET, "/v1/rooms/{room}/messages", reads, this::roomMessages),
         route(POST, "/v1/rooms/{room}/messages", journal, this::postRoomMessage),
         route(Route.ANY, "/v1/rooms/{room}/{sub}", unserved, ApiRouter::absent),
+        route(GET, "/v1/logins", keepLogins, this::logins),
+        route(POST, "/v1/logins/{harness}/{name}:use", keepLogins, this::useLogin),
+        route(PUT, "/v1/logins/{harness}/{name}", keepLogins, this::storeLogin),
+        route(DELETE, "/v1/logins/{harness}/{name}", keepLogins, this::removeLogin),
+        route(Route.ANY, "/v1/logins/{rest...}", unserved, ApiRouter::absent),
         route(POST, "/v1/attention", Gate.ATTENDS, this::attend),
         route(Route.ANY, "/v1/attention", unserved, ApiRouter::absent),
         route(GET, "/v1/reviews/{review}", reads, this::reviewDetail),
@@ -745,6 +751,34 @@ public final class ApiRouter implements HttpHandler, RouteTable {
             roomId,
             SpecMessageRequest.fromMap(JsonBody.readMessageMap(call.exchange())),
             ApiAuth.actorOf(call.exchange()).handle()));
+  }
+
+  private ApiResponse logins(Call call) {
+    return ApiResponse.ok(operations.logins().list(call.query().get("fde")));
+  }
+
+  /** Stores the caller's login from the body's {@code kind} and {@code value}, and only those. */
+  private ApiResponse storeLogin(Call call) throws IOException {
+    var body = call.body();
+    return ApiResponse.ok(
+        operations
+            .logins()
+            .store(
+                call.param("harness"),
+                call.param("name"),
+                body.get("kind") instanceof String kind ? kind : null,
+                body.get("value") instanceof String value ? value : null));
+  }
+
+  private ApiResponse useLogin(Call call) {
+    return ApiResponse.ok(operations.logins().use(call.param("harness"), call.param("name")));
+  }
+
+  private ApiResponse removeLogin(Call call) {
+    return ApiResponse.ok(
+        operations
+            .logins()
+            .remove(call.param("harness"), call.param("name"), call.query().get("fde")));
   }
 
   /**

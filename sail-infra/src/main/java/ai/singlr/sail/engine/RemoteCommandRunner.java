@@ -36,6 +36,8 @@ public final class RemoteCommandRunner {
   private static final Set<String> MACHINE_VERBS = Set.of("_pty-child", "_pty-selftest");
   private static final List<String> LOCAL_TERMINAL_HOST = List.of("_pty-host", "--local");
   private static final Set<String> INTERACTIVE_COMMANDS = Set.of("shell", "exec");
+  private static final List<String> LOGIN = List.of("agent", "login");
+  private static final Set<String> LOGIN_VERBS = Set.of("list", "use", "remove");
   private static final Set<String> HOST_ONLY_COMMANDS = Set.of("host");
   private static final Set<String> GATEWAY_COMMANDS =
       Stream.concat(SshGateway.API_COMMANDS.stream(), SshGateway.ADMIN_COMMANDS.stream())
@@ -89,8 +91,7 @@ public final class RemoteCommandRunner {
       return 1;
     }
 
-    var interactive = INTERACTIVE_COMMANDS.contains(command);
-    return executeRemote(args, interactive);
+    return executeRemote(args, interactive(args));
   }
 
   private int executeLocal(String[] args) {
@@ -176,6 +177,18 @@ public final class RemoteCommandRunner {
    */
   private boolean gatewayLane(String[] args) {
     return config.gatewayEnabled() && args.length > 0 && GATEWAY_COMMANDS.contains(args[0]);
+  }
+
+  /**
+   * Whether {@code args} need the box's terminal: an interactive shell, and storing a login, which
+   * reads its value there with echo off rather than echoing it on this machine's terminal.
+   */
+  static boolean interactive(String... args) {
+    return INTERACTIVE_COMMANDS.contains(args[0])
+        || args.length > 2
+            && List.of(args).subList(0, 2).equals(LOGIN)
+            && !LOGIN_VERBS.contains(args[2])
+            && !args[2].startsWith("-");
   }
 
   /** Whether {@code args} run on this machine, never forwarded to the server. */

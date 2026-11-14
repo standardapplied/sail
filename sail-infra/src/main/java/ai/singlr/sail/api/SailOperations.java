@@ -412,6 +412,7 @@ public final class SailOperations implements HostOperations {
   private final ProjectLoader projects;
   private final SnapshotOperations snapshotOps;
   private final GlobalSpecOperations globalSpecOps;
+  private final LoginOperations loginOps;
   private SpecPruner pruner;
   private EventDoor door;
   private final ReviewOperations reviewOps;
@@ -745,6 +746,7 @@ public final class SailOperations implements HostOperations {
             definitions,
             () -> attention);
     this.reviewOps = new ReviewOperations(reviewStore, specStore);
+    this.loginOps = new LoginOperations(fdeStore, runStore, this::publishOnBus);
     this.dispatchOps =
         new DispatchOperations(
             shell,
@@ -826,6 +828,11 @@ public final class SailOperations implements HostOperations {
   @Override
   public StackOperations stack() {
     return new StackOperations(shell, projectCatalog(), projects, Thread::sleep, System::nanoTime);
+  }
+
+  @Override
+  public LoginOperations logins() {
+    return loginOps;
   }
 
   /** The review and fix lanes the review pipeline launches through — see {@code reviewLanes}. */

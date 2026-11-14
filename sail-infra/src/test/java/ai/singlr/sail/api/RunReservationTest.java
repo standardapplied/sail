@@ -14,17 +14,22 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.fail;
 
 import ai.singlr.sail.common.DateTimeUtils;
+import ai.singlr.sail.config.Lane;
 import ai.singlr.sail.config.ProjectDefinition;
 import ai.singlr.sail.config.TestDefinitions;
 import ai.singlr.sail.engine.AgentUnit;
+import ai.singlr.sail.engine.LaunchEnv;
 import ai.singlr.sail.engine.ScriptedShellExecutor;
 import ai.singlr.sail.engine.ShellExec;
+import ai.singlr.sail.harness.Harnesses;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.ActingAs;
 import ai.singlr.sail.store.DispatchGate;
+import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.Sqlite;
+import ai.singlr.sail.store.TestLogins;
 import ai.singlr.sail.store.TestRuns;
 import java.io.IOException;
 import java.nio.file.Path;
@@ -65,6 +70,7 @@ class RunReservationTest {
     db = Sqlite.open(tempDir.resolve("test.db"));
     new SchemaManager(db).migrate();
     runStore = new RunStore(db);
+    TestLogins.store(db, "node");
   }
 
   @AfterEach
@@ -152,10 +158,16 @@ class RunReservationTest {
   }
 
   private RunReservation reservation(ShellExec shell, RunStore store) {
-    return new RunReservation(store, shell, DispatchOperations.Listener.NONE, sessionYield);
+    return new RunReservation(
+        store,
+        shell,
+        DispatchOperations.Listener.NONE,
+        sessionYield,
+        RunReservation.Displaceable.NONE,
+        new FdeStore(db));
   }
 
-  private String reserve(RunReservation r) {
+  private LaunchEnv reserve(RunReservation r) {
     return r.reserve(
         RUN_ID,
         "acme",
@@ -172,10 +184,127 @@ class RunReservationTest {
   }
 
   @Test
-  void reserveClaimsTheRunAndReturnsItsCredential() {
-    var credential = reserve(reservation(quietShell(), runStore));
-    assertNotNull(credential);
+  void reserveClaimsTheRunAndReturnsItsCredentialWithThePersonsLogin() {
+    var env = reserve(reservation(quietShell(), runStore));
+    assertNotNull(env.runCredential());
+    assertEquals(new RunStore.RunLogin("default", "api-key"), env.login());
+    assertEquals(TestLogins.VALUE, env.stored().value());
     assertEquals("running", runStore.findById(RUN_ID).orElseThrow().status());
+  }
+
+  /** HL6: a spec run whose person stored no login is refused before anything is reserved. */
+  @Test
+  void aSpecRunWhosePersonStoredNoLoginIsRefusedBeforeAnyRowIsWritten() {
+    var fdes = new FdeStore(db);
+    fdes.logins().forget(fdes.byHandle("node").orElseThrow().id());
+    var r = reservation(quietShell(), runStore);
+
+    var refused = assertThrows(ApiException.class, () -> reserve(r));
+
+    assertEquals(ErrorCode.AGENT_NOT_CONFIGURED, refused.failure().errorCode());
+    assertEquals(
+        "No Codex CLI login stored for node, so a run of a spec cannot start: a login made by hand"
+            + " in the project's container is not used by runs.",
+        refused.getMessage());
+    assertEquals(
+        "Create an API key at platform.openai.com/api-keys, then sail agent login codex. Or:"
+            + " Create a Codex access token at chatgpt.com/admin/access-tokens (ChatGPT Business"
+            + " and Enterprise), then sail agent login codex --kind token.",
+        refused.failure().remedy().plain());
+    assertTrue(runStore.findById(RUN_ID).isEmpty(), "no row");
+    assertThrows(
+        ApiException.class,
+        () ->
+            r.reserveForReview(
+                RUN_ID,
+                "review-1",
+                "acme",
+                "spec",
+                "node",
+                Lane.REVIEW,
+                List.of(),
+                "codex",
+                null,
+                "task",
+                AgentUnit.forRun(RUN_ID),
+                CONFIG));
+    assertTrue(runStore.findById(RUN_ID).isEmpty(), "no review row either");
+  }
+
+  /** A run acting for no one on this box's roster has no stored login to start with. */
+  @Test
+  void aSpecRunForSomeoneNotOnTheRosterIsRefusedBeforeAnyRowIsWritten() {
+    var refused =
+        assertThrows(
+            ApiException.class,
+            () ->
+                reservation(quietShell(), runStore)
+                    .reserve(
+                        RUN_ID,
+                        "acme",
+                        "spec",
+                        "stranger",
+                        "build",
+                        List.of(),
+                        "codex",
+                        null,
+                        "task",
+                        AgentUnit.forRun(RUN_ID),
+                        CONFIG));
+
+    assertEquals(
+        "No Codex CLI login stored for stranger, so a run of a spec cannot start: a login made by"
+            + " hand in the project's container is not used by runs.",
+        refused.getMessage());
+    assertTrue(runStore.findById(RUN_ID).isEmpty());
+  }
+
+  /** A person with logins but none the default is told which to choose, not given one. */
+  @Test
+  void aSpecRunWhosePersonHasNoDefaultIsRefusedNamingTheLoginsStored() {
+    var fdes = new FdeStore(db);
+    var id = fdes.byHandle("node").orElseThrow().id();
+    var codex = Harnesses.of("codex");
+    fdes.logins().store(id, codex, "work", null, "sk-work");
+    fdes.logins().remove(id, codex, "default");
+
+    var refused =
+        assertThrows(ApiException.class, () -> reserve(reservation(quietShell(), runStore)));
+
+    assertEquals(
+        "node has no default Codex CLI login, so a run of a spec cannot start; stored: work.",
+        refused.getMessage());
+    assertEquals(
+        "Choose one: sail agent login use codex work.", refused.failure().remedy().plain());
+    assertTrue(runStore.findById(RUN_ID).isEmpty());
+  }
+
+  /** A run that names no spec uses its container's login: nothing is stored for it, nor asked. */
+  @Test
+  void aRunThatNamesNoSpecStartsOnItsContainersLogin() {
+    new FdeStore(db).logins().forget(new FdeStore(db).byHandle("node").orElseThrow().id());
+
+    var env =
+        reservation(quietShell(), runStore)
+            .reserve(
+                RUN_ID,
+                "acme",
+                "",
+                "node",
+                "adhoc",
+                List.of(),
+                "codex",
+                null,
+                "task",
+                AgentUnit.forRun(RUN_ID),
+                CONFIG);
+
+    assertEquals(RunStore.RunLogin.CONTAINER, env.login());
+    assertEquals(null, env.stored());
+    assertEquals(
+        LaunchEnv.RUN_CREDENTIAL + "=" + env.runCredential() + "\n",
+        env.lines(),
+        "its file carries its credential alone");
   }
 
   @Test
@@ -214,7 +343,7 @@ class RunReservationTest {
         });
   }
 
-  private String reserveBuild(String specId, String role, List<String> repos) {
+  private LaunchEnv reserveBuild(String specId, String role, List<String> repos) {
     return reservation(quietShell(), runStore)
         .reserve(
             RUN_ID,
@@ -401,7 +530,12 @@ class RunReservationTest {
     assertDoesNotThrow(
         () ->
             new RunReservation(
-                    null, quietShell(), DispatchOperations.Listener.NONE, SessionYield.NONE)
+                    null,
+                    quietShell(),
+                    DispatchOperations.Listener.NONE,
+                    SessionYield.NONE,
+                    RunReservation.Displaceable.NONE,
+                    null)
                 .releaseIfAbsent(RUN_ID, "acme", AgentUnit.forRun(RUN_ID)));
   }
 
@@ -440,10 +574,15 @@ class RunReservationTest {
 
   private RunReservation displacing(RunReservation.Displaceable displaceable) {
     return new RunReservation(
-        runStore, quietShell(), DispatchOperations.Listener.NONE, sessionYield, displaceable);
+        runStore,
+        quietShell(),
+        DispatchOperations.Listener.NONE,
+        sessionYield,
+        displaceable,
+        new FdeStore(db));
   }
 
-  private String claim(RunReservation reservation, String role) {
+  private LaunchEnv claim(RunReservation reservation, String role) {
     return reservation.reserve(
         RUN_ID,
         "acme",

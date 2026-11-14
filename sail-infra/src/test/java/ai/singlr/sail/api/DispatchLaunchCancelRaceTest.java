@@ -6,6 +6,7 @@
 package ai.singlr.sail.api;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -25,6 +26,8 @@ import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
+import ai.singlr.sail.store.TestLogins;
+import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
@@ -119,10 +122,11 @@ class DispatchLaunchCancelRaceTest {
                     List.of())));
     specStore.setContent("auth", "Do auth", "");
     new FdeStore(db).add(HANDLE, null, null, "admin");
+    TestLogins.store(db, HANDLE);
     var runStore = new RunStore(db);
     var events = new CopyOnWriteArrayList<Event>();
     var cancelled = new AtomicReference<String>();
-    var launchCredential = new AtomicReference<String>();
+    var onArgv = new AtomicReference<String>();
     var shell = new CancelDuringLaunchShell(cancelled);
     var ops =
         new DispatchOperations(
@@ -136,11 +140,7 @@ class DispatchLaunchCancelRaceTest {
             new WatcherSpawner(shell, (command, logPath) -> 4242L),
             (project, config) -> "",
             command -> {
-              launchCredential.set(
-                  command.stream()
-                      .filter(arg -> arg.startsWith("sailrun_"))
-                      .findFirst()
-                      .orElse(""));
+              onArgv.set(String.join(" ", command));
               var run = runStore.running().getFirst();
               assertTrue(runStore.claimStop(run.id(), "stopped", () -> {}));
               cancelled.set(run.id());
@@ -172,11 +172,13 @@ class DispatchLaunchCancelRaceTest {
     assertTrue(
         events.stream().noneMatch(e -> "agent_session_started".equals(e.type())),
         "a cancelled launch must not announce a started session");
+    var launchCredential = shell.pushedCredential.get();
     assertTrue(
-        launchCredential.get().startsWith("sailrun_"),
-        "the launch command carries the run credential into the container env");
+        launchCredential.startsWith("sailrun_"),
+        "the run's launch.env carries the run credential into the container env");
+    assertFalse(onArgv.get().contains(launchCredential), "no command line carries it");
     assertTrue(
-        runStore.findByCredential(launchCredential.get()).isEmpty(),
+        runStore.findByCredential(launchCredential).isEmpty(),
         "a launch lost to a cancel leaves no live credential behind");
   }
 
@@ -188,6 +190,7 @@ class DispatchLaunchCancelRaceTest {
   private static final class CancelDuringLaunchShell implements ShellExec {
     private final AtomicReference<String> cancelled;
     private final List<String> commandsAfterCancel = new CopyOnWriteArrayList<>();
+    private final AtomicReference<String> pushedCredential = new AtomicReference<>("");
 
     CancelDuringLaunchShell(AtomicReference<String> cancelled) {
       this.cancelled = cancelled;
@@ -201,6 +204,16 @@ class DispatchLaunchCancelRaceTest {
       }
       if (joined.contains("incus list ^acme$")) {
         return new Result(0, RUNNING_JSON, "");
+      }
+      if (joined.startsWith("incus file push") && joined.endsWith("/launch.env")) {
+        try {
+          Files.readAllLines(Path.of(command.get(command.size() - 2))).stream()
+              .filter(line -> line.startsWith("SAIL_RUN_CREDENTIAL="))
+              .forEach(line -> pushedCredential.set(line.substring(line.indexOf('=') + 1)));
+        } catch (IOException e) {
+          return new Result(1, "", e.getMessage());
+        }
+        return new Result(0, "", "");
       }
       if (joined.contains("cat " + ContainerSailSetup.STAMP_PATH)) {
         return new Result(0, ContainerSailSetup.fingerprint(), "");

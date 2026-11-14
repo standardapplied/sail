@@ -81,7 +81,7 @@ class SshGatewayTest {
               + " board, or SSH to the host directly to run it.",
           refused.reason());
     }
-    for (var verb : List.of("stream", "sessions", "review")) {
+    for (var verb : List.of("stream", "sessions", "review", "login")) {
       assertEquals(
           List.of("agent", verb, "r1"),
           assertInstanceOf(

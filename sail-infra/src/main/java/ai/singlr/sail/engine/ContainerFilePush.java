@@ -39,6 +39,24 @@ public final class ContainerFilePush {
   }
 
   /**
+   * Pushes {@code content} to {@code remotePath} inside {@code containerName} as the dev user's
+   * file, of {@code mode} when one is given ({@code 0600} for a secret), its directory made first
+   * as the dev user: the one way Sail hands the dev user a file it wrote, a credential included.
+   */
+  public static void pushAsDev(
+      ShellExec shell, String containerName, String remotePath, String content, String mode)
+      throws IOException, InterruptedException, TimeoutException {
+    var parentDir = remotePath.substring(0, remotePath.lastIndexOf('/'));
+    shell.exec(ContainerExec.asDevUser(containerName, List.of("mkdir", "-p", parentDir)));
+    var flags =
+        new ArrayList<>(List.of("--uid", ContainerExec.DEV_UID, "--gid", ContainerExec.DEV_GID));
+    if (mode != null) {
+      flags.addAll(List.of("--mode", mode));
+    }
+    push(shell, containerName, remotePath, content, flags);
+  }
+
+  /**
    * Pushes the host file {@code source} to {@code remotePath} inside {@code containerName}, with
    * {@code flags} as above. The source is the caller's: it is read, never deleted.
    */

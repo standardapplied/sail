@@ -19,10 +19,12 @@ import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.HostInfo;
 import ai.singlr.sail.engine.ScriptedShellExecutor;
 import ai.singlr.sail.engine.ShellExec;
+import ai.singlr.sail.harness.Harnesses;
 import ai.singlr.sail.harness.RunUsage;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.store.DispatchGate;
 import ai.singlr.sail.store.EventStore;
+import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.HeldProjects;
 import ai.singlr.sail.store.ReviewRuns;
 import ai.singlr.sail.store.ReviewStore;
@@ -31,11 +33,13 @@ import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.Snapshots;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
+import ai.singlr.sail.store.TestLogins;
 import ai.singlr.sail.store.TestRuns;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -85,7 +89,7 @@ class MissedStopReconcilerTest {
     if (db != null) db.close();
   }
 
-  private static final class CountingProbe implements MissedStopReconciler.UnitProbe {
+  private static class CountingProbe implements MissedStopReconciler.UnitProbe {
     final AtomicInteger calls = new AtomicInteger();
     volatile boolean active;
     volatile String lastUnit;
@@ -118,7 +122,8 @@ class MissedStopReconcilerTest {
         probe,
         new WatcherCoverage(watched::contains, pid -> false),
         localHandle,
-        clock);
+        clock,
+        new FdeStore(db));
   }
 
   private void createInProgressSpec(String id) {
@@ -424,6 +429,54 @@ class MissedStopReconcilerTest {
     assertEquals(1, finalized);
     assertEquals("", probe.lastUnit);
     assertEquals("stopped", sessionStore.findById(runId).orElseThrow().status());
+  }
+
+  /**
+   * HL4 and HL9 on the pass: every container this box ran a run in is told which of its runs are
+   * live, so a launch file only a dead launch left goes; and the logins of a person the roster no
+   * longer holds are deleted, while those of a person it holds stay.
+   */
+  @Test
+  void eachPassRemovesLaunchFilesOfRunsNotLiveAndTheLoginsOfPeopleRemoved() {
+    var live = session(null, "node-a", "adhoc");
+    var ended = session(null, "node-a", "adhoc");
+    Acting.system(() -> TestRuns.complete(sessionStore, ended, "failed", 1));
+    session(null, "node-b", "adhoc");
+    var told = new ArrayList<String>();
+    var probe =
+        new CountingProbe(true) {
+          @Override
+          public void removeLaunchFiles(String project, List<String> liveRuns) {
+            told.add(project + " " + liveRuns);
+          }
+        };
+    var fdes = new FdeStore(db);
+    var kept = TestLogins.store(db, "ada");
+    var claude = Harnesses.of("claude-code");
+    fdes.logins().store("fde_gone000000000000000", claude, null, null, "gone-token");
+
+    reconciler(probe, PAST_GRACE).sweep();
+
+    assertEquals(List.of("test-project [" + live + "]"), told, "node-b's run is not this box's");
+    assertEquals(List.of(), fdes.logins().list("fde_gone000000000000000"));
+    assertEquals(2, fdes.logins().list(kept).size());
+  }
+
+  /** A container that cannot be asked fails nothing: the next pass tries again. */
+  @Test
+  void aContainerThatCannotBeToldIsLeftForTheNextPass() {
+    var live = session(null, "node-a", "adhoc");
+    var probe =
+        new CountingProbe(true) {
+          @Override
+          public void removeLaunchFiles(String project, List<String> liveRuns) throws Exception {
+            throw new IOException("Error: Instance is not running");
+          }
+        };
+
+    reconciler(probe, PAST_GRACE).sweep();
+
+    assertEquals("running", sessionStore.findById(live).orElseThrow().status());
   }
 
   @Test

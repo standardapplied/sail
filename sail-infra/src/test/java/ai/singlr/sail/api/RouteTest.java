@@ -50,6 +50,19 @@ class RouteTest {
     assertEquals(Optional.empty(), unclosed.match("/v1/auth"));
   }
 
+  /** A placeholder with a verb after it matches only a segment ending in the verb. */
+  @Test
+  void aPlaceholderWithAVerbIsFilledWithWhatComesBeforeIt() {
+    var use = new Route<>("POST", "/v1/logins/{harness}/{name}:use", Gate.JOURNAL, "use");
+
+    assertEquals(
+        Optional.of(Map.of("harness", "codex", "name", "work")),
+        use.match("/v1/logins/codex/work:use"));
+    for (var path : List.of("/v1/logins/codex/work", "/v1/logins/codex/:use", "/v1/logins/codex")) {
+      assertEquals(Optional.empty(), use.match(path), path);
+    }
+  }
+
   @Test
   void aRestPlaceholderTakesTheRestOfThePathSlashesAndAllUpToTheLiteralsAfterIt() {
     assertEquals(

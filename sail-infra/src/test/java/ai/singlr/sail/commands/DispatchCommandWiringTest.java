@@ -45,6 +45,7 @@ import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
+import ai.singlr.sail.store.TestLogins;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.nio.file.Path;
@@ -159,6 +160,7 @@ class DispatchCommandWiringTest {
       seed();
     }
     new FdeStore(db).add(HANDLE, null, null, "admin");
+    TestLogins.store(db, HANDLE);
     var command =
         new DispatchCommand(
             dryRun -> shell,
@@ -257,6 +259,7 @@ class DispatchCommandWiringTest {
     var operations = cliOperations(shell(), new ArrayList<>());
     var fdes = new FdeStore(db);
     fdes.add(HANDLE, null, null, "member");
+    TestLogins.store(db, HANDLE);
     operations.useControlPlane(
         db,
         tempDir,
@@ -302,6 +305,7 @@ class DispatchCommandWiringTest {
             .on("flock /home/dev/.claude/skills", "");
     var operations = cliOperations(shell, new ArrayList<>());
     new FdeStore(db).add(HANDLE, null, null, "admin");
+    TestLogins.store(db, HANDLE);
     Acting.system(
         () -> {
           new ProjectStore(db).upsert(TestDefinitions.yaml(YAML));
@@ -352,6 +356,7 @@ class DispatchCommandWiringTest {
     var events = new ArrayList<Event>();
     var operations = cliOperations(shell(), events);
     new FdeStore(db).add(HANDLE, null, null, "admin");
+    TestLogins.store(db, HANDLE);
 
     var outcome = DispatchCommand.dispatchAsOperator(operations, "acme", request(), HANDLE);
 
@@ -442,6 +447,7 @@ class DispatchCommandWiringTest {
   void cliRestartWithoutASpecIsRefusedByTheSharedExecutor() throws Exception {
     var operations = cliOperations(shell(), new ArrayList<>());
     new FdeStore(db).add(HANDLE, null, null, "admin");
+    TestLogins.store(db, HANDLE);
     var request = new DispatchOperations.Request(null, "background", false, null, true);
 
     var ex =
@@ -466,6 +472,7 @@ class DispatchCommandWiringTest {
                 .on("git -C /home/dev/workspace/app checkout -f x", ""),
             events);
     new FdeStore(db).add(HANDLE, null, null, "admin");
+    TestLogins.store(db, HANDLE);
     var specStore = new SpecStore(db);
     Acting.system(
         () -> specStore.updateReposAndStatus("auth", List.of("app"), SpecStatus.REVIEW, "x"));
@@ -511,6 +518,7 @@ class DispatchCommandWiringTest {
      */
     StubShell() {
       on("incus config device add", "");
+      on("incus file push", "");
       on("cat " + ContainerSailSetup.STAMP_PATH, ContainerSailSetup.fingerprint());
       for (var skill : SailSkills.all()) {
         on("/" + skill.name() + "/" + StageSkill.STAMP, ProjectSkillInstaller.fingerprint(skill));

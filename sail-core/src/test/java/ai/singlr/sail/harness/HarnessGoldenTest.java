@@ -272,7 +272,7 @@ class HarnessGoldenTest {
     assertEquals(
         "{includeCoAuthoredBy=false, permissions={deny=[Read(//var/lib/sail/run/box.credential),"
             + " Read(/home/dev/.ssh/**), Read(/home/dev/.git-credentials),"
-            + " Read(/home/dev/.config/gh/**)]}}",
+            + " Read(/home/dev/.config/gh/**), Read(/home/dev/.sail/runs/**/launch.env)]}}",
         settings.entries().toString());
   }
 
@@ -313,5 +313,26 @@ class HarnessGoldenTest {
     assertEquals(
         "curl -fsSL https://chatgpt.com/codex/install.sh | CODEX_NON_INTERACTIVE=1 sh",
         CODEX.installCommand());
+  }
+
+  @Test
+  void eachHarnessReadsItsStaticLoginsFromTheVariablesItsReleaseDocuments() {
+    assertEquals(
+        List.of(
+            "token CLAUDE_CODE_OAUTH_TOKEN Run claude setup-token in any terminal with a browser",
+            "api-key ANTHROPIC_API_KEY Create an API key in the Claude Console"),
+        described(CLAUDE_CODE));
+    assertEquals(
+        List.of(
+            "api-key CODEX_API_KEY Create an API key at platform.openai.com/api-keys",
+            "token CODEX_ACCESS_TOKEN Create a Codex access token at"
+                + " chatgpt.com/admin/access-tokens (ChatGPT Business and Enterprise)"),
+        described(CODEX));
+  }
+
+  private static List<String> described(Harness harness) {
+    return harness.loginKinds().stream()
+        .map(kind -> kind.kind() + " " + kind.variable() + " " + kind.howToMake().described())
+        .toList();
   }
 }

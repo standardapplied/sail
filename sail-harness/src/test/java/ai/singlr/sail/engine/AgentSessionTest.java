@@ -20,12 +20,20 @@ import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.attribute.FileTime;
+import java.time.Duration;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.EnabledOnOs;
+import org.junit.jupiter.api.condition.OS;
+import org.junit.jupiter.api.io.TempDir;
 
 class AgentSessionTest {
 
@@ -52,8 +60,7 @@ class AgentSessionTest {
         specId,
         agentType,
         RUN_UNIT.logPath(),
-        RUN_ID,
-        "cred-0");
+        RUN_ID);
   }
 
   private static List<String> foreground(
@@ -74,8 +81,7 @@ class AgentSessionTest {
         specId,
         agentType,
         RUN_UNIT.logPath(),
-        RUN_ID,
-        "cred-0");
+        RUN_ID);
   }
 
   @Test
@@ -700,6 +706,134 @@ class AgentSessionTest {
     assertEquals(1, shell.invocations().size(), "no signal was sent and nothing removed");
   }
 
+  /** The wrapper every launch shape starts its harness with: the run's launch.env, read once. */
+  private static final String READS_LAUNCH_ENV =
+      "f=/home/dev/.sail/runs/"
+          + RUN_ID
+          + "/launch.env; while IFS= read -r kv; do export \"$kv\"; done < \"$f\" || exit 1;"
+          + " rm -f \"$f\"; exec ";
+
+  private static final List<String> AS_DEV =
+      List.of(
+          "incus",
+          "exec",
+          "acme",
+          "--user",
+          "1000",
+          "--group",
+          "1000",
+          "--env",
+          "HOME=/home/dev",
+          "--env",
+          "XDG_RUNTIME_DIR=/run/user/1000",
+          "--env",
+          "DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus",
+          "--");
+
+  /**
+   * The background launch whole: no credential and no login on it, the unit's environment naming
+   * neither, and the harness started by the wrapper that reads both from the run's launch.env.
+   */
+  @Test
+  void theBackgroundLaunchIsPinnedWholeAndCarriesNoSecret() {
+    var cmd = background(true, CLAUDE_CODE, null, null, "auth", "claude-code");
+
+    var expected = new ArrayList<>(AS_DEV);
+    expected.addAll(
+        List.of(
+            "bash",
+            "-lc",
+            """
+            mkdir -p "$1"
+            mkdir -p "$(dirname "$4")"
+            rm -f "$5"
+            : > "$4"
+            systemctl --user reset-failed @S >/dev/null 2>&1 || true
+            systemd-run --user --setenv "SAIL_SPEC_ID=$6" --setenv "SAIL_AGENT=$7" --setenv \
+            "SAIL_RUN_ID=$8" --setenv "SAIL_RUN_ROLE=$9" --unit @U bash -lc 'printf "%s\\n" "$$" \
+            > "$4"; cd "$1" && exec bash -l -c "$2" > "$3" 2>&1' bash "$2" "$3" "$4" "$5"
+            for i in $(seq 1 25); do
+              test -s "$5" && exit 0
+              pid="$(systemctl --user show @S --property=MainPID --value 2>/dev/null || true)"
+              case "$pid" in
+                ''|0|*[!0-9]*) ;;
+                *) printf '%s\\n' "$pid" > "$5"; exit 0 ;;
+              esac
+              sleep 0.2
+            done
+            systemctl --user status @S --no-pager || true
+            exit 1
+            """
+                .replace("@S", RUN_UNIT.service())
+                .replace("@U", RUN_UNIT.unitName()),
+            "bash",
+            "/home/dev/.sail",
+            "/home/dev/workspace",
+            READS_LAUNCH_ENV
+                + "claude --print --output-format stream-json --verbose --settings"
+                + " /home/dev/.sail/claude-settings.json --dangerously-skip-permissions -p"
+                + " \"$(cat "
+                + RUN_UNIT.taskPath()
+                + ")\"",
+            RUN_UNIT.logPath(),
+            RUN_UNIT.pidPath(),
+            "auth",
+            "claude-code",
+            RUN_ID,
+            ""));
+    assertEquals(expected, cmd);
+  }
+
+  /** The pass's tidy names the runs directory and every live run, as arguments. */
+  @Test
+  void removingLaunchFilesAsksTheContainerOnceNamingTheLiveRuns() throws Exception {
+    var shell = new ScriptedShellExecutor(new ShellExec.Result(0, "", ""));
+
+    assertTrue(new AgentSession(shell).removeLaunchFiles("acme", List.of("r1", "r2")));
+
+    var expected = new ArrayList<>(AS_DEV);
+    expected.addAll(
+        List.of(
+            "sh",
+            "-c",
+            AgentSession.REMOVE_LAUNCH_FILES,
+            "sh",
+            "/home/dev/.sail/runs",
+            "r1",
+            "r2"));
+    assertEquals(List.of(expected), shell.arguments());
+  }
+
+  /**
+   * A launch file goes once it is a minute old and its run is not live; a live run's, and one a
+   * launch wrote this minute, stay; nothing else in a run's directory is touched.
+   */
+  @Test
+  @EnabledOnOs(OS.LINUX)
+  void theTidyRemovesOnlyOldLaunchFilesOfRunsNotLive(@TempDir Path runs) throws Exception {
+    var old = FileTime.from(Instant.now().minus(Duration.ofMinutes(5)));
+    for (var run : List.of("live", "dead", "fresh")) {
+      Files.createDirectories(runs.resolve(run));
+      Files.writeString(runs.resolve(run).resolve("launch.env"), "SAIL_RUN_CREDENTIAL=x\n");
+      Files.writeString(runs.resolve(run).resolve("agent.log"), "log");
+    }
+    for (var run : List.of("live", "dead")) {
+      Files.setLastModifiedTime(runs.resolve(run).resolve("launch.env"), old);
+    }
+
+    var tidy =
+        new ProcessBuilder(
+                "sh", "-c", AgentSession.REMOVE_LAUNCH_FILES, "sh", runs.toString(), "live")
+            .start();
+    assertTrue(tidy.waitFor(30, TimeUnit.SECONDS));
+
+    assertEquals(0, tidy.exitValue());
+    assertTrue(Files.exists(runs.resolve("live/launch.env")));
+    assertFalse(Files.exists(runs.resolve("dead/launch.env")));
+    assertTrue(Files.exists(runs.resolve("fresh/launch.env")));
+    assertTrue(Files.exists(runs.resolve("dead/agent.log")));
+  }
+
   @Test
   void buildBackgroundLaunchCommandStructure() {
     var cmd = background(false, CLAUDE_CODE, null, null, null, null);
@@ -711,9 +845,9 @@ class AgentSessionTest {
     assertTrue(
         joined.contains(
             "systemd-run --user --setenv \"SAIL_SPEC_ID=$6\" --setenv \"SAIL_AGENT=$7\""
-                + " --setenv \"SAIL_RUN_ID=$8\" --setenv \"SAIL_RUN_CREDENTIAL=$9\""
-                + " --setenv \"SAIL_RUN_ROLE=${10}\" --unit "
+                + " --setenv \"SAIL_RUN_ID=$8\" --setenv \"SAIL_RUN_ROLE=$9\" --unit "
                 + RUN_UNIT.unitName()));
+    assertFalse(joined.contains("SAIL_RUN_CREDENTIAL"), "no credential is named on the host");
     assertTrue(joined.contains("claude --print"));
     assertTrue(joined.contains("--settings " + CLAUDE_CODE.hooks().path()));
     assertTrue(cmd.contains(RUN_UNIT.logPath()));
@@ -772,8 +906,7 @@ class AgentSessionTest {
         "spec-1",
         "claude-code",
         unit.logPath(),
-        runId,
-        "cred-0");
+        runId);
   }
 
   @Test
@@ -795,7 +928,7 @@ class AgentSessionTest {
 
     assertEquals(
         RUN_UNIT.pidPath(),
-        cmd.get(cmd.size() - 3),
+        cmd.get(cmd.size() - 2),
         "the wrapper's pid lands in the run's pid file so a foreground session stays probeable"
             + " and stoppable");
     var script = cmd.get(cmd.indexOf("-c") + 1);
@@ -817,7 +950,6 @@ class AgentSessionTest {
             "claude-code",
             RUN_UNIT.logPath(),
             RUN_ID,
-            "cred-0",
             "room",
             null);
     var foreground =
@@ -833,12 +965,11 @@ class AgentSessionTest {
             "claude-code",
             RUN_UNIT.logPath(),
             RUN_ID,
-            "cred-0",
             "adhoc");
 
-    assertTrue(String.join(" ", background).contains("SAIL_RUN_ROLE=${10}"));
-    assertEquals("room", background.getLast(), "the role rides as the tenth positional argument");
-    assertTrue(String.join(" ", foreground).contains("SAIL_RUN_ROLE=\"$9\""));
+    assertTrue(String.join(" ", background).contains("SAIL_RUN_ROLE=$9"));
+    assertEquals("room", background.getLast(), "the role rides as the ninth positional argument");
+    assertTrue(String.join(" ", foreground).contains("SAIL_RUN_ROLE=\"$8\""));
     assertEquals("adhoc", foreground.getLast());
   }
 
@@ -866,7 +997,6 @@ class AgentSessionTest {
             "claude-code",
             RUN_UNIT.logPath(),
             RUN_ID,
-            "cred-0",
             "room",
             "sess-42");
 
@@ -892,7 +1022,6 @@ class AgentSessionTest {
             "claude-code",
             RUN_UNIT.logPath(),
             RUN_ID,
-            "cred-0",
             "room",
             null);
     var resumed =
@@ -908,7 +1037,6 @@ class AgentSessionTest {
             "claude-code",
             RUN_UNIT.logPath(),
             RUN_ID,
-            "cred-0",
             "room",
             "sess-42");
 
@@ -932,7 +1060,6 @@ class AgentSessionTest {
                 "claude-code",
                 RUN_UNIT.logPath(),
                 RUN_ID,
-                "cred-0",
                 "build",
                 null));
     assertTrue(
@@ -956,8 +1083,7 @@ class AgentSessionTest {
                 null,
                 null,
                 RUN_UNIT.logPath(),
-                "",
-                "cred-0"));
+                ""));
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -972,8 +1098,7 @@ class AgentSessionTest {
                 null,
                 null,
                 RUN_UNIT.logPath(),
-                "../escape",
-                "cred-0"));
+                "../escape"));
   }
 
   @Test
@@ -1038,14 +1163,12 @@ class AgentSessionTest {
   void buildBackgroundLaunchCommandPassesEmptySpecForAdHocLaunches() {
     var cmd = background(false, CLAUDE_CODE, null, null, null, null);
 
-    var specId = cmd.get(cmd.size() - 5);
-    var agent = cmd.get(cmd.size() - 4);
-    var runId = cmd.get(cmd.size() - 3);
-    var credential = cmd.get(cmd.size() - 2);
+    var specId = cmd.get(cmd.size() - 4);
+    var agent = cmd.get(cmd.size() - 3);
+    var runId = cmd.get(cmd.size() - 2);
     assertEquals("", specId, "ad-hoc launches pass empty specId so the in-container hook no-ops");
     assertEquals("claude-code", agent, "agent type defaults to CLI yamlName when blank");
     assertEquals(RUN_ID, runId, "an ad-hoc launch is still a run, so SAIL_RUN_ID carries its id");
-    assertEquals("cred-0", credential, "the run credential rides in as SAIL_RUN_CREDENTIAL");
   }
 
   @Test
@@ -1108,7 +1231,8 @@ class AgentSessionTest {
             "codex exec --dangerously-bypass-approvals-and-sandbox"
                 + " --dangerously-bypass-hook-trust --model gpt-5.5"));
     assertTrue(joined.contains("model_reasoning_effort='\"high\"'"));
-    assertFalse(joined.contains("exec codex exec"));
+    assertTrue(joined.contains("rm -f \"$f\"; exec codex exec --dangerously"), joined);
+    assertFalse(joined.contains("exec exec"));
   }
 
   /** Scenario 15 at the launch: the effort a spec asks reaches Claude Code as its flag. */
@@ -1180,7 +1304,6 @@ class AgentSessionTest {
             "codex",
             RUN_UNIT.logPath(),
             RUN_ID,
-            "cred-0",
             "room-full",
             "sess-42");
 
@@ -1215,8 +1338,7 @@ class AgentSessionTest {
             null,
             null,
             RUN_UNIT.logPath(),
-            RUN_ID,
-            "cred-0");
+            RUN_ID);
 
     var script = cmd.get(cmd.indexOf("-lc") + 1);
     assertTrue(script.contains("systemd-run"));
@@ -1242,8 +1364,7 @@ class AgentSessionTest {
             null,
             null,
             RUN_UNIT.logPath(),
-            RUN_ID,
-            "cred-0");
+            RUN_ID);
 
     var script = cmd.get(cmd.indexOf("-c") + 1);
     assertTrue(script.contains("cd \"$1\""));
@@ -1261,14 +1382,28 @@ class AgentSessionTest {
     assertTrue(joined.contains("claude --print"));
     assertTrue(joined.contains("--settings " + CLAUDE_CODE.hooks().path()));
     assertTrue(joined.contains("agent-task.txt"));
-    var script = cmd.get(cmd.indexOf("-c") + 1);
-    assertEquals(
-        "mkdir -p \"$(dirname \"$5\")\"; printf '%s\\n' \"$$\" > \"$7\"; cd \"$1\" && "
-            + "SAIL_SPEC_ID=\"$3\" SAIL_AGENT=\"$4\" SAIL_RUN_ID=\"$6\""
-            + " SAIL_RUN_CREDENTIAL=\"$8\" SAIL_RUN_ROLE=\"$9\""
-            + " exec bash -l -c \"$2\" > \"$5\" 2>&1",
-        script);
-    assertEquals(RUN_UNIT.pidPath(), cmd.get(cmd.size() - 3));
+    var expected = new ArrayList<>(AS_DEV);
+    expected.addAll(
+        List.of(
+            "bash",
+            "-l",
+            "-c",
+            "mkdir -p \"$(dirname \"$5\")\"; printf '%s\\n' \"$$\" > \"$7\"; cd \"$1\" && "
+                + "SAIL_SPEC_ID=\"$3\" SAIL_AGENT=\"$4\" SAIL_RUN_ID=\"$6\" SAIL_RUN_ROLE=\"$8\""
+                + " exec bash -l -c \"$2\" > \"$5\" 2>&1",
+            "bash",
+            "/home/dev/workspace",
+            READS_LAUNCH_ENV
+                + "claude --print --settings /home/dev/.sail/claude-settings.json -p \"$(cat "
+                + RUN_UNIT.taskPath()
+                + ")\"",
+            "",
+            "claude-code",
+            RUN_UNIT.logPath(),
+            RUN_ID,
+            RUN_UNIT.pidPath(),
+            ""));
+    assertEquals(expected, cmd, "the foreground launch whole, no secret on it");
   }
 
   @Test

@@ -12,6 +12,8 @@ import ai.singlr.sail.harness.Harness;
 import ai.singlr.sail.harness.Harness.Launch;
 import ai.singlr.sail.harness.Harnesses;
 import java.io.IOException;
+import java.util.ArrayList;
+import java.util.Collection;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -487,6 +489,39 @@ public final class AgentSession {
     };
   }
 
+  /**
+   * Removes, under the runs directory its first argument names, every run's {@code launch.env} at
+   * least a minute old whose run is not among the rest of its arguments: what a launch that died
+   * before its wrapper read the file left. A launch a minute old has read its file or died, so a
+   * run reserved since the live runs were read is never touched. It exits 0 whatever it found.
+   */
+  static final String REMOVE_LAUNCH_FILES =
+      """
+      dir=$1
+      shift
+      find "$dir" -mindepth 2 -maxdepth 2 -name launch.env -mmin +1 2>/dev/null | while IFS= read -r f; do
+        run=${f%/launch.env}
+        case " $* " in
+          *" ${run##*/} "*) ;;
+          *) rm -f -- "$f" ;;
+        esac
+      done
+      exit 0
+      """;
+
+  /**
+   * Removes from the container every {@code launch.env} of a run not in {@code liveRunIds} (HL4): a
+   * run's secrets are in its container only between their push and its wrapper. Whether the
+   * container ran it.
+   */
+  public boolean removeLaunchFiles(String containerName, Collection<String> liveRunIds)
+      throws IOException, InterruptedException, TimeoutException {
+    var command =
+        new ArrayList<>(List.of("sh", "-c", REMOVE_LAUNCH_FILES, "sh", AgentUnit.RUNS_DIR));
+    command.addAll(liveRunIds);
+    return shell.exec(ContainerExec.asDevUser(containerName, command)).ok();
+  }
+
   public static String launchWorkDir(String sshUser, List<ProjectDefinition.Repo> targetRepos) {
     var workspace = "/home/" + sshUser + "/workspace";
     if (targetRepos.size() == 1) {
@@ -506,9 +541,9 @@ public final class AgentSession {
    * ad-hoc session, which makes the in-container hook script no-op); {@code agentType} flows in as
    * {@code SAIL_AGENT}, defaulting to the CLI's yaml name when blank; {@code runId} flows in as
    * {@code SAIL_RUN_ID} so the agent's hooks and the watcher can address terminal events at the
-   * exact run; {@code runCredential} flows in as {@code SAIL_RUN_CREDENTIAL}, the credential the
-   * in-container helpers present to the local API so every request resolves to this run's minted
-   * principal.
+   * exact run. The run's credential and its person's login are not on this command line: the
+   * agent's command is {@link LaunchEnv#wrap wrapped}, so the innermost shell reads them from the
+   * run's {@code launch.env} and removes it before the harness starts.
    */
   public static List<String> buildBackgroundLaunchCommand(
       String containerName,
@@ -521,8 +556,7 @@ public final class AgentSession {
       String specId,
       String agentType,
       String logPath,
-      String runId,
-      String runCredential) {
+      String runId) {
     return buildBackgroundLaunchCommand(
         containerName,
         sshUser,
@@ -535,13 +569,12 @@ public final class AgentSession {
         agentType,
         logPath,
         runId,
-        runCredential,
         "",
         null);
   }
 
   /**
-   * As the twelve-argument overload, additionally exporting {@code role} as {@code SAIL_RUN_ROLE}
+   * As the eleven-argument overload, additionally exporting {@code role} as {@code SAIL_RUN_ROLE}
    * (the lane marker hooks and synthesized stops carry) and, when {@code resumeSessionId} is
    * non-null, launching the agent as a headless resume of that recorded conversation instead of a
    * fresh one.
@@ -558,14 +591,13 @@ public final class AgentSession {
       String agentType,
       String logPath,
       String runId,
-      String runCredential,
       String role,
       String resumeSessionId) {
     var launching = Objects.requireNonNullElse(harness, Harnesses.DEFAULT);
     var effort = launching.requireEffort(reasoningEffort);
     var unit = AgentUnit.forRun(runId);
     var launch = new Launch(unit.taskPath(), fullPermissions, model, effort, resumeSessionId, true);
-    var agentCmd = agentCommand(launching, role, launch);
+    var agentCmd = LaunchEnv.wrap(unit.launchEnvPath(), agentCommand(launching, role, launch));
     var effectiveSpec = Objects.requireNonNullElse(specId, "");
     var effectiveAgent =
         agentType == null || agentType.isBlank() ? launching.yamlName() : agentType;
@@ -576,7 +608,7 @@ public final class AgentSession {
         rm -f "$5"
         : > "$4"
         systemctl --user reset-failed @SERVICE@ >/dev/null 2>&1 || true
-        systemd-run --user --setenv "SAIL_SPEC_ID=$6" --setenv "SAIL_AGENT=$7" --setenv "SAIL_RUN_ID=$8" --setenv "SAIL_RUN_CREDENTIAL=$9" --setenv "SAIL_RUN_ROLE=${10}" --unit @UNIT@ bash -lc 'printf "%s\\n" "$$" > "$4"; cd "$1" && exec bash -l -c "$2" > "$3" 2>&1' bash "$2" "$3" "$4" "$5"
+        systemd-run --user --setenv "SAIL_SPEC_ID=$6" --setenv "SAIL_AGENT=$7" --setenv "SAIL_RUN_ID=$8" --setenv "SAIL_RUN_ROLE=$9" --unit @UNIT@ bash -lc 'printf "%s\\n" "$$" > "$4"; cd "$1" && exec bash -l -c "$2" > "$3" 2>&1' bash "$2" "$3" "$4" "$5"
         for i in $(seq 1 25); do
           test -s "$5" && exit 0
           pid="$(systemctl --user show @SERVICE@ --property=MainPID --value 2>/dev/null || true)"
@@ -606,7 +638,6 @@ public final class AgentSession {
             effectiveSpec,
             effectiveAgent,
             runId,
-            Objects.toString(runCredential, ""),
             Objects.toString(role, "")));
   }
 
@@ -630,8 +661,7 @@ public final class AgentSession {
       String specId,
       String agentType,
       String logPath,
-      String runId,
-      String runCredential) {
+      String runId) {
     return buildForegroundTaskCommand(
         containerName,
         sshUser,
@@ -644,11 +674,10 @@ public final class AgentSession {
         agentType,
         logPath,
         runId,
-        runCredential,
         "");
   }
 
-  /** As the twelve-argument overload, additionally exporting {@code role} as SAIL_RUN_ROLE. */
+  /** As the eleven-argument overload, additionally exporting {@code role} as SAIL_RUN_ROLE. */
   public static List<String> buildForegroundTaskCommand(
       String containerName,
       String sshUser,
@@ -661,21 +690,21 @@ public final class AgentSession {
       String agentType,
       String logPath,
       String runId,
-      String runCredential,
       String role) {
     var launching = Objects.requireNonNullElse(harness, Harnesses.DEFAULT);
     var effort = launching.requireEffort(reasoningEffort);
     var unit = AgentUnit.forRun(runId);
     var agentCmd =
-        launching.headless(
-            new Launch(unit.taskPath(), fullPermissions, model, effort, null, false));
+        LaunchEnv.wrap(
+            unit.launchEnvPath(),
+            launching.headless(
+                new Launch(unit.taskPath(), fullPermissions, model, effort, null, false)));
     var effectiveSpec = Objects.requireNonNullElse(specId, "");
     var effectiveAgent =
         agentType == null || agentType.isBlank() ? launching.yamlName() : agentType;
     var script =
         "mkdir -p \"$(dirname \"$5\")\"; printf '%s\\n' \"$$\" > \"$7\"; cd \"$1\" && "
-            + "SAIL_SPEC_ID=\"$3\" SAIL_AGENT=\"$4\" SAIL_RUN_ID=\"$6\""
-            + " SAIL_RUN_CREDENTIAL=\"$8\" SAIL_RUN_ROLE=\"$9\""
+            + "SAIL_SPEC_ID=\"$3\" SAIL_AGENT=\"$4\" SAIL_RUN_ID=\"$6\" SAIL_RUN_ROLE=\"$8\""
             + " exec bash -l -c \"$2\" > \"$5\" 2>&1";
     return ContainerExec.asDevUser(
         containerName,
@@ -692,7 +721,6 @@ public final class AgentSession {
             logPath,
             runId,
             unit.pidPath(),
-            Objects.toString(runCredential, ""),
             Objects.toString(role, "")));
   }
 

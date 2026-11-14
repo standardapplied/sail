@@ -422,6 +422,28 @@ marking that follow-up done resolves them.
 Every spec has a room. Agents post progress there, read it before deciding, and ask with
 `spec comment <id> --question --body <text>`, which pages the engineer on the board.
 
+### Your harness login
+
+A run of your spec starts its harness with a login you stored, never one made by hand in the
+container. Store an API key, or a long-lived token, once; it is read from stdin and never shown
+again:
+
+```bash
+claude setup-token                                  # in any terminal with a browser; prints a token
+sudo sail agent login claude-code                   # paste it: stored as 'default', the default
+printf %s "$ANTHROPIC_API_KEY" | sudo sail agent login claude-code --name work --kind api-key
+printf %s "$CODEX_API_KEY" | sudo sail agent login codex      # an API key; --kind token for a Codex access token
+sudo sail agent login list                          # name, kind, default, stored date, fingerprint
+sudo sail agent login use claude-code work          # the default for runs launched from now on
+sudo sail agent login remove claude-code default
+```
+
+On the host it is `sudo`, as you; from a thin client run the same `sail agent login` without
+`sudo`. A spec run whose person stored no login for its harness is refused before anything
+starts, saying how to make one. An admin lists or removes another person's logins with `--fde
+<handle>`; nobody, an admin included, can read a value back. A login made by hand in a terminal
+(`claude` then `/login`) still works in that terminal, and an ad-hoc `sail agent run` uses it.
+
 ### A stage's brief
 
 The loop is sail's: a build, then review stages, then a fix when a stage fails. What the

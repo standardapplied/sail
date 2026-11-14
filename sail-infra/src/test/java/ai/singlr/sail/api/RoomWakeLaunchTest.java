@@ -16,6 +16,7 @@ import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.Engagement;
 import ai.singlr.sail.config.Roster;
 import ai.singlr.sail.config.SpecStatus;
+import ai.singlr.sail.engine.ConnectEnvironment;
 import ai.singlr.sail.engine.ContainerSailSetup;
 import ai.singlr.sail.engine.ProjectSkillInstaller;
 import ai.singlr.sail.engine.SailSkills;
@@ -35,6 +36,7 @@ import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
+import ai.singlr.sail.store.TestLogins;
 import ai.singlr.sail.store.TestRuns;
 import ai.singlr.sail.sync.NodeRound;
 import ai.singlr.sail.sync.SyncBox;
@@ -132,6 +134,7 @@ class RoomWakeLaunchTest {
     runStore = new RunStore(db);
     messageStore = new MessageStore(db);
     new FdeStore(db).add(HANDLE, null, null, "admin");
+    TestLogins.store(db, HANDLE);
     return new DispatchOperations(
             shell,
             TestProjects.reading(yaml),
@@ -159,6 +162,7 @@ class RoomWakeLaunchTest {
     specStore = new SpecStore(db);
     runStore = new RunStore(db);
     new FdeStore(db).add(HANDLE, null, null, "admin");
+    TestLogins.store(db, HANDLE);
     var ops =
         new DispatchOperations(
             liveAgentShell(),
@@ -1322,7 +1326,12 @@ class RoomWakeLaunchTest {
                   bus,
                   specStore,
                   new ReviewStore(db),
-                  runStore)
+                  runStore,
+                  null,
+                  ConnectEnvironment.detector(),
+                  SyncScheduler.disabled(),
+                  new FdeStore(db),
+                  SessionYield.NONE)
               .useMessages(messageStore);
 
       var runId = sailOps.startRoomRun("acme", "auth", HANDLE);
@@ -1345,6 +1354,7 @@ class RoomWakeLaunchTest {
 
     StubShell() {
       on("incus config device add", "");
+      on("incus file push", "");
       on("cat " + ContainerSailSetup.STAMP_PATH, ContainerSailSetup.fingerprint());
       for (var skill : SailSkills.all()) {
         on("/" + skill.name() + "/" + StageSkill.STAMP, ProjectSkillInstaller.fingerprint(skill));

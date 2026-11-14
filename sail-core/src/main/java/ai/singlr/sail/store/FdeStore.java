@@ -130,6 +130,14 @@ public final class FdeStore {
     return db.queryOne(SELECT + " WHERE handle = ?", FdeStore::map, handle);
   }
 
+  /**
+   * The harness logins the people of this roster stored on this runner, kept beside its database
+   * ({@link LoginStore#beside}).
+   */
+  public LoginStore logins() {
+    return LoginStore.beside(db);
+  }
+
   public Optional<Fde> byId(String id) {
     return db.queryOne(SELECT + " WHERE id = ?", FdeStore::map, id);
   }
@@ -405,6 +413,10 @@ public final class FdeStore {
    * <p>The box the FDE synced from ({@link FdeBoxes}) is released, so an FDE later added under the
    * same handle syncs from whichever box it next connects from.
    *
+   * <p>Once the removal commits, the harness logins the FDE stored on this runner are deleted
+   * ({@link LoginStore#forget}); a crash in between leaves them for the sweep of logins whose FDE
+   * is gone.
+   *
    * <p>Refuses to remove the last active admin. The guard runs inside the delete transaction so two
    * concurrent removals cannot both pass it and leave the host with no administrator.
    */
@@ -447,6 +459,20 @@ public final class FdeStore {
     new FdeBoxes(db).release(fde.handle());
     db.execute("DELETE FROM fdes WHERE id = ?", fde.id());
     new FeedFloors(db).raiseFor(fde.handle());
+    db.afterCommit(() -> forgetLogins(fde.id()));
+  }
+
+  /**
+   * Deletes the logins of a removed FDE, after the removal committed. A failure is said and left to
+   * the sweep: the person is removed either way.
+   */
+  private void forgetLogins(String fdeId) {
+    try {
+      logins().forget(fdeId);
+    } catch (RuntimeException e) {
+      System.err.println(
+          "  [fde] the logins of a removed FDE are left for the sweep: " + e.getMessage());
+    }
   }
 
   /**

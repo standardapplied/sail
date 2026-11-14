@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.harness;
 
+import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.engine.BoxCredentialFile;
 import ai.singlr.sail.engine.ContainerExec;
 import ai.singlr.sail.engine.SailPaths;
@@ -291,6 +292,26 @@ final class ClaudeCode implements Harness {
     return count == null ? 0 : count;
   }
 
+  /**
+   * A token {@code claude setup-token} makes, which lasts a year and is read from {@code
+   * CLAUDE_CODE_OAUTH_TOKEN}; or a Console API key, read from {@code ANTHROPIC_API_KEY}. Either
+   * outranks a login made by hand with {@code /login}, which the harness refreshes and so is never
+   * stored.
+   */
+  @Override
+  public List<LoginKind> loginKinds() {
+    return List.of(
+        new LoginKind(
+            "token",
+            "CLAUDE_CODE_OAUTH_TOKEN",
+            Remedy.of(
+                "Run ",
+                Remedy.program("claude", "setup-token"),
+                " in any terminal with a browser")),
+        new LoginKind(
+            "api-key", "ANTHROPIC_API_KEY", Remedy.of("Create an API key in the Claude Console")));
+  }
+
   @Override
   public OptionalInt loginTunnelPort() {
     return OptionalInt.of(3000);
@@ -347,10 +368,11 @@ final class ClaudeCode implements Harness {
    * a read of any path outside it (verified empirically), so the container's secrets, all of which
    * live outside {@code ~/workspace}, are unreadable by default even without a rule. These denies
    * harden the box FDE {@code box.credential}, the box SSH identity ({@code ~/.ssh}, the Sail CLI
-   * identity), the {@code ~/.git-credentials} token and the {@code gh} token under {@code
-   * ~/.config/gh} explicitly on top of that, so the protection does not rest solely on the cwd
-   * heuristic. Claude Code applies a {@code Read(path)} deny to a Bash command that reads that path
-   * (verified), deny outranks every allow rule, and the room invocation pins {@code
+   * identity), the {@code ~/.git-credentials} token, the {@code gh} token under {@code
+   * ~/.config/gh} and a run's {@code launch.env}, which holds its credential and its person's login
+   * until its wrapper reads it, explicitly on top of that, so the protection does not rest solely
+   * on the cwd heuristic. Claude Code applies a {@code Read(path)} deny to a Bash command that
+   * reads that path (verified), deny outranks every allow rule, and the room invocation pins {@code
    * --setting-sources ""} so no ambient settings file can shadow these. A full (YOLO) agent skips
    * permission rules by design: it is the trusted member lane. Spec-CLI auth is untouched: the
    * helper reads the credential at the OS level, not through a tool. Residual (a secret committed
@@ -362,7 +384,8 @@ final class ClaudeCode implements Harness {
         boxCredentialReadDeny(),
         "Read(" + ContainerExec.DEV_HOME + "/.ssh/**)",
         "Read(" + ContainerExec.DEV_HOME + "/.git-credentials)",
-        "Read(" + ContainerExec.DEV_HOME + "/.config/gh/**)");
+        "Read(" + ContainerExec.DEV_HOME + "/.config/gh/**)",
+        "Read(" + ContainerExec.DEV_HOME + "/.sail/runs/**/launch.env)");
   }
 
   private static String boxCredentialReadDeny() {

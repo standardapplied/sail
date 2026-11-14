@@ -37,6 +37,7 @@ final class FakeAgentProcess implements AgentProcess {
     private final List<String> command;
     private final String pidFile;
     private final String logFile;
+    private final Map<String, String> secrets;
 
     private Started(
         String container,
@@ -44,13 +45,20 @@ final class FakeAgentProcess implements AgentProcess {
         Map<String, String> env,
         List<String> command,
         String pidFile,
-        String logFile) {
+        String logFile,
+        Map<String, String> secrets) {
       this.container = container;
       this.workDir = workDir;
       this.env = Map.copyOf(env);
       this.command = List.copyOf(command);
       this.pidFile = pidFile;
       this.logFile = logFile;
+      this.secrets = secrets;
+    }
+
+    /** What its wrapper read from its launch.env, which is gone from the container since. */
+    Map<String, String> secrets() {
+      return secrets;
     }
 
     String container() {
@@ -119,12 +127,21 @@ final class FakeAgentProcess implements AgentProcess {
       Map<String, String> env,
       List<String> command,
       String pidFile,
-      String logFile)
+      String logFile,
+      String launchEnvFile)
       throws IOException {
     if (refusal != null) {
       throw refusal;
     }
-    starts.add(new Started(containerName, workDir, Map.copyOf(env), command, pidFile, logFile));
+    starts.add(
+        new Started(
+            containerName,
+            workDir,
+            Map.copyOf(env),
+            command,
+            pidFile,
+            logFile,
+            container.takeLaunchEnv(launchEnvFile)));
     var fake = new Fake(env.get("SAIL_RUN_ID"));
     if (!slowToName) {
       container.started(fake.runId);

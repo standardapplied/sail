@@ -14,6 +14,7 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -64,11 +65,13 @@ final class FakeContainer implements ShellExec {
 
   private static final class Agent {
     private final int pid;
+    private final Map<String, String> environment;
     private volatile boolean alive = true;
     private volatile int exitCode;
 
-    private Agent(int pid) {
+    private Agent(int pid, Map<String, String> environment) {
       this.pid = pid;
+      this.environment = environment;
     }
   }
 
@@ -78,10 +81,39 @@ final class FakeContainer implements ShellExec {
 
   /** The agent of {@code runId} started: its unit is active and its pid file names it. */
   void started(String runId) {
-    var agent = new Agent(pids.incrementAndGet());
+    var agent = new Agent(pids.incrementAndGet(), readLaunchEnv(runId));
     agents.put(runId, agent);
     launched.add(runId);
     files.put(AgentUnit.forRun(runId).pidPath(), String.valueOf(agent.pid));
+  }
+
+  /**
+   * What the wrapper of {@code runId}'s launch does before its agent starts: its launch.env read
+   * into the agent's environment, one line each, and removed.
+   */
+  private Map<String, String> readLaunchEnv(String runId) {
+    return takeLaunchEnv(AgentUnit.forRun(runId).launchEnvPath());
+  }
+
+  /** The launch file at {@code path} read as a wrapper reads it, one line each, and removed. */
+  Map<String, String> takeLaunchEnv(String path) {
+    var lines = files.remove(path);
+    modes.remove(path);
+    var environment = new LinkedHashMap<String, String>();
+    if (lines != null) {
+      lines
+          .lines()
+          .forEach(
+              line ->
+                  environment.put(
+                      line.substring(0, line.indexOf('=')), line.substring(line.indexOf('=') + 1)));
+    }
+    return Map.copyOf(environment);
+  }
+
+  /** The environment {@code runId}'s agent started with, from its launch.env. */
+  Map<String, String> environmentOf(String runId) {
+    return agents.get(runId).environment;
   }
 
   /**

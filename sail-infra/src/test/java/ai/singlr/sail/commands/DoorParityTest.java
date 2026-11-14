@@ -22,6 +22,7 @@ import ai.singlr.sail.ssh.SshGateway;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
+import ai.singlr.sail.store.TestLogins;
 import ai.singlr.sail.sync.MainReplica;
 import ai.singlr.sail.sync.SyncDatabase;
 import ai.singlr.sail.sync.SyncSession;
@@ -308,6 +309,7 @@ class DoorParityTest {
     var dryRun = "{\"spec_id\": \"e1\", \"dry_run\": true}";
     var web = web("eng", "eng", "POST", "/v1/projects/acme/dispatch", dryRun);
     db.execute("UPDATE specs SET status = 'pending' WHERE id = 'e1'");
+    TestLogins.store(db, "eng");
     assertEveryDoor(Expected.ALLOWED, web, dispatch("eng"));
     assertEveryDoor(
         Expected.refused(

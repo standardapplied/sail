@@ -50,6 +50,7 @@ import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
+import ai.singlr.sail.store.TestLogins;
 import ai.singlr.sail.store.TestRuns;
 import java.io.IOException;
 import java.nio.file.Files;
@@ -898,6 +899,7 @@ class SailOperationsTest {
       var brokenRuns = new RunStore(brokenDb);
       brokenDb.close();
       var shell = shell().on("incus list ^acme$", RUNNING_JSON);
+      TestLogins.store(db, LOCAL_HANDLE);
       var operations =
           new SailOperations(
               shell,
@@ -908,7 +910,10 @@ class SailOperationsTest {
               new ReviewStore(db),
               brokenRuns,
               new ProjectStore(db),
-              ConnectEnvironment.detector());
+              ConnectEnvironment.detector(),
+              SyncScheduler.disabled(),
+              new FdeStore(db),
+              SessionYield.NONE);
 
       var error = dispatch(operations, "acme", request("auth"));
 
@@ -1057,7 +1062,10 @@ class SailOperationsTest {
         operationsWithStore(
             baseYaml(),
             shell().on("incus list ^acme$", STOPPED_JSON),
-            store -> seedAssigned(store, "auth", "pending", "raj"));
+            store -> seedAssigned(store, "auth", "pending", "raj"),
+            null,
+            LOCAL_HANDLE,
+            "raj");
 
     var placement =
         Actor.call(ADMIN, () -> operations.dispatch("acme", request("auth"), LOCAL_HANDLE));
@@ -1851,6 +1859,7 @@ class SailOperationsTest {
     var ownFiles = AgentUnit.runDir(recorded.getFirst().id());
     var runFileCommands =
         shell.invocations().stream()
+            .map(command -> command.replace(AgentUnit.RUNS_DIR + "/**", "<every run>"))
             .filter(command -> command.contains(AgentUnit.RUNS_DIR + "/"))
             .toList();
     assertFalse(runFileCommands.isEmpty(), "the launch writes its run's files");
@@ -2195,6 +2204,7 @@ class SailOperationsTest {
         store, "auth", "Add auth", "done", List.of(), "Do auth", null, null, null, "sail/auth");
     var fdeStore = new FdeStore(db);
     fdeStore.add(LOCAL_HANDLE, null, null, "admin");
+    TestLogins.store(db, LOCAL_HANDLE);
     var shell =
         shell()
             .on("incus list ^acme$", RUNNING_JSON)
@@ -2402,6 +2412,7 @@ class SailOperationsTest {
                 }
               },
               latch));
+      TestLogins.store(db, LOCAL_HANDLE);
       var operations =
           new SailOperations(
               shell,
@@ -2412,7 +2423,10 @@ class SailOperationsTest {
               null,
               null,
               new ProjectStore(db),
-              ConnectEnvironment.detector());
+              ConnectEnvironment.detector(),
+              SyncScheduler.disabled(),
+              new FdeStore(db),
+              SessionYield.NONE);
 
       dispatch(operations, "acme", request("auth"));
 
@@ -3530,6 +3544,7 @@ class SailOperationsTest {
     var sessionStore = new RunStore(db);
     seedSpecs.accept(specStore);
     seedSessions.accept(sessionStore);
+    TestLogins.store(db, LOCAL_HANDLE);
     return new SailOperations(
         shell,
         TestProjects.reading(yaml),
@@ -3539,7 +3554,10 @@ class SailOperationsTest {
         reviewStore,
         sessionStore,
         new ProjectStore(db),
-        ConnectEnvironment.detector());
+        ConnectEnvironment.detector(),
+        SyncScheduler.disabled(),
+        new FdeStore(db),
+        SessionYield.NONE);
   }
 
   /** Builds operations with a seeded project catalog and a fixed connect environment. */
@@ -3585,6 +3603,17 @@ class SailOperationsTest {
       Consumer<SpecStore> seed,
       WatcherSpawner.ProcessSpawner watcher)
       throws Exception {
+    return operationsWithStore(yamlContent, shell, seed, watcher, LOCAL_HANDLE);
+  }
+
+  /** As the four-argument form, with each of {@code people} on the roster with a login stored. */
+  private SailOperations operationsWithStore(
+      String yamlContent,
+      FakeShell shell,
+      Consumer<SpecStore> seed,
+      WatcherSpawner.ProcessSpawner watcher,
+      String... people)
+      throws Exception {
     var yaml = tempDir.resolve("sail-" + System.nanoTime() + ".yaml");
     Files.writeString(yaml, yamlContent);
     var db = Sqlite.open(tempDir.resolve("specs-" + System.nanoTime() + ".db"));
@@ -3594,6 +3623,9 @@ class SailOperationsTest {
     seed.accept(store);
     WatcherSpawner.ProcessSpawner fallback =
         watcher != null ? watcher : (command, logPath) -> 4242L;
+    for (var person : people) {
+      TestLogins.store(db, person);
+    }
     return new SailOperations(
         shell,
         TestProjects.reading(yaml),
@@ -3603,7 +3635,10 @@ class SailOperationsTest {
         null,
         null,
         new ProjectStore(db),
-        ConnectEnvironment.detector());
+        ConnectEnvironment.detector(),
+        SyncScheduler.disabled(),
+        new FdeStore(db),
+        SessionYield.NONE);
   }
 
   /**
@@ -3768,6 +3803,7 @@ class SailOperationsTest {
      */
     FakeShell() {
       on("incus config device add", "");
+      on("incus file push", "");
       on("cat " + ContainerSailSetup.STAMP_PATH, ContainerSailSetup.fingerprint());
       for (var skill : SailSkills.all()) {
         on("/" + skill.name() + "/" + StageSkill.STAMP, ProjectSkillInstaller.fingerprint(skill));

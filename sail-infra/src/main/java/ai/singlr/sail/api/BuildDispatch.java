@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.api;
 
+import ai.singlr.sail.access.Access;
 import ai.singlr.sail.access.ReadFilter;
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.common.Strings;
@@ -17,6 +18,7 @@ import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.engine.AgentUnit;
 import ai.singlr.sail.engine.DispatchRepos;
 import ai.singlr.sail.engine.HostInfo;
+import ai.singlr.sail.engine.LaunchEnv;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.WorkPrompt;
 import ai.singlr.sail.identity.Actor;
@@ -201,7 +203,7 @@ public final class BuildDispatch {
     var background = request.mode().equals("background");
     var runId = DateTimeUtils.newId().toString();
     var unit = AgentUnit.forRun(runId);
-    var credential =
+    var env =
         reserveRun(
             runId,
             project,
@@ -237,7 +239,8 @@ public final class BuildDispatch {
               taskSpec,
               agentType,
               runId,
-              credential);
+              env,
+              Access.attendee(Actor.reader()).orElse(null));
       var status =
           runLauncher.finishLaunch(
               new RunLauncher.RunContext(
@@ -315,7 +318,7 @@ public final class BuildDispatch {
     if (claim instanceof RunReservation.Claim.Held held) {
       return new ReviewLanes.Launch.Deferred(held.conflict().run());
     }
-    var credential = ((RunReservation.Claim.Claimed) claim).credential();
+    var env = ((RunReservation.Claim.Claimed) claim).env();
     try {
       seedRoomDelivery(runId, built.renderedMessages());
       workBranch.resume(project, targetRepos, row.branch());
@@ -330,7 +333,8 @@ public final class BuildDispatch {
               spec,
               agentType,
               runId,
-              credential);
+              env,
+              null);
       runLauncher.finishLaunch(
           new RunLauncher.RunContext(
               project, unit, runId, specId, agentType, Lane.BUILD.wire(), true),
@@ -522,11 +526,11 @@ public final class BuildDispatch {
 
   /**
    * Atomically reserves the dispatch as a {@code running} run stamped with this box's handle and
-   * the target repo set, and commits {@code claim} with it, returning the run's bearer credential.
-   * A run store is absent only on boxes that keep no run aggregate, which have nothing to reserve
-   * against and claim on their own.
+   * the target repo set, and commits {@code claim} with it, returning what the run's process starts
+   * with. A run store is absent only on boxes that keep no run aggregate, which have nothing to
+   * reserve against and claim on their own, and start the run with its person's login alone.
    */
-  private String reserveRun(
+  private LaunchEnv reserveRun(
       String runId,
       String project,
       String specId,
@@ -539,8 +543,9 @@ public final class BuildDispatch {
       ProjectDefinition config,
       Runnable claim) {
     if (runStore == null) {
+      var env = runReservation.unreserved(specId, boxHandle, agentType);
       commit(claim);
-      return null;
+      return env;
     }
     return runReservation.reserve(
         runId,

@@ -53,17 +53,7 @@ public final class ForgeCliLogin {
       ShellExec shell, String container, String user, String host, String token)
       throws IOException, InterruptedException, TimeoutException {
     var file = "/home/" + user + "/.sail/gh-token-" + DateTimeUtils.newId();
-    var made =
-        shell.exec(ContainerExec.asDevUser(container, List.of("mkdir", "-p", parentOf(file))));
-    if (!made.ok()) {
-      throw new IOException("Failed to create " + parentOf(file) + ": " + made.stderr());
-    }
-    ContainerFilePush.push(
-        shell,
-        container,
-        file,
-        token + "\n",
-        List.of("--uid", ContainerExec.DEV_UID, "--gid", ContainerExec.DEV_GID, "--mode", "0600"));
+    ContainerFilePush.pushAsDev(shell, container, file, token + "\n", "0600");
     var login =
         shell.exec(
             ContainerExec.asDevUser(container, List.of("sh", "-c", LOGIN, "sh", host, file)));
@@ -71,9 +61,5 @@ public final class ForgeCliLogin {
       throw new IOException(
           "Failed to log gh in for " + host + " in " + container + ": " + login.stderr().strip());
     }
-  }
-
-  private static String parentOf(String path) {
-    return path.substring(0, path.lastIndexOf('/'));
   }
 }
