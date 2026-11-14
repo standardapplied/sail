@@ -85,7 +85,8 @@ class RunPlaceSweepTest {
                       "BuildDispatch",
                       "WorkBranch",
                       "RunPlaces",
-                      "SailOperations")
+                      "SailOperations",
+                      "MembershipService")
                   .map(name -> Path.of("src/main/java/ai/singlr/sail/api", name + ".java")),
               Stream.of(
                   Path.of("src/main/java/ai/singlr/sail/engine/AgentPresence.java"),

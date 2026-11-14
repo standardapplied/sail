@@ -251,8 +251,6 @@ public final class DispatchOperations {
     this.launcher = Objects.requireNonNull(launcher, "launcher");
     this.listener = Objects.requireNonNull(listener, "listener");
     this.sessionYield = Objects.requireNonNull(sessionYield, "sessionYield");
-    this.membership =
-        new MembershipService(specStore, () -> roomStore, projects, admission, this.events, shell);
     this.roomCommitGuard = new RoomCommitGuard(runStore, projects, this.events, shell);
     this.runLauncher =
         new RunLauncher(
@@ -268,6 +266,8 @@ public final class DispatchOperations {
         new RunReservation(
             runStore, shell, listener, sessionYield, this::endLiveHolder, fdeStore, this::tellRoom);
     var places = new RunPlaces(projects, workspaces, runStore, shell, this::tellRoom);
+    this.membership =
+        new MembershipService(specStore, () -> roomStore, projects, admission, this.events, places);
     this.adhocRunner =
         new AdhocRunner(
             projects,

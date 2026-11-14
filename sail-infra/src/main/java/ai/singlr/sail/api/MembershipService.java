@@ -11,12 +11,9 @@ import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.Engagement;
 import ai.singlr.sail.config.Roster;
 import ai.singlr.sail.engine.HostInfo;
-import ai.singlr.sail.engine.ShellExec;
-import ai.singlr.sail.engine.SnapshotManager;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.store.RoomStore;
 import ai.singlr.sail.store.SpecStore;
-import java.time.Duration;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Objects;
@@ -41,14 +38,12 @@ import java.util.function.Supplier;
  */
 public final class MembershipService {
 
-  private static final Duration SNAPSHOT_TIMEOUT = Duration.ofHours(1);
-
   private final SpecStore specStore;
   private final Supplier<RoomStore> rooms;
   private final ProjectLoader projects;
   private final LaunchAdmission admission;
   private final DispatchOperations.EventSink events;
-  private final ShellExec shell;
+  private final RunPlaces places;
 
   public MembershipService(
       SpecStore specStore,
@@ -56,13 +51,13 @@ public final class MembershipService {
       ProjectLoader projects,
       LaunchAdmission admission,
       DispatchOperations.EventSink events,
-      ShellExec shell) {
+      RunPlaces places) {
     this.specStore = specStore;
     this.rooms = Objects.requireNonNull(rooms, "rooms");
     this.projects = projects;
     this.admission = admission;
     this.events = events;
-    this.shell = shell;
+    this.places = places;
   }
 
   /**
@@ -126,22 +121,18 @@ public final class MembershipService {
     return spec;
   }
 
-  /** A prepared membership: the snapshot label a full mode will pay, and the deferred half. */
-  public record EngageLaunch(String agent, String mode, String snapshot, Runnable completion) {}
+  /** A recorded membership: the harness seated and its mode. */
+  public record EngageLaunch(String agent, String mode) {}
 
   /**
    * Seats an agent in {@code specId}'s room: records the member on the room row's roster (synced,
    * atomic — one JSON array), so the wake reactor answers every human message with a chat turn
    * until a human dismisses the member. Mode {@code full} is the default; {@code read-only} is the
-   * explicit narrow choice, offered only where the harness enforces it. A full membership may take
-   * one engage-time rollback snapshot (never per turn), but the default is none — on the {@code
-   * dir} backend a snapshot is a slow full filesystem copy, so the rollback point is opt-in ({@code
-   * takeSnapshot}) and the per-turn repo reservation remains the standing guard. A requested
-   * snapshot runs off the request thread ({@code completion}) because a {@code dir}-backend
-   * snapshot would blow the HTTP timeout; the membership is then persisted only after the snapshot
-   * succeeds — the payment precedes the access — and a failure publishes {@code spec_engage_failed}
-   * into the room instead of seating anyone. Requires the dispatch tier on the spec, exactly like a
-   * dispatch.
+   * explicit narrow choice, offered only where the harness enforces it. A member of a spec's room
+   * works in the spec's own workspace, so it is checked and entered as a dispatch's run is ({@link
+   * RunPlaces}), its harness found installed there, and no snapshot of the project's container is
+   * taken for it: {@code takeSnapshot} is refused, naming why. Requires the dispatch tier on the
+   * spec, exactly like a dispatch.
    */
   public EngageLaunch engage(
       String specId,
@@ -156,16 +147,24 @@ public final class MembershipService {
     }
     LaunchAdmission.requireAllowed(spec.toSpec(), localHandle);
     authorizeRoster(spec.roomIdOrIdentity());
-    var project = spec.project();
-    var member = admit(project, agentYamlName, mode, model, localHandle);
-    if (!member.full() || !takeSnapshot) {
-      persistMembership(specId, member);
-      publishEngaged(project, specId, member, "");
-      return new EngageLaunch(member.agent(), member.mode(), "", null);
+    if (takeSnapshot) {
+      throw new ApiException(
+          ErrorCode.BAD_REQUEST,
+          "A member of a spec's room works in the spec's own workspace, which a snapshot of the"
+              + " project's container does not hold, so no engage snapshot is taken.",
+          "Engage it without --snapshot.");
     }
-    var label = "engage-" + DateTimeUtils.newId();
-    Runnable completion = () -> completeEngage(project, specId, member, label);
-    return new EngageLaunch(member.agent(), member.mode(), label, completion);
+    var project = spec.project();
+    var member = admit(agentYamlName, mode, model, localHandle);
+    var config = projects.definition(project);
+    var place =
+        places
+            .enter(places.checkSpec(project, config, specId, localHandle), config, localHandle)
+            .place();
+    admission.requireInstalled(LaunchAdmission.resolveAgent(member.agent()), place.instance());
+    persistMembership(specId, member);
+    publishEngaged(project, specId, member, "");
+    return new EngageLaunch(member.agent(), member.mode());
   }
 
   /**
@@ -180,10 +179,10 @@ public final class MembershipService {
     var room = readable(store, roomId);
     LaunchAdmission.requireAllowedForRoom(
         roomId, room.project(), store.ownerOf(roomId), localHandle);
-    var member = admit(room.project(), agentYamlName, mode, model, localHandle);
+    var member = inTheProjectsContainer(room.project(), agentYamlName, mode, model, localHandle);
     store.updateRoster(roomId, Roster.solo(member).toJson());
     publishEngaged(room.project(), roomId, member, "");
-    return new EngageLaunch(member.agent(), member.mode(), "", null);
+    return new EngageLaunch(member.agent(), member.mode());
   }
 
   /**
@@ -200,19 +199,32 @@ public final class MembershipService {
       String localHandle,
       Function<String, T> create) {
     LaunchAdmission.requireAllowedForRoom(roomId, project, owner, localHandle);
-    var member = admit(project, request.agent(), request.mode(), request.model(), localHandle);
+    var member =
+        inTheProjectsContainer(
+            project, request.agent(), request.mode(), request.model(), localHandle);
     var created = create.apply(Roster.solo(member).toJson());
     publishEngaged(project, roomId, member, "");
     return created;
   }
 
   /**
-   * The member an engagement seats, once every check that does not read the room has passed: a
-   * trusted roster, a known harness, a valid mode and model, read-only only where the harness
-   * enforces it, and the harness installed in the project's running container.
+   * {@link #admit}, for a member of a room with no spec, which works in the project's running
+   * container: its harness installed there.
    */
-  private Engagement admit(
+  private Engagement inTheProjectsContainer(
       String project, String agentYamlName, String mode, String model, String localHandle) {
+    var member = admit(agentYamlName, mode, model, localHandle);
+    projects.loadRunning(project);
+    admission.requireInstalled(LaunchAdmission.resolveAgent(member.agent()), project);
+    return member;
+  }
+
+  /**
+   * The member an engagement seats, once every check that does not read the room or a container has
+   * passed: a trusted roster, a known harness, a valid mode and model, and read-only only where the
+   * harness enforces it.
+   */
+  private Engagement admit(String agentYamlName, String mode, String model, String localHandle) {
     admission.requireTrustedRoster(localHandle);
     var harness = LaunchAdmission.resolveAgent(agentYamlName);
     Engagement member;
@@ -233,32 +245,7 @@ public final class MembershipService {
           refusal.get(),
           "Add " + harness.yamlName() + " with full access instead.");
     }
-    projects.loadRunning(project);
-    admission.requireInstalled(harness, project);
     return member;
-  }
-
-  private void completeEngage(String project, String specId, Engagement member, String label) {
-    try {
-      try {
-        new SnapshotManager(shell).create(project, label, SNAPSHOT_TIMEOUT);
-      } catch (Exception e) {
-        throw new ApiException(
-            ErrorCode.SNAPSHOT_FAILED,
-            "Failed to create the engage snapshot, so the membership does not take effect.",
-            "Check the host's snapshot capacity (incus storage) and retry.",
-            e);
-      }
-      publish(project, specId, Event.WellKnownTypes.SNAPSHOT_CREATED, Map.of("label", label));
-      persistMembership(specId, member);
-      publishEngaged(project, specId, member, label);
-    } catch (RuntimeException e) {
-      var data = new LinkedHashMap<String, Object>();
-      data.put("agent", member.agent());
-      data.put("label", label);
-      data.put("error", Objects.requireNonNullElse(e.getMessage(), e.toString()));
-      publish(project, specId, Event.WellKnownTypes.SPEC_ENGAGE_FAILED, data);
-    }
   }
 
   /** Dismisses the room's standing member. Idempotent: dismissing an empty room is a no-op. */

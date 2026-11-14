@@ -20,17 +20,17 @@ import picocli.CommandLine.Parameters;
 
 /**
  * Adds an agent to a spec's room: it joins the conversation and answers every human message until
- * removed. Full access is the default — conversations produce artifacts. {@code --snapshot} opts
- * into a rollback point first (off by default: a dir-backend snapshot is a slow full copy); {@code
- * --read-only} is the explicit narrow choice, offered only where the harness enforces it. A thin
- * client of {@code POST /v1/rooms/{id}/members}; the server's refusals render verbatim.
+ * removed. Full access is the default — conversations produce artifacts; {@code --read-only} is the
+ * explicit narrow choice, offered only where the harness enforces it. The member works in the
+ * spec's own workspace. A thin client of {@code POST /v1/rooms/{id}/members}; the server's refusals
+ * render verbatim.
  */
 @Command(
     name = "engage",
     description =
         "Add an agent to this spec's room — it answers every message until"
             + " 'spec disengage' removes it. Full access by default; --read-only for the enforced"
-            + " narrow mode, --snapshot for a rollback point first.",
+            + " narrow mode.",
     mixinStandardHelpOptions = true)
 public final class ApiSpecEngageCommand implements Runnable {
 
@@ -47,13 +47,6 @@ public final class ApiSpecEngageCommand implements Runnable {
       names = "--read-only",
       description = "Enforced read-only conversation (claude-code only today).")
   private boolean readOnly;
-
-  @Option(
-      names = "--snapshot",
-      description =
-          "Take a rollback snapshot before the engagement takes effect (full mode only)."
-              + " Off by default — on the dir backend a snapshot is a slow full copy.")
-  private boolean snapshot;
 
   @Mixin private SyncOptions syncOptions;
 
@@ -73,9 +66,6 @@ public final class ApiSpecEngageCommand implements Runnable {
     var body = new LinkedHashMap<String, Object>();
     body.put("agent", agent);
     body.put("mode", (readOnly ? EngagementMode.READ_ONLY : EngagementMode.FULL).wire());
-    if (snapshot && !readOnly) {
-      body.put("snapshot", true);
-    }
     if (Strings.isNotBlank(model)) {
       body.put("model", model);
     }
@@ -84,19 +74,6 @@ public final class ApiSpecEngageCommand implements Runnable {
 
       if (json) {
         System.out.println(YamlUtil.dumpJson(new LinkedHashMap<>(result)));
-        return;
-      }
-      var snapshot = result.get("snapshot");
-      if (snapshot != null && !snapshot.toString().isBlank()) {
-        System.out.println(
-            Ansi.AUTO.string(
-                "  @|green ✓|@ Engaging "
-                    + agent
-                    + " (full) in spec '"
-                    + specId
-                    + "' — snapshot "
-                    + snapshot
-                    + " is being taken; the engagement takes effect when it completes."));
         return;
       }
       System.out.println(

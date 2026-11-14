@@ -773,14 +773,13 @@ record EngageRequest(String agent, String mode, String model, boolean snapshot) 
   }
 }
 
-/** Response of {@code POST /v1/rooms/{id}/members}: the recorded (or pending) membership. */
-record EngageResponse(String agent, String mode, String snapshot) implements Mappable {
+/** Response of {@code POST /v1/rooms/{id}/members}: the recorded membership. */
+record EngageResponse(String agent, String mode) implements Mappable {
   @Override
   public Map<String, Object> toMap() {
     var m = new LinkedHashMap<String, Object>();
     m.put("agent", agent);
     m.put("mode", mode);
-    if (snapshot != null && !snapshot.isBlank()) m.put("snapshot", snapshot);
     return m;
   }
 }

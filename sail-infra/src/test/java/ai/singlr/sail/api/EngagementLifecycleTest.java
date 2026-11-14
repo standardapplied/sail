@@ -40,16 +40,14 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 /**
- * The engagement lifecycle: engage records the standing agent on the spec row (full mode only after
- * its snapshot payment succeeds, off the request thread), disengage clears it, and every transition
- * speaks on the bus so the room renders joins and leaves.
+ * The engagement lifecycle: engage records the standing agent on the spec's room, seated in the
+ * spec's own workspace, disengage clears it, and every transition speaks on the bus so the room
+ * renders joins and leaves.
  */
 @ActingAs
 class EngagementLifecycleTest {
@@ -117,8 +115,7 @@ class EngagementLifecycleTest {
   private StubShell shell() {
     return new StubShell(order)
         .on("incus list ^acme$", RUNNING_JSON)
-        .on("command -v", "/usr/local/bin/claude\n")
-        .on("incus snapshot create", "");
+        .on("command -v", "/usr/local/bin/claude\n");
   }
 
   private void seedSpec(String id) {
@@ -166,9 +163,11 @@ class EngagementLifecycleTest {
   private static class StubShell implements ShellExec {
     private final Map<String, ShellExec.Result> scripts = new LinkedHashMap<>();
     private final List<String> order;
+    private final List<String> ran = new ArrayList<>();
 
     StubShell(List<String> order) {
       this.order = order;
+      scripts.putAll(TestWorkspaces.answers("acme"));
       on("incus config device add", "");
       on("incus file push", "");
       on("cat " + ContainerSailSetup.STAMP_PATH, ContainerSailSetup.fingerprint());
@@ -187,9 +186,7 @@ class EngagementLifecycleTest {
     @Override
     public ShellExec.Result exec(List<String> command) {
       var joined = String.join(" ", command);
-      if (joined.contains("incus snapshot create")) {
-        order.add("snapshot");
-      }
+      ran.add(joined);
       for (var entry : scripts.entrySet()) {
         if (joined.contains(entry.getKey())) {
           return entry.getValue();
@@ -210,9 +207,20 @@ class EngagementLifecycleTest {
     }
   }
 
+  /**
+   * M3: a member of a spec's room is seated where its turns run, the spec's own workspace, checked
+   * and entered as a dispatch's run is, its harness found installed there; the project's container
+   * is neither required running nor asked.
+   */
   @Test
-  void theDefaultFullEngageTakesEffectImmediatelyWithNoSnapshot() throws Exception {
-    var ops = operations(shell());
+  void aSpecsMemberIsSeatedInTheSpecsWorkspaceWhateverTheProjectsContainerIs() throws Exception {
+    var stopped =
+        new StubShell(order)
+            .on(
+                "incus list ^acme$",
+                "[{\"name\": \"acme\", \"status\": \"Stopped\", \"state\": {}}]")
+            .on("command -v", "/usr/local/bin/claude\n");
+    var ops = operations(stopped);
     seedSpec("auth");
 
     var launch =
@@ -221,64 +229,37 @@ class EngagementLifecycleTest {
             () -> ops.engage("auth", "claude-code", null, null, false, HANDLE));
 
     assertEquals("full", launch.mode(), "full is the default mode");
-    assertEquals("", launch.snapshot(), "no snapshot unless asked — dir backends are slow");
-    assertNull(launch.completion(), "nothing is deferred");
     assertTrue(stored("auth").full());
-    assertTrue(ofType(Event.WellKnownTypes.SNAPSHOT_CREATED).isEmpty());
     assertEquals(1, ofType(Event.WellKnownTypes.SPEC_ENGAGED).size());
+    var asked = stopped.ran.stream().filter(command -> command.contains("command -v")).toList();
+    assertEquals(1, asked.size(), String.valueOf(stopped.ran));
+    assertTrue(asked.getFirst().startsWith("incus exec acme-auth "), asked.getFirst());
   }
 
+  /** M3: no snapshot of the project's container is taken for a member of a spec's room. */
   @Test
-  void aFullEngageTakesEffectOnlyAfterItsRequestedSnapshotAndInOrder() throws Exception {
+  void aSpecsEngageWithASnapshotIsRefusedNamingWhyAndSeatsNoOne() throws Exception {
     var ops = operations(shell());
     seedSpec("auth");
 
-    var launch =
-        Actor.call(
-            new Actor(HANDLE, Role.ADMIN, Actor.Lane.CLI),
-            () -> ops.engage("auth", "claude-code", null, "opus-x", true, HANDLE));
+    for (var mode : java.util.Arrays.asList(null, "read-only")) {
+      var refused =
+          assertThrows(
+              ApiException.class,
+              () ->
+                  Actor.call(
+                      new Actor(HANDLE, Role.ADMIN, Actor.Lane.CLI),
+                      () -> ops.engage("auth", "claude-code", mode, null, true, HANDLE)));
 
-    assertEquals("full", launch.mode(), "full is the default mode");
-    assertTrue(launch.snapshot().startsWith("engage-"));
-    assertNotNull(launch.completion());
-    assertNull(stored("auth"), "the payment precedes the access");
-
-    launch.completion().run();
-
-    var engagement = stored("auth");
-    assertEquals("claude-code", engagement.agent());
-    assertEquals("opus-x", engagement.model());
-    assertTrue(engagement.full());
-    assertEquals(1, ofType(Event.WellKnownTypes.SNAPSHOT_CREATED).size());
-    var engaged = ofType(Event.WellKnownTypes.SPEC_ENGAGED);
-    assertEquals(1, engaged.size());
-    assertEquals("auth", engaged.getFirst().spec());
-    assertEquals("full", engaged.getFirst().data().get("mode"));
-    assertEquals(launch.snapshot(), engaged.getFirst().data().get("label"));
-  }
-
-  @Test
-  void aFailedSnapshotPublishesEngageFailedAndLeavesTheRoomEmpty() throws Exception {
-    var failing =
-        new StubShell(order)
-            .on("incus list ^acme$", RUNNING_JSON)
-            .on("command -v", "/usr/local/bin/claude\n")
-            .failing("incus snapshot create", "no space left on storage pool");
-    var ops = operations(failing);
-    seedSpec("auth");
-
-    var launch =
-        Actor.call(
-            new Actor(HANDLE, Role.ADMIN, Actor.Lane.CLI),
-            () -> ops.engage("auth", "claude-code", "full", null, true, HANDLE));
-    launch.completion().run();
-
-    assertNull(stored("auth"), "a failed payment engages nobody");
-    assertTrue(ofType(Event.WellKnownTypes.SPEC_ENGAGED).isEmpty());
-    var failedEvents = ofType(Event.WellKnownTypes.SPEC_ENGAGE_FAILED);
-    assertEquals(1, failedEvents.size());
-    assertEquals("claude-code", failedEvents.getFirst().data().get("agent"));
-    assertNotNull(failedEvents.getFirst().data().get("error"));
+      assertEquals(ErrorCode.BAD_REQUEST, refused.failure().errorCode());
+      assertEquals(
+          "A member of a spec's room works in the spec's own workspace, which a snapshot of the"
+              + " project's container does not hold, so no engage snapshot is taken.",
+          refused.getMessage());
+      assertEquals("Engage it without --snapshot.", refused.failure().remedy().plain());
+    }
+    assertNull(stored("auth"));
+    assertTrue(events.isEmpty());
   }
 
   @Test
@@ -310,25 +291,6 @@ class EngagementLifecycleTest {
   }
 
   @Test
-  void aSpecDeletedDuringItsSnapshotPaymentPublishesEngageFailed() throws Exception {
-    var ops = operations(shell());
-    seedSpec("auth");
-
-    var launch =
-        Actor.call(
-            new Actor(HANDLE, Role.ADMIN, Actor.Lane.CLI),
-            () -> ops.engage("auth", "claude-code", "full", null, true, HANDLE));
-    specStore.delete("auth");
-    launch.completion().run();
-
-    assertNull(specStore.findById("auth").orElse(null), "the spec is gone");
-    assertTrue(
-        ofType(Event.WellKnownTypes.SPEC_ENGAGED).isEmpty(),
-        "a spec that vanished mid-payment engages nobody");
-    assertEquals(1, ofType(Event.WellKnownTypes.SPEC_ENGAGE_FAILED).size());
-  }
-
-  @Test
   void aReadOnlyEngagePersistsImmediatelyWithNoSnapshot() throws Exception {
     var ops = operations(shell());
     seedSpec("auth");
@@ -336,13 +298,10 @@ class EngagementLifecycleTest {
     var launch =
         Actor.call(
             new Actor(HANDLE, Role.ADMIN, Actor.Lane.CLI),
-            () -> ops.engage("auth", "claude-code", "read-only", null, true, HANDLE));
+            () -> ops.engage("auth", "claude-code", "read-only", null, false, HANDLE));
 
-    assertNull(launch.completion(), "nothing is deferred — no payment to make");
-    assertEquals("", launch.snapshot());
     var engagement = stored("auth");
     assertEquals("read_only", engagement.mode());
-    assertTrue(ofType(Event.WellKnownTypes.SNAPSHOT_CREATED).isEmpty());
     assertEquals(1, ofType(Event.WellKnownTypes.SPEC_ENGAGED).size());
   }
 
@@ -385,13 +344,12 @@ class EngagementLifecycleTest {
   }
 
   @Test
-  void anEngageContinuedOnTheLaunchExecutorRecordsTheRequester() throws Exception {
+  void anEngageThroughTheServerLaneRecordsTheRequester() throws Exception {
     var shell = shell();
     operations(shell);
     seedSpec("auth");
     var yaml = tempDir.resolve("sail-server.yaml");
     Files.writeString(yaml, YAML);
-    var continued = new CompletableFuture<Void>();
     try (var bus = new EventBus()) {
       var sailOps =
           new SailOperations(
@@ -403,19 +361,7 @@ class EngagementLifecycleTest {
                   new ReviewStore(db),
                   runStore)
               .useMessages(new MessageStore(db))
-              .useRooms(roomStore)
-              .useLaunchExecutor(
-                  task ->
-                      Thread.ofPlatform()
-                          .start(
-                              () -> {
-                                try {
-                                  task.run();
-                                  continued.complete(null);
-                                } catch (Throwable failure) {
-                                  continued.completeExceptionally(failure);
-                                }
-                              }));
+              .useRooms(roomStore);
       var requester = new Actor("mady", Role.ADMIN, Actor.Lane.CLI);
 
       var engaged =
@@ -423,11 +369,10 @@ class EngagementLifecycleTest {
               requester,
               () ->
                   sailOps.addRoomMember(
-                      "auth", new EngageRequest("claude-code", null, null, true), HANDLE));
-      continued.get(30, TimeUnit.SECONDS);
+                      "auth", new EngageRequest("claude-code", null, null, false), HANDLE));
 
       assertTrue(engaged instanceof Result.Success<EngageResponse>);
-      assertNotNull(stored("auth"), "the snapshot's continuation seated the member");
+      assertNotNull(stored("auth"), "the request seated the member");
       assertEquals("mady", roomStore.findById("auth").orElseThrow().updatedBy());
       assertEquals("mady", new ChangeLog(db).head("room", "auth").orElseThrow().actor());
     }
@@ -451,20 +396,18 @@ class EngagementLifecycleTest {
                   new ReviewStore(db),
                   runStore)
               .useMessages(new MessageStore(db))
-              .useRooms(roomStore)
-              .useLaunchExecutor(Runnable::run);
+              .useRooms(roomStore);
 
       var engaged =
           Actor.call(
               new Actor(HANDLE, Role.ADMIN, Actor.Lane.CLI),
               () ->
                   sailOps.addRoomMember(
-                      "auth", new EngageRequest("claude-code", null, null, true), HANDLE));
+                      "auth", new EngageRequest("claude-code", null, null, false), HANDLE));
       assertTrue(engaged instanceof Result.Success<EngageResponse>);
       var response = ((Result.Success<EngageResponse>) engaged).value();
       assertEquals("full", response.mode());
-      assertTrue(response.snapshot().startsWith("engage-"));
-      assertNotNull(stored("auth"), "the deferred snapshot ran inline and engaged the room");
+      assertNotNull(stored("auth"), "the request engaged the room");
 
       var refused =
           Actor.call(
@@ -496,7 +439,14 @@ class EngagementLifecycleTest {
       assertTrue(posted instanceof Result.Success<SpecMessageResponse>);
       var roomList = sailOps.roomMessages("auth", null, null, 10);
       assertTrue(roomList instanceof Result.Success<SpecMessagesResponse>);
-      assertEquals(1, ((Result.Success<SpecMessagesResponse>) roomList).value().messages().size());
+      assertEquals(
+          List.of("hello room"),
+          ((Result.Success<SpecMessagesResponse>) roomList)
+              .value().messages().stream()
+                  .filter(message -> !MessageStore.SAIL_AUTHOR.equals(message.author()))
+                  .map(SpecMessageView::body)
+                  .toList(),
+          "the person's post, beside what Sail said of the workspace it made for the member");
       var removed =
           Actor.call(
               new Actor(HANDLE, Role.ADMIN, Actor.Lane.CLI),
@@ -507,7 +457,7 @@ class EngagementLifecycleTest {
           new Actor(HANDLE, Role.ADMIN, Actor.Lane.CLI),
           () ->
               sailOps.addRoomMember(
-                  "auth", new EngageRequest("claude-code", null, null, true), HANDLE));
+                  "auth", new EngageRequest("claude-code", null, null, false), HANDLE));
 
       var dismissed =
           Actor.call(
@@ -710,7 +660,6 @@ class EngagementLifecycleTest {
             new Actor(HANDLE, Role.ADMIN, Actor.Lane.CLI),
             () -> ops.engage("chat-room", "claude-code", "read-only", null, false, HANDLE));
     assertEquals("read_only", launch.mode());
-    assertNull(launch.completion(), "no spec, no snapshot offer — nothing to anchor a rollback");
     assertNotNull(roomMember("chat-room"), "the collaborator is seated on the room row");
     assertEquals(1, ofType(Event.WellKnownTypes.SPEC_ENGAGED).size());
 
@@ -861,13 +810,10 @@ class EngagementLifecycleTest {
   void anEngageNeverRevertsAConcurrentStatusTransition() throws Exception {
     var ops = operations(shell());
     seedSpec("auth");
-    var launch =
-        Actor.call(
-            new Actor(HANDLE, Role.ADMIN, Actor.Lane.CLI),
-            () -> ops.engage("auth", "claude-code", "full", null, true, HANDLE));
     specStore.compareAndSetStatus("auth", SpecStatus.DRAFT, SpecStatus.IN_PROGRESS);
-
-    launch.completion().run();
+    Actor.call(
+        new Actor(HANDLE, Role.ADMIN, Actor.Lane.CLI),
+        () -> ops.engage("auth", "claude-code", "full", null, false, HANDLE));
 
     var after = specStore.findById("auth").orElseThrow();
     assertEquals(

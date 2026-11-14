@@ -82,8 +82,6 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.TreeMap;
-import java.util.concurrent.Executor;
-import java.util.concurrent.Executors;
 import java.util.function.Function;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
@@ -420,7 +418,6 @@ public final class SailOperations implements HostOperations {
   private ProjectSkills projectSkills = ProjectSkills.none();
   private final StopOperations stopOps;
   private final FdeStore fdeStore;
-  private Executor launchExecutor = Executors.newVirtualThreadPerTaskExecutor();
   private MessageStore messageStore;
   private RoomStore roomStore;
   private BoxCredentialStore boxCredentialStore;
@@ -534,17 +531,6 @@ public final class SailOperations implements HostOperations {
   public SailOperations useRooms(RoomStore roomStore) {
     this.roomStore = Objects.requireNonNull(roomStore, "roomStore");
     this.dispatchOps.useRooms(roomStore);
-    return this;
-  }
-
-  /**
-   * Overrides the executor that runs the deferred half of a membership (the engage-time snapshot).
-   * Production keeps the default virtual-thread executor; a test injects {@code Runnable::run} to
-   * make the completion run inline, so its assertions and teardown see a finished launch. Returns
-   * {@code this}.
-   */
-  SailOperations useLaunchExecutor(Executor executor) {
-    this.launchExecutor = Objects.requireNonNull(executor, "executor");
     return this;
   }
 
@@ -907,10 +893,7 @@ public final class SailOperations implements HostOperations {
                       request.model(),
                       request.snapshot(),
                       localHandle);
-              if (launch.completion() != null) {
-                launchExecutor.execute(Actor.carrying(launch.completion()));
-              }
-              return new EngageResponse(launch.agent(), launch.mode(), launch.snapshot());
+              return new EngageResponse(launch.agent(), launch.mode());
             });
     if (result instanceof Result.Success<EngageResponse>) {
       triggerSyncAfterWrite();

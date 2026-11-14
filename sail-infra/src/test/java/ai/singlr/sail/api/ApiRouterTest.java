@@ -2642,8 +2642,7 @@ class ApiRouterTest {
         String roomId, EngageRequest request, String localHandle) {
       lastAddMember = new Engage(roomId, request, localHandle);
       return Result.success(
-          new EngageResponse(
-              request.agent(), request.mode() == null ? "full" : request.mode(), ""));
+          new EngageResponse(request.agent(), request.mode() == null ? "full" : request.mode()));
     }
 
     @Override
