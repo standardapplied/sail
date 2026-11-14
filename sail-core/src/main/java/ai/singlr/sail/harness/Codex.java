@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.harness;
 
+import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.engine.ContainerExec;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -174,6 +175,27 @@ final class Codex implements Harness {
     var payload = RunUsage.map(line, "payload");
     return "token_count".equals(payload.get("type"))
         && !RunUsage.map(RunUsage.map(payload, "info"), "total_token_usage").isEmpty();
+  }
+
+  /**
+   * An API key, read from {@code CODEX_API_KEY}, which {@code codex exec} (every Sail launch of
+   * Codex) reads before any other login; or a Codex access token, read from {@code
+   * CODEX_ACCESS_TOKEN}. Codex does not read {@code OPENAI_API_KEY} for its own login, and its
+   * "Sign in with ChatGPT" refreshes, so it is never stored.
+   */
+  @Override
+  public List<LoginKind> loginKinds() {
+    return List.of(
+        new LoginKind(
+            "api-key",
+            "CODEX_API_KEY",
+            Remedy.of("Create an API key at platform.openai.com/api-keys")),
+        new LoginKind(
+            "token",
+            "CODEX_ACCESS_TOKEN",
+            Remedy.of(
+                "Create a Codex access token at chatgpt.com/admin/access-tokens (ChatGPT Business"
+                    + " and Enterprise)")));
   }
 
   @Override

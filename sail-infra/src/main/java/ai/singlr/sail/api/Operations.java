@@ -155,6 +155,12 @@ public interface Operations extends LocalLaneOperations {
   Result<AttentionResponse> attend(String conversation);
 
   /**
+   * The doors to a person's harness logins: the caller's own, and another person's to list or
+   * remove for whoever manages people. No container lane reaches them.
+   */
+  LoginOperations logins();
+
+  /**
    * The measures of the specs {@code filter} lists, done between {@code doneSince} and {@code
    * doneUntil} (dates, either blank) by this box's record, with their medians and 90th percentiles.
    */

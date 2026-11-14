@@ -10,6 +10,7 @@ import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.ProjectDefinition;
 import ai.singlr.sail.engine.AgentUnit;
 import ai.singlr.sail.engine.ContainerExec;
+import ai.singlr.sail.engine.LaunchEnv;
 import ai.singlr.sail.engine.RunUsageReader;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.StreamJsonResult;
@@ -85,7 +86,7 @@ final class ReviewLaneLauncher implements ReviewLanes {
     return switch (claim) {
       case RunReservation.Claim.Held held -> new Launch.Deferred(held.conflict().run());
       case RunReservation.Claim.Claimed reserved ->
-          launchClaimed(invocation, runId, unit, config, reserved.credential(), claimed);
+          launchClaimed(invocation, runId, unit, config, reserved.env(), claimed);
     };
   }
 
@@ -94,7 +95,7 @@ final class ReviewLaneLauncher implements ReviewLanes {
       String runId,
       AgentUnit unit,
       ProjectDefinition config,
-      String credential,
+      LaunchEnv env,
       Runnable claimed) {
     var project = invocation.project();
     var role = invocation.lane().wire();
@@ -119,8 +120,9 @@ final class ReviewLaneLauncher implements ReviewLanes {
                   invocation.repos(),
                   true,
                   runId,
-                  credential,
+                  env,
                   role,
+                  null,
                   null));
       runLauncher.finishLaunch(
           new RunLauncher.RunContext(

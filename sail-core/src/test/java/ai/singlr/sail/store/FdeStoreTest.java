@@ -9,8 +9,10 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.harness.Harnesses;
 import ai.singlr.sail.ssh.SshPublicKey;
 import java.nio.file.Path;
+import java.util.List;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -54,6 +56,37 @@ class FdeStoreTest {
     assertEquals(0L, count("sessions", fde.id()));
     assertEquals(0L, count("fde_ssh_keys", fde.id()));
     assertEquals(0L, count("fde_pairings", fde.id()));
+  }
+
+  @Test
+  void removingAnFdeDeletesTheLoginsItStoredOnceTheRemovalCommits() {
+    var ghost = store.add("ghost", null, null, "member");
+    var keeper = store.add("keeper", null, null, "member");
+    var logins = LoginStore.beside(db);
+    var claude = Harnesses.of("claude-code");
+    logins.store(ghost.id(), claude, null, null, "ghost-token");
+    logins.store(keeper.id(), claude, null, null, "keeper-token");
+
+    store.remove(ghost.id());
+
+    assertEquals(List.of(), logins.list(ghost.id()));
+    assertEquals(1, logins.list(keeper.id()).size());
+  }
+
+  @Test
+  void aRemovalThatRollsBackKeepsTheLoginsAndOneOffTheListIsForgottenAfterItsCommit() {
+    var admin = store.add("solo", null, null, "admin");
+    var member = store.add("member", null, null, "member");
+    var logins = LoginStore.beside(db);
+    var claude = Harnesses.of("claude-code");
+    logins.store(admin.id(), claude, null, null, "admin-token");
+    logins.store(member.id(), claude, null, null, "member-token");
+
+    assertThrows(IllegalStateException.class, () -> store.remove(admin.id()));
+    assertEquals(1, store.removeUnlisted(List.of("solo"), "solo"));
+
+    assertEquals(1, logins.list(admin.id()).size());
+    assertEquals(List.of(), logins.list(member.id()));
   }
 
   @Test

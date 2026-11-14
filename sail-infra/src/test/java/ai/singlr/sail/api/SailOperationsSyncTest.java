@@ -15,11 +15,13 @@ import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.ActingAs;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.Role;
+import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.HeldProjects;
 import ai.singlr.sail.store.ProjectStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
+import ai.singlr.sail.store.TestLogins;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
@@ -192,7 +194,7 @@ class SailOperationsSyncTest {
                 operations.dispatch(
                     "acme", new DispatchRequest("auth", "background", true), "uday"));
 
-    assertInstanceOf(Result.Success.class, result);
+    assertInstanceOf(Result.Success.class, result, result.toString());
     assertEquals(2, rounds.get());
   }
 
@@ -246,6 +248,7 @@ class SailOperationsSyncTest {
     HeldProjects.hold(db, "acme");
     var specStore = new SpecStore(db);
     seed.accept(specStore);
+    TestLogins.store(db, "uday");
     return TestControlPlane.standalone(
         new SailOperations(
             shell,
@@ -257,7 +260,9 @@ class SailOperationsSyncTest {
             null,
             new ProjectStore(db),
             () -> new ConnectEnvironment("203.0.113.7", "uday", true),
-            scheduler),
+            scheduler,
+            new FdeStore(db),
+            SessionYield.NONE),
         db,
         tempDir);
   }

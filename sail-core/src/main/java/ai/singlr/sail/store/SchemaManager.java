@@ -38,7 +38,7 @@ public final class SchemaManager {
    * The version this release stamps and opens. It lies beyond every version a release before v1
    * stamped, so no older database is ever read as this one.
    */
-  public static final int CURRENT_VERSION = 1003;
+  public static final int CURRENT_VERSION = 1004;
 
   private static final String SCHEMA_VERSION_TABLE =
       """
@@ -482,7 +482,10 @@ public final class SchemaManager {
               tokens_cache_write INTEGER,
               cost_usd REAL,
               usage_source TEXT
-                  CHECK (usage_source IN ('result', 'transcript', 'none', 'unattributable'))
+                  CHECK (usage_source IN ('result', 'transcript', 'none', 'unattributable')),
+              login TEXT,
+              login_kind TEXT,
+              dispatched_by TEXT
           )""",
           RUN_COUNTED,
           RUN_RECOUNTED_FROM,

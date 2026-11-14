@@ -338,6 +338,16 @@ class AccessTest {
                   "Ask an admin to do it."),
               null),
           new Expected(
+              Action.KEEP_LOGINS,
+              PEOPLE,
+              PEOPLE,
+              "keep harness logins",
+              List.of(ALLOWED, ALLOWED, ALLOWED, LANE, LANE, LANE, LANE, LANE),
+              null,
+              null,
+              "Do it from outside the container: 'sail agent login <harness>' on the host, or"
+                  + " Mast."),
+          new Expected(
               Action.OPERATE_BOX,
               BOX_ADA,
               BOX_BOB,
@@ -989,6 +999,37 @@ class AccessTest {
             "Ask bob to make this change, or have an admin do it."),
         Access.decide(Actors.OWNER_IN_CONTAINER, Action.CHANGE, SPEC_BOB),
         "the role column says whose the work is");
+  }
+
+  /**
+   * Every person keeps their own logins, a viewer too, and doing so writes no row, so a viewer
+   * stays read-only; no agent and no credential in a container keeps any, and the container's
+   * refusal names the door outside it.
+   */
+  @Test
+  void everyPersonKeepsTheirOwnLoginsAndNoAgentOrContainerCredentialDoes() {
+    for (var person : List.of(Actors.VIEWER, Actors.OWNER_API, Actors.OWNER_CLI, Actors.ADMIN)) {
+      assertEquals(
+          Optional.empty(), Access.atAll(person, Action.KEEP_LOGINS, Resource.Kind.PEOPLE));
+    }
+    assertFalse(Access.mayWrite(Actors.VIEWER), "keeping logins writes no row");
+    for (var agent : List.of(Actors.AGENT, Actors.ROOM)) {
+      assertEquals(
+          refusedAtAll(
+              Refusal.Kind.LANE_FORBIDDEN,
+              "Agent principals cannot keep harness logins.",
+              LANE_FIX),
+          Access.atAll(agent, Action.KEEP_LOGINS, Resource.Kind.PEOPLE));
+    }
+    assertEquals(
+        Optional.of(
+            new Refusal(
+                Refusal.Kind.LANE_FORBIDDEN,
+                "The credential in a project container cannot keep harness logins.",
+                Remedy.of(
+                    "Do it from outside the container: 'sail agent login <harness>' on the host,"
+                        + " or Mast."))),
+        Access.atAll(Actors.ADMIN_IN_CONTAINER, Action.KEEP_LOGINS, Resource.Kind.PEOPLE));
   }
 
   private static Decision refused(Refusal.Kind kind, String message, Remedy fix) {

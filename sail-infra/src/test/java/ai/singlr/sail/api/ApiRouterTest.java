@@ -2297,6 +2297,63 @@ class ApiRouterTest {
     assertEquals("proj", list.toMap().get("project"));
     assertEquals("auth", list.toMap().get("spec"));
     assertEquals(view.toMap(), new RunDetailResponse(view).toMap());
+    assertFalse(map.containsKey("login"), "a run not launched yet names no login");
+    var stored =
+        new RunView(
+                "s2",
+                "proj",
+                "auth",
+                "node-a",
+                "build",
+                "codex",
+                null,
+                null,
+                "running",
+                "t0",
+                null,
+                null,
+                null,
+                null,
+                "uday",
+                null,
+                null,
+                null,
+                null,
+                null,
+                new RunStore.RunLogin("work", "api-key"),
+                "ana")
+            .toMap();
+    assertEquals("work", stored.get("login"));
+    assertEquals("api-key", stored.get("login_kind"));
+    assertEquals("ana", stored.get("dispatched_by"));
+    var container =
+        new RunView(
+                "s3",
+                "proj",
+                null,
+                "node-a",
+                "adhoc",
+                "codex",
+                null,
+                null,
+                "running",
+                "t0",
+                null,
+                null,
+                null,
+                null,
+                "uday",
+                null,
+                null,
+                null,
+                null,
+                null,
+                RunStore.RunLogin.CONTAINER,
+                null)
+            .toMap();
+    assertEquals("container", container.get("login"));
+    assertFalse(container.containsKey("login_kind"));
+    assertFalse(container.containsKey("dispatched_by"));
 
     var summary = RunSummary.from(row).toMap();
     assertEquals("s1", summary.get("id"));
@@ -2795,6 +2852,8 @@ class ApiRouterTest {
                   null,
                   "running",
                   "t0",
+                  null,
+                  null,
                   null,
                   null,
                   null,

@@ -136,6 +136,38 @@ public final class WorkBranch {
   }
 
   /**
+   * Whether {@link #checkout} would create {@code branch}: a target repo in the container is a work
+   * tree that does not have it yet. Read only, on the shell's observer, so a dry run can say it.
+   */
+  public boolean wouldCreate(
+      String project, List<ProjectDefinition.Repo> targetRepos, String branch) {
+    if (Strings.isBlank(branch)) {
+      return false;
+    }
+    var reads = new WorkBranch(shell.observer(), listener);
+    for (var repo : targetRepos) {
+      var repoDir = "/home/" + ProjectDefinition.USER + "/workspace/" + repo.path();
+      if (reads.insideWorkTree(project, repoDir)
+          && !reads
+              .exec(
+                  ContainerExec.asDevUser(
+                      project,
+                      List.of(
+                          "git",
+                          "-C",
+                          repoDir,
+                          "rev-parse",
+                          "--verify",
+                          "--quiet",
+                          "refs/heads/" + branch)))
+              .ok()) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /**
    * Puts every target repo that exists in the container back on {@code branch}, which a build
    * already made, as a build that goes on after its question needs. A repo still on the branch is
    * left as that build left it, uncommitted work and all. A repo another run moved is checked out

@@ -46,6 +46,7 @@ import ai.singlr.sail.store.MessageStore;
 import ai.singlr.sail.store.ProjectStore;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SpecStore;
+import ai.singlr.sail.store.TestLogins;
 import ai.singlr.sail.store.TokenStore;
 import ai.singlr.sail.sync.SyncBox;
 import ai.singlr.sail.sync.SyncRpcServer;
@@ -319,6 +320,7 @@ class EventPublishersTest {
   private void serve(SyncConfig config, String role) throws IOException {
     box = new SyncBox(tempDir, "box");
     new FdeStore(box.db).add(config.handle(), null, null, role);
+    TestLogins.store(box.db, config.handle());
     var token = new TokenStore(box.db).create(HostToken.NAME, "admin").token();
     Acting.system(() -> new ProjectStore(box.db).upsert(TestDefinitions.yaml(YAML)));
     bus = new EventBus();

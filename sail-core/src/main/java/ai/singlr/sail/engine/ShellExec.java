@@ -68,4 +68,12 @@ public interface ShellExec {
 
   /** Returns true if this executor is in dry-run mode (prints commands instead of executing). */
   boolean isDryRun();
+
+  /**
+   * The shell a read-only probe runs on, so a dry run reads what is really there and changes
+   * nothing: this shell, unless it is a dry run that executes nothing.
+   */
+  default ShellExec observer() {
+    return this;
+  }
 }

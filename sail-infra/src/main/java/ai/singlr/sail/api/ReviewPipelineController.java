@@ -47,7 +47,9 @@ public final class ReviewPipelineController implements EventSubscriber {
       Set.of(
           Event.WellKnownTypes.AGENT_SESSION_STOPPED,
           Event.WellKnownTypes.AGENT_CANCELLED,
-          Event.WellKnownTypes.SPEC_MESSAGE_POSTED);
+          Event.WellKnownTypes.SPEC_MESSAGE_POSTED,
+          LoginOperations.STORED,
+          LoginOperations.DEFAULT);
 
   /** How many steps one event may take: the longest chain the loop's table allows is shorter. */
   static final int MAX_STEPS = 8;
@@ -142,6 +144,11 @@ public final class ReviewPipelineController implements EventSubscriber {
       answered(event);
       return;
     }
+    if (LoginOperations.STORED.equals(event.type())
+        || LoginOperations.DEFAULT.equals(event.type())) {
+      loginStored();
+      return;
+    }
     if (!isAuthoritative(event)) {
       return;
     }
@@ -151,6 +158,22 @@ public final class ReviewPipelineController implements EventSubscriber {
     } finally {
       resumeWaiting(event.project(), read);
     }
+  }
+
+  /**
+   * A login stored, or made the default, is what a launch refused for want of one waits for ({@link
+   * RunLogins#wantsALogin}): every spec the loop may be moving is told ({@link
+   * LoopTrigger.LoginStored}), and a loop this box drives that is owed a reviewer, a fix or a
+   * resume takes that step now.
+   */
+  private void loginStored() {
+    var read = reader.forOneEvent(pipelines);
+    Stream.of(SpecStatus.REVIEW, SpecStatus.IN_PROGRESS)
+        .map(status -> new SpecStore.SpecFilter(null, status.wire(), null, null, null))
+        .flatMap(filter -> specStore.list(filter).stream())
+        .forEach(
+            spec ->
+                freed(new Routed(spec.project(), spec.id(), new LoopTrigger.LoginStored()), read));
   }
 
   /**

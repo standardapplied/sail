@@ -1495,45 +1495,66 @@ applies_with_forge_token() {
   on "$1" "$2" "sudo sh -c 'GITHUB_TOKEN=\$(cat /root/.fleet/gh) sail project apply $3 --yes'"
 }
 
-container_ip() {
-  on "$1" "$2" "sudo sail project connect $3 2>/dev/null" | awk -v h="$3" '$1 == "Host" {in_host = ($2 == h)} in_host && $1 == "HostName" {print $2; exit}'
-}
-
-in_container_ssh() {
-  local run=$1 box=$2 project=$3 ip
-  shift 3
-  ip=$(container_ip "$run" "$box" "$project" < /dev/null)
-  [[ -n $ip ]] || { echo "no container address for $project"; return 1; }
-  on "$run" "$box" "ssh -i ~/.ssh/fleet_container -o BatchMode=yes -o StrictHostKeyChecking=accept-new dev@$ip '$*'"
+key_of() {
+  case $1 in
+    claude-code) echo fleet-anthropic-key ;;
+    codex) echo fleet-openai-key ;;
+    *) echo "no key for $1" >&2; return 1 ;;
+  esac
 }
 
 gives_agents_their_keys() {
-  local run=$1 box=$2 project=$3 login=''
-  [[ " $LOOP_AGENTS " == *" codex "* ]] && login='printf %s "$OPENAI_API_KEY" | codex login --with-api-key >/dev/null && '
-  {
-    printf 'export ANTHROPIC_API_KEY=%s\n' "$(secret fleet-anthropic-key)"
-    printf 'export OPENAI_API_KEY=%s\n' "$(secret fleet-openai-key)"
-  } | in_container_ssh "$run" "$box" "$project" \
-    'umask 077; cat > ~/.agent-keys; grep -q agent-keys ~/.profile || printf "\n[ -f ~/.agent-keys ] && . ~/.agent-keys\n" >> ~/.profile; test -s ~/.agent-keys || { echo no keys arrived; exit 1; }; . ~/.profile; '"$login"'echo keys placed'
-}
-
-agent_answers() {
-  local asks out
-  case $4 in
-    claude-code) asks='claude -p \"Reply with the single word ready\"' ;;
-    codex) asks='codex exec --skip-git-repo-check \"Reply with the single word ready\"' ;;
-    *) echo "no way to ask $4"; return 1 ;;
-  esac
-  out=$(in_container_ssh "$1" "$2" "$3" "bash -lc \"$asks 2>&1 | tail -6\"" < /dev/null)
-  echo "$4: $out"
-  grep -qi '^ready' <<< "$out"
-}
-
-agents_answer() {
-  local agent
+  local run=$1 box=$2 agent name
   for agent in $LOOP_AGENTS; do
-    agent_answers "$1" "$2" "$3" "$agent" || return 1
+    name=$(key_of "$agent") || return 1
+    secret "$name" | on "$run" "$box" "sudo sail agent login $agent --kind api-key" || return 1
   done
+}
+
+each_agent_has_its_login() {
+  local listed
+  listed=$(on "$1" "$2" "sudo sail agent login list --json") || return 1
+  python3 -I -c '
+import json, sys
+logins = json.loads(sys.argv[1])["logins"]
+shown = sorted((l["harness"], l["name"], l["kind"], l["default"]) for l in logins)
+print("logins: %s" % shown)
+wanted = sorted((a, "default", "api-key", True) for a in sys.argv[2].split())
+sys.exit(0 if shown == wanted and all(len(l["fingerprint"]) == 8 and "value" not in l for l in logins) else 1)
+' "$listed" "$LOOP_AGENTS"
+}
+
+no_key_in_any_command_line() {
+  local run=$1 box=$2 agent name found=0 i
+  for i in $(seq 1 20); do
+    for agent in $LOOP_AGENTS; do
+      name=$(key_of "$agent") || return 1
+      if secret "$name" | on "$run" "$box" "sudo sh -c 'grep -laF -f - /proc/[0-9]*/cmdline 2>/dev/null | head -1'" | grep -q .; then
+        echo "$name is in a command line"
+        found=1
+      fi
+    done
+    if printf 'sailrun_\nsailbox_\n' | on "$run" "$box" "sudo sh -c 'grep -laF -f - /proc/[0-9]*/cmdline 2>/dev/null | head -1'" | grep -q .; then
+      echo "a run or box credential is in a command line"
+      found=1
+    fi
+    sleep 15
+  done
+  [[ $found == 0 ]] && echo "no key and no Sail credential in any command line, sampled 20 times"
+  [[ $found == 0 ]]
+}
+
+the_build_ran_on_the_stored_login() {
+  local runs
+  runs=$(on "$1" "$2" "sudo sail agent sessions acme --json") || return 1
+  python3 -I -c '
+import json, sys
+spec = sys.argv[1]
+builds = [r for r in json.loads(sys.argv[2]).get("runs", []) if r.get("spec_id") == spec and r.get("role") == "build"]
+seen = [(r.get("login"), r.get("login_kind")) for r in builds]
+print("build runs: %s" % seen)
+sys.exit(0 if builds and all(s == ("default", "api-key") for s in seen) else 1)
+' "$3" "$runs"
 }
 
 install_list() {
@@ -1666,17 +1687,19 @@ loop() {
   check "$run" "eng holds the forge token where only root reads it" place_secret "$run" eng fleet-github-token gh
   check "$run" "eng registers its workstation key" registers_container_key "$run" eng
   check "$run" "eng applies acme with the forge token" applies_with_forge_token "$run" eng acme
-  check "$run" "acme's agents get their keys through their own login" gives_agents_their_keys "$run" eng acme
-  check "$run" "each installed agent answers" agents_answer "$run" eng acme
+  check "$run" "eng stores each agent's key as its harness login, nothing in the container" gives_agents_their_keys "$run" eng
+  check "$run" "eng's logins list each agent's default by fingerprint, no value" each_agent_has_its_login "$run" eng
   check "$run" "no secret appears in the run's logs" no_secret_in_logs "$run"
   check "$run" "eng writes a spec for the loop" \
     on "$run" eng "cat > /tmp/loop.md && sudo sail spec create -p acme --id $spec --title 'The build passes on JDK 21 and the README says how to run it' --body-file /tmp/loop.md --assignee eng" <<< "$LOOP_BODY"
   check "$run" "eng makes it ready" on "$run" eng "sudo sail spec update $spec --status pending"
   check "$run" "eng dispatches it in the background" on "$run" eng "sudo sail spec dispatch -p acme --spec $spec --background"
+  check "$run" "no agent key and no Sail credential is in any process's command line on eng while it builds and its hooks fire" no_key_in_any_command_line "$run" eng
   check "$run" "the build asks its question and waits, unreviewed" waits_on_its_question "$run" eng "$spec" 20
   check "$run" "eng answers in the room" on "$run" eng "sudo sail spec comment $spec --body 'Call it Building.'"
   check "$run" "the answer resumes the build, and the review takes it to awaiting_merge" reaches_status "$run" eng "$spec" awaiting_merge 45
   check "$run" "the agent opened a pull request on $LOOP_REPO" opened_a_pull_request "$spec"
+  check "$run" "the build ran on eng's stored login, by name and kind" the_build_ran_on_the_stored_login "$run" eng "$spec"
   check "$run" "the room shows the review" the_room_shows_the_review "$run" eng "$spec"
   check "$run" "every node syncs twice" sync_all "$run"
   check "$run" "every box sees it awaiting merge" everywhere "$run" "$spec" status awaiting_merge

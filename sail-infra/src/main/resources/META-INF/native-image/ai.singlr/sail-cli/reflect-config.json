@@ -20,6 +20,11 @@
     "allRecordComponents": true
   },
   {
+    "name": "ai.singlr.sail.commands.DispatchCommand$DryDispatch",
+    "allDeclaredMethods": true,
+    "allRecordComponents": true
+  },
+  {
     "name": "ai.singlr.sail.commands.DispatchCommand$NoDispatch",
     "allDeclaredMethods": true,
     "allRecordComponents": true

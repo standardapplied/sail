@@ -25,6 +25,7 @@ import ai.singlr.sail.api.SyncScheduler;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.config.TestDefinitions;
+import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.ContainerSailSetup;
 import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.ProjectSkillInstaller;
@@ -45,6 +46,7 @@ import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
+import ai.singlr.sail.store.TestLogins;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.nio.file.Path;
@@ -158,7 +160,10 @@ class DispatchCommandWiringTest {
     if (db == null) {
       seed();
     }
-    new FdeStore(db).add(HANDLE, null, null, "admin");
+    if (new FdeStore(db).byHandle(HANDLE).isEmpty()) {
+      new FdeStore(db).add(HANDLE, null, null, "admin");
+    }
+    TestLogins.store(db, HANDLE);
     var command =
         new DispatchCommand(
             dryRun -> shell,
@@ -252,11 +257,76 @@ class DispatchCommandWiringTest {
     return new DispatchOperations.Request("auth", "background", false, null, false);
   }
 
+  /**
+   * A dry run says what a real dispatch would do, in the conditional, and that nothing was changed:
+   * no launch banner and no command for a run that does not exist; with {@code --restart} it says
+   * the restart and that the branch it would land on exists. Its JSON says {@code dry_run}.
+   */
+  @Test
+  void aDryRunSaysWhatADispatchWouldDoAndThatNothingWasChanged() throws Exception {
+    var plain = dispatch(shell(), 0, "--background", "--dry-run");
+
+    assertEquals(0, plain.exit(), plain.err());
+    assertEquals(
+        "  Dry run: nothing was changed.\n"
+            + "  Would dispatch spec auth (Add auth) to claude-code in the background, on branch"
+            + " sail/auth, which it would create.\n",
+        afterBranding(plain.out()));
+    assertEquals(SpecStatus.PENDING, new SpecStore(db).findById("auth").orElseThrow().status());
+
+    Acting.system(
+        () ->
+            new SpecStore(db)
+                .updateReposAndStatus("auth", List.of("app"), SpecStatus.REVIEW, "sail/auth"));
+    var restart =
+        dispatch(
+            shell().on("rev-parse --verify --quiet refs/heads/sail/auth", ""),
+            0,
+            "--background",
+            "--restart",
+            "--dry-run");
+
+    assertEquals(0, restart.exit(), restart.err());
+    assertEquals(
+        "  Dry run: nothing was changed.\n"
+            + "  Would dispatch spec auth (Add auth) to claude-code in the background, on branch"
+            + " sail/auth, which it would check out.\n"
+            + "  Would restart the spec first: its status would go back to pending.\n",
+        afterBranding(restart.out()));
+    assertEquals(SpecStatus.REVIEW, new SpecStore(db).findById("auth").orElseThrow().status());
+
+    var json =
+        dispatch(
+            shell().on("rev-parse --verify --quiet refs/heads/sail/auth", ""),
+            0,
+            "--background",
+            "--restart",
+            "--dry-run",
+            "--json");
+    assertEquals(0, json.exit(), json.err());
+    var said = YamlUtil.parseMap(json.out());
+    assertEquals(true, said.get("dry_run"), json.out());
+    assertEquals("auth", said.get("spec_id"));
+    assertEquals("claude-code", said.get("agent"));
+    assertEquals("sail/auth", said.get("branch"));
+    assertEquals(false, said.get("would_create_branch"), "the branch exists");
+    assertEquals(true, said.get("would_restart"));
+  }
+
+  /** {@code out} past the CLI's branding, which every non-JSON run prints first. */
+  private static String afterBranding(String out) {
+    var at = out.indexOf("  Dry run:");
+    assertTrue(at >= 0, out);
+    assertFalse(out.contains("Launching agent") || out.contains("sail agent"), out);
+    return out.substring(at);
+  }
+
   @Test
   void aViewerNodesCliDispatchAndStopAreRefusedWithTheSyncedRole() throws Exception {
     var operations = cliOperations(shell(), new ArrayList<>());
     var fdes = new FdeStore(db);
     fdes.add(HANDLE, null, null, "member");
+    TestLogins.store(db, HANDLE);
     operations.useControlPlane(
         db,
         tempDir,
@@ -302,6 +372,7 @@ class DispatchCommandWiringTest {
             .on("flock /home/dev/.claude/skills", "");
     var operations = cliOperations(shell, new ArrayList<>());
     new FdeStore(db).add(HANDLE, null, null, "admin");
+    TestLogins.store(db, HANDLE);
     Acting.system(
         () -> {
           new ProjectStore(db).upsert(TestDefinitions.yaml(YAML));
@@ -352,6 +423,7 @@ class DispatchCommandWiringTest {
     var events = new ArrayList<Event>();
     var operations = cliOperations(shell(), events);
     new FdeStore(db).add(HANDLE, null, null, "admin");
+    TestLogins.store(db, HANDLE);
 
     var outcome = DispatchCommand.dispatchAsOperator(operations, "acme", request(), HANDLE);
 
@@ -442,6 +514,7 @@ class DispatchCommandWiringTest {
   void cliRestartWithoutASpecIsRefusedByTheSharedExecutor() throws Exception {
     var operations = cliOperations(shell(), new ArrayList<>());
     new FdeStore(db).add(HANDLE, null, null, "admin");
+    TestLogins.store(db, HANDLE);
     var request = new DispatchOperations.Request(null, "background", false, null, true);
 
     var ex =
@@ -466,6 +539,7 @@ class DispatchCommandWiringTest {
                 .on("git -C /home/dev/workspace/app checkout -f x", ""),
             events);
     new FdeStore(db).add(HANDLE, null, null, "admin");
+    TestLogins.store(db, HANDLE);
     var specStore = new SpecStore(db);
     Acting.system(
         () -> specStore.updateReposAndStatus("auth", List.of("app"), SpecStatus.REVIEW, "x"));
@@ -511,6 +585,7 @@ class DispatchCommandWiringTest {
      */
     StubShell() {
       on("incus config device add", "");
+      on("incus file push", "");
       on("cat " + ContainerSailSetup.STAMP_PATH, ContainerSailSetup.fingerprint());
       for (var skill : SailSkills.all()) {
         on("/" + skill.name() + "/" + StageSkill.STAMP, ProjectSkillInstaller.fingerprint(skill));

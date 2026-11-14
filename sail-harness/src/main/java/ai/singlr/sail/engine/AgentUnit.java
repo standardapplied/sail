@@ -106,6 +106,14 @@ public record AgentUnit(
     return RUNS_DIR + "/" + runId;
   }
 
+  /**
+   * The run's {@code launch.env}: its secrets, which its wrapper reads and removes before its
+   * harness starts ({@link LaunchEnv}).
+   */
+  public String launchEnvPath() {
+    return logPath.substring(0, logPath.lastIndexOf('/')) + "/launch.env";
+  }
+
   /** Where the watcher records the guardrail that ended this run, beside the run's own files. */
   public String guardrailTriggerPath() {
     return logPath.substring(0, logPath.lastIndexOf('/')) + "/guardrail-triggered.yaml";

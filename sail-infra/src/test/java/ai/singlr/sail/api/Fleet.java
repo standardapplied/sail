@@ -40,6 +40,7 @@ import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.SlackThreadStore;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
+import ai.singlr.sail.store.TestLogins;
 import ai.singlr.sail.store.TestRuns;
 import ai.singlr.sail.store.TokenStore;
 import java.net.ServerSocket;
@@ -279,6 +280,7 @@ public final class Fleet implements AutoCloseable {
       fdes = new FdeStore(db);
       messages = new MessageStore(db);
       fdes.add(handle, handle, handle + "@example.dev", "admin");
+      TestLogins.store(db, handle);
       bus = new EventBus();
       var shell = new FleetShell();
       dispatcher =
@@ -432,7 +434,8 @@ public final class Fleet implements AutoCloseable {
               (project, runId, unit) -> false,
               new WatcherCoverage(runId -> false, pid -> false),
               () -> handle,
-              () -> Instant.now().plus(Duration.ofHours(1)));
+              () -> Instant.now().plus(Duration.ofHours(1)),
+              fdes);
       return reconciler.sweep();
     }
 

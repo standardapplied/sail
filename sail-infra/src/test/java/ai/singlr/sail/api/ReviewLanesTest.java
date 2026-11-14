@@ -18,11 +18,15 @@ import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.AgentUnit;
+import ai.singlr.sail.harness.Harnesses;
 import ai.singlr.sail.harness.RunUsage;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.store.EventStore;
+import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.Finding;
+import ai.singlr.sail.store.MessageStore;
 import ai.singlr.sail.store.RunStore;
+import ai.singlr.sail.store.TestLogins;
 import ai.singlr.sail.store.TestRuns;
 import java.io.IOException;
 import java.io.UncheckedIOException;
@@ -57,6 +61,102 @@ class ReviewLanesTest {
     loop.close();
   }
 
+  /**
+   * A reviewer the loop launches for a person who stored no login is refused before it reserves,
+   * and the spec's room says why and the command that fixes it, once, however often the loop
+   * retries.
+   */
+  @Test
+  void aReviewerRefusedForWantOfALoginSaysSoInTheRoomOnce() {
+    loop = ReviewLoop.staged(tempDir, "codex", "claude-code");
+    var fdes = new FdeStore(loop.db);
+    fdes.logins().forget(fdes.byHandle(ReviewLoop.HANDLE).orElseThrow().id());
+
+    loop.built("auth");
+
+    assertEquals(
+        List.of(
+            "No Codex CLI login stored for node-a, so a run of a spec cannot start: a login made"
+                + " by hand in the project's container is not used by runs. Create an API key at"
+                + " platform.openai.com/api-keys, then sail agent login codex. Or: Create a Codex"
+                + " access token at chatgpt.com/admin/access-tokens (ChatGPT Business and"
+                + " Enterprise), then sail agent login codex --kind token."),
+        loop.roomLines("auth", "No Codex CLI login"));
+    assertEquals(
+        List.of(),
+        loop.messages.list("auth", null, 100).stream()
+            .filter(row -> MessageStore.SAIL_AUTHOR.equals(row.author()))
+            .map(MessageStore.MessageRow::body)
+            .filter(body -> body.contains("No Codex CLI login") && !body.startsWith("No Codex"))
+            .toList(),
+        "no other narration quotes the refusal");
+    assertTrue(loop.container.live().isEmpty(), "no reviewer started");
+    var review = loop.reviewOf("auth");
+    assertEquals("running", loop.statusOf(review), "a review owed its reviewer, not errored");
+
+    var said = sailLines("auth").size();
+    var reconciler = loop.reconciler(() -> Instant.now().plus(Duration.ofMinutes(5)));
+    for (var pass = 0; pass <= LoopDecision.MAX_ERRORED_RETRIES; pass++) {
+      reconciler.sweep();
+    }
+    assertEquals(said, sailLines("auth").size(), "each pass's refusal says nothing more");
+    assertEquals("running", loop.statusOf(review), "and never escalates");
+
+    TestLogins.store(loop.db, ReviewLoop.HANDLE);
+    loop.onEvent(loginStored());
+
+    assertEquals("review", loop.onlyLive().role(), "storing the login launches it");
+  }
+
+  @Test
+  void aFixRefusedForWantOfALoginSaysOnlyThatAndIsLaunchedOnceTheLoginIsStored() {
+    loop = ReviewLoop.staged(tempDir, "codex", "claude-code");
+    loop.built("auth");
+    var reviewer = loop.onlyLive();
+    var fdes = new FdeStore(loop.db);
+    var person = fdes.byHandle(ReviewLoop.HANDLE).orElseThrow().id();
+    fdes.logins().remove(person, Harnesses.of("claude-code"), "default");
+    var before = sailLines("auth").size();
+
+    loop.finish(reviewer.id(), CRITICAL_FINDING);
+    var reconciler = loop.reconciler(() -> Instant.now().plus(Duration.ofMinutes(5)));
+    for (var pass = 0; pass <= LoopDecision.MAX_ERRORED_RETRIES; pass++) {
+      reconciler.sweep();
+    }
+
+    var said = sailLines("auth").subList(before, sailLines("auth").size());
+    assertEquals(
+        1,
+        said.stream().filter(line -> line.contains("No Claude Code login")).count(),
+        "the refusal is said once and quoted by nothing else: " + said);
+    assertTrue(
+        said.stream().noneMatch(line -> line.contains("fix iteration failed")), said.toString());
+    assertTrue(loop.container.live().isEmpty(), "no fix started");
+    assertEquals(SpecStatus.REVIEW, loop.specStatus("auth"), "not handed to a person");
+
+    TestLogins.store(loop.db, ReviewLoop.HANDLE);
+    loop.onEvent(loginStored());
+
+    assertEquals("fix", loop.onlyLive().role(), "storing the login launches the fix");
+  }
+
+  private static Event loginStored() {
+    return Event.of(
+        Event.SAIL_AGENT,
+        null,
+        LoginOperations.STORED,
+        ReviewLoop.HANDLE,
+        "host",
+        Map.of("person", ReviewLoop.HANDLE, "harness", "claude-code"));
+  }
+
+  private List<String> sailLines(String specId) {
+    return loop.messages.list(specId, null, 100).stream()
+        .filter(row -> MessageStore.SAIL_AUTHOR.equals(row.author()))
+        .map(MessageStore.MessageRow::body)
+        .toList();
+  }
+
   @Test
   void aReviewerThatCompletesHasItsStopRoutedByLaneAndItsStageResolvedFromItsOwnLog() {
     loop = ReviewLoop.staged(tempDir, "codex", "claude-code");
@@ -71,12 +171,16 @@ class ReviewLanesTest {
     assertEquals(
         List.of("auth", "codex", first.id(), "review"),
         List.of(
-            launch.get(launch.size() - 5),
             launch.get(launch.size() - 4),
             launch.get(launch.size() - 3),
+            launch.get(launch.size() - 2),
             launch.getLast()),
         "a reviewer runs with the spec, agent, run id and lane every lane's hooks read");
-    assertTrue(launch.get(launch.size() - 2).startsWith("sailrun"), "and its own run credential");
+    var secrets = loop.container.environmentOf(first.id());
+    assertTrue(secrets.get("SAIL_RUN_CREDENTIAL").startsWith("sailrun"), "its own run credential");
+    assertEquals(TestLogins.VALUE, secrets.get("CODEX_API_KEY"), "and the login its person stored");
+    assertFalse(String.join(" ", launch).contains(secrets.get("SAIL_RUN_CREDENTIAL")));
+    assertFalse(String.join(" ", launch).contains(TestLogins.VALUE));
     assertTrue(
         String.join(" ", launch).contains("systemd-run --user"),
         "launched as its run's systemd unit, never a foreground exec the host waits on");

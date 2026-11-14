@@ -61,6 +61,15 @@ public final class SailPaths {
         System.getenv("SAIL_DATA_DIR"), Files.isReadable(SYSTEM_DATA_DIR.resolve("sail.db")));
   }
 
+  /**
+   * Where content waits on its way into a container ({@code ContainerFilePush}), beside the
+   * database: under a directory only the server's account may write, so no other account can make
+   * it first.
+   */
+  public static Path stagingDir() {
+    return dataDir().resolve("staging");
+  }
+
   /** The box's lock files, beside its database, where the API server and a root CLI meet. */
   public static Path locksDir() {
     return dataDir().resolve("locks");

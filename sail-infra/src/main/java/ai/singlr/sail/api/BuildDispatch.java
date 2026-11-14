@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.api;
 
+import ai.singlr.sail.access.Access;
 import ai.singlr.sail.access.ReadFilter;
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.common.Strings;
@@ -17,6 +18,7 @@ import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.engine.AgentUnit;
 import ai.singlr.sail.engine.DispatchRepos;
 import ai.singlr.sail.engine.HostInfo;
+import ai.singlr.sail.engine.LaunchEnv;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.WorkPrompt;
 import ai.singlr.sail.identity.Actor;
@@ -173,25 +175,17 @@ public final class BuildDispatch {
     Runnable claim = () -> claim(resolution, taskSpec, branch);
     if (request.dryRun()) {
       requireNoRepoOverlap(project, localHandle, taskSpec.id(), taskSpec.repos());
-      commit(claim);
-      var prepared =
-          prepare(
-              project,
-              loaded.config(),
-              targetRepos,
-              resolution,
-              taskSpec,
-              branch,
-              task,
-              request.mode());
+      runReservation.unreserved(taskSpec.id(), localHandle, agentType);
+      specStore.rehearse(claim);
+      listener.claimed(taskSpec, task);
       return new DispatchOperations.Dispatched(
           taskSpec,
           branch,
           agentType,
           task,
           null,
-          prepared.snapshot(),
-          prepared.branchCreated(),
+          "",
+          workBranch.wouldCreate(project, targetRepos, branch),
           resolution.restarted(),
           null,
           null,
@@ -201,7 +195,7 @@ public final class BuildDispatch {
     var background = request.mode().equals("background");
     var runId = DateTimeUtils.newId().toString();
     var unit = AgentUnit.forRun(runId);
-    var credential =
+    var env =
         reserveRun(
             runId,
             project,
@@ -237,7 +231,8 @@ public final class BuildDispatch {
               taskSpec,
               agentType,
               runId,
-              credential);
+              env,
+              Access.attendee(Actor.reader()).orElse(null));
       var status =
           runLauncher.finishLaunch(
               new RunLauncher.RunContext(
@@ -315,7 +310,7 @@ public final class BuildDispatch {
     if (claim instanceof RunReservation.Claim.Held held) {
       return new ReviewLanes.Launch.Deferred(held.conflict().run());
     }
-    var credential = ((RunReservation.Claim.Claimed) claim).credential();
+    var env = ((RunReservation.Claim.Claimed) claim).env();
     try {
       seedRoomDelivery(runId, built.renderedMessages());
       workBranch.resume(project, targetRepos, row.branch());
@@ -330,7 +325,8 @@ public final class BuildDispatch {
               spec,
               agentType,
               runId,
-              credential);
+              env,
+              null);
       runLauncher.finishLaunch(
           new RunLauncher.RunContext(
               project, unit, runId, specId, agentType, Lane.BUILD.wire(), true),
@@ -425,6 +421,8 @@ public final class BuildDispatch {
    * in_progress} with its resolved repos and branch, and supersede stale reviews. On the live lane
    * it commits in the transaction that reserves the run ({@link #reserveRun}), so a claim the
    * journal refuses leaves no run, and two concurrent dispatches can never both mutate spec state.
+   * On the dry lane it is rehearsed and rolled back ({@link SpecStore#rehearse}): a dry run meets
+   * the refusals the claim would and writes nothing.
    */
   private void claim(SpecResolution resolution, Spec taskSpec, String branch) {
     if (resolution.restarted()) {
@@ -446,9 +444,10 @@ public final class BuildDispatch {
   }
 
   /**
-   * What follows a claim that landed, identical on the dry and live lanes: publish the lifecycle
-   * events, snapshot as configured, and check out the work branch, racing no other dispatch's
-   * checkouts in a shared repo.
+   * What follows a claim that landed, on the live lane only (a dry run stops at its rehearsed claim
+   * and changes nothing in the database, the container or a room): publish the lifecycle events,
+   * snapshot as configured, and check out the work branch, racing no other dispatch's checkouts in
+   * a shared repo.
    */
   private PreparedClaim prepare(
       String project,
@@ -522,11 +521,11 @@ public final class BuildDispatch {
 
   /**
    * Atomically reserves the dispatch as a {@code running} run stamped with this box's handle and
-   * the target repo set, and commits {@code claim} with it, returning the run's bearer credential.
-   * A run store is absent only on boxes that keep no run aggregate, which have nothing to reserve
-   * against and claim on their own.
+   * the target repo set, and commits {@code claim} with it, returning what the run's process starts
+   * with. A run store is absent only on boxes that keep no run aggregate, which have nothing to
+   * reserve against and claim on their own, and start the run with its person's login alone.
    */
-  private String reserveRun(
+  private LaunchEnv reserveRun(
       String runId,
       String project,
       String specId,
@@ -539,8 +538,9 @@ public final class BuildDispatch {
       ProjectDefinition config,
       Runnable claim) {
     if (runStore == null) {
+      var env = runReservation.unreserved(specId, boxHandle, agentType);
       commit(claim);
-      return null;
+      return env;
     }
     return runReservation.reserve(
         runId,

@@ -116,6 +116,13 @@ class RunStoreTest {
   }
 
   @Test
+  void aReservationPrintedNamesNoCredential() {
+    var printed = new RunStore.Reservation.Reserved("cred-secret-1").toString();
+
+    assertFalse(printed.contains("cred-secret-1"), printed);
+  }
+
+  @Test
   void aReservationStampsTheRunWithTheBoxsHandleAsItsNodeAndOwner() {
     var id = DateTimeUtils.newId().toString();
 

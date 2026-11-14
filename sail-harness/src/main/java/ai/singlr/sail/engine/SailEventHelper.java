@@ -87,6 +87,7 @@ public final class SailEventHelper {
       if [ ! -S "$SOCKET" ]; then
         exit 0
       fi
+      __SAIL_CURL__
 
       FIELDS=""
       if [ -n "$RUN_ID" ]; then
@@ -104,10 +105,9 @@ public final class SailEventHelper {
       DATA="{$FIELDS}"
       BODY="{\\"v\\":1,\\"ts\\":\\"$TS\\",\\"project\\":\\"$PROJECT\\",\\"spec\\":\\"$SPEC_ID\\",\\"type\\":\\"$EVENT_TYPE\\",\\"agent\\":\\"$AGENT\\",\\"host\\":\\"$HOST\\",\\"data\\":$DATA}"
 
-      curl --silent --max-time 5 \\
+      sail_curl --silent --max-time 5 \\
         --unix-socket "$SOCKET" \\
         -H 'Content-Type: application/json' \\
-        -H "Authorization: Bearer $CREDENTIAL" \\
         -X POST -d "$BODY" \\
         http://sail/v1/events >/dev/null 2>&1 || true
       """;
@@ -123,7 +123,8 @@ public final class SailEventHelper {
     return SCRIPT
         .replace("__SAIL_API_SOCKET__", SailPaths.apiSocketContainerPath().toString())
         .replace("__BATCH_RESOLVED__", BATCH_RESOLVED)
-        .replace("__DEFAULT_AGENT__", Harnesses.DEFAULT.yamlName());
+        .replace("__DEFAULT_AGENT__", Harnesses.DEFAULT.yamlName())
+        .replace("__SAIL_CURL__\n", SocketPreamble.credentialCurl());
   }
 
   /**

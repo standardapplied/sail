@@ -16,6 +16,7 @@ import ai.singlr.sail.engine.AgentSession;
 import ai.singlr.sail.engine.ConnectEnvironment;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.WatcherSpawner;
+import ai.singlr.sail.harness.Harnesses;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.Role;
@@ -26,11 +27,14 @@ import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
+import ai.singlr.sail.store.TestLogins;
+import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -42,7 +46,7 @@ import org.junit.jupiter.api.io.TempDir;
 
 /**
  * The agent-principal lifecycle end to end: a real dispatch reserves the run and mints its
- * principal, the launch command carries the credential into the container environment, the local
+ * principal, the run's launch.env carries the credential into the container environment, the local
  * API lane resolves that credential so the agent's spec update and emitted events are attributed to
  * the minted handle — and once the run is stopped, the same credential is refused with 401.
  */
@@ -88,6 +92,7 @@ class AgentPrincipalLifecycleTest {
     var specStore = new SpecStore(db);
     var runStore = new RunStore(db);
     new FdeStore(db).add(HANDLE, null, null, "admin");
+    TestLogins.store(db, HANDLE);
     Acting.as(
         HANDLE,
         () ->
@@ -113,7 +118,7 @@ class AgentPrincipalLifecycleTest {
 
     var agentAlive = new AtomicBoolean(true);
     var shell = new AgentShell(agentAlive);
-    var credential = new AtomicReference<String>();
+    var onArgv = new AtomicReference<String>();
     var events = new CopyOnWriteArrayList<Event>();
     var dispatchOps =
         new DispatchOperations(
@@ -127,11 +132,7 @@ class AgentPrincipalLifecycleTest {
             new WatcherSpawner(shell, (command, logPath) -> 4242L),
             (project, config) -> "",
             command -> {
-              credential.set(
-                  command.stream()
-                      .filter(arg -> arg.startsWith("sailrun_"))
-                      .findFirst()
-                      .orElse(""));
+              onArgv.set(String.join(" ", command));
               return 0;
             },
             DispatchOperations.Listener.NONE,
@@ -147,7 +148,9 @@ class AgentPrincipalLifecycleTest {
                     HANDLE));
     var dispatched = assertInstanceOf(DispatchOperations.Dispatched.class, outcome);
     var runId = dispatched.runId();
-    assertTrue(credential.get().startsWith("sailrun_"), "the launch env carries the credential");
+    var credential = shell.pushed("SAIL_RUN_CREDENTIAL");
+    assertTrue(credential.startsWith("sailrun_"), "the launch env carries the credential");
+    assertFalse(onArgv.get().contains(credential), "and no command line does");
 
     var run = runStore.findById(runId).orElseThrow();
     var expectedHandle = "claude/" + runId;
@@ -192,12 +195,12 @@ class AgentPrincipalLifecycleTest {
                 },
                 delivered));
 
-    var whoami = router.ask("GET", "/v1/whoami", credential.get(), "");
+    var whoami = router.ask("GET", "/v1/whoami", credential, "");
     assertEquals(200, whoami.status());
     assertEquals(expectedHandle, whoami.body().get("handle"));
     assertEquals(HANDLE, whoami.body().get("owner"));
 
-    var updated = router.ask("PUT", "/v1/specs/auth", credential.get(), "priority=3");
+    var updated = router.ask("PUT", "/v1/specs/auth", credential, "priority=3");
     assertEquals(200, updated.status());
     assertEquals(
         expectedHandle,
@@ -212,7 +215,7 @@ class AgentPrincipalLifecycleTest {
             "claude-code",
             "acme",
             Map.of("run_id", "some-other-run", "source", "watcher"));
-    var published = router.ask("POST", "/v1/events", credential.get(), hookEvent.toJsonLine());
+    var published = router.ask("POST", "/v1/events", credential, hookEvent.toJsonLine());
     assertEquals(202, published.status());
     BusTesting.awaitDelivery(delivered);
     var stamped = events.getFirst();
@@ -240,7 +243,7 @@ class AgentPrincipalLifecycleTest {
         Acting.by(ADMIN, () -> stopOps.stop(new StopOperations.RunTarget(runId), HANDLE, false));
     assertInstanceOf(StopOperations.Stopped.class, stopped);
 
-    var refused = router.ask("GET", "/v1/whoami", credential.get(), "");
+    var refused = router.ask("GET", "/v1/whoami", credential, "");
     assertEquals(401, refused.status(), "a stopped run's credential is revoked");
     subscription.close();
   }
@@ -258,6 +261,10 @@ class AgentPrincipalLifecycleTest {
     var fdes = new FdeStore(db);
     fdes.add(HANDLE, null, null, "member");
     fdes.add("alice", null, null, "admin");
+    var claude = Harnesses.of("claude-code");
+    fdes.logins().store(fdes.byHandle(HANDLE).orElseThrow().id(), claude, null, null, "uday-token");
+    fdes.logins()
+        .store(fdes.byHandle("alice").orElseThrow().id(), claude, null, null, "alice-token");
     Acting.as(
         HANDLE,
         () ->
@@ -282,7 +289,7 @@ class AgentPrincipalLifecycleTest {
     Acting.system(() -> specStore.setContent("auth", "Do auth", ""));
 
     var shell = new AgentShell(new AtomicBoolean(true));
-    var credential = new AtomicReference<String>();
+    var onArgv = new AtomicReference<String>();
     var dispatchOps =
         new DispatchOperations(
             shell,
@@ -295,11 +302,7 @@ class AgentPrincipalLifecycleTest {
             new WatcherSpawner(shell, (command, logPath) -> 4242L),
             (project, config) -> "",
             command -> {
-              credential.set(
-                  command.stream()
-                      .filter(arg -> arg.startsWith("sailrun_"))
-                      .findFirst()
-                      .orElse(""));
+              onArgv.set(String.join(" ", command));
               return 0;
             },
             DispatchOperations.Listener.NONE,
@@ -320,6 +323,10 @@ class AgentPrincipalLifecycleTest {
         HANDLE,
         run.owner(),
         "the agent acts for the assignee whose spec it builds, never for the initiating admin");
+    assertEquals("uday-token", shell.pushed("CLAUDE_CODE_OAUTH_TOKEN"), "it spends uday's login");
+    assertEquals(new RunStore.RunLogin("default", "token"), run.login());
+    assertEquals("alice", run.dispatchedBy(), "and records who asked");
+    var credential = shell.pushed("SAIL_RUN_CREDENTIAL");
 
     var operations =
         new SailOperations(
@@ -336,7 +343,7 @@ class AgentPrincipalLifecycleTest {
             new FdeStore(db),
             SessionYield.NONE);
     var router = new SocketDoor(operations);
-    var updated = router.ask("PUT", "/v1/specs/auth", credential.get(), "priority=7");
+    var updated = router.ask("PUT", "/v1/specs/auth", credential, "priority=7");
     assertEquals(
         200,
         updated.status(),
@@ -349,14 +356,33 @@ class AgentPrincipalLifecycleTest {
    */
   private static final class AgentShell implements ShellExec {
     private final AtomicBoolean agentAlive;
+    private final Map<String, String> pushed = new ConcurrentHashMap<>();
 
     AgentShell(AtomicBoolean agentAlive) {
       this.agentAlive = agentAlive;
     }
 
+    /** The value a run's launch.env pushed into the container gave {@code name}. */
+    String pushed(String name) {
+      return pushed.getOrDefault(name, "");
+    }
+
     @Override
     public Result exec(List<String> command) {
       var joined = String.join(" ", command);
+      if (joined.startsWith("incus file push") && command.getLast().endsWith("/launch.env")) {
+        try {
+          Files.readAllLines(Path.of(command.get(command.size() - 2)))
+              .forEach(
+                  line ->
+                      pushed.put(
+                          line.substring(0, line.indexOf('=')),
+                          line.substring(line.indexOf('=') + 1)));
+        } catch (IOException e) {
+          return new Result(1, "", e.getMessage());
+        }
+        return new Result(0, "", "");
+      }
       if (joined.contains("incus list ^acme$")) {
         return new Result(0, RUNNING_JSON, "");
       }
