@@ -1368,19 +1368,18 @@ public final class RunStore implements ConflictResolver, SyncedStore {
   }
 
   /**
-   * How many spec workspaces this box's live runs are in: the distinct specs, of every project, of
-   * its {@code running} and {@code stopping} runs. What a box counts against its cap before it
-   * makes one more.
+   * The spec workspaces this box's live runs are in, each as {@code <project>/<spec>}: the distinct
+   * specs, of every project, of its {@code running} and {@code stopping} runs. What a box counts
+   * against its cap before it makes one more.
    */
-  public int liveSpecWorkspaces(String localHandle) {
-    return db.queryOne(
-            "SELECT COUNT(DISTINCT project || '/' || spec_id) FROM runs"
+  public Set<String> liveSpecs(String localHandle) {
+    return Set.copyOf(
+        db.query(
+            "SELECT DISTINCT project || '/' || spec_id FROM runs"
                 + " WHERE status IN ('running', 'stopping') AND IFNULL(spec_id, '') <> ''"
                 + " AND IFNULL(node, '') = ?",
-            row -> row.integer(0),
-            ownerKey(localHandle))
-        .orElse(0L)
-        .intValue();
+            row -> row.text(0),
+            ownerKey(localHandle)));
   }
 
   public List<RunRow> listForProject(String project) {

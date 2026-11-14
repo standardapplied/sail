@@ -20,11 +20,13 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.TimeoutException;
 import java.util.function.Consumer;
 import java.util.function.LongSupplier;
@@ -369,7 +371,8 @@ public final class Workspaces {
       var unfinished = requireUnclaimed(project, name, instance, source.held(), box.all());
       var built =
           new WorkspaceTemplate(observer, shell, locks).ensure(config, source, template, zfs);
-      return make(config, name, instance, built, List.of(), owner, name, unfinished, files);
+      return make(
+          config, name, instance, built, List.of(), owner, name, unfinished, files, () -> {});
     }
   }
 
@@ -403,12 +406,14 @@ public final class Workspaces {
    * is {@code owner}'s before anything of the run is staged (R12). A create that cannot have the
    * create lock within {@link #CREATE_WAIT} is {@link Busy}.
    */
-  public Entered enterSpec(SpecCheck check, ProjectDefinition config, String owner, Path files)
+  public Entered enterSpec(
+      SpecCheck check,
+      ProjectDefinition config,
+      String owner,
+      Path files,
+      Consumer<Set<String>> room)
       throws Exception {
     var place = check.place();
-    if (check.whole()) {
-      return reuse(check.found().get(), owner);
-    }
     try (var held = nameLock(place.instance())) {
       var found = requireTheSpecs(place, name -> false, box.all());
       if (found.map(i -> ((BoxInstances.Workspace) i.kind()).ready()).orElse(false)) {
@@ -424,8 +429,26 @@ public final class Workspaces {
               owner,
               "",
               found.isPresent(),
-              files));
+              files,
+              () -> room.accept(wholeSpecs())));
     }
+  }
+
+  /**
+   * The spec workspaces this box holds whole, each as {@code <project>/<spec>}: what a create made
+   * under the create lock counts its room against, so two that each found room before their runs
+   * were reserved never both make one past the cap.
+   */
+  private Set<String> wholeSpecs() throws IOException, InterruptedException, TimeoutException {
+    var specs = new HashSet<String>();
+    for (var instance : box.all()) {
+      if (instance.kind() instanceof BoxInstances.Workspace workspace && workspace.ready()) {
+        instance
+            .key(BoxInstances.SPEC_KEY)
+            .ifPresent(spec -> specs.add(workspace.project() + "/" + spec));
+      }
+    }
+    return specs;
   }
 
   private Reused reuse(BoxInstances.Instance found, String owner) throws Exception {
@@ -471,7 +494,8 @@ public final class Workspaces {
       String owner,
       String branch,
       boolean unfinished,
-      Path files)
+      Path files,
+      Room room)
       throws Exception {
     var project = config.name();
     if (unfinished) {
@@ -479,8 +503,15 @@ public final class Workspaces {
     }
     var started = nanos.getAsLong();
     try (var held = createLock(started)) {
+      room.require();
       return made(config, name, instance, built, keys, owner, branch, files, started);
     }
+  }
+
+  /** What a create checks under the create lock before it clones: room on the box for one more. */
+  @FunctionalInterface
+  private interface Room {
+    void require() throws Exception;
   }
 
   private FileMutex createLock(long started) throws IOException, InterruptedException {

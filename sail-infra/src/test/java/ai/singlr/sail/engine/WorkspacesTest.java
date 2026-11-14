@@ -1983,7 +1983,8 @@ class WorkspacesTest {
         stderrOf(
             () -> {
               checked.set(workspaces.checkSpec(FIX, INPUTS, name -> false));
-              workspaces.enterSpec(checked.get(), acme(), "uday", tempDir.resolve("no-files"));
+              workspaces.enterSpec(
+                  checked.get(), acme(), "uday", tempDir.resolve("no-files"), whole -> {});
             });
 
     assertTrue(
@@ -2071,6 +2072,32 @@ class WorkspacesTest {
     assertFalse(shell.invocations().stream().anyMatch(c -> c.startsWith("incus copy")));
   }
 
+  /**
+   * The workspace a check found whole is read again under its name lock: one deleted between the
+   * check and the entry is made again, never reused as a raw failure.
+   */
+  @Test
+  void aWorkspaceDeletedBetweenTheCheckAndTheEntryIsMadeAgain() throws Exception {
+    var deleted = new AtomicBoolean();
+    var before =
+        incus(
+            DIR_AND_ZFS,
+            list(template("v1", INPUTS), specWorkspace("Running", "fix-login", "uday")),
+            snapshots("v1"));
+    var after = incus(DIR_AND_ZFS, list(template("v1", INPUTS)), snapshots("v1"));
+    var workspaces = workspaces(switching(deleted, before, after), ticks(0, 1, 2, 3, 4, 5, 6, 7));
+    var check = workspaces.checkSpec(FIX, INPUTS, name -> false);
+    assertTrue(check.whole());
+    deleted.set(true);
+
+    var entered =
+        workspaces.enterSpec(check, acme(), "uday", tempDir.resolve("no-files"), whole -> {});
+
+    assertInstanceOf(Workspaces.Made.class, entered);
+    assertTrue(
+        after.invocations().stream().anyMatch(c -> c.startsWith("incus copy acme--tmpl/v1 ")));
+  }
+
   /** A shell that answers as {@code before} until {@code built} is set, then as {@code after}. */
   private static ShellExec switching(AtomicBoolean built, ShellExec before, ShellExec after) {
     return new ShellExec() {
@@ -2109,7 +2136,7 @@ class WorkspacesTest {
     var made =
         assertInstanceOf(
             Workspaces.Made.class,
-            workspaces.enterSpec(check, acme(), "uday", tempDir.resolve("no-files")));
+            workspaces.enterSpec(check, acme(), "uday", tempDir.resolve("no-files"), whole -> {}));
 
     assertFalse(check.whole());
     assertFalse(check.stale());
@@ -2263,7 +2290,8 @@ class WorkspacesTest {
     var check = workspaces.checkSpec(FIX, INPUTS, name -> false);
     var reused =
         assertInstanceOf(
-            Workspaces.Reused.class, workspaces.enterSpec(check, acme(), "uday", tempDir));
+            Workspaces.Reused.class,
+            workspaces.enterSpec(check, acme(), "uday", tempDir, whole -> {}));
 
     assertEquals(new Workspaces.Reused("acme-fix-login", true), reused);
     var start = indexOf(shell, List.of("incus", "start", "acme-fix-login"));
@@ -2287,7 +2315,7 @@ class WorkspacesTest {
     assertTrue(check.running());
     assertEquals(
         new Workspaces.Reused("acme-fix-login", false),
-        workspaces.enterSpec(check, acme(), "uday", tempDir));
+        workspaces.enterSpec(check, acme(), "uday", tempDir, whole -> {}));
     assertFalse(
         shell.invocations().stream()
             .anyMatch(
@@ -2322,7 +2350,7 @@ class WorkspacesTest {
       var check = spec.checkSpec(FIX, INPUTS, name -> false);
       assertThrows(
           Workspaces.Busy.class,
-          () -> spec.enterSpec(check, acme(), "uday", tempDir.resolve("no-files")));
+          () -> spec.enterSpec(check, acme(), "uday", tempDir.resolve("no-files"), whole -> {}));
       assertThrows(
           Workspaces.Busy.class,
           () ->

@@ -265,7 +265,8 @@ public final class DispatchOperations {
     this.runReservation =
         new RunReservation(
             runStore, shell, listener, sessionYield, this::endLiveHolder, fdeStore, this::tellRoom);
-    var places = new RunPlaces(projects, workspaces, runStore, shell, this::tellRoom);
+    var places =
+        new RunPlaces(projects, workspaces, runStore, shell, this::tellRoom, runReservation::prune);
     this.membership =
         new MembershipService(specStore, () -> roomStore, projects, admission, this.events, places);
     this.adhocRunner =

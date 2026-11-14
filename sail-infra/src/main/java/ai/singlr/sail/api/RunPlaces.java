@@ -20,11 +20,14 @@ import ai.singlr.sail.engine.Workspaces;
 import ai.singlr.sail.engine.WorkstationIdentity;
 import ai.singlr.sail.store.RunStore;
 import java.io.IOException;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.TimeoutException;
+import java.util.function.Consumer;
 
 /**
  * Where a run goes, made ready around its reservation: every lane asks {@link #check} before it
@@ -66,18 +69,21 @@ final class RunPlaces {
   private final RunStore runStore;
   private final ShellExec shell;
   private final RunLauncher.Room room;
+  private final Consumer<RunPlace> prune;
 
   RunPlaces(
       ProjectLoader projects,
       Workspaces workspaces,
       RunStore runStore,
       ShellExec shell,
-      RunLauncher.Room room) {
+      RunLauncher.Room room,
+      Consumer<RunPlace> prune) {
     this.projects = projects;
     this.workspaces = Objects.requireNonNull(workspaces, "workspaces");
     this.runStore = runStore;
     this.shell = shell;
     this.room = room;
+    this.prune = Objects.requireNonNull(prune, "prune");
   }
 
   /**
@@ -149,6 +155,7 @@ final class RunPlaces {
           room.tell(specId, Remedied.message(notice.reason(), notice.remedy()));
         }
         check.degraded().ifPresent(degraded -> room.tell(specId, degraded));
+        prune.accept(check.place());
         yield new Entered(
             check.place(), Optional.of(entered), stale, check.degraded().orElse(null));
       }
@@ -186,9 +193,15 @@ final class RunPlaces {
       Workspaces.SpecCheck check, ProjectDefinition config, String owner) {
     try {
       return workspaces.enterSpec(
-          check, config, owner, SailPaths.projectFilesDir(check.place().project()));
+          check,
+          config,
+          owner,
+          SailPaths.projectFilesDir(check.place().project()),
+          whole -> requireCap(config, owner, whole));
     } catch (Workspaces.Busy busy) {
       throw busy(busy);
+    } catch (ApiException refused) {
+      throw refused;
     } catch (Exception e) {
       if (e instanceof InterruptedException) {
         Thread.currentThread().interrupt();
@@ -227,6 +240,17 @@ final class RunPlaces {
           Remedy.of(
               "Free space on it, or see sudo zpool status " + pool + "; then dispatch again."));
     }
+    requireCap(config, boxHandle, null);
+  }
+
+  /**
+   * Refuses one more workspace when as many spec workspaces hold a live run as the box's memory
+   * holds of the project's limit, and at least one: counted before the reservation from the live
+   * runs alone, and again under the create lock ({@code whole}, the spec workspaces the box holds
+   * whole, given) from those of them that are made, so two creates that each found room before
+   * their runs were reserved never both make one past the cap.
+   */
+  private void requireCap(ProjectDefinition config, String boxHandle, Set<String> whole) {
     var limit =
         config.resources() == null ? 0 : ResourceChecker.parseMemoryMb(config.resources().memory());
     var memory = limit <= 0 || runStore == null ? 0 : hostMemoryMb();
@@ -234,7 +258,11 @@ final class RunPlaces {
       return;
     }
     var cap = Math.max(1, memory / limit);
-    var live = runStore.liveSpecWorkspaces(boxHandle);
+    var specs = new HashSet<>(runStore.liveSpecs(boxHandle));
+    if (whole != null) {
+      specs.retainAll(whole);
+    }
+    var live = specs.size();
     if (live >= cap) {
       throw busy(
           "This box has "

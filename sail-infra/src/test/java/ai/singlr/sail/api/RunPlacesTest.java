@@ -70,7 +70,8 @@ class RunPlacesTest {
         TestWorkspaces.over(incus),
         null,
         shell,
-        RunLauncher.Room.NONE);
+        RunLauncher.Room.NONE,
+        place -> {});
   }
 
   /** A shell on which every command holding {@code fragment} is interrupted, and others answer. */
@@ -196,7 +197,8 @@ class RunPlacesTest {
               TestWorkspaces.over(incus),
               runs,
               shell,
-              RunLauncher.Room.NONE);
+              RunLauncher.Room.NONE,
+              place -> {});
       assertInstanceOf(
           RunPlaces.InWorkspace.class, places.checkSpec("acme", config(), "auth", "eng"));
     }
@@ -252,7 +254,8 @@ class RunPlacesTest {
             TestWorkspaces.over(incus),
             null,
             new ScriptedShellExecutor(),
-            (specId, body) -> told.add(body));
+            (specId, body) -> told.add(body),
+            place -> {});
     var check = places.checkSpec("acme", config(), "auth", "eng");
 
     var entered = places.enter(check, config(), "eng");
@@ -284,7 +287,8 @@ class RunPlacesTest {
             TestWorkspaces.over(incus),
             null,
             new ScriptedShellExecutor(),
-            (specId, body) -> told.add(body));
+            (specId, body) -> told.add(body),
+            place -> {});
 
     var entered = places.enter(places.checkSpec("acme", config(), "auth", "eng"), config(), "eng");
 
@@ -292,16 +296,78 @@ class RunPlacesTest {
     assertEquals(List.of(entered.degraded()), told);
   }
 
+  /**
+   * The cap again under the create lock: a spec that found room before its run was reserved is busy
+   * at its create when another spec's workspace, made meanwhile, holds the last of it.
+   */
+  @Test
+  void aCreateThatFindsTheCapReachedUnderTheCreateLockIsBusyAndMakesNothing() throws Exception {
+    var incus =
+        TestWorkspaces.incus(definitions(), "acme")
+            .onOk(
+                "incus list --format json",
+                "["
+                    + TestWorkspaces.currentTemplate(definitions(), "acme")
+                    + ","
+                    + TestWorkspaces.specWorkspace("acme", "other", "Running", "eng")
+                    + "]");
+    var db = Sqlite.open(dir.resolve("cap.db"));
+    new SchemaManager(db).migrate();
+    var runs = new RunStore(db);
+    var memory =
+        new ScriptedShellExecutor()
+            .onOk("incus query /1.0/resources", "{\"memory\": {\"total\": 6442450944}}");
+    var places =
+        new RunPlaces(
+            new ProjectLoader(memory, definitions()),
+            TestWorkspaces.over(incus),
+            runs,
+            memory,
+            RunLauncher.Room.NONE,
+            place -> {});
+    var check = places.checkSpec("acme", config(), "auth", "eng");
+    Acting.system(
+        () ->
+            runs.reserveDispatch(
+                DateTimeUtils.newId().toString(),
+                "acme",
+                "other",
+                "eng",
+                "build",
+                List.of("app"),
+                "claude-code",
+                null,
+                "t",
+                "l",
+                "u"));
+
+    var busy = assertThrows(ApiException.class, () -> places.enter(check, config(), "eng"));
+
+    assertEquals(ErrorCode.RUNNER_BUSY, busy.failure().errorCode());
+    assertTrue(busy.getMessage().startsWith("This box has 1 spec workspace with a live run"));
+    assertTrue(incus.invocations().stream().noneMatch(c -> c.startsWith("incus copy")));
+  }
+
   @Test
   void aFirstEntryMakesTheWorkspaceFromATemplateAsTheDefinitionIsAndCallsNothingStale()
       throws Exception {
     var incus = TestWorkspaces.incus(definitions(), "acme");
-    var places = places(incus, new ScriptedShellExecutor());
+    var pruned = new ArrayList<RunPlace>();
+    var places =
+        new RunPlaces(
+            new ProjectLoader(new ScriptedShellExecutor(), definitions()),
+            TestWorkspaces.over(incus),
+            null,
+            new ScriptedShellExecutor(),
+            RunLauncher.Room.NONE,
+            pruned::add);
     var check = places.checkSpec("acme", config(), "auth", "eng");
+    assertEquals(List.of(), pruned, "no run directory is pruned before the workspace is made");
 
     var entered = places.enter(check, config(), "eng");
 
     assertInstanceOf(Workspaces.Made.class, entered.workspace().orElseThrow());
     assertEquals(false, entered.stale());
+    assertEquals(List.of(check.place()), pruned, "the run directories of the made workspace are");
   }
 }

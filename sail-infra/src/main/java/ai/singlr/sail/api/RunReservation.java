@@ -346,7 +346,10 @@ public final class RunReservation {
       throw new ApiException(
           ErrorCode.COMMAND_FAILED, "Could not lock project '" + project + "' to dispatch.", e);
     }
-    whenClaimed(claim, () -> pruneRuns(RunPlace.of(project, specId)));
+    var place = RunPlace.of(project, specId);
+    if (place instanceof RunPlace.ProjectContainer) {
+      whenClaimed(claim, () -> prune(place));
+    }
     return claim;
   }
 
@@ -481,7 +484,12 @@ public final class RunReservation {
   /**
    * Prunes the oldest run directories of {@code place}'s instance, of the runs that lived there.
    */
-  private void pruneRuns(RunPlace place) {
+  /**
+   * Prunes the run directories of {@code place} past the newest kept: right after a claim of the
+   * project's container, which is running, and once a spec's workspace is entered ({@link
+   * RunPlaces#enter}), which a first run makes and a stopped one starts.
+   */
+  void prune(RunPlace place) {
     try {
       var runs =
           runStore.listForProject(place.project()).stream()

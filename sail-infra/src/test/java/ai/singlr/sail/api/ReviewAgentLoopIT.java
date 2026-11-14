@@ -252,7 +252,7 @@ class ReviewAgentLoopIT extends AbstractIncusIT {
             (RunPlace.SpecWorkspace) RunPlace.of(CONTAINER, specId),
             ProjectProvisioner.inputs(definition, WorkstationIdentity.registered()),
             name -> false);
-    workspaces.enterSpec(check, definition, HANDLE, null);
+    workspaces.enterSpec(check, definition, HANDLE, null, whole -> {});
   }
 
   /** Records spec {@code id}, in progress under {@code codex}, working the whole container. */
