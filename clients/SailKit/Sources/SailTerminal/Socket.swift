@@ -20,8 +20,14 @@ final class Socket: Sendable {
 
     private let descriptor: Int32
 
+    /// Takes `descriptor` over; on Darwin a write to a closed peer then fails rather than raising
+    /// SIGPIPE (Linux asks the same of every send with `MSG_NOSIGNAL`).
     init(descriptor: Int32) {
         self.descriptor = descriptor
+        #if canImport(Darwin)
+        var on: Int32 = 1
+        setsockopt(descriptor, SOL_SOCKET, SO_NOSIGPIPE, &on, socklen_t(MemoryLayout<Int32>.size))
+        #endif
     }
 
     deinit {
@@ -156,9 +162,6 @@ final class Socket: Sendable {
         var on: Int32 = 1
         var limit = timeval(tv_sec: Self.sendTimeout, tv_usec: 0)
         setsockopt(descriptor, SOL_SOCKET, SO_SNDTIMEO, &limit, socklen_t(MemoryLayout<timeval>.size))
-        #if canImport(Darwin)
-        setsockopt(descriptor, SOL_SOCKET, SO_NOSIGPIPE, &on, socklen_t(MemoryLayout<Int32>.size))
-        #endif
         guard tcp else { return }
         let options: [(Int32, Int32, Int32)] = [
             (Int32(IPPROTO_TCP), TCP_NODELAY, 1),
