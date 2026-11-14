@@ -89,11 +89,9 @@ Usage:
                                 main, drops the lost spec into its history, and pushes what main never had
   ci/fleet upgrade RUN TARGET [FROM]
                                 upgrade main, then every node, to TARGET, and check that the projects
-                                and the conflicts scenario's spec and conversation held; from FROM
-                                across a release whose schema no older database opens (0.68.0), each
-                                box is reinstalled on TARGET instead: it refuses its old database
-                                naming a reinstall, the database is moved aside, the fleet joins again
-                                and its projects are made again (run passes its VERSION as FROM)
+                                and the conflicts scenario's spec and conversation held; refused from FROM
+                                across a release whose schema no older database opens (0.68.0),
+                                where boxes are installed fresh (run passes its VERSION as FROM)
   ci/fleet ssh RUN BOX COMMAND  run COMMAND on BOX as the operator account
   ci/fleet down [RUN]           delete the run's VMs, or every fleet VM when RUN is left out
 
@@ -1161,7 +1159,8 @@ mirrored_on() {
   made=$(on "$run" "$box" "sudo zpool history $pool" | grep "zpool create")
   echo "$made"
   [[ $made == *" mirror "* && $made != *" -f "* ]] || { echo "the zpool was not made as an unforced mirror"; return 1; }
-  trace=$(on "$run" "$box" "sudo cat /tmp/sail-mirror.trace" | grep -E 'execve\("[^"]*/(wipefs|incus|realpath)", \["(wipefs", "--all|incus", "storage", "create|realpath)')
+  trace=$(on "$run" "$box" "sudo cat /tmp/sail-mirror.trace" | grep -E 'execve\("[^"]*/(wipefs|incus|realpath)", \["(wipefs", "--all|incus", "storage", "create|realpath)' \
+    | grep -E ' = 0$' | grep -vF 'execve("/opt/incus/')
   echo "$trace"
   [[ $(grep -c '"incus", "storage", "create"' <<< "$trace") == 1 ]] || { echo "Sail asked Incus for more than one create"; return 1; }
   grep -F '"incus", "storage", "create"' <<< "$trace" | grep -qF 'source=mirror=' || { echo "the create is not the mirror's"; return 1; }
@@ -1726,35 +1725,13 @@ crosses_the_schema() {
   [[ $oldest == "$SCHEMA_CHANGED_IN" ]]
 }
 
-refuses_its_old_database() {
-  local said
-  said=$(on "$1" "$2" "sudo sail spec list --no-sync 2>&1 || true")
-  echo "$said" | tail -3
-  grep -q "was made by an earlier Sail release" <<< "$said" && grep -q "sail init" <<< "$said"
-}
-
-moves_its_database_aside() {
-  on "$1" "$2" "sudo systemctl stop sail-api 2>/dev/null || true; sudo mv /var/lib/sail/sail.db /var/lib/sail/sail.db.before-reinstall && sudo rm -f /var/lib/sail/sail.db-wal /var/lib/sail/sail.db-shm"
-}
-
-reinstall() {
-  local run=$1 target=$2 box
-  for box in main eng client observer; do
-    check "$run" "$box takes $target over the old release" upgrade_box "$run" "$box" "$target"
-    check "$run" "$box refuses its old database, naming a reinstall" refuses_its_old_database "$run" "$box"
-    check "$run" "$box moves its database aside" moves_its_database_aside "$run" "$box"
-  done
-  join "$run"
-  projects "$run"
-}
-
 upgrade() {
   local run=${1:-} target box expected from=${3:-}
   target=$(from_caller "${2:-}")
   [[ -n $run && -n $target ]] || usage
   if [[ -n $from ]] && crosses_the_schema "$from" "$target"; then
-    reinstall "$run" "$target"
-    return
+    echo "No box upgrades from $from to $target: its database schema changed in $SCHEMA_CHANGED_IN and boxes are installed fresh. Run: ci/fleet run $target" >&2
+    exit 2
   fi
   for box in main eng client observer; do
     check "$run" "$box upgrades to $target" upgrade_box "$run" "$box" "$target"
@@ -1807,6 +1784,10 @@ run() {
     target=${3:-}
     [[ -n $target ]] || usage
   fi
+  if [[ -n $target ]] && crosses_the_schema "$version" "$target"; then
+    echo "No box upgrades from $version to $target: its database schema changed in $SCHEMA_CHANGED_IN and boxes are installed fresh. Run: ci/fleet run $target" >&2
+    exit 2
+  fi
   local id
   id="r$(date -u +%Y%m%d-%H%M%S)"
   echo "Fleet run $id on $version${target:+, upgraded to $target}; logs in $RUNS/$id"
@@ -1821,9 +1802,7 @@ run() {
   fi
   step doors "$id"
   step inside "$id"
-  if [[ -z $target ]] || crosses_the_schema "$version" "$target"; then
-    step conflicts "$id"
-  fi
+  [[ -n $target ]] || step conflicts "$id"
   step rooms "$id"
   step access "$id"
   step files "$id"
