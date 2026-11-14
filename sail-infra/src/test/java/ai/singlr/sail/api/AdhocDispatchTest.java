@@ -31,6 +31,7 @@ import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
+import ai.singlr.sail.store.TestLogins;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -112,6 +113,7 @@ class AdhocDispatchTest {
     specStore = new SpecStore(db);
     runStore = new RunStore(db);
     new FdeStore(db).add(HANDLE, null, null, "admin");
+    TestLogins.store(db, HANDLE);
     return new DispatchOperations(
         shell,
         TestProjects.reading(yaml),
@@ -208,8 +210,13 @@ class AdhocDispatchTest {
         "with no configured hard stop only a verified finisher revokes the credential");
   }
 
+  /**
+   * The launch command names no credential at all, so the command listeners print to terminals and
+   * logs is the one the launcher runs: the run's credential reaches the container only in its
+   * launch.env.
+   */
   @Test
-  void listenersSeeTheLaunchCommandWithTheCredentialRedacted() throws Exception {
+  void listenersSeeTheLaunchCommandWholeAndItCarriesNoCredential() throws Exception {
     var launched = new AtomicReference<List<String>>();
     var shown = new AtomicReference<List<String>>();
     var listener =
@@ -231,15 +238,10 @@ class AdhocDispatchTest {
 
     ops.startAdhoc("acme", background("task"), HANDLE);
 
-    var credential = launched.get().get(launched.get().size() - 2);
-    assertTrue(credential.startsWith("sailrun_"), "the launcher receives the real credential");
-    assertTrue(
-        shown.get().contains("<redacted>"),
-        "the listener command carries the redaction marker in the credential's place");
-    assertFalse(
-        shown.get().contains(credential),
-        "presentation listeners print commands to terminals and logs; the plaintext credential"
-            + " must never reach them");
+    assertEquals(launched.get(), shown.get());
+    var joined = String.join(" ", launched.get());
+    assertFalse(joined.contains("sailrun_"), joined);
+    assertFalse(joined.contains("SAIL_RUN_CREDENTIAL"), joined);
   }
 
   @Test
@@ -688,6 +690,7 @@ class AdhocDispatchTest {
      */
     StubShell() {
       on("incus config device add", "");
+      on("incus file push", "");
       on("cat " + ContainerSailSetup.STAMP_PATH, ContainerSailSetup.fingerprint());
       for (var skill : SailSkills.all()) {
         on("/" + skill.name() + "/" + StageSkill.STAMP, ProjectSkillInstaller.fingerprint(skill));

@@ -45,7 +45,8 @@ class SpecCliHelperTest {
     var content = SpecCliHelper.scriptContent();
     assertTrue(content.contains("PROJECT=\"$(hostname)\""));
     assertTrue(content.contains("CREDENTIAL=\"${SAIL_RUN_CREDENTIAL:-}\""));
-    assertTrue(content.contains("Authorization: Bearer $CREDENTIAL"));
+    assertTrue(content.contains(SocketPreamble.credentialCurl()));
+    assertFalse(content.contains("-H \"Authorization"), "the credential is never an argument");
     assertFalse(content.contains("SAIL_ACTOR"));
   }
 
@@ -124,11 +125,10 @@ class SpecCliHelperTest {
       Files.createDirectories(bin);
       writeExecutable(
           bin.resolve("curl"),
-          """
-          #!/bin/sh
-          printf '%s\\n' "$*" >> "$HOME/curl.log"
+          FakeCurl.script(
+              """
           exit 0
-          """);
+          """));
       try (var bound = bind(socket)) {
         runShim(
             home,

@@ -24,6 +24,7 @@ import picocli.CommandLine.Command;
       AgentSweepCommand.class,
       AgentWatchCommand.class,
       AgentReportCommand.class,
+      AgentLoginCommand.class,
     })
 public final class AgentCommand implements Runnable {
 

@@ -230,6 +230,53 @@ public interface Harness {
   RunUsage usage(String report);
 
   /**
+   * The static credentials this harness reads from its environment, the first its default kind. A
+   * spec run starts with one its person stored; a login the harness refreshes is never one.
+   */
+  List<LoginKind> loginKinds();
+
+  /**
+   * Every variable this harness takes a credential from, its kinds' and any that outranks them: a
+   * run started with a stored login has each but its own kind's set empty, so no credential its
+   * container exports outranks the login the run records.
+   */
+  default List<String> loginVariables() {
+    return loginKinds().stream().map(LoginKind::variable).toList();
+  }
+
+  /**
+   * The variables that, set, make this harness take its credential from somewhere else than any
+   * login, a cloud provider's account: a run started with a stored login has each set empty, since
+   * runs do not take a cloud provider's credentials and the run records the login it was given.
+   */
+  default List<String> credentialSwitches() {
+    return List.of();
+  }
+
+  /**
+   * The kind of login this harness declares as {@code kind}, its first when {@code kind} is blank.
+   *
+   * @throws IllegalArgumentException naming the kinds it declares, when it declares no such kind
+   */
+  default LoginKind loginKind(String kind) {
+    if (Strings.isBlank(kind)) {
+      return loginKinds().getFirst();
+    }
+    return loginKinds().stream()
+        .filter(declared -> declared.kind().equals(kind))
+        .findFirst()
+        .orElseThrow(
+            () ->
+                new IllegalArgumentException(
+                    displayName()
+                        + " takes no login of kind '"
+                        + kind
+                        + "'; it takes "
+                        + String.join(", ", loginKinds().stream().map(LoginKind::kind).toList())
+                        + "."));
+  }
+
+  /**
    * The local port an interactive session's login flow listens on, which the engineer forwards over
    * SSH, or empty when the harness logs in without one.
    */

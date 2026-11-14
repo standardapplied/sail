@@ -80,7 +80,7 @@ public final class SailRoomRelay {
       [ -S "$SOCKET" ] || exit 0
       command -v curl >/dev/null 2>&1 || exit 0
       command -v python3 >/dev/null 2>&1 || exit 0
-
+      __SAIL_CURL__
       SAIL_HOME="${HOME:-/home/dev}"
       RUN_DIR="$SAIL_HOME/.sail/runs/$RUN_ID"
       STAMP="$RUN_DIR/room-relay-checked"
@@ -91,9 +91,8 @@ public final class SailRoomRelay {
       mkdir -p "$RUN_DIR" 2>/dev/null || exit 0
       printf '%s' "$NOW" > "$STAMP" 2>/dev/null || exit 0
 
-      INBOX="$(curl --silent --max-time 5 \\
+      INBOX="$(sail_curl --silent --max-time 5 \\
         --unix-socket "$SOCKET" \\
-        -H "Authorization: Bearer $CREDENTIAL" \\
         http://sail/v1/run/messages 2>/dev/null || true)"
       [ -n "$INBOX" ] || exit 0
 
@@ -126,9 +125,8 @@ public final class SailRoomRelay {
       [ -n "$OUTPUT" ] || exit 0
       printf '%s\\n' "$OUTPUT" || exit 0
 
-      curl --silent --output /dev/null --max-time 5 \\
+      sail_curl --silent --output /dev/null --max-time 5 \\
         --unix-socket "$SOCKET" \\
-        -H "Authorization: Bearer $CREDENTIAL" \\
         -X POST --data-urlencode "delivered=$IDS" \\
         http://sail/v1/run/messages 2>/dev/null || true
       exit 0
@@ -144,7 +142,8 @@ public final class SailRoomRelay {
   public static String scriptContent() {
     return SCRIPT
         .replace("__SAIL_API_SOCKET__", SailPaths.apiSocketContainerPath().toString())
-        .replace("__CHECK_INTERVAL__", Integer.toString(CHECK_INTERVAL_SECONDS));
+        .replace("__CHECK_INTERVAL__", Integer.toString(CHECK_INTERVAL_SECONDS))
+        .replace("__SAIL_CURL__\n", SocketPreamble.credentialCurl());
   }
 
   /**

@@ -362,6 +362,49 @@ class LiveMemberDisplacementTest {
         List.of("failed", "stopped"),
         room.runs.listForSpec(SPEC).stream().map(RunStore.RunRow::status).toList(),
         "the claim it had made is given back");
+    assertNoLaunchFileOfTheFailedRun();
+  }
+
+  @Test
+  void aTerminalThatOpensWhileTheMemberStagesLeavesNoLaunchFileBehind() {
+    var asked = new AtomicReference<>(0);
+    var process = idleMember();
+    process.onClose(() -> process.exits(0));
+    room.sail.dispatching().endLiveMember(process.runId, "displaced by a terminal");
+    room.awaitStopped(process);
+    var session = SessionYield.resumeSession(process.runId);
+    room.terminals(
+        new SessionYield() {
+          @Override
+          public Hold lock(String project) {
+            return NO_HOLD;
+          }
+
+          @Override
+          public void end(List<String> sessions, String reason) {}
+
+          @Override
+          public boolean live(String name) {
+            return asked.updateAndGet(count -> count + 1) > 2 && session.equals(name);
+          }
+        });
+
+    room.says(SPEC, "the attach lands while the launch file is pushed");
+
+    assertEquals(3, asked.get(), "before the claim, before staging, and after staging");
+    assertEquals(1, room.processes.starts.size());
+    assertNoLaunchFileOfTheFailedRun();
+  }
+
+  private void assertNoLaunchFileOfTheFailedRun() {
+    var failed =
+        room.runs.listForSpec(SPEC).stream()
+            .filter(run -> "failed".equals(run.status()))
+            .findFirst()
+            .orElseThrow();
+    assertNull(
+        room.container.file(AgentUnit.live(failed.id()).launchEnvPath()),
+        "the secrets left with the claim");
   }
 
   @Test
@@ -441,11 +484,12 @@ class LiveMemberDisplacementTest {
     var cli = room.elsewhere().dispatching();
     room.processes.onStart(starting -> starting.onClose(() -> starting.exits(0)));
     room.live.useProcesses(
-        (container, workDir, env, command, pidFile, logFile) -> {
+        (container, workDir, env, command, pidFile, logFile, launchEnvFile) -> {
           assertTrue(
               cli.endLiveMember(env.get("SAIL_RUN_ID"), "displaced by a build"),
               "a run that records no process was never prompted, so another process may end it");
-          return room.processes.start(container, workDir, env, command, pidFile, logFile);
+          return room.processes.start(
+              container, workDir, env, command, pidFile, logFile, launchEnvFile);
         });
 
     var first = room.says(SPEC, "first");

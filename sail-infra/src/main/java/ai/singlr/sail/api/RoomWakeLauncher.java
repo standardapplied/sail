@@ -134,7 +134,7 @@ public final class RoomWakeLauncher {
             : List.<ProjectDefinition.Repo>of();
     var repoPaths = targetRepos.stream().map(ProjectDefinition.Repo::path).toList();
     var branch = full ? Objects.toString(spec.branch(), "") : "";
-    var credential =
+    var env =
         runReservation.reserve(
             runId,
             project,
@@ -174,9 +174,10 @@ public final class RoomWakeLauncher {
                   repoPaths,
                   true,
                   runId,
-                  credential,
+                  env,
                   role,
-                  resumeSessionId));
+                  resumeSessionId,
+                  RunLauncher.wokenBy(room)));
       runLauncher.finishLaunch(
           new RunLauncher.RunContext(project, unit, runId, specId, agentType, role, true), launch);
       return runId;
@@ -246,7 +247,7 @@ public final class RoomWakeLauncher {
     var role = full ? DispatchGate.ROOM_FULL_ROLE : DispatchGate.ROOM_ROLE;
     var targetRepos = full ? config.repos() : List.<ProjectDefinition.Repo>of();
     var repoPaths = targetRepos.stream().map(ProjectDefinition.Repo::path).toList();
-    var credential =
+    var env =
         runReservation.reserve(
             runId,
             project,
@@ -285,9 +286,10 @@ public final class RoomWakeLauncher {
                   repoPaths,
                   true,
                   runId,
-                  credential,
+                  env,
                   role,
-                  null));
+                  null,
+                  RunLauncher.wokenBy(conversation)));
       runLauncher.finishLaunch(
           new RunLauncher.RunContext(project, unit, runId, roomId, agentType, role, true), launch);
       return runId;

@@ -16,6 +16,8 @@ import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.Engagement;
 import ai.singlr.sail.config.Roster;
 import ai.singlr.sail.config.SpecStatus;
+import ai.singlr.sail.config.SyncConfig;
+import ai.singlr.sail.engine.ConnectEnvironment;
 import ai.singlr.sail.engine.ContainerSailSetup;
 import ai.singlr.sail.engine.ProjectSkillInstaller;
 import ai.singlr.sail.engine.SailSkills;
@@ -26,6 +28,7 @@ import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.Actors;
 import ai.singlr.sail.identity.Role;
+import ai.singlr.sail.store.Decidability;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.HeldProjects;
 import ai.singlr.sail.store.MessageStore;
@@ -35,8 +38,11 @@ import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
+import ai.singlr.sail.store.Standing;
+import ai.singlr.sail.store.TestLogins;
 import ai.singlr.sail.store.TestRuns;
 import ai.singlr.sail.sync.NodeRound;
+import ai.singlr.sail.sync.Settlement;
 import ai.singlr.sail.sync.SyncBox;
 import ai.singlr.sail.sync.SyncWire;
 import ai.singlr.sail.sync.SyncedEntities;
@@ -132,6 +138,7 @@ class RoomWakeLaunchTest {
     runStore = new RunStore(db);
     messageStore = new MessageStore(db);
     new FdeStore(db).add(HANDLE, null, null, "admin");
+    TestLogins.store(db, HANDLE);
     return new DispatchOperations(
             shell,
             TestProjects.reading(yaml),
@@ -159,6 +166,7 @@ class RoomWakeLaunchTest {
     specStore = new SpecStore(db);
     runStore = new RunStore(db);
     new FdeStore(db).add(HANDLE, null, null, "admin");
+    TestLogins.store(db, HANDLE);
     var ops =
         new DispatchOperations(
             liveAgentShell(),
@@ -512,6 +520,220 @@ class RoomWakeLaunchTest {
         SyncBox.assertConverged(main, box);
       }
     }
+  }
+
+  /**
+   * A wake Sail starts on its own for a person who stored no login is refused before anything is
+   * reserved, and the spec's room says why and what fixes it, once, however often it is woken.
+   */
+  @Test
+  void aWakeRefusedForWantOfALoginSaysSoInTheRoomOnce() throws Exception {
+    var ops = operations(liveAgentShell());
+    seedSpec("auth");
+    var fdes = new FdeStore(db);
+    fdes.logins().forget(fdes.byHandle(HANDLE).orElseThrow().id());
+
+    for (var attempt = 0; attempt < 2; attempt++) {
+      var refused =
+          assertThrows(ApiException.class, () -> ops.startRoomRun("acme", "auth", HANDLE));
+      assertEquals(ErrorCode.LOGIN_NOT_STORED, refused.failure().errorCode());
+    }
+
+    assertEquals(
+        List.of(
+            "No Claude Code login stored for uday, so a run of a spec cannot start: a login made by"
+                + " hand in the project's container is not used by runs. Run claude setup-token on"
+                + " a machine where Claude Code is signed in, then sail agent login claude-code."
+                + " Or: Create an"
+                + " API key in the Claude Console, then sail agent login claude-code --kind"
+                + " api-key."),
+        messageStore.list("auth", null, 20).stream().map(MessageStore.MessageRow::body).toList());
+    assertEquals(List.of(), runStore.listForSpec("auth"));
+  }
+
+  /**
+   * A person's own dispatch, refused for want of their login, is said in the spec's room by Sail as
+   * the loop narrates there: posted as this box's machinery, whoever asked, as on a node where the
+   * person's own credential may not write as {@code sail}.
+   */
+  @Test
+  void aPersonsDispatchRefusedForWantOfALoginIsSaidInTheRoomBySail() throws Exception {
+    var ops = operations(liveAgentShell());
+    createSpec(HANDLE, "auth", HANDLE);
+    var fdes = new FdeStore(db);
+    fdes.logins().forget(fdes.byHandle(HANDLE).orElseThrow().id());
+    var person = new Actor(HANDLE, Role.MEMBER, Actor.Lane.CLI);
+
+    var refused =
+        assertThrows(
+            ApiException.class,
+            () ->
+                Actor.call(
+                    person,
+                    () ->
+                        ops.dispatch(
+                            "acme",
+                            new DispatchOperations.Request(
+                                "auth", "background", false, null, false),
+                            HANDLE)));
+
+    assertEquals(ErrorCode.LOGIN_NOT_STORED, refused.failure().errorCode());
+    var said = messageStore.list("auth", null, 20);
+    assertEquals(1, said.size(), said.toString());
+    assertEquals(MessageStore.SAIL_AUTHOR, said.getFirst().author());
+    assertTrue(said.getFirst().body().startsWith("No Claude Code login stored for uday"));
+  }
+
+  /**
+   * "Once" is the room's, not a process's: three CLI attempts, each its own process, and a restart
+   * between them say the refusal once; once a run of the spec started on a stored login, a refusal
+   * after the login is removed is said again.
+   */
+  @Test
+  void aRefusalIsSaidOnceAcrossProcessesAndRestartsAndAgainAfterARunStarted() throws Exception {
+    var first = operations(liveAgentShell());
+    createSpec(HANDLE, "auth", HANDLE);
+    var fdes = new FdeStore(db);
+    var person = fdes.byHandle(HANDLE).orElseThrow().id();
+    fdes.logins().forget(person);
+
+    assertThrows(ApiException.class, () -> dispatchAsThePerson(first));
+    for (var attempt = 0; attempt < 2; attempt++) {
+      var process = anotherProcess(liveAgentShell());
+      assertThrows(ApiException.class, () -> dispatchAsThePerson(process));
+    }
+    assertEquals(1, sailLines("auth").size(), sailLines("auth").toString());
+
+    TestLogins.store(db, HANDLE);
+    var started = dispatchAsThePerson(anotherProcess(liveAgentShell()));
+    Acting.system(() -> TestRuns.complete(runStore, started.runId(), "completed", 0));
+    Acting.system(() -> specStore.updateStatus("auth", SpecStatus.PENDING));
+    fdes.logins().forget(person);
+    assertThrows(ApiException.class, () -> dispatchAsThePerson(anotherProcess(liveAgentShell())));
+
+    assertEquals(2, sailLines("auth").size(), "a run started since, so it is said again");
+  }
+
+  /**
+   * On a node, Sail posts only what its own sync keeps: with no run of the box's FDE in the
+   * conversation the refusal is not posted at all (the person is told on their terminal) and the
+   * next round withdraws nothing; with one, it is posted once and the next round keeps it.
+   */
+  @Test
+  void onANodeTheRefusalIsPostedOnlyWhereItsOwnSyncWouldKeepIt() throws Exception {
+    var first = operations(liveAgentShell());
+    createSpec(HANDLE, "auth", HANDLE);
+    var fdes = new FdeStore(db);
+    fdes.logins().forget(fdes.byHandle(HANDLE).orElseThrow().id());
+    var node = new SyncConfig(SyncConfig.ROLE_NODE, "main.example", HANDLE);
+
+    var refused =
+        assertThrows(
+            ApiException.class,
+            () -> dispatchAsThePerson(anotherProcess(liveAgentShell()).useBox(() -> node)));
+
+    assertEquals(ErrorCode.LOGIN_NOT_STORED, refused.failure().errorCode());
+    assertEquals(List.of(), sailLines("auth"), "no run of uday here supports a post");
+    assertEquals(List.of(), withdrawnMessages(), "and the next round withdraws nothing");
+    var unsupported =
+        Acting.system(() -> messageStore.append("auth", MessageStore.SAIL_AUTHOR, "probe", null));
+    assertTrue(
+        messageStore.standingOnNode("auth", MessageStore.SAIL_AUTHOR, HANDLE)
+            instanceof Standing.Gone);
+    assertTrue(
+        withdrawnMessages().stream().anyMatch(settled -> settled.contains(unsupported.id())),
+        "the rule asked is the one the round withdraws by");
+
+    Acting.system(
+        () ->
+            runStore.reserveDispatch(
+                DateTimeUtils.newId().toString(),
+                "acme",
+                "auth",
+                HANDLE,
+                "build",
+                List.of(),
+                "claude-code",
+                null,
+                "task",
+                "/tmp/r.log",
+                "sail-agent-r"));
+    assertThrows(
+        ApiException.class,
+        () -> dispatchAsThePerson(anotherProcess(liveAgentShell()).useBox(() -> node)));
+
+    assertEquals(1, sailLines("auth").size(), "a run of uday here supports it");
+    assertEquals(List.of(), withdrawnMessages(), "and the next round keeps it");
+    assertEquals(1, sailLines("auth").size());
+    assertNotNull(first);
+  }
+
+  /** The messages the node's next settlement round withdraws. */
+  private List<String> withdrawnMessages() {
+    return new Settlement(db, Decidability.onNode(db), HANDLE)
+        .settle().stream()
+            .filter(settled -> "message".equals(settled.type()))
+            .map(Object::toString)
+            .toList();
+  }
+
+  /** Operations over this test's database as a second process, or a restarted one, opens them. */
+  private DispatchOperations anotherProcess(ShellExec shell) throws IOException {
+    var yaml = tempDir.resolve("sail-" + System.nanoTime() + ".yaml");
+    Files.writeString(yaml, YAML);
+    return new DispatchOperations(
+            shell,
+            TestProjects.reading(yaml),
+            new SpecStore(db),
+            new ReviewStore(db),
+            new RunStore(db),
+            new FdeStore(db),
+            events::add,
+            new WatcherSpawner(shell, (command, logPath) -> 4242L),
+            (project, config) -> "",
+            command -> 0,
+            DispatchOperations.Listener.NONE,
+            SessionYield.NONE)
+        .useMessages(new MessageStore(db))
+        .useRooms(new RoomStore(db));
+  }
+
+  private DispatchOperations.Dispatched dispatchAsThePerson(DispatchOperations ops) {
+    return (DispatchOperations.Dispatched)
+        Actor.call(
+            new Actor(HANDLE, Role.MEMBER, Actor.Lane.CLI),
+            () ->
+                ops.dispatch(
+                    "acme",
+                    new DispatchOperations.Request("auth", "background", false, null, false),
+                    HANDLE));
+  }
+
+  private List<String> sailLines(String room) {
+    return messageStore.list(room, null, 50).stream()
+        .filter(row -> MessageStore.SAIL_AUTHOR.equals(row.author()))
+        .map(MessageStore.MessageRow::body)
+        .filter(body -> body.startsWith("No Claude Code login"))
+        .toList();
+  }
+
+  @Test
+  void aWakeRecordsThePersonWhoseMessageWokeItAndSailsOwnLinesWakeNoOne() throws Exception {
+    var ops = operations(liveAgentShell());
+    seedSpec("auth");
+    Acting.system(() -> messageStore.append("auth", "uday", "what did you ship?", null));
+    Acting.system(() -> messageStore.append("auth", "sail", "Review passed.", null));
+
+    var woken = runStore.findById(ops.startRoomRun("acme", "auth", HANDLE)).orElseThrow();
+
+    assertEquals("uday", woken.dispatchedBy(), "a person's message woke it");
+    assertEquals(
+        null,
+        RunLauncher.wokenBy(
+            List.of(
+                messageStore.list("auth", null, 20).getLast(),
+                Acting.system(() -> messageStore.append("auth", "claude/room-r1", "Done.", null)))),
+        "Sail's own line and an agent's wake no one");
   }
 
   @Test
@@ -1322,7 +1544,12 @@ class RoomWakeLaunchTest {
                   bus,
                   specStore,
                   new ReviewStore(db),
-                  runStore)
+                  runStore,
+                  null,
+                  ConnectEnvironment.detector(),
+                  SyncScheduler.disabled(),
+                  new FdeStore(db),
+                  SessionYield.NONE)
               .useMessages(messageStore);
 
       var runId = sailOps.startRoomRun("acme", "auth", HANDLE);
@@ -1345,6 +1572,7 @@ class RoomWakeLaunchTest {
 
     StubShell() {
       on("incus config device add", "");
+      on("incus file push", "");
       on("cat " + ContainerSailSetup.STAMP_PATH, ContainerSailSetup.fingerprint());
       for (var skill : SailSkills.all()) {
         on("/" + skill.name() + "/" + StageSkill.STAMP, ProjectSkillInstaller.fingerprint(skill));

@@ -372,10 +372,11 @@ class LiveMemberEdgesTest {
     room.engage(SPEC, "claude-code", "full");
     room.processes.onStart(starting -> starting.onClose(() -> starting.exits(0)));
     room.live.useProcesses(
-        (container, workDir, env, command, pidFile, logFile) -> {
+        (container, workDir, env, command, pidFile, logFile, launchEnvFile) -> {
           room.vacate(SPEC);
           room.live.membershipChanged(SPEC);
-          return room.processes.start(container, workDir, env, command, pidFile, logFile);
+          return room.processes.start(
+              container, workDir, env, command, pidFile, logFile, launchEnvFile);
         });
 
     room.says(SPEC, "first");

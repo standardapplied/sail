@@ -1,0 +1,8 @@
+size 20x3
+cursor 6,1 block visible steady
+colors fg #f6f1e9 bg #0a0e11 cursor #fc4926
+row 0 |café ñ à́̂|
+row 1 |q̣̇ done|
+input ctrl-c 03
+input paste needs confirmation
+input focus-lost -

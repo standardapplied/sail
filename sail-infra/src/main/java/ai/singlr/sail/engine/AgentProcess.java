@@ -64,8 +64,9 @@ public interface AgentProcess {
 
   /**
    * Starts {@code command} in {@code container} as the dev user, in {@code workDir} under {@code
-   * env}, its pid written to {@code pidFile} and its stderr appended to {@code logFile}, both paths
-   * inside the container.
+   * env} and the secrets of {@code launchEnvFile}, which is removed before the command starts, its
+   * pid written to {@code pidFile} and its stderr appended to {@code logFile}, every path inside
+   * the container.
    */
   Handle start(
       String container,
@@ -73,6 +74,7 @@ public interface AgentProcess {
       Map<String, String> env,
       List<String> command,
       String pidFile,
-      String logFile)
+      String logFile,
+      String launchEnvFile)
       throws IOException;
 }

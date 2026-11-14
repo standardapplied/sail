@@ -320,16 +320,15 @@ class SailRoomRelayTest {
     Files.createDirectories(bin);
     writeExecutable(
         bin.resolve("curl"),
-        """
-        #!/bin/sh
-        printf '%s\\n' "$*" >> "$HOME/curl.log"
+        FakeCurl.script(
+            """
         [ "${FAKE_CURL_EXIT:-0}" = "0" ] || exit "$FAKE_CURL_EXIT"
         case "$*" in
           *"-X POST"*) [ "${FAKE_ACK:-200}" = "200" ] || exit 22 ;;
           *) cat "$HOME/inbox.json" 2>/dev/null ;;
         esac
         exit 0
-        """);
+        """));
     return bin;
   }
 

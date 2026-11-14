@@ -36,6 +36,10 @@ public final class RemoteCommandRunner {
   private static final Set<String> MACHINE_VERBS = Set.of("_pty-child", "_pty-selftest");
   private static final List<String> LOCAL_TERMINAL_HOST = List.of("_pty-host", "--local");
   private static final Set<String> INTERACTIVE_COMMANDS = Set.of("shell", "exec");
+  private static final List<String> LOGIN = List.of("agent", "login");
+  private static final Set<String> LOGIN_VERBS = Set.of("list", "use", "remove");
+  private static final Set<String> LOGIN_NO_VALUE = Set.of("--help", "-h", "--dry-run");
+  private static final Set<String> LOGIN_VALUED_OPTIONS = Set.of("--name", "--kind", "--fde");
   private static final Set<String> HOST_ONLY_COMMANDS = Set.of("host");
   private static final Set<String> GATEWAY_COMMANDS =
       Stream.concat(SshGateway.API_COMMANDS.stream(), SshGateway.ADMIN_COMMANDS.stream())
@@ -89,8 +93,7 @@ public final class RemoteCommandRunner {
       return 1;
     }
 
-    var interactive = INTERACTIVE_COMMANDS.contains(command);
-    return executeRemote(args, interactive);
+    return executeRemote(args, interactive(args));
   }
 
   private int executeLocal(String[] args) {
@@ -176,6 +179,39 @@ public final class RemoteCommandRunner {
    */
   private boolean gatewayLane(String[] args) {
     return config.gatewayEnabled() && args.length > 0 && GATEWAY_COMMANDS.contains(args[0]);
+  }
+
+  /**
+   * Whether {@code args} need the box's terminal: an interactive shell, and storing a login, which
+   * reads its value there with echo off rather than echoing it on this machine's terminal.
+   */
+  static boolean interactive(String... args) {
+    return INTERACTIVE_COMMANDS.contains(args[0]) || storesALogin(args);
+  }
+
+  /**
+   * Whether {@code args} store a login: {@code agent login} whose first positional word, past its
+   * options and their values, is not one of its verbs, and that asks for neither its help nor a dry
+   * run, so its value is never typed on this machine's echoing terminal. A login named {@code use}
+   * is a name, not the verb.
+   */
+  private static boolean storesALogin(String... args) {
+    if (args.length < 3 || !List.of(args).subList(0, 2).equals(LOGIN)) {
+      return false;
+    }
+    var rest = List.of(args).subList(2, args.length);
+    if (rest.stream().anyMatch(LOGIN_NO_VALUE::contains)) {
+      return false;
+    }
+    for (var i = 0; i < rest.size(); i++) {
+      var word = rest.get(i);
+      if (LOGIN_VALUED_OPTIONS.contains(word)) {
+        i++;
+      } else if (!word.startsWith("-")) {
+        return !LOGIN_VERBS.contains(word);
+      }
+    }
+    return false;
   }
 
   /** Whether {@code args} run on this machine, never forwarded to the server. */

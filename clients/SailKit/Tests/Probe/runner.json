@@ -1,0 +1,11 @@
+{"size": [100, 30], "steps": [
+  {"type": "echo runner-$((6*7)); read -r line\r"},
+  {"wait": "(?m)^runner-42$", "within": 30},
+  {"snapshot": "before"},
+  {"drop": true},
+  {"phase": "attached", "within": 30},
+  {"same": "before"},
+  {"detach": true},
+  {"attach": true},
+  {"same": "before"}
+]}

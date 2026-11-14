@@ -24,6 +24,7 @@ import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
+import ai.singlr.sail.store.TestLogins;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -143,6 +144,7 @@ class DispatchBranchBaseTest {
                     List.of())));
     specStore.setContent("auth", "Do auth", "");
     new FdeStore(db).add(HANDLE, null, null, "admin");
+    TestLogins.store(db, HANDLE);
 
     var ops =
         new DispatchOperations(
@@ -192,6 +194,7 @@ class DispatchBranchBaseTest {
     /** Every launch reconciles the in-container sail helpers; answer as already installed. */
     RecordingShell() {
       on("incus config device add", "");
+      on("incus file push", "");
       on("cat " + ContainerSailSetup.STAMP_PATH, ContainerSailSetup.fingerprint());
     }
 

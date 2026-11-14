@@ -48,12 +48,7 @@ class SkillCliHelperTest {
         SkillCliHelper.scriptContent()
             .replace(SailPaths.apiSocketContainerPath().toString(), socket.toString()));
     Files.writeString(home.resolve("box.credential"), "sailbox_test\n");
-    writeExecutable(
-        bin.resolve("curl"),
-        """
-        #!/bin/sh
-        printf '%s\\n' "$*" >> "$HOME/curl.log"
-        """);
+    writeExecutable(bin.resolve("curl"), FakeCurl.script(""));
     writeExecutable(bin.resolve("hostname"), "#!/bin/sh\necho acme\n");
   }
 
@@ -106,8 +101,9 @@ class SkillCliHelperTest {
   private String call(String... rest) {
     return "--silent --fail-with-body --max-time 20 --unix-socket "
         + socket
-        + " -H Authorization: Bearer sailbox_test "
-        + String.join(" ", rest);
+        + " "
+        + String.join(" ", rest)
+        + FakeCurl.presenting("sailbox_test");
   }
 
   @Test

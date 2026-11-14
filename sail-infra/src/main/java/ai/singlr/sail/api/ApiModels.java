@@ -1554,6 +1554,64 @@ record SpecMessageView(
 }
 
 /**
+ * One stored harness login as every door shows it: whose it is, its harness, name and kind, whether
+ * it is the default, when it was stored and the first eight hex digits of its value's SHA-256.
+ * Never the value.
+ */
+record LoginView(
+    String fde,
+    String harness,
+    String name,
+    String kind,
+    boolean isDefault,
+    Instant storedAt,
+    String fingerprint)
+    implements Mappable {
+  @Override
+  public Map<String, Object> toMap() {
+    var m = new LinkedHashMap<String, Object>();
+    m.put("fde", fde);
+    m.put("harness", harness);
+    m.put("name", name);
+    m.put("kind", kind);
+    m.put("default", isDefault);
+    m.put("stored_at", DateTimeUtils.format(storedAt));
+    m.put("fingerprint", fingerprint);
+    return m;
+  }
+}
+
+/** A person's stored logins. */
+record LoginList(String fde, List<LoginView> logins) implements Mappable {
+  @Override
+  public Map<String, Object> toMap() {
+    var m = new LinkedHashMap<String, Object>();
+    m.put("fde", fde);
+    m.put("logins", logins.stream().map(LoginView::toMap).toList());
+    return m;
+  }
+}
+
+/**
+ * A login a door stored, made the default or removed, with what is said once of live runs that
+ * started with it ({@code note}, null when none did); no login and a note for a removal of one that
+ * was not stored.
+ */
+record LoginResponse(LoginView login, String note) implements Mappable {
+  @Override
+  public Map<String, Object> toMap() {
+    var m = new LinkedHashMap<String, Object>();
+    if (login != null) {
+      m.put("login", login.toMap());
+    }
+    if (note != null) {
+      m.put("note", note);
+    }
+    return m;
+  }
+}
+
+/**
  * What a focus heartbeat recorded: the conversation, the minute the server stamped, and whether
  * this minute of the caller's was new, false for a caller who is not a person or a minute already
  * recorded.
@@ -1810,7 +1868,9 @@ record RunView(
     String sessionSource,
     String lastActivityAt,
     String presence,
-    String reviewId)
+    String reviewId,
+    RunStore.RunLogin login,
+    String dispatchedBy)
     implements Mappable {
   static RunView from(RunStore.RunRow row) {
     return new RunView(
@@ -1833,7 +1893,9 @@ record RunView(
         row.sessionSource(),
         DateTimeUtils.format(row.lastActivityAt()),
         RunPresence.of(row.status(), row.lastActivityAt(), DateTimeUtils.now()),
-        row.reviewId());
+        row.reviewId(),
+        row.login(),
+        row.dispatchedBy());
   }
 
   @Override
@@ -1860,6 +1922,11 @@ record RunView(
     if (lastActivityAt != null) m.put("last_activity_at", lastActivityAt);
     if (presence != null) m.put("presence", presence);
     if (reviewId != null) m.put("review_id", reviewId);
+    if (login != null) {
+      m.put("login", login.name());
+      if (login.kind() != null) m.put("login_kind", login.kind());
+    }
+    if (dispatchedBy != null) m.put("dispatched_by", dispatchedBy);
     return m;
   }
 }

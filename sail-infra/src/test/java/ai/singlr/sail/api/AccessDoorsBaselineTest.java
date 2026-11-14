@@ -167,7 +167,31 @@ class AccessDoorsBaselineTest {
     rooms(world, doors);
     projects(doors);
     events(world, doors);
+    logins(doors);
     return doors;
+  }
+
+  /**
+   * The login doors: one's own, which every person keeps and no agent or container credential does,
+   * and another person's, which only an admin lists or removes. No login is stored on this box,
+   * whose database is in memory, so a door that passes Access answers what is not there.
+   */
+  private static void logins(List<Door> doors) {
+    doors.add(new Door("list my logins", ops -> ops.logins().list(null)));
+    doors.add(
+        new Door(
+            "store my claude-code login",
+            ops -> ops.logins().store("claude-code", "default", "token", "value")));
+    doors.add(new Door("use my claude-code login", ops -> ops.logins().use("claude-code", "work")));
+    doors.add(
+        new Door(
+            "remove my claude-code login",
+            ops -> ops.logins().remove("claude-code", "work", null)));
+    doors.add(new Door("list bob's logins", ops -> ops.logins().list(Cast.OTHER)));
+    doors.add(
+        new Door(
+            "remove bob's claude-code login",
+            ops -> ops.logins().remove("claude-code", "work", Cast.OTHER)));
   }
 
   /**

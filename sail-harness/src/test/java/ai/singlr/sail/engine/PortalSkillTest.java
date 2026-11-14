@@ -44,8 +44,7 @@ class PortalSkillTest {
         PortalSkill.script()
             .replace(SailPaths.apiSocketContainerPath().toString(), socket.toString()));
     Files.writeString(home.resolve("box.credential"), "sailbox_test\n");
-    writeExecutable(
-        bin.resolve("curl"), "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$HOME/curl.log\"\n");
+    writeExecutable(bin.resolve("curl"), FakeCurl.script(""));
     writeExecutable(bin.resolve("hostname"), "#!/bin/sh\necho acme\n");
   }
 
@@ -79,8 +78,9 @@ class PortalSkillTest {
   private String call(String... rest) {
     return "--silent --fail-with-body --max-time 20 --unix-socket "
         + socket
-        + " -H Authorization: Bearer sailbox_test "
-        + String.join(" ", rest);
+        + " "
+        + String.join(" ", rest)
+        + FakeCurl.presenting("sailbox_test");
   }
 
   private static void writeExecutable(Path path, String content) throws IOException {

@@ -274,17 +274,17 @@ class SyncRpcServerTest {
    * upgrade; nothing else is exchanged.
    */
   @Test
-  void aBoxOnTheProtocolBeforeCostIsRefusedAtTheHelloAndToldToReinstall() throws Exception {
-    assertEquals(8, SyncWire.PROTOCOL);
+  void aBoxOnTheProtocolBeforeRunLoginsIsRefusedAtTheHelloAndToldToReinstall() throws Exception {
+    assertEquals(9, SyncWire.PROTOCOL);
     var answers =
         serve(
             writer(new FakeMain()),
-            new SyncWire.Hello(7, "0.67.0", "b"),
+            new SyncWire.Hello(8, "0.68.0", "b"),
             new SyncWire.Pull("spec", 0, 10));
     var refusal = assertInstanceOf(SyncWire.Refuse.class, answers.getFirst());
     assertEquals(
         Remedy.of(
-            "this main speaks sync protocol 8, not 7: reinstall this box on dev, whose database is"
+            "this main speaks sync protocol 9, not 8: reinstall this box on dev, whose database is"
                 + " not converted: move its database aside and run '",
             Remedy.sail("init"),
             "', then join again"),
@@ -305,7 +305,7 @@ class SyncRpcServerTest {
   void onlyA058BoxOnAnOlderProtocolIsToldToUpgradeEveryOtherToReinstall() throws Exception {
     var upgrade =
         Remedy.of(
-            "this main speaks sync protocol 8, not 4: upgrade to dev: ", Remedy.sail("upgrade"));
+            "this main speaks sync protocol 9, not 4: upgrade to dev: ", Remedy.sail("upgrade"));
 
     assertEquals(upgrade, refusedAtHello(new SyncWire.Hello(4, "0.58.0", "b")));
     assertEquals(upgrade, refusedAtHello(new SyncWire.Hello(4, "0.58.3", "b")));
@@ -315,11 +315,12 @@ class SyncRpcServerTest {
             new SyncWire.Hello(4, "0.44.1", "b"),
             new SyncWire.Hello(4, null, "b"),
             new SyncWire.Hello(7, "0.59.0", "b"),
-            new SyncWire.Hello(7, "0.67.0", "b"))) {
+            new SyncWire.Hello(7, "0.67.0", "b"),
+            new SyncWire.Hello(8, "0.68.0", "b"))) {
       var refusal = refusedAtHello(hello);
       assertEquals(List.of(Remedy.sail("init")), refusal.commands(), hello.toString());
       assertTrue(
-          refusal.plain().startsWith("this main speaks sync protocol 8, not " + hello.protocol()),
+          refusal.plain().startsWith("this main speaks sync protocol 9, not " + hello.protocol()),
           refusal.plain());
     }
   }

@@ -1,0 +1,15 @@
+{"size": [100, 30], "steps": [
+  {"type": "pwd\r"},
+  {"wait": "(?m)^(/private)?/tmp$", "within": 20},
+  {"type": "echo local-$((6*7)); read -r line\r"},
+  {"wait": "(?m)^local-42$"},
+  {"snapshot": "before"},
+  {"drop": true},
+  {"phase": "attached", "within": 20},
+  {"same": "before"},
+  {"detach": true},
+  {"attach": true},
+  {"same": "before"},
+  {"killHost": true},
+  {"phase": "ended:restarted", "within": 30}
+]}

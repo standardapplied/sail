@@ -6,7 +6,7 @@
 package ai.singlr.sail.access;
 
 /**
- * What a principal asks to do: the nineteen actions that cover every door and sync lane, each a row
+ * What a principal asks to do: the twenty actions that cover every door and sync lane, each a row
  * of {@link Policy}. A type rule names the action, or actions, a revision takes, and every one of
  * them must be allowed. {@code label} and {@code covers} are the row as ARCHITECTURE.md shows it;
  * {@code verb} and {@code object} are how a refusal words it ({@link #act}).
@@ -98,6 +98,16 @@ public enum Action {
    * Erasing a whole project everywhere, or sweeping by a retention policy: whoever's work it is.
    */
   PURGE("Purge", "erase a project everywhere; a retention sweep", "purge"),
+  /**
+   * Keeping one's own harness logins: storing, replacing, choosing the default of, listing or
+   * removing them. Each door acts on its caller's own logins; another person's are listed or
+   * removed only by whoever manages people, and no door ever answers a value.
+   */
+  KEEP_LOGINS(
+      "Keep logins",
+      "store, replace, choose the default of, list or remove your own harness logins",
+      "keep",
+      "harness logins"),
   /** Changing the roster: adding, re-roling, granting, removing, pairing, minting tokens. */
   MANAGE_PEOPLE("Manage people", "add, change role, grant, remove, pair, mint tokens", "manage"),
   /** Acting for a box: a sync round, its sync health and bus stats, the main it points at. */

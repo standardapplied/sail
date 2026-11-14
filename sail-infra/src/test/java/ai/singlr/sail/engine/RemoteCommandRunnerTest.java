@@ -182,6 +182,35 @@ class RemoteCommandRunnerTest {
     assertEquals(0, exitCode);
   }
 
+  /**
+   * Storing a login reads its value at the box's terminal with echo off, so it asks for one; its
+   * other verbs print, and a terminal would mangle their output.
+   */
+  @Test
+  void onlyStoringALoginAndAnInteractiveShellAskForTheBoxsTerminal() {
+    assertTrue(RemoteCommandRunner.interactive("agent", "login", "claude-code"));
+    assertTrue(RemoteCommandRunner.interactive("agent", "login", "codex", "--name", "work"));
+    assertTrue(RemoteCommandRunner.interactive("agent", "login", "--kind", "api-key", "codex"));
+    assertTrue(RemoteCommandRunner.interactive("agent", "login", "--name", "work", "claude-code"));
+    assertTrue(
+        RemoteCommandRunner.interactive("agent", "login", "claude-code", "--name", "use"),
+        "a login named use is a name, not the verb");
+    assertTrue(RemoteCommandRunner.interactive("agent", "login", "--name", "list", "codex"));
+    assertTrue(RemoteCommandRunner.interactive("shell", "acme"));
+    for (var args :
+        List.of(
+            new String[] {"agent", "login", "list", "--json"},
+            new String[] {"agent", "login", "use", "codex", "work"},
+            new String[] {"agent", "login", "remove", "codex", "work"},
+            new String[] {"agent", "login", "--help"},
+            new String[] {"agent", "login", "codex", "--dry-run"},
+            new String[] {"agent", "login", "--json", "list"},
+            new String[] {"agent", "login"},
+            new String[] {"agent", "sessions", "acme"})) {
+      assertFalse(RemoteCommandRunner.interactive(args), String.join(" ", args));
+    }
+  }
+
   @Test
   void isHostOnlyCommandRecognizesHostSubcommands() {
     assertTrue(RemoteCommandRunner.isHostOnlyCommand("host"));

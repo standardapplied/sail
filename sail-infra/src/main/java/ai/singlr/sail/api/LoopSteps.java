@@ -119,8 +119,10 @@ final class LoopSteps {
    * The build goes on where it ended, with the answer in its prompt. A claim another run holds
    * defers it, and the stop that frees that claim resumes it ({@link LoopTrigger.Freed}). A resume
    * deferred or failed is said in the room when someone is there to be told, and marks the stop
-   * acted on; a quiet retry only logs. A failure after the run was written leaves that run {@code
-   * failed}, which nothing retries: the spec waits, in progress, for a person to re-dispatch it.
+   * acted on; a quiet retry only logs. One refused for want of a login was said once already
+   * ({@link RunLogins#forRun}), and the next answer resumes it once the login is stored. A failure
+   * after the run was written leaves that run {@code failed}, which nothing retries: the spec
+   * waits, in progress, for a person to re-dispatch it.
    */
   private Optional<LoopTrigger> resumeBuild(LoopFacts facts, LoopStep.ResumeBuild step) {
     var specId = facts.specId();
@@ -136,6 +138,9 @@ final class LoopSteps {
                 deferred.holder().runId());
       }
     } catch (RuntimeException e) {
+      if (RunLogins.wantsALogin(e)) {
+        return Optional.empty();
+      }
       var told = step.told() || wroteARun(facts);
       tell(facts, told, ReviewNarration.resumeFailed(reasonOf(e)), reasonOf(e));
       if (told) {
@@ -327,7 +332,9 @@ final class LoopSteps {
    * A claim the gate refused is recorded as the run that holds it, and the room is told in the same
    * write, so once per run waited on. A launch that fails after its agent started still left a run
    * serving the review, and the loop waits for that run's stop rather than act over it; one that
-   * left none is {@code notStarted}, for the reason it gives.
+   * left none is {@code notStarted}, for the reason it gives. One refused for want of a login was
+   * said once in the room ({@link RunLogins#forRun}) and leaves the review owed what it was, so the
+   * loop's next pass launches it once the login is stored.
    */
   private Optional<LoopTrigger> launch(
       Supplier<ReviewLanes.Invocation> invocation,
@@ -348,6 +355,9 @@ final class LoopSteps {
         }
       }
     } catch (Exception e) {
+      if (RunLogins.wantsALogin(e)) {
+        return Optional.empty();
+      }
       if (!reader.served(review.id())) {
         return Optional.of(notStarted.apply(reasonOf(e)));
       }

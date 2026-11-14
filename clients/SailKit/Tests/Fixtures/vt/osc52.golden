@@ -1,0 +1,10 @@
+size 30x3
+cursor 5,1 block visible steady
+colors fg #f6f1e9 bg #0a0e11 cursor #fc4926
+row 0 |copying done|
+row 1 |asked|
+reply 1b5d35323b633b07
+event clipboardWrite("hello clipboard")
+input ctrl-c 03
+input paste needs confirmation
+input focus-lost -

@@ -70,6 +70,11 @@ class TestOperations implements Operations {
     throw new UnsupportedOperationException();
   }
 
+  @Override
+  public LoginOperations logins() {
+    throw new UnsupportedOperationException();
+  }
+
   static final String RUN_CREDENTIAL = "sailrun_test";
   static final String PRINCIPAL = "claude/abc123";
   static final String OWNER = "uday";
@@ -159,6 +164,8 @@ class TestOperations implements Operations {
         null,
         null,
         "lounge",
+        null,
+        null,
         null,
         null,
         null,
@@ -380,6 +387,8 @@ class TestOperations implements Operations {
                 null,
                 null,
                 "/home/dev/.sail/runs/" + runId + "/agent.log",
+                null,
+                null,
                 null,
                 null,
                 null,
