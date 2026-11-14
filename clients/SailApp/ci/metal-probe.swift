@@ -9,7 +9,7 @@ let shaders = """
 using namespace metal;
 struct Quad { float2 origin; float2 size; float4 color; };
 struct Out { float4 position [[position]]; float2 uv; float4 color; };
-vertex Out quad(uint v [[vertex_id]], uint i [[instance_id]], constant Quad *quads [[buffer(0)]], constant float2 &viewport [[buffer(1)]]) {
+vertex Out quadVertex(uint v [[vertex_id]], uint i [[instance_id]], constant Quad *quads [[buffer(0)]], constant float2 &viewport [[buffer(1)]]) {
     float2 corner = float2(v & 1, v >> 1);
     float2 p = quads[i].origin + corner * quads[i].size;
     Out o;
@@ -29,7 +29,7 @@ func offscreen(_ device: MTLDevice) throws {
     let started = Date()
     let library = try device.makeLibrary(source: shaders, options: nil)
     let pipeline = MTLRenderPipelineDescriptor()
-    pipeline.vertexFunction = library.makeFunction(name: "quad")
+    pipeline.vertexFunction = library.makeFunction(name: "quadVertex")
     pipeline.fragmentFunction = library.makeFunction(name: "tint")
     pipeline.colorAttachments[0].pixelFormat = .bgra8Unorm
     pipeline.colorAttachments[0].isBlendingEnabled = true
@@ -80,6 +80,31 @@ func offscreen(_ device: MTLDevice) throws {
     line("offscreen: gpu time \(String(format: "%.3f", (buffer.gpuEndTime - buffer.gpuStartTime) * 1000)) ms")
 }
 
+final class InputView: NSView, NSTextInputClient {
+    var log: [String] = []
+    var marked = NSAttributedString()
+    override var acceptsFirstResponder: Bool { true }
+    override func keyDown(with event: NSEvent) {
+        log.append("keyDown(\(event.keyCode))")
+        let handled = inputContext?.handleEvent(event) ?? false
+        log.append("handled=\(handled) context=\(inputContext != nil)")
+    }
+    func insertText(_ string: Any, replacementRange: NSRange) { log.append("insert(\(string))"); marked = NSAttributedString() }
+    func doCommand(by selector: Selector) { log.append("command(\(selector))") }
+    func setMarkedText(_ string: Any, selectedRange: NSRange, replacementRange: NSRange) {
+        marked = (string as? NSAttributedString) ?? NSAttributedString(string: string as? String ?? "")
+        log.append("marked(\(marked.string))")
+    }
+    func unmarkText() { log.append("unmark"); marked = NSAttributedString() }
+    func selectedRange() -> NSRange { NSRange(location: NSNotFound, length: 0) }
+    func markedRange() -> NSRange { marked.length > 0 ? NSRange(location: 0, length: marked.length) : NSRange(location: NSNotFound, length: 0) }
+    func hasMarkedText() -> Bool { marked.length > 0 }
+    func attributedSubstring(forProposedRange range: NSRange, actualRange: NSRangePointer?) -> NSAttributedString? { nil }
+    func validAttributesForMarkedText() -> [NSAttributedString.Key] { [] }
+    func firstRect(forCharacterRange range: NSRange, actualRange: NSRangePointer?) -> NSRect { .zero }
+    func characterIndex(for point: NSPoint) -> Int { NSNotFound }
+}
+
 final class Probe: NSObject, NSApplicationDelegate {
     var window: NSWindow?
     var ticks = 0
@@ -87,6 +112,7 @@ final class Probe: NSObject, NSApplicationDelegate {
     var presented = 0
     var layer = CAMetalLayer()
     var link: CADisplayLink?
+    var input: InputView?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         for s in NSScreen.screens {
@@ -100,8 +126,12 @@ final class Probe: NSObject, NSApplicationDelegate {
         view.layer = layer
         window.contentView = view
         window.makeKeyAndOrderFront(nil)
-        NSApp.activate()
+        NSApp.activate(ignoringOtherApps: true)
         self.window = window
+        let input = InputView(frame: NSRect(x: 0, y: 0, width: 10, height: 10))
+        view.addSubview(input)
+        line("makeFirstResponder: \(window.makeFirstResponder(input))")
+        self.input = input
         let link = view.displayLink(target: self, selector: #selector(tick(_:)))
         link.add(to: .main, forMode: .common)
         self.link = link
@@ -132,6 +162,19 @@ final class Probe: NSObject, NSApplicationDelegate {
         }
         let key = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0, windowNumber: window?.windowNumber ?? 0, context: nil, characters: "a", charactersIgnoringModifiers: "a", isARepeat: false, keyCode: 0)
         line("synthesized key event: \(key != nil)")
+        func press(_ chars: String, _ ignoring: String, _ code: UInt16, _ flags: NSEvent.ModifierFlags) {
+            for type in [NSEvent.EventType.keyDown, .keyUp] {
+                if let e = NSEvent.keyEvent(with: type, location: .zero, modifierFlags: flags, timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window?.windowNumber ?? 0, context: nil, characters: chars, charactersIgnoringModifiers: ignoring, isARepeat: false, keyCode: code) { window?.sendEvent(e) }
+            }
+        }
+        press("a", "a", 0, [])
+        press("\u{3}", "c", 8, [.control])
+        press("", "e", 14, [.option])
+        press("e", "e", 14, [])
+        press("\r", "\r", 36, [])
+        line("input log: \(input?.log ?? [])")
+        line("window key after events=\(window?.isKeyWindow ?? false) firstResponder=\(String(describing: window?.firstResponder))")
+        line("input source: \(NSTextInputContext.current?.selectedKeyboardInputSource ?? "nil") / \(input?.inputContext?.selectedKeyboardInputSource ?? "nil")")
         NSApp.terminate(nil)
     }
 }
