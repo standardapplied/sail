@@ -1597,7 +1597,8 @@ the one whose name and keys match.
   free, or when as many spec workspaces hold a live run as the box's memory (from `incus query
   /1.0/resources`) holds of the project's memory limit, and at least one. A stale template is cloned
   as it is, and the spec's room is told once, naming the build that freshens it; dispatch never
-  builds a template.
+  builds a template, and reads it under the template's lock, so one a build holds is waited for and
+  the version it built is cloned (W7). A degraded mirror goes on, said once.
 - **Entered after it.** `RunPlaces.enter` reuses a whole workspace as it is (starting it when
   stopped), or makes it from the checked template version under the box-wide
   `workspace-create.lock`, one create at a time, and refuses `runner_busy` when another create holds
@@ -1618,7 +1619,9 @@ the one whose name and keys match.
   `BuildDispatchCoverageTest.aBoxAtItsCapOfLiveRunWorkspacesIsBusyNamingTheCountAndTheCap`,
   `BuildDispatchCoverageTest.aDispatchThatWaitsPastTheCreateLocksLimitIsBusyAndItsRunIsReleased`,
   `WorkspacesTest.aSpecsFirstRunClonesTheCurrentTemplateWithItsSpecAndOwnerAndLeavesItsReposDetached`,
-  `WorkspacesTest.aWorkspaceALiveRunOfItsSpecIsInIsNeitherStoppedNorDeleted`, `WorkBranchTest`,
+  `WorkspacesTest.aWorkspaceALiveRunOfItsSpecIsInIsNeitherStoppedNorDeleted`,
+  `WorkspacesTest.aSpecsRunWaitsOnABuildOfItsTemplateUnderWayAndClonesWhatItBuilt`,
+  `WorkspacesTest.aSpecsRunOnADegradedPoolIsMadeAndThePoolIsSaidDegradedOnce`, `WorkBranchTest`,
   `StopOperationsTest.aProjectTargetWithTwoSpecsLiveIsRefusedNamingEachAndTheSpecFormStopsOne`,
   `ConcurrentDispatchIT` (two specs on one repo at once, each in its own workspace under its own
   unit), `ReviewAgentLoopIT` (every run of a spec in one workspace), `RunLoginIT`.*

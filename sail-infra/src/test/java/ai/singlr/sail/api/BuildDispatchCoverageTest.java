@@ -658,14 +658,16 @@ class BuildDispatchCoverageTest {
   }
 
   /**
-   * A ZFS box's Incus whose list holds {@code before} for a spec's first two reads (its check, and
-   * the create's own under the workspace's lock) and {@code after} for every read since.
+   * A ZFS box's Incus whose list holds {@code before} for a spec's first three reads (its check's
+   * of the template, under the template's lock, and of the box, and the create's own under the
+   * workspace's lock) and {@code after} for every read since.
    */
   private static ScriptedShellExecutor incus(String before, String after) {
     return new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
         .onOk("incus storage list --format json", TestWorkspaces.POOL)
         .onceOnOk("incus list --format", "[" + before + "]")
         .onceOnOk("incus list --format j", "[" + before + "]")
+        .onceOnOk("incus list --format js", "[" + before + "]")
         .onOk("incus list --format json", "[" + after + "]")
         .onOk("incus snapshot list acme--tmpl --format json", TestWorkspaces.V1);
   }

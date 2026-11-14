@@ -8,6 +8,7 @@ package ai.singlr.sail.engine;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 
+import java.util.List;
 import org.junit.jupiter.api.Test;
 
 class AgentPresenceTest {
@@ -65,6 +66,27 @@ class AgentPresenceTest {
         AgentSession.Presence.Unanswered.class,
         presenceIn(containerListedAs("Freezing")),
         "an incus outage, or a state it does not name, never reads as every agent gone");
+  }
+
+  @Test
+  void aSpecsRunIsAskedOfItsOwnWorkspaceAndAWorkspaceIncusNoLongerListsRunsNoAgent()
+      throws Exception {
+    var place = RunPlace.of("acme", "fix-login");
+    var inWorkspace = new ScriptedShellExecutor().onOk("incus exec acme-fix-login", "gone");
+    var workspaceGone =
+        new ScriptedShellExecutor()
+            .onOk("incus list", "[{\"name\": \"acme\", \"status\": \"Running\", \"state\": {}}]");
+
+    assertInstanceOf(
+        AgentSession.Presence.Gone.class, new AgentPresence(inWorkspace).of(place, UNIT));
+    assertInstanceOf(
+        AgentSession.Presence.Gone.class, new AgentPresence(workspaceGone).of(place, UNIT));
+    assertEquals(
+        List.of(),
+        workspaceGone.invocations().stream()
+            .filter(command -> command.startsWith("incus exec acme "))
+            .toList(),
+        "the project's container is never asked about a spec's run");
   }
 
   @Test

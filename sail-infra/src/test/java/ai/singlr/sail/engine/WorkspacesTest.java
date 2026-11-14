@@ -37,6 +37,8 @@ import java.util.TreeMap;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.FutureTask;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
@@ -1960,6 +1962,97 @@ class WorkspacesTest {
                 + " \"user.sail.template\": \"v1\", \"user.sail.ready\": \"1762941601000\","
                 + " \"user.sail.spec\": \"%s\", \"user.sail.owner\": \"%s\"")
             .formatted(spec, owner));
+  }
+
+  /** Scenario 14: a spec's run on a degraded mirror goes on, and the pool is said degraded once. */
+  @Test
+  void aSpecsRunOnADegradedPoolIsMadeAndThePoolIsSaidDegradedOnce() throws Throwable {
+    var shell =
+        incus(DIR_AND_MIRROR, list(template("v1", INPUTS)), snapshots("v1"))
+            .onOk(
+                "zpool status -P tank",
+                DeviceFixtures.read("handwritten-mirror-degraded-removed.zpool-status.txt")
+                    .replace("devpool", "tank"));
+    var workspaces = workspaces(shell, ticks(0, 1, 2, 3, 4, 5, 6, 7));
+
+    var said =
+        stderrOf(
+            () ->
+                workspaces.enterSpec(
+                    workspaces.checkSpec(FIX, INPUTS, name -> false),
+                    acme(),
+                    "uday",
+                    tempDir.resolve("no-files")));
+
+    assertTrue(
+        shell.invocations().stream().anyMatch(c -> c.startsWith("incus copy acme--tmpl/v1 ")),
+        String.join("\n", shell.invocations()));
+    assertEquals(1, said.split("Pool tank is DEGRADED", -1).length - 1, said);
+  }
+
+  /**
+   * Scenario 12 (W7): a spec's run that finds its template being built waits for the build, then
+   * clones the version it built, never refused for a template the build has not yet recorded.
+   */
+  @Test
+  void aSpecsRunWaitsOnABuildOfItsTemplateUnderWayAndClonesWhatItBuilt() throws Exception {
+    var built = new AtomicBoolean();
+    var before = incus(DIR_AND_ZFS, list(), snapshots());
+    var after = incus(DIR_AND_ZFS, list(template("v1", INPUTS)), snapshots("v1"));
+    var shell = switching(built, before, after);
+    var workspaces = workspaces(shell, ticks(0, 1, 2, 3, 4, 5, 6, 7));
+    var checked = new AtomicReference<Workspaces.SpecCheck>();
+    var failed = new AtomicReference<Exception>();
+    Thread checking;
+    try (var build = ContainerConfig.hold(locks(), "acme--tmpl")) {
+      checking =
+          Thread.ofPlatform()
+              .start(
+                  () -> {
+                    try {
+                      checked.set(workspaces.checkSpec(FIX, INPUTS, name -> false));
+                    } catch (Exception e) {
+                      failed.set(e);
+                    }
+                  });
+      var deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(30);
+      while (checking.getState() != Thread.State.WAITING
+          && checking.getState() != Thread.State.TERMINATED
+          && System.nanoTime() < deadline) {
+        Thread.onSpinWait();
+      }
+      assertEquals(
+          Thread.State.WAITING,
+          checking.getState(),
+          "the check waits on the build's lock: " + failed.get());
+      built.set(true);
+    }
+    checking.join(TimeUnit.SECONDS.toMillis(30));
+
+    assertEquals(null, failed.get());
+    assertEquals("v1", checked.get().template().version());
+  }
+
+  /** A shell that answers as {@code before} until {@code built} is set, then as {@code after}. */
+  private static ShellExec switching(AtomicBoolean built, ShellExec before, ShellExec after) {
+    return new ShellExec() {
+      @Override
+      public Result exec(List<String> command)
+          throws IOException, InterruptedException, TimeoutException {
+        return (built.get() ? after : before).exec(command);
+      }
+
+      @Override
+      public Result exec(List<String> command, Path workDir, Duration timeout)
+          throws IOException, InterruptedException, TimeoutException {
+        return (built.get() ? after : before).exec(command, workDir, timeout);
+      }
+
+      @Override
+      public boolean isDryRun() {
+        return false;
+      }
+    };
   }
 
   @Test

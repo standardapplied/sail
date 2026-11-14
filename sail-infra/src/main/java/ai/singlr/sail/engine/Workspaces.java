@@ -371,18 +371,18 @@ public final class Workspaces {
    * (R3): a box with no ZFS pool is refused naming the command that adds one, a project with no
    * current template naming the command that builds it, a pool ZFS says is neither online nor
    * degraded naming {@code zpool status}, and a name another workspace holds naming that workspace.
-   * The template is never built here: a stale one is cloned as it is, and said to be stale.
+   * The template is never built here: a stale one is cloned as it is, and said to be stale; one a
+   * build holds is waited for (W7).
    */
   public SpecCheck checkSpec(RunPlace.SpecWorkspace place, String inputs, Predicate<String> held)
       throws IOException, InterruptedException, TimeoutException {
     var zfs = WorkspaceTemplate.requireZfs(observer);
-    var instances = box.all();
     var template =
         new WorkspaceTemplate(observer, shell, locks)
-            .current(place.project(), instances, zfs)
+            .current(place.project(), zfs)
             .orElseThrow(() -> noTemplate(place.project()));
     WorkspaceTemplate.requireUsable(observer, template.pool());
-    var found = requireTheSpecs(place, held, instances);
+    var found = requireTheSpecs(place, held, box.all());
     var space = new IncusStorage(observer).find(template.pool()).flatMap(IncusStorage.Pool::space);
     return new SpecCheck(place, template, found, !inputs.equals(template.inputs()), space);
   }

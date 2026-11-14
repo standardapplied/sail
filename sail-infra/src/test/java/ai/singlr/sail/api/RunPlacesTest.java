@@ -26,6 +26,7 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.TimeoutException;
@@ -187,7 +188,7 @@ class RunPlacesTest {
         new ScriptedShellExecutor()
             .onOk("incus query /1.0/resources", "{\"memory\": {\"total\": 68719476736}}");
 
-    for (var shell : List.of(unreadable, interrupted, silent, roomy)) {
+    for (var shell : List.of(unreadable, silent, roomy, interrupted)) {
       var places =
           new RunPlaces(
               new ProjectLoader(shell, definitions()),
@@ -228,6 +229,36 @@ class RunPlacesTest {
             });
 
     assertTrue(loader.held("acme-auth"));
+  }
+
+  @Test
+  void aReusedWorkspaceOfAStaleTemplateIsEnteredAsItIsAndTheRoomIsToldNothing() throws Exception {
+    var incus =
+        new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
+            .onOk("incus storage list --format json", TestWorkspaces.POOL)
+            .onOk(
+                "incus list --format json",
+                "["
+                    + TestWorkspaces.template("acme", "an-older-definition")
+                    + ","
+                    + TestWorkspaces.specWorkspace("acme", "auth", "Running", "eng")
+                    + "]")
+            .onOk("incus snapshot list acme--tmpl --format json", TestWorkspaces.V1);
+    var told = new ArrayList<String>();
+    var places =
+        new RunPlaces(
+            new ProjectLoader(new ScriptedShellExecutor(), definitions()),
+            TestWorkspaces.over(incus),
+            null,
+            new ScriptedShellExecutor(),
+            (specId, body) -> told.add(body));
+    var check = places.checkSpec("acme", config(), "auth", "eng");
+
+    var entered = places.enter(check, config(), "eng");
+
+    assertInstanceOf(Workspaces.Reused.class, entered.workspace().orElseThrow());
+    assertEquals(false, entered.stale());
+    assertEquals(List.of(), told);
   }
 
   @Test

@@ -216,22 +216,28 @@ public final class WorkspaceTemplate {
   }
 
   /**
-   * Project {@code project}'s template as its workspaces clone it now, read from {@code instances}
-   * and built by nothing: its current version when one is recorded and its snapshot exists, on a
-   * ZFS pool among {@code zfs}; empty when the project has no such template. What a dispatch
-   * clones, since only a person can build a template (its repos' tokens are theirs to give); {@code
-   * inputs()} is what it was built from, which a definition edited since no longer matches.
+   * Project {@code project}'s template as its workspaces clone it now, built by nothing: its
+   * current version when one is recorded and its snapshot exists, on a ZFS pool among {@code zfs};
+   * empty when the project has no such template. What a dispatch clones, since only a person can
+   * build a template (its repos' tokens are theirs to give); {@code inputs()} is what it was built
+   * from, which a definition edited since no longer matches. It is read under the template's lock,
+   * so a read while a build is under way waits for it and answers what it built (W7).
    */
-  Optional<Template> current(
-      String project, List<BoxInstances.Instance> instances, List<String> zfs)
+  Optional<Template> current(String project, List<String> zfs)
       throws IOException, InterruptedException, TimeoutException {
     var template = nameOf(project);
+    try (var held = shell.isDryRun() ? null : ContainerConfig.hold(locks, template)) {
+      return recorded(project, template, zfs);
+    }
+  }
+
+  private Optional<Template> recorded(String project, String template, List<String> zfs)
+      throws IOException, InterruptedException, TimeoutException {
     var found =
-        instances.stream()
-            .filter(i -> i.name().equals(template))
+        new BoxInstances(observer)
+            .named(template)
             .filter(i -> i.kind() instanceof BoxInstances.Template(var of) && of.equals(project))
-            .filter(i -> zfs.contains(i.pool()))
-            .findFirst();
+            .filter(i -> zfs.contains(i.pool()));
     var version = found.flatMap(i -> i.key(CURRENT_KEY));
     if (version.isEmpty()
         || new SnapshotManager(observer)
