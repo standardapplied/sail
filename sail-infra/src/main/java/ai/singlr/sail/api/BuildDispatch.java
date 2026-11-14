@@ -209,6 +209,7 @@ public final class BuildDispatch {
             unit,
             config,
             claim);
+    var launching = false;
     try {
       var entered = places.enter(checked, config, localHandle);
       var workspace = DispatchOperations.WorkspaceUse.entered(entered);
@@ -216,6 +217,7 @@ public final class BuildDispatch {
       seedRoomDelivery(runId, built.renderedMessages());
       var branchCreated =
           prepare(entered.place(), targetRepos, resolution, taskSpec, branch, task, request.mode());
+      launching = true;
       var launch =
           runLauncher.launchAgent(
               entered.place(),
@@ -254,8 +256,21 @@ public final class BuildDispatch {
           launch.watcher());
     } catch (RuntimeException e) {
       runReservation.releaseIfAbsent(runId, checked.place(), unit);
+      if (!launching) {
+        giveBack(nextSpec);
+      }
       throw e;
     }
+  }
+
+  /**
+   * Gives back what the claim of {@code spec} took when its run could not be launched after the
+   * reservation (the workspace busy, its create failed, a branch collision): the spec is pending
+   * again, so the dispatch its refusal names works as printed. A restart had already set it
+   * pending, which it stays.
+   */
+  private void giveBack(Spec spec) {
+    specStore.updateReposAndStatus(spec.id(), spec.repos(), SpecStatus.PENDING, null);
   }
 
   /**

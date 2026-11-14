@@ -908,10 +908,37 @@ class BuildDispatchCoverageTest {
           List.of("failed"),
           new RunStore(db).listForSpec("auth").stream().map(RunStore.RunRow::status).toList(),
           "the run it reserved is let go");
+      assertEquals(
+          SpecStatus.PENDING,
+          new SpecStore(db).findById("auth").orElseThrow().status(),
+          "the claim is given back");
     } finally {
       release.countDown();
       other.join();
     }
+
+    assertInstanceOf(
+        DispatchOperations.Dispatched.class,
+        dispatch(ops(launching(), YAML, db)),
+        "the dispatch again the refusal names works as printed");
+  }
+
+  /** M1: a create that fails gives the claim back, so the next dispatch meets the failure again. */
+  @Test
+  void aCreateThatFailsGivesTheClaimBackAndTheNextDispatchMeetsItsOwnReason() throws IOException {
+    var db = seedDb();
+    var template = TestWorkspaces.currentTemplate(definitions(), "acme");
+    workspaces = TestWorkspaces.over(incus(template, template).onFail("incus copy", "no space"));
+
+    for (var attempt = 0; attempt < 2; attempt++) {
+      var refused = assertThrows(ApiException.class, () -> dispatch(ops(launching(), YAML, db)));
+
+      assertEquals(ErrorCode.COMMAND_FAILED, refused.failure().errorCode());
+      assertEquals(SpecStatus.PENDING, new SpecStore(db).findById("auth").orElseThrow().status());
+    }
+    assertTrue(
+        new RunStore(db)
+            .listForSpec("auth").stream().allMatch(run -> run.status().equals("failed")));
   }
 
   /** Scenario 11: a template older than the definition is cloned as it is, and said so once. */
