@@ -20,12 +20,16 @@ usage() {
 Usage:
   ci/fleet run VERSION [--upgrade-to TARGET] [--group GROUP]...
                                 fresh fleets on release VERSION (e.g. 0.59.0), one per group of scenarios
-                                (access, storage, rebuilt, loop), all at once, every scenario, one report;
+                                (access, storage, rebuilt), all at once, every scenario, one report;
                                 a fleet goes down when all its checks pass and is kept when one fails;
                                 --group runs only the groups named; with --upgrade-to, projects (and, in
                                 its group, conflicts) run on VERSION, each fleet is upgraded to TARGET,
                                 main first (a release version, or a native binary file for sail upgrade
                                 --binary), and every other scenario runs on TARGET
+  FLEET_SERIAL=1 ci/fleet run VERSION [--upgrade-to TARGET]
+                                the gate of record for a version being cut: one fleet, every scenario in
+                                order, so each one meets everything the ones before it wrote; the parallel
+                                default is the fast check while working
   ci/fleet up RUN               create the run's four VMs and wait until each answers ssh
   ci/fleet install RUN VERSION  install release VERSION on every box from the README's install line;
                                 VERSION may be a candidate binary, put in place by sail upgrade --binary
@@ -37,6 +41,9 @@ Usage:
                                 resolves the same everywhere; different fields merge; a conversation
                                 reads the same on every box
   ci/fleet containers RUN       apply acme on client and observer
+  ci/fleet furnish RUN          give acme what the scenarios before storage give it in order: the
+                                loop's repo, runtimes and agent install, and a shared file
+  ci/fleet eng-acme RUN         apply acme on eng, as access does before the loop in order
   ci/fleet inside RUN           apply acme on client and observer; each role at the in-container spec
                                 CLI and at the HTTP API Mast calls; from main, over client's private address,
                                 a ticket from the API opens a session over TCP that echoes a line, and the
@@ -97,14 +104,21 @@ Usage:
                                 across a release whose schema no older database opens (0.68.0),
                                 where boxes are installed fresh (run passes its VERSION as FROM)
   ci/fleet ssh RUN BOX COMMAND  run COMMAND on BOX as the operator account
-  ci/fleet down [RUN]           delete the run's VMs (a parallel run's id takes down all its groups),
-                                or every fleet VM when RUN is left out
+  ci/fleet list                 every fleet VM and detached fleet disk in the project, with its age
+  ci/fleet down [RUN]           delete the run's VMs and its detached disks (a parallel run's id takes
+                                down all its groups), or every fleet VM when RUN is left out; exits 1
+                                naming what is left when a delete fails
 
 Each step logs to $FLEET_RUNS/RUN/ (default ~/.sail-fleet); report.txt holds one line per check.
-A scenario runs on a standing fleet as often as asked, every check of it, and exits 1 on a FAIL;
-run again, it gives what it creates a suffix of its attempt. A kept fleet names its run id and
-the commands that go on from what failed. FLEET_SERIAL=1 runs every scenario on one fleet, one
-after another. FLEET_KEEP=always leaves every fleet up; FLEET_KEEP=0 takes down even a failed one.
+A scenario subcommand runs every check of the scenario on a standing fleet and exits 1 on a FAIL;
+run again, it gives what it creates a suffix of its attempt. Most scenarios run again on the
+fleet they ran on; not storage, which deletes its own disk, nor up, install, join or projects:
+those need a fresh fleet, ci/fleet run VERSION --group GROUP. doors does not run again once access
+has written beta's specs, nor conflicts while an earlier attempt's conflict is still parked. A
+rerun is for diagnosis and for proving a fix: it does not clear the run's FAIL, and a release
+passes only on a run whose report has 0 FAIL. A kept fleet names its run id, when its VMs delete
+themselves, and the commands that go on from what failed. FLEET_KEEP=always leaves every fleet up;
+FLEET_KEEP=0 takes down even a failed one.
 FLEET_LOOP=0 skips the agent loop, which needs the fleet-* secrets and spends model tokens;
 FLEET_LOOP_AGENTS names the agents it installs, builder first (default: claude-code; add codex to have it review).
 EOF
@@ -138,32 +152,40 @@ route() {
   file="$(log_dir "$run")/route-$box"
   if [[ ! -s $file ]]; then
     line=$(gc compute ssh "$(vm "$run" "$box")" --zone "$ZONE" --dry-run --command true) || return 1
-    [[ $line == *" -o StrictHostKeyChecking=yes "* && $line == *" -- true" ]] || {
+    [[ $line == *" -o StrictHostKeyChecking=yes "* && $line == *" -- true" && $line != *StrictHostKeyChecking=no* \
+      && $line != *accept-new* && $line != *UserKnownHostsFile=/dev/null* ]] || {
       echo "ci/fleet: gcloud offers no checked ssh to $box: $line" >&2
       return 1
     }
     line=${line% -- true}
-    printf '%s\n' "${line#* }" > "$file.$$" && mv "$file.$$" "$file"
+    printf '%s\n' "${line#* }" > "$file.$BASHPID" && mv "$file.$BASHPID" "$file"
   fi
   cat "$file"
 }
 
-shared_connection() { echo "$(log_dir "$1")/ssh-$2"; }
+# ssh adds 17 characters to the control path while it makes the connection, and refuses one over 107.
+shared_connection() {
+  local path
+  path="$(log_dir "$1")/ssh-$2"
+  ((${#path} <= 90)) || { echo "ci/fleet: the ssh control path $path is too long: give FLEET_RUNS a shorter directory." >&2; return 1; }
+  echo "$path"
+}
 
 on() {
-  local run=$1 box=$2 options destination
+  local run=$1 box=$2 options socket destination
   shift 2
   options=$(route "$run" "$box") || return 1
+  socket=$(shared_connection "$run" "$box") || return 1
   destination=${options##* }
   options=${options% *}
   # shellcheck disable=SC2086
   ssh $options $SSH_OPTIONS -o ControlMaster=auto -o ControlPersist=10m \
-    -o ControlPath="$(shared_connection "$run" "$box")" "$destination" -- "$*"
+    -o ControlPath="$socket" "$destination" -- "$*"
 }
 
 forget_route() {
   local socket
-  socket=$(shared_connection "$1" "$2")
+  socket=$(shared_connection "$1" "$2") || socket=""
   [[ -S $socket ]] && { ssh -o ControlPath="$socket" -O exit "$2" 2> /dev/null || true; }
   rm -f "$(log_dir "$1")/route-$2"
 }
@@ -174,7 +196,7 @@ log_dir() {
 }
 
 # Runs the probe until it holds, says it never will (status 2), or SECONDS have gone by, EVERY
-# seconds apart.
+# seconds apart. A probe may set its caller's locals (said, after, last) for the caller to report.
 until_true() {
   local deadline=$((SECONDS + $1)) every=$2 verdict
   shift 2
@@ -250,6 +272,7 @@ up() {
     wait "$pid" || failed=1
   done
   [[ $failed == 0 ]] || { echo "ci/fleet: a VM of $run was not created." >&2; return 1; }
+  date -u -d "+${MAX_RUN%h} hours" '+%H:%M UTC on %b %d' > "$(log_dir "$run")/expires"
   pids=""
   for box in $BOXES; do
     answers_ssh "$run" "$box" &
@@ -288,7 +311,17 @@ install() {
 }
 
 init_main() {
-  on "$1" main "sudo sail init --as-main --handle uday --name 'Uday Fleet' --email uday@fleet.example"
+  on "$1" main "sudo sail init --as-main --handle uday --name 'Uday Fleet' --email uday@fleet.example" \
+    | tee "$(log_dir "$1")/init-main.out"
+}
+
+# init's download of Incus from Zabbly sometimes stalls for minutes: the report says how long each
+# box's took, so a slow run explains itself.
+incus_took() {
+  local seconds
+  seconds=$(sed 's/\x1b\[[0-9;]*[A-Za-z]//g' "$(log_dir "$1")/init-$2.out" 2> /dev/null | tr '\r' '\n' \
+    | grep -F 'Installing Incus' | grep -oE '\([0-9]+s\)$' | tail -1 | tr -dc '0-9') || true
+  echo "init on $2 installed Incus in ${seconds:-?} s" | tee -a "$(log_dir "$1")/report.txt"
 }
 
 init_node() {
@@ -321,7 +354,7 @@ join() {
   local run=${1:-}
   [[ -n $run ]] || usage
   check "$run" "init main as uday (admin)" init_main "$run"
-  local main_ip eng client observer
+  local main_ip eng client observer box
   main_ip=$(internal_ip "$run" main)
   init_node "$run" eng eng "$main_ip" &
   eng=$!
@@ -332,6 +365,9 @@ join() {
   check "$run" "join eng (member, every project)" join_node "$run" eng member all "$eng"
   check "$run" "join client (member, scoped)" join_node "$run" client member scoped "$client"
   check "$run" "join observer (viewer, scoped)" join_node "$run" observer viewer scoped "$observer"
+  for box in $BOXES; do
+    incus_took "$run" "$box"
+  done
   check "$run" "main's roster has every FDE with its role" roster "$run"
 }
 
@@ -427,7 +463,7 @@ sync_all() {
   done
 }
 
-main_holds() { on "$1" main "sudo sail spec show $2 --no-sync" > /dev/null 2>&1; }
+main_holds() { on "$1" main "sudo sail spec show $2 --no-sync" > /dev/null 2>&1 && return 0; return 1; }
 
 reaches_main_unasked() {
   local start=$SECONDS
@@ -694,6 +730,24 @@ conflicts() {
 containers() {
   check "$1" "client applies acme" apply_project "$1" client acme
   check "$1" "observer applies acme" apply_project "$1" observer acme
+}
+
+# In order, storage builds its template and workspaces from an acme that the loop gave a repo,
+# runtimes and an agent, and that files gave a shared file: on a fleet of its own it gets them
+# first, by the same checks, so the same provisioning is proven.
+furnish() {
+  local run=${1:-}
+  [[ -n $run ]] || usage
+  loop_config "$run"
+  check "$run" "main shares notes.md in acme" share "$run" main acme notes.md "acme notes v1"
+  check "$run" "every node syncs twice" sync_all "$run"
+}
+
+# In order, the loop re-applies an acme that access applied on eng.
+eng-acme() {
+  local run=${1:-}
+  [[ -n $run ]] || usage
+  check "$run" "eng applies acme" apply_project "$run" eng acme
 }
 
 inside() {
@@ -1554,6 +1608,7 @@ rebuilt() {
   check "$run" "a new main comes up in its place" brings_up_main "$run"
   check "$run" "install $version on the new main" install_box "$run" main "$version"
   check "$run" "the new main inits empty, as uday" init_main "$run"
+  incus_took "$run" main
   main_ip=$(internal_ip "$run" main)
   check "$run" "observer pins the empty main and checks its fingerprint" pins_main "$run" observer "$main_ip"
   check "$run" "the empty main admits obs as a viewer" admits_on_empty_main "$run" observer viewer
@@ -1590,20 +1645,23 @@ place_secret() {
   secret "$3" | on "$1" "$2" "sudo sh -c 'umask 077; mkdir -p /root/.fleet; cat > /root/.fleet/$4; test -s /root/.fleet/$4'"
 }
 
+# A parallel run writes each group's output beside the groups' log dirs, so that log is read too.
 no_secret_in_logs() {
-  local run=$1 dir name leaked=0
+  local run=$1 dir name value leaked=0
   dir=$(log_dir "$run")
   for name in $SECRETS; do
-    if grep -rqF -f <(secret "$name") "$dir"; then
-      echo "$name appears in $dir: its logs are deleted"
+    value=$(secret "$name")
+    [[ -n $value ]] || { echo "$name read empty: nothing to look for"; return 1; }
+    if grep -rqF -f <(printf '%s\n' "$value") "$dir" ${group_log:+"$group_log"}; then
+      echo "$name appears in $dir${group_log:+ or $group_log}: its logs are deleted"
       leaked=1
     fi
   done
   if [[ $leaked == 1 ]]; then
-    rm -f "$dir"/*.log "$dir"/report.txt
+    rm -f "$dir"/*.log "$dir"/report.txt ${group_log:+"$group_log"}
     return 1
   fi
-  echo "no secret appears in $dir"
+  echo "no secret appears in $dir${group_log:+ or $group_log}"
 }
 
 registers_container_key() {
@@ -1777,14 +1835,18 @@ that `mvn -q verify` builds and tests every module and that the build needs JDK 
 `mvn -q verify` yourself and say in the pull request that it passed. Change only pom.xml and
 README.md.'
 
+loop_config() {
+  check "$1" "main gives acme the nocaptcha repo, JDK 21 and Maven" \
+    on "$1" main "echo '[{\"url\":\"https://github.com/$LOOP_REPO.git\",\"path\":\"nocaptcha\"}]' | sudo sail project config set acme repos - && echo '{\"jdk\":21,\"maven\":\"3.9.9\"}' | sudo sail project config set acme runtimes -"
+  check "$1" "main installs $LOOP_AGENTS, the first to build and the next to review, naming no flag" \
+    on "$1" main "echo '{\"type\":\"${LOOP_AGENTS%% *}\",\"install\":[$(install_list)]}' | sudo sail project config set acme agent -"
+}
+
 loop() {
   local run=${1:-} spec
   [[ -n $run ]] || usage
   spec="loop-$(date -u +%H%M%S)"
-  check "$run" "main gives acme the nocaptcha repo, JDK 21 and Maven" \
-    on "$run" main "echo '[{\"url\":\"https://github.com/$LOOP_REPO.git\",\"path\":\"nocaptcha\"}]' | sudo sail project config set acme repos - && echo '{\"jdk\":21,\"maven\":\"3.9.9\"}' | sudo sail project config set acme runtimes -"
-  check "$run" "main installs $LOOP_AGENTS, the first to build and the next to review, naming no flag" \
-    on "$run" main "echo '{\"type\":\"${LOOP_AGENTS%% *}\",\"install\":[$(install_list)]}' | sudo sail project config set acme agent -"
+  loop_config "$run"
   check "$run" "every node syncs twice" sync_all "$run"
   check "$run" "eng holds the forge token where only root reads it" place_secret "$run" eng fleet-github-token gh
   check "$run" "eng registers its workstation key" registers_container_key "$run" eng
@@ -1877,34 +1939,65 @@ upgrade() {
   check "$run" "its conversation still reads the same on every box" conversation_matches "$run" "$shared"
 }
 
+fleet_vms() {
+  local filter="labels.purpose=sail-fleet"
+  [[ -n $1 ]] && filter="$filter AND labels.run ~ \"^$1(-[a-z]+)?\$\""
+  gc compute instances list --filter="$filter" --format="value(name,creationTimestamp.date('%s'))"
+}
+
+detached_disks() {
+  gc compute disks list --filter="name ~ \"^sail-fleet-${1:+$1(-[a-z]+)?-}\" AND -users:*" \
+    --format="value(name,creationTimestamp.date('%s'))"
+}
+
+aged() {
+  local kind=$1 name made now
+  now=$(date +%s)
+  while read -r name made; do
+    [[ -z $name ]] || echo "$kind $name, made $(((now - made) / 3600)) h $(((now - made) / 60 % 60)) min ago"
+  done
+}
+
+list() {
+  local vms disks
+  vms=$(fleet_vms "") || return 1
+  disks=$(detached_disks "") || return 1
+  [[ -n $vms$disks ]] || { echo "No fleet VMs and no detached fleet disks."; return 0; }
+  aged VM <<< "$vms"
+  aged "detached disk" <<< "$disks"
+}
+
 down() {
-  local run=${1:-} filter="labels.purpose=sail-fleet" names disks socket
-  [[ -n $run ]] && filter="$filter AND labels.run ~ \"^$run(-[a-z]+)?\$\""
+  local run=${1:-} names disks socket left
   for socket in "$RUNS/${run:-}"*/ssh-*; do
     [[ -S $socket ]] && { ssh -o ControlPath="$socket" -O exit fleet 2> /dev/null || true; }
   done
-  names=$(gc compute instances list --filter="$filter" --format='value(name)')
-  if [[ -z $names ]]; then
-    echo "No fleet VMs to delete."
-  else
-    gc compute instances delete $names --zone "$ZONE" > /dev/null
-    echo "Deleted: $names"
+  names=$(fleet_vms "$run" | awk '{print $1}') || return 1
+  if [[ -n $names ]]; then
+    gc compute instances delete $names --zone "$ZONE" > /dev/null && echo "Deleted: $names"
   fi
-  disks=$(gc compute disks list --filter="name ~ \"^sail-fleet-${run:-.*}(-[a-z]+)?-client-scratch2\$\" AND -users:*" --format='value(name)')
-  [[ -z $disks ]] || { gc compute disks delete $disks --zone "$ZONE" > /dev/null; echo "Deleted: $disks"; }
+  disks=$(detached_disks "$run" | awk '{print $1}') || return 1
+  if [[ -n $disks ]]; then
+    gc compute disks delete $disks --zone "$ZONE" > /dev/null && echo "Deleted: $disks"
+  fi
+  left=$({ fleet_vms "$run" | aged VM; detached_disks "$run" | aged "detached disk"; }) || left="what is left could not be listed"
+  [[ -z $left ]] && return 0
+  echo "ci/fleet: ${run:-the fleet} is not down, and this still bills:" >&2
+  echo "$left" >&2
+  return 1
 }
 
-readonly ALL_GROUPS="access storage rebuilt loop"
+readonly ALL_GROUPS="access storage rebuilt"
 
 # Each group needs only a joined fleet with its projects, and keeps to itself whatever would break
 # a neighbour: resilience restarts client's services, storage reboots client and deletes a disk,
-# rebuilt replaces main. So each group runs on a fleet of its own, all of them at once.
+# rebuilt replaces main. So each group runs on a fleet of its own, all of them at once. rebuilt
+# comes after the loop, so the copy it restores holds the loop's runs, events and measures.
 scenarios_of() {
   case $1 in
     access) echo "doors inside access resilience" ;;
-    storage) echo "containers storage" ;;
-    rebuilt) echo "conflicts rooms files rebuilt" ;;
-    loop) echo "portal loop" ;;
+    storage) echo "furnish containers storage" ;;
+    rebuilt) echo "conflicts rooms files portal eng-acme loop rebuilt" ;;
     serial) echo "doors inside conflicts rooms access files portal resilience loop storage rebuilt" ;;
     *) echo "ci/fleet: there is no group '$1'; the groups are: $ALL_GROUPS." >&2; return 2 ;;
   esac
@@ -1912,6 +2005,7 @@ scenarios_of() {
 
 status=0
 failed_at=""
+group_log=""
 
 step() {
   [[ $status == 0 ]] || return 0
@@ -1967,19 +2061,28 @@ again() {
   esac
 }
 
+readonly RERUN_PROVES='A rerun is for diagnosis and for proving a fix: it does not clear the FAIL, and a release passes only on a run whose report has 0 FAIL.'
+
+kept_notice() {
+  local expires
+  expires=$(cat "$(log_dir "$1")/expires" 2> /dev/null) || expires="$MAX_RUN after they were made"
+  echo "KEPT $1: its VMs bill until they delete themselves at about $expires, and a detached disk never does. Tear it down: ci/fleet down $1"
+}
+
 keep() {
   local run=$1 version=$2 target=$3 group=$4 plan=$5 name reached=""
   {
-    echo "Kept $run: its VMs stay until ci/fleet down $run, or until their $MAX_RUN run duration ends."
     if [[ -n $failed_at ]]; then
-      echo "$failed_at failed. To go on from it on this fleet:"
+      echo "$failed_at failed on $run. To go on from it on this fleet:"
       for name in $plan; do
         [[ $name == "$failed_at" ]] && reached=1
         [[ -n $reached ]] || continue
         again "$name" "$run" "$version" "$target" "$group"
         once_per_fleet "$name" && break
       done
+      echo "$RERUN_PROVES"
     fi
+    kept_notice "$run"
   } | tee "$(log_dir "$run")/kept.txt"
 }
 
@@ -1995,47 +2098,73 @@ fleet() {
   if [[ ${FLEET_KEEP:-} == always || ( $status != 0 && ${FLEET_KEEP:-} != 0 ) ]]; then
     keep "$run" "$version" "$target" "$group" "$plan"
   else
-    down "$run"
+    down "$run" || { echo "ci/fleet: $run was not taken down." >&2; return 1; }
   fi
   return $status
 }
 
 counts() {
-  local passed failed
-  passed=$(grep -c '^PASS' "$1" 2> /dev/null) || passed=${passed:-0}
-  failed=$(grep -c '^FAIL' "$1" 2> /dev/null) || failed=${failed:-0}
+  local lines passed failed
+  lines=$(cat "$1" 2> /dev/null) || lines=""
+  passed=$(grep -c '^PASS' <<< "$lines") || true
+  failed=$(grep -c '^FAIL' <<< "$lines") || true
   echo "$passed PASS, $failed FAIL"
 }
 
+# A group's subshell can die before its checks finish (an exit, an unset variable): its status,
+# kept beside the report, still makes a FAIL line there.
 merge() {
-  local id=$1 group
+  local id=$1 group report ended
   shift
   for group in "$@"; do
-    echo "--- group $group, run $id-$group: $(counts "$RUNS/$id-$group/report.txt")"
-    cat "$RUNS/$id-$group/report.txt" 2> /dev/null || echo "FAIL group $group wrote no report (see $RUNS/$id/$group.log)"
+    report="$RUNS/$id-$group/report.txt"
+    ended=$(cat "$RUNS/$id/$group.status")
+    echo "--- group $group, run $id-$group: $(counts "$report")"
+    cat "$report" 2> /dev/null || true
+    if [[ $ended != 0 ]] && ! grep -qs '^FAIL' "$report"; then
+      echo "FAIL group $group ended with status $ended before its checks finished (see $RUNS/$id/$group.log)"
+    fi
     cat "$RUNS/$id-$group/kept.txt" 2> /dev/null || true
   done > "$RUNS/$id/report.txt"
 }
 
 in_parallel() {
-  local id=$1 version=$2 target=$3 group pids="" pid failed=0
+  local id=$1 version=$2 target=$3 group pid ended failed=0
+  local -a pids=()
   shift 3
   for group in "$@"; do
     (
-      if fleet "$id-$group" "$version" "$target" "$group" $(scenarios_of "$group") > "$RUNS/$id/$group.log" 2>&1; then
+      group_log="$RUNS/$id/$group.log"
+      if fleet "$id-$group" "$version" "$target" "$group" $(scenarios_of "$group") > "$group_log" 2>&1; then
         echo "$(date -u +%H:%M:%S) group $group passed, run $id-$group: $(counts "$RUNS/$id-$group/report.txt")"
       else
-        echo "$(date -u +%H:%M:%S) group $group FAILED, run $id-$group: $(counts "$RUNS/$id-$group/report.txt"); see $RUNS/$id/$group.log"
+        echo "$(date -u +%H:%M:%S) group $group FAILED, run $id-$group: $(counts "$RUNS/$id-$group/report.txt"); see $group_log"
         exit 1
       fi
     ) &
-    pids="$pids $!"
+    pids+=("$!")
   done
-  for pid in $pids; do
-    wait "$pid" || failed=1
+  for group in "$@"; do
+    pid=${pids[0]}
+    pids=("${pids[@]:1}")
+    ended=0
+    wait "$pid" || ended=$?
+    echo "$ended" > "$RUNS/$id/$group.status"
+    [[ $ended == 0 ]] || failed=1
   done
   merge "$id" "$@"
   return $failed
+}
+
+groups_from() {
+  local group seen=" "
+  for group in "$@"; do
+    [[ " $ALL_GROUPS " == *" $group "* ]] || { echo "ci/fleet: there is no group '$group'; the groups are: $ALL_GROUPS." >&2; return 2; }
+    [[ $seen != *" $group "* ]] || { echo "ci/fleet: group $group is named twice." >&2; return 2; }
+    seen="$seen$group "
+  done
+  seen=${seen# }
+  echo "${seen% }"
 }
 
 run() {
@@ -2045,7 +2174,7 @@ run() {
   while [[ $# -gt 0 ]]; do
     case $1 in
       --upgrade-to) target=${2:-}; [[ -n $target ]] || usage; shift 2 ;;
-      --group) scenarios_of "${2:-}" > /dev/null || exit 2; groups="$groups $2"; shift 2 ;;
+      --group) [[ -n ${2:-} ]] || usage; groups="$groups $2"; shift 2 ;;
       *) usage ;;
     esac
   done
@@ -2053,34 +2182,42 @@ run() {
     echo "No box upgrades from $version to $target: its database schema changed in $SCHEMA_CHANGED_IN and boxes are installed fresh. Run: ci/fleet run $target" >&2
     exit 2
   fi
-  local id result=0
+  if [[ ${FLEET_SERIAL:-0} == 1 && -n $groups ]]; then
+    echo "ci/fleet: FLEET_SERIAL=1 runs every scenario on one fleet, so it takes no --group." >&2
+    exit 2
+  fi
+  groups=$(groups_from ${groups:-$ALL_GROUPS}) || exit 2
+  local id result=0 kept
   id="r$(date -u +%Y%m%d-%H%M%S)"
   mkdir -p "$RUNS/$id"
   if [[ ${FLEET_SERIAL:-0} == 1 ]]; then
     echo "Fleet run $id on $version${target:+, upgraded to $target}, one fleet; logs in $RUNS/$id"
     fleet "$id" "$version" "$target" "" $(scenarios_of serial) || result=1
   else
-    groups=${groups:-$ALL_GROUPS}
-    echo "Fleet run $id on $version${target:+, upgraded to $target}: groups ${groups# } at once, each on a fleet of its own; each group logs to $RUNS/$id/GROUP.log"
+    echo "Fleet run $id on $version${target:+, upgraded to $target}: groups $groups at once, each on a fleet of its own; each group logs to $RUNS/$id/GROUP.log"
     in_parallel "$id" "$version" "$target" $groups || result=1
   fi
   echo "--- $RUNS/$id/report.txt"
   cat "$RUNS/$id/report.txt"
   echo "Fleet run $id: $(counts "$RUNS/$id/report.txt")"
+  for kept in "$RUNS/$id"/kept.txt "$RUNS/$id"-*/kept.txt; do
+    [[ -f $kept ]] && tail -1 "$kept"
+  done
   return $result
 }
 
 # A scenario on its own, on a standing fleet: every check runs, as in a run, and the count of
 # this attempt's checks decides the exit.
 alone() {
-  local run=${2:-} report before result=0
+  local run=${2:-} report before result=0 this
   [[ -n $run ]] || usage
   report="$(log_dir "$run")/report.txt"
   before=$(wc -l < "$report" 2> /dev/null || echo 0)
   "$@" || result=1
-  tail -n +$((before + 1)) "$report" > "$report.attempt"
-  echo "$1 on $run: $(counts "$report.attempt")"
-  ! grep -q '^FAIL' "$report.attempt" && [[ $result == 0 ]]
+  this=$(tail -n +$((before + 1)) "$report")
+  echo "$1 on $run: $(counts <(echo "$this"))"
+  grep -q '^FAIL' <(head -n "$before" "$report") && echo "$run's report still holds its earlier FAIL. $RERUN_PROVES"
+  ! grep -q '^FAIL' <<< "$this" && [[ $result == 0 ]]
 }
 
 case ${1:-} in
@@ -2088,7 +2225,8 @@ case ${1:-} in
   up) shift; up "$@" ;;
   install) shift; install "$@" ;;
   join) shift; join "$@" ;;
-  projects | doors | upgrade | inside | conflicts | rooms | access | files | portal | resilience | containers | storage | loop | rebuilt) alone "$@" ;;
+  projects | doors | upgrade | inside | conflicts | rooms | access | files | portal | resilience | containers | furnish | eng-acme | storage | loop | rebuilt) alone "$@" ;;
+  list) list ;;
   ssh) shift; [[ $# -ge 3 ]] || usage; r=$1 b=$2; shift 2; on "$r" "$b" "$@" ;;
   down) shift; down "$@" ;;
   *) usage ;;
