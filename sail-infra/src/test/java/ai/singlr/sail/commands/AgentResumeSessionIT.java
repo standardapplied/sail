@@ -27,6 +27,7 @@ import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.pty.PtyIdentity;
 import ai.singlr.sail.pty.PtySessionHost;
+import ai.singlr.sail.store.DispatchGate;
 import ai.singlr.sail.store.EventStore;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.HeldProjects;
@@ -47,12 +48,15 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 /**
- * Brick 3 end to end: a completed run with a recorded session resumes inside a host-owned,
- * room-bound session running the resume argv in a real container; the conversation survives a
- * detach, a second attach joins it (history replayed, still live) rather than forking; and a
- * dispatch reserving the project ends it — attached or detached — with the reason in the stream and
- * on the room's {@code pty_session_ended} event. The container gets a stand-in {@code claude} that
- * echoes its arguments and its input, so the argv and the liveness are both observable.
+ * Brick 3 end to end: a completed run of a spec-less room with a recorded session resumes inside a
+ * host-owned, room-bound session running the resume argv in the project's real container; the
+ * conversation survives a detach, a second attach joins it (history replayed, still live) rather
+ * than forking; and a full turn of the room reserving the project's container ends it — attached or
+ * detached — with the reason in the stream and on the room's {@code pty_session_ended} event. A
+ * spec's run lives in its own workspace, where no host session opens; its conversation is resumed
+ * there over a raw tty ({@code AgentAttachCommandTest}). The container gets a stand-in {@code
+ * claude} that echoes its arguments and its input, so the argv and the liveness are both
+ * observable.
  */
 class AgentResumeSessionIT extends AbstractIncusIT {
 
@@ -139,7 +143,7 @@ class AgentResumeSessionIT extends AbstractIncusIT {
           terminal.await("got:again");
 
           var dispatched = reserve(reservation, runStore);
-          var reason = "yielded to dispatch " + dispatched + " of spec " + ROOM;
+          var reason = "yielded to dispatch " + dispatched;
           terminal.await("[sail: session ended — " + reason + "]");
           assertEquals(reason, terminal.ending(), "the attached client hears why it ended");
         }
@@ -176,6 +180,7 @@ class AgentResumeSessionIT extends AbstractIncusIT {
             runStore.reserveDispatch(
                 id,
                 CONTAINER,
+                null,
                 ROOM,
                 "it",
                 "build",
@@ -184,13 +189,17 @@ class AgentResumeSessionIT extends AbstractIncusIT {
                 null,
                 "task",
                 "log",
-                "u"));
+                "u",
+                null));
     Acting.system(() -> runStore.recordSession(id, sessionId, "hook", null));
     Acting.system(() -> runStore.finish(id, "running", "completed", 0, null));
     return id;
   }
 
-  /** Reserves a whole-container build and completes it at once, so the next claim is free. */
+  /**
+   * Reserves a whole-container full turn of the spec-less room, in the project's container, and
+   * completes it at once, so the next claim is free.
+   */
   private static String reserve(RunReservation reservation, RunStore runStore) {
     var id = DateTimeUtils.newId().toString();
     Acting.as(
@@ -199,9 +208,10 @@ class AgentResumeSessionIT extends AbstractIncusIT {
             reservation.reserve(
                 id,
                 CONTAINER,
+                null,
                 ROOM,
                 "it",
-                "build",
+                DispatchGate.ROOM_FULL_ROLE,
                 List.of(),
                 "claude-code",
                 null,
