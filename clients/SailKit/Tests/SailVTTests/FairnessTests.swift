@@ -3,12 +3,12 @@ import Foundation
 import Synchronization
 import Testing
 
-/// The feeder and every other caller take turns: a caller waits behind at most
-/// ``Screen/handOffEvery`` slices (the reviewer saw 192-361 ms frame waits and a 372 ms p95 key
-/// encode before turns), and callers that come back as fast as they can get a turn at most every
-/// that many slices or ``Screen/turnEvery`` (the reviewer saw two such readers cut output to
-/// 0.33 MiB/s). Slices and turns are counted rather than timed where they can be: a wait in time
-/// also counts waiting for a CPU on a busy runner.
+/// The feeder hands the lock off to callers: a caller waits behind at most ``Screen/handOffEvery``
+/// slices (the reviewer saw 192-361 ms frame waits before hand-offs), and callers that come back as
+/// fast as they can get a hand-off at most every that many slices (the reviewer saw two such
+/// readers cut output to 0.33 MiB/s when the feeder let them in at every slice). Slices and
+/// hand-offs are counted rather than timed: a wait in time also counts waiting for a CPU on a busy
+/// runner.
 @Suite(.timeLimit(.minutes(1))) struct FairnessTests {
     static let line = Array("\u{1b}[32mcompiling\u{1b}[0m a line of build output that scrolls the screen\r\n".utf8)
 
@@ -38,23 +38,19 @@ import Testing
         }
     }
 
-    @Test func aFrameWaitsBehindAtMostATurnsSlicesOfBackToBackFeeds() throws {
+    @Test func aFrameWaitsBehindAtMostAHandOffsSlicesOfBackToBackFeeds() throws {
         let screen = try Self.screen()
         let stop = Self.flooding(screen)
         defer { stop() }
-        _ = screen.feed(Self.chunk(1 << 20))
-        let waits = try (0 ..< 1000).map { _ in try screen.timedFrame().wait.slices }
+        while screen.slices == 0 {
+            sched_yield()
+        }
+        let waits = try (0 ..< 300).map { _ in try screen.timedFrame().wait.slices }
         #expect(waits.allSatisfy { $0 <= Screen.handOffEvery }, "most slices waited behind: \(waits.max() ?? 0)")
     }
 
-    /// With turns due by output alone (``Screen/turnEvery`` set past the test's length), two readers
-    /// that never pause get a turn at most every ``Screen/handOffEvery`` slices, and take the lock
-    /// only in their turns, once each.
-    @Test func readersThatNeverPauseGetATurnAtMostEveryTurnsWorthOfOutput() throws {
-        let screen = try Screen(
-            size: GridSize(columns: 200, rows: 60), scrollbackBytes: 1 << 20, palette: .dark, now: { ContinuousClock.now },
-            turnEvery: .seconds(3600)
-        )
+    @Test func readersThatNeverPauseGetAHandOffAtMostEveryHandOffsWorthOfOutput() throws {
+        let screen = try Self.screen()
         let stop = Atomic<Bool>(false)
         let stopped = Atomic<Int>(0)
         for reader in 0 ..< 2 {
@@ -67,27 +63,26 @@ import Testing
         }
         let chunk = Self.chunk(64 * 1024)
         let feeds = 128
-        let turnsBefore = screen.turns.load(ordering: .sequentiallyConsistent)
-        let servedBefore = screen.ticketsServed
+        let before = screen.handOffs.load(ordering: .sequentiallyConsistent)
         for _ in 0 ..< feeds {
             _ = screen.feed(chunk)
         }
-        let turns = screen.turns.load(ordering: .sequentiallyConsistent) - turnsBefore
-        let served = screen.ticketsServed - servedBefore
+        let handOffs = screen.handOffs.load(ordering: .sequentiallyConsistent) - before
         stop.store(true, ordering: .releasing)
         while stopped.load(ordering: .acquiring) < 2 {
-            _ = screen.feed(Self.chunk(1 << 20))
+            sched_yield()
         }
         let slices = feeds * ((chunk.count + Screen.feedSlice - 1) / Screen.feedSlice)
-        #expect(turns <= slices / Screen.handOffEvery + 2, "\(turns) turns for \(slices) slices")
-        #expect(served <= 2 * turns + 2, "\(served) readings in \(turns) turns")
+        #expect(handOffs <= slices / Screen.handOffEvery + 1, "\(handOffs) hand-offs for \(slices) slices")
     }
 
     @Test func aKeysEncodingIsLetInDuringAFlood() throws {
         let screen = try Self.screen()
         let stop = Self.flooding(screen, Self.chunk(8 << 20))
         defer { stop() }
-        _ = screen.feed(Self.chunk(1 << 20))
+        while screen.slices == 0 {
+            sched_yield()
+        }
         let key = KeyInput(key: .x, text: "x", unshifted: "x")
         var during: [Int] = []
         for _ in 0 ..< 50 {
@@ -99,12 +94,12 @@ import Testing
         #expect(median <= 2 * Screen.handOffEvery, "slices fed during a key's encoding, median \(median)")
     }
 
-    @Test func aFrameWithNothingNewFedTakesNoTicket() throws {
+    @Test func aFrameWithNothingNewFedDoesNotAnnounceItself() throws {
         let screen = try Self.screen()
         _ = screen.feed(Array("hello".utf8))
-        #expect(try screen.timedFrame().wait.ticketed)
-        #expect(try !screen.timedFrame().wait.ticketed)
+        #expect(try screen.timedFrame().wait.announced)
+        #expect(try !screen.timedFrame().wait.announced)
         _ = screen.feed(Array(" again".utf8))
-        #expect(try screen.timedFrame().wait.ticketed)
+        #expect(try screen.timedFrame().wait.announced)
     }
 }

@@ -16,64 +16,49 @@ import Synchronization
 /// thread, so it keeps the last finished frame until the program ends the hold, or the hold has
 /// lasted ``holdLimit``.
 ///
-/// Bytes are fed in slices of ``feedSlice``, each under its own taking of the lock, and callers on
-/// any other thread take turns with the feeder. A caller (a frame, a key's encoding, a paste)
-/// takes a ticket. A turn falls due once ``handOffEvery`` slices were fed since the last, or
-/// ``turnEvery`` passed: then the feeder, before its next slice, lets in every ticket taken so far,
-/// and a ticket taken meanwhile waits for the next turn; with no feed running, a caller takes a
-/// due turn itself. So a caller waits behind at most ``handOffEvery`` slices or ``turnEvery``,
-/// however many feeds follow back to back (`Mutex` alone would let the feeder take the lock
-/// straight back), and callers that come back as fast as they can still leave output the lock for
-/// that long between their turns. The feeding thread's own calls (a replay's start, the hold's
-/// remaining time) wait for no turn, and a `frame()` or `text()` with no output fed since the last
-/// one takes no ticket while the lock is free and nobody waits.
+/// Bytes are fed in slices of ``feedSlice``, each under its own taking of the lock, and every other
+/// caller (a frame, a key's encoding, a paste) announces itself, then passes a gate the feeder
+/// holds while it feeds. Once at least ``handOffEvery`` slices were fed since its last hand-off and
+/// a caller waits, the feeder hands off: it opens the gate and yields until as many callers as
+/// were waiting have taken the lock, then goes on. So a caller waits behind at most
+/// ``handOffEvery`` slices however many feeds follow back to back (`Mutex` alone would let the
+/// feeder take the lock straight back), and callers that come back as fast as they can still leave
+/// output the lock for that many slices between hand-offs. A caller waits blocked, never spinning,
+/// and with no feed running the gate is open. A `frame()` or `text()` with no output fed
+/// since the last one, no feed running and nobody waiting takes the lock without announcing,
+/// when it is free.
 public final class Screen: Sendable {
     /// The longest a program may hold the screen still; then the hold is ended and frames go on.
     public static let holdLimit = Duration.seconds(1)
     /// The most bytes fed under one taking of the lock.
     public static let feedSlice = 16 * 1024
-    /// The fewest slices fed between two turns: 512 KiB, about 1.5 ms of feeding on Linux and 4 ms
-    /// on a macOS runner, against a frame's 0.6 and 1.4 ms.
-    public static let handOffEvery = 32
-    /// The longest between two turns, so a caller is let in when output slows or stops.
-    public static let turnEvery = Duration.milliseconds(5)
+    /// The fewest slices fed between two hand-offs: 1 MiB, about 3.5 ms of feeding on Linux and
+    /// 7.5 ms on a macOS runner, against a frame's 0.6 and 1.4 ms, and less than a 120 Hz frame's
+    /// 8.3 ms, so a renderer drawing at that rate finds a hand-off due.
+    public static let handOffEvery = 64
     /// The largest pixel size of one cell this screen takes.
     public static let largestCellPixels = 4096
 
     private let parts: Mutex<Parts>
-    /// Tickets taken, numbered from 1.
-    private let tickets = Atomic<Int>(0)
-    /// Tickets whose caller has taken the lock.
+    /// Held by the feeder while it feeds, between hand-offs.
+    private let gate = Mutex<Void>(())
+    /// Callers waiting for the lock, and callers that have taken it.
+    private let waiting = Atomic<Int>(0)
     private let served = Atomic<Int>(0)
-    /// The last ticket the open hand-off lets in, ``closed`` with none open, ``opening`` while it
-    /// counts.
-    private let admitting = Atomic<Int>(closed)
-    private static let closed = Int.min
-    private static let opening = Int.max
-    /// Slices fed so far, and at the last turn.
+    /// Slices fed so far, and at the last hand-off.
     private let slicesFed = Atomic<Int>(0)
-    private let turnAt = Atomic<Int>(-handOffEvery)
-    /// Nanoseconds from ``origin`` to the last turn.
-    private let turnTime = Atomic<Int>(Int.min / 2)
-    private let origin = ContinuousClock.now
-    /// Feeds running, and the thread that fed last.
+    private let handedOffAt = Atomic<Int>(-handOffEvery)
+    /// Feeds running.
     private let feeders = Atomic<Int>(0)
-    private let feederThread = Atomic<UInt>(0)
     /// Slices fed when the last frame or text was read.
     private let readAt = Atomic<Int>(-1)
-    /// Turns so far, which the tests bound.
-    package let turns = Atomic<Int>(0)
+    /// Hand-offs so far, which the tests bound.
+    package let handOffs = Atomic<Int>(0)
 
-    /// Slices fed so far, and tickets served, which the tests count.
+    /// Slices fed so far, which the tests count.
     package var slices: Int {
         slicesFed.load(ordering: .sequentiallyConsistent)
     }
-
-    package var ticketsServed: Int {
-        served.load(ordering: .sequentiallyConsistent)
-    }
-
-    private let turnGap: Int
 
     private struct Parts {
         let core: TerminalCore
@@ -86,13 +71,10 @@ public final class Screen: Sendable {
         try self.init(size: size, scrollbackBytes: scrollbackBytes, palette: palette, now: { ContinuousClock.now })
     }
 
-    /// As the public one, its render holds timed on `now`, and a turn due at least every
-    /// `turnEvery`.
+    /// As the public one, its render holds timed on `now`.
     package init(
-        size: GridSize, scrollbackBytes: Int, palette: Palette, now: @escaping @Sendable () -> ContinuousClock.Instant,
-        turnEvery: Duration = Screen.turnEvery
+        size: GridSize, scrollbackBytes: Int, palette: Palette, now: @escaping @Sendable () -> ContinuousClock.Instant
     ) throws(ScreenError) {
-        turnGap = Self.nanoseconds(turnEvery)
         try LibraryVersion.check(LibraryVersion.loaded)
         guard scrollbackBytes >= 0 else { throw .invalid("a scrollback of \(scrollbackBytes) bytes is not one") }
         guard palette.ansi.count == 16 else { throw .invalid("a palette names 16 colours, not \(palette.ansi.count)") }
@@ -103,20 +85,33 @@ public final class Screen: Sendable {
     }
 
     /// Takes the next bytes of the program's output, in order, and answers what they provoked.
+    /// Output is fed from one thread at a time, as it arrives in order: a second feed while a
+    /// first runs is not handed the lock, and waits for the first to end.
     public func feed(_ bytes: [UInt8]) -> Effects {
-        feederThread.store(Self.thread(), ordering: .sequentiallyConsistent)
         feeders.add(1, ordering: .sequentiallyConsistent)
         defer { feeders.subtract(1, ordering: .sequentiallyConsistent) }
         var effects = Effects()
-        for start in stride(from: 0, to: bytes.count, by: Self.feedSlice) {
+        var start = 0
+        while start < bytes.count {
             handOff()
-            let fed = parts.withLock { parts in
-                bytes[start ..< min(bytes.count, start + Self.feedSlice)].withUnsafeBufferPointer {
-                    ghostty_terminal_vt_write(parts.core.handle, $0.baseAddress, $0.count)
-                }
-                slicesFed.add(1, ordering: .sequentiallyConsistent)
-                return parts.core.drain()
+            let (next, fed) = gate.withLock { _ -> (Int, Effects) in
+                var next = start
+                var fed = Effects()
+                repeat {
+                    let slice = parts.withLock { parts in
+                        bytes[next ..< min(bytes.count, next + Self.feedSlice)].withUnsafeBufferPointer {
+                            ghostty_terminal_vt_write(parts.core.handle, $0.baseAddress, $0.count)
+                        }
+                        slicesFed.add(1, ordering: .sequentiallyConsistent)
+                        return parts.core.drain()
+                    }
+                    fed.reply += slice.reply
+                    fed.events += slice.events
+                    next += Self.feedSlice
+                } while next < bytes.count && !handOffDue()
+                return (next, fed)
             }
+            start = next
             effects.reply += fed.reply
             effects.events += fed.events
         }
@@ -193,7 +188,7 @@ public final class Screen: Sendable {
 
     /// A frame, and what it waited for the lock: how long, which also counts waiting for a CPU, how
     /// many slices the feeder ran first, which counts only the feeder's fairness, and whether it
-    /// took a ticket.
+    /// announced itself.
     package func timedFrame() throws(ScreenError) -> (frame: ScreenFrame, wait: Wait) {
         try read { (parts: Parts, wait: Wait) throws(ScreenError) in
             try Self.refresh(parts)
@@ -281,95 +276,55 @@ public final class Screen: Sendable {
     package struct Wait: Sendable {
         package let time: Duration
         package let slices: Int
-        package let ticketed: Bool
+        package let announced: Bool
     }
 
-    /// When a turn is due, lets in every ticket taken so far. Every access is sequentially
-    /// consistent: a ticket taken after the count sees the hand-off open and waits for the next
-    /// turn, and with a feed running no caller takes the lock but through a hand-off, so the
-    /// feeder waits only for the callers it counted, each on its way to the lock.
+    /// Hands the lock off once ``handOffEvery`` slices were fed since the last hand-off and a
+    /// caller waits: yields until as many callers as were waiting have taken the lock, or none
+    /// waits, so one that keeps coming back cannot hold the feeder. Every access is sequentially
+    /// consistent, so a caller announced before the count is in it.
     private func handOff() {
-        guard turnDue(), tickets.load(ordering: .sequentiallyConsistent) > served.load(ordering: .sequentiallyConsistent) else { return }
-        admitting.store(Self.opening, ordering: .sequentiallyConsistent)
-        let last = tickets.load(ordering: .sequentiallyConsistent)
-        admitting.store(last, ordering: .sequentiallyConsistent)
-        while served.load(ordering: .sequentiallyConsistent) < last {
+        guard handOffDue() else { return }
+        let fed = slicesFed.load(ordering: .sequentiallyConsistent)
+        let owed = waiting.load(ordering: .sequentiallyConsistent)
+        let due = served.load(ordering: .sequentiallyConsistent) + owed
+        while served.load(ordering: .sequentiallyConsistent) < due, waiting.load(ordering: .sequentiallyConsistent) > 0 {
             sched_yield()
         }
-        takeTurn()
-        admitting.store(Self.closed, ordering: .sequentiallyConsistent)
+        handedOffAt.store(fed, ordering: .sequentiallyConsistent)
+        handOffs.add(1, ordering: .sequentiallyConsistent)
     }
 
-    private func turnDue() -> Bool {
-        slicesFed.load(ordering: .sequentiallyConsistent) - turnAt.load(ordering: .sequentiallyConsistent) >= Self.handOffEvery
-            || elapsed() - turnTime.load(ordering: .sequentiallyConsistent) >= turnGap
+    private func handOffDue() -> Bool {
+        slicesFed.load(ordering: .sequentiallyConsistent) - handedOffAt.load(ordering: .sequentiallyConsistent) >= Self.handOffEvery
+            && waiting.load(ordering: .sequentiallyConsistent) > 0
     }
 
-    private func takeTurn() {
-        turnAt.store(slicesFed.load(ordering: .sequentiallyConsistent), ordering: .sequentiallyConsistent)
-        turnTime.store(elapsed(), ordering: .sequentiallyConsistent)
-        turns.add(1, ordering: .sequentiallyConsistent)
-    }
-
-    private func elapsed() -> Int {
-        Self.nanoseconds(ContinuousClock.now - origin)
-    }
-
-    private static func nanoseconds(_ duration: Duration) -> Int {
-        let (seconds, attoseconds) = duration.components
-        return Int(seconds) &* 1_000_000_000 &+ Int(attoseconds / 1_000_000_000)
-    }
-
-    private static func thread() -> UInt {
-        #if canImport(Darwin)
-        UInt(bitPattern: pthread_self())
-        #else
-        UInt(pthread_self())
-        #endif
-    }
-
-    /// Runs `body` under the lock in this caller's turn: at the feeder's next hand-off, or, with
-    /// no feed running, once a turn is due; at once on the feeding thread. Nothing between taking
-    /// the ticket and serving it can fail, so every ticket is served.
+    /// Runs `body` under the lock as an announced caller, through the gate, which the feeder opens
+    /// at its next hand-off.
     private func ahead<Value: Sendable, Failure: Error>(_ body: (Parts, Wait) throws(Failure) -> Value) throws(Failure) -> Value {
         let asked = ContinuousClock.now
-        let ticket = tickets.wrappingAdd(1, ordering: .sequentiallyConsistent).newValue
+        waiting.add(1, ordering: .sequentiallyConsistent)
         let fedBefore = slicesFed.load(ordering: .sequentiallyConsistent)
-        if feederThread.load(ordering: .sequentiallyConsistent) != Self.thread() {
-            awaitTurn(ticket)
-        }
+        gate.withLock { _ in }
         return try parts.withLock { (parts: inout Parts) throws(Failure) -> Value in
+            waiting.subtract(1, ordering: .sequentiallyConsistent)
             served.add(1, ordering: .sequentiallyConsistent)
-            let wait = Wait(time: ContinuousClock.now - asked, slices: slicesFed.load(ordering: .sequentiallyConsistent) - fedBefore, ticketed: true)
+            let wait = Wait(time: ContinuousClock.now - asked, slices: slicesFed.load(ordering: .sequentiallyConsistent) - fedBefore, announced: true)
             return try body(parts, wait)
         }
     }
 
-    private func awaitTurn(_ ticket: Int) {
-        while true {
-            let admitted = admitting.load(ordering: .sequentiallyConsistent)
-            if admitted == Self.closed {
-                if feeders.load(ordering: .sequentiallyConsistent) == 0, turnDue() {
-                    takeTurn()
-                    return
-                }
-            } else if admitted != Self.opening, ticket <= admitted {
-                return
-            }
-            sched_yield()
-        }
-    }
-
-    /// A frame's or text's read: with no output fed since the last read, no ticket waiting and the
-    /// lock free, taken at once without a ticket; else through ``ahead(_:)``. A read without a
-    /// ticket while one waits could take the lock again and again ahead of it, and so hold up the
-    /// hand-off waiting for that ticket.
+    /// A frame's or text's read: with no output fed since the last read, no feed running, nobody
+    /// waiting and the lock free, taken at once without announcing; else through ``ahead(_:)``. A
+    /// read that does not announce while a feed or a caller waits could take the lock again and
+    /// again ahead of it.
     private func read<Value: Sendable>(_ body: (Parts, Wait) throws(ScreenError) -> Value) throws(ScreenError) -> Value {
         if slicesFed.load(ordering: .sequentiallyConsistent) == readAt.load(ordering: .sequentiallyConsistent),
-           tickets.load(ordering: .sequentiallyConsistent) == served.load(ordering: .sequentiallyConsistent)
+           feeders.load(ordering: .sequentiallyConsistent) == 0, waiting.load(ordering: .sequentiallyConsistent) == 0
         {
             let quiet = try parts.withLockIfAvailable { (parts: inout Parts) throws(ScreenError) -> Value in
-                try body(parts, Wait(time: .zero, slices: 0, ticketed: false))
+                try body(parts, Wait(time: .zero, slices: 0, announced: false))
             }
             if let quiet { return quiet }
         }

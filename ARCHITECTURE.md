@@ -3736,13 +3736,15 @@ against them before it is used. Both expose one module, `GhosttyVt`. The termina
   has lasted 1 s, when the session ticks the screen so a renderer drawing only on change draws
   again; a renderer never draws a half-finished update. A change of the default colours or the
   palette redraws every row. Output is fed in 16 KiB slices, each under its own taking of the lock,
-  and every other caller (a frame, a key's encoding, a paste) takes turns with the feeder: a turn
-  falls due after 32 slices or 5 ms, and then the feeder lets in every ticket taken so far before
-  its next slice (with no feed running, a caller takes a due turn itself). So a caller waits
-  behind at most 32 slices however many feeds follow back to back, and callers that read as fast
-  as they can still leave output the lock between their turns; a frame with nothing new fed
-  takes no turn while the lock is free (`FairnessTests` counts slices and turns; the bench times
-  frames, keys and the output rate under polling readers, on Linux and macOS).
+  and every other caller (a frame, a key's encoding, a paste) announces itself and passes a gate
+  the feeder holds while it feeds. Once 64 slices were fed since the last hand-off and a caller
+  waits, the feeder opens the gate and yields until as many callers as were waiting have taken
+  the lock. So a caller waits behind at most 64 slices however many feeds follow back to back,
+  callers that read as fast as they can still leave output the lock for 64 slices between
+  hand-offs, callers wait blocked rather than spinning, and with no feed running nothing waits; a
+  frame with nothing new fed does not announce itself while the lock is free (`FairnessTests`
+  counts slices and hand-offs; the bench times frames, keys and the output rate under polling
+  readers, on Linux and macOS).
 - **T4. Secrets stay secret.** A ticket is presented once; a reconnect asks for a new one. No ticket,
   token or terminal byte is logged, written to a file or put on a command line (the probe takes its
   token from an environment variable it is named).
