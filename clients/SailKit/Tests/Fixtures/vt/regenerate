@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+cd "$(dirname "$0")"
+for script in *.sh; do
+  bash "$script" > "${script%.sh}.bytes"
+done
+swift build --package-path ../../.. --product sail-term-probe
+probe=$(swift build --package-path ../../.. --show-bin-path)/sail-term-probe
+while read -r name size; do
+  "$probe" --dump "$name.bytes" --size "$size" > "$name.golden"
+done < sizes

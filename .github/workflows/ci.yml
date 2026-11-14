@@ -174,6 +174,124 @@ jobs:
           retention-days: 14
           path: ${{ runner.temp }}/native
 
+  # The native app's terminal core against this commit's real terminal hosts: this machine's own
+  # (`sail _pty-host --local`) and a runner's ticketed TCP door on a box with Incus and a project.
+  # The SailKit tests that need a host run here with the hosts named in their environment, then the
+  # probe runs its scripts and leaves its reports. No token reaches an argv, a log or a report.
+  terminal-e2e:
+    name: Terminal end to end
+    needs: native
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    defaults:
+      run:
+        working-directory: clients/SailKit
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Take this commit's native binaries
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: native-binaries
+          path: ${{ runner.temp }}/native
+
+      - name: Keep libghostty-vt built from its pins
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: ~/.cache/sailkit/libghostty-vt
+          key: libghostty-vt-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('clients/SailKit/scripts/libghostty-vt') }}
+
+      - name: Keep SwiftPM's downloads
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: ~/.cache/org.swift.swiftpm
+          key: swiftpm-${{ runner.os }}-${{ hashFiles('clients/SailKit/Package.swift') }}
+
+      - name: Build the tests and the probe
+        run: |
+          scripts/libghostty-vt "$HOME/.cache/sailkit/libghostty-vt"
+          export PKG_CONFIG_PATH="$HOME/.cache/sailkit/libghostty-vt/lib/pkgconfig"
+          echo "PKG_CONFIG_PATH=$PKG_CONFIG_PATH" >> "$GITHUB_ENV"
+          swift build --build-tests
+          swift build -c release --product sail-term-probe
+          echo "PROBE=$(swift build -c release --show-bin-path)/sail-term-probe" >> "$GITHUB_ENV"
+          chmod +x "$RUNNER_TEMP/native/sail"
+          mkdir -p "$RUNNER_TEMP/reports"
+
+      - name: The screen's own overhead
+        run: '"$PROBE" --bench --report "$RUNNER_TEMP/reports/bench.json"'
+
+      - name: This machine's own host
+        env:
+          SAIL_BINARY: ${{ runner.temp }}/native/sail
+        run: |
+          swift test --filter RealLocalHostTests
+          for script in local measure; do
+            "$PROBE" --local --host-binary "$SAIL_BINARY" --folder /tmp --script "Tests/Probe/$script.json" \
+              --report "$RUNNER_TEMP/reports/local-$script.json"
+          done
+
+      - name: Set up incus
+        uses: ./.github/actions/incus
+
+      - name: A box with a project, its API and terminal door on loopback
+        run: |
+          sudo install -m 755 "$RUNNER_TEMP/native/sail" /usr/local/bin/sail
+          sudo -H sail init --as-main --handle ada --name 'Ada E2E' --email ada@e2e.example
+          echo '{"name":"demo","resources":{"cpu":2,"memory":"2GB","disk":"10GB"}}' | sudo -H sail project create demo --definition -
+          sudo -H sail project apply demo
+          sudo -H sail host config set api-listen 127.0.0.1:7071
+          sudo -H sail host config set terminal-listen 127.0.0.1:7072
+          sudo systemctl restart sail-api sail-pty-host
+          for attempt in $(seq 1 60); do
+            curl -sf http://127.0.0.1:7071/v1/health > /dev/null && break
+            sleep 1
+          done
+          sudo -H sail fde add eng --role member --name 'Eng E2E' --email eng@e2e.example
+          sudo -H sail host status
+
+      - name: The runner's door, through tickets
+        run: |
+          token=$(sudo -H sail server token create e2e-ada member --fde ada 2> /dev/null | sed -n 2p | tr -d ' ')
+          other=$(sudo -H sail server token create e2e-eng member --fde eng 2> /dev/null | sed -n 2p | tr -d ' ')
+          echo "::add-mask::$token"
+          echo "::add-mask::$other"
+          if [[ -z $token || -z $other ]]; then
+            echo "::error::the box minted no token"
+            exit 1
+          fi
+          SAIL_API=http://127.0.0.1:7071 SAIL_TOKEN=$token SAIL_OTHER_TOKEN=$other SAIL_PROJECT=demo \
+            swift test --filter RealRunnerTests
+          SAIL_E2E_TOKEN=$token "$PROBE" --api http://127.0.0.1:7071 --token-env SAIL_E2E_TOKEN --project demo \
+            --script Tests/Probe/runner.json --report "$RUNNER_TEMP/reports/runner.json" \
+            > "$RUNNER_TEMP/probe.out" 2> "$RUNNER_TEMP/probe.err" &
+          probe=$!
+          samples=0
+          while kill -0 "$probe" 2> /dev/null; do
+            ps -eo args >> "$RUNNER_TEMP/argv.txt"
+            samples=$((samples + 1))
+          done
+          status=0
+          wait "$probe" || status=$?
+          cat "$RUNNER_TEMP/probe.err"
+          echo "every process's argv was sampled $samples times during the run"
+          if grep -qF -f <(printf '%s\n' "$token") "$RUNNER_TEMP/argv.txt" "$RUNNER_TEMP/probe.out" "$RUNNER_TEMP/probe.err" "$RUNNER_TEMP/reports/runner.json"; then
+            echo "::error::the token appeared in an argv, the probe's output or its report"
+            exit 1
+          fi
+          rm "$RUNNER_TEMP/argv.txt"
+          [[ $status == 0 ]]
+          SAIL_E2E_TOKEN=$token "$PROBE" --api http://127.0.0.1:7071 --token-env SAIL_E2E_TOKEN --project demo \
+            --script Tests/Probe/measure.json --report "$RUNNER_TEMP/reports/runner-measure.json"
+
+      - name: Leave the probe's reports
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: terminal-e2e-reports
+          if-no-files-found: ignore
+          path: ${{ runner.temp }}/reports
+
   # Each fleet test opens a fleet of its own, so the suite splits by test into three parts.
   native-fleet:
     name: Native fleet sync tests (part ${{ matrix.part }} of 3)
@@ -375,7 +493,7 @@ jobs:
     name: CI passed
     if: always()
     needs:
-      [unit, dependency-scan, native, native-fleet, native-upgrade, fleet-integration, incus-integration]
+      [unit, dependency-scan, native, native-fleet, native-upgrade, fleet-integration, incus-integration, terminal-e2e]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
