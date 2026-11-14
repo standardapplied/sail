@@ -67,11 +67,11 @@ import Testing
         let frameA = try makeScreen(40, 2, String(alphabet[0 ..< slots - 4]) + "\u{1b}[?25l").frame()
         let frameB = try makeScreen(40, 2, String(alphabet[slots ..< slots + 8]) + "\u{1b}[?25l").frame()
         let size = renderer.pixels(of: frameA.size)
-        let gate = try #require(renderer.device.makeEvent())
+        let gate = try #require(renderer.device.makeSharedEvent())
         let (doneA, readbackA) = try held(renderer, frameA, size, gate: gate)
         let (doneB, _) = try held(renderer, frameB, size, gate: nil)
         #expect(renderer.unplacedGlyphs == 4, "the atlas had four free slots for the second frame's eight new glyphs")
-        try release(gate, on: renderer.device)
+        gate.signaledValue = 1
         await doneA.value
         await doneB.value
         let drawnInFlight = RenderedImage(
@@ -90,19 +90,19 @@ import Testing
         let renderer = try makeRenderer()
         let frame = try makeScreen(10, 2, "abc").frame()
         let size = renderer.pixels(of: frame.size)
-        let gate = try #require(renderer.device.makeEvent())
+        let gate = try #require(renderer.device.makeSharedEvent())
         var done: [Task<Void, Never>] = []
         for _ in 0 ..< 3 {
             done.append(try held(renderer, frame, size, gate: gate).done)
         }
         #expect(throws: RenderError.self) { try renderer.submitOffscreen(frame, overlay: Overlay(), size: size) }
-        try release(gate, on: renderer.device)
+        gate.signaledValue = 1
         for task in done { await task.value }
         #expect(throws: Never.self) { _ = try renderer.image(of: frame, overlay: Overlay(), size: size) }
     }
 
-    /// Submits `frame`, held until `gate` is signalled when given; the task ends once its buffer is
-    /// free again.
+    /// Submits `frame`, held until the test signals `gate` from the CPU when given; the task ends
+    /// once its buffer is free again.
     private func held(
         _ renderer: TerminalRenderer, _ frame: ScreenFrame, _ size: PixelSize, gate: (any MTLEvent)?
     ) throws -> (done: Task<Void, Never>, readback: any MTLBuffer) {
@@ -111,52 +111,6 @@ import Testing
             finished.finish()
         }
         return (Task { for await _ in stream {} }, readback)
-    }
-
-    private func release(_ gate: any MTLEvent, on device: any MTLDevice) throws {
-        guard let release = device.makeCommandQueue()?.makeCommandBuffer() else { throw TestError(description: "no command buffer") }
-        release.encodeSignalEvent(gate, value: 1)
-        release.commit()
-    }
-
-    /// The CPU side of a full 200x60 redraw: reading the frame, laying out every row, writing the
-    /// buffers and encoding; p95 ≤ 4 ms. The first CJK-heavy frame's time and atlas bytes are
-    /// reported beside it.
-    @Test func aFullRedrawStaysInsideItsBudget() throws {
-        let renderer = try makeRenderer()
-        let screen = try makeScreen(200, 60)
-        let size = renderer.pixels(of: GridSize(columns: 200, rows: 60))
-        var timings: [Double] = []
-        for round in 0 ..< 60 {
-            var text = "\u{1b}[H"
-            for row in 0 ..< 60 {
-                text += "\u{1b}[\(31 + (row + round) % 7)m" + String(repeating: "lorem ipsum \(round) dolor sit amet ", count: 7).prefix(200)
-            }
-            _ = screen.feed(Array(text.utf8))
-            let started = ContinuousClock.now
-            let frame = try screen.frame()
-            let read = ContinuousClock.now - started
-            _ = try renderer.image(of: frame, overlay: Overlay(), size: size)
-            timings.append((read + renderer.lastEncodeTime).milliseconds)
-        }
-        let warm = Array(timings.dropFirst(5)).sorted()
-        let p95 = warm[Int((0.95 * Double(warm.count)).rounded(.up)) - 1]
-
-        let cjk = try makeRenderer()
-        let wide = try makeScreen(200, 60)
-        let ideographs = (0 ..< 6000).map { Character(Unicode.Scalar(0x4E00 + UInt32($0 % 600)) ?? "x") }
-        _ = wide.feed(Array(String(ideographs).utf8))
-        let before = cjk.atlasUploadBytes
-        _ = try cjk.image(of: try wide.frame(), overlay: Overlay(), size: size)
-        let firstCJK = cjk.lastEncodeTime.milliseconds
-        let report: [String: Double] = [
-            "full redraw 200x60 cpu p50 ms": warm[warm.count / 2], "full redraw 200x60 cpu p95 ms": p95,
-            "full redraw 200x60 cpu max ms": warm.last ?? 0, "first CJK frame cpu ms": firstCJK,
-            "first CJK frame atlas bytes": Double(cjk.atlasUploadBytes - before),
-        ]
-        try JSONEncoder().encode(report).write(to: Paths.out.appending(path: "renderer-measures.json"))
-        print("renderer measures: \(report.sorted { $0.key < $1.key })")
-        #expect(p95 <= 4, "a full redraw took \(p95) ms at p95")
     }
 
     @Test func theShippedFontsAreThePinnedOnes() throws {
@@ -174,12 +128,5 @@ import Testing
         let faces = try TerminalFonts(directory: Paths.fonts).faces(points: 15, scale: 2)
         print("JetBrains Mono 15 pt at scale 2: cell \(faces.metrics.width)x\(faces.metrics.height), baseline \(faces.metrics.baseline)")
         #expect(faces.metrics.width > 0 && faces.metrics.height > faces.metrics.width)
-    }
-}
-
-extension Duration {
-    var milliseconds: Double {
-        let (seconds, attoseconds) = components
-        return Double(seconds) * 1000 + Double(attoseconds) / 1e15
     }
 }

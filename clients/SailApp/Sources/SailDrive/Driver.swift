@@ -17,6 +17,7 @@ final class Driver {
     private let out: URL
     private var results: [Result] = []
     private var measures: [Measure] = []
+    private var bench: [String: Double] = [:]
     private var started = false
 
     struct Result: Encodable {
@@ -41,6 +42,7 @@ final class Driver {
         let scale: Double
         let steps: [Result]
         let measures: [Measure]
+        let bench: [String: Double]
     }
 
     init(preview: PreviewApp, script: Script, out: URL) {
@@ -74,7 +76,7 @@ final class Driver {
         let passed = results.count == steps.count && results.allSatisfy(\.ok)
         let report = Report(
             passed: passed, hertz: preview.window.screen?.maximumFramesPerSecond ?? 0, scale: terminal.metrics.scale, steps: results,
-            measures: measures
+            measures: measures, bench: bench
         )
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
@@ -151,6 +153,16 @@ final class Driver {
         if let count = step.drawables {
             terminal.drawableCount = count
             return (terminal.drawableCount == count, "\(terminal.drawableCount) drawables")
+        }
+        if step.bench == true {
+            guard let fonts = Bundle.main.resourceURL?.appending(path: "Fonts") else { return (false, "the bundle has no fonts") }
+            do {
+                bench = try Bench.run(fonts: fonts)
+            } catch {
+                return (false, "the bench could not run: \(error)")
+            }
+            let p95 = bench["full redraw 200x60 cpu p95 ms"] ?? .infinity
+            return (p95 <= 4, bench.sorted { $0.key < $1.key }.map { "\($0.key) \(String(format: "%.2f", $0.value))" }.joined(separator: ", "))
         }
         if step.resetLatency == true {
             terminal.resetLatency()

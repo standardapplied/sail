@@ -1,3 +1,4 @@
+import Dispatch
 import Metal
 import QuartzCore
 import SailLook
@@ -142,10 +143,16 @@ public final class TerminalRenderer {
         return .drawn(number)
     }
 
+    /// How long an offscreen frame may take on the GPU before reading it back is given up.
+    public static let offscreenDeadline = 10.0
+
     /// `frame` drawn offscreen at `size` pixels and read back, every row laid out afresh.
     public func image(of frame: ScreenFrame, overlay: Overlay, size: PixelSize) throws(RenderError) -> RenderedImage {
-        let (commandBuffer, readback) = try submitOffscreen(frame, overlay: overlay, size: size)
-        commandBuffer.waitUntilCompleted()
+        let done = DispatchSemaphore(value: 0)
+        let (commandBuffer, readback) = try submitOffscreen(frame, overlay: overlay, size: size) { done.signal() }
+        guard done.wait(timeout: .now() + Self.offscreenDeadline) == .success else {
+            throw .unavailable("the GPU did not finish an offscreen frame within \(Int(Self.offscreenDeadline)) s")
+        }
         if let error = commandBuffer.error { throw .unavailable("the offscreen frame failed on the GPU: \(error)") }
         let bytes = [UInt8](UnsafeRawBufferPointer(start: readback.contents(), count: size.width * size.height * 4))
         return RenderedImage(width: size.width, height: size.height, bgra: bytes)

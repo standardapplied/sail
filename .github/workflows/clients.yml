@@ -204,10 +204,22 @@ jobs:
       - name: Build
         run: swift build --build-tests
 
+      # Each suite in its own run, through a pty so its lines are not buffered away, and bounded:
+      # a test stuck in a synchronous wait cannot be stopped by its time limit.
       - name: Test
+        timeout-minutes: 15
         env:
           SAIL_FRAMES_OUT: ${{ runner.temp }}/frames
-        run: swift test
+        run: |
+          failed=0
+          for suite in SailTerminalViewTests.SweepTests SailRendererTests.GoldenTests SailRendererTests.RendererTests SailTerminalViewTests.ViewTests; do
+            echo "::group::$suite"
+            log="$RUNNER_TEMP/$suite.log"
+            perl -e 'alarm shift; exec @ARGV' 240 script -q "$log" swift test --skip-build --filter "${suite//./\\.}" || failed=1
+            grep -q 'Test run with .* passed' "$log" || failed=1
+            echo "::endgroup::"
+          done
+          exit $failed
 
       - name: Release build, the shipped app and the drive build
         if: ${{ !cancelled() }}
