@@ -178,6 +178,10 @@
       "status": 409
     },
     {
+      "code": "login_not_stored",
+      "status": 409
+    },
+    {
       "code": "agent_status_failed",
       "status": 500
     },

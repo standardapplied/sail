@@ -412,7 +412,8 @@ public final class ProjectApplier {
     out.println("  [apply] Upgrading container cleanup cron...");
 
     shell.exec(ContainerExec.asDevUser(name, List.of("mkdir", "-p", CleanupScripts.SAIL_DIR)));
-    pushFile(
+    ContainerFilePush.pushAsDev(
+        shell,
         name,
         CleanupScripts.CONTAINER_CLEANUP_PATH,
         CleanupScripts.containerCleanupScript(),
@@ -425,7 +426,7 @@ public final class ProjectApplier {
       throw new IOException("Failed to create temp file for crontab: " + mktemp.stderr());
     }
     var tmpPath = mktemp.stdout().strip();
-    pushFile(name, tmpPath, newCron);
+    ContainerFilePush.pushAsDev(shell, name, tmpPath, newCron, null);
     var cronResult =
         shell.exec(ContainerExec.asRoot(name, List.of("crontab", "-u", sshUser, tmpPath)));
     shell.exec(ContainerExec.asRoot(name, List.of("rm", "-f", tmpPath)));
@@ -478,7 +479,7 @@ public final class ProjectApplier {
       return;
     }
     var credPath = "/home/" + sshUser + "/.git-credentials";
-    pushFile(name, credPath, credContent, "0600");
+    ContainerFilePush.pushAsDev(shell, name, credPath, credContent, "0600");
     var helperResult =
         shell.exec(
             ContainerExec.asDevUser(
@@ -487,24 +488,5 @@ public final class ProjectApplier {
       throw new IOException("Failed to configure git credential helper: " + helperResult.stderr());
     }
     ForgeCliLogin.loginGitHub(shell, name, sshUser, gitTokens, repos);
-  }
-
-  /** Pushes content to a file inside the container via temp file + incus file push + chown. */
-  private void pushFile(String containerName, String remotePath, String content)
-      throws IOException, InterruptedException, TimeoutException {
-    pushFile(containerName, remotePath, content, null);
-  }
-
-  /** Pushes content with optional file mode (e.g. "0600" for credentials). */
-  private void pushFile(String containerName, String remotePath, String content, String mode)
-      throws IOException, InterruptedException, TimeoutException {
-    var parentDir = remotePath.substring(0, remotePath.lastIndexOf('/'));
-    shell.exec(ContainerExec.asDevUser(containerName, List.of("mkdir", "-p", parentDir)));
-    var flags =
-        new ArrayList<>(List.of("--uid", ContainerExec.DEV_UID, "--gid", ContainerExec.DEV_GID));
-    if (mode != null) {
-      flags.addAll(List.of("--mode", mode));
-    }
-    ContainerFilePush.push(shell, containerName, remotePath, content, flags);
   }
 }

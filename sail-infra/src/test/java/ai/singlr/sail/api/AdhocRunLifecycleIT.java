@@ -28,6 +28,7 @@ import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
+import ai.singlr.sail.store.TestLogins;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
@@ -113,6 +114,7 @@ class AdhocRunLifecycleIT extends AbstractIncusIT {
       var specStore = new SpecStore(db);
       var runStore = new RunStore(db);
       new FdeStore(db).add(HANDLE, null, null, "admin");
+      TestLogins.store(db, HANDLE);
       seedSpec(specStore, "spec-app", List.of("app"));
       var events = new CopyOnWriteArrayList<Event>();
       var dispatchOps =

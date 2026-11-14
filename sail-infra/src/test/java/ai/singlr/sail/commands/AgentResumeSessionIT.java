@@ -12,6 +12,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.api.DispatchOperations;
 import ai.singlr.sail.api.OperationsFactory;
+import ai.singlr.sail.api.RunLauncher;
 import ai.singlr.sail.api.RunReservation;
 import ai.singlr.sail.api.SessionYield;
 import ai.singlr.sail.common.DateTimeUtils;
@@ -33,6 +34,7 @@ import ai.singlr.sail.store.RoomStore;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.Sqlite;
+import ai.singlr.sail.store.TestLogins;
 import java.io.ByteArrayOutputStream;
 import java.io.PipedInputStream;
 import java.io.PipedOutputStream;
@@ -83,12 +85,20 @@ class AgentResumeSessionIT extends AbstractIncusIT {
                   new RoomStore.RoomRow(
                       ROOM, CONTAINER, "Resume talk", "it", "on", null, "it", null, null, "it")));
       new FdeStore(db).add("it", "IT", "it@example.dev", "admin");
+      TestLogins.store(db, "it");
       var runStore = new RunStore(db);
       var runId = completedRun(runStore, "sess-abc");
       var run = runStore.findById(runId).orElseThrow();
       var hostYield = new PtyHostYield(socket, dir.resolve("locks"));
       var reservation =
-          new RunReservation(runStore, shell, DispatchOperations.Listener.NONE, hostYield);
+          new RunReservation(
+              runStore,
+              shell,
+              DispatchOperations.Listener.NONE,
+              hostYield,
+              RunReservation.Displaceable.NONE,
+              new FdeStore(db),
+              RunLauncher.Room.NONE);
 
       try (var host =
           new PtySessionHost(

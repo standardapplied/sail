@@ -124,7 +124,7 @@ class SchemaManagerTest {
     var refusal = assertThrows(Remedied.State.class, schema::migrate);
 
     assertEquals(
-        "Database schema v244 was made by an earlier Sail release; this release opens only v1003"
+        "Database schema v244 was made by an earlier Sail release; this release opens only v1004"
             + " and converts none: the box is reinstalled.",
         refusal.reason());
     assertEquals(List.of(Remedy.sail("init")), refusal.remedy().commands());
@@ -139,25 +139,25 @@ class SchemaManagerTest {
   }
 
   /**
-   * The database 0.67.0 made, before a run recorded its cost: refused whole, the reinstall named,
+   * The database 0.68.0 made, before a run recorded its login: refused whole, the reinstall named,
    * nothing created or changed beside it.
    */
   @Test
   void aDatabaseTheReleaseBeforeMadeIsRefusedNamingAReinstallAndLeftAsItWas() {
-    stageAtVersion(1002);
+    stageAtVersion(1003);
     db.execute("CREATE TABLE runs (id TEXT PRIMARY KEY)");
     var schema = new SchemaManager(db);
 
     var refusal = assertThrows(Remedied.State.class, schema::migrate);
 
     assertEquals(
-        "Database schema v1002 was made by an earlier Sail release; this release opens only v1003"
+        "Database schema v1003 was made by an earlier Sail release; this release opens only v1004"
             + " and converts none: the box is reinstalled.",
         refusal.reason());
     assertEquals(
         "Move " + tempDir.resolve("test.db") + " aside and run 'sail init' to make a fresh one.",
         refusal.remedy().plain());
-    assertEquals(1002, schema.currentVersion());
+    assertEquals(1003, schema.currentVersion());
     assertEquals(
         List.of("id"),
         db.query("SELECT name FROM pragma_table_info('runs')", row -> row.text(0)),

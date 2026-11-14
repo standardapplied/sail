@@ -21,7 +21,8 @@ class HarnessHooksGoldenTest {
       """
       {"includeCoAuthoredBy": false, \
       "permissions": {"deny": ["Read(//var/lib/sail/run/box.credential)", \
-      "Read(/home/dev/.ssh/**)", "Read(/home/dev/.git-credentials)", "Read(/home/dev/.config/gh/**)"]}, \
+      "Read(/home/dev/.ssh/**)", "Read(/home/dev/.git-credentials)", "Read(/home/dev/.config/gh/**)", \
+      "Read(/home/dev/.sail/runs/**/launch.env)"]}, \
       "hooks": {\
       "SessionStart": [{"matcher": "startup", "hooks": [\
       {"type": "command", "command": "/home/dev/.sail/bin/sail-event.sh agent_session_started", "timeout": 10}]}, \
@@ -59,7 +60,8 @@ class HarnessHooksGoldenTest {
       """
       {"includeCoAuthoredBy": false, \
       "permissions": {"deny": ["Read(//var/lib/sail/run/box.credential)", \
-      "Read(/home/dev/.ssh/**)", "Read(/home/dev/.git-credentials)", "Read(/home/dev/.config/gh/**)"]}}""";
+      "Read(/home/dev/.ssh/**)", "Read(/home/dev/.git-credentials)", "Read(/home/dev/.config/gh/**)", \
+      "Read(/home/dev/.sail/runs/**/launch.env)"]}}""";
 
   @Test
   void claudeCodeLiveSettingsNameNoHook() {

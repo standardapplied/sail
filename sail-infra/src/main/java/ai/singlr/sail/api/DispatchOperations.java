@@ -9,16 +9,19 @@ import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.Engagement;
 import ai.singlr.sail.config.ProjectDefinition;
 import ai.singlr.sail.config.Spec;
+import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.engine.AgentSession;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.SnapshotManager;
 import ai.singlr.sail.engine.WatcherSpawner;
+import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.MessageStore;
 import ai.singlr.sail.store.ReviewStore;
 import ai.singlr.sail.store.RoomStore;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SpecStore;
+import ai.singlr.sail.store.Standing;
 import java.io.IOException;
 import java.time.Duration;
 import java.time.OffsetDateTime;
@@ -26,6 +29,7 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.function.Function;
+import java.util.function.Supplier;
 
 /**
  * The single dispatch executor behind every lane. Owns the whole procedure — resolve, policy,
@@ -90,7 +94,8 @@ public final class DispatchOperations {
    * A completed dispatch. {@code restarted} reports whether this dispatch was a re-dispatch that
    * reset a non-pending spec, so callers can message it as an iteration. {@code session}, {@code
    * exitCode} (foreground only), {@code runId} and {@code watcher} are absent on a dry run, which
-   * stops after the claim/branch phase.
+   * stops at its rehearsed claim; there {@code branchCreated} says whether the branch would be
+   * created.
    */
   public record Dispatched(
       Spec taskSpec,
@@ -172,6 +177,7 @@ public final class DispatchOperations {
   private final ReviewLanes reviewLanes;
   private final BuildDispatch buildDispatch;
   private MessageStore messageStore;
+  private Supplier<SyncConfig> box = SyncConfig::unset;
   private RoomStore roomStore;
   private ProjectSkills projectSkills = ProjectSkills.none();
   private final SessionYield sessionYield;
@@ -229,7 +235,8 @@ public final class DispatchOperations {
             () -> projectSkills,
             this::tellRoom);
     this.runReservation =
-        new RunReservation(runStore, shell, listener, sessionYield, this::endLiveHolder);
+        new RunReservation(
+            runStore, shell, listener, sessionYield, this::endLiveHolder, fdeStore, this::tellRoom);
     this.adhocRunner =
         new AdhocRunner(
             projects,
@@ -281,8 +288,11 @@ public final class DispatchOperations {
   }
 
   /**
-   * Says {@code body} in the room of {@code specId} as sail, best-effort: a line telling of what a
-   * launch skipped must never fail the launch. Silent on a box that keeps no messages.
+   * Says {@code body} in {@code specId}'s room as Sail's own machinery, whoever's request is being
+   * served, as the loop narrates: the line is Sail's, posted as {@link Actor#system} on this box
+   * and carried to main as every narration of this box is, and said once ({@link
+   * #saidSinceItsNewestRun}). Best-effort: a line telling of what a launch skipped or why it could
+   * not start must never fail the launch. Silent on a box that keeps no messages.
    */
   private void tellRoom(String specId, String body) {
     var messages = messageStore;
@@ -291,11 +301,61 @@ public final class DispatchOperations {
     }
     try {
       var room = specStore.findById(specId).map(SpecStore.SpecRow::roomIdOrIdentity).orElse(specId);
-      messages.append(room, MessageStore.SAIL_AUTHOR, MessageStore.fitted(body), null);
+      var line = MessageStore.fitted(body);
+      Actor.run(
+          Actor.system(),
+          () -> {
+            if (supportedHere(messages, room)
+                && !saidSinceItsNewestRun(messages, room, specId, line)) {
+              messages.append(room, MessageStore.SAIL_AUTHOR, line, null);
+            }
+          });
     } catch (RuntimeException e) {
       System.err.println(
           "  [api] Warning: could not post to the room of spec " + specId + ": " + e.getMessage());
     }
+  }
+
+  /**
+   * Whether a Sail post in {@code room} would stand on this box: always on main, and on a node only
+   * where its own sync would keep it ({@link MessageStore#standingOnNode}, the rule that withdraws
+   * a post no run of the box's FDE in the conversation supports), so Sail never posts what its sync
+   * will withdraw.
+   */
+  private boolean supportedHere(MessageStore messages, String room) {
+    var config = box.get();
+    return !config.isNode()
+        || !(messages.standingOnNode(room, MessageStore.SAIL_AUTHOR, config.handle())
+            instanceof Standing.Gone);
+  }
+
+  /**
+   * Whether {@code line} is the newest thing Sail said in {@code room} and no run of {@code specId}
+   * has started since: the room itself remembers what it was told, so no process keeps it.
+   */
+  private boolean saidSinceItsNewestRun(
+      MessageStore messages, String room, String specId, String line) {
+    return messages
+        .newestBy(room, MessageStore.SAIL_AUTHOR)
+        .filter(said -> said.body().equals(line))
+        .filter(
+            said ->
+                runStore == null
+                    || runStore.listForSpec(specId).stream()
+                        .noneMatch(
+                            run ->
+                                run.startedAt() != null
+                                    && !run.startedAt().isBefore(said.createdAt())))
+        .isPresent();
+  }
+
+  /**
+   * Wires this box's sync role, which decides whether a Sail post stands here ({@link
+   * #supportedHere}); returns {@code this}. Until then the box is taken for main.
+   */
+  public DispatchOperations useBox(Supplier<SyncConfig> box) {
+    this.box = Objects.requireNonNull(box, "box");
+    return this;
   }
 
   public DispatchOperations useMessages(MessageStore messages) {

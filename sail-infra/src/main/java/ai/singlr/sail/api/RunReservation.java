@@ -12,15 +12,20 @@ import ai.singlr.sail.config.ProjectDefinition;
 import ai.singlr.sail.config.RunStatus;
 import ai.singlr.sail.engine.AgentPresence;
 import ai.singlr.sail.engine.AgentUnit;
+import ai.singlr.sail.engine.ContainerExec;
+import ai.singlr.sail.engine.LaunchEnv;
 import ai.singlr.sail.engine.RunRetention;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.harness.RunUsage;
 import ai.singlr.sail.store.DispatchGate;
+import ai.singlr.sail.store.FdeStore;
+import ai.singlr.sail.store.LoginStore;
 import ai.singlr.sail.store.RunStore;
 import java.io.IOException;
 import java.time.Duration;
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
@@ -28,10 +33,13 @@ import java.util.stream.Collectors;
  * The shared reservation and launch-failure cleanup every launching lane runs. {@link #reserve}
  * atomically claims the container (and, for a build, its target repos) as a {@code running} run row
  * in one {@code BEGIN IMMEDIATE} transaction — so two concurrent launches, even from separate
- * processes, can never both claim the same repos — and returns the run's bearer credential. {@link
- * #releaseIfAbsent} is the mirror: on a launch failure it frees the reservation, but only once the
- * agent is proven absent, so a failure that races a live process never pulls the repo out from
- * under it. Kept in one place so the concurrency guarantee has a single definition across lanes.
+ * processes, can never both claim the same repos — and returns what the run's process starts with
+ * ({@link LaunchEnv}): its bearer credential and, for a run that names a spec, the login its person
+ * stored, resolved before anything is reserved, so a spec run with none is refused with no row
+ * ({@link RunLogins}). {@link #releaseIfAbsent} is the mirror: on a launch failure it frees the
+ * reservation, but only once the agent is proven absent, so a failure that races a live process
+ * never pulls the repo out from under it. Kept in one place so the concurrency guarantee has a
+ * single definition across lanes.
  *
  * <p>Host-owned terminal sessions respect the same gate: once a claim lands, every resumed agent
  * conversation ({@link SessionYield#resumeSession}) whose run the new claim would have conflicted
@@ -65,26 +73,26 @@ public final class RunReservation {
   private final DispatchOperations.Listener listener;
   private final SessionYield sessionYield;
   private final Displaceable displaceable;
+  private final RunLogins logins;
 
-  public RunReservation(
-      RunStore runStore,
-      ShellExec shell,
-      DispatchOperations.Listener listener,
-      SessionYield sessionYield) {
-    this(runStore, shell, listener, sessionYield, Displaceable.NONE);
-  }
-
+  /**
+   * {@code fdes} is the roster whose people's stored logins spec runs start with; {@code room} is
+   * where a spec run refused for want of one is said.
+   */
   public RunReservation(
       RunStore runStore,
       ShellExec shell,
       DispatchOperations.Listener listener,
       SessionYield sessionYield,
-      Displaceable displaceable) {
+      Displaceable displaceable,
+      FdeStore fdes,
+      RunLauncher.Room room) {
     this.runStore = runStore;
     this.shell = shell;
     this.listener = listener;
     this.sessionYield = Objects.requireNonNull(sessionYield, "sessionYield");
     this.displaceable = Objects.requireNonNull(displaceable, "displaceable");
+    this.logins = new RunLogins(fdes, room);
   }
 
   /**
@@ -94,9 +102,9 @@ public final class RunReservation {
    * overlap and inserts the row in one transaction, so two concurrent launches can never both claim
    * the same repo. A conflict or a store failure aborts before any launch — the row is what every
    * later overlap check and provenance guard depends on. Also prunes the container's oldest run-log
-   * directories (best-effort). Returns the run's plaintext bearer credential.
+   * directories (best-effort). Returns what the run's process starts with.
    */
-  public String reserve(
+  public LaunchEnv reserve(
       String runId,
       String project,
       String specId,
@@ -114,7 +122,7 @@ public final class RunReservation {
   }
 
   /** Reservation variant for chat lanes that may serve a spec-less room. */
-  public String reserve(
+  public LaunchEnv reserve(
       String runId,
       String project,
       String specId,
@@ -137,7 +145,7 @@ public final class RunReservation {
    * String, AgentUnit, ProjectDefinition)}, committing {@code alongside} with the reservation: a
    * dispatch's claim of its spec lands with its run or not at all.
    */
-  public String reserve(
+  public LaunchEnv reserve(
       String runId,
       String project,
       String specId,
@@ -154,7 +162,7 @@ public final class RunReservation {
     return switch (dispatchClaim(
         runId, project, specId, roomId, boxHandle, role, repos, agentType, branch, task, unit,
         config, alongside)) {
-      case Claim.Claimed claimed -> claimed.credential();
+      case Claim.Claimed claimed -> claimed.env();
       case Claim.Held held -> throw overlapRefusal(held.conflict());
     };
   }
@@ -204,12 +212,14 @@ public final class RunReservation {
       AgentUnit unit,
       ProjectDefinition config,
       Runnable alongside) {
+    var login = logins.forRun(specId, boxHandle, agentType);
     return claim(
         runId,
         project,
         specId,
         role,
         repos,
+        login,
         () ->
             runStore.reserveDispatch(
                 runId,
@@ -231,8 +241,8 @@ public final class RunReservation {
   /** How a claim on a spec's repos was answered. */
   public sealed interface Claim {
 
-    /** The run is reserved; {@code credential} is its plaintext bearer credential. */
-    record Claimed(String credential) implements Claim {}
+    /** The run is reserved; {@code env} is its credential and login, for its process alone. */
+    record Claimed(LaunchEnv env) implements Claim {}
 
     /** Nothing was reserved: the run {@code conflict} names holds what this one would claim. */
     record Held(DispatchGate.Conflict conflict) implements Claim {}
@@ -258,12 +268,14 @@ public final class RunReservation {
       String task,
       AgentUnit unit,
       ProjectDefinition config) {
+    var login = logins.forRun(specId, boxHandle, agentType);
     return claim(
         runId,
         project,
         specId,
         lane.wire(),
         repos,
+        login,
         () ->
             runStore.reserveForReview(
                 runId,
@@ -294,12 +306,13 @@ public final class RunReservation {
       String specId,
       String role,
       List<String> repos,
+      Optional<LoginStore.Login> login,
       Supplier<RunStore.Reservation> reservation) {
-    var claim = claimOnce(runId, project, specId, role, repos, reservation);
+    var claim = claimOnce(runId, project, specId, role, repos, login, reservation);
     for (var ended = 0;
         ended < MAX_DISPLACED && claim instanceof Claim.Held held && displaced(runId, role, held);
         ended++) {
-      claim = claimOnce(runId, project, specId, role, repos, reservation);
+      claim = claimOnce(runId, project, specId, role, repos, login, reservation);
     }
     return claim;
   }
@@ -322,10 +335,11 @@ public final class RunReservation {
       String specId,
       String role,
       List<String> repos,
+      Optional<LoginStore.Login> login,
       Supplier<RunStore.Reservation> reservation) {
     Claim claim;
     try (var hold = sessionYield.lock(project)) {
-      claim = claimOf(reservation);
+      claim = claimOf(reservation, login);
       whenClaimed(claim, () -> yieldDisplacedSessions(runId, project, specId, role, repos));
     } catch (IOException e) {
       throw new ApiException(
@@ -342,7 +356,8 @@ public final class RunReservation {
     }
   }
 
-  private Claim claimOf(Supplier<RunStore.Reservation> reservation) {
+  private Claim claimOf(
+      Supplier<RunStore.Reservation> reservation, Optional<LoginStore.Login> login) {
     RunStore.Reservation reserved;
     try {
       reserved = reservation.get();
@@ -352,7 +367,8 @@ public final class RunReservation {
       throw new ApiException(ErrorCode.COMMAND_FAILED, "Failed to record the dispatch run.", e);
     }
     return switch (reserved) {
-      case RunStore.Reservation.Reserved landed -> new Claim.Claimed(landed.credential());
+      case RunStore.Reservation.Reserved landed ->
+          new Claim.Claimed(new LaunchEnv(landed.credential(), login.orElse(null)));
       case RunStore.Reservation.Conflicted conflicted -> new Claim.Held(conflicted.conflict());
       case RunStore.Reservation.LeaseHeld held -> throw leaseRefusal(held);
     };
@@ -399,6 +415,16 @@ public final class RunReservation {
   }
 
   /**
+   * What a run of {@code specId} acting for {@code owner} would start {@code agent} with, minting
+   * no credential and saying nothing in a room: the login alone, resolved as a reservation resolves
+   * it, refused as a reservation would be. What a box that keeps no run aggregate starts a run
+   * with, and what a dry run checks.
+   */
+  public LaunchEnv unreserved(String specId, String owner, String agent) {
+    return new LaunchEnv(null, logins.resolve(specId, owner, agent).orElse(null));
+  }
+
+  /**
    * Releases the run's repo reservation on a launch failure only when the agent is proven absent —
    * probed on the run's own identity (systemd unit and run-scoped pid file), so the check covers
    * background and foreground launches alike. A failure before or during launch leaves no live
@@ -407,13 +433,30 @@ public final class RunReservation {
    * leaves a live agent, and failing the run would free the repo under it and admit an overlapping
    * session. An agent the container gives no answer about ({@link AgentPresence}) is treated as
    * live for the same reason — the missed-stop reconciler releases a genuinely dead run on its next
-   * pass.
+   * pass. A run released so has its launch file removed too.
    */
   public void releaseIfAbsent(String runId, String project, AgentUnit unit) {
     if (agentLive(project, unit)) {
       return;
     }
     failRun(runId);
+    removeLaunchFile(project, unit);
+  }
+
+  /**
+   * Removes the launch file of a run whose agent is proven absent, best-effort: its secrets leave
+   * the container now rather than at the next sweep, which stays the net for a crash.
+   */
+  private void removeLaunchFile(String project, AgentUnit unit) {
+    try {
+      shell.exec(ContainerExec.asDevUser(project, List.of("rm", "-f", unit.launchEnvPath())));
+    } catch (Exception e) {
+      System.err.println(
+          "  [api] Warning: could not remove the launch file of "
+              + unit.unitName()
+              + ": "
+              + e.getMessage());
+    }
   }
 
   /**

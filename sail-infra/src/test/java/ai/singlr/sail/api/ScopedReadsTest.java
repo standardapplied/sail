@@ -116,6 +116,7 @@ class ScopedReadsTest {
           "/v1/specs/board",
           "/v1/rooms",
           "/v1/runs",
+          "/v1/logins",
           "/v1/projects");
 
   /**

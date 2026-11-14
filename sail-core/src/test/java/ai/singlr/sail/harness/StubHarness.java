@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.harness;
 
+import ai.singlr.sail.common.Remedy;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Objects;
@@ -95,6 +96,12 @@ public record StubHarness(String yamlName, HookFile hooks, OptionalInt loginTunn
   @Override
   public RunUsage usage(String report) {
     return RunUsage.NONE;
+  }
+
+  @Override
+  public List<LoginKind> loginKinds() {
+    return List.of(
+        new LoginKind("api-key", yamlName.toUpperCase().replace('-', '_') + "_KEY", Remedy.NONE));
   }
 
   @Override

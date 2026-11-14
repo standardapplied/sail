@@ -25,6 +25,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -32,6 +33,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.TreeMap;
 import java.util.function.Function;
 
 /**
@@ -60,6 +62,20 @@ public final class RunStore implements ConflictResolver, SyncedStore {
     this.db = db;
     this.changeLog = new ChangeLog(db);
     this.journal = new RevisionJournal(db, changeLog, new RunSchema(), this::authority);
+  }
+
+  /**
+   * The harness login a run started with: a stored login's name and kind, never its value, or
+   * {@link #CONTAINER}, the login the run's container has, which Sail neither knows nor records.
+   */
+  public record RunLogin(String name, String kind) {
+
+    /** A run that names no spec: it uses whatever login its container has. */
+    public static final RunLogin CONTAINER = new RunLogin("container", null);
+
+    public RunLogin {
+      Strings.requireNonBlank(name, "name");
+    }
   }
 
   /**
@@ -98,6 +114,13 @@ public final class RunStore implements ConflictResolver, SyncedStore {
    * its harness. {@code usage} is what its harness reported it cost, recorded as it finished (M1):
    * null while it runs and for a finished run whose report could not be read, {@link RunUsage#NONE}
    * for one whose harness reported nothing. All three are its executing box's facts (M2).
+   *
+   * <p>{@code login} is the harness login the run started with, recorded at its launch: the name
+   * and kind of the stored login of the person it acts for, for a run that names a spec, or {@link
+   * RunLogin#CONTAINER} for one that names none, which uses whatever login its container has. Null
+   * until the launch records it. {@code dispatchedBy} is the handle of the person whose request
+   * launched the run, null when Sail's own machinery launched it (the review loop, a room wake, a
+   * resumed build).
    */
   public record RunRow(
       String id,
@@ -129,7 +152,9 @@ public final class RunStore implements ConflictResolver, SyncedStore {
       String stopSource,
       String model,
       String effort,
-      RunUsage usage) {
+      RunUsage usage,
+      RunLogin login,
+      String dispatchedBy) {
 
     /** The conversation this run serves — its spec's room, or the room itself when spec-less. */
     public String conversationId() {
@@ -203,6 +228,8 @@ public final class RunStore implements ConflictResolver, SyncedStore {
           sessionId,
           sessionSource,
           transcriptPath,
+          null,
+          null,
           null,
           null,
           null,
@@ -349,7 +376,8 @@ public final class RunStore implements ConflictResolver, SyncedStore {
           + " exit_code, log_path, unit, started_at, completed_at, repos, pid_ticks,"
           + " principal, owner, session_id, session_source, transcript_path, last_activity_at,"
           + " room_id, review_id, stop_source, model, effort, tokens_in, tokens_out,"
-          + " tokens_cache_read, tokens_cache_write, cost_usd, usage_source";
+          + " tokens_cache_read, tokens_cache_write, cost_usd, usage_source, login, login_kind,"
+          + " dispatched_by";
 
   /**
    * Records a new run in the {@code running} state, journaling a baseline revision so it
@@ -421,7 +449,12 @@ public final class RunStore implements ConflictResolver, SyncedStore {
    * restore) that owns the whole container right now.
    */
   public sealed interface Reservation {
-    record Reserved(String credential) implements Reservation {}
+    record Reserved(String credential) implements Reservation {
+      @Override
+      public String toString() {
+        return "Reserved[credential=<hidden>]";
+      }
+    }
 
     record Conflicted(DispatchGate.Conflict conflict) implements Reservation {}
 
@@ -1494,6 +1527,31 @@ public final class RunStore implements ConflictResolver, SyncedStore {
         });
   }
 
+  /**
+   * Every project this box executed a run in that started or finished at {@code since} or later,
+   * each with the ids of its runs there still running or stopping: what a container may hold a file
+   * of a run that is no longer live in. A project with no such run is not named, so a pass over
+   * them asks no idle container anything.
+   */
+  public Map<String, List<String>> liveRunsByProject(String localHandle, Instant since) {
+    var byProject = new TreeMap<String, List<String>>();
+    db.query(
+            "SELECT project, id, status FROM runs WHERE COALESCE(node, '') = ?1 AND project IN"
+                + " (SELECT project FROM runs WHERE COALESCE(node, '') = ?1 AND (started_at >= ?2"
+                + " OR completed_at >= ?2)) ORDER BY id",
+            row -> List.of(row.text(0), row.text(1), row.text(2)),
+            ownerKey(localHandle),
+            since)
+        .forEach(
+            run -> {
+              var live = byProject.computeIfAbsent(run.get(0), project -> new ArrayList<>());
+              if (List.of("running", "stopping").contains(run.get(2))) {
+                live.add(run.get(1));
+              }
+            });
+    return Collections.unmodifiableMap(byProject);
+  }
+
   /** The finished runs this box executed whose report was not read, oldest first. */
   public List<RunRow> unread(String localHandle) {
     return db.query(
@@ -1506,19 +1564,31 @@ public final class RunStore implements ConflictResolver, SyncedStore {
   }
 
   /**
-   * Stamps the model a run was launched on (null for the harness default), the reasoning effort
-   * passed to its harness and, for a run resuming a harness session, that session: a resumed run's
-   * report is the session's running total, so the session must be known before it reports. Process
-   * bookkeeping like {@link #updateProcess}: no revision, since the finish journals the row whole.
+   * What a run was launched with: the model (null for the harness default), the reasoning effort
+   * passed to its harness, for a run resuming a harness session that session (a resumed run's
+   * report is the session's running total, so the session must be known before it reports), the
+   * login it started with and who asked for it ({@link RunRow}). Process bookkeeping like {@link
+   * #updateProcess}: no revision, since the finish journals the row whole.
    */
-  public void recordLaunch(String id, String model, String effort, String resumedSession) {
+  public void recordLaunch(String id, Launched launched) {
     db.execute(
-        "UPDATE runs SET model = ?, effort = ?, session_id = COALESCE(?, session_id)"
-            + " WHERE id = ? AND status = 'running'",
-        model,
-        effort,
-        resumedSession,
+        "UPDATE runs SET model = ?, effort = ?, session_id = COALESCE(?, session_id), login = ?,"
+            + " login_kind = ?, dispatched_by = ? WHERE id = ? AND status = 'running'",
+        launched.model(),
+        launched.effort(),
+        launched.resumedSession(),
+        launched.login().name(),
+        launched.login().kind(),
+        launched.dispatchedBy(),
         id);
+  }
+
+  /** What {@link #recordLaunch} records of a run's launch. */
+  public record Launched(
+      String model, String effort, String resumedSession, RunLogin login, String dispatchedBy) {
+    public Launched {
+      Objects.requireNonNull(login, "login");
+    }
   }
 
   /**
@@ -1943,9 +2013,10 @@ public final class RunStore implements ConflictResolver, SyncedStore {
             status, exit_code, log_path, unit, started_at, completed_at, repos, pid_ticks,
             principal, owner, session_id, session_source, transcript_path, last_activity_at,
             room_id, review_id, stop_source, model, effort, tokens_in, tokens_out,
-            tokens_cache_read, tokens_cache_write, cost_usd, usage_source)
+            tokens_cache_read, tokens_cache_write, cost_usd, usage_source, login, login_kind,
+            dispatched_by)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-            ?, ?, ?, ?, ?, ?, ?, ?)
+            ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(id) DO UPDATE SET project = excluded.project, spec_id = excluded.spec_id,
             node = excluded.node, role = excluded.role, agent = excluded.agent,
             branch = excluded.branch, task = excluded.task, pid = excluded.pid,
@@ -1961,7 +2032,8 @@ public final class RunStore implements ConflictResolver, SyncedStore {
             model = excluded.model, effort = excluded.effort, tokens_in = excluded.tokens_in,
             tokens_out = excluded.tokens_out, tokens_cache_read = excluded.tokens_cache_read,
             tokens_cache_write = excluded.tokens_cache_write, cost_usd = excluded.cost_usd,
-            usage_source = excluded.usage_source""",
+            usage_source = excluded.usage_source, login = excluded.login,
+            login_kind = excluded.login_kind, dispatched_by = excluded.dispatched_by""",
         row.id(),
         row.project(),
         row.specId(),
@@ -1996,7 +2068,10 @@ public final class RunStore implements ConflictResolver, SyncedStore {
         row.usage() == null ? null : row.usage().tokensCacheRead(),
         row.usage() == null ? null : row.usage().tokensCacheWrite(),
         row.usage() == null ? null : row.usage().costUsd(),
-        row.usage() == null ? null : row.usage().source().wire());
+        row.usage() == null ? null : row.usage().source().wire(),
+        row.login() == null ? null : row.login().name(),
+        row.login() == null ? null : row.login().kind(),
+        row.dispatchedBy());
   }
 
   private static Map<String, Object> snapshotMap(RunRow run) {
@@ -2037,6 +2112,9 @@ public final class RunStore implements ConflictResolver, SyncedStore {
     map.put("tokens_cache_write", usage == null ? null : figure(usage.tokensCacheWrite()));
     map.put("cost_usd", usage == null ? null : usage.costUsd());
     map.put("usage_source", usage == null ? null : usage.source().wire());
+    map.put("login", run.login() == null ? null : run.login().name());
+    map.put("login_kind", run.login() == null ? null : run.login().kind());
+    map.put("dispatched_by", run.dispatchedBy());
     return map;
   }
 
@@ -2091,7 +2169,10 @@ public final class RunStore implements ConflictResolver, SyncedStore {
           "tokens_cache_read",
           "tokens_cache_write",
           "cost_usd",
-          "usage_source");
+          "usage_source",
+          "login",
+          "login_kind",
+          "dispatched_by");
 
   /**
    * The subset of a snapshot that carries the run's meaning across boxes. The surrogate id is out
@@ -2149,7 +2230,12 @@ public final class RunStore implements ConflictResolver, SyncedStore {
             Snapshots.longValue(snapshot, "tokens_cache_read"),
             Snapshots.longValue(snapshot, "tokens_cache_write"),
             snapshot.get("cost_usd") instanceof Number usd ? usd.doubleValue() : null,
-            Snapshots.text(snapshot, "model")));
+            Snapshots.text(snapshot, "model")),
+        Snapshots.text(snapshot, "login") == null
+            ? null
+            : new RunLogin(
+                Snapshots.text(snapshot, "login"), Snapshots.text(snapshot, "login_kind")),
+        Snapshots.text(snapshot, "dispatched_by"));
   }
 
   /** The run's store-specific half of the shared {@link RevisionJournal} sync protocol. */
@@ -2251,7 +2337,9 @@ public final class RunStore implements ConflictResolver, SyncedStore {
             row.isNull(31) ? null : row.integer(31),
             row.isNull(32) ? null : row.integer(32),
             row.real(33),
-            row.text(27)));
+            row.text(27)),
+        row.isNull(35) ? null : new RunLogin(row.text(35), row.text(36)),
+        row.text(37));
   }
 
   /** The usage a row records, null when it names no source: not finished, or not read. */

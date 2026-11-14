@@ -53,6 +53,7 @@ final class LoopDecision {
       case LoopTrigger.OperatorStopped stopped -> operatorStopped(facts, stopped.run());
       case LoopTrigger.Answered answered -> answered(facts, isTheAnswer(facts, answered));
       case LoopTrigger.Freed freed -> freed(facts);
+      case LoopTrigger.LoginStored stored -> loginStored(facts);
       case LoopTrigger.GoOn goOn -> goOn(facts);
       case LoopTrigger.ReviewRunning running -> on(rows.review(), review -> inItsStages(facts));
       case LoopTrigger.StageJudged judged ->
@@ -228,6 +229,22 @@ final class LoopDecision {
         .flatMap(stopped -> facts.rows().awaited(stopped, "pending", "running", "failed"))
         .<LoopStep>map(review -> new LoopStep.Escalate(review, reason))
         .orElseGet(LoopStep.Nothing::new);
+  }
+
+  /**
+   * A stored login moves a loop this box drives that a launch refused for want of one left owed:
+   * the reviewer of a review no run serves or the fix of one that failed its gate ({@link #goOn}),
+   * or else the answered build its refused resume left holding. An errored review keeps to the
+   * reconciler's pace, and a wait to the run it waits on.
+   */
+  private static LoopStep loginStored(LoopFacts facts) {
+    if (!facts.rows().drivenHere()) {
+      return new LoopStep.Nothing();
+    }
+    var due = facts.rows().due();
+    return due instanceof Owed.Advance || due instanceof Owed.Fix
+        ? goOn(facts)
+        : answered(facts, false);
   }
 
   /**

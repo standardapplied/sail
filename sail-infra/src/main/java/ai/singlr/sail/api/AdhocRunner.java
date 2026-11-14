@@ -5,12 +5,15 @@
 
 package ai.singlr.sail.api;
 
+import ai.singlr.sail.access.Access;
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.common.Remedied;
 import ai.singlr.sail.config.Lane;
 import ai.singlr.sail.config.ProjectDefinition;
 import ai.singlr.sail.engine.AgentUnit;
+import ai.singlr.sail.engine.LaunchEnv;
 import ai.singlr.sail.harness.Harnesses;
+import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.store.RunStore;
 import java.util.List;
 import java.util.Optional;
@@ -89,13 +92,14 @@ public final class AdhocRunner {
                   List.of(),
                   background,
                   runId,
-                  null,
+                  new LaunchEnv(null, null),
                   Lane.ADHOC.wire(),
+                  null,
                   null)));
       return new DispatchOperations.AdhocSession(
           runId, request.branch(), null, null, Optional.empty());
     }
-    var credential =
+    var env =
         reserveAdhocRun(
             runId, project, localHandle, agentType, request.branch(), request.task(), unit, config);
     try {
@@ -116,9 +120,10 @@ public final class AdhocRunner {
                   List.of(),
                   background,
                   runId,
-                  credential,
+                  env,
                   Lane.ADHOC.wire(),
-                  null));
+                  null,
+                  Access.attendee(Actor.reader()).orElse(null)));
       var status =
           runLauncher.finishLaunch(
               new RunLauncher.RunContext(
@@ -132,7 +137,7 @@ public final class AdhocRunner {
     }
   }
 
-  private String reserveAdhocRun(
+  private LaunchEnv reserveAdhocRun(
       String runId,
       String project,
       String boxHandle,

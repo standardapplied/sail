@@ -86,6 +86,8 @@ public final class PtySelfTestCommand implements Callable<Integer> {
           "instance_id",
           "event_drops",
           "spec_title",
+          "dry_run",
+          "would_create_branch",
           "dispatched",
           "clone_ms",
           "change",
@@ -465,7 +467,11 @@ public final class PtySelfTestCommand implements Callable<Integer> {
     var info =
         new PtyMessage.SessionInfo("probe", "instance", true, 0, "fde", "", List.of("bash", "-l"));
     var listing = new SessionCommand.Ls.Listing(1, "boot", List.of(info), PtyEventDrops.Drops.NONE);
-    var preview = new DispatchCommand.DispatchPreview("box", "spec", "title", "foreground", "task");
+    var preview =
+        new DispatchCommand.DispatchPreview(false, "box", "spec", "title", "foreground", "task");
+    var dry =
+        new DispatchCommand.DryDispatch(
+            true, "box", "spec", "title", "background", "claude-code", "b", true, false, "task");
     var idle = new DispatchCommand.NoDispatch("box", false, "no_pending_specs");
     var template = new WorkspaceTemplate.Template("p", "p--tmpl", "v1", "i", "tank", true);
     var created =
@@ -475,6 +481,6 @@ public final class PtySelfTestCommand implements Callable<Integer> {
     var rows =
         new Workspaces.Listing(
             "p", List.of(new Workspaces.Row("w", "p-w", "running", "v1", "2026-11-12", null)));
-    return CliJson.stringify(List.of(listing, preview, idle, created, changed, rows));
+    return CliJson.stringify(List.of(listing, preview, dry, idle, created, changed, rows));
   }
 }

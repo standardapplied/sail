@@ -22,7 +22,11 @@ import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
+import java.util.stream.Stream;
 
 /**
  * A pseudo-terminal pair owned by this process, with the child spawned as a session leader whose
@@ -296,14 +300,23 @@ public final class Pty implements AutoCloseable {
     }
   }
 
-  /** Kills a shim that failed to claim, and everything it started, and closes its pipe. */
+  /**
+   * Kills a shim that failed to claim, and everything it started, waits up to {@link #STOP_WAIT}
+   * for all of them to be gone, and closes its pipe. A killed process the shim started is still
+   * there until it is reaped, so waiting for the shim alone would return with one running.
+   */
   private static void stop(Process shim) throws IOException {
-    shim.descendants().forEach(ProcessHandle::destroyForcibly);
-    shim.destroyForcibly();
+    var started = Stream.concat(shim.descendants(), Stream.of(shim.toHandle())).toList();
+    started.forEach(ProcessHandle::destroyForcibly);
+    var gone =
+        CompletableFuture.allOf(
+            started.stream().map(ProcessHandle::onExit).toArray(CompletableFuture[]::new));
     try {
-      var unused = shim.waitFor(STOP_WAIT.toMillis(), TimeUnit.MILLISECONDS);
+      gone.get(STOP_WAIT.toMillis(), TimeUnit.MILLISECONDS);
     } catch (InterruptedException interrupted) {
       Thread.currentThread().interrupt();
+    } catch (ExecutionException | TimeoutException stillThere) {
+      var unused = stillThere;
     }
     shim.getInputStream().close();
   }

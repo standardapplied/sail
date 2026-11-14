@@ -104,6 +104,7 @@ public final class SailStopGate {
       WORKSPACE="$SAIL_HOME/workspace"
       RUNS_DIR="$SAIL_HOME/.sail/runs"
       SOCKET="__SAIL_API_SOCKET__"
+      __SAIL_CURL__
 
       publish() {
         if [ -x "$EVENT_HELPER" ]; then
@@ -211,9 +212,9 @@ public final class SailStopGate {
       ROOM_MORE=""
       if [ ! -f "$ROOM_MARKER" ] && [ -n "${SAIL_RUN_CREDENTIAL:-}" ] && [ -S "$SOCKET" ] \\
         && command -v curl >/dev/null 2>&1; then
-        INBOX="$(curl --silent --max-time 5 \\
+        CREDENTIAL="$SAIL_RUN_CREDENTIAL"
+        INBOX="$(sail_curl --silent --max-time 5 \\
           --unix-socket "$SOCKET" \\
-          -H "Authorization: Bearer ${SAIL_RUN_CREDENTIAL}" \\
           http://sail/v1/run/messages 2>/dev/null || true)"
         if [ -n "$INBOX" ]; then
           ROOM_IDS="$(printf '%s' "$INBOX" | python3 -c '
@@ -245,9 +246,8 @@ public final class SailStopGate {
       ' 2>/dev/null || true)"
         fi
         if [ -n "$ROOM_REASON" ]; then
-          ACK="$(curl --silent --output /dev/null --write-out '%{http_code}' --max-time 5 \\
+          ACK="$(sail_curl --silent --output /dev/null --write-out '%{http_code}' --max-time 5 \\
             --unix-socket "$SOCKET" \\
-            -H "Authorization: Bearer ${SAIL_RUN_CREDENTIAL}" \\
             -X POST --data-urlencode "delivered=$ROOM_IDS" \\
             http://sail/v1/run/messages 2>/dev/null || true)"
           if [ "$ACK" = "200" ]; then
@@ -293,7 +293,9 @@ public final class SailStopGate {
 
   /** Returns the script content that {@link #install(String)} writes. Pure function. */
   public static String scriptContent() {
-    return SCRIPT.replace("__SAIL_API_SOCKET__", SailPaths.apiSocketContainerPath().toString());
+    return SCRIPT
+        .replace("__SAIL_API_SOCKET__", SailPaths.apiSocketContainerPath().toString())
+        .replace("__SAIL_CURL__\n", SocketPreamble.credentialCurl());
   }
 
   /**

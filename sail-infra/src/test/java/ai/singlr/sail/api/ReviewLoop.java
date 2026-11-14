@@ -16,6 +16,7 @@ import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.config.TestDefinitions;
 import ai.singlr.sail.engine.AgentSession;
 import ai.singlr.sail.engine.AgentUnit;
+import ai.singlr.sail.engine.LaunchEnv;
 import ai.singlr.sail.engine.RunUsageReader;
 import ai.singlr.sail.engine.SharedProjectFiles;
 import ai.singlr.sail.engine.SlackPoster;
@@ -34,6 +35,7 @@ import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.SlackThreadStore;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
+import ai.singlr.sail.store.TestLogins;
 import ai.singlr.sail.sync.SyncTransitions;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
@@ -138,6 +140,7 @@ final class ReviewLoop implements AutoCloseable {
       Function<String, String> reviewer) {
     db = Sqlite.open(dir.resolve("loop-" + System.nanoTime() + ".db"));
     new SchemaManager(db).migrate();
+    TestLogins.store(db, HANDLE);
     projects = new ProjectStore(db);
     reader = ProjectReader.ofCatalog(projects);
     describe(yamlContent);
@@ -240,7 +243,8 @@ final class ReviewLoop implements AutoCloseable {
         MissedStopReconciler.systemdUnitProbe(container),
         watchers(),
         () -> HANDLE,
-        clock);
+        clock,
+        new FdeStore(db));
   }
 
   private WatcherCoverage watchers() {
@@ -556,8 +560,8 @@ final class ReviewLoop implements AutoCloseable {
 
   private void play(RunStore.RunRow run) {
     var command = launchCommandOf(run.id());
-    var agentCommand = command.get(command.size() - 8);
-    var credential = command.get(command.size() - 2);
+    var agentCommand = command.get(command.size() - 7);
+    var credential = container.environmentOf(run.id()).get(LaunchEnv.RUN_CREDENTIAL);
     var model = group(MODEL, agentCommand);
     var effort = group(EFFORT, agentCommand);
     try {
@@ -595,7 +599,7 @@ final class ReviewLoop implements AutoCloseable {
   /** The command the run's agent was launched with, as the launcher issued it. */
   List<String> launchCommandOf(String runId) {
     return launchCommands.stream()
-        .filter(command -> command.get(command.size() - 3).equals(runId))
+        .filter(command -> command.get(command.size() - 2).equals(runId))
         .findFirst()
         .orElseThrow();
   }
@@ -790,7 +794,7 @@ final class ReviewLoop implements AutoCloseable {
     if (refusing) {
       return 1;
     }
-    var runId = command.get(command.size() - 3);
+    var runId = command.get(command.size() - 2);
     launchCommands.add(List.copyOf(command));
     container.started(runId);
     launched.accept(runId);

@@ -26,6 +26,7 @@ import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
+import ai.singlr.sail.store.TestLogins;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.time.Duration;
@@ -117,6 +118,7 @@ final class LiveRoom implements AutoCloseable {
     reader = ProjectReader.ofCatalog(projects);
     Acting.system(() -> projects.upsert(TestDefinitions.yaml(yaml)));
     new FdeStore(db).add(HANDLE, null, null, "admin");
+    TestLogins.store(db, HANDLE);
     specs = new SpecStore(db);
     runs = new RunStore(db);
     messages = new MessageStore(db);
@@ -519,7 +521,7 @@ final class LiveRoom implements AutoCloseable {
   }
 
   private int launch(List<String> command) {
-    var runId = command.get(command.size() - 3);
+    var runId = command.get(command.size() - 2);
     launchCommands.add(List.copyOf(command));
     container.started(runId);
     return 0;

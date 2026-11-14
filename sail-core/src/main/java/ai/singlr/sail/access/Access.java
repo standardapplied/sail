@@ -51,7 +51,12 @@ public final class Access {
   private static final Decision NOT_FOUND = new Decision.NotFound();
   private static final Set<Action> SEATED = EnumSet.of(Action.CREATE, Action.CLAIM);
   private static final Set<Action> WRITES_NOTHING =
-      EnumSet.of(Action.READ, Action.READ_DEFINITION, Action.READ_MEASURES, Action.OPERATE_BOX);
+      EnumSet.of(
+          Action.READ,
+          Action.READ_DEFINITION,
+          Action.READ_MEASURES,
+          Action.KEEP_LOGINS,
+          Action.OPERATE_BOX);
 
   private Access() {}
 
@@ -105,9 +110,10 @@ public final class Access {
 
   /**
    * Whether {@code actor}'s role may write at all: whether its column allows any action that
-   * changes a row. Reading changes none, and operating a box is its own person's whatever their
-   * role. A role that may write nothing is read-only: the role step's refusal says so, and main's
-   * sync server neither takes content from such a session nor asks what it was served.
+   * changes a row. Reading changes none, keeping one's harness logins changes none (they are files
+   * on the runner, never rows), and operating a box is its own person's whatever their role. A role
+   * that may write nothing is read-only: the role step's refusal says so, and main's sync server
+   * neither takes content from such a session nor asks what it was served.
    */
   public static boolean mayWrite(Actor actor) {
     var column = Column.role(actor.role());

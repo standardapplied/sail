@@ -87,6 +87,8 @@ class MissedStopsTest {
         RunStore.STOPPED_BY_OPERATOR,
         null,
         null,
+        null,
+        null,
         null);
   }
 

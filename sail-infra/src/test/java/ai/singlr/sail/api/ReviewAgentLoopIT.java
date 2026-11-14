@@ -24,6 +24,7 @@ import ai.singlr.sail.engine.AgentUnit;
 import ai.singlr.sail.engine.ContainerAgentProcess;
 import ai.singlr.sail.engine.ContainerExec;
 import ai.singlr.sail.engine.ContainerFilePush;
+import ai.singlr.sail.engine.LaunchEnv;
 import ai.singlr.sail.engine.LiveStream;
 import ai.singlr.sail.engine.PortalSkill;
 import ai.singlr.sail.engine.ProjectSkillInstaller;
@@ -46,6 +47,7 @@ import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
+import ai.singlr.sail.store.TestLogins;
 import java.io.ByteArrayInputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -171,6 +173,7 @@ class ReviewAgentLoopIT extends AbstractIncusIT {
             .formatted(CONTAINER));
     db = Sqlite.open(stateDir.resolve("loop.db"));
     new SchemaManager(db).migrate();
+    TestLogins.store(db, HANDLE);
     HeldProjects.hold(db, CONTAINER);
     specStore = new SpecStore(db);
     reviewStore = new ReviewStore(db);
@@ -450,13 +453,25 @@ class ReviewAgentLoopIT extends AbstractIncusIT {
     env.put("SAIL_SPEC_ID", "auth");
     env.put("SAIL_AGENT", "claude-code");
     env.put("SAIL_RUN_ID", runId);
-    env.put("SAIL_RUN_CREDENTIAL", "it-credential");
     env.put("SAIL_RUN_ROLE", "room");
     var presence = new AgentPresence(shell);
+    ContainerFilePush.pushAsDev(
+        shell,
+        CONTAINER,
+        unit.launchEnvPath(),
+        new LaunchEnv("it-credential", null).lines(),
+        "0600");
 
     var handle =
         new ContainerAgentProcess(shell)
-            .start(CONTAINER, "/home/dev/workspace", env, command, unit.pidPath(), unit.logPath());
+            .start(
+                CONTAINER,
+                "/home/dev/workspace",
+                env,
+                command,
+                unit.pidPath(),
+                unit.logPath(),
+                unit.launchEnvPath());
     try {
       assertEquals(new LiveStream.Step.Init("it-session"), nextStep(handle));
       var prompt =
@@ -473,6 +488,11 @@ class ReviewAgentLoopIT extends AbstractIncusIT {
           "auth|claude-code|" + runId + "|it-credential|room\n",
           fileOf("/home/dev/.sail/live-env"));
       assertEquals("/home/dev/workspace\n", fileOf("/home/dev/.sail/live-cwd"));
+      assertFalse(
+          shell
+              .exec(ContainerExec.asDevUser(CONTAINER, List.of("test", "-e", unit.launchEnvPath())))
+              .ok(),
+          "the live member's launch.env is gone before it starts");
       assertEquals("warming up\n", fileOf(unit.logPath()), "stderr is the run's log");
       assertFalse(exec(CONTAINER, List.of("test", "-e", "/tmp/pwned")).ok(), "a prompt is data");
       var pid = handle.pid().orElseThrow();

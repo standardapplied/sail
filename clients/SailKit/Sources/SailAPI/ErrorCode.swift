@@ -43,6 +43,7 @@ public enum ErrorCode: String, CaseIterable, Sendable {
     case forbiddenNotAuthor = "forbidden_not_author"
     case agentAlreadyRunning = "agent_already_running"
     case agentNotConfigured = "agent_not_configured"
+    case loginNotStored = "login_not_stored"
     case agentStatusFailed = "agent_status_failed"
     case agentLogFailed = "agent_log_failed"
     case agentStopFailed = "agent_stop_failed"

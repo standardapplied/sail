@@ -16,9 +16,10 @@ import java.util.Optional;
  * One route a router serves: requests of {@code method} ({@link #ANY} for every method) on a path
  * {@code pattern} matches, decided by {@code gate}, answered by {@code handler}. A pattern is an
  * absolute path of segments, each literal or a placeholder: {@code {name}} matches one segment, an
- * empty one included, so a path as sent fills it as sent; {@code {name...}} matches the rest of the
- * path, slashes and all, up to the literal segments after it, and holds something unless it is
- * last.
+ * empty one included, so a path as sent fills it as sent; {@code {name}:verb} matches one segment
+ * that ends in {@code :verb}, and is filled with what comes before it; {@code {name...}} matches
+ * the rest of the path, slashes and all, up to the literal segments after it, and holds something
+ * unless it is last.
  */
 record Route<H>(String method, String pattern, Gate gate, H handler) {
 
@@ -67,12 +68,15 @@ record Route<H>(String method, String pattern, Gate gate, H handler) {
         }
         fill(filled, segment, tail);
         taken = end;
-      } else if (taken >= given.size()
-          || !placeholder(segment) && !segment.equals(given.get(taken))) {
+      } else if (taken >= given.size() || !matches(segment, given.get(taken))) {
         return Optional.empty();
       } else {
         if (placeholder(segment)) {
-          fill(filled, segment, given.get(taken));
+          var verb = verb(segment);
+          var value = given.get(taken);
+          filled.put(
+              segment.substring(1, segment.length() - verb.length() - 1),
+              value.substring(0, value.length() - verb.length()));
         }
         taken++;
       }
@@ -80,13 +84,27 @@ record Route<H>(String method, String pattern, Gate gate, H handler) {
     return taken == given.size() ? Optional.of(filled) : Optional.empty();
   }
 
-  private static void fill(Map<String, String> filled, String segment, String value) {
-    var close = rest(segment) ? REST : "}";
-    filled.put(segment.substring(1, segment.length() - close.length()), value);
+  /** Whether one {@code segment} of a pattern matches the {@code given} segment of a path. */
+  private static boolean matches(String segment, String given) {
+    if (!placeholder(segment)) {
+      return segment.equals(given);
+    }
+    var verb = verb(segment);
+    return verb.isEmpty() || (given.length() > verb.length() && given.endsWith(verb));
   }
 
   private static boolean placeholder(String segment) {
-    return segment.startsWith("{") && segment.endsWith("}");
+    return segment.startsWith("{") && segment.indexOf('}') > 0;
+  }
+
+  /** What a placeholder segment requires after its value: {@code :use} of {@code {name}:use}. */
+  private static String verb(String segment) {
+    return segment.substring(segment.indexOf('}') + 1);
+  }
+
+  private static void fill(Map<String, String> filled, String segment, String value) {
+    var close = rest(segment) ? REST : "}";
+    filled.put(segment.substring(1, segment.length() - close.length()), value);
   }
 
   private static boolean rest(String segment) {
