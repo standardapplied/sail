@@ -1954,6 +1954,7 @@ aged() {
   local kind=$1 name made now
   now=$(date +%s)
   while read -r name made; do
+    made=${made%%.*}
     [[ -z $name ]] || echo "$kind $name, made $(((now - made) / 3600)) h $(((now - made) / 60 % 60)) min ago"
   done
 }
