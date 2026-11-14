@@ -856,14 +856,14 @@ access() {
     on "$run" main "echo '{\"type\":\"claude-code\"}' | sudo sail project config set acme agent -"
   check "$run" "every node syncs twice" sync_all "$run"
   check "$run" "matrix 10: uday's dispatch of e1 on main is placement: e1 runs on eng's box [CLI]" \
-    refused "$run" main "$E1_RUNS_ON_ENG" "sudo sail spec dispatch -p acme --spec e1 --dry-run --no-snapshot"
+    refused "$run" main "$E1_RUNS_ON_ENG" "sudo sail spec dispatch -p acme --spec e1 --dry-run"
   check "$run" "matrix 10: uday's dispatch of e1 on main is placement: e1 runs on eng's box [HTTP]" \
     http_token_door "$run" main uday admin 403 POST /v1/projects/acme/dispatch '{"spec_id":"e1","dry_run":true}' "$E1_RUNS_ON_ENG"
   check "$run" "eng applies acme" apply_project "$run" eng acme
   check "$run" "matrix 10: eng's dispatch of e1 on its box is eng's to make, and stops at the fact that e1 is a draft [HTTP]" \
     http_token_door "$run" eng eng member 409 POST /v1/projects/acme/dispatch '{"spec_id":"e1","dry_run":true}' "$E1_IS_A_DRAFT"
   check "$run" "matrix 10: eng's dispatch of e1 on its box is eng's to make, and stops at the fact that e1 is a draft [CLI]" \
-    refused "$run" eng "$E1_IS_A_DRAFT" "sudo sail spec dispatch -p acme --spec e1 --dry-run --no-snapshot"
+    refused "$run" eng "$E1_IS_A_DRAFT" "sudo sail spec dispatch -p acme --spec e1 --dry-run"
   check "$run" "matrix 25: eng adds a person at its node's CLI, refused admin-only [CLI]" \
     naming "$ASK_AN_ADMIN_TO_DO_IT" refused "$run" eng "$ADMIN_MANAGES_PEOPLE" "sudo sail fde add zed --name Zed"
   check "$run" "matrix 25: eng adds a person at main's gateway, refused admin-only [gateway]" \
@@ -1675,10 +1675,44 @@ that `mvn -q verify` builds and tests every module and that the build needs JDK 
 `mvn -q verify` yourself and say in the pull request that it passed. Change only pom.xml and
 README.md.'
 
+readonly BESIDE_BODY='# The README says what the project is for
+
+Add one sentence to README.md, right after its title, saying what the project is for, as its code
+shows. Change only README.md.'
+
+each_ran_in_its_own_workspace() {
+  local run=$1 box=$2 listed runs
+  listed=$(on "$run" "$box" "sudo sail project workspace list acme --json") || return 1
+  runs=$(on "$run" "$box" "sudo sail agent sessions acme --json") || return 1
+  python3 -I -c '
+import json, sys
+from datetime import datetime
+specs = sys.argv[1:3]
+rows = {r.get("spec"): r for r in json.loads(sys.argv[3])["workspaces"] if r.get("spec") in specs}
+def at(text):
+    return datetime.fromisoformat(text.replace("Z", "+00:00"))
+def first_build(spec):
+    builds = sorted((r for r in json.loads(sys.argv[4]).get("runs", [])
+                     if r.get("spec_id") == spec and r.get("role") == "build"),
+                    key=lambda r: at(r["started_at"]))
+    return builds[0] if builds else None
+first, second = (first_build(s) for s in specs)
+print("workspaces: %s; first build %s to %s, second started %s" % (
+    {s: (r["instance"], r["state"], r.get("owner")) for s, r in rows.items()},
+    first and first["started_at"], first and first.get("completed_at"), second and second["started_at"]))
+own = len(rows) == 2 and rows[specs[0]]["instance"] != rows[specs[1]]["instance"]
+mine = all(r.get("owner") == "eng" for r in rows.values())
+overlapped = bool(first and second and first.get("completed_at")
+                  and at(second["started_at"]) < at(first["completed_at"]))
+sys.exit(0 if own and mine and overlapped else 1)
+' "$3" "$4" "$listed" "$runs"
+}
+
 loop() {
-  local run=${1:-} spec
+  local run=${1:-} spec beside
   [[ -n $run ]] || usage
   spec="loop-$(date -u +%H%M%S)"
+  beside="beside-${spec#loop-}"
   check "$run" "main gives acme the nocaptcha repo, JDK 21 and Maven" \
     on "$run" main "echo '[{\"url\":\"https://github.com/$LOOP_REPO.git\",\"path\":\"nocaptcha\"}]' | sudo sail project config set acme repos - && echo '{\"jdk\":21,\"maven\":\"3.9.9\"}' | sudo sail project config set acme runtimes -"
   check "$run" "main installs $LOOP_AGENTS, the first to build and the next to review, naming no flag" \
@@ -1687,6 +1721,10 @@ loop() {
   check "$run" "eng holds the forge token where only root reads it" place_secret "$run" eng fleet-github-token gh
   check "$run" "eng registers its workstation key" registers_container_key "$run" eng
   check "$run" "eng applies acme with the forge token" applies_with_forge_token "$run" eng acme
+  check "$run" "eng adds a ZFS pool in a file, where each spec's run gets its own workspace" \
+    on "$run" eng "sudo sail host init --storage zfs --pool-file-size 20GiB --pool tank --yes"
+  check "$run" "eng builds acme's template with the forge token" \
+    on "$run" eng "sudo sh -c 'GITHUB_TOKEN=\$(cat /root/.fleet/gh) sail project template build acme'"
   check "$run" "eng stores each agent's key as its harness login, nothing in the container" gives_agents_their_keys "$run" eng
   check "$run" "eng's logins list each agent's default by fingerprint, no value" each_agent_has_its_login "$run" eng
   check "$run" "no secret appears in the run's logs" no_secret_in_logs "$run"
@@ -1694,10 +1732,16 @@ loop() {
     on "$run" eng "cat > /tmp/loop.md && sudo sail spec create -p acme --id $spec --title 'The build passes on JDK 21 and the README says how to run it' --body-file /tmp/loop.md --assignee eng" <<< "$LOOP_BODY"
   check "$run" "eng makes it ready" on "$run" eng "sudo sail spec update $spec --status pending"
   check "$run" "eng dispatches it in the background" on "$run" eng "sudo sail spec dispatch -p acme --spec $spec --background"
+  check "$run" "eng writes a second spec of the same repo" \
+    on "$run" eng "cat > /tmp/beside.md && sudo sail spec create -p acme --id $beside --title 'The README says what the project is for' --body-file /tmp/beside.md --assignee eng" <<< "$BESIDE_BODY"
+  check "$run" "eng makes it ready" on "$run" eng "sudo sail spec update $beside --status pending"
+  check "$run" "eng dispatches it while the first builds, in the background" on "$run" eng "sudo sail spec dispatch -p acme --spec $beside --background"
   check "$run" "no agent key and no Sail credential is in any process's command line on eng while it builds and its hooks fire" no_key_in_any_command_line "$run" eng
   check "$run" "the build asks its question and waits, unreviewed" waits_on_its_question "$run" eng "$spec" 20
   check "$run" "eng answers in the room" on "$run" eng "sudo sail spec comment $spec --body 'Call it Building.'"
   check "$run" "the answer resumes the build, and the review takes it to awaiting_merge" reaches_status "$run" eng "$spec" awaiting_merge 45
+  check "$run" "the second spec's review takes it to awaiting_merge" reaches_status "$run" eng "$beside" awaiting_merge 30
+  check "$run" "the two builds ran at once, each in its own workspace of acme" each_ran_in_its_own_workspace "$run" eng "$spec" "$beside"
   check "$run" "the agent opened a pull request on $LOOP_REPO" opened_a_pull_request "$spec"
   check "$run" "the build ran on eng's stored login, by name and kind" the_build_ran_on_the_stored_login "$run" eng "$spec"
   check "$run" "the room shows the review" the_room_shows_the_review "$run" eng "$spec"
@@ -1709,6 +1753,7 @@ loop() {
   check "$run" "its cost is dollars over every run listed for it, and its ready and done are the same on main and eng" \
     measures_record_the_cost_and_the_times "$run" "$spec" eng
   check "$run" "the fleet closes its pull request and deletes the branch" closes_the_pull_request "$spec" "$run"
+  check "$run" "the fleet closes the second spec's pull request and deletes its branch" closes_the_pull_request "$beside" "$run"
   check "$run" "still no secret appears in the run's logs" no_secret_in_logs "$run"
 }
 

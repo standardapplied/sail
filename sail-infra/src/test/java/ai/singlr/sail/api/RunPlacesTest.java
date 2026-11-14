@@ -10,6 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.ProjectDefinition;
 import ai.singlr.sail.config.TestDefinitions;
 import ai.singlr.sail.config.YamlUtil;
@@ -17,6 +18,7 @@ import ai.singlr.sail.engine.RunPlace;
 import ai.singlr.sail.engine.ScriptedShellExecutor;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.Workspaces;
+import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.Sqlite;
@@ -157,19 +159,35 @@ class RunPlacesTest {
   }
 
   @Test
-  void aBoxWhoseMemoryIncusDoesNotSayOrWillNotTellSetsNoCap() throws Exception {
+  void aBoxWhoseMemoryIncusDoesNotSayOrWillNotTellSetsNoCapEvenWithALiveWorkspace()
+      throws Exception {
     var incus = TestWorkspaces.incus(definitions(), "acme");
     var db = Sqlite.open(dir.resolve("r.db"));
     new SchemaManager(db).migrate();
     var runs = new RunStore(db);
+    Acting.system(
+        () ->
+            runs.reserveDispatch(
+                DateTimeUtils.newId().toString(),
+                "acme",
+                "other",
+                "eng",
+                "build",
+                List.of("app"),
+                "claude-code",
+                null,
+                "t",
+                "l",
+                "u"));
     var unreadable =
         new ScriptedShellExecutor().onThrow("incus query /1.0/resources", new IOException("x"));
     var interrupted = interrupting(new ScriptedShellExecutor(), "incus query /1.0/resources");
+    var silent = new ScriptedShellExecutor().onOk("incus query /1.0/resources", "{}");
     var roomy =
         new ScriptedShellExecutor()
             .onOk("incus query /1.0/resources", "{\"memory\": {\"total\": 68719476736}}");
 
-    for (var shell : List.of(unreadable, interrupted, roomy)) {
+    for (var shell : List.of(unreadable, interrupted, silent, roomy)) {
       var places =
           new RunPlaces(
               new ProjectLoader(shell, definitions()),

@@ -14,6 +14,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.FileLimits;
 import ai.singlr.sail.config.Guardrails;
+import ai.singlr.sail.config.ProjectDefinition;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.config.TestDefinitions;
 import ai.singlr.sail.engine.AbstractIncusIT;
@@ -21,12 +22,14 @@ import ai.singlr.sail.engine.AgentPresence;
 import ai.singlr.sail.engine.AgentProcess;
 import ai.singlr.sail.engine.AgentSession;
 import ai.singlr.sail.engine.AgentUnit;
+import ai.singlr.sail.engine.BoxInstances;
 import ai.singlr.sail.engine.ContainerAgentProcess;
 import ai.singlr.sail.engine.ContainerExec;
 import ai.singlr.sail.engine.ContainerFilePush;
 import ai.singlr.sail.engine.LaunchEnv;
 import ai.singlr.sail.engine.LiveStream;
 import ai.singlr.sail.engine.PortalSkill;
+import ai.singlr.sail.engine.ProjectProvisioner;
 import ai.singlr.sail.engine.ProjectSkillInstaller;
 import ai.singlr.sail.engine.RunPlace;
 import ai.singlr.sail.engine.SailSkills;
@@ -34,6 +37,7 @@ import ai.singlr.sail.engine.SharedProjectFiles;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.StageSkill;
 import ai.singlr.sail.engine.WatcherSpawner;
+import ai.singlr.sail.engine.WorkstationIdentity;
 import ai.singlr.sail.gen.SpecSkillGenerator;
 import ai.singlr.sail.harness.Harness;
 import ai.singlr.sail.harness.Harnesses;
@@ -130,6 +134,7 @@ class ReviewAgentLoopIT extends AbstractIncusIT {
       """;
 
   private Path stateDir;
+  private ProjectDefinition definition;
   private Sqlite db;
   private SpecStore specStore;
   private ReviewStore reviewStore;
@@ -172,6 +177,12 @@ class ReviewAgentLoopIT extends AbstractIncusIT {
           type: codex
         """
             .formatted(CONTAINER));
+    definition = TestProjects.reading(yaml).require(CONTAINER);
+    specBox(
+        definition,
+        template ->
+            ContainerFilePush.push(
+                shell, template, "/usr/local/bin/codex", FAKE_AGENT, List.of("--mode", "0755")));
     db = Sqlite.open(stateDir.resolve("loop.db"));
     new SchemaManager(db).migrate();
     TestLogins.store(db, HANDLE);
@@ -227,6 +238,21 @@ class ReviewAgentLoopIT extends AbstractIncusIT {
                 () -> HANDLE)
             .useMessages(new MessageStore(db)));
     spec("auth");
+    made("auth");
+  }
+
+  /**
+   * Makes spec {@code specId}'s workspace as its build would have, so a test can set its fake
+   * agent's files before a reviewer of the spec is launched into it: the reviewer reuses it.
+   */
+  private void made(String specId) throws Exception {
+    var workspaces = TestWorkspaces.over(shell);
+    var check =
+        workspaces.checkSpec(
+            (RunPlace.SpecWorkspace) RunPlace.of(CONTAINER, specId),
+            ProjectProvisioner.inputs(definition, WorkstationIdentity.registered()),
+            name -> false);
+    workspaces.enterSpec(check, definition, HANDLE, null);
   }
 
   /** Records spec {@code id}, in progress under {@code codex}, working the whole container. */
@@ -293,7 +319,7 @@ class ReviewAgentLoopIT extends AbstractIncusIT {
   private List<String> installedSkill(String folder) throws Exception {
     var listed =
         exec(
-            CONTAINER,
+            workspaceOf(CONTAINER, "auth"),
             List.of(
                 "sh",
                 "-c",
@@ -315,11 +341,16 @@ class ReviewAgentLoopIT extends AbstractIncusIT {
       db.close();
     }
     deleteContainerQuietly(CONTAINER);
+    removeSpecBox(CONTAINER);
     if (stateDir != null) {
       deleteRecursively(stateDir);
     }
   }
 
+  /**
+   * Scenario 3: the build's workspace takes its reviewer, its fix and the review after it, each as
+   * its own unit there, and no other workspace is made.
+   */
   @Test
   void theReviewLoopReachesAwaitingMergeWithEveryAgentAsItsOwnUnit() throws Exception {
     hold();
@@ -334,9 +365,11 @@ class ReviewAgentLoopIT extends AbstractIncusIT {
     eventually(
         () -> logOf(reviewer).contains("review started"),
         "the reviewer's log streams to its own run directory while it runs");
+    assertEquals(workspaceOf(CONTAINER, "auth"), reviewer.place().instance());
     assertTrue(
-        new AgentSession(shell).unitActive(CONTAINER, AgentUnit.forRun(reviewer.id())),
-        "the reviewer runs as its run's systemd unit, like a build");
+        new AgentSession(shell)
+            .unitActive(reviewer.place().instance(), AgentUnit.forRun(reviewer.id())),
+        "the reviewer runs as its run's systemd unit in the spec's workspace, like a build");
     assertEquals(
         List.of(
             ".sail-skill 644 dev " + ProjectSkillInstaller.fingerprint(SpecSkillGenerator.skill()),
@@ -359,15 +392,18 @@ class ReviewAgentLoopIT extends AbstractIncusIT {
     watcherObservesTheExitOf(second);
     assertEquals(
         SailSkills.all().stream().map(StageSkill::name).toList(),
-        exec(CONTAINER, List.of("ls", "-A", "/home/dev/.agents/skills")).stdout().lines().toList(),
+        exec(workspaceOf(CONTAINER, "auth"), List.of("ls", "-A", "/home/dev/.agents/skills"))
+            .stdout()
+            .lines()
+            .toList(),
         "sail's skills are installed once each, and no build folder is left among them");
     for (var contextFile : List.of("/home/dev/.claude/CLAUDE.md", "/home/dev/.codex/AGENTS.md")) {
       assertFalse(
-          exec(CONTAINER, List.of("test", "-e", contextFile)).ok(),
+          exec(workspaceOf(CONTAINER, "auth"), List.of("test", "-e", contextFile)).ok(),
           "sail writes no context file: " + contextFile);
     }
     assertTrue(
-        exec(CONTAINER, List.of("cat", "/home/dev/.sail/claude-settings.json"))
+        exec(workspaceOf(CONTAINER, "auth"), List.of("cat", "/home/dev/.sail/claude-settings.json"))
             .stdout()
             .contains("Read(/home/dev/.config/gh/**)"),
         "the room lane's deny rules name the gh token");
@@ -385,8 +421,20 @@ class ReviewAgentLoopIT extends AbstractIncusIT {
         specStore.findById("auth").orElseThrow().status(),
         "the re-review passes and the spec awaits merge");
     assertEquals(2, reviewStore.reviewsForSpec("auth").size());
+    assertEquals(
+        List.of(workspaceOf(CONTAINER, "auth")),
+        new BoxInstances(shell)
+            .all().stream()
+                .filter(
+                    instance ->
+                        instance.kind() instanceof BoxInstances.Workspace workspace
+                            && workspace.project().equals(CONTAINER))
+                .map(BoxInstances.Instance::name)
+                .toList(),
+        "one workspace took every run of the spec");
     for (var run : List.of(reviewer, fix, second)) {
       var ended = runStore.findById(run.id()).orElseThrow();
+      assertEquals(workspaceOf(CONTAINER, "auth"), ended.place().instance(), ended.role());
       assertEquals("stopped", ended.status(), ended.role());
       assertEquals(0, ended.exitCode(), ended.role());
       assertFalse(logOf(run).isBlank(), "each run wrote its own log: " + ended.role());
@@ -524,19 +572,20 @@ class ReviewAgentLoopIT extends AbstractIncusIT {
     var session = new AgentSession(shell);
     eventually(() -> logOf(reviewer).contains("review started"), "the fake agent is running");
 
-    var halt = session.killAgent(CONTAINER, unit);
+    var instance = reviewer.place().instance();
+    var halt = session.killAgent(instance, unit);
 
     assertInstanceOf(
         AgentSession.Halt.Ended.class, halt, "a signal was delivered and the unit answered gone");
-    assertFalse(session.unitActive(CONTAINER, unit), "the unit is gone");
+    assertFalse(session.unitActive(instance, unit), "the unit is gone");
     var survivors =
         shell.exec(
-            ContainerExec.asDevUser(CONTAINER, List.of("pgrep", "-f", "/usr/local/bin/codex")));
+            ContainerExec.asDevUser(instance, List.of("pgrep", "-f", "/usr/local/bin/codex")));
     assertFalse(
         survivors.ok(),
         "the kill takes the unit's whole cgroup: no agent process is left to push work: "
             + survivors.stdout());
-    var exit = session.answeredExitStatus(CONTAINER, unit).orElseThrow();
+    var exit = session.answeredExitStatus(instance, unit).orElseThrow();
     bus.publish(
         RunStops.of(
             Event.WellKnownData.SOURCE_WATCHER,
@@ -555,59 +604,42 @@ class ReviewAgentLoopIT extends AbstractIncusIT {
     assertEquals("stopped", runStore.findById(reviewer.id()).orElseThrow().status());
   }
 
+  /**
+   * Scenario 2 and R5 on the review lane: another spec's reviewer at work over the same repo holds
+   * nothing of this spec's, whose reviewer runs at once in its own workspace.
+   */
   @Test
-  void aReviewerRefusedTheRepoARealRunHoldsWaitsOnItAndStartsWhenItStops() throws Exception {
-    inContainer("printf 1 > \"$HOME/.sail/review-count\"");
+  void anotherSpecsReviewerAtWorkHoldsUpNoReviewerOfThisSpec() throws Exception {
+    inWorkspace("auth", "printf 1 > \"$HOME/.sail/review-count\"");
     spec("billing");
-    hold();
+    made("billing");
+    hold("billing");
     bus.publish(buildStop("billing"));
     var holder = launched("billing", "review", "review_stage_started");
     eventually(() -> logOf(holder).contains("review started"), "billing's reviewer runs");
 
     bus.publish(stopOfABuildRunOf("auth"));
 
-    eventually(
-        () ->
-            reviewStore
-                .latestReviewForSpec("auth")
-                .filter(review -> review.waitingOn() != null)
-                .isPresent(),
-        "auth's review records the run it waits on");
-    var waiting = reviewStore.latestReviewForSpec("auth").orElseThrow();
-    assertEquals(holder.id(), waiting.waitingOn(), "the wait names the run that holds the repo");
-    assertEquals("running", waiting.status());
-    assertEquals(
-        List.of("pending"),
-        reviewStore.stagesForReview(waiting.id()).stream()
-            .map(ReviewStore.StageRow::status)
-            .toList(),
-        "no stage is running for a reviewer that does not exist");
-    assertTrue(runStore.forReview(waiting.id()).isEmpty(), "nothing was started for auth");
-    assertEquals(
-        List.of(
-            "Review is waiting for run `" + holder.id() + "` (`review` of `billing`) to finish."),
-        new MessageStore(db)
-            .list("auth", null, 20).stream().map(MessageStore.MessageRow::body).toList());
-
-    release();
-    watcherObservesTheExitOf(holder);
-
-    awaitEvent("review_completed");
     var reviewer = launched("auth", "review", "review_stage_started");
-    assertEquals(waiting.id(), reviewer.reviewId(), "the holder's stop launched the reviewer");
-    assertNull(reviewStore.findReview(waiting.id()).orElseThrow().waitingOn());
-    assertTrue(
-        new AgentSession(shell).unitActive(CONTAINER, AgentUnit.forRun(reviewer.id()))
-            || !logOf(reviewer).isBlank(),
-        "the reviewer runs as its own unit");
+    assertNull(reviewStore.findReview(reviewer.reviewId()).orElseThrow().waitingOn());
+    assertEquals(workspaceOf(CONTAINER, "auth"), reviewer.place().instance());
+    assertEquals(workspaceOf(CONTAINER, "billing"), holder.place().instance());
     watcherObservesTheExitOf(reviewer);
     awaitEvent("review_completed");
     assertEquals(SpecStatus.AWAITING_MERGE, specStore.findById("auth").orElseThrow().status());
+    assertEquals(
+        "running",
+        runStore.findById(holder.id()).orElseThrow().status(),
+        "billing's reviewer was at work the whole time");
+
+    release("billing");
+    watcherObservesTheExitOf(holder);
   }
 
   @Test
   void aRealToolCallLongerThanTheStallWindowIsNotKilledAsAStall() throws Exception {
-    inContainer("printf 1 > \"$HOME/.sail/review-count\"; printf 8 > \"$HOME/.sail/slow-tool\"");
+    inWorkspace(
+        "auth", "printf 1 > \"$HOME/.sail/review-count\"; printf 8 > \"$HOME/.sail/slow-tool\"");
     bus.publish(buildStop("auth"));
     var reviewer = launched("auth", "review", "review_stage_started");
     var feed = new LinkedBlockingQueue<Event>();
@@ -621,7 +653,7 @@ class ReviewAgentLoopIT extends AbstractIncusIT {
             Map.of(Event.WellKnownData.RUN_ID, reviewer.id())));
 
     new RunWatch(
-            RunPlace.of(CONTAINER, null),
+            reviewer.place(),
             reviewer.id(),
             AgentUnit.forRun(reviewer.id()),
             new Guardrails("5m", "2s", "stop"),
@@ -680,8 +712,10 @@ class ReviewAgentLoopIT extends AbstractIncusIT {
     return shell.exec(ContainerExec.asDevUser(CONTAINER, List.of("kill", "-0", pid))).ok();
   }
 
-  private void inContainer(String script) throws Exception {
-    var ran = shell.exec(ContainerExec.asDevUser(CONTAINER, List.of("bash", "-c", script)));
+  private void inWorkspace(String specId, String script) throws Exception {
+    var ran =
+        shell.exec(
+            ContainerExec.asDevUser(workspaceOf(CONTAINER, specId), List.of("bash", "-c", script)));
     assertTrue(ran.ok(), ran.stderr());
   }
 
@@ -731,17 +765,19 @@ class ReviewAgentLoopIT extends AbstractIncusIT {
   }
 
   private void hold() throws Exception {
-    var held =
-        shell.exec(
-            ContainerExec.asDevUser(CONTAINER, List.of("touch", "/home/dev/.sail/review-hold")));
-    assertTrue(held.ok(), held.stderr());
+    hold("auth");
+  }
+
+  private void hold(String specId) throws Exception {
+    inWorkspace(specId, "touch /home/dev/.sail/review-hold");
   }
 
   private void release() throws Exception {
-    var released =
-        shell.exec(
-            ContainerExec.asDevUser(CONTAINER, List.of("rm", "-f", "/home/dev/.sail/review-hold")));
-    assertTrue(released.ok(), released.stderr());
+    release("auth");
+  }
+
+  private void release(String specId) throws Exception {
+    inWorkspace(specId, "rm -f /home/dev/.sail/review-hold");
   }
 
   private String logOf(RunStore.RunRow run) {
@@ -749,7 +785,7 @@ class ReviewAgentLoopIT extends AbstractIncusIT {
       var log =
           shell.exec(
               ContainerExec.asDevUser(
-                  CONTAINER, List.of("cat", AgentUnit.forRun(run.id()).logPath())));
+                  run.place().instance(), List.of("cat", AgentUnit.forRun(run.id()).logPath())));
       return log.ok() ? log.stdout() : "";
     } catch (Exception e) {
       return "";
@@ -774,7 +810,7 @@ class ReviewAgentLoopIT extends AbstractIncusIT {
     var ended = new AtomicReference<AgentSession.ExitState>();
     eventually(
         () -> {
-          var exit = session.answeredExitStatus(CONTAINER, unit);
+          var exit = session.answeredExitStatus(run.place().instance(), unit);
           exit.ifPresent(ended::set);
           return exit.filter(state -> !state.active() && run.id().equals(state.runId()))
               .isPresent();

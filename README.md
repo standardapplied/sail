@@ -403,8 +403,16 @@ sail spec board --project web    # who is on what, and what is ready
 sail spec dispatch --project web # pick the next ready spec, launch the agent, watch it
 ```
 
-`dispatch` honors dependencies and assignee, snapshots the container for rollback, creates the
-work branch and launches the agent with its generated context. When the build stops, the review
+`dispatch` honors dependencies and assignee, puts the spec in its own workspace (`web-<spec id>`,
+a clone of the project's template; see [Workspaces](#workspaces-several-lines-of-work-on-one-box)),
+puts each repo there on the work branch and launches the agent. Every later run of the spec, its
+reviews and fixes and its room's turns, goes on in the same workspace, so specs over the same repo
+run at once and the project's own container is never touched by them. A box needs a ZFS pool and
+the project a template before it dispatches (`sudo sail host init --storage zfs`, `sudo sail
+project template build web`); dispatch refuses before it reserves anything otherwise, and refuses
+one more workspace as busy when the pool is under 10% free or the box's memory holds no more of
+them. `sail project workspace list web` shows each workspace's spec and person; `sail agent stop
+web --spec <id>` stops one spec's run. When the build stops, the review
 loop runs: each stage of the definition's `pipeline` has a reviewer that checks the branch, a fix
 agent addresses its findings, and the loop repeats up to `max_iterations` before escalating to
 a person. Sail is agent-agnostic across claude-code and codex, so one agent can implement and

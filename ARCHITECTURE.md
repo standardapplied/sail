@@ -1316,7 +1316,8 @@ own, about three (2.9 to 4.3 s over 32 creates, median 3.2 s).
   | the authorized-keys rewrite | every container on remove; a project's container and whole workspaces on add |
   | `project stop --all`, `host status`, the overcommit hints, `host init`'s restart check | every instance, as before |
   | every verb that addresses a container by a project's name (`project start`, `stop`, `switch`, `shell`, `exec`, `logs`, `connect`, `containers`, `snapshot create`, `list`, `restore`, `delete`, `rename`, `resources set`, `config show`, `install-agent`, `repo add`, `service add`, `service remove`, `demo`, `apply`, `files`, `agent run`, `attach`, `logs`, `report`, `status`, `sweep`, `watch`) | plain only: `ContainerManager.queryState` and `queryInfo`, which each passes through, refuse an instance of the project's name that is a workspace, a template or a copy (`BoxInstances.Taken`), naming what it is and what frees the name; `snapshot prune`, `create` and `destroy`, which read no state, ask `BoxInstances.requireNotTakenFor` |
-  | every API door that reaches a container by a project's name: dispatch and every run launch (build, review, fix, ad hoc, room wake, live member), serve and ports, snapshots and restore, skills share, agent status, logs and report, through `ProjectLoader` | plain only: the loader's `queryState` refusal is `409 conflict` with the reason and remedy |
+  | every API door that reaches a container by a project's name: every run launch that names no spec (ad hoc, a spec-less room's member), serve and ports, snapshots and restore, skills share, agent status, logs and report, through `ProjectLoader` | plain only: the loader's `queryState` refusal is `409 conflict` with the reason and remedy |
+  | dispatch and every run launch of a spec (build, review, fix, resumed build, room wake, live member), through `RunPlaces` | the spec's own workspace alone: the instance `RunPlace` names that carries the project's and the spec's keys; a person's workspace or another spec's under that name is refused, naming it |
   | the terminal host's open (`PtyAdmission.instance`, `HostLanes.Pty.admitInstance`) | plain only: asked once per open, outside the host's lock, of the one instance by name (`incus list ^<p>$`, `BoxInstances.lookup`) within 3 s, and refused, saying so, when Incus does not answer in that time; an attach and a ticket ask Incus nothing, an attach joining a session an open already admitted |
   | `skills ls`'s read of hand-made skills, `project create`, `POST /v1/projects` | plain only, by the same one-name lookup within 3 s (`BoxInstances.namedIfReadable`); an Incus that does not answer in time holds no instance of the name |
   | the resource reconcile after a sync round | plain only: a project whose name is another's instance has no container here, and is skipped |
@@ -1407,8 +1408,12 @@ Each row with the tests that prove it:
   - On a box with no ZFS pool, every verb that makes or changes a workspace or a template is refused
     before anything changes, naming `sudo sail host init --storage zfs`. Listing answers the default
     workspace alone.
+  - A run of a spec is a verb that makes a workspace: on a box with no ZFS pool its dispatch, and
+    every lane of the spec, is refused before anything is reserved, naming the same command.
 
   *`WorkspacesTest.everyVerbThatMakesOrChangesOnABoxWithNoZfsPoolIsRefusedBeforeAnythingChanges`,
+  `SailOperationsTest.aSpecsDispatchIsRefusedOnABoxWithNoZfsPoolAndReservesNothing`,
+  `WorkspacesTest.aRunOfASpecIsRefusedBeforeAnythingChangesOnABoxWithNoZfsNoTemplateOrAFaultedPool`,
   `WorkspacesTest.aBoxWithNoZfsPoolListsItsDefaultWorkspaceAlone`,
   `WorkspacesTest.anExistingTemplateStaysOnItsPoolWhateverPoolsWereAddedSince`.*
 - **W9. One decision.** Every verb first reads the project from the catalog as the box's person,
@@ -1430,7 +1435,8 @@ Each row with the tests that prove it:
   `ScopeChangeRoundTest.aScopedRoundLeavesTheWorkspacesAndTemplateOfAProjectInScopeAlone`,
   `ContainerSetupSweepTest`, `ContainerAuthorizedKeysTest`.*
 - **W11. A project's instances go with it.** `project destroy <p>` removes the project's
-  workspaces and its template with its container, naming each in its confirmation. When a project
+  workspaces, its specs' run workspaces among them, and its template with its container, naming each
+  in its confirmation; a run live in one ends as any killed run does. When a project
   leaves a box's scope, the sync round removes them the same way, and only then. A copy carrying
   the project's keys under another name is not Sail's: it stays, said once, in the round that
   drops the project.
@@ -1554,8 +1560,8 @@ runs.
 
 **Dispatch and agent execution** (`DispatchCommand` plus `sail-harness`): autonomous
 dispatch reads the next ready spec from the database, honoring `depends_on` and assignee,
-marks it `in_progress`, snapshots the container for rollback, creates the work branch, and
-launches the agent headless under `systemd-run --user` with `SAIL_SPEC_ID`, `SAIL_AGENT`,
+marks it `in_progress`, puts it in its spec's own workspace (*Where a run lives*, below), puts
+each repo there on the work branch, and launches the agent headless under `systemd-run --user` with `SAIL_SPEC_ID`, `SAIL_AGENT`,
 `SAIL_RUN_ID`, and the run's `SAIL_RUN_CREDENTIAL` in its environment so in-container hooks
 correlate events back to the spec and authenticate as the run's principal. The credential, and
 the login of the person a spec's run acts for (*Harness logins*, below), are never on a command
@@ -1568,6 +1574,65 @@ socket, needing no `sail` binary or files — it presents the run credential on 
 request, so every write is attributed to the run's minted principal. `sail spec dispatch --restart` re-runs a
 spec whose status is no longer pending, resetting it to pending and recording the restart as
 a lifecycle event.
+
+**Where a run lives** (`RunPlace`, `RunPlaces`, `Workspaces.checkSpec` and `enterSpec`). A run
+that names a spec lives in that spec's own workspace, and every run of the spec (build, review,
+fix, resumed build, room wake and live member) in the same one; a run that names none, an ad hoc
+session or a spec-less room's member, lives in the project's own container, as before. `RunPlace`
+(sail-core) is the one answer: `RunPlace.of(project, specId)` is a `ProjectContainer` or a
+`SpecWorkspace`, and `RunRow.place()` reads it from the run's row, so every class on a run's path
+addresses the run's container as `place.instance()` and none by the project's name
+(`RunPlaceSweepTest`). The workspace is named after the spec id, `<p>-<id>`, when that fits Incus's
+63 characters, is not `main`, does not end in `-` and is no template's name; otherwise the id is
+cut to fit, any trailing `-` dropped, and `-` with six hex characters of its SHA-256 added. A
+project name of more than 54 characters leaves no room for a cut id and is refused naming that
+limit. The name is never parsed back: the instance carries `user.sail.spec`, and is found only as
+the one whose name and keys match.
+
+- **Checked before the reservation.** `RunPlaces.check` reads the box and refuses before anything is
+  written: no ZFS pool (naming `sudo sail host init --storage zfs`), no template (naming `sudo sail
+  project template build <p>`), a pool ZFS calls neither online nor degraded (naming `zpool
+  status`), and an instance of the workspace's name that is a person's workspace or another
+  spec's. A workspace not running yet is refused `runner_busy` (503, `ErrorCode.RUNNER_BUSY`, SailKit's `runnerBusy`) when its pool is under 10%
+  free, or when as many spec workspaces hold a live run as the box's memory (from `incus query
+  /1.0/resources`) holds of the project's memory limit, and at least one. A stale template is cloned
+  as it is, and the spec's room is told once, naming the build that freshens it; dispatch never
+  builds a template.
+- **Entered after it.** `RunPlaces.enter` reuses a whole workspace as it is (starting it when
+  stopped), or makes it from the checked template version under the box-wide
+  `workspace-create.lock`, one create at a time, and refuses `runner_busy` when another create holds
+  it past 60 s. The copy carries `user.sail.spec` and `user.sail.owner`; a reused workspace becomes
+  the owner's of the run before anything of the run is staged. A create that fails releases the
+  run. Dispatch says `Workspace <w> made in 3.2 s` or `Workspace <w> reused`, and `--json` carries
+  the instance, whether it was reused and its timings.
+- **One branch rule** (`WorkBranch.enter`). With B the run's branch: a fresh build whose B already
+  exists, locally or on the remote, is refused naming `--restart`; a repo on B is left as it is,
+  uncommitted work included; a repo elsewhere with uncommitted work is refused naming where it is;
+  a clean one is put on B, the local one, else the remote's, else, for a build, a new one from the
+  latest base. A made workspace's repos start detached at their fetched base, so the build's B is
+  the spec's, never the workspace's name.
+
+  *`RunPlaceTest`, `RunPlaceSweepTest`, `RunPlacesTest`, `DispatchGateTest`,
+  `BuildDispatchCoverageTest.aSpecsDispatchMakesItsWorkspaceAndLaunchesItsRunThereAndNowhereElse`,
+  `BuildDispatchCoverageTest.twoSpecsOverOneRepoBothRunAtOnce`,
+  `BuildDispatchCoverageTest.aBoxAtItsCapOfLiveRunWorkspacesIsBusyNamingTheCountAndTheCap`,
+  `BuildDispatchCoverageTest.aDispatchThatWaitsPastTheCreateLocksLimitIsBusyAndItsRunIsReleased`,
+  `WorkspacesTest.aSpecsFirstRunClonesTheCurrentTemplateWithItsSpecAndOwnerAndLeavesItsReposDetached`,
+  `WorkspacesTest.aWorkspaceALiveRunOfItsSpecIsInIsNeitherStoppedNorDeleted`, `WorkBranchTest`,
+  `StopOperationsTest.aProjectTargetWithTwoSpecsLiveIsRefusedNamingEachAndTheSpecFormStopsOne`,
+  `ConcurrentDispatchIT` (two specs on one repo at once, each in its own workspace under its own
+  unit), `ReviewAgentLoopIT` (every run of a spec in one workspace), `RunLoginIT`.*
+- **The workspace is the rollback.** Dispatch takes no snapshot (`--snapshot` and
+  `agent.auto_snapshot` are gone; a definition naming the key is refused like any key `agent` does
+  not have): the project's container is never touched by a spec's run, and the spec's tree is its
+  workspace's. `sail project workspace list` shows each workspace's spec and owner; `stop` and
+  `delete` refuse a workspace a live run of its spec is in, and `project destroy` takes the run
+  workspaces with the rest (W11).
+- **Stop, log and watch by place.** `sail agent stop` and `watch` take `--spec`; a stop of a project
+  with several live runs and no spec named is refused, naming each spec and the `--spec` form.
+  `agent log` reads the newest run of its lane in the place that run lives. The watcher is told the
+  spec on its command line, so it probes the run's own workspace. A resumed
+  terminal conversation (`agent attach`) opens in the project's container.
 
 **Sail writes no context file.** How a codebase is built, tested and verified is the
 repository's own `AGENTS.md` to say, which both harnesses read natively (Claude Code from the
@@ -1711,9 +1776,8 @@ else its unit, and printed that it is gone — or incus lists the container stop
 absent. Only the printed word is believed, so no number of lost commands reads a live
 agent as gone; a container that runs no command says nothing of its agents. The watch
 ends with its run: its run's authoritative stop or cancel, published by anyone, ends it
-with nothing published and no trigger written. Rollback uses Incus
-snapshots, which are instant on `zfs` and full copies on `dir`, and the pre-dispatch
-snapshot is the restore point.
+with nothing published and no trigger written. A spec's run needs no snapshot to roll back:
+its tree is its own workspace, and the project's container is never touched by it.
 
 The watcher runs detached, as the systemd transient unit `sail-watch-<runId>` — the same
 mechanism that runs the agent — so it survives Ctrl-C on the dispatch stream, the SSH
@@ -1722,15 +1786,18 @@ lane launched it:
 the agent runs as `sail-agent-<runId>` with its pid, session, task, and log files under
 `~/.sail/runs/<runId>/`, the run records the unit it was launched with, and every later
 consumer (stop, probe, reconciler, watcher) addresses that recorded unit — which is what
-lets dispatches on disjoint repo sets share one container concurrently, refused only when
-their repo sets overlap. The overlap gate is an atomic reservation: one `BEGIN IMMEDIATE`
+lets runs share one container concurrently, refused only when their repo sets overlap. The
+overlap gate is scoped by place (`DispatchGate.decide` takes the target's `RunPlace` and compares
+only the running runs in it): two specs are never in one container, so runs of different specs
+never block each other whatever repos they name, and the gate decides between runs of one spec, or
+spec-less runs in the project's container. It is an atomic reservation: one `BEGIN IMMEDIATE`
 SQLite transaction checks every running local run and inserts the new run with its reserved
 repos, so concurrent dispatches — even a CLI and the server in separate processes — can never
-both claim the same repo, and a reservation failure aborts the dispatch before any spec is
+both claim the same repo of one place, and a reservation failure aborts the dispatch before any spec is
 claimed or branch checked out. An ad-hoc `sail agent run --task` session is a run like any
 other: it mints a `role='adhoc'` row with no spec and an empty repo set — the
-whole-container reservation — through the same transaction, so ad-hoc and dispatched agents
-exclude each other atomically and are stopped, listed, and reconciled by the same run-scoped
+whole-container reservation of the project's container — through the same transaction, so
+ad-hoc runs and the spec-less runs beside them exclude each other atomically and are stopped, listed, and reconciled by the same run-scoped
 machinery. Coverage is probed rather than bookkept, per run, and the periodic
 re-armer — whose coverage probe is process-level, seeing units in
 any user's systemd scope and plain fallback processes alike — relaunches unit-or-nothing for
@@ -2520,7 +2587,7 @@ review:
 | `SayBuildFailed(exitCode)` | publishes `agent_failed` with `exit <code>` | none |
 | `ParkForAPerson` | moves the spec to `review` | none |
 | `AwaitAnswer(lane, question)` | says in the room, unless sail said exactly that among its recent messages, that nothing is reviewed until the question is answered, and publishes `agent_awaiting_answer`, which the missed-stop reconciler counts as the stop acted on; the spec stays `in_progress` | none |
-| `ResumeBuild(told)` | `ReviewLanes.resumeBuild`: for the roster-trusted box of the spec's assignee, a build run on the spec's branch (a repo still on it keeps the tree its last build left; one another run moved is checked out with `checkout <branch> --` only when clean, else the resume fails), with nothing claimed, snapshotted or superseded and no `spec_restarted`, its prompt a dispatch's, so the room's question and answer are in it; says so in the room. A refused claim defers it, and the stop that frees it retries (W2). A deferral or failure is said in the room and publishes `agent_held_on_question` when `told` (the post is the newest answer, or it is the run's own stop), and only logs on a quiet retry. A failure after the run was written is final (that run is `failed`, which nothing retries), so it is always said | none |
+| `ResumeBuild(told)` | `ReviewLanes.resumeBuild`: for the roster-trusted box of the spec's assignee, a build run on the spec's branch in the spec's own workspace, entered by the one branch rule (`WorkBranch.enter`: a repo on the branch keeps the tree its last build left; one elsewhere is put on it only when clean, else the resume fails naming where it is), with nothing claimed, snapshotted or superseded and no `spec_restarted`, its prompt a dispatch's, so the room's question and answer are in it; says so in the room. A refused claim defers it, and the stop that frees it retries (W2). A deferral or failure is said in the room and publishes `agent_held_on_question` when `told` (the post is the newest answer, or it is the run's own stop), and only logs on a quiet retry. A failure after the run was written is final (that run is `failed`, which nothing retries), so it is always said | none |
 | `CannotResume(lane)` | says in the room that the run ended before it heard the answer and this box no longer holds the spec; publishes `agent_held_on_question` | none |
 | `ResumeFix(review)` | `LaunchFix` with the review's open findings; once the run serves, also says so in the room | as `LaunchFix` |
 | `StartReview(iteration)` | writes the review `running`, then moves the spec to `review` | `ReviewRunning` |
@@ -2836,7 +2903,7 @@ whether its sender speaks for this box, whether it retells, and whether this box
 | Approve | `review_iteration_started`, `review_stage_started`, `review_stage_passed`, `review_stage_failed`, `review_completed`, `review_errored`, `review_escalated` | main's sync bridge |
 | Narrate | `agent_session_started`, `agent_stop_nudged`, `agent_tool_started`, `agent_tool_finished` | the in-container hooks over the socket; the host CLI's dispatch and `sail run` (`agent_session_started`) |
 | Post | `spec_message_posted` | a node's sync, for each message it pulled |
-| Operate the box | `snapshot_created`, `board_updated` | the host CLI's dispatch (`snapshot_created`); a node's sync, for a round that changed the board |
+| Operate the box | `snapshot_created`, `board_updated` | no client since dispatch takes no snapshot (`snapshot_created`, which a room engagement's snapshot publishes on the server itself); a node's sync, for a round that changed the board |
 
 Those the machinery acts on are taken first-hand only from whoever speaks for this box (its FDE,
 or an admin), and retold only by one who may take the action on the work, about a run this box
