@@ -160,6 +160,13 @@ public final class TerminalRenderer {
         builder.complete
     }
 
+    /// Whether drawing the last frame again could show more of it: not once it is complete, nor
+    /// when an atlas cannot hold its items at once, which it then shows as far as they fit until
+    /// the screen changes.
+    public var lastFrameWantsAnother: Bool {
+        !builder.complete && !store.overfull
+    }
+
     /// How long an offscreen frame may take on the GPU before reading it back is given up.
     public static let offscreenDeadline = 10.0
 

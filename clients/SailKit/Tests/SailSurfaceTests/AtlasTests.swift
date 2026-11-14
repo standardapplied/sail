@@ -103,6 +103,24 @@ import Testing
         #expect(Set(taken).count == 2000)
     }
 
+    /// An atlas at its largest whose every slot the frame itself uses says so, as one with room,
+    /// one that can still grow, or one whose slots only earlier frames used does not.
+    @Test func anAtlasFullOfOneFramesItemsSaysSo() throws {
+        var atlas = try Atlas<String>(cell: cell, initialSide: 20, largestSide: 20)
+        #expect(!atlas.isFull(of: 1, wide: false), "room left")
+        for item in ["a", "b", "c", "d"] {
+            _ = atlas.place(item, wide: false, frame: 1, completed: 0)
+        }
+        #expect(atlas.place("e", wide: false, frame: 1, completed: 0) == .full)
+        #expect(atlas.isFull(of: 1, wide: false), "every slot holds an item of frame 1")
+        #expect(!atlas.isFull(of: 2, wide: false), "frame 2 may take a slot only frame 1 used")
+        var growing = try Atlas<String>(cell: cell, initialSide: 20, largestSide: 40)
+        for item in ["a", "b", "c", "d"] {
+            _ = growing.place(item, wide: false, frame: 1, completed: 0)
+        }
+        #expect(!growing.isFull(of: 1, wide: false), "it can still grow")
+    }
+
     @Test func aWideItemTakesOnlyAWideSlot() throws {
         var atlas = try Atlas<String>(cell: cell, initialSide: 20, largestSide: 20)
         for item in ["a", "b", "c", "d"] {

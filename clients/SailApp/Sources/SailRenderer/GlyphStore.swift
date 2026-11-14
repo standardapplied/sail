@@ -105,6 +105,9 @@ final class GlyphStore: GlyphSource {
     /// The newest frame the GPU finished, every earlier one finished too.
     var completed: @Sendable () -> UInt64 = { 0 }
     private(set) var unplaced = 0
+    /// This frame found an atlas whose every slot of a width it uses itself: it can never place
+    /// all its items, however many frames it is drawn again.
+    private(set) var overfull = false
 
     init(device: any MTLDevice, faces: TerminalFaces, sides: AtlasSides) throws(RenderError) {
         rasterizer = GlyphRasterizer(faces: faces)
@@ -125,6 +128,7 @@ final class GlyphStore: GlyphSource {
     func begin(_ frame: UInt64, newItems: Int) {
         self.frame = frame
         newAllowed = newItems
+        overfull = false
     }
 
     /// An item already drawn costs one lookup (text and sprites are in the alpha atlas); only a new
@@ -155,6 +159,7 @@ final class GlyphStore: GlyphSource {
         }
         guard let slot else {
             unplaced += 1
+            if (isColour ? colour : alpha).atlas.isFull(of: frame, wide: item.wide) { overfull = true }
             return nil
         }
         return GlyphPlace(slot: slot, colour: isColour)

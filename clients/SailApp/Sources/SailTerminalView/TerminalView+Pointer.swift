@@ -14,7 +14,10 @@ extension TerminalView {
         apply(action, MouseInput(action: .press, button: .left, x: place.x, y: place.y, modifiers: Self.modifiers(event)))
     }
 
+    /// A drag moves the pointer as a program sees it, so the next motion without a button is
+    /// reported whatever cell it is in.
     override public func mouseDragged(with event: NSEvent) {
+        hovered = nil
         guard let place = place(of: event) else { return }
         apply(pointer.dragged(to: place.cell), MouseInput(action: .motion, button: .left, x: place.x, y: place.y, modifiers: Self.modifiers(event)))
     }
@@ -164,7 +167,6 @@ extension TerminalView {
         NSEvent.removeMonitor(watch)
         escapeWatch = nil
     }
-
 
     private func report(_ event: NSEvent, _ action: MouseAction, _ button: MouseButton) {
         guard let link, link.screen.tracksMouse, !event.modifierFlags.contains(.shift), let place = place(of: event) else { return }

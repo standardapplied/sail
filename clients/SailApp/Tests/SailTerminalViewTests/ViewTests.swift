@@ -137,6 +137,11 @@ import Testing
         #expect(move(4) == "\u{1b}[<35;5;2M", "a new cell")
         #expect(move(4, nudge: 1).isEmpty, "the same cell")
         #expect(move(6) == "\u{1b}[<35;7;2M", "another cell")
+        harness.mouse(.leftMouseDown, column: 6, row: 1)
+        harness.mouse(.leftMouseDragged, column: 8, row: 1)
+        harness.mouse(.leftMouseUp, column: 8, row: 1)
+        harness.flush()
+        #expect(move(6) == "\u{1b}[<35;7;2M", "the cell hovered before a drag, entered again after it")
     }
 
     /// M3: a view draws a session for its life. Detaching ends its reading of the session's
@@ -396,6 +401,34 @@ import Testing
         harness.view.nextDrawable = { $0.nextDrawable() }
         harness.tick()
         #expect(harness.view.visibleText.contains("more"))
+    }
+
+    /// A visible window with no drawable is asked again off the main thread, where an ask can wait
+    /// a second; a drawable that ask brings draws the next frame, and nothing asks on the main
+    /// thread meanwhile.
+    @Test func aVisibleWindowWithNoDrawableIsAskedAgainOffTheMainThread() async throws {
+        let harness = try Harness()
+        await harness.drainMain()
+        harness.view.isOnScreen = { _ in true }
+        let (asks, ask) = AsyncStream.makeStream(of: Bool.self)
+        let answers = Mutex(0)
+        harness.view.nextDrawable = { layer in
+            ask.yield(Thread.isMainThread)
+            return answers.withLock { $0 += 1; return $0 } < 3 ? nil : layer.nextDrawable()
+        }
+        harness.link.output("asked")
+        harness.tick()
+        try #require(harness.clock.isPaused, "no drawable came, so the link paused")
+        harness.view.needFrame()
+        harness.tick()
+        var asked = asks.makeAsyncIterator()
+        #expect(await asked.next() == true, "the refresh asked on the main thread")
+        #expect(await asked.next() == false, "the retry asked off it")
+        #expect(await asked.next() == false, "and again, the first retry having brought none")
+        if harness.clock.isPaused { await harness.clock.nextResume() }
+        harness.tick()
+        #expect(harness.view.visibleText.contains("asked"), "the drawable it brought drew the frame")
+        ask.finish()
     }
 
     /// V3: every start, pause, resume and stop of the display link ran on the main thread, the

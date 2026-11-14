@@ -3925,7 +3925,8 @@ secrets), `ci/notarize` notarizes and staples, `ci/drive` runs the drive scripts
   otherwise the next refresh draws it. A key that changes nothing on screen asks for no frame,
   so the view is still idle when its echo comes. Nothing holds output to batch it. A refresh that
   finds nothing changed, or no drawable, pauses the link; a view paused for want of a drawable is
-  not idle, and asks again when its window is seen again, or after 0.25 s while it is visible.
+  not idle and asks nothing on the main thread: it asks again when its window is seen again, and
+  while the window is visible it is asked off the main thread every 0.25 s.
 - **V2. One screen, one source.** The view draws only what `Screen.frame()` says and sends only what
   the screen's encoders make; no source of the app spells an escape sequence (a sweep test).
 - **V3. Display-link changes happen on the main thread**, through one pacer that records each one.
@@ -3946,7 +3947,8 @@ about first, naming its line count. The renderer draws one render pass a frame: 
 glyphs and decorations from two atlases (one-channel coverage tinted per cell, and BGRA for emoji),
 each an instanced draw of pixel rectangles that read their atlas texels exactly; a frame on the
 display rasterizes at most 32 new glyphs and the next refreshes draw the rest, the cursor and
-composing text placed first; a frame with anything left undrawn is drawn again. Grapheme clustering
+composing text placed first; a frame with anything left undrawn is drawn again, unless the atlas
+cannot hold its items at once, when it shows what fits until the screen changes. Grapheme clustering
 (mode 2027) is on in every SailVT screen from its creation and survives every reset, so an emoji
 sequence, a flag or a skin-toned emoji is one two-cell cluster, as Ghostty draws it. A view draws
 one session for the session's life (its streams have one reader); a ⌘ chord no menu takes sends
@@ -3958,7 +3960,8 @@ paravirtual Metal device renders offscreen and reads back exactly: the renderer'
 (every SailKit fixture at scale 2, dark and light; a pixel differs past 8 of 255 on a channel, a
 frame fails past 0.1% of its pixels; emoji cells are left out of that and must hold colour), the
 view's input tests with synthesized events (every suite `swift test list` names, each in its own
-bounded run by `ci/test-suites`, which fails when a listed suite passes no test), the preview driven against the pinned darwin `sail`'s
+bounded run by `ci/test-suites`, which fails when a listed suite passes no test of its own or a
+test stands outside any suite), the preview driven against the pinned darwin `sail`'s
 local host with its latency budgets (the drive waits, at every step, until the view has drawn the
 screen's text in full; the renderer bench takes 300 full redraws, drawn offscreen with nothing read
 back, on the drawing thread's CPU clock with the wall clock beside it), and the bundle checked on

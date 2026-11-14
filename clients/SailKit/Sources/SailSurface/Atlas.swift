@@ -113,6 +113,13 @@ public struct Atlas<Item: Hashable & Sendable>: Sendable {
         return nodes[node].slot
     }
 
+    /// Whether every slot `wide` items take is used by `frame` itself, so no slot can be given to
+    /// another item of it, however long it waits: the frame holds more such items than the atlas.
+    public func isFull(of frame: UInt64, wide: Bool) -> Bool {
+        guard side == largestSide, newSlotFits(width: wide ? 2 * cell.width : cell.width) == false else { return false }
+        return lists[wide ? 1 : 0].head.map { nodes[$0].lastUsed >= frame } ?? true
+    }
+
     public func slot(of item: Item) -> AtlasSlot? {
         index[item].map { nodes[$0].slot }
     }
@@ -155,6 +162,10 @@ public struct Atlas<Item: Hashable & Sendable>: Sendable {
         nodes[node].next = nil
         if let tail = lists[list].tail { nodes[tail].next = node } else { lists[list].head = node }
         lists[list].tail = node
+    }
+
+    private func newSlotFits(width: Int) -> Bool {
+        shelves.contains { $0 + width <= side } || ((shelves.count + 1) * cell.height <= side && width <= side)
     }
 
     /// Room never used yet: on a shelf with space left, or a new shelf below the last.

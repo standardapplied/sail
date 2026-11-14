@@ -85,6 +85,26 @@ import Testing
         #expect(drawnInFlight.difference(from: alone, tolerance: 0).pixels == 0, "the frame in flight changed")
     }
 
+    /// A frame with more distinct glyphs than the atlas holds is drawn as far as they fit and not
+    /// asked for again, which would only evict what it shows; a frame past its share of new glyphs
+    /// is.
+    @Test func aFrameTheAtlasCannotHoldIsDrawnAsFarAsItFits() throws {
+        let sides = AtlasSides(initial: 128, largest: 128)
+        let renderer = try makeRenderer(sides: sides)
+        let cell = renderer.metrics
+        let slots = (128 / cell.height) * (128 / cell.width)
+        let alphabet = Array("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789")
+        try #require(slots + 4 <= alphabet.count && slots + 4 <= 40)
+        let frame = try makeScreen(40, 2, String(alphabet[0 ..< slots + 4]) + "\u{1b}[?25l").frame()
+        let size = renderer.pixels(of: frame.size)
+        _ = try renderer.image(of: frame, overlay: Overlay(), size: size)
+        #expect(!renderer.lastFrameComplete)
+        #expect(!renderer.lastFrameWantsAnother)
+        let capped = try makeRenderer(sides: sides)
+        _ = try capped.image(of: try makeScreen(40, 2, "abcd\u{1b}[?25l").frame(), overlay: Overlay(), size: size, newItems: 2)
+        #expect(capped.lastFrameWantsAnother)
+    }
+
     /// V5 for instance memory: with three frames in flight no fourth frame is written, and one
     /// is once they completed.
     @Test(.timeLimit(.minutes(1))) func aFourthFrameWaitsForABuffer() async throws {
