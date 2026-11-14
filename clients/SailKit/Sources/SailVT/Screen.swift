@@ -1,3 +1,8 @@
+#if canImport(Glibc)
+import Glibc
+#elseif canImport(Darwin)
+import Darwin
+#endif
 import GhosttyVt
 import Synchronization
 
@@ -9,8 +14,13 @@ import Synchronization
 /// its render state. One lock is what a render hold needs: when a program starts synchronized
 /// output (mode 2026), the render state is updated from inside the terminal's write, on the feeding
 /// thread, so it keeps the last finished frame until the program ends the hold, or the hold has
-/// lasted ``holdLimit``. Bytes are fed in slices of ``feedSlice``, so a frame waits at most one
-/// slice for the lock.
+/// lasted ``holdLimit``.
+///
+/// Bytes are fed in slices of ``feedSlice``, each under its own taking of the lock, and before each
+/// slice the feeder lets a reader that is waiting go first: a `frame()` or `text()` announces
+/// itself, and the feeder yields its thread until that reader holds the lock. So a frame waits for
+/// at most the slice being fed when it asked, however many feeds follow back to back (`Mutex` alone
+/// would let the feeder take the lock straight back).
 public final class Screen: Sendable {
     /// The longest a program may hold the screen still; then the hold is ended and frames go on.
     public static let holdLimit = Duration.seconds(1)
@@ -20,6 +30,10 @@ public final class Screen: Sendable {
     public static let largestCellPixels = 4096
 
     private let parts: Mutex<Parts>
+    /// Readers waiting for the lock, which the feeder lets in between slices.
+    private let waitingReaders = Atomic<Int>(0)
+    /// Slices fed so far: how a reader counts the slices it waited behind.
+    private let slicesFed = Atomic<Int>(0)
 
     private struct Parts {
         let core: TerminalCore
@@ -49,10 +63,14 @@ public final class Screen: Sendable {
     public func feed(_ bytes: [UInt8]) -> Effects {
         var effects = Effects()
         for start in stride(from: 0, to: bytes.count, by: Self.feedSlice) {
+            while waitingReaders.load(ordering: .sequentiallyConsistent) > 0 {
+                sched_yield()
+            }
             let fed = parts.withLock { parts in
                 bytes[start ..< min(bytes.count, start + Self.feedSlice)].withUnsafeBufferPointer {
                     ghostty_terminal_vt_write(parts.core.handle, $0.baseAddress, $0.count)
                 }
+                slicesFed.add(1, ordering: .sequentiallyConsistent)
                 return parts.core.drain()
             }
             effects.reply += fed.reply
@@ -107,7 +125,7 @@ public final class Screen: Sendable {
 
     /// Back to a blank terminal, every mode reset.
     public func reset() {
-        parts.withLock { _ = $0.core.restart() }
+        parts.withLock { $0.core.restart() }
     }
 
     public func scrollToBottom() {
@@ -126,16 +144,30 @@ public final class Screen: Sendable {
 
     /// What a renderer draws now, and which rows changed since the last frame.
     public func frame() throws(ScreenError) -> ScreenFrame {
-        try parts.withLock { (parts: inout Parts) throws(ScreenError) in
+        try timedFrame().frame
+    }
+
+    /// A frame, and what it waited for the lock: how long, which also counts waiting for a CPU, and
+    /// how many slices the feeder ran first, which counts only the feeder's fairness.
+    package func timedFrame() throws(ScreenError) -> (frame: ScreenFrame, waited: Duration, slicesWaited: Int) {
+        try read { (parts: Parts, wait: Wait) throws(ScreenError) in
             try Self.refresh(parts)
-            return parts.cache.frame()
+            return (parts.cache.frame(), wait.time, wait.slices)
+        }
+    }
+
+    /// How long until the program's current render hold reaches ``holdLimit`` and frames go on,
+    /// nil with no hold: a renderer that draws only on change draws again then.
+    public var holdRemaining: Duration? {
+        parts.withLock { parts in
+            parts.core.sink.heldSince.map { max(.zero, $0 + Self.holdLimit - parts.core.sink.now()) }
         }
     }
 
     /// The viewport as plain text: each row's graphemes, trailing blanks dropped, then trailing
     /// blank rows. Reading it leaves the next frame's changes as they were.
     public func text() throws(ScreenError) -> String {
-        try parts.withLock { (parts: inout Parts) throws(ScreenError) in
+        try read { (parts: Parts, _: Wait) throws(ScreenError) in
             try Self.refresh(parts)
             return Self.text(of: parts.cache.rows)
         }
@@ -198,6 +230,28 @@ public final class Screen: Sendable {
     /// The selected text, wrapped lines joined; nil with no selection.
     public func selectedText() -> String? {
         parts.withLock { $0.core.selectedText() }
+    }
+
+    private struct Wait {
+        let time: Duration
+        let slices: Int
+    }
+
+    /// Runs `body` under the lock as a reader the feeder lets in before its next slice. Every access
+    /// is sequentially consistent, so a feeder checking after the announcement sees it: the reader
+    /// waits behind at most the one slice already past its check.
+    private func read<Value: Sendable>(_ body: (Parts, Wait) throws(ScreenError) -> Value) throws(ScreenError) -> Value {
+        let asked = ContinuousClock.now
+        waitingReaders.add(1, ordering: .sequentiallyConsistent)
+        let fedBefore = slicesFed.load(ordering: .sequentiallyConsistent)
+        var announced = true
+        defer { if announced { waitingReaders.subtract(1, ordering: .sequentiallyConsistent) } }
+        return try parts.withLock { (parts: inout Parts) throws(ScreenError) -> Value in
+            waitingReaders.subtract(1, ordering: .sequentiallyConsistent)
+            announced = false
+            let wait = Wait(time: ContinuousClock.now - asked, slices: slicesFed.load(ordering: .sequentiallyConsistent) - fedBefore)
+            return try body(parts, wait)
+        }
     }
 
     /// Brings the rows up to date, unless the program holds the screen still: then the rows keep

@@ -13,8 +13,9 @@ import Testing
         session: "work", command: [], workingDirectory: "/tmp", project: "", room: "", size: TerminalSize(columns: 80, rows: 24)
     )
 
-    /// Ruling 1: a host that attaches and at once drops is a failed attempt: five, and the session
-    /// parks, where it used to retry every 0.5 s forever.
+    /// Ruling 1: a host that attaches and at once drops is a failed attempt: after the first drop,
+    /// five reconnects that each attach and drop, waiting 0.5, 1, 2, 4 and 8 s before them, and the
+    /// session parks, where it used to retry every 0.5 s forever.
     @Test func aHostThatAttachesAndDropsParksTheSessionAfterFiveTries() async throws {
         let naps = Naps()
         let (host, session, peer, watch) = try await attachedLocally(stableAfter: TerminalSession.stableAttachment, sleep: naps.sleep)
@@ -35,18 +36,18 @@ import Testing
             if case .parked = session.state.phase { return true }
             return false
         }
-        #expect(attaches == 5)
-        #expect(naps.durations == Array(TerminalSession.retryWaits.dropFirst()))
+        #expect(attaches == 6)
+        #expect(naps.durations == TerminalSession.retryWaits)
         session.close()
     }
 
-    @Test func aRunnerThatAttachesAndClosesIsAskedFiveTicketsThenParks() async throws {
+    @Test func aRunnerThatAttachesAndClosesIsAskedSixTicketsThenParks() async throws {
         let host = try FakeHost(tcp: ())
         let desk = TicketDesk(address: host.address)
         let session = TerminalSession(open: create, door: .runner(desk), screen: try screen(), timeout: 5, sleep: Naps().sleep)
         let watch = Watch(session)
         session.start()
-        for _ in 1 ... 5 {
+        for _ in 1 ... 6 {
             let peer = try await host.accept()
             try await peer.welcome()
             _ = try await peer.acceptAttach()
@@ -56,7 +57,7 @@ import Testing
             if case .parked = session.state.phase { return true }
             return false
         }
-        #expect(desk.requests.count == 5)
+        #expect(desk.requests.count == 6)
         session.close()
     }
 
@@ -112,11 +113,12 @@ import Testing
         #else
         #expect(socket.retransmitDrop == Int32(Socket.deadAfter))
         #endif
-        #expect(Int(Socket.keepalive.idle + Socket.keepalive.interval * Socket.keepalive.count) == Socket.deadAfter)
+        #expect(Socket.quietDeadAfter == 45)
     }
 
-    /// Ruling 3: keys written into a connection that died before the host applied them are counted
-    /// dropped, as the next attach's replay shows; keys it applied are not.
+    /// Ruling 3: keys written into a connection that died before the host applied them are counted,
+    /// as an estimate apart from the exact dropped count, by the next attach's replay; keys it
+    /// applied are not.
     @Test(arguments: [(Int64(0), 2), (Int64(1), 1), (Int64(2), 0)])
     func keysTheHostNeverAppliedAreCountedDroppedAtTheNextAttach(_ applied: Int64, _ dropped: Int) async throws {
         let (host, session, peer, watch) = try await attachedLocally()
@@ -130,7 +132,8 @@ import Testing
         #expect(try await again.read() == .attach(session: "work", write: true))
         try again.send([.accepted, .replayBegin(safe: true), output("history", applied: applied), .replayEnd])
         try await watch.text("history")
-        #expect(session.state.droppedInputs == dropped)
+        #expect(session.state.possiblyLostInputs == dropped)
+        #expect(session.state.droppedInputs == 0)
         session.close()
     }
 
@@ -239,6 +242,85 @@ import Testing
         #expect(throws: TerminalError.self) { try session.kill() }
     }
 
+    /// Fix 2: a kill with no connection attached says so rather than doing nothing.
+    @Test func aKillWhileNotAttachedIsRefused() throws {
+        let host = try FakeHost()
+        let session = TerminalSession(attach: "s", write: true, door: .local(host.address), screen: try screen())
+        #expect(throws: TerminalError.unsupported("the session is not attached, so there is no connection to ask the host to end it on")) {
+            try session.kill()
+        }
+    }
+
+    /// Fix 2 BLOCKER (the reviewer's n1): an applied number no client could have sent ends the
+    /// session; the next key no longer overflows.
+    @Test(arguments: [Int64.max, TerminalSession.largestApplied + 1, -2, Int64.min])
+    func anAppliedNumberNoClientCouldSendEndsTheSession(_ applied: Int64) async throws {
+        let (host, session, peer, watch) = try await attachedLocally()
+        try peer.send(output("x", applied: applied))
+        try await watch.until("ended") {
+            if case .ended(.protocolViolation) = session.state.phase { return true }
+            return false
+        }
+        session.send(KeyInput(key: .a, text: "a"))
+        #expect(session.state.droppedInputs == 1)
+        _ = host
+    }
+
+    @Test func theLargestAppliedNumberStillLeavesRoomToNumberInput() async throws {
+        let (host, session, peer, watch) = try await attachedLocally()
+        try peer.send(output("edge", applied: TerminalSession.largestApplied))
+        try await watch.text("edge")
+        session.send(KeyInput(key: .a, text: "a"))
+        #expect(try await peer.read() == .input(sequence: TerminalSession.largestApplied + 1, bytes: Array("a".utf8)))
+        session.close()
+        _ = host
+    }
+
+    /// Fix 2 MAJOR (the reviewer's n5): after this client resized the pty, the wake probe sends that
+    /// size, never the size the session attached at.
+    @Test func theWakeProbeSendsThePtySizeThisClientLastSent() async throws {
+        let timeline = Timeline()
+        let (host, session, peer, watch) = try await attachedLocally(columns: 80, rows: 24, sleep: timeline.sleep)
+        try session.resize(GridSize(columns: 100, rows: 30))
+        try await timeline.until(held: [TerminalSession.resizeHold])
+        timeline.passAll()
+        #expect(try await peer.read() == .resize(TerminalSize(columns: 100, rows: 30)))
+        session.reconnectNow()
+        #expect(try await peer.read() == .resize(TerminalSize(columns: 100, rows: 30)))
+        try peer.send(.resized(TerminalSize(columns: 120, rows: 40)))
+        try await watch.until("took the host's size") { try session.screen.frame().size == GridSize(columns: 120, rows: 40) }
+        session.reconnectNow()
+        #expect(try await peer.read() == .resize(TerminalSize(columns: 120, rows: 40)))
+        session.close()
+        _ = host
+    }
+
+    /// Fix 2: a render hold left open when the output stops ticks the screen at its limit, so a
+    /// renderer that draws only on a tick shows what the program left.
+    @Test func aHoldLeftOpenTicksTheScreenAtItsLimit() async throws {
+        let timeline = Timeline()
+        let hands = Hands()
+        let host = try FakeHost()
+        let create = SessionCreate(session: "work", command: [], workingDirectory: "/tmp", project: "", room: "", size: TerminalSize(columns: 20, rows: 3))
+        let screen = try Screen(size: GridSize(columns: 20, rows: 3), scrollbackBytes: 0, palette: .dark, now: { hands.now })
+        let session = TerminalSession(open: create, door: .local(host.address), screen: screen, timeout: 5, stableAfter: .zero, sleep: timeline.sleep)
+        var ticks = session.screenChanges.makeAsyncIterator()
+        session.start()
+        let peer = try await host.accept()
+        try await peer.welcome()
+        _ = try await peer.acceptAttach(columns: 20, rows: 3)
+        try peer.send(output("old\u{1b}[?2026h\r\u{1b}[2Kstuck"))
+        while try screen.text() != "old" {
+            _ = await ticks.next()
+        }
+        try await timeline.until(held: [Screen.holdLimit])
+        hands.advance(Screen.holdLimit)
+        timeline.passAll()
+        _ = await ticks.next()
+        #expect(try Screen.text(of: [screen.frame().rows[0]]) == "stuck")
+        session.close()
+    }
+
     /// MINOR 2: a resize's in-band size report goes out at once.
     @Test func aResizeAnswersAnInBandSizeReportAtOnce() async throws {
         let (host, session, peer, watch) = try await attachedLocally()
@@ -259,5 +341,36 @@ import Testing
         try await watch.until("told the replay") { watch.seen.contains(.replay(safe: false)) }
         session.close()
         _ = host
+    }
+}
+
+/// The local host's listing, page by page.
+@Suite(.timeLimit(.minutes(1))) struct SessionListingTests {
+    static func info(_ name: String) -> SessionInfo {
+        SessionInfo(name: name, instanceID: "i-\(name)", live: true, attached: 0, writerFDE: "", room: "", command: [])
+    }
+
+    @Test func everyPageIsReadInOrder() async throws {
+        let host = try FakeHost()
+        async let listed = SessionListing.sessions(at: host.address, timeout: 5)
+        let peer = try await host.accept()
+        #expect(try await peer.welcome() == "")
+        #expect(try await peer.read() == .listSessions(after: "", limit: SessionListing.pageSize))
+        try peer.send(.sessions(SessionPage(sessions: [Self.info("a"), Self.info("b")], next: "b")))
+        #expect(try await peer.read() == .listSessions(after: "b", limit: SessionListing.pageSize))
+        try peer.send(.sessions(SessionPage(sessions: [Self.info("c")], next: "")))
+        #expect(try await listed.map(\.name) == ["a", "b", "c"])
+    }
+
+    @Test func aCursorThatDoesNotMoveForwardIsAProtocolViolation() async throws {
+        let host = try FakeHost()
+        let listed = Task { try await SessionListing.sessions(at: host.address, timeout: 5) }
+        let peer = try await host.accept()
+        try await peer.welcome()
+        _ = try await peer.read()
+        try peer.send(.sessions(SessionPage(sessions: [Self.info("a")], next: "a")))
+        _ = try await peer.read()
+        try peer.send(.sessions(SessionPage(sessions: [Self.info("a")], next: "a")))
+        await #expect(throws: TerminalError.protocolViolation("its listing went back to 'a' after 'a'")) { try await listed.value }
     }
 }

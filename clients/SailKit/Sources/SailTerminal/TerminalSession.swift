@@ -30,8 +30,13 @@ public final class TerminalSession: Sendable {
     public static let largestGrid = GridSize(columns: 1000, rows: 500)
     /// How many inputs not yet confirmed applied are kept to be accounted for after a drop.
     public static let unconfirmedLimit = 4096
-    /// What the host answers input from a connection that does not hold the write token.
+    /// What the host answers input from a connection that does not hold the write token. The host's
+    /// refusal frame carries words alone, no kind, so the words are what there is to match; a host
+    /// that rewords it makes such a connection answer queries again, which the host refuses.
     static let notWriter = "You do not hold the write token."
+    /// The largest input number a host may name applied: anything above leaves no room to number
+    /// this client's input after it (2^32 inputs), and is a protocol violation.
+    static let largestApplied = Int64.max - (1 << 32)
 
     public let screen: Screen
     /// What the session tells the app, the newest ``eventBacklog`` kept for a slow reader.
@@ -62,7 +67,10 @@ public final class TerminalSession: Sendable {
         var supervisor: Task<Void, Never>?
         var resizeTimer: Task<Void, Never>?
         var viewSize: TerminalSize?
-        var hostSize: TerminalSize?
+        /// The pty's size as far as this client knows: the last size the host announced or this
+        /// client sent. A writer's pty has exactly it; a reader's `Resize` the host ignores.
+        var ptySize: TerminalSize?
+        var holdTimer: Task<Void, Never>?
         var focused = true
         var detaching = false
         var closed = false
@@ -130,6 +138,7 @@ public final class TerminalSession: Sendable {
         var initial = Core(state: SessionState(phase: .connecting, session: intent.session), intent: intent)
         if case let .open(create) = intent {
             initial.viewSize = create.size
+            initial.ptySize = create.size
         }
         core = Mutex(initial)
         (events, eventSink) = AsyncStream.makeStream(of: SessionEvent.self, bufferingPolicy: .bufferingNewest(Self.eventBacklog))
@@ -166,13 +175,15 @@ public final class TerminalSession: Sendable {
     }
 
     /// Skips a reconnect's wait, or leaves the park and tries at once. While attached it asks the
-    /// connection to prove itself: the host's current size goes to the host, which changes
-    /// nothing there (`TIOCSWINSZ` to the size a pty has raises no `SIGWINCH`), but leaves data
-    /// the peer must acknowledge, so a connection that died while the machine slept is found dead
-    /// within ``Socket/deadAfter`` seconds. The app calls it on wake and on a network change.
+    /// connection to prove itself: the pty's size as this client last knew it goes to the host,
+    /// which changes nothing there (`TIOCSWINSZ` to the size a pty has raises no `SIGWINCH`), but
+    /// leaves data the peer must acknowledge, so a connection that died while the machine slept is
+    /// found dead within ``Socket/deadAfter`` seconds. The protocol has no frame that does nothing
+    /// at all: an empty `Input` would count as typing in a room-bound session. The app calls it on
+    /// wake and on a network change.
     public func reconnectNow() {
         alarm.ring()
-        let (connection, size) = core.withLock { ($0.connection, $0.hostSize ?? $0.viewSize) }
+        let (connection, size) = core.withLock { ($0.connection, $0.ptySize) }
         guard let connection, let size else { return }
         send(.resize(size), on: connection)
     }
@@ -200,17 +211,17 @@ public final class TerminalSession: Sendable {
     /// Ends this client's part: the connection, or the one being admitted, closes and nothing
     /// reconnects.
     public func close() {
-        let (connections, supervisor, timer) = core.withLock { core in
+        let (connections, supervisor, timers) = core.withLock { core in
             core.closed = true
             defer {
                 core.supervisor = nil
                 core.connection = nil
                 core.inFlight = nil
             }
-            return ([core.connection, core.inFlight].compactMap(\.self), core.supervisor, core.resizeTimer)
+            return ([core.connection, core.inFlight].compactMap(\.self), core.supervisor, [core.resizeTimer, core.holdTimer])
         }
         supervisor?.cancel()
-        timer?.cancel()
+        timers.forEach { $0?.cancel() }
         connections.forEach { $0.close() }
         finish(.closed)
     }
@@ -295,20 +306,23 @@ public final class TerminalSession: Sendable {
         send(.takeWrite, on: connection)
     }
 
-    /// Asks this machine's own host to end the session. A runner's door is refused before anything
-    /// is sent: its ticket admits a session's input, size and write token, and closes on anything
-    /// else.
+    /// Asks this machine's own host to end the session, on the attached connection. A runner's door
+    /// is refused before anything is sent (its ticket admits a session's input, size and write token,
+    /// and closes on anything else), and so is a session not attached now.
     public func kill() throws(TerminalError) {
         if case .runner = door {
             throw .unsupported("a runner's terminal door ends no session: its ticket admits only this session's input, size and write token")
         }
-        guard let connection = core.withLock({ $0.connection }) else { return }
+        guard let connection = core.withLock({ $0.connection }) else {
+            throw .unsupported("the session is not attached, so there is no connection to ask the host to end it on")
+        }
         send(.kill(session: state.session), on: connection)
     }
 
     private func supervise(_ generation: Int) async {
         var failures = 0
         var first = true
+        var retrying = false
         var reason = ""
         while !Task.isCancelled {
             if !first {
@@ -322,6 +336,7 @@ public final class TerminalSession: Sendable {
                 }
                 guard !Task.isCancelled else { return }
             }
+            retrying = !first
             first = false
             let outcome = await attempt(generation)
             guard core.withLock({ $0.generation == generation }) else { return }
@@ -330,7 +345,7 @@ public final class TerminalSession: Sendable {
                 failures += 1
                 reason = error.description
             case let .dropped(error, attachedFor):
-                failures = attachedFor >= stableAfter ? 0 : failures + 1
+                failures = attachedFor >= stableAfter || !retrying ? 0 : failures + 1
                 reason = error.description
             case .detached:
                 core.withLock { $0.supervisor = nil }
@@ -484,6 +499,9 @@ public final class TerminalSession: Sendable {
     private func take(_ frame: Frame, from connection: Connection) -> Outcome? {
         switch frame {
         case let .output(applied, bytes):
+            guard (-1 ... Self.largestApplied).contains(applied) else {
+                return .finished(.protocolViolation("it named input \(applied) applied, outside -1 through \(Self.largestApplied)"))
+            }
             account(applied)
             tap.withLock { $0 }?(bytes)
             let effects = screen.feed(bytes)
@@ -491,6 +509,7 @@ public final class TerminalSession: Sendable {
             sendInput(effects.reply, handedIn: nil)
             effects.events.forEach { emit(.screen($0)) }
             screenSink.yield()
+            armHoldTick()
         case let .replayBegin(safe):
             core.withLock { $0.replaying = true }
             screen.beginReplay()
@@ -500,11 +519,13 @@ public final class TerminalSession: Sendable {
             let (focused, refit) = core.withLock { core in
                 core.replaying = false
                 if core.accounting {
-                    core.state.droppedInputs += core.unconfirmed.count
+                    core.state.possiblyLostInputs += core.unconfirmed.count
                     core.unconfirmed = []
                     core.accounting = false
                 }
-                return (core.focused, core.viewSize.flatMap { $0 == core.hostSize ? nil : $0 })
+                let refit = core.viewSize.flatMap { $0 == core.ptySize ? nil : $0 }
+                if refit != nil { core.ptySize = refit }
+                return (core.focused, refit)
             }
             if !focused {
                 sendInput(screen.focus(false), handedIn: nil)
@@ -518,7 +539,7 @@ public final class TerminalSession: Sendable {
             guard Self.fits(grid), let effects = try? screen.resize(grid) else {
                 return .finished(.protocolViolation("it resized the session to \(size.columns)x\(size.rows), beyond \(Self.largestGrid)"))
             }
-            core.withLock { $0.hostSize = size }
+            core.withLock { $0.ptySize = size }
             sendInput(effects.reply, handedIn: nil)
             emit(.resized(size))
             screenSink.yield()
@@ -555,7 +576,7 @@ public final class TerminalSession: Sendable {
     private func account(_ applied: Int64) {
         let replaying = core.withLock { core in
             if core.replaying, core.accounting {
-                core.state.droppedInputs += core.unconfirmed.filter { $0 > applied }.count
+                core.state.possiblyLostInputs += core.unconfirmed.filter { $0 > applied }.count
                 core.unconfirmed = []
                 core.accounting = false
             } else if !core.replaying {
@@ -586,7 +607,7 @@ public final class TerminalSession: Sendable {
         }
         guard let connection else { return }
         do throws(TerminalError) {
-            let last = try connection.sendInput(bytes) { sequence.withLock { $0 += 1; return $0 } }
+            let last = try connection.sendInput(bytes) { sequence.withLock { $0 &+= 1; return $0 } }
             guard let handedIn else { return }
             let written = clock.now
             latency.withLock { $0.sent(last, handedIn: handedIn, written: written) }
@@ -608,9 +629,32 @@ public final class TerminalSession: Sendable {
     }
 
     private func sendViewSize() {
-        let (connection, size) = core.withLock { ($0.connection, $0.viewSize) }
+        let (connection, size) = core.withLock { core in
+            if core.connection != nil { core.ptySize = core.viewSize }
+            return (core.connection, core.viewSize)
+        }
         guard let connection, let size else { return }
         send(.resize(size), on: connection)
+    }
+
+    /// When output left the program's render hold open, a screen tick at the hold's limit: the
+    /// frame then goes on without the program, and a renderer that draws only on a tick draws it.
+    private func armHoldTick() {
+        guard let remaining = screen.holdRemaining else { return }
+        let previous = core.withLock { core in
+            defer {
+                core.holdTimer = Task {
+                    do {
+                        try await self.sleep(remaining)
+                    } catch {
+                        return
+                    }
+                    self.screenSink.yield()
+                }
+            }
+            return core.holdTimer
+        }
+        previous?.cancel()
     }
 
     private func setPhase(_ phase: SessionPhase) {

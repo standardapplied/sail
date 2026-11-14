@@ -10,13 +10,19 @@ import Darwin
 final class Socket: Sendable {
     /// How long a write may wait for a peer that stopped reading before the connection is given up.
     static let sendTimeout = 10
-    /// How long a TCP peer may leave what was sent unacknowledged, or a quiet connection
-    /// unanswered, before it is taken for dead: the bound of a dead connection's discovery, typing
-    /// or not.
+    /// How long a TCP peer may leave what was sent unacknowledged before it is taken for dead: a
+    /// connection that dies while something is in flight (a key, a paste, the wake probe) is found
+    /// within it. The cost: a live link that loses every packet for this long (a tethered phone in
+    /// a tunnel, a box stalled under load) is cut, and the session reconnects and replays.
     static let deadAfter = 10
-    /// TCP keepalive on a quiet connection: probes after 4 s of silence, 2 s apart, 3 unanswered
-    /// and the peer is dead, about ``deadAfter`` in all.
-    static let keepalive = (idle: Int32(4), interval: Int32(2), count: Int32(3))
+    /// TCP keepalive on a quiet connection, the only case the timeout above does not cover: probes
+    /// after 30 s of silence, 5 s apart, 3 unanswered and the peer is dead, so a quiet connection's
+    /// death is found within ``quietDeadAfter``. One probe per 30 s per idle session is the battery
+    /// cost; a person who comes back finds a dead connection through what they type, or the wake
+    /// probe, within ``deadAfter``.
+    static let keepalive = (idle: Int32(30), interval: Int32(5), count: Int32(3))
+    /// The bound on finding a quiet connection dead: keepalive's idle time and its probes.
+    static let quietDeadAfter = Int(keepalive.idle + keepalive.interval * keepalive.count)
 
     private let descriptor: Int32
 

@@ -6,10 +6,16 @@ public struct SessionState: Equatable, Sendable {
     public var phase: SessionPhase
     /// The session's name on its host: the one it was opened or attached as.
     public var session: String
-    /// Input handed in that never reached the program: handed in while not attached (dropped, never
-    /// queued), or written into a connection that died before the host applied it, as the replay
-    /// of the next attach shows.
+    /// Input the person handed in while the session was not attached: dropped, never queued, and
+    /// counted exactly.
     public var droppedInputs: Int
+    /// An estimate, never an exact count, of input written into a connection that then died
+    /// without the host applying it: at the next attach, inputs not yet confirmed and numbered
+    /// above the replay's last-applied input. It over-counts when the replay carries no output
+    /// (every unconfirmed input is counted), under-counts when another client wrote after the drop
+    /// (its numbers are not this client's), and counts nothing for a session that ends instead of
+    /// attaching again.
+    public var possiblyLostInputs: Int
     /// The boot id of the run of the host the session lives on, once a host welcomed it.
     public var hostBootID: String?
     /// The FDE holding the write token, empty for nobody, as the host last said.
@@ -19,12 +25,13 @@ public struct SessionState: Equatable, Sendable {
     public var paused: Bool
 
     public init(
-        phase: SessionPhase, session: String, droppedInputs: Int = 0, hostBootID: String? = nil, writer: String? = nil,
-        paused: Bool = false
+        phase: SessionPhase, session: String, droppedInputs: Int = 0, possiblyLostInputs: Int = 0, hostBootID: String? = nil,
+        writer: String? = nil, paused: Bool = false
     ) {
         self.phase = phase
         self.session = session
         self.droppedInputs = droppedInputs
+        self.possiblyLostInputs = possiblyLostInputs
         self.hostBootID = hostBootID
         self.writer = writer
         self.paused = paused

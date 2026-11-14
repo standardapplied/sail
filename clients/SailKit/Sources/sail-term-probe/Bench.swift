@@ -4,10 +4,15 @@ import SailVT
 import Synchronization
 
 /// T10's budgets for the screen's own overhead, measured in process: an output frame of 4 KiB to
-/// the screen updated at 200x60, the rate a 20 MiB stream feeds at, and how long a renderer's
-/// `frame()` takes while that stream arrives twenty times, called at 120 Hz on a thread of its own:
-/// within half a 60 Hz frame (8 ms) at p95, so a 60 Hz display keeps up while a program floods the
-/// screen, where at 120 Hz a flood may cost a refresh now and then. Its maximum is reported.
+/// the screen updated at 200x60, the rate a 20 MiB stream feeds at, and what a renderer meets while
+/// a program floods the screen. For that, `frame()` is called at 120 Hz on a thread of its own while
+/// another feeds back to back, with no gap between feeds: 1 MiB at a time (the most one `Output`
+/// carries) and 13 KiB at a time (a busy pty). A frame stays within half a 120 Hz frame (4 ms) at
+/// p95, so the display keeps up while a program floods the screen; the time it waits for the lock
+/// stays within 1 ms at p95, since the feeder lets it in between slices of ``Screen/feedSlice``.
+/// Maxima are reported. The wait includes the reader's wait for a CPU after the lock is free, so
+/// these are budgets for a machine with a core to spare: with every core busy the waits rise for
+/// small feeds as much as large ones (measured 2.2 and 3.2 ms p95), which no lock can help.
 enum Bench {
     static func run() throws -> [Budget] {
         let clock = ContinuousClock()
@@ -28,43 +33,55 @@ enum Bench {
             _ = fed.feed(Array(stream[start ..< min(stream.count, start + 64 * 1024)]))
         }
         let elapsed: Double = (clock.now - started).milliseconds
-        let mebibytes = Double(stream.count) / 1_048_576
-        let rate = mebibytes / (elapsed / 1000)
-        let burst = Percentiles(try framesDuringBurst(stream))
-        return [
+        let rate = Double(stream.count) / 1_048_576 / (elapsed / 1000)
+        var budgets = [
             Budget(name: "4 KiB output to screen updated at 200x60, p95", milliseconds: Percentiles(updates).p95, limit: 2),
             Budget(name: "20 MiB fed, milliseconds per MiB (50 MiB/s is 20)", milliseconds: 1000 / rate, limit: 20),
-            Budget(name: "frame() at 120 Hz during a 20 MiB burst at 200x60, p95", milliseconds: burst.p95, limit: 8),
-            Budget(name: "frame() at 120 Hz during a 20 MiB burst at 200x60, max (reported)", milliseconds: burst.max, limit: .infinity),
         ]
+        for (label, size) in [("1 MiB", 1 << 20), ("13 KiB", 13 * 1024)] {
+            let (frames, waits) = try framesWhileFeeding(stride(from: 0, to: stream.count, by: size).map {
+                Array(stream[$0 ..< min(stream.count, $0 + size)])
+            })
+            let frame = Percentiles(frames)
+            let wait = Percentiles(waits)
+            budgets += [
+                Budget(name: "frame() at 120 Hz, \(label) feeds back to back, p95", milliseconds: frame.p95, limit: 4),
+                Budget(name: "frame() at 120 Hz, \(label) feeds back to back, max (reported)", milliseconds: frame.max, limit: .infinity),
+                Budget(name: "frame()'s wait for the lock, \(label) feeds back to back, p95", milliseconds: wait.p95, limit: 1),
+                Budget(name: "frame()'s wait for the lock, \(label) feeds back to back, max (reported)", milliseconds: wait.max, limit: .infinity),
+            ]
+        }
+        return budgets
     }
 
-    /// How many times the burst is fed, so the frames taken meanwhile are enough to rank.
-    static let bursts = 20
+    /// How many times the stream is fed, so the frames taken meanwhile are enough to rank.
+    static let rounds = 20
 
-    /// The time each `frame()` took while `stream` was fed ``bursts`` times in 1 MiB output frames,
-    /// the most a host sends at once, on another thread.
-    private static func framesDuringBurst(_ stream: [UInt8]) throws -> [Duration] {
+    /// How long each `frame()` took, and waited for the lock, while `chunks` were fed ``rounds``
+    /// times back to back on another thread.
+    private static func framesWhileFeeding(_ chunks: [[UInt8]]) throws -> (frames: [Duration], waits: [Duration]) {
         let clock = ContinuousClock()
         let screen = try Screen(size: GridSize(columns: 200, rows: 60), scrollbackBytes: 10 << 20, palette: .dark)
-        let fed = Mutex(false)
+        let fed = Atomic<Bool>(false)
         let feeder = Thread {
-            for _ in 0 ..< bursts {
-                for start in stride(from: 0, to: stream.count, by: 1 << 20) {
-                    _ = screen.feed(Array(stream[start ..< min(stream.count, start + (1 << 20))]))
+            for _ in 0 ..< rounds {
+                for chunk in chunks {
+                    _ = screen.feed(chunk)
                 }
             }
-            fed.withLock { $0 = true }
+            fed.store(true, ordering: .releasing)
         }
         feeder.start()
         var frames: [Duration] = []
-        while !fed.withLock({ $0 }) {
+        var waits: [Duration] = []
+        while !fed.load(ordering: .acquiring) {
             let started = clock.now
-            _ = try screen.frame()
+            let waited = try screen.timedFrame().waited
             frames.append(clock.now - started)
+            waits.append(waited)
             Thread.sleep(forTimeInterval: 1.0 / 120)
         }
-        return frames
+        return (frames, waits)
     }
 
     /// Lines of coloured output as a build log or `ls --color` writes them.

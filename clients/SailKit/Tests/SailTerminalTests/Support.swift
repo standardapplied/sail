@@ -178,3 +178,16 @@ func attachedLocally(
     try await watch.until("took the attach's prologue") { watch.seen.contains(.writerChanged("ada")) }
     return (host, session, peer, watch)
 }
+
+/// A clock a test moves by hand.
+final class Hands: Sendable {
+    private let instant = Mutex(ContinuousClock.now)
+
+    var now: ContinuousClock.Instant {
+        instant.withLock { $0 }
+    }
+
+    func advance(_ duration: Duration) {
+        instant.withLock { $0 += duration }
+    }
+}

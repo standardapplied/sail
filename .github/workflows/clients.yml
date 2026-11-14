@@ -1,19 +1,10 @@
 name: Clients
 
-# Only a change to the clients or to this workflow can change these lanes' result: the macOS lane
-# tests against the pinned darwin release, not this commit's server (the terminal end to end job in
-# ci.yml runs the clients against this commit's own hosts on every change).
 on:
   pull_request:
-    paths:
-      - clients/**
-      - .github/workflows/clients.yml
   push:
     branches:
       - main
-    paths:
-      - clients/**
-      - .github/workflows/clients.yml
 
 permissions:
   contents: read
@@ -94,13 +85,16 @@ jobs:
       - name: Test
         run: swift test
 
-      # The scenarios ran in the Test step; this measures the echo through this machine's own host,
-      # with the debug probe the build already made (the budget is far above its cost).
-      - name: Echo latency through this machine's own host
+      # The scenarios ran in the Test step; this measures, on the machine the renderer will run on,
+      # the screen's own overhead (release, as the app ships) and the echo through this machine's
+      # own host.
+      - name: Overhead and echo latency on macOS
         if: runner.os == 'macOS'
         run: |
           mkdir -p "$RUNNER_TEMP/reports"
-          "$(swift build --show-bin-path)/sail-term-probe" --local --host-binary "$SAIL_BINARY" --folder /tmp \
+          swift build -c release --product sail-term-probe
+          "$(swift build -c release --show-bin-path)/sail-term-probe" --bench --report "$RUNNER_TEMP/reports/macos-bench.json"
+          "$(swift build -c release --show-bin-path)/sail-term-probe" --local --host-binary "$SAIL_BINARY" --folder /tmp \
             --script Tests/Probe/measure.json --report "$RUNNER_TEMP/reports/macos-measure.json"
 
       - name: Leave the probe's reports
