@@ -63,9 +63,9 @@ final class Timeline: Sendable {
         waiting.withLock { $0.held.map(\.duration) }
     }
 
-    /// Waits until the waits held are `durations`, failing after five seconds.
+    /// Waits until the waits held are `durations`, failing after ``FakeHost/deadline`` seconds.
     func until(held durations: [Duration]) async throws {
-        let deadline = ContinuousClock.now + .seconds(5)
+        let deadline = ContinuousClock.now + .seconds(FakeHost.deadline)
         while held != durations {
             let left = deadline - ContinuousClock.now
             guard left > .zero else { throw HostError("the waits held are \(held), never \(durations)") }

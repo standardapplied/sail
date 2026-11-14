@@ -9,10 +9,7 @@ import Synchronization
 /// another feeds back to back, with no gap between feeds: 1 MiB at a time (the most one `Output`
 /// carries) and 13 KiB at a time (a busy pty). A frame stays within half a 120 Hz frame (4 ms) at
 /// p95, so the display keeps up while a program floods the screen; the time it waits for the lock
-/// stays within 1 ms at p95, since the feeder hands the lock off between slices of
-/// ``Screen/feedSlice``. Readers that poll with no pause still leave output its 50 MiB/s, since a
-/// hand-off comes at most every ``Screen/handOffEvery`` slices, and a key typed during a flood is
-/// encoded within 1 ms at p95.
+/// stays within 1 ms at p95, since the feeder lets it in between slices of ``Screen/feedSlice``.
 /// Maxima are reported. The wait includes the reader's wait for a CPU after the lock is free, so
 /// these are budgets for a machine with a core to spare: with every core busy the waits rise for
 /// small feeds as much as large ones (measured 2.2 and 3.2 ms p95), which no lock can help.
@@ -54,69 +51,7 @@ enum Bench {
                 Budget(name: "frame()'s wait for the lock, \(label) feeds back to back, max (reported)", milliseconds: wait.max, limit: .infinity),
             ]
         }
-        for (label, readers) in [("one reader calls frame() as fast as it can", 1), ("two readers call frame() and text() as fast as they can", 2)] {
-            budgets.append(Budget(
-                name: "20 MiB fed while \(label), milliseconds per MiB", milliseconds: try polledFeed(stream, readers: readers),
-                limit: 20
-            ))
-        }
-        budgets.append(Budget(
-            name: "a key's encoding at 100 Hz, 1 MiB feeds back to back, p95",
-            milliseconds: Percentiles(try keysWhileFeeding(stride(from: 0, to: stream.count, by: 1 << 20).map {
-                Array(stream[$0 ..< min(stream.count, $0 + (1 << 20))])
-            })).p95, limit: 1
-        ))
         return budgets
-    }
-
-    /// Milliseconds per MiB feeding `stream` in 64 KiB outputs while `readers` threads read the
-    /// screen in a loop with no pause: the first `frame()`, the second `text()`.
-    private static func polledFeed(_ stream: [UInt8], readers: Int) throws -> Double {
-        let screen = try Screen(size: GridSize(columns: 200, rows: 60), scrollbackBytes: 10 << 20, palette: .dark)
-        let stop = Atomic<Bool>(false)
-        let stopped = Atomic<Int>(0)
-        for reader in 0 ..< readers {
-            Thread {
-                while !stop.load(ordering: .acquiring) {
-                    if reader == 0 { _ = try? screen.frame() } else { _ = try? screen.text() }
-                }
-                stopped.add(1, ordering: .releasing)
-            }.start()
-        }
-        let started = ContinuousClock.now
-        for start in stride(from: 0, to: stream.count, by: 64 * 1024) {
-            _ = screen.feed(Array(stream[start ..< min(stream.count, start + 64 * 1024)]))
-        }
-        let elapsed = (ContinuousClock.now - started).milliseconds
-        stop.store(true, ordering: .releasing)
-        while stopped.load(ordering: .acquiring) < readers {
-            sched_yield()
-        }
-        return elapsed / (Double(stream.count) / 1_048_576)
-    }
-
-    /// How long each key's encoding took, a key every 10 ms, while `chunks` were fed ``rounds``
-    /// times back to back on another thread.
-    private static func keysWhileFeeding(_ chunks: [[UInt8]]) throws -> [Duration] {
-        let clock = ContinuousClock()
-        let screen = try Screen(size: GridSize(columns: 200, rows: 60), scrollbackBytes: 10 << 20, palette: .dark)
-        let fed = Atomic<Bool>(false)
-        Thread {
-            for _ in 0 ..< rounds {
-                for chunk in chunks {
-                    _ = screen.feed(chunk)
-                }
-            }
-            fed.store(true, ordering: .releasing)
-        }.start()
-        var keys: [Duration] = []
-        while !fed.load(ordering: .acquiring) {
-            let started = clock.now
-            _ = screen.encode(KeyInput(key: .x, text: "x", unshifted: "x"))
-            keys.append(clock.now - started)
-            Thread.sleep(forTimeInterval: 1.0 / 100)
-        }
-        return keys
     }
 
     /// How many times the stream is fed, so the frames taken meanwhile are enough to rank.
@@ -141,7 +76,7 @@ enum Bench {
         var waits: [Duration] = []
         while !fed.load(ordering: .acquiring) {
             let started = clock.now
-            let waited = try screen.timedFrame().wait.time
+            let waited = try screen.timedFrame().waited
             frames.append(clock.now - started)
             waits.append(waited)
             Thread.sleep(forTimeInterval: 1.0 / 120)

@@ -12,7 +12,11 @@ import Synchronization
 /// port, and each connection it accepts is a ``Peer`` the test reads and answers frame by frame.
 /// Every wait is bounded by ``deadline`` seconds.
 final class FakeHost: Sendable {
-    static let deadline = 5
+    /// How long a test waits for the client to connect or send. The client's session is a task
+    /// on the cooperative pool, and on a 3-core macOS runner the suite's synchronous, CPU-heavy
+    /// tests (fixtures fed in 500 chunkings, streams cut at every byte) hold all 3 of its threads
+    /// for the first 20 s or so of a run: a 5 s bound expired there before the client could run.
+    static let deadline = 30
 
     let address: HostAddress
     private let listener: Mutex<Int32>

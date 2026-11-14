@@ -3736,15 +3736,13 @@ against them before it is used. Both expose one module, `GhosttyVt`. The termina
   has lasted 1 s, when the session ticks the screen so a renderer drawing only on change draws
   again; a renderer never draws a half-finished update. A change of the default colours or the
   palette redraws every row. Output is fed in 16 KiB slices, each under its own taking of the lock,
-  and every other caller (a frame, a key's encoding, a paste) announces itself and passes a gate
-  the feeder holds while it feeds. Once 64 slices were fed since the last hand-off and a caller
-  waits, the feeder opens the gate and yields until as many callers as were waiting have taken
-  the lock. So a caller waits behind at most 64 slices however many feeds follow back to back,
-  callers that read as fast as they can still leave output the lock for 64 slices between
-  hand-offs, callers wait blocked rather than spinning, and with no feed running nothing waits; a
-  frame with nothing new fed does not announce itself while the lock is free (`FairnessTests`
-  counts slices and hand-offs; the bench times frames, keys and the output rate under polling
-  readers, on Linux and macOS).
+  and before each slice the feeder yields to a reader that has announced itself, so a frame waits
+  behind at most the one slice already being fed, however many feeds follow back to back
+  (`FairnessTests` counts the slices; the bench times the wait on Linux and macOS). `frame()` is
+  meant to be called once per display refresh: a reader polling in a tight loop slows output (one
+  such reader to about 32 MiB/s, two to about 0.33 MiB/s). The encoders take the lock without the
+  hand-off: through a session a key waits at most about 0.25 ms at p95, and with `feed()` called
+  back to back with no gap, up to 372 ms at p95.
 - **T4. Secrets stay secret.** A ticket is presented once; a reconnect asks for a new one. No ticket,
   token or terminal byte is logged, written to a file or put on a command line (the probe takes its
   token from an environment variable it is named).
@@ -3765,8 +3763,8 @@ against them before it is used. Both expose one module, `GhosttyVt`. The termina
   pty's is the size the host announced or this client sent while it held the write token (the
   host ignores a reader's resize), and a granted `takeWrite()` sends the view's size once, so the
   new writer's pty takes it. `reconnectNow()` while attached sends the pty's size, so a connection
-  that died during sleep is found at once without resizing anything; the protocol has no no-op frame, and an
-  empty `Input` would count as typing. A connect attempt a detach or a close overtook stands down
+  that died during sleep is found at once without resizing anything; the protocol has no no-op
+  frame, and an empty `Input` would count as typing. A connect attempt a detach or a close overtook stands down
   before it sends anything for the session, and `kill()` while not attached throws.
 - **T7. No keystroke reaches a screen the person cannot see.** Input while not attached is
   dropped and counted exactly (`droppedInputs`), never queued; input written into a connection
