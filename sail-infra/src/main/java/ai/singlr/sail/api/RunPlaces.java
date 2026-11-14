@@ -55,11 +55,7 @@ final class RunPlaces {
   }
 
   /** Where a reserved run went in, and how: none for the project's container. */
-  record Entered(RunPlace place, Optional<Workspaces.Entered> workspace, boolean stale) {
-    String instance() {
-      return place.instance();
-    }
-  }
+  record Entered(RunPlace place, Optional<Workspaces.Entered> workspace, boolean stale) {}
 
   private final ProjectLoader projects;
   private final Workspaces workspaces;
@@ -89,20 +85,20 @@ final class RunPlaces {
    * runs count against its cap.
    */
   Checked check(String project, ProjectDefinition config, String specId, String boxHandle) {
-    var place = place(project, specId);
-    return switch (place) {
-      case RunPlace.ProjectContainer container -> {
-        projects.running(project, config);
-        yield new InContainer(container);
-      }
-      case RunPlace.SpecWorkspace workspace -> {
-        var check = checked(workspace, config);
-        if (!check.running()) {
-          requireRoom(check, config, boxHandle);
-        }
-        yield new InWorkspace(check);
-      }
-    };
+    if (Strings.isBlank(specId)) {
+      projects.running(project, config);
+      return new InContainer(new RunPlace.ProjectContainer(project));
+    }
+    return checkSpec(project, config, specId, boxHandle);
+  }
+
+  /** As {@link #check}, for a run that names spec {@code specId}: its workspace. */
+  InWorkspace checkSpec(String project, ProjectDefinition config, String specId, String boxHandle) {
+    var check = checked(workspaceOf(project, specId), config);
+    if (!check.running()) {
+      requireRoom(check, config, boxHandle);
+    }
+    return new InWorkspace(check);
   }
 
   /**
@@ -128,9 +124,9 @@ final class RunPlaces {
     };
   }
 
-  private static RunPlace place(String project, String specId) {
+  private static RunPlace.SpecWorkspace workspaceOf(String project, String specId) {
     try {
-      return RunPlace.of(project, specId);
+      return (RunPlace.SpecWorkspace) RunPlace.of(project, specId);
     } catch (IllegalArgumentException tooLong) {
       throw new ApiException(ErrorCode.BAD_REQUEST, tooLong.getMessage(), tooLong);
     }
@@ -144,12 +140,12 @@ final class RunPlaces {
           projects::held);
     } catch (IllegalStateException | IllegalArgumentException refused) {
       throw ApiException.of(ErrorCode.CONFLICT, refused);
-    } catch (IOException | TimeoutException e) {
+    } catch (IOException | TimeoutException | InterruptedException e) {
+      if (e instanceof InterruptedException) {
+        Thread.currentThread().interrupt();
+      }
       throw new ApiException(
           ErrorCode.COMMAND_FAILED, "Could not read this box's Incus: " + e.getMessage(), e);
-    } catch (InterruptedException e) {
-      Thread.currentThread().interrupt();
-      throw new ApiException(ErrorCode.COMMAND_FAILED, "Interrupted reading Incus.", e);
     }
   }
 
@@ -160,10 +156,10 @@ final class RunPlaces {
           check, config, owner, SailPaths.projectFilesDir(check.place().project()));
     } catch (Workspaces.Busy busy) {
       throw busy(busy);
-    } catch (InterruptedException e) {
-      Thread.currentThread().interrupt();
-      throw new ApiException(ErrorCode.COMMAND_FAILED, "Interrupted making a workspace.", e);
     } catch (Exception e) {
+      if (e instanceof InterruptedException) {
+        Thread.currentThread().interrupt();
+      }
       throw new ApiException(
           ErrorCode.COMMAND_FAILED,
           "Workspace "
@@ -185,69 +181,58 @@ final class RunPlaces {
    */
   private void requireRoom(Workspaces.SpecCheck check, ProjectDefinition config, String boxHandle) {
     var pool = check.template().pool();
-    check
-        .space()
-        .filter(space -> space.total() > 0)
-        .filter(space -> space.total() - space.used() < space.total() * FREE_SHARE)
-        .ifPresent(
-            space -> {
-              throw busy(
-                  "Pool "
-                      + pool
-                      + " has "
-                      + Strings.gibibytes(space.total() - space.used())
-                      + " free of "
-                      + Strings.gibibytes(space.total())
-                      + ", under the 10% this box keeps free, so no new workspace is made on it.",
-                  Remedy.of(
-                      "Free space on it, or see sudo zpool status "
-                          + Objects.requireNonNullElse(pool, "")
-                          + "; then dispatch again."));
-            });
+    var space = check.space().orElse(null);
+    if (space != null && space.total() - space.used() < space.total() * FREE_SHARE) {
+      throw busy(
+          "Pool "
+              + pool
+              + " has "
+              + Strings.gibibytes(space.total() - space.used())
+              + " free of "
+              + Strings.gibibytes(space.total())
+              + ", under the 10% this box keeps free, so no new workspace is made on it.",
+          Remedy.of(
+              "Free space on it, or see sudo zpool status " + pool + "; then dispatch again."));
+    }
     var limit =
         config.resources() == null ? 0 : ResourceChecker.parseMemoryMb(config.resources().memory());
-    if (limit <= 0 || runStore == null) {
+    var memory = limit <= 0 || runStore == null ? 0 : hostMemoryMb();
+    if (memory <= 0) {
       return;
     }
-    hostMemoryMb()
-        .ifPresent(
-            memory -> {
-              var cap = Math.max(1, memory / limit);
-              var live = runStore.liveSpecWorkspaces(boxHandle);
-              if (live >= cap) {
-                throw busy(
-                    "This box has "
-                        + live
-                        + " spec workspace"
-                        + (live == 1 ? "" : "s")
-                        + " with a live run, as many as its memory holds at "
-                        + config.name()
-                        + "'s "
-                        + config.resources().memory()
-                        + " each (a cap of "
-                        + cap
-                        + "), so no new workspace is made.",
-                    Remedy.of("Dispatch again when one of their runs ends."));
-              }
-            });
+    var cap = Math.max(1, memory / limit);
+    var live = runStore.liveSpecWorkspaces(boxHandle);
+    if (live >= cap) {
+      throw busy(
+          "This box has "
+              + live
+              + " spec workspace"
+              + (live == 1 ? "" : "s")
+              + " with a live run, as many as its memory holds at "
+              + config.name()
+              + "'s "
+              + config.resources().memory()
+              + " each (a cap of "
+              + cap
+              + "), so no new workspace is made.",
+          Remedy.of("Dispatch again when one of their runs ends."));
+    }
   }
 
-  /** The box's memory, as Incus says it, in megabytes; none when it does not say. */
-  private Optional<Long> hostMemoryMb() {
+  /** The box's memory, as Incus says it, in megabytes; 0 when it does not say. */
+  private long hostMemoryMb() {
     try {
       var queried = shell.observer().exec(List.of("incus", "query", "/1.0/resources"));
-      if (queried.ok()
-          && YamlUtil.parseMap(queried.stdout()).get("memory") instanceof Map<?, ?> m
-          && m.get("total") instanceof Number total
-          && total.longValue() > 0) {
-        return Optional.of(total.longValue() / (1024L * 1024L));
+      return queried.ok()
+              && YamlUtil.parseMap(queried.stdout()).get("memory") instanceof Map<?, ?> memory
+              && memory.get("total") instanceof Number total
+          ? total.longValue() / (1024L * 1024L)
+          : 0;
+    } catch (IOException | TimeoutException | InterruptedException | RuntimeException e) {
+      if (e instanceof InterruptedException) {
+        Thread.currentThread().interrupt();
       }
-      return Optional.empty();
-    } catch (IOException | TimeoutException | RuntimeException e) {
-      return Optional.empty();
-    } catch (InterruptedException e) {
-      Thread.currentThread().interrupt();
-      return Optional.empty();
+      return 0;
     }
   }
 

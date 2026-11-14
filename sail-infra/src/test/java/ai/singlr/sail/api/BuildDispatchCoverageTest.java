@@ -961,6 +961,66 @@ class BuildDispatchCoverageTest {
     assertFalse(box.invocations().stream().anyMatch(command -> command.startsWith("incus copy")));
   }
 
+  /** A dry run over the spec's running workspace asks its tree whether the branch is there. */
+  @Test
+  void aDryRunOverTheSpecsRunningWorkspaceSaysItWouldReuseItAndAsksItsTree() throws IOException {
+    var db = seedDb();
+    var template = TestWorkspaces.currentTemplate(definitions(), "acme");
+    var running = TestWorkspaces.specWorkspace("acme", "auth", "Running", HANDLE);
+    workspaces = TestWorkspaces.over(incus(template + "," + running, template + "," + running));
+    var shell = launching();
+
+    var dry =
+        Actor.call(
+            ADMIN,
+            () ->
+                ops(shell, YAML, db)
+                    .dispatch(
+                        "acme",
+                        new DispatchOperations.Request("auth", "background", true, null, false),
+                        HANDLE));
+
+    var said = assertInstanceOf(DispatchOperations.Dispatched.class, dry);
+    assertEquals(
+        new DispatchOperations.WorkspaceUse("acme-auth", "auth", true, null, false),
+        said.workspace());
+    assertTrue(said.branchCreated(), "the reused tree has no sail/auth yet");
+    assertTrue(
+        ranContaining(shell, REPO + " rev-parse --verify --quiet refs/heads/sail/auth"),
+        "asked of the workspace's tree");
+  }
+
+  /** A room that cannot be told what a launch noticed never fails the launch. */
+  @Test
+  void aStaleTemplatesNoticeARoomCannotTakeLeavesTheDispatchStanding() throws IOException {
+    var db = seedDb();
+    db.execute(
+        """
+        CREATE TRIGGER room_down BEFORE INSERT ON room_messages
+        BEGIN SELECT RAISE(ABORT, 'room is down'); END""");
+    var stale = TestWorkspaces.template("acme", "an-older-definition");
+    workspaces = TestWorkspaces.over(incus(stale, stale));
+
+    var dispatched =
+        assertInstanceOf(
+            DispatchOperations.Dispatched.class,
+            dispatch(ops(launching(), YAML, db).useMessages(new MessageStore(db))));
+
+    assertTrue(dispatched.workspace().stale());
+    assertEquals("running", new RunStore(db).listForSpec("auth").getFirst().status());
+  }
+
+  /** Scenario 16, beside: a box whose memory holds one more spec workspace makes it. */
+  @Test
+  void aBoxUnderItsCapMakesTheWorkspace() throws IOException {
+    var db = seedDb();
+    var shell =
+        launching().on("incus query /1.0/resources", "{\"memory\": {\"total\": 68719476736}}");
+    var limited = YAML + "resources:\n  cpu: 2\n  memory: 4GB\n  disk: 50GB\n";
+
+    assertInstanceOf(DispatchOperations.Dispatched.class, dispatch(ops(shell, limited, db)));
+  }
+
   private Sqlite seedDb() {
     return seedDb(null);
   }

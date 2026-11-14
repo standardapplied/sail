@@ -27,10 +27,9 @@ import java.util.Optional;
  * as a {@link Remedy}, so each door renders it for its reader: the CLI as the command to type, the
  * API as its verb and arguments with the command as data.
  *
- * <p>{@link #branchCheckoutArgs} is the branch half of the same decision: a restart force-checks
- * out the prior branch when it exists ({@code checkout -f}, so a dirty tree left by the previous
- * run cannot abort the re-dispatch) and creates it fresh otherwise, while a non-restart dispatch
- * fails loud on a collision, pointing the caller at the re-dispatch. {@link #freshBranchArgs} cuts
+ * <p>{@link #collision} is the branch half of the same decision: a non-restart dispatch whose
+ * branch is there already fails loud, pointing the caller at the re-dispatch; a restart enters the
+ * branch by {@link WorkBranch#enter}'s rule, which discards nothing. {@link #freshBranchArgs} cuts
  * a brand-new work branch off the latest fetched base so an agent never inherits a stale local
  * checkout of {@code main}/{@code master}.
  */
@@ -91,28 +90,18 @@ public sealed interface RestartResolution
   }
 
   /**
-   * The checkout onto {@code branchName}, refused on a collision when not restarting; the refusal
-   * names {@code redispatch} when the run has a spec to re-dispatch onto the branch.
+   * The refusal of a run that would cut {@code branchName}, which is there already: it names {@code
+   * redispatch} when the run has a spec to dispatch onto the branch, and is told to delete it
+   * otherwise.
    */
-  static List<String> branchCheckoutArgs(
-      String repoDir,
-      String branchName,
-      boolean branchExists,
-      boolean restart,
-      Optional<Remedy.Command> redispatch) {
-    if (branchExists && !restart) {
-      throw new ApiException(
-          ErrorCode.BRANCH_CREATE_FAILED,
-          "Branch '" + branchName + "' already exists.",
-          redispatch
-              .map(
-                  command ->
-                      Remedy.of("To dispatch onto it, run ", command, ", or delete it first."))
-              .orElse(Remedy.of("Delete it first.")));
-    }
-    return branchExists
-        ? List.of("git", "-C", repoDir, "checkout", "-f", branchName)
-        : List.of("git", "-C", repoDir, "checkout", "-b", branchName);
+  static ApiException collision(String branchName, Optional<Remedy.Command> redispatch) {
+    return new ApiException(
+        ErrorCode.BRANCH_CREATE_FAILED,
+        "Branch '" + branchName + "' already exists.",
+        redispatch
+            .map(
+                command -> Remedy.of("To dispatch onto it, run ", command, ", or delete it first."))
+            .orElse(Remedy.of("Delete it first.")));
   }
 
   /**

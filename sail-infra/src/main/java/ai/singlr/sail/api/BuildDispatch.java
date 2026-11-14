@@ -171,7 +171,7 @@ public final class BuildDispatch {
         WorkPrompt.build(
             taskSpec, specBody.isBlank() ? nextSpec.title() : specBody, room, List.of());
     var task = built.prompt();
-    var checked = places.check(project, config, nextSpec.id(), localHandle);
+    var checked = places.checkSpec(project, config, nextSpec.id(), localHandle);
 
     Runnable claim = () -> claim(resolution, taskSpec, branch);
     if (request.dryRun()) {
@@ -185,7 +185,7 @@ public final class BuildDispatch {
           agentType,
           task,
           null,
-          DispatchOperations.WorkspaceUse.wouldEnter(checked),
+          DispatchOperations.WorkspaceUse.wouldEnter(checked.check()),
           wouldCreate(checked, targetRepos, branch, resolution.ontoExistingBranch()),
           resolution.restarted(),
           null,
@@ -264,12 +264,12 @@ public final class BuildDispatch {
    * would not land on as one that is there already, as a restart does.
    */
   private boolean wouldCreate(
-      RunPlaces.Checked checked,
+      RunPlaces.InWorkspace checked,
       List<ProjectDefinition.Repo> targetRepos,
       String branch,
       boolean ontoExisting) {
-    return checked instanceof RunPlaces.InWorkspace(var check) && check.running()
-        ? workBranch.wouldCreate(check.place().instance(), targetRepos, branch)
+    return checked.check().running()
+        ? workBranch.wouldCreate(checked.place().instance(), targetRepos, branch)
         : Strings.isNotBlank(branch) && !ontoExisting;
   }
 
@@ -310,7 +310,7 @@ public final class BuildDispatch {
     var body = specStore.getContent(specId).map(SpecStore.SpecContent::body).orElse("");
     var built =
         WorkPrompt.build(spec, body.isBlank() ? spec.title() : body, room(specId), List.of());
-    var checked = places.check(project, config, specId, localHandle);
+    var checked = places.checkSpec(project, config, specId, localHandle);
     var runId = DateTimeUtils.newId().toString();
     var unit = AgentUnit.forRun(runId);
     var claim =

@@ -191,12 +191,7 @@ public final class AdhocRunner {
     try {
       preparer.prepare();
       return workBranch.checkout(
-          project,
-          config,
-          WorkBranch.repos(config, request.path()),
-          request.branch(),
-          Optional.empty(),
-          false);
+          project, WorkBranch.repos(config, request.path()), request.branch());
     } catch (Exception e) {
       throw e instanceof Remedied refused && !refused.remedy().isEmpty()
           ? new ApiException(

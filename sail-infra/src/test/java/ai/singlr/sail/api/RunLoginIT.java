@@ -15,13 +15,10 @@ import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.engine.AbstractIncusIT;
 import ai.singlr.sail.engine.AgentUnit;
+import ai.singlr.sail.engine.BoxInstances;
 import ai.singlr.sail.engine.ContainerExec;
 import ai.singlr.sail.engine.ContainerFilePush;
-import ai.singlr.sail.engine.SailEventHelper;
 import ai.singlr.sail.engine.SailPaths;
-import ai.singlr.sail.engine.SailRoomRelay;
-import ai.singlr.sail.engine.SailSessionReport;
-import ai.singlr.sail.engine.SailStopGate;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.WatcherSpawner;
 import ai.singlr.sail.harness.Harnesses;
@@ -40,9 +37,9 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.MessageDigest;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.HexFormat;
 import java.util.List;
-import java.util.Map;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.atomic.AtomicBoolean;
 import org.junit.jupiter.api.AfterEach;
@@ -59,7 +56,7 @@ import org.junit.jupiter.api.Test;
  */
 class RunLoginIT extends AbstractIncusIT {
 
-  private static final String CONTAINER = "sail-it-run-login";
+  private static final String PROJECT = "sail-it-run-login";
   private static final String HANDLE = "it-node";
   private static final String KEY = "sk-proj-it-fake-0123456789abcdef";
   private static final Actor OPERATOR = new Actor(HANDLE, Role.ADMIN, Actor.Lane.CLI);
@@ -120,6 +117,7 @@ class RunLoginIT extends AbstractIncusIT {
       """
       import http.server, os, socketserver, time
       PATH = "/run/sail-it-stub/api.sock"
+      os.makedirs("/run/sail-it-stub", exist_ok=True)
       class Handler(http.server.BaseHTTPRequestHandler):
           def answer(self):
               length = int(self.headers.get("Content-Length") or 0)
@@ -147,63 +145,87 @@ class RunLoginIT extends AbstractIncusIT {
       server.serve_forever()
       """;
 
+  private static final String YAML =
+      """
+      name: %s
+      repos:
+        - url: https://example.invalid/app.git
+          path: app
+        - url: https://example.invalid/web.git
+          path: web
+        - url: https://example.invalid/r1.git
+          path: r1
+        - url: https://example.invalid/r2.git
+          path: r2
+        - url: https://example.invalid/r3.git
+          path: r3
+        - url: https://example.invalid/r4.git
+          path: r4
+        - url: https://example.invalid/r5.git
+          path: r5
+        - url: https://example.invalid/r6.git
+          path: r6
+      agent:
+        type: codex
+      """
+          .formatted(PROJECT);
+
+  /**
+   * The stub API, and a second user who samples every run directory, as services the template
+   * enables, so every workspace cloned from it runs both from its boot, before a run is staged in
+   * it.
+   */
+  private static final String SERVICES =
+      """
+      set -e
+      cat > /etc/systemd/system/sail-it-stub-api.service <<'UNIT'
+      [Service]
+      ExecStart=/usr/bin/python3 /root/stub.py
+      [Install]
+      WantedBy=multi-user.target
+      UNIT
+      useradd -m other
+      mkdir -p /home/dev/.sail/runs /var/lib/sail-it
+      chown -R dev:dev /home/dev
+      chmod 0755 /home/dev /home/dev/.sail /home/dev/.sail/runs
+      chown other /var/lib/sail-it
+      cat > /etc/systemd/system/sail-it-other-sampler.service <<'UNIT'
+      [Service]
+      User=other
+      ExecStart=/bin/sh -c 'while true; do for d in /home/dev/.sail/runs/*/; do [ -d "$d" ] || continue; echo "dir $(stat -c %%a "$d" 2>/dev/null) $d"; if [ -e "$d/launch.env" ]; then echo "file $d"; head -c1 "$d/launch.env" > /dev/null 2>&1 && echo "READ $d"; fi; done >> /var/lib/sail-it/samples; sleep 0.005; done'
+      [Install]
+      WantedBy=multi-user.target
+      UNIT
+      systemctl enable sail-it-stub-api.service sail-it-other-sampler.service
+      echo 'export CODEX_ACCESS_TOKEN=container-token' >> /home/dev/.profile
+      """;
+
   private Path stateDir;
 
   @BeforeEach
   void provision() throws Exception {
     ensureIncusOrSkip();
-    launchPrepared(CONTAINER);
-    var setup =
-        exec(
-            CONTAINER,
-            List.of(
-                "bash",
-                "-c",
-                "set -e;"
-                    + " userdel -r ubuntu 2>/dev/null || true;"
-                    + " id -u dev >/dev/null 2>&1 || useradd -m -u 1000 -s /bin/bash dev;"
-                    + " mkdir -p /home/dev/.sail/bin /home/dev/.sail/runs /home/dev/workspace/app"
-                    + " /home/dev/workspace/web /run/sail-it-stub;"
-                    + " for i in 1 2 3 4 5 6; do mkdir -p /home/dev/workspace/r$i; done;"
-                    + " echo 'export CODEX_ACCESS_TOKEN=container-token' >> /home/dev/.profile;"
-                    + " chown -R dev:dev /home/dev;"
-                    + " for i in $(seq 1 30); do"
-                    + " loginctl enable-linger dev 2>/dev/null && break; sleep 1; done;"
-                    + " loginctl enable-linger dev;"
-                    + " timeout 60 sh -c 'until test -S /run/user/1000/bus; do sleep 1; done'"));
-    assertTrue(setup.ok(), "container provisioning failed: " + setup.stderr());
-    ContainerFilePush.push(
-        shell,
-        CONTAINER,
-        "/usr/local/bin/codex",
-        FAKE_AGENT.replace("__API_SOCKET__", SailPaths.apiSocketContainerPath().toString()),
-        List.of("--mode", "0755"));
-    var hooks =
-        Map.of(
-            SailEventHelper.SCRIPT_PATH, SailEventHelper.scriptContent(),
-            SailSessionReport.SCRIPT_PATH, SailSessionReport.scriptContent(),
-            SailRoomRelay.SCRIPT_PATH, SailRoomRelay.scriptContent(),
-            SailStopGate.SCRIPT_PATH, SailStopGate.scriptContent());
-    for (var hook : hooks.entrySet()) {
-      ContainerFilePush.pushAsDev(shell, CONTAINER, hook.getKey(), hook.getValue(), "0755");
-    }
-    ContainerFilePush.push(shell, CONTAINER, "/root/stub.py", STUB_API, List.of("--mode", "0600"));
-    var stub =
-        exec(
-            CONTAINER,
-            List.of(
-                "sh",
-                "-c",
-                "systemd-run --quiet --unit=sail-it-stub-api python3 /root/stub.py &&"
-                    + " timeout 30 sh -c 'until test -S /run/sail-it-stub/api.sock; do sleep 0.2;"
-                    + " done'"));
-    assertTrue(stub.ok(), "the stub API never listened: " + stub.stderr());
     stateDir = Files.createTempDirectory("run-login-it");
+    Files.writeString(stateDir.resolve("sail.yaml"), YAML);
+    specBox(
+        TestProjects.reading(stateDir.resolve("sail.yaml")).require(PROJECT),
+        template -> {
+          ContainerFilePush.push(
+              shell,
+              template,
+              "/usr/local/bin/codex",
+              FAKE_AGENT.replace("__API_SOCKET__", SailPaths.apiSocketContainerPath().toString()),
+              List.of("--mode", "0755"));
+          ContainerFilePush.push(
+              shell, template, "/root/stub.py", STUB_API, List.of("--mode", "0600"));
+          var services = exec(template, List.of("bash", "-c", SERVICES));
+          assertTrue(services.ok(), "the template's services: " + services.stderr());
+        });
   }
 
   @AfterEach
   void cleanup() {
-    deleteContainerQuietly(CONTAINER);
+    removeSpecBox(PROJECT);
     if (stateDir != null) {
       deleteRecursively(stateDir);
     }
@@ -229,34 +251,36 @@ class RunLoginIT extends AbstractIncusIT {
         DispatchOperations.Dispatched dispatched;
         try {
           dispatched = dispatch(ops, spec, shape);
-          awaitStarted(dispatched.runId());
+          awaitStarted(dispatched.workspace().instance(), dispatched.runId());
         } finally {
           sampling.set(false);
           sampler.join(Duration.ofSeconds(30));
         }
         var runId = dispatched.runId();
+        var workspace = dispatched.workspace().instance();
+        assertEquals(workspaceOf(PROJECT, spec), workspace);
 
         assertEquals(
             "key=" + sha256(KEY) + "\ncred=minted\naccess=[]\nfile=gone\n",
-            asDev(List.of("cat", "/home/dev/.sail/started-" + runId)).stdout(),
+            asDev(workspace, List.of("cat", "/home/dev/.sail/started-" + runId)).stdout(),
             shape
                 + ": the agent had the key and its credential, the container's own token was set"
                 + " empty, and the file was gone");
         assertFalse(
-            asDev(List.of("test", "-e", AgentUnit.forRun(runId).launchEnvPath())).ok(),
+            asDev(workspace, List.of("test", "-e", AgentUnit.forRun(runId).launchEnvPath())).ok(),
             shape + ": no launch.env is left");
         assertTrue(sampled.size() > 1, "the host's process list was sampled through the launch");
         assertTrue(
             sampled.stream().noneMatch(line -> line.contains(KEY) || line.contains("sailrun_")),
             shape + ": no host command line held the key or a run credential");
-        var inContainer = asDev(List.of("ps", "-eo", "args")).stdout();
+        var inContainer = asDev(workspace, List.of("ps", "-eo", "args")).stdout();
         assertFalse(inContainer.contains(KEY) || inContainer.contains("sailrun_"), inContainer);
         assertEquals(
             "",
-            asDev(List.of("cat", "/home/dev/.sail/argv-hits-" + runId)).stdout(),
+            asDev(workspace, List.of("cat", "/home/dev/.sail/argv-hits-" + runId)).stdout(),
             shape + ": no process in the container held the run credential while every hook ran");
         var requests =
-            exec(CONTAINER, List.of("sh", "-c", "cat /root/stub.log; : > /root/stub.log"))
+            exec(workspace, List.of("sh", "-c", "cat /root/stub.log; : > /root/stub.log"))
                 .stdout()
                 .lines()
                 .toList();
@@ -271,7 +295,7 @@ class RunLoginIT extends AbstractIncusIT {
                 + ": every hook reached the API presenting the run credential: "
                 + requests
                 + "\n"
-                + stubDiagnosis(runId));
+                + stubDiagnosis(workspace, runId));
         assertTrue(
             requests.stream().filter("GET /v1/run/messages run-credential"::equals).count() >= 2,
             shape + ": the relay and the stop gate both read the room: " + requests);
@@ -284,6 +308,7 @@ class RunLoginIT extends AbstractIncusIT {
         if (shape.equals("background")) {
           var unit =
               asDev(
+                      workspace,
                       List.of(
                           "systemctl",
                           "--user",
@@ -307,52 +332,36 @@ class RunLoginIT extends AbstractIncusIT {
    * directory keeps it.
    */
   @Test
-  void anotherUserOfTheContainerNeverSeesALaunchFileAtAnyInstant() throws Exception {
-    var opened =
-        exec(
-            CONTAINER,
-            List.of(
-                "sh",
-                "-c",
-                "useradd -m other && chmod 0755 /home/dev /home/dev/.sail /home/dev/.sail/runs"
-                    + " && systemd-run --quiet --unit=sail-it-other-sampler --uid=other sh -c "
-                    + "'while [ ! -e /tmp/sampler-stop ]; do"
-                    + " for d in /home/dev/.sail/runs/*/; do"
-                    + " [ -d \"$d\" ] || continue;"
-                    + " echo \"dir $(stat -c %a \"$d\" 2>/dev/null) $d\";"
-                    + " if [ -e \"$d/launch.env\" ]; then echo \"file $d\";"
-                    + " head -c1 \"$d/launch.env\" > /dev/null 2>&1 && echo \"READ $d\"; fi;"
-                    + " done >> /tmp/samples; sleep 0.005; done'"));
-    assertTrue(opened.ok(), "the second user's sampler never started: " + opened.stderr());
+  void anotherUserOfTheWorkspaceNeverSeesALaunchFileAtAnyInstant() throws Exception {
     try (var db = database()) {
       var fdes = new FdeStore(db);
       var id = fdes.add(HANDLE, null, null, "admin").id();
       fdes.logins().store(id, Harnesses.of("codex"), null, "api-key", KEY);
       var ops = operations(db);
-      var runs = new java.util.ArrayList<String>();
+      var runs = new ArrayList<DispatchOperations.Dispatched>();
       for (var i = 1; i <= 6; i++) {
         seedSpec(new SpecStore(db), "spec-m" + i, "r" + i);
-        var runId = dispatch(ops, "spec-m" + i, "background").runId();
-        awaitStarted(runId);
-        runs.add(runId);
+        var dispatched = dispatch(ops, "spec-m" + i, "background");
+        awaitStarted(dispatched.workspace().instance(), dispatched.runId());
+        runs.add(dispatched);
       }
-      exec(CONTAINER, List.of("sh", "-c", "touch /tmp/sampler-stop; sleep 1"));
 
-      var samples = exec(CONTAINER, List.of("sort", "-u", "/tmp/samples")).stdout();
-      for (var runId : runs) {
+      for (var dispatched : runs) {
+        var workspace = dispatched.workspace().instance();
+        var samples = exec(workspace, List.of("sort", "-u", "/var/lib/sail-it/samples")).stdout();
         assertTrue(
-            samples.contains("dir 700 /home/dev/.sail/runs/" + runId + "/"),
-            "the second user sampled run " + runId + "'s directory: " + samples);
+            samples.contains("dir 700 /home/dev/.sail/runs/" + dispatched.runId() + "/"),
+            "the second user sampled run " + dispatched.runId() + "'s directory: " + samples);
+        assertTrue(
+            samples
+                .lines()
+                .filter(line -> line.startsWith("dir "))
+                .allMatch(line -> line.startsWith("dir 700 ")),
+            "every run directory it saw was the dev user's alone: " + samples);
+        assertFalse(
+            samples.contains("file ") || samples.contains("READ "),
+            "no launch.env was ever seen by another user: " + samples);
       }
-      assertTrue(
-          samples
-              .lines()
-              .filter(line -> line.startsWith("dir "))
-              .allMatch(line -> line.startsWith("dir 700 ")),
-          "every run directory it saw was the dev user's alone: " + samples);
-      assertFalse(
-          samples.contains("file ") || samples.contains("READ "),
-          "no launch.env was ever seen by another user: " + samples);
     }
   }
 
@@ -366,52 +375,17 @@ class RunLoginIT extends AbstractIncusIT {
           assertThrows(ApiException.class, () -> dispatch(operations(db), "spec-bg", "background"));
 
       assertEquals(ErrorCode.LOGIN_NOT_STORED, refused.failure().errorCode());
-      assertEquals(List.of(), new RunStore(db).listForProject(CONTAINER));
-      assertEquals(
-          "",
-          asDev(
-                  List.of(
-                      "systemctl",
-                      "--user",
-                      "list-units",
-                      "--plain",
-                      "--no-legend",
-                      "sail-agent-*"))
-              .stdout()
-              .strip());
+      assertEquals(List.of(), new RunStore(db).listForProject(PROJECT));
+      assertTrue(
+          new BoxInstances(shell).named(workspaceOf(PROJECT, "spec-bg")).isEmpty(),
+          "a refusal before the reservation makes no workspace");
     }
   }
 
   private Sqlite database() throws Exception {
-    var yaml = stateDir.resolve("sail.yaml");
-    Files.writeString(
-        yaml,
-        """
-        name: %s
-        repos:
-          - url: https://example.invalid/app.git
-            path: app
-          - url: https://example.invalid/web.git
-            path: web
-          - url: https://example.invalid/r1.git
-            path: r1
-          - url: https://example.invalid/r2.git
-            path: r2
-          - url: https://example.invalid/r3.git
-            path: r3
-          - url: https://example.invalid/r4.git
-            path: r4
-          - url: https://example.invalid/r5.git
-            path: r5
-          - url: https://example.invalid/r6.git
-            path: r6
-        agent:
-          type: codex
-        """
-            .formatted(CONTAINER));
     var db = Sqlite.open(stateDir.resolve(DateTimeUtils.newId() + ".db"));
     new SchemaManager(db).migrate();
-    HeldProjects.hold(db, CONTAINER);
+    HeldProjects.hold(db, PROJECT);
     return db;
   }
 
@@ -439,7 +413,7 @@ class RunLoginIT extends AbstractIncusIT {
             OPERATOR,
             () ->
                 ops.dispatch(
-                    CONTAINER,
+                    PROJECT,
                     new DispatchOperations.Request(spec, mode, false, null, false),
                     HANDLE)));
   }
@@ -455,11 +429,12 @@ class RunLoginIT extends AbstractIncusIT {
     }
   }
 
-  /** Waits, in the container and bounded, for the fake agent of {@code runId} to report. */
-  private void awaitStarted(String runId) throws Exception {
+  /** Waits, in {@code workspace} and bounded, for the fake agent of {@code runId} to report. */
+  private void awaitStarted(String workspace, String runId) throws Exception {
     var started = "/home/dev/.sail/started-" + runId;
     var waited =
         asDev(
+            workspace,
             List.of(
                 "timeout", "60", "sh", "-c", "until test -s " + started + "; do sleep 0.2; done"));
     assertTrue(
@@ -467,13 +442,13 @@ class RunLoginIT extends AbstractIncusIT {
         "run "
             + runId
             + " never started its agent; its log: "
-            + asDev(List.of("cat", AgentUnit.forRun(runId).logPath())).stdout());
+            + asDev(workspace, List.of("cat", AgentUnit.forRun(runId).logPath())).stdout());
   }
 
   /** What a test that saw no hook reach the stub API prints: the socket, the stub and the run. */
-  private String stubDiagnosis(String runId) throws Exception {
+  private String stubDiagnosis(String workspace, String runId) throws Exception {
     return exec(
-            CONTAINER,
+            workspace,
             List.of(
                 "sh",
                 "-c",
@@ -483,8 +458,8 @@ class RunLoginIT extends AbstractIncusIT {
         .stdout();
   }
 
-  private ShellExec.Result asDev(List<String> argv) throws Exception {
-    return shell.exec(ContainerExec.asDevUser(CONTAINER, argv));
+  private ShellExec.Result asDev(String workspace, List<String> argv) throws Exception {
+    return shell.exec(ContainerExec.asDevUser(workspace, argv));
   }
 
   private static String sha256(String value) throws Exception {
@@ -500,7 +475,7 @@ class RunLoginIT extends AbstractIncusIT {
           store.create(
               new SpecStore.SpecRow(
                   id,
-                  CONTAINER,
+                  PROJECT,
                   "Title " + id,
                   SpecStatus.PENDING,
                   HANDLE,

@@ -65,13 +65,7 @@ class WorkBranchTest {
 
     var cut =
         new WorkBranch(new LocalGit(tempDir), listener)
-            .checkout(
-                "acme",
-                config,
-                WorkBranch.repos(config, "app-wt"),
-                "sail/run",
-                Optional.empty(),
-                false);
+            .checkout("acme", WorkBranch.repos(config, "app-wt"), "sail/run");
 
     assertTrue(cut);
     assertEquals(List.of("sail/run in app-wt"), reported);
@@ -118,13 +112,7 @@ class WorkBranchTest {
 
     var cut =
         new WorkBranch(new LocalGit(tempDir), listener)
-            .checkout(
-                "acme",
-                config,
-                WorkBranch.repos(config, "app/.git"),
-                "sail/run",
-                Optional.empty(),
-                false);
+            .checkout("acme", WorkBranch.repos(config, "app/.git"), "sail/run");
 
     assertFalse(cut);
     assertEquals(List.of("sail/run"), unavailable);

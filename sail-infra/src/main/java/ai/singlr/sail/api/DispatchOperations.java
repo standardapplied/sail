@@ -101,17 +101,13 @@ public final class DispatchOperations {
       boolean stale) {
 
     /** The workspace a dry run's checks found, as a dispatch would use it. */
-    static WorkspaceUse wouldEnter(RunPlaces.Checked checked) {
-      return switch (checked) {
-        case RunPlaces.InContainer container -> null;
-        case RunPlaces.InWorkspace(var check) ->
-            new WorkspaceUse(
-                check.place().instance(),
-                check.place().workspace(),
-                check.whole(),
-                null,
-                !check.whole() && check.stale());
-      };
+    static WorkspaceUse wouldEnter(Workspaces.SpecCheck check) {
+      return new WorkspaceUse(
+          check.place().instance(),
+          check.place().workspace(),
+          check.whole(),
+          null,
+          !check.whole() && check.stale());
     }
 
     /** The workspace a run entered. */

@@ -70,19 +70,12 @@ public final class WorkBranch {
   }
 
   /**
-   * Checks out the work branch in every target repo that exists in the container: a fresh branch
-   * with {@code checkout -b}, or — on a restart — a forced {@code checkout -f} onto the existing
-   * branch so re-dispatch lands on the prior work even over a dirty tree the previous run left. A
-   * collision on a non-restart dispatch fails loud, naming {@code redispatch}, the command that
-   * dispatches the spec onto the branch; a run with no spec to re-dispatch is told to delete it.
+   * Cuts the work branch of a run that lives in the project's own container (an ad-hoc session) in
+   * every target repo that exists there, with {@code checkout -b} off the latest base; a branch
+   * that is there already fails loud, and is told to be deleted.
    */
   public boolean checkout(
-      String container,
-      ProjectDefinition config,
-      List<ProjectDefinition.Repo> targetRepos,
-      String branch,
-      Optional<Remedy.Command> redispatch,
-      boolean restart) {
+      String container, List<ProjectDefinition.Repo> targetRepos, String branch) {
     if (Strings.isBlank(branch)) {
       return false;
     }
@@ -104,22 +97,18 @@ public final class WorkBranch {
                       "--quiet",
                       "refs/heads/" + branch)))
               .ok();
-      List<String> checkoutArgs;
       if (branchExists) {
-        checkoutArgs =
-            RestartResolution.branchCheckoutArgs(repoDir, branch, true, restart, redispatch);
-      } else {
-        var base = baseBranch(container, repoDir, repo);
-        checkoutArgs =
-            RestartResolution.freshBranchArgs(
-                repoDir, branch, base, fetchLatestBase(container, repoDir, base));
+        throw RestartResolution.collision(branch, Optional.empty());
       }
+      var base = baseBranch(container, repoDir, repo);
+      var checkoutArgs =
+          RestartResolution.freshBranchArgs(
+              repoDir, branch, base, fetchLatestBase(container, repoDir, base));
       var result = exec(ContainerExec.asDevUser(container, checkoutArgs));
       if (!result.ok()) {
         throw new ApiException(
             ErrorCode.BRANCH_CREATE_FAILED,
-            "Failed to "
-                + (branchExists ? "check out" : "create")
+            "Failed to create"
                 + " branch '"
                 + branch
                 + "' in repo '"
@@ -127,7 +116,7 @@ public final class WorkBranch {
                 + "': "
                 + result.reason());
       }
-      listener.branchReady(branch, repo.path(), branchExists);
+      listener.branchReady(branch, repo.path(), false);
       created = true;
     }
     if (!created) {
@@ -198,7 +187,7 @@ public final class WorkBranch {
       var local = named && hasRef(instance, repoDir, "refs/heads/" + branch);
       var remote = named && !local && onRemote(instance, repoDir, branch);
       if (build && !restart && (local || remote)) {
-        RestartResolution.branchCheckoutArgs(repoDir, branch, true, false, redispatch);
+        throw RestartResolution.collision(branch, redispatch);
       }
       var base = build ? baseBranch(instance, repoDir, repo) : "";
       var target = named ? branch : base;

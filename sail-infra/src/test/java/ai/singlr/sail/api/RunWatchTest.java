@@ -368,7 +368,9 @@ class RunWatchTest {
     var snapshots = container.commandsContaining("incus snapshot create");
     assertEquals(1, snapshots.size(), snapshots.toString());
     assertTrue(
-        snapshots.getFirst().startsWith("incus snapshot create " + place.instance() + " guardrail-"),
+        snapshots
+            .getFirst()
+            .startsWith("incus snapshot create " + place.instance() + " guardrail-"),
         snapshots.getFirst());
     assertEquals(1, published.size());
   }

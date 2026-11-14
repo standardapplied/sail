@@ -45,7 +45,6 @@ import java.nio.file.Files;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Objects;
-import java.util.Optional;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BiFunction;
 import java.util.function.Function;
@@ -214,8 +213,7 @@ public final class RunCommand implements Runnable {
       snapshot(shell, snapshotTaken, label);
       if (!dryRun) {
         new WorkBranch(shell, listener(new AtomicReference<>()))
-            .checkout(
-                name, config, WorkBranch.repos(config, path), branchName, Optional.empty(), false);
+            .checkout(name, WorkBranch.repos(config, path), branchName);
       }
     }
 

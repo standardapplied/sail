@@ -76,7 +76,7 @@ final class ReviewLaneLauncher implements ReviewLanes {
   public Launch launch(Invocation invocation, String boxHandle, Runnable claimed) {
     var project = invocation.project();
     var config = projects.definition(project);
-    var checked = places.check(project, config, invocation.specId(), boxHandle);
+    var checked = places.checkSpec(project, config, invocation.specId(), boxHandle);
     var runId = DateTimeUtils.newId().toString();
     var unit = AgentUnit.forRun(runId);
     var claim =

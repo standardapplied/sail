@@ -29,7 +29,6 @@ import ai.singlr.sail.store.TestLogins;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
-import java.time.Instant;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -38,18 +37,18 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 /**
- * Two specs on disjoint repos dispatched into <strong>one real incus container</strong>: both are
- * admitted concurrently — the repo-overlap gate does not refuse the second — and each launches
- * under its own {@code sail-agent-<runId>} unit and run-scoped files, so the two agents coexist
- * without colliding on a unit or session file. A fake {@code codex} binary stands in for the agent
- * (sleeps) — no LLM, no API key. The stop/review lifecycle is covered deterministically by the unit
- * suite and the multi-node fleet harness, not here, so this IT stays free of agent-execution
- * timing. Runs only under the {@code integration} profile against a real incus daemon; skips
- * elsewhere.
+ * Two specs on <strong>one repo</strong> dispatched one after the other on a real incus box with a
+ * ZFS pool: both are admitted at once, each in its own workspace cloned from the project's template
+ * (scenario 2, R5), and each launches under its own {@code sail-agent-<runId>} unit there. A fake
+ * {@code codex} binary stands in for the agent (sleeps) — no LLM, no API key. The stop/review
+ * lifecycle is covered deterministically by the unit suite and the multi-node fleet harness, not
+ * here, so this IT stays free of agent-execution timing. Runs only under the {@code integration}
+ * profile against a real incus daemon; skips elsewhere. What a create took is printed as a record,
+ * not a gate.
  */
 class ConcurrentDispatchIT extends AbstractIncusIT {
 
-  private static final String CONTAINER = "sail-it-concurrent-dispatch";
+  private static final String PROJECT = "sail-it-concurrent-dispatch";
   private static final String HANDLE = "it-node";
   private static final Actor OPERATOR = new Actor(HANDLE, Role.ADMIN, Actor.Lane.CLI);
 
@@ -59,72 +58,56 @@ class ConcurrentDispatchIT extends AbstractIncusIT {
       sleep 30
       """;
 
+  private static final String YAML =
+      """
+      name: %s
+      repos:
+        - url: https://example.invalid/app.git
+          path: app
+      agent:
+        type: codex
+      """
+          .formatted(PROJECT);
+
   private Path stateDir;
 
   @BeforeEach
   void provision() throws Exception {
     ensureIncusOrSkip();
-    launchPrepared(CONTAINER);
-    var setup =
-        exec(
-            CONTAINER,
-            List.of(
-                "bash",
-                "-c",
-                "set -e;"
-                    + " userdel -r ubuntu 2>/dev/null || true;"
-                    + " id -u dev >/dev/null 2>&1 || useradd -m -u 1000 -s /bin/bash dev;"
-                    + " mkdir -p /home/dev/.sail /home/dev/workspace;"
-                    + " chown -R dev:dev /home/dev;"
-                    + " for i in $(seq 1 30); do"
-                    + " loginctl enable-linger dev 2>/dev/null && exit 0; sleep 1; done;"
-                    + " loginctl enable-linger dev"));
-    assertTrue(setup.ok(), "container provisioning failed: " + setup.stderr());
-    awaitUserManager();
-    ContainerFilePush.push(
-        shell, CONTAINER, "/usr/local/bin/codex", FAKE_AGENT, List.of("--mode", "0755"));
     stateDir = Files.createTempDirectory("concurrent-dispatch-it");
+    Files.writeString(stateDir.resolve("sail.yaml"), YAML);
+    specBox(
+        TestProjects.reading(stateDir.resolve("sail.yaml")).require(PROJECT),
+        template ->
+            ContainerFilePush.push(
+                shell, template, "/usr/local/bin/codex", FAKE_AGENT, List.of("--mode", "0755")));
   }
 
   @AfterEach
   void cleanup() {
-    deleteContainerQuietly(CONTAINER);
+    removeSpecBox(PROJECT);
     if (stateDir != null) {
       deleteRecursively(stateDir);
     }
   }
 
   @Test
-  void twoDisjointRepoSpecsAreAdmittedConcurrentlyUnderDistinctUnits() throws Exception {
-    var yaml = stateDir.resolve("sail.yaml");
-    Files.writeString(
-        yaml,
-        """
-        name: %s
-        repos:
-          - url: https://example.invalid/app.git
-            path: app
-          - url: https://example.invalid/web.git
-            path: web
-        agent:
-          type: codex
-        """
-            .formatted(CONTAINER));
+  void twoSpecsOnOneRepoRunAtOnceEachInItsOwnWorkspaceUnderItsOwnUnit() throws Exception {
     try (var db = Sqlite.open(stateDir.resolve("it.db"))) {
       new SchemaManager(db).migrate();
-      HeldProjects.hold(db, CONTAINER);
+      HeldProjects.hold(db, PROJECT);
       var specStore = new SpecStore(db);
       var reviewStore = new ReviewStore(db);
       var runStore = new RunStore(db);
       new FdeStore(db).add(HANDLE, null, null, "admin");
       TestLogins.store(db, HANDLE);
-      seedSpec(specStore, "spec-app", List.of("app"));
-      seedSpec(specStore, "spec-web", List.of("web"));
+      seedSpec(specStore, "spec-a", List.of("app"));
+      seedSpec(specStore, "spec-b", List.of("app"));
       var events = new CopyOnWriteArrayList<Event>();
       var dispatchOps =
           new DispatchOperations(
               shell,
-              TestProjects.reading(yaml),
+              TestProjects.reading(stateDir.resolve("sail.yaml")),
               specStore,
               reviewStore,
               runStore,
@@ -136,19 +119,67 @@ class ConcurrentDispatchIT extends AbstractIncusIT {
               DispatchOperations.Listener.NONE,
               SessionYield.NONE);
 
-      var first = dispatchBackground(dispatchOps, "spec-app");
-      var second = dispatchBackground(dispatchOps, "spec-web");
+      var first = dispatchBackground(dispatchOps, "spec-a");
+      var second = dispatchBackground(dispatchOps, "spec-b");
+      for (var dispatched : List.of(first, second)) {
+        System.out.println(
+            "  [it] workspace "
+                + dispatched.workspace().instance()
+                + " made in "
+                + dispatched.workspace().timings().totalMs()
+                + " ms: "
+                + dispatched.workspace().timings());
+      }
 
-      var runs = runStore.listForProject(CONTAINER);
+      var runs = runStore.listForProject(PROJECT);
       assertEquals(2, runs.size(), "both dispatches recorded their runs");
       assertTrue(
           runs.stream().allMatch(run -> "running".equals(run.status())),
           "the second dispatch was admitted while the first agent was still running");
+      assertEquals(
+          Set.of(workspaceOf(PROJECT, "spec-a"), workspaceOf(PROJECT, "spec-b")),
+          Set.of(first.workspace().instance(), second.workspace().instance()));
+      for (var dispatched : List.of(first, second)) {
+        var unit = "sail-agent-" + dispatched.runId();
+        var active =
+            exec(
+                dispatched.workspace().instance(),
+                List.of(
+                    "runuser",
+                    "-u",
+                    "dev",
+                    "--",
+                    "env",
+                    "XDG_RUNTIME_DIR=/run/user/1000",
+                    "systemctl",
+                    "--user",
+                    "is-active",
+                    unit));
+        assertEquals(
+            "active",
+            active.stdout().strip(),
+            unit + " runs in " + dispatched.workspace().instance() + ": " + active.stderr());
+        assertEquals(
+            "agent/" + dispatched.taskSpec().id(),
+            exec(
+                    dispatched.workspace().instance(),
+                    List.of(
+                        "runuser",
+                        "-u",
+                        "dev",
+                        "--",
+                        "git",
+                        "-C",
+                        "/home/dev/workspace/app",
+                        "rev-parse",
+                        "--abbrev-ref",
+                        "HEAD"))
+                .stdout()
+                .strip(),
+            "each tree is on its own spec's branch");
+      }
       assertNotEquals(
           runs.get(0).unit(), runs.get(1).unit(), "each run owns its own recorded unit");
-      assertEquals(
-          Set.copyOf(List.of("sail-agent-" + first.runId(), "sail-agent-" + second.runId())),
-          Set.copyOf(List.of(runs.get(0).unit(), runs.get(1).unit())));
     }
   }
 
@@ -158,7 +189,7 @@ class ConcurrentDispatchIT extends AbstractIncusIT {
             OPERATOR,
             () ->
                 ops.dispatch(
-                    CONTAINER,
+                    PROJECT,
                     new DispatchOperations.Request(specId, "background", false, null, false),
                     HANDLE));
     return assertInstanceOf(DispatchOperations.Dispatched.class, outcome);
@@ -171,7 +202,7 @@ class ConcurrentDispatchIT extends AbstractIncusIT {
           store.create(
               new SpecStore.SpecRow(
                   id,
-                  CONTAINER,
+                  PROJECT,
                   "Title " + id,
                   SpecStatus.PENDING,
                   HANDLE,
@@ -211,17 +242,5 @@ class ConcurrentDispatchIT extends AbstractIncusIT {
         return false;
       }
     };
-  }
-
-  private void awaitUserManager() throws Exception {
-    var deadline = Instant.now().plus(Duration.ofSeconds(60));
-    while (Instant.now().isBefore(deadline)) {
-      var probe = exec(CONTAINER, List.of("test", "-S", "/run/user/1000/bus"));
-      if (probe.ok()) {
-        return;
-      }
-      Thread.sleep(Duration.ofSeconds(1));
-    }
-    throw new AssertionError("dev user's systemd manager (bus) never came up in " + CONTAINER);
   }
 }
