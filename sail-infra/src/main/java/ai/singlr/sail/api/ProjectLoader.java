@@ -39,7 +39,7 @@ final class ProjectLoader {
 
   private LoadedProject load(String project, ProjectDefinition config) {
     try {
-      var state = new ContainerManager(shell).queryState(project);
+      var state = new ContainerManager(shell.observer()).queryState(project);
       return new LoadedProject(config, state);
     } catch (BoxInstances.Taken taken) {
       throw ApiException.of(ErrorCode.CONFLICT, taken);

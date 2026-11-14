@@ -37,6 +37,12 @@ public final class ShellExecutor implements ShellExec {
     this(dryRun, Duration.ofSeconds(120));
   }
 
+  /** A dry run's probes execute: the same shell that runs every command, with its timeout. */
+  @Override
+  public ShellExec observer() {
+    return dryRun ? new ShellExecutor(false, defaultTimeout) : this;
+  }
+
   @Override
   public Result exec(List<String> command)
       throws IOException, InterruptedException, TimeoutException {

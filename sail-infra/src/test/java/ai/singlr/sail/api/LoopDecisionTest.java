@@ -72,6 +72,7 @@ class LoopDecisionTest {
   private static final LoopStep NOTHING = new LoopStep.Nothing();
   private static final LoopTrigger GO_ON = new LoopTrigger.GoOn();
   private static final LoopTrigger FREED = new LoopTrigger.Freed();
+  private static final LoopTrigger LOGIN_STORED = new LoopTrigger.LoginStored();
   private static final LoopTrigger ANSWERED = new LoopTrigger.Answered("answer-1");
   private static final LoopTrigger REVIEW_RUNNING = new LoopTrigger.ReviewRunning();
 
@@ -272,6 +273,36 @@ class LoopDecisionTest {
                 .review(waiting, List.of())
                 .holderEnded(true),
             FREED,
+            NOTHING));
+  }
+
+  private static Stream<Row> loginStored() {
+    var anotherBoxs = run("build-1", "node-b", "build", null, "stopped", ENDED);
+    return Stream.of(
+        row(
+            "L1 a review no run serves launches its reviewer once a login is stored",
+            facts().newestLoopRun(BUILD).review(RUNNING, List.of()),
+            LOGIN_STORED,
+            new LoopStep.Resume(RUNNING)),
+        row(
+            "L1 a fix owed launches once a login is stored",
+            owedAFix(GATE_FAILED).newestLoopRun(BUILD),
+            LOGIN_STORED,
+            new LoopStep.LaunchFix(GATE_FAILED, List.of(HIGH))),
+        row(
+            "L1 an answered build its refused resume left holding resumes quietly",
+            facts().spec(SpecStatus.IN_PROGRESS).newestLoopRun(BUILD).answeredUnheard("Which?"),
+            LOGIN_STORED,
+            new LoopStep.ResumeBuild(false)),
+        row(
+            "L2 a loop another box drives is that box's",
+            facts().review(RUNNING, List.of()).newestLoopRun(anotherBoxs),
+            LOGIN_STORED,
+            NOTHING),
+        row(
+            "L2 an errored review keeps to the reconciler's pace",
+            facts().newestLoopRun(BUILD).review(ERRORED, List.of()),
+            LOGIN_STORED,
             NOTHING));
   }
 
@@ -1012,6 +1043,7 @@ class LoopDecisionTest {
             buildEnded(),
             answered(),
             freed(),
+            loginStored(),
             goOn(),
             reviewRunning(),
             reviewerEnded(),

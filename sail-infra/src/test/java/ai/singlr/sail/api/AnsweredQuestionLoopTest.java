@@ -15,6 +15,7 @@ import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.identity.ActingAs;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.MessageStore;
+import ai.singlr.sail.store.TestLogins;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
@@ -73,7 +74,7 @@ class AnsweredQuestionLoopTest {
                   }
                 });
     var fdes = new FdeStore(loop.db);
-    fdes.add(ReviewLoop.HANDLE, "Node A", null, "admin");
+    fdes.update(ReviewLoop.HANDLE, "Node A", null, "admin");
     fdes.add("mo", "Mo", null);
     loop.spec(SPEC, "api");
     loop.assign(SPEC, ReviewLoop.HANDLE);
@@ -122,6 +123,53 @@ class AnsweredQuestionLoopTest {
         List.of(ReviewNarration.resumed(Lane.BUILD)), loop.roomLines(SPEC, "The build goes on"));
     assertEquals(SpecStatus.AWAITING_MERGE, loop.specStatus(SPEC));
     assertEquals(List.of(), loop.details(Event.WellKnownTypes.SPEC_RESTARTED));
+  }
+
+  @Test
+  void anAnswerToABuildWhosePersonStoredNoLoginIsMetWithTheOneLoginMessageAndResumesOnceStored() {
+    start(List.of());
+    var build = loop.run(SPEC, "build");
+    asks(build, QUESTION);
+    loop.onEvent(ReviewLoop.buildStop(SPEC, build));
+    var fdes = new FdeStore(loop.db);
+    var person = fdes.byHandle(ReviewLoop.HANDLE).orElseThrow().id();
+    fdes.logins().forget(person);
+    var before = sailLines();
+
+    says(ReviewLoop.HANDLE, "Use 21.");
+    says(ReviewLoop.HANDLE, "Use 21, please.");
+    says(ReviewLoop.HANDLE, "Still 21.");
+
+    var said = sailLines().subList(before.size(), sailLines().size());
+    assertEquals(1, said.size(), "one login message and nothing else: " + said);
+    assertTrue(
+        said.getFirst().startsWith("No Claude Code login stored for node-a"), said.getFirst());
+    assertEquals(List.of(), builds);
+
+    TestLogins.store(loop.db, ReviewLoop.HANDLE);
+    says(ReviewLoop.HANDLE, "Use 21.");
+
+    assertEquals(1, builds.size(), "a plain answer resumes it once the login is stored");
+    assertEquals(
+        List.of(ReviewNarration.resumed(Lane.BUILD)), loop.roomLines(SPEC, "The build goes on"));
+  }
+
+  @Test
+  void aReasonThatEndsItsSentenceIsQuotedWithOneFullStop() {
+    assertEquals(
+        "The build could not go on with your answer: the tree is dirty. Re-dispatch it with"
+            + " --restart once that is fixed.",
+        ReviewNarration.resumeFailed("the tree is dirty."));
+    assertEquals(
+        ReviewNarration.resumeFailed("the tree is dirty."),
+        ReviewNarration.resumeFailed("the tree is dirty"));
+  }
+
+  private List<String> sailLines() {
+    return loop.messages.list(SPEC, null, 100).stream()
+        .filter(row -> MessageStore.SAIL_AUTHOR.equals(row.author()))
+        .map(MessageStore.MessageRow::body)
+        .toList();
   }
 
   @Test

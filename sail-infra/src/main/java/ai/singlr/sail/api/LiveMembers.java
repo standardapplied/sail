@@ -447,7 +447,7 @@ public final class LiveMembers implements RoomWakeReactor.Live, AutoCloseable {
             : "/home/" + ProjectDefinition.USER + "/workspace";
     var runId = DateTimeUtils.newId().toString();
     var unit = AgentUnit.live(runId);
-    var credential =
+    var env =
         reservation.reserve(
             runId,
             seat.project(),
@@ -463,6 +463,10 @@ public final class LiveMembers implements RoomWakeReactor.Live, AutoCloseable {
             config);
     AgentProcess.Handle handle;
     try {
+      if (resumed.isPresent() && terminalHolds(resumed.get())) {
+        reservation.releaseIfAbsent(runId, seat.project(), unit);
+        return;
+      }
       launcher.stage(
           new RunLauncher.LaunchSpec(
               seat.project(),
@@ -478,9 +482,10 @@ public final class LiveMembers implements RoomWakeReactor.Live, AutoCloseable {
               repoPaths,
               true,
               runId,
-              credential,
+              env,
               role,
-              null));
+              null,
+              RunLauncher.wokenBy(unread)));
       if (!full) {
         guard.captureRoomBaseline(seat.project(), config, runId);
       }
@@ -489,15 +494,22 @@ public final class LiveMembers implements RoomWakeReactor.Live, AutoCloseable {
         return;
       }
       runStore.recordLaunch(
-          runId, member.model(), null, resumed.map(RunStore.RunRow::sessionId).orElse(null));
+          runId,
+          new RunStore.Launched(
+              member.model(),
+              null,
+              resumed.map(RunStore.RunRow::sessionId).orElse(null),
+              env.login(),
+              RunLauncher.wokenBy(unread)));
       handle =
           processes.start(
               seat.project(),
               workDir,
-              environment(seat.conversation(), member.agent(), runId, credential, role),
+              environment(seat.conversation(), member.agent(), runId, role),
               command,
               unit.pidPath(),
-              unit.logPath());
+              unit.logPath(),
+              unit.launchEnvPath());
     } catch (IOException | RuntimeException failed) {
       reservation.releaseIfAbsent(runId, seat.project(), unit);
       throw failed instanceof RuntimeException refused
@@ -585,14 +597,16 @@ public final class LiveMembers implements RoomWakeReactor.Live, AutoCloseable {
         : config.repos();
   }
 
-  /** What every run exports, so the {@code spec} CLI speaks for this one. */
+  /**
+   * What every run exports that is no secret, so the {@code spec} CLI speaks for this one: its
+   * credential and login reach it only through its {@code launch.env}.
+   */
   private static Map<String, String> environment(
-      String conversation, String agent, String runId, String credential, String role) {
+      String conversation, String agent, String runId, String role) {
     var env = new LinkedHashMap<String, String>();
     env.put("SAIL_SPEC_ID", conversation);
     env.put("SAIL_AGENT", agent);
     env.put("SAIL_RUN_ID", runId);
-    env.put("SAIL_RUN_CREDENTIAL", credential);
     env.put("SAIL_RUN_ROLE", role);
     return env;
   }

@@ -16,6 +16,7 @@ import ai.singlr.sail.api.SailOperations;
 import ai.singlr.sail.api.SessionYield;
 import ai.singlr.sail.api.StopOperations;
 import ai.singlr.sail.api.SyncScheduler;
+import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.Spec;
 import ai.singlr.sail.engine.Banner;
 import ai.singlr.sail.engine.GuardrailWatcher;
@@ -214,6 +215,7 @@ public final class DispatchCommand implements Runnable {
       DispatchOperations.Outcome outcome, ShellExec shell, OperatorCommand operator) {
     switch (outcome) {
       case DispatchOperations.NoSpecs ignored -> printNoSpecs();
+      case DispatchOperations.Dispatched dispatched when dryRun -> printDryRun(dispatched);
       case DispatchOperations.Dispatched dispatched -> {
         if (!background) {
           if (dispatched.exitCode() != null && dispatched.exitCode() != 0) {
@@ -235,6 +237,56 @@ public final class DispatchCommand implements Runnable {
                                     spawned,
                                     WatcherSpawner.watchLogForRun(name, dispatched.runId())))));
       }
+    }
+  }
+
+  /**
+   * What a real dispatch would do, said in the conditional, and that nothing was changed: the spec,
+   * the agent and lane, the branch and whether it would be created, and whether the spec would be
+   * restarted. No launch banner and no command for a run that does not exist.
+   */
+  private void printDryRun(DispatchOperations.Dispatched dispatched) {
+    var spec = dispatched.taskSpec();
+    var mode = background ? "background" : "foreground";
+    if (json) {
+      System.out.println(
+          CliJson.stringify(
+              new DryDispatch(
+                  true,
+                  name,
+                  spec.id(),
+                  spec.title(),
+                  mode,
+                  dispatched.agentType(),
+                  dispatched.branch(),
+                  dispatched.branchCreated(),
+                  dispatched.restarted(),
+                  dispatched.task())));
+      return;
+    }
+    var branch =
+        Strings.isBlank(dispatched.branch())
+            ? "with no work branch"
+            : "on branch "
+                + dispatched.branch()
+                + (dispatched.branchCreated()
+                    ? ", which it would create"
+                    : ", which it would check out");
+    System.out.println(Ansi.AUTO.string("  @|bold Dry run:|@ nothing was changed."));
+    System.out.println(
+        "  Would dispatch spec "
+            + spec.id()
+            + " ("
+            + spec.title()
+            + ") to "
+            + dispatched.agentType()
+            + " in the "
+            + mode
+            + ", "
+            + branch
+            + ".");
+    if (dispatched.restarted()) {
+      System.out.println("  Would restart the spec first: its status would go back to pending.");
     }
   }
 
@@ -261,17 +313,22 @@ public final class DispatchCommand implements Runnable {
   /**
    * Renders the executor's progress for the terminal, and — the claim being the moment the spec
    * flips {@code in_progress} — pushes the claim to main synchronously so a short-lived CLI process
-   * never exits before its most important write propagates.
+   * never exits before its most important write propagates. A dry run claimed nothing: it pushes
+   * nothing and says what it would do once it is done ({@link #printDryRun}).
    */
   private DispatchOperations.Listener renderer(SyncScheduler sync) {
     return new DispatchOperations.Listener() {
       @Override
       public void claimed(Spec taskSpec, String task) {
+        if (dryRun) {
+          return;
+        }
         sync.syncNow();
         if (json) {
           System.out.println(
               CliJson.stringify(
                   new DispatchPreview(
+                      false,
                       name,
                       taskSpec.id(),
                       taskSpec.title(),
@@ -379,7 +436,21 @@ public final class DispatchCommand implements Runnable {
     }
   }
 
-  record DispatchPreview(String name, String specId, String specTitle, String mode, String task) {}
+  record DispatchPreview(
+      boolean dryRun, String name, String specId, String specTitle, String mode, String task) {}
+
+  /** What a dry run says, in JSON: what a real dispatch would do. */
+  record DryDispatch(
+      boolean dryRun,
+      String name,
+      String specId,
+      String specTitle,
+      String mode,
+      String agent,
+      String branch,
+      boolean wouldCreateBranch,
+      boolean wouldRestart,
+      String task) {}
 
   record NoDispatch(String name, boolean dispatched, String reason) {}
 }

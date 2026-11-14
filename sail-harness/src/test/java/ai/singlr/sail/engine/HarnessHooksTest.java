@@ -157,7 +157,8 @@ class HarnessHooksTest {
             "Read(//var/lib/sail/run/box.credential)",
             "Read(/home/dev/.ssh/**)",
             "Read(/home/dev/.git-credentials)",
-            "Read(/home/dev/.config/gh/**)"),
+            "Read(/home/dev/.config/gh/**)",
+            "Read(/home/dev/.sail/runs/**/launch.env)"),
         deny,
         "the room lane's reads are cwd-scoped (Claude auto-approves cat/head/tail/grep only inside"
             + " the workspace, refusing out-of-tree paths), so the container's secrets are unreadable"

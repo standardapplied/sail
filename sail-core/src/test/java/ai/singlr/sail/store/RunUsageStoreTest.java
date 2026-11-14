@@ -83,11 +83,54 @@ class RunUsageStoreTest {
     return YamlUtil.parseMap(new ChangeLog(db).head("run", id).orElseThrow().snapshot());
   }
 
+  /**
+   * The login a run started with and who asked for it are recorded at its launch, journaled with
+   * its finish, and adopted whole by a box that applies that revision: a run's login names a stored
+   * login and its kind, never a value.
+   */
+  @Test
+  void aLaunchRecordsItsLoginAndWhoAskedAndTheFinishCarriesThemToEveryBox() {
+    var id = run(null);
+    store.recordLaunch(
+        id,
+        new RunStore.Launched("opus", null, null, new RunStore.RunLogin("work", "token"), "ana"));
+
+    assertTrue(store.finish(id, "running", "completed", 0, REPORTED));
+
+    var row = store.findById(id).orElseThrow();
+    assertEquals(new RunStore.RunLogin("work", "token"), row.login());
+    assertEquals("ana", row.dispatchedBy());
+    var finished = journaled(id);
+    assertEquals("work", finished.get("login"));
+    assertEquals("token", finished.get("login_kind"));
+    assertEquals("ana", finished.get("dispatched_by"));
+    var adopted = DateTimeUtils.newId().toString();
+    store.applyRevision(adopted, store.comparableSnapshot(id), "1-remote");
+    var copy = store.findById(adopted).orElseThrow();
+    assertEquals(new RunStore.RunLogin("work", "token"), copy.login());
+    assertEquals("ana", copy.dispatchedBy());
+  }
+
+  /** A run that names no spec records the container's login, of no kind, and machinery no one. */
+  @Test
+  void aRunOnTheContainersLoginRecordsItAsSuchAndAnUnlaunchedRunRecordsNone() {
+    var unlaunched = run(null);
+    var id = run(null);
+    store.recordLaunch(
+        id, new RunStore.Launched(null, null, null, RunStore.RunLogin.CONTAINER, null));
+
+    assertEquals(RunStore.RunLogin.CONTAINER, store.findById(id).orElseThrow().login());
+    assertEquals(null, store.findById(id).orElseThrow().dispatchedBy());
+    assertEquals(null, store.findById(unlaunched).orElseThrow().login());
+    assertThrows(IllegalArgumentException.class, () -> new RunStore.RunLogin(" ", "token"));
+  }
+
   /** M1: the finish and its usage are one write, so main hears them as one revision. */
   @Test
   void aFinishRecordsWhatTheHarnessReportedInTheRevisionThatFinishesTheRow() {
     var id = run(null);
-    store.recordLaunch(id, "opus", "high", null);
+    store.recordLaunch(
+        id, new RunStore.Launched("opus", "high", null, RunStore.RunLogin.CONTAINER, null));
 
     assertTrue(store.finish(id, "running", "completed", 0, REPORTED));
 
@@ -134,7 +177,8 @@ class RunUsageStoreTest {
   @Test
   void aRunWhoseHarnessReportedNothingRecordsNoneWithNullCounts() {
     var id = run(null);
-    store.recordLaunch(id, "opus", null, null);
+    store.recordLaunch(
+        id, new RunStore.Launched("opus", null, null, RunStore.RunLogin.CONTAINER, null));
 
     store.finish(id, "running", "completed", 0, RunUsage.NONE);
 
@@ -243,7 +287,8 @@ class RunUsageStoreTest {
     var b = run("S4");
     finish(b, report(100, 1.0));
     var resumed = run(null);
-    store.recordLaunch(resumed, "opus", null, "S4");
+    store.recordLaunch(
+        resumed, new RunStore.Launched("opus", null, "S4", RunStore.RunLogin.CONTAINER, null));
 
     finish(resumed, report(150, 1.5));
     var fresh = run(null);

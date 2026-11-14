@@ -157,6 +157,8 @@ final class LoopRows {
         null,
         null,
         null,
+        null,
+        null,
         null);
   }
 

@@ -29,15 +29,21 @@ class HarnessGoldenTest {
   private static final String MALFORMED_ID =
       "Malformed session id; refusing to build a resume command from replicated data.";
 
+  private static final String READ_ONLY_RULES =
+      " --tools \"Bash,Read,Grep,Glob\" --allowedTools \"Bash(spec show:*)\""
+          + " \"Bash(spec list:*)\" \"Bash(spec board:*)\" \"Bash(spec comments:*)\""
+          + " \"Bash(spec comment:*)\" \"Bash(spec whoami:*)\" \"Bash(cd:*)\""
+          + " --disallowedTools \"Bash(spec *--body-file*)\" \"Bash(spec *--plan-file*)\"";
+
   private static final String CLAUDE_ROOM =
       "claude --print --settings /home/dev/.sail/claude-settings.json --setting-sources \"\""
-          + " --strict-mcp-config --tools \"Bash,Read,Grep,Glob\" --allowedTools \"Bash(spec:*)\""
-          + " \"Bash(cd:*)\"";
+          + " --strict-mcp-config"
+          + READ_ONLY_RULES;
 
   private static final String CLAUDE_ROOM_STREAMED =
       "claude --print --output-format stream-json --verbose --settings"
           + " /home/dev/.sail/claude-settings.json --setting-sources \"\" --strict-mcp-config"
-          + " --tools \"Bash,Read,Grep,Glob\" --allowedTools \"Bash(spec:*)\" \"Bash(cd:*)\"";
+          + READ_ONLY_RULES;
 
   private static String claudeHeadless(
       boolean full, String model, String effort, String resume, boolean stream) {
@@ -246,8 +252,16 @@ class HarnessGoldenTest {
             "--tools",
             "Bash,Read,Grep,Glob",
             "--allowedTools",
-            "Bash(spec:*)",
+            "Bash(spec show:*)",
+            "Bash(spec list:*)",
+            "Bash(spec board:*)",
+            "Bash(spec comments:*)",
+            "Bash(spec comment:*)",
+            "Bash(spec whoami:*)",
             "Bash(cd:*)",
+            "--disallowedTools",
+            "Bash(spec *--body-file*)",
+            "Bash(spec *--plan-file*)",
             "--resume",
             "sess-1"),
         CLAUDE_CODE.live(new LiveLaunch(false, null, "sess-1")).orElseThrow());
@@ -272,7 +286,7 @@ class HarnessGoldenTest {
     assertEquals(
         "{includeCoAuthoredBy=false, permissions={deny=[Read(//var/lib/sail/run/box.credential),"
             + " Read(/home/dev/.ssh/**), Read(/home/dev/.git-credentials),"
-            + " Read(/home/dev/.config/gh/**)]}}",
+            + " Read(/home/dev/.config/gh/**), Read(/home/dev/.sail/runs/**/launch.env)]}}",
         settings.entries().toString());
   }
 
@@ -313,5 +327,37 @@ class HarnessGoldenTest {
     assertEquals(
         "curl -fsSL https://chatgpt.com/codex/install.sh | CODEX_NON_INTERACTIVE=1 sh",
         CODEX.installCommand());
+  }
+
+  @Test
+  void eachHarnessReadsItsStaticLoginsFromTheVariablesItsReleaseDocuments() {
+    assertEquals(
+        List.of(
+            "token CLAUDE_CODE_OAUTH_TOKEN Run claude setup-token on a machine where Claude Code is"
+                + " signed in",
+            "api-key ANTHROPIC_API_KEY Create an API key in the Claude Console"),
+        described(CLAUDE_CODE));
+    assertEquals(
+        List.of(
+            "api-key CODEX_API_KEY Create an API key at platform.openai.com/api-keys",
+            "token CODEX_ACCESS_TOKEN Create a Codex access token at"
+                + " chatgpt.com/admin/access-tokens (ChatGPT Business and Enterprise)"),
+        described(CODEX));
+    assertEquals(
+        List.of("ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN"),
+        CLAUDE_CODE.loginVariables(),
+        "every variable Claude Code takes a credential from, the gateway token outranking both");
+    assertEquals(List.of("CODEX_API_KEY", "CODEX_ACCESS_TOKEN"), CODEX.loginVariables());
+    assertEquals(
+        List.of("CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX", "CLAUDE_CODE_USE_FOUNDRY"),
+        CLAUDE_CODE.credentialSwitches(),
+        "each sends Claude Code to a cloud account, outranking any login");
+    assertEquals(List.of(), CODEX.credentialSwitches());
+  }
+
+  private static List<String> described(Harness harness) {
+    return harness.loginKinds().stream()
+        .map(kind -> kind.kind() + " " + kind.variable() + " " + kind.howToMake().described())
+        .toList();
   }
 }

@@ -323,12 +323,11 @@ class SailSessionReportTest {
     Files.createDirectories(bin);
     writeExecutable(
         bin.resolve("curl"),
-        """
-        #!/bin/sh
-        printf '%s\\n' "$*" >> "$HOME/curl.log"
+        FakeCurl.script(
+            """
         [ "${FAKE_CURL_EXIT:-0}" = "0" ] || exit "$FAKE_CURL_EXIT"
         exit 0
-        """);
+        """));
     return bin;
   }
 

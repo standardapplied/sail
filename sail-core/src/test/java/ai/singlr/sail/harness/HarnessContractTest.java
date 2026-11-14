@@ -10,6 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.harness.Harness.Launch;
 import java.util.List;
 import java.util.stream.Stream;
@@ -147,5 +148,43 @@ class HarnessContractTest {
   void aLaunchNamesTheTaskFileItReads(String taskFile) {
     assertThrows(
         IllegalArgumentException.class, () -> new Launch(taskFile, true, null, null, null, true));
+  }
+
+  @ParameterizedTest
+  @MethodSource("harnesses")
+  void everyHarnessDeclaresAStaticLoginOfDistinctKindsAndVariables(Harness harness) {
+    var kinds = harness.loginKinds();
+
+    assertFalse(kinds.isEmpty(), harness.yamlName());
+    assertEquals(kinds.size(), kinds.stream().map(LoginKind::kind).distinct().count());
+    assertEquals(kinds.size(), kinds.stream().map(LoginKind::variable).distinct().count());
+    for (var kind : kinds) {
+      assertTrue(kind.variable().matches("[A-Z][A-Z0-9_]*"), kind.variable());
+      assertFalse(kind.howToMake().isEmpty(), kind.kind());
+      assertTrue(
+          kind.howToMake().parts().stream().allMatch(Remedy.Words.class::isInstance),
+          "a login is made where the person's harness is signed in, not on the box, so no door"
+              + " renders its making as a command of the box's account (sudo): "
+              + kind.howToMake());
+      assertEquals(kind, harness.loginKind(kind.kind()));
+    }
+    assertEquals(kinds.getFirst(), harness.loginKind(null));
+    assertTrue(
+        harness.loginVariables().containsAll(kinds.stream().map(LoginKind::variable).toList()),
+        "a run on a stored login sets empty every other variable its harness reads");
+    assertEquals(kinds.getFirst(), harness.loginKind(" "));
+  }
+
+  @ParameterizedTest
+  @MethodSource("harnesses")
+  void aKindTheHarnessDoesNotDeclareIsRefusedNamingTheOnesItDoes(Harness harness) {
+    var ex = assertThrows(IllegalArgumentException.class, () -> harness.loginKind("session"));
+
+    assertEquals(
+        harness.displayName()
+            + " takes no login of kind 'session'; it takes "
+            + String.join(", ", harness.loginKinds().stream().map(LoginKind::kind).toList())
+            + ".",
+        ex.getMessage());
   }
 }

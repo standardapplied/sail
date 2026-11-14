@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.harness;
 
+import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.engine.BoxCredentialFile;
 import ai.singlr.sail.engine.ContainerExec;
 import ai.singlr.sail.engine.SailPaths;
@@ -42,7 +43,10 @@ final class ClaudeCode implements Harness {
 
   /**
    * What makes a session read-only, as argv: ambient settings and MCP configs excluded, the tool
-   * set cut, and the two allow-rules. Every read-only lane is built from this one list.
+   * set cut, the allow-rules naming only the {@code spec} subcommands a room member uses (it reads
+   * and it comments) and {@code cd}, and deny-rules refusing either file-reading flag of {@code
+   * spec} anywhere in a command, so no glob or trailing flag hands it a file such as {@code
+   * /proc/self/environ}. Every read-only lane is built from this one list.
    */
   private static final List<String> READ_ONLY_ARGS =
       List.of(
@@ -52,8 +56,16 @@ final class ClaudeCode implements Harness {
           "--tools",
           "Bash,Read,Grep,Glob",
           "--allowedTools",
-          "Bash(spec:*)",
-          "Bash(cd:*)");
+          "Bash(spec show:*)",
+          "Bash(spec list:*)",
+          "Bash(spec board:*)",
+          "Bash(spec comments:*)",
+          "Bash(spec comment:*)",
+          "Bash(spec whoami:*)",
+          "Bash(cd:*)",
+          "--disallowedTools",
+          "Bash(spec *--body-file*)",
+          "Bash(spec *--plan-file*)");
 
   @Override
   public String yamlName() {
@@ -291,6 +303,41 @@ final class ClaudeCode implements Harness {
     return count == null ? 0 : count;
   }
 
+  /**
+   * A token {@code claude setup-token} makes, which lasts a year and is read from {@code
+   * CLAUDE_CODE_OAUTH_TOKEN}; or a Console API key, read from {@code ANTHROPIC_API_KEY}. Either
+   * outranks a login made by hand with {@code /login}, which the harness refreshes and so is never
+   * stored.
+   */
+  @Override
+  public List<LoginKind> loginKinds() {
+    return List.of(
+        new LoginKind(
+            "token",
+            "CLAUDE_CODE_OAUTH_TOKEN",
+            Remedy.of("Run claude setup-token on a machine where Claude Code is signed in")),
+        new LoginKind(
+            "api-key", "ANTHROPIC_API_KEY", Remedy.of("Create an API key in the Claude Console")));
+  }
+
+  /**
+   * Its kinds' variables and {@code ANTHROPIC_AUTH_TOKEN}, a gateway's token, which outranks both.
+   * Claude Code takes an empty variable as unset.
+   */
+  @Override
+  public List<String> loginVariables() {
+    return List.of("ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN");
+  }
+
+  /**
+   * The Bedrock, Vertex and Foundry switches: set, Claude Code sends its requests to that cloud on
+   * the container's own account, whatever login it holds; empty, it is off.
+   */
+  @Override
+  public List<String> credentialSwitches() {
+    return List.of("CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX", "CLAUDE_CODE_USE_FOUNDRY");
+  }
+
   @Override
   public OptionalInt loginTunnelPort() {
     return OptionalInt.of(3000);
@@ -347,10 +394,11 @@ final class ClaudeCode implements Harness {
    * a read of any path outside it (verified empirically), so the container's secrets, all of which
    * live outside {@code ~/workspace}, are unreadable by default even without a rule. These denies
    * harden the box FDE {@code box.credential}, the box SSH identity ({@code ~/.ssh}, the Sail CLI
-   * identity), the {@code ~/.git-credentials} token and the {@code gh} token under {@code
-   * ~/.config/gh} explicitly on top of that, so the protection does not rest solely on the cwd
-   * heuristic. Claude Code applies a {@code Read(path)} deny to a Bash command that reads that path
-   * (verified), deny outranks every allow rule, and the room invocation pins {@code
+   * identity), the {@code ~/.git-credentials} token, the {@code gh} token under {@code
+   * ~/.config/gh} and a run's {@code launch.env}, which holds its credential and its person's login
+   * until its wrapper reads it, explicitly on top of that, so the protection does not rest solely
+   * on the cwd heuristic. Claude Code applies a {@code Read(path)} deny to a Bash command that
+   * reads that path (verified), deny outranks every allow rule, and the room invocation pins {@code
    * --setting-sources ""} so no ambient settings file can shadow these. A full (YOLO) agent skips
    * permission rules by design: it is the trusted member lane. Spec-CLI auth is untouched: the
    * helper reads the credential at the OS level, not through a tool. Residual (a secret committed
@@ -362,7 +410,8 @@ final class ClaudeCode implements Harness {
         boxCredentialReadDeny(),
         "Read(" + ContainerExec.DEV_HOME + "/.ssh/**)",
         "Read(" + ContainerExec.DEV_HOME + "/.git-credentials)",
-        "Read(" + ContainerExec.DEV_HOME + "/.config/gh/**)");
+        "Read(" + ContainerExec.DEV_HOME + "/.config/gh/**)",
+        "Read(" + ContainerExec.DEV_HOME + "/.sail/runs/**/launch.env)");
   }
 
   private static String boxCredentialReadDeny() {

@@ -695,7 +695,8 @@ class EventDoorTest {
         (project, run, unit) -> false,
         new WatcherCoverage(run -> false, pid -> false),
         () -> "root",
-        () -> Instant.now().plus(Duration.ofMinutes(10)));
+        () -> Instant.now().plus(Duration.ofMinutes(10)),
+        new FdeStore(db));
   }
 
   private static RoomStore.RoomRow room(String id, String owner) {

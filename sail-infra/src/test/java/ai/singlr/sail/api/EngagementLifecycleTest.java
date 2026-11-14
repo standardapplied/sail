@@ -169,6 +169,7 @@ class EngagementLifecycleTest {
     StubShell(List<String> order) {
       this.order = order;
       on("incus config device add", "");
+      on("incus file push", "");
       on("cat " + ContainerSailSetup.STAMP_PATH, ContainerSailSetup.fingerprint());
     }
 
