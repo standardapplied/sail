@@ -179,7 +179,7 @@ final class LiveRoom implements AutoCloseable {
             new OperationHooks(
                 events::publish,
                 new WatcherSpawner(shell, null),
-                (project, config) -> "",
+                TestWorkspaces.ready(reader, PROJECT),
                 this::launch,
                 DispatchOperations.Listener.NONE,
                 StopOperations.Listener.NONE))

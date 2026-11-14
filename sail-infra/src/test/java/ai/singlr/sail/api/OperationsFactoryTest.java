@@ -17,6 +17,7 @@ import ai.singlr.sail.engine.ScriptedShellExecutor;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.engine.WatcherSpawner;
+import ai.singlr.sail.engine.Workspaces;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.Role;
@@ -140,7 +141,7 @@ class OperationsFactoryTest {
           new OperationHooks(
               event -> {},
               new WatcherSpawner(shell, WatcherSpawner::spawnProcess),
-              DispatchOperations.autoSnapshotter(shell),
+              Workspaces.onThisBox(shell),
               DispatchOperations.shellLauncher(shell),
               DispatchOperations.Listener.NONE,
               StopOperations.Listener.NONE);

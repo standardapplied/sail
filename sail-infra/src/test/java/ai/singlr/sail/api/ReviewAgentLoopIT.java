@@ -28,6 +28,7 @@ import ai.singlr.sail.engine.LaunchEnv;
 import ai.singlr.sail.engine.LiveStream;
 import ai.singlr.sail.engine.PortalSkill;
 import ai.singlr.sail.engine.ProjectSkillInstaller;
+import ai.singlr.sail.engine.RunPlace;
 import ai.singlr.sail.engine.SailSkills;
 import ai.singlr.sail.engine.SharedProjectFiles;
 import ai.singlr.sail.engine.ShellExec;
@@ -189,7 +190,7 @@ class ReviewAgentLoopIT extends AbstractIncusIT {
             new FdeStore(db),
             bus::publish,
             new WatcherSpawner(refusingShell(), (command, logPath) -> 4242L),
-            (project, config) -> "",
+            TestWorkspaces.over(shell),
             DispatchOperations.shellLauncher(shell),
             DispatchOperations.Listener.NONE,
             SessionYield.NONE);
@@ -501,13 +502,14 @@ class ReviewAgentLoopIT extends AbstractIncusIT {
           fileOf("/proc/" + pid + "/cmdline").contains("/usr/local/bin/claude"),
           "the wrapper exec'd into the agent: the pid file names it");
       assertFalse(
-          presence.gone(CONTAINER, unit), "a live member probes alive through its pid file");
+          presence.gone(RunPlace.of(CONTAINER, null), unit),
+          "a live member probes alive through its pid file");
 
       handle.stdin().close();
 
       assertNull(handle.stdout().read(), "stdin closed: the agent finishes and its stdout ends");
       assertEquals(OptionalInt.of(0), handle.waitFor(PATIENCE));
-      assertTrue(presence.gone(CONTAINER, unit));
+      assertTrue(presence.gone(RunPlace.of(CONTAINER, null), unit));
     } finally {
       handle.signal(AgentProcess.Signal.TERM);
     }
@@ -619,7 +621,7 @@ class ReviewAgentLoopIT extends AbstractIncusIT {
             Map.of(Event.WellKnownData.RUN_ID, reviewer.id())));
 
     new RunWatch(
-            CONTAINER,
+            RunPlace.of(CONTAINER, null),
             reviewer.id(),
             AgentUnit.forRun(reviewer.id()),
             new Guardrails("5m", "2s", "stop"),

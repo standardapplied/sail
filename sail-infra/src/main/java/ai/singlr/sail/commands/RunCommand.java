@@ -207,7 +207,7 @@ public final class RunCommand implements Runnable {
     var harness = Harnesses.of(agentType);
 
     var label = SnapshotManager.defaultLabel();
-    var snapshotTaken = !dryRun && SnapshotDecision.shouldSnapshot(snapshot, config, json);
+    var snapshotTaken = !dryRun && SnapshotDecision.shouldSnapshot(snapshot, json);
     var branchName = branchName(config, label);
 
     if (task == null) {

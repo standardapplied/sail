@@ -76,13 +76,15 @@ class ProjectWorkspaceCommandTest {
         new Workspaces.Listing(
             "acme",
             List.of(
-                new Workspaces.Row("main", "acme", "running", null, null, "10.0.0.2"),
+                new Workspaces.Row("main", "acme", "running", null, null, "10.0.0.2", null, null),
                 new Workspaces.Row(
                     "fix-login",
                     "acme-fix-login",
                     "frozen",
                     "v1",
                     "2026-11-12T10:00:00.000Z",
+                    null,
+                    null,
                     null)));
 
     assertEquals(

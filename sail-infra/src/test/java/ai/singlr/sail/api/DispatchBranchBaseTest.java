@@ -156,7 +156,7 @@ class DispatchBranchBaseTest {
             new FdeStore(db),
             new CopyOnWriteArrayList<Event>()::add,
             new WatcherSpawner(happyPath(), (command, logPath) -> 4242L),
-            (project, config) -> "",
+            TestWorkspaces.ready(TestProjects.reading(yaml), "acme"),
             command -> 0,
             DispatchOperations.Listener.NONE,
             SessionYield.NONE);

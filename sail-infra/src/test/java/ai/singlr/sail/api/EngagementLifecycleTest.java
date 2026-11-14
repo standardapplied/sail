@@ -105,7 +105,7 @@ class EngagementLifecycleTest {
             new FdeStore(db),
             events::add,
             new WatcherSpawner(shell, (command, logPath) -> 4242L),
-            (project, config) -> "",
+            TestWorkspaces.ready(TestProjects.reading(yaml), "acme"),
             command -> 0,
             DispatchOperations.Listener.NONE,
             SessionYield.NONE)
@@ -569,7 +569,7 @@ class EngagementLifecycleTest {
                 new FdeStore(db),
                 events::add,
                 new WatcherSpawner(shell(), (command, logPath) -> 4242L),
-                (project, config) -> "",
+                TestWorkspaces.ready(TestProjects.reading(yaml), "acme"),
                 command -> 0,
                 DispatchOperations.Listener.NONE,
                 SessionYield.NONE)

@@ -14,6 +14,7 @@ import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.Lane;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.AgentUnit;
+import ai.singlr.sail.engine.RunPlace;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.store.RunStore;
 import java.nio.file.Path;
@@ -184,7 +185,9 @@ class ReviewLaneLauncherTest {
   void aRescueCommitsOnlyReposOnTheSpecsBranchThatHoldUncommittedWork() throws Exception {
     loop.container.dirty("api", " M src/A.java\nR  old.txt -> new.txt\n");
 
-    var rescued = lanes.ensureCommitted(PROJECT, List.of("api", "web"), "feat/test", "fix: it");
+    var rescued =
+        lanes.ensureCommitted(
+            RunPlace.of(PROJECT, null), List.of("api", "web"), "feat/test", "fix: it");
 
     assertEquals(
         List.of(new ReviewLanes.Rescue("api", List.of("src/A.java", "new.txt"))),
@@ -202,10 +205,12 @@ class ReviewLaneLauncherTest {
     loop.container.dirty("api", " M src/A.java\n");
     loop.container.checkedOut("main");
 
-    assertEquals(List.of(), lanes.ensureCommitted(PROJECT, List.of("api"), "feat/test", "fix"));
     assertEquals(
         List.of(),
-        lanes.ensureCommitted(PROJECT, List.of("api"), " ", "fix"),
+        lanes.ensureCommitted(RunPlace.of(PROJECT, null), List.of("api"), "feat/test", "fix"));
+    assertEquals(
+        List.of(),
+        lanes.ensureCommitted(RunPlace.of(PROJECT, null), List.of("api"), " ", "fix"),
         "no branch, no rescue");
     assertTrue(loop.container.commits().isEmpty(), "auto-committing there contaminates the clone");
   }
@@ -218,7 +223,9 @@ class ReviewLaneLauncherTest {
     var failure =
         assertThrows(
             IllegalStateException.class,
-            () -> lanes.ensureCommitted(PROJECT, List.of("api"), "feat/test", "fix"));
+            () ->
+                lanes.ensureCommitted(
+                    RunPlace.of(PROJECT, null), List.of("api"), "feat/test", "fix"));
 
     assertTrue(failure.getMessage().contains("git status failed"), failure.getMessage());
     assertTrue(failure.getMessage().contains("index.lock"), failure.getMessage());
@@ -229,7 +236,8 @@ class ReviewLaneLauncherTest {
     loop.container.dirty("api", " M src/A.java\n");
     loop.container.gitFails("remote hung up", "push");
 
-    var rescued = lanes.ensureCommitted(PROJECT, List.of("api"), "feat/test", "fix");
+    var rescued =
+        lanes.ensureCommitted(RunPlace.of(PROJECT, null), List.of("api"), "feat/test", "fix");
 
     assertEquals(1, rescued.size(), "the commit is the rescue; the push is best-effort");
     assertEquals(1, loop.container.commits().size());

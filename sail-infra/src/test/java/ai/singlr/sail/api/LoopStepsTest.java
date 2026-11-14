@@ -16,6 +16,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.config.SpecStatus;
+import ai.singlr.sail.engine.RunPlace;
 import ai.singlr.sail.harness.RunUsage;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.store.Finding;
@@ -98,9 +99,9 @@ class LoopStepsTest {
 
               @Override
               public List<Rescue> ensureCommitted(
-                  String project, List<String> repos, String branch, String commitMessage)
+                  RunPlace place, List<String> repos, String branch, String commitMessage)
                   throws Exception {
-                return lanes.get().ensureCommitted(project, repos, branch, commitMessage);
+                return lanes.get().ensureCommitted(place, repos, branch, commitMessage);
               }
             },
             reader,
@@ -154,9 +155,9 @@ class LoopStepsTest {
 
           @Override
           public List<Rescue> ensureCommitted(
-              String project, List<String> repos, String branch, String commitMessage)
+              RunPlace place, List<String> repos, String branch, String commitMessage)
               throws Exception {
-            return real.ensureCommitted(project, repos, branch, commitMessage);
+            return real.ensureCommitted(place, repos, branch, commitMessage);
           }
         });
   }
@@ -544,7 +545,7 @@ class LoopStepsTest {
 
           @Override
           public List<Rescue> ensureCommitted(
-              String project, List<String> repos, String branch, String commitMessage) {
+              RunPlace place, List<String> repos, String branch, String commitMessage) {
             return List.of();
           }
         });
@@ -738,9 +739,9 @@ class LoopStepsTest {
 
           @Override
           public List<Rescue> ensureCommitted(
-              String project, List<String> repos, String branch, String commitMessage)
+              RunPlace place, List<String> repos, String branch, String commitMessage)
               throws Exception {
-            return real.ensureCommitted(project, repos, branch, commitMessage);
+            return real.ensureCommitted(place, repos, branch, commitMessage);
           }
         });
   }

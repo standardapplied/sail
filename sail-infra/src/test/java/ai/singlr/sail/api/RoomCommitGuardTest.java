@@ -13,6 +13,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.config.ProjectDefinition;
 import ai.singlr.sail.config.TestDefinitions;
+import ai.singlr.sail.engine.RunPlace;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.identity.ActingAs;
 import ai.singlr.sail.store.RunStore;
@@ -159,7 +160,7 @@ class RoomCommitGuardTest {
   @Test
   void captureIsANoOpWithoutARunStore() {
     var guard = new RoomCommitGuard(null, null, events::add, throwingShell());
-    assertDoesNotThrow(() -> guard.captureRoomBaseline("acme", CONFIG, "run-1"));
+    assertDoesNotThrow(() -> guard.captureRoomBaseline(RunPlace.of("acme", null), CONFIG, "run-1"));
   }
 
   @Test
@@ -168,7 +169,7 @@ class RoomCommitGuardTest {
         "run-1", "acme", "auth", "node", "room", "codex", "b", "t", null, null, "log", "unit");
     var guard = guard(runStore, shell(command -> new ShellExec.Result(0, "deadbeef\n", "")));
 
-    guard.captureRoomBaseline("acme", CONFIG, "run-1");
+    guard.captureRoomBaseline(RunPlace.of("acme", null), CONFIG, "run-1");
 
     assertNotNull(runStore.consumeRoomGuardBaseline("run-1").orElse(null));
   }
@@ -177,7 +178,7 @@ class RoomCommitGuardTest {
   void captureSavesNothingWhenAReposHeadCannotBeRead() {
     var guard = guard(runStore, shell(command -> new ShellExec.Result(1, "", "no git")));
 
-    guard.captureRoomBaseline("acme", CONFIG, "run-1");
+    guard.captureRoomBaseline(RunPlace.of("acme", null), CONFIG, "run-1");
 
     assertNull(
         runStore.consumeRoomGuardBaseline("run-1").orElse(null),
@@ -188,7 +189,7 @@ class RoomCommitGuardTest {
   void captureDegradesTheGuardButNeverThrowsWhenTheShellFails() {
     var guard = guard(runStore, throwingShell());
 
-    assertDoesNotThrow(() -> guard.captureRoomBaseline("acme", CONFIG, "run-1"));
+    assertDoesNotThrow(() -> guard.captureRoomBaseline(RunPlace.of("acme", null), CONFIG, "run-1"));
     assertNull(runStore.consumeRoomGuardBaseline("run-1").orElse(null));
   }
 

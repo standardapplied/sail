@@ -5,7 +5,6 @@
 
 package ai.singlr.sail.commands;
 
-import ai.singlr.sail.config.ProjectDefinition;
 import ai.singlr.sail.engine.Banner;
 import ai.singlr.sail.engine.SnapshotManager;
 import ai.singlr.sail.engine.Spinner;
@@ -27,10 +26,8 @@ final class SnapshotDecision {
    * --snapshot} / {@code --no-snapshot} ({@code null} means neither was passed). When no override
    * is set the user is prompted (defaults to no); non-interactive mode (JSON output or piped stdin)
    * skips silently: snapshotting is opt-in per run via the flag.
-   *
-   * @param config kept for API consistency across call sites; currently unused
    */
-  static boolean shouldSnapshot(Boolean override, ProjectDefinition config, boolean json) {
+  static boolean shouldSnapshot(Boolean override, boolean json) {
     if (override != null) {
       return override;
     }

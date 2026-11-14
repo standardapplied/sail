@@ -293,7 +293,7 @@ public final class Fleet implements AutoCloseable {
               fdes,
               bus::publish,
               new WatcherSpawner(shell, (command, log) -> 4242L),
-              (project, config) -> "",
+              TestWorkspaces.ready(TestProjects.reading(descriptor), PROJECT),
               command -> 0,
               DispatchOperations.Listener.NONE,
               SessionYield.NONE);
@@ -415,7 +415,9 @@ public final class Fleet implements AutoCloseable {
           () ->
               Actor.call(
                   new Actor(handle, Role.ADMIN, Actor.Lane.CLI),
-                  () -> stopper.stop(new StopOperations.ProjectTarget(PROJECT), handle, false)));
+                  () ->
+                      stopper.stop(
+                          new StopOperations.ProjectTarget(PROJECT, null), handle, false)));
     }
 
     /**

@@ -1361,13 +1361,16 @@ class ApiRouterTest {
                 new WorkspaceListResponse(
                     project,
                     List.of(
-                        new Workspaces.Row("main", project, "running", null, null, "10.0.0.2"),
+                        new Workspaces.Row(
+                            "main", project, "running", null, null, "10.0.0.2", null, null),
                         new Workspaces.Row(
                             "fix-login",
                             project + "-fix-login",
                             "frozen",
                             "v1",
                             "2026-11-12T10:00:00.000Z",
+                            null,
+                            null,
                             null))));
           }
         };

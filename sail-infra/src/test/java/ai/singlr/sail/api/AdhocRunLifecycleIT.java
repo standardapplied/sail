@@ -127,7 +127,7 @@ class AdhocRunLifecycleIT extends AbstractIncusIT {
               new FdeStore(db),
               events::add,
               new WatcherSpawner(refusingShell(), (command, logPath) -> 4242L),
-              (project, config) -> "",
+              TestWorkspaces.over(shell),
               DispatchOperations.shellLauncher(shell),
               DispatchOperations.Listener.NONE,
               SessionYield.NONE);
@@ -170,7 +170,7 @@ class AdhocRunLifecycleIT extends AbstractIncusIT {
       var outcome =
           Acting.by(
               OPERATOR,
-              () -> stopOps.stop(new StopOperations.ProjectTarget(CONTAINER), HANDLE, false));
+              () -> stopOps.stop(new StopOperations.ProjectTarget(CONTAINER, null), HANDLE, false));
 
       var stopped = assertInstanceOf(StopOperations.Stopped.class, outcome);
       assertEquals(session.runId(), stopped.runId());

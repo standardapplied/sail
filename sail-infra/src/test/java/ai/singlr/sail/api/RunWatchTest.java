@@ -18,6 +18,7 @@ import ai.singlr.sail.engine.AgentUnit;
 import ai.singlr.sail.engine.GuardrailChecker;
 import ai.singlr.sail.engine.GuardrailTrigger;
 import ai.singlr.sail.engine.HarnessHooks;
+import ai.singlr.sail.engine.RunPlace;
 import ai.singlr.sail.engine.ScriptedShellExecutor;
 import ai.singlr.sail.harness.Harnesses;
 import java.time.Duration;
@@ -162,7 +163,7 @@ class RunWatchTest {
       Guardrails guardrails, Instant startedAt, boolean dryRun, RunWatch.StopPublisher publisher)
       throws Exception {
     new RunWatch(
-            PROJECT,
+            RunPlace.of(PROJECT, null),
             RUN,
             UNIT,
             guardrails,
@@ -567,7 +568,8 @@ class RunWatchTest {
 
   private boolean reconcilerReadsItActive() {
     try {
-      return MissedStopReconciler.systemdUnitProbe(container).active(PROJECT, RUN, UNIT.unitName());
+      return MissedStopReconciler.systemdUnitProbe(container)
+          .active(RunPlace.of(PROJECT, null), RUN, UNIT.unitName());
     } catch (Exception e) {
       throw new IllegalStateException(e);
     }
@@ -1121,7 +1123,8 @@ class RunWatchTest {
                     .formatted(RUN));
 
     var stopped =
-        RunWatch.stopIfAlreadyEnded(PROJECT, RUN, UNIT, new AgentSession(shell), this::publish);
+        RunWatch.stopIfAlreadyEnded(
+            RunPlace.of(PROJECT, null), RUN, UNIT, new AgentSession(shell), this::publish);
 
     assertTrue(stopped);
     assertEquals(127, published.getFirst().data().get("exit_code"));
@@ -1133,7 +1136,11 @@ class RunWatchTest {
   void aWatcherStartedForARunThatNeverLaunchedPublishesNothing() throws Exception {
     var stopped =
         RunWatch.stopIfAlreadyEnded(
-            PROJECT, RUN, UNIT, new AgentSession(new ScriptedShellExecutor()), this::publish);
+            RunPlace.of(PROJECT, null),
+            RUN,
+            UNIT,
+            new AgentSession(new ScriptedShellExecutor()),
+            this::publish);
 
     assertFalse(stopped, "no unit and no session file name this run");
     assertTrue(published.isEmpty());

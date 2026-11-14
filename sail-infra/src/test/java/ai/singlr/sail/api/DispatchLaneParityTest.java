@@ -147,7 +147,7 @@ class DispatchLaneParityTest {
             new FdeStore(cli.db()),
             cli.events()::add,
             new WatcherSpawner(shell(), (command, logPath) -> 4242L),
-            (project, config) -> "",
+            TestWorkspaces.ready(TestProjects.reading(cli.yaml()), "acme"),
             command -> 0,
             DispatchOperations.Listener.NONE,
             SessionYield.NONE);

@@ -22,7 +22,7 @@ class AgentPresenceTest {
   }
 
   private static AgentSession.Presence presenceIn(ShellExec shell) throws Exception {
-    return new AgentPresence(shell).of("acme", UNIT);
+    return new AgentPresence(shell).of(RunPlace.of("acme", null), UNIT);
   }
 
   @Test

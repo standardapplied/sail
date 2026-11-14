@@ -164,7 +164,9 @@ class AgentLogCommandTest {
       HostOperations operations, String project, Optional<Lane> lane) {
     return Actor.readingAs(
         () -> operations.identity().operator(),
-        () -> AgentLogCommand.logPath(operations, project, "mady", lane));
+        () ->
+            AgentLogCommand.logPathFrom(
+                AgentLogCommand.newestRun(operations, project, "mady", lane)));
   }
 
   private static HostOperations operations(Sqlite db, Path dir) {

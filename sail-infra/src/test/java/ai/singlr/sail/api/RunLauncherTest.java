@@ -12,6 +12,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.engine.AgentUnit;
+import ai.singlr.sail.engine.RunPlace;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.WatcherSpawner;
 import ai.singlr.sail.identity.Acting;
@@ -151,7 +152,13 @@ class RunLauncherTest {
 
   private static RunLauncher.RunContext ctx(boolean background) {
     return new RunLauncher.RunContext(
-        "proj", AgentUnit.forRun(RUN_ID), RUN_ID, "spec", "codex", "build", background);
+        RunPlace.of("proj", "spec"),
+        AgentUnit.forRun(RUN_ID),
+        RUN_ID,
+        "spec",
+        "codex",
+        "build",
+        background);
   }
 
   private static RunLauncher.LaunchOutcome outcome() {

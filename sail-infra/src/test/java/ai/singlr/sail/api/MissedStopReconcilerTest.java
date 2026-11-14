@@ -17,6 +17,7 @@ import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.config.TestDefinitions;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.HostInfo;
+import ai.singlr.sail.engine.RunPlace;
 import ai.singlr.sail.engine.ScriptedShellExecutor;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.harness.Harnesses;
@@ -99,7 +100,7 @@ class MissedStopReconcilerTest {
     }
 
     @Override
-    public boolean active(String project, String runId, String unit) {
+    public boolean active(RunPlace place, String runId, String unit) {
       calls.incrementAndGet();
       lastUnit = unit;
       return active;
@@ -564,7 +565,7 @@ class MissedStopReconcilerTest {
     MissedStopReconciler.UnitProbe probe =
         new MissedStopReconciler.UnitProbe() {
           @Override
-          public boolean active(String project, String runId, String unit) {
+          public boolean active(RunPlace place, String runId, String unit) {
             return false;
           }
 
@@ -597,7 +598,7 @@ class MissedStopReconcilerTest {
     MissedStopReconciler.UnitProbe probe =
         new MissedStopReconciler.UnitProbe() {
           @Override
-          public boolean active(String project, String runId, String unit) {
+          public boolean active(RunPlace place, String runId, String unit) {
             return false;
           }
 
@@ -688,7 +689,7 @@ class MissedStopReconcilerTest {
     MissedStopReconciler.UnitProbe probe =
         new MissedStopReconciler.UnitProbe() {
           @Override
-          public boolean active(String project, String runId, String unit) {
+          public boolean active(RunPlace place, String runId, String unit) {
             return false;
           }
 
@@ -1003,7 +1004,7 @@ class MissedStopReconcilerTest {
 
               @Override
               public List<Rescue> ensureCommitted(
-                  String project, List<String> repos, String branch, String commitMessage) {
+                  RunPlace place, List<String> repos, String branch, String commitMessage) {
                 return List.of();
               }
             },
@@ -1059,12 +1060,12 @@ class MissedStopReconcilerTest {
     var probe =
         new MissedStopReconciler.UnitProbe() {
           @Override
-          public boolean active(String project, String runId, String unit) {
+          public boolean active(RunPlace place, String runId, String unit) {
             return false;
           }
 
           @Override
-          public MissedStopReconciler.Ending ending(String project, String runId, String unit)
+          public MissedStopReconciler.Ending ending(RunPlace place, String runId, String unit)
               throws IOException {
             throw new IOException("incus exec: connection reset");
           }
@@ -1090,12 +1091,12 @@ class MissedStopReconcilerTest {
     var probe =
         new MissedStopReconciler.UnitProbe() {
           @Override
-          public boolean active(String project, String runId, String unit) {
+          public boolean active(RunPlace place, String runId, String unit) {
             return false;
           }
 
           @Override
-          public MissedStopReconciler.Ending ending(String project, String runId, String unit)
+          public MissedStopReconciler.Ending ending(RunPlace place, String runId, String unit)
               throws InterruptedException {
             throw new InterruptedException("shutting down");
           }
@@ -1631,7 +1632,11 @@ class MissedStopReconcilerTest {
     assertEquals(0, bus.publishedCount(), "its stop was acted on: never replayed");
     assertTrue(
         DispatchGate.decide(
-                "auth", "build", List.of(), sessionStore.runningOnNode("test-project", "node-a"))
+                RunPlace.of("test-project", "auth"),
+                "auth",
+                "build",
+                List.of(),
+                sessionStore.runningOnNode("test-project", "node-a"))
             .isEmpty(),
         "the failed spec can be dispatched again");
   }
@@ -2124,13 +2129,13 @@ class MissedStopReconcilerTest {
     var unit = "sail-agent-" + runId;
     assertTrue(
         MissedStopReconciler.systemdUnitProbe(runIdentityShell(true, true))
-            .active("acme", runId, unit));
+            .active(RunPlace.of("acme", null), runId, unit));
     assertFalse(
         MissedStopReconciler.systemdUnitProbe(runIdentityShell(true, false))
-            .active("acme", runId, unit));
+            .active(RunPlace.of("acme", null), runId, unit));
     assertFalse(
         MissedStopReconciler.systemdUnitProbe(runIdentityShell(false, false))
-            .active("acme", runId, unit));
+            .active(RunPlace.of("acme", null), runId, unit));
   }
 
   private static ShellExec runIdentityShell(boolean pidRecorded, boolean alive) {

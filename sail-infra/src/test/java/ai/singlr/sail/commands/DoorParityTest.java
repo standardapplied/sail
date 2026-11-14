@@ -762,7 +762,7 @@ class DoorParityTest {
                         new OperationHooks(
                             event -> {},
                             new WatcherSpawner(shell, (spawned, logPath) -> 4242L),
-                            hooks.snapshotter(),
+                            hooks.workspaces(),
                             launched -> 0,
                             hooks.dispatchListener(),
                             hooks.stopListener()),

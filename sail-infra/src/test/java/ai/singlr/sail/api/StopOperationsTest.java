@@ -760,7 +760,8 @@ class StopOperationsTest {
 
     var outcome =
         Actor.call(
-            ADMIN, () -> ops.stop(new StopOperations.ProjectTarget("acme"), LOCAL_HANDLE, false));
+            ADMIN,
+            () -> ops.stop(new StopOperations.ProjectTarget("acme", null), LOCAL_HANDLE, false));
 
     var stopped = assertInstanceOf(StopOperations.Stopped.class, outcome);
     assertEquals(R1, stopped.runId());
@@ -786,7 +787,9 @@ class StopOperationsTest {
                         outside,
                         () ->
                             ops.stop(
-                                new StopOperations.ProjectTarget("acme"), LOCAL_HANDLE, dryRun)));
+                                new StopOperations.ProjectTarget("acme", null),
+                                LOCAL_HANDLE,
+                                dryRun)));
 
         assertEquals(ErrorCode.PROJECT_NOT_IN_CATALOG, refusal.failure().errorCode());
         assertEquals("Project 'acme' is not in the catalog.", refusal.getMessage());
@@ -833,7 +836,7 @@ class StopOperationsTest {
             "Only me or an admin may access this run.");
     for (var target :
         List.<StopOperations.Target>of(
-            new StopOperations.RunTarget(R1), new StopOperations.ProjectTarget("acme"))) {
+            new StopOperations.RunTarget(R1), new StopOperations.ProjectTarget("acme", null))) {
       for (var i = 0; i < asked.size(); i++) {
         var actor = asked.get(i);
         for (var dryRun : List.of(true, false)) {
@@ -867,7 +870,8 @@ class StopOperationsTest {
 
     var outcome =
         Actor.call(
-            ADMIN, () -> ops.stop(new StopOperations.ProjectTarget("acme"), LOCAL_HANDLE, false));
+            ADMIN,
+            () -> ops.stop(new StopOperations.ProjectTarget("acme", null), LOCAL_HANDLE, false));
 
     var stopped = assertInstanceOf(StopOperations.Stopped.class, outcome);
     assertEquals(R1, stopped.runId());
@@ -910,7 +914,9 @@ class StopOperationsTest {
             () ->
                 Actor.call(
                     ADMIN,
-                    () -> ops.stop(new StopOperations.ProjectTarget("acme"), LOCAL_HANDLE, false)));
+                    () ->
+                        ops.stop(
+                            new StopOperations.ProjectTarget("acme", null), LOCAL_HANDLE, false)));
 
     assertEquals(ErrorCode.AGENT_STOP_FAILED, refusal.failure().errorCode());
     assertEquals(1, halts.size());
@@ -929,7 +935,8 @@ class StopOperationsTest {
 
     var outcome =
         Actor.call(
-            ADMIN, () -> ops.stop(new StopOperations.ProjectTarget("acme"), LOCAL_HANDLE, false));
+            ADMIN,
+            () -> ops.stop(new StopOperations.ProjectTarget("acme", null), LOCAL_HANDLE, false));
 
     var notRunning = assertInstanceOf(StopOperations.NotRunning.class, outcome);
     assertTrue(notRunning.runReleased());
@@ -940,7 +947,8 @@ class StopOperationsTest {
 
     var second =
         Actor.call(
-            ADMIN, () -> ops.stop(new StopOperations.ProjectTarget("acme"), LOCAL_HANDLE, false));
+            ADMIN,
+            () -> ops.stop(new StopOperations.ProjectTarget("acme", null), LOCAL_HANDLE, false));
     assertFalse(second.mutated(), "a repeated stop after the prep-window cancel writes nothing");
   }
 
@@ -986,7 +994,8 @@ class StopOperationsTest {
 
     var outcome =
         Actor.call(
-            ADMIN, () -> ops.stop(new StopOperations.ProjectTarget("acme"), LOCAL_HANDLE, false));
+            ADMIN,
+            () -> ops.stop(new StopOperations.ProjectTarget("acme", null), LOCAL_HANDLE, false));
 
     var notRunning = assertInstanceOf(StopOperations.NotRunning.class, outcome);
     assertEquals(R1, notRunning.runId());
@@ -1005,7 +1014,8 @@ class StopOperationsTest {
 
     var outcome =
         Actor.call(
-            ADMIN, () -> ops.stop(new StopOperations.ProjectTarget("acme"), LOCAL_HANDLE, false));
+            ADMIN,
+            () -> ops.stop(new StopOperations.ProjectTarget("acme", null), LOCAL_HANDLE, false));
 
     var notRunning = assertInstanceOf(StopOperations.NotRunning.class, outcome);
     assertFalse(notRunning.specCancelled());
@@ -1020,7 +1030,8 @@ class StopOperationsTest {
 
     var outcome =
         Actor.call(
-            ADMIN, () -> ops.stop(new StopOperations.ProjectTarget("acme"), LOCAL_HANDLE, true));
+            ADMIN,
+            () -> ops.stop(new StopOperations.ProjectTarget("acme", null), LOCAL_HANDLE, true));
 
     var stopped = assertInstanceOf(StopOperations.Stopped.class, outcome);
     assertNull(stopped.specId(), "an ad-hoc dry run must normalize the blank spec id");

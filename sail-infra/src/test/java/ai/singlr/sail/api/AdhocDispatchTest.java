@@ -123,7 +123,7 @@ class AdhocDispatchTest {
         new FdeStore(db),
         events::add,
         new WatcherSpawner(shell, (command, logPath) -> 4242L),
-        (project, config) -> "",
+        TestWorkspaces.ready(TestProjects.reading(yaml), "acme"),
         launcher,
         listener,
         SessionYield.NONE);
@@ -504,7 +504,7 @@ class AdhocDispatchTest {
             new FdeStore(db),
             events::add,
             new WatcherSpawner(new StubShell(), (command, logPath) -> 4242L),
-            (project, config) -> "",
+            TestWorkspaces.ready(TestProjects.reading(yaml), "acme"),
             command -> {
               throw new AssertionError("a dry run must not launch");
             },
@@ -639,7 +639,7 @@ class AdhocDispatchTest {
             new FdeStore(db),
             events::add,
             new WatcherSpawner(liveAgentShell(), (command, logPath) -> 4242L),
-            (project, config) -> "",
+            TestWorkspaces.ready(TestProjects.reading(yaml), "acme"),
             command -> {
               commands.add(command);
               return 0;

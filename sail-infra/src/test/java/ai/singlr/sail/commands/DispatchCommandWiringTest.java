@@ -22,6 +22,7 @@ import ai.singlr.sail.api.ProjectReader;
 import ai.singlr.sail.api.SailOperations;
 import ai.singlr.sail.api.SessionYield;
 import ai.singlr.sail.api.SyncScheduler;
+import ai.singlr.sail.api.TestWorkspaces;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.config.TestDefinitions;
@@ -110,7 +111,7 @@ class DispatchCommandWiringTest {
         shell,
         events::add,
         new WatcherSpawner(shell, (command, logPath) -> 4242L),
-        (project, config) -> "",
+        TestWorkspaces.ready(ProjectReader.ofCatalog(new ProjectStore(db)), "acme"),
         command -> 0,
         DispatchOperations.Listener.NONE,
         SessionYield.NONE,
@@ -174,7 +175,7 @@ class DispatchCommandWiringTest {
                     new OperationHooks(
                         event -> {},
                         new WatcherSpawner(host, (spawned, logPath) -> 4242L),
-                        hooks.snapshotter(),
+                        hooks.workspaces(),
                         launched -> agent,
                         hooks.dispatchListener(),
                         hooks.stopListener()),
@@ -348,12 +349,12 @@ class DispatchCommandWiringTest {
     var stop =
         assertThrows(
             ApiException.class,
-            () -> AgentStopCommand.stopAsOperator(operations, "acme", HANDLE, false));
+            () -> AgentStopCommand.stopAsOperator(operations, "acme", null, HANDLE, false));
     assertEquals(ErrorCode.READ_ONLY_CREDENTIAL, stop.failure().errorCode());
     var preview =
         assertThrows(
             ApiException.class,
-            () -> AgentStopCommand.stopAsOperator(operations, "acme", HANDLE, true));
+            () -> AgentStopCommand.stopAsOperator(operations, "acme", null, HANDLE, true));
     assertEquals(stop.getMessage(), preview.getMessage(), "a preview is refused as the stop is");
     var dispatch =
         assertThrows(

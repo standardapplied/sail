@@ -74,7 +74,6 @@ class ProjectDefinitionTest {
           type: claude-code
           auto_branch: true
           branch_prefix: "sail/"
-          auto_snapshot: true
           config:
             permissions: full
         """;
@@ -117,7 +116,6 @@ class ProjectDefinitionTest {
     assertEquals("claude-code", config.agent().type());
     assertTrue(config.agent().autoBranch());
     assertEquals("sail/", config.agent().branchPrefix());
-    assertTrue(config.agent().autoSnapshot());
     assertEquals("full", config.agent().config().get("permissions"));
   }
 
@@ -446,7 +444,6 @@ class ProjectDefinitionTest {
     assertEquals(original.processes().size(), roundTripped.processes().size());
     assertEquals(original.agent().type(), roundTripped.agent().type());
     assertEquals(original.agent().autoBranch(), roundTripped.agent().autoBranch());
-    assertEquals(original.agent().autoSnapshot(), roundTripped.agent().autoSnapshot());
     assertEquals(original, roundTripped, "every section round-trips");
   }
 
@@ -815,7 +812,6 @@ class ProjectDefinitionTest {
     assertEquals(ProjectDefinition.Agent.created("claude-code", null), agent);
     assertTrue(agent.autoBranch());
     assertEquals("agent/", agent.branchPrefix());
-    assertTrue(agent.autoSnapshot());
   }
 
   @Test
@@ -829,13 +825,19 @@ class ProjectDefinitionTest {
                       type: claude-code
                       auto_branch: false
                       branch_prefix: "feat/"
-                      auto_snapshot: false
                     """))
             .agent();
 
     assertFalse(agent.autoBranch());
     assertEquals("feat/", agent.branchPrefix());
-    assertFalse(agent.autoSnapshot());
+  }
+
+  @Test
+  void aDefinitionNamingAutoSnapshotIsRefusedLikeAnyKeyAgentDoesNotHave() {
+    assertEquals(
+        "agent.auto_snapshot is not a key of agent. Its keys are: type, auto_branch,"
+            + " branch_prefix, install, config, guardrails, notifications, member, budget.",
+        refusal("name: acme\nagent:\n  type: claude-code\n  auto_snapshot: true\n"));
   }
 
   @Test
@@ -891,9 +893,8 @@ class ProjectDefinitionTest {
 
   @Test
   void installsFallBackToTheAgentType() {
-    var none = new ProjectDefinition.Agent(null, false, null, false, null, null, null, null);
-    var empty =
-        new ProjectDefinition.Agent("codex", false, null, false, List.of(), null, null, null);
+    var none = new ProjectDefinition.Agent(null, false, null, null, null, null, null);
+    var empty = new ProjectDefinition.Agent("codex", false, null, List.of(), null, null, null);
 
     assertEquals(List.of(), none.installs());
     assertEquals(List.of("codex"), empty.installs());
@@ -1019,7 +1020,7 @@ class ProjectDefinitionTest {
         refusal("name: acme\nssh:\n  user: dev\n"));
     assertEquals(
         "agent.review_pipeline is not a key of agent. Its keys are: type, auto_branch,"
-            + " branch_prefix, auto_snapshot, install, config, guardrails, notifications, member, budget.",
+            + " branch_prefix, install, config, guardrails, notifications, member, budget.",
         refusal("name: acme\nagent:\n  type: claude-code\n  review_pipeline: {}\n"));
     assertEquals(
         "resources.cpus is not a key of resources. Its keys are: cpu, memory, disk.",

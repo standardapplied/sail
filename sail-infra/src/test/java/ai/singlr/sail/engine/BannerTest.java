@@ -1254,7 +1254,7 @@ class BannerTest {
             null,
             services,
             null,
-            new ProjectDefinition.Agent("claude-code", true, "sail/", true, null, null, null, null),
+            new ProjectDefinition.Agent("claude-code", true, "sail/", null, null, null, null),
             null);
     var state = new ContainerState.Running("10.0.0.42");
     var out = new ByteArrayOutputStream();
@@ -1375,7 +1375,7 @@ class BannerTest {
             null,
             null,
             null,
-            new ProjectDefinition.Agent("claude-code", false, null, true, null, null, null, null),
+            new ProjectDefinition.Agent("claude-code", false, null, null, null, null, null),
             null);
     var state = new ContainerState.Running("10.0.0.1");
     var out = new ByteArrayOutputStream();

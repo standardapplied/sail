@@ -174,7 +174,7 @@ final class ReviewLoop implements AutoCloseable {
                 new FdeStore(db),
                 started::publish,
                 new WatcherSpawner(container, null),
-                (project, descriptor) -> "",
+                TestWorkspaces.ready(reader, PROJECT),
                 this::launch,
                 DispatchOperations.Listener.NONE,
                 SessionYield.NONE)
@@ -674,7 +674,7 @@ final class ReviewLoop implements AutoCloseable {
     var time = new AtomicReference<>(Instant.parse(group(STARTED_AT, spawned)));
     try {
       new RunWatch(
-              PROJECT,
+              run.place(),
               runId,
               AgentUnit.forRun(runId),
               Guardrails.of(

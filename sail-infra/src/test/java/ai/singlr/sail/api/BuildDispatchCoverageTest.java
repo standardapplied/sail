@@ -735,7 +735,7 @@ class BuildDispatchCoverageTest {
         new FdeStore(db),
         events::add,
         new WatcherSpawner(happyPath(), (command, logPath) -> 4242L),
-        (project, config) -> "",
+        TestWorkspaces.ready(TestProjects.reading(yaml), "acme"),
         launcher,
         DispatchOperations.Listener.NONE,
         SessionYield.NONE);

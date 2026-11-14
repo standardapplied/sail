@@ -55,6 +55,8 @@ import org.junit.jupiter.api.io.TempDir;
  */
 class WorkspacesTest {
 
+  private static final Predicate<String> NO_RUN = spec -> false;
+
   private static final Instant NOW = Instant.parse("2026-11-12T10:00:00Z");
   private static final String INPUTS = "a1b2c3";
   private static final Map<String, String> TEMPLATE_OF = Map.of("user.sail.template.of", "acme");
@@ -245,7 +247,7 @@ class WorkspacesTest {
         workspaces(
                 shell,
                 ticks(0, ms(210), ms(1110), ms(1110), ms(1200), ms(1300), ms(1400), ms(1410)))
-            .create(acme(), "fix-login", source(), tempDir.resolve("no-files"));
+            .create(acme(), "fix-login", source(), tempDir.resolve("no-files"), "eng");
 
     assertEquals(
         List.of(new ProjectProvisioner.Instance("acme--tmpl", Optional.of("tank"), TEMPLATE_OF)),
@@ -310,7 +312,7 @@ class WorkspacesTest {
 
     var created =
         workspaces(shell, ticks(0, ms(150), ms(500), ms(500), ms(600), ms(650), ms(690), ms(700)))
-            .create(acme(), "fix-login", source(), tempDir);
+            .create(acme(), "fix-login", source(), tempDir, "eng");
 
     assertEquals(List.of(), builtInto);
     assertEquals(
@@ -341,7 +343,7 @@ class WorkspacesTest {
 
     var created =
         workspaces(shell, ticks(0, 1, 2, 3, 4, 5, 6, 7))
-            .create(acme(), "fix-login", source(), tempDir);
+            .create(acme(), "fix-login", source(), tempDir, "eng");
 
     assertEquals(List.of(false), builtFresh);
     var start = indexOf(shell, List.of("incus", "start", "acme--tmpl"));
@@ -499,7 +501,7 @@ class WorkspacesTest {
     var failure =
         assertThrows(
             IllegalStateException.class,
-            () -> workspaces(shell, ticks()).create(acme(), "fix-login", source(), tempDir));
+            () -> workspaces(shell, ticks()).create(acme(), "fix-login", source(), tempDir, "eng"));
 
     assertEquals(
         "Incus has the ZFS pools fast, tank and the base profile's pool 'devpool' is none of them,"
@@ -520,11 +522,11 @@ class WorkspacesTest {
 
     List<Executable> verbs =
         List.of(
-            () -> workspaces.create(acme(), "fix-login", source(), tempDir),
+            () -> workspaces.create(acme(), "fix-login", source(), tempDir, "eng"),
             () -> templates(shell).ensure(acme(), source()),
             () -> workspaces.start("acme", "fix-login"),
-            () -> workspaces.stop("acme", "fix-login"),
-            () -> workspaces.delete("acme", "fix-login"));
+            () -> workspaces.stop("acme", "fix-login", NO_RUN),
+            () -> workspaces.delete("acme", "fix-login", NO_RUN, instance -> {}));
     for (var verb : verbs) {
       assertEquals(expected, assertThrows(IllegalStateException.class, verb).getMessage());
     }
@@ -547,7 +549,8 @@ class WorkspacesTest {
 
     assertEquals(
         List.of(
-            new Workspaces.Row("main", "acme", "stopped", null, "2026-11-12T09:00:00.123Z", null)),
+            new Workspaces.Row(
+                "main", "acme", "stopped", null, "2026-11-12T09:00:00.123Z", null, null, null)),
         listing.workspaces());
     assertEquals(List.of("incus list --format json"), shell.invocations());
   }
@@ -576,11 +579,27 @@ class WorkspacesTest {
             "acme",
             List.of(
                 new Workspaces.Row(
-                    "main", "acme", "running", null, "2026-11-12T09:00:00.123Z", ip("acme")),
+                    "main",
+                    "acme",
+                    "running",
+                    null,
+                    "2026-11-12T09:00:00.123Z",
+                    ip("acme"),
+                    null,
+                    null),
                 new Workspaces.Row(
-                    "fix-login", "acme-fix-login", "running", "v1", created, ip("acme-fix-login")),
-                new Workspaces.Row("paused", "acme-paused", "frozen", "v1", created, null),
-                new Workspaces.Row("second", "acme-second", "stopped", "v2", created, null))),
+                    "fix-login",
+                    "acme-fix-login",
+                    "running",
+                    "v1",
+                    created,
+                    ip("acme-fix-login"),
+                    null,
+                    null),
+                new Workspaces.Row(
+                    "paused", "acme-paused", "frozen", "v1", created, null, null, null),
+                new Workspaces.Row(
+                    "second", "acme-second", "stopped", "v2", created, null, null, null))),
         listing);
   }
 
@@ -604,7 +623,7 @@ class WorkspacesTest {
     var listing = workspaces(shell, ticks()).list("acme");
 
     assertEquals(
-        List.of(new Workspaces.Row("main", "acme", "not_created", null, null, null)),
+        List.of(new Workspaces.Row("main", "acme", "not_created", null, null, null, null, null)),
         listing.workspaces());
   }
 
@@ -673,7 +692,7 @@ class WorkspacesTest {
         stderrOf(
             () ->
                 workspaces(shell, ticks(0, 1, 2, 3, 4, 5, 6, 7))
-                    .create(acme(), "fix-login", source(), tempDir.resolve("no-files")));
+                    .create(acme(), "fix-login", source(), tempDir.resolve("no-files"), "eng"));
 
     assertTrue(indexOf(shell, copyArgv("v1")) >= 0, String.join("\n", shell.invocations()));
     assertEquals(1, said.split("Pool tank is DEGRADED", -1).length - 1, said);
@@ -702,11 +721,11 @@ class WorkspacesTest {
 
     for (Executable verb :
         List.<Executable>of(
-            () -> workspaces.create(acme(), "second", source(), tempDir.resolve("no-files")),
+            () -> workspaces.create(acme(), "second", source(), tempDir.resolve("no-files"), "eng"),
             () -> templates(shell).ensure(acme(), source()),
-            () -> workspaces.stop("acme", "fix-login"),
+            () -> workspaces.stop("acme", "fix-login", NO_RUN),
             () -> workspaces.start("acme", "fix-login"),
-            () -> workspaces.delete("acme", "fix-login"))) {
+            () -> workspaces.delete("acme", "fix-login", NO_RUN, instance -> {}))) {
       assertEquals(refusal, assertThrows(IllegalStateException.class, verb).getMessage());
     }
     assertEquals(
@@ -732,8 +751,8 @@ class WorkspacesTest {
 
     for (Executable verb :
         List.<Executable>of(
-            () -> workspaces.create(acme(), "second", source(), tempDir.resolve("no-files")),
-            () -> workspaces.stop("acme", "fix-login"))) {
+            () -> workspaces.create(acme(), "second", source(), tempDir.resolve("no-files"), "eng"),
+            () -> workspaces.stop("acme", "fix-login", NO_RUN))) {
       assertEquals(refusal, assertThrows(IllegalStateException.class, verb).getMessage());
     }
     assertEquals(
@@ -749,7 +768,7 @@ class WorkspacesTest {
                                     "[]")
                                 .onThrow("zpool", new IOException("no zpool")),
                             ticks())
-                        .stop("acme", "fix-login"))
+                        .stop("acme", "fix-login", NO_RUN))
             .getMessage());
     assertEquals(
         List.of(),
@@ -770,8 +789,9 @@ class WorkspacesTest {
             "[]");
     var workspaces = workspaces(shell, ticks());
 
-    assertEquals(Workspaces.Change.STOPPED, workspaces.stop("acme", "fix-login").change());
-    assertEquals(Workspaces.Change.ALREADY_STOPPED, workspaces.stop("acme", "second").change());
+    assertEquals(Workspaces.Change.STOPPED, workspaces.stop("acme", "fix-login", NO_RUN).change());
+    assertEquals(
+        Workspaces.Change.ALREADY_STOPPED, workspaces.stop("acme", "second", NO_RUN).change());
     assertEquals(
         List.of(List.of("incus", "stop", "acme-fix-login")),
         shell.arguments().stream().filter(a -> a.get(1).equals("stop")).toList());
@@ -791,8 +811,11 @@ class WorkspacesTest {
             "[]");
     var workspaces = workspaces(shell, ticks());
 
-    var absent = assertThrows(IllegalStateException.class, () -> workspaces.delete("a", "b-c"));
-    var deleted = workspaces.delete("a-b", "c");
+    var absent =
+        assertThrows(
+            IllegalStateException.class,
+            () -> workspaces.delete("a", "b-c", NO_RUN, instance -> {}));
+    var deleted = workspaces.delete("a-b", "c", NO_RUN, instance -> {});
 
     assertEquals(
         "Project 'a' has no workspace 'b-c' on this box. List them with: sail project workspace"
@@ -815,14 +838,17 @@ class WorkspacesTest {
           throw new AssertionError("asked about " + instance);
         };
 
-    assertThrows(IllegalArgumentException.class, () -> workspaces.delete("acme", "main", never));
-    assertThrows(IllegalStateException.class, () -> workspaces.delete("acme", "gone", never));
+    assertThrows(
+        IllegalArgumentException.class, () -> workspaces.delete("acme", "main", NO_RUN, never));
+    assertThrows(
+        IllegalStateException.class, () -> workspaces.delete("acme", "gone", NO_RUN, never));
     assertThrows(
         IllegalStateException.class,
         () ->
             workspaces.delete(
                 "acme",
                 "fix",
+                NO_RUN,
                 instance -> {
                   asked.add(instance);
                   throw new IllegalStateException("Not deleted.");
@@ -830,7 +856,7 @@ class WorkspacesTest {
 
     assertEquals(List.of("acme-fix"), asked);
     assertTrue(shell.invocations().stream().noneMatch(c -> c.startsWith("incus delete")));
-    workspaces.delete("acme", "fix", asked::add);
+    workspaces.delete("acme", "fix", NO_RUN, asked::add);
     assertEquals(List.of("acme-fix", "acme-fix"), asked);
     assertEquals("incus delete acme-fix --force", shell.invocations().getLast());
   }
@@ -841,8 +867,11 @@ class WorkspacesTest {
     var workspaces = workspaces(shell, ticks());
 
     var delete =
-        assertThrows(IllegalArgumentException.class, () -> workspaces.delete("acme", "main"));
-    var stop = assertThrows(IllegalArgumentException.class, () -> workspaces.stop("acme", "main"));
+        assertThrows(
+            IllegalArgumentException.class,
+            () -> workspaces.delete("acme", "main", NO_RUN, instance -> {}));
+    var stop =
+        assertThrows(IllegalArgumentException.class, () -> workspaces.stop("acme", "main", NO_RUN));
     var start =
         assertThrows(IllegalArgumentException.class, () -> workspaces.start("acme", "main"));
     var shellIn =
@@ -850,7 +879,7 @@ class WorkspacesTest {
     var create =
         assertThrows(
             IllegalArgumentException.class,
-            () -> workspaces.create(acme(), "main", source(), tempDir));
+            () -> workspaces.create(acme(), "main", source(), tempDir, "eng"));
 
     var prefix =
         "'main' is acme's default workspace, the project's own container, which workspace"
@@ -878,7 +907,7 @@ class WorkspacesTest {
     var failure =
         assertThrows(
             IllegalArgumentException.class,
-            () -> workspaces(shell, ticks()).create(config, "abcd", source(), tempDir));
+            () -> workspaces(shell, ticks()).create(config, "abcd", source(), tempDir, "eng"));
 
     assertEquals(
         "Workspace 'abcd' of "
@@ -902,7 +931,7 @@ class WorkspacesTest {
     var failure =
         assertThrows(
             IllegalArgumentException.class,
-            () -> workspaces(shell, ticks()).create(config, "a", source(), tempDir));
+            () -> workspaces(shell, ticks()).create(config, "a", source(), tempDir, "eng"));
 
     assertEquals(
         project
@@ -928,19 +957,19 @@ class WorkspacesTest {
     var instance =
         assertThrows(
             IllegalArgumentException.class,
-            () -> workspaces.create(acme(), "taken", held, tempDir));
+            () -> workspaces.create(acme(), "taken", held, tempDir, "eng"));
     var project =
         assertThrows(
             IllegalArgumentException.class,
-            () -> workspaces.create(acme(), "billing", held, tempDir));
+            () -> workspaces.create(acme(), "billing", held, tempDir, "eng"));
     var existing =
         assertThrows(
             IllegalStateException.class,
-            () -> workspaces.create(acme(), "fix-login", held, tempDir));
+            () -> workspaces.create(acme(), "fix-login", held, tempDir, "eng"));
     var invalid =
         assertThrows(
             IllegalArgumentException.class,
-            () -> workspaces.create(acme(), "Fix_Login", held, tempDir));
+            () -> workspaces.create(acme(), "Fix_Login", held, tempDir, "eng"));
 
     assertEquals(
         "Workspace 'taken' of acme would be the instance 'acme-taken', which Incus already has."
@@ -971,7 +1000,7 @@ class WorkspacesTest {
     var failure =
         assertThrows(
             IllegalArgumentException.class,
-            () -> workspaces(shell, ticks()).create(config, "tmpl", source(), tempDir));
+            () -> workspaces(shell, ticks()).create(config, "tmpl", source(), tempDir, "eng"));
 
     assertEquals(
         "Workspace 'tmpl' of acme- would be the instance 'acme--tmpl', a name kept for templates."
@@ -1015,7 +1044,7 @@ class WorkspacesTest {
     var failure =
         assertThrows(
             IllegalStateException.class,
-            () -> workspaces(shell, ticks()).create(acme(), "fix-login", source(), tempDir));
+            () -> workspaces(shell, ticks()).create(acme(), "fix-login", source(), tempDir, "eng"));
 
     assertEquals(
         "acme--tmpl is on pool 'devpool', which is not ZFS, so a copy of it would be a full copy,"
@@ -1034,7 +1063,9 @@ class WorkspacesTest {
     var failure =
         assertThrows(
             IOException.class,
-            () -> workspaces(shell, ticks(0, 1, 2)).create(acme(), "fix-login", source(), tempDir));
+            () ->
+                workspaces(shell, ticks(0, 1, 2))
+                    .create(acme(), "fix-login", source(), tempDir, "eng"));
 
     assertEquals(
         "Workspace 'fix-login' could not be made its own: fatal: could not read from remote",
@@ -1054,7 +1085,8 @@ class WorkspacesTest {
     var failure =
         assertThrows(
             IOException.class,
-            () -> workspaces(shell, ticks(0)).create(acme(), "fix-login", source(), tempDir));
+            () ->
+                workspaces(shell, ticks(0)).create(acme(), "fix-login", source(), tempDir, "eng"));
 
     assertEquals(
         "Failed to clone acme--tmpl/v1 as 'acme-fix-login': Error: Instance name already in use",
@@ -1128,7 +1160,9 @@ class WorkspacesTest {
     var failure =
         assertThrows(
             IOException.class,
-            () -> workspaces(shell, ticks(0, 1, 2)).create(acme(), "fix-login", source(), tempDir));
+            () ->
+                workspaces(shell, ticks(0, 1, 2))
+                    .create(acme(), "fix-login", source(), tempDir, "eng"));
 
     assertEquals(
         "Failed to delete container 'acme-fix-login': busy",
@@ -1169,8 +1203,8 @@ class WorkspacesTest {
 
     assertEquals(
         List.of(
-            new Workspaces.Row("main", "acme", "not_created", null, null, null),
-            new Workspaces.Row("odd", "acme-odd", "error", null, null, null)),
+            new Workspaces.Row("main", "acme", "not_created", null, null, null, null, null),
+            new Workspaces.Row("odd", "acme-odd", "error", null, null, null, null, null)),
         workspaces.list("acme").workspaces());
     assertEquals(
         "Workspace 'odd' of acme is not running: Incus lists it as"
@@ -1195,7 +1229,7 @@ class WorkspacesTest {
     var failure =
         assertThrows(
             IllegalArgumentException.class,
-            () -> workspaces(shell, ticks()).create(acme(), "fix", source(), tempDir));
+            () -> workspaces(shell, ticks()).create(acme(), "fix", source(), tempDir, "eng"));
 
     assertEquals(
         "Workspace 'fix' of acme would be the instance 'acme-fix', which Incus already has. Give"
@@ -1213,13 +1247,15 @@ class WorkspacesTest {
     var live = incus(DIR_AND_ZFS, list(running, workspace("acme", "w", "Running", "v1")), "[]");
     shells.addAll(List.of(fresh, stale, stopped, live));
 
-    workspaces(fresh, ticks(0, 1, 2, 3, 4, 5, 6, 7)).create(acme(), "fix-login", source(), tempDir);
+    workspaces(fresh, ticks(0, 1, 2, 3, 4, 5, 6, 7))
+        .create(acme(), "fix-login", source(), tempDir, "eng");
     workspaces(fresh, ticks()).list("acme");
-    workspaces(stale, ticks(0, 1, 2, 3, 4, 5, 6, 7)).create(acme(), "fix-login", source(), tempDir);
+    workspaces(stale, ticks(0, 1, 2, 3, 4, 5, 6, 7))
+        .create(acme(), "fix-login", source(), tempDir, "eng");
     workspaces(stopped, ticks(0, 1, 2)).start("acme", "w");
     workspaces(live, ticks()).running("acme", "w");
-    workspaces(live, ticks()).stop("acme", "w");
-    workspaces(live, ticks()).delete("acme", "w");
+    workspaces(live, ticks()).stop("acme", "w", NO_RUN);
+    workspaces(live, ticks()).delete("acme", "w", NO_RUN, instance -> {});
 
     var touching = new ArrayList<String>();
     for (var shell : shells) {
@@ -1388,7 +1424,8 @@ class WorkspacesTest {
     Files.writeString(files.resolve("notes.md"), "shared");
     var shell = incus(DIR_AND_ZFS, list(template("v1", INPUTS)), snapshots("v1"));
 
-    workspaces(shell, ticks(0, 1, 2, 3, 4, 5, 6, 7)).create(acme(), "fix-login", source(), files);
+    workspaces(shell, ticks(0, 1, 2, 3, 4, 5, 6, 7))
+        .create(acme(), "fix-login", source(), files, "eng");
 
     var calls = shell.invocations();
     var prepare = indexOf(shell, prepareArgv());
@@ -1439,7 +1476,7 @@ class WorkspacesTest {
             IOException.class,
             () ->
                 workspaces(shell, ticks(0, 1, 2, 3, 4, 5))
-                    .create(acme(), "fix-login", source(), tempDir));
+                    .create(acme(), "fix-login", source(), tempDir, "eng"));
 
     assertEquals(
         "Workspace 'fix-login' could not be marked whole: disk full", failure.getMessage());
@@ -1476,7 +1513,7 @@ class WorkspacesTest {
         shell.invocations().stream()
             .anyMatch(c -> c.startsWith("incus start") || c.startsWith("incus exec")));
 
-    workspaces.create(acme(), "fix-login", source(), tempDir);
+    workspaces.create(acme(), "fix-login", source(), tempDir, "eng");
 
     var deleted = indexOf(shell, List.of("incus", "delete", "acme-fix-login", "--force"));
     assertTrue(
@@ -1502,7 +1539,7 @@ class WorkspacesTest {
 
     for (Executable verb :
         List.<Executable>of(
-            () -> workspaces.create(acme(), "fix-login", source(), tempDir),
+            () -> workspaces.create(acme(), "fix-login", source(), tempDir, "eng"),
             () -> workspaces.start("acme", "fix-login"),
             () -> workspaces.running("acme", "fix-login"))) {
       assertEquals(refusal, assertThrows(IllegalStateException.class, verb).getMessage());
@@ -1547,17 +1584,23 @@ class WorkspacesTest {
         "Instances acme-backup, acme-fix carry the keys of workspace 'fix' of acme, which only"
             + " acme-fix may: nothing is done to any of them. Delete the copies, or their keys,"
             + " first.",
-        assertThrows(IllegalStateException.class, () -> workspaces.delete("acme", "fix"))
+        assertThrows(
+                IllegalStateException.class,
+                () -> workspaces.delete("acme", "fix", NO_RUN, instance -> {}))
             .getMessage());
     assertEquals(
         "Instance beta carries the keys of workspace 'x' of acme, which only acme-x may: nothing is"
             + " done to any of them. Delete the copies, or their keys, first.",
-        assertThrows(IllegalStateException.class, () -> workspaces.delete("acme", "x"))
+        assertThrows(
+                IllegalStateException.class,
+                () -> workspaces.delete("acme", "x", NO_RUN, instance -> {}))
             .getMessage());
     assertEquals(
         "Project 'acme' has no workspace 'w' on this box. List them with: sail project workspace"
             + " list acme.",
-        assertThrows(IllegalStateException.class, () -> workspaces.delete("acme", "w"))
+        assertThrows(
+                IllegalStateException.class,
+                () -> workspaces.delete("acme", "w", NO_RUN, instance -> {}))
             .getMessage());
     assertEquals(
         List.of("main", "fix"),
@@ -1578,7 +1621,7 @@ class WorkspacesTest {
     var failure =
         assertThrows(
             IllegalStateException.class,
-            () -> workspaces(shell, ticks()).create(acme(), "fix", source(), tempDir));
+            () -> workspaces(shell, ticks()).create(acme(), "fix", source(), tempDir, "eng"));
 
     assertEquals(
         "Instance acme-backup carries the keys of workspace 'fix' of acme under another name."
@@ -1623,7 +1666,7 @@ class WorkspacesTest {
     var failure =
         assertThrows(
             IllegalArgumentException.class,
-            () -> workspaces(shell, ticks()).create(acme(), "fix-", source(), tempDir));
+            () -> workspaces(shell, ticks()).create(acme(), "fix-", source(), tempDir, "eng"));
 
     assertEquals(
         "Workspace 'fix-' ends in '-', and Incus names no instance so. Give the workspace another"
@@ -1644,7 +1687,7 @@ class WorkspacesTest {
 
     var created =
         workspaces(shell, ticks(0, 1, 2, 3, 4, 5, 6, 7))
-            .create(acme(), "fix-login", source(), tempDir);
+            .create(acme(), "fix-login", source(), tempDir, "eng");
 
     assertEquals("tank", created.template().pool());
     assertTrue(indexOf(shell, copyArgv("v1")) >= 0);
@@ -1724,7 +1767,7 @@ class WorkspacesTest {
   private Object outcome(
       Box box, LongSupplier clock, String name, WorkspaceTemplate.Source source) {
     try {
-      return new Workspaces(box, box, clock, locks()).create(acme(), name, source, tempDir);
+      return new Workspaces(box, box, clock, locks()).create(acme(), name, source, tempDir, "eng");
     } catch (Exception refused) {
       return refused.getMessage();
     }

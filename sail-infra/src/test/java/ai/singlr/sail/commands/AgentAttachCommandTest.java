@@ -19,6 +19,7 @@ import ai.singlr.sail.config.TestDefinitions;
 import ai.singlr.sail.engine.AgentUnit;
 import ai.singlr.sail.engine.FileMutexTest;
 import ai.singlr.sail.engine.OperatorCommand;
+import ai.singlr.sail.engine.RunPlace;
 import ai.singlr.sail.harness.Harnesses;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.Actor;
@@ -261,7 +262,8 @@ class AgentAttachCommandTest {
                   AgentUnit.live(id).unitName()));
       var member = runs.findById(id).orElseThrow();
       var itself =
-          new DispatchGate.RunningRun(id, "chat", DispatchGate.ROOM_FULL_ROLE, List.of("app"));
+          new DispatchGate.RunningRun(
+              id, "chat", DispatchGate.ROOM_FULL_ROLE, List.of("app"), RunPlace.of("acme", null));
       var build = running("build", "build", List.of("app"));
 
       assertTrue(AgentAttachCommand.takesFromMember(member, "sess-1"));
@@ -297,7 +299,7 @@ class AgentAttachCommandTest {
   }
 
   private static DispatchGate.RunningRun running(String id, String role, List<String> repos) {
-    return new DispatchGate.RunningRun(id, "spec-" + id, role, repos);
+    return new DispatchGate.RunningRun(id, "spec-" + id, role, repos, RunPlace.of("acme", null));
   }
 
   /**

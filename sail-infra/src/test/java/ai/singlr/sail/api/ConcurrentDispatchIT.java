@@ -131,7 +131,7 @@ class ConcurrentDispatchIT extends AbstractIncusIT {
               new FdeStore(db),
               events::add,
               new WatcherSpawner(refusingShell(), (command, logPath) -> 4242L),
-              (project, config) -> "",
+              TestWorkspaces.over(shell),
               DispatchOperations.shellLauncher(shell),
               DispatchOperations.Listener.NONE,
               SessionYield.NONE);

@@ -138,7 +138,7 @@ class DispatchLaunchCancelRaceTest {
             new FdeStore(db),
             events::add,
             new WatcherSpawner(shell, (command, logPath) -> 4242L),
-            (project, config) -> "",
+            TestWorkspaces.ready(TestProjects.reading(yaml), "acme"),
             command -> {
               onArgv.set(String.join(" ", command));
               var run = runStore.running().getFirst();

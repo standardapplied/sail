@@ -407,11 +407,17 @@ public final class RunReservation {
     }
   }
 
+  /**
+   * Whether a claim of {@code specId}'s run would displace the conversation of {@code resumed},
+   * resumed in a terminal: a terminal opens in the project's own container, so only a run that
+   * lives there, a spec-less one, can be in its way.
+   */
   static boolean displaces(
       String specId, String role, List<String> repos, RunStore.RunRow resumed) {
+    var terminal = RunPlace.of(resumed.project(), null);
     var conversation =
         new DispatchGate.RunningRun(
-            resumed.id(), resumed.specId(), Lane.BUILD.wire(), resumed.repos(), resumed.place());
+            resumed.id(), resumed.specId(), Lane.BUILD.wire(), resumed.repos(), terminal);
     return DispatchGate.decide(
             RunPlace.of(resumed.project(), specId), specId, role, repos, List.of(conversation))
         .isPresent();

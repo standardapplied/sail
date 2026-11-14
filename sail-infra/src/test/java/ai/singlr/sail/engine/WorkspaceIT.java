@@ -50,6 +50,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.function.Predicate;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -67,6 +68,8 @@ import picocli.CommandLine;
  * The measured times are printed into the job log as a record, not checked: CI is not a runner.
  */
 class WorkspaceIT extends AbstractIncusIT {
+
+  private static final Predicate<String> NO_RUN = spec -> false;
 
   private static final String POOL = "sail-it-ws";
   private static final String BASE_POOL = "default";
@@ -170,8 +173,8 @@ class WorkspaceIT extends AbstractIncusIT {
   void workspacesAreClonesOfTheTemplateEachItsOwnMachineBesideTheProjectsContainer()
       throws Exception {
     var before = bystander();
-    var fix = workspaces.create(definition(), FIX, source(), null);
-    var second = workspaces.create(definition(), SECOND, source(), null);
+    var fix = workspaces.create(definition(), FIX, source(), null, "eng");
+    var second = workspaces.create(definition(), SECOND, source(), null, "eng");
     record("create " + FIX, fix.timings());
     record("create " + SECOND, second.timings());
 
@@ -262,7 +265,7 @@ class WorkspaceIT extends AbstractIncusIT {
 
   @Test
   void everyProjectVerbIsRefusedOnARealWorkspaceAndTemplateAndChangesNeither() throws Exception {
-    var fix = workspaces.create(definition(), FIX, source(), null);
+    var fix = workspaces.create(definition(), FIX, source(), null, "eng");
     var ws = fix.instance();
     var verbs =
         List.<Map.Entry<Object, List<String>>>of(
@@ -313,11 +316,11 @@ class WorkspaceIT extends AbstractIncusIT {
 
   @Test
   void aWorkspaceStopsAndResumesWithItsEditsAndAPauseListsAsFrozen() throws Exception {
-    var fix = workspaces.create(definition(), FIX, source(), null);
+    var fix = workspaces.create(definition(), FIX, source(), null, "eng");
     var edited = exec(fix.instance(), List.of("bash", "-c", "echo kept > /home/dev/edit"));
     assertTrue(edited.ok(), edited.stderr());
 
-    assertEquals(Workspaces.Change.STOPPED, workspaces.stop(PROJECT, FIX).change());
+    assertEquals(Workspaces.Change.STOPPED, workspaces.stop(PROJECT, FIX, NO_RUN).change());
     assertEquals(
         new ContainerState.Stopped(),
         new BoxInstances(shell).named(fix.instance()).orElseThrow().state());
@@ -369,7 +372,7 @@ class WorkspaceIT extends AbstractIncusIT {
       TestControlPlane.on(operations, db, socketDir, new SyncConfig(null, null, "it"));
       try (var server = new LocalApiSocket(operations, socketDir.resolve("api.sock"))) {
         server.start();
-        var fix = workspaces.create(definition(), FIX, source(), null);
+        var fix = workspaces.create(definition(), FIX, source(), null, "eng");
         new IncusDeviceManager(shell).ensureEventSocket(fix.instance(), socketDir, CONTAINER_DIR);
 
         var board =

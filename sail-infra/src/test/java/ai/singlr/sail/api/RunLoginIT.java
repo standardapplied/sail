@@ -425,7 +425,7 @@ class RunLoginIT extends AbstractIncusIT {
         new FdeStore(db),
         event -> {},
         new WatcherSpawner(refusingShell(), (command, logPath) -> 4242L),
-        (project, config) -> "",
+        TestWorkspaces.over(shell),
         DispatchOperations.shellLauncher(shell),
         DispatchOperations.Listener.NONE,
         SessionYield.NONE);

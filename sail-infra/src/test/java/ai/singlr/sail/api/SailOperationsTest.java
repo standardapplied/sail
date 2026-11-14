@@ -22,6 +22,7 @@ import ai.singlr.sail.engine.AgentUnit;
 import ai.singlr.sail.engine.ConnectEnvironment;
 import ai.singlr.sail.engine.ContainerSailSetup;
 import ai.singlr.sail.engine.ProjectSkillInstaller;
+import ai.singlr.sail.engine.RunPlace;
 import ai.singlr.sail.engine.SailSkills;
 import ai.singlr.sail.engine.ScriptedShellExecutor;
 import ai.singlr.sail.engine.ShellExec;
@@ -984,11 +985,11 @@ class SailOperationsTest {
 
     assertEquals(
         List.of(
-            new Workspaces.Row("main", "acme", "not_created", null, null, null),
-            new Workspaces.Row("w", "acme-w", "stopped", "v1", null, null)),
+            new Workspaces.Row("main", "acme", "not_created", null, null, null, null, null),
+            new Workspaces.Row("w", "acme-w", "stopped", "v1", null, null, null, null)),
         listed.workspaces());
     assertEquals(
-        List.of(new Workspaces.Row("main", "acme", "not_created", null, null, null)),
+        List.of(new Workspaces.Row("main", "acme", "not_created", null, null, null, null, null)),
         noZfs.orThrow().workspaces());
     assertError(ErrorCode.CONTAINER_ERROR, unread);
     assertError(
@@ -2583,7 +2584,9 @@ class SailOperationsTest {
 
     assertEquals(
         List.of(),
-        operations.reviewLanes().ensureCommitted("acme", List.of(), "feat/auth", "fix"),
+        operations
+            .reviewLanes()
+            .ensureCommitted(RunPlace.of("acme", "auth"), List.of(), "feat/auth", "fix"),
         "a spec with no repos has nothing to rescue");
   }
 

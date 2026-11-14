@@ -130,7 +130,7 @@ class AgentPrincipalLifecycleTest {
             new FdeStore(db),
             bus::publish,
             new WatcherSpawner(shell, (command, logPath) -> 4242L),
-            (project, config) -> "",
+            TestWorkspaces.ready(TestProjects.reading(yaml), "acme"),
             command -> {
               onArgv.set(String.join(" ", command));
               return 0;
@@ -300,7 +300,7 @@ class AgentPrincipalLifecycleTest {
             fdes,
             bus::publish,
             new WatcherSpawner(shell, (command, logPath) -> 4242L),
-            (project, config) -> "",
+            TestWorkspaces.ready(TestProjects.reading(yaml), "acme"),
             command -> {
               onArgv.set(String.join(" ", command));
               return 0;

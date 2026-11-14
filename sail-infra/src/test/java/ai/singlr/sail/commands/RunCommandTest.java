@@ -197,7 +197,7 @@ class RunCommandTest {
               new OperationHooks(
                   event -> {},
                   new WatcherSpawner(host, (spawned, logPath) -> 4242L),
-                  hooks.snapshotter(),
+                  hooks.workspaces(),
                   hooks.launcher(),
                   hooks.dispatchListener(),
                   hooks.stopListener()),

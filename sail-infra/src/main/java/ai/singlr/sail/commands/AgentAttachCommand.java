@@ -19,6 +19,7 @@ import ai.singlr.sail.engine.ContainerStateGuard;
 import ai.singlr.sail.engine.NameValidator;
 import ai.singlr.sail.engine.NodeIdentity;
 import ai.singlr.sail.engine.OperatorCommand;
+import ai.singlr.sail.engine.RunPlace;
 import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.engine.Stty;
 import ai.singlr.sail.harness.Harness;
@@ -267,11 +268,18 @@ public final class AgentAttachCommand implements Runnable {
    * The dispatch gate read from the conversation's side: resuming {@code run} puts a working agent
    * on its repos, so any live run the gate would refuse a build of that spec over those repos — a
    * build, a full room turn — refuses the resume. This is the exact mirror of the rule a
-   * reservation uses to yield a live resume session, so the two sides can never disagree.
+   * reservation uses to yield a live resume session, so the two sides can never disagree. A resumed
+   * conversation runs in the project's own container, where a terminal opens, so only the runs that
+   * live there are in its way.
    */
   static void requireNoLiveConflict(
       RunStore.RunRow run, List<DispatchGate.RunningRun> running, String project) {
-    DispatchGate.decide(run.place(), run.conversationId(), Lane.BUILD.wire(), run.repos(), running)
+    DispatchGate.decide(
+            RunPlace.of(project, null),
+            run.conversationId(),
+            Lane.BUILD.wire(),
+            run.repos(),
+            running)
         .ifPresent(
             conflict -> {
               throw new IllegalStateException(conflictRefusal(run, conflict, project));

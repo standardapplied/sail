@@ -148,7 +148,7 @@ class RoomWakeLaunchTest {
             new FdeStore(db),
             events::add,
             new WatcherSpawner(shell, (command, logPath) -> 4242L),
-            (project, config) -> "",
+            TestWorkspaces.ready(TestProjects.reading(yaml), "acme"),
             launcher,
             DispatchOperations.Listener.NONE,
             SessionYield.NONE)
@@ -177,7 +177,7 @@ class RoomWakeLaunchTest {
             new FdeStore(db),
             events::add,
             new WatcherSpawner(liveAgentShell(), (command, logPath) -> 4242L),
-            (project, config) -> "",
+            TestWorkspaces.ready(TestProjects.reading(yaml), "acme"),
             command -> {
               launched.set(command);
               return 0;
@@ -690,7 +690,7 @@ class RoomWakeLaunchTest {
             new FdeStore(db),
             events::add,
             new WatcherSpawner(shell, (command, logPath) -> 4242L),
-            (project, config) -> "",
+            TestWorkspaces.ready(TestProjects.reading(yaml), "acme"),
             command -> 0,
             DispatchOperations.Listener.NONE,
             SessionYield.NONE)
