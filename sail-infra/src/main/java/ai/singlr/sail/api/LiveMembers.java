@@ -11,7 +11,6 @@ import ai.singlr.sail.config.Engagement;
 import ai.singlr.sail.config.Guardrails;
 import ai.singlr.sail.config.ProjectDefinition;
 import ai.singlr.sail.config.Roster;
-import ai.singlr.sail.config.RunStatus;
 import ai.singlr.sail.engine.AgentPresence;
 import ai.singlr.sail.engine.AgentProcess;
 import ai.singlr.sail.engine.AgentSession;
@@ -400,21 +399,13 @@ public final class LiveMembers implements RoomWakeReactor.Live, AutoCloseable {
   }
 
   /**
-   * Whether a terminal resumed on {@code run}'s conversation is open: it holds that session, as a
-   * host session of the project's container or as the live hold of a spec's workspace a terminal
-   * resumes it in ({@link HostDispatching#holdForTerminal}). A host that could not be asked has not
-   * said the conversation is free, and a second process on a held one would corrupt it, so that is
-   * a refusal to start, never a no.
+   * Whether a terminal resumed on {@code run}'s conversation in a host session is open: it holds
+   * that session. (A terminal on a spec's conversation holds the spec's workspace as a full chat
+   * turn does, so the gate keeps every member of the spec out while it lives.) A host that could
+   * not be asked has not said the conversation is free, and a second process on a held one would
+   * corrupt it, so that is a refusal to start, never a no.
    */
   private boolean terminalHolds(RunStore.RunRow run) {
-    if (runStore.listForProject(run.project()).stream()
-        .anyMatch(
-            held ->
-                HostLanes.TERMINAL.equals(held.sessionSource())
-                    && !RunStatus.isTerminal(held.status())
-                    && run.sessionId().equals(held.sessionId()))) {
-      return true;
-    }
     try {
       return terminals.live(SessionYield.resumeSession(run.id()));
     } catch (IOException unreachable) {
