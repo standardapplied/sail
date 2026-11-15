@@ -93,14 +93,14 @@ class AgentAttachCommandTest {
   @Test
   void aRecordedSessionResumesExactlyByIdForClaudeCode() {
     var cmd = AgentAttachCommand.buildResumeCommand(Harnesses.of("claude-code"), "abc-123");
-    assertEquals(List.of("bash", "-lc", "cd ~/workspace && claude --resume abc-123"), cmd);
+    assertEquals(List.of("bash", "-lc", "cd ~/workspace && exec claude --resume abc-123"), cmd);
   }
 
   @Test
   void aRecordedSessionResumesExactlyByIdForCodex() {
     var cmd = AgentAttachCommand.buildResumeCommand(Harnesses.of("codex"), "abc-123");
     assertEquals(
-        List.of("bash", "-lc", "cd ~/workspace && codex resume abc-123"),
+        List.of("bash", "-lc", "cd ~/workspace && exec codex resume abc-123"),
         cmd,
         "codex resumes by id via 'codex resume <SESSION_ID>' — verified against current docs");
   }
@@ -108,11 +108,11 @@ class AgentAttachCommandTest {
   @Test
   void aNullSessionAttachesFreshNeverAnInteractivePicker() {
     assertEquals(
-        List.of("bash", "-lc", "cd ~/workspace && claude"),
+        List.of("bash", "-lc", "cd ~/workspace && exec claude"),
         AgentAttachCommand.buildResumeCommand(Harnesses.of("claude-code"), null),
         "no recorded session means a fresh conversation, not '--resume' picker roulette");
     assertEquals(
-        List.of("bash", "-lc", "cd ~/workspace && codex"),
+        List.of("bash", "-lc", "cd ~/workspace && exec codex"),
         AgentAttachCommand.buildResumeCommand(Harnesses.of("codex"), null));
   }
 
@@ -203,7 +203,7 @@ class AgentAttachCommandTest {
   @Test
   void aLiveLaneStillRefusesThroughTheGate() {
     var completed = row("r1", "completed", List.of("app"));
-    var wholeContainer = running("adhoc", "adhoc", List.of());
+    var wholeContainer = runningIn("adhoc", "adhoc", List.of());
     assertTrue(
         assertThrows(
                 IllegalStateException.class,
@@ -214,9 +214,9 @@ class AgentAttachCommandTest {
                         "acme",
                         OperatorCommand.PLAIN))
             .getMessage()
-            .contains("live in container 'acme'"));
+            .contains("live in container 'acme-spec-r1'"));
 
-    var fullTurn = running("turn", DispatchGate.ROOM_FULL_ROLE, List.of("app"));
+    var fullTurn = runningIn("turn", DispatchGate.ROOM_FULL_ROLE, List.of("app"));
     var refused =
         assertThrows(
             IllegalStateException.class,
@@ -227,8 +227,8 @@ class AgentAttachCommandTest {
         refused.getMessage().startsWith("Run turn (room-full) is live in repo(s) [app]"),
         refused.getMessage());
 
-    var elsewhere = running("other", "build", List.of("web"));
-    var wake = running("wake", DispatchGate.ROOM_ROLE, List.of());
+    var elsewhere = runningIn("other", "build", List.of("web"));
+    var wake = runningIn("wake", DispatchGate.ROOM_ROLE, List.of());
     assertDoesNotThrow(
         () ->
             AgentAttachCommand.requireStillLatestAndIdle(
@@ -301,6 +301,12 @@ class AgentAttachCommandTest {
   private static AgentAttachCommand.Latest latest(
       RunStore.RunRow run, DispatchGate.RunningRun... running) {
     return new AgentAttachCommand.Latest(run, "", List.of(running));
+  }
+
+  /** A run live in the workspace of spec {@code spec-r1}, the planned run's. */
+  private static DispatchGate.RunningRun runningIn(String id, String role, List<String> repos) {
+    return new DispatchGate.RunningRun(
+        id, "spec-" + id, role, repos, RunPlace.of("acme", "spec-r1"));
   }
 
   private static DispatchGate.RunningRun running(String id, String role, List<String> repos) {
@@ -459,10 +465,14 @@ class AgentAttachCommandTest {
     var adhoc = adhocRow("r2");
 
     assertEquals(
-        Optional.of(AgentAttachCommand.buildIncusExecWithTty("acme-spec-r1", command)),
+        Optional.of(
+            AgentAttachCommand.buildIncusExecWithTty(
+                "acme-spec-r1", AgentAttachCommand.inTheWorkspace(command))),
         AgentAttachCommand.direct(specRun, "acme", "abc", command));
     assertEquals(
-        Optional.of(AgentAttachCommand.buildIncusExecWithTty("acme-spec-r1", command)),
+        Optional.of(
+            AgentAttachCommand.buildIncusExecWithTty(
+                "acme-spec-r1", AgentAttachCommand.inTheWorkspace(command))),
         AgentAttachCommand.direct(specRun, "acme", null, command));
     assertEquals(
         Optional.of(AgentAttachCommand.buildIncusExecWithTty("acme", command)),
@@ -471,24 +481,25 @@ class AgentAttachCommandTest {
   }
 
   /**
-   * A held terminal's process is the hold's, by the hold's pid file, so the hold is live exactly
-   * while the conversation is, and the missed-stop sweep ends a hold whose terminal died
-   * unobserved.
+   * A terminal resuming a spec's conversation writes its process into its workspace's terminal pid
+   * file before it execs the harness, so a claim of the workspace ends it by that file and a live
+   * member sees it; the dry run prints this very command.
    */
   @Test
-  void aHeldTerminalRecordsItsProcessAsTheHoldsThenResumesTheConversation() {
-    var hold = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+  void aSpecsTerminalNamesItsProcessForTheWorkspaceThenExecsTheConversation() {
+    var command = AgentAttachCommand.buildResumeCommand(Harnesses.of("claude-code"), "abc");
 
     assertEquals(
         List.of(
             "bash",
             "-lc",
-            "mkdir -p /home/dev/.sail/runs/"
-                + hold
-                + " && echo $$ > "
-                + AgentUnit.forRun(hold).pidPath()
-                + " && cd ~/workspace && exec claude --resume abc"),
-        AgentAttachCommand.held(hold, Harnesses.of("claude-code"), "abc"));
+            "echo $$ > /home/dev/.sail/terminal.pid && cd ~/workspace && exec claude --resume abc"),
+        AgentAttachCommand.inTheWorkspace(command));
+    assertEquals(
+        Optional.of(
+            AgentAttachCommand.buildIncusExecWithTty(
+                "acme-spec-r1", AgentAttachCommand.inTheWorkspace(command))),
+        AgentAttachCommand.direct(row("r1", "completed"), "acme", "abc", command));
   }
 
   /** A run of a spec's workspace is in the way of resuming another of that spec, and no other. */
@@ -519,7 +530,7 @@ class AgentAttachCommandTest {
             "spec-x");
     assertEquals(
         "sail session new resume-1 --project acme --room spec-x --command bash -lc"
-            + " 'cd ~/workspace && claude --resume abc'\nsail session attach resume-1",
+            + " 'cd ~/workspace && exec claude --resume abc'\nsail session attach resume-1",
         plan.asSessionCommands());
     var unbound = new AgentAttachCommand.ResumePlan("resume-1", List.of("codex"), "acme", "");
     assertFalse(unbound.asSessionCommands().contains("--room"));

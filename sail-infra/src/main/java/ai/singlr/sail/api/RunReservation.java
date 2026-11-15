@@ -11,6 +11,7 @@ import ai.singlr.sail.config.Lane;
 import ai.singlr.sail.config.ProjectDefinition;
 import ai.singlr.sail.config.RunStatus;
 import ai.singlr.sail.engine.AgentPresence;
+import ai.singlr.sail.engine.AgentSession;
 import ai.singlr.sail.engine.AgentUnit;
 import ai.singlr.sail.engine.ContainerExec;
 import ai.singlr.sail.engine.LaunchEnv;
@@ -381,12 +382,19 @@ public final class RunReservation {
   /**
    * Ends the resumed conversations this claim displaces: a run's resume session is judged as if the
    * run were still running a working lane over its repos, so a read-only room wake displaces
-   * nothing while a build or full turn over an overlapping repo (or the same spec) ends it.
-   * Best-effort after the claim, like pruning: the reservation stands either way, and a host that
-   * refuses or cannot be reached is a warning, never a failed launch.
+   * nothing while a build or full turn over an overlapping repo (or the same spec) ends it. A claim
+   * of a spec's workspace by any lane but the read-only room's ends the terminal resumed in it
+   * ({@link AgentUnit#TERMINAL}): its conversation is resumable, and a person's open terminal never
+   * holds the loop up. Best-effort after the claim, like pruning: the reservation stands either
+   * way, and a host or container that refuses or cannot be reached is a warning, never a failed
+   * launch.
    */
   private void yieldDisplacedSessions(
       String runId, String project, String specId, String role, List<String> repos) {
+    var place = RunPlace.of(project, specId);
+    if (place instanceof RunPlace.SpecWorkspace && !DispatchGate.ROOM_ROLE.equals(role)) {
+      endTerminal(place);
+    }
     var target = Objects.requireNonNullElse(repos, List.<String>of());
     var displaced =
         runStore.listForProject(project).stream()
@@ -405,6 +413,22 @@ public final class RunReservation {
       System.err.println(
           "  [api] Warning: could not yield terminal sessions "
               + displaced
+              + ": "
+              + e.getMessage());
+    }
+  }
+
+  /** Ends the terminal resumed in {@code place}'s workspace, when one is there. */
+  private void endTerminal(RunPlace place) {
+    try {
+      new AgentSession(shell).killAgent(place.instance(), AgentUnit.TERMINAL);
+    } catch (Exception e) {
+      if (e instanceof InterruptedException) {
+        Thread.currentThread().interrupt();
+      }
+      System.err.println(
+          "  [api] Warning: could not end the terminal in "
+              + place.instance()
               + ": "
               + e.getMessage());
     }

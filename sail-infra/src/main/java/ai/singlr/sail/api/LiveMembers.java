@@ -46,6 +46,7 @@ import java.util.OptionalInt;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.TimeoutException;
 import java.util.function.Supplier;
 
 /**
@@ -399,22 +400,30 @@ public final class LiveMembers implements RoomWakeReactor.Live, AutoCloseable {
   }
 
   /**
-   * Whether a terminal resumed on {@code run}'s conversation in a host session is open: it holds
-   * that session. (A terminal on a spec's conversation holds the spec's workspace as a full chat
-   * turn does, so the gate keeps every member of the spec out while it lives.) A host that could
-   * not be asked has not said the conversation is free, and a second process on a held one would
-   * corrupt it, so that is a refusal to start, never a no.
+   * Whether a terminal resumed on {@code run}'s conversation is open: a host session of the
+   * project's container, or the terminal of a spec's workspace ({@link AgentUnit#TERMINAL}), which
+   * holds that session. A host or container that could not be asked has not said the conversation
+   * is free, and a second process on a held one would corrupt it, so that is a refusal to start,
+   * never a no.
    */
   private boolean terminalHolds(RunStore.RunRow run) {
     try {
+      if (run.place() instanceof RunPlace.SpecWorkspace workspace) {
+        return !(new AgentPresence(shell).of(workspace, AgentUnit.TERMINAL)
+            instanceof AgentSession.Presence.Gone);
+      }
       return terminals.live(SessionYield.resumeSession(run.id()));
-    } catch (IOException unreachable) {
+    } catch (IOException | TimeoutException | InterruptedException unreachable) {
+      if (unreachable instanceof InterruptedException) {
+        Thread.currentThread().interrupt();
+      }
       throw new ApiException(
           ErrorCode.COMMAND_FAILED,
-          "Could not ask the session host whether a terminal holds the conversation of run "
+          "Could not ask whether a terminal holds the conversation of run "
               + run.id()
               + ", so no process was started over it.",
-          "Check the sail-pty-host service on this box; the room's next message tries again.",
+          "Check the sail-pty-host service and the run's container; the room's next message tries"
+              + " again.",
           unreachable);
     }
   }

@@ -48,19 +48,6 @@ public interface HostDispatching {
   boolean endLiveMember(String runId, String why);
 
   /**
-   * Holds the place spec run {@code run} lived in for a terminal resuming its conversation there,
-   * on the box whose handle is {@code node}: a run row of the full chat lane over the whole place,
-   * reserved through the dispatch gate and carrying the conversation's session, so that a dispatch,
-   * a reviewer, a fix and a room turn of the spec wait on it as on any holder (and are resumed by
-   * its stop), and a live member never starts a second process on that session. Refused, naming the
-   * run that holds it, while another run of the spec lives there. Returns the hold's run id.
-   */
-  String holdForTerminal(RunStore.RunRow run, String node);
-
-  /** Ends hold {@code holdId} once its terminal's process exited with {@code exitCode}. */
-  void releaseTerminal(String holdId, Integer exitCode);
-
-  /**
    * The newest run of {@code project} the box whose handle is {@code node} executed, in any lane,
    * when whoever reads ({@link Actor#reader}) may operate it — read its log, attach to it — as
    * every log door admits it ({@link LogAdmission}): a project outside its scope is not in the

@@ -180,6 +180,21 @@ class ReviewLanesTest {
         loop.roomLines("auth", "The build ended with no exit"));
   }
 
+  /**
+   * B1, main's rule by place: a person's terminal on the spec's conversation in its workspace is
+   * ended by the reviewer's claim of the workspace, never waited on, so the loop goes on.
+   */
+  @Test
+  void aReviewersClaimOfTheWorkspaceEndsATerminalOpenOnTheSpecsConversation() {
+    loop = ReviewLoop.staged(tempDir, "codex", "claude-code");
+    loop.container.terminalOpened();
+
+    loop.built("auth");
+
+    assertEquals("review", loop.onlyLive().role(), "the reviewer runs");
+    assertFalse(loop.container.terminalOpen(), "the terminal it displaced is ended");
+  }
+
   @Test
   void aFixRefusedForWantOfALoginSaysOnlyThatAndIsLaunchedOnceTheLoginIsStored() {
     loop = ReviewLoop.staged(tempDir, "codex", "claude-code");

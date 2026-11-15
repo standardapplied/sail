@@ -31,6 +31,18 @@ public record AgentUnit(
   /** Root of the per-run directories: {@code ~/.sail/runs/<runId>/}. */
   public static final String RUNS_DIR = DIR + "/runs";
 
+  /**
+   * A terminal resuming a spec's conversation in its workspace, which is no run: one per workspace,
+   * its process named in {@code ~/.sail/terminal.pid}, which a claim of the workspace kills it by.
+   */
+  public static final AgentUnit TERMINAL =
+      new AgentUnit(
+          "",
+          DIR + "/terminal.log",
+          DIR + "/terminal.pid",
+          DIR + "/terminal.json",
+          DIR + "/terminal.task");
+
   /** Prefix of every run-scoped build unit: {@code sail-agent-<runId>}. */
   public static final String RUN_UNIT_PREFIX = "sail-agent-";
 

@@ -315,7 +315,7 @@ class LiveMemberDisplacementTest {
     var open = new ArrayList<String>();
     var ended = new ArrayList<String>();
     room.terminals(host(open, ended));
-    var process = idleMember();
+    var process = idleMember(LOUNGE);
     process.onClose(() -> process.exits(0));
 
     assertTrue(
@@ -328,39 +328,40 @@ class LiveMemberDisplacementTest {
     assertEquals("displaced by a terminal", room.stopOf(process.runId).data().get("reason"));
     assertEquals("sess-1", room.run(process.runId).sessionId(), "the session the terminal resumes");
 
-    var during = room.says(SPEC, "is the terminal still open?");
+    var during = room.says(LOUNGE, "is the terminal still open?");
     assertEquals(1, room.processes.starts.size(), "one process on a conversation, never two");
     assertEquals(List.of(), ended, "and the terminal is left alone");
 
     open.clear();
-    var after = room.says(SPEC, "and now?");
+    var after = room.says(LOUNGE, "and now?");
 
     assertEquals(2, room.processes.starts.size());
     assertEquals(
         LiveRoom.invocation("--dangerously-skip-permissions", "--resume", "sess-1"),
         room.processes.starts.getLast().command());
-    assertEquals(List.of(room.promptOf(SPEC, during, after)), room.processes.latest().written);
+    assertEquals(List.of(room.promptOf(LOUNGE, during, after)), room.processes.latest().written);
   }
 
   /**
-   * B1: a terminal resuming a read-only member's conversation in the spec's workspace holds it as a
-   * host session holds one in the project's container: the room's next message starts no second
-   * process on that session, and once the terminal ends the member resumes it.
+   * B1: a terminal resuming a member's conversation in the spec's workspace holds it as a host
+   * session holds one in the project's container: the room's next message starts no second process
+   * on that session, and once the terminal ends the member resumes it.
    */
   @Test
-  void aTerminalHoldingTheSpecsWorkspaceOnTheMembersSessionStartsNoSecondProcessUntilItEnds() {
+  void aTerminalInTheSpecsWorkspaceOnTheMembersSessionStartsNoSecondProcessUntilItEnds() {
     var process = room.prompted(SPEC, "read-only", "first");
     room.says(process, Lines.init("sess-1"), Lines.delta("One"), Lines.result("One"));
     process.onClose(() -> process.exits(0));
     room.sail.dispatching().endLiveMember(process.runId, "displaced by a terminal");
     room.awaitStopped(process);
-    var hold = room.sail.dispatching().holdForTerminal(room.run(process.runId), HANDLE);
+    room.container.terminalOpened();
 
     room.says(SPEC, "is the terminal still open?");
 
     assertEquals(1, room.processes.starts.size(), "one process on a conversation, never two");
+    assertTrue(room.container.terminalOpen(), "and the terminal is left alone");
 
-    room.sail.dispatching().releaseTerminal(hold, 0);
+    room.container.terminalClosed();
     room.says(SPEC, "and now?");
 
     assertEquals(2, room.processes.starts.size());
@@ -373,7 +374,7 @@ class LiveMemberDisplacementTest {
   void aTerminalThatOpensWhileTheMemberClaimsStillFindsNoSecondProcess() {
     var open = new ArrayList<String>();
     var asked = new AtomicReference<>(0);
-    var process = idleMember();
+    var process = idleMember(LOUNGE);
     process.onClose(() -> process.exits(0));
     room.sail.dispatching().endLiveMember(process.runId, "displaced by a terminal");
     room.awaitStopped(process);
@@ -394,13 +395,13 @@ class LiveMemberDisplacementTest {
           }
         });
 
-    room.says(SPEC, "the attach lands between the member's two looks");
+    room.says(LOUNGE, "the attach lands between the member's two looks");
 
     assertEquals(2, asked.get(), "once before the claim and once after it landed");
     assertEquals(1, room.processes.starts.size());
     assertEquals(
         List.of("failed", "stopped"),
-        room.runs.listForSpec(SPEC).stream().map(RunStore.RunRow::status).toList(),
+        room.runs.listForRoom(LOUNGE).stream().map(RunStore.RunRow::status).toList(),
         "the claim it had made is given back");
     assertNoLaunchFileOfTheFailedRun();
   }
@@ -408,7 +409,7 @@ class LiveMemberDisplacementTest {
   @Test
   void aTerminalThatOpensWhileTheMemberStagesLeavesNoLaunchFileBehind() {
     var asked = new AtomicReference<>(0);
-    var process = idleMember();
+    var process = idleMember(LOUNGE);
     process.onClose(() -> process.exits(0));
     room.sail.dispatching().endLiveMember(process.runId, "displaced by a terminal");
     room.awaitStopped(process);
@@ -429,7 +430,7 @@ class LiveMemberDisplacementTest {
           }
         });
 
-    room.says(SPEC, "the attach lands while the launch file is pushed");
+    room.says(LOUNGE, "the attach lands while the launch file is pushed");
 
     assertEquals(3, asked.get(), "before the claim, before staging, and after staging");
     assertEquals(1, room.processes.starts.size());
@@ -438,7 +439,7 @@ class LiveMemberDisplacementTest {
 
   private void assertNoLaunchFileOfTheFailedRun() {
     var failed =
-        room.runs.listForSpec(SPEC).stream()
+        room.runs.listForRoom(LOUNGE).stream()
             .filter(run -> "failed".equals(run.status()))
             .findFirst()
             .orElseThrow();
@@ -449,7 +450,7 @@ class LiveMemberDisplacementTest {
 
   @Test
   void aSessionHostThatCannotBeAskedHasNotSaidTheConversationIsFree() {
-    var process = idleMember();
+    var process = idleMember(LOUNGE);
     process.onClose(() -> process.exits(0));
     room.sail.dispatching().endLiveMember(process.runId, "displaced by a terminal");
     room.awaitStopped(process);
@@ -474,46 +475,47 @@ class LiveMemberDisplacementTest {
           }
         });
 
-    var unanswered = room.says(SPEC, "anyone?");
+    var unanswered = room.says(LOUNGE, "anyone?");
 
     assertEquals(1, room.processes.starts.size(), "no answer is not a no: nothing is started");
     assertEquals(
         List.of("stopped"),
-        room.runs.listForSpec(SPEC).stream().map(RunStore.RunRow::status).toList(),
+        room.runs.listForRoom(LOUNGE).stream().map(RunStore.RunRow::status).toList(),
         "and nothing was claimed for it");
     asked.set(0);
-    var refused = assertThrows(ApiException.class, () -> room.live.deliver(SPEC, HANDLE));
+    var refused = assertThrows(ApiException.class, () -> room.live.deliver(LOUNGE, HANDLE));
     assertEquals(ErrorCode.COMMAND_FAILED, refused.failure().errorCode());
     assertEquals(
-        "Could not ask the session host whether a terminal holds the conversation of run "
+        "Could not ask whether a terminal holds the conversation of run "
             + process.runId
             + ", so no process was started over it.",
         refused.getMessage());
     assertEquals(
-        "Check the sail-pty-host service on this box; the room's next message tries again.",
+        "Check the sail-pty-host service and the run's container; the room's next message tries"
+            + " again.",
         refused.failure().remedy().plain());
     assertEquals("the host refused the dispatch credential", refused.getCause().getMessage());
 
     asked.set(0);
     refusedAt.set(2);
-    var between = room.says(SPEC, "the host goes quiet between the member's two looks");
+    var between = room.says(LOUNGE, "the host goes quiet between the member's two looks");
 
     assertEquals(1, room.processes.starts.size());
     assertEquals(
         List.of("failed", "stopped"),
-        room.runs.listForSpec(SPEC).stream().map(RunStore.RunRow::status).toList(),
+        room.runs.listForRoom(LOUNGE).stream().map(RunStore.RunRow::status).toList(),
         "the claim made between the two looks is given back");
 
     asked.set(0);
     refusedAt.set(0);
-    var answered = room.says(SPEC, "and now?");
+    var answered = room.says(LOUNGE, "and now?");
 
     assertEquals(2, room.processes.starts.size(), "a host that answers no frees the conversation");
     assertEquals(
         LiveRoom.invocation("--dangerously-skip-permissions", "--resume", "sess-1"),
         room.processes.starts.getLast().command());
     assertEquals(
-        List.of(room.promptOf(SPEC, unanswered, between, answered)),
+        List.of(room.promptOf(LOUNGE, unanswered, between, answered)),
         room.processes.latest().written,
         "what was posted while the host could not be asked was never lost");
   }

@@ -13,7 +13,6 @@ import ai.singlr.sail.config.ProjectDefinition;
 import ai.singlr.sail.config.Spec;
 import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.engine.AgentSession;
-import ai.singlr.sail.engine.AgentUnit;
 import ai.singlr.sail.engine.BoxInstances;
 import ai.singlr.sail.engine.DemoSeeder;
 import ai.singlr.sail.engine.HostAccess;
@@ -55,9 +54,6 @@ import java.util.function.Supplier;
 /** The host facets as thin adapters over the stores and the shared executors. */
 final class HostLanes {
   private HostLanes() {}
-
-  /** The session source of a run that holds a spec's place for a terminal on its conversation. */
-  static final String TERMINAL = "terminal";
 
   record Dispatching(
       DispatchOperations dispatchOps,
@@ -116,43 +112,6 @@ final class HostLanes {
     @Override
     public AgentSession.SessionInfo projectSession(String project, String node) throws Exception {
       return StopOperations.resolveSession(shell, runs, project, node);
-    }
-
-    @Override
-    public String holdForTerminal(RunStore.RunRow run, String node) {
-      var holdId = DateTimeUtils.newId().toString();
-      var reserved =
-          runs.reserveDispatch(
-              holdId,
-              run.project(),
-              run.specId(),
-              node,
-              DispatchGate.ROOM_FULL_ROLE,
-              List.of(),
-              run.agent(),
-              run.branch(),
-              "A terminal resuming the conversation of run " + run.id() + ".",
-              AgentUnit.forRun(holdId).logPath(),
-              "");
-      if (reserved instanceof RunStore.Reservation.Conflicted(var conflict)) {
-        throw new IllegalStateException(
-            "Run "
-                + conflict.run().runId()
-                + " ("
-                + conflict.run().role()
-                + ") is live in "
-                + run.place().instance()
-                + ", so the conversation of run "
-                + run.id()
-                + " is not resumed beside it. Wait for it to finish, or stop it first.");
-      }
-      runs.recordSession(holdId, run.sessionId(), TERMINAL, null);
-      return holdId;
-    }
-
-    @Override
-    public void releaseTerminal(String holdId, Integer exitCode) {
-      runs.finish(holdId, "running", "completed", exitCode, null);
     }
 
     @Override

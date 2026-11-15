@@ -81,6 +81,27 @@ final class FakeContainer implements ShellExec {
     this.project = project;
   }
 
+  /** A person's terminal opened on a spec's conversation: its pid file names a live process. */
+  void terminalOpened() {
+    var terminal = new Agent(pids.incrementAndGet(), Map.of());
+    agents.put("terminal", terminal);
+    files.put(AgentUnit.TERMINAL.pidPath(), String.valueOf(terminal.pid));
+  }
+
+  /** Whether the terminal opened on a spec's conversation still runs. */
+  boolean terminalOpen() {
+    var terminal = agents.get("terminal");
+    return terminal != null && terminal.alive;
+  }
+
+  /** The person closed the terminal. */
+  void terminalClosed() {
+    var terminal = agents.get("terminal");
+    if (terminal != null) {
+      terminal.alive = false;
+    }
+  }
+
   /** The agent of {@code runId} started: its unit is active and its pid file names it. */
   void started(String runId) {
     var agent = new Agent(pids.incrementAndGet(), readLaunchEnv(runId));
