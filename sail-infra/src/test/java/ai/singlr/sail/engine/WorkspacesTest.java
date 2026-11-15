@@ -2146,6 +2146,44 @@ class WorkspacesTest {
     assertFalse(copy.contains("user.sail.owner"), copy);
   }
 
+  /**
+   * High 2: a spec's workspace a create left half-made (its dispatch killed: {@code creating} set,
+   * no ready mark) is never entered by a lane: the next entry deletes it and makes it again.
+   */
+  @Test
+  void aHalfMadeWorkspaceOfASpecIsDeletedAndMadeAgainNeverEntered() throws Exception {
+    var shell =
+        incus(
+            DIR_AND_ZFS,
+            list(
+                template("v1", INPUTS),
+                instance(
+                    "acme-fix-login",
+                    "Running",
+                    "tank",
+                    "\"user.sail.project\": \"acme\", \"user.sail.workspace\": \"fix-login\","
+                        + " \"user.sail.spec\": \"fix-login\", \"user.sail.creating\": \"1\"")),
+            snapshots("v1"));
+    var workspaces = workspaces(shell, ticks(0, 1, 2, 3, 4, 5, 6, 7));
+
+    var check = workspaces.checkSpec(FIX, INPUTS, name -> false);
+    var entered =
+        workspaces.enterSpec(check, acme(), "uday", tempDir.resolve("no-files"), whole -> {});
+
+    assertFalse(check.whole());
+    assertInstanceOf(Workspaces.Made.class, entered);
+    var delete = shell.invocations().indexOf("incus delete acme-fix-login --force");
+    var copy =
+        shell
+            .invocations()
+            .indexOf(
+                shell.invocations().stream()
+                    .filter(c -> c.startsWith("incus copy acme--tmpl/v1 acme-fix-login"))
+                    .findFirst()
+                    .orElseThrow());
+    assertTrue(delete >= 0 && delete < copy, String.join("\n", shell.invocations()));
+  }
+
   /** A shell that answers as {@code before} until {@code built} is set, then as {@code after}. */
   private static ShellExec switching(AtomicBoolean built, ShellExec before, ShellExec after) {
     return new ShellExec() {
