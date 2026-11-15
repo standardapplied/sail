@@ -2,8 +2,8 @@ import Foundation
 
 /// A control plane's address as Sail may use it: `https://` to any name, or plain `http://` only to
 /// an IP literal in a private range (loopback, RFC 1918, 100.64.0.0/10, `::1`, `fc00::/7`), which is
-/// for an encrypting overlay. Nothing but a scheme, a host and a port: no user, path, query or
-/// fragment. Decided from the text alone, before any byte is sent and with no name looked up.
+/// for an encrypting overlay. Nothing but a scheme, a host and a port from 1 to 65535: no user,
+/// path, query or fragment. Decided from the text alone, before any byte is sent and with no name looked up.
 public struct ControlPlane: Hashable, Sendable, CustomStringConvertible {
     /// `scheme://host[:port]`, the host lowercased and an IPv6 host in brackets.
     public let url: URL
@@ -12,7 +12,8 @@ public struct ControlPlane: Hashable, Sendable, CustomStringConvertible {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let parts = URLComponents(string: trimmed), let scheme = parts.scheme?.lowercased(), ["http", "https"].contains(scheme),
               let raw = parts.host, !raw.isEmpty, parts.user == nil, parts.password == nil, parts.query == nil,
-              parts.fragment == nil, ["", "/"].contains(parts.path)
+              parts.fragment == nil, ["", "/"].contains(parts.path),
+              parts.port.map({ (1 ... 65535).contains($0) }) ?? true
         else {
             throw AccountRefusal(.notAnAddress)
         }

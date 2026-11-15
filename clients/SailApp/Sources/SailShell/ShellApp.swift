@@ -8,8 +8,9 @@ import SailTerminalView
 /// selects: "This Mac" (the local terminal) or the account. The window's chrome is drawn from the
 /// look: a transparent title bar over a full-size content view, so the rail's tint and the pane's
 /// surface run to the top edge under the platform's own window buttons, which keep dragging and
-/// double-click to zoom. It asks the control plane who it is signed in as at launch and each time
-/// the app is activated.
+/// double-click to zoom. Text being edited is selected and its caret drawn in the look's accent, by a
+/// field editor of the window's own. The look follows the appearance while the app runs. It asks the
+/// control plane who it is signed in as at launch and each time the app is activated.
 @MainActor
 public final class ShellApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
     public static let title = "Sail"
@@ -19,10 +20,12 @@ public final class ShellApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
     public let rail: Rail
     public let account: AccountPane
     public let thisMac: TerminalPane
-    public let look: Look
+    public private(set) var look: Look
 
     private let root = NSView()
     private let content = NSView()
+    private let fieldEditor = NSTextView()
+    private var appearanceWatch: NSKeyValueObservation?
 
     /// The app from its bundle: the fonts in `Contents/Resources/Fonts`, the host in
     /// `Contents/Helpers/sail`, the look the appearance names. `passkeys` makes the authenticator,
@@ -34,8 +37,12 @@ public final class ShellApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         let helper = bundle.bundleURL.appending(path: "Contents/Helpers/sail").path
         try self.init(
             fonts: resources.appending(path: "Fonts"), helper: FileManager.default.isExecutableFile(atPath: helper) ? helper : nil,
-            look: NSApplication.shared.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .aqua ? .light : .dark, passkeys: passkeys
+            look: Self.look(of: NSApplication.shared.effectiveAppearance), passkeys: passkeys
         )
+    }
+
+    static func look(of appearance: NSAppearance) -> Look {
+        appearance.bestMatch(from: [.darkAqua, .aqua]) == .aqua ? .light : .dark
     }
 
     init(
@@ -66,6 +73,9 @@ public final class ShellApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     public func applicationDidFinishLaunching(_: Notification) {
         NSApp.mainMenu = menu()
+        appearanceWatch = NSApp.observe(\.effectiveAppearance) { [weak self] application, _ in
+            MainActor.assumeIsolated { self?.apply(Self.look(of: application.effectiveAppearance)) }
+        }
         window.center()
         window.makeKeyAndOrderFront(nil)
         select(UserDefaults.standard.string(forKey: Self.paneKey).flatMap { Rail.Item(rawValue: $0) } ?? .account)
@@ -94,7 +104,7 @@ public final class ShellApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
             content.addSubview(pane)
         }
         rail.show(item)
-        root.layer?.backgroundColor = NSColor(item == .thisMac ? look.palette.background : look.canvas).cgColor
+        paintStrip()
         UserDefaults.standard.set(item.rawValue, forKey: Self.paneKey)
         window.title = Self.title
         if item == .thisMac {
@@ -102,6 +112,27 @@ public final class ShellApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         } else {
             window.makeFirstResponder(account.address)
         }
+    }
+
+    /// Draws the window in `look`: the chrome, the rail, the panes and the field editor.
+    func apply(_ look: Look) {
+        self.look = look
+        window.backgroundColor = NSColor(look.canvas)
+        rail.look = look
+        account.look = look
+        thisMac.look = look
+        paintStrip()
+        fieldEditor.selectedTextAttributes = [.backgroundColor: NSColor(look.fillSelected), .foregroundColor: NSColor(look.text)]
+        fieldEditor.insertionPointColor = NSColor(look.accent)
+    }
+
+    /// The strip under the title bar beside the rail: the selected pane's surface.
+    private func paintStrip() {
+        root.layer?.backgroundColor = NSColor(rail.selected == .thisMac ? thisMac.palette.background : look.canvas).cgColor
+    }
+
+    public func windowWillReturnFieldEditor(_: NSWindow, to _: Any?) -> Any? {
+        fieldEditor
     }
 
     /// Runs the app, `configure` given it before it launches; a bundle missing its fonts or host
@@ -133,11 +164,12 @@ public final class ShellApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         window.contentMinSize = NSSize(width: 480, height: 600)
         window.delegate = self
         window.isReleasedWhenClosed = false
-        window.backgroundColor = NSColor(look.canvas)
+        fieldEditor.isFieldEditor = true
+        apply(look)
         window.titlebarAppearsTransparent = true
         window.titleVisibility = .hidden
         root.wantsLayer = true
-        root.layer?.backgroundColor = NSColor(look.canvas).cgColor
+        paintStrip()
         rail.translatesAutoresizingMaskIntoConstraints = false
         content.translatesAutoresizingMaskIntoConstraints = false
         root.addSubview(rail)

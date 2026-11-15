@@ -26,6 +26,7 @@ final class Driver {
     private var measures: [Measure] = []
     private var bench: [String: Double] = [:]
     private var started = false
+    private var presentedOnce = false
     private let mainThread = Heartbeat.onTheMainThread()
     private let ownThread = Heartbeat.onItsOwnThread()
 
@@ -98,7 +99,7 @@ final class Driver {
             if let only = step.signed, only != signed {
                 let build = signed ? "signed" : "unsigned"
                 results.append(Result(index: index, name: name, ok: true, skipped: true, seconds: 0, detail: "skipped: this build is \(build)"))
-                print("drive \(index) \(name): skipped on \(signed ? "a signed" : "an unsigned") build")
+                Self.say("drive \(index) \(name): skipped on \(signed ? "a signed" : "an unsigned") build")
                 continue
             }
             var (ok, detail) = await perform(step, name: name)
@@ -117,7 +118,7 @@ final class Driver {
             let seconds = (ContinuousClock.now - began) / .seconds(1)
             results.append(Result(index: index, name: name, ok: ok, skipped: false, seconds: seconds, detail: detail))
             save(index: index, name: name)
-            print("drive \(index) \(name): \(ok ? "ok" : "FAILED") in \(String(format: "%.2f", seconds)) s \(detail)")
+            Self.say("drive \(index) \(name): \(ok ? "ok" : "FAILED") in \(String(format: "%.2f", seconds)) s \(detail)")
             if !ok { break }
         }
         let passed = results.count == steps.count && results.allSatisfy(\.ok)
@@ -135,6 +136,11 @@ final class Driver {
     private func perform(_ step: Step, name: String) async -> (Bool, String) {
         if let account = await performAccount(step) {
             return account
+        }
+        let reachesTheView = [step.type, step.press, step.paste].contains { $0 != nil } || step.compose != nil || step.measure != nil
+            || step.click != nil || step.drag != nil || step.scroll != nil || step.copy == true
+        if reachesTheView, let unseen = await presentedBeforeInput() {
+            return unseen
         }
         if let text = step.type {
             for character in text { key(character) }
@@ -355,6 +361,33 @@ final class Driver {
         capture.arguments = ["-x", file.path]
         try? capture.run()
         capture.waitUntilExit()
+    }
+
+    /// `line` on standard output at once, unbuffered, so what the drive printed is in its output
+    /// file when the sweep reads it.
+    static func say(_ line: String) {
+        FileHandle.standardOutput.write(Data((line + "\n").utf8))
+    }
+
+    /// How long a launched window may take to reach the display before the first input fails.
+    static let presentDeadline = 20.0
+
+    /// Input reaches the view only once its window is visible and the view has presented a frame,
+    /// counted by the view itself: a key typed before then is echoed into a window not yet on the
+    /// display, and its echo is never counted. Waited for once a launch, at the first input.
+    private func presentedBeforeInput() async -> (Bool, String)? {
+        guard !presentedOnce else { return nil }
+        func presents() -> Int {
+            terminal.latency.reportedPresents + terminal.latency.unreportedPresents
+        }
+        let began = ContinuousClock.now
+        _ = await waitUntil(Self.presentDeadline) { presents() > 0 && self.shell.window.occlusionState.contains(.visible) }
+        guard presents() > 0 else {
+            return (false, "the view presented no frame within \(Self.presentDeadline) s of the first input; " + whereTheWindowIs)
+        }
+        presentedOnce = true
+        Self.say("drive: the first input waited \(Self.ms((ContinuousClock.now - began) / .milliseconds(1))) ms for the view's first presented frame")
+        return nil
     }
 
     /// How long a step's screen may take to be drawn by the view before the step fails.

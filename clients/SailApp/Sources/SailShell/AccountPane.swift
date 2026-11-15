@@ -6,7 +6,9 @@ import SailTerminalView
 /// The account. Signed out: a title, the control plane's address, Sign In with Passkey and Enroll
 /// with a Ticket (a secure field, cleared as soon as it is read). Signed in: who, `@handle`, role,
 /// the control plane, until when, and Sign Out. A refusal shows under the buttons, line by line:
-/// the sentence, what to do, the server's words, the system's.
+/// the sentence, what to do, the server's words, the system's. The field being edited takes a ring
+/// in the accent, and Return does what that field is for: Enroll in the ticket field, Sign In
+/// otherwise.
 @MainActor
 public final class AccountPane: NSView, NSMenuItemValidation {
     static let addressKey = "controlPlane.address"
@@ -24,8 +26,15 @@ public final class AccountPane: NSView, NSMenuItemValidation {
 
     private let account: Account
     private let defaults: UserDefaults
-    private let look: Look
+    /// The look it is drawn in; a new one repaints it.
+    var look: Look {
+        didSet { paint() }
+    }
+
     private let mono: TerminalFonts
+    private var lines: [String] = []
+    private var labels: [NSTextField] = []
+    private var focusWatch: NSKeyValueObservation?
     private let heading = NSTextField(labelWithString: "Sign in to Sail")
     private let who = NSTextField(wrappingLabelWithString: "")
     private let signedOutRows = NSStackView()
@@ -56,9 +65,10 @@ public final class AccountPane: NSView, NSMenuItemValidation {
             .joined(separator: "\n")
     }
 
-    /// Asks the server who this Mac is signed in as, when it holds a session.
+    /// Asks the server who this Mac is signed in as at the control plane it last used, when it
+    /// holds a session there; what is typed in the field and not yet used is not asked about.
     public func refresh() async {
-        guard !busy, let plane = try? ControlPlane(address: address.stringValue) else { return }
+        guard !busy, let used = defaults.string(forKey: Self.addressKey), let plane = try? ControlPlane(address: used) else { return }
         await run { () async throws(AccountRefusal) in
             self.show(try await self.account.current(at: plane))
         }
@@ -148,7 +158,37 @@ public final class AccountPane: NSView, NSMenuItemValidation {
         ].filter { !$0.isEmpty }.joined(separator: "\n")
     }
 
+    override public func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        focusWatch = window?.observe(\.firstResponder) { [weak self] _, _ in
+            MainActor.assumeIsolated { self?.focus() }
+        }
+        focus()
+    }
+
+    /// The field being edited ringed in the accent, and Return given to its button.
+    private func focus() {
+        for field in [address, ticket] {
+            field.layer?.borderWidth = field.currentEditor() == nil ? 0 : 2
+            field.layer?.borderColor = NSColor(look.accent).cgColor
+        }
+        let enrolling = ticket.currentEditor() != nil
+        enroll.keyEquivalent = enrolling ? "\r" : ""
+        signIn.keyEquivalent = enrolling ? "" : "\r"
+    }
+
+    private func paint() {
+        layer?.backgroundColor = NSColor(look.canvas).cgColor
+        heading.textColor = NSColor(look.text)
+        who.textColor = NSColor(look.textSecondary)
+        labels.forEach { $0.textColor = NSColor(look.textSecondary) }
+        signIn.look = look
+        say(lines)
+        focus()
+    }
+
     private func say(_ lines: [String]) {
+        self.lines = lines
         let text = NSMutableAttributedString()
         for (index, line) in lines.enumerated() {
             let color = NSColor(index == 0 ? look.text : look.textSecondary)
@@ -164,7 +204,7 @@ public final class AccountPane: NSView, NSMenuItemValidation {
     private func label(_ text: String) -> NSTextField {
         let label = NSTextField(labelWithString: text.uppercased())
         label.font = monospaced(.micro)
-        label.textColor = NSColor(look.textSecondary)
+        labels.append(label)
         return label
     }
 
@@ -176,14 +216,14 @@ public final class AccountPane: NSView, NSMenuItemValidation {
 
     private func compose() {
         wantsLayer = true
-        layer?.backgroundColor = NSColor(look.canvas).cgColor
-        heading.textColor = NSColor(look.text)
-        who.textColor = NSColor(look.textSecondary)
         who.font = .systemFont(ofSize: Look.Step.body.points)
         address.placeholderString = "https://sail.example.com or http://100.64.0.7:7443"
         address.font = monospaced(.callout)
         ticket.placeholderString = "enr_… or the link sail fde enroll printed"
-        signIn.keyEquivalent = "\r"
+        for field in [address, ticket] {
+            field.focusRingType = .none
+            field.wantsLayer = true
+        }
         enroll.target = self
         enroll.action = #selector(enrollWithTicket(_:))
         signOut.target = self
@@ -215,5 +255,6 @@ public final class AccountPane: NSView, NSMenuItemValidation {
             address.widthAnchor.constraint(equalToConstant: 380), ticket.widthAnchor.constraint(equalToConstant: 380),
             said.widthAnchor.constraint(lessThanOrEqualToConstant: 560),
         ])
+        paint()
     }
 }

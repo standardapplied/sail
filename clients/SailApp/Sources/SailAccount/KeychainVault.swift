@@ -18,7 +18,7 @@ public struct KeychainVault: TokenVault {
         ]
     }
 
-    public func session(for controlPlane: ControlPlane) throws(VaultFailure) -> StoredSession? {
+    public func session(for controlPlane: ControlPlane) throws(VaultFailure) -> PasskeySession? {
         var query = Self.item(controlPlane)
         query[kSecReturnData as String] = true
         query[kSecMatchLimit as String] = kSecMatchLimitOne
@@ -26,13 +26,13 @@ public struct KeychainVault: TokenVault {
         let status = SecItemCopyMatching(query as CFDictionary, &found)
         if status == errSecItemNotFound { return nil }
         guard status == errSecSuccess, let data = found as? Data else { throw Self.failure(status) }
-        guard let session = try? JSONDecoder().decode(StoredSession.self, from: data) else {
+        guard let session = try? JSONDecoder().decode(PasskeySession.self, from: data) else {
             throw VaultFailure(status: "the item for \(controlPlane) is not a sign-in Sail kept")
         }
         return session
     }
 
-    public func keep(_ session: StoredSession, for controlPlane: ControlPlane) throws(VaultFailure) {
+    public func keep(_ session: PasskeySession, for controlPlane: ControlPlane) throws(VaultFailure) {
         try forget(controlPlane)
         guard let data = try? JSONEncoder().encode(session) else { throw VaultFailure(status: "the sign-in could not be written") }
         var item = Self.item(controlPlane)

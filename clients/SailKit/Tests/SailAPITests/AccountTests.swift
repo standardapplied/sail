@@ -52,28 +52,28 @@ final class ToldPasskey: PasskeyAuthenticator {
 
 /// A vault holding sessions by control plane, only those it was given.
 final class MemoryVault: TokenVault {
-    private let held = Mutex<[ControlPlane: StoredSession]>([:])
+    private let held = Mutex<[ControlPlane: PasskeySession]>([:])
     private let failure: VaultFailure?
 
     init(failing failure: VaultFailure? = nil) {
         self.failure = failure
     }
 
-    func holding(_ session: StoredSession, at plane: ControlPlane) -> Self {
+    func holding(_ session: PasskeySession, at plane: ControlPlane) -> Self {
         held.withLock { $0[plane] = session }
         return self
     }
 
-    var sessions: [ControlPlane: StoredSession] {
+    var sessions: [ControlPlane: PasskeySession] {
         held.withLock { $0 }
     }
 
-    func session(for controlPlane: ControlPlane) throws(VaultFailure) -> StoredSession? {
+    func session(for controlPlane: ControlPlane) throws(VaultFailure) -> PasskeySession? {
         if let failure { throw failure }
         return held.withLock { $0[controlPlane] }
     }
 
-    func keep(_ session: StoredSession, for controlPlane: ControlPlane) throws(VaultFailure) {
+    func keep(_ session: PasskeySession, for controlPlane: ControlPlane) throws(VaultFailure) {
         if let failure { throw failure }
         held.withLock { $0[controlPlane] = session }
     }
@@ -84,13 +84,32 @@ final class MemoryVault: TokenVault {
     }
 }
 
+/// A vault holding one session that it cannot forget, as a locked Keychain refuses a delete.
+final class StuckVault: TokenVault {
+    private let held: PasskeySession
+
+    init(held: PasskeySession) {
+        self.held = held
+    }
+
+    func session(for controlPlane: ControlPlane) throws(VaultFailure) -> PasskeySession? {
+        held
+    }
+
+    func keep(_ session: PasskeySession, for controlPlane: ControlPlane) throws(VaultFailure) {}
+
+    func forget(_ controlPlane: ControlPlane) throws(VaultFailure) {
+        throw VaultFailure(status: "User interaction is not allowed. (-25308)")
+    }
+}
+
 func plane(_ address: String = preview) throws -> ControlPlane {
     try ControlPlane(address: address)
 }
 
 /// An account whose control plane is a server answering with `exchanges`, and that server.
 func makeAccount(
-    _ exchanges: [Exchange], passkey: ToldPasskey = ToldPasskey(), vault: MemoryVault = MemoryVault()
+    _ exchanges: [Exchange], passkey: ToldPasskey = ToldPasskey(), vault: any TokenVault = MemoryVault()
 ) throws -> (Account, RecordedServer) {
     let server = RecordedServer(exchanges)
     let address = try plane()
@@ -111,7 +130,7 @@ func refusal(_ act: () async throws(AccountRefusal) -> some Any) async -> Accoun
 
 /// The session the recorded sign-in mints: 30 days from the golden writer's clock.
 let thirtyDays: Int64 = 30 * 86_400_000
-let held = StoredSession(token: "sess_golden14", fde: "uday", expiresAt: Date(timeIntervalSince1970: Double(Goldens.pinnedMilliseconds + thirtyDays) / 1000))
+let held = PasskeySession(sessionToken: "sess_golden14", fde: "uday", expiresAt: Date(timeIntervalSince1970: Double(Goldens.pinnedMilliseconds + thirtyDays) / 1000))
 
 @Suite struct AddressRuleTests {
     @Test(arguments: [
@@ -121,6 +140,7 @@ let held = StoredSession(token: "sess_golden14", fde: "uday", expiresAt: Date(ti
         ("http://172.16.0.1", "http://172.16.0.1"), ("http://172.31.255.255", "http://172.31.255.255"),
         ("http://192.168.1.1", "http://192.168.1.1"), ("http://100.127.0.1", "http://100.127.0.1"), ("http://[::1]", "http://[::1]"),
         ("http://[FC00::7]", "http://[fc00::7]"), ("  http://10.0.0.2:1  ", "http://10.0.0.2:1"),
+        ("http://10.0.0.2:65535", "http://10.0.0.2:65535"),
     ])
     func anAddressThePlainHTTPRuleAllows(_ address: String, _ kept: String) throws {
         #expect(try ControlPlane(address: address).description == kept)
@@ -145,7 +165,7 @@ let held = StoredSession(token: "sess_golden14", fde: "uday", expiresAt: Date(ti
 
     @Test(arguments: [
         "100.84.93.13:7443", "ftp://10.0.0.2", "http://", "http://u:p@10.0.0.2", "http://10.0.0.2/v1", "http://10.0.0.2?x=1",
-        "http://10.0.0.2#top", "enr_0123456789abcdef", "",
+        "http://10.0.0.2#top", "enr_0123456789abcdef", "", "http://10.0.0.2:0", "http://10.0.0.2:99999",
     ])
     func whatIsNotAnAddressIsSaidWithoutEchoingIt(_ text: String) {
         do {
@@ -219,7 +239,7 @@ let held = StoredSession(token: "sess_golden14", fde: "uday", expiresAt: Date(ti
         let address = try plane()
         let signedIn = try await account.signIn(at: address)
         let kept = try #require(vault.sessions[address])
-        #expect(vault.sessions.count == 1 && kept.token == held.token && kept.fde == "uday")
+        #expect(vault.sessions.count == 1 && kept.sessionToken == held.sessionToken && kept.fde == "uday")
         #expect(kept.expiresAt.milliseconds == Goldens.pinnedMilliseconds + thirtyDays)
         #expect(signedIn.fde == "uday" && signedIn.until == kept.expiresAt && signedIn.controlPlane == address)
         let whoami = try signedIn.whoami.get()
@@ -244,16 +264,20 @@ let held = StoredSession(token: "sess_golden14", fde: "uday", expiresAt: Date(ti
         #expect(try await other.current(at: plane()) == nil)
     }
 
-    @Test func aRelyingPartyOtherThanSailsIsRefusedBeforeThePasskeyIsAsked() async throws {
+    @Test(arguments: [
+        "example.com", "evil.standardapplied.com", "x.sail.standardapplied.com", "standardapplied.com", "sail.standardapplied.com.",
+        "sail.example.com", "sail.standardapplied.co", "SAIL.standardapplied.com", "",
+    ])
+    func aRelyingPartyOtherThanSailsIsRefusedBeforeThePasskeyIsAsked(_ party: String) async throws {
         let passkey = ToldPasskey()
-        let enrolling = try Exchange("passkey-register-start").altered(at: ["public_key", "rp", "id"], to: "example.com")
-        let signing = try Exchange("passkey-login-start").altered(at: ["public_key", "rpId"], to: "example.com")
+        let enrolling = try Exchange("passkey-register-start").altered(at: ["public_key", "rp", "id"], to: party)
+        let signing = try Exchange("passkey-login-start").altered(at: ["public_key", "rpId"], to: party)
         let (account, _) = try makeAccount([enrolling, signing], passkey: passkey)
         let refusals = [await refusal { () async throws(AccountRefusal) in try await account.enroll(ticket: aTicket, at: try! plane()) },
                         await refusal { () async throws(AccountRefusal) in try await account.signIn(at: try! plane()) }]
         for refused in refusals {
-            #expect(refused?.reason == .foreignRelyingParty("example.com"))
-            #expect(refused?.sentence == "\(preview) uses passkeys for example.com; Sail can use them only for sail.standardapplied.com.")
+            #expect(refused?.reason == .foreignRelyingParty(party))
+            #expect(refused?.sentence == "\(preview) uses passkeys for \(party); Sail can use them only for sail.standardapplied.com.")
             #expect(refused?.remedy == "On the control plane, run:\nsail host config set webauthn-rp-id sail.standardapplied.com\nsudo systemctl restart sail-api")
         }
         #expect(passkey.registrations.isEmpty && passkey.assertions.isEmpty)
@@ -272,6 +296,49 @@ let held = StoredSession(token: "sess_golden14", fde: "uday", expiresAt: Date(ti
             return
         }
         #expect(refused.reason == .refused && refused.sentence == "Enrollment ticket is invalid or expired.")
+    }
+
+    @Test func signedInWithTheControlPlaneUnreachableStaysSignedInAndSaysSo() async throws {
+        let vault = MemoryVault().holding(held, at: try plane())
+        let (account, _) = try makeAccount([], vault: vault)
+        let signedIn = try #require(try await account.current(at: plane()))
+        #expect(signedIn.fde == "uday" && signedIn.until == held.expiresAt)
+        #expect(vault.sessions == [try plane(): held])
+        guard case let .failure(refused) = signedIn.whoami else {
+            Issue.record("whoami answered")
+            return
+        }
+        #expect(refused.reason == .unreachable && refused.sentence == "Sail cannot reach \(preview).")
+    }
+
+    /// Only `invalid_bearer_token` and `missing_bearer_token` end a session: every other code the
+    /// server's refusals carry, and one it may grow, leaves it.
+    @Test(arguments: ErrorCode.allCases.filter { ![.invalidBearerToken, .missingBearerToken].contains($0) }.map(\.rawValue) + ["harbor_closed"])
+    func noOtherRefusalEndsTheSession(_ code: String) async throws {
+        let vault = MemoryVault().holding(held, at: try plane())
+        let refusing = try Exchange("refusal-not-found").altered(at: ["error", "code"], to: code)
+        let whoami = try Exchange("whoami")
+        let (account, _) = try makeAccount([Exchange(method: whoami.method, path: whoami.path, status: refusing.status, body: refusing.body)], vault: vault)
+        let signedIn = try #require(try await account.current(at: plane()))
+        #expect(vault.sessions == [try plane(): held], "\(code) ended the session")
+        guard case let .failure(refused) = signedIn.whoami else {
+            Issue.record("whoami answered")
+            return
+        }
+        #expect(refused.reason != .ended)
+    }
+
+    @Test func anEndedSessionIsSaidEvenWhenTheVaultCannotForgetIt() async throws {
+        let vault = StuckVault(held: held)
+        let (account, _) = try makeAccount([Exchange("refusal-invalid-bearer-token")], vault: vault)
+        let refused = await refusal { () async throws(AccountRefusal) in try await account.current(at: try! plane()) }
+        #expect(refused?.reason == .ended)
+    }
+
+    @Test func aVaultThatCannotBeReadSaysItCouldNotRead() async throws {
+        let (account, _) = try makeAccount([], vault: MemoryVault(failing: VaultFailure(status: "User interaction is not allowed. (-25308)")))
+        let refused = await refusal { () async throws(AccountRefusal) in try await account.current(at: try! plane()) }
+        #expect(refused?.sentence == "Sail could not read your sign-in in the Keychain: User interaction is not allowed. (-25308).")
     }
 
     @Test(arguments: ["refusal-invalid-bearer-token", "refusal-missing-bearer-token"])
@@ -296,7 +363,7 @@ let held = StoredSession(token: "sess_golden14", fde: "uday", expiresAt: Date(ti
 
 @Suite struct RefusalRowTests {
     func refused(
-        _ exchanges: [Exchange], passkey: ToldPasskey = ToldPasskey(), vault: MemoryVault = MemoryVault(), signingIn: Bool
+        _ exchanges: [Exchange], passkey: ToldPasskey = ToldPasskey(), vault: any TokenVault = MemoryVault(), signingIn: Bool
     ) async throws -> AccountRefusal? {
         let (account, _) = try makeAccount(exchanges, passkey: passkey, vault: vault)
         return signingIn

@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Notarizes a Developer ID signed APP with the App Store Connect key (APPLE_API_KEY_P8_BASE64,
 # APPLE_API_KEY, APPLE_API_ISSUER), staples the ticket, and zips the stapled app to ZIP. Stapling
-# fetches the accepted submission's ticket from Apple's ticket service over the network, so a fetch
-# that loses its connection is asked again, three tries at most.
+# fetches the accepted submission's ticket from Apple's ticket service over the network; any failed
+# staple is tried again, three tries at most, 30 s apart.
 set -euo pipefail
 
 [[ $# -eq 2 ]] || { echo "usage: ci/notarize APP ZIP" >&2; exit 2; }

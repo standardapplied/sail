@@ -7,7 +7,10 @@ import SailTerminalView
 /// white on terracotta is 3.43:1, which only large text may be (bold at any size, HIG Accessibility).
 @MainActor
 public final class AccentButton: NSButton {
-    private let look: Look
+    /// The look it is drawn in; a new one repaints it.
+    var look: Look {
+        didSet { setTitle(title) }
+    }
 
     public init(_ title: String, look: Look, target: AnyObject?, action: Selector) {
         self.look = look
@@ -16,7 +19,6 @@ public final class AccentButton: NSButton {
         self.action = action
         isBordered = false
         wantsLayer = true
-        layer?.backgroundColor = NSColor(look.accent).cgColor
         layer?.cornerRadius = Look.contentRadius
         setTitle(title)
     }
@@ -27,6 +29,7 @@ public final class AccentButton: NSButton {
     }
 
     public func setTitle(_ title: String) {
+        layer?.backgroundColor = NSColor(look.accent).cgColor
         attributedTitle = NSAttributedString(
             string: title, attributes: [.foregroundColor: NSColor(look.onAccent), .font: NSFont.systemFont(ofSize: Look.Step.body.points, weight: .bold)]
         )

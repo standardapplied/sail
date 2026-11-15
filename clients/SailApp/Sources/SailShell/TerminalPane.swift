@@ -8,7 +8,9 @@ import SailVT
 
 /// "This Mac": one terminal session on this Mac's own host, in the home folder with the login shell,
 /// signed in or not. The session's name is remembered; the next launch attaches to it while it
-/// lives. ⌥⌘L shows the latency of key to echo on glass.
+/// lives. ⌥⌘L shows the latency of key to echo on glass. The terminal keeps the palette of the
+/// appearance it opened in (a screen's palette is set when it is made); the banner and the overlay
+/// follow the look.
 @MainActor
 public final class TerminalPane: NSView {
     static let sessionKey = "terminal.session"
@@ -21,7 +23,13 @@ public final class TerminalPane: NSView {
     /// Told when a program names the window.
     public var onTitle: @MainActor (String) -> Void = { _ in }
 
-    private let look: Look
+    /// The terminal's palette, the launch appearance's.
+    public let palette: Palette
+    /// The look the banner and the overlay are drawn in; a new one repaints them.
+    var look: Look {
+        didSet { paint() }
+    }
+
     private let banner: StatusBanner
     private let latency = NSTextField(labelWithString: "")
     private var latencyTimer: Timer?
@@ -29,6 +37,7 @@ public final class TerminalPane: NSView {
 
     init(fonts directory: URL, helper: String?, look: Look) throws(ShellError) {
         self.look = look
+        palette = look.palette
         do {
             terminal = try TerminalView(fonts: try TerminalFonts(directory: directory))
         } catch {
@@ -76,7 +85,7 @@ public final class TerminalPane: NSView {
         ))
         let screen: Screen
         do {
-            screen = try Screen(size: grid, scrollbackBytes: 10 << 20, palette: look.palette)
+            screen = try Screen(size: grid, scrollbackBytes: 10 << 20, palette: palette)
         } catch {
             banner.show(Self.sentence("the terminal screen could not be made: \(error)"))
             return
@@ -160,17 +169,16 @@ public final class TerminalPane: NSView {
 
     private func compose() {
         wantsLayer = true
-        layer?.backgroundColor = NSColor(look.palette.background).cgColor
+        layer?.backgroundColor = NSColor(palette.background).cgColor
         terminal.frame = bounds
         terminal.autoresizingMask = [.width, .height]
         addSubview(terminal)
         banner.translatesAutoresizingMaskIntoConstraints = false
         addSubview(banner)
         latency.font = .monospacedDigitSystemFont(ofSize: Look.Step.micro.points, weight: .regular)
-        latency.textColor = NSColor(look.textSecondary)
         latency.wantsLayer = true
         latency.drawsBackground = true
-        latency.backgroundColor = NSColor(look.surface)
+        paint()
         latency.isBezeled = false
         latency.maximumNumberOfLines = Self.latencyLines
         latency.isHidden = true
@@ -183,6 +191,12 @@ public final class TerminalPane: NSView {
             latency.topAnchor.constraint(equalTo: topAnchor, constant: Look.Space.s),
             latency.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Look.Space.m),
         ])
+    }
+
+    private func paint() {
+        banner.look = look
+        latency.textColor = NSColor(look.textSecondary)
+        latency.backgroundColor = NSColor(look.surface)
     }
 
     private func updateLatency() {

@@ -22,5 +22,6 @@
   {"name": "item-gone-when-ended", "signed": true, "keychain": "gone"},
   {"name": "sign-in-with-the-removed-passkey", "signIn": true},
   {"name": "row-8", "pane": "http://127.0.0.1:7979 did not accept that passkey.\nPick the passkey you enrolled there, or enroll one.\nPasskey authentication failed."},
+  {"name": "title-bar-double-click-zooms-and-restores", "zoomByTitleBar": true},
   {"name": "sweep", "sweep": true}
 ]}

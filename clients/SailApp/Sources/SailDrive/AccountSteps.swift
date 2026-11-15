@@ -34,7 +34,7 @@ extension Driver {
         if step.signIn == true {
             let idle = await settled(step) { pane.signIn.performClick(nil) }
             if signed, let plane = try? ControlPlane(address: pane.address.stringValue), let held = try? KeychainVault().session(for: plane) {
-                tokens.insert(held.token)
+                tokens.insert(held.sessionToken)
             }
             return (idle, said)
         }
@@ -68,6 +68,9 @@ extension Driver {
         }
         if step.titleBar == true {
             return titleBar()
+        }
+        if step.zoomByTitleBar == true {
+            return await zoomByTitleBar()
         }
         if step.sweep == true {
             return sweep()
@@ -199,6 +202,46 @@ extension Driver {
         )
     }
 
+    /// A double-click in the title bar does what the person's setting says (System Settings, Desktop
+    /// & Dock, "Double-click a window's title bar to"): zoom (or fill) changes the frame and a second
+    /// double-click gives it back, minimize puts the window in the Dock, nothing does nothing. The
+    /// clicks are posted to the event queue, as the title bar tracks the mouse from the queue.
+    private func zoomByTitleBar() async -> (Bool, String) {
+        let window = shell.window
+        let setting = UserDefaults.standard.persistentDomain(forName: UserDefaults.globalDomain)?["AppleActionOnDoubleClick"] as? String
+        window.setFrame(NSRect(x: 80, y: 80, width: 800, height: 640), display: true)
+        let before = window.frame
+        func doubleClick() {
+            let point = NSPoint(x: before.width / 2, y: window.frame.height - 12)
+            for (type, clicks) in [(NSEvent.EventType.leftMouseDown, 1), (.leftMouseUp, 1), (.leftMouseDown, 2), (.leftMouseUp, 2)] {
+                guard let event = NSEvent.mouseEvent(
+                    with: type, location: point, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+                    windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: clicks, pressure: 1
+                ) else { continue }
+                NSApp.postEvent(event, atStart: false)
+            }
+        }
+        let said = "the setting is \(setting ?? "unset, which zooms")"
+        switch setting ?? "" {
+        case "None":
+            doubleClick()
+            let moved = await waitUntil(2) { window.frame != before }
+            return (!moved, "\(said); the frame \(moved ? "changed" : "stayed")")
+        case "Minimize":
+            doubleClick()
+            let docked = await waitUntil(5) { window.isMiniaturized }
+            window.deminiaturize(nil)
+            return (docked, "\(said); the window went \(docked ? "" : "not ")to the Dock")
+        default:
+            doubleClick()
+            let zoomed = await waitUntil(5) { window.frame != before && !window.inLiveResize }
+            let after = window.frame
+            doubleClick()
+            let back = await waitUntil(5) { window.frame == before }
+            return (zoomed && back, "\(said); the frame went from \(before) to \(after) and \(back ? "back" : "stayed at \(window.frame)")")
+        }
+    }
+
     private static func near(_ found: UInt32, _ wanted: UInt32) -> Bool {
         [16, 8, 0].allSatisfy { abs(Int(found >> $0 & 0xFF) - Int(wanted >> $0 & 0xFF)) <= 2 }
     }
@@ -212,10 +255,12 @@ extension Driver {
     }
 
     /// Scenario 17: the session token, `sess_` and the enrollment ticket searched for in the
-    /// process's own memory of
-    /// what it shows, every file named for the bundle id under the Library folders, the drive's
-    /// output, the last 15 minutes of the system log, every process's arguments and the
-    /// pasteboard. Paths are reported, never what was found.
+    /// process's own memory of what it shows, every file named for the bundle id under the Library
+    /// folders, crash reports of Sail, `$TMPDIR`, the drive's output and its printed lines, the user
+    /// defaults as cfprefsd answers them, the last 15 minutes of the system log at every level,
+    /// every process's arguments and the pasteboard. Paths are reported, never what was found. An
+    /// image is searched as its bytes, which a drawn token would not be; the pasteboard is never
+    /// written by the drive, so it shows only that the app did not write there.
     private func sweep() -> (Bool, String) {
         let ticket = ProcessInfo.processInfo.environment["SAIL_DRIVE_TICKET"].map { [Data($0.utf8)] } ?? []
         let needles = tokens.map { Data($0.utf8) } + [Data("sess_".utf8)] + ticket
@@ -226,22 +271,22 @@ extension Driver {
         search(Data(shell.account.text.utf8), at: "the account pane")
         search(Data(results.map(\.detail).joined(separator: "\n").utf8), at: "the drive's report")
         let library = FileManager.default.homeDirectoryForCurrentUser.appending(path: "Library")
-        var files = 0
-        for folder in ["Preferences", "Caches", "HTTPStorages", "Application Support", "Saved Application State"] {
-            for file in Self.files(under: library.appending(path: folder)) where file.path.contains("sh.standardapplied.sail") {
-                files += 1
-                if let data = try? Data(contentsOf: file) { search(data, at: file.path) }
-            }
+        let named = ["Preferences", "Caches", "HTTPStorages", "Application Support", "Saved Application State"].flatMap {
+            Self.files(under: library.appending(path: $0)).filter { $0.path.contains("sh.standardapplied.sail") }
         }
-        for file in Self.files(under: out) {
-            files += 1
-            if let data = try? Data(contentsOf: file) { search(data, at: file.path) }
+        let crashes = Self.files(under: library.appending(path: "Logs/DiagnosticReports")).filter { $0.lastPathComponent.hasPrefix("Sail") }
+        let outputs = Self.files(under: out.deletingLastPathComponent()).filter { $0.lastPathComponent.hasSuffix("-output.txt") }
+        let searched = named + crashes + Self.files(under: out) + outputs + Self.files(under: FileManager.default.temporaryDirectory)
+        for file in searched {
+            if let data = try? Data(contentsOf: file, options: .mappedIfSafe) { search(data, at: file.path) }
         }
-        search(Self.output(of: "/usr/bin/log", ["show", "--last", "15m", "--style", "compact"]), at: "log show --last 15m")
+        let files = searched.count
+        search(Self.output(of: "/usr/bin/log", ["show", "--last", "15m", "--info", "--debug", "--style", "compact"]), at: "log show --last 15m --info --debug")
+        search(Self.output(of: "/usr/bin/defaults", ["export", "sh.standardapplied.sail", "-"]), at: "defaults export sh.standardapplied.sail")
         search(Self.output(of: "/bin/ps", ["-axww", "-o", "args"]), at: "ps -axww -o args")
         search(Data((NSPasteboard.general.string(forType: .string) ?? "").utf8), at: "the pasteboard")
-        let searched = "\(tokens.count) token(s), sess_ and \(ticket.count) ticket in \(files) files, the log, the processes and the pasteboard"
-        return (places.isEmpty, places.isEmpty ? "found in none of \(searched)" : "found in \(places.joined(separator: ", ")) of \(searched)")
+        let scope = "\(tokens.count) token(s), sess_ and \(ticket.count) ticket in \(files) files, the log, the defaults, the processes and the pasteboard"
+        return (places.isEmpty, places.isEmpty ? "found in none of \(scope)" : "found in \(places.joined(separator: ", ")) of \(scope)")
     }
 
     private static func files(under folder: URL) -> [URL] {

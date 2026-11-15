@@ -38,7 +38,9 @@ import Testing
         #expect(system.contains("\(code.rawValue)"))
     }
 
-    @Test func aMacNotSetUpForPasskeysCannotCreateOne() {
+    /// The code exists from macOS 26; on an older Mac the test shows as skipped, not passed.
+    @Test(.enabled(if: ProcessInfo.processInfo.isOperatingSystemAtLeast(OperatingSystemVersion(majorVersion: 26, minorVersion: 0, patchVersion: 0))))
+    func aMacNotSetUpForPasskeysCannotCreateOne() {
         guard #available(macOS 26, *) else { return }
         guard case .cannotCreate = PlatformPasskeys.failure(error(.deviceNotConfiguredForPasskeyCreation)) else {
             Issue.record("deviceNotConfiguredForPasskeyCreation was not cannotCreate")

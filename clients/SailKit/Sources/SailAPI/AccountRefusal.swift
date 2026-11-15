@@ -18,8 +18,9 @@ public struct AccountRefusal: Error, Equatable, Sendable {
         case associationNotConfirmed
         case cannotCreate
         case cancelled(signingIn: Bool)
-        case keychain(String)
+        case keychain(String, String)
         case ended
+        case redirected
         case refused
         case unreadable
         case authenticatorFailed
@@ -56,6 +57,8 @@ public struct AccountRefusal: Error, Equatable, Sendable {
         guard case let .refused(refusal) = error else {
             if case let .unreachable(text) = error {
                 self.init(.unreachable, at: plane, system: text)
+            } else if case let .unexpected(_, status) = error, (300 ..< 400).contains(status) {
+                self.init(.redirected, at: plane, system: Self.text(of: error))
             } else {
                 self.init(.unreadable, at: plane, system: Self.text(of: error))
             }
@@ -142,14 +145,16 @@ public struct AccountRefusal: Error, Equatable, Sendable {
             return ("This Mac cannot make passkeys right now.", "Turn on iCloud Keychain in System Settings.")
         case let .cancelled(signingIn):
             return ("Cancelled.", signingIn ? "If this Mac holds no passkey for \(address), enroll one with a ticket from an admin." : nil)
-        case let .keychain(status):
-            return ("Sail could not keep your sign-in in the Keychain: \(status).", nil)
+        case let .keychain(verb, status):
+            return ("Sail could not \(verb) your sign-in in the Keychain: \(status).", nil)
         case .ended:
             return ("Your sign-in to \(address) has ended.", "Sign in again with your passkey.")
         case .refused:
             return (server?.message ?? "\(address) refused.", server?.action)
         case .unreadable:
             return ("\(address) answered in a way Sail cannot read.", nil)
+        case .redirected:
+            return ("\(address) answered with a redirect; Sail does not follow one.", "Type the control plane's own address.")
         case .authenticatorFailed:
             return ("macOS did not finish the passkey request.", nil)
         }

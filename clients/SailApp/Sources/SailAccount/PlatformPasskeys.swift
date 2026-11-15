@@ -13,7 +13,7 @@ public final class PlatformPasskeys: PasskeyAuthenticator {
     }
 
     public func register(_ request: PasskeyRegistrationRequest) async throws(PasskeyFailure) -> PasskeyRegistration {
-        let answer = await Sheet.run(on: anchor) {
+        let answer: Result<PasskeyRegistration, PasskeyFailure> = await Sheet.run(on: anchor) {
             let provider = ASAuthorizationPlatformPublicKeyCredentialProvider(relyingPartyIdentifier: request.relyingParty)
             let asking = provider.createCredentialRegistrationRequest(challenge: request.challenge, name: request.userName, userID: request.userId)
             asking.displayName = request.displayName
@@ -22,19 +22,17 @@ public final class PlatformPasskeys: PasskeyAuthenticator {
             asking.excludedCredentials = request.excluded.map { ASAuthorizationPlatformPublicKeyCredentialDescriptor(credentialID: $0) }
             return asking
         }
-        guard case let .registered(made) = answer else { throw answer.failure }
-        return made
+        return try answer.get()
     }
 
     public func assert(_ request: PasskeyAssertionRequest) async throws(PasskeyFailure) -> PasskeyAssertion {
-        let answer = await Sheet.run(on: anchor) {
+        let answer: Result<PasskeyAssertion, PasskeyFailure> = await Sheet.run(on: anchor) {
             let provider = ASAuthorizationPlatformPublicKeyCredentialProvider(relyingPartyIdentifier: request.relyingParty)
             let asking = provider.createCredentialAssertionRequest(challenge: request.challenge)
             asking.userVerificationPreference = .required
             return asking
         }
-        guard case let .asserted(signed) = answer else { throw answer.failure }
-        return signed
+        return try answer.get()
     }
 
     /// What `error` from the authorization controller means. A failure whose words name the
@@ -57,40 +55,41 @@ public final class PlatformPasskeys: PasskeyAuthenticator {
     }
 }
 
-enum SheetAnswer: Sendable {
-    case registered(PasskeyRegistration)
-    case asserted(PasskeyAssertion)
-    case failed(PasskeyFailure)
-
-    var failure: PasskeyFailure {
-        switch self {
-        case let .failed(failure): failure
-        case .registered, .asserted: .failed("macOS answered with a passkey of the other kind")
-        }
-    }
-}
-
-/// One authorization controller's run, kept alive until it answers once.
+/// One authorization controller's run, kept alive until it answers once. A run the system has not
+/// answered within the server's challenge life (five minutes) is cancelled and said, so the pane is
+/// never left waiting.
 @MainActor
 final class Sheet: NSObject, @preconcurrency ASAuthorizationControllerDelegate, @preconcurrency ASAuthorizationControllerPresentationContextProviding {
+    static let deadline = Duration.seconds(300)
     private static var running: Set<Sheet> = []
     private let window: NSWindow
-    private var answer: CheckedContinuation<SheetAnswer, Never>?
+    private var answer: CheckedContinuation<Result<any Sendable, PasskeyFailure>, Never>?
 
     private init(window: NSWindow) {
         self.window = window
     }
 
-    static func run(on anchor: @MainActor () -> NSWindow?, _ request: @MainActor () -> ASAuthorizationRequest) async -> SheetAnswer {
-        guard let window = anchor() else { return .failed(.failed("Sail has no window to show the passkey sheet on.")) }
+    static func run<Made: Sendable>(
+        on anchor: @MainActor () -> NSWindow?, _ request: @MainActor () -> ASAuthorizationRequest
+    ) async -> Result<Made, PasskeyFailure> {
+        guard let window = anchor() else { return .failure(.failed("Sail has no window to show the passkey sheet on.")) }
         let sheet = Sheet(window: window)
         let controller = ASAuthorizationController(authorizationRequests: [request()])
-        return await withCheckedContinuation { continuation in
+        let made = await withCheckedContinuation { continuation in
             sheet.answer = continuation
             running.insert(sheet)
             controller.delegate = sheet
             controller.presentationContextProvider = sheet
             controller.performRequests()
+            Task { @MainActor in
+                try? await Task.sleep(for: deadline)
+                guard sheet.answer != nil else { return }
+                controller.cancel()
+                sheet.finish(.failure(.failed("macOS did not answer the passkey request within five minutes.")))
+            }
+        }
+        return made.flatMap { (made) -> Result<Made, PasskeyFailure> in
+            (made as? Made).map { .success($0) } ?? .failure(.failed("macOS answered with a passkey of the other kind"))
         }
     }
 
@@ -98,28 +97,28 @@ final class Sheet: NSObject, @preconcurrency ASAuthorizationControllerDelegate, 
         switch authorization.credential {
         case let made as ASAuthorizationPlatformPublicKeyCredentialRegistration:
             guard let attestation = made.rawAttestationObject else {
-                return finish(.failed(.failed("macOS made a passkey and gave no attestation object")))
+                return finish(.failure(.failed("macOS made a passkey and gave no attestation object")))
             }
-            finish(.registered(PasskeyRegistration(credentialId: made.credentialID, clientDataJSON: made.rawClientDataJSON, attestationObject: attestation)))
+            finish(.success(PasskeyRegistration(credentialId: made.credentialID, clientDataJSON: made.rawClientDataJSON, attestationObject: attestation)))
         case let signed as ASAuthorizationPlatformPublicKeyCredentialAssertion:
-            finish(.asserted(PasskeyAssertion(
+            finish(.success(PasskeyAssertion(
                 credentialId: signed.credentialID, clientDataJSON: signed.rawClientDataJSON, authenticatorData: signed.rawAuthenticatorData,
                 signature: signed.signature, userHandle: signed.userID
             )))
         default:
-            finish(.failed(.failed("macOS answered with a credential that is not a passkey")))
+            finish(.failure(.failed("macOS answered with a credential that is not a passkey")))
         }
     }
 
     func authorizationController(controller _: ASAuthorizationController, didCompleteWithError error: any Error) {
-        finish(.failed(PlatformPasskeys.failure(error)))
+        finish(.failure(PlatformPasskeys.failure(error)))
     }
 
     func presentationAnchor(for _: ASAuthorizationController) -> ASPresentationAnchor {
         window
     }
 
-    private func finish(_ result: SheetAnswer) {
+    private func finish(_ result: Result<any Sendable, PasskeyFailure>) {
         answer?.resume(returning: result)
         answer = nil
         Self.running.remove(self)

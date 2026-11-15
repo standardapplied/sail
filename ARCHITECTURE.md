@@ -4124,7 +4124,8 @@ the session into the vault, then `GET /v1/whoami`, asked again at launch and on 
   127.0.0.0/8, 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 100.64.0.0/10, `::1` or `fc00::/7`, parsed
   from the text with no name looked up; `https` with the system's trust otherwise. App Transport
   Security blocks plain HTTP to an IP address from macOS 14, so `Info.plist` excepts exactly these
-  ranges and nothing else.
+  ranges and nothing else. No redirect is followed (the transport refuses every one, and says so),
+  so no request, ticket or token reaches any server but the one the person named.
 - **S5. The ceremony is the server's:** challenge, relying party, user and excluded credentials go
   to the authenticator unchanged, and a relying party other than `sail.standardapplied.com` is
   refused before any sheet.
@@ -4140,7 +4141,9 @@ Sail look: terracotta for every accent, drawn by the app so the system accent ne
 label dark ink in the dark appearance and white in the light (3.43:1, so a label on the accent is
 always bold, large text by the HIG's measure), content corners at 6 pt, a 60 pt icon rail with "This
 Mac" and the account. The title bar is transparent over a full-size content view: the rail's tint and
-the pane's surface run to the top edge under the platform's own window buttons. The artifact is the
+the pane's surface run to the top edge under the platform's own window buttons. Focus rings,
+selection and the caret are the accent's, through the window's own field editor; the look follows a
+dark/light change while the app runs (the terminal's palette at its next session). The artifact is the
 zip `ditto` made, uploaded unarchived, so one unzip gives `Sail.app`; CI checks the download as
 Finder unpacks it.
 

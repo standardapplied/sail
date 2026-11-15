@@ -48,7 +48,6 @@ public struct RegistrationCeremony: Decodable, Equatable, Sendable {
 public struct CreationOptions: Decodable, Equatable, Sendable {
     public struct Party: Decodable, Equatable, Sendable {
         public let id: String
-        public let name: String
     }
 
     public struct User: Decodable, Equatable, Sendable {
@@ -76,55 +75,43 @@ public struct CreationOptions: Decodable, Equatable, Sendable {
 }
 
 public struct CredentialDescriptor: Decodable, Equatable, Sendable {
-    public let type: String
     public let id: Base64URL
 }
 
 /// What `register/finish` answers: the passkey is enrolled for `fde`. It mints no session.
 public struct Enrollment: Decodable, Equatable, Sendable {
-    public let status: String
     public let fde: String
-    public let credentialId: Base64URL
-
-    private enum CodingKeys: String, CodingKey {
-        case status, fde
-        case credentialId = "credential_id"
-    }
 }
 
-/// What `login/start` answers: the ceremony's id, the request options (no allow list: any passkey
-/// for the relying party), and the origins the server accepts.
+/// What `login/start` answers: the ceremony's id and the request options (no allow list: any
+/// passkey for the relying party).
 public struct SignInCeremony: Decodable, Equatable, Sendable {
     public struct Options: Decodable, Equatable, Sendable {
         public let challenge: Base64URL
         public let rpId: String
-        public let userVerification: String?
     }
 
     public let challengeId: String
     public let publicKey: Options
-    public let origins: [String]
-
-    public init(from decoder: any Decoder) throws {
-        let fields = try decoder.container(keyedBy: CodingKeys.self)
-        challengeId = try fields.decode(String.self, forKey: .challengeId)
-        publicKey = try fields.decode(Options.self, forKey: .publicKey)
-        origins = try fields.decodeIfPresent([String].self, forKey: .origins) ?? []
-    }
 
     private enum CodingKeys: String, CodingKey {
-        case origins
         case challengeId = "challenge_id"
         case publicKey = "public_key"
     }
 }
 
-/// What `login/finish` answers: a session for `fde` until `expiresAt`. Its description never
-/// holds the token.
-public struct PasskeySession: Decodable, Equatable, Sendable, CustomStringConvertible {
+/// What `login/finish` answers, and what the vault keeps: a session for `fde` until `expiresAt`.
+/// Its description never holds the token.
+public struct PasskeySession: Codable, Equatable, Sendable, CustomStringConvertible {
     public let sessionToken: String
     public let fde: String
     public let expiresAt: Date
+
+    public init(sessionToken: String, fde: String, expiresAt: Date) {
+        self.sessionToken = sessionToken
+        self.fde = fde
+        self.expiresAt = expiresAt
+    }
 
     public var description: String {
         "a session for \(fde) until \(expiresAt)"

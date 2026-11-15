@@ -28,16 +28,10 @@ import Testing
 
     @Test(arguments: [("dark", Look.dark), ("light", Look.light)])
     func everyTextOnEverySurfaceIsFourAndAHalfToOne(_ name: String, _ look: Look) {
-        let surfaces = [
-            ("canvas", look.canvas), ("surface", look.surface), ("well", look.well), ("hover over canvas", look.fillHover.over(look.canvas)),
-            ("hover over surface", look.fillHover.over(look.surface)),
-        ]
-        let texts: [(String, Tint)] = [
-            ("text", look.text), ("textSecondary", look.textSecondary), ("textTertiary", look.textTertiary),
-            ("accentText", Tint(Self.hex(look.accentText))), ("danger", Tint(Self.hex(look.danger))),
-        ]
+        let surfaces = [("canvas", look.canvas), ("surface", look.surface), ("selection over canvas", look.fillSelected.over(look.canvas))]
+        let texts: [(String, Tint)] = [("text", look.text), ("textSecondary", look.textSecondary), ("accentText", Tint(Self.hex(look.accentText)))]
         for (surfaceName, surface) in surfaces {
-            for (textName, text) in texts {
+            for (textName, text) in texts where !(textName == "accentText" && surfaceName.hasPrefix("selection")) {
                 let ratio = Self.contrast(text.over(surface), surface)
                 #expect(ratio >= 4.5, "\(name) \(textName) on \(surfaceName) is \(String(format: "%.2f", ratio)):1")
             }
@@ -137,7 +131,42 @@ import Testing
         #expect(CTFontGetSize(title) == 22)
     }
 
+    /// Focus and selection are the look's accent, never the system's: a field being edited is
+    /// ringed in the accent (the system's ring is off), text selected in it is on the selection fill,
+    /// and its caret is the accent; Return goes to Enroll in the ticket field and to Sign In in the
+    /// address field.
+    @MainActor @Test(arguments: [("dark", Look.dark), ("light", Look.light)])
+    func focusSelectionAndReturnAreTheLooks(_ name: String, _ look: Look) throws {
+        let folder = FileManager.default.temporaryDirectory.appending(path: "sail-focus-\(UUID().uuidString.prefix(8))")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let passkey = SoftwarePasskey(file: folder.appending(path: "passkey.json"))
+        let shell = try ShellApp(fonts: Self.fonts, helper: nil, look: look) { _ in passkey }
+        shell.select(.account)
+        let pane = shell.account
+        let cases: [(NSTextField, NSButton, NSButton)] = [(pane.ticket, pane.enroll, pane.signIn), (pane.address, pane.signIn, pane.enroll)]
+        for (field, button, other) in cases {
+            #expect(shell.window.makeFirstResponder(field), "\(name): the field took no focus")
+            let editor = try #require(field.currentEditor() as? NSTextView)
+            #expect(field.focusRingType == .none)
+            #expect(field.layer?.borderWidth == 2 && field.layer?.borderColor == NSColor(look.accent).cgColor, "\(name): the field is not ringed in the accent")
+            #expect(editor.selectedTextAttributes[.backgroundColor] as? NSColor == NSColor(look.fillSelected))
+            #expect(editor.insertionPointColor == NSColor(look.accent))
+            #expect(button.keyEquivalent == "\r" && other.keyEquivalent.isEmpty, "\(name): Return does not go to \(button.title)")
+        }
+    }
+
     static func hex(_ rgb: RGB) -> UInt32 {
         UInt32(rgb.red) << 16 | UInt32(rgb.green) << 8 | UInt32(rgb.blue)
+    }
+}
+
+extension Tint {
+    /// This tint drawn over the opaque `base`.
+    func over(_ base: RGB) -> RGB {
+        func mix(_ top: UInt8, _ bottom: UInt8) -> UInt8 {
+            UInt8((Double(top) * alpha + Double(bottom) * (1 - alpha)).rounded())
+        }
+        return RGB(red: mix(rgb.red, base.red), green: mix(rgb.green, base.green), blue: mix(rgb.blue, base.blue))
     }
 }

@@ -3,26 +3,27 @@ import SailLook
 import SailTerminalView
 
 /// A card over the terminal saying where the session stands, with the one thing to do about it:
-/// the Sail look's surface and hairline, content corners at 6 pt, the action in the accent with dark text.
+/// the Sail look's surface and hairline, content corners at 6 pt, the action in the accent.
 /// Its button answers Return while it shows.
 @MainActor
 final class StatusBanner: NSView {
     private let message = NSTextField(wrappingLabelWithString: "")
     private let action: AccentButton
     private var handler: () -> Void = {}
-    private let look: Look
+    /// The look it is drawn in; a new one repaints it.
+    var look: Look {
+        didSet { paint() }
+    }
 
     init(look: Look) {
         self.look = look
         action = AccentButton("", look: look, target: nil, action: #selector(StatusBanner.act))
         super.init(frame: .zero)
         wantsLayer = true
-        layer?.backgroundColor = NSColor(look.surface).cgColor
-        layer?.borderColor = NSColor(look.separator).cgColor
         layer?.borderWidth = 1
         layer?.cornerRadius = Look.contentRadius
         message.font = .systemFont(ofSize: Look.Step.callout.points)
-        message.textColor = NSColor(look.text)
+        paint()
         action.keyEquivalent = "\r"
         action.target = self
         let stack = NSStackView(views: [message, action])
@@ -52,6 +53,13 @@ final class StatusBanner: NSView {
         action.isHidden = button == nil
         action.setTitle(button ?? "")
         isHidden = false
+    }
+
+    private func paint() {
+        layer?.backgroundColor = NSColor(look.surface).cgColor
+        layer?.borderColor = NSColor(look.separator).cgColor
+        message.textColor = NSColor(look.text)
+        action.look = look
     }
 
     func hide() {

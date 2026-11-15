@@ -234,6 +234,13 @@ jobs:
 
       - name: Release build, the shipped app and the drive build
         if: ${{ !cancelled() }}
+        run: |
+          swift build -c release
+          ci/bundle Sail "$RUNNER_TEMP/app/Sail.app" "$SAIL_BINARY"
+          ci/bundle SailDrive "$RUNNER_TEMP/drive/Sail.app" "$SAIL_BINARY"
+
+      - name: Sign the drive build as the shipped app is signed
+        if: ${{ !cancelled() }}
         env:
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
@@ -242,11 +249,7 @@ jobs:
           APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
           APPLE_API_KEY_P8_BASE64: ${{ secrets.APPLE_API_KEY_P8_BASE64 }}
           APPLE_PROVISIONING_PROFILE_BASE64: ${{ secrets.APPLE_PROVISIONING_PROFILE_BASE64 }}
-        run: |
-          swift build -c release
-          ci/bundle Sail "$RUNNER_TEMP/app/Sail.app" "$SAIL_BINARY"
-          ci/bundle SailDrive "$RUNNER_TEMP/drive/Sail.app" "$SAIL_BINARY"
-          ci/sign "$RUNNER_TEMP/drive/Sail.app"
+        run: ci/sign "$RUNNER_TEMP/drive/Sail.app"
 
       - name: The bundled sail runs under the hardened runtime from inside the bundle
         if: ${{ !cancelled() }}
@@ -312,9 +315,11 @@ jobs:
           codesign -d --verbose=2 "$app" 2>&1 | grep -E 'flags=.*runtime'
           codesign -d --verbose=2 "$app/Contents/Helpers/sail" 2>&1 | grep -E 'flags=.*runtime'
           if strings "$app/Contents/MacOS/Sail" | grep -q SailDrive; then echo "the drive harness is in the shipped app" >&2; exit 1; fi
-          if nm "$app/Contents/MacOS/Sail" | grep -q SoftwarePasskey; then echo "the software passkey is in the shipped app" >&2; exit 1; fi
-          if strings "$app/Contents/MacOS/Sail" | grep -q sail-test-passkey-not-for-shipping; then
-            echo "the software passkey's marker is in the shipped app" >&2
+          # The marker string, and the module's name, which every Swift type's context descriptor
+          # carries as a string whatever the type's kind and even in a stripped binary (a symbol name
+          # is mangled with word substitutions and is gone once stripped).
+          if strings "$app/Contents/MacOS/Sail" | grep -Eq 'sail-test-passkey-not-for-shipping|SailTestPasskey'; then
+            echo "the software passkey is in the shipped app" >&2
             exit 1
           fi
           inner=$(codesign -d --entitlements - --xml "$app/Contents/Helpers/sail" 2>/dev/null || true)

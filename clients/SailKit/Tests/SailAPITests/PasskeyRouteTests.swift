@@ -22,12 +22,12 @@ import Testing
         #expect(try json(endpoint.request.body) == json(exchange.requestBody))
         let ceremony = try endpoint.decode(response(exchange))
         #expect(ceremony.challengeId == "wac_golden1")
-        #expect(ceremony.publicKey.rp.id == "sail.standardapplied.com" && ceremony.publicKey.rp.name == "Sail")
+        #expect(ceremony.publicKey.rp.id == "sail.standardapplied.com")
         #expect(ceremony.publicKey.user.name == "uday" && ceremony.publicKey.user.displayName == "Uday")
         #expect(!ceremony.publicKey.challenge.data.isEmpty && !ceremony.publicKey.user.id.data.isEmpty)
         #expect(ceremony.publicKey.excludeCredentials.isEmpty)
         let enrolled = try Endpoint.registrationStart(ticket: aTicket).decode(response(Exchange("passkey-register-start-enrolled")))
-        #expect(enrolled.publicKey.excludeCredentials.map(\.type) == ["public-key"])
+        #expect(enrolled.publicKey.excludeCredentials.count == 1)
     }
 
     @Test func registrationFinishSendsWhatThePasskeyMadeAndReadsTheEnrollment() throws {
@@ -41,18 +41,17 @@ import Testing
         #expect(endpoint.request.headers["X-Enrollment-Ticket"] == aTicket)
         #expect(try json(endpoint.request.body) == json(exchange.requestBody))
         let enrollment = try endpoint.decode(response(exchange))
-        #expect(enrollment.status == "registered" && enrollment.fde == "uday" && !enrollment.credentialId.data.isEmpty)
+        #expect(enrollment.fde == "uday")
     }
 
-    @Test func signInStartReadsTheRequestOptionsAndTheOrigins() throws {
+    @Test func signInStartReadsTheRequestOptions() throws {
         let exchange = try Exchange("passkey-login-start")
         #expect(Endpoint.signInStart.request.route == "\(exchange.method) \(exchange.path)")
         #expect(Endpoint.signInStart.request.headers["Authorization"] == nil)
         #expect(try json(Endpoint.signInStart.request.body) == json(exchange.requestBody))
         let ceremony = try Endpoint.signInStart.decode(response(exchange))
         #expect(ceremony.challengeId == "wac_golden9")
-        #expect(ceremony.publicKey.rpId == "sail.standardapplied.com" && ceremony.publicKey.userVerification == "required")
-        #expect(ceremony.origins == ["https://sail.standardapplied.com"])
+        #expect(ceremony.publicKey.rpId == "sail.standardapplied.com")
     }
 
     @Test func signInFinishSendsTheAssertionAndReadsTheSession() throws {

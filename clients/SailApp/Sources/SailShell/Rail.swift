@@ -29,7 +29,11 @@ public final class Rail: NSView {
     public private(set) var selected: Item?
     var onSelect: @MainActor (Item) -> Void = { _ in }
 
-    private let look: Look
+    /// The look it is drawn in; a new one repaints it.
+    var look: Look {
+        didSet { show(selected) }
+    }
+
     private var buttons: [Item: NSButton] = [:]
     private var bars: [Item: NSView] = [:]
 
@@ -37,7 +41,6 @@ public final class Rail: NSView {
         self.look = look
         super.init(frame: .zero)
         wantsLayer = true
-        layer?.backgroundColor = NSColor(look.chrome).cgColor
         for item in Item.allCases {
             let button = NSButton(image: Self.image(item), target: self, action: #selector(pick(_:)))
             button.isBordered = false
@@ -49,7 +52,6 @@ public final class Rail: NSView {
             button.translatesAutoresizingMaskIntoConstraints = false
             let bar = NSView()
             bar.wantsLayer = true
-            bar.layer?.backgroundColor = NSColor(look.accent).cgColor
             bar.translatesAutoresizingMaskIntoConstraints = false
             addSubview(button)
             addSubview(bar)
@@ -76,7 +78,9 @@ public final class Rail: NSView {
 
     func show(_ item: Item?) {
         selected = item
+        layer?.backgroundColor = NSColor(look.chrome).cgColor
         for (each, button) in buttons {
+            bars[each]?.layer?.backgroundColor = NSColor(look.accent).cgColor
             let chosen = each == item
             button.layer?.backgroundColor = chosen ? NSColor(look.fillSelected).cgColor : NSColor.clear.cgColor
             button.contentTintColor = chosen ? NSColor(look.accentText) : NSColor(look.textSecondary)

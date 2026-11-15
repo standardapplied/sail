@@ -102,6 +102,8 @@ struct Step: Decodable {
     var accent: Bool?
     /// The window's title bar: transparent, the platform's buttons, the rail and the pane under it.
     var titleBar: Bool?
+    /// Double-clicks the title bar twice: the frame changes and comes back, as the system's setting says.
+    var zoomByTitleBar: Bool?
     /// Searches everywhere a token could be left for the session token and for `sess_`.
     var sweep: Bool?
     /// The step runs only on a signed build, or only on an unsigned one; skipped otherwise.

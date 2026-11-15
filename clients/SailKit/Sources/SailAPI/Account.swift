@@ -34,8 +34,8 @@ public enum PasskeyFailure: Error, Equatable, Sendable {
 
 /// One session per control plane, kept where only this app reads it.
 public protocol TokenVault: Sendable {
-    func session(for controlPlane: ControlPlane) throws(VaultFailure) -> StoredSession?
-    func keep(_ session: StoredSession, for controlPlane: ControlPlane) throws(VaultFailure)
+    func session(for controlPlane: ControlPlane) throws(VaultFailure) -> PasskeySession?
+    func keep(_ session: PasskeySession, for controlPlane: ControlPlane) throws(VaultFailure)
     func forget(_ controlPlane: ControlPlane) throws(VaultFailure)
 }
 
@@ -47,23 +47,6 @@ public struct VaultFailure: Error, Equatable, Sendable {
     public init(status: String, remedy: String? = nil) {
         self.status = status
         self.remedy = remedy
-    }
-}
-
-/// A session as the vault keeps it. Its description never holds the token.
-public struct StoredSession: Codable, Equatable, Sendable, CustomStringConvertible {
-    public let token: String
-    public let fde: String
-    public let expiresAt: Date
-
-    public init(token: String, fde: String, expiresAt: Date) {
-        self.token = token
-        self.fde = fde
-        self.expiresAt = expiresAt
-    }
-
-    public var description: String {
-        "a session for \(fde) until \(expiresAt)"
     }
 }
 
@@ -135,31 +118,32 @@ public struct Account: Sendable {
         }
         let finish = try built { () throws(SailError) in try Endpoint.signInFinish(challengeId: ceremony.challengeId, assertion) }
         let session = try await call(finish, on: transport, at: plane, step: .signingIn)
-        let stored = StoredSession(token: session.sessionToken, fde: session.fde, expiresAt: session.expiresAt)
-        try vaulted { () throws(VaultFailure) in try vault.keep(stored, for: plane) }
-        return try await standing(stored, at: plane, on: transport)
+        try vaulted("keep") { () throws(VaultFailure) in try vault.keep(session, for: plane) }
+        return try await standing(session, at: plane, on: transport)
     }
 
     /// Who this Mac is signed in as, nil when it holds no session; a session the server ended is
     /// forgotten and said.
     public func current(at plane: ControlPlane) async throws(AccountRefusal) -> SignedIn? {
-        guard let stored = try vaulted({ () throws(VaultFailure) in try vault.session(for: plane) }) else { return nil }
+        guard let stored = try vaulted("read", { () throws(VaultFailure) in try vault.session(for: plane) }) else { return nil }
         return try await standing(stored, at: plane, on: connect(plane))
     }
 
     /// Forgets the session on this Mac. The server keeps it until it expires or an admin revokes it.
     public func signOut(at plane: ControlPlane) throws(AccountRefusal) {
-        try vaulted { () throws(VaultFailure) in try vault.forget(plane) }
+        try vaulted("remove") { () throws(VaultFailure) in try vault.forget(plane) }
     }
 
-    private func standing(_ stored: StoredSession, at plane: ControlPlane, on transport: any Transport) async throws(AccountRefusal) -> SignedIn {
+    /// Who `stored` signs in as. A session the server ended is forgotten and said, whether or not
+    /// the vault could forget it: the next launch is told again and tries again.
+    private func standing(_ stored: PasskeySession, at plane: ControlPlane, on transport: any Transport) async throws(AccountRefusal) -> SignedIn {
         do {
-            let whoami = try await SailClient(transport: transport, token: stored.token).send(.whoami)
+            let whoami = try await SailClient(transport: transport, token: stored.sessionToken).send(.whoami)
             return SignedIn(controlPlane: plane, fde: stored.fde, until: stored.expiresAt, whoami: .success(whoami))
         } catch {
             let refusal = AccountRefusal(error, at: plane, step: .asking)
             guard refusal.reason != .ended else {
-                try signOut(at: plane)
+                try? vault.forget(plane)
                 throw refusal
             }
             return SignedIn(controlPlane: plane, fde: stored.fde, until: stored.expiresAt, whoami: .failure(refusal))
@@ -188,11 +172,11 @@ public struct Account: Sendable {
         }
     }
 
-    private func vaulted<Value>(_ act: () throws(VaultFailure) -> Value) throws(AccountRefusal) -> Value {
+    private func vaulted<Value>(_ verb: String, _ act: () throws(VaultFailure) -> Value) throws(AccountRefusal) -> Value {
         do {
             return try act()
         } catch {
-            throw AccountRefusal(.keychain(error.status), remedy: error.remedy)
+            throw AccountRefusal(.keychain(verb, error.status), remedy: error.remedy)
         }
     }
 }
