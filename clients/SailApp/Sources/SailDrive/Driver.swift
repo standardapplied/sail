@@ -450,6 +450,7 @@ final class Driver {
         let stem = String(format: "%02d-", index) + name
         guard onTerminal else {
             try? shell.account.text.write(to: out.appending(path: stem + ".txt"), atomically: true, encoding: .utf8)
+            try? windowImage()?.write(to: out.appending(path: stem + ".png"))
             return
         }
         if let image = try? terminal.snapshot(), let png = image.png() {

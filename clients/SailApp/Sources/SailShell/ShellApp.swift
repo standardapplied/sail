@@ -122,6 +122,7 @@ public final class ShellApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         window.isReleasedWhenClosed = false
         window.backgroundColor = NSColor(look.canvas)
         let root = NSView()
+        root.wantsLayer = true
         rail.translatesAutoresizingMaskIntoConstraints = false
         content.translatesAutoresizingMaskIntoConstraints = false
         root.addSubview(rail)

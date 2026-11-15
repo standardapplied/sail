@@ -127,21 +127,33 @@ extension Driver {
         return (failed.isEmpty, failed.isEmpty ? "the item is \(checks.keys.sorted().joined(separator: ", "))" : "the item is not: \(failed.joined(separator: ", "))")
     }
 
-    /// Scenario 18: the sign-in button drawn into an sRGB bitmap, its commonest colour the fill and
-    /// its darkest the label, each within 2 of 255 of the token, whatever the system accent is.
-    private func accent() -> (Bool, String) {
-        let button = shell.account.signIn
-        button.display()
+    /// `view` drawn by its layer into an sRGB bitmap at twice its size.
+    static func drawn(_ view: NSView) -> CGContext? {
+        view.display()
         let scale = 2
-        let width = Int(button.bounds.width) * scale, height = Int(button.bounds.height) * scale
-        guard width > 0, height > 0, let layer = button.layer, let space = CGColorSpace(name: CGColorSpace.sRGB),
+        let width = Int(view.bounds.width) * scale, height = Int(view.bounds.height) * scale
+        guard width > 0, height > 0, let layer = view.layer, let space = CGColorSpace(name: CGColorSpace.sRGB),
               let context = CGContext(
                   data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: width * 4, space: space,
                   bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
-              ), let bytes = context.data
-        else { return (false, "the button could not be drawn") }
+              )
+        else { return nil }
         context.scaleBy(x: CGFloat(scale), y: CGFloat(scale))
         layer.render(in: context)
+        return context
+    }
+
+    /// The window's content as a PNG, for the owner to judge the look and for a failed step.
+    func windowImage() -> Data? {
+        guard let content = shell.window.contentView, let image = Self.drawn(content)?.makeImage() else { return nil }
+        return NSBitmapImageRep(cgImage: image).representation(using: .png, properties: [:])
+    }
+
+    /// Scenario 18: the sign-in button drawn into an sRGB bitmap, its commonest colour the fill and
+    /// its darkest the label, each within 2 of 255 of the token, whatever the system accent is.
+    private func accent() -> (Bool, String) {
+        guard let context = Self.drawn(shell.account.signIn), let bytes = context.data else { return (false, "the button could not be drawn") }
+        let width = context.width, height = context.height
         let pixels = bytes.bindMemory(to: UInt8.self, capacity: width * height * 4)
         var counts: [UInt32: Int] = [:]
         var darkest: (sum: Int, rgb: UInt32) = (Int.max, 0)

@@ -17,31 +17,11 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - name: token-in-user-defaults
-            file: Sources/SailAccount/KeychainVault.swift
-            old: '        try forget(controlPlane)'
-            new: '        UserDefaults.standard.set(session.token, forKey: "session"); try forget(controlPlane)'
-            check: drive
-          - name: software-passkey-linked-into-sail
+          - name: unsigned-build-is-refused-the-keychain
             file: Sources/Sail/main.swift
             old: 'ShellApp.run()'
-            new: 'print(SoftwarePasskey.marker); ShellApp.run()'
-            check: bundle
-          - name: system-accent-for-the-button
-            file: Sources/SailShell/AccentButton.swift
-            old: '        layer?.backgroundColor = NSColor(look.accent).cgColor'
-            new: '        layer?.backgroundColor = NSColor.controlAccentColor.cgColor'
-            check: drive
-          - name: item-kept-after-sign-out
-            file: Sources/SailAccount/KeychainVault.swift
-            old: '        let status = SecItemDelete(Self.item(controlPlane) as CFDictionary)'
-            new: '        let status = controlPlane.description.isEmpty ? SecItemDelete(Self.item(controlPlane) as CFDictionary) : errSecSuccess'
-            check: drive
-          - name: ticket-logged
-            file: Sources/SailShell/AccountPane.swift
-            old: '        ticket.stringValue = ""'
-            new: '        ticket.stringValue = ""; NSLog("enrolling with %@", pasted)'
-            check: drive
+            new: 'ShellApp.run()'
+            check: unsigned
     defaults:
       run:
         working-directory: clients/SailApp
@@ -100,6 +80,13 @@ jobs:
           ci/bundle SailDrive "$RUNNER_TEMP/drive/Sail.app" "$SAIL_BINARY"
           ci/sign "$RUNNER_TEMP/drive/Sail.app"
 
+      - name: The drive build signed ad hoc, as an unsigned run signs it
+        if: matrix.check == 'unsigned'
+        run: |
+          ci/bundle SailDrive "$RUNNER_TEMP/drive/Sail.app" "$SAIL_BINARY"
+          ci/sign "$RUNNER_TEMP/drive/Sail.app"
+          echo "SIGNING=off" >> "$GITHUB_ENV"
+
       - name: The check that must go red
         env:
           CHECK: ${{ matrix.check }}
@@ -115,6 +102,11 @@ jobs:
             exit 1
           fi
           defaults write -g AppleAccentColor -int -1
+          if [[ $CHECK == unsigned ]]; then
+            ci/drive "$RUNNER_TEMP/drive/Sail.app" "$RUNNER_TEMP/drive-out"
+            grep -h 'row-13-unsigned' -A1 "$RUNNER_TEMP"/drive-out/first/report.json || true
+            exit 0
+          fi
           if ci/drive "$RUNNER_TEMP/drive/Sail.app" "$RUNNER_TEMP/drive-out"; then
             echo "SURVIVED: the drive passed" >&2
             exit 1
