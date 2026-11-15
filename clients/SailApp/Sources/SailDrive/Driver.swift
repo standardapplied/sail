@@ -86,6 +86,10 @@ final class Driver {
                 detail = "the view never drew the screen in full: it shows \(terminal.visibleText.count) characters, the screen holds "
                     + "\(screenText.count), every glyph drawn: \(terminal.isDrawnInFull)"
             }
+            if !ok {
+                detail += "; " + whereTheWindowIs
+                Self.captureTheScreen(to: out.appending(path: String(format: "%02d-", index) + name + "-screen.png"))
+            }
             let seconds = (ContinuousClock.now - began) / .seconds(1)
             results.append(Result(index: index, name: name, ok: ok, seconds: seconds, detail: detail))
             save(index: index, name: name)
@@ -306,6 +310,24 @@ final class Driver {
 
     private static func ms(_ milliseconds: Double) -> String {
         String(format: "%.1f", milliseconds)
+    }
+
+    /// Whether the app is active, its window on screen and key, and which app is in front: what a
+    /// failed step's frames depended on.
+    private var whereTheWindowIs: String {
+        let window = preview.window
+        return "the app is \(NSApp.isActive ? "" : "not ")active, its window is \(window.occlusionState.contains(.visible) ? "" : "not ")"
+            + "visible and \(window.isKeyWindow ? "" : "not ")key, the app in front is "
+            + (NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? "none")
+    }
+
+    /// The whole screen as it is, so whatever covered the window is seen.
+    private static func captureTheScreen(to file: URL) {
+        let capture = Process()
+        capture.executableURL = URL(filePath: "/usr/sbin/screencapture")
+        capture.arguments = ["-x", file.path]
+        try? capture.run()
+        capture.waitUntilExit()
     }
 
     /// How long a step's screen may take to be drawn by the view before the step fails.
