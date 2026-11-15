@@ -1,13 +1,43 @@
 #!/usr/bin/env bash
-# Runs the drive build against this Mac's own host: Tests/Drive/first.json, then the app quit and
-# opened again for Tests/Drive/second.json. Each run's images, texts and report land in OUT.
+# Runs the drive build against this Mac's own host and two control planes the bundled sail starts
+# here, each on a data directory of its own: one taking passkeys for sail.standardapplied.com on
+# 7979, with uday an admin and a ticket to enroll him, and one with no relying party on 7980.
+# Tests/Drive/first.json runs, then the app is quit and opened again for Tests/Drive/second.json.
+# Each run's texts, images and report land in OUT; the servers' logs beside them. The ticket is
+# handed to the drive in its environment and printed nowhere.
 set -euo pipefail
 
 [[ $# -eq 2 ]] || { echo "usage: ci/drive DRIVE_APP OUT" >&2; exit 2; }
 readonly app=$1 out=$2
 cd "$(dirname "$0")/.."
-readonly drive=$app/Contents/MacOS/SailDrive
+readonly drive=$app/Contents/MacOS/SailDrive sail=$app/Contents/Helpers/sail
 [[ -x $drive ]] || { echo "ci/drive: $app holds no SailDrive" >&2; exit 1; }
+
+mkdir -p "$out"
+passkeys=$(mktemp -d) plain=$(mktemp -d)
+SAIL_DATA_DIR=$passkeys "$sail" server start --port 7979 --rp-id sail.standardapplied.com --origin https://sail.standardapplied.com \
+  > "$out/server-7979.log" 2>&1 &
+servers=($!)
+SAIL_DATA_DIR=$plain "$sail" server start --port 7980 > "$out/server-7980.log" 2>&1 &
+servers+=($!)
+trap 'kill "${servers[@]}" 2>/dev/null || true; rm -rf "$passkeys" "$plain"' EXIT
+for port in 7979 7980; do
+  for _ in $(seq 1 60); do
+    curl -fsS "http://127.0.0.1:$port/v1/health" > /dev/null 2>&1 && break
+    sleep 1
+  done
+  curl -fsS "http://127.0.0.1:$port/v1/health" > /dev/null || {
+    echo "ci/drive: the control plane on $port did not answer within 60 s:" >&2
+    tail -20 "$out/server-$port.log" >&2
+    exit 1
+  }
+done
+
+export SAIL_DATA_DIR=$passkeys
+"$sail" fde add uday --name Uday --role admin
+SAIL_DRIVE_TICKET=$("$sail" fde enroll uday --json | plutil -extract ticket raw -)
+export SAIL_DRIVE_TICKET SAIL_DRIVE_PASSKEY=$out/software-passkey.json
+rm -f "$SAIL_DRIVE_PASSKEY"
 
 for run in first second; do
   echo "ci/drive: $run"

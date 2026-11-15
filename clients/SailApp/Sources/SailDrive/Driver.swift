@@ -1,22 +1,28 @@
 import AppKit
-import SailPreview
 import SailRenderer
+import SailShell
 import SailSurface
 import SailTerminal
 import SailTerminalView
+import SailTestPasskey
 import SailVT
 
-/// Runs a drive script in the real preview against the real local host. Every key, click and
-/// drag is an `NSEvent` sent through the app's own `sendEvent`, so no Accessibility or Screen
-/// Recording permission is needed; the wheel goes to the view's `scrollWheel`, since a wheel event
-/// made by hand carries no window. After each step the terminal's last frame is saved as an
-/// image, rendered in-process, with the screen's text; at the end a JSON report.
+/// Runs a drive script in the real app against the real local host and a real control plane, the
+/// software passkey in the platform's place. Every key, click and drag is an `NSEvent` sent through
+/// the app's own `sendEvent`, so no Accessibility or Screen Recording permission is needed; the
+/// wheel goes to the view's `scrollWheel`, since a wheel event made by hand carries no window. After
+/// each step on "This Mac" the terminal's last frame is saved as an image, rendered in-process, with
+/// the screen's text, and after each step on the account the pane's text; at the end a JSON report.
 @MainActor
 final class Driver {
-    private let preview: PreviewApp
+    let shell: ShellApp
+    let passkey: SoftwarePasskey
+    let signed: Bool
+    var tokens: Set<String> = []
+    var askedAtStart = 0
     private let steps: [Step]
-    private let out: URL
-    private var results: [Result] = []
+    let out: URL
+    var results: [Result] = []
     private var measures: [Measure] = []
     private var bench: [String: Double] = [:]
     private var started = false
@@ -27,6 +33,7 @@ final class Driver {
         let index: Int
         let name: String
         let ok: Bool
+        let skipped: Bool
         let seconds: Double
         let detail: String
     }
@@ -52,14 +59,22 @@ final class Driver {
         let bench: [String: Double]
     }
 
-    init(preview: PreviewApp, script: Script, out: URL) {
-        self.preview = preview
+    init(shell: ShellApp, passkey: SoftwarePasskey, signed: Bool, script: Script, out: URL) {
+        self.shell = shell
+        self.passkey = passkey
+        self.signed = signed
         steps = script.steps
         self.out = out
+        askedAtStart = passkey.asked
     }
 
     var terminal: TerminalView {
-        preview.terminal
+        shell.thisMac.terminal
+    }
+
+    /// Whether the steps are on "This Mac" with a session drawn.
+    var onTerminal: Bool {
+        shell.rail.selected == .thisMac && shell.thisMac.session != nil
     }
 
     /// Runs the script once. App Nap is held off for the run: it slows a window that is not in
@@ -67,7 +82,7 @@ final class Driver {
     func start() {
         guard !started else { return }
         started = true
-        let activity = ProcessInfo.processInfo.beginActivity(options: [.userInitiated, .latencyCritical], reason: "driving the preview")
+        let activity = ProcessInfo.processInfo.beginActivity(options: [.userInitiated, .latencyCritical], reason: "driving the app")
         Task {
             await run()
             ProcessInfo.processInfo.endActivity(activity)
@@ -75,12 +90,21 @@ final class Driver {
     }
 
     private func run() async {
+        _ = await waitUntil(10) { self.shell.window.isVisible && self.shell.rail.selected != nil }
         for (offset, step) in steps.enumerated() {
             let index = offset + 1
             let name = step.name ?? "step"
             let began = ContinuousClock.now
+            if let only = step.signed, only != signed {
+                let build = signed ? "signed" : "unsigned"
+                results.append(Result(index: index, name: name, ok: true, skipped: true, seconds: 0, detail: "skipped: this build is \(build)"))
+                print("drive \(index) \(name): skipped on \(signed ? "a signed" : "an unsigned") build")
+                continue
+            }
             var (ok, detail) = await perform(step, name: name)
-            let drew = await waitUntil(Self.drawDeadline) { self.terminal.visibleText == self.screenText && self.terminal.isDrawnInFull }
+            let drew = await waitUntil(Self.drawDeadline) {
+                !self.onTerminal || self.terminal.visibleText == self.screenText && self.terminal.isDrawnInFull
+            }
             if ok, !drew {
                 ok = false
                 detail = "the view never drew the screen in full: it shows \(terminal.visibleText.count) characters, the screen holds "
@@ -91,14 +115,14 @@ final class Driver {
                 Self.captureTheScreen(to: out.appending(path: String(format: "%02d-", index) + name + "-screen.png"))
             }
             let seconds = (ContinuousClock.now - began) / .seconds(1)
-            results.append(Result(index: index, name: name, ok: ok, seconds: seconds, detail: detail))
+            results.append(Result(index: index, name: name, ok: ok, skipped: false, seconds: seconds, detail: detail))
             save(index: index, name: name)
             print("drive \(index) \(name): \(ok ? "ok" : "FAILED") in \(String(format: "%.2f", seconds)) s \(detail)")
             if !ok { break }
         }
         let passed = results.count == steps.count && results.allSatisfy(\.ok)
         let report = Report(
-            passed: passed, hertz: preview.window.screen?.maximumFramesPerSecond ?? 0, scale: terminal.metrics.scale, steps: results,
+            passed: passed, hertz: shell.window.screen?.maximumFramesPerSecond ?? 0, scale: terminal.metrics.scale, steps: results,
             measures: measures, bench: bench
         )
         let encoder = JSONEncoder()
@@ -109,6 +133,9 @@ final class Driver {
     }
 
     private func perform(_ step: Step, name: String) async -> (Bool, String) {
+        if let account = await performAccount(step) {
+            return account
+        }
         if let text = step.type {
             for character in text { key(character) }
             return (true, "typed \(text.count) keys")
@@ -141,7 +168,7 @@ final class Driver {
             return (true, "")
         }
         if let size = step.resize, size.count == 2 {
-            preview.window.setContentSize(NSSize(width: size[0], height: size[1]))
+            shell.window.setContentSize(NSSize(width: size[0], height: size[1]))
             return (true, "")
         }
         if let font = step.font {
@@ -169,8 +196,8 @@ final class Driver {
             guard let paste = Keys.named("v", modifiers: ["command"]) else { return (false, "no ⌘V") }
             send(paste)
             guard let confirm = step.confirm else { return (true, "") }
-            let asked = await waitUntil(step.seconds ?? 5) { self.preview.window.attachedSheet != nil }
-            guard asked, let sheet = preview.window.attachedSheet, let button = Self.button(confirm ? "Paste" : "Cancel", in: sheet.contentView)
+            let asked = await waitUntil(step.seconds ?? 5) { self.shell.window.attachedSheet != nil }
+            guard asked, let sheet = shell.window.attachedSheet, let button = Self.button(confirm ? "Paste" : "Cancel", in: sheet.contentView)
             else { return (false, "no confirmation was asked") }
             button.performClick(nil)
             return (true, confirm ? "pasted after the sheet" : "cancelled at the sheet")
@@ -190,8 +217,8 @@ final class Driver {
             return (p95 <= 4, bench.sorted { $0.key < $1.key }.map { "\($0.key) \(String(format: "%.2f", $0.value))" }.joined(separator: ", "))
         }
         if let title = step.title {
-            let found = await waitUntil(step.seconds ?? 5) { self.preview.window.title == title }
-            return (found, "the window's title is '\(preview.window.title)'")
+            let found = await waitUntil(step.seconds ?? 5) { self.shell.window.title == title }
+            return (found, "the window's title is '\(shell.window.title)'")
         }
         if step.latencyOverlay == true {
             return await latencyOverlay(within: step.seconds ?? 5)
@@ -232,8 +259,8 @@ final class Driver {
             return (found, found ? "" : "the screen never showed '\(text)'")
         }
         if let banner = step.banner {
-            let found = await waitUntil(step.seconds ?? 15) { self.preview.status?.contains(banner) == true }
-            return (found, "the banner says '\(preview.status ?? "nothing")'")
+            let found = await waitUntil(step.seconds ?? 15) { self.shell.thisMac.status?.contains(banner) == true }
+            return (found, "the banner says '\(shell.thisMac.status ?? "nothing")'")
         }
         if step.still == true {
             let before = screenText
@@ -246,16 +273,16 @@ final class Driver {
             return await measure(keys, interval: step.interval ?? 50, name: name)
         }
         if step.killHost == true {
-            guard preview.host.startedPID != nil else { return (false, "the preview started no host to kill") }
-            preview.host.crash()
+            guard shell.thisMac.host.startedPID != nil else { return (false, "the app started no host to kill") }
+            shell.thisMac.host.crash()
             return (true, "")
         }
         if step.attached == true {
-            let attached = await waitUntil(step.seconds ?? 20) { self.preview.session?.state.phase == .attached }
-            return (attached, "the session is \(preview.session.map { "\($0.state.phase)" } ?? "none")")
+            let attached = await waitUntil(step.seconds ?? 20) { self.shell.thisMac.session?.state.phase == .attached }
+            return (attached, "the session is \(shell.thisMac.session.map { "\($0.state.phase)" } ?? "none")")
         }
         if step.newSession == true {
-            await preview.open(fresh: true)
+            await shell.thisMac.open(fresh: true)
             return (true, "")
         }
         return (false, "the step names no action")
@@ -279,7 +306,7 @@ final class Driver {
         }
         let figures = terminal.latency
         if let clear = Keys.named("u", modifiers: ["control"]) { send(clear) }
-        let refresh = 1000 / Double(max(1, preview.window.screen?.maximumFramesPerSecond ?? 60))
+        let refresh = 1000 / Double(max(1, shell.window.screen?.maximumFramesPerSecond ?? 60))
         let measured = figures.outputToPresented.count > 0
         let budgets = [
             "key to bytes written p95 <= 2 ms": figures.keyToWritten.p95 <= 2,
@@ -315,7 +342,7 @@ final class Driver {
     /// Whether the app is active, its window on screen and key, and which app is in front: what a
     /// failed step's frames depended on.
     private var whereTheWindowIs: String {
-        let window = preview.window
+        let window = shell.window
         return "the app is \(NSApp.isActive ? "" : "not ")active, its window is \(window.occlusionState.contains(.visible) ? "" : "not ")"
             + "visible and \(window.isKeyWindow ? "" : "not ")key, the app in front is "
             + (NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? "none")
@@ -340,7 +367,7 @@ final class Driver {
     }
 
     private var screenText: String {
-        (try? preview.session?.screen.text()) ?? ""
+        (try? shell.thisMac.session?.screen.text()) ?? ""
     }
 
     private var lines: [String] {
@@ -355,19 +382,19 @@ final class Driver {
         let waited = (ContinuousClock.now - began) / .milliseconds(1)
         guard let toggle = Keys.named("l", modifiers: ["command", "option"]) else { return (false, "no ⌥⌘L") }
         send(toggle)
-        let shown = preview.latencyShown ?? ""
+        let shown = shell.thisMac.latencyShown ?? ""
         let lines = shown.split(separator: "\n")
         let keys = shown.components(separatedBy: "(").dropFirst().compactMap { part in Int(part.prefix(while: \.isNumber)) }.reduce(0, +)
         let figures = terminal.latency
-        let ok = counted && keys > 0 && lines.count <= PreviewApp.latencyLines && shown.contains("key → echo on glass")
+        let ok = counted && keys > 0 && lines.count <= TerminalPane.latencyLines && shown.contains("key → echo on glass")
         let measured = "keys written \(figures.keyToWritten.count), echoes counted on glass \(figures.keyToEcho.count) and estimated "
             + "\(figures.keyToEchoEstimated.count), presents reported \(figures.reportedPresents) and not \(figures.unreportedPresents), "
             + "told before their commit \(figures.presentedBeforeCommit), "
             + "waited \(String(format: "%.0f", waited)) ms"
-        return (ok, "\(measured); \(lines.count) lines of \(PreviewApp.latencyLines): \(lines.joined(separator: " | "))")
+        return (ok, "\(measured); \(lines.count) lines of \(TerminalPane.latencyLines): \(lines.joined(separator: " | "))")
     }
 
-    private func waitUntil(_ seconds: Double, _ condition: @MainActor () -> Bool) async -> Bool {
+    func waitUntil(_ seconds: Double, _ condition: @MainActor () -> Bool) async -> Bool {
         let deadline = ContinuousClock.now + .seconds(seconds)
         while !condition() {
             guard ContinuousClock.now < deadline else { return false }
@@ -384,7 +411,7 @@ final class Driver {
         for type in [NSEvent.EventType.keyDown, .keyUp] {
             guard let event = NSEvent.keyEvent(
                 with: type, location: .zero, modifierFlags: key.flags, timestamp: ProcessInfo.processInfo.systemUptime,
-                windowNumber: (NSApp.keyWindow ?? preview.window).windowNumber, context: nil, characters: key.characters,
+                windowNumber: (NSApp.keyWindow ?? shell.window).windowNumber, context: nil, characters: key.characters,
                 charactersIgnoringModifiers: key.ignoring, isARepeat: false, keyCode: key.code
             ) else { continue }
             NSApp.sendEvent(event)
@@ -413,7 +440,7 @@ final class Driver {
         )
         guard let event = NSEvent.mouseEvent(
             with: type, location: terminal.convert(point, to: nil), modifierFlags: shift ? .shift : [],
-            timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: preview.window.windowNumber, context: nil, eventNumber: 0,
+            timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: shell.window.windowNumber, context: nil, eventNumber: 0,
             clickCount: clicks, pressure: 1
         ) else { return }
         NSApp.sendEvent(event)
@@ -421,6 +448,10 @@ final class Driver {
 
     private func save(index: Int, name: String) {
         let stem = String(format: "%02d-", index) + name
+        guard onTerminal else {
+            try? shell.account.text.write(to: out.appending(path: stem + ".txt"), atomically: true, encoding: .utf8)
+            return
+        }
         if let image = try? terminal.snapshot(), let png = image.png() {
             try? png.write(to: out.appending(path: stem + ".png"))
         }

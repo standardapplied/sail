@@ -1,7 +1,11 @@
-Sail Terminal Preview carries the software below. Each notice is reproduced as its licence asks.
+Sail carries the software below. Each notice is reproduced as its licence asks.
 
 ================================================================================
 JetBrains Mono 2.304: SIL Open Font License 1.1, its text in Fonts/OFL.txt beside the fonts.
+================================================================================
+
+================================================================================
+Newsreader (Production Type, productiontype/Newsreader at cfcb4f7, Newsreader16pt-Medium): SIL Open Font License 1.1, its text in Fonts/Newsreader-OFL.txt beside the fonts.
 ================================================================================
 
 ================================================================================

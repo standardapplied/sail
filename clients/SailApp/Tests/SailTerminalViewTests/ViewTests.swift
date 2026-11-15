@@ -484,7 +484,7 @@ import Testing
     @Test func noAppSourceSpellsAnEscapeSequence() throws {
         let sources = URL(filePath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
             .appending(path: "Sources")
-        let targets = ["SailLook", "SailRenderer", "SailTerminalView", "SailPreview", "SailTerminalPreview"]
+        let targets = ["SailLook", "SailRenderer", "SailTerminalView", "SailShell", "SailAccount", "Sail"]
         var read = 0
         for target in targets {
             let directory = sources.appending(path: target)

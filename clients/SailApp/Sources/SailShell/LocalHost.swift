@@ -3,9 +3,9 @@ import Foundation
 import SailTerminal
 import Synchronization
 
-/// This Mac's own terminal host for the preview: the one already answering at the person's
+/// This Mac's own terminal host for "This Mac": the one already answering at the person's
 /// socket, or else the bundled `sail _pty-host --local`, started in a session of its own so it
-/// outlives the app (spec 3 replaces this with a LaunchAgent). A host the preview started and that
+/// outlives the app (a later spec replaces this with a LaunchAgent). A host the app started and that
 /// then dies is started again at once, unless it died within ``shortestLife`` of starting. Its
 /// standard error goes to a file only its owner reads, so when it refuses to start, its own last
 /// sentence is what the person is told; the host appends to it, and the file is emptied each time
@@ -29,13 +29,13 @@ public final class LocalHost: Sendable {
         self.log = log
     }
 
-    /// The pid of the host the preview started, nil when it found one serving.
+    /// The pid of the host the app started, nil when it found one serving.
     public var startedPID: pid_t? {
         child.withLock { $0 }
     }
 
     /// Returns once a host answers, starting the bundled one when none does.
-    public func ensureServing() async throws(PreviewError) {
+    public func ensureServing() async throws(ShellError) {
         if await answers() {
             _ = truncate(log, 0)
             return
@@ -64,7 +64,7 @@ public final class LocalHost: Sendable {
         return ", saying: \(line.prefix(300))"
     }
 
-    /// Kills the host the preview started, as a crash would; it is started again.
+    /// Kills the host the app started, as a crash would; it is started again.
     public func crash() {
         guard let pid = startedPID else { return }
         kill(pid, SIGKILL)
@@ -74,7 +74,7 @@ public final class LocalHost: Sendable {
         (try? await SessionListing.sessions(at: address, timeout: 1)) != nil
     }
 
-    private func start(_ binary: String) throws(PreviewError) {
+    private func start(_ binary: String) throws(ShellError) {
         var attributes: posix_spawnattr_t?
         var actions: posix_spawn_file_actions_t?
         posix_spawnattr_init(&attributes)
@@ -113,16 +113,5 @@ public final class LocalHost: Sendable {
             guard ours, ContinuousClock.now - started >= Self.shortestLife else { return }
             try? start(binary)
         }.start()
-    }
-}
-
-public enum PreviewError: Error, Equatable, CustomStringConvertible {
-    case host(String)
-    case resources(String)
-
-    public var description: String {
-        switch self {
-        case let .host(what), let .resources(what): what
-        }
     }
 }

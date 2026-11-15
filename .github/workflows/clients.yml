@@ -146,8 +146,9 @@ jobs:
             echo "clients=false" >> "$GITHUB_OUTPUT"
           fi
 
-  # The macOS app: the Metal device first; the renderer's goldens and the view's input tests; the
-  # preview driven against the pinned darwin sail's own local host; the D3 answer for spec 3; then
+  # The macOS app: the Metal device first; the renderer's goldens, the view's input tests and the
+  # shell's; the app driven, with a software passkey, against the pinned darwin sail's own local host
+  # and two control planes it starts on this runner, under a graphite system accent; then
   # the shipped bundle signed with Developer ID, its provisioning profile embedded and its
   # entitlements claimed, and notarized, when all seven signing secrets exist (ci/signing says so),
   # and otherwise an unsigned build, signed ad hoc with neither, and named unsigned. The drive build
@@ -254,27 +255,14 @@ jobs:
           echo "$selftest"
           grep -qx 'local-selftest: ok' <<< "$selftest"
 
-      - name: Drive the preview against this Mac's own host
+      # The system accent graphite first, so a view that took the system's accent would show it.
+      - name: Drive the app against this Mac's own host and two control planes
         if: ${{ !cancelled() }}
-        run: ci/drive "$RUNNER_TEMP/drive/Sail.app" "$RUNNER_TEMP/drive-out"
-
-      # D3 of the plan: whether the control plane serves from the darwin binary in a temp data dir.
-      # The answer is reported for spec 3; it fails nothing.
-      - name: D3, the control plane on macOS (reported only)
-        if: ${{ !cancelled() }}
-        continue-on-error: true
+        env:
+          SAIL_SIGNING: ${{ env.SIGNING }}
         run: |
-          mkdir -p "$RUNNER_TEMP/drive-out"
-          home=$(mktemp -d)
-          HOME=$home "$SAIL_BINARY" server start --port 7979 > "$RUNNER_TEMP/drive-out/d3-server.log" 2>&1 &
-          server=$!
-          answer="no answer within 60 s"
-          for _ in $(seq 1 60); do
-            if body=$(curl -fsS http://127.0.0.1:7979/v1/health 2>/dev/null); then answer="GET /v1/health answered: $body"; break; fi
-            sleep 1
-          done
-          kill "$server" 2>/dev/null || true
-          echo "D3: $answer" | tee "$RUNNER_TEMP/drive-out/d3.txt"
+          defaults write -g AppleAccentColor -int -1
+          ci/drive "$RUNNER_TEMP/drive/Sail.app" "$RUNNER_TEMP/drive-out"
 
       - name: Sign the shipped app with Developer ID
         if: env.SIGNING == 'on'
@@ -315,6 +303,7 @@ jobs:
           test -x "$app/Contents/MacOS/Sail" && test -x "$app/Contents/Helpers/sail"
           for font in Regular Bold Italic BoldItalic; do test -f "$app/Contents/Resources/Fonts/JetBrainsMono-$font.ttf"; done
           test -f "$app/Contents/Resources/Fonts/OFL.txt" && test -f "$app/Contents/Resources/Acknowledgements.txt"
+          test -f "$app/Contents/Resources/Fonts/Newsreader16pt-Medium.ttf" && test -f "$app/Contents/Resources/Fonts/Newsreader-OFL.txt"
           codesign --verify --deep --strict --verbose=2 "$app"
           codesign -d --verbose=2 "$app" 2>&1 | grep -E 'flags=.*runtime'
           codesign -d --verbose=2 "$app/Contents/Helpers/sail" 2>&1 | grep -E 'flags=.*runtime'

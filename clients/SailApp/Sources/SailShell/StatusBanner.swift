@@ -3,35 +3,33 @@ import SailLook
 import SailTerminalView
 
 /// A card over the terminal saying where the session stands, with the one thing to do about it:
-/// Mast's surface and hairline, content corners at 6 pt, the action in the accent with dark text.
+/// the Sail look's surface and hairline, content corners at 6 pt, the action in the accent with dark text.
 /// Its button answers Return while it shows.
 @MainActor
 final class StatusBanner: NSView {
     private let message = NSTextField(wrappingLabelWithString: "")
-    private let action = NSButton(title: "", target: nil, action: nil)
+    private let action: AccentButton
     private var handler: () -> Void = {}
     private let look: Look
 
     init(look: Look) {
         self.look = look
+        action = AccentButton("", look: look, target: nil, action: #selector(StatusBanner.act))
         super.init(frame: .zero)
         wantsLayer = true
         layer?.backgroundColor = NSColor(look.surface).cgColor
-        layer?.borderColor = NSColor(look.border).cgColor
+        layer?.borderColor = NSColor(look.separator).cgColor
         layer?.borderWidth = 1
         layer?.cornerRadius = Look.contentRadius
-        message.font = .systemFont(ofSize: 13)
-        message.textColor = NSColor(look.foreground)
-        action.bezelStyle = .push
-        action.bezelColor = NSColor(look.accent)
+        message.font = .systemFont(ofSize: Look.Step.callout.points)
+        message.textColor = NSColor(look.text)
         action.keyEquivalent = "\r"
         action.target = self
-        action.action = #selector(act)
         let stack = NSStackView(views: [message, action])
         stack.orientation = .vertical
         stack.alignment = .leading
-        stack.spacing = 12
-        stack.edgeInsets = NSEdgeInsets(top: 16, left: 16, bottom: 16, right: 16)
+        stack.spacing = Look.Space.m
+        stack.edgeInsets = NSEdgeInsets(top: Look.Space.l, left: Look.Space.l, bottom: Look.Space.l, right: Look.Space.l)
         stack.translatesAutoresizingMaskIntoConstraints = false
         addSubview(stack)
         NSLayoutConstraint.activate([
@@ -52,9 +50,7 @@ final class StatusBanner: NSView {
         message.stringValue = text
         self.handler = handler
         action.isHidden = button == nil
-        action.attributedTitle = NSAttributedString(
-            string: button ?? "", attributes: [.foregroundColor: NSColor(look.onAccent), .font: NSFont.systemFont(ofSize: 13, weight: .medium)]
-        )
+        action.setTitle(button ?? "")
         isHidden = false
     }
 
