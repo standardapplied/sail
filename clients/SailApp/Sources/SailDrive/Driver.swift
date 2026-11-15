@@ -20,6 +20,8 @@ final class Driver {
     private var measures: [Measure] = []
     private var bench: [String: Double] = [:]
     private var started = false
+    private let mainThread = Heartbeat.onTheMainThread()
+    private let ownThread = Heartbeat.onItsOwnThread()
 
     struct Result: Encodable {
         let index: Int
@@ -35,6 +37,10 @@ final class Driver {
         let keys: Int
         let figures: LatencyFigures
         let budgets: [String: Bool]
+        /// The longest the main thread, and a thread of the drive's own, went without running, in
+        /// milliseconds, over the same span as `figures`.
+        let mainThreadHeld: Double
+        let ownThreadHeld: Double
     }
 
     struct Report: Encodable {
@@ -187,7 +193,7 @@ final class Driver {
             return await latencyOverlay(within: step.seconds ?? 5)
         }
         if step.resetLatency == true {
-            terminal.resetLatency()
+            resetLatency()
             return (true, "")
         }
         if let line = step.line {
@@ -209,8 +215,13 @@ final class Driver {
             return (found, "the grid is \(columns) columns")
         }
         if let limit = step.shownWithin {
-            let waited = terminal.latency.outputToShown.max
-            return (waited <= limit, "the longest any output waited to be shown was \(String(format: "%.1f", waited)) ms")
+            let figures = terminal.latency
+            let ok = figures.outputToShown.max <= limit
+            let measure = measured(name, keys: 0, figures: figures, budgets: ["every output shown within \(Self.ms(limit)) ms": ok])
+            measures.append(measure)
+            return (ok, "the longest any output waited to be shown was \(Self.ms(figures.outputToShown.max)) ms; the longest refresh took "
+                + "\(Self.ms(figures.refresh.max)) ms, \(figures.lateOutputs) outputs were late; the main thread was held at most "
+                + "\(Self.ms(measure.mainThreadHeld)) ms, a thread of the drive's own \(Self.ms(measure.ownThreadHeld)) ms")
         }
         if let text = step.text {
             let found = await waitUntil(step.seconds ?? 10) { self.screenText.contains(text) }
@@ -252,7 +263,7 @@ final class Driver {
     /// display reports few or none), output to presented p50 ≤ 1 refresh and p95 ≤ 2, and key to echo
     /// on the display p95 ≤ 50 ms. Estimated presentation times are reported, never gated.
     private func measure(_ keys: Int, interval: Int, name: String) async -> (Bool, String) {
-        terminal.resetLatency()
+        resetLatency()
         let start = ContinuousClock.now
         for index in 1 ... max(1, keys) {
             key("x")
@@ -275,9 +286,26 @@ final class Driver {
             "key to echo presented p95 <= 50 ms (reported presents only)": figures.keyToEcho.count == 0 || figures.keyToEcho.p95 <= 50,
             "every echo measured": figures.keyToEcho.count + figures.keyToEchoEstimated.count >= keys * 9 / 10,
         ]
-        measures.append(Measure(name: name, drawables: terminal.drawableCount, keys: keys, figures: figures, budgets: budgets))
+        measures.append(measured(name, keys: keys, figures: figures, budgets: budgets))
         let missed = budgets.filter { !$0.value }.keys.sorted()
         return (missed.isEmpty, missed.isEmpty ? "within every budget" : "missed: \(missed.joined(separator: "; "))")
+    }
+
+    private func measured(_ name: String, keys: Int, figures: LatencyFigures, budgets: [String: Bool]) -> Measure {
+        Measure(
+            name: name, drawables: terminal.drawableCount, keys: keys, figures: figures, budgets: budgets,
+            mainThreadHeld: mainThread.longest, ownThreadHeld: ownThread.longest
+        )
+    }
+
+    private func resetLatency() {
+        terminal.resetLatency()
+        mainThread.reset()
+        ownThread.reset()
+    }
+
+    private static func ms(_ milliseconds: Double) -> String {
+        String(format: "%.1f", milliseconds)
     }
 
     /// How long a step's screen may take to be drawn by the view before the step fails.
