@@ -6,6 +6,7 @@
 package ai.singlr.sail.api;
 
 import ai.singlr.sail.authority.WriteRefused;
+import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.Lane;
 import ai.singlr.sail.config.ProjectDefinition;
@@ -18,7 +19,7 @@ import ai.singlr.sail.engine.LaunchEnv;
 import ai.singlr.sail.engine.RunPlace;
 import ai.singlr.sail.engine.RunRetention;
 import ai.singlr.sail.engine.ShellExec;
-import ai.singlr.sail.harness.RunUsage;
+import ai.singlr.sail.harness.RunReport;
 import ai.singlr.sail.store.DispatchGate;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.LoginStore;
@@ -94,7 +95,7 @@ public final class RunReservation {
     this.listener = listener;
     this.sessionYield = Objects.requireNonNull(sessionYield, "sessionYield");
     this.displaceable = Objects.requireNonNull(displaceable, "displaceable");
-    this.logins = new RunLogins(fdes, room);
+    this.logins = new RunLogins(fdes, room, DateTimeUtils::now);
   }
 
   /**
@@ -214,7 +215,7 @@ public final class RunReservation {
       AgentUnit unit,
       ProjectDefinition config,
       Runnable alongside) {
-    var login = logins.forRun(specId, boxHandle, agentType);
+    var login = logins.forRun(specId, boxHandle, agentType, role);
     return claim(
         runId,
         project,
@@ -270,7 +271,7 @@ public final class RunReservation {
       String task,
       AgentUnit unit,
       ProjectDefinition config) {
-    var login = logins.forRun(specId, boxHandle, agentType);
+    var login = logins.forRun(specId, boxHandle, agentType, lane.wire());
     return claim(
         runId,
         project,
@@ -572,7 +573,7 @@ public final class RunReservation {
   private void failRun(String runId) {
     runBookkeeping(
         "mark run failed " + runId,
-        () -> runStore.finish(runId, "running", "failed", null, RunUsage.NONE));
+        () -> runStore.finish(runId, "running", "failed", null, RunReport.NONE));
   }
 
   /**

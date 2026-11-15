@@ -4,6 +4,7 @@ public enum EventType: String, CaseIterable, Sendable {
     case agentConversationStarted = "agent_conversation_started"
     case agentFailed = "agent_failed"
     case agentLogChunk = "agent_log_chunk"
+    case agentLoginOutcome = "agent_login_outcome"
     case agentPresence = "agent_presence"
     case agentSessionCompleted = "agent_session_completed"
     case agentSessionStarted = "agent_session_started"

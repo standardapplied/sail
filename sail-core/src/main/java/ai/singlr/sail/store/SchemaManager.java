@@ -485,7 +485,8 @@ public final class SchemaManager {
                   CHECK (usage_source IN ('result', 'transcript', 'none', 'unattributable')),
               login TEXT,
               login_kind TEXT CHECK (login_kind IN ('api-key', 'token')),
-              dispatched_by TEXT
+              dispatched_by TEXT,
+              login_overridden TEXT
           )""",
           RUN_COUNTED,
           RUN_RECOUNTED_FROM,

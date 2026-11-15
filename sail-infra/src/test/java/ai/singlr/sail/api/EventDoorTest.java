@@ -15,7 +15,7 @@ import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.ShellExec;
-import ai.singlr.sail.harness.RunUsage;
+import ai.singlr.sail.harness.RunReport;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.store.DispatchGate;
 import ai.singlr.sail.store.EventStore;
@@ -158,7 +158,11 @@ class EventDoorTest {
   void aMembersForgedStopDoesNotFinishARunOfAnotherMembersSpec() throws Exception {
     var run = reserve("theirs", null, "build");
     bus.subscribe(
-        new RunTracker(runs, finished -> RunUsage.NONE, SyncScheduler.disabled(), () -> "root"));
+        new RunTracker(
+            runs,
+            new RunReports(finished -> RunReport.NONE, RunLauncher.Room.NONE, event -> {}),
+            SyncScheduler.disabled(),
+            () -> "root"));
 
     var stop = publish(adaToken, event("theirs", STOPPED, watcherStop(run)));
     var retold = publish(adaToken, event("theirs", STOPPED, retoldStop(run)));
@@ -261,7 +265,11 @@ class EventDoorTest {
   void anOwnerIsNotTakenAtTheirWordForWhatThisBoxObserved() throws Exception {
     var local = reserve("theirs", null, "build");
     bus.subscribe(
-        new RunTracker(runs, finished -> RunUsage.NONE, SyncScheduler.disabled(), () -> "root"));
+        new RunTracker(
+            runs,
+            new RunReports(finished -> RunReport.NONE, RunLauncher.Room.NONE, event -> {}),
+            SyncScheduler.disabled(),
+            () -> "root"));
 
     var unnamed = publish(bobToken, event("theirs", STOPPED, watcherStop(null)));
     var named = publish(bobToken, event("theirs", STOPPED, retoldStop(local)));
@@ -696,7 +704,8 @@ class EventDoorTest {
         new WatcherCoverage(run -> false, pid -> false),
         () -> "root",
         () -> Instant.now().plus(Duration.ofMinutes(10)),
-        new FdeStore(db));
+        new FdeStore(db),
+        new RunReports(run -> RunReport.NONE, RunLauncher.Room.NONE, event -> {}));
   }
 
   private static RoomStore.RoomRow room(String id, String owner) {

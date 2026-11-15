@@ -16,9 +16,7 @@ import ai.singlr.sail.engine.ContainerFilePush;
 import ai.singlr.sail.engine.ContainerState;
 import ai.singlr.sail.engine.GuardrailTrigger;
 import ai.singlr.sail.engine.RunPlace;
-import ai.singlr.sail.engine.RunUsageReader;
 import ai.singlr.sail.engine.ShellExec;
-import ai.singlr.sail.harness.RunUsage;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.store.EventStore;
 import ai.singlr.sail.store.FdeStore;
@@ -123,14 +121,6 @@ public final class MissedStopReconciler implements AutoCloseable {
     }
 
     /**
-     * What {@code run}'s harness reported it cost, as its container still holds it ({@link
-     * RunUsageReader}); unread, by default.
-     */
-    default RunUsage usage(RunStore.RunRow run) {
-      return null;
-    }
-
-    /**
      * Removes from {@code instance} the launch file of every run not in {@code live} ({@link
      * AgentSession#removeLaunchFiles}), throwing when the instance did not run it; nothing, by
      * default.
@@ -163,6 +153,7 @@ public final class MissedStopReconciler implements AutoCloseable {
   private final Supplier<String> localHandle;
   private final Supplier<Instant> clock;
   private final FdeStore fdes;
+  private final RunReports reports;
   private final PeriodicPass pass;
   private volatile Instant tidiedSince = Instant.EPOCH;
   private final Set<String> untidied = ConcurrentHashMap.newKeySet();
@@ -178,7 +169,8 @@ public final class MissedStopReconciler implements AutoCloseable {
       WatcherCoverage coverage,
       Supplier<String> localHandle,
       Supplier<Instant> clock,
-      FdeStore fdes) {
+      FdeStore fdes,
+      RunReports reports) {
     this.specStore = specStore;
     this.sessionStore = sessionStore;
     this.eventStore = eventStore;
@@ -188,6 +180,7 @@ public final class MissedStopReconciler implements AutoCloseable {
     this.localHandle = localHandle;
     this.clock = clock;
     this.fdes = Objects.requireNonNull(fdes, "fdes");
+    this.reports = Objects.requireNonNull(reports, "reports");
     this.strandedReviews =
         new StrandedReviewRescue(
             specStore,
@@ -210,7 +203,6 @@ public final class MissedStopReconciler implements AutoCloseable {
   public static UnitProbe systemdUnitProbe(ShellExec shell) {
     var agentSession = new AgentSession(shell);
     var presence = new AgentPresence(shell);
-    var usage = new RunUsageReader(shell);
     return new UnitProbe() {
       @Override
       public boolean instanceGone(RunPlace place) throws Exception {
@@ -250,11 +242,6 @@ public final class MissedStopReconciler implements AutoCloseable {
                 .filter(GuardrailTrigger::stops)
                 .map(GuardrailTrigger::cause);
         return new Ending(exitCode.orElse(null), limit.orElse(null));
-      }
-
-      @Override
-      public RunUsage usage(RunStore.RunRow run) {
-        return usage.read(run);
       }
 
       @Override
@@ -436,7 +423,20 @@ public final class MissedStopReconciler implements AutoCloseable {
             + " ("
             + why
             + ")");
-    return sessionStore.finish(run.id(), "running", "stopped", exitCode, unitProbe.usage(run));
+    return finished(run, "running", exitCode);
+  }
+
+  /**
+   * {@code run} finished {@code expected → stopped} with what its report says, read here ({@link
+   * RunReports}); the write that finished it says what came of its login. Returns whether it did.
+   */
+  private boolean finished(RunStore.RunRow run, String expected, Integer exitCode) {
+    var report = reports.read(run);
+    if (!sessionStore.finish(run.id(), expected, "stopped", exitCode, report)) {
+      return false;
+    }
+    reports.recorded(run, report);
+    return true;
   }
 
   /**
@@ -485,15 +485,17 @@ public final class MissedStopReconciler implements AutoCloseable {
    * container that was stopped, missing or slow as the run finished, or an operator's stop, which
    * never waits on one (M3). Whatever the container answers is recorded and journaled, once: a
    * report, or none when the report is gone, says nothing or does not parse; only an unanswered
-   * read is left for the next sweep, the run's directory kept by retention meanwhile. Returns how
-   * many were recorded.
+   * read is left for the next sweep, the run's directory kept by retention meanwhile; what it says
+   * of the run's login is said by the read that recorded it (the reconciler's late read). Returns
+   * how many were recorded.
    */
   int readUnreadUsage() {
     var recorded = 0;
     for (var run : sessionStore.unread(localHandle.get())) {
       try {
-        var usage = unitProbe.usage(run);
-        if (usage != null && sessionStore.recordRead(run.id(), usage)) {
+        var report = reports.read(run);
+        if (report != null && sessionStore.recordRead(run.id(), report)) {
+          reports.recorded(run, report);
           recorded++;
         }
       } catch (RuntimeException e) {
@@ -525,7 +527,7 @@ public final class MissedStopReconciler implements AutoCloseable {
         if (unitProbe.active(run.place(), run.id(), StopOperations.runUnit(run).unitName())) {
           continue;
         }
-        if (sessionStore.finish(run.id(), "stopping", "stopped", null, unitProbe.usage(run))) {
+        if (finished(run, "stopping", null)) {
           System.err.println(
               "  [reconcile] finalized interrupted stop "
                   + run.id()

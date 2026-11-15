@@ -22,6 +22,7 @@ import ai.singlr.sail.engine.FileMutex;
 import ai.singlr.sail.engine.RunPlace;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.harness.Harnesses;
+import ai.singlr.sail.harness.RunReport;
 import ai.singlr.sail.harness.RunUsage;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.store.EventStore;
@@ -1380,11 +1381,11 @@ class ReviewLanesTest {
     Acting.system(() -> loop.runs.finish(unread, "running", "stopped", null, null));
     var read = loop.run("next", "build");
     loop.container.wrote(read, "read");
-    Acting.system(() -> loop.runs.finish(read, "running", "stopped", null, RunUsage.NONE));
+    Acting.system(() -> loop.runs.finish(read, "running", "stopped", null, RunReport.NONE));
     for (var newer = 0; newer < 20; newer++) {
       var run = loop.run("next", "build");
       loop.container.wrote(run, "newer");
-      Acting.system(() -> loop.runs.finish(run, "running", "completed", 0, RunUsage.NONE));
+      Acting.system(() -> loop.runs.finish(run, "running", "completed", 0, RunReport.NONE));
     }
 
     loop.built("next");

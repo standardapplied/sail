@@ -6,7 +6,7 @@
 package ai.singlr.sail.api;
 
 import ai.singlr.sail.engine.RunPlace;
-import ai.singlr.sail.harness.RunUsage;
+import ai.singlr.sail.harness.RunReport;
 import ai.singlr.sail.store.RunStore;
 import java.util.List;
 
@@ -29,9 +29,8 @@ final class NoReviewLanes implements ReviewLanes {
   }
 
   @Override
-  public RunUsage usage(RunStore.RunRow run) {
-
-    return RunUsage.NONE;
+  public RunReports reports() {
+    return new RunReports(run -> RunReport.NONE, RunLauncher.Room.NONE, event -> {});
   }
 
   @Override

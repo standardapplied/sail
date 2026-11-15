@@ -18,7 +18,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import ai.singlr.sail.config.Lane;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.engine.RunPlace;
-import ai.singlr.sail.harness.RunUsage;
+import ai.singlr.sail.harness.RunReport;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.store.Finding;
 import ai.singlr.sail.store.ReviewStore;
@@ -93,9 +93,8 @@ class LoopStepsTest {
               }
 
               @Override
-              public RunUsage usage(RunStore.RunRow run) {
-
-                return RunUsage.NONE;
+              public RunReports reports() {
+                return new RunReports(run -> RunReport.NONE, RunLauncher.Room.NONE, event -> {});
               }
 
               @Override
@@ -149,9 +148,8 @@ class LoopStepsTest {
           }
 
           @Override
-          public RunUsage usage(RunStore.RunRow run) {
-
-            return RunUsage.NONE;
+          public RunReports reports() {
+            return new RunReports(run -> RunReport.NONE, RunLauncher.Room.NONE, event -> {});
           }
 
           @Override
@@ -540,9 +538,8 @@ class LoopStepsTest {
           }
 
           @Override
-          public RunUsage usage(RunStore.RunRow run) {
-
-            return RunUsage.NONE;
+          public RunReports reports() {
+            return new RunReports(run -> RunReport.NONE, RunLauncher.Room.NONE, event -> {});
           }
 
           @Override
@@ -734,9 +731,8 @@ class LoopStepsTest {
           }
 
           @Override
-          public RunUsage usage(RunStore.RunRow run) {
-
-            return RunUsage.NONE;
+          public RunReports reports() {
+            return new RunReports(run -> RunReport.NONE, RunLauncher.Room.NONE, event -> {});
           }
 
           @Override

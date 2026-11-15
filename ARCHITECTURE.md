@@ -2826,7 +2826,7 @@ hundred.
   report: Claude Code from the last `result` line of the run's stream-json log that reports
   anything (tokens summed over `modelUsage`, so subagents count; dollars from `total_cost_usd`;
   the model that cost most), Codex from its rollout transcript's last `token_count` and
-  `turn_context` model (no dollars; its cached input taken out of its input). `RunUsageReader`
+  `turn_context` model (no dollars; its cached input taken out of its input). `RunReportReader`
   reads, in the run's container and in one command waiting at most 10 s, for each of its markers the
   last 16 lines of the one file the harness reports in that hold it (`tac | grep -m 16 -a -F` per
   marker, so Codex's many `token_count` lines never crowd out its one `turn_context` a turn), and
@@ -2902,7 +2902,7 @@ hundred.
 
 | | Invariant | Proven by |
 |---|---|---|
-| M1 | A finished run records its usage once, from its harness's own report, in the update that finishes it or, when it could not be read then, in the sweep that reads it; a harness that reported nothing, or whose last report does not parse, records `none` with null counts, never zeros nor an earlier running total; a report its container did not answer is never `none`. | `HarnessUsageTest` (a recorded stream-json log and a Codex rollout, golden; their marked lines alone; a last line cut mid-write; a raw C1 control), `YamlUtilTest` (a raw C1 control, U+FFFE and U+FFFF read as JSON), `RunUsageReaderTest` (a container stopped, missing or silent; a missing file; a long log with no result line, in one command; a last line that does not parse, said once), `HarnessContractTest`, `RunUsageStoreTest`, `ReviewLanesTest` (Claude Code, Codex and an empty log through the production finish), `LiveMemberTest` (three turns), `MissedStopReconcilerTest` (the sweep's read), `StopOperationsTest` (a stop reads nothing) |
+| M1 | A finished run records its usage once, from its harness's own report, in the update that finishes it or, when it could not be read then, in the sweep that reads it; a harness that reported nothing, or whose last report does not parse, records `none` with null counts, never zeros nor an earlier running total; a report its container did not answer is never `none`. | `HarnessUsageTest` (a recorded stream-json log and a Codex rollout, golden; their marked lines alone; a last line cut mid-write; a raw C1 control), `YamlUtilTest` (a raw C1 control, U+FFFE and U+FFFF read as JSON), `RunReportReaderTest` (a container stopped, missing or silent; a missing file; a long log with no result line, in one command; a last line that does not parse, said once), `HarnessContractTest`, `RunUsageStoreTest`, `ReviewLanesTest` (Claude Code, Codex and an empty log through the production finish), `LiveMemberTest` (three turns), `MissedStopReconcilerTest` (the sweep's read), `StopOperationsTest` (a stop reads nothing) |
 | M2 | A run's usage is its executing box's fact: it syncs with the run and no other box writes it. | `SpecMeasuresSyncTest` (main holds the node's usage after one round), `BoxRunsSyncTest`, `JournalDecidesEveryWriteTest` |
 | M3 | Retention never removes the directory of a finished run whose usage was not read, and the read is tried again until its container answers; what it answers is recorded once and never asked for again. | `ReviewLanesTest` (past the newest twenty), `MissedStopReconcilerTest` (a long log with no result line, a cut last result and a raw C1 control each recorded in one sweep through the box's own reader; a silent container asked again) |
 | M4 | Ready, awaiting merge and done are the moves' own times, the same on every box. | `SchemaManagerTest` (the triggers), `SpecMeasuresSyncTest` (made ready, restarted, reopened, done on a node, read on both boxes) |
@@ -3849,7 +3849,7 @@ no pairing is removed through the gateway as before, and no key file is touched.
     sets empty too every switch that sends the harness to a cloud provider's account
     (`Harness.credentialSwitches`: Claude Code's Bedrock, Vertex and Foundry switches), since
     cloud-provider credentials are not supported for runs. A repo's own `apiKeyHelper` still
-    outranks a token; that is the follow-up spec's `OVERRIDDEN` case, refused saying so. Every launch shape (the background unit, the
+    outranks a token; the run goes on and its report says so (*What came of it*, below). Every launch shape (the background unit, the
     foreground task, the live member) starts with the same fixed text, `LaunchEnv.read`, which
     turns tracing off (`set +x`, so a profile's `set -x` prints no value), exports each line as it
     is (`export "$kv"` evaluates nothing), removes the file and only then
@@ -3879,7 +3879,38 @@ no pairing is removed through the gateway as before, and no key file is touched.
   - *What a run records.* `login` (the name, or `container`), `login_kind`, and `dispatched_by`
     (the person whose request launched it: a dispatch's caller, or for a room's run the person whose
     message woke it, `RunLauncher.wokenBy`; none for Sail's own machinery, the loop's reviews,
-    fixes and resumed builds), at its launch, synced with the run.
+    fixes and resumed builds), at its launch, synced with the run; and `login_overridden`, the
+    credential source its harness reported using instead of that login, with its report.
+  - *What came of it.* Each harness reads a finished run's report for what came of the stored login
+    it was given (`Harness.loginOutcome`): `Refused`, `Limited` (when it resets, if it says) or
+    `Overridden` (the source it used), or nothing, and anything it does not recognise is an
+    ordinary end. Claude Code: the last `result` line that is an error with `api_error_status` 401,
+    or that says "Invalid API key" or "Not logged in", is a refusal, "You've hit your … limit ·
+    resets <time>" a limit, and the last `init` line naming an `apiKeySource` other than the
+    kind's (`none` for a token, `ANTHROPIC_API_KEY` for a key) an override, whatever the run's end
+    said. Codex: the rollout's last `task_complete` whose `codex_error_info` is
+    `http_connection_failed` with `http_status_code` 401 is a refusal (codex-cli 0.163.0; without
+    `--json` it writes no `turn.failed`), and `usage_limit_exceeded` a limit, with the time its
+    message says to try again at. It is read with the usage, from the same marked lines in the one
+    container read (`RunReportReader`, the markers `"subtype":"init"` and `"type":"task_complete"`
+    added), and recorded in the same write. One place words it and says it, `RunReports`: every
+    finisher (the tracker of a watcher's stop and the review pipeline, through `RunTracker.finish`;
+    a foreground run's end; the reconciler's finish of a dead run, of an interrupted stop and its
+    late read of an unread report; a live member's turn, whose report is its process's `init` line
+    and the turn's result) reads the report there and, only when its own write recorded it, hands
+    it back (`RunReports.recorded`), so the tracker and the pipeline racing on one stop say it
+    once, and a report read late is said by the read that records it. It is said in the spec's
+    room through the room seam (`DispatchOperations.tellRoom`, once) and as an
+    `agent_login_outcome` event carrying the same sentence; a live member says it once a run. The
+    sentence names the login by its person, name and kind and the command that replaces it under
+    the same name and kind (`RunLogins.howToReplace`); a limit says until when and the branch its
+    work stays on; it quotes nothing of the harness but a reset time or a source's name, each kept
+    only as a plain short label (`LoginOutcome.LABEL`), so Codex's masked key is never repeated.
+    The watcher's own `agent_session_stopped` cannot carry it: the watcher is another process and
+    publishes before the one read. A run on its container's own login says nothing. Nothing is
+    retried on another login. A build's login of a kind with a known lifetime (Claude Code's
+    token: 365 days from the day it was stored, `LoginKind.lifetime`) is said in the room in its
+    last 14 days, as a warning, at each dispatch (`RunLogins.forRun`).
   - *What it cannot hide.* A run's harness holds its person's login in its environment for the
     run's whole life. Whoever can prompt an agent acting for a person (a room's members, a spec's
     author, a repo's files the agent reads) can try to make it reveal that login, and Sail's

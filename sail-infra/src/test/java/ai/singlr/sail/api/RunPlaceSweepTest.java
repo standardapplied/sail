@@ -99,7 +99,8 @@ class RunPlaceSweepTest {
                   Path.of(
                       "..", "sail-harness/src/main/java/ai/singlr/sail/engine/AgentReporter.java"),
                   Path.of(
-                      "..", "sail-harness/src/main/java/ai/singlr/sail/engine/RunUsageReader.java"),
+                      "..",
+                      "sail-harness/src/main/java/ai/singlr/sail/engine/RunReportReader.java"),
                   Path.of(
                       "..",
                       "sail-harness/src/main/java/ai/singlr/sail/engine/GuardrailTrigger.java"),

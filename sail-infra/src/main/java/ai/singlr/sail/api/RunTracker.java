@@ -6,12 +6,10 @@
 package ai.singlr.sail.api;
 
 import ai.singlr.sail.common.Strings;
-import ai.singlr.sail.harness.RunUsage;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.store.RunStore;
 import java.util.Objects;
 import java.util.Set;
-import java.util.function.Function;
 import java.util.function.Predicate;
 import java.util.function.Supplier;
 
@@ -48,18 +46,18 @@ public final class RunTracker implements EventSubscriber {
           Event.WellKnownTypes.AGENT_SESSION_STOPPED, Event.WellKnownTypes.AGENT_SESSION_COMPLETED);
 
   private final RunStore runStore;
-  private final Function<RunStore.RunRow, RunUsage> usage;
+  private final RunReports reports;
   private final SyncScheduler syncScheduler;
   private final Supplier<String> localHandle;
 
-  /** {@code usage} reads what a run's harness reported it cost as the run finishes. */
+  /** {@code reports} reads what a run's harness reported as the run finishes, and says it. */
   public RunTracker(
       RunStore runStore,
-      Function<RunStore.RunRow, RunUsage> usage,
+      RunReports reports,
       SyncScheduler syncScheduler,
       Supplier<String> localHandle) {
     this.runStore = runStore;
-    this.usage = usage;
+    this.reports = reports;
     this.syncScheduler = syncScheduler;
     this.localHandle = localHandle;
   }
@@ -111,7 +109,7 @@ public final class RunTracker implements EventSubscriber {
   }
 
   private void completeOrRecord(RunStore.RunRow run, String status, Integer exitCode) {
-    if (finish(runStore, usage, run.id(), status, exitCode)) {
+    if (finish(runStore, reports, run.id(), status, exitCode)) {
       syncScheduler.afterWrite();
     }
   }
@@ -120,20 +118,20 @@ public final class RunTracker implements EventSubscriber {
    * Finishes run {@code runId} as its stop says: {@code running → status} with the exit code, as
    * one compare-and-set; a run something else already finished only gains an exit code it lacked.
    * The one finish every reader of a stop shares — the tracker, and the review pipeline, which must
-   * see the run that stopped finished before it reserves the run that follows. What its harness
-   * reported it cost, read by {@code usage} while it still runs, is recorded in the same write
-   * (M1). Returns whether anything was written.
+   * see the run that stopped finished before it reserves the run that follows; and a foreground
+   * run's own end. What its harness reported, read by {@code reports} while it still runs, is
+   * recorded in the same write (M1), and only the write that recorded it says what came of the
+   * run's login ({@link RunReports#recorded}). Returns whether anything was written.
    */
   static boolean finish(
-      RunStore runStore,
-      Function<RunStore.RunRow, RunUsage> usage,
-      String runId,
-      String status,
-      Integer exitCode) {
+      RunStore runStore, RunReports reports, String runId, String status, Integer exitCode) {
     var running = runStore.findById(runId).filter(run -> "running".equals(run.status()));
-    if (running.isPresent()
-        && runStore.finish(runId, "running", status, exitCode, usage.apply(running.get()))) {
-      return true;
+    if (running.isPresent()) {
+      var report = reports.read(running.get());
+      if (runStore.finish(runId, "running", status, exitCode, report)) {
+        reports.recorded(running.get(), report);
+        return true;
+      }
     }
     if (exitCode == null) {
       return false;

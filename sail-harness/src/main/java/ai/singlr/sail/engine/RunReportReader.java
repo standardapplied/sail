@@ -8,6 +8,7 @@ package ai.singlr.sail.engine;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.harness.Harness;
 import ai.singlr.sail.harness.Harnesses;
+import ai.singlr.sail.harness.RunReport;
 import ai.singlr.sail.harness.RunUsage;
 import ai.singlr.sail.store.RunStore;
 import java.io.IOException;
@@ -19,14 +20,15 @@ import java.util.Objects;
 import java.util.concurrent.TimeoutException;
 
 /**
- * Reads what a finished run cost from its harness's own report, inside the run's container: the
- * last lines of the file its harness reports in ({@link Harness#reportFile}) holding each of its
- * markers ({@link Harness#reportMarkers}), which its harness reads ({@link Harness#usage}). What
- * the container answered is final, so it is recorded: a report that does not parse is none, said
- * once. Only a container that did not answer leaves the report unread: the run's directory is then
- * kept and the read tried again (M3).
+ * Reads a finished run's harness's own report, inside the run's container: the last lines of the
+ * file its harness reports in ({@link Harness#reportFile}) holding each of its markers ({@link
+ * Harness#reportMarkers}), from which its harness reads what the run cost ({@link Harness#usage})
+ * and what came of the stored login the run was given ({@link Harness#loginOutcome}), in the one
+ * read. What the container answered is final, so it is recorded: a cost that does not parse is
+ * none, said once. Only a container that did not answer leaves the report unread: the run's
+ * directory is then kept and the read tried again (M3).
  */
-public final class RunUsageReader {
+public final class RunReportReader {
 
   /** How many of the last lines holding a marker are read: a report may pass over a few. */
   static final int LINES = 16;
@@ -47,33 +49,43 @@ public final class RunUsageReader {
 
   private final ShellExec shell;
 
-  public RunUsageReader(ShellExec shell) {
+  public RunReportReader(ShellExec shell) {
     this.shell = Objects.requireNonNull(shell, "shell");
   }
 
   /**
-   * What run {@code run}'s harness reported: {@link RunUsage#NONE} when its report file is not
+   * What run {@code run}'s harness reported: {@link RunReport#NONE} when its report file is not
    * there or cannot be read, holds no line with a marker, says nothing or does not parse, or its
    * harness is one this binary does not know; null, unread, only when the container could not be
-   * asked (stopped, missing, or no answer within {@link #TIMEOUT}).
+   * asked (stopped, missing, or no answer within {@link #TIMEOUT}). A run given no stored login
+   * (one that names no spec) has no login outcome.
    */
-  public RunUsage read(RunStore.RunRow run) {
+  public RunReport read(RunStore.RunRow run) {
     Harness harness;
     try {
       harness = Harnesses.of(run.agent());
     } catch (IllegalArgumentException unknown) {
-      return RunUsage.NONE;
+      return RunReport.NONE;
     }
     var path =
         harness.reportFile() == Harness.ReportFile.TRANSCRIPT
             ? run.transcriptPath()
             : AgentUnit.readableLogPath(run.id(), run.logPath());
     if (Strings.isBlank(path)) {
-      return RunUsage.NONE;
+      return RunReport.NONE;
     }
     try {
       var marked = lastMarked(run.place().instance(), path, harness.reportMarkers());
-      return marked == null ? null : parsed(run, harness.usage(inFileOrder(marked)));
+      if (marked == null) {
+        return null;
+      }
+      var report = inFileOrder(marked);
+      return new RunReport(
+          parsed(run, harness.usage(report)),
+          harness
+              .declaredKind(run.loginKind())
+              .flatMap(kind -> harness.loginOutcome(report, kind))
+              .orElse(null));
     } catch (IOException | TimeoutException unanswered) {
       return null;
     } catch (InterruptedException interrupted) {

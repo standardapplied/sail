@@ -246,7 +246,11 @@ public final class ReviewPipelineController implements EventSubscriber {
       return run;
     }
     if (RunTracker.finish(
-        runStore, lanes::usage, run.id(), "stopped", Event.WellKnownData.exitCode(event.data()))) {
+        runStore,
+        lanes.reports(),
+        run.id(),
+        "stopped",
+        Event.WellKnownData.exitCode(event.data()))) {
       syncTrigger.run();
     }
     return runStore.findById(run.id()).orElse(run);

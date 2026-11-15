@@ -9,6 +9,7 @@ import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.engine.BoxCredentialFile;
 import ai.singlr.sail.engine.ContainerExec;
 import ai.singlr.sail.engine.SailPaths;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -16,6 +17,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.OptionalInt;
 import java.util.SequencedMap;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 /** Claude Code: {@code claude}, launched headless with sail's own settings file of hooks. */
@@ -23,8 +25,20 @@ final class ClaudeCode implements Harness {
 
   private static final String BINARY = "claude";
   private static final String RESULT = "\"type\":\"result\"";
+  private static final String INIT = "\"subtype\":\"init\"";
+
+  /** The {@code apiKeySource} its {@code init} line names for a login of each kind it was given. */
+  private static final Map<String, String> SOURCES =
+      Map.of("token", "none", "api-key", "ANTHROPIC_API_KEY");
+
+  /** A result that says the login's account is out of quota, and when it resets, if it says. */
+  private static final Pattern LIMIT =
+      Pattern.compile("You['\u2019]ve hit your .*?limit(?:\\s*\u00b7\\s*resets\\s+(.+))?");
 
   private static final List<String> EFFORTS = List.of("low", "medium", "high", "xhigh");
+
+  /** How long a token {@code claude setup-token} makes lasts from the day it is made. */
+  private static final Duration TOKEN_LIFETIME = Duration.ofDays(365);
 
   /**
    * The sail-owned settings file, passed to {@code claude} via {@code --settings} only when sail
@@ -243,7 +257,7 @@ final class ClaudeCode implements Harness {
 
   @Override
   public List<String> reportMarkers() {
-    return List.of(RESULT);
+    return List.of(RESULT, INIT);
   }
 
   /**
@@ -261,6 +275,43 @@ final class ClaudeCode implements Harness {
       return null;
     }
     return found.line() == null ? RunUsage.NONE : usageOf(found.line());
+  }
+
+  /**
+   * The last {@code init} line naming a credential source other than the one a login of kind {@code
+   * given} sets is an override, whatever the run's end said; else the last {@code result}, when it
+   * is an error: a 401, or "Invalid API key" or "Not logged in", is a refusal, and "You've hit your
+   * … limit" a limit, with the time it resets.
+   */
+  @Override
+  public Optional<LoginOutcome> loginOutcome(String report, LoginKind given) {
+    var init =
+        RunUsage.last(
+                report,
+                INIT,
+                line -> "system".equals(line.get("type")) && "init".equals(line.get("subtype")))
+            .line();
+    var expected = SOURCES.get(given.kind());
+    if (init != null
+        && expected != null
+        && init.get("apiKeySource") instanceof String source
+        && !source.equals(expected)) {
+      return LoginOutcome.label(source).map(LoginOutcome.Overridden::new);
+    }
+    var result = RunUsage.last(report, RESULT, line -> "result".equals(line.get("type"))).line();
+    if (result == null || !Boolean.TRUE.equals(result.get("is_error"))) {
+      return Optional.empty();
+    }
+    var said = result.get("result") instanceof String text ? text.strip() : "";
+    if (Long.valueOf(401).equals(RunUsage.count(result, "api_error_status"))
+        || said.startsWith("Invalid API key")
+        || said.startsWith("Not logged in")) {
+      return Optional.of(new LoginOutcome.Refused());
+    }
+    var limit = LIMIT.matcher(said);
+    return limit.matches()
+        ? Optional.of(new LoginOutcome.Limited(LoginOutcome.label(limit.group(1)).orElse(null)))
+        : Optional.empty();
   }
 
   private static boolean reports(Map<String, Object> line) {
@@ -324,9 +375,15 @@ final class ClaudeCode implements Harness {
         new LoginKind(
             "token",
             "CLAUDE_CODE_OAUTH_TOKEN",
-            Remedy.of("Run claude setup-token on a machine where Claude Code is signed in")),
+            "long-lived token",
+            Remedy.of("Run claude setup-token on a machine where Claude Code is signed in"),
+            TOKEN_LIFETIME),
         new LoginKind(
-            "api-key", "ANTHROPIC_API_KEY", Remedy.of("Create an API key in the Claude Console")));
+            "api-key",
+            "ANTHROPIC_API_KEY",
+            "API key",
+            Remedy.of("Create an API key in the Claude Console"),
+            null));
   }
 
   /**

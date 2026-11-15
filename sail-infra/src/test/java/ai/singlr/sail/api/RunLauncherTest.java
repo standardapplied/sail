@@ -12,6 +12,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.engine.AgentUnit;
+import ai.singlr.sail.engine.ReportLines;
 import ai.singlr.sail.engine.RunPlace;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.WatcherSpawner;
@@ -23,6 +24,7 @@ import ai.singlr.sail.store.Sqlite;
 import ai.singlr.sail.store.TestRuns;
 import java.io.IOException;
 import java.io.UncheckedIOException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -147,7 +149,8 @@ class RunLauncherTest {
         store,
         events::add,
         ProjectSkills::none,
-        RunLauncher.Room.NONE);
+        RunLauncher.Room.NONE,
+        RunReports.reading(shell, RunLauncher.Room.NONE, events::add));
   }
 
   private static RunLauncher.RunContext ctx(boolean background) {
@@ -347,6 +350,67 @@ class RunLauncherTest {
     seedRunningRun();
     launcher(quietShell(), runStore).finishLaunch(ctx(false), outcome());
     assertEquals("completed", runStore.findById(RUN_ID).orElseThrow().status());
+  }
+
+  /**
+   * A foreground run's own end is a finisher too: its report is read as it completes, and a login
+   * its harness refused is said in the spec's room by that one write, with the run failed (RL4).
+   */
+  @Test
+  void aForegroundRunWhoseLoginItsHarnessRefusedSaysSoAsItCompletes() throws IOException {
+    String log;
+    try (var in =
+        getClass().getResourceAsStream("/ai/singlr/sail/harness/claude-code-refused-token.jsonl")) {
+      log = new String(in.readAllBytes(), StandardCharsets.UTF_8);
+    }
+    Acting.system(
+        () -> {
+          runStore.create(
+              RUN_ID,
+              "proj",
+              "spec",
+              "node",
+              "build",
+              "claude-code",
+              "b",
+              "t",
+              null,
+              null,
+              AgentUnit.forRun(RUN_ID).logPath(),
+              "unit");
+          runStore.recordLaunch(
+              RUN_ID,
+              new RunStore.Launched(
+                  null, null, null, new RunStore.RunLogin("default", "token"), "uday"));
+        });
+    var told = new ArrayList<String>();
+    var shell =
+        shell(
+            command ->
+                ReportLines.asks(command)
+                    ? ReportLines.answer(log, command)
+                    : new ShellExec.Result(1, "", ""));
+    var launcher =
+        new RunLauncher(
+            shell,
+            command -> 1,
+            DispatchOperations.Listener.NONE,
+            null,
+            runStore,
+            events::add,
+            ProjectSkills::none,
+            RunLauncher.Room.NONE,
+            RunReports.reading(shell, (spec, body) -> told.add(spec + ": " + body), events::add));
+
+    launcher.finishLaunch(ctx(false), new RunLauncher.LaunchOutcome(1, Optional.empty()));
+
+    assertEquals("failed", runStore.findById(RUN_ID).orElseThrow().status());
+    assertEquals(
+        List.of(
+            "spec: Claude Code refused node's login 'default' (long-lived token), so its run"
+                + " stopped. Run claude setup-token on a machine where Claude Code is signed in,"
+                + " then sail agent login claude-code."),
+        told);
   }
 
   @Test

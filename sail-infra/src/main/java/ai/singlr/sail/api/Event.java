@@ -212,6 +212,14 @@ public record Event(
     public static final String AGENT_FAILED = "agent_failed";
 
     /**
+     * What a finished run's harness report said of the stored login it was given: {@code
+     * data.outcome} {@code refused}, {@code limited} or {@code overridden}, {@code data.login} and
+     * {@code data.login_kind} naming it, and {@code data.detail} the sentence its spec's room was
+     * told. Published once, by the write that recorded the report ({@link RunReports}).
+     */
+    public static final String AGENT_LOGIN_OUTCOME = "agent_login_outcome";
+
+    /**
      * The {@link RetentionClass#TELEMETRY} types: high-volume liveness signals the retention
      * sweeper prunes and history reads exclude, so "the record" always means RECORD-class events.
      */

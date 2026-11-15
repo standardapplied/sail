@@ -26,6 +26,9 @@ import ai.singlr.sail.engine.HostInfo;
 import ai.singlr.sail.engine.ScriptedShellExecutor;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.SyncOperations;
+import ai.singlr.sail.harness.LoginOutcome;
+import ai.singlr.sail.harness.RunReport;
+import ai.singlr.sail.harness.RunUsage;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.Role;
@@ -698,6 +701,17 @@ class ClientGoldensTest {
               WellKnownTypes.SNAPSHOT_DELETED,
               WellKnownTypes.SPEC_STRANDED)
           .forEach(type -> bus.publish(envelope(SPEC, type)));
+      var runs = new RunStore(db);
+      Acting.system(
+          () ->
+              runs.recordLaunch(
+                  run.id(),
+                  new RunStore.Launched(
+                      null, null, null, new RunStore.RunLogin("default", "token"), null)));
+      new RunReports(read -> null, RunLauncher.Room.NONE, bus::publish)
+          .recorded(
+              runs.findById(run.id()).orElseThrow(),
+              new RunReport(RunUsage.NONE, new LoginOutcome.Refused()));
       return Stream.of(
               WellKnownTypes.SPEC_ENGAGED,
               WellKnownTypes.SPEC_DISENGAGED,
