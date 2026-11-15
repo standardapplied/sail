@@ -1865,10 +1865,10 @@ that `mvn -q verify` builds and tests every module and that the build needs JDK 
 `mvn -q verify` yourself and say in the pull request that it passed. Change only pom.xml and
 README.md.'
 
-readonly BESIDE_BODY='# The README says what the project is for
+readonly BESIDE_BODY='# A note beside the build
 
-Add one sentence to README.md, right after its title, saying what the project is for, as its code
-shows. Change only README.md.'
+Create the file `docs/beside.md` holding the one line `Built beside another spec of this repo.` and
+change nothing else. The task is complete as written: ask no question.'
 
 each_ran_in_its_own_workspace() {
   local run=$1 box=$2 listed runs
@@ -1927,7 +1927,7 @@ loop() {
   check "$run" "eng makes it ready" on "$run" eng "sudo sail spec update $spec --status pending"
   check "$run" "eng dispatches it in the background" on "$run" eng "sudo sail spec dispatch -p acme --spec $spec --background"
   check "$run" "eng writes a second spec of the same repo" \
-    on "$run" eng "cat > /tmp/beside.md && sudo sail spec create -p acme --id $beside --title 'The README says what the project is for' --body-file /tmp/beside.md --assignee eng" <<< "$BESIDE_BODY"
+    on "$run" eng "cat > /tmp/beside.md && sudo sail spec create -p acme --id $beside --title 'A note beside the build' --body-file /tmp/beside.md --assignee eng" <<< "$BESIDE_BODY"
   check "$run" "eng makes it ready" on "$run" eng "sudo sail spec update $beside --status pending"
   check "$run" "eng dispatches it while the first builds, in the background" on "$run" eng "sudo sail spec dispatch -p acme --spec $beside --background"
   check "$run" "no agent key and no Sail credential is in any process's command line on eng while it builds and its hooks fire" no_key_in_any_command_line "$run" eng
