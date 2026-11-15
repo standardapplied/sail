@@ -5,17 +5,17 @@ set -euo pipefail
 
 usage() {
   echo "usage: ci/bundle PRODUCT APP SAIL_BINARY [IDENTIFIER]" >&2
-  echo "  PRODUCT is SailTerminalPreview (shipped) or SailDrive (CI's drive build)" >&2
+  echo "  PRODUCT is Sail (shipped) or SailDrive (CI's drive build)" >&2
   exit 2
 }
 
 [[ $# -ge 3 ]] || usage
 readonly product=$1 app=$2 sail=$3
-readonly identifier=${4:-sh.standardapplied.sail.terminal-preview}
+readonly identifier=${4:-sh.standardapplied.sail}
 cd "$(dirname "$0")/.."
 
 case $product in
-  SailTerminalPreview | SailDrive) ;;
+  Sail | SailDrive) ;;
   *) usage ;;
 esac
 [[ -x $sail ]] || { echo "ci/bundle: $sail is not an executable sail" >&2; exit 1; }

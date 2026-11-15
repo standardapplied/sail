@@ -13,6 +13,7 @@ let package = Package(
     platforms: [.macOS(.v15)],
     products: [
         .library(name: "SailTerminalView", targets: ["SailTerminalView"]),
+        .executable(name: "Sail", targets: ["Sail"]),
         .executable(name: "SailTerminalPreview", targets: ["SailTerminalPreview"]),
         .executable(name: "SailDrive", targets: ["SailDrive"]),
     ],
@@ -30,6 +31,9 @@ let package = Package(
             dependencies: ["SailTerminalView", "SailLook", kit("SailSurface"), kit("SailTerminal"), kit("SailTerminalWire"), kit("SailVT")],
             swiftSettings: strict
         ),
+        .target(name: "SailAccount", dependencies: [kit("SailAPI")], swiftSettings: strict),
+        .target(name: "SailShell", dependencies: ["SailAccount", "SailLook", kit("SailAPI")], swiftSettings: strict),
+        .executableTarget(name: "Sail", dependencies: ["SailShell"], swiftSettings: strict),
         .executableTarget(name: "SailTerminalPreview", dependencies: ["SailPreview"], swiftSettings: strict),
         .executableTarget(
             name: "SailDrive",

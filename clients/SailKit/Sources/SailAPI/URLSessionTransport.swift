@@ -16,8 +16,9 @@ public struct URLSessionTransport: Transport {
     private let connection: Connection
 
     /// Requests reach the server at `base`, `https://box.example.com` say; a path in `base` is
-    /// kept in front of every request's.
-    public init(base: URL, configuration: URLSessionConfiguration = .default) {
+    /// kept in front of every request's. The session is ephemeral unless told otherwise: nothing it
+    /// learns, a cookie or a cached answer, is written to disk.
+    public init(base: URL, configuration: URLSessionConfiguration = .ephemeral) {
         let base = base.absoluteString
         root = base.hasSuffix("/") ? String(base.dropLast()) : base
         connection = Connection(configuration: configuration)

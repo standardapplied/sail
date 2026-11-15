@@ -132,6 +132,17 @@ public struct Exchange: Sendable {
         self.body = try JSONSerialization.data(withJSONObject: body)
     }
 
+    /// A recorded answer given to another request: a refusal one route recorded, as another route
+    /// may answer with it.
+    public init(method: String, path: String, status: Int, body: Data) {
+        self.method = method
+        self.path = path
+        self.status = status
+        self.body = body
+        requestBody = nil
+        headers = [:]
+    }
+
     private init(_ exchange: Exchange, body: Data) {
         method = exchange.method
         path = exchange.path

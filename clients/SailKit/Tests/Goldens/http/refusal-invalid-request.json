@@ -1,0 +1,23 @@
+{
+  "request": {
+    "body": {
+      "attestation_object": "Z29sZGVuIGF0dGVzdGF0aW9uX29iamVjdCAxOQ",
+      "challenge_id": "wac_golden16",
+      "client_data_json": "Z29sZGVuIGNsaWVudF9kYXRhX2pzb24gMTg",
+      "label": "Sail for Mac"
+    },
+    "method": "POST",
+    "path": "/v1/auth/register/finish"
+  },
+  "response": {
+    "body": {
+      "error": {
+        "code": "invalid_request",
+        "field_errors": [],
+        "message": "Registration origin not allowed: https://elsewhere.example"
+      },
+      "schema_version": 1
+    },
+    "status": 422
+  }
+}
