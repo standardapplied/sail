@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # Notarizes a Developer ID signed APP with the App Store Connect key (APPLE_API_KEY_P8_BASE64,
-# APPLE_API_KEY, APPLE_API_ISSUER), staples the ticket, and zips the stapled app to ZIP.
+# APPLE_API_KEY, APPLE_API_ISSUER), staples the ticket, and zips the stapled app to ZIP. Stapling
+# fetches the accepted submission's ticket from Apple's ticket service over the network, so a fetch
+# that loses its connection is asked again, three tries at most.
 set -euo pipefail
 
 [[ $# -eq 2 ]] || { echo "usage: ci/notarize APP ZIP" >&2; exit 2; }
@@ -24,7 +26,12 @@ if [[ $status != Accepted ]]; then
   xcrun notarytool log "$id" --key "$key" --key-id "$APPLE_API_KEY" --issuer "$APPLE_API_ISSUER" >&2 || true
   exit 1
 fi
-xcrun stapler staple "$app"
+for attempt in 1 2 3; do
+  xcrun stapler staple "$app" && break
+  (( attempt < 3 )) || { echo "ci/notarize: $id is accepted but Apple's ticket service did not hand over its ticket in 3 tries" >&2; exit 1; }
+  echo "ci/notarize: $id is accepted; fetching its ticket failed (try $attempt of 3), asking again in 30 s" >&2
+  sleep 30
+done
 xcrun stapler validate "$app"
 ditto -c -k --keepParent "$app" "$zip"
 echo "ci/notarize: $app notarized ($id) and stapled; $zip"
