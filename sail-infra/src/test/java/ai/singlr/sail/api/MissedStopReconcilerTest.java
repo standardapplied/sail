@@ -48,6 +48,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.Callable;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -1169,15 +1170,29 @@ class MissedStopReconcilerTest {
   @Test
   void aBuildIsLostOnlyWithNoProcessRecordedOrItsInstanceGone() throws Exception {
     createInProgressSpec("auth");
-    assertEquals(false, lostOf(session("auth", "node-a", "build"), false, null));
-    assertEquals(true, lostOf(processless("auth"), false, null));
-    assertEquals(true, lostOf(session("auth", "node-a", "build"), true, null));
-    assertEquals(false, lostOf(processless("auth"), true, 2), "a code says how it ended");
-    assertEquals(false, lostOf(finishedSession("auth", "completed", null), true, null));
+    assertEquals(false, lostOf(session("auth", "node-a", "build"), () -> false, null));
+    assertEquals(true, lostOf(processless("auth"), () -> false, null));
+    assertEquals(true, lostOf(session("auth", "node-a", "build"), () -> true, null));
+    assertEquals(false, lostOf(processless("auth"), () -> true, 2), "a code says how it ended");
+    assertEquals(false, lostOf(finishedSession("auth", "completed", null), () -> true, null));
     assertEquals(
         false,
-        lostOf(session("auth", "node-a", "build"), null, null),
+        lostOf(
+            session("auth", "node-a", "build"),
+            () -> {
+              throw new IOException("incus did not answer");
+            },
+            null),
         "an instance whose state cannot be read is never called gone");
+    assertEquals(
+        "interrupted, lost false",
+        lostOf(
+            session("auth", "node-a", "build"),
+            () -> {
+              throw new InterruptedException("stopping");
+            },
+            null),
+        "nor one whose read was interrupted, which keeps the interrupt");
   }
 
   /** The production probe calls a spec's workspace gone when it is stopped or missing, only. */
@@ -1202,10 +1217,9 @@ class MissedStopReconcilerTest {
   }
 
   /**
-   * Whether the sweep's stop of {@code run} says it was lost, its instance gone or not ({@code
-   * null}: its state cannot be read).
+   * Whether the sweep's stop of {@code run} says it was lost, its instance as {@code gone} says.
    */
-  private Object lostOf(String run, Boolean instanceGone, Integer code) throws Exception {
+  private Object lostOf(String run, Callable<Boolean> gone, Integer code) throws Exception {
     var latch = new CountDownLatch(1);
     var stops = captureStops(latch);
     var probe =
@@ -1221,14 +1235,12 @@ class MissedStopReconcilerTest {
           }
 
           @Override
-          public boolean instanceGone(RunPlace place) throws IOException {
-            if (instanceGone == null) {
-              throw new IOException("incus did not answer");
-            }
-            return instanceGone;
+          public boolean instanceGone(RunPlace place) throws Exception {
+            return gone.call();
           }
         };
     reconciler(probe, PAST_GRACE).sweep();
+    var interrupted = Thread.interrupted();
     BusTesting.awaitDelivery(latch);
     var stop =
         stops.stream()
@@ -1239,7 +1251,8 @@ class MissedStopReconcilerTest {
         () ->
             sessionStore.finish(
                 run, sessionStore.findById(run).orElseThrow().status(), "stopped", null, null));
-    return Boolean.TRUE.equals(stop.data().get(Event.WellKnownData.LOST));
+    var lost = Boolean.TRUE.equals(stop.data().get(Event.WellKnownData.LOST));
+    return interrupted ? "interrupted, lost " + lost : lost;
   }
 
   /** A build of {@code specId} still recorded running that never recorded a process. */

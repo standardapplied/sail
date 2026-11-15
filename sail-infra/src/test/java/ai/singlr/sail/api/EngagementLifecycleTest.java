@@ -243,6 +243,27 @@ class EngagementLifecycleTest {
         "nor of a workspace that is not there yet");
   }
 
+  /** A spec's workspace already running, its harness installed, seats the member there. */
+  @Test
+  void aSpecsRunningWorkspaceWithTheHarnessSeatsTheMember() throws Exception {
+    var ops = operations(shell());
+    var yaml = Files.writeString(tempDir.resolve("seated.yaml"), YAML);
+    incus.onOk(
+        "incus list --format json",
+        "["
+            + TestWorkspaces.currentTemplate(TestProjects.reading(yaml), "acme")
+            + ","
+            + TestWorkspaces.specWorkspace("acme", "auth", "Running", HANDLE)
+            + "]");
+    seedSpec("auth");
+
+    Actor.call(
+        new Actor(HANDLE, Role.ADMIN, Actor.Lane.CLI),
+        () -> ops.engage("auth", "claude-code", null, null, false, HANDLE));
+
+    assertEquals(1, ofType(Event.WellKnownTypes.SPEC_ENGAGED).size());
+  }
+
   /**
    * A spec's workspace already running is asked for the member's harness, and one it lacks is
    * refused naming the template that a workspace is cloned from, and seats no one.
