@@ -166,7 +166,8 @@ class ReviewLanesTest {
     var build = loop.run("auth", "build");
 
     var sweep = loop.reconciler(() -> Instant.now().plus(Duration.ofMinutes(5)));
-    sweep.sweep();
+    assertEquals(1, sweep.sweep());
+    loop.settle();
 
     assertTrue(loop.container.live().isEmpty(), "no reviewer started");
     assertTrue(loop.reviews.latestReviewForSpec("auth").isEmpty(), "and no review began");

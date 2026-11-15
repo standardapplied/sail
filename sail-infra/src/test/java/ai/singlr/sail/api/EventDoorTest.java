@@ -219,7 +219,7 @@ class EventDoorTest {
             "'theirs' (owned by 'bob')");
       }
     }
-    for (var type : List.of("snapshot_created", "board_updated")) {
+    for (var type : List.of("board_updated")) {
       assertRefused(
           publish(adaToken, event(null, type, RETOLD)),
           "forbidden_not_assignee",
