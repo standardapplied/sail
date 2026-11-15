@@ -382,7 +382,9 @@ class ReviewLoopRecoveryTest {
                     ADMIN,
                     () ->
                         stops.stop(
-                            new StopOperations.RunTarget(fix.id()), ReviewLoop.HANDLE, false)));
+                            new StopOperations.RunTarget(fix.id(), null),
+                            ReviewLoop.HANDLE,
+                            false)));
 
     assertEquals(ErrorCode.AGENT_STOP_FAILED, refused.failure().errorCode());
     var claimed = loop.runs.findById(fix.id()).orElseThrow();

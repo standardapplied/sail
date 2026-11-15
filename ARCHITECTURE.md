@@ -1594,8 +1594,9 @@ the one whose name and keys match.
   project template build <p>`), a pool ZFS calls neither online nor degraded (naming `zpool
   status`), and an instance of the workspace's name that is a person's workspace or another
   spec's. A workspace not running yet is refused `runner_busy` (503, `ErrorCode.RUNNER_BUSY`, SailKit's `runnerBusy`) when its pool is under 10%
-  free, or when as many spec workspaces hold a live run as the box's memory (from `incus query
-  /1.0/resources`) holds of the project's memory limit, and at least one. A stale template is cloned
+  free, or when as many spec workspaces hold a live run of this box as its memory (`HostDetector`,
+  through `Workspaces.memoryMb`) holds of the project's memory limit, and at least one; the count is
+  made again under the create lock, of the spec workspaces the box holds whole. A stale template is cloned
   as it is, and the spec's room is told once, naming the build that freshens it; dispatch never
   builds a template, and reads it under the template's lock, so one a build holds is waited for and
   the version it built is cloned (W7). A degraded mirror goes on, said once.
@@ -1633,37 +1634,51 @@ the one whose name and keys match.
   workspaces with the rest (W11).
 - **Every door that reads or attaches to a run goes where it lives.** `sail agent stop`, `log`,
   `status`, `report` and `attach` take one selector (`RunSelector`): `--spec <id>`, or `--run <id>`
-  for a run of no spec, and every printed command for a run carries it. A stop of a project with
-  several live runs and neither named is refused, naming the command that stops each. `watch` takes `--spec`, and the
+  for a run of no spec, and every printed command for a run carries it, resolved one way
+  (`RunSelector.resolve`, the newest run it picks that the reader may operate). A stop of a project
+  with several live runs and neither named is refused, naming the command that stops each, and so
+  is any of the five verbs given a spec with several live runs (a room turn beside its build),
+  naming each run's `--run`; `--run` names a run of the project it is given with. `watch` takes `--spec`, and the
   watcher is told the spec on its command line, so it probes the run's own workspace. `agent log`
   and `GET /v1/runs/{run}/log` read the run's log, `agent status` and `GET /v1/projects/{p}/agent`
   its session and commits, and `agent report` (`POST /v1/projects/{p}/agent/report`) its session,
   commits and guardrail, each in the run's place. Each door is in `RunPlaceSweepTest`.
-- **A terminal on a spec's conversation holds the workspace as a run does.** `agent attach` of a
-  spec's run resumes it in the spec's workspace over a raw tty (the terminal host opens sessions
-  only in the project's container, W10), under a hold (`HostDispatching.holdForTerminal`): a run
-  row of the full chat lane over the whole place, reserved through the dispatch gate and carrying
-  the conversation's session, its process recorded in the hold's pid file. While it lives a
-  dispatch, reviewer, fix or room turn of the spec waits on it as on any holder and is resumed by
-  its stop, which the attach publishes when the process ends (or the missed-stop sweep, once the
-  pid names no process); a live member never starts a second process on that session; and a hold
-  is refused while another run of the spec lives there, so no fix commits a tree a person's agent
-  is writing. A conversation of the project's container is resumed in a host session as before.
-- **A member of a spec's room is seated in the spec's workspace.** An engagement is checked and
-  entered as a dispatch's run is, its harness found installed there; the project's container is
-  neither required running nor snapshotted, and an engage snapshot is refused for a spec's room. A
+- **A terminal on a spec's conversation is no run, and any claim of the workspace ends it, as on
+  main.** `agent attach` of a spec's run resumes it in the spec's workspace over a raw tty (the
+  terminal host opens sessions only in the project's container, W10): `incus exec -t <workspace>
+  -- bash -lc "echo $$ > ~/.sail/terminal.pid && cd ~/workspace && exec <harness attach>"`, which
+  `attach --dry-run` prints as it runs. A dispatch, reviewer, fix or full room turn that claims
+  the workspace ends that process (`RunReservation`, `AgentUnit.TERMINAL`) before it launches, so a
+  person's open terminal never holds the loop and the conversation stays resumable; a live member
+  starts no second process on that session while it lives (`LiveMembers.terminalHolds`); and the
+  attach is refused while a run of the spec lives there. The terminal takes the pty host's lock
+  around its last check and its start, so a claim made before it sees the run, and one made after
+  finds its pid. A conversation of the project's container is resumed in a host session as
+  before.
+- **A member of a spec's room is seated in the spec's workspace.** An engagement is checked as a
+  dispatch's run is, and a running workspace asked for its harness, but nothing is made: the
+  member's first turn makes the workspace once its run is reserved (R3), so nothing is cloned on an
+  HTTP request. The project's container is neither required running nor snapshotted, and an engage
+  snapshot is refused for a spec's room. A
   room with no spec seats its member in the project's container, as before.
 - **A lost build is a failed build.** A run the missed-stop sweep finds gone while still recorded
-  running, with no exit or reason observed, is published `lost` (`Event.WellKnownData.LOST`), the
-  one reading of an unknown exit: a lost build starts no review, and its room names the dispatch
-  that builds it again (`--restart`).
-- **A refusal is said in the spec's room too.** Every refusal of `RunPlaces` (no ZFS pool, no
-  template, a faulted pool, a name another holds, `runner_busy`) and a degraded pool's notice is
+  running, with no exit or reason observed, is lost (`MissedStopReconciler.lost`,
+  `Event.WellKnownData.LOST`) only when it never recorded a process or its instance is stopped or
+  missing when the sweep looks: a lost build starts no review, and its room names the dispatch
+  that builds it again (`--restart`). One that recorded a process and exited unseen (sail-api
+  restarted under it) is finished and reviewed, as on main.
+- **A refusal is said in the spec's room too, with its lane's remedy.** Every refusal of
+  `RunPlaces` (no ZFS pool, no template, a faulted pool, a name another holds, `runner_busy`) is
   said in the spec's room in the words the CLI and the API give, once, through the room seam a
-  refusal for want of a login uses. A dispatch whose run cannot launch after its reservation gives
-  its claim back, so the spec is pending and the dispatch the refusal names works as printed. A
-  review or fix lane that meets `runner_busy` waits for the next stop in the project, never
-  ending its review in error.
+  refusal for want of a login uses, its remedy ending in the one sentence that fits its lane
+  (`RunPlaces.again`): a build is dispatched again, a reviewer or fix is retried by the loop, and a
+  room's turn is engaged or posted again, never told to dispatch. A degraded pool's notice is said
+  once, by the dispatch that made the workspace. A dispatch whose run cannot launch after its
+  reservation gives its claim back while the spec is still that claim's (a compare-and-set, its
+  newest run this one), so the spec is pending and the dispatch the refusal names works as
+  printed, and a cancel made meanwhile wins. A review or fix lane that meets `runner_busy`, after
+  at most 60 s on the create lock, ends its review in error, which the loop retries at the
+  reconciler's pace and escalates to a person after three, as any errored review.
 
 **Sail writes no context file.** How a codebase is built, tested and verified is the
 repository's own `AGENTS.md` to say, which both harnesses read natively (Claude Code from the

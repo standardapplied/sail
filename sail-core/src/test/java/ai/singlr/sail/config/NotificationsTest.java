@@ -41,8 +41,8 @@ class NotificationsTest {
     var mutable = new java.util.ArrayList<String>(List.of("agent_session_stopped"));
     var n = Notifications.fromMap(Map.of("url", "https://ntfy.sh/test", "events", mutable));
 
-    assertThrows(UnsupportedOperationException.class, () -> n.events().add("snapshot_created"));
-    mutable.add("snapshot_created");
+    assertThrows(UnsupportedOperationException.class, () -> n.events().add("agent_stop_nudged"));
+    mutable.add("agent_stop_nudged");
     assertEquals(List.of("agent_session_stopped"), n.events());
   }
 
@@ -124,10 +124,10 @@ class NotificationsTest {
   @Test
   void newBusTypesValidateAndFilter() {
     var n =
-        new Notifications("https://ntfy.sh/test", List.of("spec_dispatched", "snapshot_created"));
+        new Notifications("https://ntfy.sh/test", List.of("spec_dispatched", "agent_stop_nudged"));
 
     assertTrue(n.shouldNotify("spec_dispatched"));
-    assertTrue(n.shouldNotify("snapshot_created"));
+    assertTrue(n.shouldNotify("agent_stop_nudged"));
     assertFalse(n.shouldNotify("spec_restarted"));
   }
 

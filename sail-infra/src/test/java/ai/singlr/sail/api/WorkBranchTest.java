@@ -87,12 +87,16 @@ class WorkBranchTest {
         "--allow-empty",
         "-m",
         "c");
+    git(main, "update-ref", "refs/remotes/origin/sail/remote", "HEAD");
     var config = TestDefinitions.map(Map.of("name", "acme"));
     var reads = new WorkBranch(new LocalGit(tempDir), DispatchOperations.Listener.NONE);
     var repos = WorkBranch.repos(config, "app");
 
     assertTrue(reads.wouldCreate("acme", repos, "sail/new"));
     assertFalse(reads.wouldCreate("acme", repos, "main"), "the repo has it");
+    assertFalse(
+        reads.wouldCreate("acme", repos, "sail/remote"),
+        "m16: the remote has it, which a dispatch takes or is refused for, never cuts again");
     assertFalse(reads.wouldCreate("acme", repos, null), "no work branch is none to create");
   }
 
@@ -304,6 +308,23 @@ class WorkBranchTest {
         refused.remedy().plain());
     assertEquals("other", head());
     assertEquals("the spec's", Files.readString(app.resolve("work.txt")));
+  }
+
+  /** A fresh workspace's repo, detached at its base, holding uncommitted work says so as it is. */
+  @Test
+  void aDetachedRepoWithUncommittedWorkIsRefusedNamingItsDetachedHead() throws Exception {
+    var repos = freshWorkspace("agent/a");
+    Files.writeString(tempDir.resolve("app").resolve("work.txt"), "the spec's");
+
+    var refused =
+        assertThrows(
+            ApiException.class,
+            () -> enter().enter(PLACE, repos, "agent/a", true, true, Optional.empty()));
+
+    assertEquals(
+        "Repo 'app' in acme-a is on a detached HEAD with uncommitted work, which is never carried"
+            + " onto 'agent/a' or discarded.",
+        refused.getMessage());
   }
 
   @Test

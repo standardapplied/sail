@@ -232,28 +232,13 @@ public final class WorkspaceTemplate {
       return recorded(project, template, zfs);
     }
     try (var held =
-        FileMutex.acquireUntil(ContainerConfig.lockOf(locks, template), 0, pastTheWait(nanos))
+        FileMutex.acquireUntil(
+                ContainerConfig.lockOf(locks, template),
+                nanos.getAsLong() + Workspaces.CREATE_WAIT.toNanos(),
+                nanos)
             .orElseThrow(() -> Workspaces.Busy.building(project))) {
       return recorded(project, template, zfs);
     }
-  }
-
-  /**
-   * How far past {@link Workspaces#CREATE_WAIT} {@code nanos} reads, from its first read on: what a
-   * bounded acquire compares with a deadline of 0, reading the clock only while another holds the
-   * lock, so an uncontended read costs no tick of a test's clock.
-   */
-  private static LongSupplier pastTheWait(LongSupplier nanos) {
-    var first = new long[1];
-    var read = new boolean[1];
-    return () -> {
-      var now = nanos.getAsLong();
-      if (!read[0]) {
-        read[0] = true;
-        first[0] = now;
-      }
-      return now - first[0] - Workspaces.CREATE_WAIT.toNanos();
-    };
   }
 
   private Optional<Template> recorded(String project, String template, List<String> zfs)

@@ -446,9 +446,8 @@ public final class AgentAttachCommand implements Runnable {
         () -> {
           try (var operations = this.operations.apply(operator)) {
             var node = NodeIdentity.handle();
-            return operations
-                .dispatching()
-                .latestOperable(name, node, selector::picks)
+            return selector
+                .resolve(operations.dispatching(), "agent attach", name, node, run -> true)
                 .map(
                     run ->
                         new Latest(

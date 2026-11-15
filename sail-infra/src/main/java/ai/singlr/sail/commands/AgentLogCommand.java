@@ -176,7 +176,8 @@ public final class AgentLogCommand implements Runnable {
   private Optional<RunStore.RunRow> resolveRun(
       String project, Optional<Lane> lane, OperatorCommand operator) {
     try (var operations = this.operations.apply(operator)) {
-      return newestRun(operations, project, NodeIdentity.handle(), lane, selector::picks);
+      return selector.resolve(
+          operations.dispatching(), "agent log", project, NodeIdentity.handle(), inLane(lane));
     } catch (ApiException refused) {
       throw refused;
     } catch (RuntimeException e) {
@@ -184,30 +185,9 @@ public final class AgentLogCommand implements Runnable {
     }
   }
 
-  /**
-   * {@code project}'s newest run in {@code lane} on the box {@code node}, decided as {@code
-   * operations}' operator, or none.
-   */
-  static Optional<RunStore.RunRow> newestRun(
-      HostOperations operations, String project, String node, Optional<Lane> lane) {
-    return newestRun(operations, project, node, lane, run -> true);
-  }
-
-  /**
-   * {@link #newestRun(HostOperations, String, String, Optional)}, of the runs {@code which} picks.
-   */
-  static Optional<RunStore.RunRow> newestRun(
-      HostOperations operations,
-      String project,
-      String node,
-      Optional<Lane> lane,
-      Predicate<RunStore.RunRow> which) {
-    return operations
-        .dispatching()
-        .latestOperable(
-            project,
-            node,
-            run -> lane.map(only -> only.matches(run.role())).orElse(true) && which.test(run));
+  /** The runs of {@code lane}; every run when none is asked for. */
+  static Predicate<RunStore.RunRow> inLane(Optional<Lane> lane) {
+    return run -> lane.map(only -> only.matches(run.role())).orElse(true);
   }
 
   /** The run's own log path, derived from its id, or null when there is no run. */

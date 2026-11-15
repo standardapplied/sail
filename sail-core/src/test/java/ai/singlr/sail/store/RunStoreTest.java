@@ -855,6 +855,30 @@ class RunStoreTest {
         "sail-agent-" + id);
   }
 
+  /**
+   * What a box's cap counts and its tidy walks: the distinct specs of its live runs, of every
+   * project and of no other box, and every place it ran in by its instance, with the runs still
+   * live there.
+   */
+  @Test
+  void aBoxsLiveSpecsAreTheDistinctSpecsOfItsLiveRunsAndItsPlacesAreNamedByInstance() {
+    var auth = newRun("backend", "auth");
+    var again = newRun("backend", "auth");
+    var billing = newRun("other", "billing");
+    TestRuns.complete(store, billing, "completed", 0);
+    var adhoc = newRun("backend", null);
+    newRunOn("backend", "pay", "node-b");
+
+    assertEquals(Set.of("backend/auth"), store.liveSpecs("node-a"));
+    assertEquals(Set.of("backend/pay"), store.liveSpecs("node-b"));
+    assertEquals(
+        Map.of(
+            "backend", List.of(adhoc),
+            "backend-auth", List.of(auth, again),
+            "other-billing", List.of()),
+        store.liveRunsByPlace("node-a", Instant.EPOCH));
+  }
+
   @Test
   void latestForProjectOnNodeReturnsNewest() {
     newRun("backend", "spec-1");

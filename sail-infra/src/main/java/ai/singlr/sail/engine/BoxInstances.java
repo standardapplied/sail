@@ -115,6 +115,18 @@ public final class BoxInstances {
       return new Plain();
     }
 
+    /** Whether this is {@code place}'s workspace by its keys, whichever spec or person it is of. */
+    public boolean isWorkspaceOf(RunPlace.SpecWorkspace place) {
+      return kind() instanceof Workspace(var project, var workspace, var ready)
+          && project.equals(place.project())
+          && workspace.equals(place.workspace());
+    }
+
+    /** Whether this is spec {@code place}'s own workspace: {@code place}'s, carrying its spec. */
+    public boolean isTheSpecs(RunPlace.SpecWorkspace place) {
+      return isWorkspaceOf(place) && key(SPEC_KEY).filter(place.specId()::equals).isPresent();
+    }
+
     /** Whether this is a plain instance, the only kind a project's own container is. */
     public boolean plain() {
       return kind() instanceof Plain;

@@ -86,7 +86,8 @@ class StopOperationsTest {
     seedRun(123, UNIT);
 
     var outcome =
-        Actor.call(ADMIN, () -> ops.stop(new StopOperations.RunTarget(R1), LOCAL_HANDLE, false));
+        Actor.call(
+            ADMIN, () -> ops.stop(new StopOperations.RunTarget(R1, null), LOCAL_HANDLE, false));
 
     var stopped = assertInstanceOf(StopOperations.Stopped.class, outcome);
     assertEquals(123, stopped.pid());
@@ -109,7 +110,7 @@ class StopOperationsTest {
     seedSpec("auth", SpecStatus.IN_PROGRESS, LOCAL_HANDLE);
     seedRun(123, UNIT);
 
-    Actor.call(ADMIN, () -> ops.stop(new StopOperations.RunTarget(R1), LOCAL_HANDLE, false));
+    Actor.call(ADMIN, () -> ops.stop(new StopOperations.RunTarget(R1, null), LOCAL_HANDLE, false));
 
     assertEquals(1, events.size());
     var event = events.getFirst();
@@ -135,9 +136,10 @@ class StopOperationsTest {
     seedSpec("auth", SpecStatus.IN_PROGRESS, LOCAL_HANDLE);
     seedRun(123, UNIT);
 
-    Actor.call(ADMIN, () -> ops.stop(new StopOperations.RunTarget(R1), LOCAL_HANDLE, false));
+    Actor.call(ADMIN, () -> ops.stop(new StopOperations.RunTarget(R1, null), LOCAL_HANDLE, false));
     var second =
-        Actor.call(ADMIN, () -> ops.stop(new StopOperations.RunTarget(R1), LOCAL_HANDLE, false));
+        Actor.call(
+            ADMIN, () -> ops.stop(new StopOperations.RunTarget(R1, null), LOCAL_HANDLE, false));
 
     var terminal = assertInstanceOf(StopOperations.AlreadyTerminal.class, second);
     assertEquals(R1, terminal.runId());
@@ -157,7 +159,8 @@ class StopOperationsTest {
     seedRun(123, UNIT);
 
     var outcome =
-        Actor.call(ADMIN, () -> ops.stop(new StopOperations.RunTarget(R1), LOCAL_HANDLE, false));
+        Actor.call(
+            ADMIN, () -> ops.stop(new StopOperations.RunTarget(R1, null), LOCAL_HANDLE, false));
 
     var notRunning = assertInstanceOf(StopOperations.NotRunning.class, outcome);
     assertEquals(R1, notRunning.runId());
@@ -186,7 +189,8 @@ class StopOperationsTest {
     TestRuns.complete(runStore, R1, "completed", 0);
 
     var outcome =
-        Actor.call(ADMIN, () -> ops.stop(new StopOperations.RunTarget(R1), LOCAL_HANDLE, false));
+        Actor.call(
+            ADMIN, () -> ops.stop(new StopOperations.RunTarget(R1, null), LOCAL_HANDLE, false));
 
     var notRunning = assertInstanceOf(StopOperations.NotRunning.class, outcome);
     assertTrue(notRunning.specCancelled());
@@ -205,7 +209,8 @@ class StopOperationsTest {
     seedRun(123, UNIT);
 
     var outcome =
-        Actor.call(ADMIN, () -> ops.stop(new StopOperations.RunTarget(R1), LOCAL_HANDLE, false));
+        Actor.call(
+            ADMIN, () -> ops.stop(new StopOperations.RunTarget(R1, null), LOCAL_HANDLE, false));
 
     assertTrue(assertInstanceOf(StopOperations.Stopped.class, outcome).specCancelled());
     assertEquals(SpecStatus.CANCELLED, specStore.findById("auth").orElseThrow().status());
@@ -222,7 +227,8 @@ class StopOperationsTest {
             ApiException.class,
             () ->
                 Actor.call(
-                    ADMIN, () -> ops.stop(new StopOperations.RunTarget(R1), LOCAL_HANDLE, false)));
+                    ADMIN,
+                    () -> ops.stop(new StopOperations.RunTarget(R1, null), LOCAL_HANDLE, false)));
 
     assertEquals(ErrorCode.CONFLICT, refusal.failure().errorCode());
     assertEquals(SpecStatus.IN_PROGRESS, specStore.findById("auth").orElseThrow().status());
@@ -243,7 +249,8 @@ class StopOperationsTest {
             ApiException.class,
             () ->
                 Actor.call(
-                    ADMIN, () -> ops.stop(new StopOperations.RunTarget(R1), LOCAL_HANDLE, false)));
+                    ADMIN,
+                    () -> ops.stop(new StopOperations.RunTarget(R1, null), LOCAL_HANDLE, false)));
 
     assertEquals(ErrorCode.CONFLICT, refusal.failure().errorCode());
     assertEquals("running", runStore.findById(R1).orElseThrow().status());
@@ -263,7 +270,8 @@ class StopOperationsTest {
             ApiException.class,
             () ->
                 Actor.call(
-                    ADMIN, () -> ops.stop(new StopOperations.RunTarget(R1), LOCAL_HANDLE, false)));
+                    ADMIN,
+                    () -> ops.stop(new StopOperations.RunTarget(R1, null), LOCAL_HANDLE, false)));
 
     assertEquals(ErrorCode.CONFLICT, refusal.failure().errorCode());
     assertEquals(SpecStatus.IN_PROGRESS, specStore.findById("auth").orElseThrow().status());
@@ -283,7 +291,8 @@ class StopOperationsTest {
             ApiException.class,
             () ->
                 Actor.call(
-                    ADMIN, () -> ops.stop(new StopOperations.RunTarget(R1), LOCAL_HANDLE, false)));
+                    ADMIN,
+                    () -> ops.stop(new StopOperations.RunTarget(R1, null), LOCAL_HANDLE, false)));
 
     assertEquals(ErrorCode.CONFLICT, refusal.failure().errorCode());
     assertEquals("running", runStore.findById(R1).orElseThrow().status());
@@ -298,7 +307,8 @@ class StopOperationsTest {
     runStore.updateProcess(R1, 123, 555L, null);
 
     var outcome =
-        Actor.call(ADMIN, () -> ops.stop(new StopOperations.RunTarget(R1), LOCAL_HANDLE, false));
+        Actor.call(
+            ADMIN, () -> ops.stop(new StopOperations.RunTarget(R1, null), LOCAL_HANDLE, false));
 
     var stopped = assertInstanceOf(StopOperations.Stopped.class, outcome);
     assertEquals(123, stopped.pid());
@@ -321,7 +331,8 @@ class StopOperationsTest {
             ApiException.class,
             () ->
                 Actor.call(
-                    ADMIN, () -> ops.stop(new StopOperations.RunTarget(R1), LOCAL_HANDLE, false)));
+                    ADMIN,
+                    () -> ops.stop(new StopOperations.RunTarget(R1, null), LOCAL_HANDLE, false)));
 
     assertEquals(ErrorCode.CONFLICT, refusal.failure().errorCode());
     assertEquals("stopping", runStore.findById(R1).orElseThrow().status());
@@ -336,7 +347,8 @@ class StopOperationsTest {
     seedRun(null, UNIT);
 
     var outcome =
-        Actor.call(ADMIN, () -> ops.stop(new StopOperations.RunTarget(R1), LOCAL_HANDLE, false));
+        Actor.call(
+            ADMIN, () -> ops.stop(new StopOperations.RunTarget(R1, null), LOCAL_HANDLE, false));
 
     var stopped = assertInstanceOf(StopOperations.Stopped.class, outcome);
     assertEquals(123, stopped.pid());
@@ -352,7 +364,8 @@ class StopOperationsTest {
     seedRun(123, null);
 
     var outcome =
-        Actor.call(ADMIN, () -> ops.stop(new StopOperations.RunTarget(R1), LOCAL_HANDLE, false));
+        Actor.call(
+            ADMIN, () -> ops.stop(new StopOperations.RunTarget(R1, null), LOCAL_HANDLE, false));
 
     var stopped = assertInstanceOf(StopOperations.Stopped.class, outcome);
     assertEquals(123, stopped.pid());
@@ -370,7 +383,8 @@ class StopOperationsTest {
     seedRun(123, null);
 
     var outcome =
-        Actor.call(ADMIN, () -> ops.stop(new StopOperations.RunTarget(R1), LOCAL_HANDLE, false));
+        Actor.call(
+            ADMIN, () -> ops.stop(new StopOperations.RunTarget(R1, null), LOCAL_HANDLE, false));
 
     var notRunning = assertInstanceOf(StopOperations.NotRunning.class, outcome);
     assertTrue(notRunning.specCancelled());
@@ -427,7 +441,8 @@ class StopOperationsTest {
             ApiException.class,
             () ->
                 Actor.call(
-                    ADMIN, () -> ops.stop(new StopOperations.RunTarget(R1), LOCAL_HANDLE, false)));
+                    ADMIN,
+                    () -> ops.stop(new StopOperations.RunTarget(R1, null), LOCAL_HANDLE, false)));
 
     assertEquals(ErrorCode.RUN_NOT_FOUND, refusal.failure().errorCode());
   }
@@ -443,7 +458,8 @@ class StopOperationsTest {
             ApiException.class,
             () ->
                 Actor.call(
-                    ADMIN, () -> ops.stop(new StopOperations.RunTarget(R1), "sumesh", false)));
+                    ADMIN,
+                    () -> ops.stop(new StopOperations.RunTarget(R1, null), "sumesh", false)));
 
     assertEquals(ErrorCode.RUN_ON_OTHER_NODE, refusal.failure().errorCode());
     assertEquals(SpecStatus.IN_PROGRESS, specStore.findById("auth").orElseThrow().status());
@@ -481,7 +497,8 @@ class StopOperationsTest {
               ApiException.class,
               () ->
                   Actor.call(
-                      actor, () -> ops.stop(new StopOperations.RunTarget(R1), "sumesh", false)));
+                      actor,
+                      () -> ops.stop(new StopOperations.RunTarget(R1, null), "sumesh", false)));
       assertEquals(codes.get(i), refusal.failure().errorCode(), actor.toString());
       assertEquals(messages.get(i), refusal.getMessage(), actor.toString());
     }
@@ -499,9 +516,13 @@ class StopOperationsTest {
             ApiException.class,
             () ->
                 Actor.call(
-                    ADMIN, () -> ops.stop(new StopOperations.RunTarget(R1), LOCAL_HANDLE, false)));
+                    ADMIN,
+                    () -> ops.stop(new StopOperations.RunTarget(R1, null), LOCAL_HANDLE, false)));
 
     assertEquals(ErrorCode.RUN_ON_OTHER_NODE, refusal.failure().errorCode());
+    assertEquals(
+        "Run " + R1 + " runs on an unknown node, not this box; only its executing box can stop it.",
+        refusal.getMessage());
   }
 
   @Test
@@ -527,7 +548,8 @@ class StopOperationsTest {
     runStore.stamp(LOCAL_HANDLE, runStore.unacknowledged());
 
     var outcome =
-        Actor.call(ADMIN, () -> ops.stop(new StopOperations.RunTarget(R1), LOCAL_HANDLE, false));
+        Actor.call(
+            ADMIN, () -> ops.stop(new StopOperations.RunTarget(R1, null), LOCAL_HANDLE, false));
 
     assertInstanceOf(StopOperations.Stopped.class, outcome);
     assertEquals("stopped", runStore.findById(R1).orElseThrow().status());
@@ -545,7 +567,8 @@ class StopOperationsTest {
             ApiException.class,
             () ->
                 Actor.call(
-                    other, () -> ops.stop(new StopOperations.RunTarget(R1), LOCAL_HANDLE, false)));
+                    other,
+                    () -> ops.stop(new StopOperations.RunTarget(R1, null), LOCAL_HANDLE, false)));
 
     assertEquals(ErrorCode.FORBIDDEN_NOT_ASSIGNEE, refusal.failure().errorCode());
     assertEquals(SpecStatus.IN_PROGRESS, specStore.findById("auth").orElseThrow().status());
@@ -583,7 +606,7 @@ class StopOperationsTest {
             () ->
                 Actor.call(
                     new Actor("raj", Role.MEMBER, Actor.Lane.API),
-                    () -> ops.stop(new StopOperations.RunTarget(R1), LOCAL_HANDLE, false)));
+                    () -> ops.stop(new StopOperations.RunTarget(R1, null), LOCAL_HANDLE, false)));
     assertEquals(ErrorCode.FORBIDDEN_NOT_ASSIGNEE, refusal.failure().errorCode());
     assertEquals(
         "Run " + R1 + " is an ad-hoc session launched by 'ada' and 'me', not you.",
@@ -592,7 +615,7 @@ class StopOperationsTest {
     var outcome =
         Actor.call(
             new Actor(LOCAL_HANDLE, Role.MEMBER, Actor.Lane.API),
-            () -> ops.stop(new StopOperations.RunTarget(R1), LOCAL_HANDLE, false));
+            () -> ops.stop(new StopOperations.RunTarget(R1, null), LOCAL_HANDLE, false));
 
     assertInstanceOf(StopOperations.Stopped.class, outcome);
   }
@@ -627,7 +650,7 @@ class StopOperationsTest {
             () ->
                 Actor.call(
                     new Actor("raj", Role.MEMBER, Actor.Lane.API),
-                    () -> ops.stop(new StopOperations.RunTarget(R1), null, false)));
+                    () -> ops.stop(new StopOperations.RunTarget(R1, null), null, false)));
 
     assertEquals(ErrorCode.FORBIDDEN_NOT_ASSIGNEE, refusal.failure().errorCode());
     assertEquals("Run " + R1 + " names no spec and no one it acts for.", refusal.getMessage());
@@ -642,7 +665,8 @@ class StopOperationsTest {
 
     var assignee = new Actor("raj", Role.MEMBER, Actor.Lane.API);
     var outcome =
-        Actor.call(assignee, () -> ops.stop(new StopOperations.RunTarget(R1), LOCAL_HANDLE, false));
+        Actor.call(
+            assignee, () -> ops.stop(new StopOperations.RunTarget(R1, null), LOCAL_HANDLE, false));
 
     assertInstanceOf(StopOperations.Stopped.class, outcome);
   }
@@ -660,13 +684,15 @@ class StopOperationsTest {
             ApiException.class,
             () ->
                 Actor.call(
-                    other, () -> ops.stop(new StopOperations.RunTarget(R1), LOCAL_HANDLE, false)));
+                    other,
+                    () -> ops.stop(new StopOperations.RunTarget(R1, null), LOCAL_HANDLE, false)));
     assertEquals(ErrorCode.FORBIDDEN_NOT_ASSIGNEE, refusal.failure().errorCode());
     assertTrue(refusal.getMessage().contains("owned by 'me'"), refusal.getMessage());
 
     var creator = new Actor("me", Role.MEMBER, Actor.Lane.API);
     var outcome =
-        Actor.call(creator, () -> ops.stop(new StopOperations.RunTarget(R1), LOCAL_HANDLE, false));
+        Actor.call(
+            creator, () -> ops.stop(new StopOperations.RunTarget(R1, null), LOCAL_HANDLE, false));
 
     assertInstanceOf(StopOperations.Stopped.class, outcome);
   }
@@ -680,7 +706,8 @@ class StopOperationsTest {
     var member = new Actor(LOCAL_HANDLE, Role.MEMBER, Actor.Lane.CLI);
 
     var outcome =
-        Actor.call(member, () -> ops.stop(new StopOperations.RunTarget(R1), LOCAL_HANDLE, false));
+        Actor.call(
+            member, () -> ops.stop(new StopOperations.RunTarget(R1, null), LOCAL_HANDLE, false));
 
     var stopped = assertInstanceOf(StopOperations.Stopped.class, outcome);
     assertFalse(stopped.specCancelled(), "the spec is its new owner's to change");
@@ -701,7 +728,8 @@ class StopOperationsTest {
     var member = new Actor(LOCAL_HANDLE, Role.MEMBER, Actor.Lane.CLI);
 
     var outcome =
-        Actor.call(member, () -> ops.stop(new StopOperations.RunTarget(R1), LOCAL_HANDLE, false));
+        Actor.call(
+            member, () -> ops.stop(new StopOperations.RunTarget(R1, null), LOCAL_HANDLE, false));
 
     assertInstanceOf(StopOperations.AlreadyTerminal.class, outcome);
     assertEquals(SpecStatus.IN_PROGRESS, specStore.findById("auth").orElseThrow().status());
@@ -714,7 +742,8 @@ class StopOperationsTest {
     seedRun(123, UNIT);
 
     var outcome =
-        Actor.call(ADMIN, () -> ops.stop(new StopOperations.RunTarget(R1), LOCAL_HANDLE, false));
+        Actor.call(
+            ADMIN, () -> ops.stop(new StopOperations.RunTarget(R1, null), LOCAL_HANDLE, false));
 
     var stopped = assertInstanceOf(StopOperations.Stopped.class, outcome);
     assertFalse(stopped.specCancelled());
@@ -742,7 +771,8 @@ class StopOperationsTest {
         UNIT);
 
     var outcome =
-        Actor.call(ADMIN, () -> ops.stop(new StopOperations.RunTarget(R1), LOCAL_HANDLE, false));
+        Actor.call(
+            ADMIN, () -> ops.stop(new StopOperations.RunTarget(R1, null), LOCAL_HANDLE, false));
 
     var stopped = assertInstanceOf(StopOperations.Stopped.class, outcome);
     assertFalse(stopped.specCancelled());
@@ -807,8 +837,7 @@ class StopOperationsTest {
             + " project's run.",
         refused.getMessage());
     assertEquals(
-        "Name the one to stop: sail agent stop acme --spec billing, sail agent stop acme --spec"
-            + " auth.",
+        "Name the one: sail agent stop acme --spec billing, sail agent stop acme --spec" + " auth.",
         refused.failure().remedy().plain());
     assertEquals("running", runStore.findById(R1).orElseThrow().status());
     assertEquals("running", runStore.findById(R2).orElseThrow().status());
@@ -865,15 +894,13 @@ class StopOperationsTest {
                             new StopOperations.ProjectTarget("acme", null), LOCAL_HANDLE, false)));
 
     assertEquals(
-        "Name the one to stop: sail agent stop acme --run "
-            + R2
-            + ", sail agent stop acme --spec auth.",
+        "Name the one: sail agent stop acme --run " + R2 + ", sail agent stop acme --spec auth.",
         refused.failure().remedy().plain());
     var adhoc =
         assertInstanceOf(
             StopOperations.Stopped.class,
             Actor.call(
-                ADMIN, () -> ops.stop(new StopOperations.RunTarget(R2), LOCAL_HANDLE, true)));
+                ADMIN, () -> ops.stop(new StopOperations.RunTarget(R2, null), LOCAL_HANDLE, true)));
     assertEquals(R2, adhoc.runId());
     var spec =
         assertInstanceOf(
@@ -884,6 +911,67 @@ class StopOperationsTest {
                     ops.stop(
                         new StopOperations.ProjectTarget("acme", "auth"), LOCAL_HANDLE, true)));
     assertEquals(R1, spec.runId());
+  }
+
+  /**
+   * m8: a room turn live beside its spec's build makes --spec name no one run, so the stop is
+   * refused naming each run's --run, and stops nothing; m9: --run names a run of the project it is
+   * given with, and a run of another is not found.
+   */
+  @Test
+  void aSpecWithTwoLiveRunsIsRefusedNamingEachRunAndARunOfAnotherProjectIsNotFound()
+      throws Exception {
+    var shell = liveAgentShell();
+    var ops = stopOps(shell, killingHalter(shell), StopOperations.Listener.NONE);
+    seedSpec("auth", SpecStatus.IN_PROGRESS, LOCAL_HANDLE);
+    seedRun(123, UNIT);
+    Acting.system(
+        () ->
+            runStore.create(
+                R2,
+                "acme",
+                "auth",
+                LOCAL_HANDLE,
+                "room",
+                "codex",
+                null,
+                "answer",
+                124,
+                null,
+                "/home/dev/.sail/runs/" + R2 + "/agent.log",
+                "sail-agent-" + R2));
+
+    var refused =
+        assertThrows(
+            ApiException.class,
+            () ->
+                Actor.call(
+                    ADMIN,
+                    () ->
+                        ops.stop(
+                            new StopOperations.ProjectTarget("acme", "auth"), LOCAL_HANDLE, true)));
+    var elsewhere =
+        assertThrows(
+            ApiException.class,
+            () ->
+                Actor.call(
+                    ADMIN,
+                    () -> ops.stop(new StopOperations.RunTarget(R1, "beta"), LOCAL_HANDLE, true)));
+
+    assertEquals(ErrorCode.CONFLICT, refused.failure().errorCode());
+    assertEquals(
+        "Spec auth of acme has 2 live runs on this box, so --spec names no one of them.",
+        refused.getMessage());
+    assertEquals(
+        "Name the one: sail agent stop acme --run "
+            + R2
+            + ", sail agent stop acme --run "
+            + R1
+            + ".",
+        refused.failure().remedy().plain());
+    assertEquals(ErrorCode.RUN_NOT_FOUND, elsewhere.failure().errorCode());
+    assertEquals("running", runStore.findById(R1).orElseThrow().status());
+    assertEquals("running", runStore.findById(R2).orElseThrow().status());
   }
 
   @Test
@@ -954,7 +1042,8 @@ class StopOperationsTest {
             "Only me or an admin may access this run.");
     for (var target :
         List.<StopOperations.Target>of(
-            new StopOperations.RunTarget(R1), new StopOperations.ProjectTarget("acme", null))) {
+            new StopOperations.RunTarget(R1, null),
+            new StopOperations.ProjectTarget("acme", null))) {
       for (var i = 0; i < asked.size(); i++) {
         var actor = asked.get(i);
         for (var dryRun : List.of(true, false)) {
@@ -1011,7 +1100,8 @@ class StopOperationsTest {
     assertTrue(TestRuns.transition(runStore, R1, "running", "stopping"));
 
     var outcome =
-        Actor.call(ADMIN, () -> ops.stop(new StopOperations.RunTarget(R1), LOCAL_HANDLE, false));
+        Actor.call(
+            ADMIN, () -> ops.stop(new StopOperations.RunTarget(R1, null), LOCAL_HANDLE, false));
 
     var stopped = assertInstanceOf(StopOperations.Stopped.class, outcome);
     assertEquals(R1, stopped.runId());
@@ -1078,7 +1168,8 @@ class StopOperationsTest {
 
     var owner = new Actor(LOCAL_HANDLE, Role.MEMBER, Actor.Lane.API);
     var outcome =
-        Actor.call(owner, () -> ops.stop(new StopOperations.RunTarget(R1), LOCAL_HANDLE, false));
+        Actor.call(
+            owner, () -> ops.stop(new StopOperations.RunTarget(R1, null), LOCAL_HANDLE, false));
 
     assertInstanceOf(StopOperations.Stopped.class, outcome);
   }
@@ -1094,7 +1185,8 @@ class StopOperationsTest {
             ApiException.class,
             () ->
                 Actor.call(
-                    other, () -> ops.stop(new StopOperations.RunTarget(R1), LOCAL_HANDLE, false)));
+                    other,
+                    () -> ops.stop(new StopOperations.RunTarget(R1, null), LOCAL_HANDLE, false)));
 
     assertEquals(ErrorCode.FORBIDDEN_NOT_ASSIGNEE, refusal.failure().errorCode());
     assertEquals("running", runStore.findById(R1).orElseThrow().status());
@@ -1194,6 +1286,20 @@ class StopOperationsTest {
     assertEquals(
         "Run " + R2 + " runs on eng, not this box; only its executing box can stop it.",
         refused.getMessage());
+    assertEquals(
+        refused.getMessage(),
+        assertThrows(
+                ApiException.class,
+                () ->
+                    Actor.call(
+                        ADMIN,
+                        () ->
+                            ops.stop(
+                                new StopOperations.ProjectTarget("acme", null),
+                                LOCAL_HANDLE,
+                                false)))
+            .getMessage(),
+        "a stop naming no spec says the same");
     assertEquals("running", runStore.findById(R2).orElseThrow().status());
   }
 
@@ -1213,7 +1319,8 @@ class StopOperationsTest {
     seedRun(123, UNIT);
 
     var outcome =
-        Actor.call(ADMIN, () -> ops.stop(new StopOperations.RunTarget(R1), LOCAL_HANDLE, true));
+        Actor.call(
+            ADMIN, () -> ops.stop(new StopOperations.RunTarget(R1, null), LOCAL_HANDLE, true));
 
     var stopped = assertInstanceOf(StopOperations.Stopped.class, outcome);
     assertTrue(stopped.specCancelled());
@@ -1235,7 +1342,8 @@ class StopOperationsTest {
     seedRun(123, UNIT);
 
     var outcome =
-        Actor.call(ADMIN, () -> ops.stop(new StopOperations.RunTarget(R1), LOCAL_HANDLE, true));
+        Actor.call(
+            ADMIN, () -> ops.stop(new StopOperations.RunTarget(R1, null), LOCAL_HANDLE, true));
 
     var notRunning = assertInstanceOf(StopOperations.NotRunning.class, outcome);
     assertTrue(notRunning.specCancelled());
@@ -1257,7 +1365,8 @@ class StopOperationsTest {
     TestRuns.complete(runStore, R1, "completed", 0);
 
     var outcome =
-        Actor.call(ADMIN, () -> ops.stop(new StopOperations.RunTarget(R1), LOCAL_HANDLE, true));
+        Actor.call(
+            ADMIN, () -> ops.stop(new StopOperations.RunTarget(R1, null), LOCAL_HANDLE, true));
 
     var notRunning = assertInstanceOf(StopOperations.NotRunning.class, outcome);
     assertTrue(notRunning.specCancelled());
@@ -1275,7 +1384,8 @@ class StopOperationsTest {
             ApiException.class,
             () ->
                 Actor.call(
-                    ADMIN, () -> ops.stop(new StopOperations.RunTarget(R1), LOCAL_HANDLE, false)));
+                    ADMIN,
+                    () -> ops.stop(new StopOperations.RunTarget(R1, null), LOCAL_HANDLE, false)));
 
     assertEquals(ErrorCode.AGENT_STOP_FAILED, refusal.failure().errorCode());
     assertTrue(refusal.getMessage().contains("PID 123 is still running"), refusal.getMessage());
@@ -1304,7 +1414,8 @@ class StopOperationsTest {
             ApiException.class,
             () ->
                 Actor.call(
-                    ADMIN, () -> ops.stop(new StopOperations.RunTarget(R1), LOCAL_HANDLE, false)));
+                    ADMIN,
+                    () -> ops.stop(new StopOperations.RunTarget(R1, null), LOCAL_HANDLE, false)));
 
     assertEquals(ErrorCode.AGENT_STOP_FAILED, refusal.failure().errorCode());
     assertTrue(refusal.getMessage().contains("did not answer"), refusal.getMessage());
@@ -1322,7 +1433,8 @@ class StopOperationsTest {
 
     shell.on("systemctl --user show", "ActiveState=inactive\nExecMainStatus=0\n");
     var retried =
-        Actor.call(ADMIN, () -> ops.stop(new StopOperations.RunTarget(R1), LOCAL_HANDLE, false));
+        Actor.call(
+            ADMIN, () -> ops.stop(new StopOperations.RunTarget(R1, null), LOCAL_HANDLE, false));
 
     assertInstanceOf(StopOperations.Stopped.class, retried);
     assertEquals("stopped", runStore.findById(R1).orElseThrow().status());
@@ -1347,7 +1459,8 @@ class StopOperationsTest {
             ApiException.class,
             () ->
                 Actor.call(
-                    ADMIN, () -> ops.stop(new StopOperations.RunTarget(R1), LOCAL_HANDLE, false)));
+                    ADMIN,
+                    () -> ops.stop(new StopOperations.RunTarget(R1, null), LOCAL_HANDLE, false)));
 
     assertEquals(ErrorCode.AGENT_STOP_FAILED, refusal.failure().errorCode());
     var claimed = runStore.findById(R1).orElseThrow();
@@ -1373,7 +1486,8 @@ class StopOperationsTest {
             ApiException.class,
             () ->
                 Actor.call(
-                    ADMIN, () -> ops.stop(new StopOperations.RunTarget(R1), LOCAL_HANDLE, false)));
+                    ADMIN,
+                    () -> ops.stop(new StopOperations.RunTarget(R1, null), LOCAL_HANDLE, false)));
 
     assertEquals(ErrorCode.AGENT_STOP_FAILED, refusal.failure().errorCode());
     assertEquals(
@@ -1401,7 +1515,8 @@ class StopOperationsTest {
             ApiException.class,
             () ->
                 Actor.call(
-                    ADMIN, () -> ops.stop(new StopOperations.RunTarget(R1), LOCAL_HANDLE, false)));
+                    ADMIN,
+                    () -> ops.stop(new StopOperations.RunTarget(R1, null), LOCAL_HANDLE, false)));
 
     assertEquals(ErrorCode.CONFLICT, refusal.failure().errorCode());
     assertEquals(SpecStatus.IN_PROGRESS, specStore.findById("auth").orElseThrow().status());
@@ -1427,7 +1542,8 @@ class StopOperationsTest {
             ApiException.class,
             () ->
                 Actor.call(
-                    ADMIN, () -> ops.stop(new StopOperations.RunTarget(R1), LOCAL_HANDLE, false)));
+                    ADMIN,
+                    () -> ops.stop(new StopOperations.RunTarget(R1, null), LOCAL_HANDLE, false)));
 
     assertEquals(ErrorCode.CONFLICT, refusal.failure().errorCode());
     assertEquals(SpecStatus.REVIEW, specStore.findById("auth").orElseThrow().status());
@@ -1448,7 +1564,8 @@ class StopOperationsTest {
             ApiException.class,
             () ->
                 Actor.call(
-                    ADMIN, () -> ops.stop(new StopOperations.RunTarget(R1), LOCAL_HANDLE, false)));
+                    ADMIN,
+                    () -> ops.stop(new StopOperations.RunTarget(R1, null), LOCAL_HANDLE, false)));
 
     assertEquals(ErrorCode.AGENT_STATUS_FAILED, refusal.failure().errorCode());
     assertEquals(
@@ -1474,7 +1591,8 @@ class StopOperationsTest {
             ApiException.class,
             () ->
                 Actor.call(
-                    ADMIN, () -> ops.stop(new StopOperations.RunTarget(R1), LOCAL_HANDLE, false)));
+                    ADMIN,
+                    () -> ops.stop(new StopOperations.RunTarget(R1, null), LOCAL_HANDLE, false)));
 
     assertEquals(ErrorCode.AGENT_STATUS_FAILED, refusal.failure().errorCode());
     assertEquals(
@@ -1497,7 +1615,8 @@ class StopOperationsTest {
     seedRun(123, UNIT);
 
     var outcome =
-        Actor.call(ADMIN, () -> ops.stop(new StopOperations.RunTarget(R1), LOCAL_HANDLE, false));
+        Actor.call(
+            ADMIN, () -> ops.stop(new StopOperations.RunTarget(R1, null), LOCAL_HANDLE, false));
 
     assertInstanceOf(
         StopOperations.Stopped.class,
@@ -1525,7 +1644,8 @@ class StopOperationsTest {
     seedRun(123, UNIT);
 
     var outcome =
-        Actor.call(ADMIN, () -> ops.stop(new StopOperations.RunTarget(R1), LOCAL_HANDLE, false));
+        Actor.call(
+            ADMIN, () -> ops.stop(new StopOperations.RunTarget(R1, null), LOCAL_HANDLE, false));
 
     assertInstanceOf(StopOperations.NotRunning.class, outcome);
     assertEquals(
@@ -1548,7 +1668,8 @@ class StopOperationsTest {
     interruptStop();
 
     var outcome =
-        Actor.call(ADMIN, () -> ops.stop(new StopOperations.RunTarget(R1), LOCAL_HANDLE, false));
+        Actor.call(
+            ADMIN, () -> ops.stop(new StopOperations.RunTarget(R1, null), LOCAL_HANDLE, false));
 
     var notRunning = assertInstanceOf(StopOperations.NotRunning.class, outcome);
     assertEquals(R1, notRunning.runId());
@@ -1568,7 +1689,8 @@ class StopOperationsTest {
     interruptStop();
 
     var outcome =
-        Actor.call(ADMIN, () -> ops.stop(new StopOperations.RunTarget(R1), LOCAL_HANDLE, false));
+        Actor.call(
+            ADMIN, () -> ops.stop(new StopOperations.RunTarget(R1, null), LOCAL_HANDLE, false));
 
     var stopped = assertInstanceOf(StopOperations.Stopped.class, outcome);
     assertEquals(123, stopped.pid());
@@ -1585,7 +1707,8 @@ class StopOperationsTest {
     interruptStop();
 
     var outcome =
-        Actor.call(ADMIN, () -> ops.stop(new StopOperations.RunTarget(R1), LOCAL_HANDLE, true));
+        Actor.call(
+            ADMIN, () -> ops.stop(new StopOperations.RunTarget(R1, null), LOCAL_HANDLE, true));
 
     var stopped = assertInstanceOf(StopOperations.Stopped.class, outcome);
     assertEquals(123, stopped.pid());
@@ -1608,7 +1731,8 @@ class StopOperationsTest {
     seedRun(123, UNIT);
 
     var outcome =
-        Actor.call(ADMIN, () -> ops.stop(new StopOperations.RunTarget(R1), LOCAL_HANDLE, false));
+        Actor.call(
+            ADMIN, () -> ops.stop(new StopOperations.RunTarget(R1, null), LOCAL_HANDLE, false));
 
     assertInstanceOf(StopOperations.Stopped.class, outcome);
     assertEquals("stopped", runStore.findById(R1).orElseThrow().status());
@@ -1628,7 +1752,8 @@ class StopOperationsTest {
     seedNewerRun();
 
     var outcome =
-        Actor.call(ADMIN, () -> ops.stop(new StopOperations.RunTarget(R1), LOCAL_HANDLE, false));
+        Actor.call(
+            ADMIN, () -> ops.stop(new StopOperations.RunTarget(R1, null), LOCAL_HANDLE, false));
 
     var terminal = assertInstanceOf(StopOperations.AlreadyTerminal.class, outcome);
     assertEquals(R1, terminal.runId());
@@ -1651,7 +1776,8 @@ class StopOperationsTest {
     seedNewerRun();
 
     var outcome =
-        Actor.call(ADMIN, () -> ops.stop(new StopOperations.RunTarget(R1), LOCAL_HANDLE, true));
+        Actor.call(
+            ADMIN, () -> ops.stop(new StopOperations.RunTarget(R1, null), LOCAL_HANDLE, true));
 
     assertInstanceOf(StopOperations.AlreadyTerminal.class, outcome);
     assertEquals(SpecStatus.IN_PROGRESS, specStore.findById("auth").orElseThrow().status());
@@ -1666,9 +1792,11 @@ class StopOperationsTest {
     seedNewerRun();
 
     var preview =
-        Actor.call(ADMIN, () -> ops.stop(new StopOperations.RunTarget(R1), LOCAL_HANDLE, true));
+        Actor.call(
+            ADMIN, () -> ops.stop(new StopOperations.RunTarget(R1, null), LOCAL_HANDLE, true));
     var outcome =
-        Actor.call(ADMIN, () -> ops.stop(new StopOperations.RunTarget(R1), LOCAL_HANDLE, false));
+        Actor.call(
+            ADMIN, () -> ops.stop(new StopOperations.RunTarget(R1, null), LOCAL_HANDLE, false));
 
     assertFalse(assertInstanceOf(StopOperations.Stopped.class, preview).specCancelled());
     var stopped = assertInstanceOf(StopOperations.Stopped.class, outcome);
@@ -1691,7 +1819,8 @@ class StopOperationsTest {
     seedNewerRun();
 
     var outcome =
-        Actor.call(ADMIN, () -> ops.stop(new StopOperations.RunTarget(R1), LOCAL_HANDLE, false));
+        Actor.call(
+            ADMIN, () -> ops.stop(new StopOperations.RunTarget(R1, null), LOCAL_HANDLE, false));
 
     var notRunning = assertInstanceOf(StopOperations.NotRunning.class, outcome);
     assertFalse(notRunning.specCancelled());
@@ -1716,7 +1845,8 @@ class StopOperationsTest {
             ApiException.class,
             () ->
                 Actor.call(
-                    ADMIN, () -> ops.stop(new StopOperations.RunTarget(R1), LOCAL_HANDLE, false)));
+                    ADMIN,
+                    () -> ops.stop(new StopOperations.RunTarget(R1, null), LOCAL_HANDLE, false)));
 
     assertEquals(ErrorCode.CONFLICT, refusal.failure().errorCode());
     assertEquals("completed", runStore.findById(R1).orElseThrow().status());
@@ -1749,7 +1879,8 @@ class StopOperationsTest {
     seedReviewRun();
 
     var outcome =
-        Actor.call(ADMIN, () -> ops.stop(new StopOperations.RunTarget(R1), LOCAL_HANDLE, false));
+        Actor.call(
+            ADMIN, () -> ops.stop(new StopOperations.RunTarget(R1, null), LOCAL_HANDLE, false));
 
     assertTrue(
         assertInstanceOf(StopOperations.NotRunning.class, outcome).specCancelled(),
@@ -1772,7 +1903,8 @@ class StopOperationsTest {
     seedReviewRun();
 
     var outcome =
-        Actor.call(ADMIN, () -> ops.stop(new StopOperations.RunTarget(R2), LOCAL_HANDLE, false));
+        Actor.call(
+            ADMIN, () -> ops.stop(new StopOperations.RunTarget(R2, null), LOCAL_HANDLE, false));
 
     var stopped = assertInstanceOf(StopOperations.Stopped.class, outcome);
     assertFalse(
@@ -1805,7 +1937,8 @@ class StopOperationsTest {
             ApiException.class,
             () ->
                 Actor.call(
-                    ADMIN, () -> ops.stop(new StopOperations.RunTarget(R1), LOCAL_HANDLE, false)));
+                    ADMIN,
+                    () -> ops.stop(new StopOperations.RunTarget(R1, null), LOCAL_HANDLE, false)));
 
     assertEquals(ErrorCode.AGENT_STATUS_FAILED, refusal.failure().errorCode());
     assertEquals(SpecStatus.IN_PROGRESS, specStore.findById("auth").orElseThrow().status());
@@ -2099,7 +2232,7 @@ class StopOperationsTest {
     seedSpec("auth", SpecStatus.IN_PROGRESS, LOCAL_HANDLE);
     var credential = seedRunWithCredential(123, UNIT);
 
-    Actor.call(ADMIN, () -> ops.stop(new StopOperations.RunTarget(R1), LOCAL_HANDLE, false));
+    Actor.call(ADMIN, () -> ops.stop(new StopOperations.RunTarget(R1, null), LOCAL_HANDLE, false));
 
     assertEquals("stopped", runStore.findById(R1).orElseThrow().status());
     assertTrue(
@@ -2115,7 +2248,8 @@ class StopOperationsTest {
     var credential = seedRunWithCredential(123, UNIT);
 
     var outcome =
-        Actor.call(ADMIN, () -> ops.stop(new StopOperations.RunTarget(R1), LOCAL_HANDLE, false));
+        Actor.call(
+            ADMIN, () -> ops.stop(new StopOperations.RunTarget(R1, null), LOCAL_HANDLE, false));
 
     assertInstanceOf(StopOperations.NotRunning.class, outcome);
     assertTrue(
@@ -2136,7 +2270,8 @@ class StopOperationsTest {
             ApiException.class,
             () ->
                 Actor.call(
-                    agent, () -> ops.stop(new StopOperations.RunTarget(R1), LOCAL_HANDLE, false)));
+                    agent,
+                    () -> ops.stop(new StopOperations.RunTarget(R1, null), LOCAL_HANDLE, false)));
 
     assertEquals(ErrorCode.AGENT_LANE_FORBIDDEN, refusal.failure().errorCode());
     assertEquals("running", runStore.findById(R1).orElseThrow().status());

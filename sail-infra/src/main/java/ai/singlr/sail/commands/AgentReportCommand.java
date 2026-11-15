@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.commands;
 
+import ai.singlr.sail.api.ApiException;
 import ai.singlr.sail.api.HostOperations;
 import ai.singlr.sail.api.OperationsFactory;
 import ai.singlr.sail.config.ProjectDefinition;
@@ -108,13 +109,13 @@ public final class AgentReportCommand implements Runnable {
 
   RunStore.RunRow latestSession(String project, OperatorCommand operator) {
     try (var operations = this.operations.apply(operator)) {
-      return (selector.names()
-              ? operations
-                  .dispatching()
-                  .latestOperable(project, NodeIdentity.handle(), selector::picks)
-              : operations.dispatching().latestRun(project, NodeIdentity.handle()))
+      return selector
+          .resolve(
+              operations.dispatching(), "agent report", project, NodeIdentity.handle(), run -> true)
           .orElse(null);
-    } catch (Exception ignored) {
+    } catch (ApiException refused) {
+      throw refused;
+    } catch (RuntimeException ignored) {
       return null;
     }
   }

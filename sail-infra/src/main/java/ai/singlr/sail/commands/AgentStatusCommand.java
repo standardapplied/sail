@@ -118,13 +118,17 @@ public final class AgentStatusCommand implements Runnable {
       probes =
           runningContainers.stream()
               .map(
-                  container ->
-                      new Probe(
-                          container.name(),
-                          sessionOrNull(operations, container.name()),
-                          activePlace(operations, container.name(), NodeIdentity.handle())
-                              .instance(),
-                          repoPathsOrDefault(definitions, container.name())))
+                  container -> {
+                    var run =
+                        operations.dispatching().activeRun(container.name(), NodeIdentity.handle());
+                    return new Probe(
+                        container.name(),
+                        sessionOrNull(run),
+                        run.map(RunStore.RunRow::place)
+                            .orElse(RunPlace.of(container.name(), null))
+                            .instance(),
+                        repoPathsOrDefault(definitions, container.name()));
+                  })
               .toList();
     }
 
@@ -201,35 +205,18 @@ public final class AgentStatusCommand implements Runnable {
 
   private void executeSingle(OperatorCommand operator) throws Exception {
     NameValidator.requireValidProjectName(name);
-    try (var operations = this.operations.apply(operator)) {
-      operations.catalog().readable(name);
-    }
-    RunPlace place;
-    Optional<RunStore.RunRow> named = Optional.empty();
-    try (var operations = this.operations.apply(operator)) {
-      if (selector.names()) {
-        named =
-            operations.dispatching().liveRuns(NodeIdentity.handle()).stream()
-                .filter(run -> run.project().equals(name) && selector.picks(run))
-                .findFirst();
-      }
-      place =
-          selector.names()
-              ? named.map(RunStore.RunRow::place).orElse(RunPlace.of(name, selector.specId))
-              : activePlace(operations, name, NodeIdentity.handle());
-    }
-    var state = new AgentPresence(shell).state(place);
-    ContainerStateGuard.requireRunning(state, place.instance());
-
-    AgentSession.SessionInfo info;
+    Optional<RunStore.RunRow> run;
     ProjectDefinition config;
     try (var operations = this.operations.apply(operator)) {
-      info =
-          selector.names()
-              ? sessionOf(named)
-              : operations.dispatching().projectSession(name, NodeIdentity.handle());
+      operations.catalog().readable(name);
+      run =
+          selector.resolve(
+              operations.dispatching(), "agent status", name, NodeIdentity.handle(), any -> true);
       config = operations.catalog().definitions().read(name).orElse(null);
     }
+    var place = run.map(RunStore.RunRow::place).orElse(RunPlace.of(name, null));
+    ContainerStateGuard.requireRunning(new AgentPresence(shell).state(place), place.instance());
+    var info = sessionOf(run);
 
     var commitCount = 0;
     var lastCommitMinutesAgo = -1L;
@@ -293,7 +280,7 @@ public final class AgentStatusCommand implements Runnable {
 
     Banner.printAgentStatus(
         name,
-        named.map(RunSelector::of).orElse(""),
+        run.map(RunSelector::of).orElse(""),
         info,
         commitCount,
         lastCommitMinutesAgo,
@@ -318,7 +305,7 @@ public final class AgentStatusCommand implements Runnable {
     }
   }
 
-  /** The session of {@code run}, the live run the selector names, or none when there is none. */
+  /** The session of {@code run}, the run the selector names, or none when there is none. */
   private AgentSession.SessionInfo sessionOf(Optional<RunStore.RunRow> run) throws Exception {
     if (run.isEmpty()) {
       return null;
@@ -330,23 +317,9 @@ public final class AgentStatusCommand implements Runnable {
             AgentUnit.recorded(live.id(), Objects.toString(live.unit(), "")));
   }
 
-  /**
-   * Where {@code project}'s active run on {@code node}, this box, lives, whose session the status
-   * shows: a spec's workspace, or the project's container when the run names no spec or there is
-   * none.
-   */
-  static RunPlace activePlace(HostOperations operations, String project, String node) {
-    return operations
-        .dispatching()
-        .activeRun(project, node)
-        .map(RunStore.RunRow::place)
-        .orElse(RunPlace.of(project, null));
-  }
-
-  private static AgentSession.SessionInfo sessionOrNull(
-      HostOperations operations, String projectName) {
+  private AgentSession.SessionInfo sessionOrNull(Optional<RunStore.RunRow> run) {
     try {
-      return operations.dispatching().projectSession(projectName, NodeIdentity.handle());
+      return sessionOf(run);
     } catch (Exception ignored) {
       return null;
     }

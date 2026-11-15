@@ -108,6 +108,33 @@ class AgentPresenceTest {
     assertEquals(new ContainerState.NotCreated(), new AgentPresence(others).state(place));
   }
 
+  /**
+   * The workspace of a spec's run is the instance of its name that carries its project, workspace
+   * and spec: a person's workspace of that name, or another spec's, says nothing of the run.
+   */
+  @Test
+  void onlyTheInstanceCarryingTheSpecsKeyIsItsWorkspace() throws Exception {
+    var place = RunPlace.of("acme", "auth");
+    var owned = workspace("\"user.sail.spec\": \"auth\"");
+    var persons = workspace("\"user.sail.owner\": \"eng\"");
+    var anothers = workspace("\"user.sail.spec\": \"auth-x\"");
+
+    assertInstanceOf(ContainerState.Running.class, new AgentPresence(owned).state(place));
+    assertEquals(new ContainerState.NotCreated(), new AgentPresence(persons).state(place));
+    assertEquals(new ContainerState.NotCreated(), new AgentPresence(anothers).state(place));
+  }
+
+  private static ScriptedShellExecutor workspace(String key) {
+    return new ScriptedShellExecutor()
+        .onOk(
+            "incus list",
+            "[{\"name\": \"acme-auth\", \"status\": \"Running\", \"state\": {},"
+                + " \"config\": {\"user.sail.project\": \"acme\", \"user.sail.workspace\":"
+                + " \"auth\", \"user.sail.ready\": \"1\", "
+                + key
+                + "}}]");
+  }
+
   @Test
   void aFrozenContainersAgentIsPausedNotGone() throws Exception {
     assertInstanceOf(

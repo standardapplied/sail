@@ -166,7 +166,13 @@ class AgentLogCommandTest {
         () -> operations.identity().operator(),
         () ->
             AgentLogCommand.logPathFrom(
-                AgentLogCommand.newestRun(operations, project, "mady", lane)));
+                new RunSelector()
+                    .resolve(
+                        operations.dispatching(),
+                        "agent log",
+                        project,
+                        "mady",
+                        AgentLogCommand.inLane(lane))));
   }
 
   private static HostOperations operations(Sqlite db, Path dir) {

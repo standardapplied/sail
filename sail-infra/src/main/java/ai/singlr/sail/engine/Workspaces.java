@@ -1001,10 +1001,7 @@ public final class Workspaces {
     var name = place.workspace();
     var instance = place.instance();
     var taken = instances.stream().filter(i -> i.name().equals(instance)).findFirst();
-    if (taken.isPresent()
-        && taken.get().kind() instanceof BoxInstances.Workspace(var p, var w, var ready)
-        && p.equals(project)
-        && w.equals(name)) {
+    if (taken.isPresent() && taken.get().isWorkspaceOf(place)) {
       var spec = taken.get().key(BoxInstances.SPEC_KEY);
       if (spec.isEmpty()) {
         throw Remedied.state(
@@ -1034,7 +1031,8 @@ public final class Workspaces {
                 + place.specId()
                 + " goes in it. Give one of the two specs another id.");
       }
-      if (!ready && taken.get().key(CREATING_KEY).isEmpty()) {
+      if (!((BoxInstances.Workspace) taken.get().kind()).ready()
+          && taken.get().key(CREATING_KEY).isEmpty()) {
         throw markTakenOff(project, name);
       }
       return taken;
@@ -1059,11 +1057,9 @@ public final class Workspaces {
 
   /** What an instance a spec's workspace name collides with is, in words that name its owner. */
   private static String whatItIs(BoxInstances.Instance taken) {
-    return switch (taken.kind()) {
-      case BoxInstances.Workspace(var p, var w, var ready) -> "workspace '" + w + "' of " + p;
-      case BoxInstances.Template(var of) -> "the template of " + of;
-      default -> "an instance Incus already has";
-    };
+    return taken.kind() instanceof BoxInstances.Workspace(var p, var w, var ready)
+        ? "workspace '" + w + "' of " + p
+        : "an instance Incus already has";
   }
 
   /** As {@link #existing}, refused when the workspace was never made whole (W12). */

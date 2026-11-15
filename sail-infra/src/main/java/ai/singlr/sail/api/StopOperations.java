@@ -76,8 +76,11 @@ public final class StopOperations {
   /** What a stop should act on: one project's active run (CLI) or an exact run id (API). */
   public sealed interface Target permits RunTarget, ProjectTarget {}
 
-  /** Stop the exact run {@code runId}, the API lane's address. */
-  public record RunTarget(String runId) implements Target {}
+  /**
+   * Stop the exact run {@code runId}: the API lane's address, which names no project ({@code
+   * project} null), and the CLI's {@code --run}, refused when the run is not of {@code project}.
+   */
+  public record RunTarget(String runId, String project) implements Target {}
 
   /**
    * Stop {@code project}'s live run — the CLI lane's address: spec {@code specId}'s when it names
@@ -200,21 +203,21 @@ public final class StopOperations {
    */
   public Outcome stop(Target target, String localHandle, boolean dryRun) {
     return switch (target) {
-      case RunTarget run -> stopRun(run.runId(), localHandle, dryRun);
+      case RunTarget run -> stopRun(run.runId(), run.project(), localHandle, dryRun);
       case ProjectTarget project ->
           stopProject(project.project(), project.specId(), localHandle, dryRun);
     };
   }
 
-  private Outcome stopRun(String runId, String localHandle, boolean dryRun) {
-    var run = runStore.findById(runId).orElseThrow(() -> Refusals.runNotFound(runId));
+  private Outcome stopRun(String runId, String project, String localHandle, boolean dryRun) {
+    var run =
+        runStore
+            .findById(runId)
+            .filter(found -> project == null || project.equals(found.project()))
+            .orElseThrow(() -> Refusals.runNotFound(runId));
     authorize(run);
     if (!run.ownedBy(localHandle)) {
-      var node = Strings.isBlank(run.node()) ? "an unknown node" : run.node();
-      throw new ApiException(
-          ErrorCode.RUN_ON_OTHER_NODE,
-          "Run " + run.id() + " executed on " + node + "; only its executing box can stop it.",
-          "Stop it from " + node + "'s box.");
+      throw onOtherNode(run);
     }
     projects.requireExists(run.project());
     return stopResolved(run, dryRun);
@@ -224,9 +227,10 @@ public final class StopOperations {
    * A project-targeted stop resolves the live run it names — spec {@code specId}'s, or the
    * project's only one — and applies the one resolved-run procedure, decided as a stop by run id
    * is: a project outside the caller's scope is not in the catalog, and its run is authorized
-   * before the container is asked about. Specs run at once, each in its own workspace, so with no
-   * spec named and several runs live the stop is refused naming each run's spec and the form that
-   * stops one. A project, or spec, with no live run on this box has nothing to stop.
+   * before the container is asked about. Specs run at once, each in its own workspace, so with
+   * several runs live, of the project or of the spec named, the stop is refused naming the form
+   * that stops each ({@link #severalLive}). A project, or spec, with no live run on this box has
+   * nothing to stop.
    */
   private Outcome stopProject(String project, String specId, String localHandle, boolean dryRun) {
     ProjectGate.requireReads(project);
@@ -234,8 +238,8 @@ public final class StopOperations {
         runStore.liveForProjectOnNode(project, localHandle).stream()
             .filter(run -> Strings.isBlank(specId) || specId.equals(run.specId()))
             .toList();
-    if (live.size() > 1 && Strings.isBlank(specId)) {
-      throw severalLive(project, live);
+    if (live.size() > 1) {
+      throw severalLive("agent stop", project, live);
     }
     var run = live.isEmpty() ? null : live.getFirst();
     if (run != null) {
@@ -259,50 +263,72 @@ public final class StopOperations {
         .findFirst()
         .ifPresent(
             elsewhere -> {
-              var node = Strings.isBlank(elsewhere.node()) ? "an unknown node" : elsewhere.node();
-              throw new ApiException(
-                  ErrorCode.RUN_ON_OTHER_NODE,
-                  "Run "
-                      + elsewhere.id()
-                      + " runs on "
-                      + node
-                      + ", not this box; only its executing box can stop it.",
-                  "Stop it from " + node + "'s box.");
+              throw onOtherNode(elsewhere);
             });
   }
 
-  /** The refusal of a stop that names no spec while {@code live}, several runs, run at once. */
-  private static ApiException severalLive(String project, List<RunStore.RunRow> live) {
-    var specs =
-        live.stream()
-            .map(run -> Strings.isBlank(run.specId()) ? "an ad-hoc run " + run.id() : run.specId())
-            .distinct()
-            .toList();
-    var forms = new ArrayList<Object>(List.of("Name the one to stop: "));
-    live.stream()
-        .map(
-            run ->
-                Strings.isBlank(run.specId())
-                    ? Remedy.sail("agent stop", project, "--run", run.id())
-                    : Remedy.sail("agent stop", project, "--spec", run.specId()))
-        .distinct()
-        .forEach(
-            command -> {
-              if (forms.size() > 1) {
-                forms.add(", ");
-              }
-              forms.add(command);
-            });
+  /** The refusal of a stop of {@code run}, which another box executes. */
+  private static ApiException onOtherNode(RunStore.RunRow run) {
+    var node = Strings.isBlank(run.node()) ? "an unknown node" : run.node();
+    return new ApiException(
+        ErrorCode.RUN_ON_OTHER_NODE,
+        "Run "
+            + run.id()
+            + " runs on "
+            + node
+            + ", not this box; only its executing box can stop it.",
+        "Stop it from " + node + "'s box.");
+  }
+
+  /**
+   * The refusal of {@code verb} on {@code project} while {@code live}, several runs, run at once:
+   * of several specs, or several of one spec (a room turn beside its build), so the project or the
+   * spec names no one of them. Each is named by its own form: {@code --spec} for the one live run
+   * of its spec, {@code --run} for a run of no spec or one of several of its spec.
+   */
+  public static ApiException severalLive(String verb, String project, List<RunStore.RunRow> live) {
+    var specs = live.stream().map(RunStore.RunRow::specId).distinct().toList();
+    var forms = new ArrayList<Object>(List.of("Name the one: "));
+    for (var run : live) {
+      if (forms.size() > 1) {
+        forms.add(", ");
+      }
+      var alone =
+          Strings.isNotBlank(run.specId())
+              && live.stream().filter(other -> run.specId().equals(other.specId())).count() == 1;
+      forms.add(
+          alone
+              ? Remedy.sail(verb, project, "--spec", run.specId())
+              : Remedy.sail(verb, project, "--run", run.id()));
+    }
     forms.add(".");
+    var oneSpec = specs.size() == 1 && Strings.isNotBlank(specs.getFirst());
     return new ApiException(
         ErrorCode.CONFLICT,
-        "Project "
-            + project
-            + " has "
-            + live.size()
-            + " live runs on this box, of "
-            + String.join(", ", specs)
-            + ", so no one of them is the project's run.",
+        oneSpec
+            ? "Spec "
+                + specs.getFirst()
+                + " of "
+                + project
+                + " has "
+                + live.size()
+                + " live runs on this box, so --spec names no one of them."
+            : "Project "
+                + project
+                + " has "
+                + live.size()
+                + " live runs on this box, of "
+                + String.join(
+                    ", ",
+                    live.stream()
+                        .map(
+                            run ->
+                                Strings.isBlank(run.specId())
+                                    ? "an ad-hoc run " + run.id()
+                                    : run.specId())
+                        .distinct()
+                        .toList())
+                + ", so no one of them is the project's run.",
         Remedy.of(forms.toArray()));
   }
 

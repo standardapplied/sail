@@ -1977,7 +1977,7 @@ class WorkspacesTest {
                 "zpool status -P tank",
                 DeviceFixtures.read("handwritten-mirror-degraded-removed.zpool-status.txt")
                     .replace("devpool", "tank"));
-    var workspaces = workspaces(shell, ticks(0, 1, 2, 3, 4, 5, 6, 7));
+    var workspaces = workspaces(shell, ticks(0, 0, 1, 2, 3, 4, 5, 6, 7));
     var checked = new AtomicReference<Workspaces.SpecCheck>();
 
     var said =
@@ -2088,7 +2088,8 @@ class WorkspacesTest {
             list(template("v1", INPUTS), specWorkspace("Running", "fix-login", "uday")),
             snapshots("v1"));
     var after = incus(DIR_AND_ZFS, list(template("v1", INPUTS)), snapshots("v1"));
-    var workspaces = workspaces(switching(deleted, before, after), ticks(0, 1, 2, 3, 4, 5, 6, 7));
+    var workspaces =
+        workspaces(switching(deleted, before, after), ticks(0, 0, 1, 2, 3, 4, 5, 6, 7));
     var check = workspaces.checkSpec(FIX, INPUTS, name -> false);
     assertTrue(check.whole());
     deleted.set(true);
@@ -2125,7 +2126,7 @@ class WorkspacesTest {
     var refused =
         assertThrows(
             IllegalArgumentException.class,
-            () -> workspaces(shell, ticks()).checkSpec(place, INPUTS, name -> false));
+            () -> workspaces(shell, ticks(0)).checkSpec(place, INPUTS, name -> false));
 
     assertEquals(
         "Spec x-y's workspace of acme would be the instance 'acme-x-y', which is workspace 'y' of"
@@ -2167,7 +2168,7 @@ class WorkspacesTest {
                     "\"user.sail.project\": \"acme\", \"user.sail.workspace\": \"fix-login\","
                         + " \"user.sail.spec\": \"fix-login\", \"user.sail.creating\": \"1\"")),
             snapshots("v1"));
-    var workspaces = workspaces(shell, ticks(0, 1, 2, 3, 4, 5, 6, 7));
+    var workspaces = workspaces(shell, ticks(0, 0, 1, 2, 3, 4, 5, 6, 7));
 
     var check = workspaces.checkSpec(FIX, INPUTS, name -> false);
     var entered =
@@ -2219,7 +2220,8 @@ class WorkspacesTest {
             snapshots("v1", "v2"));
     var workspaces =
         workspaces(
-            shell, ticks(0, ms(200), ms(1100), ms(1100), ms(1200), ms(1300), ms(1400), ms(3200)));
+            shell,
+            ticks(0, 0, ms(200), ms(1100), ms(1100), ms(1200), ms(1300), ms(1400), ms(3200)));
 
     var check = workspaces.checkSpec(FIX, INPUTS, name -> false);
     var made =
@@ -2283,7 +2285,7 @@ class WorkspacesTest {
   void aTemplateOlderThanTheDefinitionIsClonedAsItIsAndSaidStale() throws Exception {
     var shell = incus(DIR_AND_ZFS, list(template("v1", "an-older-definition")), snapshots("v1"));
 
-    var check = workspaces(shell, ticks()).checkSpec(FIX, INPUTS, name -> false);
+    var check = workspaces(shell, ticks(0)).checkSpec(FIX, INPUTS, name -> false);
 
     assertTrue(check.stale());
     assertEquals("v1", check.template().version());
@@ -2311,20 +2313,20 @@ class WorkspacesTest {
             + " file.",
         assertThrows(
                 IllegalStateException.class,
-                () -> workspaces(noPool, ticks()).checkSpec(FIX, INPUTS, name -> false))
+                () -> workspaces(noPool, ticks(0)).checkSpec(FIX, INPUTS, name -> false))
             .getMessage());
     for (var shell : List.of(noTemplate, noSnapshot)) {
       assertEquals(
           "acme has no template yet: sail project template build acme.",
           assertThrows(
                   IllegalStateException.class,
-                  () -> workspaces(shell, ticks()).checkSpec(FIX, INPUTS, name -> false))
+                  () -> workspaces(shell, ticks(0)).checkSpec(FIX, INPUTS, name -> false))
               .getMessage());
     }
     assertTrue(
         assertThrows(
                 IllegalStateException.class,
-                () -> workspaces(faulted, ticks()).checkSpec(FIX, INPUTS, name -> false))
+                () -> workspaces(faulted, ticks(0)).checkSpec(FIX, INPUTS, name -> false))
             .getMessage()
             .startsWith("Pool tank is FAULTED"));
     for (var shell : List.of(noPool, noTemplate, noSnapshot, faulted)) {
@@ -2354,7 +2356,7 @@ class WorkspacesTest {
             + " fix-login).",
         assertThrows(
                 IllegalStateException.class,
-                () -> workspaces(persons, ticks()).checkSpec(FIX, INPUTS, name -> false))
+                () -> workspaces(persons, ticks(0)).checkSpec(FIX, INPUTS, name -> false))
             .getMessage());
     assertEquals(
         "Workspace 'fix-login' of acme is spec fix-login-x's, whose workspace name spec"
@@ -2362,7 +2364,7 @@ class WorkspacesTest {
             + " another id.",
         assertThrows(
                 IllegalStateException.class,
-                () -> workspaces(anothers, ticks()).checkSpec(FIX, INPUTS, name -> false))
+                () -> workspaces(anothers, ticks(0)).checkSpec(FIX, INPUTS, name -> false))
             .getMessage());
   }
 
@@ -2374,7 +2376,7 @@ class WorkspacesTest {
             DIR_AND_ZFS,
             list(template("v1", INPUTS), specWorkspace("Stopped", "fix-login", "eng")),
             snapshots("v1"));
-    var workspaces = workspaces(shell, ticks());
+    var workspaces = workspaces(shell, ticks(0));
 
     var check = workspaces.checkSpec(FIX, INPUTS, name -> false);
     var reused =
@@ -2397,7 +2399,7 @@ class WorkspacesTest {
             DIR_AND_ZFS,
             list(template("v1", INPUTS), specWorkspace("Running", "fix-login", "uday")),
             snapshots("v1"));
-    var workspaces = workspaces(shell, ticks());
+    var workspaces = workspaces(shell, ticks(0));
 
     var check = workspaces.checkSpec(FIX, INPUTS, name -> false);
 
@@ -2435,7 +2437,7 @@ class WorkspacesTest {
     assertTrue(holding.await(30, TimeUnit.SECONDS));
     var waited = Workspaces.CREATE_WAIT.toNanos();
     try {
-      var spec = workspaces(shell, ticks(0, waited));
+      var spec = workspaces(shell, ticks(0, 0, waited));
       var check = spec.checkSpec(FIX, INPUTS, name -> false);
       assertThrows(
           Workspaces.Busy.class,
@@ -2443,7 +2445,7 @@ class WorkspacesTest {
       assertThrows(
           Workspaces.Busy.class,
           () ->
-              workspaces(shell, ticks(0, waited))
+              workspaces(shell, ticks(0, 0, waited))
                   .create(acme(), "second", source(), tempDir.resolve("no-files"), "eng"));
     } finally {
       release.countDown();

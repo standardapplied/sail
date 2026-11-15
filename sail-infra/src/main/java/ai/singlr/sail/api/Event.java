@@ -145,7 +145,6 @@ public record Event(
     public static final String AGENT_TOOL_STARTED = "agent_tool_started";
     public static final String AGENT_TOOL_FINISHED = "agent_tool_finished";
     public static final String AGENT_LOG_CHUNK = "agent_log_chunk";
-    public static final String SNAPSHOT_CREATED = "snapshot_created";
     public static final String SNAPSHOT_RESTORED = "snapshot_restored";
     public static final String SNAPSHOT_DELETED = "snapshot_deleted";
     public static final String GUARDRAIL_TRIGGERED = "guardrail_triggered";

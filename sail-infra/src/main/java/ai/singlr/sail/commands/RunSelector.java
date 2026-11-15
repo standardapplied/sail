@@ -5,8 +5,11 @@
 
 package ai.singlr.sail.commands;
 
+import ai.singlr.sail.api.HostDispatching;
 import ai.singlr.sail.api.StopOperations;
 import ai.singlr.sail.store.RunStore;
+import java.util.Optional;
+import java.util.function.Predicate;
 import picocli.CommandLine.Option;
 
 /**
@@ -31,16 +34,34 @@ public final class RunSelector {
           "This run, by its id: how a run of no spec, such as an ad-hoc session, is named.")
   String runId;
 
-  /** Whether {@code run} is the one this selector names; any run when it names none. */
-  boolean picks(RunStore.RunRow run) {
+  /**
+   * The run of {@code project} this selector names, of those the box {@code node} executed that
+   * {@code also} picks: the newest, when whoever reads may operate it ({@link
+   * HostDispatching#latestOperable}); none when there is no such run. A spec with several live runs
+   * (a room turn beside its build) names no one of them, so {@code --spec} is refused naming each
+   * run's {@code --run} for {@code verb} ({@link StopOperations#severalLive}).
+   */
+  Optional<RunStore.RunRow> resolve(
+      HostDispatching dispatching,
+      String verb,
+      String project,
+      String node,
+      Predicate<RunStore.RunRow> also) {
     requireOne();
-    return runId != null ? runId.equals(run.id()) : specId == null || specId.equals(run.specId());
-  }
-
-  /** Whether this selector names a run or a spec. */
-  boolean names() {
-    requireOne();
-    return runId != null || specId != null;
+    Predicate<RunStore.RunRow> named =
+        run ->
+            (runId != null ? runId.equals(run.id()) : specId == null || specId.equals(run.specId()))
+                && also.test(run);
+    if (specId != null) {
+      var live =
+          dispatching.liveRuns(node).stream()
+              .filter(run -> project.equals(run.project()) && named.test(run))
+              .toList();
+      if (live.size() > 1) {
+        throw StopOperations.severalLive(verb, project, live);
+      }
+    }
+    return dispatching.latestOperable(project, node, named);
   }
 
   /**
@@ -50,7 +71,7 @@ public final class RunSelector {
   StopOperations.Target target(String project) {
     requireOne();
     return runId != null
-        ? new StopOperations.RunTarget(runId)
+        ? new StopOperations.RunTarget(runId, project)
         : new StopOperations.ProjectTarget(project, specId);
   }
 

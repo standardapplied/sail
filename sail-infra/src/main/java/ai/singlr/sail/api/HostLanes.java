@@ -8,7 +8,6 @@ package ai.singlr.sail.api;
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.common.Remedied;
 import ai.singlr.sail.common.Remedy;
-import ai.singlr.sail.config.Lane;
 import ai.singlr.sail.config.ProjectDefinition;
 import ai.singlr.sail.config.Spec;
 import ai.singlr.sail.config.SyncConfig;
@@ -44,7 +43,6 @@ import java.io.IOException;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
-import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.TimeoutException;
 import java.util.function.Function;
@@ -90,11 +88,6 @@ final class HostLanes {
     }
 
     @Override
-    public Optional<RunStore.RunRow> latestRun(String project, String node) {
-      return runs.latestForProjectOnNode(project, node);
-    }
-
-    @Override
     public Optional<RunStore.RunRow> activeRun(String project, String node) {
       return runs.runningForProjectOnNode(project, node);
     }
@@ -117,17 +110,6 @@ final class HostLanes {
     @Override
     public boolean endLiveMember(String runId, String why) {
       return dispatchOps.liveMembers().endHolder(runId, why);
-    }
-
-    @Override
-    public Optional<RunStore.RunRow> latestOperable(String project, String node) {
-      return operable(project, node, () -> latestRun(project, node));
-    }
-
-    @Override
-    public Optional<RunStore.RunRow> latestOperable(String project, String node, Lane lane) {
-      Objects.requireNonNull(lane, "lane");
-      return latestOperable(project, node, run -> lane.matches(run.role()));
     }
 
     @Override

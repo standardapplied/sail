@@ -5,7 +5,6 @@
 
 package ai.singlr.sail.api;
 
-import ai.singlr.sail.config.Lane;
 import ai.singlr.sail.engine.AgentSession;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.store.DispatchGate;
@@ -30,8 +29,6 @@ public interface HostDispatching {
 
   StopOperations.Outcome stop(StopOperations.Target target, String localHandle, boolean dryRun);
 
-  Optional<RunStore.RunRow> latestRun(String project, String node);
-
   Optional<RunStore.RunRow> activeRun(String project, String node);
 
   List<DispatchGate.RunningRun> runningRuns(String project, String node);
@@ -48,17 +45,11 @@ public interface HostDispatching {
   boolean endLiveMember(String runId, String why);
 
   /**
-   * The newest run of {@code project} the box whose handle is {@code node} executed, in any lane,
-   * when whoever reads ({@link Actor#reader}) may operate it — read its log, attach to it — as
-   * every log door admits it ({@link LogAdmission}): a project outside its scope is not in the
-   * catalog, and a run it may not operate is refused. Empty when there is no such run.
+   * The newest run of {@code project} the box whose handle is {@code node} executed of those {@code
+   * which} picks, when whoever reads ({@link Actor#reader}) may operate it — read its log, attach
+   * to it — as every log door admits it ({@link LogAdmission}): a project outside its scope is not
+   * in the catalog, and a run it may not operate is refused. Empty when there is no such run.
    */
-  Optional<RunStore.RunRow> latestOperable(String project, String node);
-
-  /** {@link #latestOperable(String, String)}, of the runs in {@code lane} alone. */
-  Optional<RunStore.RunRow> latestOperable(String project, String node, Lane lane);
-
-  /** {@link #latestOperable(String, String)}, of the runs {@code which} picks alone. */
   Optional<RunStore.RunRow> latestOperable(
       String project, String node, Predicate<RunStore.RunRow> which);
 }

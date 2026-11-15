@@ -25,7 +25,7 @@ class AgentStopCommandTest {
 
   @Test
   void aRunIdNamesThatRunASpecItsRunAndNeitherTheProjectsOne() {
-    assertEquals(new StopOperations.RunTarget(RUN), parsed("acme", "--run", RUN).target());
+    assertEquals(new StopOperations.RunTarget(RUN, "acme"), parsed("acme", "--run", RUN).target());
     assertEquals(
         new StopOperations.ProjectTarget("acme", "auth"),
         parsed("acme", "--spec", "auth").target());

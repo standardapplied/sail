@@ -138,10 +138,6 @@ public final class RunLauncher {
       Objects.requireNonNull(env, "env");
     }
 
-    String project() {
-      return place.project();
-    }
-
     AgentUnit unit() {
       return AgentUnit.forRun(runId);
     }

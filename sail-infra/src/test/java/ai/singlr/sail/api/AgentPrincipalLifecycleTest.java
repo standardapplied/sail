@@ -240,7 +240,8 @@ class AgentPrincipalLifecycleTest {
             },
             StopOperations.Listener.NONE);
     var stopped =
-        Acting.by(ADMIN, () -> stopOps.stop(new StopOperations.RunTarget(runId), HANDLE, false));
+        Acting.by(
+            ADMIN, () -> stopOps.stop(new StopOperations.RunTarget(runId, null), HANDLE, false));
     assertInstanceOf(StopOperations.Stopped.class, stopped);
 
     var refused = router.ask("GET", "/v1/whoami", credential, "");

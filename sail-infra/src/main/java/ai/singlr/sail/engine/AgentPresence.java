@@ -81,15 +81,7 @@ public final class AgentPresence {
     try {
       return instances
           .lookup(workspace.instance(), Duration.ofSeconds(BoxInstances.LOOKUP_SECONDS))
-          .filter(
-              found ->
-                  found.kind() instanceof BoxInstances.Workspace(var project, var name, var ready)
-                      && project.equals(workspace.project())
-                      && name.equals(workspace.workspace())
-                      && found
-                          .key(BoxInstances.SPEC_KEY)
-                          .filter(workspace.specId()::equals)
-                          .isPresent())
+          .filter(found -> found.isTheSpecs(workspace))
           .map(BoxInstances.Instance::state)
           .orElse(new ContainerState.NotCreated());
     } catch (IOException | TimeoutException unanswered) {

@@ -248,7 +248,6 @@
     "pty_session_attached",
     "pty_session_ended",
     "pty_session_started",
-    "snapshot_created",
     "snapshot_deleted",
     "snapshot_restored",
     "spec_disengaged",

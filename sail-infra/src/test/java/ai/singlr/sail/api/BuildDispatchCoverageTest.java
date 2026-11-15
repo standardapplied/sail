@@ -882,7 +882,7 @@ class BuildDispatchCoverageTest {
     var reads = new AtomicInteger();
     workspaces =
         TestWorkspaces.over(
-            incus(template, template), () -> reads.getAndIncrement() == 0 ? 0 : deadline, locks);
+            incus(template, template), () -> reads.getAndIncrement() * deadline, locks);
     var holding = new CountDownLatch(1);
     var release = new CountDownLatch(1);
     var other =
@@ -939,14 +939,15 @@ class BuildDispatchCoverageTest {
         TestWorkspaces.over(
             incus(template, template),
             () -> {
-              if (reads.getAndIncrement() == 1) {
+              var read = reads.getAndIncrement();
+              if (read == 1) {
                 Acting.system(
                     () ->
                         new SpecStore(db)
                             .compareAndSetStatus(
                                 "auth", SpecStatus.IN_PROGRESS, SpecStatus.CANCELLED));
               }
-              return reads.get() == 1 ? 0 : deadline;
+              return read * deadline;
             },
             locks);
     var holding = new CountDownLatch(1);

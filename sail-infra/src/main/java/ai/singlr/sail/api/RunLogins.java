@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.api;
 
+import ai.singlr.sail.common.Remedied;
 import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.harness.Harness;
@@ -58,7 +59,7 @@ final class RunLogins {
     try {
       return resolve(specId, owner, agent);
     } catch (ApiException refused) {
-      room.tell(specId, refused.getMessage() + " " + refused.failure().remedy().plain());
+      room.tell(specId, Remedied.message(refused.getMessage(), refused.failure().remedy()));
       throw refused;
     }
   }

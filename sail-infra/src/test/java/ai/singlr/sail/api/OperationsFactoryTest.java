@@ -106,7 +106,7 @@ class OperationsFactoryTest {
                       () ->
                           operations
                               .dispatching()
-                              .stop(new StopOperations.RunTarget(runId), "node", false)));
+                              .stop(new StopOperations.RunTarget(runId, null), "node", false)));
 
       assertTrue(assertInstanceOf(StopOperations.NotRunning.class, outcome).runReleased());
       assertEquals("stopped", runs.findById(runId).orElseThrow().status());

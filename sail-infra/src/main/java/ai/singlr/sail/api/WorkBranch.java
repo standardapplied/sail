@@ -85,19 +85,7 @@ public final class WorkBranch {
       if (!insideWorkTree(container, repoDir)) {
         continue;
       }
-      var branchExists =
-          exec(ContainerExec.asDevUser(
-                  container,
-                  List.of(
-                      "git",
-                      "-C",
-                      repoDir,
-                      "rev-parse",
-                      "--verify",
-                      "--quiet",
-                      "refs/heads/" + branch)))
-              .ok();
-      if (branchExists) {
+      if (hasRef(container, repoDir, "refs/heads/" + branch)) {
         throw RestartResolution.collision(branch, Optional.empty());
       }
       var base = baseBranch(container, repoDir, repo);
@@ -126,8 +114,10 @@ public final class WorkBranch {
   }
 
   /**
-   * Whether {@link #checkout} would create {@code branch}: a target repo in the container is a work
-   * tree that does not have it yet. Read only, on the shell's observer, so a dry run can say it.
+   * Whether a run would create {@code branch}: a target repo in the container is a work tree that
+   * has it neither locally nor on the remote as it last fetched it, since a branch on the remote is
+   * taken, never cut again ({@link #enter}). Read only, on the shell's observer, so a dry run can
+   * say it.
    */
   public boolean wouldCreate(
       String container, List<ProjectDefinition.Repo> targetRepos, String branch) {
@@ -138,19 +128,8 @@ public final class WorkBranch {
     for (var repo : targetRepos) {
       var repoDir = "/home/" + ProjectDefinition.USER + "/workspace/" + repo.path();
       if (reads.insideWorkTree(container, repoDir)
-          && !reads
-              .exec(
-                  ContainerExec.asDevUser(
-                      container,
-                      List.of(
-                          "git",
-                          "-C",
-                          repoDir,
-                          "rev-parse",
-                          "--verify",
-                          "--quiet",
-                          "refs/heads/" + branch)))
-              .ok()) {
+          && !reads.hasRef(container, repoDir, "refs/heads/" + branch)
+          && !reads.hasRef(container, repoDir, "refs/remotes/origin/" + branch)) {
         return true;
       }
     }

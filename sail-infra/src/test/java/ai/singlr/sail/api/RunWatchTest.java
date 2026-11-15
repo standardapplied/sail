@@ -1000,7 +1000,7 @@ class RunWatchTest {
     assertTrue(RunWatch.isProgressEvent(sampleEvent(Event.WellKnownTypes.AGENT_TOOL_STARTED)));
     assertTrue(RunWatch.isProgressEvent(sampleEvent(Event.WellKnownTypes.AGENT_TOOL_FINISHED)));
     assertTrue(RunWatch.isProgressEvent(sampleEvent(Event.WellKnownTypes.AGENT_LOG_CHUNK)));
-    assertFalse(RunWatch.isProgressEvent(sampleEvent(Event.WellKnownTypes.SNAPSHOT_CREATED)));
+    assertFalse(RunWatch.isProgressEvent(sampleEvent(Event.WellKnownTypes.SNAPSHOT_RESTORED)));
   }
 
   @Test

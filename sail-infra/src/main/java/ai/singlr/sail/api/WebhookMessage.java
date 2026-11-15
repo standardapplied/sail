@@ -27,7 +27,6 @@ public record WebhookMessage(String title, String message) {
       case Event.WellKnownTypes.AGENT_SESSION_STARTED -> sessionStarted(event);
       case Event.WellKnownTypes.AGENT_SESSION_STOPPED -> sessionStopped(event);
       case Event.WellKnownTypes.AGENT_SESSION_COMPLETED -> sessionCompleted(event);
-      case Event.WellKnownTypes.SNAPSHOT_CREATED -> snapshotCreated(event);
       case Event.WellKnownTypes.GUARDRAIL_TRIGGERED -> guardrailTriggered(event);
       default -> generic(event);
     };
@@ -66,12 +65,6 @@ public record WebhookMessage(String title, String message) {
   private static WebhookMessage sessionCompleted(Event event) {
     var detail = withSpec(event, "Agent " + event.agent() + " completed its session.");
     return new WebhookMessage("Agent completed: " + event.project(), detail);
-  }
-
-  private static WebhookMessage snapshotCreated(Event event) {
-    var label = stringFromData(event, "label");
-    var detail = label.isBlank() ? "Snapshot created." : "Snapshot '" + label + "' created.";
-    return new WebhookMessage("Snapshot: " + event.project(), detail);
   }
 
   private static WebhookMessage guardrailTriggered(Event event) {

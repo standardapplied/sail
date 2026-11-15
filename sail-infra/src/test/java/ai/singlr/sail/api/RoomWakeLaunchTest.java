@@ -1152,9 +1152,6 @@ class RoomWakeLaunchTest {
     assertTrue(
         runStore.consumeRoomGuardBaseline(runId).isEmpty(),
         "a full turn's workspace changes are expected — no read-only guard baseline");
-    assertTrue(
-        events.stream().noneMatch(e -> Event.WellKnownTypes.SNAPSHOT_CREATED.equals(e.type())),
-        "turns never snapshot — the engage paid once");
     assertEquals("room-full", launched.get().getLast(), "SAIL_RUN_ROLE rides the launch");
     var started =
         events.stream()

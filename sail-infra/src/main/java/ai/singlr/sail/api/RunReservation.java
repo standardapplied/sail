@@ -506,9 +506,6 @@ public final class RunReservation {
   }
 
   /**
-   * Prunes the oldest run directories of {@code place}'s instance, of the runs that lived there.
-   */
-  /**
    * Prunes the run directories of {@code place} past the newest kept: right after a claim of the
    * project's container, which is running, and once a spec's workspace is entered ({@link
    * RunPlaces#enter}), which a first run makes and a stopped one starts.

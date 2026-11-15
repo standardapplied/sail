@@ -1484,7 +1484,8 @@ public final class SailOperations implements HostOperations {
     if (stopOps == null) {
       return storeUnavailable("Run store").failure().asFailure();
     }
-    var outcome = safe(() -> stopOps.stop(new StopOperations.RunTarget(runId), localHandle, false));
+    var outcome =
+        safe(() -> stopOps.stop(new StopOperations.RunTarget(runId, null), localHandle, false));
     if (outcome instanceof Result.Failure<StopOperations.Outcome>) {
       return outcome.asFailure();
     }
