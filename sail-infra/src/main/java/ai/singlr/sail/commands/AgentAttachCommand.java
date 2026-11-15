@@ -44,6 +44,7 @@ import java.util.function.Supplier;
 import java.util.stream.Collectors;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
+import picocli.CommandLine.Mixin;
 import picocli.CommandLine.Option;
 import picocli.CommandLine.Parameters;
 
@@ -84,6 +85,8 @@ public final class AgentAttachCommand implements Runnable {
       arity = "0..1",
       description = "Project name (default: the current project).")
   private String name;
+
+  @Mixin private RunSelector selector = new RunSelector();
 
   @Option(names = "--dry-run", description = "Print the exact command instead of attaching.")
   private boolean dryRun;
@@ -506,7 +509,7 @@ public final class AgentAttachCommand implements Runnable {
             var node = NodeIdentity.handle();
             return operations
                 .dispatching()
-                .latestOperable(name, node)
+                .latestOperable(name, node, selector::picks)
                 .map(
                     run ->
                         new Latest(
@@ -576,7 +579,7 @@ public final class AgentAttachCommand implements Runnable {
         + " and worktree. Reply in "
         + room
         + " to steer it (delivered mid-run), or stop it first with: "
-        + operator.sail("agent stop " + project)
+        + operator.sail("agent stop " + project + RunSelector.of(run))
         + ".";
   }
 

@@ -194,6 +194,10 @@ class DispatchCommandWiringTest {
     assertEquals(0, ran.exit(), ran.err());
     assertTrue(ran.out().contains("Launching agent in background..."), ran.out());
     assertTrue(ran.out().contains("Guardrail watcher started (pid 4242"), ran.out());
+    assertTrue(ran.out().contains("sail agent log acme --spec auth --follow"), ran.out());
+    assertTrue(
+        ran.out().contains("sail agent stop acme --spec auth"),
+        "the stop it prints reaches this spec's run however many run: " + ran.out());
   }
 
   @Test
@@ -226,7 +230,7 @@ class DispatchCommandWiringTest {
     assertEquals(
         "  ✗ The agent exited 1: Not logged in · Please run /login\n"
             + "  Full log: "
-            + OperatorCommand.here().sail("agent log acme")
+            + OperatorCommand.here().sail("agent log acme --spec auth")
             + "\n",
         ran.err());
   }

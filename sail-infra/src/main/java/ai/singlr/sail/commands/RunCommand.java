@@ -420,7 +420,13 @@ public final class RunCommand implements Runnable {
       return;
     }
     if (background) {
-      Banner.printAgentLaunched(name, task, session.branch(), operator, System.out, Ansi.AUTO);
+      Banner.printAgentLaunched(
+          name + " --run " + session.runId(),
+          task,
+          session.branch(),
+          operator,
+          System.out,
+          Ansi.AUTO);
       session
           .watcher()
           .ifPresent(

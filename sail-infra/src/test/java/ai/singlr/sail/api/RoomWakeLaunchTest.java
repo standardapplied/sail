@@ -602,6 +602,39 @@ class RoomWakeLaunchTest {
     assertEquals(List.of(), runStore.listForSpec("auth"));
   }
 
+  /** M2: a wake refused because the box has no ZFS pool is said in the spec's room, once. */
+  @Test
+  void aWakeRefusedForWantOfAPoolSaysSoInTheRoomOnce() throws Exception {
+    var noPool =
+        TestWorkspaces.over(
+            new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
+                .onOk(
+                    "incus storage list --format json",
+                    "[{\"name\": \"default\", \"driver\": \"dir\", \"config\": {}}]"));
+    var ops =
+        operations(
+            liveAgentShell(),
+            YAML,
+            true,
+            command -> {
+              launched.set(command);
+              return 0;
+            },
+            noPool);
+    seedSpec("auth");
+
+    for (var attempt = 0; attempt < 2; attempt++) {
+      assertThrows(ApiException.class, () -> ops.startRoomRun("acme", "auth", HANDLE));
+    }
+
+    var said =
+        messageStore.list("auth", null, 20).stream().map(MessageStore.MessageRow::body).toList();
+    assertEquals(1, said.size(), said.toString());
+    assertTrue(said.getFirst().startsWith("This box has no ZFS pool"), said.getFirst());
+    assertTrue(said.getFirst().contains("host init --storage zfs"), said.getFirst());
+    assertEquals(List.of(), runStore.listForSpec("auth"));
+  }
+
   /**
    * A person's own dispatch, refused for want of their login, is said in the spec's room by Sail as
    * the loop narrates there: posted as this box's machinery, whoever asked, as on a node where the

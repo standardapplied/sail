@@ -52,19 +52,7 @@ public final class AgentStopCommand implements Runnable {
       description = "Project name (default: the current project).")
   private String name;
 
-  @Option(
-      names = "--spec",
-      description =
-          "Stop this spec's run. Needed when the project has several live runs: specs run at once,"
-              + " each in its own workspace.")
-  private String specId;
-
-  @Option(
-      names = "--run",
-      description =
-          "Stop this run, by its id: how a run of no spec, such as an ad-hoc session, is named when"
-              + " the project has several live runs.")
-  private String runId;
+  @Mixin private RunSelector selector = new RunSelector();
 
   @Option(names = "--dry-run", description = "Print what would be stopped instead of stopping.")
   private boolean dryRun;
@@ -105,17 +93,9 @@ public final class AgentStopCommand implements Runnable {
     }
   }
 
-  /**
-   * What this stop names: a run by its id, or the project's run, spec {@code --spec}'s when given.
-   */
+  /** What this stop names ({@link RunSelector#target}). */
   StopOperations.Target target() {
-    if (runId == null) {
-      return new StopOperations.ProjectTarget(name, specId);
-    }
-    if (specId != null) {
-      throw new CliCommand.Refused("Name a run with --run or a spec with --spec, not both.");
-    }
-    return new StopOperations.RunTarget(runId);
+    return selector.target(name);
   }
 
   /** Stops {@code target} as this box's operator; a preview decided as the real stop is. */

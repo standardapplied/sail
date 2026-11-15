@@ -49,6 +49,7 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.TimeoutException;
 import java.util.function.Function;
+import java.util.function.Predicate;
 import java.util.function.Supplier;
 
 /** The host facets as thin adapters over the stores and the shared executors. */
@@ -167,7 +168,20 @@ final class HostLanes {
     @Override
     public Optional<RunStore.RunRow> latestOperable(String project, String node, Lane lane) {
       Objects.requireNonNull(lane, "lane");
-      return operable(project, node, () -> latestInLane(project, node, lane));
+      return latestOperable(project, node, run -> lane.matches(run.role()));
+    }
+
+    @Override
+    public Optional<RunStore.RunRow> latestOperable(
+        String project, String node, Predicate<RunStore.RunRow> which) {
+      return operable(
+          project,
+          node,
+          () ->
+              runs.listForProject(project).stream()
+                  .filter(run -> run.ownedBy(node))
+                  .filter(which)
+                  .findFirst());
     }
 
     /**
@@ -185,13 +199,6 @@ final class HostLanes {
                     case Result.Success<RunStore.RunRow> admitted -> admitted.value();
                     case Result.Failure<RunStore.RunRow> refused -> throw ApiException.of(refused);
                   });
-    }
-
-    private Optional<RunStore.RunRow> latestInLane(String project, String node, Lane lane) {
-      return runs.listForProject(project).stream()
-          .filter(run -> lane.matches(run.role()))
-          .filter(run -> run.ownedBy(node))
-          .findFirst();
     }
   }
 

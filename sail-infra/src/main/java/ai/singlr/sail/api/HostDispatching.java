@@ -12,6 +12,7 @@ import ai.singlr.sail.store.DispatchGate;
 import ai.singlr.sail.store.RunStore;
 import java.util.List;
 import java.util.Optional;
+import java.util.function.Predicate;
 
 /** Running and stopping agents from the host, and reading the runs that gate it. */
 public interface HostDispatching {
@@ -69,4 +70,8 @@ public interface HostDispatching {
 
   /** {@link #latestOperable(String, String)}, of the runs in {@code lane} alone. */
   Optional<RunStore.RunRow> latestOperable(String project, String node, Lane lane);
+
+  /** {@link #latestOperable(String, String)}, of the runs {@code which} picks alone. */
+  Optional<RunStore.RunRow> latestOperable(
+      String project, String node, Predicate<RunStore.RunRow> which);
 }

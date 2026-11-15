@@ -286,15 +286,15 @@ public final class StopOperations {
         .map(
             run ->
                 Strings.isBlank(run.specId())
-                    ? List.of("--run", run.id())
-                    : List.of("--spec", run.specId()))
+                    ? Remedy.sail("agent stop", project, "--run", run.id())
+                    : Remedy.sail("agent stop", project, "--spec", run.specId()))
         .distinct()
         .forEach(
-            selector -> {
+            command -> {
               if (forms.size() > 1) {
                 forms.add(", ");
               }
-              forms.add(Remedy.sail("agent stop", project, selector.get(0), selector.get(1)));
+              forms.add(command);
             });
     forms.add(".");
     return new ApiException(

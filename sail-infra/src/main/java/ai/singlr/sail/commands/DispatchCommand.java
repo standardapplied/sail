@@ -224,7 +224,12 @@ public final class DispatchCommand implements Runnable {
           return;
         }
         Banner.printAgentLaunched(
-            name, dispatched.task(), dispatched.branch(), operator, System.out, Ansi.AUTO);
+            name + " --spec " + dispatched.taskSpec().id(),
+            dispatched.task(),
+            dispatched.branch(),
+            operator,
+            System.out,
+            Ansi.AUTO);
         dispatched
             .watcher()
             .ifPresent(

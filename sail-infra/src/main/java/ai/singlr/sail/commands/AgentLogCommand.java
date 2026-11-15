@@ -34,8 +34,10 @@ import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.TimeoutException;
 import java.util.function.Function;
+import java.util.function.Predicate;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
+import picocli.CommandLine.Mixin;
 import picocli.CommandLine.Option;
 import picocli.CommandLine.Parameters;
 
@@ -53,6 +55,8 @@ public final class AgentLogCommand implements Runnable {
       arity = "0..1",
       description = "Project name (default: the current project).")
   private String name;
+
+  @Mixin private RunSelector selector = new RunSelector();
 
   @Option(
       names = {"-f", "--follow"},
@@ -172,7 +176,7 @@ public final class AgentLogCommand implements Runnable {
   private Optional<RunStore.RunRow> resolveRun(
       String project, Optional<Lane> lane, OperatorCommand operator) {
     try (var operations = this.operations.apply(operator)) {
-      return newestRun(operations, project, NodeIdentity.handle(), lane);
+      return newestRun(operations, project, NodeIdentity.handle(), lane, selector::picks);
     } catch (ApiException refused) {
       throw refused;
     } catch (RuntimeException e) {
@@ -186,9 +190,24 @@ public final class AgentLogCommand implements Runnable {
    */
   static Optional<RunStore.RunRow> newestRun(
       HostOperations operations, String project, String node, Optional<Lane> lane) {
-    var dispatching = operations.dispatching();
-    return lane.map(only -> dispatching.latestOperable(project, node, only))
-        .orElseGet(() -> dispatching.latestOperable(project, node));
+    return newestRun(operations, project, node, lane, run -> true);
+  }
+
+  /**
+   * {@link #newestRun(HostOperations, String, String, Optional)}, of the runs {@code which} picks.
+   */
+  static Optional<RunStore.RunRow> newestRun(
+      HostOperations operations,
+      String project,
+      String node,
+      Optional<Lane> lane,
+      Predicate<RunStore.RunRow> which) {
+    return operations
+        .dispatching()
+        .latestOperable(
+            project,
+            node,
+            run -> lane.map(only -> only.matches(run.role())).orElse(true) && which.test(run));
   }
 
   /** The run's own log path, derived from its id, or null when there is no run. */
@@ -230,7 +249,11 @@ public final class AgentLogCommand implements Runnable {
     return new ApiException(
         ErrorCode.AGENT_LAUNCH_FAILED,
         "The agent exited " + exitCode + said.map(line -> ": " + line).orElse("."),
-        Remedy.of("Full log: ", Remedy.sail("agent log", place.project())));
+        Remedy.of(
+            "Full log: ",
+            place instanceof RunPlace.SpecWorkspace workspace
+                ? Remedy.sail("agent log", place.project(), "--spec", workspace.specId())
+                : Remedy.sail("agent log", place.project())));
   }
 
   private static Optional<String> lastLine(ShellExec shell, String container, String logPath) {

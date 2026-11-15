@@ -156,6 +156,13 @@ public final class AgentWatchCommand implements Runnable {
     return RunPlace.of(name, specId);
   }
 
+  /** The report of this watch's run, named so it reaches that run however many are live. */
+  private Remedy.Command report() {
+    return Strings.isBlank(specId)
+        ? Remedy.sail("agent report", name, "--run", runId)
+        : Remedy.sail("agent report", name, "--spec", specId);
+  }
+
   private Guardrails guardrails() {
     return Guardrails.of(maxDuration, maxIdle, action);
   }
@@ -435,8 +442,7 @@ public final class AgentWatchCommand implements Runnable {
         Event.WellKnownTypes.AGENT_SESSION_STOPPED,
         name,
         "Agent exited",
-        Remedy.of("Agent process is no longer running. Run: ", Remedy.sail("agent report", name))
-            .plain());
+        Remedy.of("Agent process is no longer running. Run: ", report()).plain());
   }
 
   private void notifyTriggered(
@@ -459,7 +465,7 @@ public final class AgentWatchCommand implements Runnable {
         Event.WellKnownTypes.AGENT_SESSION_COMPLETED,
         name,
         "Watch complete",
-        Remedy.of("Agent session ended. Run: ", Remedy.sail("agent report", name)).plain());
+        Remedy.of("Agent session ended. Run: ", report()).plain());
   }
 
   private static void sendNotification(

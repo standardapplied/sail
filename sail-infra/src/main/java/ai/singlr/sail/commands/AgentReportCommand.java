@@ -24,6 +24,7 @@ import java.util.List;
 import java.util.function.Function;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
+import picocli.CommandLine.Mixin;
 import picocli.CommandLine.Option;
 import picocli.CommandLine.Parameters;
 
@@ -38,6 +39,8 @@ public final class AgentReportCommand implements Runnable {
       arity = "0..1",
       description = "Project name (default: the current project).")
   private String name;
+
+  @Mixin private RunSelector selector = new RunSelector();
 
   @Option(names = "--json", description = "Output in JSON format.")
   private boolean json;
@@ -86,7 +89,13 @@ public final class AgentReportCommand implements Runnable {
       return;
     }
 
-    Banner.printAgentReport(name, report, operator, System.out, Ansi.AUTO);
+    Banner.printAgentReport(
+        name,
+        session == null ? "" : RunSelector.of(session),
+        report,
+        operator,
+        System.out,
+        Ansi.AUTO);
   }
 
   List<Spec> projectSpecs(String project, OperatorCommand operator) {
@@ -99,7 +108,12 @@ public final class AgentReportCommand implements Runnable {
 
   RunStore.RunRow latestSession(String project, OperatorCommand operator) {
     try (var operations = this.operations.apply(operator)) {
-      return operations.dispatching().latestRun(project, NodeIdentity.handle()).orElse(null);
+      return (selector.names()
+              ? operations
+                  .dispatching()
+                  .latestOperable(project, NodeIdentity.handle(), selector::picks)
+              : operations.dispatching().latestRun(project, NodeIdentity.handle()))
+          .orElse(null);
     } catch (Exception ignored) {
       return null;
     }

@@ -15,6 +15,7 @@ import ai.singlr.sail.config.SpecCatalog;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.AgentPresence;
 import ai.singlr.sail.engine.AgentSession;
+import ai.singlr.sail.engine.AgentUnit;
 import ai.singlr.sail.engine.Banner;
 import ai.singlr.sail.engine.BoxInstances;
 import ai.singlr.sail.engine.ContainerExec;
@@ -36,9 +37,12 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
+import java.util.Optional;
 import java.util.function.Function;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
+import picocli.CommandLine.Mixin;
 import picocli.CommandLine.Option;
 import picocli.CommandLine.Parameters;
 
@@ -52,6 +56,8 @@ public final class AgentStatusCommand implements Runnable {
 
   @Parameters(index = "0", description = "Project name (omit for all projects).", arity = "0..1")
   private String name;
+
+  @Mixin private RunSelector selector = new RunSelector();
 
   @Option(names = "--json", description = "Output in JSON format.")
   private boolean json;
@@ -199,8 +205,18 @@ public final class AgentStatusCommand implements Runnable {
       operations.catalog().readable(name);
     }
     RunPlace place;
+    Optional<RunStore.RunRow> named = Optional.empty();
     try (var operations = this.operations.apply(operator)) {
-      place = activePlace(operations, name, NodeIdentity.handle());
+      if (selector.names()) {
+        named =
+            operations.dispatching().liveRuns(NodeIdentity.handle()).stream()
+                .filter(run -> run.project().equals(name) && selector.picks(run))
+                .findFirst();
+      }
+      place =
+          selector.names()
+              ? named.map(RunStore.RunRow::place).orElse(RunPlace.of(name, selector.specId))
+              : activePlace(operations, name, NodeIdentity.handle());
     }
     var state = new AgentPresence(shell).state(place);
     ContainerStateGuard.requireRunning(state, place.instance());
@@ -208,7 +224,10 @@ public final class AgentStatusCommand implements Runnable {
     AgentSession.SessionInfo info;
     ProjectDefinition config;
     try (var operations = this.operations.apply(operator)) {
-      info = operations.dispatching().projectSession(name, NodeIdentity.handle());
+      info =
+          selector.names()
+              ? sessionOf(named)
+              : operations.dispatching().projectSession(name, NodeIdentity.handle());
       config = operations.catalog().definitions().read(name).orElse(null);
     }
 
@@ -273,7 +292,15 @@ public final class AgentStatusCommand implements Runnable {
     }
 
     Banner.printAgentStatus(
-        name, info, commitCount, lastCommitMinutesAgo, taskCounts, operator, System.out, Ansi.AUTO);
+        name,
+        named.map(RunSelector::of).orElse(""),
+        info,
+        commitCount,
+        lastCommitMinutesAgo,
+        taskCounts,
+        operator,
+        System.out,
+        Ansi.AUTO);
   }
 
   /** What the listing reads of one running project before anything long-running starts. */
@@ -289,6 +316,18 @@ public final class AgentStatusCommand implements Runnable {
     } catch (Exception ignored) {
       return DEFAULT_REPO_PATHS;
     }
+  }
+
+  /** The session of {@code run}, the live run the selector names, or none when there is none. */
+  private AgentSession.SessionInfo sessionOf(Optional<RunStore.RunRow> run) throws Exception {
+    if (run.isEmpty()) {
+      return null;
+    }
+    var live = run.get();
+    return new AgentSession(shell)
+        .queryStatus(
+            live.place().instance(),
+            AgentUnit.recorded(live.id(), Objects.toString(live.unit(), "")));
   }
 
   /**
