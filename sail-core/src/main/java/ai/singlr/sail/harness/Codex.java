@@ -163,8 +163,7 @@ final class Codex implements Harness {
             RunUsage.map(RunUsage.map(found.line(), "payload"), "info"), "total_token_usage");
     var input = RunUsage.count(total, "input_tokens");
     var cached = RunUsage.count(total, "cached_input_tokens");
-    var context =
-        RunUsage.last(report, TURN_CONTEXT, line -> "turn_context".equals(line.get("type"))).line();
+    var context = RunUsage.last(report, TURN_CONTEXT, Codex::isTurnContext).line();
     var model = context == null ? null : RunUsage.map(context, "payload").get("model");
     return new RunUsage(
         model instanceof String named ? named : null,
@@ -177,20 +176,26 @@ final class Codex implements Harness {
   }
 
   /**
-   * The transcript's last {@code task_complete}: its error's {@code codex_error_info} naming an
-   * HTTP 401 is a refusal, and {@code usage_limit_exceeded} a limit, with the time its message says
-   * to try again at. {@code codex exec} without {@code --json}, as Sail launches it, writes no
-   * {@code turn.failed}; this is where its end is recorded (codex-cli 0.163.0).
+   * The {@code task_complete} of the transcript's last turn, the one whose {@code turn_id} its last
+   * {@code turn_context} names: a resumed session's rollout holds earlier runs' turns, and an end
+   * of one of theirs says nothing of this run. Its error's {@code codex_error_info} naming an HTTP
+   * 401 is a refusal, and {@code usage_limit_exceeded} a limit, with the time its message says to
+   * try again at. {@code codex exec} without {@code --json}, as Sail launches it, writes no {@code
+   * turn.failed}; this is where its end is recorded (codex-cli 0.163.0).
    */
   @Override
   public Optional<LoginOutcome> loginOutcome(String report, LoginKind given) {
+    var context = RunUsage.last(report, TURN_CONTEXT, Codex::isTurnContext).line();
+    var turn = context == null ? null : RunUsage.map(context, "payload").get("turn_id");
     var done =
         RunUsage.last(
                 report,
                 TASK_COMPLETE,
                 line -> "task_complete".equals(RunUsage.map(line, "payload").get("type")))
             .line();
-    if (done == null) {
+    if (turn == null
+        || done == null
+        || !turn.equals(RunUsage.map(done, "payload").get("turn_id"))) {
       return Optional.empty();
     }
     var error = RunUsage.map(RunUsage.map(done, "payload"), "error");
@@ -208,8 +213,12 @@ final class Codex implements Harness {
             .results()
             .map(found -> found.group(1))
             .reduce((first, last) -> last)
-            .flatMap(LoginOutcome::label);
+            .map(LoginOutcome::resetTime);
     return Optional.of(new LoginOutcome.Limited(resets.orElse(null)));
+  }
+
+  private static boolean isTurnContext(Map<String, Object> line) {
+    return "turn_context".equals(line.get("type"));
   }
 
   private static boolean counts(Map<String, Object> line) {

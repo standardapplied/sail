@@ -126,12 +126,12 @@ public final class RunTracker implements EventSubscriber {
   static boolean finish(
       RunStore runStore, RunReports reports, String runId, String status, Integer exitCode) {
     var running = runStore.findById(runId).filter(run -> "running".equals(run.status()));
-    if (running.isPresent()) {
-      var report = reports.read(running.get());
-      if (runStore.finish(runId, "running", status, exitCode, report)) {
-        reports.recorded(running.get(), report);
-        return true;
-      }
+    if (running.isPresent()
+        && reports.finish(
+            runStore,
+            running.get(),
+            report -> runStore.finish(runId, "running", status, exitCode, report))) {
+      return true;
     }
     if (exitCode == null) {
       return false;

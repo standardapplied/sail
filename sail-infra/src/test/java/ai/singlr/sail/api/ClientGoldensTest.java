@@ -708,10 +708,9 @@ class ClientGoldensTest {
                   run.id(),
                   new RunStore.Launched(
                       null, null, null, new RunStore.RunLogin("default", "token"), null)));
-      new RunReports(read -> null, RunLauncher.Room.NONE, bus::publish)
-          .recorded(
-              runs.findById(run.id()).orElseThrow(),
-              new RunReport(RunUsage.NONE, new LoginOutcome.Refused()));
+      var refused = new RunReport(RunUsage.NONE, new LoginOutcome.Refused());
+      new RunReports(read -> refused, RunLauncher.Room.NONE, bus::publish)
+          .finish(runs, runs.findById(run.id()).orElseThrow(), report -> true);
       return Stream.of(
               WellKnownTypes.SPEC_ENGAGED,
               WellKnownTypes.SPEC_DISENGAGED,

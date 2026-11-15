@@ -431,12 +431,10 @@ public final class MissedStopReconciler implements AutoCloseable {
    * RunReports}); the write that finished it says what came of its login. Returns whether it did.
    */
   private boolean finished(RunStore.RunRow run, String expected, Integer exitCode) {
-    var report = reports.read(run);
-    if (!sessionStore.finish(run.id(), expected, "stopped", exitCode, report)) {
-      return false;
-    }
-    reports.recorded(run, report);
-    return true;
+    return reports.finish(
+        sessionStore,
+        run,
+        report -> sessionStore.finish(run.id(), expected, "stopped", exitCode, report));
   }
 
   /**
@@ -493,9 +491,10 @@ public final class MissedStopReconciler implements AutoCloseable {
     var recorded = 0;
     for (var run : sessionStore.unread(localHandle.get())) {
       try {
-        var report = reports.read(run);
-        if (report != null && sessionStore.recordRead(run.id(), report)) {
-          reports.recorded(run, report);
+        if (reports.finish(
+            sessionStore,
+            run,
+            report -> report != null && sessionStore.recordRead(run.id(), report))) {
           recorded++;
         }
       } catch (RuntimeException e) {

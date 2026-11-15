@@ -17,6 +17,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.OptionalInt;
 import java.util.SequencedMap;
+import java.util.Set;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
@@ -27,9 +28,16 @@ final class ClaudeCode implements Harness {
   private static final String RESULT = "\"type\":\"result\"";
   private static final String INIT = "\"subtype\":\"init\"";
 
-  /** The {@code apiKeySource} its {@code init} line names for a login of each kind it was given. */
-  private static final Map<String, String> SOURCES =
-      Map.of("token", "none", "api-key", "ANTHROPIC_API_KEY");
+  /**
+   * The {@code apiKeySource} values that, for a login of each kind, name another credential than
+   * the one Sail gave: the sources Claude Code declares ({@code ANTHROPIC_API_KEY}, the configured
+   * {@code apiKeyHelper}, a {@code /login managed key}; 2.1.322's own schema) other than the
+   * kind's. Any other value, {@code none} and names never seen among them, says nothing.
+   */
+  private static final Map<String, Set<String>> OTHER_SOURCES =
+      Map.of(
+          "token", Set.of("ANTHROPIC_API_KEY", "apiKeyHelper", "/login managed key"),
+          "api-key", Set.of("apiKeyHelper", "/login managed key"));
 
   /** A result that says the login's account is out of quota, and when it resets, if it says. */
   private static final Pattern LIMIT =
@@ -278,39 +286,38 @@ final class ClaudeCode implements Harness {
   }
 
   /**
-   * The last {@code init} line naming a credential source other than the one a login of kind {@code
-   * given} sets is an override, whatever the run's end said; else the last {@code result}, when it
-   * is an error: a 401, or "Invalid API key" or "Not logged in", is a refusal, and "You've hit your
-   * … limit" a limit, with the time it resets.
+   * The last {@code result}, when it is an error, decides first: a 401 is a refusal, whatever the
+   * {@code init} line said; "Not logged in" is no login delivered at all (only a harness given no
+   * credential, or an empty one, prints it: 2.1.322, recorded); "You've hit your … limit" is a
+   * limit, with the time it resets. Otherwise the last {@code init} line naming a source that is
+   * another credential for the kind it was given ({@link #OTHER_SOURCES}) is an override.
    */
   @Override
   public Optional<LoginOutcome> loginOutcome(String report, LoginKind given) {
+    var result = RunUsage.last(report, RESULT, line -> "result".equals(line.get("type"))).line();
+    if (result != null && Boolean.TRUE.equals(result.get("is_error"))) {
+      var said = result.get("result") instanceof String text ? text.strip() : "";
+      var limit = LIMIT.matcher(said);
+      if (Long.valueOf(401).equals(RunUsage.count(result, "api_error_status"))) {
+        return Optional.of(new LoginOutcome.Refused());
+      }
+      if (said.startsWith("Not logged in")) {
+        return Optional.of(new LoginOutcome.Undelivered());
+      }
+      if (limit.matches()) {
+        return Optional.of(new LoginOutcome.Limited(LoginOutcome.resetTime(limit.group(1))));
+      }
+    }
     var init =
         RunUsage.last(
                 report,
                 INIT,
                 line -> "system".equals(line.get("type")) && "init".equals(line.get("subtype")))
             .line();
-    var expected = SOURCES.get(given.kind());
-    if (init != null
-        && expected != null
-        && init.get("apiKeySource") instanceof String source
-        && !source.equals(expected)) {
-      return LoginOutcome.label(source).map(LoginOutcome.Overridden::new);
-    }
-    var result = RunUsage.last(report, RESULT, line -> "result".equals(line.get("type"))).line();
-    if (result == null || !Boolean.TRUE.equals(result.get("is_error"))) {
-      return Optional.empty();
-    }
-    var said = result.get("result") instanceof String text ? text.strip() : "";
-    if (Long.valueOf(401).equals(RunUsage.count(result, "api_error_status"))
-        || said.startsWith("Invalid API key")
-        || said.startsWith("Not logged in")) {
-      return Optional.of(new LoginOutcome.Refused());
-    }
-    var limit = LIMIT.matcher(said);
-    return limit.matches()
-        ? Optional.of(new LoginOutcome.Limited(LoginOutcome.label(limit.group(1)).orElse(null)))
+    return init != null
+            && init.get("apiKeySource") instanceof String source
+            && OTHER_SOURCES.getOrDefault(given.kind(), Set.of()).contains(source)
+        ? Optional.of(new LoginOutcome.Overridden(source))
         : Optional.empty();
   }
 

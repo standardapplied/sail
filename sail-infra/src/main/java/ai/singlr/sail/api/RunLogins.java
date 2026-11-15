@@ -201,20 +201,10 @@ final class RunLogins {
   /** Each kind its harness takes, how to make one, and the command that stores it. */
   static Remedy howToStore(Harness harness) {
     var parts = new ArrayList<Object>();
-    var kinds = harness.loginKinds();
-    for (var i = 0; i < kinds.size(); i++) {
-      parts.add(i == 0 ? "" : " Or: ");
-      parts.add(kinds.get(i).howToMake());
-      parts.add(", then ");
-      parts.add(storeCommand(harness, kinds.get(i), i == 0));
-      parts.add(".");
+    for (var kind : harness.loginKinds()) {
+      parts.add(parts.isEmpty() ? "" : " Or: ");
+      parts.add(howToReplace(harness, kind, LoginStore.DEFAULT_NAME));
     }
     return Remedy.of(parts.toArray());
-  }
-
-  private static Remedy.Command storeCommand(Harness harness, LoginKind kind, boolean first) {
-    return first
-        ? Remedy.sail("agent login", harness.yamlName())
-        : Remedy.sail("agent login", harness.yamlName(), "--kind", kind.kind());
   }
 }

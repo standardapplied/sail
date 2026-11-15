@@ -37,6 +37,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.TreeMap;
 import java.util.function.Function;
+import java.util.function.Supplier;
 
 /**
  * The Run aggregate on SQLite: one dispatch execution of a spec. Records where it ran ({@code node}
@@ -401,6 +402,14 @@ public final class RunStore implements ConflictResolver, SyncedStore {
     public boolean liveOn(String localHandle) {
       return ownedBy(localHandle) && !RunStatus.isTerminal(status);
     }
+  }
+
+  /**
+   * Runs {@code work} as one write transaction, so a finish and what it says commit together or not
+   * at all.
+   */
+  public <T> T atomically(Supplier<T> work) {
+    return db.transaction(work);
   }
 
   /** The {@code stop_source} of a run an operator's stop claimed. */

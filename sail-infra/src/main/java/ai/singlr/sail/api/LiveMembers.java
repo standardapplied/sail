@@ -1107,7 +1107,7 @@ public final class LiveMembers implements RoomWakeReactor.Live, AutoCloseable {
       }
       if (outcome != null && !loginSaid) {
         loginSaid = true;
-        reports.recorded(run, report);
+        reports.heardLive(runStore, run, report);
       }
     }
 

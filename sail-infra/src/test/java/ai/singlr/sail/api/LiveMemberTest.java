@@ -309,7 +309,7 @@ class LiveMemberTest {
         List.of(
             "sail: Claude Code refused "
                 + LiveRoom.HANDLE
-                + "'s login 'default' (long-lived token), so its run stopped. Run claude"
+                + "'s login 'default' (long-lived token). Run claude"
                 + " setup-token on a machine where Claude Code is signed in, then sail agent login"
                 + " claude-code."),
         room.conversation(SPEC).stream().filter(line -> line.startsWith("sail: ")).toList());
@@ -317,7 +317,7 @@ class LiveMemberTest {
 
     var helper = RunLoginOutcomeTest.fixture("claude-code-helper-init.jsonl").strip();
     room.says(SPEC, "third");
-    room.says(process, helper, Lines.spent("Three", 45, 4.0));
+    room.says(process, helper, Lines.result("Three"));
 
     assertEquals("apiKeyHelper", room.runs.findById(process.runId).orElseThrow().loginOverridden());
     assertEquals(1, room.events(Event.WellKnownTypes.AGENT_LOGIN_OUTCOME).size(), "once a run");

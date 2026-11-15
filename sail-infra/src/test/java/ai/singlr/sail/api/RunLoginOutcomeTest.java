@@ -17,6 +17,7 @@ import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.AfterEach;
@@ -176,9 +177,54 @@ class RunLoginOutcomeTest {
     assertEquals(
         List.of(
             "Claude Code says the account behind node-a's login 'default' (long-lived token) is"
-                + " out of quota until 3pm (UTC), so its run stopped; what it committed stays on"
+                + " out of quota until 15:00 UTC, so its run stopped; what it committed stays on"
                 + " branch feat/test."),
         said());
+  }
+
+  /**
+   * RL6, ruling 2: what a harness printed in a reset time or a credential source, a credential's
+   * shape included, reaches neither the room, the event nor the run's row.
+   */
+  @Test
+  void nothingAHarnessPrintedReachesTheRoomTheEventOrTheRow() {
+    loop = ReviewLoop.staged(tempDir, "codex");
+    loop.spec("auth", "api");
+    var hostile =
+        List.of(
+            "ghp_0123456789abcdefghijABCDEFGHIJklmnop",
+            "AKIAIOSFODNN7EXAMPLE",
+            "sk-ant-api03-AbCdEf0123456789",
+            "Authorization: Bearer sk-proj-abcdef0123456789");
+    var runs = new ArrayList<String>();
+    for (var value : hostile) {
+      var limited = launched("build", "claude-code", "default", "token");
+      loop.container.wrote(
+          limited,
+          "{\"type\":\"result\",\"is_error\":true,\"api_error_status\":null,"
+              + "\"result\":\"You've hit your session limit · resets "
+              + value
+              + "\"}\n");
+      loop.onEvent(stop(limited, "claude-code", "build", 1));
+      var sourced = launched("build", "claude-code", "default", "token");
+      var log = fixture("claude-code-agent.jsonl");
+      loop.container.wrote(
+          sourced, log.replace("\"apiKeySource\":\"none\"", "\"apiKeySource\":\"" + value + "\""));
+      loop.onEvent(stop(sourced, "claude-code", "build", 0));
+      runs.add(sourced);
+    }
+
+    var everything = String.join("\n", said()) + outcomes();
+    for (var value : hostile) {
+      assertFalse(everything.contains(value), value + " in " + everything);
+    }
+    for (var run : runs) {
+      assertNull(loop.runs.findById(run).orElseThrow().loginOverridden(), run);
+    }
+    assertEquals(
+        "Claude Code says the account behind node-a's login 'default' (long-lived token) is out"
+            + " of quota, so its run stopped; what it committed stays on branch feat/test.",
+        said().getFirst());
   }
 
   /** RL7: an error Sail does not know is an ordinary failure: nothing is said of the login. */

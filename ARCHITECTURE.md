@@ -3884,39 +3884,48 @@ no pairing is removed through the gateway as before, and no key file is touched.
     fixes and resumed builds), at its launch, synced with the run; and `login_overridden`, the
     credential source its harness reported using instead of that login, with its report.
   - *What came of it.* Each harness reads a finished run's report for what came of the stored login
-    it was given (`Harness.loginOutcome`): `Refused`, `Limited` (when it resets, if it says) or
-    `Overridden` (the source it used), or nothing, and anything it does not recognise is an
-    ordinary end. Claude Code: the last `result` line that is an error with `api_error_status` 401,
-    or that says "Invalid API key" or "Not logged in", is a refusal, "You've hit your … limit ·
-    resets <time>" a limit, and the last `init` line naming an `apiKeySource` other than the
-    kind's (`none` for a token, `ANTHROPIC_API_KEY` for a key) an override, whatever the run's end
-    said. Codex: the rollout's last `task_complete` whose `codex_error_info` is
-    `http_connection_failed` with `http_status_code` 401 is a refusal (codex-cli 0.163.0; without
-    `--json` it writes no `turn.failed`), and `usage_limit_exceeded` a limit, with the time its
-    message says to try again at. It is read with the usage, from the same marked lines in the one
+    it was given (`Harness.loginOutcome`): `Refused`, `Limited` (when it resets, if it says),
+    `Overridden` (the source it used) or `Undelivered` (no login reached it), or nothing; anything
+    it does not recognise, a newer format's renamed or missing field included, is an ordinary end.
+    Claude Code: the last `result`, when it is an error, decides first: `api_error_status` 401 is a
+    refusal whatever the `init` line says; "Not logged in", which only a harness given no
+    credential (or an empty one) prints, is `Undelivered`; "You've hit your … limit · resets
+    <time>" a limit. Otherwise the last `init` line's `apiKeySource` is an override only when it is
+    one of the sources Claude Code declares that name another credential than the kind's
+    (`ANTHROPIC_API_KEY`, `apiKeyHelper`, `/login managed key`, less the kind's own): `none` and any
+    name never seen says nothing. Codex: the `task_complete` of the rollout's last turn (its
+    `turn_id` the last `turn_context`'s, so an end an earlier run of a resumed session wrote never
+    speaks for this one) whose `codex_error_info` is `http_connection_failed` with
+    `http_status_code` 401 is a refusal (codex-cli 0.163.0; without `--json` it writes no
+    `turn.failed`), and `usage_limit_exceeded` a limit. Nothing a harness printed is carried: a
+    reset time is said only as Sail's rendering of a time it parsed (`LoginOutcome.resetTime`:
+    `2026-11-16 15:04`, `15:00 UTC`), else the limit is said with no time, and a source only as one
+    of the declared names. It is read with the usage, from the same marked lines in the one
     container read (`RunReportReader`, the markers `"subtype":"init"` and `"type":"task_complete"`
-    added), and recorded in the same write. One place words it and says it, `RunReports`: every
-    finisher (the tracker of a watcher's stop and the review pipeline, through `RunTracker.finish`;
-    a foreground run's end; the reconciler's finish of a dead run, of an interrupted stop and its
-    late read of an unread report; a live member's turn, whose report is its process's `init` line
-    and the turn's result) reads the report there and, only when its own write recorded it, hands
-    it back (`RunReports.recorded`), so the tracker and the pipeline racing on one stop say it
-    once, and a report read late is said by the read that records it. It is said in the spec's
-    room through the room seam (`DispatchOperations.tellRoom`, once) and as an
-    `agent_login_outcome` event carrying the same sentence; a live member says it once a run. The
-    sentence names the login by its person, name and kind and the command that replaces it under
-    the same name and kind (`RunLogins.howToReplace`); a limit says until when and the branch its
-    work stays on; it quotes nothing of the harness but a reset time or a source's name, each kept
-    only as a plain short label (`LoginOutcome.LABEL`), so Codex's masked key is never repeated.
-    The watcher's own `agent_session_stopped` cannot carry it: the watcher is another process and
-    publishes before the one read. A run on its container's own login says nothing. Nothing is
-    retried on another login. A refusal or a limit also marks the run in the finishing write
-    (`stop_source` `login`, `RunStore.STOPPED_FOR_LOGIN`), and a reviewer or fix agent so ended
-    holds its review as a launch refused for want of a login does (rows R1b, F1b): its review is
-    owed the reviewer or the fix again, no reconciler pass retries or escalates it, and storing a
-    login (`LoopTrigger.LoginStored`) launches it. A build's login of a kind with a known lifetime (Claude Code's
-    token: 365 days from the day it was stored, `LoginKind.lifetime`) is said in the room in its
-    last 14 days, as a warning, at each dispatch (`RunLogins.forRun`).
+    added). One place reads, words and says it, `RunReports.finish`: every finisher (the tracker
+    of a watcher's stop and the review pipeline, through `RunTracker.finish`; a foreground run's
+    end; the reconciler's finish of a dead run, of an interrupted stop, and its late read of an
+    unread report) hands it its write, and the room is told in that write's own transaction
+    (`RunStore.atomically`), so the tracker and the pipeline racing on one stop say it once, a
+    report read late is said by the read that records it, and a crash between the write and the
+    room line loses neither. An `agent_login_outcome` event carrying the same sentence follows the
+    commit, whether or not the room could be told. A live member's turn, whose report is its
+    process's `init` line and the turn's result, is said once a run (`RunReports.heardLive`), and
+    its sentence does not say the run stopped, since the member goes on. `Undelivered` is said to
+    the operator on the server's log alone: Sail's delivery failed, and the person is not told to
+    replace a login that was never tried. An override is said once a spec, until its source
+    changes. The sentence names the login by its person, name and kind and the command that
+    replaces it under the same name and kind (`RunLogins.howToReplace`); a limit says until when
+    and the branch its work stays on. The watcher's own `agent_session_stopped` cannot carry it:
+    the watcher is another process and publishes before the one read. A run on its container's own
+    login says nothing. Nothing is retried on another login. A refusal or a limit also marks the
+    run in the finishing write (`stop_source` `login`, `RunStore.STOPPED_FOR_LOGIN`), and a
+    reviewer or fix agent so ended holds its review as a launch refused for want of a login does
+    (rows R1b, F1b): its review is owed the reviewer or the fix again, no reconciler pass retries
+    or escalates it, and storing a login (`LoopTrigger.LoginStored`) launches it. A build's login
+    of a kind with a known lifetime (Claude Code's token: 365 days from the day it was stored,
+    `LoginKind.lifetime`) is said in the room in its last 14 days, as a warning, at each build
+    reservation, a resumed build's included (`RunLogins.forRun`).
   - *What it cannot hide.* A run's harness holds its person's login in its environment for the
     run's whole life. Whoever can prompt an agent acting for a person (a room's members, a spec's
     author, a repo's files the agent reads) can try to make it reveal that login, and Sail's

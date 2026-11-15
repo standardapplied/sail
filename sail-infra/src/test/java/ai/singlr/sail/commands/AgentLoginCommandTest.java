@@ -142,7 +142,8 @@ class AgentLoginCommandTest {
     new FdeStore(db).logins().store(uday, claude, null, "token", "sk-ant-oat01-old");
     new FdeStore(db).logins().store(uday, claude, "work", "api-key", "sk-ant-api03-old");
     var told = new ArrayList<String>();
-    var reports = new RunReports(run -> null, (spec, body) -> told.add(body), event -> {});
+    var refused = new RunReport(RunUsage.NONE, new LoginOutcome.Refused());
+    var reports = new RunReports(run -> refused, (spec, body) -> told.add(body), event -> {});
     var runs = new RunStore(db);
     for (var login :
         List.of(
@@ -165,9 +166,7 @@ class AgentLoginCommandTest {
                 "u");
             runs.recordLaunch(id, new RunStore.Launched(null, null, null, login, null));
           });
-      reports.recorded(
-          runs.findById(id).orElseThrow(),
-          new RunReport(RunUsage.NONE, new LoginOutcome.Refused()));
+      reports.finish(runs, runs.findById(id).orElseThrow(), report -> true);
     }
 
     for (var sentence : told) {
