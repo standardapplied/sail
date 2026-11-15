@@ -418,7 +418,7 @@ class WorkspaceIT extends AbstractIncusIT {
       var instance =
           doneSpecsWorkspace(
               db, GONE, "git switch -q -c agent/gone && git commit -q --allow-empty -m work");
-      clock.set(clock.get().plus(SpecWorkspaces.IDLE));
+      clock.set(Instant.now().plus(SpecWorkspaces.IDLE).plusSeconds(1));
 
       sweeper.sweep();
 
@@ -460,7 +460,7 @@ class WorkspaceIT extends AbstractIncusIT {
               "git switch -q -c by-hand && git commit -q --allow-empty -m work"
                   + " && git checkout -q --detach HEAD^ && echo x > f && git add f"
                   + " && git stash -q && echo y > untracked");
-      clock.set(clock.get().plus(SpecWorkspaces.IDLE));
+      clock.set(Instant.now().plus(SpecWorkspaces.IDLE).plusSeconds(1));
 
       sweeper.sweep();
       sweeper.sweep();
