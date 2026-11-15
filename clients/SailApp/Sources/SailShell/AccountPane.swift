@@ -18,8 +18,9 @@ public final class AccountPane: NSView, NSMenuItemValidation {
     public let signOut = NSButton(title: "Sign Out", target: nil, action: nil)
     public let said = NSTextField(wrappingLabelWithString: "")
     public private(set) var standing: SignedIn?
-    /// Whether a ceremony or a call is under way.
+    /// Whether a ceremony or a call is under way, and how many have ended.
     public private(set) var busy = false
+    public private(set) var ended = 0
 
     private let account: Account
     private let defaults: UserDefaults
@@ -93,6 +94,7 @@ public final class AccountPane: NSView, NSMenuItemValidation {
         } catch {
             say(error.lines)
         }
+        ended += 1
     }
 
     public func validateMenuItem(_ item: NSMenuItem) -> Bool {
@@ -112,6 +114,7 @@ public final class AccountPane: NSView, NSMenuItemValidation {
         [signIn, enroll, signOut].forEach { $0.isEnabled = false }
         defer {
             busy = false
+            ended += 1
             [signIn, enroll, signOut].forEach { $0.isEnabled = true }
         }
         do {

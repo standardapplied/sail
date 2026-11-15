@@ -1,0 +1,123 @@
+name: SailApp sign-in mutants
+
+on:
+  push:
+    branches:
+      - agent/sail-app-signs-in-with-a-passkey
+
+permissions:
+  contents: read
+
+jobs:
+  mutant:
+    name: Mutant ${{ matrix.name }}
+    runs-on: macos-15
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: token-in-user-defaults
+            file: Sources/SailAccount/KeychainVault.swift
+            old: '        try forget(controlPlane)'
+            new: '        UserDefaults.standard.set(session.token, forKey: "session"); try forget(controlPlane)'
+            check: drive
+          - name: software-passkey-linked-into-sail
+            file: Sources/Sail/main.swift
+            old: 'ShellApp.run()'
+            new: 'print(SoftwarePasskey.marker); ShellApp.run()'
+            check: bundle
+          - name: system-accent-for-the-button
+            file: Sources/SailShell/AccentButton.swift
+            old: '        layer?.backgroundColor = NSColor(look.accent).cgColor'
+            new: '        layer?.backgroundColor = NSColor.controlAccentColor.cgColor'
+            check: drive
+          - name: item-kept-after-sign-out
+            file: Sources/SailAccount/KeychainVault.swift
+            old: '        let status = SecItemDelete(Self.item(controlPlane) as CFDictionary)'
+            new: '        let status = controlPlane.description.isEmpty ? SecItemDelete(Self.item(controlPlane) as CFDictionary) : errSecSuccess'
+            check: drive
+          - name: ticket-logged
+            file: Sources/SailShell/AccountPane.swift
+            old: '        ticket.stringValue = ""'
+            new: '        ticket.stringValue = ""; NSLog("enrolling with %@", pasted)'
+            check: drive
+    defaults:
+      run:
+        working-directory: clients/SailApp
+    env:
+      DARWIN_SAIL_TAG: v0.68.0
+      DARWIN_SAIL_SHA256: bdae9ab430aecdefe6c4780fb8dacaa91838587b1f2215d361f31060c5f7f8d3
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Xcode
+        run: sudo xcode-select --switch /Applications/Xcode_26.3.app
+
+      - name: The pinned darwin sail
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/sail"
+          gh release download "$DARWIN_SAIL_TAG" --repo "$GITHUB_REPOSITORY" --dir "$RUNNER_TEMP/sail" --pattern sail-darwin-arm64
+          echo "$DARWIN_SAIL_SHA256  $RUNNER_TEMP/sail/sail-darwin-arm64" | shasum -a 256 -c -
+          chmod +x "$RUNNER_TEMP/sail/sail-darwin-arm64"
+          echo "SAIL_BINARY=$RUNNER_TEMP/sail/sail-darwin-arm64" >> "$GITHUB_ENV"
+
+      - name: The mutant
+        env:
+          FILE: ${{ matrix.file }}
+          OLD: ${{ matrix.old }}
+          NEW: ${{ matrix.new }}
+          NAME: ${{ matrix.name }}
+        run: |
+          python3 -c '
+          import os, sys
+          path, old, new = os.environ["FILE"], os.environ["OLD"], os.environ["NEW"]
+          text = open(path).read()
+          if text.count(old) != 1: sys.exit("the mutant does not apply once to " + path)
+          open(path, "w").write(text.replace(old, new))
+          '
+          if [[ $NAME == software-passkey-linked-into-sail ]]; then
+            sed -i '' 's/.executableTarget(name: "Sail", dependencies: \["SailShell"\]/.executableTarget(name: "Sail", dependencies: ["SailShell", "SailTestPasskey"]/' Package.swift
+            sed -i '' 's/^import SailShell$/import SailShell\nimport SailTestPasskey/' Sources/Sail/main.swift
+          fi
+          git diff --stat
+
+      - name: Release build, signed as the lane signs
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          APPLE_API_KEY_P8_BASE64: ${{ secrets.APPLE_API_KEY_P8_BASE64 }}
+          APPLE_PROVISIONING_PROFILE_BASE64: ${{ secrets.APPLE_PROVISIONING_PROFILE_BASE64 }}
+        run: |
+          echo "SIGNING=$(ci/signing)" >> "$GITHUB_ENV"
+          swift build -c release
+          ci/bundle Sail "$RUNNER_TEMP/app/Sail.app" "$SAIL_BINARY"
+          ci/bundle SailDrive "$RUNNER_TEMP/drive/Sail.app" "$SAIL_BINARY"
+          ci/sign "$RUNNER_TEMP/drive/Sail.app"
+
+      - name: The check that must go red
+        env:
+          CHECK: ${{ matrix.check }}
+          SAIL_SIGNING: ${{ env.SIGNING }}
+        run: |
+          app="$RUNNER_TEMP/app/Sail.app"
+          if [[ $CHECK == bundle ]]; then
+            if nm "$app/Contents/MacOS/Sail" | grep -q SoftwarePasskey || strings "$app/Contents/MacOS/Sail" | grep -q sail-test-passkey-not-for-shipping; then
+              echo "RED: the every-build check finds the software passkey in the shipped app"
+              exit 0
+            fi
+            echo "SURVIVED: the shipped app holds no software passkey" >&2
+            exit 1
+          fi
+          defaults write -g AppleAccentColor -int -1
+          if ci/drive "$RUNNER_TEMP/drive/Sail.app" "$RUNNER_TEMP/drive-out"; then
+            echo "SURVIVED: the drive passed" >&2
+            exit 1
+          fi
+          echo "RED: the drive failed"
+          grep -h '"ok" : false' -B3 -A3 "$RUNNER_TEMP"/drive-out/*/report.json | grep '"name"\|"detail"' || true

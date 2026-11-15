@@ -27,21 +27,18 @@ extension Driver {
         if let variable = step.enroll {
             guard let ticket = ProcessInfo.processInfo.environment[variable], !ticket.isEmpty else { return (false, "\(variable) holds no ticket") }
             pane.ticket.stringValue = ticket
-            pane.enroll.performClick(nil)
-            let idle = await settled(step)
+            let idle = await settled(step) { pane.enroll.performClick(nil) }
             return (idle && pane.ticket.stringValue.isEmpty, "the ticket field is \(pane.ticket.stringValue.isEmpty ? "empty" : "not empty"); \(said)")
         }
         if step.signIn == true {
-            pane.signIn.performClick(nil)
-            let idle = await settled(step)
+            let idle = await settled(step) { pane.signIn.performClick(nil) }
             if signed, let plane = try? ControlPlane(address: pane.address.stringValue), let held = try? KeychainVault().session(for: plane) {
                 tokens.insert(held.token)
             }
             return (idle, said)
         }
         if step.signOut == true {
-            pane.signOut.performClick(nil)
-            return (await settled(step), said)
+            return (await settled(step) { pane.signOut.performClick(nil) }, said)
         }
         if let lines = step.exactly {
             let found = await waitUntil(step.seconds ?? 10) { !pane.busy && pane.text.split(separator: "\n").map(String.init) == lines }
@@ -55,8 +52,8 @@ extension Driver {
             return run(words.map { $0 == "{credential}" ? passkey.credentialIds.last ?? "" : $0 })
         }
         if step.activate == true {
-            NotificationCenter.default.post(name: NSApplication.didBecomeActiveNotification, object: NSApp)
-            return (await settled(step), said)
+            let idle = await settled(step) { NotificationCenter.default.post(name: NSApplication.didBecomeActiveNotification, object: NSApp) }
+            return (idle, said)
         }
         if let count = step.asked {
             let asked = passkey.asked - askedAtStart
@@ -79,8 +76,11 @@ extension Driver {
         "the pane says: " + shell.account.text.replacingOccurrences(of: "\n", with: " | ")
     }
 
-    private func settled(_ step: Step) async -> Bool {
-        await waitUntil(step.seconds ?? 20) { !self.shell.account.busy }
+    /// Does `act` and waits until the pane has ended what it started.
+    private func settled(_ step: Step, _ act: () -> Void) async -> Bool {
+        let before = shell.account.ended
+        act()
+        return await waitUntil(step.seconds ?? 20) { self.shell.account.ended > before && !self.shell.account.busy }
     }
 
     private func run(_ words: [String]) -> (Bool, String) {
