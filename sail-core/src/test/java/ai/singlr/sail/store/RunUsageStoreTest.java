@@ -18,6 +18,7 @@ import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.ActingAs;
 import ai.singlr.sail.sync.SyncBox;
 import java.nio.file.Path;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.AfterEach;
@@ -123,6 +124,27 @@ class RunUsageStoreTest {
     assertEquals(null, store.findById(id).orElseThrow().dispatchedBy());
     assertEquals(null, store.findById(unlaunched).orElseThrow().login());
     assertThrows(IllegalArgumentException.class, () -> new RunStore.RunLogin(" ", "token"));
+  }
+
+  /** A run records only a kind of login a harness takes, whether launched here or synced. */
+  @Test
+  void aLoginOfAKindNoHarnessTakesIsRefusedAndNothingIsRecorded() {
+    var id = run(null);
+
+    assertThrows(
+        SqliteException.class,
+        () ->
+            store.recordLaunch(
+                id,
+                new RunStore.Launched(
+                    null, null, null, new RunStore.RunLogin("work", "bogus"), null)));
+    assertNull(store.findById(id).orElseThrow().login());
+    var snapshot = new LinkedHashMap<>(store.comparableSnapshot(id));
+    snapshot.put("login", "work");
+    snapshot.put("login_kind", "bogus");
+    var adopted = DateTimeUtils.newId().toString();
+    assertThrows(SqliteException.class, () -> store.applyRevision(adopted, snapshot, "1-remote"));
+    assertTrue(store.findById(adopted).isEmpty());
   }
 
   /** M1: the finish and its usage are one write, so main hears them as one revision. */

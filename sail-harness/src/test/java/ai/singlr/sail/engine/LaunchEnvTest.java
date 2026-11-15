@@ -61,6 +61,21 @@ class LaunchEnvTest {
   }
 
   @Test
+  void aCodexRunOnItsKeySetsTheAccessTokenVariableEmpty() {
+    var codex = Harnesses.of("codex");
+    var key =
+        new LoginStore.Login(
+            new LoginStore.Row("codex", "work", "api-key", true, Instant.EPOCH, "0123abcd"),
+            codex.loginKind("api-key"),
+            "sk-proj-x");
+
+    assertEquals(
+        "SAIL_RUN_CREDENTIAL=cred-1\nCODEX_ACCESS_TOKEN=\nCODEX_API_KEY=sk-proj-x\n",
+        new LaunchEnv("cred-1", key).lines(),
+        "a container's own access token never outranks the stored key");
+  }
+
+  @Test
   void aCredentialOfTwoLinesAndAPathThatIsNotOneAreRefused() {
     assertThrows(IllegalArgumentException.class, () -> new LaunchEnv("a\nb", null));
     assertThrows(IllegalArgumentException.class, () -> new LaunchEnv("a\rb", null));

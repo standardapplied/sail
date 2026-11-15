@@ -46,7 +46,10 @@ final class ClaudeCode implements Harness {
    * set cut, the allow-rules naming only the {@code spec} subcommands a room member uses (it reads
    * and it comments) and {@code cd}, and deny-rules refusing either file-reading flag of {@code
    * spec} anywhere in a command, so no glob or trailing flag hands it a file such as {@code
-   * /proc/self/environ}. Every read-only lane is built from this one list.
+   * /proc/self/environ}, and refusing the shell's environment readers and every read under {@code
+   * /proc}, which hold the run's login: Claude Code's own checks refuse those too, and these rules
+   * keep them refused whatever a later release of it approves. Every read-only lane is built from
+   * this one list.
    */
   private static final List<String> READ_ONLY_ARGS =
       List.of(
@@ -65,7 +68,13 @@ final class ClaudeCode implements Harness {
           "Bash(cd:*)",
           "--disallowedTools",
           "Bash(spec *--body-file*)",
-          "Bash(spec *--plan-file*)");
+          "Bash(spec *--plan-file*)",
+          "Bash(printenv:*)",
+          "Bash(env:*)",
+          "Bash(set:*)",
+          "Bash(export:*)",
+          "Bash(declare:*)",
+          "Read(//proc/**)");
 
   @Override
   public String yamlName() {

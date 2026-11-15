@@ -432,7 +432,7 @@ again:
 claude setup-token                                  # on your machine, where Claude Code is signed in; prints a token
 sudo sail agent login claude-code                   # paste it: stored as 'default', the default
 printf %s "$ANTHROPIC_API_KEY" | sudo sail agent login claude-code --name work --kind api-key
-printf %s "$CODEX_API_KEY" | sudo sail agent login codex      # an API key; --kind token for a Codex access token
+printf %s "$CODEX_API_KEY" | sudo sail agent login codex      # an API key, the one kind Codex takes
 sudo sail agent login codex --dry-run               # what it would store; reads and stores nothing
 sudo sail agent login list                          # name, kind, default, stored date, fingerprint
 sudo sail agent login use claude-code work          # the default for runs launched from now on
