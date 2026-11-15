@@ -30,6 +30,7 @@ import ai.singlr.sail.engine.RunPlace;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.engine.WebhookNotifier;
+import ai.singlr.sail.store.RunStore;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.format.DateTimeParseException;
@@ -157,10 +158,8 @@ public final class AgentWatchCommand implements Runnable {
   }
 
   /** The report of this watch's run, named so it reaches that run however many are live. */
-  private Remedy.Command report() {
-    return Strings.isBlank(specId)
-        ? Remedy.sail("agent report", name, "--run", runId)
-        : Remedy.sail("agent report", name, "--spec", specId);
+  Remedy.Command report() {
+    return Remedy.sail("agent report", RunStore.RunRow.addressed(name, runId, specId));
   }
 
   private Guardrails guardrails() {
@@ -289,23 +288,26 @@ public final class AgentWatchCommand implements Runnable {
     }
   }
 
-  private RunWatch.Narrator narrator(WebhookNotifier notifier, Notifications notifications) {
+  RunWatch.Narrator narrator(WebhookNotifier notifier, Notifications notifications) {
+    Notify notify =
+        (event, title, message) ->
+            sendNotification(notifier, notifications, event, name, title, message);
     return new RunWatch.Narrator() {
       @Override
       public void tripped(
           GuardrailChecker.GuardrailResult.Triggered limit, Duration elapsed, String snapshot) {
         reportTrigger(limit, GuardrailChecker.formatDuration(elapsed), snapshot);
-        notifyTriggered(notifier, notifications, limit);
+        notifyTriggered(notify, limit);
       }
 
       @Override
       public void exited() {
-        handleAgentExited(notifier, notifications);
+        handleAgentExited(notify);
       }
 
       @Override
       public void ended() {
-        notifySessionDone(notifier, notifications);
+        notifySessionDone(notify);
       }
 
       @Override
@@ -345,7 +347,7 @@ public final class AgentWatchCommand implements Runnable {
    * Refuses a watch of a spec-less run whose project's container is not running. A spec's run is in
    * its own workspace, which {@link #watchable} asks about.
    */
-  private void requireRunning(ShellExecutor shell) throws Exception {
+  void requireRunning(ShellExec shell) throws Exception {
     if (!(place() instanceof RunPlace.ProjectContainer)) {
       return;
     }
@@ -426,7 +428,13 @@ public final class AgentWatchCommand implements Runnable {
     }
   }
 
-  private void handleAgentExited(WebhookNotifier notifier, Notifications notifications) {
+  /** A notification of this watch's run, sent where the project's definition says. */
+  @FunctionalInterface
+  interface Notify {
+    void send(String event, String title, String message);
+  }
+
+  void handleAgentExited(Notify notify) {
     if (json) {
       var map = new LinkedHashMap<String, Object>();
       map.put("name", name);
@@ -436,34 +444,23 @@ public final class AgentWatchCommand implements Runnable {
     } else {
       System.out.println(Ansi.AUTO.string("  @|faint Agent exited. Watch complete.|@"));
     }
-    sendNotification(
-        notifier,
-        notifications,
+    notify.send(
         Event.WellKnownTypes.AGENT_SESSION_STOPPED,
-        name,
         "Agent exited",
         Remedy.of("Agent process is no longer running. Run: ", report()).plain());
   }
 
-  private void notifyTriggered(
-      WebhookNotifier notifier,
-      Notifications notifications,
-      GuardrailChecker.GuardrailResult.Triggered triggered) {
-    sendNotification(
-        notifier,
-        notifications,
+  private static void notifyTriggered(
+      Notify notify, GuardrailChecker.GuardrailResult.Triggered triggered) {
+    notify.send(
         Event.WellKnownTypes.GUARDRAIL_TRIGGERED,
-        name,
         "Guardrail: " + triggered.reason(),
         triggered.detail() + ". Action: " + triggered.action());
   }
 
-  private void notifySessionDone(WebhookNotifier notifier, Notifications notifications) {
-    sendNotification(
-        notifier,
-        notifications,
+  void notifySessionDone(Notify notify) {
+    notify.send(
         Event.WellKnownTypes.AGENT_SESSION_COMPLETED,
-        name,
         "Watch complete",
         Remedy.of("Agent session ended. Run: ", report()).plain());
   }

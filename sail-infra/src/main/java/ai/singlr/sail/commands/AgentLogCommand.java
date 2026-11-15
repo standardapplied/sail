@@ -231,9 +231,14 @@ public final class AgentLogCommand implements Runnable {
         "The agent exited " + exitCode + said.map(line -> ": " + line).orElse("."),
         Remedy.of(
             "Full log: ",
-            place instanceof RunPlace.SpecWorkspace workspace
-                ? Remedy.sail("agent log", place.project(), "--spec", workspace.specId())
-                : Remedy.sail("agent log", place.project())));
+            Remedy.sail(
+                "agent log",
+                RunStore.RunRow.addressed(
+                    place.project(),
+                    runId,
+                    place instanceof RunPlace.SpecWorkspace workspace
+                        ? workspace.specId()
+                        : null))));
   }
 
   private static Optional<String> lastLine(ShellExec shell, String container, String logPath) {

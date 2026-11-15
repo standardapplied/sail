@@ -297,9 +297,8 @@ public final class StopOperations {
           Strings.isNotBlank(run.specId())
               && live.stream().filter(other -> run.specId().equals(other.specId())).count() == 1;
       forms.add(
-          alone
-              ? Remedy.sail(verb, project, "--spec", run.specId())
-              : Remedy.sail(verb, project, "--run", run.id()));
+          Remedy.sail(
+              verb, RunStore.RunRow.addressed(project, run.id(), alone ? run.specId() : null)));
     }
     forms.add(".");
     var oneSpec = specs.size() == 1 && Strings.isNotBlank(specs.getFirst());

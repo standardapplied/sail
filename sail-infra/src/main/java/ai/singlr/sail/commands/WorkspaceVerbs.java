@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.commands;
 
+import ai.singlr.sail.api.HostOperations;
 import ai.singlr.sail.api.OperationsFactory;
 import ai.singlr.sail.api.ProjectSkills;
 import ai.singlr.sail.common.Remedied;
@@ -38,6 +39,7 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.Callable;
 import java.util.function.Predicate;
+import java.util.function.Supplier;
 import picocli.CommandLine.Model.CommandSpec;
 
 /**
@@ -96,13 +98,15 @@ final class WorkspaceVerbs {
   }
 
   /**
-   * Whether a run of {@code project}'s spec, the one a workspace is, is live on this box, as its
-   * runs say: what refuses a stop or delete of that workspace.
+   * Whether a run of {@code project}'s spec, the one a workspace is, is live on the box whose
+   * handle is {@code handle}, as the runs {@code operations} opens say: what refuses a stop or
+   * delete of that workspace.
    */
-  static Predicate<String> liveRun(String project) {
+  static Predicate<String> liveRun(
+      String project, Supplier<HostOperations> operations, String handle) {
     return spec -> {
-      try (var operations = OperationsFactory.open()) {
-        return operations.dispatching().runningRuns(project, HostSync.handle()).stream()
+      try (var opened = operations.get()) {
+        return opened.dispatching().runningRuns(project, handle).stream()
             .anyMatch(run -> run.place().equals(RunPlace.of(project, spec)));
       }
     };

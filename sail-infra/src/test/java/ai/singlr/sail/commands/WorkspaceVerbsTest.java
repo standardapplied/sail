@@ -11,12 +11,21 @@ import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.api.OperationsFactory;
+import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.HostYaml;
 import ai.singlr.sail.config.ProjectDefinition;
+import ai.singlr.sail.config.TestDefinitions;
 import ai.singlr.sail.engine.ProjectPhase;
 import ai.singlr.sail.engine.ProjectProvisioner;
 import ai.singlr.sail.engine.ProvisionTracker;
 import ai.singlr.sail.engine.SailPaths;
+import ai.singlr.sail.identity.Acting;
+import ai.singlr.sail.store.HeldProjects;
+import ai.singlr.sail.store.ProjectStore;
+import ai.singlr.sail.store.RunStore;
+import ai.singlr.sail.store.SchemaManager;
+import ai.singlr.sail.store.Sqlite;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
@@ -44,6 +53,44 @@ class WorkspaceVerbsTest {
         null,
         null,
         null);
+  }
+
+  /**
+   * Scenario 21: a stop or delete of a spec's workspace is refused while a run of that spec is live
+   * in it on this box; a run of another spec, of no spec, or on another box is no reason.
+   */
+  @Test
+  void aWorkspaceIsHeldByALiveRunOfItsOwnSpecOnThisBoxAlone(@TempDir Path dir) throws Exception {
+    var dbPath = dir.resolve("control-plane.db");
+    try (var db = Sqlite.open(dbPath)) {
+      new SchemaManager(db).migrate();
+      HeldProjects.hold(db, "acme");
+      Acting.system(() -> new ProjectStore(db).upsert(TestDefinitions.named("acme")));
+      var runs = new RunStore(db);
+      for (var run :
+          List.of(List.of("auth", "eng"), List.of("billing", "other"), List.of("", "eng"))) {
+        Acting.system(
+            () ->
+                runs.reserveDispatch(
+                    DateTimeUtils.newId().toString(),
+                    "acme",
+                    run.get(0).isEmpty() ? null : run.get(0),
+                    run.get(1),
+                    run.get(0).isEmpty() ? "adhoc" : "build",
+                    List.of("app"),
+                    "claude-code",
+                    null,
+                    "t",
+                    "l",
+                    "u"));
+      }
+    }
+
+    var live = WorkspaceVerbs.liveRun("acme", () -> OperationsFactory.open(dbPath), "eng");
+
+    assertTrue(live.test("auth"));
+    assertFalse(live.test("billing"), "billing's run is another box's");
+    assertFalse(live.test("docs"));
   }
 
   @Test

@@ -81,9 +81,8 @@ public final class RunSelector {
    * however many runs are live.
    */
   public static String of(RunStore.RunRow run) {
-    return run.specId() != null && !run.specId().isBlank()
-        ? " --spec " + run.specId()
-        : " --run " + run.id();
+    var addressed = RunStore.RunRow.addressed(run.project(), run.id(), run.specId());
+    return " " + addressed[1] + " " + addressed[2];
   }
 
   private void requireOne() {

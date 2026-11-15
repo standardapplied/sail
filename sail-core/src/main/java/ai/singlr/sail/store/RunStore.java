@@ -355,6 +355,18 @@ public final class RunStore implements ConflictResolver, SyncedStore {
     }
 
     /**
+     * The arguments of a verb that name a run of {@code project} whose id is {@code runId}, of spec
+     * {@code specId} (none: of no spec): {@code --spec <id>} for a spec's run, {@code --run <id>}
+     * for any other. The one form every printed command that names a run takes, so it reaches that
+     * run however many are live.
+     */
+    public static String[] addressed(String project, String runId, String specId) {
+      return Strings.isBlank(specId)
+          ? new String[] {project, "--run", runId}
+          : new String[] {project, "--spec", specId};
+    }
+
+    /**
      * Whether this run belongs to the box whose handle is {@code localHandle} — the one predicate
      * for every run-ownership question (the read guard, the reaper, the reconciler, presence), so
      * they can never disagree about which box owns a run. A handled box owns the runs stamped with

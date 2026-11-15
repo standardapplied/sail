@@ -115,6 +115,22 @@ class AgentReporterTest {
     assertNotNull(report.duration());
   }
 
+  /**
+   * The report a person asks for reads the project's own state directory, which may hold nothing.
+   */
+  @Test
+  void aReportReadsTheProjectsOwnStateDirectory() throws Exception {
+    var session =
+        sessionRow(RUN_UNIT.unitName(), "completed", 0, Instant.now().minusSeconds(60), null);
+
+    var report =
+        new AgentReporter(new ScriptedShellExecutor())
+            .generate(CONTAINER, buildConfig(), List.of(), session);
+
+    assertEquals(CONTAINER, report.name());
+    assertFalse(report.rolledBack(), "a project with no state directory was never rolled back");
+  }
+
   /** A spec's run lived in its workspace, so its session, commits and guardrail are read there. */
   @Test
   void aSpecsRunIsReportedFromItsOwnWorkspace(@TempDir java.nio.file.Path stateDir)

@@ -37,10 +37,13 @@ import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.Sqlite;
 import java.io.IOException;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
 import org.junit.jupiter.api.Test;
@@ -401,6 +404,64 @@ class AgentAttachCommandTest {
           runs.reserveDispatch(
               id, "acme", "spec-" + id, "it", role, repos, "codex", null, "t", "l", "u");
         });
+  }
+
+  /**
+   * The terminal's half of the order against a claim: it asks for claims only once its process is
+   * named, or once it has ended; a terminal never named in its wait is reported, so it can be
+   * ended.
+   */
+  @Test
+  void aTerminalWaitsUntilItsProcessIsNamedOrItEndsAndNoLonger() throws Exception {
+    var asked = new AtomicInteger();
+    var pauses = new AtomicInteger();
+    var now = new AtomicLong();
+    AgentAttachCommand.Pause pause = pauses::incrementAndGet;
+
+    assertTrue(
+        AgentAttachCommand.awaitNamed(
+            () -> asked.incrementAndGet() > 2, () -> true, now::get, Duration.ofSeconds(10), pause),
+        "named on the third ask");
+    assertEquals(2, pauses.get(), "a pause between asks, none after");
+    assertTrue(
+        AgentAttachCommand.awaitNamed(
+            () -> false, () -> false, now::get, Duration.ofSeconds(10), pause),
+        "a terminal that ended has nothing to yield");
+    assertFalse(
+        AgentAttachCommand.awaitNamed(
+            () -> false,
+            () -> true,
+            () -> now.getAndAdd(Duration.ofSeconds(11).toNanos()),
+            Duration.ofSeconds(10),
+            pause),
+        "never named in its wait");
+  }
+
+  /**
+   * The claims a terminal yields to are the runs of other lanes than the read-only room's live in
+   * its own workspace, and what it says names the run and the command that resumes it.
+   */
+  @Test
+  void aTerminalYieldsOnlyToAClaimOfItsWorkspaceAndSaysHowToResume() {
+    var planned = row("r0", "spec-a", "build", "completed", List.of());
+    var workspace = (RunPlace.SpecWorkspace) RunPlace.of("acme", "spec-a");
+    var running =
+        List.of(
+            new DispatchGate.RunningRun("r0", "spec-a", "build", List.of(), workspace),
+            new DispatchGate.RunningRun("r1", "spec-a", "room", List.of(), workspace),
+            new DispatchGate.RunningRun(
+                "r2", "spec-b", "build", List.of(), RunPlace.of("acme", "spec-b")),
+            new DispatchGate.RunningRun("r3", "spec-a", "review", List.of(), workspace));
+
+    assertEquals(
+        List.of("r3"),
+        AgentAttachCommand.claimsOf(
+            planned, workspace, new AgentAttachCommand.Latest(planned, "", running)));
+    assertEquals(
+        "  ⚠ This terminal ended: yielded to dispatch r3 of spec spec-a. Its conversation is"
+            + " resumable once that run ends: sail agent attach acme --spec spec-a",
+        AgentAttachCommand.yielded(planned, "r3", "acme", OperatorCommand.PLAIN)
+            .replaceAll("\u001B\\[[;\\d]*m", ""));
   }
 
   private static RunStore.RunRow row(String id, String status) {

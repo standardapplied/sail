@@ -39,6 +39,7 @@ import ai.singlr.sail.engine.Workspaces;
 import ai.singlr.sail.harness.Harness;
 import ai.singlr.sail.harness.Harnesses;
 import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SpecStore;
 import java.io.PrintStream;
 import java.nio.file.Files;
@@ -421,7 +422,7 @@ public final class RunCommand implements Runnable {
     }
     if (background) {
       Banner.printAgentLaunched(
-          name + " --run " + session.runId(),
+          String.join(" ", RunStore.RunRow.addressed(name, session.runId(), null)),
           task,
           session.branch(),
           operator,

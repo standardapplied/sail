@@ -11,6 +11,7 @@ import ai.singlr.sail.common.Remedied;
 import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.ProjectDefinition;
+import ai.singlr.sail.store.RunStore;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.io.PrintStream;
@@ -718,7 +719,7 @@ public final class Workspaces {
               + ", which would die with it.",
           Remedy.of(
               "Stop the run first: ",
-              Remedy.sail("agent stop", project, "--spec", spec.get()),
+              Remedy.sail("agent stop", RunStore.RunRow.addressed(project, null, spec.get())),
               "."));
     }
   }

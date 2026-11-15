@@ -19,6 +19,8 @@ import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.AgentUnit;
 import ai.singlr.sail.engine.FileMutex;
+import ai.singlr.sail.engine.RunPlace;
+import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.harness.Harnesses;
 import ai.singlr.sail.harness.RunUsage;
 import ai.singlr.sail.identity.Acting;
@@ -38,6 +40,9 @@ import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Function;
 import org.junit.jupiter.api.AfterEach;
@@ -119,8 +124,8 @@ class ReviewLanesTest {
     loop = ReviewLoop.staged(tempDir, "codex", "claude-code");
     loop.spec("auth", "api");
     var build = loop.run("auth", "build");
-    var holding = new java.util.concurrent.CountDownLatch(1);
-    var release = new java.util.concurrent.CountDownLatch(1);
+    var holding = new CountDownLatch(1);
+    var release = new CountDownLatch(1);
     var other =
         Thread.ofVirtual()
             .start(
@@ -132,7 +137,7 @@ class ReviewLanesTest {
                     throw new IllegalStateException(e);
                   }
                 });
-    assertTrue(holding.await(30, java.util.concurrent.TimeUnit.SECONDS));
+    assertTrue(holding.await(30, TimeUnit.SECONDS));
     try {
       loop.onEvent(ReviewLoop.buildStop("auth", build));
     } finally {
@@ -203,6 +208,82 @@ class ReviewLanesTest {
 
     assertEquals("review", loop.onlyLive().role(), "the reviewer runs");
     assertFalse(loop.container.terminalOpen(), "the terminal it displaced is ended");
+  }
+
+  /**
+   * The race between a terminal and a claim of the spec's workspace, closed by order: a claim that
+   * lands before the terminal names its process finds no pid to end, so the terminal, which asks
+   * for claims only once named, ends itself, yielding to that run.
+   */
+  @Test
+  void aTerminalNamedAfterAClaimFindsTheClaimAndEndsItself() {
+    loop = ReviewLoop.staged(tempDir, "codex", "claude-code");
+    var place = (RunPlace.SpecWorkspace) RunPlace.of(ReviewLoop.PROJECT, "auth");
+    loop.built("auth");
+    var reviewer = loop.onlyLive();
+    loop.container.terminalOpened();
+
+    var yielded = RunReservation.yieldToAClaim(loop.container, place, () -> claimsOf(place));
+
+    assertEquals(Optional.of(reviewer.id()), yielded);
+    assertFalse(loop.container.terminalOpen(), "the terminal yields to the run that claimed first");
+    assertEquals("review", loop.onlyLive().role(), "and the reviewer runs on");
+  }
+
+  /**
+   * The other order: a terminal named before any claim finds none and goes on, and the claim that
+   * follows ends the terminal its pid file names.
+   */
+  @Test
+  void aClaimAfterTheTerminalIsNamedEndsIt() {
+    loop = ReviewLoop.staged(tempDir, "codex", "claude-code");
+    var place = (RunPlace.SpecWorkspace) RunPlace.of(ReviewLoop.PROJECT, "auth");
+    loop.container.terminalOpened();
+
+    var yielded = RunReservation.yieldToAClaim(loop.container, place, () -> claimsOf(place));
+    loop.built("auth");
+
+    assertEquals(Optional.empty(), yielded);
+    assertFalse(loop.container.terminalOpen(), "the claim that came second ends it");
+    assertEquals("review", loop.onlyLive().role());
+  }
+
+  /** A terminal that cannot be ended, its container's answer cut short, is said and kept. */
+  @Test
+  void aTerminalThatCannotBeEndedIsSaidAndTheInterruptKept() {
+    loop = ReviewLoop.staged(tempDir, "codex", "claude-code");
+    var place = (RunPlace.SpecWorkspace) RunPlace.of(ReviewLoop.PROJECT, "auth");
+    var interrupted =
+        new ShellExec() {
+          @Override
+          public Result exec(List<String> command) throws InterruptedException {
+            throw new InterruptedException("stopping");
+          }
+
+          @Override
+          public Result exec(List<String> command, Path workDir, Duration timeout)
+              throws InterruptedException {
+            return exec(command);
+          }
+
+          @Override
+          public boolean isDryRun() {
+            return false;
+          }
+        };
+
+    assertEquals(
+        Optional.of("r1"), RunReservation.yieldToAClaim(interrupted, place, () -> List.of("r1")));
+    assertTrue(Thread.interrupted(), "the interrupt is kept for whoever waits on the thread");
+  }
+
+  /** The runs claiming {@code place} in a lane that ends its terminal. */
+  private List<String> claimsOf(RunPlace.SpecWorkspace place) {
+    return loop.live().stream()
+        .filter(run -> run.place().equals(place))
+        .filter(run -> RunReservation.endsTheTerminal(run.role()))
+        .map(RunStore.RunRow::id)
+        .toList();
   }
 
   /**

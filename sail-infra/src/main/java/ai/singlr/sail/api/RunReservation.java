@@ -392,8 +392,8 @@ public final class RunReservation {
   private void yieldDisplacedSessions(
       String runId, String project, String specId, String role, List<String> repos) {
     var place = RunPlace.of(project, specId);
-    if (place instanceof RunPlace.SpecWorkspace && !DispatchGate.ROOM_ROLE.equals(role)) {
-      endTerminal(place);
+    if (place instanceof RunPlace.SpecWorkspace && endsTheTerminal(role)) {
+      endTerminal(shell, place);
     }
     var target = Objects.requireNonNullElse(repos, List.<String>of());
     var displaced =
@@ -405,10 +405,8 @@ public final class RunReservation {
     if (displaced.isEmpty()) {
       return;
     }
-    var reason =
-        "yielded to dispatch " + runId + (Strings.isBlank(specId) ? "" : " of spec " + specId);
     try {
-      sessionYield.end(displaced, reason);
+      sessionYield.end(displaced, yieldReason(runId, specId));
     } catch (IOException e) {
       System.err.println(
           "  [api] Warning: could not yield terminal sessions "
@@ -418,8 +416,36 @@ public final class RunReservation {
     }
   }
 
+  /** Why a terminal on a conversation ended for run {@code runId}'s claim, in its own words. */
+  public static String yieldReason(String runId, String specId) {
+    return "yielded to dispatch " + runId + (Strings.isBlank(specId) ? "" : " of spec " + specId);
+  }
+
+  /**
+   * Whether a claim of a spec's workspace in lane {@code role} ends the terminal open in it: every
+   * lane's but the read-only room's, whose member starts nothing over an open terminal.
+   */
+  public static boolean endsTheTerminal(String role) {
+    return !DispatchGate.ROOM_ROLE.equals(role);
+  }
+
+  /**
+   * The terminal's half of the order that keeps a person's terminal in spec {@code place}'s
+   * workspace and a claim of it from both going on, with no lock between them: a claim takes its
+   * row, then ends the terminal its pid file names; the terminal names its process, then calls
+   * this, which asks {@code claims} for the runs claiming the place and, when there is one, ends
+   * the terminal itself. Whichever comes second sees what the first did. Answers the run it yielded
+   * to.
+   */
+  public static Optional<String> yieldToAClaim(
+      ShellExec shell, RunPlace.SpecWorkspace place, Supplier<List<String>> claims) {
+    var claim = claims.get().stream().findFirst();
+    claim.ifPresent(run -> endTerminal(shell, place));
+    return claim;
+  }
+
   /** Ends the terminal resumed in {@code place}'s workspace, when one is there. */
-  private void endTerminal(RunPlace place) {
+  private static void endTerminal(ShellExec shell, RunPlace place) {
     try {
       new AgentSession(shell).killAgent(place.instance(), AgentUnit.TERMINAL);
     } catch (Exception e) {

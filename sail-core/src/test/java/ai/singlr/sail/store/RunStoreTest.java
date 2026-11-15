@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.store;
 
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
@@ -877,6 +878,17 @@ class RunStoreTest {
             "backend-auth", List.of(auth, again),
             "other-billing", List.of()),
         store.liveRunsByPlace("node-a", Instant.EPOCH));
+  }
+
+  /** A printed command names a spec's run by its spec and any other by its id. */
+  @Test
+  void aRunIsAddressedByItsSpecOrElseByItsId() {
+    assertArrayEquals(
+        new String[] {"acme", "--spec", "auth"}, RunStore.RunRow.addressed("acme", "r1", "auth"));
+    assertArrayEquals(
+        new String[] {"acme", "--run", "r1"}, RunStore.RunRow.addressed("acme", "r1", null));
+    assertArrayEquals(
+        new String[] {"acme", "--run", "r1"}, RunStore.RunRow.addressed("acme", "r1", " "));
   }
 
   @Test

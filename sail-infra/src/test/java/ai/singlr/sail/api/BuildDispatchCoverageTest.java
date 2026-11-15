@@ -1091,6 +1091,19 @@ class BuildDispatchCoverageTest {
     assertEquals("running", new RunStore(db).listForSpec("auth").getFirst().status());
   }
 
+  /** A workspace that cannot take the project's skills fails the launch, naming the workspace. */
+  @Test
+  void aWorkspaceThatCannotTakeTheProjectsSkillsFailsTheLaunchNamingIt() throws IOException {
+    var db = seedDb();
+
+    var refused =
+        assertThrows(
+            ApiException.class, () -> dispatch(ops(launching().throwOn("for d in"), YAML, db)));
+
+    assertEquals(ErrorCode.AGENT_LAUNCH_FAILED, refused.failure().errorCode());
+    assertEquals("Failed to install the project's skills in acme-auth.", refused.getMessage());
+  }
+
   /** A box that keeps no runs has none live, so its cap counts none and a dispatch goes on. */
   @Test
   void aBoxThatKeepsNoRunsCountsNoLiveWorkspaceAgainstItsCap() throws IOException {

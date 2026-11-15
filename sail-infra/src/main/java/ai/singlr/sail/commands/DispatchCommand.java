@@ -29,6 +29,7 @@ import ai.singlr.sail.engine.WatcherSpawner;
 import ai.singlr.sail.engine.WorkspaceTemplate;
 import ai.singlr.sail.engine.Workspaces;
 import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.Sqlite;
 import java.util.List;
 import java.util.Locale;
@@ -224,7 +225,9 @@ public final class DispatchCommand implements Runnable {
           return;
         }
         Banner.printAgentLaunched(
-            name + " --spec " + dispatched.taskSpec().id(),
+            String.join(
+                " ",
+                RunStore.RunRow.addressed(name, dispatched.runId(), dispatched.taskSpec().id())),
             dispatched.task(),
             dispatched.branch(),
             operator,

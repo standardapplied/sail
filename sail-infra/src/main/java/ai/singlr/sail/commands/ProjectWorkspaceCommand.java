@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.commands;
 
+import ai.singlr.sail.api.OperationsFactory;
 import ai.singlr.sail.engine.Banner;
 import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.SailPaths;
@@ -200,7 +201,11 @@ public final class ProjectWorkspaceCommand implements Runnable {
       target.change(
           null,
           (workspaces, named) ->
-              workspaces.stop(named.project, named.name, WorkspaceVerbs.liveRun(named.project)));
+              workspaces.stop(
+                  named.project,
+                  named.name,
+                  WorkspaceVerbs.liveRun(
+                      named.project, OperationsFactory::open, HostSync.handle())));
     }
   }
 
@@ -228,7 +233,7 @@ public final class ProjectWorkspaceCommand implements Runnable {
               workspaces.delete(
                   named.project,
                   named.name,
-                  WorkspaceVerbs.liveRun(named.project),
+                  WorkspaceVerbs.liveRun(named.project, OperationsFactory::open, HostSync.handle()),
                   instance -> confirm(yes, named)));
     }
   }

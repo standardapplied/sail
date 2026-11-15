@@ -29,6 +29,7 @@ import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.config.TestDefinitions;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.ContainerSailSetup;
+import ai.singlr.sail.engine.DeviceFixtures;
 import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.ProjectSkillInstaller;
 import ai.singlr.sail.engine.SailSkills;
@@ -322,6 +323,74 @@ class DispatchCommandWiringTest {
     assertEquals(true, said.get("would_restart"));
     assertEquals("acme-auth", said.get("workspace"));
     assertEquals(false, said.get("would_reuse_workspace"));
+  }
+
+  /**
+   * A dispatch into its spec's running workspace on a degraded mirror says the workspace is reused
+   * and the pool degraded, rehearsed and for real.
+   */
+  @Test
+  void aDispatchIntoItsRunningWorkspaceOnADegradedMirrorSaysBoth() throws Exception {
+    var mirror =
+        """
+        [{"name": "tank", "driver": "zfs", "config": {"source": "tank", "zfs.pool_name": "tank",
+          "volatile.initial_source": "mirror=/dev/disk/by-id/wwn-0x5000c500a1b2c3d4-part5,/dev/disk/by-id/wwn-0x5000c500e5f6a7b8-part5"}}]
+        """;
+    var degraded =
+        DeviceFixtures.read("handwritten-mirror-degraded-removed.zpool-status.txt")
+            .replace("devpool", "tank");
+    var running =
+        "["
+            + TestWorkspaces.template("acme", "")
+            + ","
+            + TestWorkspaces.specWorkspace("acme", "auth", "Running", HANDLE)
+            + "]";
+
+    var rehearsed =
+        dispatch(
+            shell()
+                .on("incus storage list --format json", mirror)
+                .on("zpool status -P tank", degraded)
+                .on("incus list --format json", running),
+            0,
+            "--background",
+            "--dry-run");
+    var real =
+        dispatch(
+            shell()
+                .on("incus storage list --format json", mirror)
+                .on("zpool status -P tank", degraded)
+                .on("incus list --format json", running),
+            0,
+            "--background");
+
+    assertEquals(0, rehearsed.exit(), rehearsed.err());
+    assertTrue(
+        rehearsed
+            .out()
+            .contains("  Would reuse workspace auth (acme-auth).\n  Pool tank is DEGRADED"),
+        rehearsed.out());
+    assertEquals(0, real.exit(), real.err());
+    assertTrue(real.out().contains("Workspace auth reused"), real.out());
+    assertTrue(real.out().contains("Pool tank is DEGRADED"), real.out());
+  }
+
+  /** Under {@code --json} the dispatch says what it entered in its JSON alone. */
+  @Test
+  void aJsonDispatchSaysTheWorkspaceItEnteredInItsJsonAlone() throws Exception {
+    var running =
+        "["
+            + TestWorkspaces.template("acme", "")
+            + ","
+            + TestWorkspaces.specWorkspace("acme", "auth", "Running", HANDLE)
+            + "]";
+
+    var json =
+        dispatch(shell().on("incus list --format json", running), 0, "--background", "--json");
+
+    assertEquals(0, json.exit(), json.out() + json.err());
+    assertFalse(json.out().contains("Workspace auth reused"), json.out());
+    assertTrue(json.out().contains("acme-auth"), json.out());
   }
 
   /** {@code out} past the CLI's branding, which every non-JSON run prints first. */

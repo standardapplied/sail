@@ -18,14 +18,18 @@ import ai.singlr.sail.api.OperationsFactory;
 import ai.singlr.sail.api.QuietNarrator;
 import ai.singlr.sail.api.RunWatch;
 import ai.singlr.sail.config.TestDefinitions;
+import ai.singlr.sail.engine.GuardrailChecker;
 import ai.singlr.sail.engine.ScriptedShellExecutor;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.store.ProjectStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.Sqlite;
+import java.io.ByteArrayOutputStream;
+import java.io.PrintStream;
 import java.io.PrintWriter;
 import java.io.StringWriter;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Instant;
@@ -211,6 +215,89 @@ class AgentWatchCommandTest {
     var command = new AgentWatchCommand();
     new CommandLine(command).parseArgs("acme", "--run", RUN_ID, "--started-at", STARTED_AT);
     return command;
+  }
+
+  /**
+   * The report a watch names when its run ends reaches that run however many are live: by its spec
+   * for a spec's run, by its id for one of no spec, as {@code agent report} reads it.
+   */
+  @Test
+  void theReportAWatchNamesIsTheCommandThatReportsItsRun() {
+    var spec = new AgentWatchCommand();
+    new CommandLine(spec)
+        .parseArgs("acme", "--run", RUN_ID, "--spec", "auth", "--started-at", STARTED_AT);
+
+    for (var watched : List.of(watching(), spec)) {
+      var report = watched.report();
+      assertEquals("agent report", report.verb());
+      var parsed = new AgentReportCommand();
+      new CommandLine(parsed).parseArgs(report.args().toArray(String[]::new));
+      assertEquals(report.args().getFirst(), "acme");
+    }
+    assertEquals(List.of("acme", "--run", RUN_ID), watching().report().args());
+    assertEquals(List.of("acme", "--spec", "auth"), spec.report().args());
+
+    var sent = new ArrayList<String>();
+    spec.handleAgentExited((event, title, message) -> sent.add(event + " " + message));
+    spec.notifySessionDone((event, title, message) -> sent.add(event + " " + message));
+    assertEquals(
+        List.of(
+            "agent_session_stopped Agent process is no longer running. Run: sail agent report acme"
+                + " --spec auth",
+            "agent_session_completed Agent session ended. Run: sail agent report acme --spec auth"),
+        sent,
+        "the report each notification names is the one that reaches the run");
+  }
+
+  /**
+   * A spec's run lives in its own workspace, which the watch asks about; one of no spec is refused
+   * while its project's container is not running.
+   */
+  @Test
+  void aWatchOfARunOfNoSpecNeedsItsProjectsContainerRunning() throws Exception {
+    var stopped =
+        new ScriptedShellExecutor()
+            .onOk(
+                "incus list ^acme$",
+                "[{\"name\": \"acme\", \"status\": \"Stopped\", \"state\": {}}]");
+    var spec = new AgentWatchCommand();
+    new CommandLine(spec)
+        .parseArgs("acme", "--run", RUN_ID, "--spec", "auth", "--started-at", STARTED_AT);
+
+    spec.requireRunning(stopped);
+    assertTrue(stopped.invocations().isEmpty(), "a spec's workspace is the watch's to ask later");
+    var refused =
+        assertThrows(IllegalStateException.class, () -> watching().requireRunning(stopped));
+    assertTrue(refused.getMessage().contains("acme"), refused.getMessage());
+    watching()
+        .requireRunning(
+            new ScriptedShellExecutor()
+                .onOk(
+                    "incus list ^acme$",
+                    "[{\"name\": \"acme\", \"status\": \"Running\", \"state\": {}}]"));
+  }
+
+  /** The watch says each way its run ends, and sends each where the project's definition says. */
+  @Test
+  void theWatchSaysEachEndOfItsRun() {
+    var out = System.out;
+    var captured = new ByteArrayOutputStream();
+    System.setOut(new PrintStream(captured, true, StandardCharsets.UTF_8));
+    try {
+      var narrator = watching().narrator(null, null);
+      narrator.tripped(
+          new GuardrailChecker.GuardrailResult.Triggered("stall", "no output for 3s", "stop", "2s"),
+          Duration.ofSeconds(3),
+          "");
+      narrator.exited();
+      narrator.ended();
+    } finally {
+      System.setOut(out);
+    }
+
+    var said = captured.toString(StandardCharsets.UTF_8);
+    assertTrue(said.contains("stall"), said);
+    assertTrue(said.contains("Agent exited. Watch complete."), said);
   }
 
   @Test

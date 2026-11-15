@@ -1634,7 +1634,7 @@ the one whose name and keys match.
   workspaces with the rest (W11).
 - **Every door that reads or attaches to a run goes where it lives.** `sail agent stop`, `log`,
   `status`, `report` and `attach` take one selector (`RunSelector`): `--spec <id>`, or `--run <id>`
-  for a run of no spec, and every printed command for a run carries it, resolved one way
+  for a run of no spec, and every printed command for a run carries it, built in one place (`RunStore.RunRow.addressed`), resolved one way
   (`RunSelector.resolve`, the newest run it picks that the reader may operate). A stop of a project
   with several live runs and neither named is refused, naming the command that stops each, and so
   is any of the five verbs given a spec with several live runs (a room turn beside its build),
@@ -1651,10 +1651,12 @@ the one whose name and keys match.
   the workspace ends that process (`RunReservation`, `AgentUnit.TERMINAL`) before it launches, so a
   person's open terminal never holds the loop and the conversation stays resumable; a live member
   starts no second process on that session while it lives (`LiveMembers.terminalHolds`); and the
-  attach is refused while a run of the spec lives there. The terminal takes the pty host's lock
-  around its last check and its start, so a claim made before it sees the run, and one made after
-  finds its pid. A conversation of the project's container is resumed in a host session as
-  before.
+  attach is refused while a run of the spec lives there. The race between a terminal and a claim
+  is closed by order, with no lock between them: a claim takes its run row, then ends the
+  terminal its pid file names; the terminal names its process, then asks for a run claiming the
+  place (`RunReservation.yieldToAClaim`) and, finding one, ends itself. Whichever comes second sees
+  what the first did. A terminal that cannot name its process within 10 s is ended. A
+  conversation of the project's container is resumed in a host session as before.
 - **A member of a spec's room is seated in the spec's workspace.** An engagement is checked as a
   dispatch's run is, and a running workspace asked for its harness, but nothing is made: the
   member's first turn makes the workspace once its run is reserved (R3), so nothing is cloned on an

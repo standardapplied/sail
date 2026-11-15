@@ -2392,6 +2392,99 @@ class WorkspacesTest {
     assertFalse(shell.invocations().stream().anyMatch(c -> c.startsWith("incus copy")));
   }
 
+  /** A mirror ZFS calls online carries no notice: only a degraded one is said. */
+  @Test
+  void aSpecsRunOnAnOnlineMirrorSaysNothingOfThePool() throws Exception {
+    var shell =
+        incus(DIR_AND_MIRROR, list(template("v1", INPUTS)), snapshots("v1"))
+            .onOk(
+                "zpool status -P tank",
+                DeviceFixtures.read("handwritten-mirror-online.zpool-status.txt")
+                    .replace("devpool", "tank"));
+
+    assertTrue(
+        workspaces(shell, ticks(0)).checkSpec(FIX, INPUTS, name -> false).degraded().isEmpty());
+  }
+
+  /** A reused workspace that cannot be made the run's person's takes no run of theirs. */
+  @Test
+  void aWorkspaceThatCannotBeMadeTheRunsPersonsIsRefusedSayingWhy() throws Exception {
+    var shell =
+        incus(
+                DIR_AND_ZFS,
+                list(template("v1", INPUTS), specWorkspace("Running", "fix-login", "eng")),
+                snapshots("v1"))
+            .onFail("incus config set acme-fix-login", "permission denied");
+    var workspaces = workspaces(shell, ticks(0));
+    var check = workspaces.checkSpec(FIX, INPUTS, name -> false);
+
+    var refused =
+        assertThrows(
+            IOException.class,
+            () -> workspaces.enterSpec(check, acme(), "uday", tempDir, whole -> {}));
+
+    assertTrue(
+        refused
+            .getMessage()
+            .startsWith(
+                "Workspace acme-fix-login could not be made uday's, so no run of theirs goes in"
+                    + " it: "),
+        refused.getMessage());
+  }
+
+  /**
+   * A spec's workspace whose ready mark was taken off by hand is left as it is, and an instance of
+   * its name that is no workspace at all is refused as Incus's own.
+   */
+  @Test
+  void aSpecsWorkspaceWithItsMarkTakenOffOrAStrayInstanceUnderItsNameIsRefused() {
+    var unmarked =
+        incus(
+            DIR_AND_ZFS,
+            list(
+                template("v1", INPUTS),
+                instance(
+                    "acme-fix-login",
+                    "Running",
+                    "tank",
+                    "\"user.sail.project\": \"acme\", \"user.sail.workspace\": \"fix-login\","
+                        + " \"user.sail.spec\": \"fix-login\"")),
+            snapshots("v1"));
+    var stray =
+        incus(
+            DIR_AND_ZFS,
+            list(template("v1", INPUTS), instance("acme-fix-login", "Running", "tank", "")),
+            snapshots("v1"));
+
+    assertTrue(
+        assertThrows(
+                IllegalStateException.class,
+                () -> workspaces(unmarked, ticks(0)).checkSpec(FIX, INPUTS, name -> false))
+            .getMessage()
+            .startsWith("Workspace 'fix-login' of acme has no ready mark"));
+    assertEquals(
+        "Spec fix-login's workspace of acme would be the instance 'acme-fix-login', which is an"
+            + " instance Incus already has, so no run of the spec goes there. Give the spec"
+            + " another id.",
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> workspaces(stray, ticks(0)).checkSpec(FIX, INPUTS, name -> false))
+            .getMessage());
+  }
+
+  /** A dry run of a create narrates it and takes no create lock, so it waits on no one. */
+  @Test
+  void aDryRunCreateTakesNoCreateLock() throws Exception {
+    var observer = incus(DIR_AND_ZFS, list(template("v1", INPUTS)), snapshots("v1"));
+    var locks = locks();
+
+    new Workspaces(
+            observer, new ShellExecutor(true), ticks(0, 1, 2, 3, 4, 5, 6, 7), locks, () -> 65536)
+        .create(acme(), "fix-login", source(), tempDir, "eng");
+
+    assertFalse(Files.exists(locks.resolve("workspace-create.lock")));
+  }
+
   @Test
   void aSpecsRunningWorkspaceOfTheSamePersonIsReusedAsItIs() throws Exception {
     var shell =

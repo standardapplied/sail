@@ -9,18 +9,21 @@ import ai.singlr.sail.api.ApiException;
 import ai.singlr.sail.api.HostOperations;
 import ai.singlr.sail.api.LiveMembers;
 import ai.singlr.sail.api.OperationsFactory;
+import ai.singlr.sail.api.RunReservation;
 import ai.singlr.sail.api.SessionYield;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.Lane;
 import ai.singlr.sail.config.ProjectDefinition;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.AgentPresence;
+import ai.singlr.sail.engine.AgentSession;
 import ai.singlr.sail.engine.AgentUnit;
 import ai.singlr.sail.engine.ContainerStateGuard;
 import ai.singlr.sail.engine.NameValidator;
 import ai.singlr.sail.engine.NodeIdentity;
 import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.RunPlace;
+import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.engine.Stty;
 import ai.singlr.sail.harness.Harness;
@@ -30,12 +33,16 @@ import ai.singlr.sail.store.RoomStore;
 import ai.singlr.sail.store.RunStore;
 import java.io.IOException;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.function.BooleanSupplier;
 import java.util.function.Function;
+import java.util.function.LongSupplier;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 import picocli.CommandLine.Command;
@@ -412,12 +419,113 @@ public final class AgentAttachCommand implements Runnable {
       exitedWith(new ProcessBuilder(exec).inheritIO().start().waitFor());
       return;
     }
+    var workspace = (RunPlace.SpecWorkspace) place;
+    var shell = new ShellExecutor(false);
+    var before = terminalPid(shell, workspace);
     Process terminal;
     try (var hold = new PtyHostYield(SessionCommand.socketOrDefault(socket)).lock(name)) {
       requireStillLatestAndIdle(run, latest(operator), name, operator);
       terminal = new ProcessBuilder(exec).inheritIO().start();
     }
-    exitedWith(terminal.waitFor());
+    var started = terminal;
+    if (!awaitNamed(
+        () -> named(shell, workspace, before),
+        started::isAlive,
+        System::nanoTime,
+        TERMINAL_NAMED_WAIT,
+        () -> Thread.sleep(POLL.toMillis()))) {
+      started.destroyForcibly();
+      throw new IllegalStateException(
+          "The terminal in "
+              + workspace.instance()
+              + " did not name its process within "
+              + TERMINAL_NAMED_WAIT.toSeconds()
+              + " s, so it is ended rather than left where a claim of the workspace cannot end it."
+              + " Attach again.");
+    }
+    var claims = (Supplier<List<String>>) () -> claimsOf(run, workspace, latest(operator));
+    var yielded = RunReservation.yieldToAClaim(shell, workspace, claims);
+    var code = terminal.waitFor();
+    yielded
+        .or(() -> claims.get().stream().findFirst())
+        .ifPresentOrElse(
+            claim -> System.err.println(yielded(run, claim, name, operator)),
+            () -> exitedWith(code));
+  }
+
+  /** How long a terminal in a spec's workspace has to name its process before it is ended. */
+  static final Duration TERMINAL_NAMED_WAIT = Duration.ofSeconds(10);
+
+  private static final Duration POLL = Duration.ofMillis(100);
+
+  /** A wait between two asks. */
+  @FunctionalInterface
+  interface Pause {
+    void pause() throws InterruptedException;
+  }
+
+  /**
+   * Waits until {@code named} says the terminal's process is named in its pid file, or the terminal
+   * has ended ({@code alive} false), asking again after each {@code pause} until {@code wait} has
+   * passed on {@code nanos}: false then, a terminal a claim could not end.
+   */
+  static boolean awaitNamed(
+      BooleanSupplier named, BooleanSupplier alive, LongSupplier nanos, Duration wait, Pause pause)
+      throws InterruptedException {
+    var deadline = nanos.getAsLong() + wait.toNanos();
+    while (alive.getAsBoolean() && !named.getAsBoolean()) {
+      if (nanos.getAsLong() - deadline >= 0) {
+        return false;
+      }
+      pause.pause();
+    }
+    return true;
+  }
+
+  /**
+   * The runs other than {@code run} that claim {@code workspace} in a lane that ends its terminal,
+   * as {@code latest} found the box's live runs.
+   */
+  static List<String> claimsOf(
+      RunStore.RunRow run, RunPlace.SpecWorkspace workspace, Latest latest) {
+    return latest.running().stream()
+        .filter(other -> !other.runId().equals(run.id()))
+        .filter(other -> workspace.equals(other.place()))
+        .filter(other -> RunReservation.endsTheTerminal(other.role()))
+        .map(DispatchGate.RunningRun::runId)
+        .toList();
+  }
+
+  /** What a terminal that a claim ended says, in the words a claim gives every terminal it ends. */
+  static String yielded(
+      RunStore.RunRow run, String claim, String project, OperatorCommand operator) {
+    return Ansi.AUTO.string(
+        "  @|yellow ⚠|@ This terminal ended: "
+            + RunReservation.yieldReason(claim, run.specId())
+            + ". Its conversation is resumable once that run ends: "
+            + operator.sail("agent attach " + project + RunSelector.of(run)));
+  }
+
+  /** The pid {@code workspace}'s terminal pid file names, alive or not; none when it names none. */
+  private static Integer terminalPid(ShellExec shell, RunPlace.SpecWorkspace workspace)
+      throws Exception {
+    var info = new AgentSession(shell).queryStatus(workspace.instance(), AgentUnit.TERMINAL);
+    return info == null ? null : info.pid();
+  }
+
+  /**
+   * Whether {@code workspace}'s terminal pid file names a live process other than {@code before}.
+   */
+  private static boolean named(ShellExec shell, RunPlace.SpecWorkspace workspace, Integer before) {
+    try {
+      var info = new AgentSession(shell).queryStatus(workspace.instance(), AgentUnit.TERMINAL);
+      return info != null && info.running() && !Objects.equals(info.pid(), before);
+    } catch (Exception unanswered) {
+      if (unanswered instanceof InterruptedException) {
+        Thread.currentThread().interrupt();
+      }
+      return false;
+    }
   }
 
   private static void exitedWith(int exitCode) {
