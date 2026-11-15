@@ -15,11 +15,14 @@ import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.TimeoutException;
+import java.util.function.Consumer;
 import java.util.function.LongSupplier;
 
 /**
@@ -42,6 +45,45 @@ public final class TestWorkspaces {
   /** The workspaces of a box holding a current template of each of {@code projects}. */
   public static Workspaces ready(ProjectReader definitions, String... projects) {
     return over(incus(definitions, projects));
+  }
+
+  /**
+   * As {@link #ready(ProjectReader, String...)}, telling {@code made} each {@code incus copy} a
+   * create clones a workspace with (its instance at index 3, its keys after), so a fake container
+   * that answers only the instances that exist answers it too.
+   */
+  public static Workspaces ready(
+      ProjectReader definitions, Consumer<List<String>> made, String... projects) {
+    return over(made(incus(definitions, projects), made));
+  }
+
+  /** {@code incus}, telling {@code made} each {@code incus copy} it answers done. */
+  public static ShellExec made(ShellExec incus, Consumer<List<String>> made) {
+    return new ShellExec() {
+      @Override
+      public Result exec(List<String> command)
+          throws IOException, InterruptedException, TimeoutException {
+        return told(command, incus.exec(command));
+      }
+
+      @Override
+      public Result exec(List<String> command, Path workDir, Duration timeout)
+          throws IOException, InterruptedException, TimeoutException {
+        return told(command, incus.exec(command, workDir, timeout));
+      }
+
+      private Result told(List<String> command, Result result) {
+        if (result.ok() && command.size() > 3 && command.get(1).equals("copy")) {
+          made.accept(List.copyOf(command));
+        }
+        return result;
+      }
+
+      @Override
+      public boolean isDryRun() {
+        return false;
+      }
+    };
   }
 
   /** The workspaces of a box whose Incus is {@code incus}. */

@@ -53,6 +53,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 
 public final class Fleet implements AutoCloseable {
@@ -293,7 +294,7 @@ public final class Fleet implements AutoCloseable {
               fdes,
               bus::publish,
               new WatcherSpawner(shell, (command, log) -> 4242L),
-              TestWorkspaces.ready(TestProjects.reading(descriptor), PROJECT),
+              TestWorkspaces.ready(TestProjects.reading(descriptor), shell::made, PROJECT),
               command -> 0,
               DispatchOperations.Listener.NONE,
               SessionYield.NONE);
@@ -551,12 +552,47 @@ public final class Fleet implements AutoCloseable {
     }
   }
 
+  /**
+   * The box's containers: the project's own and each workspace a create made, and no other, so a
+   * run addressed to a container that does not exist fails as it would on a box.
+   */
   private static final class FleetShell implements ShellExec {
+    private final Map<String, String> instances = new ConcurrentHashMap<>();
+
+    FleetShell() {
+      instances.put(PROJECT, RUNNING_JSON);
+    }
+
+    /** A workspace {@code copy}, an {@code incus copy} argv, made: listed whole with its keys. */
+    void made(List<String> copy) {
+      var keys = new ArrayList<String>(List.of("\"user.sail.ready\": \"1\""));
+      for (var i = 4; i + 1 < copy.size(); i += 2) {
+        var assignment = copy.get(i + 1);
+        var at = assignment.indexOf('=');
+        keys.add(
+            "\"" + assignment.substring(0, at) + "\": \"" + assignment.substring(at + 1) + "\"");
+      }
+      instances.put(
+          copy.get(3),
+          "[{\"name\": \"%s\", \"status\": \"Running\", \"state\": {}, \"config\": {%s}}]"
+              .formatted(copy.get(3), String.join(", ", keys)));
+    }
+
     @Override
     public Result exec(List<String> command) {
       var joined = String.join(" ", command);
+      if (command.size() > 2
+          && command.get(0).equals("incus")
+          && command.get(1).equals("exec")
+          && !instances.containsKey(command.get(2))) {
+        return new Result(1, "", "Error: Instance not found");
+      }
       if (joined.contains("incus list")) {
-        return new Result(0, RUNNING_JSON, "");
+        var asked = command.size() > 2 ? command.get(2) : "";
+        return asked.startsWith("^") && asked.endsWith("$")
+            ? new Result(
+                0, instances.getOrDefault(asked.substring(1, asked.length() - 1), "[]"), "")
+            : new Result(0, RUNNING_JSON, "");
       }
       return ScriptedShellExecutor.reachableContainer(joined)
           .orElseGet(() -> new Result(0, joined.endsWith("/agent.log") ? CLEAN_REVIEW : "", ""));

@@ -29,8 +29,9 @@ import java.util.concurrent.atomic.AtomicReference;
  * sees them through {@link ShellExec}: files that are written can be read back, an agent unit that
  * was started is active until it exits or is killed, and git answers for the spec's repos. The
  * project's container and its specs' workspaces are one instance here, listed under whichever name
- * is asked for: a loop that runs one spec at a time never tells them apart. It stands in for the
- * shell only — every sail class that talks to a container runs for real against it.
+ * is asked for, a spec's workspace with its keys as a create gives them: a loop that runs one spec
+ * at a time never tells them apart. It stands in for the shell only — every sail class that talks
+ * to a container runs for real against it.
  */
 final class FakeContainer implements ShellExec {
 
@@ -290,9 +291,16 @@ final class FakeContainer implements ShellExec {
           asked.startsWith("^") && asked.endsWith("$")
               ? asked.substring(1, asked.length() - 1)
               : project;
+      var workspace = name.startsWith(project + "-") ? name.substring(project.length() + 1) : "";
+      var keys =
+          workspace.isEmpty()
+              ? ""
+              : (", \"config\": {\"user.sail.project\": \"%s\", \"user.sail.workspace\": \"%s\","
+                      + " \"user.sail.spec\": \"%s\", \"user.sail.ready\": \"1\"}")
+                  .formatted(project, workspace, workspace);
       return ok(
-          "[{\"name\": \"%s\", \"status\": \"%s\", \"state\": {}}]"
-              .formatted(name, running ? "Running" : "Stopped"));
+          "[{\"name\": \"%s\", \"status\": \"%s\", \"state\": {}%s}]"
+              .formatted(name, running ? "Running" : "Stopped", keys));
     }
     if (!"incus".equals(command.get(0)) || !"exec".equals(command.get(1)) || boundary < 0) {
       return host(command);
