@@ -1631,9 +1631,10 @@ the one whose name and keys match.
   workspace's. `sail project workspace list` shows each workspace's spec and owner; `stop` and
   `delete` refuse a workspace a live run of its spec is in, and `project destroy` takes the run
   workspaces with the rest (W11).
-- **Every door that reads or attaches to a run goes where it lives.** `sail agent stop` takes
-  `--spec`, and `--run <id>` for a run of no spec; a stop of a project with several live runs and
-  neither named is refused, naming the command that stops each. `watch` takes `--spec`, and the
+- **Every door that reads or attaches to a run goes where it lives.** `sail agent stop`, `log`,
+  `status`, `report` and `attach` take one selector (`RunSelector`): `--spec <id>`, or `--run <id>`
+  for a run of no spec, and every printed command for a run carries it. A stop of a project with
+  several live runs and neither named is refused, naming the command that stops each. `watch` takes `--spec`, and the
   watcher is told the spec on its command line, so it probes the run's own workspace. `agent log`
   and `GET /v1/runs/{run}/log` read the run's log, `agent status` and `GET /v1/projects/{p}/agent`
   its session and commits, and `agent report` (`POST /v1/projects/{p}/agent/report`) its session,
@@ -1652,6 +1653,10 @@ the one whose name and keys match.
   entered as a dispatch's run is, its harness found installed there; the project's container is
   neither required running nor snapshotted, and an engage snapshot is refused for a spec's room. A
   room with no spec seats its member in the project's container, as before.
+- **A lost build is a failed build.** A run the missed-stop sweep finds gone while still recorded
+  running, with no exit or reason observed, is published `lost` (`Event.WellKnownData.LOST`), the
+  one reading of an unknown exit: a lost build starts no review, and its room names the dispatch
+  that builds it again (`--restart`).
 - **A refusal is said in the spec's room too.** Every refusal of `RunPlaces` (no ZFS pool, no
   template, a faulted pool, a name another holds, `runner_busy`) and a degraded pool's notice is
   said in the spec's room in the words the CLI and the API give, once, through the room seam a
