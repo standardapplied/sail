@@ -238,6 +238,9 @@ class EngagementLifecycleTest {
     assertTrue(
         stopped.ran.stream().noneMatch(command -> command.startsWith("incus exec acme ")),
         "and asks nothing of the project's container");
+    assertTrue(
+        stopped.ran.stream().noneMatch(command -> command.startsWith("incus exec acme-auth ")),
+        "nor of a workspace that is not there yet");
   }
 
   /** M3: no snapshot of the project's container is taken for a member of a spec's room. */
