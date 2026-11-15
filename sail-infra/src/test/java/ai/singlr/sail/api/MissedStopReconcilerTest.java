@@ -467,6 +467,43 @@ class MissedStopReconcilerTest {
     assertEquals(2, fdes.logins().list(kept).size());
   }
 
+  /**
+   * Scenario 11: each pass takes the credentials of every person the roster no longer holds out of
+   * their workspaces, however they were removed, asking of the roster as it is; one it cannot reach
+   * is said once and taken again by the next pass.
+   */
+  @Test
+  void eachPassTakesARemovedPersonsCredentialsOutOfTheirWorkspacesAndSaysOneLeftOnce() {
+    TestLogins.store(db, "ada");
+    var asked = new ArrayList<String>();
+    var probe =
+        new CountingProbe(true) {
+          @Override
+          public List<String> disown(Predicate<String> held) {
+            asked.add("ada " + held.test("ada") + ", gone " + held.test("gone"));
+            return List.of("acme-b: Error: permission denied");
+          }
+        };
+    var err = new ByteArrayOutputStream();
+    var before = System.err;
+    System.setErr(new PrintStream(err, true, StandardCharsets.UTF_8));
+    try {
+      var reconciler = reconciler(probe, PAST_GRACE);
+      reconciler.sweep();
+      reconciler.sweep();
+    } finally {
+      System.setErr(before);
+    }
+
+    assertEquals(List.of("ada true, gone false", "ada true, gone false"), asked);
+    assertEquals(
+        1,
+        err.toString(StandardCharsets.UTF_8)
+            .lines()
+            .filter(line -> line.contains("credentials are left in acme-b"))
+            .count());
+  }
+
   /** A container that cannot be asked fails nothing: the next pass tries again. */
   @Test
   void aContainerThatCannotBeToldIsLeftForTheNextPass() {

@@ -836,6 +836,10 @@ laptop, and connect warns of it; a key file that holds no readable key is refuse
 read as none (`WorkstationIdentity.registered`). The result is that each engineer's containers
 commit as them and trust only their own key.
 
+This is the project's own container. A template holds none of it (T1), and a workspace holds its
+owner's alone (T2): their name and email from the roster, their git tokens from `sail git login`,
+their `fde_ssh_keys`, and the workstation key only when they are the box's person.
+
 ### Live resource resync
 
 A project's `resources` (cpu, memory, disk) sync like any other field: bump them on any box
@@ -1460,19 +1464,60 @@ Each row with the tests that prove it:
   `WorkspacesTest.aWholeWorkspaceWhoseMarkWasTakenOffByHandIsNeitherReplacedNorUsedButNamesItsDelete`,
   `WorkspacesTest.twoCreatesOfOneNameMakeOneWorkspaceAndTheOtherIsRefusedLeavingItWhole`.*
 
+- **T1. A template holds no one's credentials.** A build provisions with its caller's tokens
+  (`--git-token`, or `GITHUB_TOKEN` and its kin) for its own clone and fetches, with no git
+  identity and no trusted key. After the provisioner and before the stop, one root step
+  (`WorkspaceCredentials.STRIP`) removes `/home/dev/.git-credentials`, gh's `hosts.yml`, the dev
+  user's `user.name` and `user.email`, and every line of its `authorized_keys`; a check
+  (`WorkspaceCredentials.HELD`) then reads that none of the four is there. A step or check that
+  fails fails the build: nothing is recorded or snapshotted and the version before stays current.
+  *`WorkspacesTest.aBuildTakesItsBuildersCredentialsOutAndChecksNoneIsLeftBeforeItIsSnapshotted`,
+  `WorkspacesTest.aTemplateStillHoldingACredentialFailsItsBuildAndTheVersionBeforeStaysCurrent`,
+  `WorkspaceIT.aTemplateBuiltWithItsBuildersCredentialsIsSnapshottedHoldingNone`.*
+- **T2. A workspace holds only its owner's credentials.** Its owner (`user.sail.owner`) is the
+  person its runs act for (every lane of a box runs for its person, `boxFde()`), or the creator of
+  a person's workspace. The owner step (`WorkspaceCredentials.give`) runs after the clone's start
+  and before its prepare, so the fetch already uses the owner's token: it strips the four, sets
+  `user.name` (display name, else handle) and `user.email` from the owner's FDE row, writes their
+  `fde_ssh_keys` as `authorized_keys` (with the box's workstation key only when the owner is the
+  box's person), and their git tokens for the project's https hosts as the token store. gh is
+  logged in once the prepare has the network up. Only hosts the owner keeps a token for are
+  written, so no token of the process's environment ever lands in a workspace. A workspace is
+  refused before a run's reservation, or before a person's copy, when it will be made or re-owned
+  for someone with no email, or who keeps no token for a host that asks for credentials, naming
+  `sail fde update <h> --email <email>` or `sail git login <host>`.
+  *`WorkspacesTest.aNewWorkspaceIsGivenItsOwnersCredentialsBetweenItsStartAndItsPrepare`,
+  `WorkspacesTest.anOwnerWhoKeepsNoTokenGetsNoTokenStoreAndNoGhLogin`, `WorkspaceOwnerTest`,
+  `RunPlacesTest.aWorkspaceItsOwnerCannotFetchIsRefusedBeforeItsReservationNamingTheLogin`,
+  `WorkspaceIT.twoWorkspacesOfTwoPeopleEachCommitAsTheirOwnerWithTheirOwnStore`.*
+- **T3. A re-own replaces them all before the new owner's run is staged.** The owner step runs
+  again, gh too, and only then is `user.sail.owner` set, so a re-own cut short is done again by
+  the next entry.
+  *`WorkspacesTest.aWorkspaceOfAnotherIsStrippedAndGivenItsNewOwnersBeforeItIsRecordedTheirs`,
+  `RunPlacesTest.aWorkspaceOfAnotherIsReOwnedOnlyForAPersonWithAnEmail`.*
+- **T4. A template's digest is its definition alone** (`ProjectProvisioner.inputs(config,
+  Optional.empty())`): a workstation key revoked or replaced leaves it current. The project's own
+  container keeps the key in its digest.
+  *`WorkspaceVerbsTest.aTemplateIsBuiltFromTheBaseProfilesPoolAndItsDigestIsTheDefinitionsAlone`.*
+- **T5. A git token is kept like a harness login.** `sail git login <host>` reads it from stdin;
+  it is `/var/lib/sail/logins/<fde-id>/git/<host>`, `0600` under `0700` directories, written whole
+  and renamed, one line under the login value rule, never in the database, a log, an argv or an
+  answer, and erased with the person's logins. `GET /v1/git-logins[?fde=]`, `PUT
+  /v1/git-logins/{host}` and `DELETE /v1/git-logins/{host}[?fde=]` are Keep logins doors.
+  *`LoginStoreTest`, `LoginRoutesTest.aPersonKeepsTheirOwnGitTokensByHostAndOnlyAnAdminReachesAnothersSeeingNoValue`,
+  `GitCommandTest`.*
+- **Keys follow owners.** A pairing reaches the project's container and the workspaces of the
+  box's person; `sail fde key add` reaches that person's whole workspaces; a key removal (`fde key
+  rm`, a replaced or unpaired workstation key) reaches every container and workspace. A person
+  removed (`fde rm`, or a scoped node's roster round) has every workspace they owned lose its
+  token store, gh login and keys, and its owner, through its files, running or stopped.
+  *`ContainerAuthorizedKeysTest`,
+  `WorkspacesTest.aRemovedPersonsWorkspacesLoseTheirStoreGhLoginKeysAndOwnerAndNoOneElsesDo`.*
+
 **Known limits.**
-- **The template is its owner's.** A clone carries the box owner's GitHub token
-  (`/home/dev/.git-credentials` and gh's `hosts.yml`), git identity (`~/.gitconfig`) and the
-  workstation key in `authorized_keys`, as the project's own container does. On a box of one
-  person, that is the same person.
-- **Keys and the template.**
-  - The workstation key is in the digest the template is built from, so revoking it makes the
-    template stale and the next create builds a new version without it. Older versions keep the
-    old key, but no create clones them again.
-  - A new pairing reaches the project's container and its whole workspaces at once. It replaces
-    the workstation key, which is in the digest, so the template takes it only when the next create
-    rebuilds it.
-  - Key lines added to `authorized_keys` by hand are not tracked at all.
+- **A token stored after a workspace was made is not pushed into it.** The owner step runs at a
+  create and a re-own; a person who replaces their token has it in their next workspace.
+- **Key lines added to `authorized_keys` by hand** are replaced by the owner step of a re-own.
 - **Hand copies are not Sail's.** A copy of a workspace made with `incus copy` carries the
   project's keys under another name: every verb refuses it, and it outlives its project, keeping
   the project's tree and the owner's credentials (and, through `deleted/`, the dataset of a
@@ -3141,7 +3186,7 @@ a birth, as on main. A door's placement comes after `Access` too. The table is
 | Configure | change a project's definition | no | yes | yes | no | no | no |
 | Prune | erase a spec everywhere, once archived, cancelled or deleted | no | owner | yes | no | no | no |
 | Purge | erase a project everywhere; a retention sweep | no | no | yes | no | no | no |
-| Keep logins | store, replace, choose the default of, list or remove your own harness logins | yes | yes | yes | no | no | no |
+| Keep logins | store, replace, choose the default of, list or remove your own harness logins and git tokens | yes | yes | yes | no | no | no |
 | Manage people | add, change role, grant, remove, pair, mint tokens | no | no | yes | no | no | no |
 | Operate the box | sync now; read sync health and bus stats; point the box at another main | owner | owner | yes | no | no | no |
 

@@ -863,7 +863,9 @@ class FdeCommandTest {
   }
 
   /** What a revocation of {@code key} leaves in each container, and the incus it took. */
-  private void assertContainersNoLongerTrust(SshPublicKey key) {
+  /** {@code after}: what the change asks of Incus once every container is edited. */
+  @SafeVarargs
+  private void assertContainersNoLongerTrust(SshPublicKey key, List<String>... after) {
     assertEquals(othersMentioning(key), keygen.incus.file("acme", "/home/dev" + AUTHORIZED));
     assertEquals(LAPTOP.line() + "\n", keygen.incus.file("web", "/home/eng" + AUTHORIZED));
     assertEquals("", keygen.incus.file("docs", "/home/dev" + AUTHORIZED));
@@ -892,6 +894,7 @@ class FdeCommandTest {
               "<staged>",
               file));
     }
+    commands.addAll(List.of(after));
     assertEquals(commands, incusCommands());
   }
 
@@ -986,7 +989,7 @@ class FdeCommandTest {
             + " workstation key was its key and is removed. Containers of acme, web, docs, stray no"
             + " longer trust it.",
         printed().getLast());
-    assertContainersNoLongerTrust(key);
+    assertContainersNoLongerTrust(key, List.of("incus", "list", "--format", "json"));
     assertFalse(Files.exists(workstationKey()));
     assertEquals("", Files.readString(authorizedKeys()));
   }
@@ -1131,7 +1134,7 @@ class FdeCommandTest {
     appliedContainers(held);
 
     assertEquals(
-        List.of(), new ContainerAuthorizedKeys(keygen).add(LAPTOP, List.of("acme", "web")));
+        List.of(), new ContainerAuthorizedKeys(keygen).add(LAPTOP, List.of("acme", "web"), "uday"));
 
     assertEquals(held, keygen.incus.file("acme", "/home/dev" + AUTHORIZED));
     assertEquals(held, keygen.incus.file("web", "/home/dev" + AUTHORIZED));

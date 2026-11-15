@@ -138,6 +138,11 @@ public final class FdeStore {
     return LoginStore.beside(db);
   }
 
+  /** The SSH keys the people of this roster registered ({@code fde_ssh_keys}). */
+  public FdeSshKeyStore sshKeys() {
+    return new FdeSshKeyStore(db);
+  }
+
   public Optional<Fde> byId(String id) {
     return db.queryOne(SELECT + " WHERE id = ?", FdeStore::map, id);
   }

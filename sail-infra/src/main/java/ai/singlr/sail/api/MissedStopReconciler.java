@@ -18,6 +18,7 @@ import ai.singlr.sail.engine.GuardrailTrigger;
 import ai.singlr.sail.engine.RunPlace;
 import ai.singlr.sail.engine.RunUsageReader;
 import ai.singlr.sail.engine.ShellExec;
+import ai.singlr.sail.engine.Workspaces;
 import ai.singlr.sail.harness.RunUsage;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.store.EventStore;
@@ -37,6 +38,7 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.Predicate;
 import java.util.function.Supplier;
 import java.util.stream.Stream;
 
@@ -141,6 +143,14 @@ public final class MissedStopReconciler implements AutoCloseable {
     default boolean instanceGone(RunPlace place) throws Exception {
       return false;
     }
+
+    /**
+     * Takes from every workspace whose owner {@code held} says the roster no longer holds their
+     * credentials ({@link Workspaces#disown}), answering those it could not; none, by default.
+     */
+    default List<String> disown(Predicate<String> held) throws Exception {
+      return List.of();
+    }
   }
 
   /**
@@ -166,6 +176,7 @@ public final class MissedStopReconciler implements AutoCloseable {
   private final PeriodicPass pass;
   private volatile Instant tidiedSince = Instant.EPOCH;
   private final Set<String> untidied = ConcurrentHashMap.newKeySet();
+  private final Set<String> undisowned = ConcurrentHashMap.newKeySet();
   private final StrandedReviewRescue strandedReviews;
 
   public MissedStopReconciler(
@@ -263,6 +274,11 @@ public final class MissedStopReconciler implements AutoCloseable {
           throw new IOException("Container '" + instance + "' did not tidy its launch files.");
         }
       }
+
+      @Override
+      public List<String> disown(Predicate<String> held) throws Exception {
+        return Workspaces.onThisBox(shell).disown(held);
+      }
     };
   }
 
@@ -328,12 +344,13 @@ public final class MissedStopReconciler implements AutoCloseable {
    * Removes what may outlive a run but must not: the launch file of every run of this box that is
    * not live, which a launch that died before its wrapper read it left in its container (HL4), and
    * the logins of every person the roster no longer holds, which a removal that crashed before
-   * deleting them left on this runner (HL9), and what a push killed midway left in the host's
-   * staging directory. Only a container that had a run start or finish since {@link #TIDY_LOOKBACK}
-   * before the last pass is asked (every one, on the first pass after a start): a launch that dies
-   * leaves its file with a run that finishes, by its launch's cleanup or by this sweep. A container
-   * that does not answer, or does not run the tidy (a stopped one), is tried again on a later pass,
-   * and said once: not again until its tidy has succeeded.
+   * deleting them left on this runner (HL9), and their credentials in the workspaces they owned,
+   * and what a push killed midway left in the host's staging directory. Only a container that had a
+   * run start or finish since {@link #TIDY_LOOKBACK} before the last pass is asked (every one, on
+   * the first pass after a start): a launch that dies leaves its file with a run that finishes, by
+   * its launch's cleanup or by this sweep. A container that does not answer, or does not run the
+   * tidy (a stopped one), is tried again on a later pass, and said once: not again until its tidy
+   * has succeeded.
    */
   void removeLeftovers() {
     var pass = clock.get();
@@ -360,6 +377,27 @@ public final class MissedStopReconciler implements AutoCloseable {
     var swept = fdes.logins().sweep(id -> fdes.byId(id).isPresent());
     if (swept > 0) {
       System.err.println("  [reconcile] removed the logins of " + swept + " people removed");
+    }
+    disownRemoved();
+  }
+
+  /**
+   * Takes the credentials of every person the roster no longer holds out of the workspaces they
+   * owned, however they were removed (a host {@code fde rm}, a scoped node's roster round, or one
+   * whose own take-back could not reach Incus); a workspace not reached is said once, until it is.
+   */
+  private void disownRemoved() {
+    try {
+      var unreached = unitProbe.disown(handle -> fdes.byHandle(handle).isPresent());
+      for (var left : unreached) {
+        if (undisowned.add(left)) {
+          System.err.println("  [reconcile] a removed person's credentials are left in " + left);
+        }
+      }
+      undisowned.retainAll(unreached);
+    } catch (Exception e) {
+      System.err.println(
+          "  [reconcile] could not take removed people's credentials out: " + e.getMessage());
     }
   }
 

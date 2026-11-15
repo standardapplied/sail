@@ -29,6 +29,7 @@ import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.engine.SshIdentityProvisioner;
 import ai.singlr.sail.engine.SyncIdentity;
+import ai.singlr.sail.engine.Workspaces;
 import ai.singlr.sail.engine.WorkstationIdentity;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.ProjectScope;
@@ -60,6 +61,7 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.TimeoutException;
 import java.util.function.Function;
+import java.util.function.Predicate;
 import java.util.function.Supplier;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
@@ -403,6 +405,67 @@ public final class FdeCommand implements Runnable {
 
   private static void applyKeys(Sqlite db, OperatorCommand operator) throws Exception {
     System.out.println(Ansi.AUTO.string(keysOutcome(new AuthorizedKeysSync().sync(db), operator)));
+  }
+
+  /** A change of the containers' keys, said only for each one it did not reach and why. */
+  @FunctionalInterface
+  interface KeyChange {
+    List<ContainerAuthorizedKeys.Unreached> apply()
+        throws IOException, InterruptedException, TimeoutException;
+  }
+
+  /**
+   * Makes {@code change} and says each container it did not reach, that it {@code still} (for
+   * instance "may still trust the removed key"), and why; or, when the containers cannot be listed,
+   * that the change reached none.
+   */
+  static void say(KeyChange change, String still) throws InterruptedException {
+    try {
+      for (var unreached : change.apply()) {
+        System.out.println(
+            Ansi.AUTO.string(
+                "  @|yellow ⚠|@ "
+                    + unreached.container()
+                    + " "
+                    + still
+                    + ": "
+                    + unreached.reason()
+                    + "."));
+      }
+    } catch (IOException | TimeoutException failure) {
+      System.out.println(
+          Ansi.AUTO.string(
+              "  @|yellow ⚠|@ This box's containers could not be read, so the key change reached"
+                  + " none of them: "
+                  + Remedied.reasonOf(failure).strip()
+                  + "."));
+    }
+  }
+
+  /**
+   * Takes from every workspace of a person the roster no longer holds ({@code held}), {@code
+   * handle} just removed among them, their token store, {@code gh} login and keys, and says each it
+   * could not; sail-api's next pass takes those again.
+   */
+  private static void disown(Box box, String handle, Predicate<String> held)
+      throws InterruptedException {
+    try {
+      for (var unreached : Workspaces.onThisBox(box.shell()).disown(held)) {
+        System.out.println(
+            Ansi.AUTO.string(
+                "  @|yellow ⚠|@ A workspace may still hold a removed person's credentials until"
+                    + " sail-api's next pass: "
+                    + unreached));
+      }
+    } catch (IOException | TimeoutException failure) {
+      System.out.println(
+          Ansi.AUTO.string(
+              "  @|yellow ⚠|@ This box's workspaces could not be read, so they may hold "
+                  + handle
+                  + "'s credentials until sail-api's next pass: "
+                  + Remedied.reasonOf(failure).strip()
+                  + "."));
+    }
   }
 
   /**
@@ -1008,6 +1071,7 @@ public final class FdeCommand implements Runnable {
                       : PairingRevocation.revoke(box, db, fde.handle(), pairing);
               fdeStore.remove(fde.id());
               System.out.println(Ansi.AUTO.string("  @|green ✓|@ FDE removed: " + fde.handle()));
+              disown(box, fde.handle(), person -> fdeStore.byHandle(person).isPresent());
               System.out.println(
                   Ansi.AUTO.string(
                       "  @|faint Owned tokens, SSH keys, sessions, passkeys, and enrollment"
@@ -1182,9 +1246,10 @@ public final class FdeCommand implements Runnable {
     }
 
     /**
-     * Writes {@code key} into the container of each project this box runs once its code is shown,
-     * and names each that does not trust it yet. The catalog holds projects this box never ran, so
-     * a box whose containers cannot be listed names the apply of every container it runs instead.
+     * Writes {@code key} into the container of each project this box runs, and into the workspaces
+     * of the box's person, once its code is shown, and names each that does not trust it yet. The
+     * catalog holds projects this box never ran, so a box whose containers cannot be listed names
+     * the apply of every container it runs instead.
      */
     private static List<String> trustInContainers(
         Box box, Sqlite db, SshPublicKey key, OperatorCommand operator)
@@ -1196,7 +1261,7 @@ public final class FdeCommand implements Runnable {
       }
       try {
         return new ContainerAuthorizedKeys(box.shell())
-            .add(key, projects).stream()
+            .add(key, projects, box.handle()).stream()
                 .map(
                     container -> notTrustedYet(container.container(), container.reason(), operator))
                 .toList();
@@ -1507,6 +1572,10 @@ public final class FdeCommand implements Runnable {
       return command.database();
     }
 
+    private Box box() {
+      return command.box.get();
+    }
+
     @Command(
         name = "add",
         description = "Register an SSH public key for an FDE.",
@@ -1535,6 +1604,10 @@ public final class FdeCommand implements Runnable {
                         .orElseThrow(
                             () -> new IllegalArgumentException(unknownFde(handle, operator)));
                 registerKey(db, fde, publicKey, operator);
+                var keys = new ContainerAuthorizedKeys(key.box().shell());
+                say(
+                    () -> keys.addToWorkspacesOf(SshPublicKey.parse(publicKey), fde.handle()),
+                    "does not trust this key yet");
               }
             });
       }
@@ -1602,10 +1675,14 @@ public final class FdeCommand implements Runnable {
                 if (fingerprint.isEmpty()) {
                   return;
                 }
+                var removing = keyStore.findByFingerprint(fingerprint.get());
                 if (keyStore.remove(fingerprint.get())) {
                   System.out.println(
                       Ansi.AUTO.string("  @|green ✓|@ Removed key " + fingerprint.get()));
                   applyKeys(db, operator);
+                  var keys = new ContainerAuthorizedKeys(key.box().shell());
+                  var removed = SshPublicKey.parse(removing.orElseThrow().publicKey());
+                  say(() -> keys.removeFromEach(removed), "may still trust the removed key");
                 } else {
                   System.out.println(
                       Ansi.AUTO.string(

@@ -341,12 +341,12 @@ class AccessTest {
               Action.KEEP_LOGINS,
               PEOPLE,
               PEOPLE,
-              "keep harness logins",
+              "keep harness logins and git tokens",
               List.of(ALLOWED, ALLOWED, ALLOWED, LANE, LANE, LANE, LANE, LANE),
               null,
               null,
-              "Do it from outside the container: 'sail agent login <harness>' on the host, or"
-                  + " Mast."),
+              "Do it from outside the container: 'sail agent login <harness>' or 'sail git login"
+                  + " <host>' on the host, or Mast."),
           new Expected(
               Action.OPERATE_BOX,
               BOX_ADA,
@@ -1017,7 +1017,7 @@ class AccessTest {
       assertEquals(
           refusedAtAll(
               Refusal.Kind.LANE_FORBIDDEN,
-              "Agent principals cannot keep harness logins.",
+              "Agent principals cannot keep harness logins and git tokens.",
               LANE_FIX),
           Access.atAll(agent, Action.KEEP_LOGINS, Resource.Kind.PEOPLE));
     }
@@ -1025,10 +1025,11 @@ class AccessTest {
         Optional.of(
             new Refusal(
                 Refusal.Kind.LANE_FORBIDDEN,
-                "The credential in a project container cannot keep harness logins.",
+                "The credential in a project container cannot keep harness logins and git"
+                    + " tokens.",
                 Remedy.of(
-                    "Do it from outside the container: 'sail agent login <harness>' on the host,"
-                        + " or Mast."))),
+                    "Do it from outside the container: 'sail agent login <harness>' or 'sail git"
+                        + " login <host>' on the host, or Mast."))),
         Access.atAll(Actors.ADMIN_IN_CONTAINER, Action.KEEP_LOGINS, Resource.Kind.PEOPLE));
   }
 

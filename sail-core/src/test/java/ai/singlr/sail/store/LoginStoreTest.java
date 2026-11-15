@@ -19,6 +19,7 @@ import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermissions;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.NoSuchElementException;
 import java.util.Optional;
 import java.util.Set;
@@ -373,6 +374,73 @@ class LoginStoreTest {
 
     assertEquals(List.of(), store.list(UDAY));
     assertEquals(Optional.empty(), store.defaultFor(UDAY, CLAUDE));
+  }
+
+  @Test
+  void aGitTokenIsKeptByHostBesideTheLoginsAndOnlyItsHostDateAndFingerprintAreShown()
+      throws Exception {
+    var store = store();
+    store.store(UDAY, CLAUDE, null, null, TOKEN);
+    var stored = store.storeGit(UDAY, "GitHub.com", "ghp_uday");
+    store.storeGit(UDAY, "gitlab.example", "glpat-uday");
+
+    assertEquals(
+        new LoginStore.GitRow("github.com", stored.storedAt(), LoginStore.fingerprint("ghp_uday")),
+        stored);
+    assertEquals(
+        List.of("github.com", "gitlab.example"),
+        store.gitRows(UDAY).stream().map(LoginStore.GitRow::host).toList());
+    assertFalse(store.gitRows(UDAY).toString().contains("ghp_uday"));
+    assertEquals(
+        Map.of("github.com", "ghp_uday", "gitlab.example", "glpat-uday"), store.gitTokens(UDAY));
+    assertEquals(List.of("claude-code/default token default"), described(store.list(UDAY)));
+    var git = dir.resolve("logins").resolve(UDAY).resolve("git");
+    assertEquals("rwx------", PosixFilePermissions.toString(Files.getPosixFilePermissions(git)));
+    assertEquals(
+        "rw-------",
+        PosixFilePermissions.toString(Files.getPosixFilePermissions(git.resolve("github.com"))));
+    assertEquals("ghp_uday\n", Files.readString(git.resolve("github.com")));
+    try (Stream<Path> files = Files.list(git)) {
+      assertEquals(2, files.count());
+    }
+  }
+
+  @Test
+  void aGitTokenStoredAgainIsReplacedAndOneRemovedTwiceIsRemovedOnce() {
+    var store = store();
+    store.storeGit(UDAY, "github.com", "ghp_old");
+    store.storeGit(UDAY, "github.com", "ghp_new");
+
+    assertEquals(Map.of("github.com", "ghp_new"), store.gitTokens(UDAY));
+    assertTrue(store.removeGit(UDAY, "github.com").isPresent());
+    assertEquals(Optional.empty(), store.removeGit(UDAY, "github.com"));
+    assertEquals(List.of(), store.gitRows(UDAY));
+    assertEquals(Map.of(), store.gitTokens(ANA));
+  }
+
+  @Test
+  void aGitTokenTakesTheLoginValueRuleAndAHostOutsideTheHostRuleIsRefused() {
+    var store = store();
+    var value =
+        assertThrows(
+            IllegalArgumentException.class, () -> store.storeGit(UDAY, "github.com", "a b"));
+    assertEquals(VALUE_RULE, value.getMessage());
+    for (var host : List.of("../x", "-github.com", "git hub", "")) {
+      assertThrows(IllegalArgumentException.class, () -> store.storeGit(UDAY, host, "ghp_x"));
+    }
+    assertEquals(List.of(), store.gitRows(UDAY));
+  }
+
+  @Test
+  void forgettingAPersonDeletesTheirGitTokensWithTheirLogins() {
+    var store = store();
+    store.storeGit(UDAY, "github.com", "ghp_uday");
+    store.storeGit(ANA, "github.com", "ghp_ana");
+
+    store.forget(UDAY);
+    assertEquals(Map.of(), store.gitTokens(UDAY));
+    assertEquals(1, store.sweep(id -> false));
+    assertEquals(Map.of(), store.gitTokens(ANA));
   }
 
   private static List<String> described(List<LoginStore.Row> rows) {

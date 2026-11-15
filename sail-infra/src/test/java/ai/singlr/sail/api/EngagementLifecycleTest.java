@@ -14,6 +14,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import ai.singlr.sail.config.Engagement;
 import ai.singlr.sail.config.Roster;
 import ai.singlr.sail.config.SpecStatus;
+import ai.singlr.sail.engine.ConnectEnvironment;
 import ai.singlr.sail.engine.ContainerSailSetup;
 import ai.singlr.sail.engine.ScriptedShellExecutor;
 import ai.singlr.sail.engine.ShellExec;
@@ -95,7 +96,7 @@ class EngagementLifecycleTest {
     specStore = new SpecStore(db);
     roomStore = new RoomStore(db);
     runStore = new RunStore(db);
-    new FdeStore(db).add(HANDLE, null, null, "admin");
+    new FdeStore(db).add(HANDLE, null, HANDLE + "@sail.invalid", "admin");
     return new DispatchOperations(
             shell,
             TestProjects.reading(yaml),
@@ -428,7 +429,12 @@ class EngagementLifecycleTest {
                   bus,
                   specStore,
                   new ReviewStore(db),
-                  runStore)
+                  runStore,
+                  null,
+                  ConnectEnvironment.detector(),
+                  SyncScheduler.disabled(),
+                  new FdeStore(db),
+                  SessionYield.NONE)
               .useMessages(new MessageStore(db))
               .useRooms(roomStore);
       var requester = new Actor("mady", Role.ADMIN, Actor.Lane.CLI);
@@ -463,7 +469,12 @@ class EngagementLifecycleTest {
                   bus,
                   specStore,
                   new ReviewStore(db),
-                  runStore)
+                  runStore,
+                  null,
+                  ConnectEnvironment.detector(),
+                  SyncScheduler.disabled(),
+                  new FdeStore(db),
+                  SessionYield.NONE)
               .useMessages(new MessageStore(db))
               .useRooms(roomStore);
 
@@ -579,7 +590,7 @@ class EngagementLifecycleTest {
     HeldProjects.hold(db, "acme");
     specStore = new SpecStore(db);
     runStore = new RunStore(db);
-    new FdeStore(db).add(HANDLE, null, null, "admin");
+    new FdeStore(db).add(HANDLE, null, HANDLE + "@sail.invalid", "admin");
     var unwired =
         new DispatchOperations(
                 shell(),

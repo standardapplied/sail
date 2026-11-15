@@ -10,7 +10,8 @@ import ai.singlr.sail.identity.Acting;
 
 /**
  * Stores a person's harness login through the production store, as {@code sail agent login} does:
- * the login a test's spec runs start with, without which they are refused before reserving.
+ * the login a test's spec runs start with, without which they are refused before reserving, and
+ * gives them the email a workspace of theirs commits as.
  */
 public final class TestLogins {
 
@@ -21,13 +22,18 @@ public final class TestLogins {
 
   /**
    * Stores {@link #VALUE} as {@code handle}'s default login for every harness, adding {@code
-   * handle} to the roster as a member when it is not on it. Returns its FDE id.
+   * handle} to the roster as a member when it is not on it and giving them an email when they have
+   * none. Returns its FDE id.
    */
   public static String store(Sqlite db, String handle) {
     var fdes = new FdeStore(db);
+    var email = handle + "@sail.invalid";
     var fde =
         fdes.byHandle(handle)
-            .orElseGet(() -> Acting.system(() -> fdes.add(handle, handle, null, "member")));
+            .orElseGet(() -> Acting.system(() -> fdes.add(handle, handle, email, "member")));
+    if (fde.email() == null || fde.email().isBlank()) {
+      Acting.system(() -> fdes.update(handle, null, email, null));
+    }
     for (var harness : Harnesses.all()) {
       fdes.logins().store(fde.id(), harness, null, null, VALUE);
     }

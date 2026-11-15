@@ -91,6 +91,16 @@ class SshGatewayTest {
     assertInstanceOf(SshGateway.Rejected.class, authorize("sail agent", "uday"));
   }
 
+  /** A person keeps their own git tokens through the gateway, as their own harness logins. */
+  @Test
+  void gitLoginTalksToTheLoopbackApiAsTheSessionsFde() {
+    assertEquals(
+        List.of("git", "login", "github.com"),
+        assertInstanceOf(
+                SshGateway.Authorized.class, authorize("sail git login github.com", "uday"))
+            .args());
+  }
+
   @Test
   void stripsLeadingSailToken() {
     var authorized = assertInstanceOf(SshGateway.Authorized.class, authorize("spec list", "uday"));

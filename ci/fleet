@@ -71,8 +71,9 @@ Usage:
   ci/fleet loop RUN             on eng, the loop's agents build and review a spec in acme on nocaptcha: its
                                 build asks a question and waits, eng answers, and it goes on to
                                 awaiting_merge, beside a second spec of the same repo dispatched while it
-                                builds (eng is given a ZFS pool in a file and acme's template first, and the
-                                two builds overlap, each in its own workspace of acme);
+                                builds (eng is given a ZFS pool in a file, its git token through
+                                sail git login and acme's template first, and the two builds overlap,
+                                each in its own workspace of acme, committing as eng);
                                 the pull request, the room and every box's status are checked,
                                 main's measures of the spec count the reviews and the build runs listed for it,
                                 no secret reaches a log, and the pull request is closed
@@ -87,9 +88,10 @@ Usage:
                                 become one ZFS mirror (one incus storage create, never forced, the
                                 probes of both last), its re-run in the other order is kept, ONLINE
                                 after the reboot, and DEGRADED naming the disk once it is detached;
-                                acme's template is built on tank, a
+                                acme's template is built on tank and holds no .git-credentials, a
                                 workspace of it is a clone of its snapshot with a machine-id of its
-                                own (create time in the report), a second is made and stopped,
+                                own (create time in the report) that commits as client's person, a
+                                second is made and stopped,
                                 apply --all leaves both and the template alone; with acme's repos set
                                 to octocat/Hello-World for the row (and given back after), ten made at
                                 once are each whole on their own branch of it, each one's ready steps and
@@ -1382,6 +1384,23 @@ workspace_on() {
   [[ $origin == tank/containers/acme--tmpl@snapshot-v* && -n $template && -n $workspace && $template != "$workspace" ]]
 }
 
+no_file_in() {
+  local out
+  if out=$(on "$1" "$2" "sudo incus file pull $3 -" 2>&1); then
+    echo "$3 is there"
+    return 1
+  fi
+  echo "$out"
+  grep -qi "not found" <<< "$out"
+}
+
+commits_as() {
+  local said
+  said=$(on "$1" "$2" "sudo incus exec $3 -- runuser -u dev -- git config --global user.email") || return 1
+  echo "$3 commits as '$said'"
+  [[ $said == "$4" ]]
+}
+
 instance_state() {
   on "$1" "$2" "sudo incus list --format csv -c ns $3" | awk -F, -v name="$3" '$1 == name { print $2 }'
 }
@@ -1497,8 +1516,12 @@ storage() {
     allowed "$run" client "sudo sail sync && sudo sail project apply acme --yes"
   check "$run" "acme's template is built on tank" \
     allowed "$run" client "sudo sail project template build acme"
+  check "$run" "acme's template holds no git token" \
+    no_file_in "$run" client acme--tmpl/home/dev/.git-credentials
   check "$run" "a workspace of acme is a clone of its template's snapshot on tank, with its own machine-id" \
     workspace_on "$run" client
+  check "$run" "the workspace commits as client's person" \
+    commits_as "$run" client acme-fleet-w client@fleet.example
   check "$run" "a second workspace of acme is made and stopped" \
     allowed "$run" client "sudo sail project workspace create acme fleet-v && sudo sail project workspace stop acme fleet-v"
   check "$run" "apply --all leaves the workspaces and the template as they are" \
@@ -1917,8 +1940,12 @@ loop() {
   check "$run" "eng applies acme with the forge token" applies_with_forge_token "$run" eng acme
   check "$run" "eng adds a ZFS pool in a file, where each spec's run gets its own workspace" \
     on "$run" eng "sudo sail host init --storage zfs --pool-file-size 20GiB --pool tank --yes"
+  check "$run" "eng stores its forge token as its own, for its workspaces" \
+    on "$run" eng "sudo sh -c 'sail git login github.com < /root/.fleet/gh'"
   check "$run" "eng builds acme's template with the forge token" \
     on "$run" eng "sudo sh -c 'GITHUB_TOKEN=\$(cat /root/.fleet/gh) sail project template build acme'"
+  check "$run" "acme's template on eng holds no git token" \
+    no_file_in "$run" eng acme--tmpl/home/dev/.git-credentials
   check "$run" "eng stores each agent's key as its harness login, nothing in the container" gives_agents_their_keys "$run" eng
   check "$run" "eng's logins list each agent's default by fingerprint, no value" each_agent_has_its_login "$run" eng
   check "$run" "no secret appears in the run's logs" no_secret_in_logs "$run"
@@ -1936,6 +1963,10 @@ loop() {
   check "$run" "the answer resumes the build, and the review takes it to awaiting_merge" reaches_status "$run" eng "$spec" awaiting_merge 45
   check "$run" "the second spec's review takes it to awaiting_merge" reaches_status "$run" eng "$beside" awaiting_merge 30
   check "$run" "the two builds ran at once, each in its own workspace of acme" each_ran_in_its_own_workspace "$run" eng "$spec" "$beside"
+  check "$run" "each workspace commits as eng" \
+    commits_as "$run" eng "acme-$spec" eng@fleet.example
+  check "$run" "the second workspace commits as eng" \
+    commits_as "$run" eng "acme-$beside" eng@fleet.example
   check "$run" "the agent opened a pull request on $LOOP_REPO" opened_a_pull_request "$spec"
   check "$run" "the build ran on eng's stored login, by name and kind" the_build_ran_on_the_stored_login "$run" eng "$spec"
   check "$run" "the room shows the review" the_room_shows_the_review "$run" eng "$spec"

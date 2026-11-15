@@ -9,7 +9,6 @@ import ai.singlr.sail.api.Mappable;
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.common.Remedied;
 import ai.singlr.sail.common.Remedy;
-import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.ProjectDefinition;
 import ai.singlr.sail.store.RunStore;
 import java.io.IOException;
@@ -327,6 +326,7 @@ public final class Workspaces {
   private final LongSupplier nanos;
   private final Path locks;
   private final LongSupplier memoryMb;
+  private final Predicate<String> asks;
   private final BoxInstances box;
   private final ContainerManager containers;
 
@@ -336,14 +336,22 @@ public final class Workspaces {
    * @param nanos the clock phases are measured on, {@code System::nanoTime} outside tests
    * @param locks the box's lock directory
    * @param memoryMb the box's memory in megabytes, which bounds its spec workspaces (D8)
+   * @param asks whether a repo's smart-HTTP refs URL asks for credentials ({@link
+   *     ShellExec#asksForCredentials}), which an owner who keeps no token for its host cannot fetch
    */
   public Workspaces(
-      ShellExec observer, ShellExec shell, LongSupplier nanos, Path locks, LongSupplier memoryMb) {
+      ShellExec observer,
+      ShellExec shell,
+      LongSupplier nanos,
+      Path locks,
+      LongSupplier memoryMb,
+      Predicate<String> asks) {
     this.observer = Objects.requireNonNull(observer, "observer");
     this.shell = Objects.requireNonNull(shell, "shell");
     this.nanos = Objects.requireNonNull(nanos, "nanos");
     this.locks = Objects.requireNonNull(locks, "locks");
     this.memoryMb = Objects.requireNonNull(memoryMb, "memoryMb");
+    this.asks = Objects.requireNonNull(asks, "asks");
     this.box = new BoxInstances(observer);
     this.containers = new ContainerManager(shell);
   }
@@ -358,7 +366,16 @@ public final class Workspaces {
         shell,
         System::nanoTime,
         SailPaths.locksDir(),
-        memoryOf(new HostDetector()));
+        memoryOf(new HostDetector()),
+        shell::asksForCredentials);
+  }
+
+  /**
+   * Refuses {@code owner} for a workspace of {@code config} that will be made or re-owned for them
+   * ({@link WorkspaceOwner#require}): what a lane asks before its run is reserved.
+   */
+  public void requireOwner(WorkspaceOwner owner, ProjectDefinition config) {
+    owner.require(config, asks);
   }
 
   /** The memory {@code host} reads, in megabytes; unchecked when it cannot be read. */
@@ -379,21 +396,23 @@ public final class Workspaces {
 
   /**
    * Creates workspace {@code name} of {@code config}'s project for {@code owner}, the person it
-   * belongs to: a clone of its template's current version, built first when there is none or it is
-   * stale, then started, made its own with every repo on a branch of its name, and marked whole.
-   * One create of a workspace runs at a time, under its lock: of two of one name, the second finds
-   * the first's workspace and is refused. An instance a create of it did not finish is deleted and
-   * made again.
+   * belongs to, refused first when it could not be theirs ({@link #requireOwner}): a clone of its
+   * template's current version, built first when there is none or it is stale, then started, given
+   * its owner's credentials, made its own with every repo on a branch of its name, and marked
+   * whole. One create of a workspace runs at a time, under its lock: of two of one name, the second
+   * finds the first's workspace and is refused. An instance a create of it did not finish is
+   * deleted and made again.
    */
   public Created create(
       ProjectDefinition config,
       String name,
       WorkspaceTemplate.Source source,
       Path files,
-      String owner)
+      WorkspaceOwner owner)
       throws Exception {
     var project = config.name();
     var instance = requireNewName(project, name);
+    requireOwner(owner, config);
     var zfs = WorkspaceTemplate.requireZfs(observer);
     var template = WorkspaceTemplate.requireName(project, source);
     try (var held = nameLock(instance)) {
@@ -432,13 +451,14 @@ public final class Workspaces {
    * person the run acts for: a whole one is started when stopped and kept as it is, tree and all;
    * otherwise a clone of the checked template carrying the spec and the owner is made, with every
    * repo left detached at its fetched base, under the box's create lock. Either way the workspace
-   * is {@code owner}'s before anything of the run is staged (R12). A create that cannot have the
-   * create lock within {@link #CREATE_WAIT} is {@link Busy}.
+   * is {@code owner}'s, and holds their credentials alone, before anything of the run is staged
+   * (R12, T2, T3). A create that cannot have the create lock within {@link #CREATE_WAIT} is {@link
+   * Busy}.
    */
   public Entered enterSpec(
       SpecCheck check,
       ProjectDefinition config,
-      String owner,
+      WorkspaceOwner owner,
       Path files,
       Consumer<Set<String>> room)
       throws Exception {
@@ -446,7 +466,7 @@ public final class Workspaces {
     try (var held = nameLock(place.instance())) {
       var found = requireTheSpecs(place, name -> false, box.all());
       if (found.map(i -> ((BoxInstances.Workspace) i.kind()).ready()).orElse(false)) {
-        return reuse(found.get(), owner);
+        return reuse(found.get(), config, owner);
       }
       return new Made(
           make(
@@ -480,27 +500,67 @@ public final class Workspaces {
     return specs;
   }
 
-  private Reused reuse(BoxInstances.Instance found, String owner) throws Exception {
+  /**
+   * Starts {@code found} when stopped and, when it is another's, takes their credentials away and
+   * gives it {@code owner}'s before it records them as its owner, so a re-own cut short is made
+   * again by the next entry.
+   */
+  private Reused reuse(BoxInstances.Instance found, ProjectDefinition config, WorkspaceOwner owner)
+      throws Exception {
     var started = !(found.state() instanceof ContainerState.Running);
     if (started) {
       containers.start(found.name());
       awaitReady(found.name());
     }
-    if (Strings.isNotBlank(owner) && !owner.equals(found.key(BoxInstances.OWNER_KEY).orElse(""))) {
+    if (!owner.handle().equals(found.key(BoxInstances.OWNER_KEY).orElse(""))) {
+      WorkspaceCredentials.give(shell, found.name(), config, owner);
+      WorkspaceCredentials.logForgeIn(shell, found.name(), config, owner);
       var owned =
           new ContainerConfig(shell, locks)
-              .set(found.name(), List.of(BoxInstances.OWNER_KEY + "=" + owner));
+              .set(found.name(), List.of(BoxInstances.OWNER_KEY + "=" + owner.handle()));
       if (!owned.ok()) {
         throw new IOException(
             "Workspace "
                 + found.name()
                 + " could not be made "
-                + owner
+                + owner.handle()
                 + "'s, so no run of theirs goes in it: "
                 + owned.reason());
       }
     }
     return new Reused(found.name(), started);
+  }
+
+  /**
+   * Takes from every workspace whose owner {@code held} says the roster no longer holds, a person
+   * removed, their token store, {@code gh} login and keys, and its owner with them, so a person
+   * later given the handle has their own written at its next entry. Answers those it could not,
+   * each with why: one that cannot be reached stops none of the others, and is taken again by the
+   * next call.
+   */
+  public List<String> disown(Predicate<String> held)
+      throws IOException, InterruptedException, TimeoutException {
+    var unreached = new ArrayList<String>();
+    for (var instance : box.all()) {
+      var owner = instance.key(BoxInstances.OWNER_KEY).orElse("");
+      if (!(instance.kind() instanceof BoxInstances.Workspace)
+          || owner.isBlank()
+          || held.test(owner)) {
+        continue;
+      }
+      try {
+        WorkspaceCredentials.takeBack(shell, instance.name());
+        var cleared =
+            new ContainerConfig(shell, locks)
+                .set(instance.name(), List.of(BoxInstances.OWNER_KEY + "="));
+        if (!cleared.ok()) {
+          throw new IOException(cleared.reason());
+        }
+      } catch (IOException | TimeoutException failure) {
+        unreached.add(instance.name() + ": " + Remedied.reasonOf(failure).strip());
+      }
+    }
+    return List.copyOf(unreached);
   }
 
   /** The lock one create of {@code instance} holds; none in a dry run, which makes nothing. */
@@ -522,7 +582,7 @@ public final class Workspaces {
       String instance,
       WorkspaceTemplate.Template built,
       List<String> keys,
-      String owner,
+      WorkspaceOwner owner,
       String branch,
       boolean unfinished,
       Path files,
@@ -554,22 +614,22 @@ public final class Workspaces {
       String instance,
       WorkspaceTemplate.Template built,
       List<String> keys,
-      String owner,
+      WorkspaceOwner owner,
       String branch,
       Path files,
       long started)
       throws Exception {
     var project = config.name();
     var copyKeys = new ArrayList<>(keys);
-    if (Strings.isNotBlank(owner)) {
-      copyKeys.add(BoxInstances.OWNER_KEY + "=" + owner);
-    }
+    copyKeys.add(BoxInstances.OWNER_KEY + "=" + owner.handle());
     clone(project, name, instance, built, copyKeys);
     try {
       var cloned = nanos.getAsLong();
       containers.start(instance);
       var running = nanos.getAsLong();
+      WorkspaceCredentials.give(shell, instance, config, owner);
       var steps = prepare(config, name, branch, instance, files);
+      WorkspaceCredentials.logForgeIn(shell, instance, config, owner);
       var ready = nanos.getAsLong();
       return new Created(
           project,

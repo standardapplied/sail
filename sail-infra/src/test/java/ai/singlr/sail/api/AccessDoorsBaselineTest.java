@@ -172,9 +172,10 @@ class AccessDoorsBaselineTest {
   }
 
   /**
-   * The login doors: one's own, which every person keeps and no agent or container credential does,
-   * and another person's, which only an admin lists or removes. No login is stored on this box,
-   * whose database is in memory, so a door that passes Access answers what is not there.
+   * The login and git-token doors: one's own, which every person keeps and no agent or container
+   * credential does, and another person's, which only an admin lists or removes. No login is stored
+   * on this box, whose database is in memory, so a door that passes Access answers what is not
+   * there.
    */
   private static void logins(List<Door> doors) {
     doors.add(new Door("list my logins", ops -> ops.logins().list(null)));
@@ -192,6 +193,16 @@ class AccessDoorsBaselineTest {
         new Door(
             "remove bob's claude-code login",
             ops -> ops.logins().remove("claude-code", "work", Cast.OTHER)));
+    doors.add(new Door("list my git tokens", ops -> ops.logins().gitList(null)));
+    doors.add(
+        new Door("store my github.com token", ops -> ops.logins().gitStore("github.com", "value")));
+    doors.add(
+        new Door("remove my github.com token", ops -> ops.logins().gitRemove("github.com", null)));
+    doors.add(new Door("list bob's git tokens", ops -> ops.logins().gitList(Cast.OTHER)));
+    doors.add(
+        new Door(
+            "remove bob's github.com token",
+            ops -> ops.logins().gitRemove("github.com", Cast.OTHER)));
   }
 
   /**

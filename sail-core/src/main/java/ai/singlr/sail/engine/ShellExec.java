@@ -70,6 +70,16 @@ public interface ShellExec {
   boolean isDryRun();
 
   /**
+   * Whether a plain GET of {@code url}, sent without credentials, asks for them: how a box learns
+   * that a repo cannot be fetched without a token. The one shell that reaches the network, {@link
+   * ShellExecutor}, asks it, a dry run included, since it is a read; any other shell reaches none,
+   * and answers no.
+   */
+  default boolean asksForCredentials(String url) {
+    return false;
+  }
+
+  /**
    * The shell a read-only probe runs on, so a dry run reads what is really there and changes
    * nothing: this shell, unless it is a dry run that executes nothing.
    */

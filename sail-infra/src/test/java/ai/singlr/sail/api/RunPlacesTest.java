@@ -6,6 +6,7 @@
 package ai.singlr.sail.api;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -21,6 +22,8 @@ import ai.singlr.sail.engine.HostDetector;
 import ai.singlr.sail.engine.RunPlace;
 import ai.singlr.sail.engine.ScriptedShellExecutor;
 import ai.singlr.sail.engine.ShellExec;
+import ai.singlr.sail.engine.TestOwners;
+import ai.singlr.sail.engine.WorkspaceOwner;
 import ai.singlr.sail.engine.Workspaces;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.store.RunStore;
@@ -33,9 +36,11 @@ import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Function;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -77,7 +82,12 @@ class RunPlacesTest {
       Workspaces workspaces, ShellExec shell, RunStore runs, RunLauncher.Room room)
       throws IOException {
     return new RunPlaces(
-        new ProjectLoader(shell, definitions()), workspaces, runs::liveSpecs, room, place -> {});
+        new ProjectLoader(shell, definitions()),
+        workspaces,
+        runs::liveSpecs,
+        room,
+        place -> {},
+        TestOwners::of);
   }
 
   private RunStore runs(String file) {
@@ -174,7 +184,7 @@ class RunPlacesTest {
     var places = places(refusing, new ScriptedShellExecutor());
     var check = places.checkSpec("acme", config(), "auth", Lane.BUILD, "eng");
 
-    var failed = assertThrows(ApiException.class, () -> places.enter(check, config(), "eng"));
+    var failed = assertThrows(ApiException.class, () -> places.enter(check, config()));
     var interrupted =
         assertThrows(
             ApiException.class,
@@ -182,7 +192,7 @@ class RunPlacesTest {
                 places(
                         interrupting(TestWorkspaces.incus(definitions(), "acme"), "incus copy"),
                         new ScriptedShellExecutor())
-                    .enter(check, config(), "eng"));
+                    .enter(check, config()));
 
     assertEquals(ErrorCode.COMMAND_FAILED, failed.failure().errorCode());
     assertEquals(
@@ -288,7 +298,7 @@ class RunPlacesTest {
     var checked = places.check("acme", config(), null, Lane.ROOM, "eng");
 
     assertEquals(new RunPlaces.InContainer(new RunPlace.ProjectContainer("acme")), checked);
-    assertNull(places.enter(checked, config(), "eng"), "no workspace is entered");
+    assertNull(places.enter(checked, config()), "no workspace is entered");
   }
 
   @Test
@@ -325,7 +335,7 @@ class RunPlacesTest {
             (specId, body) -> told.add(body));
     var check = places.checkSpec("acme", config(), "auth", Lane.BUILD, "eng");
 
-    var entered = places.enter(check, config(), "eng");
+    var entered = places.enter(check, config());
 
     assertTrue(entered.reused());
     assertEquals(false, entered.stale());
@@ -359,12 +369,11 @@ class RunPlacesTest {
             (specId, body) -> told.add(body));
 
     var entered =
-        places.enter(
-            places.checkSpec("acme", config(), "auth", Lane.BUILD, "eng"), config(), "eng");
+        places.enter(places.checkSpec("acme", config(), "auth", Lane.BUILD, "eng"), config());
     for (var lane : List.of(Lane.REVIEW, Lane.FIX, Lane.ROOM)) {
       assertNull(
           places
-              .enter(places.checkSpec("acme", config(), "auth", lane, "eng"), config(), "eng")
+              .enter(places.checkSpec("acme", config(), "auth", lane, "eng"), config())
               .degraded(),
           lane + " says nothing of it");
     }
@@ -399,7 +408,7 @@ class RunPlacesTest {
     var check = places.checkSpec("acme", config(), "auth", Lane.BUILD, "eng");
     liveBuild(runs, "other", "eng");
 
-    var busy = assertThrows(ApiException.class, () -> places.enter(check, config(), "alice"));
+    var busy = assertThrows(ApiException.class, () -> places.enter(check, config()));
 
     assertEquals(ErrorCode.RUNNER_BUSY, busy.failure().errorCode());
     assertTrue(busy.getMessage().startsWith("This box has 1 spec workspace with a live run"));
@@ -455,14 +464,116 @@ class RunPlacesTest {
             TestWorkspaces.over(incus),
             runs("made.db")::liveSpecs,
             RunLauncher.Room.NONE,
-            pruned::add);
+            pruned::add,
+            TestOwners::of);
     var check = places.checkSpec("acme", config(), "auth", Lane.BUILD, "eng");
     assertEquals(List.of(), pruned, "no run directory is pruned before the workspace is made");
 
-    var entered = places.enter(check, config(), "eng");
+    var entered = places.enter(check, config());
 
     assertEquals(false, entered.reused());
     assertEquals(false, entered.stale());
     assertEquals(List.of(check.place()), pruned, "the run directories of the made workspace are");
+  }
+
+  private RunPlaces owning(
+      ShellExec incus, Function<String, WorkspaceOwner> owners, List<String> told)
+      throws IOException {
+    return new RunPlaces(
+        new ProjectLoader(new ScriptedShellExecutor(), definitions()),
+        new Workspaces(
+            incus, incus, System::nanoTime, dir.resolve("locks"), () -> 65536, url -> true),
+        runs("owning.db")::liveSpecs,
+        (specId, body) -> told.add(body),
+        place -> {},
+        owners);
+  }
+
+  private static WorkspaceOwner withoutEmail(String handle) {
+    return new WorkspaceOwner(handle, handle, "", Map.of(), List.of());
+  }
+
+  /**
+   * Scenario 4: a run whose workspace would be made for a person who keeps no token for its private
+   * repo's host is refused before anything is reserved, in the spec's room too, naming the login
+   * that stores one, and nothing is made.
+   */
+  @Test
+  void aWorkspaceItsOwnerCannotFetchIsRefusedBeforeItsReservationNamingTheLogin() throws Exception {
+    var incus = TestWorkspaces.incus(definitions(), "acme");
+    var told = new ArrayList<String>();
+
+    var refused =
+        assertThrows(
+            ApiException.class,
+            () ->
+                owning(incus, TestOwners::of, told)
+                    .checkSpec("acme", config(), "auth", Lane.BUILD, "ana"));
+
+    assertEquals(ErrorCode.CONFLICT, refused.failure().errorCode());
+    assertEquals(
+        "github.com asks for credentials to fetch acme's repo app, and ana keeps no token for it.",
+        refused.getMessage());
+    assertEquals(
+        "Store one with sail git login github.com. Then dispatch again.",
+        refused.failure().remedy().plain());
+    assertEquals(
+        List.of(
+            "github.com asks for credentials to fetch acme's repo app, and ana keeps no token for"
+                + " it. Store one with sail git login github.com. Then dispatch again."),
+        told);
+    assertFalse(incus.invocations().stream().anyMatch(c -> c.startsWith("incus copy")));
+  }
+
+  /**
+   * A person's own whole workspace is reused whatever their roster row says now: they are asked of
+   * only when a workspace will be made or re-owned.
+   */
+  @Test
+  void aWorkspaceAlreadyTheOwnersIsNeverRefusedForTheOwner() throws Exception {
+    var incus =
+        TestWorkspaces.incus(definitions(), "acme")
+            .onOk(
+                "incus list --format json",
+                "["
+                    + TestWorkspaces.currentTemplate(definitions(), "acme")
+                    + ","
+                    + TestWorkspaces.specWorkspace("acme", "auth", "Running", "eng")
+                    + "]");
+
+    var check =
+        owning(incus, RunPlacesTest::withoutEmail, new ArrayList<>())
+            .checkSpec("acme", config(), "auth", Lane.REVIEW, "eng");
+
+    assertEquals("eng", check.owner().handle());
+  }
+
+  /** Scenarios 6 and 7: a workspace another person owns is re-owned only for one who may own it. */
+  @Test
+  void aWorkspaceOfAnotherIsReOwnedOnlyForAPersonWithAnEmail() throws Exception {
+    var incus =
+        TestWorkspaces.incus(definitions(), "acme")
+            .onOk(
+                "incus list --format json",
+                "["
+                    + TestWorkspaces.currentTemplate(definitions(), "acme")
+                    + ","
+                    + TestWorkspaces.specWorkspace("acme", "auth", "Running", "uday")
+                    + "]");
+
+    var refused =
+        assertThrows(
+            ApiException.class,
+            () ->
+                owning(incus, RunPlacesTest::withoutEmail, new ArrayList<>())
+                    .checkSpec("acme", config(), "auth", Lane.BUILD, "ana"));
+
+    assertEquals(ErrorCode.CONFLICT, refused.failure().errorCode());
+    assertEquals(
+        "ana has no email on this box, and a workspace commits as its owner.",
+        refused.getMessage());
+    assertEquals(
+        "Set it with sail fde update ana --email <email>. Then dispatch again.",
+        refused.failure().remedy().plain());
   }
 }

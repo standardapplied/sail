@@ -12,7 +12,9 @@ import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.engine.AgentSession;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.WatcherSpawner;
+import ai.singlr.sail.engine.WorkspaceOwner;
 import ai.singlr.sail.engine.Workspaces;
+import ai.singlr.sail.engine.WorkstationIdentity;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.MessageStore;
@@ -255,7 +257,8 @@ public final class DispatchOperations {
             workspaces,
             runStore == null ? box -> Set.of() : runStore::liveSpecs,
             this::tellRoom,
-            runReservation::prune);
+            runReservation::prune,
+            handle -> owner(fdeStore, handle));
     this.membership =
         new MembershipService(specStore, () -> roomStore, projects, admission, this.events, places);
     this.adhocRunner =
@@ -574,6 +577,18 @@ public final class DispatchOperations {
    * run is mid-stop, not terminal: pruning its directory would turn {@code killAgent} into a no-op
    * that can never verify, wedging the claim until the process exits on its own.
    */
+  /**
+   * The box's person {@code handle} as the owner of the workspaces their runs live in, with the
+   * box's workstation key, since every run of this box acts for them.
+   */
+  private static WorkspaceOwner owner(FdeStore fdes, String handle) {
+    if (fdes == null) {
+      throw new ApiException(
+          ErrorCode.COMMAND_FAILED, "This box keeps no roster, so no workspace has an owner.");
+    }
+    return WorkspaceOwner.of(fdes, handle, handle, WorkstationIdentity.registered());
+  }
+
   static boolean ownsLiveAgent(RunStore.RunRow run) {
     return "running".equals(run.status()) || StopOperations.STOPPING.equals(run.status());
   }

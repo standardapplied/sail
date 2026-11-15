@@ -6,6 +6,7 @@
 package ai.singlr.sail.engine;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -108,7 +109,8 @@ class WorkspaceIT extends AbstractIncusIT {
           shell,
           System::nanoTime,
           SailPaths.locksDir(),
-          Workspaces.memoryOf(new HostDetector()));
+          Workspaces.memoryOf(new HostDetector()),
+          url -> false);
 
   private static ProjectDefinition definition() {
     return new ProjectDefinition(
@@ -174,12 +176,95 @@ class WorkspaceIT extends AbstractIncusIT {
     }
   }
 
+  /**
+   * What {@code path} of {@code instance} holds, running or stopped, or null when it is not there.
+   */
+  private String pulled(String instance, String path) throws Exception {
+    var pulled = shell.exec(List.of("incus", "file", "pull", instance + path, "-"));
+    return pulled.ok() ? pulled.stdout() : null;
+  }
+
+  /**
+   * Scenario 1 on a real Incus: a template its build left holding a fake token, gh's login, a git
+   * identity and a key is rebuilt as the production lane rebuilds it, and its new version holds
+   * none of the four.
+   */
+  @Test
+  void aTemplateBuiltWithItsBuildersCredentialsIsSnapshottedHoldingNone() throws Exception {
+    containers.start(TEMPLATE);
+    var planted =
+        exec(
+            TEMPLATE,
+            List.of(
+                "bash",
+                "-c",
+                "set -eu; install -d -o dev -g dev -m 700 /home/dev/.ssh /home/dev/.config/gh;"
+                    + " echo https://oauth2:fake-token@example.invalid > /home/dev/.git-credentials;"
+                    + " echo 'example.invalid: {oauth_token: fake-token}' >"
+                    + " /home/dev/.config/gh/hosts.yml;"
+                    + " echo 'ssh-ed25519 AAAAbuilder builder@box' > /home/dev/.ssh/authorized_keys"));
+    assertTrue(planted.ok(), planted.stderr());
+    containers.stop(TEMPLATE);
+    var rebuild =
+        new WorkspaceTemplate.Source(
+            BASE_POOL, "a-later-definition", name -> name.equals(PROJECT), (into, fresh) -> {});
+
+    var built =
+        new WorkspaceTemplate(shell, shell, SailPaths.locksDir()).ensure(definition(), rebuild);
+
+    assertEquals("v2", built.version());
+    assertEquals(null, pulled(TEMPLATE, "/home/dev/.git-credentials"), "no token store");
+    assertEquals(null, pulled(TEMPLATE, "/home/dev/.config/gh/hosts.yml"), "no gh login");
+    assertEquals("", pulled(TEMPLATE, "/home/dev/.ssh/authorized_keys"), "no key");
+    var gitconfig = pulled(TEMPLATE, "/home/dev/.gitconfig");
+    assertFalse(gitconfig != null && gitconfig.contains("email"), gitconfig);
+  }
+
+  /**
+   * Scenarios 2 and 3 on a real Incus: two workspaces made for two people each commit as their
+   * owner and hold their owner's token store alone.
+   */
+  @Test
+  void twoWorkspacesOfTwoPeopleEachCommitAsTheirOwnerWithTheirOwnStore() throws Exception {
+    var uday =
+        new WorkspaceOwner(
+            "uday", "Uday", "uday@sail.invalid", Map.of("example.invalid", "tok-uday"), List.of());
+    var ana =
+        new WorkspaceOwner(
+            "ana",
+            "Ana",
+            "ana@sail.invalid",
+            Map.of("example.invalid", "tok-ana"),
+            List.of("ssh-ed25519 AAAAana ana@laptop"));
+
+    var fix = workspaces.create(definition(), FIX, source(), null, uday);
+    var second = workspaces.create(definition(), SECOND, source(), null, ana);
+
+    for (var made : List.of(Map.entry(fix, uday), Map.entry(second, ana))) {
+      var instance = made.getKey().instance();
+      var owner = made.getValue();
+      var email =
+          exec(
+              instance,
+              List.of("runuser", "-u", "dev", "--", "git", "config", "--global", "user.email"));
+      assertEquals(owner.email(), email.stdout().strip(), instance);
+      assertEquals(
+          "https://oauth2:" + owner.tokens().get("example.invalid") + "@example.invalid\n",
+          pulled(instance, "/home/dev/.git-credentials"),
+          instance);
+      assertEquals(
+          owner.keys().stream().map(key -> key + "\n").reduce("", String::concat),
+          pulled(instance, "/home/dev/.ssh/authorized_keys"),
+          instance);
+    }
+  }
+
   @Test
   void workspacesAreClonesOfTheTemplateEachItsOwnMachineBesideTheProjectsContainer()
       throws Exception {
     var before = bystander();
-    var fix = workspaces.create(definition(), FIX, source(), null, "eng");
-    var second = workspaces.create(definition(), SECOND, source(), null, "eng");
+    var fix = workspaces.create(definition(), FIX, source(), null, TestOwners.of("eng"));
+    var second = workspaces.create(definition(), SECOND, source(), null, TestOwners.of("eng"));
     record("create " + FIX, fix.timings());
     record("create " + SECOND, second.timings());
 
@@ -270,7 +355,7 @@ class WorkspaceIT extends AbstractIncusIT {
 
   @Test
   void everyProjectVerbIsRefusedOnARealWorkspaceAndTemplateAndChangesNeither() throws Exception {
-    var fix = workspaces.create(definition(), FIX, source(), null, "eng");
+    var fix = workspaces.create(definition(), FIX, source(), null, TestOwners.of("eng"));
     var ws = fix.instance();
     var verbs =
         List.<Map.Entry<Object, List<String>>>of(
@@ -321,7 +406,7 @@ class WorkspaceIT extends AbstractIncusIT {
 
   @Test
   void aWorkspaceStopsAndResumesWithItsEditsAndAPauseListsAsFrozen() throws Exception {
-    var fix = workspaces.create(definition(), FIX, source(), null, "eng");
+    var fix = workspaces.create(definition(), FIX, source(), null, TestOwners.of("eng"));
     var edited = exec(fix.instance(), List.of("bash", "-c", "echo kept > /home/dev/edit"));
     assertTrue(edited.ok(), edited.stderr());
 
@@ -377,7 +462,7 @@ class WorkspaceIT extends AbstractIncusIT {
       TestControlPlane.on(operations, db, socketDir, new SyncConfig(null, null, "it"));
       try (var server = new LocalApiSocket(operations, socketDir.resolve("api.sock"))) {
         server.start();
-        var fix = workspaces.create(definition(), FIX, source(), null, "eng");
+        var fix = workspaces.create(definition(), FIX, source(), null, TestOwners.of("eng"));
         new IncusDeviceManager(shell).ensureEventSocket(fix.instance(), socketDir, CONTAINER_DIR);
 
         var board =

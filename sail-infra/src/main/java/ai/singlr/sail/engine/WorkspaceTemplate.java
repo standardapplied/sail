@@ -265,8 +265,10 @@ public final class WorkspaceTemplate {
   }
 
   /**
-   * Provisions {@code template} and stops it. One this call starts, by launching it or starting it
-   * stopped, is stopped again when the build fails, so a failed build leaves no template running.
+   * Provisions {@code template}, takes every credential of its builder out of it and checks that
+   * none is left (T1), then stops it. One this call starts, by launching it or starting it stopped,
+   * is stopped again when the build fails, so a failed build leaves no template running, and no
+   * version is recorded or snapshotted: the one before stays current.
    */
   private void build(
       Source source,
@@ -287,6 +289,8 @@ public final class WorkspaceTemplate {
               new ProjectProvisioner.Instance(
                   template, Optional.of(pool), Map.of(BoxInstances.TEMPLATE_OF_KEY, project)),
               found.isEmpty());
+      WorkspaceCredentials.strip(shell, template);
+      WorkspaceCredentials.requireNone(shell, template);
     } catch (Exception failure) {
       if (startedHere) {
         try {

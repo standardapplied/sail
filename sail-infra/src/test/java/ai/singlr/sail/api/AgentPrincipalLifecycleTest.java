@@ -91,7 +91,7 @@ class AgentPrincipalLifecycleTest {
     bus = new EventBus();
     var specStore = new SpecStore(db);
     var runStore = new RunStore(db);
-    new FdeStore(db).add(HANDLE, null, null, "admin");
+    new FdeStore(db).add(HANDLE, null, HANDLE + "@sail.invalid", "admin");
     TestLogins.store(db, HANDLE);
     Acting.as(
         HANDLE,
@@ -260,7 +260,7 @@ class AgentPrincipalLifecycleTest {
     var specStore = new SpecStore(db);
     var runStore = new RunStore(db);
     var fdes = new FdeStore(db);
-    fdes.add(HANDLE, null, null, "member");
+    fdes.add(HANDLE, null, HANDLE + "@sail.invalid", "member");
     fdes.add("alice", null, null, "admin");
     var claude = Harnesses.of("claude-code");
     fdes.logins().store(fdes.byHandle(HANDLE).orElseThrow().id(), claude, null, null, "uday-token");

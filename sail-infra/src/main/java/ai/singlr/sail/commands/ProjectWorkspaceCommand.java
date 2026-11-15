@@ -92,6 +92,7 @@ public final class ProjectWorkspaceCommand implements Runnable {
       WorkspaceVerbs.requireRoot(dryRun, spec);
       CliCommand.requireJsonOrDryRun(json, dryRun);
       var config = WorkspaceVerbs.buildable(project, operator);
+      var owner = WorkspaceVerbs.owner();
       if (!json) {
         Banner.printBranding(System.out, Ansi.AUTO);
         System.out.println();
@@ -103,7 +104,7 @@ public final class ProjectWorkspaceCommand implements Runnable {
                   name,
                   WorkspaceVerbs.source(config, gitToken, dryRun, json, operator),
                   SailPaths.projectFilesDir(config.name()),
-                  WorkspaceVerbs.owner());
+                  owner);
       if (json) {
         System.out.println(CliJson.stringify(created));
         return;

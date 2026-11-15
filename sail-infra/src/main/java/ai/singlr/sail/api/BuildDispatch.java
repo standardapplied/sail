@@ -211,7 +211,7 @@ public final class BuildDispatch {
             claim);
     var launching = false;
     try {
-      var workspace = places.enter(checked, config, localHandle);
+      var workspace = places.enter(checked, config);
       listener.workspaceEntered(workspace);
       seedRoomDelivery(runId, built.renderedMessages());
       var branchCreated =
@@ -351,7 +351,7 @@ public final class BuildDispatch {
     }
     var env = ((RunReservation.Claim.Claimed) claim).env();
     try {
-      places.enter(checked, config, localHandle);
+      places.enter(checked, config);
       var place = checked.place();
       seedRoomDelivery(runId, built.renderedMessages());
       enterBranch(place, targetRepos, row.branch(), true, Optional.empty());

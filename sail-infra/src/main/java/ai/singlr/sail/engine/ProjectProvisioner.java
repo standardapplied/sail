@@ -143,6 +143,7 @@ public final class ProjectProvisioner {
    * names one: what {@link #provision(ProjectDefinition, HostYaml, Map, LocalIdentity.GitIdentity,
    * Path)} does for the project's own container, for another instance, such as its template. The
    * definition, its digest and the project's skills are the project's whatever instance takes them.
+   * With no {@code git} identity none is set, as a template, which is no one's, is built.
    */
   public void provision(
       Instance into,
@@ -821,15 +822,17 @@ public final class ProjectProvisioner {
 
     var user = ProjectDefinition.USER;
 
-    var nameResult =
-        execAsDevUser(name, List.of("git", "config", "--global", "user.name", git.name()));
-    if (!nameResult.ok()) {
-      throw new IOException("Failed to set git user.name: " + nameResult.stderr());
-    }
-    var emailResult =
-        execAsDevUser(name, List.of("git", "config", "--global", "user.email", git.email()));
-    if (!emailResult.ok()) {
-      throw new IOException("Failed to set git user.email: " + emailResult.stderr());
+    if (git != null) {
+      var nameResult =
+          execAsDevUser(name, List.of("git", "config", "--global", "user.name", git.name()));
+      if (!nameResult.ok()) {
+        throw new IOException("Failed to set git user.name: " + nameResult.stderr());
+      }
+      var emailResult =
+          execAsDevUser(name, List.of("git", "config", "--global", "user.email", git.email()));
+      if (!emailResult.ok()) {
+        throw new IOException("Failed to set git user.email: " + emailResult.stderr());
+      }
     }
 
     if (gitTokens != null && !gitTokens.isEmpty()) {

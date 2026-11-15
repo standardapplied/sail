@@ -14,6 +14,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
 import java.util.concurrent.TimeoutException;
+import java.util.function.Predicate;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
@@ -22,13 +23,14 @@ import java.util.stream.Stream;
 /**
  * The {@code authorized_keys} of the accounts in each of this box's containers, which provisioning
  * fills from the project's {@code ssh.authorized_keys}. A removal reaches every container, an
- * addition each container sail made for the projects it is given, running or not alike, since
- * {@code incus file pull} and {@code push} reach a stopped container's filesystem. The accounts are
- * read from the container's own {@code /etc/passwd}, never from the catalog, which may name another
- * user than the one a container was provisioned with. A removal edits the file of every account
- * whose home is under {@code /home}, where provisioning creates the SSH user; an addition only the
- * SSH user's, the account at uid 1000 provisioning requires. Only the lines whose key is the exact
- * key are matched, so the other keys an engineer put there stay.
+ * addition each container sail made for the projects it is given and each workspace of the person
+ * the key is of, running or not alike, since {@code incus file pull} and {@code push} reach a
+ * stopped container's filesystem. The accounts are read from the container's own {@code
+ * /etc/passwd}, never from the catalog, which may name another user than the one a container was
+ * provisioned with. A removal edits the file of every account whose home is under {@code /home},
+ * where provisioning creates the SSH user; an addition only the SSH user's, the account at uid 1000
+ * provisioning requires. Only the lines whose key is the exact key are matched, so the other keys
+ * an engineer put there stay.
  */
 public final class ContainerAuthorizedKeys {
 
@@ -78,24 +80,45 @@ public final class ContainerAuthorizedKeys {
   }
 
   /**
-   * Adds {@code key} to the SSH user's file in each container of {@code projects} this box runs
-   * that does not hold it yet, and returns those it could not, each with why: one container that
-   * cannot be written stops none of the others. A container bearing a project's name that carries
-   * no sail-api-sock device is not written but returned, as {@code project apply --all} names it:
-   * sail did not make it, or did not finish.
+   * Adds {@code key}, the box's workstation key, to the SSH user's file in each container of {@code
+   * projects} this box runs and in each of their workspaces whose owner is {@code boxHandle}, the
+   * box's person, that does not hold it yet, and returns those it could not, each with why: one
+   * that cannot be written stops none of the others. A workspace of anyone else never takes it
+   * (T2). A container bearing a project's name that carries no sail-api-sock device is not written
+   * but returned, as {@code project apply --all} names it: sail did not make it, or did not finish.
    */
-  public List<Unreached> add(SshPublicKey key, Collection<String> projects)
+  public List<Unreached> add(SshPublicKey key, Collection<String> projects, String boxHandle)
+      throws IOException, InterruptedException, TimeoutException {
+    return addWhere(
+        key,
+        instance ->
+            ofProject(instance, projects)
+                && (instance.kind() instanceof BoxInstances.Plain || ownedBy(instance, boxHandle)));
+  }
+
+  /**
+   * Adds {@code key}, a key person {@code handle} registered, to each whole workspace of theirs
+   * this box holds, and returns those it could not, each with why.
+   */
+  public List<Unreached> addToWorkspacesOf(SshPublicKey key, String handle)
+      throws IOException, InterruptedException, TimeoutException {
+    return addWhere(
+        key,
+        instance ->
+            instance.kind() instanceof BoxInstances.Workspace workspace
+                && workspace.ready()
+                && ownedBy(instance, handle));
+  }
+
+  private List<Unreached> addWhere(SshPublicKey key, Predicate<BoxInstances.Instance> reached)
       throws IOException, InterruptedException, TimeoutException {
     var entry = entry(key);
     var devices = new IncusDeviceManager(shell);
-    var ofProjects =
+    var instances =
         new BoxInstances(shell)
-            .containers().stream()
-                .filter(instance -> ofProject(instance, projects))
-                .map(BoxInstances.Instance::name)
-                .toList();
+            .containers().stream().filter(reached).map(BoxInstances.Instance::name).toList();
     return each(
-        ofProjects,
+        instances,
         container -> {
           if (!devices.sailManaged(container)) {
             throw new IOException(
@@ -104,6 +127,10 @@ public final class ContainerAuthorizedKeys {
           }
           addTo(container, homeAccounts(container), key, entry);
         });
+  }
+
+  private static boolean ownedBy(BoxInstances.Instance instance, String handle) {
+    return instance.key(BoxInstances.OWNER_KEY).filter(owner -> owner.equals(handle)).isPresent();
   }
 
   private static List<Unreached> each(List<String> containers, Edit edit)
@@ -145,9 +172,8 @@ public final class ContainerAuthorizedKeys {
   }
 
   /**
-   * Whether {@code instance} is the container or a whole workspace of one of {@code projects}: a
-   * new key reaches every workspace of the projects it is for, and no template, which takes it at
-   * its next build.
+   * Whether {@code instance} is the container or a whole workspace of one of {@code projects}, and
+   * no template, which holds no one's key.
    */
   private static boolean ofProject(BoxInstances.Instance instance, Collection<String> projects) {
     return switch (instance.kind()) {
