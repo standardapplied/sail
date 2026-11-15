@@ -63,6 +63,34 @@ class CliCommandTest {
     assertTrue(capturedErr.toString(StandardCharsets.UTF_8).contains("boom"));
   }
 
+  /** Low 10: under {@code --json} a refusal is JSON on stdout, its fix beside it. */
+  @Test
+  void aRefusalUnderJsonIsJsonOnStdout() {
+    var out = System.out;
+    var captured = new ByteArrayOutputStream();
+    System.setOut(new PrintStream(captured, true, StandardCharsets.UTF_8));
+    try {
+      assertThrows(
+          CliCommand.Printed.class,
+          () ->
+              CliCommand.run(
+                  true,
+                  () -> {
+                    throw new ApiException(
+                        ErrorCode.CONFLICT,
+                        "This box has no ZFS pool.",
+                        Remedy.of("Add one."));
+                  }));
+    } finally {
+      System.setOut(out);
+    }
+
+    assertEquals(
+        "{\"error\": \"This box has no ZFS pool.\", \"fix\": \"Add one.\"}",
+        captured.toString(StandardCharsets.UTF_8).strip());
+    assertEquals("", capturedErr.toString(StandardCharsets.UTF_8));
+  }
+
   @Test
   void aDestroyNobodyCanConfirmIsRefusedWithNoDryRunHint() {
     ConsoleStub.answering("", false);

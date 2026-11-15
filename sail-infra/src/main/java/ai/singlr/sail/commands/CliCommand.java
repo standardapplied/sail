@@ -12,6 +12,7 @@ import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.engine.Banner;
 import ai.singlr.sail.engine.OperatorCommand;
 import java.io.PrintStream;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Objects;
 import picocli.CommandLine.Help.Ansi;
@@ -55,6 +56,30 @@ public final class CliCommand {
 
   static void run(PrintStream err, CheckedRunnable runnable) {
     run(err, null, runnable);
+  }
+
+  /**
+   * As {@link #run(CheckedRunnable)}, but under {@code --json} ({@code json}) a failure is printed
+   * as JSON on stdout, {@code {"error": <its line>, "fix": <what follows, if any>}}, so a caller
+   * that reads JSON reads a refusal too.
+   */
+  static void run(boolean json, CheckedRunnable runnable) {
+    if (!json) {
+      run(runnable);
+      return;
+    }
+    try {
+      runnable.run();
+    } catch (Exception e) {
+      var lines = lines(e, reader());
+      var said = new LinkedHashMap<String, Object>();
+      said.put("error", lines.getFirst());
+      if (lines.size() > 1) {
+        said.put("fix", String.join(" ", lines.subList(1, lines.size())));
+      }
+      System.out.println(CliJson.stringify(said));
+      throw new Printed(lines.getFirst(), e);
+    }
   }
 
   private static void run(PrintStream err, String failureHint, CheckedRunnable runnable) {
