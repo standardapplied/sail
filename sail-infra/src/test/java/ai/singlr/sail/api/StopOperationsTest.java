@@ -1192,9 +1192,7 @@ class StopOperationsTest {
 
     assertEquals(ErrorCode.RUN_ON_OTHER_NODE, refused.failure().errorCode());
     assertEquals(
-        "Run "
-            + R2
-            + " of spec auth runs on eng, not this box; only its executing box can stop it.",
+        "Run " + R2 + " runs on eng, not this box; only its executing box can stop it.",
         refused.getMessage());
     assertEquals("running", runStore.findById(R2).orElseThrow().status());
   }

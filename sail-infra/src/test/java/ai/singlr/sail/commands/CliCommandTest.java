@@ -89,6 +89,28 @@ class CliCommandTest {
     assertEquals("", capturedErr.toString(StandardCharsets.UTF_8));
   }
 
+  /** Under {@code --json} a refusal with no fix says its error alone. */
+  @Test
+  void aRefusalWithNoFixUnderJsonIsItsErrorAlone() {
+    var out = System.out;
+    var captured = new ByteArrayOutputStream();
+    System.setOut(new PrintStream(captured, true, StandardCharsets.UTF_8));
+    try {
+      assertThrows(
+          CliCommand.Printed.class,
+          () ->
+              CliCommand.run(
+                  true,
+                  () -> {
+                    throw new IllegalStateException("boom");
+                  }));
+    } finally {
+      System.setOut(out);
+    }
+
+    assertEquals("{\"error\": \"boom\"}", captured.toString(StandardCharsets.UTF_8).strip());
+  }
+
   @Test
   void aDestroyNobodyCanConfirmIsRefusedWithNoDryRunHint() {
     ConsoleStub.answering("", false);

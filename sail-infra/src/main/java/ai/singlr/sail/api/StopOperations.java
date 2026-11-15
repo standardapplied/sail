@@ -264,9 +264,6 @@ public final class StopOperations {
                   ErrorCode.RUN_ON_OTHER_NODE,
                   "Run "
                       + elsewhere.id()
-                      + (Strings.isBlank(elsewhere.specId())
-                          ? ""
-                          : " of spec " + elsewhere.specId())
                       + " runs on "
                       + node
                       + ", not this box; only its executing box can stop it.",

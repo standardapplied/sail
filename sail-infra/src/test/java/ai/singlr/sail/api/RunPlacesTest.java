@@ -14,6 +14,7 @@ import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.ProjectDefinition;
 import ai.singlr.sail.config.TestDefinitions;
 import ai.singlr.sail.config.YamlUtil;
+import ai.singlr.sail.engine.ContainerConfig;
 import ai.singlr.sail.engine.DeviceFixtures;
 import ai.singlr.sail.engine.RunPlace;
 import ai.singlr.sail.engine.ScriptedShellExecutor;
@@ -24,6 +25,7 @@ import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.Sqlite;
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
@@ -31,6 +33,8 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -346,6 +350,44 @@ class RunPlacesTest {
     assertEquals(ErrorCode.RUNNER_BUSY, busy.failure().errorCode());
     assertTrue(busy.getMessage().startsWith("This box has 1 spec workspace with a live run"));
     assertTrue(incus.invocations().stream().noneMatch(c -> c.startsWith("incus copy")));
+  }
+
+  /** A check that waits past the create wait on a build of the template is busy, naming it. */
+  @Test
+  void aCheckThatMeetsABuildOfTheTemplatePastTheWaitIsRunnerBusy() throws Exception {
+    var locks = Files.createDirectories(dir.resolve("locks"));
+    var now = new AtomicLong();
+    var places =
+        new RunPlaces(
+            new ProjectLoader(new ScriptedShellExecutor(), definitions()),
+            TestWorkspaces.over(
+                TestWorkspaces.incus(definitions(), "acme"),
+                () -> now.addAndGet(Workspaces.CREATE_WAIT.toNanos()),
+                locks),
+            null,
+            new ScriptedShellExecutor(),
+            RunLauncher.Room.NONE,
+            place -> {});
+    var refused = new AtomicReference<ApiException>();
+    try (var build = ContainerConfig.hold(locks, "acme--tmpl")) {
+      var checking =
+          Thread.ofPlatform()
+              .start(
+                  () -> {
+                    try {
+                      places.checkSpec("acme", config(), "auth", "eng");
+                    } catch (ApiException e) {
+                      refused.set(e);
+                    } catch (IOException e) {
+                      throw new UncheckedIOException(e);
+                    }
+                  });
+      checking.join(Duration.ofSeconds(30));
+    }
+
+    assertEquals(ErrorCode.RUNNER_BUSY, refused.get().failure().errorCode());
+    assertEquals(
+        "acme's template is being built; dispatch again once it is.", refused.get().getMessage());
   }
 
   @Test

@@ -7,7 +7,6 @@ package ai.singlr.sail.api;
 
 import ai.singlr.sail.access.ReadFilter;
 import ai.singlr.sail.common.DateTimeUtils;
-import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.Engagement;
 import ai.singlr.sail.config.Roster;
 import ai.singlr.sail.engine.HostInfo;
@@ -162,8 +161,8 @@ public final class MembershipService {
             .enter(places.checkSpec(project, config, specId, localHandle), config, localHandle)
             .place();
     admission.requireInstalled(LaunchAdmission.resolveAgent(member.agent()), place.instance());
-    persistMembership(specId, member);
-    publishEngaged(project, specId, member, "");
+    writeRoster(spec, Roster.solo(member));
+    publishEngaged(project, specId, member);
     return new EngageLaunch(member.agent(), member.mode());
   }
 
@@ -181,7 +180,7 @@ public final class MembershipService {
         roomId, room.project(), store.ownerOf(roomId), localHandle);
     var member = inTheProjectsContainer(room.project(), agentYamlName, mode, model, localHandle);
     store.updateRoster(roomId, Roster.solo(member).toJson());
-    publishEngaged(room.project(), roomId, member, "");
+    publishEngaged(room.project(), roomId, member);
     return new EngageLaunch(member.agent(), member.mode());
   }
 
@@ -203,7 +202,7 @@ public final class MembershipService {
         inTheProjectsContainer(
             project, request.agent(), request.mode(), request.model(), localHandle);
     var created = create.apply(Roster.solo(member).toJson());
-    publishEngaged(project, roomId, member, "");
+    publishEngaged(project, roomId, member);
     return created;
   }
 
@@ -300,18 +299,6 @@ public final class MembershipService {
     Refusals.enforce(store.decide(roomId, held == null ? Map.of() : held));
   }
 
-  private void persistMembership(String specId, Engagement member) {
-    var current =
-        specStore
-            .findById(specId)
-            .orElseThrow(
-                () ->
-                    new ApiException(
-                        ErrorCode.SPEC_NOT_FOUND,
-                        "Spec '" + specId + "' vanished while engaging."));
-    writeRoster(current, Roster.solo(member));
-  }
-
   private void writeRoster(SpecStore.SpecRow spec, Roster roster) {
     var store = requireRooms();
     specStore.atomically(
@@ -334,13 +321,10 @@ public final class MembershipService {
     return store;
   }
 
-  private void publishEngaged(String project, String specId, Engagement member, String label) {
+  private void publishEngaged(String project, String specId, Engagement member) {
     var data = new LinkedHashMap<String, Object>();
     data.put("agent", member.agent());
     data.put("mode", member.mode());
-    if (!Strings.isBlank(label)) {
-      data.put("label", label);
-    }
     publish(project, specId, Event.WellKnownTypes.SPEC_ENGAGED, data);
   }
 
