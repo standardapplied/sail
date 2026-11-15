@@ -431,6 +431,22 @@ class SpecWorkspacesTest {
     assertEquals(List.of(), said);
   }
 
+  /**
+   * A push that git took but after which the repo still holds what no remote has (a remote that
+   * tracks nothing the push sent) keeps the workspace: the count after the push is what decides.
+   */
+  @Test
+  void aPushAfterWhichTheCommitsAreStillUnpushedKeepsTheWorkspace() {
+    spec("a", SpecStatus.DONE);
+    box.workspace("a", "Running").repo("app", 1, 0).pushTracksNothing = true;
+    ended("a", "completed");
+
+    sweeper().sweep();
+
+    assertEquals("app: 1 commit that no remote has", box.key(instance("a"), KEPT));
+    assertEquals("Stopped", box.state(instance("a")));
+  }
+
   /** Scenario 6: a push that fails keeps the workspace stopped, said once with git's reason. */
   @Test
   void aPushThatFailsKeepsTheWorkspaceAndSaysWhy() {
@@ -1039,6 +1055,7 @@ class SpecWorkspacesTest {
       volatile boolean pushFails;
       volatile boolean usageAnswers = true;
       volatile boolean stopFails;
+      volatile boolean pushTracksNothing;
       volatile boolean configFails;
       volatile ShellExec.Result countSays;
 
@@ -1227,7 +1244,9 @@ class SpecWorkspacesTest {
           return fail(
               "fatal: unable to access 'https://github.com/acme/app/': Could not connect\n");
         }
-        held.repos.get(path)[0] = 0;
+        if (!held.pushTracksNothing) {
+          held.repos.get(path)[0] = 0;
+        }
         return ok("");
       }
       return unexpected(joined);
