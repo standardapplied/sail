@@ -100,6 +100,8 @@ struct Step: Decodable {
     var keychain: String?
     /// The sign-in pane's button drawn: its fill terracotta and its label `onAccent`.
     var accent: Bool?
+    /// The window's title bar: transparent, the platform's buttons, the rail and the pane under it.
+    var titleBar: Bool?
     /// Searches everywhere a token could be left for the session token and for `sess_`.
     var sweep: Bool?
     /// The step runs only on a signed build, or only on an unsigned one; skipped otherwise.

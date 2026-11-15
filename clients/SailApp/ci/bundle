@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Assembles a .app from this package's release build: the executable, Info.plist, the fonts and
-# their licences, the acknowledgements, and the bundled sail as Contents/Helpers/sail.
+# their licences, the acknowledgements, the icon, and the bundled sail as Contents/Helpers/sail.
 set -euo pipefail
 
 usage() {
@@ -29,7 +29,7 @@ rm -rf "$app"
 mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources/Fonts" "$app/Contents/Helpers"
 cp "$bin/$product" "$app/Contents/MacOS/$product"
 cp Fonts/*.ttf Fonts/*.txt "$app/Contents/Resources/Fonts/"
-cp ci/Acknowledgements.txt "$app/Contents/Resources/"
+cp ci/Acknowledgements.txt ci/Sail.icns "$app/Contents/Resources/"
 cp "$sail" "$app/Contents/Helpers/sail"
 chmod 755 "$app/Contents/MacOS/$product" "$app/Contents/Helpers/sail"
 sed -e "s/@EXECUTABLE@/$product/" -e "s/@IDENTIFIER@/$identifier/" -e "s/@VERSION@/${version:-0.0.0}/" \

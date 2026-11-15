@@ -1,6 +1,7 @@
 {"steps": [
   {"name": "this-mac-signed-out", "select": "thisMac"},
   {"name": "this-mac-attached", "attached": true, "seconds": 30},
+  {"name": "title-bar-over-this-mac", "titleBar": true},
   {"name": "type-echo-hi", "type": "echo hi\r"},
   {"name": "shows-hi", "line": "hi", "seconds": 30},
   {"name": "plain-prompt", "type": "PS1='$ '; PROMPT='$ '; clear\r"},
@@ -48,6 +49,7 @@
   {"name": "new-session-works", "type": "echo after-$((2+3))\r"},
   {"name": "after-restart", "line": "after-5", "seconds": 30},
   {"name": "account", "select": "account"},
+  {"name": "title-bar-over-the-account", "titleBar": true},
   {"name": "signed-out", "exactly": ["Sign in to Sail"]},
   {"name": "accent-is-terracotta-under-graphite", "accent": true},
   {"name": "unreachable-address", "address": "http://127.0.0.1:1"},

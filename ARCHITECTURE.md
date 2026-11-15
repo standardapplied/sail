@@ -4136,9 +4136,13 @@ with `com.apple.application-identifier` and `com.apple.developer.team-identifier
 Developer ID provisioning profile at `Contents/embedded.provisionprofile`; the domain's
 `apple-app-site-association` names the app. Cancelling and finding no passkey are one answer on
 Apple platforms, so a cancelled sign-in says what to do if this Mac holds none. The window is the
-Sail look: terracotta for every accent, drawn by the app so the system accent never reaches it, dark
-ink on it, content corners at 6 pt, a 60 pt icon rail on the window's chrome with "This Mac" and the
-account.
+Sail look: terracotta for every accent, drawn by the app so the system accent never reaches it, its
+label dark ink in the dark appearance and white in the light (3.43:1, so a label on the accent is
+always bold, large text by the HIG's measure), content corners at 6 pt, a 60 pt icon rail with "This
+Mac" and the account. The title bar is transparent over a full-size content view: the rail's tint and
+the pane's surface run to the top edge under the platform's own window buttons. The artifact is the
+zip `ditto` made, uploaded unarchived, so one unzip gives `Sail.app`; CI checks the download as
+Finder unpacks it.
 
 ## Continuous integration
 

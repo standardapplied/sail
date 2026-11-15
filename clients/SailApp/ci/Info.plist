@@ -8,6 +8,8 @@
 	<string>Sail</string>
 	<key>CFBundleExecutable</key>
 	<string>@EXECUTABLE@</string>
+	<key>CFBundleIconFile</key>
+	<string>Sail.icns</string>
 	<key>CFBundleIdentifier</key>
 	<string>@IDENTIFIER@</string>
 	<key>CFBundleInfoDictionaryVersion</key>

@@ -2,8 +2,9 @@ import AppKit
 import SailLook
 import SailTerminalView
 
-/// The one prominent action: terracotta filled, its label `onAccent`, content corners at 6 pt. It
-/// draws its own fill, so the system accent never reaches it.
+/// The one prominent action: terracotta filled, its label `onAccent` in bold, content corners at
+/// 6 pt. It draws its own fill, so the system accent never reaches it. The label is bold because
+/// white on terracotta is 3.43:1, which only large text may be (bold at any size, HIG Accessibility).
 @MainActor
 public final class AccentButton: NSButton {
     private let look: Look
@@ -27,7 +28,7 @@ public final class AccentButton: NSButton {
 
     public func setTitle(_ title: String) {
         attributedTitle = NSAttributedString(
-            string: title, attributes: [.foregroundColor: NSColor(look.onAccent), .font: NSFont.systemFont(ofSize: Look.Step.body.points, weight: .medium)]
+            string: title, attributes: [.foregroundColor: NSColor(look.onAccent), .font: NSFont.systemFont(ofSize: Look.Step.body.points, weight: .bold)]
         )
     }
 

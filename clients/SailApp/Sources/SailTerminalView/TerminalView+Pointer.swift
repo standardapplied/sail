@@ -125,7 +125,8 @@ extension TerminalView {
         }
     }
 
-    /// The paste sheet: the line count, the risk in a sentence, Paste in the accent, and Cancel the
+    /// The paste sheet: the line count, the risk in a sentence, Paste in the accent (its label the
+    /// appearance's `onAccent`, bold, as text on the accent always is), and Cancel the
     /// default, so Return does not run what the sheet warns of, and Escape cancels too. The keys are
     /// given once the sheet is laid out, which gives the first button Return and Cancel Escape; a
     /// button answers one key, so Escape is watched for while the sheet is up.
@@ -139,8 +140,11 @@ extension TerminalView {
         alert.informativeText = "The program in this terminal did not ask for pastes, so each line may run as a command as it arrives."
         let paste = alert.addButton(withTitle: "Paste")
         let cancel = alert.addButton(withTitle: "Cancel")
-        paste.bezelColor = NSColor(Look.dark.accent)
-        paste.attributedTitle = NSAttributedString(string: "Paste", attributes: [.foregroundColor: NSColor(Look.dark.onAccent)])
+        let look: Look = window.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .aqua ? .light : .dark
+        paste.bezelColor = NSColor(look.accent)
+        paste.attributedTitle = NSAttributedString(
+            string: "Paste", attributes: [.foregroundColor: NSColor(look.onAccent), .font: NSFont.boldSystemFont(ofSize: NSFont.systemFontSize)]
+        )
         alert.beginSheetModal(for: window) { [weak self] response in
             MainActor.assumeIsolated {
                 self?.stopWatchingEscape()

@@ -20,7 +20,9 @@ public struct Tint: Hashable, Sendable {
 }
 
 /// The Sail look's tokens, dark and light (`design-language.md` 2.1.1). The accent is terracotta
-/// always, never the system's, and text on it is `onAccent` in both appearances.
+/// always, never the system's. Text on it is `onAccent`: dark ink in the dark appearance, white in
+/// the light (the owner's choice), which is 3.43:1 on terracotta, so text on an accent fill is
+/// always large text (bold) and counts against 3:1.
 public struct Look: Equatable, Sendable {
     public let palette: Palette
     public let canvas: RGB
@@ -51,7 +53,7 @@ public struct Look: Equatable, Sendable {
     public static let light = Look(
         palette: .light, canvas: RGB(0xF8FAFC), surface: RGB(0xFDFFFF), well: RGB(0xEEF2F6), chrome: RGB(0xF7EAE2),
         text: Tint(0x0E1217), textSecondary: Tint(0x383E43), textTertiary: Tint(0x63686D), separator: Tint(0x0E1217, alpha: 0.12),
-        separatorStrong: Tint(0x0E1217, alpha: 0.22), accent: RGB(0xFC4926), accentText: RGB(0xC8321F), onAccent: RGB(0x0A0E11),
+        separatorStrong: Tint(0x0E1217, alpha: 0.22), accent: RGB(0xFC4926), accentText: RGB(0xC8321F), onAccent: RGB(0xFFFFFF),
         danger: RGB(0xB42318), fillHover: Tint(0x0E1217, alpha: 0.05), fillSelected: Tint(0xFC4926, alpha: 0.16),
         fillSelectedInactive: Tint(0x0E1217, alpha: 0.08)
     )

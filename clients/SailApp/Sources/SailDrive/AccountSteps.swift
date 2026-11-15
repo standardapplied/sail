@@ -3,6 +3,7 @@ import SailAccount
 import SailAPI
 import SailShell
 import SailTestPasskey
+import SailVT
 import Security
 
 /// The drive's steps on the account: they act through the pane's own fields and buttons, and read
@@ -64,6 +65,9 @@ extension Driver {
         }
         if step.accent == true {
             return accent()
+        }
+        if step.titleBar == true {
+            return titleBar()
         }
         if step.sweep == true {
             return sweep()
@@ -150,30 +154,61 @@ extension Driver {
     }
 
     /// Scenario 18: the sign-in button drawn into an sRGB bitmap, its commonest colour the fill and
-    /// its darkest the label, each within 2 of 255 of the token, whatever the system accent is.
+    /// the colour furthest from it the label, each within 2 of 255 of the token (the label `onAccent`:
+    /// white in the light appearance, ink in the dark), whatever the system accent is.
     private func accent() -> (Bool, String) {
         guard let context = Self.drawn(shell.account.signIn), let bytes = context.data else { return (false, "the button could not be drawn") }
         let width = context.width, height = context.height
         let pixels = bytes.bindMemory(to: UInt8.self, capacity: width * height * 4)
         var counts: [UInt32: Int] = [:]
-        var darkest: (sum: Int, rgb: UInt32) = (Int.max, 0)
-        for index in 0 ..< width * height {
-            let red = pixels[index * 4], green = pixels[index * 4 + 1], blue = pixels[index * 4 + 2]
-            guard pixels[index * 4 + 3] == 255 else { continue }
-            let rgb = UInt32(red) << 16 | UInt32(green) << 8 | UInt32(blue)
-            counts[rgb, default: 0] += 1
-            let sum = Int(red) + Int(green) + Int(blue)
-            if sum < darkest.sum { darkest = (sum, rgb) }
+        for index in 0 ..< width * height where pixels[index * 4 + 3] == 255 {
+            counts[UInt32(pixels[index * 4]) << 16 | UInt32(pixels[index * 4 + 1]) << 8 | UInt32(pixels[index * 4 + 2]), default: 0] += 1
         }
-        guard let fill = counts.max(by: { $0.value < $1.value })?.key else { return (false, "the button drew nothing opaque") }
-        func near(_ found: UInt32, _ wanted: UInt32) -> Bool {
-            [16, 8, 0].allSatisfy { abs(Int(found >> $0 & 0xFF) - Int(wanted >> $0 & 0xFF)) <= 2 }
-        }
-        let system = NSColor.controlAccentColor.usingColorSpace(.sRGB).map { String(format: "%02X%02X%02X", Int($0.redComponent * 255), Int($0.greenComponent * 255), Int($0.blueComponent * 255)) } ?? "unknown"
+        guard let fill = counts.max(by: { $0.value < $1.value })?.key,
+              let label = counts.keys.max(by: { Self.distance($0, fill) < Self.distance($1, fill) })
+        else { return (false, "the button drew nothing opaque") }
+        let wanted = Self.hex(shell.look.onAccent)
+        let system = NSColor.controlAccentColor.usingColorSpace(.sRGB).map {
+            String(format: "%02X%02X%02X", Int($0.redComponent * 255), Int($0.greenComponent * 255), Int($0.blueComponent * 255))
+        } ?? "unknown"
         return (
-            near(fill, 0xFC4926) && near(darkest.rgb, 0x0A0E11),
-            String(format: "fill #%06X, label #%06X; the system accent is #", fill, darkest.rgb) + system
+            Self.near(fill, 0xFC4926) && Self.near(label, wanted),
+            String(format: "fill #%06X, label #%06X (wanted #%06X); the system accent is #", fill, label, wanted) + system
         )
+    }
+
+    /// A: the window's chrome is the look's. The title bar is transparent over a full-size content
+    /// view with the platform's buttons, and under it the rail's tint at the left and the selected
+    /// pane's surface beside it, as the window draws them.
+    private func titleBar() -> (Bool, String) {
+        let window = shell.window
+        guard window.styleMask.contains(.fullSizeContentView), window.titlebarAppearsTransparent,
+              [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton].allSatisfy({ window.standardWindowButton($0)?.isHidden == false }),
+              let content = window.contentView, let context = Self.drawn(content), let bytes = context.data
+        else { return (false, "the window's title bar is the system's, or a window button is missing") }
+        let pixels = bytes.bindMemory(to: UInt8.self, capacity: context.width * context.height * 4)
+        func at(_ x: Double) -> UInt32 {
+            let index = (20 * context.width + Int(x * 2)) * 4
+            return UInt32(pixels[index]) << 16 | UInt32(pixels[index + 1]) << 8 | UInt32(pixels[index + 2])
+        }
+        let surface = Self.hex(shell.rail.selected == .thisMac ? shell.look.palette.background : shell.look.canvas)
+        let rail = at(Rail.width / 2), pane = at(Rail.width + 200)
+        return (
+            Self.near(rail, Self.hex(shell.look.chrome)) && Self.near(pane, surface),
+            String(format: "under the title bar the rail is #%06X (wanted #%06X) and the pane #%06X (wanted #%06X)", rail, Self.hex(shell.look.chrome), pane, surface)
+        )
+    }
+
+    private static func near(_ found: UInt32, _ wanted: UInt32) -> Bool {
+        [16, 8, 0].allSatisfy { abs(Int(found >> $0 & 0xFF) - Int(wanted >> $0 & 0xFF)) <= 2 }
+    }
+
+    private static func distance(_ one: UInt32, _ other: UInt32) -> Int {
+        [16, 8, 0].map { abs(Int(one >> $0 & 0xFF) - Int(other >> $0 & 0xFF)) }.reduce(0, +)
+    }
+
+    private static func hex(_ rgb: RGB) -> UInt32 {
+        UInt32(rgb.red) << 16 | UInt32(rgb.green) << 8 | UInt32(rgb.blue)
     }
 
     /// Scenario 17: the session token, `sess_` and the enrollment ticket searched for in the

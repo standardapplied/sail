@@ -5,8 +5,11 @@ import SailLook
 import SailTerminalView
 
 /// "Sail": one window, 1180 by 800 and no smaller than 480 by 600, an icon rail beside the pane it
-/// selects: "This Mac" (the local terminal) or the account. It asks the control plane who it is
-/// signed in as at launch and each time the app is activated.
+/// selects: "This Mac" (the local terminal) or the account. The window's chrome is drawn from the
+/// look: a transparent title bar over a full-size content view, so the rail's tint and the pane's
+/// surface run to the top edge under the platform's own window buttons, which keep dragging and
+/// double-click to zoom. It asks the control plane who it is signed in as at launch and each time
+/// the app is activated.
 @MainActor
 public final class ShellApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
     public static let title = "Sail"
@@ -16,23 +19,32 @@ public final class ShellApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
     public let rail: Rail
     public let account: AccountPane
     public let thisMac: TerminalPane
+    public let look: Look
 
+    private let root = NSView()
     private let content = NSView()
-    private let look: Look
 
     /// The app from its bundle: the fonts in `Contents/Resources/Fonts`, the host in
-    /// `Contents/Helpers/sail`. `passkeys` makes the authenticator, given the window its sheets show on.
-    public init(
+    /// `Contents/Helpers/sail`, the look the appearance names. `passkeys` makes the authenticator,
+    /// given the window its sheets show on.
+    public convenience init(
         bundle: Bundle, passkeys: (@escaping @MainActor @Sendable () -> NSWindow?) -> any PasskeyAuthenticator = { PlatformPasskeys(anchor: $0) }
     ) throws(ShellError) {
         guard let resources = bundle.resourceURL else { throw .resources("the app's bundle has no resources folder") }
-        let fonts = resources.appending(path: "Fonts")
         let helper = bundle.bundleURL.appending(path: "Contents/Helpers/sail").path
-        let look: Look = NSApplication.shared.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .aqua ? .light : .dark
+        try self.init(
+            fonts: resources.appending(path: "Fonts"), helper: FileManager.default.isExecutableFile(atPath: helper) ? helper : nil,
+            look: NSApplication.shared.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .aqua ? .light : .dark, passkeys: passkeys
+        )
+    }
+
+    init(
+        fonts: URL, helper: String?, look: Look, passkeys: (@escaping @MainActor @Sendable () -> NSWindow?) -> any PasskeyAuthenticator
+    ) throws(ShellError) {
         self.look = look
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 1180, height: 800), styleMask: [.titled, .closable, .miniaturizable, .resizable],
-            backing: .buffered, defer: false
+            contentRect: NSRect(x: 0, y: 0, width: 1180, height: 800),
+            styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView], backing: .buffered, defer: false
         )
         self.window = window
         let title: TitleFont
@@ -43,7 +55,7 @@ public final class ShellApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         } catch {
             throw .resources("the app's fonts cannot be read: \(error)")
         }
-        thisMac = try TerminalPane(fonts: fonts, helper: FileManager.default.isExecutableFile(atPath: helper) ? helper : nil, look: look)
+        thisMac = try TerminalPane(fonts: fonts, helper: helper, look: look)
         account = AccountPane(
             account: Account(authenticator: passkeys { [weak window] in window }, vault: KeychainVault()), look: look, title: title, mono: mono
         )
@@ -82,6 +94,7 @@ public final class ShellApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
             content.addSubview(pane)
         }
         rail.show(item)
+        root.layer?.backgroundColor = NSColor(item == .thisMac ? look.palette.background : look.canvas).cgColor
         UserDefaults.standard.set(item.rawValue, forKey: Self.paneKey)
         window.title = Self.title
         if item == .thisMac {
@@ -121,19 +134,22 @@ public final class ShellApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         window.delegate = self
         window.isReleasedWhenClosed = false
         window.backgroundColor = NSColor(look.canvas)
-        let root = NSView()
+        window.titlebarAppearsTransparent = true
+        window.titleVisibility = .hidden
         root.wantsLayer = true
+        root.layer?.backgroundColor = NSColor(look.canvas).cgColor
         rail.translatesAutoresizingMaskIntoConstraints = false
         content.translatesAutoresizingMaskIntoConstraints = false
         root.addSubview(rail)
         root.addSubview(content)
+        window.contentView = root
+        let belowTheTitleBar = (window.contentLayoutGuide as? NSLayoutGuide)?.topAnchor ?? root.topAnchor
         NSLayoutConstraint.activate([
             rail.leadingAnchor.constraint(equalTo: root.leadingAnchor), rail.topAnchor.constraint(equalTo: root.topAnchor),
             rail.bottomAnchor.constraint(equalTo: root.bottomAnchor), content.leadingAnchor.constraint(equalTo: rail.trailingAnchor),
-            content.trailingAnchor.constraint(equalTo: root.trailingAnchor), content.topAnchor.constraint(equalTo: root.topAnchor),
+            content.trailingAnchor.constraint(equalTo: root.trailingAnchor), content.topAnchor.constraint(equalTo: belowTheTitleBar),
             content.bottomAnchor.constraint(equalTo: root.bottomAnchor),
         ])
-        window.contentView = root
         rail.onSelect = { [weak self] item in self?.select(item) }
         thisMac.onTitle = { [weak self] title in
             guard let self, rail.selected == .thisMac else { return }
