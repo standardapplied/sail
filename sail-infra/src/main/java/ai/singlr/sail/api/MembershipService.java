@@ -128,10 +128,11 @@ public final class MembershipService {
    * atomic — one JSON array), so the wake reactor answers every human message with a chat turn
    * until a human dismisses the member. Mode {@code full} is the default; {@code read-only} is the
    * explicit narrow choice, offered only where the harness enforces it. A member of a spec's room
-   * works in the spec's own workspace, so it is checked and entered as a dispatch's run is ({@link
-   * RunPlaces}), its harness found installed there, and no snapshot of the project's container is
-   * taken for it: {@code takeSnapshot} is refused, naming why. Requires the dispatch tier on the
-   * spec, exactly like a dispatch.
+   * works in the spec's own workspace, so it is checked as a dispatch's run is ({@link RunPlaces})
+   * and nothing is made: its first turn makes the workspace once its run is reserved (R3). A
+   * running workspace is asked for its harness; no snapshot of the project's container is taken for
+   * it: {@code takeSnapshot} is refused, naming why. Requires the dispatch tier on the spec,
+   * exactly like a dispatch.
    */
   public EngageLaunch engage(
       String specId,
@@ -156,11 +157,11 @@ public final class MembershipService {
     var project = spec.project();
     var member = admit(agentYamlName, mode, model, localHandle);
     var config = projects.definition(project);
-    var place =
-        places
-            .enter(places.checkSpec(project, config, specId, localHandle), config, localHandle)
-            .place();
-    admission.requireInstalled(LaunchAdmission.resolveAgent(member.agent()), place.instance());
+    var checked = places.checkSpec(project, config, specId, localHandle);
+    if (checked.check().running()) {
+      admission.requireInstalled(
+          LaunchAdmission.resolveAgent(member.agent()), checked.place().instance());
+    }
     writeRoster(spec, Roster.solo(member));
     publishEngaged(project, specId, member);
     return new EngageLaunch(member.agent(), member.mode());

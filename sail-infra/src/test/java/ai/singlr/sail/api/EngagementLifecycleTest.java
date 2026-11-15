@@ -77,6 +77,7 @@ class EngagementLifecycleTest {
   private Sqlite db;
   private final List<Event> events = new ArrayList<>();
   private final List<String> order = new ArrayList<>();
+  private ScriptedShellExecutor incus;
 
   @AfterEach
   void tearDown() {
@@ -104,7 +105,7 @@ class EngagementLifecycleTest {
             new FdeStore(db),
             events::add,
             new WatcherSpawner(shell, (command, logPath) -> 4242L),
-            TestWorkspaces.ready(TestProjects.reading(yaml), "acme"),
+            TestWorkspaces.over(incus = TestWorkspaces.incus(TestProjects.reading(yaml), "acme")),
             command -> 0,
             DispatchOperations.Listener.NONE,
             SessionYield.NONE)
@@ -208,9 +209,9 @@ class EngagementLifecycleTest {
   }
 
   /**
-   * M3: a member of a spec's room is seated where its turns run, the spec's own workspace, checked
-   * and entered as a dispatch's run is, its harness found installed there; the project's container
-   * is neither required running nor asked.
+   * M3 and MJ2: a member of a spec's room is checked where its turns run, the spec's own workspace,
+   * as a dispatch's run is, and nothing is made on the request: its first turn makes it once its
+   * run is reserved. The project's container is neither required running nor asked.
    */
   @Test
   void aSpecsMemberIsSeatedInTheSpecsWorkspaceWhateverTheProjectsContainerIs() throws Exception {
@@ -231,9 +232,12 @@ class EngagementLifecycleTest {
     assertEquals("full", launch.mode(), "full is the default mode");
     assertTrue(stored("auth").full());
     assertEquals(1, ofType(Event.WellKnownTypes.SPEC_ENGAGED).size());
-    var asked = stopped.ran.stream().filter(command -> command.contains("command -v")).toList();
-    assertEquals(1, asked.size(), String.valueOf(stopped.ran));
-    assertTrue(asked.getFirst().startsWith("incus exec acme-auth "), asked.getFirst());
+    assertTrue(
+        incus.invocations().stream().noneMatch(command -> command.startsWith("incus copy")),
+        "the engage makes no workspace: its first turn does, once reserved");
+    assertTrue(
+        stopped.ran.stream().noneMatch(command -> command.startsWith("incus exec acme ")),
+        "and asks nothing of the project's container");
   }
 
   /** M3: no snapshot of the project's container is taken for a member of a spec's room. */
