@@ -80,7 +80,7 @@ class LoginStoreTest {
     store().store(UDAY, CLAUDE, null, null, TOKEN);
     store().store(UDAY, CODEX, null, null, KEY);
 
-    var self = PrivateDirectory.ProcessOwner.CURRENT.orElseThrow();
+    var self = PrivateDirectory.ProcessOwner.current().orElseThrow();
     for (var each : List.of(logins, person, person.resolve("claude-code"), codex)) {
       assertEquals(0700, (int) Files.getAttribute(each, "unix:mode") & 07777, each.toString());
       assertEquals(self.uid(), Files.getAttribute(each, "unix:uid"), each.toString());
@@ -167,8 +167,12 @@ class LoginStoreTest {
         assertThrows(
             IllegalArgumentException.class, () -> store.store(UDAY, CODEX, "x", "session", "v"));
     assertEquals(
-        "Codex CLI takes no login of kind 'session'; it takes api-key, token.",
-        refused.getMessage());
+        "Codex CLI takes no login of kind 'session'; it takes api-key.", refused.getMessage());
+    assertEquals(
+        "Codex CLI takes no login of kind 'token'; it takes api-key.",
+        assertThrows(
+                IllegalArgumentException.class, () -> store.store(UDAY, CODEX, "x", "token", "v"))
+            .getMessage());
     assertEquals(Optional.empty(), store.defaultFor(UDAY, CLAUDE));
   }
 

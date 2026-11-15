@@ -210,9 +210,7 @@ class RunReservationTest {
             + " in the project's container is not used by runs.",
         refused.getMessage());
     assertEquals(
-        "Create an API key at platform.openai.com/api-keys, then sail agent login codex. Or:"
-            + " Create a Codex access token at chatgpt.com/admin/access-tokens (ChatGPT Business"
-            + " and Enterprise), then sail agent login codex --kind token.",
+        "Create an API key at platform.openai.com/api-keys, then sail agent login codex.",
         refused.failure().remedy().plain());
     assertTrue(runStore.findById(RUN_ID).isEmpty(), "no row");
     assertThrows(
@@ -259,7 +257,7 @@ class RunReservationTest {
 
     assertEquals(2, said.size(), "no process keeps what it told: the room decides " + said);
     assertTrue(said.getFirst().startsWith("spec: No Codex CLI login stored for node"), said.get(0));
-    assertTrue(said.getFirst().endsWith("then sail agent login codex --kind token."), said.get(0));
+    assertTrue(said.getFirst().endsWith("then sail agent login codex."), said.get(0));
   }
 
   /** A run acting for no one on this box's roster has no stored login to start with. */

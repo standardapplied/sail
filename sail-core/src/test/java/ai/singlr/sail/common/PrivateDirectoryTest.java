@@ -11,6 +11,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Optional;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -29,6 +30,22 @@ class PrivateDirectoryTest {
     assertEquals(0700, (int) Files.getAttribute(made, "unix:mode") & 07777);
     assertEquals(0700, (int) Files.getAttribute(found, "unix:mode") & 07777);
     assertThrows(UncheckedIOException.class, () -> PrivateDirectory.ensure(link));
+  }
+
+  /** A status that cannot be read fails that call alone, never every later one. */
+  @Test
+  void aStatusWithNoIdsFailsEachCallThatReadsItAndALaterCallStillSucceeds() throws Exception {
+    var none = Files.writeString(dir.resolve("none"), "Name:\tx\n");
+    var target = dir.resolve("made");
+
+    for (var call = 0; call < 2; call++) {
+      var refused =
+          assertThrows(IllegalStateException.class, () -> PrivateDirectory.ensure(target, none));
+      assertEquals("No Uid: line in /proc/self/status.", refused.getMessage());
+    }
+    assertEquals(target, PrivateDirectory.ensure(target));
+    assertEquals(0700, (int) Files.getAttribute(target, "unix:mode") & 07777);
+    assertEquals(Optional.empty(), PrivateDirectory.ProcessOwner.current(dir.resolve("missing")));
   }
 
   @Test

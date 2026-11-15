@@ -33,7 +33,9 @@ class HarnessGoldenTest {
       " --tools \"Bash,Read,Grep,Glob\" --allowedTools \"Bash(spec show:*)\""
           + " \"Bash(spec list:*)\" \"Bash(spec board:*)\" \"Bash(spec comments:*)\""
           + " \"Bash(spec comment:*)\" \"Bash(spec whoami:*)\" \"Bash(cd:*)\""
-          + " --disallowedTools \"Bash(spec *--body-file*)\" \"Bash(spec *--plan-file*)\"";
+          + " --disallowedTools \"Bash(spec *--body-file*)\" \"Bash(spec *--plan-file*)\""
+          + " \"Bash(printenv:*)\" \"Bash(env:*)\" \"Bash(set:*)\" \"Bash(export:*)\""
+          + " \"Bash(declare:*)\" \"Read(//proc/**)\"";
 
   private static final String CLAUDE_ROOM =
       "claude --print --settings /home/dev/.sail/claude-settings.json --setting-sources \"\""
@@ -262,6 +264,12 @@ class HarnessGoldenTest {
             "--disallowedTools",
             "Bash(spec *--body-file*)",
             "Bash(spec *--plan-file*)",
+            "Bash(printenv:*)",
+            "Bash(env:*)",
+            "Bash(set:*)",
+            "Bash(export:*)",
+            "Bash(declare:*)",
+            "Read(//proc/**)",
             "--resume",
             "sess-1"),
         CLAUDE_CODE.live(new LiveLaunch(false, null, "sess-1")).orElseThrow());
@@ -338,16 +346,16 @@ class HarnessGoldenTest {
             "api-key ANTHROPIC_API_KEY Create an API key in the Claude Console"),
         described(CLAUDE_CODE));
     assertEquals(
-        List.of(
-            "api-key CODEX_API_KEY Create an API key at platform.openai.com/api-keys",
-            "token CODEX_ACCESS_TOKEN Create a Codex access token at"
-                + " chatgpt.com/admin/access-tokens (ChatGPT Business and Enterprise)"),
+        List.of("api-key CODEX_API_KEY Create an API key at platform.openai.com/api-keys"),
         described(CODEX));
     assertEquals(
         List.of("ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN"),
         CLAUDE_CODE.loginVariables(),
         "every variable Claude Code takes a credential from, the gateway token outranking both");
-    assertEquals(List.of("CODEX_API_KEY", "CODEX_ACCESS_TOKEN"), CODEX.loginVariables());
+    assertEquals(
+        List.of("CODEX_API_KEY", "CODEX_ACCESS_TOKEN"),
+        CODEX.loginVariables(),
+        "a container's own access token never outranks the stored key");
     assertEquals(
         List.of("CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX", "CLAUDE_CODE_USE_FOUNDRY"),
         CLAUDE_CODE.credentialSwitches(),

@@ -79,9 +79,7 @@ class ReviewLanesTest {
         List.of(
             "No Codex CLI login stored for node-a, so a run of a spec cannot start: a login made"
                 + " by hand in the project's container is not used by runs. Create an API key at"
-                + " platform.openai.com/api-keys, then sail agent login codex. Or: Create a Codex"
-                + " access token at chatgpt.com/admin/access-tokens (ChatGPT Business and"
-                + " Enterprise), then sail agent login codex --kind token."),
+                + " platform.openai.com/api-keys, then sail agent login codex."),
         loop.roomLines("auth", "No Codex CLI login"));
     assertEquals(
         List.of(),

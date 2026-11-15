@@ -33,6 +33,11 @@ public final class PrivateDirectory {
    * @throws UncheckedIOException when it cannot be made or made this account's alone
    */
   public static Path ensure(Path dir) {
+    return ensure(dir, ProcessOwner.STATUS);
+  }
+
+  static Path ensure(Path dir, Path status) {
+    var owner = ProcessOwner.current(status);
     try {
       try {
         Files.createDirectory(
@@ -43,8 +48,8 @@ public final class PrivateDirectory {
           throw new IOException(dir + " is not a directory.");
         }
       }
-      if (ProcessOwner.CURRENT.isPresent()) {
-        var self = ProcessOwner.CURRENT.get();
+      if (owner.isPresent()) {
+        var self = owner.get();
         Files.setAttribute(dir, "unix:uid", self.uid(), LinkOption.NOFOLLOW_LINKS);
         Files.setAttribute(dir, "unix:gid", self.gid(), LinkOption.NOFOLLOW_LINKS);
       }
@@ -63,8 +68,18 @@ public final class PrivateDirectory {
   public record ProcessOwner(int uid, int gid) {
 
     private static final Path STATUS = Path.of("/proc/self/status");
-    public static final Optional<ProcessOwner> CURRENT =
-        Files.isReadable(STATUS) ? Optional.of(read(STATUS)) : Optional.empty();
+
+    /**
+     * Read on each call, never once for the process: a status that cannot be read fails the call
+     * that read it, not every later one.
+     */
+    public static Optional<ProcessOwner> current() {
+      return current(STATUS);
+    }
+
+    static Optional<ProcessOwner> current(Path status) {
+      return Files.isReadable(status) ? Optional.of(read(status)) : Optional.empty();
+    }
 
     static ProcessOwner read(Path status) {
       try {

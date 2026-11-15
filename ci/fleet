@@ -1677,10 +1677,6 @@ no_secret_in_logs() {
   echo "no secret appears in $dir${group_log:+ or $group_log}"
 }
 
-registers_container_key() {
-  on "$1" "$2" 'test -f ~/.ssh/fleet_container || ssh-keygen -q -t ed25519 -N "" -f ~/.ssh/fleet_container; sudo sail host config set ssh-public-key "$(cat ~/.ssh/fleet_container.pub)"'
-}
-
 applies_with_forge_token() {
   on "$1" "$2" "sudo sh -c 'GITHUB_TOKEN=\$(cat /root/.fleet/gh) sail project apply $3 --yes'"
 }
@@ -1918,7 +1914,6 @@ loop() {
   loop_config "$run"
   check "$run" "every node syncs twice" sync_all "$run"
   check "$run" "eng holds the forge token where only root reads it" place_secret "$run" eng fleet-github-token gh
-  check "$run" "eng registers its workstation key" registers_container_key "$run" eng
   check "$run" "eng applies acme with the forge token" applies_with_forge_token "$run" eng acme
   check "$run" "eng adds a ZFS pool in a file, where each spec's run gets its own workspace" \
     on "$run" eng "sudo sail host init --storage zfs --pool-file-size 20GiB --pool tank --yes"

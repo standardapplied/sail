@@ -3769,7 +3769,9 @@ no pairing is removed through the gateway as before, and no key file is touched.
   - *What is stored.* Only static credentials a harness declares (`Harness.loginKinds`): Claude
     Code's `token` from `claude setup-token` (`CLAUDE_CODE_OAUTH_TOKEN`) or `api-key`
     (`ANTHROPIC_API_KEY`); Codex's `api-key` (`CODEX_API_KEY`, which `codex exec`, every Sail
-    launch of Codex, reads first) or `token` (`CODEX_ACCESS_TOKEN`). A login a harness refreshes
+    launch of Codex, reads first), the one kind Codex takes: a `CODEX_ACCESS_TOKEN` is read by
+    Codex as an agent identity, so a run is never started on one, but it is in Codex's
+    `Harness.loginVariables`, so a container's own value is set empty. A login a harness refreshes
     (Claude Code's `/login`, Codex's "Sign in with ChatGPT") rotates a single-use refresh token, so
     a second copy logs the first out: it is never stored, copied, mounted or adopted, and stays in
     the shell it was made in. A login is (person, harness, name); the first stored is the
@@ -3843,7 +3845,10 @@ no pairing is removed through the gateway as before, and no key file is touched.
     agent started (`RunReservation.releaseIfAbsent`) removes its `launch.env` at once. The
     missed-stop reconciler's 60-second pass is the net for a crash: it removes the `launch.env` of
     every run of the box that is not live, asking only the containers a run started or finished in
-    since its last complete pass; what a killed push left in the staging directory; and the logins
+    since two minutes before its last complete pass (`MissedStopReconciler.TIDY_LOOKBACK`, longer
+    than the tidy's one-minute age filter, so a file too young to remove on one pass is seen on a
+    later one), and asking again on the next pass a container that did not answer or did not run
+    the tidy (a stopped one); what a killed push left in the staging directory; and the logins
     of every person the roster no longer holds, under the store's write lock, asking the roster of
     each just before deleting, so a person added meanwhile keeps theirs. `FdeStore.delete` removes
     a person's logins once the removal commits.
@@ -3854,12 +3859,16 @@ no pairing is removed through the gateway as before, and no key file is touched.
   - *What it cannot hide.* A run's harness holds its person's login in its environment for the
     run's whole life. Whoever can prompt an agent acting for a person (a room's members, a spec's
     author, a repo's files the agent reads) can try to make it reveal that login, and Sail's
-    defence is the harness's own permission rules: a read-only room member runs no command but
-    the `spec` subcommands it uses (`show`, `list`, `board`, `comments`, `comment`, `whoami`) and
-    `cd`, never with `spec`'s file-reading flags (`--body-file`, `--plan-file`, refused anywhere in
-    a command, so a room reply whose command line merely mentions `--body-file` is refused too and
-    the agent rephrases it), reads outside its workspace only on approval it cannot get, and is denied
-    `launch.env`; a full-permission run has no such rule. Neither harness can hide the variable from the commands
+    defence is the harness's own permission rules. A read-only room member (Claude Code's; Codex
+    has no read-only lane) runs the `spec` subcommands it uses (`show`, `list`, `board`,
+    `comments`, `comment`, `whoami`), `cd`, and the read commands Claude Code itself approves inside
+    its workspace (`cat`, `head`, `grep`, `ls` and the like); never `spec`'s file-reading flags
+    (`--body-file`, `--plan-file`, refused anywhere in a command, so a room reply whose command line
+    merely mentions `--body-file` is refused too and the agent rephrases it); never the shell's
+    environment readers (`printenv`, `env`, `set`, `export`, `declare`) nor a read under `/proc`,
+    which Sail's deny rules refuse as Claude Code's own checks do; reads outside its workspace only
+    on approval it cannot get; and is denied `launch.env`. A full-permission run, every Codex run
+    among them, has no such rule. Neither harness can hide the variable from the commands
     it runs here: Claude Code's `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB` and Codex's sandbox both need
     bubblewrap, which needs unprivileged user namespaces, and an Incus container on an Ubuntu 24.04
     host is refused them (`kernel.apparmor_restrict_unprivileged_userns=1`: `bwrap: setting up uid

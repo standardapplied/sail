@@ -179,9 +179,8 @@ final class Codex implements Harness {
 
   /**
    * An API key, read from {@code CODEX_API_KEY}, which {@code codex exec} (every Sail launch of
-   * Codex) reads before any other login; or a Codex access token, read from {@code
-   * CODEX_ACCESS_TOKEN}. Codex does not read {@code OPENAI_API_KEY} for its own login, and its
-   * "Sign in with ChatGPT" refreshes, so it is never stored.
+   * Codex) reads before any other login. Codex does not read {@code OPENAI_API_KEY} for its own
+   * login, and its "Sign in with ChatGPT" refreshes, so it is never stored.
    */
   @Override
   public List<LoginKind> loginKinds() {
@@ -189,13 +188,16 @@ final class Codex implements Harness {
         new LoginKind(
             "api-key",
             "CODEX_API_KEY",
-            Remedy.of("Create an API key at platform.openai.com/api-keys")),
-        new LoginKind(
-            "token",
-            "CODEX_ACCESS_TOKEN",
-            Remedy.of(
-                "Create a Codex access token at chatgpt.com/admin/access-tokens (ChatGPT Business"
-                    + " and Enterprise)")));
+            Remedy.of("Create an API key at platform.openai.com/api-keys")));
+  }
+
+  /**
+   * Its key's variable and {@code CODEX_ACCESS_TOKEN}, which Codex reads as an agent identity: no
+   * run is started on one, but a value the container exports must not outrank the stored key.
+   */
+  @Override
+  public List<String> loginVariables() {
+    return List.of("CODEX_API_KEY", "CODEX_ACCESS_TOKEN");
   }
 
   @Override
