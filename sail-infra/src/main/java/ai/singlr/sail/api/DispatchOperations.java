@@ -472,6 +472,14 @@ public final class DispatchOperations {
     return liveMembers;
   }
 
+  /**
+   * Where Sail says something in a spec's room as its machinery, once and only where it stands
+   * ({@link #tellRoom}): what every lane of this box tells a room through.
+   */
+  public RunLauncher.Room room() {
+    return this::tellRoom;
+  }
+
   private boolean endLiveHolder(String runId, String why) {
     return liveMembers.endHolder(runId, why);
   }

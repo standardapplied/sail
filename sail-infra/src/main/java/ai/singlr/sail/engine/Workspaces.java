@@ -505,7 +505,20 @@ public final class Workspaces {
 
   /** The lock one create of {@code instance} holds; none in a dry run, which makes nothing. */
   private FileMutex nameLock(String instance) throws IOException {
-    return shell.isDryRun() ? null : FileMutex.acquire(locks.resolve(instance + ".workspace.lock"));
+    return shell.isDryRun() ? null : FileMutex.acquire(nameLockFile(instance));
+  }
+
+  /**
+   * The lock a create or a run's entry of {@code instance} holds, when nothing holds it now: what a
+   * change of the workspace that no run asked for holds while it decides and acts, so a run that
+   * enters it meanwhile waits and then finds what the change left. Empty while another holds it.
+   */
+  public Optional<FileMutex> holdIfFree(String instance) throws IOException, InterruptedException {
+    return FileMutex.acquireUntil(nameLockFile(instance), nanos.getAsLong(), nanos);
+  }
+
+  private Path nameLockFile(String instance) {
+    return locks.resolve(instance + ".workspace.lock");
   }
 
   /**

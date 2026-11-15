@@ -1459,6 +1459,57 @@ Each row with the tests that prove it:
   `WorkspacesTest.anIncompleteWorkspaceIsListedAsSuchNeverStartedOrEnteredAndReplacedByTheNextCreate`,
   `WorkspacesTest.aWholeWorkspaceWhoseMarkWasTakenOffByHandIsNeitherReplacedNorUsedButNamesItsDelete`,
   `WorkspacesTest.twoCreatesOfOneNameMakeOneWorkspaceAndTheOtherIsRefusedLeavingItWhole`.*
+- **W13. A spec's workspace stops when no run needs it and goes when its spec is done.** One
+  box-local sweep, `SpecWorkspaces.sweep`, ends every `MissedStopReconciler` pass, after the usage
+  read and the launch-file tidy. It walks the whole workspaces carrying `user.sail.spec` that
+  `BoxInstances` lists. It decides each under the workspace's own name lock, the one a run's entry
+  takes: the lock is tried, never waited on, and a held one is left to the next pass. The decision
+  reads the spec's row and this box's runs of it, looked up again inside the lock:
+
+  | The spec is | The workspace is |
+  |---|---|
+  | any status, with a run of it live on this box (`running` or `stopping`) | left as it is |
+  | `draft`, `pending`, `in_progress`, `review`, `awaiting_merge` or `cancelled`, 10 minutes after its newest run here ended (the ready mark when it has none), every run's usage read | stopped; a stopped one is left stopped |
+  | `done` or `archived` | started when stopped, since neither read runs in a stopped instance; deleted once the reads below pass, otherwise kept |
+  | erased: the change log holds the erasure of the spec or of its project | deleted at once, ending any agent still in it; nothing is read or pushed |
+  | not on this box, or filed under another project | left as it is, said once in the log |
+
+  - **The reads before a delete.** First, every run of the spec this box executed has its usage
+    recorded: one still unread is read by `RunUsageReader` and recorded with
+    `RunStore.recordRead`. Then every repository under `~/workspace` is counted with `git rev-list
+    --count HEAD --branches --not --remotes` (`SpecWorkspaces.UNPUSHED`). No fetch is made, so a
+    branch the forge deleted after its merge still counts as pushed. When the only commits no
+    remote has are on the runs' branch, that branch is pushed once in each repository holding
+    some (`git push origin <branch>`) and the repositories are counted again. A commit anywhere
+    else, a failed push, an unread usage, a count that fails or a start that fails keeps the
+    workspace.
+  - **Kept, said once.** A kept workspace carries `user.sail.kept=<repo: reason>`. The sweep that
+    first writes the key posts once in the spec's room as Sail, through the door every lane tells
+    a room through, naming `sail project workspace start`, `shell` and `delete`. The key is what
+    remembers that it was said, across restarts. Each later pass starts the workspace and checks
+    again. It deletes the workspace once the reads pass and says nothing more; otherwise it stops
+    the workspace again, unless it was already running when the pass came: then a person started
+    it to push by hand, and it is left running for them. A spec moved off `done` or `archived`
+    has its workspace's key cleared.
+  - **R4. Nothing a run produced is lost by deleting its workspace.** Its usage is recorded, its
+    branch has nothing the remote lacks and its row survives; a workspace that fails either check
+    is kept, and that is said once.
+  - **R8. The lifecycle is reconciled from facts, not events.** The sweep takes no event bus. A
+    runner that restarts, a status that arrives by sync, or an instance stopped by hand converges
+    in the next sweep.
+  - **R13. A workspace with a live run is never stopped or deleted by the sweep,** except one
+    whose spec or project was erased. Its stop and delete also go through the workspace doors'
+    own live-run refusal.
+  - **R14. The sweep never touches a person's workspace** (one without `user.sail.spec`), nor one
+    without a ready mark (W12).
+
+  *`SpecWorkspacesTest` (every row, the reads in their order, the said-once rule across three
+  sweeps and across a restart, a status written straight to the store and one arriving by a
+  `SyncBox` round, an erasure adopted from main, the name lock, the kept notice's commands parsed
+  as printed, and the count run by git against real repositories),
+  `MissedStopReconcilerTest.eachPassSweepsTheSpecWorkspacesAfterTheUsageIsRead`,
+  `WorkspaceIT.aDoneSpecsWorkspaceIsPushedThenDeletedAndItsDatasetGoes`,
+  `WorkspaceIT.aDoneSpecsWorkspaceWithACommitOnAnotherBranchIsKeptStoppedWithItsDataset`.*
 
 **Known limits.**
 - **The template is its owner's.** A clone carries the box owner's GitHub token
@@ -1631,7 +1682,8 @@ the one whose name and keys match.
   not have): the project's container is never touched by a spec's run, and the spec's tree is its
   workspace's. `sail project workspace list` shows each workspace's spec and owner; `stop` and
   `delete` refuse a workspace a live run of its spec is in, and `project destroy` takes the run
-  workspaces with the rest (W11).
+  workspaces with the rest (W11). A spec's workspace stops by itself 10 minutes after its last
+  run, and goes once its spec is done and nothing its runs made would be lost (W13).
 - **Every door that reads or attaches to a run goes where it lives.** `sail agent stop`, `log`,
   `status`, `report` and `attach` take one selector (`RunSelector`): `--spec <id>`, or `--run <id>`
   for a run of no spec, and every printed command for a run carries it, built in one place (`RunStore.RunRow.addressed`), resolved one way

@@ -6,6 +6,7 @@
 package ai.singlr.sail.engine;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -14,6 +15,7 @@ import ai.singlr.sail.api.LocalApiSocket;
 import ai.singlr.sail.api.ProjectReader;
 import ai.singlr.sail.api.SailOperations;
 import ai.singlr.sail.api.SessionYield;
+import ai.singlr.sail.api.SpecWorkspaces;
 import ai.singlr.sail.api.SyncScheduler;
 import ai.singlr.sail.api.TestControlPlane;
 import ai.singlr.sail.commands.DownCommand;
@@ -25,11 +27,14 @@ import ai.singlr.sail.commands.SnapCommand;
 import ai.singlr.sail.commands.SnapDeleteCommand;
 import ai.singlr.sail.commands.SnapsPruneCommand;
 import ai.singlr.sail.commands.UpCommand;
+import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.ProjectDefinition;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.config.SyncConfig;
+import ai.singlr.sail.harness.RunUsage;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.store.BoxCredentialStore;
+import ai.singlr.sail.store.ChangeLog;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.HeldProjects;
 import ai.singlr.sail.store.MessageStore;
@@ -39,12 +44,14 @@ import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
+import ai.singlr.sail.store.TestRuns;
 import java.io.ByteArrayOutputStream;
 import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermissions;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
@@ -78,6 +85,8 @@ class WorkspaceIT extends AbstractIncusIT {
   private static final String FIX = "fix-login";
   private static final String SECOND = "second";
   private static final String SPEC_ID = "sail-it-ws-probe";
+  private static final String GONE = "gone";
+  private static final String KEPT = "kept";
   private static final Path CONTAINER_DIR = Path.of("/var/lib/sail/run");
 
   private static final String SEAL =
@@ -166,6 +175,8 @@ class WorkspaceIT extends AbstractIncusIT {
   void removeEverything() {
     deleteContainerQuietly(PROJECT + "-" + FIX);
     deleteContainerQuietly(PROJECT + "-" + SECOND);
+    deleteContainerQuietly(PROJECT + "-" + GONE);
+    deleteContainerQuietly(PROJECT + "-" + KEPT);
     deleteContainerQuietly(TEMPLATE);
     deleteContainerQuietly(PROJECT);
     try {
@@ -391,6 +402,144 @@ class WorkspaceIT extends AbstractIncusIT {
             "the board lists the project's spec: " + board.stdout());
       }
     }
+  }
+
+  /**
+   * Scenario 5 on a real ZFS pool: a done spec's workspace whose only unpushed commit is on its
+   * runs' branch has that branch pushed, and is then deleted, its dataset with it.
+   */
+  @Test
+  void aDoneSpecsWorkspaceIsPushedThenDeletedAndItsDatasetGoes() throws Exception {
+    try (var db = Sqlite.open(Files.createTempDirectory("sail-it-idle").resolve("sail.db"))) {
+      var said = new ArrayList<String>();
+      var instance = doneSpecsWorkspace(db, GONE, "git switch -q -c agent/gone", said);
+
+      sweeper(db, said).sweep();
+
+      assertEquals(Optional.empty(), new BoxInstances(shell).named(instance));
+      assertFalse(
+          shell
+              .exec(
+                  List.of(
+                      "sudo",
+                      "-n",
+                      "zfs",
+                      "list",
+                      "-H",
+                      "-o",
+                      "name",
+                      POOL + "/containers/" + instance))
+              .ok(),
+          "the workspace's dataset is gone");
+      assertEquals(List.of(), said);
+    }
+  }
+
+  /**
+   * Scenario 6 on a real ZFS pool: a done spec's workspace holding a commit on another branch is
+   * kept, stopped, naming the repo, its dataset kept, and said once.
+   */
+  @Test
+  void aDoneSpecsWorkspaceWithACommitOnAnotherBranchIsKeptStoppedWithItsDataset() throws Exception {
+    try (var db = Sqlite.open(Files.createTempDirectory("sail-it-idle").resolve("sail.db"))) {
+      var said = new ArrayList<String>();
+      var instance = doneSpecsWorkspace(db, KEPT, "git switch -q -c by-hand", said);
+
+      sweeper(db, said).sweep();
+      sweeper(db, said).sweep();
+
+      var kept = new BoxInstances(shell).named(instance).orElseThrow();
+      assertEquals(new ContainerState.Stopped(), kept.state());
+      assertEquals(
+          Optional.of("app: 1 commit on a branch other than agent/kept that no remote has"),
+          kept.key(BoxInstances.KEPT_KEY));
+      assertEquals(
+          POOL + "/containers/" + instance,
+          zfs("list", "-H", "-o", "name", POOL + "/containers/" + instance));
+      assertEquals(1, said.size(), String.join("\n", said));
+    }
+  }
+
+  /**
+   * Spec {@code specId}, done, with one ended run on this box whose usage is read, and its
+   * workspace made as a dispatch makes it, holding one commit made after {@code onto} in its repo.
+   */
+  private String doneSpecsWorkspace(Sqlite db, String specId, String onto, List<String> said)
+      throws Exception {
+    new SchemaManager(db).migrate();
+    HeldProjects.hold(db, PROJECT);
+    var specs = new SpecStore(db);
+    Acting.as("it", () -> specs.create(spec(specId, SpecStatus.DONE)));
+    var runs = new RunStore(db);
+    var run = DateTimeUtils.newId().toString();
+    Acting.system(
+        () -> {
+          runs.create(
+              run,
+              PROJECT,
+              specId,
+              "eng",
+              "build",
+              "claude-code",
+              "agent/" + specId,
+              "task",
+              1,
+              null,
+              "/home/dev/.sail/runs/" + run + "/agent.log",
+              "sail-agent-" + run);
+          TestRuns.complete(runs, run, "completed", null);
+          runs.recordRead(run, RunUsage.NONE);
+        });
+    var place = (RunPlace.SpecWorkspace) RunPlace.of(PROJECT, specId);
+    var check =
+        workspaces.checkSpec(
+            place, ProjectProvisioner.inputs(definition(), Optional.empty()), name -> false);
+    var entered = workspaces.enterSpec(check, definition(), "eng", null, whole -> {});
+    var committed =
+        shell.exec(
+            ContainerExec.asDevUser(
+                entered.instance(),
+                List.of(
+                    "bash",
+                    "-c",
+                    "cd /home/dev/workspace/app && "
+                        + onto
+                        + " && git commit -q --allow-empty -m work")));
+    assertTrue(committed.ok(), committed.stderr());
+    return entered.instance();
+  }
+
+  private SpecWorkspaces sweeper(Sqlite db, List<String> said) {
+    return new SpecWorkspaces(
+        workspaces,
+        shell,
+        SailPaths.locksDir(),
+        new SpecStore(db),
+        new RunStore(db),
+        new ChangeLog(db),
+        (specId, body) -> said.add(body),
+        () -> "eng",
+        Instant::now);
+  }
+
+  private static SpecStore.SpecRow spec(String id, SpecStatus status) {
+    return new SpecStore.SpecRow(
+        id,
+        PROJECT,
+        "Spec " + id,
+        status,
+        "eng",
+        "claude-code",
+        null,
+        null,
+        "agent/" + id,
+        0,
+        "it",
+        null,
+        null,
+        "it",
+        List.of(),
+        List.of("app"));
   }
 
   private static SpecStore.SpecRow probe() {

@@ -305,7 +305,8 @@ public final class ServerStartCommand implements Runnable {
             watchers,
             NodeIdentity::handle,
             DateTimeUtils::now,
-            roster);
+            roster,
+            operations.specWorkspaces(NodeIdentity::handle)::sweep);
     var rearmer =
         new WatcherRearmer(
             runStore,

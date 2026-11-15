@@ -46,6 +46,12 @@ public final class BoxInstances {
    */
   public static final String OWNER_KEY = "user.sail.owner";
 
+  /**
+   * Why a spec's workspace is kept though its spec is done: what deleting it would lose. Written by
+   * the sweep that first keeps it ({@code SpecWorkspaces}), which says it in the spec's room then.
+   */
+  public static final String KEPT_KEY = "user.sail.kept";
+
   /** Written last when a workspace is made, so one without it is not whole (W12). */
   public static final String READY_KEY = "user.sail.ready";
 
