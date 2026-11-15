@@ -1631,16 +1631,34 @@ the one whose name and keys match.
   workspace's. `sail project workspace list` shows each workspace's spec and owner; `stop` and
   `delete` refuse a workspace a live run of its spec is in, and `project destroy` takes the run
   workspaces with the rest (W11).
-- **Every door that reads or attaches to a run goes where it lives.** `sail agent stop` and `watch`
-  take `--spec`; a stop of a project with several live runs and no spec named is refused, naming
-  each spec and the `--spec` form. The watcher is told the spec on its command line, so it probes
-  the run's own workspace. `agent log` and `GET /v1/runs/{run}/log` read the run's log, `agent
-  status` and `GET /v1/projects/{p}/agent` its session and commits, and `agent report` (`POST /v1/projects/{p}/agent/report`) its session,
-  commits and guardrail, each in the run's place. `agent attach` resumes a spec's run's
-  conversation in its workspace over a raw tty (the terminal host opens sessions only in the
-  project's container, W10), refused while a run of that spec is live there; a recorded
-  conversation of the project's container is resumed in a host session as before. Each door is in
-  `RunPlaceSweepTest`.
+- **Every door that reads or attaches to a run goes where it lives.** `sail agent stop` takes
+  `--spec`, and `--run <id>` for a run of no spec; a stop of a project with several live runs and
+  neither named is refused, naming the command that stops each. `watch` takes `--spec`, and the
+  watcher is told the spec on its command line, so it probes the run's own workspace. `agent log`
+  and `GET /v1/runs/{run}/log` read the run's log, `agent status` and `GET /v1/projects/{p}/agent`
+  its session and commits, and `agent report` (`POST /v1/projects/{p}/agent/report`) its session,
+  commits and guardrail, each in the run's place. Each door is in `RunPlaceSweepTest`.
+- **A terminal on a spec's conversation holds the workspace as a run does.** `agent attach` of a
+  spec's run resumes it in the spec's workspace over a raw tty (the terminal host opens sessions
+  only in the project's container, W10), under a hold (`HostDispatching.holdForTerminal`): a run
+  row of the full chat lane over the whole place, reserved through the dispatch gate and carrying
+  the conversation's session, its process recorded in the hold's pid file. While it lives a
+  dispatch, reviewer, fix or room turn of the spec waits on it as on any holder and is resumed by
+  its stop, which the attach publishes when the process ends (or the missed-stop sweep, once the
+  pid names no process); a live member never starts a second process on that session; and a hold
+  is refused while another run of the spec lives there, so no fix commits a tree a person's agent
+  is writing. A conversation of the project's container is resumed in a host session as before.
+- **A member of a spec's room is seated in the spec's workspace.** An engagement is checked and
+  entered as a dispatch's run is, its harness found installed there; the project's container is
+  neither required running nor snapshotted, and an engage snapshot is refused for a spec's room. A
+  room with no spec seats its member in the project's container, as before.
+- **A refusal is said in the spec's room too.** Every refusal of `RunPlaces` (no ZFS pool, no
+  template, a faulted pool, a name another holds, `runner_busy`) and a degraded pool's notice is
+  said in the spec's room in the words the CLI and the API give, once, through the room seam a
+  refusal for want of a login uses. A dispatch whose run cannot launch after its reservation gives
+  its claim back, so the spec is pending and the dispatch the refusal names works as printed. A
+  review or fix lane that meets `runner_busy` waits for the next stop in the project, never
+  ending its review in error.
 
 **Sail writes no context file.** How a codebase is built, tested and verified is the
 repository's own `AGENTS.md` to say, which both harnesses read natively (Claude Code from the
