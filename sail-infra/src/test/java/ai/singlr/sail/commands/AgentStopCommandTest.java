@@ -9,6 +9,8 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import ai.singlr.sail.api.StopOperations;
+import ai.singlr.sail.config.YamlUtil;
+import java.util.Map;
 import org.junit.jupiter.api.Test;
 import picocli.CommandLine;
 
@@ -40,5 +42,18 @@ class AgentStopCommandTest {
             () -> parsed("acme", "--run", RUN, "--spec", "auth").target());
 
     assertEquals("Name a run with --run or a spec with --spec, not both.", refused.getMessage());
+  }
+
+  /**
+   * Low 2: under {@code --json} a refused stop is JSON in the API's error envelope, its code in it.
+   */
+  @Test
+  void aRefusedStopUnderJsonIsJsonWithItsCode() {
+    var ran = SailCli.run(new AgentStopCommand(), "Not_A_Project!", "--json");
+
+    assertEquals(1, ran.exit());
+    var error = (Map<?, ?>) YamlUtil.parseMap(ran.out()).get("error");
+    assertEquals("invalid_request", error.get("code"), ran.out());
+    assertEquals("", ran.err(), "nothing but the JSON");
   }
 }

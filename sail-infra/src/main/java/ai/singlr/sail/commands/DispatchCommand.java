@@ -5,7 +5,6 @@
 
 package ai.singlr.sail.commands;
 
-import ai.singlr.sail.api.ApiException;
 import ai.singlr.sail.api.DispatchOperations;
 import ai.singlr.sail.api.Event;
 import ai.singlr.sail.api.HostOperations;
@@ -191,21 +190,17 @@ public final class DispatchCommand implements Runnable {
   }
 
   /**
-   * Dispatches {@code project}'s spec as this box's operator, rendering a refusal, the operator's
-   * own included, with its fix for the terminal.
+   * Dispatches {@code project}'s spec as this box's operator. A refusal, the operator's own
+   * included, is the API's as it is, which {@link CliCommand} says with its code and its fix.
    */
   static DispatchOperations.Outcome dispatchAsOperator(
       HostOperations operations,
       String project,
       DispatchOperations.Request request,
       String handle) {
-    try {
-      return Actor.call(
-          operations.identity().operator(),
-          () -> operations.dispatching().dispatch(project, request, handle));
-    } catch (ApiException e) {
-      throw new IllegalStateException(CliCommand.describe(e), e);
-    }
+    return Actor.call(
+        operations.identity().operator(),
+        () -> operations.dispatching().dispatch(project, request, handle));
   }
 
   private void render(

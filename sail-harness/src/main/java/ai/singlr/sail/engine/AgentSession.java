@@ -465,6 +465,23 @@ public final class AgentSession {
       fi
       """;
 
+  /**
+   * Removes the pid file of {@code unit} in {@code containerName} while it still names {@code pid},
+   * a process that has ended: never one a later process wrote, and never a pid the box may give
+   * another process, which a later kill by this file would then signal.
+   */
+  public void forgetPid(String containerName, AgentUnit unit, int pid)
+      throws IOException, InterruptedException, TimeoutException {
+    shell.exec(
+        ContainerExec.asDevUser(
+            containerName,
+            List.of("bash", "-c", FORGET_PID_SCRIPT, "bash", unit.pidPath(), String.valueOf(pid))));
+  }
+
+  /** Removes the file its first argument names when it holds exactly its second; exits 0. */
+  static final String FORGET_PID_SCRIPT =
+      "if [ \"$(cat -- \"$1\" 2>/dev/null)\" = \"$2\" ]; then rm -f -- \"$1\"; fi";
+
   private Halt killByPidFile(String containerName, AgentUnit unit)
       throws IOException, InterruptedException, TimeoutException {
     var pidResult =

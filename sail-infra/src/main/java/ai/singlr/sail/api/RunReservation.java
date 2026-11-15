@@ -418,7 +418,7 @@ public final class RunReservation {
 
   /** Why a terminal on a conversation ended for run {@code runId}'s claim, in its own words. */
   public static String yieldReason(String runId, String specId) {
-    return "yielded to dispatch " + runId + (Strings.isBlank(specId) ? "" : " of spec " + specId);
+    return "yielded to run " + runId + (Strings.isBlank(specId) ? "" : " of spec " + specId);
   }
 
   /**

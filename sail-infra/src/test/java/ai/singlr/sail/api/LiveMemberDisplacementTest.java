@@ -370,6 +370,22 @@ class LiveMemberDisplacementTest {
         String.valueOf(room.processes.starts.getLast().command()));
   }
 
+  /**
+   * As on main (DispatchGate.decide: a read-only chat turn is never in a build's way), a read-only
+   * member's own turn writes no tree, so it neither ends a terminal open on the spec's conversation
+   * nor waits on it: the two run beside each other, and the tree keeps one writer.
+   */
+  @Test
+  void aReadOnlyMembersTurnRunsBesideATerminalOnTheSpecsConversationAndLeavesItOpen() {
+    room.container.holds(SPEC);
+    room.container.terminalOpened();
+
+    room.prompted(SPEC, "read-only", "first");
+
+    assertEquals(1, room.processes.starts.size(), "the member's own turn starts");
+    assertTrue(room.container.terminalOpen(), "and the terminal is left as it is");
+  }
+
   @Test
   void aTerminalThatOpensWhileTheMemberClaimsStillFindsNoSecondProcess() {
     var open = new ArrayList<String>();

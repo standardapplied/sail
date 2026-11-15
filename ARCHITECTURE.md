@@ -1650,7 +1650,9 @@ the one whose name and keys match.
   `attach --dry-run` prints as it runs. A dispatch, reviewer, fix or full room turn that claims
   the workspace ends that process (`RunReservation`, `AgentUnit.TERMINAL`) before it launches, so a
   person's open terminal never holds the loop and the conversation stays resumable; a live member
-  starts no second process on that session while it lives (`LiveMembers.terminalHolds`); and the
+  starts no second process on that session while it lives (`LiveMembers.terminalHolds`), while a
+  read-only member's turn on its own conversation runs beside it, as on main (`DispatchGate.decide`:
+  a read-only chat turn is never in a working lane's way); and the
   attach is refused while a run of the spec lives there. The race between a terminal and a claim
   is closed by order, with no lock between them: a claim takes its run row, then ends the
   terminal its pid file names; the terminal names its process, then asks for a run claiming the

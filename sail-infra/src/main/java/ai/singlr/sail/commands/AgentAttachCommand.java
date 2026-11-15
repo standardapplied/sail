@@ -40,6 +40,7 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BooleanSupplier;
 import java.util.function.Function;
 import java.util.function.LongSupplier;
@@ -403,7 +404,7 @@ public final class AgentAttachCommand implements Runnable {
       return;
     }
     if (dryRun) {
-      System.out.println(String.join(" ", exec));
+      System.out.println(printed(exec));
       return;
     }
     if (sessionId == null) {
@@ -428,8 +429,9 @@ public final class AgentAttachCommand implements Runnable {
       terminal = new ProcessBuilder(exec).inheritIO().start();
     }
     var started = terminal;
+    var mine = new AtomicReference<Integer>();
     if (!awaitNamed(
-        () -> named(shell, workspace, before),
+        () -> named(shell, workspace, before, mine),
         started::isAlive,
         System::nanoTime,
         TERMINAL_NAMED_WAIT,
@@ -443,14 +445,36 @@ public final class AgentAttachCommand implements Runnable {
               + " s, so it is ended rather than left where a claim of the workspace cannot end it."
               + " Attach again.");
     }
-    var claims = (Supplier<List<String>>) () -> claimsOf(run, workspace, latest(operator));
+    var claims = (Supplier<List<String>>) () -> claimsOf(run, workspace, running(operator));
     var yielded = RunReservation.yieldToAClaim(shell, workspace, claims);
     var code = terminal.waitFor();
+    if (mine.get() != null) {
+      new AgentSession(shell).forgetPid(workspace.instance(), AgentUnit.TERMINAL, mine.get());
+    }
     yielded
         .or(() -> claims.get().stream().findFirst())
         .ifPresentOrElse(
             claim -> System.err.println(yielded(run, claim, name, operator)),
             () -> exitedWith(code));
+  }
+
+  /**
+   * The command a terminal runs, as a shell reads it back: each word quoted where the shell would
+   * otherwise read it, so the line pasted into a shell runs what the attach runs.
+   */
+  static String printed(List<String> exec) {
+    return exec.stream().map(Strings::shellWord).collect(Collectors.joining(" "));
+  }
+
+  /** The runs live on this box of the project the attach is of, read as this box's operator. */
+  private List<DispatchGate.RunningRun> running(OperatorCommand operator) {
+    return orRefuse(
+        name,
+        () -> {
+          try (var operations = this.operations.apply(operator)) {
+            return operations.dispatching().runningRuns(name, NodeIdentity.handle());
+          }
+        });
   }
 
   /** How long a terminal in a spec's workspace has to name its process before it is ended. */
@@ -484,11 +508,14 @@ public final class AgentAttachCommand implements Runnable {
 
   /**
    * The runs other than {@code run} that claim {@code workspace} in a lane that ends its terminal,
-   * as {@code latest} found the box's live runs.
+   * of the box's live runs, {@code running}: read as they are, never through a selector, so other
+   * runs live beside them never stand in the way of saying which.
    */
   static List<String> claimsOf(
-      RunStore.RunRow run, RunPlace.SpecWorkspace workspace, Latest latest) {
-    return latest.running().stream()
+      RunStore.RunRow run,
+      RunPlace.SpecWorkspace workspace,
+      List<DispatchGate.RunningRun> running) {
+    return running.stream()
         .filter(other -> !other.runId().equals(run.id()))
         .filter(other -> workspace.equals(other.place()))
         .filter(other -> RunReservation.endsTheTerminal(other.role()))
@@ -514,12 +541,21 @@ public final class AgentAttachCommand implements Runnable {
   }
 
   /**
-   * Whether {@code workspace}'s terminal pid file names a live process other than {@code before}.
+   * Whether {@code workspace}'s terminal pid file names a live process other than {@code before},
+   * kept in {@code mine} once it does.
    */
-  private static boolean named(ShellExec shell, RunPlace.SpecWorkspace workspace, Integer before) {
+  private static boolean named(
+      ShellExec shell,
+      RunPlace.SpecWorkspace workspace,
+      Integer before,
+      AtomicReference<Integer> mine) {
     try {
       var info = new AgentSession(shell).queryStatus(workspace.instance(), AgentUnit.TERMINAL);
-      return info != null && info.running() && !Objects.equals(info.pid(), before);
+      var named = info != null && info.running() && !Objects.equals(info.pid(), before);
+      if (named) {
+        mine.set(info.pid());
+      }
+      return named;
     } catch (Exception unanswered) {
       if (unanswered instanceof InterruptedException) {
         Thread.currentThread().interrupt();

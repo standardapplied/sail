@@ -38,6 +38,44 @@ import org.junit.jupiter.api.io.TempDir;
 
 class AgentSessionTest {
 
+  /**
+   * Note A: a terminal that ended takes its pid file with it while the file still names it, so a
+   * later claim never signals a pid the box has given another process; a file a later terminal
+   * wrote is left to it.
+   */
+  @Test
+  void aPidFileIsForgottenOnlyWhileItStillNamesThePidThatEnded(@TempDir Path dir) throws Exception {
+    var mine = Files.writeString(dir.resolve("mine.pid"), "3472\n");
+    var later = Files.writeString(dir.resolve("later.pid"), "4262\n");
+
+    for (var file : List.of(mine, later)) {
+      var forgot =
+          new ProcessBuilder(
+                  "bash", "-c", AgentSession.FORGET_PID_SCRIPT, "bash", file.toString(), "3472")
+              .start();
+      assertEquals(0, forgot.waitFor());
+    }
+
+    assertFalse(Files.exists(mine), "the ended terminal's file is gone");
+    assertEquals("4262\n", Files.readString(later), "another's file is kept");
+    var shell = new ScriptedShellExecutor();
+    new AgentSession(shell).forgetPid("acme-a", AgentUnit.TERMINAL, 3472);
+    assertEquals(
+        List.of(
+            String.join(
+                " ",
+                ContainerExec.asDevUser(
+                    "acme-a",
+                    List.of(
+                        "bash",
+                        "-c",
+                        AgentSession.FORGET_PID_SCRIPT,
+                        "bash",
+                        AgentUnit.TERMINAL.pidPath(),
+                        "3472")))),
+        shell.invocations());
+  }
+
   private static final String RUN_ID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
   private static final AgentUnit RUN_UNIT = AgentUnit.forRun(RUN_ID);
   private static final Harness CLAUDE_CODE = Harnesses.of("claude-code");

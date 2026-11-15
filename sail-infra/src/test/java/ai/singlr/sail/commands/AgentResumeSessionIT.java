@@ -143,7 +143,7 @@ class AgentResumeSessionIT extends AbstractIncusIT {
           terminal.await("got:again");
 
           var dispatched = reserve(reservation, runStore);
-          var reason = "yielded to dispatch " + dispatched;
+          var reason = "yielded to run " + dispatched;
           terminal.await("[sail: session ended — " + reason + "]");
           assertEquals(reason, terminal.ending(), "the attached client hears why it ended");
         }
@@ -154,7 +154,7 @@ class AgentResumeSessionIT extends AbstractIncusIT {
                     d ->
                         plan.session().equals(d.get("session"))
                             && ROOM.equals(d.get("room_id"))
-                            && String.valueOf(d.get("reason")).startsWith("yielded to dispatch")),
+                            && String.valueOf(d.get("reason")).startsWith("yielded to run ")),
             "the room's ending event names the yield: " + endedEvents(db));
 
         try (var client = SessionClient.connect(socket)) {

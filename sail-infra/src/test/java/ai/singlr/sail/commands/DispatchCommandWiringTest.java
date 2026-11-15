@@ -375,6 +375,22 @@ class DispatchCommandWiringTest {
     assertTrue(real.out().contains("Pool tank is DEGRADED"), real.out());
   }
 
+  /**
+   * Under {@code --json} a dispatch refused on a box with no ZFS pool says the API's refusal: its
+   * code and its remedy, as the API returns them.
+   */
+  @Test
+  void aJsonDispatchOnABoxWithNoPoolCarriesTheRefusalsCodeAndRemedy() throws Exception {
+    var refused =
+        dispatch(shell().on("incus storage list --format json", "[]"), 0, "--background", "--json");
+
+    assertEquals(1, refused.exit());
+    var error = (Map<?, ?>) YamlUtil.parseMap(refused.out()).get("error");
+    assertEquals("conflict", error.get("code"), refused.out());
+    assertTrue(String.valueOf(error.get("action")).endsWith("Then dispatch again."), refused.out());
+    assertFalse(String.valueOf(error.get("message")).contains("Then dispatch again."));
+  }
+
   /** Under {@code --json} the dispatch says what it entered in its JSON alone. */
   @Test
   void aJsonDispatchSaysTheWorkspaceItEnteredInItsJsonAlone() throws Exception {
@@ -441,7 +457,7 @@ class DispatchCommandWiringTest {
     assertEquals(stop.getMessage(), preview.getMessage(), "a preview is refused as the stop is");
     var dispatch =
         assertThrows(
-            IllegalStateException.class,
+            ApiException.class,
             () -> DispatchCommand.dispatchAsOperator(operations, "acme", request(), HANDLE));
     assertTrue(dispatch.getMessage().contains("read-only"), dispatch.getMessage());
   }
@@ -557,7 +573,7 @@ class DispatchCommandWiringTest {
 
     assertEquals(1, ran.exit(), ran.out());
     assertEquals(
-        "  ✗ Spec 'auth' is a draft. A spec is dispatched only when pending. Make it ready with "
+        "  ✗ Spec 'auth' is a draft. A spec is dispatched only when pending.\n  Make it ready with "
             + OperatorCommand.here().sail("spec update auth --status pending")
             + ", then dispatch it.\n",
         ran.err());
@@ -573,7 +589,7 @@ class DispatchCommandWiringTest {
 
     assertEquals(1, ran.exit(), ran.out());
     assertEquals(
-        "  ✗ Branch 'sail/auth' already exists. To dispatch onto it, run "
+        "  ✗ Branch 'sail/auth' already exists.\n  To dispatch onto it, run "
             + OperatorCommand.here().sail("spec dispatch -p acme --spec auth --restart")
             + ", or delete it first.\n",
         ran.err());

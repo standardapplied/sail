@@ -66,7 +66,7 @@ public final class AgentStopCommand implements Runnable {
 
   @Override
   public void run() {
-    CliCommand.run(this::execute);
+    CliCommand.run(json, this::execute);
   }
 
   private void execute() throws Exception {

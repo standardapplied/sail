@@ -36,6 +36,7 @@ import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.Sqlite;
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Instant;
@@ -407,6 +408,29 @@ class AgentAttachCommandTest {
   }
 
   /**
+   * Medium 1: what {@code --dry-run} prints is the attach itself: the line, read back by a shell,
+   * is the very argv a real attach executes, its script one word.
+   */
+  @Test
+  void theDryRunsLineReadBackByAShellIsTheAttachsArgv() throws Exception {
+    var exec =
+        AgentAttachCommand.direct(
+                row("r1", "spec-a", "build", "completed", List.of()),
+                "acme",
+                "7027ad75-06d5-48ef-9a62-31085b8eca43",
+                AgentAttachCommand.buildResumeCommand(
+                    Harnesses.of("claude-code"), "7027ad75-06d5-48ef-9a62-31085b8eca43"))
+            .orElseThrow();
+    var line = AgentAttachCommand.printed(exec);
+
+    var shell = new ProcessBuilder("bash", "-c", "printf '%s\\0' " + line).start();
+    var argv = new String(shell.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+    assertEquals(0, shell.waitFor());
+
+    assertEquals(exec, List.of(argv.substring(0, argv.length() - 1).split("\0", -1)));
+  }
+
+  /**
    * The terminal's half of the order against a claim: it asks for claims only once its process is
    * named, or once it has ended; a terminal never named in its wait is reported, so it can be
    * ended.
@@ -455,10 +479,10 @@ class AgentAttachCommandTest {
 
     assertEquals(
         List.of("r3"),
-        AgentAttachCommand.claimsOf(
-            planned, workspace, new AgentAttachCommand.Latest(planned, "", running)));
+        AgentAttachCommand.claimsOf(planned, workspace, running),
+        "other runs live beside a claim never stand in the way of naming it");
     assertEquals(
-        "  ⚠ This terminal ended: yielded to dispatch r3 of spec spec-a. Its conversation is"
+        "  ⚠ This terminal ended: yielded to run r3 of spec spec-a. Its conversation is"
             + " resumable once that run ends: sail agent attach acme --spec spec-a",
         AgentAttachCommand.yielded(planned, "r3", "acme", OperatorCommand.PLAIN)
             .replaceAll("\u001B\\[[;\\d]*m", ""));

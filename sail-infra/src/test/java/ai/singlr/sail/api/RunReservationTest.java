@@ -408,7 +408,7 @@ class RunReservationTest {
         List.of(SessionYield.resumeSession(overlapping)),
         ended,
         "only the conversation over the reserved repo yields; the disjoint one lives on");
-    assertEquals(List.of("yielded to dispatch " + RUN_ID), reasons);
+    assertEquals(List.of("yielded to run " + RUN_ID), reasons);
   }
 
   @Test
