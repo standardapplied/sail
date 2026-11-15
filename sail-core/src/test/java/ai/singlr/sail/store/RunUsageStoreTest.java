@@ -144,6 +144,12 @@ class RunUsageStoreTest {
     assertEquals("apiKeyHelper", journaled(finished).get("login_overridden"));
     assertEquals("apiKeyHelper", store.findById(live).orElseThrow().loginOverridden());
     assertNull(store.findById(refused).orElseThrow().loginOverridden());
+    assertTrue(store.findById(refused).orElseThrow().stoppedForLogin(), "ended for its login");
+    assertEquals(RunStore.STOPPED_FOR_LOGIN, journaled(refused).get("stop_source"));
+    assertFalse(
+        store.findById(finished).orElseThrow().stoppedForLogin(), "an override ends nothing");
+    assertTrue(
+        store.findById(stopped).orElseThrow().stoppedByOperator(), "an operator's stop stays");
     assertEquals("apiKeyHelper", journaled(stopped).get("login_overridden"));
     var adopted = DateTimeUtils.newId().toString();
     store.applyRevision(adopted, store.comparableSnapshot(finished), "1-remote");

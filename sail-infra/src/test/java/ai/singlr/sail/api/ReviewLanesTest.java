@@ -355,6 +355,82 @@ class ReviewLanesTest {
         Map.of("person", ReviewLoop.HANDLE, "harness", "claude-code"));
   }
 
+  /**
+   * A reviewer whose harness refused its login holds the loop as a missing login does: the room is
+   * told once with the command that replaces it, the review stays owed its reviewer across every
+   * reconciler pass, never errored nor escalated, and the login stored as that command stores it
+   * launches the reviewer again.
+   */
+  @Test
+  void aReviewerWhoseKeyCodexRefusedHoldsTheReviewSaidOnceUntilTheLoginIsReplaced() {
+    loop = ReviewLoop.staged(tempDir, "codex", "claude-code");
+    loop.built("auth");
+    var reviewer = loop.onlyLive();
+    var transcript = "/home/dev/.codex/sessions/rollout-review.jsonl";
+    Acting.system(() -> loop.runs.recordSession(reviewer.id(), "thread-1", "startup", transcript));
+    loop.container.wroteFile(transcript, RunLoginOutcomeTest.fixture("codex-refused-key.jsonl"));
+    var before = sailLines("auth").size();
+
+    loop.exit(reviewer.id(), "codex exec writes text, not its report\n", 1);
+    var reconciler = loop.reconciler(() -> Instant.now().plus(Duration.ofMinutes(5)));
+    for (var pass = 0; pass <= LoopDecision.MAX_ERRORED_RETRIES; pass++) {
+      reconciler.sweep();
+    }
+    loop.settle();
+
+    var sentence =
+        "Codex CLI refused node-a's login 'default' (API key), so its run stopped. Create an API"
+            + " key at platform.openai.com/api-keys, then sail agent login codex.";
+    assertEquals(List.of(sentence), sailLines("auth").subList(before, sailLines("auth").size()));
+    var review = loop.reviewOf("auth");
+    assertEquals("running", loop.statusOf(review), "held, owed its reviewer, never errored");
+    assertTrue(loop.container.live().isEmpty(), "no reviewer relaunched on the same login");
+
+    var printed = List.of(sentence.substring(sentence.indexOf("then sail ") + 10).split("[ .]+"));
+    assertEquals(List.of("agent", "login", "codex"), printed, "the command as printed");
+    var person = new FdeStore(loop.db).byHandle(ReviewLoop.HANDLE).orElseThrow().id();
+    new FdeStore(loop.db).logins().store(person, Harnesses.of("codex"), null, null, "sk-new-key");
+    loop.onEvent(loginStored());
+
+    var relaunched = loop.onlyLive();
+    assertEquals("review", relaunched.role(), "the stored login launches the reviewer again");
+    assertEquals(review, relaunched.reviewId());
+  }
+
+  /** A fix agent whose harness refused its login holds the review, owed its fix, the same way. */
+  @Test
+  void aFixWhoseTokenClaudeCodeRefusedHoldsTheReviewOwedItsFixUntilTheLoginIsReplaced() {
+    loop = ReviewLoop.staged(tempDir, "codex", "claude-code");
+    loop.built("auth");
+    loop.finish(loop.onlyLive().id(), CRITICAL_FINDING);
+    var fix = loop.onlyLive();
+    assertEquals("fix", fix.role());
+    var before = sailLines("auth").size();
+
+    loop.exit(fix.id(), RunLoginOutcomeTest.fixture("claude-code-refused-token.jsonl"), 1);
+    var reconciler = loop.reconciler(() -> Instant.now().plus(Duration.ofMinutes(5)));
+    for (var pass = 0; pass <= LoopDecision.MAX_ERRORED_RETRIES; pass++) {
+      reconciler.sweep();
+    }
+    loop.settle();
+
+    var said = sailLines("auth").subList(before, sailLines("auth").size());
+    assertEquals(
+        List.of(
+            "Claude Code refused node-a's login 'default' (long-lived token), so its run stopped."
+                + " Run claude setup-token on a machine where Claude Code is signed in, then sail"
+                + " agent login claude-code."),
+        said);
+    assertEquals(SpecStatus.IN_PROGRESS, loop.specStatus("auth"), "not handed to a person");
+    assertEquals("failed", loop.statusOf(fix.reviewId()), "owed its fix, never escalated");
+    assertTrue(loop.container.live().isEmpty(), "no fix relaunched on the same login");
+
+    TestLogins.store(loop.db, ReviewLoop.HANDLE);
+    loop.onEvent(loginStored());
+
+    assertEquals("fix", loop.onlyLive().role(), "the stored login launches the fix again");
+  }
+
   private List<String> sailLines(String specId) {
     return loop.messages.list(specId, null, 100).stream()
         .filter(row -> MessageStore.SAIL_AUTHOR.equals(row.author()))

@@ -109,7 +109,9 @@ public final class RunStore implements ConflictResolver, SyncedStore {
    *
    * <p>{@code stopSource} is who ended the run when it did not end on its own: {@link
    * #STOPPED_BY_OPERATOR} from the moment an operator's stop claims it ({@link #claimStop}), kept
-   * once that stop is finalized. Null on a run that ended itself or that the watcher ended.
+   * once that stop is finalized; {@link #STOPPED_FOR_LOGIN} when its harness ended it for its
+   * login, as the report its finish recorded says ({@link RunReport#endedForItsLogin}). Null on a
+   * run that ended itself or that the watcher ended.
    *
    * <p>{@code model} is the model the run was launched on, the harness default when null, and the
    * model its harness reported once it finished; {@code effort} is the reasoning effort passed to
@@ -364,6 +366,11 @@ public final class RunStore implements ConflictResolver, SyncedStore {
       return STOPPED_BY_OPERATOR.equals(stopSource);
     }
 
+    /** Whether its harness ended this run for its login: refused it, or ran out of its quota. */
+    public boolean stoppedForLogin() {
+      return STOPPED_FOR_LOGIN.equals(stopSource);
+    }
+
     /**
      * The arguments of a verb that name a run of {@code project} whose id is {@code runId}, of spec
      * {@code specId} (none: of no spec): {@code --spec <id>} for a spec's run, {@code --run <id>}
@@ -398,6 +405,9 @@ public final class RunStore implements ConflictResolver, SyncedStore {
 
   /** The {@code stop_source} of a run an operator's stop claimed. */
   public static final String STOPPED_BY_OPERATOR = "operator";
+
+  /** The {@code stop_source} of a run its harness ended for its login. */
+  public static final String STOPPED_FOR_LOGIN = "login";
 
   private static final String COLUMNS =
       "id, project, spec_id, node, role, agent, branch, task, pid, watcher_pid, status,"
@@ -1884,10 +1894,17 @@ public final class RunStore implements ConflictResolver, SyncedStore {
               Arrays.asList(
                   own == null
                       ? new Object[] {id, expected}
-                      : usageParameters(own, report, id, expected)));
+                      : usageParameters(
+                          own,
+                          report,
+                          report.endedForItsLogin() ? STOPPED_FOR_LOGIN : null,
+                          id,
+                          expected)));
           db.execute(
               "UPDATE runs SET status = ?, completed_at = ?, exit_code = COALESCE(?, exit_code)"
-                  + (own == null ? "" : ", " + USAGE_SET)
+                  + (own == null
+                      ? ""
+                      : ", " + USAGE_SET + ", stop_source = COALESCE(stop_source, ?)")
                   + " WHERE id = ? AND status = ?"
                   + alsoWhere,
               parameters.toArray());

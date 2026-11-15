@@ -87,12 +87,16 @@ record LoopFacts(
     record Retry(ReviewStore.ReviewRow review) implements Owed {}
 
     /**
-     * The review is running, no reviewer was ever launched for the stage it is in, and no wait is
-     * recorded: the launch was cut short before the gate answered.
+     * The review is running, no reviewer was ever launched for the stage it is in, or the one that
+     * was ended for its login, and no wait is recorded: the launch was cut short before the gate
+     * answered, or the stage waits for a login to be stored.
      */
     record Advance(ReviewStore.ReviewRow review) implements Owed {}
 
-    /** The review failed its gate, and neither a fix agent nor a wait was recorded for it. */
+    /**
+     * The review failed its gate, and neither a fix agent nor a wait was recorded for it, or the
+     * fix agent was ended for its login.
+     */
     record Fix(ReviewStore.ReviewRow review) implements Owed {}
 
     /**
@@ -276,7 +280,7 @@ record LoopFacts(
         return new Owed.Nothing();
       }
       return newest
-          .filter(run -> Lane.REVIEW.matches(run.role()))
+          .filter(run -> Lane.REVIEW.matches(run.role()) && !run.stoppedForLogin())
           .filter(reviewer -> stageReviewedBy(reviewer).isPresent())
           .<Owed>map(reviewer -> new Owed.Stop(review, reviewer))
           .orElseGet(() -> unserved(review, new Owed.Advance(review)));
@@ -285,7 +289,7 @@ record LoopFacts(
     private static Owed afterGateFailure(
         ReviewStore.ReviewRow review, Optional<RunStore.RunRow> newest) {
       return newest
-          .filter(run -> Lane.FIX.matches(run.role()))
+          .filter(run -> Lane.FIX.matches(run.role()) && !run.stoppedForLogin())
           .<Owed>map(fix -> new Owed.Stop(review, fix))
           .orElseGet(() -> unserved(review, new Owed.Fix(review)));
     }

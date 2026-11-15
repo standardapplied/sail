@@ -49,6 +49,10 @@ class LoopDecisionTest {
   private static final RunStore.RunRow BUILD = ended("build-1", "build", null);
   private static final RunStore.RunRow REVIEWER = ended("reviewer-1", "review", REVIEW);
   private static final RunStore.RunRow FIXER = ended("fix-1", "fix", REVIEW);
+  private static final RunStore.RunRow REFUSED_REVIEWER =
+      LoopRows.endedForItsLogin("reviewer-1", "review", REVIEW);
+  private static final RunStore.RunRow REFUSED_FIXER =
+      LoopRows.endedForItsLogin("fix-1", "fix", REVIEW);
   private static final ReviewPipelineConfig TWO_AGENTS =
       TestDefinitions.pipeline(
           Map.of(
@@ -284,6 +288,31 @@ class LoopDecisionTest {
   private static Stream<Row> loginStored() {
     var anotherBoxs = run("build-1", "node-b", "build", null, "stopped", ENDED);
     return Stream.of(
+        row(
+            "L1 a review whose reviewer its harness ended for its login launches it again",
+            facts().review(RUNNING, stages("running", "pending")).serving(REFUSED_REVIEWER),
+            LOGIN_STORED,
+            new LoopStep.Resume(RUNNING)),
+        row(
+            "L1 a fix its harness ended for its login launches again",
+            owedAFix(GATE_FAILED).serving(REFUSED_FIXER),
+            LOGIN_STORED,
+            new LoopStep.LaunchFix(GATE_FAILED, List.of(HIGH))),
+        row(
+            "R1b a reviewer its harness ended for its login holds its review",
+            facts().review(RUNNING, stages("running", "pending")).serving(REFUSED_REVIEWER),
+            reviewerEnded(REFUSED_REVIEWER),
+            NOTHING),
+        row(
+            "F1b a fix agent its harness ended for its login holds its review",
+            owedAFix(GATE_FAILED).serving(REFUSED_FIXER),
+            fixEnded(REFUSED_FIXER),
+            NOTHING),
+        row(
+            "G1 a held review waits for the login, whatever else moves the loop",
+            facts().review(RUNNING, stages("running", "pending")).serving(REFUSED_REVIEWER),
+            FREED,
+            NOTHING),
         row(
             "L1 a review no run serves launches its reviewer once a login is stored",
             facts().newestLoopRun(BUILD).review(RUNNING, List.of()),

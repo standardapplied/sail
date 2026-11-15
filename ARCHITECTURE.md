@@ -2700,6 +2700,7 @@ review and go on with the latest.
 | G9b | | (**P**) the stage the review is in is an agent stage | `LaunchReviewer` |
 | G10 | | (**P**) every configured stage has a row and it is `passed` | `Pass` |
 | R1 | `ReviewerEnded` | not awaited in `pending`, `running` | as `GoOn` |
+| R1b | | its harness ended it for its login (`stop_source` `login`): the review is owed its reviewer (due `Advance`), held until `LoginStored` | `Nothing` |
 | R2 | | (**P**) no running agent stage was started while this run was live | as `GoOn` |
 | R3 | | (**P**) `failure` present | `ReadVerdict` with the error `"reviewer " + failure` |
 | R4 | | (**P**) otherwise | `ReadVerdict` |
@@ -2708,6 +2709,7 @@ review and go on with the latest.
 | J2 | | `GateFailed` | `FailGate` |
 | J3 | | `Errored(why)` | `ErrorReview(stage, why)`, its stage already closed |
 | F1 | `FixEnded` | not awaited in `failed`, or the review failed by error | as `GoOn` |
+| F1b | | its harness ended it for its login: the review is owed its fix (due `Fix`), held until `LoginStored` | `Nothing` |
 | F2 | | `failure` present | `FailFix("fix agent " + failure)` |
 | F2b | | the run's newest question is one no one who steers it has answered | `AwaitAnswer(fix, question)` |
 | F2c | | that question was answered and the run was not told every answer: `ResumeFix(review)` (**P**) when the spec is `resumableHere`, else `CannotResume(fix)` | as said |
@@ -3908,7 +3910,11 @@ no pairing is removed through the gateway as before, and no key file is touched.
     only as a plain short label (`LoginOutcome.LABEL`), so Codex's masked key is never repeated.
     The watcher's own `agent_session_stopped` cannot carry it: the watcher is another process and
     publishes before the one read. A run on its container's own login says nothing. Nothing is
-    retried on another login. A build's login of a kind with a known lifetime (Claude Code's
+    retried on another login. A refusal or a limit also marks the run in the finishing write
+    (`stop_source` `login`, `RunStore.STOPPED_FOR_LOGIN`), and a reviewer or fix agent so ended
+    holds its review as a launch refused for want of a login does (rows R1b, F1b): its review is
+    owed the reviewer or the fix again, no reconciler pass retries or escalates it, and storing a
+    login (`LoopTrigger.LoginStored`) launches it. A build's login of a kind with a known lifetime (Claude Code's
     token: 365 days from the day it was stored, `LoginKind.lifetime`) is said in the room in its
     last 14 days, as a warning, at each dispatch (`RunLogins.forRun`).
   - *What it cannot hide.* A run's harness holds its person's login in its environment for the

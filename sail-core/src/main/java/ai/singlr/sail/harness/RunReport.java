@@ -26,6 +26,13 @@ public record RunReport(RunUsage usage, LoginOutcome login) {
     return Optional.ofNullable(login);
   }
 
+  /**
+   * Whether its harness ended the run for its login: refused it, or its account's quota ran out.
+   */
+  public boolean endedForItsLogin() {
+    return login instanceof LoginOutcome.Refused || login instanceof LoginOutcome.Limited;
+  }
+
   /** The credential source the harness used instead of the run's login, or null when it did not. */
   public String overriddenBy() {
     return login instanceof LoginOutcome.Overridden overridden ? overridden.source() : null;

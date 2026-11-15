@@ -128,12 +128,19 @@ final class LoopDecision {
     };
   }
 
-  /** The reviewer its review waits on has its stage judged; any other reviewer's stop is late. */
+  /**
+   * The reviewer its review waits on has its stage judged; any other reviewer's stop is late. One
+   * its harness ended for its login judged nothing: the review is held, owed its reviewer, as a
+   * launch refused for want of a login holds it, until a login is stored ({@link #loginStored}).
+   */
   private static LoopStep reviewerEnded(LoopFacts facts, LoopTrigger.ReviewerEnded ended) {
     var review = facts.rows().awaited(ended.run(), "pending", "running").orElse(null);
     var stage = facts.rows().stageReviewedBy(ended.run()).orElse(null);
     if (review == null) {
       return goOn(facts);
+    }
+    if (ended.run().stoppedForLogin()) {
+      return new LoopStep.Nothing();
     }
     var error = ended.failure().map(how -> noun(Lane.REVIEW) + " " + how);
     return fit(
@@ -148,11 +155,15 @@ final class LoopDecision {
    * A fix agent that ended well has what it left uncommitted committed before the branch is judged
    * again. One the watcher killed or that exited non-zero did not address the findings: nothing of
    * its is committed, the branch still holds the code the reviewer failed, and the spec escalates.
+   * One its harness ended for its login is held, owed its fix, until a login is stored.
    */
   private static LoopStep fixEnded(LoopFacts facts, LoopTrigger.FixEnded ended) {
     var review = facts.rows().awaited(ended.run(), "failed").filter(failed -> !failed.errored());
     if (review.isEmpty()) {
       return goOn(facts);
+    }
+    if (ended.run().stoppedForLogin()) {
+      return new LoopStep.Nothing();
     }
     var asked = facts.asked().filter(question -> ended.failure().isEmpty());
     if (asked.filter(question -> !question.answered()).isPresent()) {
@@ -235,10 +246,10 @@ final class LoopDecision {
   }
 
   /**
-   * A stored login moves a loop this box drives that a launch refused for want of one left owed:
-   * the reviewer of a review no run serves or the fix of one that failed its gate ({@link #goOn}),
-   * or else the answered build its refused resume left holding. An errored review keeps to the
-   * reconciler's pace, and a wait to the run it waits on.
+   * A stored login moves a loop this box drives that a launch refused for want of one, or a run its
+   * harness ended for its login, left owed: the reviewer of a review no run serves or the fix of
+   * one that failed its gate ({@link #goOn}), or else the answered build its refused resume left
+   * holding. An errored review keeps to the reconciler's pace, and a wait to the run it waits on.
    */
   private static LoopStep loginStored(LoopFacts facts) {
     if (!facts.rows().drivenHere()) {
