@@ -643,7 +643,7 @@ class ReviewAgentLoopIT extends AbstractIncusIT {
     var holder = launched("billing", "review", "review_stage_started");
     eventually(() -> logOf(holder).contains("review started"), "billing's reviewer runs");
 
-    bus.publish(stopOfABuildRunOf("auth"));
+    bus.publish(buildStop());
 
     var reviewer = launched("auth", "review", "review_stage_started");
     assertNull(reviewStore.findReview(reviewer.reviewId()).orElseThrow().waitingOn());
@@ -665,7 +665,7 @@ class ReviewAgentLoopIT extends AbstractIncusIT {
   void aRealToolCallLongerThanTheStallWindowIsNotKilledAsAStall() throws Exception {
     inWorkspace(
         "auth", "printf 1 > \"$HOME/.sail/review-count\"; printf 8 > \"$HOME/.sail/slow-tool\"");
-    bus.publish(buildStop("auth"));
+    bus.publish(buildStop());
     var reviewer = launched("auth", "review", "review_stage_started");
     var feed = new LinkedBlockingQueue<Event>();
     feed.add(
@@ -754,35 +754,10 @@ class ReviewAgentLoopIT extends AbstractIncusIT {
     }
   }
 
+  /** The stop the watcher of the setup's build publishes, its run the spec's newest build. */
   private Event buildStop() {
     return RunStops.of(
         Event.WellKnownData.SOURCE_WATCHER, CONTAINER, "auth", "codex", build, "build", 0, null);
-  }
-
-  /**
-   * Records a build run of {@code specId} that this box executed, and returns the stop its watcher
-   * publishes: the run that makes this box the one that drives the spec's loop.
-   */
-  private Event stopOfABuildRunOf(String specId) {
-    var id = DateTimeUtils.newId().toString();
-    var unit = AgentUnit.forRun(id);
-    Acting.system(
-        () ->
-            runStore.create(
-                id,
-                CONTAINER,
-                specId,
-                HANDLE,
-                "build",
-                "codex",
-                "feat/test",
-                "work",
-                null,
-                null,
-                unit.logPath(),
-                unit.unitName()));
-    return RunStops.of(
-        Event.WellKnownData.SOURCE_WATCHER, CONTAINER, specId, "codex", id, "build", 0, null);
   }
 
   private Event buildStop(String specId) {
