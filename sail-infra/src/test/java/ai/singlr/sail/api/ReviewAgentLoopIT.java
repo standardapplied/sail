@@ -240,7 +240,7 @@ class ReviewAgentLoopIT extends AbstractIncusIT {
                 () -> {},
                 () -> HANDLE)
             .useMessages(new MessageStore(db)));
-    spec("auth");
+    spec("auth", SpecStatus.PENDING);
     build = built(dispatch, "auth");
   }
 
@@ -256,7 +256,7 @@ class ReviewAgentLoopIT extends AbstractIncusIT {
             () ->
                 dispatch.dispatch(
                     CONTAINER,
-                    new DispatchOperations.Request(specId, "background", false, null, true),
+                    new DispatchOperations.Request(specId, "background", false, null, false),
                     HANDLE));
     return assertInstanceOf(DispatchOperations.Dispatched.class, outcome).runId();
   }
@@ -277,6 +277,11 @@ class ReviewAgentLoopIT extends AbstractIncusIT {
 
   /** Records spec {@code id}, in progress under {@code codex}, working the whole container. */
   private void spec(String id) {
+    spec(id, SpecStatus.IN_PROGRESS);
+  }
+
+  /** Spec {@code id}, assigned to this box, in {@code status}. */
+  private void spec(String id, SpecStatus status) {
     Acting.as(
         null,
         () ->
@@ -285,8 +290,8 @@ class ReviewAgentLoopIT extends AbstractIncusIT {
                     id,
                     CONTAINER,
                     "T",
-                    SpecStatus.IN_PROGRESS,
-                    null,
+                    status,
+                    HANDLE,
                     "codex",
                     null,
                     null,
