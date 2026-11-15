@@ -13,6 +13,7 @@ import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.Spec;
 import ai.singlr.sail.engine.ContainerExec;
+import ai.singlr.sail.engine.RunPlace;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.harness.Harness;
 import ai.singlr.sail.harness.Harnesses;
@@ -158,32 +159,45 @@ public final class LaunchAdmission {
 
   /**
    * Refuses the launch before any reservation or snapshot when the chosen agent's binary is not on
-   * the container's PATH — the definition's agent section declares what a project apply installed,
-   * but the container is the authority on what can actually launch.
+   * the PATH of {@code place}, where the run lives — the definition's agent section declares what a
+   * project apply installed, but the instance is the authority on what can actually launch.
    */
-  public void requireInstalled(Harness harness, String project) {
+  public void requireInstalled(Harness harness, RunPlace place) {
     var found =
         exec(
             ContainerExec.asDevUser(
-                project,
+                place.instance(),
                 List.of("bash", "-lc", "command -v -- \"$1\"", "bash", harness.binaryName())));
     if (!found.ok()) {
-      throw notInstalled(harness, project);
+      throw notInstalled(harness, place);
     }
   }
 
   static final Remedy HANDLE_HINT =
       Remedy.of("Set it with: ", Remedy.sail("host config set sync-handle", "<handle>"));
 
-  static ApiException notInstalled(Harness harness, String project) {
+  /**
+   * The refusal of a harness not installed in {@code place}: a spec's workspace is a clone of its
+   * project's template, so it is the template that is built again, where the project's own
+   * container is applied.
+   */
+  static ApiException notInstalled(Harness harness, RunPlace place) {
+    var project = place.project();
     return new ApiException(
         ErrorCode.AGENT_NOT_CONFIGURED,
-        "Agent '" + harness.yamlName() + "' is not installed in project '" + project + "'.",
+        "Agent '"
+            + harness.yamlName()
+            + "' is not installed in "
+            + (place instanceof RunPlace.SpecWorkspace workspace
+                ? "spec " + workspace.specId() + "'s workspace of project '" + project + "'."
+                : "project '" + project + "'."),
         Remedy.of(
             "Add " + harness.yamlName() + " to the agent's install list with '",
             Remedy.sail("project edit", project, "--section", "agent"),
             "', then run '",
-            Remedy.sail("project apply", project),
+            place instanceof RunPlace.SpecWorkspace
+                ? Remedy.sail("project template build", project)
+                : Remedy.sail("project apply", project),
             "'."));
   }
 

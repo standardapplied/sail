@@ -11,6 +11,7 @@ import ai.singlr.sail.config.Engagement;
 import ai.singlr.sail.config.Lane;
 import ai.singlr.sail.config.Roster;
 import ai.singlr.sail.engine.HostInfo;
+import ai.singlr.sail.engine.RunPlace;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.store.RoomStore;
 import ai.singlr.sail.store.SpecStore;
@@ -162,8 +163,7 @@ public final class MembershipService {
         places.checkSpec(
             project, config, specId, member.full() ? Lane.ROOM_FULL : Lane.ROOM, localHandle);
     if (checked.check().running()) {
-      admission.requireInstalled(
-          LaunchAdmission.resolveAgent(member.agent()), checked.place().instance());
+      admission.requireInstalled(LaunchAdmission.resolveAgent(member.agent()), checked.place());
     }
     writeRoster(spec, Roster.solo(member));
     publishEngaged(project, specId, member);
@@ -218,7 +218,8 @@ public final class MembershipService {
       String project, String agentYamlName, String mode, String model, String localHandle) {
     var member = admit(agentYamlName, mode, model, localHandle);
     projects.loadRunning(project);
-    admission.requireInstalled(LaunchAdmission.resolveAgent(member.agent()), project);
+    admission.requireInstalled(
+        LaunchAdmission.resolveAgent(member.agent()), new RunPlace.ProjectContainer(project));
     return member;
   }
 

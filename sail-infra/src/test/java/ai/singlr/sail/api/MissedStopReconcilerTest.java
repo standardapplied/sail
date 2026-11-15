@@ -1174,10 +1174,38 @@ class MissedStopReconcilerTest {
     assertEquals(true, lostOf(session("auth", "node-a", "build"), true, null));
     assertEquals(false, lostOf(processless("auth"), true, 2), "a code says how it ended");
     assertEquals(false, lostOf(finishedSession("auth", "completed", null), true, null));
+    assertEquals(
+        false,
+        lostOf(session("auth", "node-a", "build"), null, null),
+        "an instance whose state cannot be read is never called gone");
   }
 
-  /** Whether the sweep's stop of {@code run} says it was lost, its instance gone or not. */
-  private Object lostOf(String run, boolean instanceGone, Integer code) throws Exception {
+  /** The production probe calls a spec's workspace gone when it is stopped or missing, only. */
+  @Test
+  void theProbeCallsAWorkspaceGoneOnlyWhenItIsStoppedOrMissing() throws Exception {
+    var place = RunPlace.of("test-project", "auth");
+    for (var status : List.of("Stopped", "Running")) {
+      var shell =
+          new ScriptedShellExecutor()
+              .onOk(
+                  "incus list ^test-project-auth$",
+                  "[" + TestWorkspaces.specWorkspace("test-project", "auth", status, "eng") + "]");
+      assertEquals(
+          "Stopped".equals(status),
+          MissedStopReconciler.systemdUnitProbe(shell).instanceGone(place),
+          status);
+    }
+    assertTrue(
+        MissedStopReconciler.systemdUnitProbe(new ScriptedShellExecutor().onOk("incus list", "[]"))
+            .instanceGone(place),
+        "a workspace Incus no longer lists is gone");
+  }
+
+  /**
+   * Whether the sweep's stop of {@code run} says it was lost, its instance gone or not ({@code
+   * null}: its state cannot be read).
+   */
+  private Object lostOf(String run, Boolean instanceGone, Integer code) throws Exception {
     var latch = new CountDownLatch(1);
     var stops = captureStops(latch);
     var probe =
@@ -1193,7 +1221,10 @@ class MissedStopReconcilerTest {
           }
 
           @Override
-          public boolean instanceGone(RunPlace place) {
+          public boolean instanceGone(RunPlace place) throws IOException {
+            if (instanceGone == null) {
+              throw new IOException("incus did not answer");
+            }
             return instanceGone;
           }
         };

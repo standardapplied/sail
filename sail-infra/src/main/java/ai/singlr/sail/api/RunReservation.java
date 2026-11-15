@@ -549,7 +549,11 @@ public final class RunReservation {
         () -> runStore.finish(runId, "running", "failed", null, RunUsage.NONE));
   }
 
-  private boolean agentLive(RunPlace place, AgentUnit unit) {
+  /**
+   * Whether {@code unit}'s agent in {@code place} may be there: anything but a proven absence,
+   * since a container that gives no answer has not said it is gone.
+   */
+  boolean agentLive(RunPlace place, AgentUnit unit) {
     try {
       return !new AgentPresence(shell).gone(place, unit);
     } catch (Exception e) {

@@ -11,6 +11,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import ai.singlr.sail.config.Spec;
 import ai.singlr.sail.config.SpecStatus;
+import ai.singlr.sail.engine.RunPlace;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.harness.Harnesses;
 import ai.singlr.sail.identity.Actor;
@@ -352,7 +353,8 @@ class LaunchAdmissionTest {
   @Test
   void requireInstalledAdmitsWhenTheBinaryIsOnThePath() {
     var admission = new LaunchAdmission(shellExiting(0), fdeStore);
-    assertDoesNotThrow(() -> admission.requireInstalled(Harnesses.of("claude-code"), "acme"));
+    assertDoesNotThrow(
+        () -> admission.requireInstalled(Harnesses.of("claude-code"), RunPlace.of("acme", null)));
   }
 
   @Test
@@ -361,7 +363,8 @@ class LaunchAdmissionTest {
     var ex =
         assertThrows(
             ApiException.class,
-            () -> admission.requireInstalled(Harnesses.of("claude-code"), "acme"));
+            () ->
+                admission.requireInstalled(Harnesses.of("claude-code"), RunPlace.of("acme", null)));
     assertEquals(ErrorCode.AGENT_NOT_CONFIGURED, ex.failure().errorCode());
   }
 
@@ -371,7 +374,8 @@ class LaunchAdmissionTest {
     var ex =
         assertThrows(
             ApiException.class,
-            () -> admission.requireInstalled(Harnesses.of("claude-code"), "acme"));
+            () ->
+                admission.requireInstalled(Harnesses.of("claude-code"), RunPlace.of("acme", null)));
     assertEquals(ErrorCode.COMMAND_FAILED, ex.failure().errorCode());
   }
 

@@ -486,13 +486,12 @@ class LiveMemberDisplacementTest {
     var refused = assertThrows(ApiException.class, () -> room.live.deliver(LOUNGE, HANDLE));
     assertEquals(ErrorCode.COMMAND_FAILED, refused.failure().errorCode());
     assertEquals(
-        "Could not ask whether a terminal holds the conversation of run "
+        "Could not ask the session host whether a terminal holds the conversation of run "
             + process.runId
             + ", so no process was started over it.",
         refused.getMessage());
     assertEquals(
-        "Check the sail-pty-host service and the run's container; the room's next message tries"
-            + " again.",
+        "Check the sail-pty-host service on this box; the room's next message tries again.",
         refused.failure().remedy().plain());
     assertEquals("the host refused the dispatch credential", refused.getCause().getMessage());
 

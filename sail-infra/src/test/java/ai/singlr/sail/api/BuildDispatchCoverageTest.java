@@ -1091,6 +1091,17 @@ class BuildDispatchCoverageTest {
     assertEquals("running", new RunStore(db).listForSpec("auth").getFirst().status());
   }
 
+  /** A box that keeps no runs has none live, so its cap counts none and a dispatch goes on. */
+  @Test
+  void aBoxThatKeepsNoRunsCountsNoLiveWorkspaceAgainstItsCap() throws IOException {
+    var db = seedDb();
+    memoryMb = 4096;
+    var limited = YAML + "resources:\n  cpu: 2\n  memory: 4GB\n  disk: 50GB\n";
+
+    assertInstanceOf(
+        DispatchOperations.Dispatched.class, dispatch(ops(launching(), limited, db, null)));
+  }
+
   /** Scenario 16, beside: a box whose memory holds one more spec workspace makes it. */
   @Test
   void aBoxUnderItsCapMakesTheWorkspace() throws IOException {

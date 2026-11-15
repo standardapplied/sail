@@ -243,6 +243,47 @@ class EngagementLifecycleTest {
         "nor of a workspace that is not there yet");
   }
 
+  /**
+   * A spec's workspace already running is asked for the member's harness, and one it lacks is
+   * refused naming the template that a workspace is cloned from, and seats no one.
+   */
+  @Test
+  void aSpecsRunningWorkspaceWithoutTheHarnessIsRefusedNamingTheTemplateBuild() throws Exception {
+    var lacking =
+        new StubShell(order)
+            .on("incus list ^acme$", RUNNING_JSON)
+            .failing("command -v", "not found");
+    var ops = operations(lacking);
+    var yaml = Files.writeString(tempDir.resolve("running.yaml"), YAML);
+    incus.onOk(
+        "incus list --format json",
+        "["
+            + TestWorkspaces.currentTemplate(TestProjects.reading(yaml), "acme")
+            + ","
+            + TestWorkspaces.specWorkspace("acme", "auth", "Running", HANDLE)
+            + "]");
+    seedSpec("auth");
+
+    var refused =
+        assertThrows(
+            ApiException.class,
+            () ->
+                Actor.call(
+                    new Actor(HANDLE, Role.ADMIN, Actor.Lane.CLI),
+                    () -> ops.engage("auth", "claude-code", null, null, false, HANDLE)));
+
+    assertEquals(ErrorCode.AGENT_NOT_CONFIGURED, refused.failure().errorCode());
+    assertEquals(
+        "Agent 'claude-code' is not installed in spec auth's workspace of project 'acme'.",
+        refused.getMessage());
+    assertTrue(
+        refused.failure().remedy().plain().endsWith("then run 'sail project template build acme'."),
+        refused.failure().remedy().plain());
+    assertTrue(
+        lacking.ran.stream().anyMatch(command -> command.startsWith("incus exec acme-auth ")));
+    assertTrue(ofType(Event.WellKnownTypes.SPEC_ENGAGED).isEmpty(), "no one is seated");
+  }
+
   /** M3: no snapshot of the project's container is taken for a member of a spec's room. */
   @Test
   void aSpecsEngageWithASnapshotIsRefusedNamingWhyAndSeatsNoOne() throws Exception {
