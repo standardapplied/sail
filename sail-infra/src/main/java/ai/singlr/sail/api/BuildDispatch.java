@@ -255,10 +255,10 @@ public final class BuildDispatch {
           background ? null : launch.exitCode(),
           launch.watcher());
     } catch (RuntimeException e) {
-      runReservation.releaseIfAbsent(runId, checked.place(), unit);
       if (!launching) {
-        giveBack(nextSpec);
+        giveBack(nextSpec.id(), runId);
       }
+      runReservation.releaseIfAbsent(runId, checked.place(), unit);
       throw e;
     }
   }
@@ -266,11 +266,16 @@ public final class BuildDispatch {
   /**
    * Gives back what the claim of {@code spec} took when its run could not be launched after the
    * reservation (the workspace busy, its create failed, a branch collision): the spec is pending
-   * again, so the dispatch its refusal names works as printed. A restart had already set it
-   * pending, which it stays.
+   * again, so the dispatch its refusal names works as printed. Only while the spec is still this
+   * claim's: in progress, its newest run this one. A cancel, or another claim, made meanwhile wins.
    */
-  private void giveBack(Spec spec) {
-    specStore.updateReposAndStatus(spec.id(), spec.repos(), SpecStatus.PENDING, null);
+  private void giveBack(String specId, String runId) {
+    if (runStore.listForSpec(specId).stream()
+        .findFirst()
+        .filter(run -> run.id().equals(runId))
+        .isPresent()) {
+      specStore.compareAndSetStatus(specId, SpecStatus.IN_PROGRESS, SpecStatus.PENDING);
+    }
   }
 
   /**

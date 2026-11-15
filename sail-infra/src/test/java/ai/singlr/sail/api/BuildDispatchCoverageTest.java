@@ -923,6 +923,53 @@ class BuildDispatchCoverageTest {
         "the dispatch again the refusal names works as printed");
   }
 
+  /** Point 5: a spec cancelled while its dispatch waited on the create lock stays cancelled. */
+  @Test
+  void aCancelMadeWhileTheDispatchWaitedWinsOverTheGiveBack() throws Exception {
+    var db = seedDb();
+    var template = TestWorkspaces.currentTemplate(definitions(), "acme");
+    var locks = Files.createDirectories(tempDir.resolve("locks"));
+    var deadline = Workspaces.CREATE_WAIT.toNanos();
+    var reads = new AtomicInteger();
+    workspaces =
+        TestWorkspaces.over(
+            incus(template, template),
+            () -> {
+              if (reads.getAndIncrement() == 1) {
+                Acting.system(
+                    () ->
+                        new SpecStore(db)
+                            .compareAndSetStatus(
+                                "auth", SpecStatus.IN_PROGRESS, SpecStatus.CANCELLED));
+              }
+              return reads.get() == 1 ? 0 : deadline;
+            },
+            locks);
+    var holding = new CountDownLatch(1);
+    var release = new CountDownLatch(1);
+    var other =
+        Thread.ofVirtual()
+            .start(
+                () -> {
+                  try (var held = FileMutex.acquire(locks.resolve("workspace-create.lock"))) {
+                    holding.countDown();
+                    release.await();
+                  } catch (Exception e) {
+                    throw new IllegalStateException(e);
+                  }
+                });
+    assertTrue(holding.await(30, TimeUnit.SECONDS));
+    try {
+      var refused = assertThrows(ApiException.class, () -> dispatch(ops(launching(), YAML, db)));
+
+      assertEquals(ErrorCode.RUNNER_BUSY, refused.failure().errorCode());
+      assertEquals(SpecStatus.CANCELLED, new SpecStore(db).findById("auth").orElseThrow().status());
+    } finally {
+      release.countDown();
+      other.join();
+    }
+  }
+
   /** M1: a create that fails gives the claim back, so the next dispatch meets the failure again. */
   @Test
   void aCreateThatFailsGivesTheClaimBackAndTheNextDispatchMeetsItsOwnReason() throws IOException {
