@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.api;
 
+import ai.singlr.sail.engine.RunPlace;
 import ai.singlr.sail.harness.RunUsage;
 import ai.singlr.sail.store.RunStore;
 import java.util.List;
@@ -35,7 +36,7 @@ final class NoReviewLanes implements ReviewLanes {
 
   @Override
   public List<Rescue> ensureCommitted(
-      String project, List<String> repos, String branch, String commitMessage) {
+      RunPlace place, List<String> repos, String branch, String commitMessage) {
     throw new AssertionError("this test rescues no work");
   }
 }

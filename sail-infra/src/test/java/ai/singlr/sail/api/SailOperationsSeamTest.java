@@ -1502,7 +1502,6 @@ class SailOperationsSeamTest {
       Acting.system(() -> box.specs.setContent("auth", "body", "plan"));
       assertEquals("auth", operations.catalog().projectSpecs("proj").getFirst().id());
       assertEquals("body", operations.catalog().specContent("auth").orElseThrow().body());
-      assertTrue(operations.dispatching().latestRun("proj", "node").isEmpty());
       assertTrue(operations.dispatching().runningRuns("proj", "node").isEmpty());
       assertNull(operations.dispatching().projectSession("proj", "node"));
       assertFalse(operations.catalog().roomKnown(null));
@@ -1599,17 +1598,19 @@ class SailOperationsSeamTest {
               runs.create(
                   id, "proj", "auth", "node", "build", "codex", "branch", "task", 1, null, "/log",
                   "unit"));
-      assertEquals(id, operations.dispatching().latestRun("proj", "node").orElseThrow().id());
       assertEquals(id, operations.dispatching().activeRun("proj", "node").orElseThrow().id());
       assertTrue(operations.dispatching().activeRun("proj", "other").isEmpty());
-      assertTrue(operations.dispatching().latestRun("proj", "other").isEmpty());
       assertEquals(1, operations.dispatching().runningRuns("proj", "node").size());
       assertEquals(
           List.of(id),
           operations.dispatching().liveRuns("node").stream().map(RunStore.RunRow::id).toList());
       assertEquals(List.of(), operations.dispatching().liveRuns("other"));
       assertTrue(
-          Acting.system(() -> operations.dispatching().latestOperable("proj", "node", Lane.REVIEW))
+          Acting.system(
+                  () ->
+                      operations
+                          .dispatching()
+                          .latestOperable("proj", "node", run -> Lane.REVIEW.matches(run.role())))
               .isEmpty());
       Acting.system(() -> TestRuns.complete(runs, id, "completed", 0));
       var reviewer = DateTimeUtils.newId().toString();
@@ -1627,23 +1628,39 @@ class SailOperationsSeamTest {
                   List.of()));
       assertEquals(
           reviewer,
-          Acting.system(() -> operations.dispatching().latestOperable("proj", "node", Lane.REVIEW))
+          Acting.system(
+                  () ->
+                      operations
+                          .dispatching()
+                          .latestOperable("proj", "node", run -> Lane.REVIEW.matches(run.role())))
               .orElseThrow()
               .id());
       assertEquals(
           id,
-          Acting.system(() -> operations.dispatching().latestOperable("proj", "node", Lane.BUILD))
+          Acting.system(
+                  () ->
+                      operations
+                          .dispatching()
+                          .latestOperable("proj", "node", run -> Lane.BUILD.matches(run.role())))
               .orElseThrow()
               .id());
       assertTrue(
-          Acting.system(() -> operations.dispatching().latestOperable("proj", "node", Lane.FIX))
+          Acting.system(
+                  () ->
+                      operations
+                          .dispatching()
+                          .latestOperable("proj", "node", run -> Lane.FIX.matches(run.role())))
               .isEmpty());
       assertTrue(
-          Acting.system(() -> operations.dispatching().latestOperable("proj", "other", Lane.REVIEW))
+          Acting.system(
+                  () ->
+                      operations
+                          .dispatching()
+                          .latestOperable("proj", "other", run -> Lane.REVIEW.matches(run.role())))
               .isEmpty());
       assertEquals(
           reviewer,
-          Acting.system(() -> operations.dispatching().latestOperable("proj", "node"))
+          Acting.system(() -> operations.dispatching().latestOperable("proj", "node", run -> true))
               .orElseThrow()
               .id());
     }
@@ -1667,7 +1684,7 @@ class SailOperationsSeamTest {
                   () ->
                       operations
                           .dispatching()
-                          .stop(new StopOperations.RunTarget("missing"), "node", false)));
+                          .stop(new StopOperations.RunTarget("missing", null), "node", false)));
     }
   }
 

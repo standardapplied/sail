@@ -144,7 +144,7 @@ class ProjectCreateCommandTest {
             name: acme
             resources: {cpu: 2, memory: 8GB, disk: 50GB}
             image: ubuntu/24.04
-            agent: {type: claude-code, auto_branch: true, branch_prefix: agent/, auto_snapshot: true}
+            agent: {type: claude-code, auto_branch: true, branch_prefix: agent/}
             """),
         created("", "acme"));
     assertEquals(

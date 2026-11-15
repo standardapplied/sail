@@ -712,9 +712,10 @@ public final class LegacyConversion {
 
   /**
    * The 0.58 catalog definition of {@code name} as this release reads it: without the {@code git}
-   * and {@code ssh} blocks this release no longer has, and with the review pipeline moved out of
-   * {@code agent} into its own section. Checked whole, as every write is; one this release refuses
-   * fails the conversion, naming the project.
+   * and {@code ssh} blocks and the {@code agent.auto_snapshot} flag this release no longer has (a
+   * spec's runs live in their own workspaces, which a dispatch does not snapshot), and with the
+   * review pipeline moved out of {@code agent} into its own section. Checked whole, as every write
+   * is; one this release refuses fails the conversion, naming the project.
    */
   static ProjectDefinition definition(String name, String yaml) {
     try {
@@ -723,6 +724,7 @@ public final class LegacyConversion {
       document.remove("ssh");
       if (document.get("agent") instanceof Map<?, ?> declared) {
         var agent = new LinkedHashMap<Object, Object>(declared);
+        agent.remove("auto_snapshot");
         var pipeline = agent.remove("review_pipeline");
         if (pipeline != null) {
           if (document.containsKey("pipeline")) {

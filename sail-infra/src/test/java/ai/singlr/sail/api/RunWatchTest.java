@@ -18,6 +18,7 @@ import ai.singlr.sail.engine.AgentUnit;
 import ai.singlr.sail.engine.GuardrailChecker;
 import ai.singlr.sail.engine.GuardrailTrigger;
 import ai.singlr.sail.engine.HarnessHooks;
+import ai.singlr.sail.engine.RunPlace;
 import ai.singlr.sail.engine.ScriptedShellExecutor;
 import ai.singlr.sail.harness.Harnesses;
 import java.time.Duration;
@@ -162,7 +163,7 @@ class RunWatchTest {
       Guardrails guardrails, Instant startedAt, boolean dryRun, RunWatch.StopPublisher publisher)
       throws Exception {
     new RunWatch(
-            PROJECT,
+            RunPlace.of(PROJECT, null),
             RUN,
             UNIT,
             guardrails,
@@ -342,6 +343,37 @@ class RunWatchTest {
             <= 0,
         "liveness is polled on the clock, however many events another run sends meanwhile: "
             + Duration.between(START, publishedAt.getFirst()));
+  }
+
+  /** Scenario 36: a snapshot-and-stop limit snapshots the instance the run lives in, alone. */
+  @Test
+  void aSnapshotAndStopLimitSnapshotsTheSpecsWorkspaceAndNotTheProjectsContainer()
+      throws Exception {
+    var place = RunPlace.of(PROJECT, "fix-login");
+    container.holds("fix-login");
+
+    new RunWatch(
+            place,
+            RUN,
+            UNIT,
+            new Guardrails(null, "20m", "snapshot-and-stop"),
+            START,
+            false,
+            container,
+            feed,
+            this::publish,
+            narrator(),
+            time::get)
+        .run();
+
+    var snapshots = container.commandsContaining("incus snapshot create");
+    assertEquals(1, snapshots.size(), snapshots.toString());
+    assertTrue(
+        snapshots
+            .getFirst()
+            .startsWith("incus snapshot create " + place.instance() + " guardrail-"),
+        snapshots.getFirst());
+    assertEquals(1, published.size());
   }
 
   @Test
@@ -567,7 +599,8 @@ class RunWatchTest {
 
   private boolean reconcilerReadsItActive() {
     try {
-      return MissedStopReconciler.systemdUnitProbe(container).active(PROJECT, RUN, UNIT.unitName());
+      return MissedStopReconciler.systemdUnitProbe(container)
+          .active(RunPlace.of(PROJECT, null), RUN, UNIT.unitName());
     } catch (Exception e) {
       throw new IllegalStateException(e);
     }
@@ -967,7 +1000,7 @@ class RunWatchTest {
     assertTrue(RunWatch.isProgressEvent(sampleEvent(Event.WellKnownTypes.AGENT_TOOL_STARTED)));
     assertTrue(RunWatch.isProgressEvent(sampleEvent(Event.WellKnownTypes.AGENT_TOOL_FINISHED)));
     assertTrue(RunWatch.isProgressEvent(sampleEvent(Event.WellKnownTypes.AGENT_LOG_CHUNK)));
-    assertFalse(RunWatch.isProgressEvent(sampleEvent(Event.WellKnownTypes.SNAPSHOT_CREATED)));
+    assertFalse(RunWatch.isProgressEvent(sampleEvent(Event.WellKnownTypes.SNAPSHOT_RESTORED)));
   }
 
   @Test
@@ -1121,7 +1154,8 @@ class RunWatchTest {
                     .formatted(RUN));
 
     var stopped =
-        RunWatch.stopIfAlreadyEnded(PROJECT, RUN, UNIT, new AgentSession(shell), this::publish);
+        RunWatch.stopIfAlreadyEnded(
+            RunPlace.of(PROJECT, null), RUN, UNIT, new AgentSession(shell), this::publish);
 
     assertTrue(stopped);
     assertEquals(127, published.getFirst().data().get("exit_code"));
@@ -1133,7 +1167,11 @@ class RunWatchTest {
   void aWatcherStartedForARunThatNeverLaunchedPublishesNothing() throws Exception {
     var stopped =
         RunWatch.stopIfAlreadyEnded(
-            PROJECT, RUN, UNIT, new AgentSession(new ScriptedShellExecutor()), this::publish);
+            RunPlace.of(PROJECT, null),
+            RUN,
+            UNIT,
+            new AgentSession(new ScriptedShellExecutor()),
+            this::publish);
 
     assertFalse(stopped, "no unit and no session file name this run");
     assertTrue(published.isEmpty());

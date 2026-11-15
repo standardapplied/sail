@@ -13,7 +13,9 @@ import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.ProjectDefinition;
 import ai.singlr.sail.config.SpecCatalog;
 import ai.singlr.sail.config.YamlUtil;
+import ai.singlr.sail.engine.AgentPresence;
 import ai.singlr.sail.engine.AgentSession;
+import ai.singlr.sail.engine.AgentUnit;
 import ai.singlr.sail.engine.Banner;
 import ai.singlr.sail.engine.BoxInstances;
 import ai.singlr.sail.engine.ContainerExec;
@@ -24,18 +26,23 @@ import ai.singlr.sail.engine.GuardrailChecker;
 import ai.singlr.sail.engine.NameValidator;
 import ai.singlr.sail.engine.NodeIdentity;
 import ai.singlr.sail.engine.OperatorCommand;
+import ai.singlr.sail.engine.RunPlace;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.store.RunStore;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
+import java.util.Optional;
 import java.util.function.Function;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
+import picocli.CommandLine.Mixin;
 import picocli.CommandLine.Option;
 import picocli.CommandLine.Parameters;
 
@@ -49,6 +56,8 @@ public final class AgentStatusCommand implements Runnable {
 
   @Parameters(index = "0", description = "Project name (omit for all projects).", arity = "0..1")
   private String name;
+
+  @Mixin private RunSelector selector = new RunSelector();
 
   @Option(names = "--json", description = "Output in JSON format.")
   private boolean json;
@@ -109,11 +118,17 @@ public final class AgentStatusCommand implements Runnable {
       probes =
           runningContainers.stream()
               .map(
-                  container ->
-                      new Probe(
-                          container.name(),
-                          sessionOrNull(operations, container.name()),
-                          repoPathsOrDefault(definitions, container.name())))
+                  container -> {
+                    var run =
+                        operations.dispatching().activeRun(container.name(), NodeIdentity.handle());
+                    return new Probe(
+                        container.name(),
+                        sessionOrNull(run),
+                        run.map(RunStore.RunRow::place)
+                            .orElse(RunPlace.of(container.name(), null))
+                            .instance(),
+                        repoPathsOrDefault(definitions, container.name()));
+                  })
               .toList();
     }
 
@@ -133,7 +148,8 @@ public final class AgentStatusCommand implements Runnable {
             elapsed = formatElapsed(Duration.between(started, DateTimeUtils.now()));
             for (var repoPath : probe.repoPaths()) {
               try {
-                commits += checker.queryGitActivity(projectName, repoPath, started).commitCount();
+                commits +=
+                    checker.queryGitActivity(probe.instance(), repoPath, started).commitCount();
               } catch (Exception ignored) {
               }
             }
@@ -189,20 +205,18 @@ public final class AgentStatusCommand implements Runnable {
 
   private void executeSingle(OperatorCommand operator) throws Exception {
     NameValidator.requireValidProjectName(name);
-    try (var operations = this.operations.apply(operator)) {
-      operations.catalog().readable(name);
-    }
-    var mgr = new ContainerManager(shell);
-
-    var state = mgr.queryState(name);
-    ContainerStateGuard.requireRunning(state, name);
-
-    AgentSession.SessionInfo info;
+    Optional<RunStore.RunRow> run;
     ProjectDefinition config;
     try (var operations = this.operations.apply(operator)) {
-      info = operations.dispatching().projectSession(name, NodeIdentity.handle());
+      operations.catalog().readable(name);
+      run =
+          selector.resolve(
+              operations.dispatching(), "agent status", name, NodeIdentity.handle(), any -> true);
       config = operations.catalog().definitions().read(name).orElse(null);
     }
+    var place = run.map(RunStore.RunRow::place).orElse(RunPlace.of(name, null));
+    ContainerStateGuard.requireRunning(new AgentPresence(shell).state(place), place.instance());
+    var info = sessionOf(run);
 
     var commitCount = 0;
     var lastCommitMinutesAgo = -1L;
@@ -213,7 +227,7 @@ public final class AgentStatusCommand implements Runnable {
         var since =
             !info.startedAt().isBlank() ? Instant.parse(info.startedAt()) : DateTimeUtils.now();
         for (var repoPath : repoPaths) {
-          var activity = checker.queryGitActivity(name, repoPath, since);
+          var activity = checker.queryGitActivity(place.instance(), repoPath, since);
           commitCount += activity.commitCount();
           if (activity.lastCommitEpoch() > 0) {
             var minutesAgo =
@@ -265,11 +279,20 @@ public final class AgentStatusCommand implements Runnable {
     }
 
     Banner.printAgentStatus(
-        name, info, commitCount, lastCommitMinutesAgo, taskCounts, operator, System.out, Ansi.AUTO);
+        name,
+        run.map(RunSelector::of).orElse(""),
+        info,
+        commitCount,
+        lastCommitMinutesAgo,
+        taskCounts,
+        operator,
+        System.out,
+        Ansi.AUTO);
   }
 
   /** What the listing reads of one running project before anything long-running starts. */
-  private record Probe(String project, AgentSession.SessionInfo info, List<String> repoPaths) {}
+  private record Probe(
+      String project, AgentSession.SessionInfo info, String instance, List<String> repoPaths) {}
 
   static List<String> repoPathsOrDefault(ProjectReader definitions, String projectName) {
     try {
@@ -282,10 +305,21 @@ public final class AgentStatusCommand implements Runnable {
     }
   }
 
-  private static AgentSession.SessionInfo sessionOrNull(
-      HostOperations operations, String projectName) {
+  /** The session of {@code run}, the run the selector names, or none when there is none. */
+  private AgentSession.SessionInfo sessionOf(Optional<RunStore.RunRow> run) throws Exception {
+    if (run.isEmpty()) {
+      return null;
+    }
+    var live = run.get();
+    return new AgentSession(shell)
+        .queryStatus(
+            live.place().instance(),
+            AgentUnit.recorded(live.id(), Objects.toString(live.unit(), "")));
+  }
+
+  private AgentSession.SessionInfo sessionOrNull(Optional<RunStore.RunRow> run) {
     try {
-      return operations.dispatching().projectSession(projectName, NodeIdentity.handle());
+      return sessionOf(run);
     } catch (Exception ignored) {
       return null;
     }

@@ -11,6 +11,7 @@ import ai.singlr.sail.common.Remedied;
 import ai.singlr.sail.config.Spec;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.engine.OperatorCommand;
+import ai.singlr.sail.engine.RunPlace;
 import ai.singlr.sail.harness.Harnesses;
 import java.util.List;
 import org.junit.jupiter.api.Test;
@@ -48,7 +49,8 @@ class ApiOperatorHintsTest {
         operator.render(LaunchAdmission.runsOnOtherNode(spec("bob"), "ada").remedy()),
         operator.render(LaunchAdmission.HANDLE_HINT),
         operator.render(
-            LaunchAdmission.notInstalled(Harnesses.of("claude-code"), "gamma").remedy()),
+            LaunchAdmission.notInstalled(Harnesses.of("claude-code"), RunPlace.of("gamma", null))
+                .remedy()),
         operator.render((Remedied) SailOperations.storeUnavailable("Run store")));
   }
 

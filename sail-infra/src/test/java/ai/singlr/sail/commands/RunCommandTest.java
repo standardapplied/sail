@@ -197,7 +197,7 @@ class RunCommandTest {
               new OperationHooks(
                   event -> {},
                   new WatcherSpawner(host, (spawned, logPath) -> 4242L),
-                  hooks.snapshotter(),
+                  hooks.workspaces(),
                   hooks.launcher(),
                   hooks.dispatchListener(),
                   hooks.stopListener()),
@@ -220,12 +220,17 @@ class RunCommandTest {
             "--no-snapshot");
 
     assertEquals(1, ran.exit(), ran.out());
-    assertEquals(
-        "  ✗ The agent exited 1: Not logged in · Please run /login\n"
-            + "  Full log: "
-            + OperatorCommand.here().sail("agent log test-proj")
-            + "\n",
+    var printed = "  Full log: " + OperatorCommand.here().sail("agent log test-proj --run ");
+    assertTrue(
+        ran.err()
+            .startsWith("  ✗ The agent exited 1: Not logged in · Please run /login\n" + printed),
         ran.err());
+    assertTrue(
+        ran.err()
+            .substring(ran.err().indexOf(printed) + printed.length())
+            .strip()
+            .matches("[0-9a-f-]{36}"),
+        "the run of no spec is named by its id: " + ran.err());
   }
 
   @Test

@@ -23,6 +23,9 @@ sealed interface LoopStep {
 
   record SayBuildFailed(int exitCode) implements LoopStep {}
 
+  /** The build was lost ({@link LoopTrigger.BuildEnded#lost}): said, and never reviewed. */
+  record SayBuildLost() implements LoopStep {}
+
   record ParkForAPerson() implements LoopStep {}
 
   /**

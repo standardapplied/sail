@@ -21,12 +21,15 @@ import ai.singlr.sail.api.OperationsFactory;
 import ai.singlr.sail.api.ProjectReader;
 import ai.singlr.sail.api.SailOperations;
 import ai.singlr.sail.api.SessionYield;
+import ai.singlr.sail.api.StopOperations;
 import ai.singlr.sail.api.SyncScheduler;
+import ai.singlr.sail.api.TestWorkspaces;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.config.TestDefinitions;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.ContainerSailSetup;
+import ai.singlr.sail.engine.DeviceFixtures;
 import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.ProjectSkillInstaller;
 import ai.singlr.sail.engine.SailSkills;
@@ -110,7 +113,7 @@ class DispatchCommandWiringTest {
         shell,
         events::add,
         new WatcherSpawner(shell, (command, logPath) -> 4242L),
-        (project, config) -> "",
+        TestWorkspaces.ready(ProjectReader.ofCatalog(new ProjectStore(db)), "acme"),
         command -> 0,
         DispatchOperations.Listener.NONE,
         SessionYield.NONE,
@@ -174,14 +177,13 @@ class DispatchCommandWiringTest {
                     new OperationHooks(
                         event -> {},
                         new WatcherSpawner(host, (spawned, logPath) -> 4242L),
-                        hooks.snapshotter(),
+                        hooks.workspaces(),
                         launched -> agent,
                         hooks.dispatchListener(),
                         hooks.stopListener()),
                     SessionYield.NONE),
             () -> HANDLE);
-    var all =
-        new ArrayList<>(List.of("-p", "acme", "--spec", "auth", "--no-sync", "--no-snapshot"));
+    var all = new ArrayList<>(List.of("-p", "acme", "--spec", "auth", "--no-sync"));
     all.addAll(List.of(args));
     return SailCli.run(command, all.toArray(String[]::new));
   }
@@ -193,6 +195,10 @@ class DispatchCommandWiringTest {
     assertEquals(0, ran.exit(), ran.err());
     assertTrue(ran.out().contains("Launching agent in background..."), ran.out());
     assertTrue(ran.out().contains("Guardrail watcher started (pid 4242"), ran.out());
+    assertTrue(ran.out().contains("sail agent log acme --spec auth --follow"), ran.out());
+    assertTrue(
+        ran.out().contains("sail agent stop acme --spec auth"),
+        "the stop it prints reaches this spec's run however many run: " + ran.out());
   }
 
   @Test
@@ -225,7 +231,7 @@ class DispatchCommandWiringTest {
     assertEquals(
         "  ✗ The agent exited 1: Not logged in · Please run /login\n"
             + "  Full log: "
-            + OperatorCommand.here().sail("agent log acme")
+            + OperatorCommand.here().sail("agent log acme --spec auth")
             + "\n",
         ran.err());
   }
@@ -270,7 +276,9 @@ class DispatchCommandWiringTest {
     assertEquals(
         "  Dry run: nothing was changed.\n"
             + "  Would dispatch spec auth (Add auth) to claude-code in the background, on branch"
-            + " sail/auth, which it would create.\n",
+            + " sail/auth, which it would create.\n"
+            + "  Would make workspace auth (acme-auth), from a template older than the"
+            + " definition.\n",
         afterBranding(plain.out()));
     assertEquals(SpecStatus.PENDING, new SpecStore(db).findById("auth").orElseThrow().status());
 
@@ -291,6 +299,8 @@ class DispatchCommandWiringTest {
         "  Dry run: nothing was changed.\n"
             + "  Would dispatch spec auth (Add auth) to claude-code in the background, on branch"
             + " sail/auth, which it would check out.\n"
+            + "  Would make workspace auth (acme-auth), from a template older than the"
+            + " definition.\n"
             + "  Would restart the spec first: its status would go back to pending.\n",
         afterBranding(restart.out()));
     assertEquals(SpecStatus.REVIEW, new SpecStore(db).findById("auth").orElseThrow().status());
@@ -311,6 +321,92 @@ class DispatchCommandWiringTest {
     assertEquals("sail/auth", said.get("branch"));
     assertEquals(false, said.get("would_create_branch"), "the branch exists");
     assertEquals(true, said.get("would_restart"));
+    assertEquals("acme-auth", said.get("workspace"));
+    assertEquals(false, said.get("would_reuse_workspace"));
+  }
+
+  /**
+   * A dispatch into its spec's running workspace on a degraded mirror says the workspace is reused
+   * and the pool degraded, rehearsed and for real.
+   */
+  @Test
+  void aDispatchIntoItsRunningWorkspaceOnADegradedMirrorSaysBoth() throws Exception {
+    var mirror =
+        """
+        [{"name": "tank", "driver": "zfs", "config": {"source": "tank", "zfs.pool_name": "tank",
+          "volatile.initial_source": "mirror=/dev/disk/by-id/wwn-0x5000c500a1b2c3d4-part5,/dev/disk/by-id/wwn-0x5000c500e5f6a7b8-part5"}}]
+        """;
+    var degraded =
+        DeviceFixtures.read("handwritten-mirror-degraded-removed.zpool-status.txt")
+            .replace("devpool", "tank");
+    var running =
+        "["
+            + TestWorkspaces.template("acme", "")
+            + ","
+            + TestWorkspaces.specWorkspace("acme", "auth", "Running", HANDLE)
+            + "]";
+
+    var rehearsed =
+        dispatch(
+            shell()
+                .on("incus storage list --format json", mirror)
+                .on("zpool status -P tank", degraded)
+                .on("incus list --format json", running),
+            0,
+            "--background",
+            "--dry-run");
+    var real =
+        dispatch(
+            shell()
+                .on("incus storage list --format json", mirror)
+                .on("zpool status -P tank", degraded)
+                .on("incus list --format json", running),
+            0,
+            "--background");
+
+    assertEquals(0, rehearsed.exit(), rehearsed.err());
+    assertTrue(
+        rehearsed
+            .out()
+            .contains("  Would reuse workspace auth (acme-auth).\n  Pool tank is DEGRADED"),
+        rehearsed.out());
+    assertEquals(0, real.exit(), real.err());
+    assertTrue(real.out().contains("Workspace auth reused"), real.out());
+    assertTrue(real.out().contains("Pool tank is DEGRADED"), real.out());
+  }
+
+  /**
+   * Under {@code --json} a dispatch refused on a box with no ZFS pool says the API's refusal: its
+   * code and its remedy, as the API returns them.
+   */
+  @Test
+  void aJsonDispatchOnABoxWithNoPoolCarriesTheRefusalsCodeAndRemedy() throws Exception {
+    var refused =
+        dispatch(shell().on("incus storage list --format json", "[]"), 0, "--background", "--json");
+
+    assertEquals(1, refused.exit());
+    var error = (Map<?, ?>) YamlUtil.parseMap(refused.out()).get("error");
+    assertEquals("conflict", error.get("code"), refused.out());
+    assertTrue(String.valueOf(error.get("action")).endsWith("Then dispatch again."), refused.out());
+    assertFalse(String.valueOf(error.get("message")).contains("Then dispatch again."));
+  }
+
+  /** Under {@code --json} the dispatch says what it entered in its JSON alone. */
+  @Test
+  void aJsonDispatchSaysTheWorkspaceItEnteredInItsJsonAlone() throws Exception {
+    var running =
+        "["
+            + TestWorkspaces.template("acme", "")
+            + ","
+            + TestWorkspaces.specWorkspace("acme", "auth", "Running", HANDLE)
+            + "]";
+
+    var json =
+        dispatch(shell().on("incus list --format json", running), 0, "--background", "--json");
+
+    assertEquals(0, json.exit(), json.out() + json.err());
+    assertFalse(json.out().contains("Workspace auth reused"), json.out());
+    assertTrue(json.out().contains("acme-auth"), json.out());
   }
 
   /** {@code out} past the CLI's branding, which every non-JSON run prints first. */
@@ -348,16 +444,20 @@ class DispatchCommandWiringTest {
     var stop =
         assertThrows(
             ApiException.class,
-            () -> AgentStopCommand.stopAsOperator(operations, "acme", HANDLE, false));
+            () ->
+                AgentStopCommand.stopAsOperator(
+                    operations, new StopOperations.ProjectTarget("acme", null), HANDLE, false));
     assertEquals(ErrorCode.READ_ONLY_CREDENTIAL, stop.failure().errorCode());
     var preview =
         assertThrows(
             ApiException.class,
-            () -> AgentStopCommand.stopAsOperator(operations, "acme", HANDLE, true));
+            () ->
+                AgentStopCommand.stopAsOperator(
+                    operations, new StopOperations.ProjectTarget("acme", null), HANDLE, true));
     assertEquals(stop.getMessage(), preview.getMessage(), "a preview is refused as the stop is");
     var dispatch =
         assertThrows(
-            IllegalStateException.class,
+            ApiException.class,
             () -> DispatchCommand.dispatchAsOperator(operations, "acme", request(), HANDLE));
     assertTrue(dispatch.getMessage().contains("read-only"), dispatch.getMessage());
   }
@@ -413,7 +513,7 @@ class DispatchCommandWiringTest {
             .anyMatch(
                 command ->
                     command.startsWith("incus file push")
-                        && command.contains("acme/home/dev/.claude/.sail-stage-build-e2e.")
+                        && command.contains("acme-auth/home/dev/.claude/.sail-stage-build-e2e.")
                         && command.endsWith("/SKILL.md")),
         "the project's skill is installed from its files: " + shell.invocations);
   }
@@ -473,7 +573,7 @@ class DispatchCommandWiringTest {
 
     assertEquals(1, ran.exit(), ran.out());
     assertEquals(
-        "  ✗ Spec 'auth' is a draft. A spec is dispatched only when pending. Make it ready with "
+        "  ✗ Spec 'auth' is a draft. A spec is dispatched only when pending.\n  Make it ready with "
             + OperatorCommand.here().sail("spec update auth --status pending")
             + ", then dispatch it.\n",
         ran.err());
@@ -489,7 +589,7 @@ class DispatchCommandWiringTest {
 
     assertEquals(1, ran.exit(), ran.out());
     assertEquals(
-        "  ✗ Branch 'sail/auth' already exists. To dispatch onto it, run "
+        "  ✗ Branch 'sail/auth' already exists.\n  To dispatch onto it, run "
             + OperatorCommand.here().sail("spec dispatch -p acme --spec auth --restart")
             + ", or delete it first.\n",
         ran.err());
@@ -501,7 +601,7 @@ class DispatchCommandWiringTest {
         dispatch(
             shell()
                 .on("git -C /home/dev/workspace/app rev-parse --verify --quiet refs/heads/", "")
-                .on("git -C /home/dev/workspace/app checkout -f sail/auth", ""),
+                .on("git -C /home/dev/workspace/app switch --quiet sail/auth", ""),
             0,
             "--background",
             "--restart");
@@ -536,7 +636,7 @@ class DispatchCommandWiringTest {
         cliOperations(
             shell()
                 .on("git -C /home/dev/workspace/app rev-parse --verify --quiet refs/heads/x", "")
-                .on("git -C /home/dev/workspace/app checkout -f x", ""),
+                .on("git -C /home/dev/workspace/app switch --quiet x", ""),
             events);
     new FdeStore(db).add(HANDLE, null, null, "admin");
     TestLogins.store(db, HANDLE);
@@ -584,6 +684,7 @@ class DispatchCommandWiringTest {
      * as already installed, and the skills folder as holding nothing else of sail's.
      */
     StubShell() {
+      scripts.putAll(TestWorkspaces.answers("acme"));
       on("incus config device add", "");
       on("incus file push", "");
       on("cat " + ContainerSailSetup.STAMP_PATH, ContainerSailSetup.fingerprint());

@@ -76,7 +76,8 @@ public final class WatcherRearmer implements AutoCloseable {
    */
   public static MissedStopReconciler.UnitProbe systemdUnitActiveProbe(ShellExec shell) {
     var session = new AgentSession(shell);
-    return (project, runId, unit) -> session.unitActive(project, AgentUnit.recorded(runId, unit));
+    return (place, runId, unit) ->
+        session.unitActive(place.instance(), AgentUnit.recorded(runId, unit));
   }
 
   /** Starts the periodic re-arm at the default cadence. */
@@ -128,7 +129,7 @@ public final class WatcherRearmer implements AutoCloseable {
     if (coverage.covers(session)) {
       return false;
     }
-    if (!agentUnitActive.active(session.project(), session.id(), session.unit())) {
+    if (!agentUnitActive.active(session.place(), session.id(), session.unit())) {
       return false;
     }
     var unit = relauncher.relaunch(session);

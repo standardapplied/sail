@@ -7,6 +7,7 @@ package ai.singlr.sail.engine;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -17,6 +18,7 @@ import ai.singlr.sail.config.YamlUtil;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.PrintStream;
+import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -35,6 +37,8 @@ import java.util.TreeMap;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.FutureTask;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
@@ -54,6 +58,8 @@ import org.junit.jupiter.api.io.TempDir;
  * base profile uses and a ZFS pool beside it unless a test says otherwise.
  */
 class WorkspacesTest {
+
+  private static final Predicate<String> NO_RUN = spec -> false;
 
   private static final Instant NOW = Instant.parse("2026-11-12T10:00:00Z");
   private static final String INPUTS = "a1b2c3";
@@ -179,7 +185,7 @@ class WorkspacesTest {
   }
 
   private Workspaces workspaces(ShellExec shell, LongSupplier nanos) {
-    return new Workspaces(shell, shell, nanos, locks());
+    return new Workspaces(shell, shell, nanos, locks(), () -> 65536);
   }
 
   private WorkspaceTemplate templates(ShellExec shell) {
@@ -202,6 +208,7 @@ class WorkspacesTest {
         "sail-workspace",
         "acme",
         "fix-login",
+        "fix-login",
         "app",
         "",
         "web/site",
@@ -223,7 +230,9 @@ class WorkspacesTest {
         "-c",
         "user.sail.created_ms=" + NOW.toEpochMilli(),
         "-c",
-        "user.sail.creating=1");
+        "user.sail.creating=1",
+        "-c",
+        "user.sail.owner=eng");
   }
 
   private static int indexOf(ScriptedShellExecutor shell, List<String> argv) {
@@ -245,7 +254,7 @@ class WorkspacesTest {
         workspaces(
                 shell,
                 ticks(0, ms(210), ms(1110), ms(1110), ms(1200), ms(1300), ms(1400), ms(1410)))
-            .create(acme(), "fix-login", source(), tempDir.resolve("no-files"));
+            .create(acme(), "fix-login", source(), tempDir.resolve("no-files"), "eng");
 
     assertEquals(
         List.of(new ProjectProvisioner.Instance("acme--tmpl", Optional.of("tank"), TEMPLATE_OF)),
@@ -310,7 +319,7 @@ class WorkspacesTest {
 
     var created =
         workspaces(shell, ticks(0, ms(150), ms(500), ms(500), ms(600), ms(650), ms(690), ms(700)))
-            .create(acme(), "fix-login", source(), tempDir);
+            .create(acme(), "fix-login", source(), tempDir, "eng");
 
     assertEquals(List.of(), builtInto);
     assertEquals(
@@ -341,7 +350,7 @@ class WorkspacesTest {
 
     var created =
         workspaces(shell, ticks(0, 1, 2, 3, 4, 5, 6, 7))
-            .create(acme(), "fix-login", source(), tempDir);
+            .create(acme(), "fix-login", source(), tempDir, "eng");
 
     assertEquals(List.of(false), builtFresh);
     var start = indexOf(shell, List.of("incus", "start", "acme--tmpl"));
@@ -499,7 +508,7 @@ class WorkspacesTest {
     var failure =
         assertThrows(
             IllegalStateException.class,
-            () -> workspaces(shell, ticks()).create(acme(), "fix-login", source(), tempDir));
+            () -> workspaces(shell, ticks()).create(acme(), "fix-login", source(), tempDir, "eng"));
 
     assertEquals(
         "Incus has the ZFS pools fast, tank and the base profile's pool 'devpool' is none of them,"
@@ -520,11 +529,11 @@ class WorkspacesTest {
 
     List<Executable> verbs =
         List.of(
-            () -> workspaces.create(acme(), "fix-login", source(), tempDir),
+            () -> workspaces.create(acme(), "fix-login", source(), tempDir, "eng"),
             () -> templates(shell).ensure(acme(), source()),
             () -> workspaces.start("acme", "fix-login"),
-            () -> workspaces.stop("acme", "fix-login"),
-            () -> workspaces.delete("acme", "fix-login"));
+            () -> workspaces.stop("acme", "fix-login", NO_RUN),
+            () -> workspaces.delete("acme", "fix-login", NO_RUN, instance -> {}));
     for (var verb : verbs) {
       assertEquals(expected, assertThrows(IllegalStateException.class, verb).getMessage());
     }
@@ -547,7 +556,8 @@ class WorkspacesTest {
 
     assertEquals(
         List.of(
-            new Workspaces.Row("main", "acme", "stopped", null, "2026-11-12T09:00:00.123Z", null)),
+            new Workspaces.Row(
+                "main", "acme", "stopped", null, "2026-11-12T09:00:00.123Z", null, null, null)),
         listing.workspaces());
     assertEquals(List.of("incus list --format json"), shell.invocations());
   }
@@ -576,11 +586,27 @@ class WorkspacesTest {
             "acme",
             List.of(
                 new Workspaces.Row(
-                    "main", "acme", "running", null, "2026-11-12T09:00:00.123Z", ip("acme")),
+                    "main",
+                    "acme",
+                    "running",
+                    null,
+                    "2026-11-12T09:00:00.123Z",
+                    ip("acme"),
+                    null,
+                    null),
                 new Workspaces.Row(
-                    "fix-login", "acme-fix-login", "running", "v1", created, ip("acme-fix-login")),
-                new Workspaces.Row("paused", "acme-paused", "frozen", "v1", created, null),
-                new Workspaces.Row("second", "acme-second", "stopped", "v2", created, null))),
+                    "fix-login",
+                    "acme-fix-login",
+                    "running",
+                    "v1",
+                    created,
+                    ip("acme-fix-login"),
+                    null,
+                    null),
+                new Workspaces.Row(
+                    "paused", "acme-paused", "frozen", "v1", created, null, null, null),
+                new Workspaces.Row(
+                    "second", "acme-second", "stopped", "v2", created, null, null, null))),
         listing);
   }
 
@@ -604,7 +630,7 @@ class WorkspacesTest {
     var listing = workspaces(shell, ticks()).list("acme");
 
     assertEquals(
-        List.of(new Workspaces.Row("main", "acme", "not_created", null, null, null)),
+        List.of(new Workspaces.Row("main", "acme", "not_created", null, null, null, null, null)),
         listing.workspaces());
   }
 
@@ -673,7 +699,7 @@ class WorkspacesTest {
         stderrOf(
             () ->
                 workspaces(shell, ticks(0, 1, 2, 3, 4, 5, 6, 7))
-                    .create(acme(), "fix-login", source(), tempDir.resolve("no-files")));
+                    .create(acme(), "fix-login", source(), tempDir.resolve("no-files"), "eng"));
 
     assertTrue(indexOf(shell, copyArgv("v1")) >= 0, String.join("\n", shell.invocations()));
     assertEquals(1, said.split("Pool tank is DEGRADED", -1).length - 1, said);
@@ -702,11 +728,11 @@ class WorkspacesTest {
 
     for (Executable verb :
         List.<Executable>of(
-            () -> workspaces.create(acme(), "second", source(), tempDir.resolve("no-files")),
+            () -> workspaces.create(acme(), "second", source(), tempDir.resolve("no-files"), "eng"),
             () -> templates(shell).ensure(acme(), source()),
-            () -> workspaces.stop("acme", "fix-login"),
+            () -> workspaces.stop("acme", "fix-login", NO_RUN),
             () -> workspaces.start("acme", "fix-login"),
-            () -> workspaces.delete("acme", "fix-login"))) {
+            () -> workspaces.delete("acme", "fix-login", NO_RUN, instance -> {}))) {
       assertEquals(refusal, assertThrows(IllegalStateException.class, verb).getMessage());
     }
     assertEquals(
@@ -725,15 +751,15 @@ class WorkspacesTest {
             list(template("v1", INPUTS), workspace("acme", "fix-login", "Running", "v1")),
             snapshots("v1"));
     var hanging = new TimingOutShell(scripted, "zpool status");
-    var workspaces = new Workspaces(hanging, hanging, ticks(), locks());
+    var workspaces = new Workspaces(hanging, hanging, ticks(), locks(), () -> 65536);
     var refusal =
         "Pool tank is a mirror whose health Sail cannot tell: zpool status did not answer within"
             + " 10 s, so no workspace or template is changed on it. See sudo zpool status tank.";
 
     for (Executable verb :
         List.<Executable>of(
-            () -> workspaces.create(acme(), "second", source(), tempDir.resolve("no-files")),
-            () -> workspaces.stop("acme", "fix-login"))) {
+            () -> workspaces.create(acme(), "second", source(), tempDir.resolve("no-files"), "eng"),
+            () -> workspaces.stop("acme", "fix-login", NO_RUN))) {
       assertEquals(refusal, assertThrows(IllegalStateException.class, verb).getMessage());
     }
     assertEquals(
@@ -749,7 +775,7 @@ class WorkspacesTest {
                                     "[]")
                                 .onThrow("zpool", new IOException("no zpool")),
                             ticks())
-                        .stop("acme", "fix-login"))
+                        .stop("acme", "fix-login", NO_RUN))
             .getMessage());
     assertEquals(
         List.of(),
@@ -770,8 +796,9 @@ class WorkspacesTest {
             "[]");
     var workspaces = workspaces(shell, ticks());
 
-    assertEquals(Workspaces.Change.STOPPED, workspaces.stop("acme", "fix-login").change());
-    assertEquals(Workspaces.Change.ALREADY_STOPPED, workspaces.stop("acme", "second").change());
+    assertEquals(Workspaces.Change.STOPPED, workspaces.stop("acme", "fix-login", NO_RUN).change());
+    assertEquals(
+        Workspaces.Change.ALREADY_STOPPED, workspaces.stop("acme", "second", NO_RUN).change());
     assertEquals(
         List.of(List.of("incus", "stop", "acme-fix-login")),
         shell.arguments().stream().filter(a -> a.get(1).equals("stop")).toList());
@@ -791,8 +818,11 @@ class WorkspacesTest {
             "[]");
     var workspaces = workspaces(shell, ticks());
 
-    var absent = assertThrows(IllegalStateException.class, () -> workspaces.delete("a", "b-c"));
-    var deleted = workspaces.delete("a-b", "c");
+    var absent =
+        assertThrows(
+            IllegalStateException.class,
+            () -> workspaces.delete("a", "b-c", NO_RUN, instance -> {}));
+    var deleted = workspaces.delete("a-b", "c", NO_RUN, instance -> {});
 
     assertEquals(
         "Project 'a' has no workspace 'b-c' on this box. List them with: sail project workspace"
@@ -815,14 +845,17 @@ class WorkspacesTest {
           throw new AssertionError("asked about " + instance);
         };
 
-    assertThrows(IllegalArgumentException.class, () -> workspaces.delete("acme", "main", never));
-    assertThrows(IllegalStateException.class, () -> workspaces.delete("acme", "gone", never));
+    assertThrows(
+        IllegalArgumentException.class, () -> workspaces.delete("acme", "main", NO_RUN, never));
+    assertThrows(
+        IllegalStateException.class, () -> workspaces.delete("acme", "gone", NO_RUN, never));
     assertThrows(
         IllegalStateException.class,
         () ->
             workspaces.delete(
                 "acme",
                 "fix",
+                NO_RUN,
                 instance -> {
                   asked.add(instance);
                   throw new IllegalStateException("Not deleted.");
@@ -830,7 +863,7 @@ class WorkspacesTest {
 
     assertEquals(List.of("acme-fix"), asked);
     assertTrue(shell.invocations().stream().noneMatch(c -> c.startsWith("incus delete")));
-    workspaces.delete("acme", "fix", asked::add);
+    workspaces.delete("acme", "fix", NO_RUN, asked::add);
     assertEquals(List.of("acme-fix", "acme-fix"), asked);
     assertEquals("incus delete acme-fix --force", shell.invocations().getLast());
   }
@@ -841,8 +874,11 @@ class WorkspacesTest {
     var workspaces = workspaces(shell, ticks());
 
     var delete =
-        assertThrows(IllegalArgumentException.class, () -> workspaces.delete("acme", "main"));
-    var stop = assertThrows(IllegalArgumentException.class, () -> workspaces.stop("acme", "main"));
+        assertThrows(
+            IllegalArgumentException.class,
+            () -> workspaces.delete("acme", "main", NO_RUN, instance -> {}));
+    var stop =
+        assertThrows(IllegalArgumentException.class, () -> workspaces.stop("acme", "main", NO_RUN));
     var start =
         assertThrows(IllegalArgumentException.class, () -> workspaces.start("acme", "main"));
     var shellIn =
@@ -850,7 +886,7 @@ class WorkspacesTest {
     var create =
         assertThrows(
             IllegalArgumentException.class,
-            () -> workspaces.create(acme(), "main", source(), tempDir));
+            () -> workspaces.create(acme(), "main", source(), tempDir, "eng"));
 
     var prefix =
         "'main' is acme's default workspace, the project's own container, which workspace"
@@ -878,7 +914,7 @@ class WorkspacesTest {
     var failure =
         assertThrows(
             IllegalArgumentException.class,
-            () -> workspaces(shell, ticks()).create(config, "abcd", source(), tempDir));
+            () -> workspaces(shell, ticks()).create(config, "abcd", source(), tempDir, "eng"));
 
     assertEquals(
         "Workspace 'abcd' of "
@@ -902,7 +938,7 @@ class WorkspacesTest {
     var failure =
         assertThrows(
             IllegalArgumentException.class,
-            () -> workspaces(shell, ticks()).create(config, "a", source(), tempDir));
+            () -> workspaces(shell, ticks()).create(config, "a", source(), tempDir, "eng"));
 
     assertEquals(
         project
@@ -928,19 +964,19 @@ class WorkspacesTest {
     var instance =
         assertThrows(
             IllegalArgumentException.class,
-            () -> workspaces.create(acme(), "taken", held, tempDir));
+            () -> workspaces.create(acme(), "taken", held, tempDir, "eng"));
     var project =
         assertThrows(
             IllegalArgumentException.class,
-            () -> workspaces.create(acme(), "billing", held, tempDir));
+            () -> workspaces.create(acme(), "billing", held, tempDir, "eng"));
     var existing =
         assertThrows(
             IllegalStateException.class,
-            () -> workspaces.create(acme(), "fix-login", held, tempDir));
+            () -> workspaces.create(acme(), "fix-login", held, tempDir, "eng"));
     var invalid =
         assertThrows(
             IllegalArgumentException.class,
-            () -> workspaces.create(acme(), "Fix_Login", held, tempDir));
+            () -> workspaces.create(acme(), "Fix_Login", held, tempDir, "eng"));
 
     assertEquals(
         "Workspace 'taken' of acme would be the instance 'acme-taken', which Incus already has."
@@ -971,7 +1007,7 @@ class WorkspacesTest {
     var failure =
         assertThrows(
             IllegalArgumentException.class,
-            () -> workspaces(shell, ticks()).create(config, "tmpl", source(), tempDir));
+            () -> workspaces(shell, ticks()).create(config, "tmpl", source(), tempDir, "eng"));
 
     assertEquals(
         "Workspace 'tmpl' of acme- would be the instance 'acme--tmpl', a name kept for templates."
@@ -1015,7 +1051,7 @@ class WorkspacesTest {
     var failure =
         assertThrows(
             IllegalStateException.class,
-            () -> workspaces(shell, ticks()).create(acme(), "fix-login", source(), tempDir));
+            () -> workspaces(shell, ticks()).create(acme(), "fix-login", source(), tempDir, "eng"));
 
     assertEquals(
         "acme--tmpl is on pool 'devpool', which is not ZFS, so a copy of it would be a full copy,"
@@ -1034,7 +1070,9 @@ class WorkspacesTest {
     var failure =
         assertThrows(
             IOException.class,
-            () -> workspaces(shell, ticks(0, 1, 2)).create(acme(), "fix-login", source(), tempDir));
+            () ->
+                workspaces(shell, ticks(0, 1, 2))
+                    .create(acme(), "fix-login", source(), tempDir, "eng"));
 
     assertEquals(
         "Workspace 'fix-login' could not be made its own: fatal: could not read from remote",
@@ -1054,7 +1092,8 @@ class WorkspacesTest {
     var failure =
         assertThrows(
             IOException.class,
-            () -> workspaces(shell, ticks(0)).create(acme(), "fix-login", source(), tempDir));
+            () ->
+                workspaces(shell, ticks(0)).create(acme(), "fix-login", source(), tempDir, "eng"));
 
     assertEquals(
         "Failed to clone acme--tmpl/v1 as 'acme-fix-login': Error: Instance name already in use",
@@ -1128,7 +1167,9 @@ class WorkspacesTest {
     var failure =
         assertThrows(
             IOException.class,
-            () -> workspaces(shell, ticks(0, 1, 2)).create(acme(), "fix-login", source(), tempDir));
+            () ->
+                workspaces(shell, ticks(0, 1, 2))
+                    .create(acme(), "fix-login", source(), tempDir, "eng"));
 
     assertEquals(
         "Failed to delete container 'acme-fix-login': busy",
@@ -1169,8 +1210,8 @@ class WorkspacesTest {
 
     assertEquals(
         List.of(
-            new Workspaces.Row("main", "acme", "not_created", null, null, null),
-            new Workspaces.Row("odd", "acme-odd", "error", null, null, null)),
+            new Workspaces.Row("main", "acme", "not_created", null, null, null, null, null),
+            new Workspaces.Row("odd", "acme-odd", "error", null, null, null, null, null)),
         workspaces.list("acme").workspaces());
     assertEquals(
         "Workspace 'odd' of acme is not running: Incus lists it as"
@@ -1195,7 +1236,7 @@ class WorkspacesTest {
     var failure =
         assertThrows(
             IllegalArgumentException.class,
-            () -> workspaces(shell, ticks()).create(acme(), "fix", source(), tempDir));
+            () -> workspaces(shell, ticks()).create(acme(), "fix", source(), tempDir, "eng"));
 
     assertEquals(
         "Workspace 'fix' of acme would be the instance 'acme-fix', which Incus already has. Give"
@@ -1213,13 +1254,15 @@ class WorkspacesTest {
     var live = incus(DIR_AND_ZFS, list(running, workspace("acme", "w", "Running", "v1")), "[]");
     shells.addAll(List.of(fresh, stale, stopped, live));
 
-    workspaces(fresh, ticks(0, 1, 2, 3, 4, 5, 6, 7)).create(acme(), "fix-login", source(), tempDir);
+    workspaces(fresh, ticks(0, 1, 2, 3, 4, 5, 6, 7))
+        .create(acme(), "fix-login", source(), tempDir, "eng");
     workspaces(fresh, ticks()).list("acme");
-    workspaces(stale, ticks(0, 1, 2, 3, 4, 5, 6, 7)).create(acme(), "fix-login", source(), tempDir);
+    workspaces(stale, ticks(0, 1, 2, 3, 4, 5, 6, 7))
+        .create(acme(), "fix-login", source(), tempDir, "eng");
     workspaces(stopped, ticks(0, 1, 2)).start("acme", "w");
     workspaces(live, ticks()).running("acme", "w");
-    workspaces(live, ticks()).stop("acme", "w");
-    workspaces(live, ticks()).delete("acme", "w");
+    workspaces(live, ticks()).stop("acme", "w", NO_RUN);
+    workspaces(live, ticks()).delete("acme", "w", NO_RUN, instance -> {});
 
     var touching = new ArrayList<String>();
     for (var shell : shells) {
@@ -1239,8 +1282,8 @@ class WorkspacesTest {
     assertEquals(
         """
         set -eu
-        project=$1 workspace=$2
-        shift 2
+        project=$1 workspace=$2 branch=$3
+        shift 3
         step() { printf 'sail-step %s %s\\n' "$1" "$(date +%s%3N)"; }
         step start
         rm -f /etc/machine-id
@@ -1280,14 +1323,16 @@ class WorkspacesTest {
           repo=/home/dev/workspace/$1 base=$2
           shift 2
           fetch "$repo"
-          if as_dev git -C "$repo" show-ref --verify --quiet "refs/remotes/origin/$workspace"; then
-            as_dev git -C "$repo" switch --quiet -C "$workspace" "origin/$workspace"
+          if [ -z "$base" ]; then
+            base=$(as_dev git -C "$repo" symbolic-ref --short refs/remotes/origin/HEAD)
+            base=${base#origin/}
+          fi
+          if [ -z "$branch" ]; then
+            as_dev git -C "$repo" switch --quiet --detach "origin/$base"
+          elif as_dev git -C "$repo" show-ref --verify --quiet "refs/remotes/origin/$branch"; then
+            as_dev git -C "$repo" switch --quiet -C "$branch" "origin/$branch"
           else
-            if [ -z "$base" ]; then
-              base=$(as_dev git -C "$repo" symbolic-ref --short refs/remotes/origin/HEAD)
-              base=${base#origin/}
-            fi
-            as_dev git -C "$repo" switch --quiet --no-track -c "$workspace" "origin/$base"
+            as_dev git -C "$repo" switch --quiet --no-track -c "$branch" "origin/$base"
           fi
         done
         step repos
@@ -1388,7 +1433,8 @@ class WorkspacesTest {
     Files.writeString(files.resolve("notes.md"), "shared");
     var shell = incus(DIR_AND_ZFS, list(template("v1", INPUTS)), snapshots("v1"));
 
-    workspaces(shell, ticks(0, 1, 2, 3, 4, 5, 6, 7)).create(acme(), "fix-login", source(), files);
+    workspaces(shell, ticks(0, 1, 2, 3, 4, 5, 6, 7))
+        .create(acme(), "fix-login", source(), files, "eng");
 
     var calls = shell.invocations();
     var prepare = indexOf(shell, prepareArgv());
@@ -1439,7 +1485,7 @@ class WorkspacesTest {
             IOException.class,
             () ->
                 workspaces(shell, ticks(0, 1, 2, 3, 4, 5))
-                    .create(acme(), "fix-login", source(), tempDir));
+                    .create(acme(), "fix-login", source(), tempDir, "eng"));
 
     assertEquals(
         "Workspace 'fix-login' could not be marked whole: disk full", failure.getMessage());
@@ -1476,7 +1522,7 @@ class WorkspacesTest {
         shell.invocations().stream()
             .anyMatch(c -> c.startsWith("incus start") || c.startsWith("incus exec")));
 
-    workspaces.create(acme(), "fix-login", source(), tempDir);
+    workspaces.create(acme(), "fix-login", source(), tempDir, "eng");
 
     var deleted = indexOf(shell, List.of("incus", "delete", "acme-fix-login", "--force"));
     assertTrue(
@@ -1502,7 +1548,7 @@ class WorkspacesTest {
 
     for (Executable verb :
         List.<Executable>of(
-            () -> workspaces.create(acme(), "fix-login", source(), tempDir),
+            () -> workspaces.create(acme(), "fix-login", source(), tempDir, "eng"),
             () -> workspaces.start("acme", "fix-login"),
             () -> workspaces.running("acme", "fix-login"))) {
       assertEquals(refusal, assertThrows(IllegalStateException.class, verb).getMessage());
@@ -1547,17 +1593,23 @@ class WorkspacesTest {
         "Instances acme-backup, acme-fix carry the keys of workspace 'fix' of acme, which only"
             + " acme-fix may: nothing is done to any of them. Delete the copies, or their keys,"
             + " first.",
-        assertThrows(IllegalStateException.class, () -> workspaces.delete("acme", "fix"))
+        assertThrows(
+                IllegalStateException.class,
+                () -> workspaces.delete("acme", "fix", NO_RUN, instance -> {}))
             .getMessage());
     assertEquals(
         "Instance beta carries the keys of workspace 'x' of acme, which only acme-x may: nothing is"
             + " done to any of them. Delete the copies, or their keys, first.",
-        assertThrows(IllegalStateException.class, () -> workspaces.delete("acme", "x"))
+        assertThrows(
+                IllegalStateException.class,
+                () -> workspaces.delete("acme", "x", NO_RUN, instance -> {}))
             .getMessage());
     assertEquals(
         "Project 'acme' has no workspace 'w' on this box. List them with: sail project workspace"
             + " list acme.",
-        assertThrows(IllegalStateException.class, () -> workspaces.delete("acme", "w"))
+        assertThrows(
+                IllegalStateException.class,
+                () -> workspaces.delete("acme", "w", NO_RUN, instance -> {}))
             .getMessage());
     assertEquals(
         List.of("main", "fix"),
@@ -1578,7 +1630,7 @@ class WorkspacesTest {
     var failure =
         assertThrows(
             IllegalStateException.class,
-            () -> workspaces(shell, ticks()).create(acme(), "fix", source(), tempDir));
+            () -> workspaces(shell, ticks()).create(acme(), "fix", source(), tempDir, "eng"));
 
     assertEquals(
         "Instance acme-backup carries the keys of workspace 'fix' of acme under another name."
@@ -1623,7 +1675,7 @@ class WorkspacesTest {
     var failure =
         assertThrows(
             IllegalArgumentException.class,
-            () -> workspaces(shell, ticks()).create(acme(), "fix-", source(), tempDir));
+            () -> workspaces(shell, ticks()).create(acme(), "fix-", source(), tempDir, "eng"));
 
     assertEquals(
         "Workspace 'fix-' ends in '-', and Incus names no instance so. Give the workspace another"
@@ -1644,7 +1696,7 @@ class WorkspacesTest {
 
     var created =
         workspaces(shell, ticks(0, 1, 2, 3, 4, 5, 6, 7))
-            .create(acme(), "fix-login", source(), tempDir);
+            .create(acme(), "fix-login", source(), tempDir, "eng");
 
     assertEquals("tank", created.template().pool());
     assertTrue(indexOf(shell, copyArgv("v1")) >= 0);
@@ -1724,7 +1776,8 @@ class WorkspacesTest {
   private Object outcome(
       Box box, LongSupplier clock, String name, WorkspaceTemplate.Source source) {
     try {
-      return new Workspaces(box, box, clock, locks()).create(acme(), name, source, tempDir);
+      return new Workspaces(box, box, clock, locks(), () -> 65536)
+          .create(acme(), name, source, tempDir, "eng");
     } catch (Exception refused) {
       return refused.getMessage();
     }
@@ -1893,5 +1946,658 @@ class WorkspacesTest {
     public boolean isDryRun() {
       return false;
     }
+  }
+
+  private static final RunPlace.SpecWorkspace FIX =
+      (RunPlace.SpecWorkspace) RunPlace.of("acme", "fix-login");
+
+  /**
+   * Spec {@code spec}'s workspace {@code fix-login} of {@code acme}, whole, owned by {@code owner}.
+   */
+  private static String specWorkspace(String status, String spec, String owner) {
+    return instance(
+        "acme-fix-login",
+        status,
+        "tank",
+        ("\"user.sail.project\": \"acme\", \"user.sail.workspace\": \"fix-login\","
+                + " \"user.sail.template\": \"v1\", \"user.sail.ready\": \"1762941601000\","
+                + " \"user.sail.spec\": \"%s\", \"user.sail.owner\": \"%s\"")
+            .formatted(spec, owner));
+  }
+
+  /**
+   * Scenario 14: a spec's run on a degraded mirror goes on, and what is said of the pool is carried
+   * to the dispatch's answer and the spec's room, which say it once, not printed here.
+   */
+  @Test
+  void aSpecsRunOnADegradedPoolIsMadeAndThePoolIsSaidDegradedOnce() throws Throwable {
+    var shell =
+        incus(DIR_AND_MIRROR, list(template("v1", INPUTS)), snapshots("v1"))
+            .onOk(
+                "zpool status -P tank",
+                DeviceFixtures.read("handwritten-mirror-degraded-removed.zpool-status.txt")
+                    .replace("devpool", "tank"));
+    var workspaces = workspaces(shell, ticks(0, 0, 1, 2, 3, 4, 5, 6, 7));
+    var checked = new AtomicReference<Workspaces.SpecCheck>();
+
+    var said =
+        stderrOf(
+            () -> {
+              checked.set(workspaces.checkSpec(FIX, INPUTS, name -> false));
+              workspaces.enterSpec(
+                  checked.get(), acme(), "uday", tempDir.resolve("no-files"), whole -> {});
+            });
+
+    assertTrue(
+        shell.invocations().stream().anyMatch(c -> c.startsWith("incus copy acme--tmpl/v1 ")),
+        String.join("\n", shell.invocations()));
+    assertEquals("", said);
+    var degraded = checked.get().degraded().orElseThrow();
+    assertTrue(degraded.startsWith("Pool tank is DEGRADED"), degraded);
+    assertTrue(
+        degraded.contains(
+            "sudo zpool replace tank /dev/disk/by-id/wwn-0x5000c500e5f6a7b8-part5 <new device>"),
+        degraded);
+  }
+
+  /**
+   * Scenario 12 (W7): a spec's run that finds its template being built waits for the build, then
+   * clones the version it built, never refused for a template the build has not yet recorded.
+   */
+  @Test
+  void aSpecsRunWaitsOnABuildOfItsTemplateUnderWayAndClonesWhatItBuilt() throws Exception {
+    var built = new AtomicBoolean();
+    var before = incus(DIR_AND_ZFS, list(), snapshots());
+    var after = incus(DIR_AND_ZFS, list(template("v1", INPUTS)), snapshots("v1"));
+    var shell = switching(built, before, after);
+    var workspaces = workspaces(shell, () -> 0L);
+    var checked = new AtomicReference<Workspaces.SpecCheck>();
+    var failed = new AtomicReference<Exception>();
+    Thread checking;
+    try (var build = ContainerConfig.hold(locks(), "acme--tmpl")) {
+      checking =
+          Thread.ofPlatform()
+              .start(
+                  () -> {
+                    try {
+                      checked.set(workspaces.checkSpec(FIX, INPUTS, name -> false));
+                    } catch (Exception e) {
+                      failed.set(e);
+                    }
+                  });
+      var deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(30);
+      while (checking.getState() != Thread.State.TIMED_WAITING
+          && checking.getState() != Thread.State.TERMINATED
+          && System.nanoTime() < deadline) {
+        Thread.onSpinWait();
+      }
+      assertEquals(
+          Thread.State.TIMED_WAITING,
+          checking.getState(),
+          "the check waits on the build's lock: " + failed.get());
+      built.set(true);
+    }
+    checking.join(TimeUnit.SECONDS.toMillis(30));
+
+    assertEquals(null, failed.get());
+    assertEquals("v1", checked.get().template().version());
+  }
+
+  /**
+   * R6 for a template build: a spec's run that finds its template's build still under way past
+   * {@link Workspaces#CREATE_WAIT} is busy, naming the build, and makes nothing.
+   */
+  @Test
+  void aSpecsRunWaitingPastTheLimitOnABuildOfItsTemplateIsBusyNamingIt() throws Exception {
+    var shell = incus(DIR_AND_ZFS, list(template("v1", INPUTS)), snapshots("v1"));
+    var workspaces = workspaces(shell, ticks(0, Workspaces.CREATE_WAIT.toNanos()));
+
+    var refused = new AtomicReference<Exception>();
+    try (var build = ContainerConfig.hold(locks(), "acme--tmpl")) {
+      var checking =
+          Thread.ofPlatform()
+              .start(
+                  () -> {
+                    try {
+                      workspaces.checkSpec(FIX, INPUTS, name -> false);
+                    } catch (Exception e) {
+                      refused.set(e);
+                    }
+                  });
+      checking.join(TimeUnit.SECONDS.toMillis(30));
+      assertEquals(Thread.State.TERMINATED, checking.getState());
+    }
+
+    var busy = assertInstanceOf(Workspaces.Busy.class, refused.get());
+    assertEquals(
+        "acme's template is being built, and no workspace is cloned from it until it is.",
+        busy.getMessage());
+    assertFalse(shell.invocations().stream().anyMatch(c -> c.startsWith("incus copy")));
+  }
+
+  /**
+   * The workspace a check found whole is read again under its name lock: one deleted between the
+   * check and the entry is made again, never reused as a raw failure.
+   */
+  @Test
+  void aWorkspaceDeletedBetweenTheCheckAndTheEntryIsMadeAgain() throws Exception {
+    var deleted = new AtomicBoolean();
+    var before =
+        incus(
+            DIR_AND_ZFS,
+            list(template("v1", INPUTS), specWorkspace("Running", "fix-login", "uday")),
+            snapshots("v1"));
+    var after = incus(DIR_AND_ZFS, list(template("v1", INPUTS)), snapshots("v1"));
+    var workspaces =
+        workspaces(switching(deleted, before, after), ticks(0, 0, 1, 2, 3, 4, 5, 6, 7));
+    var check = workspaces.checkSpec(FIX, INPUTS, name -> false);
+    assertTrue(check.whole());
+    deleted.set(true);
+
+    var entered =
+        workspaces.enterSpec(check, acme(), "uday", tempDir.resolve("no-files"), whole -> {});
+
+    assertInstanceOf(Workspaces.Made.class, entered);
+    assertTrue(
+        after.invocations().stream().anyMatch(c -> c.startsWith("incus copy acme--tmpl/v1 ")));
+  }
+
+  /**
+   * A spec's workspace name another project's instance holds ({@code acme-x-y}: spec {@code x-y} of
+   * acme, workspace {@code y} of {@code acme-x}) is refused naming that owner and the spec's id,
+   * the one thing a spec's run can change.
+   */
+  @Test
+  void aSpecsWorkspaceNameAnotherProjectHoldsIsRefusedNamingItsOwnerAndTheSpecsId() {
+    var shell =
+        incus(
+            DIR_AND_ZFS,
+            list(
+                template("v1", INPUTS),
+                instance(
+                    "acme-x-y",
+                    "Running",
+                    "tank",
+                    "\"user.sail.project\": \"acme-x\", \"user.sail.workspace\": \"y\","
+                        + " \"user.sail.ready\": \"1\"")),
+            snapshots("v1"));
+    var place = (RunPlace.SpecWorkspace) RunPlace.of("acme", "x-y");
+
+    var refused =
+        assertThrows(
+            IllegalArgumentException.class,
+            () -> workspaces(shell, ticks(0)).checkSpec(place, INPUTS, name -> false));
+
+    assertEquals(
+        "Spec x-y's workspace of acme would be the instance 'acme-x-y', which is workspace 'y' of"
+            + " acme-x, so no run of the spec goes there. Give the spec another id.",
+        refused.getMessage());
+  }
+
+  /** A box with no handle of its own makes a workspace no one's, never an owner that is blank. */
+  @Test
+  void aWorkspaceMadeOnABoxWithNoHandleCarriesNoOwner() throws Exception {
+    var shell = incus(DIR_AND_ZFS, list(template("v1", INPUTS)), snapshots("v1"));
+
+    workspaces(shell, ticks(0, 1, 2, 3, 4, 5, 6, 7))
+        .create(acme(), "fix-login", source(), tempDir.resolve("no-files"), "");
+
+    var copy =
+        shell.invocations().stream()
+            .filter(c -> c.startsWith("incus copy "))
+            .findFirst()
+            .orElseThrow();
+    assertFalse(copy.contains("user.sail.owner"), copy);
+  }
+
+  /**
+   * High 2: a spec's workspace a create left half-made (its dispatch killed: {@code creating} set,
+   * no ready mark) is never entered by a lane: the next entry deletes it and makes it again.
+   */
+  @Test
+  void aHalfMadeWorkspaceOfASpecIsDeletedAndMadeAgainNeverEntered() throws Exception {
+    var shell =
+        incus(
+            DIR_AND_ZFS,
+            list(
+                template("v1", INPUTS),
+                instance(
+                    "acme-fix-login",
+                    "Running",
+                    "tank",
+                    "\"user.sail.project\": \"acme\", \"user.sail.workspace\": \"fix-login\","
+                        + " \"user.sail.spec\": \"fix-login\", \"user.sail.creating\": \"1\"")),
+            snapshots("v1"));
+    var workspaces = workspaces(shell, ticks(0, 0, 1, 2, 3, 4, 5, 6, 7));
+
+    var check = workspaces.checkSpec(FIX, INPUTS, name -> false);
+    var entered =
+        workspaces.enterSpec(check, acme(), "uday", tempDir.resolve("no-files"), whole -> {});
+
+    assertFalse(check.whole());
+    assertInstanceOf(Workspaces.Made.class, entered);
+    var delete = shell.invocations().indexOf("incus delete acme-fix-login --force");
+    var copy =
+        shell
+            .invocations()
+            .indexOf(
+                shell.invocations().stream()
+                    .filter(c -> c.startsWith("incus copy acme--tmpl/v1 acme-fix-login"))
+                    .findFirst()
+                    .orElseThrow());
+    assertTrue(delete >= 0 && delete < copy, String.join("\n", shell.invocations()));
+  }
+
+  /** A shell that answers as {@code before} until {@code built} is set, then as {@code after}. */
+  private static ShellExec switching(AtomicBoolean built, ShellExec before, ShellExec after) {
+    return new ShellExec() {
+      @Override
+      public Result exec(List<String> command)
+          throws IOException, InterruptedException, TimeoutException {
+        return (built.get() ? after : before).exec(command);
+      }
+
+      @Override
+      public Result exec(List<String> command, Path workDir, Duration timeout)
+          throws IOException, InterruptedException, TimeoutException {
+        return (built.get() ? after : before).exec(command, workDir, timeout);
+      }
+
+      @Override
+      public boolean isDryRun() {
+        return false;
+      }
+    };
+  }
+
+  @Test
+  void aSpecsFirstRunClonesTheCurrentTemplateWithItsSpecAndOwnerAndLeavesItsReposDetached()
+      throws Exception {
+    var shell =
+        incus(
+            DIR_AND_ZFS,
+            list(instance("acme", "Running", "devpool", ""), template("v2", INPUTS)),
+            snapshots("v1", "v2"));
+    var workspaces =
+        workspaces(
+            shell,
+            ticks(0, 0, ms(200), ms(1100), ms(1100), ms(1200), ms(1300), ms(1400), ms(3200)));
+
+    var check = workspaces.checkSpec(FIX, INPUTS, name -> false);
+    var made =
+        assertInstanceOf(
+            Workspaces.Made.class,
+            workspaces.enterSpec(check, acme(), "uday", tempDir.resolve("no-files"), whole -> {}));
+
+    assertFalse(check.whole());
+    assertFalse(check.stale());
+    assertEquals("acme-fix-login", made.instance());
+    assertEquals(3200L, made.created().timings().totalMs());
+    assertEquals(List.of(), builtInto, "a run's workspace never builds its template");
+    assertTrue(
+        indexOf(
+                shell,
+                List.of(
+                    "incus",
+                    "copy",
+                    "acme--tmpl/v2",
+                    "acme-fix-login",
+                    "-c",
+                    "user.sail.project=acme",
+                    "-c",
+                    "user.sail.workspace=fix-login",
+                    "-c",
+                    "user.sail.template=v2",
+                    "-c",
+                    "user.sail.created_ms=" + NOW.toEpochMilli(),
+                    "-c",
+                    "user.sail.creating=1",
+                    "-c",
+                    "user.sail.spec=fix-login",
+                    "-c",
+                    "user.sail.owner=uday"))
+            >= 0,
+        String.join("\n", shell.invocations()));
+    assertTrue(
+        indexOf(
+                shell,
+                List.of(
+                    "incus",
+                    "exec",
+                    "acme-fix-login",
+                    "--",
+                    "bash",
+                    "-c",
+                    Workspaces.PREPARE,
+                    "sail-workspace",
+                    "acme",
+                    "fix-login",
+                    "",
+                    "app",
+                    "",
+                    "web/site",
+                    "develop"))
+            >= 0,
+        "no branch: every repo is left detached at its base");
+  }
+
+  @Test
+  void aTemplateOlderThanTheDefinitionIsClonedAsItIsAndSaidStale() throws Exception {
+    var shell = incus(DIR_AND_ZFS, list(template("v1", "an-older-definition")), snapshots("v1"));
+
+    var check = workspaces(shell, ticks(0)).checkSpec(FIX, INPUTS, name -> false);
+
+    assertTrue(check.stale());
+    assertEquals("v1", check.template().version());
+    assertFalse(
+        shell.invocations().stream().anyMatch(c -> c.startsWith("incus snapshot create")),
+        "nothing is built");
+  }
+
+  @Test
+  void aRunOfASpecIsRefusedBeforeAnythingChangesOnABoxWithNoZfsNoTemplateOrAFaultedPool() {
+    var noPool = incus(DIR_ONLY, list(instance("acme", "Running", "devpool", "")), "[]");
+    var noTemplate = incus(DIR_AND_ZFS, list(instance("acme", "Running", "devpool", "")), "[]");
+    var noSnapshot = incus(DIR_AND_ZFS, list(template("v2", INPUTS)), snapshots("v1"));
+    var faulted =
+        incus(DIR_AND_MIRROR, list(template("v1", INPUTS)), snapshots("v1"))
+            .onOk(
+                "zpool status -P tank",
+                DeviceFixtures.read("handwritten-mirror-faulted.zpool-status.txt")
+                    .replace("devpool", "tank"));
+
+    assertEquals(
+        "This box has no ZFS pool, and a workspace is a ZFS clone of its project's template. Add"
+            + " one beside the box's pool with: sail host init --storage zfs --pool tank --disk"
+            + " <device>, or with --pool-file-size <size> in place of --disk to try ZFS in a"
+            + " file.",
+        assertThrows(
+                IllegalStateException.class,
+                () -> workspaces(noPool, ticks(0)).checkSpec(FIX, INPUTS, name -> false))
+            .getMessage());
+    for (var shell : List.of(noTemplate, noSnapshot)) {
+      assertEquals(
+          "acme has no template yet: sail project template build acme.",
+          assertThrows(
+                  IllegalStateException.class,
+                  () -> workspaces(shell, ticks(0)).checkSpec(FIX, INPUTS, name -> false))
+              .getMessage());
+    }
+    assertTrue(
+        assertThrows(
+                IllegalStateException.class,
+                () -> workspaces(faulted, ticks(0)).checkSpec(FIX, INPUTS, name -> false))
+            .getMessage()
+            .startsWith("Pool tank is FAULTED"));
+    for (var shell : List.of(noPool, noTemplate, noSnapshot, faulted)) {
+      assertFalse(
+          shell.invocations().stream()
+              .anyMatch(c -> c.startsWith("incus copy") || c.startsWith("incus start")),
+          String.join("\n", shell.invocations()));
+    }
+  }
+
+  @Test
+  void aPersonsWorkspaceOrAnotherSpecsUnderTheNameIsRefusedNamingIt() {
+    var persons =
+        incus(
+            DIR_AND_ZFS,
+            list(template("v1", INPUTS), workspace("acme", "fix-login", "Running", "v1")),
+            snapshots("v1"));
+    var anothers =
+        incus(
+            DIR_AND_ZFS,
+            list(template("v1", INPUTS), specWorkspace("Running", "fix-login-x", "eng")),
+            snapshots("v1"));
+
+    assertEquals(
+        "Workspace 'fix-login' of acme is a person's, not spec fix-login's, so no run of the spec"
+            + " goes in it. Delete it if it is not wanted (sail project workspace delete acme"
+            + " fix-login).",
+        assertThrows(
+                IllegalStateException.class,
+                () -> workspaces(persons, ticks(0)).checkSpec(FIX, INPUTS, name -> false))
+            .getMessage());
+    assertEquals(
+        "Workspace 'fix-login' of acme is spec fix-login-x's, whose workspace name spec"
+            + " fix-login's is too, so no run of fix-login goes in it. Give one of the two specs"
+            + " another id.",
+        assertThrows(
+                IllegalStateException.class,
+                () -> workspaces(anothers, ticks(0)).checkSpec(FIX, INPUTS, name -> false))
+            .getMessage());
+  }
+
+  @Test
+  void aSpecsStoppedWorkspaceIsStartedAndMadeTheRunsPersonsBeforeAnythingIsStaged()
+      throws Exception {
+    var shell =
+        incus(
+            DIR_AND_ZFS,
+            list(template("v1", INPUTS), specWorkspace("Stopped", "fix-login", "eng")),
+            snapshots("v1"));
+    var workspaces = workspaces(shell, ticks(0));
+
+    var check = workspaces.checkSpec(FIX, INPUTS, name -> false);
+    var reused =
+        assertInstanceOf(
+            Workspaces.Reused.class,
+            workspaces.enterSpec(check, acme(), "uday", tempDir, whole -> {}));
+
+    assertEquals(new Workspaces.Reused("acme-fix-login", true), reused);
+    var start = indexOf(shell, List.of("incus", "start", "acme-fix-login"));
+    var owned =
+        indexOf(shell, List.of("incus", "config", "set", "acme-fix-login", "user.sail.owner=uday"));
+    assertTrue(0 <= start && start < owned, String.join("\n", shell.invocations()));
+    assertFalse(shell.invocations().stream().anyMatch(c -> c.startsWith("incus copy")));
+  }
+
+  /** A mirror ZFS calls online carries no notice: only a degraded one is said. */
+  @Test
+  void aSpecsRunOnAnOnlineMirrorSaysNothingOfThePool() throws Exception {
+    var shell =
+        incus(DIR_AND_MIRROR, list(template("v1", INPUTS)), snapshots("v1"))
+            .onOk(
+                "zpool status -P tank",
+                DeviceFixtures.read("handwritten-mirror-online.zpool-status.txt")
+                    .replace("devpool", "tank"));
+
+    assertTrue(
+        workspaces(shell, ticks(0)).checkSpec(FIX, INPUTS, name -> false).degraded().isEmpty());
+  }
+
+  /** A reused workspace that cannot be made the run's person's takes no run of theirs. */
+  @Test
+  void aWorkspaceThatCannotBeMadeTheRunsPersonsIsRefusedSayingWhy() throws Exception {
+    var shell =
+        incus(
+                DIR_AND_ZFS,
+                list(template("v1", INPUTS), specWorkspace("Running", "fix-login", "eng")),
+                snapshots("v1"))
+            .onFail("incus config set acme-fix-login", "permission denied");
+    var workspaces = workspaces(shell, ticks(0));
+    var check = workspaces.checkSpec(FIX, INPUTS, name -> false);
+
+    var refused =
+        assertThrows(
+            IOException.class,
+            () -> workspaces.enterSpec(check, acme(), "uday", tempDir, whole -> {}));
+
+    assertTrue(
+        refused
+            .getMessage()
+            .startsWith(
+                "Workspace acme-fix-login could not be made uday's, so no run of theirs goes in"
+                    + " it: "),
+        refused.getMessage());
+  }
+
+  /**
+   * A spec's workspace whose ready mark was taken off by hand is left as it is, and an instance of
+   * its name that is no workspace at all is refused as Incus's own.
+   */
+  @Test
+  void aSpecsWorkspaceWithItsMarkTakenOffOrAStrayInstanceUnderItsNameIsRefused() {
+    var unmarked =
+        incus(
+            DIR_AND_ZFS,
+            list(
+                template("v1", INPUTS),
+                instance(
+                    "acme-fix-login",
+                    "Running",
+                    "tank",
+                    "\"user.sail.project\": \"acme\", \"user.sail.workspace\": \"fix-login\","
+                        + " \"user.sail.spec\": \"fix-login\"")),
+            snapshots("v1"));
+    var stray =
+        incus(
+            DIR_AND_ZFS,
+            list(template("v1", INPUTS), instance("acme-fix-login", "Running", "tank", "")),
+            snapshots("v1"));
+
+    assertTrue(
+        assertThrows(
+                IllegalStateException.class,
+                () -> workspaces(unmarked, ticks(0)).checkSpec(FIX, INPUTS, name -> false))
+            .getMessage()
+            .startsWith("Workspace 'fix-login' of acme has no ready mark"));
+    assertEquals(
+        "Spec fix-login's workspace of acme would be the instance 'acme-fix-login', which is an"
+            + " instance Incus already has, so no run of the spec goes there. Give the spec"
+            + " another id.",
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> workspaces(stray, ticks(0)).checkSpec(FIX, INPUTS, name -> false))
+            .getMessage());
+  }
+
+  /** A dry run of a create narrates it and takes no create lock, so it waits on no one. */
+  @Test
+  void aDryRunCreateTakesNoCreateLock() throws Exception {
+    var observer = incus(DIR_AND_ZFS, list(template("v1", INPUTS)), snapshots("v1"));
+    var locks = locks();
+
+    new Workspaces(
+            observer, new ShellExecutor(true), ticks(0, 1, 2, 3, 4, 5, 6, 7), locks, () -> 65536)
+        .create(acme(), "fix-login", source(), tempDir, "eng");
+
+    assertFalse(Files.exists(locks.resolve("workspace-create.lock")));
+  }
+
+  @Test
+  void aSpecsRunningWorkspaceOfTheSamePersonIsReusedAsItIs() throws Exception {
+    var shell =
+        incus(
+            DIR_AND_ZFS,
+            list(template("v1", INPUTS), specWorkspace("Running", "fix-login", "uday")),
+            snapshots("v1"));
+    var workspaces = workspaces(shell, ticks(0));
+
+    var check = workspaces.checkSpec(FIX, INPUTS, name -> false);
+
+    assertTrue(check.running());
+    assertEquals(
+        new Workspaces.Reused("acme-fix-login", false),
+        workspaces.enterSpec(check, acme(), "uday", tempDir, whole -> {}));
+    assertFalse(
+        shell.invocations().stream()
+            .anyMatch(
+                c ->
+                    c.startsWith("incus start")
+                        || c.startsWith("incus copy")
+                        || c.startsWith("incus config set")));
+  }
+
+  @Test
+  void aCreateThatCannotHaveTheBoxsCreateLockWithinItsWaitIsBusyAndMakesNothing() throws Exception {
+    var shell = incus(DIR_AND_ZFS, list(template("v1", INPUTS)), snapshots("v1"));
+    var holding = new CountDownLatch(1);
+    var release = new CountDownLatch(1);
+    var other =
+        Thread.ofVirtual()
+            .start(
+                () -> {
+                  try (var held = FileMutex.acquire(locks().resolve(Workspaces.CREATE_LOCK))) {
+                    holding.countDown();
+                    release.await();
+                  } catch (IOException e) {
+                    throw new UncheckedIOException(e);
+                  } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                  }
+                });
+    assertTrue(holding.await(30, TimeUnit.SECONDS));
+    var waited = Workspaces.CREATE_WAIT.toNanos();
+    try {
+      var spec = workspaces(shell, ticks(0, 0, waited));
+      var check = spec.checkSpec(FIX, INPUTS, name -> false);
+      assertThrows(
+          Workspaces.Busy.class,
+          () -> spec.enterSpec(check, acme(), "uday", tempDir.resolve("no-files"), whole -> {}));
+      assertThrows(
+          Workspaces.Busy.class,
+          () ->
+              workspaces(shell, ticks(0, 0, waited))
+                  .create(acme(), "second", source(), tempDir.resolve("no-files"), "eng"));
+    } finally {
+      release.countDown();
+      other.join();
+    }
+    assertFalse(
+        shell.invocations().stream().anyMatch(c -> c.startsWith("incus copy")),
+        String.join("\n", shell.invocations()));
+  }
+
+  @Test
+  void aWorkspaceALiveRunOfItsSpecIsInIsNeitherStoppedNorDeleted() {
+    var shell =
+        incus(
+            DIR_AND_ZFS,
+            list(template("v1", INPUTS), specWorkspace("Running", "fix-login", "uday")),
+            snapshots("v1"));
+    var workspaces = workspaces(shell, ticks());
+    Predicate<String> live = "fix-login"::equals;
+    var refusal =
+        "Workspace 'fix-login' of acme holds a live run of spec fix-login, which would die with"
+            + " it. Stop the run first: sail agent stop acme --spec fix-login.";
+
+    assertEquals(
+        refusal,
+        assertThrows(IllegalStateException.class, () -> workspaces.stop("acme", "fix-login", live))
+            .getMessage());
+    assertEquals(
+        refusal,
+        assertThrows(
+                IllegalStateException.class,
+                () ->
+                    workspaces.delete(
+                        "acme",
+                        "fix-login",
+                        live,
+                        instance -> {
+                          throw new AssertionError("nothing is asked");
+                        }))
+            .getMessage());
+    assertFalse(
+        shell.invocations().stream()
+            .anyMatch(c -> c.startsWith("incus stop") || c.startsWith("incus delete")));
+  }
+
+  @Test
+  void aListingNamesTheSpecAndThePersonOfEachWorkspace() throws Exception {
+    var shell =
+        incus(
+            DIR_AND_ZFS,
+            list(
+                instance("acme", "Running", "devpool", ""),
+                specWorkspace("Stopped", "fix-login", "uday")),
+            "[]");
+
+    var rows = workspaces(shell, ticks()).list("acme").workspaces();
+
+    assertEquals(
+        List.of("main:null:null", "fix-login:fix-login:uday"),
+        rows.stream().map(row -> row.name() + ":" + row.spec() + ":" + row.owner()).toList());
   }
 }

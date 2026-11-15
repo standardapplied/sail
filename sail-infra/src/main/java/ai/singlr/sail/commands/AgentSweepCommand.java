@@ -20,6 +20,7 @@ import ai.singlr.sail.engine.NameValidator;
 import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.engine.WatcherSpawner;
+import ai.singlr.sail.engine.Workspaces;
 import ai.singlr.sail.identity.Actor;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -133,7 +134,7 @@ public final class AgentSweepCommand implements Runnable {
         new OperationHooks(
             event -> {},
             new WatcherSpawner(shell, WatcherSpawner::spawnProcess),
-            (project, config) -> "",
+            Workspaces.onThisBox(shell),
             DispatchOperations.terminalLauncher(),
             listener,
             StopOperations.Listener.NONE),

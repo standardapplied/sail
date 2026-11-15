@@ -5,14 +5,18 @@
 
 package ai.singlr.sail.commands;
 
+import ai.singlr.sail.api.ApiError;
 import ai.singlr.sail.api.ApiException;
+import ai.singlr.sail.api.ErrorCode;
 import ai.singlr.sail.api.Refusals;
 import ai.singlr.sail.common.Remedied;
+import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.engine.Banner;
 import ai.singlr.sail.engine.OperatorCommand;
 import java.io.PrintStream;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import picocli.CommandLine.Help.Ansi;
 
@@ -55,6 +59,45 @@ public final class CliCommand {
 
   static void run(PrintStream err, CheckedRunnable runnable) {
     run(err, null, runnable);
+  }
+
+  /**
+   * As {@link #run(CheckedRunnable)}, but under {@code --json} ({@code json}) a failure is printed
+   * as JSON on stdout in the API's error envelope, {@code {"error": {"code", "message", "action",
+   * ...}}} ({@link #refusalOf}), so a caller that reads JSON reads a refusal, and its code, as it
+   * reads one from the API.
+   */
+  static void run(boolean json, CheckedRunnable runnable) {
+    if (!json) {
+      run(runnable);
+      return;
+    }
+    try {
+      runnable.run();
+    } catch (Exception e) {
+      var refusal = refusalOf(e);
+      System.out.println(CliJson.stringify(Map.of("error", refusal.toMap())));
+      throw new Printed(refusal.message(), e);
+    }
+  }
+
+  /**
+   * {@code failure} as the API states a refusal: an API refusal as it is; one sail made on purpose
+   * ({@link #decided}) an invalid request, anything else an internal failure, each with the remedy
+   * it names.
+   */
+  static ApiError refusalOf(Exception failure) {
+    if (Refusals.translated(failure) instanceof ApiException refusal) {
+      return refusal.error();
+    }
+    var code = decided(failure) ? ErrorCode.INVALID_REQUEST : ErrorCode.INTERNAL;
+    return failure instanceof Remedied remedied
+        ? new ApiError(code.code(), remedied.reason(), remedied.remedy(), List.of())
+        : new ApiError(
+            code.code(),
+            Objects.requireNonNullElse(failure.getMessage(), failure.getClass().getSimpleName()),
+            Remedy.NONE,
+            List.of());
   }
 
   private static void run(PrintStream err, String failureHint, CheckedRunnable runnable) {

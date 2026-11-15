@@ -18,6 +18,9 @@ import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.AgentUnit;
+import ai.singlr.sail.engine.FileMutex;
+import ai.singlr.sail.engine.RunPlace;
+import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.harness.Harnesses;
 import ai.singlr.sail.harness.RunUsage;
 import ai.singlr.sail.identity.Acting;
@@ -37,6 +40,9 @@ import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Function;
 import org.junit.jupiter.api.AfterEach;
@@ -104,6 +110,206 @@ class ReviewLanesTest {
     loop.onEvent(loginStored());
 
     assertEquals("review", loop.onlyLive().role(), "storing the login launches it");
+  }
+
+  /**
+   * A reviewer the loop launches on a box still making another workspace past the wait is busy: the
+   * wait is bounded, the room is told once with the loop's own remedy (never "dispatch again"), the
+   * review errors, which the loop retries within its budget, and the reconciler's next pass with
+   * the box free launches it.
+   */
+  @Test
+  void aReviewerOnABusyBoxIsSaidOnceWithTheLoopsRemedyAndRetriedOnceTheBoxIsFree()
+      throws Exception {
+    loop = ReviewLoop.staged(tempDir, "codex", "claude-code");
+    loop.spec("auth", "api");
+    var build = loop.run("auth", "build");
+    var holding = new CountDownLatch(1);
+    var release = new CountDownLatch(1);
+    var other =
+        Thread.ofVirtual()
+            .start(
+                () -> {
+                  try (var held = FileMutex.acquire(loop.locks.resolve("workspace-create.lock"))) {
+                    holding.countDown();
+                    release.await();
+                  } catch (Exception e) {
+                    throw new IllegalStateException(e);
+                  }
+                });
+    assertTrue(holding.await(30, TimeUnit.SECONDS));
+    try {
+      loop.onEvent(ReviewLoop.buildStop("auth", build));
+    } finally {
+      release.countDown();
+      other.join();
+    }
+
+    assertTrue(loop.container.live().isEmpty(), "no reviewer started");
+    var errored = loop.reviews.latestReviewForSpec("auth").orElseThrow();
+    assertEquals("failed", errored.status(), "errored, a state the loop moves");
+    assertTrue(
+        errored
+            .error()
+            .endsWith(": This runner is making another workspace, which takes about a minute."),
+        errored.error());
+    assertEquals(
+        List.of(
+            "This runner is making another workspace, which takes about a minute. The loop then"
+                + " tries again by itself, and hands the review to a person if it lasts."),
+        loop.roomLines("auth", "This runner is making"),
+        "said once, with the remedy of the lane it was said for");
+
+    loop.reconciler(() -> Instant.now().plus(Duration.ofMinutes(5))).sweep();
+    loop.settle();
+
+    assertTrue(
+        loop.live().stream()
+            .anyMatch(run -> "auth".equals(run.specId()) && "review".equals(run.role())),
+        "the reconciler's retry launches it: " + loop.live());
+  }
+
+  /**
+   * High 2: a build whose process vanished (its dispatch killed mid-create, its workspace stopped
+   * by hand) is lost, never finished: the reconciler's stop with no exit starts no review, and the
+   * room says so, naming the dispatch that builds it again.
+   */
+  @Test
+  void aBuildLostWithNoExitIsNeverReviewedAndTheRoomNamesTheDispatchThatBuildsItAgain() {
+    loop = ReviewLoop.staged(tempDir, "codex", "claude-code");
+    loop.spec("auth", "api");
+    var build = loop.run("auth", "build");
+
+    var sweep = loop.reconciler(() -> Instant.now().plus(Duration.ofMinutes(5)));
+    assertEquals(1, sweep.sweep());
+    loop.settle();
+
+    assertTrue(loop.container.live().isEmpty(), "no reviewer started");
+    assertTrue(loop.reviews.latestReviewForSpec("auth").isEmpty(), "and no review began");
+    assertEquals(SpecStatus.IN_PROGRESS, loop.specStatus("auth"));
+    assertEquals(
+        List.of(
+            "The build ended with no exit anyone saw (its process vanished, its workspace stopped,"
+                + " or its dispatch died while making the workspace), so nothing of it is reviewed."
+                + " Build it again: sail spec dispatch -p test-project --spec auth --restart."),
+        loop.roomLines("auth", "The build ended with no exit"));
+  }
+
+  /**
+   * B1, main's rule by place: a person's terminal on the spec's conversation in its workspace is
+   * ended by the reviewer's claim of the workspace, never waited on, so the loop goes on.
+   */
+  @Test
+  void aReviewersClaimOfTheWorkspaceEndsATerminalOpenOnTheSpecsConversation() {
+    loop = ReviewLoop.staged(tempDir, "codex", "claude-code");
+    loop.container.terminalOpened();
+
+    loop.built("auth");
+
+    assertEquals("review", loop.onlyLive().role(), "the reviewer runs");
+    assertFalse(loop.container.terminalOpen(), "the terminal it displaced is ended");
+  }
+
+  /**
+   * The race between a terminal and a claim of the spec's workspace, closed by order: a claim that
+   * lands before the terminal names its process finds no pid to end, so the terminal, which asks
+   * for claims only once named, ends itself, yielding to that run.
+   */
+  @Test
+  void aTerminalNamedAfterAClaimFindsTheClaimAndEndsItself() {
+    loop = ReviewLoop.staged(tempDir, "codex", "claude-code");
+    var place = (RunPlace.SpecWorkspace) RunPlace.of(ReviewLoop.PROJECT, "auth");
+    loop.built("auth");
+    var reviewer = loop.onlyLive();
+    loop.container.terminalOpened();
+
+    var yielded = RunReservation.yieldToAClaim(loop.container, place, () -> claimsOf(place));
+
+    assertEquals(Optional.of(reviewer.id()), yielded);
+    assertFalse(loop.container.terminalOpen(), "the terminal yields to the run that claimed first");
+    assertEquals("review", loop.onlyLive().role(), "and the reviewer runs on");
+  }
+
+  /**
+   * The other order: a terminal named before any claim finds none and goes on, and the claim that
+   * follows ends the terminal its pid file names.
+   */
+  @Test
+  void aClaimAfterTheTerminalIsNamedEndsIt() {
+    loop = ReviewLoop.staged(tempDir, "codex", "claude-code");
+    var place = (RunPlace.SpecWorkspace) RunPlace.of(ReviewLoop.PROJECT, "auth");
+    loop.container.terminalOpened();
+
+    var yielded = RunReservation.yieldToAClaim(loop.container, place, () -> claimsOf(place));
+    loop.built("auth");
+
+    assertEquals(Optional.empty(), yielded);
+    assertFalse(loop.container.terminalOpen(), "the claim that came second ends it");
+    assertEquals("review", loop.onlyLive().role());
+  }
+
+  /** A terminal that cannot be ended, its container's answer cut short, is said and kept. */
+  @Test
+  void aTerminalThatCannotBeEndedIsSaidAndTheInterruptKept() {
+    loop = ReviewLoop.staged(tempDir, "codex", "claude-code");
+    var place = (RunPlace.SpecWorkspace) RunPlace.of(ReviewLoop.PROJECT, "auth");
+    var interrupted =
+        new ShellExec() {
+          @Override
+          public Result exec(List<String> command) throws InterruptedException {
+            throw new InterruptedException("stopping");
+          }
+
+          @Override
+          public Result exec(List<String> command, Path workDir, Duration timeout)
+              throws InterruptedException {
+            return exec(command);
+          }
+
+          @Override
+          public boolean isDryRun() {
+            return false;
+          }
+        };
+
+    assertEquals(
+        Optional.of("r1"), RunReservation.yieldToAClaim(interrupted, place, () -> List.of("r1")));
+    assertTrue(Thread.interrupted(), "the interrupt is kept for whoever waits on the thread");
+  }
+
+  /** The runs claiming {@code place} in a lane that ends its terminal. */
+  private List<String> claimsOf(RunPlace.SpecWorkspace place) {
+    return loop.live().stream()
+        .filter(run -> run.place().equals(place))
+        .filter(run -> RunReservation.endsTheTerminal(run.role()))
+        .map(RunStore.RunRow::id)
+        .toList();
+  }
+
+  /**
+   * Scenario 3 and R1 in the unit lane: the reviewer's launch and the read of its output, the fix's
+   * launch and its rescue commit all address the spec's workspace, and nothing of the spec's loop
+   * reaches the project's container.
+   */
+  @Test
+  void theReviewerAndTheFixLiveInTheSpecsWorkspaceAndNeverTouchTheProjectsContainer() {
+    loop = ReviewLoop.staged(tempDir, "codex", "claude-code");
+    loop.built("auth");
+    var reviewer = loop.onlyLive();
+    loop.finish(reviewer.id(), CRITICAL_FINDING);
+    var fix = loop.onlyLive();
+    loop.container.dirty("api", " M README.md");
+    loop.finish(fix.id(), "");
+
+    var execs =
+        loop.container.commands().stream()
+            .filter(command -> command.size() > 2 && "exec".equals(command.get(1)))
+            .map(command -> command.get(2))
+            .distinct()
+            .toList();
+    assertEquals(List.of("test-project-auth"), execs, "every command ran in the spec's workspace");
+    assertEquals("fix", fix.role());
+    assertFalse(loop.container.commits().isEmpty(), "the fix's work was committed there");
   }
 
   @Test
@@ -517,7 +723,7 @@ class ReviewLanesTest {
     var reviewer = loop.onlyLive();
     var first = loop.watcherCommandOf(reviewer.id());
     assertTrue(
-        first.endsWith("--action stop --max-duration 45m --max-idle 20m"),
+        first.endsWith("--action stop --spec auth --max-duration 45m --max-idle 20m"),
         "no review_pipeline.guardrails: the review lanes' own defaults, not the build lane's 4h: "
             + first);
 
@@ -537,7 +743,7 @@ class ReviewLanesTest {
     var fix = loop.onlyLive();
     assertEquals("fix", fix.role());
     assertTrue(
-        loop.watcherCommandOf(fix.id()).endsWith("--action stop --max-duration 6h"),
+        loop.watcherCommandOf(fix.id()).endsWith("--action stop --spec auth --max-duration 6h"),
         "the fix run launched after the edit is held to the build lane's new limits, never the"
             + " reviewer's: "
             + loop.watcherCommandOf(fix.id()));
@@ -799,7 +1005,7 @@ class ReviewLanesTest {
   }
 
   @Test
-  void aReviewerRefusedTheReposAnotherSpecsRunHoldsWaitsAndStartsWhenThatRunStops() {
+  void aReviewerOfAnotherSpecOverTheSameRepoRunsAtOnceInItsOwnWorkspace() {
     loop = ReviewLoop.staged(tempDir, "codex");
     loop.built("auth", "api");
     var auth = loop.onlyLive();
@@ -807,30 +1013,16 @@ class ReviewLanesTest {
     loop.built("billing", "api");
 
     assertEquals(
-        auth.id(), loop.onlyLive().id(), "billing's reviewer was refused the repos auth holds");
-    assertEquals(
-        "running",
-        loop.statusOf(loop.reviewOf("billing")),
-        "a refused claim is a review that waits, not a reviewer that failed");
-    assertTrue(loop.details("review_errored").isEmpty(), loop.details("review_errored").toString());
-    assertEquals(
-        1,
-        loop.events("review_stage_started").size(),
-        "and the room is told a stage started only once a reviewer runs for it");
-    assertEquals(0, loop.reconciler(Instant::now).sweep(), "nothing to rescue while it waits");
+        List.of("auth", "billing"),
+        loop.live().stream().map(RunStore.RunRow::specId).sorted().toList(),
+        "each spec's reviewer works its own workspace's tree: neither waits on the other");
+    assertNull(loop.waitingOn(loop.reviewOf("billing")));
+    assertEquals(2, loop.events("review_stage_started").size());
 
     loop.finish(auth.id(), CLEAN_REVIEW);
 
-    var billing = loop.onlyLive();
-    assertEquals(
-        "billing", billing.specId(), "auth's stop freed the repos: the waiting review starts");
-    assertEquals(loop.reviewOf("billing"), billing.reviewId());
-    assertEquals(2, loop.events("review_stage_started").size());
-
-    loop.finish(billing.id(), CLEAN_REVIEW);
-
-    assertEquals("passed", loop.statusOf(loop.reviewOf("billing")));
-    assertEquals(1, loop.reviews.reviewsForSpec("billing").size(), "in the one review, unretried");
+    assertEquals("passed", loop.statusOf(loop.reviewOf("auth")));
+    assertEquals("running", loop.statusOf(loop.reviewOf("billing")));
   }
 
   private Event replayedStop(RunStore.RunRow run) {
@@ -1183,15 +1375,14 @@ class ReviewLanesTest {
   @Test
   void aFinishedRunWhoseUsageWasNeverReadKeepsItsDirectoryPastTheNewestTwenty() {
     loop = ReviewLoop.staged(tempDir, "codex");
-    loop.spec("auth", "api");
-    var unread = loop.run("auth", "build");
+    var unread = loop.run("next", "build");
     loop.container.wrote(unread, "the only evidence of what it cost");
     Acting.system(() -> loop.runs.finish(unread, "running", "stopped", null, null));
-    var read = loop.run("auth", "build");
+    var read = loop.run("next", "build");
     loop.container.wrote(read, "read");
     Acting.system(() -> loop.runs.finish(read, "running", "stopped", null, RunUsage.NONE));
     for (var newer = 0; newer < 20; newer++) {
-      var run = loop.run("other", "build");
+      var run = loop.run("next", "build");
       loop.container.wrote(run, "newer");
       Acting.system(() -> loop.runs.finish(run, "running", "completed", 0, RunUsage.NONE));
     }

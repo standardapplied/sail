@@ -541,7 +541,6 @@ class EventAuthorityTest {
     List.of("agent_session_started", "agent_stop_nudged", TOOL, "agent_tool_finished")
         .forEach(type -> expected.put(type, Action.NARRATE));
     expected.put(POSTED, Action.POST);
-    expected.put("snapshot_created", Action.OPERATE_BOX);
     expected.put(BOARD, Action.OPERATE_BOX);
 
     assertEquals(expected, new TreeMap<>(EventAuthority.publishable()));

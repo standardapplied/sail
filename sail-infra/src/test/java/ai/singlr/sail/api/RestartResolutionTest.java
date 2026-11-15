@@ -7,7 +7,6 @@ package ai.singlr.sail.api;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
-import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.common.Remedy;
@@ -137,43 +136,8 @@ class RestartResolutionTest {
   }
 
   @Test
-  void branchCheckoutCreatesAFreshBranchWhenItDoesNotExist() {
-    var args =
-        RestartResolution.branchCheckoutArgs("/w/mast", "agent/x", false, false, Optional.empty());
-
-    assertEquals(List.of("git", "-C", "/w/mast", "checkout", "-b", "agent/x"), args);
-  }
-
-  @Test
-  void branchCheckoutForceReusesAnExistingBranchOnRestart() {
-    var args =
-        RestartResolution.branchCheckoutArgs(
-            "/w/mast", "agent/x", true, true, Optional.of(REDISPATCH));
-
-    assertEquals(
-        List.of("git", "-C", "/w/mast", "checkout", "-f", "agent/x"),
-        args,
-        "a restart must land on the existing branch even over a dirty tree from the prior run "
-            + "(untracked scaffold that would otherwise abort a plain checkout)");
-  }
-
-  @Test
-  void branchCheckoutStillCreatesWhenRestartingWithNoPriorBranch() {
-    var args =
-        RestartResolution.branchCheckoutArgs(
-            "/w/mast", "agent/x", false, true, Optional.of(REDISPATCH));
-
-    assertEquals(List.of("git", "-C", "/w/mast", "checkout", "-b", "agent/x"), args);
-  }
-
-  @Test
-  void branchCheckoutFailsLoudOnACollisionForAFreshDispatch() {
-    var ex =
-        assertThrows(
-            ApiException.class,
-            () ->
-                RestartResolution.branchCheckoutArgs(
-                    "/w/mast", "agent/x", true, false, Optional.of(REDISPATCH)));
+  void aCollisionNamesTheDispatchThatLandsOnTheBranch() {
+    var ex = RestartResolution.collision("agent/x", Optional.of(REDISPATCH));
 
     assertEquals(ErrorCode.BRANCH_CREATE_FAILED, ex.failure().errorCode());
     assertEquals("Branch 'agent/x' already exists.", ex.getMessage());
@@ -184,12 +148,7 @@ class RestartResolutionTest {
 
   @Test
   void aCollisionOfARunWithNoSpecIsToldToDeleteTheBranch() {
-    var ex =
-        assertThrows(
-            ApiException.class,
-            () ->
-                RestartResolution.branchCheckoutArgs(
-                    "/w/mast", "agent/x", true, false, Optional.empty()));
+    var ex = RestartResolution.collision("agent/x", Optional.empty());
 
     assertEquals(Remedy.of("Delete it first."), ex.failure().remedy());
   }

@@ -20,10 +20,13 @@ import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.engine.ConnectEnvironment;
 import ai.singlr.sail.engine.ContainerSailSetup;
 import ai.singlr.sail.engine.ProjectSkillInstaller;
+import ai.singlr.sail.engine.RunPlace;
 import ai.singlr.sail.engine.SailSkills;
+import ai.singlr.sail.engine.ScriptedShellExecutor;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.StageSkill;
 import ai.singlr.sail.engine.WatcherSpawner;
+import ai.singlr.sail.engine.Workspaces;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.Actors;
@@ -129,6 +132,17 @@ class RoomWakeLaunchTest {
       boolean withRunStore,
       DispatchOperations.AgentLauncher launcher)
       throws IOException {
+    return operations(shell, yamlContent, withRunStore, launcher, null);
+  }
+
+  /** As above, on a box whose workspaces are {@code workspaces}, or a ready box when null. */
+  private DispatchOperations operations(
+      ShellExec shell,
+      String yamlContent,
+      boolean withRunStore,
+      DispatchOperations.AgentLauncher launcher,
+      Workspaces workspaces)
+      throws IOException {
     var yaml = tempDir.resolve("sail-" + System.nanoTime() + ".yaml");
     Files.writeString(yaml, yamlContent);
     db = Sqlite.open(tempDir.resolve("wake-" + System.nanoTime() + ".db"));
@@ -148,7 +162,9 @@ class RoomWakeLaunchTest {
             new FdeStore(db),
             events::add,
             new WatcherSpawner(shell, (command, logPath) -> 4242L),
-            (project, config) -> "",
+            workspaces != null
+                ? workspaces
+                : TestWorkspaces.ready(TestProjects.reading(yaml), "acme"),
             launcher,
             DispatchOperations.Listener.NONE,
             SessionYield.NONE)
@@ -177,7 +193,7 @@ class RoomWakeLaunchTest {
             new FdeStore(db),
             events::add,
             new WatcherSpawner(liveAgentShell(), (command, logPath) -> 4242L),
-            (project, config) -> "",
+            TestWorkspaces.ready(TestProjects.reading(yaml), "acme"),
             command -> {
               launched.set(command);
               return 0;
@@ -552,6 +568,76 @@ class RoomWakeLaunchTest {
   }
 
   /**
+   * M2: a wake refused because the project has no template yet is said in the spec's room, in the
+   * words the CLI and the API give, once, as a refusal for want of a login is; nothing is reserved.
+   */
+  @Test
+  void aWakeRefusedForWantOfATemplateSaysSoInTheRoomOnce() throws Exception {
+    var noTemplate =
+        TestWorkspaces.over(
+            new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
+                .onOk("incus storage list --format json", TestWorkspaces.POOL)
+                .onOk("incus list --format json", "[]"));
+    var ops =
+        operations(
+            liveAgentShell(),
+            YAML,
+            true,
+            command -> {
+              launched.set(command);
+              return 0;
+            },
+            noTemplate);
+    seedSpec("auth");
+
+    for (var attempt = 0; attempt < 2; attempt++) {
+      var refused =
+          assertThrows(ApiException.class, () -> ops.startRoomRun("acme", "auth", HANDLE));
+      assertEquals(ErrorCode.CONFLICT, refused.failure().errorCode());
+    }
+
+    assertEquals(
+        List.of(
+            "acme has no template yet: sail project template build acme. Then engage or post in"
+                + " the room again."),
+        messageStore.list("auth", null, 20).stream().map(MessageStore.MessageRow::body).toList());
+    assertEquals(List.of(), runStore.listForSpec("auth"));
+  }
+
+  /** M2: a wake refused because the box has no ZFS pool is said in the spec's room, once. */
+  @Test
+  void aWakeRefusedForWantOfAPoolSaysSoInTheRoomOnce() throws Exception {
+    var noPool =
+        TestWorkspaces.over(
+            new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
+                .onOk(
+                    "incus storage list --format json",
+                    "[{\"name\": \"default\", \"driver\": \"dir\", \"config\": {}}]"));
+    var ops =
+        operations(
+            liveAgentShell(),
+            YAML,
+            true,
+            command -> {
+              launched.set(command);
+              return 0;
+            },
+            noPool);
+    seedSpec("auth");
+
+    for (var attempt = 0; attempt < 2; attempt++) {
+      assertThrows(ApiException.class, () -> ops.startRoomRun("acme", "auth", HANDLE));
+    }
+
+    var said =
+        messageStore.list("auth", null, 20).stream().map(MessageStore.MessageRow::body).toList();
+    assertEquals(1, said.size(), said.toString());
+    assertTrue(said.getFirst().startsWith("This box has no ZFS pool"), said.getFirst());
+    assertTrue(said.getFirst().contains("host init --storage zfs"), said.getFirst());
+    assertEquals(List.of(), runStore.listForSpec("auth"));
+  }
+
+  /**
    * A person's own dispatch, refused for want of their login, is said in the spec's room by Sail as
    * the loop narrates there: posted as this box's machinery, whoever asked, as on a node where the
    * person's own credential may not write as {@code sail}.
@@ -690,7 +776,7 @@ class RoomWakeLaunchTest {
             new FdeStore(db),
             events::add,
             new WatcherSpawner(shell, (command, logPath) -> 4242L),
-            (project, config) -> "",
+            TestWorkspaces.ready(TestProjects.reading(yaml), "acme"),
             command -> 0,
             DispatchOperations.Listener.NONE,
             SessionYield.NONE)
@@ -839,16 +925,14 @@ class RoomWakeLaunchTest {
   }
 
   @Test
-  void aHeldContainerLeaseRefusesTheWake() throws Exception {
+  void aSpecsWakeGoesOnInItsWorkspaceWhileTheProjectsContainerIsRestored() throws Exception {
     var ops = operations(liveAgentShell());
     seedSpec("auth");
     Acting.system(() -> runStore.acquireContainerLease("acme", HANDLE, "restore"));
 
-    var refusal = assertThrows(ApiException.class, () -> ops.startRoomRun("acme", "auth", HANDLE));
+    var runId = ops.startRoomRun("acme", "auth", HANDLE);
 
-    assertEquals(ErrorCode.CONFLICT, refusal.failure().errorCode());
-    assertTrue(
-        refusal.getMessage().contains("snapshot restore is in progress"), refusal.getMessage());
+    assertEquals(RunPlace.of("acme", "auth"), runStore.findById(runId).orElseThrow().place());
   }
 
   @Test
@@ -858,7 +942,7 @@ class RoomWakeLaunchTest {
     var live = DateTimeUtils.newId().toString();
     db.execute(
         "INSERT INTO runs (id, project, spec_id, node, role, agent, status, started_at, repos)"
-            + " VALUES (?, 'acme', 'other', ?, 'build', 'claude-code', 'running', 't0',"
+            + " VALUES (?, 'acme', 'auth', ?, 'build', 'claude-code', 'running', 't0',"
             + " '[\"app\"]')",
         live,
         HANDLE);
@@ -1068,9 +1152,6 @@ class RoomWakeLaunchTest {
     assertTrue(
         runStore.consumeRoomGuardBaseline(runId).isEmpty(),
         "a full turn's workspace changes are expected — no read-only guard baseline");
-    assertTrue(
-        events.stream().noneMatch(e -> Event.WellKnownTypes.SNAPSHOT_CREATED.equals(e.type())),
-        "turns never snapshot — the engage paid once");
     assertEquals("room-full", launched.get().getLast(), "SAIL_RUN_ROLE rides the launch");
     var started =
         events.stream()
@@ -1330,7 +1411,7 @@ class RoomWakeLaunchTest {
     var live = DateTimeUtils.newId().toString();
     db.execute(
         "INSERT INTO runs (id, project, spec_id, node, role, agent, status, started_at, repos)"
-            + " VALUES (?, 'acme', 'other', ?, 'build', 'claude-code', 'running', 't0',"
+            + " VALUES (?, 'acme', 'auth', ?, 'build', 'claude-code', 'running', 't0',"
             + " '[\"app\"]')",
         live,
         HANDLE);
@@ -1410,7 +1491,7 @@ class RoomWakeLaunchTest {
     var build = DateTimeUtils.newId().toString();
     db.execute(
         "INSERT INTO runs (id, project, spec_id, node, role, agent, status, started_at,"
-            + " completed_at, repos) VALUES (?, 'acme', 'other', ?, 'build', 'claude-code',"
+            + " completed_at, repos) VALUES (?, 'acme', 'auth', ?, 'build', 'claude-code',"
             + " 'completed', ?, ?, '[\"app\"]')",
         build,
         HANDLE,
@@ -1454,7 +1535,7 @@ class RoomWakeLaunchTest {
     var build = DateTimeUtils.newId().toString();
     db.execute(
         "INSERT INTO runs (id, project, spec_id, node, role, agent, status, started_at,"
-            + " completed_at, repos) VALUES (?, 'acme', 'other', ?, 'build', 'claude-code',"
+            + " completed_at, repos) VALUES (?, 'acme', 'auth', ?, 'build', 'claude-code',"
             + " 'completed', ?, ?, '[\"app\"]')",
         build,
         HANDLE,
@@ -1571,6 +1652,7 @@ class RoomWakeLaunchTest {
     private final Map<String, ShellExec.Result> scripts = new LinkedHashMap<>();
 
     StubShell() {
+      scripts.putAll(TestWorkspaces.answers("acme"));
       on("incus config device add", "");
       on("incus file push", "");
       on("cat " + ContainerSailSetup.STAMP_PATH, ContainerSailSetup.fingerprint());
@@ -1593,7 +1675,8 @@ class RoomWakeLaunchTest {
           return entry.getValue();
         }
       }
-      return new ShellExec.Result(1, "", "no script for " + joined);
+      return ScriptedShellExecutor.reachableContainer(joined)
+          .orElseGet(() -> new ShellExec.Result(1, "", "no script for " + joined));
     }
 
     @Override

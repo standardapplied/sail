@@ -19,6 +19,7 @@ import ai.singlr.sail.config.ProjectDefinition;
 import ai.singlr.sail.config.TestDefinitions;
 import ai.singlr.sail.engine.AgentUnit;
 import ai.singlr.sail.engine.LaunchEnv;
+import ai.singlr.sail.engine.RunPlace;
 import ai.singlr.sail.engine.ScriptedShellExecutor;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.harness.Harnesses;
@@ -347,7 +348,7 @@ class RunReservationTest {
                 second.reserve(
                     DateTimeUtils.newId().toString(),
                     "acme",
-                    "spec2",
+                    "spec",
                     "node",
                     "node",
                     "adhoc",
@@ -401,13 +402,22 @@ class RunReservationTest {
               reasons.add(reason);
             });
 
-    reserveBuild("spec", "build", List.of("app"));
+    reserveBuild(null, DispatchGate.ROOM_FULL_ROLE, List.of("app"));
 
     assertEquals(
         List.of(SessionYield.resumeSession(overlapping)),
         ended,
         "only the conversation over the reserved repo yields; the disjoint one lives on");
-    assertEquals(List.of("yielded to dispatch " + RUN_ID + " of spec spec"), reasons);
+    assertEquals(List.of("yielded to run " + RUN_ID), reasons);
+  }
+
+  @Test
+  void aSpecsClaimDisplacesNoConversationATerminalOpensInTheProjectsContainer() {
+    completedRun("old-spec", List.of("app"));
+    sessionYield =
+        ending((sessions, reason) -> fail("a spec's run lives in its own workspace: " + sessions));
+
+    assertNotNull(reserveBuild("old-spec", "build", List.of("app")));
   }
 
   @Test
@@ -456,12 +466,12 @@ class RunReservationTest {
           }
         };
 
-    reserveBuild("spec", "build", List.of("app"));
+    reserveBuild(null, DispatchGate.ROOM_FULL_ROLE, List.of("app"));
     assertEquals(List.of("acme"), locked);
     assertTrue(claimedWhileHeld.get(), "the row lands and the yield runs under one hold");
     assertFalse(held.get(), "released once the yield is done");
 
-    assertThrows(ApiException.class, () -> reserveBuild("spec2", "build", List.of("app")));
+    assertThrows(ApiException.class, () -> reserveBuild(null, "adhoc", List.of()));
     assertFalse(held.get(), "a refused claim releases the lock too");
   }
 
@@ -495,17 +505,17 @@ class RunReservationTest {
   @Test
   void aConversationYieldsByTheDispatchGateRulesHoldingItsRunsRepos() {
     var row = runStore.findById(completedRun("spec", List.of("web"))).orElseThrow();
-    assertTrue(
-        RunReservation.displaces("spec", "build", List.of("app"), row),
-        "the same spec displaces its own conversation even over disjoint repos");
     assertFalse(
-        RunReservation.displaces("other", "build", List.of("app"), row),
-        "another spec over a disjoint repo leaves it alone");
+        RunReservation.displaces("spec", "build", List.of("web"), row),
+        "a spec's build works in the spec's workspace, not the container the terminal is in");
+    assertFalse(
+        RunReservation.displaces(null, DispatchGate.ROOM_FULL_ROLE, List.of("app"), row),
+        "a run of the container over a disjoint repo leaves it alone");
     assertTrue(
-        RunReservation.displaces("other", DispatchGate.ROOM_FULL_ROLE, List.of("web"), row),
+        RunReservation.displaces(null, DispatchGate.ROOM_FULL_ROLE, List.of("web"), row),
         "a full chat turn claims its repos like a build");
     assertTrue(
-        RunReservation.displaces("other", "build", List.of(), row),
+        RunReservation.displaces(null, "adhoc", List.of(), row),
         "a whole-container claim displaces everything");
   }
 
@@ -520,7 +530,7 @@ class RunReservationTest {
     reserve(reservation(quietShell(), runStore));
 
     reservation(throwingShell(), runStore)
-        .releaseIfAbsent(RUN_ID, "acme", AgentUnit.forRun(RUN_ID));
+        .releaseIfAbsent(RUN_ID, RunPlace.of("acme", null), AgentUnit.forRun(RUN_ID));
 
     assertEquals(
         "running",
@@ -532,7 +542,8 @@ class RunReservationTest {
   void anAgentAContainerThatRunsNoCommandCannotSpeakForIsTreatedAsLive() {
     reserve(reservation(quietShell(), runStore));
 
-    reservation(quietShell(), runStore).releaseIfAbsent(RUN_ID, "acme", AgentUnit.forRun(RUN_ID));
+    reservation(quietShell(), runStore)
+        .releaseIfAbsent(RUN_ID, RunPlace.of("acme", null), AgentUnit.forRun(RUN_ID));
 
     assertEquals(
         "running",
@@ -566,7 +577,8 @@ class RunReservationTest {
           }
         };
 
-    reservation(recording, runStore).releaseIfAbsent(RUN_ID, "acme", AgentUnit.forRun(RUN_ID));
+    reservation(recording, runStore)
+        .releaseIfAbsent(RUN_ID, RunPlace.of("acme", null), AgentUnit.forRun(RUN_ID));
 
     assertEquals(
         "failed",
@@ -607,7 +619,7 @@ class RunReservationTest {
     assertDoesNotThrow(
         () ->
             reservation(refusingRemoval, runStore)
-                .releaseIfAbsent(RUN_ID, "acme", AgentUnit.forRun(RUN_ID)));
+                .releaseIfAbsent(RUN_ID, RunPlace.of("acme", null), AgentUnit.forRun(RUN_ID)));
 
     assertEquals("failed", runStore.findById(RUN_ID).orElseThrow().status());
   }
@@ -624,7 +636,7 @@ class RunReservationTest {
                     RunReservation.Displaceable.NONE,
                     null,
                     RunLauncher.Room.NONE)
-                .releaseIfAbsent(RUN_ID, "acme", AgentUnit.forRun(RUN_ID)));
+                .releaseIfAbsent(RUN_ID, RunPlace.of("acme", null), AgentUnit.forRun(RUN_ID)));
   }
 
   @Test
@@ -635,7 +647,7 @@ class RunReservationTest {
     assertDoesNotThrow(
         () ->
             reservation(quietShell(), runStore)
-                .releaseIfAbsent(RUN_ID, "acme", AgentUnit.forRun(RUN_ID)),
+                .releaseIfAbsent(RUN_ID, RunPlace.of("acme", null), AgentUnit.forRun(RUN_ID)),
         "bookkeeping must never propagate a store error out of the launch cleanup");
     assertFalse(db == null);
   }
@@ -688,7 +700,7 @@ class RunReservationTest {
 
   @Test
   void aWorkingClaimEndsTheLiveMemberThatHoldsItAndLands() {
-    var member = liveMember("chat", List.of("app"));
+    var member = liveMember("spec", List.of("app"));
     var asked = new ArrayList<String>();
 
     var credential =
@@ -708,7 +720,7 @@ class RunReservationTest {
 
   @Test
   void aClaimEndsThreeMembersInTurnAndIsThenRefusedAsAnyHeldClaimIs() {
-    var first = liveMember("chat", List.of("app"));
+    var first = liveMember("spec", List.of("app"));
     var ended = new ArrayList<String>();
 
     var refused =
@@ -721,7 +733,7 @@ class RunReservationTest {
                           ended.add(runId);
                           Acting.system(
                               () -> TestRuns.transition(runStore, runId, "running", "stopped"));
-                          liveMember("chat", List.of("app"));
+                          liveMember("spec", List.of("app"));
                           return true;
                         }),
                     "adhoc"));
@@ -734,7 +746,7 @@ class RunReservationTest {
 
   @Test
   void aMemberThatDoesNotEndLeavesTheClaimHeld() {
-    liveMember("chat", List.of("app"));
+    liveMember("spec", List.of("app"));
     var asked = new ArrayList<String>();
 
     assertThrows(
@@ -753,7 +765,7 @@ class RunReservationTest {
 
   @Test
   void aChatLanesClaimAndAClaimAnotherRunHoldsDisplaceNoOne() {
-    liveMember("chat", List.of("app"));
+    liveMember("spec", List.of("app"));
     var asked = new ArrayList<String>();
     RunReservation.Displaceable recording =
         (runId, why) -> {
@@ -772,7 +784,7 @@ class RunReservationTest {
             runStore.reserveDispatch(
                 DateTimeUtils.newId().toString(),
                 "acme",
-                "other",
+                "spec",
                 "node",
                 "build",
                 List.of("app"),

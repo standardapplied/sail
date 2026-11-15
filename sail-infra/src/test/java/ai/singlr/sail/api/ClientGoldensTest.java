@@ -694,7 +694,6 @@ class ClientGoldensTest {
               WellKnownTypes.AGENT_TOOL_STARTED,
               WellKnownTypes.AGENT_TOOL_FINISHED,
               WellKnownTypes.AGENT_LOG_CHUNK,
-              WellKnownTypes.SNAPSHOT_CREATED,
               WellKnownTypes.SNAPSHOT_RESTORED,
               WellKnownTypes.SNAPSHOT_DELETED,
               WellKnownTypes.SPEC_STRANDED)

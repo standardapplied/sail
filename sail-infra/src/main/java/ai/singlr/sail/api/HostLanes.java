@@ -8,7 +8,6 @@ package ai.singlr.sail.api;
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.common.Remedied;
 import ai.singlr.sail.common.Remedy;
-import ai.singlr.sail.config.Lane;
 import ai.singlr.sail.config.ProjectDefinition;
 import ai.singlr.sail.config.Spec;
 import ai.singlr.sail.config.SyncConfig;
@@ -44,10 +43,10 @@ import java.io.IOException;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
-import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.TimeoutException;
 import java.util.function.Function;
+import java.util.function.Predicate;
 import java.util.function.Supplier;
 
 /** The host facets as thin adapters over the stores and the shared executors. */
@@ -89,11 +88,6 @@ final class HostLanes {
     }
 
     @Override
-    public Optional<RunStore.RunRow> latestRun(String project, String node) {
-      return runs.latestForProjectOnNode(project, node);
-    }
-
-    @Override
     public Optional<RunStore.RunRow> activeRun(String project, String node) {
       return runs.runningForProjectOnNode(project, node);
     }
@@ -119,14 +113,16 @@ final class HostLanes {
     }
 
     @Override
-    public Optional<RunStore.RunRow> latestOperable(String project, String node) {
-      return operable(project, node, () -> latestRun(project, node));
-    }
-
-    @Override
-    public Optional<RunStore.RunRow> latestOperable(String project, String node, Lane lane) {
-      Objects.requireNonNull(lane, "lane");
-      return operable(project, node, () -> latestInLane(project, node, lane));
+    public Optional<RunStore.RunRow> latestOperable(
+        String project, String node, Predicate<RunStore.RunRow> which) {
+      return operable(
+          project,
+          node,
+          () ->
+              runs.listForProject(project).stream()
+                  .filter(run -> run.ownedBy(node))
+                  .filter(which)
+                  .findFirst());
     }
 
     /**
@@ -144,13 +140,6 @@ final class HostLanes {
                     case Result.Success<RunStore.RunRow> admitted -> admitted.value();
                     case Result.Failure<RunStore.RunRow> refused -> throw ApiException.of(refused);
                   });
-    }
-
-    private Optional<RunStore.RunRow> latestInLane(String project, String node, Lane lane) {
-      return runs.listForProject(project).stream()
-          .filter(run -> lane.matches(run.role()))
-          .filter(run -> run.ownedBy(node))
-          .findFirst();
     }
   }
 

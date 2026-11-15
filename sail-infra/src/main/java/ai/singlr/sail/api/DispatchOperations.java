@@ -7,13 +7,12 @@ package ai.singlr.sail.api;
 
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.Engagement;
-import ai.singlr.sail.config.ProjectDefinition;
 import ai.singlr.sail.config.Spec;
 import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.engine.AgentSession;
 import ai.singlr.sail.engine.ShellExec;
-import ai.singlr.sail.engine.SnapshotManager;
 import ai.singlr.sail.engine.WatcherSpawner;
+import ai.singlr.sail.engine.Workspaces;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.MessageStore;
@@ -23,11 +22,10 @@ import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Standing;
 import java.io.IOException;
-import java.time.Duration;
-import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import java.util.function.Function;
 import java.util.function.Supplier;
 
@@ -38,13 +36,12 @@ import java.util.function.Supplier;
  * GlobalSpecOperations}); {@code sail spec dispatch} constructs this class directly against the
  * control-plane database, so a standalone box dispatches in-process with no server required.
  *
- * <p>Lane differences are injected, never forked: where the events go ({@link EventSink}), whether
- * and how to snapshot ({@link Snapshotter}), how the launch command runs ({@link AgentLauncher}),
- * and what the operator sees ({@link Listener}). The procedure itself is identical on every lane.
+ * <p>Lane differences are injected, never forked: where the events go ({@link EventSink}), the
+ * box's workspaces a spec's runs live in ({@link Workspaces}), how the launch command runs ({@link
+ * AgentLauncher}), and what the operator sees ({@link Listener}). The procedure itself is identical
+ * on every lane.
  */
 public final class DispatchOperations {
-
-  private static final Duration SNAPSHOT_INTERVAL = Duration.ofHours(24);
 
   /** One dispatch invocation, lane-agnostic. */
   public record Request(
@@ -91,11 +88,37 @@ public final class DispatchOperations {
   public record NoSpecs() implements Outcome {}
 
   /**
+   * The workspace a dispatch's run lives in: its instance and name, whether it was there already
+   * ({@code reused}), what making it took (none when reused or on a dry run), and whether it was
+   * made from a template older than the definition. On a dry run it says what would be: reused when
+   * the spec's workspace is whole.
+   */
+  public record WorkspaceUse(
+      String instance,
+      String workspace,
+      boolean reused,
+      Workspaces.Timings timings,
+      boolean stale,
+      String degraded) {
+
+    /** The workspace a dry run's checks found, as a dispatch would use it. */
+    static WorkspaceUse wouldEnter(Workspaces.SpecCheck check) {
+      return new WorkspaceUse(
+          check.place().instance(),
+          check.place().workspace(),
+          check.whole(),
+          null,
+          !check.whole() && check.stale(),
+          check.degraded().orElse(null));
+    }
+  }
+
+  /**
    * A completed dispatch. {@code restarted} reports whether this dispatch was a re-dispatch that
    * reset a non-pending spec, so callers can message it as an iteration. {@code session}, {@code
    * exitCode} (foreground only), {@code runId} and {@code watcher} are absent on a dry run, which
    * stops at its rehearsed claim; there {@code branchCreated} says whether the branch would be
-   * created.
+   * created, and {@code workspace} which workspace would be made or reused.
    */
   public record Dispatched(
       Spec taskSpec,
@@ -103,7 +126,7 @@ public final class DispatchOperations {
       String agentType,
       String task,
       String runId,
-      String snapshotLabel,
+      WorkspaceUse workspace,
       boolean branchCreated,
       boolean restarted,
       AgentSession.SessionInfo session,
@@ -118,16 +141,6 @@ public final class DispatchOperations {
   @FunctionalInterface
   public interface EventSink {
     void publish(Event event);
-  }
-
-  /**
-   * Decides whether to snapshot the container before launch and takes the snapshot. Returns the
-   * snapshot label, or an empty string when skipped. The server lane auto-snapshots on a 24h
-   * cadence ({@link #autoSnapshotter}); the CLI lane asks the operator.
-   */
-  @FunctionalInterface
-  public interface Snapshotter {
-    String snapshot(String project, ProjectDefinition config);
   }
 
   /**
@@ -149,6 +162,9 @@ public final class DispatchOperations {
     Listener NONE = new Listener() {};
 
     default void claimed(Spec taskSpec, String task) {}
+
+    /** The run's workspace is ready for it, made or reused. */
+    default void workspaceEntered(WorkspaceUse workspace) {}
 
     default void branchReady(String branch, String repoPath, boolean reused) {}
 
@@ -183,7 +199,6 @@ public final class DispatchOperations {
   private final SessionYield sessionYield;
   private final EventSink events;
   private final WatcherSpawner watcherSpawner;
-  private final Snapshotter snapshotter;
   private final AgentLauncher launcher;
   private final Listener listener;
 
@@ -205,7 +220,7 @@ public final class DispatchOperations {
       FdeStore fdeStore,
       EventSink events,
       WatcherSpawner watcherSpawner,
-      Snapshotter snapshotter,
+      Workspaces workspaces,
       AgentLauncher launcher,
       Listener listener,
       SessionYield sessionYield) {
@@ -217,12 +232,9 @@ public final class DispatchOperations {
     this.admission = new LaunchAdmission(shell, fdeStore);
     this.events = Objects.requireNonNull(events, "events");
     this.watcherSpawner = Objects.requireNonNull(watcherSpawner, "watcherSpawner");
-    this.snapshotter = Objects.requireNonNull(snapshotter, "snapshotter");
     this.launcher = Objects.requireNonNull(launcher, "launcher");
     this.listener = Objects.requireNonNull(listener, "listener");
     this.sessionYield = Objects.requireNonNull(sessionYield, "sessionYield");
-    this.membership =
-        new MembershipService(specStore, () -> roomStore, projects, admission, this.events, shell);
     this.roomCommitGuard = new RoomCommitGuard(runStore, projects, this.events, shell);
     this.runLauncher =
         new RunLauncher(
@@ -237,6 +249,15 @@ public final class DispatchOperations {
     this.runReservation =
         new RunReservation(
             runStore, shell, listener, sessionYield, this::endLiveHolder, fdeStore, this::tellRoom);
+    var places =
+        new RunPlaces(
+            projects,
+            workspaces,
+            runStore == null ? box -> Set.of() : runStore::liveSpecs,
+            this::tellRoom,
+            runReservation::prune);
+    this.membership =
+        new MembershipService(specStore, () -> roomStore, projects, admission, this.events, places);
     this.adhocRunner =
         new AdhocRunner(
             projects,
@@ -248,16 +269,19 @@ public final class DispatchOperations {
     this.roomWakeLauncher =
         new RoomWakeLauncher(
             projects,
+            places,
             specStore,
             () -> roomStore,
             () -> messageStore,
             runStore,
             runReservation,
             runLauncher,
-            roomCommitGuard);
+            roomCommitGuard,
+            new WorkBranch(shell, listener));
     this.liveMembers =
         new LiveMembers(
             projects,
+            places,
             specStore,
             () -> roomStore,
             () -> messageStore,
@@ -278,13 +302,20 @@ public final class DispatchOperations {
             admission,
             runReservation,
             runLauncher,
-            snapshotter,
+            places,
             listener,
             this.events,
             shell);
     this.reviewLanes =
         new ReviewLaneLauncher(
-            projects, runStore, runReservation, runLauncher, shell, buildDispatch::resume);
+            projects,
+            places,
+            runStore,
+            runReservation,
+            runLauncher,
+            shell,
+            new WorkBranch(shell, listener),
+            buildDispatch::resume);
   }
 
   /**
@@ -331,7 +362,9 @@ public final class DispatchOperations {
 
   /**
    * Whether {@code line} is the newest thing Sail said in {@code room} and no run of {@code specId}
-   * has started since: the room itself remembers what it was told, so no process keeps it.
+   * has started since (launched its agent: a run reserved and let go before it did, as a refused
+   * launch's is, started nothing): the room itself remembers what it was told, so no process keeps
+   * it.
    */
   private boolean saidSinceItsNewestRun(
       MessageStore messages, String room, String specId, String line) {
@@ -344,7 +377,8 @@ public final class DispatchOperations {
                     || runStore.listForSpec(specId).stream()
                         .noneMatch(
                             run ->
-                                run.startedAt() != null
+                                run.pid() != null
+                                    && run.startedAt() != null
                                     && !run.startedAt().isBefore(said.createdAt())))
         .isPresent();
   }
@@ -452,12 +486,12 @@ public final class DispatchOperations {
    * agent keeps its remaining budget rather than getting a fresh one.
    */
   public Optional<WatcherSpawner.Unit> relaunchWatcher(RunStore.RunRow run) throws IOException {
-    var config = projects.load(run.project()).config();
+    var config = projects.definition(run.project());
     if (config.agent() == null) {
       return Optional.empty();
     }
     return watcherSpawner.spawnUnitForRun(
-        run.project(),
+        run.place(),
         run.id(),
         run.unit(),
         DateTimeUtils.format(run.startedAt()),
@@ -515,26 +549,6 @@ public final class DispatchOperations {
     roomCommitGuard.guardRoomRun(project, runId);
   }
 
-  /** The server-lane snapshotter: gated on {@code agent.auto_snapshot}, at most one per 24h. */
-  public static Snapshotter autoSnapshotter(ShellExec shell) {
-    return (project, config) -> {
-      if (config.agent() == null || !config.agent().autoSnapshot()) {
-        return "";
-      }
-      var snapMgr = new SnapshotManager(shell);
-      if (!shouldSnapshot(snapMgr, project)) {
-        return "";
-      }
-      var label = SnapshotManager.defaultLabel();
-      try {
-        snapMgr.create(project, label);
-        return label;
-      } catch (Exception e) {
-        throw new ApiException(ErrorCode.SNAPSHOT_FAILED, "Failed to create dispatch snapshot.", e);
-      }
-    };
-  }
-
   /** The server-lane launcher: runs the launch command through the shell, output captured. */
   public static AgentLauncher shellLauncher(ShellExec shell) {
     return command -> {
@@ -562,23 +576,5 @@ public final class DispatchOperations {
    */
   static boolean ownsLiveAgent(RunStore.RunRow run) {
     return "running".equals(run.status()) || StopOperations.STOPPING.equals(run.status());
-  }
-
-  private static boolean shouldSnapshot(SnapshotManager snapMgr, String project) {
-    try {
-      var snapshots = snapMgr.list(project);
-      if (snapshots.isEmpty()) {
-        return true;
-      }
-      var latestTime = OffsetDateTime.parse(snapshots.getLast().createdAt()).toInstant();
-      return DateTimeUtils.now().isAfter(latestTime.plus(SNAPSHOT_INTERVAL));
-    } catch (Exception e) {
-      System.err.println(
-          "  [snapshot] Could not determine snapshot age for '"
-              + project
-              + "', taking one to be safe: "
-              + e.getMessage());
-      return true;
-    }
   }
 }

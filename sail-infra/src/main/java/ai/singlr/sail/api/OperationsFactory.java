@@ -15,6 +15,7 @@ import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.engine.SshSyncChannel;
 import ai.singlr.sail.engine.SyncOperations;
 import ai.singlr.sail.engine.WatcherSpawner;
+import ai.singlr.sail.engine.Workspaces;
 import ai.singlr.sail.store.BoxCredentialStore;
 import ai.singlr.sail.store.EventStore;
 import ai.singlr.sail.store.FdeStore;
@@ -110,7 +111,7 @@ public final class OperationsFactory {
           if (bus != null) bus.publish(event);
         },
         new WatcherSpawner(shell, WatcherSpawner::spawnProcess),
-        DispatchOperations.autoSnapshotter(shell),
+        Workspaces.onThisBox(shell),
         DispatchOperations.shellLauncher(shell),
         DispatchOperations.Listener.NONE,
         StopOperations.Listener.NONE);

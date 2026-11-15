@@ -22,6 +22,7 @@ import ai.singlr.sail.engine.AgentUnit;
 import ai.singlr.sail.engine.ConnectEnvironment;
 import ai.singlr.sail.engine.ContainerSailSetup;
 import ai.singlr.sail.engine.ProjectSkillInstaller;
+import ai.singlr.sail.engine.RunPlace;
 import ai.singlr.sail.engine.SailSkills;
 import ai.singlr.sail.engine.ScriptedShellExecutor;
 import ai.singlr.sail.engine.ShellExec;
@@ -320,7 +321,9 @@ class SailOperationsTest {
 
   @Test
   void projectsFailsLegiblyWhenContainerListingFails() throws Exception {
-    var result = operations(shell()).projects();
+    var result =
+        operations(shell().on("incus list --format json", new ShellExec.Result(1, "", "boom")))
+            .projects();
 
     assertError(ErrorCode.COMMAND_FAILED, result);
   }
@@ -761,7 +764,7 @@ class SailOperationsTest {
                 runs.create(
                     R1,
                     "acme",
-                    "busy",
+                    "auth",
                     LOCAL_HANDLE,
                     "build",
                     "claude-code",
@@ -776,7 +779,7 @@ class SailOperationsTest {
 
     assertError(ErrorCode.AGENT_ALREADY_RUNNING, error);
     assertTrue(fullError(error).contains(R1), fullError(error));
-    assertTrue(fullError(error).contains("busy"), fullError(error));
+    assertTrue(fullError(error).contains("spec 'auth'"), fullError(error));
   }
 
   @Test
@@ -860,7 +863,7 @@ class SailOperationsTest {
                 runs.reserveDispatch(
                     R1,
                     "acme",
-                    "auth",
+                    "web-work",
                     LOCAL_HANDLE,
                     "build",
                     List.of("app", "web"),
@@ -877,9 +880,9 @@ class SailOperationsTest {
             new DispatchRequest("web-work", "background", true, List.of("web")));
 
     assertError(ErrorCode.AGENT_ALREADY_RUNNING, error);
-    assertTrue(fullError(error).contains("auth"), fullError(error));
-    assertTrue(fullError(error).contains(R1), fullError(error));
-    assertTrue(fullError(error).contains("web"), fullError(error));
+    assertEquals(
+        "Agent run " + R1 + " is already working spec 'web-work' in this container.",
+        error.errorMessage());
   }
 
   @Test
@@ -903,7 +906,7 @@ class SailOperationsTest {
               runStore.reserveDispatch(
                   R1,
                   "acme",
-                  "auth",
+                  "web-work",
                   LOCAL_HANDLE,
                   "build",
                   List.of("app", "web"),
@@ -984,11 +987,11 @@ class SailOperationsTest {
 
     assertEquals(
         List.of(
-            new Workspaces.Row("main", "acme", "not_created", null, null, null),
-            new Workspaces.Row("w", "acme-w", "stopped", "v1", null, null)),
+            new Workspaces.Row("main", "acme", "not_created", null, null, null, null, null),
+            new Workspaces.Row("w", "acme-w", "stopped", "v1", null, null, null, null)),
         listed.workspaces());
     assertEquals(
-        List.of(new Workspaces.Row("main", "acme", "not_created", null, null, null)),
+        List.of(new Workspaces.Row("main", "acme", "not_created", null, null, null, null, null)),
         noZfs.orThrow().workspaces());
     assertError(ErrorCode.CONTAINER_ERROR, unread);
     assertError(
@@ -1169,11 +1172,11 @@ class SailOperationsTest {
    * placement and another FDE's spec is theirs, a stopped container or not.
    */
   @Test
-  void aDispatchIsDecidedBeforeTheContainerIsAskedWhetherItRuns() throws Exception {
+  void aDispatchIsDecidedBeforeIncusIsAskedAboutTheSpecsWorkspace() throws Exception {
     var operations =
         operationsWithStore(
             baseYaml(),
-            shell().on("incus list ^acme$", STOPPED_JSON),
+            shell().on("incus storage list --format json", "[]"),
             store -> seedAssigned(store, "auth", "pending", "raj"),
             null,
             LOCAL_HANDLE,
@@ -1201,7 +1204,9 @@ class SailOperationsTest {
         placement.remedy().plain());
     assertError(ErrorCode.FORBIDDEN_NOT_ASSIGNEE, theirs);
     assertEquals("Spec 'auth' is assigned to 'raj', not you.", theirs.errorMessage());
-    assertError(ErrorCode.PROJECT_STOPPED, stopped);
+    assertError(ErrorCode.CONFLICT, stopped);
+    assertTrue(
+        stopped.errorMessage().startsWith("This box has no ZFS pool"), stopped.errorMessage());
   }
 
   @Test
@@ -1306,21 +1311,28 @@ class SailOperationsTest {
 
   @Test
   void agentStatusReturnsRunningSessionDetails() throws Exception {
-    var operations =
-        opsWithRun(
-            shell()
-                .on("incus list ^acme$", RUNNING_JSON)
-                .on("cat /home/dev/.sail/runs/" + R1 + "/agent.pid", "123")
-                .on("kill -0 123", "")
-                .on(
-                    "cat /home/dev/.sail/runs/" + R1 + "/agent-session.json",
-                    "{\"task\": \"work\", \"started_at\": \"2026-01-01T00:00:00Z\", \"branch\": \"sail/auth\"}"));
+    var shell =
+        shell()
+            .on("incus list ^acme$", RUNNING_JSON)
+            .on("cat /home/dev/.sail/runs/" + R1 + "/agent.pid", "123")
+            .on("kill -0 123", "")
+            .on(
+                "cat /home/dev/.sail/runs/" + R1 + "/agent-session.json",
+                "{\"task\": \"work\", \"started_at\": \"2026-01-01T00:00:00Z\", \"branch\": \"sail/auth\"}");
+    var operations = opsWithRun(shell);
 
     var result = operations.agentStatus("acme", "node-a");
 
     assertEquals(true, get(result, "agent_running"));
     assertEquals(123, get(result, "pid"));
     assertEquals("work", get(result, "task"));
+    assertEquals(
+        List.of(),
+        shell.invocations().stream()
+            .filter(command -> command.startsWith("incus exec "))
+            .filter(command -> !command.startsWith("incus exec acme-auth "))
+            .toList(),
+        "spec auth's run is asked about in its own workspace");
   }
 
   @Test
@@ -1389,16 +1401,19 @@ class SailOperationsTest {
 
   @Test
   void runLogAllowsTheRunSpecAssignee() throws Exception {
-    var operations =
-        opsWithLocalRunAndSpec(
-            shell()
-                .on("incus list ^acme$", RUNNING_JSON)
-                .on("tail -n 2 -- " + RUN_LOG, "one\ntwo\n"));
+    var shell =
+        shell().on("incus list ^acme$", RUNNING_JSON).on("tail -n 2 -- " + RUN_LOG, "one\ntwo\n");
+    var operations = opsWithLocalRunAndSpec(shell);
 
     var assignee = new Actor(LOCAL_HANDLE, Role.MEMBER, Actor.Lane.API);
     var result = Acting.by(assignee, () -> operations.runLog(R1, 2, "node-a"));
 
     assertEquals(List.of("one", "two"), get(result, "lines"));
+    assertTrue(
+        shell.invocations().stream()
+            .anyMatch(
+                command -> command.startsWith("incus exec acme-auth ") && command.contains("tail")),
+        "spec auth's log is read in its own workspace: " + shell.invocations());
   }
 
   @Test
@@ -2326,7 +2341,7 @@ class SailOperationsTest {
             .on("mkdir -p /home/dev/.sail", "")
             .on("git -C /home/dev/workspace/app rev-parse --is-inside-work-tree", "true\n")
             .on("rev-parse --verify --quiet refs/heads/sail/auth", "")
-            .on("git -C /home/dev/workspace/app checkout -f sail/auth", "")
+            .on("git -C /home/dev/workspace/app switch --quiet sail/auth", "")
             .on("systemd-run --user", "")
             .on("claude", "");
     var operations =
@@ -2350,7 +2365,8 @@ class SailOperationsTest {
     assertTrue(get(result, "spec").toString().contains("sail/auth"));
     assertEquals(SpecStatus.IN_PROGRESS, store.findById("auth").orElseThrow().status());
     assertTrue(
-        shell.invocations().stream().anyMatch(command -> command.contains("checkout -f sail/auth")),
+        shell.invocations().stream()
+            .anyMatch(command -> command.contains("switch --quiet sail/auth")),
         "a restart force-checks out the prior branch instead of failing on the collision");
     assertFalse(
         shell.invocations().stream().anyMatch(command -> command.contains("checkout -b")),
@@ -2366,7 +2382,7 @@ class SailOperationsTest {
             idleShell()
                 .on("git -C /home/dev/workspace/app rev-parse --is-inside-work-tree", "true\n")
                 .on("rev-parse --verify --quiet refs/heads/sail/auth", "")
-                .on("git -C /home/dev/workspace/app checkout -f sail/auth", ""),
+                .on("git -C /home/dev/workspace/app switch --quiet sail/auth", ""),
             store -> {
               stores[0] = store;
               seedSpec(
@@ -2583,7 +2599,9 @@ class SailOperationsTest {
 
     assertEquals(
         List.of(),
-        operations.reviewLanes().ensureCommitted("acme", List.of(), "feat/auth", "fix"),
+        operations
+            .reviewLanes()
+            .ensureCommitted(RunPlace.of("acme", "auth"), List.of(), "feat/auth", "fix"),
         "a spec with no repos has nothing to rescue");
   }
 
@@ -2599,7 +2617,6 @@ class SailOperationsTest {
             name: acme
             agent:
               type: claude-code
-              auto_snapshot: false
               guardrails:
                 max_duration: 6h
             pipeline:
@@ -2638,7 +2655,7 @@ class SailOperationsTest {
             .filter(invocation -> invocation.contains("systemd-run --user"))
             .findFirst()
             .orElseThrow();
-    assertTrue(spawned.endsWith("--action stop --max-duration 90m"), spawned);
+    assertTrue(spawned.endsWith("--action stop --spec auth --max-duration 90m"), spawned);
   }
 
   @Test
@@ -2757,16 +2774,14 @@ class SailOperationsTest {
     var operations =
         operations(
             branchYaml(),
-            shell()
+            launching(shell())
                 .on("incus list ^acme$", RUNNING_JSON)
                 .on("cat /home/dev/.sail/agent.pid", new ShellExec.Result(1, "", "missing"))
-                .on("mkdir -p /home/dev/workspace/specs", "")
-                .on("printf '%s'", "")
                 .on(
                     "git -C /home/dev/workspace/app rev-parse --is-inside-work-tree",
                     new ShellExec.Result(1, "", "missing")));
 
-    var result = dispatch(operations, "acme", request("auth", "background", true));
+    var result = dispatch(operations, "acme", request("auth", "background", false));
 
     assertEquals(false, get(result, "branch_created"));
   }
@@ -2789,80 +2804,6 @@ class SailOperationsTest {
     var error = dispatch(operations, "acme", request("auth", "background", false));
 
     assertError(ErrorCode.BRANCH_CREATE_FAILED, error);
-  }
-
-  @Test
-  void dispatchCreatesSnapshotWhenConfigured() throws Exception {
-    var operations =
-        operations(
-            snapshotYaml(),
-            launching(shell())
-                .on("incus list ^acme$", RUNNING_JSON)
-                .on("cat /home/dev/.sail/agent.pid", new ShellExec.Result(1, "", "missing"))
-                .on("mkdir -p /home/dev/workspace/specs", "")
-                .on("printf '%s'", "")
-                .on("incus snapshot list acme --format json", "[]")
-                .on("incus snapshot create acme", ""));
-
-    var result = dispatch(operations, "acme", request("auth", "background", false));
-
-    assertFalse(get(result, "snapshot").toString().isBlank());
-  }
-
-  @Test
-  void dispatchSkipsRecentSnapshot() throws Exception {
-    var snapshots = "[{\"name\": \"snap\", \"created_at\": \"" + Instant.now() + "\"}]";
-    var operations =
-        operations(
-            snapshotYaml(),
-            shell()
-                .on("incus list ^acme$", RUNNING_JSON)
-                .on("cat /home/dev/.sail/agent.pid", new ShellExec.Result(1, "", "missing"))
-                .on("mkdir -p /home/dev/workspace/specs", "")
-                .on("printf '%s'", "")
-                .on("incus snapshot list acme --format json", snapshots));
-
-    var result = dispatch(operations, "acme", request("auth", "background", true));
-
-    assertEquals("", get(result, "snapshot"));
-  }
-
-  @Test
-  void dispatchCreatesSnapshotWhenLatestTimestampIsInvalid() throws Exception {
-    var operations =
-        operations(
-            snapshotYaml(),
-            launching(shell())
-                .on("incus list ^acme$", RUNNING_JSON)
-                .on("cat /home/dev/.sail/agent.pid", new ShellExec.Result(1, "", "missing"))
-                .on("mkdir -p /home/dev/workspace/specs", "")
-                .on("printf '%s'", "")
-                .on(
-                    "incus snapshot list acme --format json",
-                    "[{\"name\": \"snap\", \"created_at\": \"bad\"}]")
-                .on("incus snapshot create acme", ""));
-
-    var result = dispatch(operations, "acme", request("auth", "background", false));
-
-    assertFalse(get(result, "snapshot").toString().isBlank());
-  }
-
-  @Test
-  void dispatchMapsSnapshotFailure() throws Exception {
-    var operations =
-        operations(
-            snapshotYaml(),
-            launching(shell())
-                .on("incus list ^acme$", RUNNING_JSON)
-                .on("cat /home/dev/.sail/agent.pid", new ShellExec.Result(1, "", "missing"))
-                .on("mkdir -p /home/dev/workspace/specs", "")
-                .on("printf '%s'", "")
-                .on("incus snapshot list acme --format json", "[]")
-                .on("incus snapshot create acme", new ShellExec.Result(1, "", "no space")));
-
-    var error = dispatch(operations, "acme", request("auth", "background", false));
-
-    assertError(ErrorCode.SNAPSHOT_FAILED, error);
   }
 
   @Test
@@ -3302,69 +3243,59 @@ class SailOperationsTest {
   }
 
   @Test
-  void dispatchPublishesSnapshotCreatedWithBus() throws Exception {
-    try (var bus = new EventBus()) {
-      var shell =
-          launching(shell())
-              .on("incus list ^acme$", RUNNING_JSON)
-              .on("cat /home/dev/.sail/agent.pid", new ShellExec.Result(1, "", "missing"))
-              .on("mkdir -p /home/dev/workspace/specs", "")
-              .on("printf '%s'", "")
-              .on("incus snapshot list acme --format json", "[]")
-              .on("incus snapshot create acme", "");
-      var operations =
-          operationsWithStores(
-              snapshotYaml(), shell, bus, SailOperationsTest::seedAuthBillingSetup, s -> {});
-
-      var result = dispatch(operations, "acme", request("auth", "background", false));
-
-      assertTrue(result.isSuccess());
-      assertFalse(get(result, "snapshot").toString().isBlank());
-    }
-  }
-
-  @Test
-  void dispatchRejectsStoppedProject() throws Exception {
+  void aSpecsDispatchIsRefusedOnABoxWithNoZfsPoolAndReservesNothing() throws Exception {
+    var runs = new AtomicReference<RunStore>();
     var operations =
         operationsWithStores(
             baseYaml(),
-            shell().on("incus list ^acme$", STOPPED_JSON),
+            shell().on("incus storage list --format json", "[]"),
+            null,
+            SailOperationsTest::seedAuthBillingSetup,
+            runs::set);
+
+    var refused = dispatch(operations, "acme", request("auth", "background", false));
+
+    assertError(ErrorCode.CONFLICT, refused);
+    assertEquals(
+        "Add one beside the box's pool with: sail host init --storage zfs --pool tank --disk"
+            + " <device>, or with --pool-file-size <size> in place of --disk to try ZFS in a file."
+            + " Then dispatch again.",
+        refused.remedy().plain());
+    assertEquals(List.of(), runs.get().listForProject("acme"), "nothing was reserved");
+  }
+
+  @Test
+  void aSpecsDispatchIsRefusedWhenItsProjectHasNoTemplateAndReservesNothing() throws Exception {
+    var runs = new AtomicReference<RunStore>();
+    var operations =
+        operationsWithStores(
+            baseYaml(),
+            shell().on("incus list --format json", "[]"),
+            null,
+            SailOperationsTest::seedAuthBillingSetup,
+            runs::set);
+
+    var refused = dispatch(operations, "acme", request("auth", "background", false));
+
+    assertError(ErrorCode.CONFLICT, refused);
+    assertEquals("acme has no template yet:", refused.errorMessage());
+    assertEquals(
+        "sail project template build acme. Then dispatch again.", refused.remedy().plain());
+    assertEquals(List.of(), runs.get().listForProject("acme"), "nothing was reserved");
+  }
+
+  @Test
+  void aSpecsDispatchIsRefusedWhenIncusCannotSayWhatTheBoxHolds() throws Exception {
+    var operations =
+        operationsWithStores(
+            baseYaml(),
+            shell().on("incus storage list --format json", new ShellExec.Result(1, "", "boom")),
             null,
             SailOperationsTest::seedAuthBillingSetup,
             s -> {});
 
     assertError(
-        ErrorCode.PROJECT_STOPPED,
-        dispatch(operations, "acme", request("auth", "background", false)));
-  }
-
-  @Test
-  void dispatchRejectsNotCreatedProject() throws Exception {
-    var operations =
-        operationsWithStores(
-            baseYaml(),
-            shell().on("incus list ^acme$", "[]"),
-            null,
-            SailOperationsTest::seedAuthBillingSetup,
-            s -> {});
-
-    assertError(
-        ErrorCode.PROJECT_NOT_CREATED,
-        dispatch(operations, "acme", request("auth", "background", false)));
-  }
-
-  @Test
-  void dispatchRejectsErroredProject() throws Exception {
-    var operations =
-        operationsWithStores(
-            baseYaml(),
-            shell().on("incus list ^acme$", new ShellExec.Result(1, "", "boom")),
-            null,
-            SailOperationsTest::seedAuthBillingSetup,
-            s -> {});
-
-    assertError(
-        ErrorCode.CONTAINER_ERROR,
+        ErrorCode.COMMAND_FAILED,
         dispatch(operations, "acme", request("auth", "background", false)));
   }
 
@@ -3821,7 +3752,6 @@ class SailOperationsTest {
         name: acme
         agent:
           type: claude-code
-          auto_snapshot: false
         """;
   }
 
@@ -3835,7 +3765,6 @@ class SailOperationsTest {
             path: web
         agent:
           type: claude-code
-          auto_snapshot: false
         """;
   }
 
@@ -3853,18 +3782,8 @@ class SailOperationsTest {
             path: app
         agent:
           type: claude-code
-          auto_snapshot: false
           auto_branch: true
           branch_prefix: sail/
-        """;
-  }
-
-  private static String snapshotYaml() {
-    return """
-        name: acme
-        agent:
-          type: claude-code
-          auto_snapshot: true
         """;
   }
 
@@ -3873,7 +3792,6 @@ class SailOperationsTest {
         name: acme
         agent:
           type: claude-code
-          auto_snapshot: false
           guardrails:
             max_duration: 4h
             action: stop
@@ -3924,6 +3842,7 @@ class SailOperationsTest {
      * as already installed, and the skills folder as holding nothing else of sail's.
      */
     FakeShell() {
+      scripts.putAll(TestWorkspaces.answers("acme"));
       on("incus config device add", "");
       on("incus file push", "");
       on("cat " + ContainerSailSetup.STAMP_PATH, ContainerSailSetup.fingerprint());

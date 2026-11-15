@@ -723,7 +723,6 @@ class ProjectApplierTest {
                 "claude-code",
                 true,
                 "sail/",
-                true,
                 List.of("claude-code", "codex"),
                 null,
                 null,
@@ -979,8 +978,7 @@ class ProjectApplierTest {
     var shell = new ScriptedShellExecutor();
     var applier = applier(shell);
     var agent =
-        new ProjectDefinition.Agent(
-            "claude-code", true, "sail/", true, null, null, null, null, null);
+        new ProjectDefinition.Agent("claude-code", true, "sail/", null, null, null, null, null);
     var config =
         new ProjectDefinition("test", null, null, null, null, null, null, null, null, agent, null);
 
@@ -1387,8 +1385,7 @@ class ProjectApplierTest {
   }
 
   private static ProjectDefinition minimalConfig(String agentType) {
-    var agent =
-        new ProjectDefinition.Agent(agentType, true, "sail/", true, null, null, null, null, null);
+    var agent = new ProjectDefinition.Agent(agentType, true, "sail/", null, null, null, null, null);
     return new ProjectDefinition(
         "test",
         null,

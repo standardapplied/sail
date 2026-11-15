@@ -1254,7 +1254,7 @@ class BannerTest {
             null,
             services,
             null,
-            new ProjectDefinition.Agent("claude-code", true, "sail/", true, null, null, null, null),
+            new ProjectDefinition.Agent("claude-code", true, "sail/", null, null, null, null),
             null);
     var state = new ContainerState.Running("10.0.0.42");
     var out = new ByteArrayOutputStream();
@@ -1375,7 +1375,7 @@ class BannerTest {
             null,
             null,
             null,
-            new ProjectDefinition.Agent("claude-code", false, null, true, null, null, null, null),
+            new ProjectDefinition.Agent("claude-code", false, null, null, null, null, null),
             null);
     var state = new ContainerState.Running("10.0.0.1");
     var out = new ByteArrayOutputStream();
@@ -1429,6 +1429,7 @@ class BannerTest {
       var status = new ByteArrayOutputStream();
       Banner.printAgentStatus(
           "gamma",
+          "",
           new AgentSession.SessionInfo(true, 42, "auth", "2026-03-02T01:00:00Z", "sail/x", "/l"),
           0,
           0,
@@ -1439,6 +1440,7 @@ class BannerTest {
       var report = new ByteArrayOutputStream();
       Banner.printAgentReport(
           "gamma",
+          "",
           new AgentReporter.Report(
               "gamma",
               "Completed",
@@ -1655,7 +1657,7 @@ class BannerTest {
             0);
     var out = new ByteArrayOutputStream();
     Banner.printAgentReport(
-        "acme-health", report, OperatorCommand.PLAIN, new PrintStream(out), Ansi.OFF);
+        "acme-health", "", report, OperatorCommand.PLAIN, new PrintStream(out), Ansi.OFF);
     var output = out.toString(StandardCharsets.UTF_8);
 
     assertTrue(output.contains("Agent Report"));
@@ -1693,7 +1695,8 @@ class BannerTest {
             null,
             null);
     var out = new ByteArrayOutputStream();
-    Banner.printAgentReport("acme", report, OperatorCommand.PLAIN, new PrintStream(out), Ansi.OFF);
+    Banner.printAgentReport(
+        "acme", "", report, OperatorCommand.PLAIN, new PrintStream(out), Ansi.OFF);
     var output = out.toString(StandardCharsets.UTF_8);
 
     assertTrue(output.contains("Killed by guardrail"));

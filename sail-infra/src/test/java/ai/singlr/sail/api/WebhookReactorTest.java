@@ -139,7 +139,7 @@ class WebhookReactorTest {
     var notifications = new Notifications("https://example.com/wh", List.of());
     var reactor = new WebhookReactor(project -> notifications, url -> recorder(calls));
 
-    reactor.onEvent(Event.of("p", null, "snapshot_created", "sail", "h").withId(1L));
+    reactor.onEvent(Event.of("p", null, "agent_session_completed", "sail", "h").withId(1L));
 
     assertEquals(1, calls.size());
   }

@@ -377,7 +377,6 @@ public final class Banner {
     }
     if (config.agent() != null) {
       w = Math.max(w, rowWidth("Agent:", Objects.requireNonNullElse(config.agent().type(), "-")));
-      w = Math.max(w, rowWidth("Auto-snap:", String.valueOf(config.agent().autoSnapshot())));
       w = Math.max(w, rowWidth("Auto-branch:", String.valueOf(config.agent().autoBranch())));
     }
     w = boxWidth(w);
@@ -447,8 +446,6 @@ public final class Banner {
           Objects.requireNonNullElse(config.agent().type(), "-"),
           null,
           null);
-      labelRow(
-          out, ansi, w, "Auto-snap:", String.valueOf(config.agent().autoSnapshot()), null, null);
       labelRow(
           out, ansi, w, "Auto-branch:", String.valueOf(config.agent().autoBranch()), null, null);
       emptyRow(out, ansi, w);
@@ -976,6 +973,7 @@ public final class Banner {
   /** Prints agent session status with optional git activity and task progress. */
   public static void printAgentStatus(
       String name,
+      String selector,
       AgentSession.SessionInfo info,
       int commitCount,
       long lastCommitMinutesAgo,
@@ -1029,7 +1027,9 @@ public final class Banner {
       printLine(
           out,
           ansi,
-          "    @|faint Tail output: " + operator.sail("agent log " + name + " --follow") + "|@");
+          "    @|faint Tail output: "
+              + operator.sail("agent log " + name + selector + " --follow")
+              + "|@");
     }
   }
 
@@ -1059,9 +1059,13 @@ public final class Banner {
     out.println();
   }
 
-  /** Prints confirmation after a background agent launch. */
+  /**
+   * Prints confirmation after a background agent launch. {@code target} is the project and the
+   * selector of the run ({@code acme --spec auth}), so the printed log and stop commands reach it
+   * however many runs are live.
+   */
   public static void printAgentLaunched(
-      String name,
+      String target,
       String task,
       String branch,
       OperatorCommand operator,
@@ -1075,8 +1079,8 @@ public final class Banner {
       printLine(out, ansi, "    @|bold Branch:|@  " + branch);
     }
     printLine(
-        out, ansi, "    @|bold Log:|@     " + operator.sail("agent log " + name + " --follow"));
-    printLine(out, ansi, "    @|bold Stop:|@    " + operator.sail("agent stop " + name));
+        out, ansi, "    @|bold Log:|@     " + operator.sail("agent log " + target + " --follow"));
+    printLine(out, ansi, "    @|bold Stop:|@    " + operator.sail("agent stop " + target));
   }
 
   /** Prints a list of other running projects (informational). */
@@ -1102,6 +1106,7 @@ public final class Banner {
   /** Prints a comprehensive morning-after agent report. */
   public static void printAgentReport(
       String name,
+      String selector,
       AgentReporter.Report report,
       OperatorCommand operator,
       PrintStream out,
@@ -1195,7 +1200,7 @@ public final class Banner {
         out,
         ansi,
         "    "
-            + operator.sail("agent log " + name + " --tail 50")
+            + operator.sail("agent log " + name + selector + " --tail 50")
             + "    @|faint # see agent output|@");
     var remaining =
         report.specs().stream()

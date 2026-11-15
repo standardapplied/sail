@@ -15,7 +15,9 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.config.Lane;
 import ai.singlr.sail.config.SpecStatus;
+import ai.singlr.sail.engine.RunPlace;
 import ai.singlr.sail.harness.RunUsage;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.store.Finding;
@@ -98,9 +100,9 @@ class LoopStepsTest {
 
               @Override
               public List<Rescue> ensureCommitted(
-                  String project, List<String> repos, String branch, String commitMessage)
+                  RunPlace place, List<String> repos, String branch, String commitMessage)
                   throws Exception {
-                return lanes.get().ensureCommitted(project, repos, branch, commitMessage);
+                return lanes.get().ensureCommitted(place, repos, branch, commitMessage);
               }
             },
             reader,
@@ -154,9 +156,9 @@ class LoopStepsTest {
 
           @Override
           public List<Rescue> ensureCommitted(
-              String project, List<String> repos, String branch, String commitMessage)
+              RunPlace place, List<String> repos, String branch, String commitMessage)
               throws Exception {
-            return real.ensureCommitted(project, repos, branch, commitMessage);
+            return real.ensureCommitted(place, repos, branch, commitMessage);
           }
         });
   }
@@ -199,8 +201,9 @@ class LoopStepsTest {
     return loop.runs.findById(reviewer.id()).orElseThrow();
   }
 
+  /** A full chat turn of the spec, at work in its workspace over the repos its loop would claim. */
   private String holder() {
-    return loop.liveRun("billing", "build");
+    return loop.liveRun(SPEC, Lane.ROOM_FULL.wire());
   }
 
   @Test
@@ -544,7 +547,7 @@ class LoopStepsTest {
 
           @Override
           public List<Rescue> ensureCommitted(
-              String project, List<String> repos, String branch, String commitMessage) {
+              RunPlace place, List<String> repos, String branch, String commitMessage) {
             return List.of();
           }
         });
@@ -738,9 +741,9 @@ class LoopStepsTest {
 
           @Override
           public List<Rescue> ensureCommitted(
-              String project, List<String> repos, String branch, String commitMessage)
+              RunPlace place, List<String> repos, String branch, String commitMessage)
               throws Exception {
-            return real.ensureCommitted(project, repos, branch, commitMessage);
+            return real.ensureCommitted(place, repos, branch, commitMessage);
           }
         });
   }

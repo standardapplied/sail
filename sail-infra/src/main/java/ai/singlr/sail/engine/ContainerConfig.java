@@ -39,8 +39,13 @@ public final class ContainerConfig {
 
   /** Takes {@code container}'s lock under {@code locks}, waiting while another holds it. */
   public static FileMutex hold(Path locks, String container) throws IOException {
+    return FileMutex.acquire(lockOf(locks, container));
+  }
+
+  /** The lock file {@link #hold} takes for {@code container}. */
+  static Path lockOf(Path locks, String container) {
     NameValidator.requireValidProjectName(container);
-    return FileMutex.acquire(locks.resolve(container + ".machinery.lock"));
+    return locks.resolve(container + ".machinery.lock");
   }
 
   /** {@code incus config set <container> <assignments…>}, each a {@code key=value}. */

@@ -5,24 +5,27 @@
 
 package ai.singlr.sail.commands;
 
+import ai.singlr.sail.api.ApiException;
 import ai.singlr.sail.api.HostOperations;
 import ai.singlr.sail.api.OperationsFactory;
 import ai.singlr.sail.config.ProjectDefinition;
 import ai.singlr.sail.config.Spec;
 import ai.singlr.sail.config.YamlUtil;
+import ai.singlr.sail.engine.AgentPresence;
 import ai.singlr.sail.engine.AgentReporter;
 import ai.singlr.sail.engine.Banner;
-import ai.singlr.sail.engine.ContainerManager;
 import ai.singlr.sail.engine.ContainerStateGuard;
 import ai.singlr.sail.engine.NameValidator;
 import ai.singlr.sail.engine.NodeIdentity;
 import ai.singlr.sail.engine.OperatorCommand;
+import ai.singlr.sail.engine.RunPlace;
 import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.store.RunStore;
 import java.util.List;
 import java.util.function.Function;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
+import picocli.CommandLine.Mixin;
 import picocli.CommandLine.Option;
 import picocli.CommandLine.Parameters;
 
@@ -37,6 +40,8 @@ public final class AgentReportCommand implements Runnable {
       arity = "0..1",
       description = "Project name (default: the current project).")
   private String name;
+
+  @Mixin private RunSelector selector = new RunSelector();
 
   @Option(names = "--json", description = "Output in JSON format.")
   private boolean json;
@@ -71,24 +76,27 @@ public final class AgentReportCommand implements Runnable {
       operations.catalog().readable(name);
     }
     var shell = new ShellExecutor(false);
-    var mgr = new ContainerManager(shell);
+    var session = latestSession(name, operator);
+    var place = session == null ? RunPlace.of(name, null) : session.place();
 
-    ContainerStateGuard.requireCreated(mgr.queryState(name), name);
+    ContainerStateGuard.requireCreated(new AgentPresence(shell).state(place), place.instance());
 
     var reporter = new AgentReporter(shell);
     var report =
-        reporter.generate(
-            name,
-            definition(operator),
-            projectSpecs(name, operator),
-            latestSession(name, operator));
+        reporter.generate(name, definition(operator), projectSpecs(name, operator), session);
 
     if (json) {
       System.out.println(YamlUtil.dumpJson(report.toMap()));
       return;
     }
 
-    Banner.printAgentReport(name, report, operator, System.out, Ansi.AUTO);
+    Banner.printAgentReport(
+        name,
+        session == null ? "" : RunSelector.of(session),
+        report,
+        operator,
+        System.out,
+        Ansi.AUTO);
   }
 
   List<Spec> projectSpecs(String project, OperatorCommand operator) {
@@ -101,8 +109,13 @@ public final class AgentReportCommand implements Runnable {
 
   RunStore.RunRow latestSession(String project, OperatorCommand operator) {
     try (var operations = this.operations.apply(operator)) {
-      return operations.dispatching().latestRun(project, NodeIdentity.handle()).orElse(null);
-    } catch (Exception ignored) {
+      return selector
+          .resolve(
+              operations.dispatching(), "agent report", project, NodeIdentity.handle(), run -> true)
+          .orElse(null);
+    } catch (ApiException refused) {
+      throw refused;
+    } catch (RuntimeException ignored) {
       return null;
     }
   }

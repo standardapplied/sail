@@ -11,9 +11,11 @@ import ai.singlr.sail.config.Lane;
 import ai.singlr.sail.config.ProjectDefinition;
 import ai.singlr.sail.config.RunStatus;
 import ai.singlr.sail.engine.AgentPresence;
+import ai.singlr.sail.engine.AgentSession;
 import ai.singlr.sail.engine.AgentUnit;
 import ai.singlr.sail.engine.ContainerExec;
 import ai.singlr.sail.engine.LaunchEnv;
+import ai.singlr.sail.engine.RunPlace;
 import ai.singlr.sail.engine.RunRetention;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.harness.RunUsage;
@@ -345,7 +347,10 @@ public final class RunReservation {
       throw new ApiException(
           ErrorCode.COMMAND_FAILED, "Could not lock project '" + project + "' to dispatch.", e);
     }
-    whenClaimed(claim, () -> pruneRuns(project));
+    var place = RunPlace.of(project, specId);
+    if (place instanceof RunPlace.ProjectContainer) {
+      whenClaimed(claim, () -> prune(place));
+    }
     return claim;
   }
 
@@ -377,12 +382,19 @@ public final class RunReservation {
   /**
    * Ends the resumed conversations this claim displaces: a run's resume session is judged as if the
    * run were still running a working lane over its repos, so a read-only room wake displaces
-   * nothing while a build or full turn over an overlapping repo (or the same spec) ends it.
-   * Best-effort after the claim, like pruning: the reservation stands either way, and a host that
-   * refuses or cannot be reached is a warning, never a failed launch.
+   * nothing while a build or full turn over an overlapping repo (or the same spec) ends it. A claim
+   * of a spec's workspace by any lane but the read-only room's ends the terminal resumed in it
+   * ({@link AgentUnit#TERMINAL}): its conversation is resumable, and a person's open terminal never
+   * holds the loop up. Best-effort after the claim, like pruning: the reservation stands either
+   * way, and a host or container that refuses or cannot be reached is a warning, never a failed
+   * launch.
    */
   private void yieldDisplacedSessions(
       String runId, String project, String specId, String role, List<String> repos) {
+    var place = RunPlace.of(project, specId);
+    if (place instanceof RunPlace.SpecWorkspace && endsTheTerminal(role)) {
+      endTerminal(shell, place);
+    }
     var target = Objects.requireNonNullElse(repos, List.<String>of());
     var displaced =
         runStore.listForProject(project).stream()
@@ -393,10 +405,8 @@ public final class RunReservation {
     if (displaced.isEmpty()) {
       return;
     }
-    var reason =
-        "yielded to dispatch " + runId + (Strings.isBlank(specId) ? "" : " of spec " + specId);
     try {
-      sessionYield.end(displaced, reason);
+      sessionYield.end(displaced, yieldReason(runId, specId));
     } catch (IOException e) {
       System.err.println(
           "  [api] Warning: could not yield terminal sessions "
@@ -406,12 +416,64 @@ public final class RunReservation {
     }
   }
 
+  /** Why a terminal on a conversation ended for run {@code runId}'s claim, in its own words. */
+  public static String yieldReason(String runId, String specId) {
+    return "yielded to run " + runId + (Strings.isBlank(specId) ? "" : " of spec " + specId);
+  }
+
+  /**
+   * Whether a claim of a spec's workspace in lane {@code role} ends the terminal open in it: every
+   * lane's but the read-only room's, whose member starts nothing over an open terminal.
+   */
+  public static boolean endsTheTerminal(String role) {
+    return !DispatchGate.ROOM_ROLE.equals(role);
+  }
+
+  /**
+   * The terminal's half of the order that keeps a person's terminal in spec {@code place}'s
+   * workspace and a claim of it from both going on, with no lock between them: a claim takes its
+   * row, then ends the terminal its pid file names; the terminal names its process, then calls
+   * this, which asks {@code claims} for the runs claiming the place and, when there is one, ends
+   * the terminal itself. Whichever comes second sees what the first did. Answers the run it yielded
+   * to.
+   */
+  public static Optional<String> yieldToAClaim(
+      ShellExec shell, RunPlace.SpecWorkspace place, Supplier<List<String>> claims) {
+    var claim = claims.get().stream().findFirst();
+    claim.ifPresent(run -> endTerminal(shell, place));
+    return claim;
+  }
+
+  /** Ends the terminal resumed in {@code place}'s workspace, when one is there. */
+  private static void endTerminal(ShellExec shell, RunPlace place) {
+    try {
+      new AgentSession(shell).killAgent(place.instance(), AgentUnit.TERMINAL);
+    } catch (Exception e) {
+      if (e instanceof InterruptedException) {
+        Thread.currentThread().interrupt();
+      }
+      System.err.println(
+          "  [api] Warning: could not end the terminal in "
+              + place.instance()
+              + ": "
+              + e.getMessage());
+    }
+  }
+
+  /**
+   * Whether a claim of {@code specId}'s run would displace the conversation of {@code resumed},
+   * resumed in a terminal: a terminal opens in the project's own container, so only a run that
+   * lives there, a spec-less one, can be in its way.
+   */
   static boolean displaces(
       String specId, String role, List<String> repos, RunStore.RunRow resumed) {
+    var terminal = RunPlace.of(resumed.project(), null);
     var conversation =
         new DispatchGate.RunningRun(
-            resumed.id(), resumed.specId(), Lane.BUILD.wire(), resumed.repos());
-    return DispatchGate.decide(specId, role, repos, List.of(conversation)).isPresent();
+            resumed.id(), resumed.specId(), Lane.BUILD.wire(), resumed.repos(), terminal);
+    return DispatchGate.decide(
+            RunPlace.of(resumed.project(), specId), specId, role, repos, List.of(conversation))
+        .isPresent();
   }
 
   /**
@@ -435,21 +497,22 @@ public final class RunReservation {
    * live for the same reason — the missed-stop reconciler releases a genuinely dead run on its next
    * pass. A run released so has its launch file removed too.
    */
-  public void releaseIfAbsent(String runId, String project, AgentUnit unit) {
-    if (agentLive(project, unit)) {
+  public void releaseIfAbsent(String runId, RunPlace place, AgentUnit unit) {
+    if (agentLive(place, unit)) {
       return;
     }
     failRun(runId);
-    removeLaunchFile(project, unit);
+    removeLaunchFile(place, unit);
   }
 
   /**
    * Removes the launch file of a run whose agent is proven absent, best-effort: its secrets leave
    * the container now rather than at the next sweep, which stays the net for a crash.
    */
-  private void removeLaunchFile(String project, AgentUnit unit) {
+  private void removeLaunchFile(RunPlace place, AgentUnit unit) {
     try {
-      shell.exec(ContainerExec.asDevUser(project, List.of("rm", "-f", unit.launchEnvPath())));
+      shell.exec(
+          ContainerExec.asDevUser(place.instance(), List.of("rm", "-f", unit.launchEnvPath())));
     } catch (Exception e) {
       System.err.println(
           "  [api] Warning: could not remove the launch file of "
@@ -468,16 +531,25 @@ public final class RunReservation {
     return config.agent() == null ? null : config.lifetimeFor(Lane.of(role).orElse(null));
   }
 
-  private void pruneRuns(String project) {
+  /**
+   * Prunes the run directories of {@code place} past the newest kept: right after a claim of the
+   * project's container, which is running, and once a spec's workspace is entered ({@link
+   * RunPlaces#enter}), which a first run makes and a stopped one starts.
+   */
+  void prune(RunPlace place) {
     try {
-      var runs = runStore.listForProject(project);
+      var runs =
+          runStore.listForProject(place.project()).stream()
+              .filter(run -> run.place().equals(place))
+              .toList();
       var ids = runs.stream().map(RunStore.RunRow::id).toList();
       var kept =
           runs.stream()
               .filter(run -> DispatchOperations.ownsLiveAgent(run) || usageUnread(run))
               .map(RunStore.RunRow::id)
               .collect(Collectors.toUnmodifiableSet());
-      var pruned = RunRetention.prune(shell, project, ids, kept, RunRetention.DEFAULT_KEEP);
+      var pruned =
+          RunRetention.prune(shell, place.instance(), ids, kept, RunRetention.DEFAULT_KEEP);
       listener.runsPruned(pruned.size());
     } catch (Exception e) {
       System.err.println("  [api] Warning: could not prune runs: " + e.getMessage());
@@ -503,9 +575,13 @@ public final class RunReservation {
         () -> runStore.finish(runId, "running", "failed", null, RunUsage.NONE));
   }
 
-  private boolean agentLive(String project, AgentUnit unit) {
+  /**
+   * Whether {@code unit}'s agent in {@code place} may be there: anything but a proven absence,
+   * since a container that gives no answer has not said it is gone.
+   */
+  boolean agentLive(RunPlace place, AgentUnit unit) {
     try {
-      return !new AgentPresence(shell).gone(project, unit);
+      return !new AgentPresence(shell).gone(place, unit);
     } catch (Exception e) {
       return true;
     }

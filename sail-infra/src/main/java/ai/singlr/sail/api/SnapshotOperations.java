@@ -5,7 +5,7 @@
 
 package ai.singlr.sail.api;
 
-import ai.singlr.sail.common.Strings;
+import ai.singlr.sail.config.Lane;
 import ai.singlr.sail.engine.ContainerManager;
 import ai.singlr.sail.engine.ContainerState;
 import ai.singlr.sail.engine.HostInfo;
@@ -242,13 +242,9 @@ final class SnapshotOperations {
 
   private static ApiException restoreRefusal(RunStore.RunRow run, String label) {
     var occupied =
-        Strings.isBlank(run.specId())
-            ? "Ad-hoc agent run " + run.id() + " is occupying this container"
-            : "Agent run "
-                + run.id()
-                + " is already working spec '"
-                + run.specId()
-                + "' in this container";
+        (Lane.ADHOC.wire().equals(run.role()) ? "Ad-hoc agent run " : "Agent run ")
+            + run.id()
+            + " is occupying this container";
     return new ApiException(
         ErrorCode.AGENT_ALREADY_RUNNING,
         occupied + "; restoring snapshot '" + label + "' would discard its live work.",

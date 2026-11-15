@@ -21,7 +21,6 @@ public enum EventType: String, CaseIterable, Sendable {
     case ptySessionAttached = "pty_session_attached"
     case ptySessionEnded = "pty_session_ended"
     case ptySessionStarted = "pty_session_started"
-    case snapshotCreated = "snapshot_created"
     case snapshotDeleted = "snapshot_deleted"
     case snapshotRestored = "snapshot_restored"
     case specDisengaged = "spec_disengaged"

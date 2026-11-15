@@ -261,7 +261,7 @@ class TestOperations implements Operations {
   public Result<EngageResponse> addRoomMember(
       String roomId, EngageRequest request, String localHandle) {
     return Result.success(
-        new EngageResponse(request.agent(), request.mode() == null ? "full" : request.mode(), ""));
+        new EngageResponse(request.agent(), request.mode() == null ? "full" : request.mode()));
   }
 
   @Override

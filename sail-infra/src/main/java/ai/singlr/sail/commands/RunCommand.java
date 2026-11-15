@@ -29,21 +29,23 @@ import ai.singlr.sail.engine.GuardrailWatcher;
 import ai.singlr.sail.engine.NameValidator;
 import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.ProjectSkillInstaller;
+import ai.singlr.sail.engine.RunPlace;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.engine.SnapshotManager;
 import ai.singlr.sail.engine.WatcherSpawner;
+import ai.singlr.sail.engine.Workspaces;
 import ai.singlr.sail.harness.Harness;
 import ai.singlr.sail.harness.Harnesses;
 import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SpecStore;
 import java.io.PrintStream;
 import java.nio.file.Files;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Objects;
-import java.util.Optional;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BiFunction;
 import java.util.function.Function;
@@ -205,15 +207,14 @@ public final class RunCommand implements Runnable {
     var harness = Harnesses.of(agentType);
 
     var label = SnapshotManager.defaultLabel();
-    var snapshotTaken = !dryRun && SnapshotDecision.shouldSnapshot(snapshot, config, json);
+    var snapshotTaken = !dryRun && SnapshotDecision.shouldSnapshot(snapshot, json);
     var branchName = branchName(config, label);
 
     if (task == null) {
       snapshot(shell, snapshotTaken, label);
       if (!dryRun) {
         new WorkBranch(shell, listener(new AtomicReference<>()))
-            .checkout(
-                name, config, WorkBranch.repos(config, path), branchName, Optional.empty(), false);
+            .checkout(name, WorkBranch.repos(config, path), branchName);
       }
     }
 
@@ -336,7 +337,7 @@ public final class RunCommand implements Runnable {
         new OperationHooks(
             this::publishLifecycle,
             new WatcherSpawner(shell, WatcherSpawner::spawnProcess),
-            (project, config) -> "",
+            Workspaces.onThisBox(shell),
             terminal,
             listener(launchCommand),
             StopOperations.Listener.NONE));
@@ -420,7 +421,13 @@ public final class RunCommand implements Runnable {
       return;
     }
     if (background) {
-      Banner.printAgentLaunched(name, task, session.branch(), operator, System.out, Ansi.AUTO);
+      Banner.printAgentLaunched(
+          String.join(" ", RunStore.RunRow.addressed(name, session.runId(), null)),
+          task,
+          session.branch(),
+          operator,
+          System.out,
+          Ansi.AUTO);
       session
           .watcher()
           .ifPresent(
@@ -433,7 +440,8 @@ public final class RunCommand implements Runnable {
       return;
     }
     if (session.exitCode() != null && session.exitCode() != 0) {
-      throw AgentLogCommand.agentExited(shell, name, session.runId(), session.exitCode());
+      throw AgentLogCommand.agentExited(
+          shell, RunPlace.of(name, null), session.runId(), session.exitCode());
     }
   }
 

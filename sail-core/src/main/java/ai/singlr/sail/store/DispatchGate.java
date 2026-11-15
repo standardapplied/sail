@@ -6,6 +6,7 @@
 package ai.singlr.sail.store;
 
 import ai.singlr.sail.config.Lane;
+import ai.singlr.sail.engine.RunPlace;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
@@ -43,10 +44,11 @@ public final class DispatchGate {
   public static final String ROOM_FULL_ROLE = Lane.ROOM_FULL.wire();
 
   /**
-   * One running local run of the project: its id, the spec it works, its role, and its reserved
-   * repos.
+   * One running local run of the project: its id, the spec it works (the room for a spec-less
+   * room's run), its role, its reserved repos and the place it lives in.
    */
-  public record RunningRun(String runId, String specId, String role, List<String> repos) {}
+  public record RunningRun(
+      String runId, String specId, String role, List<String> repos, RunPlace place) {}
 
   /**
    * The blocking run and the repos both sides claim; empty {@code overlap} means one side works the
@@ -64,11 +66,18 @@ public final class DispatchGate {
    * build through its repo claim. Any other run blocks only on repo overlap, and a {@link
    * #ROOM_ROLE} run on either side never overlaps anything: a read-only chat reserves no repos, so
    * its empty repo set must not carry the whole-container meaning the working lanes give it. {@link
-   * #ROOM_FULL_ROLE} carries real repo claims and gets no such exemption.
+   * #ROOM_FULL_ROLE} carries real repo claims and gets no such exemption. Only runs in {@code
+   * place}, the target's, are compared: a spec's workspace is its own tree, so specs on one repo
+   * never block each other, and nothing a spec does blocks the project's own container (R5).
    */
   public static Optional<Conflict> decide(
-      String targetSpecId, String targetRole, List<String> targetRepos, List<RunningRun> running) {
+      RunPlace place,
+      String targetSpecId,
+      String targetRole,
+      List<String> targetRepos,
+      List<RunningRun> running) {
     return running.stream()
+        .filter(run -> run.place().equals(place))
         .map(
             run ->
                 sameSpec(run.specId(), targetSpecId) && chatLane(targetRole) == chatLane(run.role())

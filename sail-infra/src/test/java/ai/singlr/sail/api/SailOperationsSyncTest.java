@@ -10,6 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.engine.ConnectEnvironment;
+import ai.singlr.sail.engine.ScriptedShellExecutor;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.ActingAs;
@@ -241,7 +242,6 @@ class SailOperationsSyncTest {
         name: acme
         agent:
           type: claude-code
-          auto_snapshot: false
         """);
     var db = Sqlite.open(tempDir.resolve("sync-" + System.nanoTime() + ".db"));
     new SchemaManager(db).migrate();
@@ -339,7 +339,15 @@ class SailOperationsSyncTest {
       if (containerRunning && joined.contains("incus list ^acme$")) {
         return new Result(0, RUNNING_JSON, "");
       }
-      return new Result(1, "", "no script for " + joined);
+      if (containerRunning) {
+        for (var answer : TestWorkspaces.answers("acme").entrySet()) {
+          if (joined.contains(answer.getKey())) {
+            return answer.getValue();
+          }
+        }
+      }
+      return ScriptedShellExecutor.reachableContainer(joined)
+          .orElseGet(() -> new Result(1, "", "no script for " + joined));
     }
 
     @Override

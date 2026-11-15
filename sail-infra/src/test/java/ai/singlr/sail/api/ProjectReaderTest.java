@@ -140,13 +140,15 @@ class ProjectReaderTest {
   }
 
   @Test
-  void aTestReaderAnswersEveryNameWithTheFileAndIsUnreadableAsTheCatalogWouldBe() throws Exception {
+  void aTestReaderAnswersTheProjectItsFileNamesAndIsUnreadableAsTheCatalogWouldBe()
+      throws Exception {
     var file = dir.resolve("sail.yaml");
     var reader = TestProjects.reading(file);
 
     assertTrue(reader.read("acme").isEmpty());
     Files.writeString(file, ACME);
-    assertEquals("codex", reader.require("anything").agent().type());
+    assertEquals("codex", reader.require("acme").agent().type());
+    assertTrue(reader.read("acme-fix").isEmpty(), "a catalog of one project holds no other");
     Files.writeString(file, "agent: [unterminated");
     var unreadable = assertThrows(ProjectReader.Unreadable.class, () -> reader.read("acme"));
     assertTrue(unreadable.getMessage().startsWith("The definition of project 'acme'"));

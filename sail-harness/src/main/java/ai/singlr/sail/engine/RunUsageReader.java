@@ -72,7 +72,7 @@ public final class RunUsageReader {
       return RunUsage.NONE;
     }
     try {
-      var marked = lastMarked(run.project(), path, harness.reportMarkers());
+      var marked = lastMarked(run.place().instance(), path, harness.reportMarkers());
       return marked == null ? null : parsed(run, harness.usage(inFileOrder(marked)));
     } catch (IOException | TimeoutException unanswered) {
       return null;

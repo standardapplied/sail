@@ -134,7 +134,7 @@ class SessionReportDeliveryIT {
         List.of(
             "bash",
             "-lc",
-            "cd ~/workspace && claude --resume 0199aaaa-1111-7000-8000-000000000001"),
+            "cd ~/workspace && exec claude --resume 0199aaaa-1111-7000-8000-000000000001"),
         AgentAttachCommand.buildResumeCommand(Harnesses.of(run.agent()), run.sessionId()));
   }
 

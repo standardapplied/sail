@@ -256,7 +256,7 @@ class AnsweredQuestionLoopTest {
     var build = loop.run(SPEC, "build");
     asks(build, QUESTION);
     loop.onEvent(ReviewLoop.buildStop(SPEC, build));
-    var holder = loop.run(null, "adhoc");
+    var holder = loop.run(SPEC, Lane.ROOM_FULL.wire());
 
     says(ReviewLoop.HANDLE, "Use 21.");
 
@@ -270,10 +270,10 @@ class AnsweredQuestionLoopTest {
         RunStops.of(
             Event.WellKnownData.SOURCE_WATCHER,
             ReviewLoop.PROJECT,
-            null,
+            SPEC,
             "claude-code",
             holder,
-            "adhoc",
+            Lane.ROOM_FULL.wire(),
             0,
             null));
 
@@ -368,7 +368,7 @@ class AnsweredQuestionLoopTest {
     var build = loop.run(SPEC, "build");
     asks(build, QUESTION);
     loop.onEvent(ReviewLoop.buildStop(SPEC, build));
-    var holder = loop.run(null, "adhoc");
+    var holder = loop.run(SPEC, Lane.ROOM_FULL.wire());
     says(ReviewLoop.HANDLE, "Use 21.");
     loop.refuseLaunches();
 
@@ -376,10 +376,10 @@ class AnsweredQuestionLoopTest {
         RunStops.of(
             Event.WellKnownData.SOURCE_WATCHER,
             ReviewLoop.PROJECT,
-            null,
+            SPEC,
             "claude-code",
             holder,
-            "adhoc",
+            Lane.ROOM_FULL.wire(),
             0,
             null));
 

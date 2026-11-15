@@ -7,6 +7,7 @@ package ai.singlr.sail.engine;
 
 import java.io.IOException;
 import java.nio.channels.FileChannel;
+import java.nio.channels.OverlappingFileLockException;
 import java.nio.file.FileAlreadyExistsException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -14,9 +15,12 @@ import java.nio.file.StandardOpenOption;
 import java.nio.file.attribute.PosixFilePermission;
 import java.nio.file.attribute.PosixFilePermissions;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.ReentrantLock;
+import java.util.function.LongSupplier;
 
 /**
  * An exclusive {@link java.nio.channels.FileLock} on one file, so the API server and the CLI —
@@ -36,6 +40,7 @@ import java.util.concurrent.locks.ReentrantLock;
 public final class FileMutex implements AutoCloseable {
 
   private static final Map<Path, ReentrantLock> IN_PROCESS = new ConcurrentHashMap<>();
+  private static final long POLL_MILLIS = 50;
   private static final Set<PosixFilePermission> GROUP_SHARED =
       PosixFilePermissions.fromString("rw-rw----");
 
@@ -70,6 +75,59 @@ public final class FileMutex implements AutoCloseable {
     } catch (IOException | RuntimeException e) {
       inProcess.unlock();
       throw e;
+    }
+  }
+
+  /**
+   * Takes the lock on {@code file} as {@link #acquire} does, but gives up once {@code nanos} reads
+   * {@code deadline} or later while another thread or process holds it: empty then, with nothing
+   * held. What a box that does one thing at a time answers with when it is busy, rather than
+   * queueing without end. The clock is read only while another holds the file, which is asked again
+   * every {@value #POLL_MILLIS} ms.
+   */
+  public static Optional<FileMutex> acquireUntil(Path file, long deadline, LongSupplier nanos)
+      throws IOException, InterruptedException {
+    var normalized = file.toAbsolutePath().normalize();
+    var inProcess = IN_PROCESS.computeIfAbsent(normalized, f -> new ReentrantLock());
+    while (!inProcess.tryLock(POLL_MILLIS, TimeUnit.MILLISECONDS)) {
+      if (nanos.getAsLong() - deadline >= 0) {
+        return Optional.empty();
+      }
+    }
+    if (inProcess.getHoldCount() > 1) {
+      return Optional.of(new FileMutex(inProcess, null));
+    }
+    try {
+      Files.createDirectories(normalized.getParent());
+      var channel = open(normalized);
+      try {
+        while (!lockedBy(channel)) {
+          if (nanos.getAsLong() - deadline >= 0) {
+            channel.close();
+            inProcess.unlock();
+            return Optional.empty();
+          }
+          Thread.sleep(POLL_MILLIS);
+        }
+        return Optional.of(new FileMutex(inProcess, channel));
+      } catch (IOException | InterruptedException | RuntimeException e) {
+        channel.close();
+        throw e;
+      }
+    } catch (IOException | InterruptedException | RuntimeException e) {
+      if (inProcess.isHeldByCurrentThread()) {
+        inProcess.unlock();
+      }
+      throw e;
+    }
+  }
+
+  /** Whether {@code channel} took its file's lock now; not when another channel holds it. */
+  private static boolean lockedBy(FileChannel channel) throws IOException {
+    try {
+      return channel.tryLock() != null;
+    } catch (OverlappingFileLockException heldInThisProcess) {
+      return false;
     }
   }
 

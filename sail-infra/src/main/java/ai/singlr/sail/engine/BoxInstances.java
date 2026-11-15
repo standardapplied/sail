@@ -38,6 +38,14 @@ public final class BoxInstances {
   /** The project a template instance is the template of, set when it is launched. */
   public static final String TEMPLATE_OF_KEY = "user.sail.template.of";
 
+  /** The spec whose runs live in a workspace: set at the copy, on a spec's workspace only. */
+  public static final String SPEC_KEY = "user.sail.spec";
+
+  /**
+   * The person a workspace belongs to: set at the copy, and set again when its runs change hands.
+   */
+  public static final String OWNER_KEY = "user.sail.owner";
+
   /** Written last when a workspace is made, so one without it is not whole (W12). */
   public static final String READY_KEY = "user.sail.ready";
 
@@ -105,6 +113,18 @@ public final class BoxInstances {
             : new Stray(templateOf.get(), null);
       }
       return new Plain();
+    }
+
+    /** Whether this is {@code place}'s workspace by its keys, whichever spec or person it is of. */
+    public boolean isWorkspaceOf(RunPlace.SpecWorkspace place) {
+      return kind() instanceof Workspace(var project, var workspace, var ready)
+          && project.equals(place.project())
+          && workspace.equals(place.workspace());
+    }
+
+    /** Whether this is spec {@code place}'s own workspace: {@code place}'s, carrying its spec. */
+    public boolean isTheSpecs(RunPlace.SpecWorkspace place) {
+      return isWorkspaceOf(place) && key(SPEC_KEY).filter(place.specId()::equals).isPresent();
     }
 
     /** Whether this is a plain instance, the only kind a project's own container is. */

@@ -57,7 +57,7 @@ class ProjectProvisionerTest {
             "postgres",
             new ProjectDefinition.Service("postgres:16", List.of(5432), Map.of(), null, null)),
         Map.of("app", new ProjectDefinition.Process("java -jar app.jar", ".", null, Map.of())),
-        new ProjectDefinition.Agent("claude-code", true, "sail/", true, null, Map.of(), null, null),
+        new ProjectDefinition.Agent("claude-code", true, "sail/", null, Map.of(), null, null),
         null);
   }
 
@@ -2770,7 +2770,7 @@ class ProjectProvisionerTest {
                 new ProjectDefinition.Service("postgres:16", List.of(5432), Map.of(), null, null)),
             null,
             new ProjectDefinition.Agent(
-                "claude-code", true, "sail/", true, List.of("claude-code"), Map.of(), null, null),
+                "claude-code", true, "sail/", List.of("claude-code"), Map.of(), null, null),
             null);
     var shell =
         new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
@@ -2824,7 +2824,7 @@ class ProjectProvisionerTest {
                 new ProjectDefinition.Service("postgres:16", List.of(5432), Map.of(), null, null)),
             null,
             new ProjectDefinition.Agent(
-                "claude-code", true, "sail/", true, List.of("claude-code"), Map.of(), null, null),
+                "claude-code", true, "sail/", List.of("claude-code"), Map.of(), null, null),
             null);
     var shell =
         new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
@@ -2872,7 +2872,6 @@ class ProjectProvisionerTest {
                 "claude-code",
                 true,
                 "sail/",
-                true,
                 List.of("claude-code", "codex"),
                 Map.of(),
                 null,
@@ -3018,7 +3017,7 @@ class ProjectProvisionerTest {
                 new ProjectDefinition.Service("postgres:16", List.of(5432), Map.of(), null, null)),
             null,
             new ProjectDefinition.Agent(
-                "claude-code", true, "sail/", true, List.of("claude-code"), Map.of(), null, null),
+                "claude-code", true, "sail/", List.of("claude-code"), Map.of(), null, null),
             null);
     var shell =
         new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))

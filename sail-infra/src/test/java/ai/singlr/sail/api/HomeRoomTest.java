@@ -121,8 +121,7 @@ class HomeRoomTest {
             new ReviewStore(db),
             new RunStore(db))
         .useMessages(new MessageStore(db))
-        .useRooms(roomStore)
-        .useLaunchExecutor(Runnable::run);
+        .useRooms(roomStore);
   }
 
   private static ProjectDefinition definition(String text) {

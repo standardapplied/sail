@@ -51,7 +51,6 @@ agent:
   type: claude-code
   auto_branch: true
   branch_prefix: "sail/"
-  auto_snapshot: true
   install:
     - claude-code
 

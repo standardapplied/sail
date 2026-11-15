@@ -63,10 +63,7 @@ record DoorFleet(
                         new ProjectStore(db)
                             .upsert(
                                 TestDefinitions.yaml(
-                                    "name: "
-                                        + project
-                                        + "\nagent:\n  type: claude-code\n  auto_snapshot:"
-                                        + " false\n"))));
+                                    "name: " + project + "\nagent:\n  type: claude-code\n"))));
     var specs = new SpecStore(db);
     Acting.as(
         "eng",

@@ -16,6 +16,7 @@ import ai.singlr.sail.engine.AgentUnit;
 import ai.singlr.sail.engine.HarnessHooks;
 import ai.singlr.sail.engine.LiveMemberPrompt;
 import ai.singlr.sail.engine.LiveStream;
+import ai.singlr.sail.engine.RunPlace;
 import ai.singlr.sail.harness.Harnesses;
 import ai.singlr.sail.harness.RunUsage;
 import ai.singlr.sail.identity.Acting;
@@ -70,7 +71,10 @@ class LiveMemberTest {
     var started = room.processes.starts.getFirst();
     assertEquals(1, room.processes.starts.size());
     assertEquals(LiveRoom.invocation("--dangerously-skip-permissions"), started.command());
-    assertEquals(PROJECT_CONTAINER, started.container());
+    assertEquals(
+        RunPlace.of(LiveRoom.PROJECT, SPEC).instance(),
+        started.container(),
+        "a spec's member lives in the spec's workspace");
     assertEquals("/home/dev/workspace/api", started.workDir());
     assertEquals(
         Set.of("SAIL_SPEC_ID", "SAIL_AGENT", "SAIL_RUN_ID", "SAIL_RUN_ROLE"),
@@ -119,8 +123,6 @@ class LiveMemberTest {
         room.container.file(unit.sessionPath()).contains("\"run_id\": \"" + run.id() + "\""),
         "the session file is staged as for any run");
   }
-
-  private static final String PROJECT_CONTAINER = LiveRoom.PROJECT;
 
   @Test
   void sailReadsTheProcessAndPostsTheTurnsTextAsTheMember() {

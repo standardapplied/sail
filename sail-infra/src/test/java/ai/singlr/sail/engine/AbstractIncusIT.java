@@ -8,6 +8,7 @@ package ai.singlr.sail.engine;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
+import ai.singlr.sail.config.ProjectDefinition;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.file.Files;
@@ -16,6 +17,7 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Objects;
 import java.util.stream.Stream;
 
 /**
@@ -192,6 +194,110 @@ public abstract class AbstractIncusIT {
   @FunctionalInterface
   protected interface StageCommand {
     ShellExec.Result run() throws Exception;
+  }
+
+  /** The ZFS pool a spec's workspaces are cloned on in this lane: a file, beside the dir pool. */
+  protected static final String SPEC_POOL = "sail-it-specs";
+
+  /**
+   * What makes a fresh template a project's in this lane, run as root with each of the project's
+   * repos after it: the dev user, lingering so its user manager runs, git's identity, and each repo
+   * cloned at {@code /home/dev/workspace/<path>} from a bare origin of its own in {@code /srv},
+   * holding one commit on {@code main}, so a workspace's prepare fetches with no network.
+   */
+  private static final String SEAL_SPEC_TEMPLATE =
+      """
+      set -eu
+      userdel -r ubuntu 2>/dev/null || true
+      id -u dev >/dev/null 2>&1 || useradd -m -u 1000 -s /bin/bash dev
+      for _ in $(seq 1 30); do loginctl enable-linger dev 2>/dev/null && break; sleep 1; done
+      loginctl enable-linger dev
+      as_dev() { runuser -u dev -- env HOME=/home/dev "$@"; }
+      as_dev git config --global user.email it@sail.invalid
+      as_dev git config --global user.name it
+      as_dev mkdir -p /home/dev/.sail /home/dev/workspace
+      for repo in "$@"; do
+        origin="/srv/$(printf '%s' "$repo" | tr / -).git"
+        seed="/tmp/seed-$(printf '%s' "$repo" | tr / -)"
+        git init --quiet --bare -b main "$origin"
+        chown -R dev:dev "$origin"
+        as_dev git init --quiet -b main "$seed"
+        echo seed | as_dev tee "$seed/README" >/dev/null
+        as_dev git -C "$seed" add README
+        as_dev git -C "$seed" commit --quiet -m seed
+        as_dev git -C "$seed" push --quiet "$origin" main
+        as_dev mkdir -p "$(dirname "/home/dev/workspace/$repo")"
+        as_dev git clone --quiet "file://$origin" "/home/dev/workspace/$repo"
+      done
+      """;
+
+  /** What a test adds to a project's template while it runs, before it is sealed. */
+  @FunctionalInterface
+  protected interface TemplateSetup {
+    void into(String template) throws Exception;
+  }
+
+  /**
+   * Makes this box one a spec of {@code definition}'s project is dispatched on: a file-backed ZFS
+   * pool, {@link #SPEC_POOL}, beside the box's dir pool, and the project's template, launched on it
+   * from the prepared image, made the project's ({@link #SEAL_SPEC_TEMPLATE}), given what {@code
+   * setup} adds, its sail machinery installed, stopped, recorded current at {@code v1} from the
+   * definition as a dispatch reads it, and snapshotted: what every run of a spec is cloned from.
+   */
+  protected void specBox(ProjectDefinition definition, TemplateSetup setup) throws Exception {
+    removeSpecBox(definition.name());
+    var made = new IncusStorage(shell).create(SPEC_POOL, new PoolSource.File(10240));
+    assertTrue(made.ok(), "Incus could not make a file-backed zfs pool: " + made.reason());
+    var template = WorkspaceTemplate.nameOf(definition.name());
+    launchPrepared(template, "--storage", SPEC_POOL);
+    var seal = new ArrayList<>(List.of("bash", "-c", SEAL_SPEC_TEMPLATE, "seal"));
+    for (var repo :
+        Objects.requireNonNullElse(definition.repos(), List.<ProjectDefinition.Repo>of())) {
+      seal.add(repo.path());
+    }
+    var sealed = exec(template, seal);
+    assertTrue(sealed.ok(), "could not seal the template: " + sealed.stderr() + sealed.stdout());
+    setup.into(template);
+    ContainerSailSetup.ensureInstalled(shell, template);
+    new ContainerManager(shell).stop(template);
+    var recorded =
+        shell.exec(
+            List.of(
+                "incus",
+                "config",
+                "set",
+                template,
+                BoxInstances.TEMPLATE_OF_KEY + "=" + definition.name(),
+                WorkspaceTemplate.CURRENT_KEY + "=v1",
+                WorkspaceTemplate.INPUTS_KEY
+                    + "="
+                    + ProjectProvisioner.inputs(definition, WorkstationIdentity.registered())));
+    assertTrue(recorded.ok(), recorded.reason());
+    new SnapshotManager(shell).create(template, "v1");
+  }
+
+  /** Removes every workspace and the template of {@code project}, then {@link #SPEC_POOL}. */
+  protected void removeSpecBox(String project) {
+    try {
+      for (var instance : new BoxInstances(shell).all()) {
+        if (instance.kind() instanceof BoxInstances.Workspace workspace
+            && workspace.project().equals(project)) {
+          deleteContainerQuietly(instance.name());
+        }
+      }
+    } catch (Exception unlisted) {
+      System.err.println("  [it] could not list the box's instances: " + unlisted.getMessage());
+    }
+    deleteContainerQuietly(WorkspaceTemplate.nameOf(project));
+    try {
+      shell.exec(List.of("incus", "storage", "delete", SPEC_POOL));
+    } catch (Exception ignored) {
+    }
+  }
+
+  /** The instance spec {@code specId}'s runs of {@code project} live in. */
+  protected static String workspaceOf(String project, String specId) {
+    return RunPlace.of(project, specId).instance();
   }
 
   protected ShellExec.Result exec(String container, List<String> argv) throws Exception {

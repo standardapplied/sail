@@ -5,7 +5,6 @@
 
 package ai.singlr.sail.api;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -78,21 +77,6 @@ class WebhookMessageTest {
     var event = Event.of("p", "s", "agent_session_completed", "sail", "h");
     var message = WebhookMessage.forEvent(event);
     assertTrue(message.title().contains("completed"));
-  }
-
-  @Test
-  void snapshotCreatedIncludesLabel() {
-    var event =
-        Event.of("p", null, "snapshot_created", "sail", "h", Map.of("label", "snap-20260521"));
-    var message = WebhookMessage.forEvent(event);
-    assertTrue(message.message().contains("snap-20260521"));
-  }
-
-  @Test
-  void snapshotCreatedHandlesMissingLabel() {
-    var event = Event.of("p", null, "snapshot_created", "sail", "h");
-    var message = WebhookMessage.forEvent(event);
-    assertEquals("Snapshot created.", message.message());
   }
 
   @Test

@@ -17,6 +17,7 @@ import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.config.TestDefinitions;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.HostInfo;
+import ai.singlr.sail.engine.RunPlace;
 import ai.singlr.sail.engine.ScriptedShellExecutor;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.harness.Harnesses;
@@ -47,6 +48,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.Callable;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -102,7 +104,7 @@ class MissedStopReconcilerTest {
     }
 
     @Override
-    public boolean active(String project, String runId, String unit) {
+    public boolean active(RunPlace place, String runId, String unit) {
       calls.incrementAndGet();
       lastUnit = unit;
       return active;
@@ -524,6 +526,42 @@ class MissedStopReconcilerTest {
     assertEquals(2, asked.get());
   }
 
+  /** Minor 11: a spec's stopped workspace is never counted tidied: it is asked again too. */
+  @Test
+  void aSpecsStoppedWorkspaceIsAskedAgainOnALaterPass() {
+    finishedSession("auth", "completed", null);
+    var asked = new AtomicInteger();
+    var stopped =
+        new ShellExec() {
+          @Override
+          public Result exec(List<String> command) {
+            if (command.contains("test-project-auth")
+                && command.stream().anyMatch(arg -> arg.contains("launch.env"))) {
+              asked.incrementAndGet();
+            }
+            return new Result(1, "", "Error: Instance is not running");
+          }
+
+          @Override
+          public Result exec(List<String> command, Path workDir, Duration timeout) {
+            return exec(command);
+          }
+
+          @Override
+          public boolean isDryRun() {
+            return false;
+          }
+        };
+    var clock = new ManualClock(Instant.now().plus(Duration.ofMinutes(10)), Duration.ofMinutes(10));
+    var reconciler = reconciler(MissedStopReconciler.systemdUnitProbe(stopped), clock::instant);
+
+    reconciler.removeLeftovers();
+    clock.advance(Duration.ofMinutes(10));
+    reconciler.removeLeftovers();
+
+    assertEquals(2, asked.get());
+  }
+
   /**
    * A container that stays stopped is said once, not on every pass; once its tidy succeeds, a later
    * failure is said again.
@@ -654,7 +692,7 @@ class MissedStopReconcilerTest {
     MissedStopReconciler.UnitProbe probe =
         new MissedStopReconciler.UnitProbe() {
           @Override
-          public boolean active(String project, String runId, String unit) {
+          public boolean active(RunPlace place, String runId, String unit) {
             return false;
           }
 
@@ -687,7 +725,7 @@ class MissedStopReconcilerTest {
     MissedStopReconciler.UnitProbe probe =
         new MissedStopReconciler.UnitProbe() {
           @Override
-          public boolean active(String project, String runId, String unit) {
+          public boolean active(RunPlace place, String runId, String unit) {
             return false;
           }
 
@@ -778,7 +816,7 @@ class MissedStopReconcilerTest {
     MissedStopReconciler.UnitProbe probe =
         new MissedStopReconciler.UnitProbe() {
           @Override
-          public boolean active(String project, String runId, String unit) {
+          public boolean active(RunPlace place, String runId, String unit) {
             return false;
           }
 
@@ -1093,7 +1131,7 @@ class MissedStopReconcilerTest {
 
               @Override
               public List<Rescue> ensureCommitted(
-                  String project, List<String> repos, String branch, String commitMessage) {
+                  RunPlace place, List<String> repos, String branch, String commitMessage) {
                 return List.of();
               }
             },
@@ -1124,6 +1162,120 @@ class MissedStopReconcilerTest {
         "the replayed stop reaches the pipeline, which launches the spec's reviewer");
   }
 
+  /**
+   * The one reading of an unknown exit (MJ1): a build is lost only when it never recorded a
+   * process, or its instance is stopped or gone. One that recorded a process in an instance that
+   * runs, a limit or a code, or a row that had already ended, is not lost.
+   */
+  @Test
+  void aBuildIsLostOnlyWithNoProcessRecordedOrItsInstanceGone() throws Exception {
+    createInProgressSpec("auth");
+    assertEquals(false, lostOf(session("auth", "node-a", "build"), () -> false, null));
+    assertEquals(true, lostOf(processless("auth"), () -> false, null));
+    assertEquals(true, lostOf(session("auth", "node-a", "build"), () -> true, null));
+    assertEquals(false, lostOf(processless("auth"), () -> true, 2), "a code says how it ended");
+    assertEquals(false, lostOf(finishedSession("auth", "completed", null), () -> true, null));
+    assertEquals(
+        false,
+        lostOf(
+            session("auth", "node-a", "build"),
+            () -> {
+              throw new IOException("incus did not answer");
+            },
+            null),
+        "an instance whose state cannot be read is never called gone");
+    assertEquals(
+        "interrupted, lost false",
+        lostOf(
+            session("auth", "node-a", "build"),
+            () -> {
+              throw new InterruptedException("stopping");
+            },
+            null),
+        "nor one whose read was interrupted, which keeps the interrupt");
+  }
+
+  /** The production probe calls a spec's workspace gone when it is stopped or missing, only. */
+  @Test
+  void theProbeCallsAWorkspaceGoneOnlyWhenItIsStoppedOrMissing() throws Exception {
+    var place = RunPlace.of("test-project", "auth");
+    for (var status : List.of("Stopped", "Running")) {
+      var shell =
+          new ScriptedShellExecutor()
+              .onOk(
+                  "incus list ^test-project-auth$",
+                  "[" + TestWorkspaces.specWorkspace("test-project", "auth", status, "eng") + "]");
+      assertEquals(
+          "Stopped".equals(status),
+          MissedStopReconciler.systemdUnitProbe(shell).instanceGone(place),
+          status);
+    }
+    assertTrue(
+        MissedStopReconciler.systemdUnitProbe(new ScriptedShellExecutor().onOk("incus list", "[]"))
+            .instanceGone(place),
+        "a workspace Incus no longer lists is gone");
+  }
+
+  /**
+   * Whether the sweep's stop of {@code run} says it was lost, its instance as {@code gone} says.
+   */
+  private Object lostOf(String run, Callable<Boolean> gone, Integer code) throws Exception {
+    var latch = new CountDownLatch(1);
+    var stops = captureStops(latch);
+    var probe =
+        new MissedStopReconciler.UnitProbe() {
+          @Override
+          public boolean active(RunPlace place, String runId, String unit) {
+            return false;
+          }
+
+          @Override
+          public MissedStopReconciler.Ending ending(RunPlace place, String runId, String unit) {
+            return new MissedStopReconciler.Ending(code, null);
+          }
+
+          @Override
+          public boolean instanceGone(RunPlace place) throws Exception {
+            return gone.call();
+          }
+        };
+    reconciler(probe, PAST_GRACE).sweep();
+    var interrupted = Thread.interrupted();
+    BusTesting.awaitDelivery(latch);
+    var stop =
+        stops.stream()
+            .filter(event -> run.equals(event.data().get(Event.WellKnownData.RUN_ID)))
+            .findFirst()
+            .orElseThrow();
+    Acting.system(
+        () ->
+            sessionStore.finish(
+                run, sessionStore.findById(run).orElseThrow().status(), "stopped", null, null));
+    var lost = Boolean.TRUE.equals(stop.data().get(Event.WellKnownData.LOST));
+    return interrupted ? "interrupted, lost " + lost : lost;
+  }
+
+  /** A build of {@code specId} still recorded running that never recorded a process. */
+  private String processless(String specId) {
+    return Acting.system(
+        () -> {
+          var id = DateTimeUtils.newId().toString();
+          return sessionStore.create(
+              id,
+              "test-project",
+              specId,
+              "node-a",
+              "build",
+              "claude-code",
+              "feat/test",
+              "task",
+              null,
+              null,
+              "/home/dev/.sail/runs/" + id + "/agent.log",
+              "sail-agent-" + id);
+        });
+  }
+
   @Test
   void replaysAMissedStopWithNoRecordedExitCodeAndStartsTheSpecsReview() throws Exception {
     createInProgressSpec("auth");
@@ -1149,12 +1301,12 @@ class MissedStopReconcilerTest {
     var probe =
         new MissedStopReconciler.UnitProbe() {
           @Override
-          public boolean active(String project, String runId, String unit) {
+          public boolean active(RunPlace place, String runId, String unit) {
             return false;
           }
 
           @Override
-          public MissedStopReconciler.Ending ending(String project, String runId, String unit)
+          public MissedStopReconciler.Ending ending(RunPlace place, String runId, String unit)
               throws IOException {
             throw new IOException("incus exec: connection reset");
           }
@@ -1180,12 +1332,12 @@ class MissedStopReconcilerTest {
     var probe =
         new MissedStopReconciler.UnitProbe() {
           @Override
-          public boolean active(String project, String runId, String unit) {
+          public boolean active(RunPlace place, String runId, String unit) {
             return false;
           }
 
           @Override
-          public MissedStopReconciler.Ending ending(String project, String runId, String unit)
+          public MissedStopReconciler.Ending ending(RunPlace place, String runId, String unit)
               throws InterruptedException {
             throw new InterruptedException("shutting down");
           }
@@ -1721,7 +1873,11 @@ class MissedStopReconcilerTest {
     assertEquals(0, bus.publishedCount(), "its stop was acted on: never replayed");
     assertTrue(
         DispatchGate.decide(
-                "auth", "build", List.of(), sessionStore.runningOnNode("test-project", "node-a"))
+                RunPlace.of("test-project", "auth"),
+                "auth",
+                "build",
+                List.of(),
+                sessionStore.runningOnNode("test-project", "node-a"))
             .isEmpty(),
         "the failed spec can be dispatched again");
   }
@@ -1916,7 +2072,13 @@ class MissedStopReconcilerTest {
     var adhoc = session(null, "node-a", "adhoc");
     var claim = session(null, "node-a", "adhoc");
     Acting.system(() -> TestRuns.transition(sessionStore, claim, "running", "stopping"));
-    var frozen = incus("[{\"name\": \"test-project\", \"status\": \"Frozen\"}]", "frozen");
+    var frozen =
+        incus(
+            "[{\"name\": \"test-project\", \"status\": \"Frozen\"},"
+                + " {\"name\": \"test-project-auth\", \"status\": \"Frozen\", \"config\":"
+                + " {\"user.sail.project\": \"test-project\", \"user.sail.workspace\": \"auth\","
+                + " \"user.sail.spec\": \"auth\", \"user.sail.ready\": \"1\"}}]",
+            "frozen");
 
     assertEquals(0, reconciler(MissedStopReconciler.systemdUnitProbe(frozen), PAST_GRACE).sweep());
 
@@ -2214,13 +2376,13 @@ class MissedStopReconcilerTest {
     var unit = "sail-agent-" + runId;
     assertTrue(
         MissedStopReconciler.systemdUnitProbe(runIdentityShell(true, true))
-            .active("acme", runId, unit));
+            .active(RunPlace.of("acme", null), runId, unit));
     assertFalse(
         MissedStopReconciler.systemdUnitProbe(runIdentityShell(true, false))
-            .active("acme", runId, unit));
+            .active(RunPlace.of("acme", null), runId, unit));
     assertFalse(
         MissedStopReconciler.systemdUnitProbe(runIdentityShell(false, false))
-            .active("acme", runId, unit));
+            .active(RunPlace.of("acme", null), runId, unit));
   }
 
   private static ShellExec runIdentityShell(boolean pidRecorded, boolean alive) {

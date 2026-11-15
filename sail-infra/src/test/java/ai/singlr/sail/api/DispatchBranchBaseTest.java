@@ -11,6 +11,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.engine.ContainerSailSetup;
+import ai.singlr.sail.engine.ScriptedShellExecutor;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.WatcherSpawner;
 import ai.singlr.sail.identity.Acting;
@@ -156,7 +157,7 @@ class DispatchBranchBaseTest {
             new FdeStore(db),
             new CopyOnWriteArrayList<Event>()::add,
             new WatcherSpawner(happyPath(), (command, logPath) -> 4242L),
-            (project, config) -> "",
+            TestWorkspaces.ready(TestProjects.reading(yaml), "acme"),
             command -> 0,
             DispatchOperations.Listener.NONE,
             SessionYield.NONE);
@@ -212,7 +213,8 @@ class DispatchBranchBaseTest {
           return entry.getValue();
         }
       }
-      return new Result(1, "", "no script for " + joined);
+      return ScriptedShellExecutor.reachableContainer(joined)
+          .orElseGet(() -> new Result(1, "", "no script for " + joined));
     }
 
     @Override

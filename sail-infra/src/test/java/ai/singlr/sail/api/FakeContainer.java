@@ -8,6 +8,7 @@ package ai.singlr.sail.api;
 import ai.singlr.sail.engine.AgentUnit;
 import ai.singlr.sail.engine.ContainerSailSetup;
 import ai.singlr.sail.engine.ReportLines;
+import ai.singlr.sail.engine.RunPlace;
 import ai.singlr.sail.engine.ScriptedShellExecutor;
 import ai.singlr.sail.engine.ShellExec;
 import java.io.IOException;
@@ -27,9 +28,12 @@ import java.util.concurrent.atomic.AtomicReference;
 /**
  * A project container, and the host's systemd beside it, as the launch, watch and stop machinery
  * sees them through {@link ShellExec}: files that are written can be read back, an agent unit that
- * was started is active until it exits or is killed, and git answers for the spec's repos. It
- * stands in for the shell only — every sail class that talks to a container runs for real against
- * it.
+ * was started is active until it exits or is killed, and git answers for the spec's repos. The
+ * project's container and each spec's workspace that exists (made by a create, or held by a run the
+ * test records) answer, a workspace with its keys as a create gives them, and no other instance
+ * does, so a lane addressed to a place that does not exist fails as on a box; their files are one
+ * tree, as a loop that runs one spec at a time never tells them apart. It stands in for the shell
+ * only — every sail class that talks to a container runs for real against it.
  */
 final class FakeContainer implements ShellExec {
 
@@ -37,6 +41,7 @@ final class FakeContainer implements ShellExec {
   private static final String WATCH_UNIT_PREFIX = "sail-watch-";
 
   private final String project;
+  private final Set<String> instances = ConcurrentHashMap.newKeySet();
   private final Map<String, String> files = new ConcurrentHashMap<>();
   private final Map<String, String> modes = new ConcurrentHashMap<>();
   private final Map<String, Agent> agents = new ConcurrentHashMap<>();
@@ -77,6 +82,38 @@ final class FakeContainer implements ShellExec {
 
   FakeContainer(String project) {
     this.project = project;
+    instances.add(project);
+  }
+
+  /** Spec {@code specId}'s workspace exists, as a create made it. */
+  void holds(String specId) {
+    instances.add(RunPlace.of(project, specId).instance());
+  }
+
+  /** The workspace an {@code incus copy} argv, {@code copy}, made exists. */
+  void made(List<String> copy) {
+    instances.add(copy.get(3));
+  }
+
+  /** A person's terminal opened on a spec's conversation: its pid file names a live process. */
+  void terminalOpened() {
+    var terminal = new Agent(pids.incrementAndGet(), Map.of());
+    agents.put("terminal", terminal);
+    files.put(AgentUnit.TERMINAL.pidPath(), String.valueOf(terminal.pid));
+  }
+
+  /** Whether the terminal opened on a spec's conversation still runs. */
+  boolean terminalOpen() {
+    var terminal = agents.get("terminal");
+    return terminal != null && terminal.alive;
+  }
+
+  /** The person closed the terminal. */
+  void terminalClosed() {
+    var terminal = agents.get("terminal");
+    if (terminal != null) {
+      terminal.alive = false;
+    }
   }
 
   /** The agent of {@code runId} started: its unit is active and its pid file names it. */
@@ -284,12 +321,30 @@ final class FakeContainer implements ShellExec {
     commands.add(List.copyOf(command));
     var boundary = command.indexOf("--");
     if (command.size() > 2 && "incus".equals(command.get(0)) && "list".equals(command.get(1))) {
+      var asked = command.get(2);
+      var name =
+          asked.startsWith("^") && asked.endsWith("$")
+              ? asked.substring(1, asked.length() - 1)
+              : project;
+      if (!instances.contains(name)) {
+        return ok("[]");
+      }
+      var workspace = name.startsWith(project + "-") ? name.substring(project.length() + 1) : "";
+      var keys =
+          workspace.isEmpty()
+              ? ""
+              : (", \"config\": {\"user.sail.project\": \"%s\", \"user.sail.workspace\": \"%s\","
+                      + " \"user.sail.spec\": \"%s\", \"user.sail.ready\": \"1\"}")
+                  .formatted(project, workspace, workspace);
       return ok(
-          "[{\"name\": \"%s\", \"status\": \"%s\", \"state\": {}}]"
-              .formatted(project, running ? "Running" : "Stopped"));
+          "[{\"name\": \"%s\", \"status\": \"%s\", \"state\": {}%s}]"
+              .formatted(name, running ? "Running" : "Stopped", keys));
     }
     if (!"incus".equals(command.get(0)) || !"exec".equals(command.get(1)) || boundary < 0) {
       return host(command);
+    }
+    if (!instances.contains(command.get(2))) {
+      return fail("Error: Instance not found");
     }
     if (!running || unreachable) {
       return fail("Error: Instance is not running");
@@ -356,7 +411,8 @@ final class FakeContainer implements ShellExec {
     if (!running || unreachable) {
       return fail("Error: Instance is not running");
     }
-    var path = command.getLast().substring(project.length());
+    var target = command.getLast();
+    var path = target.substring(target.indexOf('/'));
     try {
       files.put(path, Files.readString(Path.of(command.get(command.size() - 2))));
     } catch (IOException e) {

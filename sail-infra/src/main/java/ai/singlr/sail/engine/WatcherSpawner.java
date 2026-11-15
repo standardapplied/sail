@@ -100,17 +100,18 @@ public final class WatcherSpawner {
    * the run id, and enforcing {@code guardrails} — the limits of the run's lane, as the project set
    * them when the watcher was spawned — from {@code startedAt}, the instant the run's own row says
    * it started: the wall clock is the row's, never anything the agent can write. A limit the lane
-   * does not set is left off, and unlimited.
+   * does not set is left off, and unlimited. A run of a spec names its spec, so the watcher probes
+   * the spec's workspace, where the run lives ({@link RunPlace}).
    */
   public static List<String> watchCommandForRun(
-      String project, String runId, String agentUnit, String startedAt, Guardrails guardrails) {
+      RunPlace place, String runId, String agentUnit, String startedAt, Guardrails guardrails) {
     var command =
         new ArrayList<>(
             List.of(
                 SailPaths.binaryPath().toString(),
                 "agent",
                 "watch",
-                project,
+                place.project(),
                 "--run",
                 Ids.requireUuid(runId),
                 "--unit",
@@ -119,6 +120,9 @@ public final class WatcherSpawner {
                 startedAt,
                 "--action",
                 guardrails.action()));
+    if (place instanceof RunPlace.SpecWorkspace workspace) {
+      command.addAll(List.of("--spec", workspace.specId()));
+    }
     if (guardrails.maxDuration() != null) {
       command.addAll(List.of("--max-duration", guardrails.maxDuration()));
     }
@@ -145,12 +149,12 @@ public final class WatcherSpawner {
    * thread was interrupted mid-ladder, which the caller treats as a launch failure.
    */
   public Spawned spawnForRun(
-      String project, String runId, String agentUnit, String startedAt, Guardrails guardrails)
+      RunPlace place, String runId, String agentUnit, String startedAt, Guardrails guardrails)
       throws IOException {
     return spawnFresh(
         unitNameForRun(runId),
-        watchCommandForRun(project, runId, agentUnit, startedAt, guardrails),
-        watchLogForRun(project, runId));
+        watchCommandForRun(place, runId, agentUnit, startedAt, guardrails),
+        watchLogForRun(place.project(), runId));
   }
 
   private Spawned spawnFresh(String unit, List<String> argv, Path watchLog) throws IOException {
@@ -183,12 +187,12 @@ public final class WatcherSpawner {
    * back to a plain process. Empty means no systemd scope is available.
    */
   public Optional<Unit> spawnUnitForRun(
-      String project, String runId, String agentUnit, String startedAt, Guardrails guardrails)
+      RunPlace place, String runId, String agentUnit, String startedAt, Guardrails guardrails)
       throws IOException {
     return spawnUnit(
         unitNameForRun(runId),
-        watchCommandForRun(project, runId, agentUnit, startedAt, guardrails),
-        watchLogForRun(project, runId));
+        watchCommandForRun(place, runId, agentUnit, startedAt, guardrails),
+        watchLogForRun(place.project(), runId));
   }
 
   Optional<Unit> spawnUnit(String unit, List<String> argv, Path watchLog) throws IOException {

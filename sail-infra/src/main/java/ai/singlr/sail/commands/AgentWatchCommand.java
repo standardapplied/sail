@@ -26,9 +26,11 @@ import ai.singlr.sail.engine.ContainerManager;
 import ai.singlr.sail.engine.ContainerStateGuard;
 import ai.singlr.sail.engine.GuardrailChecker;
 import ai.singlr.sail.engine.NameValidator;
+import ai.singlr.sail.engine.RunPlace;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.engine.WebhookNotifier;
+import ai.singlr.sail.store.RunStore;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.format.DateTimeParseException;
@@ -75,6 +77,12 @@ public final class AgentWatchCommand implements Runnable {
       required = true,
       description = "Run id of the agent session to supervise.")
   private String runId;
+
+  @Option(
+      names = "--spec",
+      description =
+          "The spec the run works, whose workspace it lives in (none for a spec-less run).")
+  private String specId;
 
   @Option(
       names = "--unit",
@@ -144,6 +152,16 @@ public final class AgentWatchCommand implements Runnable {
         : AgentUnit.recorded(runId, unitName);
   }
 
+  /** Where the watched run lives: its spec's workspace, or the project's container. */
+  private RunPlace place() {
+    return RunPlace.of(name, specId);
+  }
+
+  /** The report of this watch's run, named so it reaches that run however many are live. */
+  Remedy.Command report() {
+    return Remedy.sail("agent report", RunStore.RunRow.addressed(name, runId, specId));
+  }
+
   private Guardrails guardrails() {
     return Guardrails.of(maxDuration, maxIdle, action);
   }
@@ -155,11 +173,11 @@ public final class AgentWatchCommand implements Runnable {
    * then nothing is left to watch; one whose unit says nothing of it never ran.
    */
   boolean watchable(ShellExec shell, RunWatch.StopPublisher publisher) throws Exception {
-    if (!new AgentPresence(shell).gone(name, resolveUnit())) {
+    if (!new AgentPresence(shell).gone(place(), resolveUnit())) {
       return true;
     }
     if (RunWatch.stopIfAlreadyEnded(
-        name, runId, resolveUnit(), new AgentSession(shell), publisher)) {
+        place(), runId, resolveUnit(), new AgentSession(shell), publisher)) {
       return false;
     }
     throw Remedied.state(
@@ -203,7 +221,7 @@ public final class AgentWatchCommand implements Runnable {
       RunWatch.Narrator narrator,
       Supplier<Instant> clock) {
     return new RunWatch(
-        name,
+        place(),
         runId,
         resolveUnit(),
         guardrails(),
@@ -270,23 +288,26 @@ public final class AgentWatchCommand implements Runnable {
     }
   }
 
-  private RunWatch.Narrator narrator(WebhookNotifier notifier, Notifications notifications) {
+  RunWatch.Narrator narrator(WebhookNotifier notifier, Notifications notifications) {
+    Notify notify =
+        (event, title, message) ->
+            sendNotification(notifier, notifications, event, name, title, message);
     return new RunWatch.Narrator() {
       @Override
       public void tripped(
           GuardrailChecker.GuardrailResult.Triggered limit, Duration elapsed, String snapshot) {
         reportTrigger(limit, GuardrailChecker.formatDuration(elapsed), snapshot);
-        notifyTriggered(notifier, notifications, limit);
+        notifyTriggered(notify, limit);
       }
 
       @Override
       public void exited() {
-        handleAgentExited(notifier, notifications);
+        handleAgentExited(notify);
       }
 
       @Override
       public void ended() {
-        notifySessionDone(notifier, notifications);
+        notifySessionDone(notify);
       }
 
       @Override
@@ -322,10 +343,16 @@ public final class AgentWatchCommand implements Runnable {
     };
   }
 
-  private void requireRunning(ShellExecutor shell) throws Exception {
-    var mgr = new ContainerManager(shell);
-    var state = mgr.queryState(name);
-    ContainerStateGuard.requireRunning(state, name);
+  /**
+   * Refuses a watch of a spec-less run whose project's container is not running. A spec's run is in
+   * its own workspace, which {@link #watchable} asks about.
+   */
+  void requireRunning(ShellExec shell) throws Exception {
+    if (!(place() instanceof RunPlace.ProjectContainer)) {
+      return;
+    }
+    var instance = place().instance();
+    ContainerStateGuard.requireRunning(new ContainerManager(shell).queryState(instance), instance);
   }
 
   /** The project's notifications as the catalog holds them when the watch starts. */
@@ -401,7 +428,13 @@ public final class AgentWatchCommand implements Runnable {
     }
   }
 
-  private void handleAgentExited(WebhookNotifier notifier, Notifications notifications) {
+  /** A notification of this watch's run, sent where the project's definition says. */
+  @FunctionalInterface
+  interface Notify {
+    void send(String event, String title, String message);
+  }
+
+  void handleAgentExited(Notify notify) {
     if (json) {
       var map = new LinkedHashMap<String, Object>();
       map.put("name", name);
@@ -411,37 +444,25 @@ public final class AgentWatchCommand implements Runnable {
     } else {
       System.out.println(Ansi.AUTO.string("  @|faint Agent exited. Watch complete.|@"));
     }
-    sendNotification(
-        notifier,
-        notifications,
+    notify.send(
         Event.WellKnownTypes.AGENT_SESSION_STOPPED,
-        name,
         "Agent exited",
-        Remedy.of("Agent process is no longer running. Run: ", Remedy.sail("agent report", name))
-            .plain());
+        Remedy.of("Agent process is no longer running. Run: ", report()).plain());
   }
 
-  private void notifyTriggered(
-      WebhookNotifier notifier,
-      Notifications notifications,
-      GuardrailChecker.GuardrailResult.Triggered triggered) {
-    sendNotification(
-        notifier,
-        notifications,
+  private static void notifyTriggered(
+      Notify notify, GuardrailChecker.GuardrailResult.Triggered triggered) {
+    notify.send(
         Event.WellKnownTypes.GUARDRAIL_TRIGGERED,
-        name,
         "Guardrail: " + triggered.reason(),
         triggered.detail() + ". Action: " + triggered.action());
   }
 
-  private void notifySessionDone(WebhookNotifier notifier, Notifications notifications) {
-    sendNotification(
-        notifier,
-        notifications,
+  void notifySessionDone(Notify notify) {
+    notify.send(
         Event.WellKnownTypes.AGENT_SESSION_COMPLETED,
-        name,
         "Watch complete",
-        Remedy.of("Agent session ended. Run: ", Remedy.sail("agent report", name)).plain());
+        Remedy.of("Agent session ended. Run: ", report()).plain());
   }
 
   private static void sendNotification(

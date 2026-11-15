@@ -51,9 +51,7 @@ class RunRequestCostTest {
     Acting.system(
         () ->
             new ProjectStore(db)
-                .upsert(
-                    TestDefinitions.yaml(
-                        "name: acme\nagent:\n  type: claude-code\n  auto_snapshot: false\n")));
+                .upsert(TestDefinitions.yaml("name: acme\nagent:\n  type: claude-code\n")));
     Acting.as(
         "eng",
         () ->

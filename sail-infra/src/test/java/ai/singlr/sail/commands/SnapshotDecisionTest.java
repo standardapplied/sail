@@ -8,11 +8,8 @@ package ai.singlr.sail.commands;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import ai.singlr.sail.config.ProjectDefinition;
 import java.io.ByteArrayInputStream;
 import java.io.InputStream;
-import java.util.List;
-import java.util.Map;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
@@ -28,30 +25,19 @@ class SnapshotDecisionTest {
 
   @Test
   void overrideTrueAlwaysSnapshots() {
-    assertTrue(SnapshotDecision.shouldSnapshot(Boolean.TRUE, configWithAutoSnapshot(false), false));
-    assertTrue(SnapshotDecision.shouldSnapshot(Boolean.TRUE, configWithAutoSnapshot(true), false));
-    assertTrue(SnapshotDecision.shouldSnapshot(Boolean.TRUE, configWithAutoSnapshot(false), true));
+    assertTrue(SnapshotDecision.shouldSnapshot(Boolean.TRUE, false));
+    assertTrue(SnapshotDecision.shouldSnapshot(Boolean.TRUE, true));
   }
 
   @Test
   void overrideFalseAlwaysSkips() {
-    assertFalse(
-        SnapshotDecision.shouldSnapshot(Boolean.FALSE, configWithAutoSnapshot(true), false));
-    assertFalse(
-        SnapshotDecision.shouldSnapshot(Boolean.FALSE, configWithAutoSnapshot(false), true));
-  }
-
-  @Test
-  void yamlAutoSnapshotDoesNotBypassPrompt() {
-    ConsoleHelper.resetStdin();
-    System.setIn(new java.io.ByteArrayInputStream(new byte[0]));
-
-    assertFalse(SnapshotDecision.shouldSnapshot(null, configWithAutoSnapshot(true), false));
+    assertFalse(SnapshotDecision.shouldSnapshot(Boolean.FALSE, false));
+    assertFalse(SnapshotDecision.shouldSnapshot(Boolean.FALSE, true));
   }
 
   @Test
   void inheritWithJsonModeSkipsSilently() {
-    assertFalse(SnapshotDecision.shouldSnapshot(null, configWithAutoSnapshot(false), true));
+    assertFalse(SnapshotDecision.shouldSnapshot(null, true));
   }
 
   @Test
@@ -59,7 +45,7 @@ class SnapshotDecisionTest {
     ConsoleHelper.resetStdin();
     System.setIn(new ByteArrayInputStream(new byte[0]));
 
-    assertFalse(SnapshotDecision.shouldSnapshot(null, configWithAutoSnapshot(false), false));
+    assertFalse(SnapshotDecision.shouldSnapshot(null, false));
   }
 
   @Test
@@ -67,7 +53,7 @@ class SnapshotDecisionTest {
     ConsoleHelper.resetStdin();
     System.setIn(new ByteArrayInputStream("\n".getBytes()));
 
-    assertFalse(SnapshotDecision.shouldSnapshot(null, configWithAutoSnapshot(false), false));
+    assertFalse(SnapshotDecision.shouldSnapshot(null, false));
   }
 
   @Test
@@ -75,7 +61,7 @@ class SnapshotDecisionTest {
     ConsoleHelper.resetStdin();
     System.setIn(new ByteArrayInputStream("y\n".getBytes()));
 
-    assertTrue(SnapshotDecision.shouldSnapshot(null, configWithAutoSnapshot(false), false));
+    assertTrue(SnapshotDecision.shouldSnapshot(null, false));
   }
 
   @Test
@@ -83,14 +69,6 @@ class SnapshotDecisionTest {
     ConsoleHelper.resetStdin();
     System.setIn(new ByteArrayInputStream(new byte[0]));
 
-    assertFalse(SnapshotDecision.shouldSnapshot(null, null, false));
-  }
-
-  private static ProjectDefinition configWithAutoSnapshot(boolean autoSnapshot) {
-    var agent =
-        new ProjectDefinition.Agent(
-            "claude-code", false, null, autoSnapshot, List.of(), Map.of(), null, null);
-    return new ProjectDefinition(
-        "test", null, null, null, null, null, List.of(), Map.of(), Map.of(), agent, null);
+    assertFalse(SnapshotDecision.shouldSnapshot(null, false));
   }
 }

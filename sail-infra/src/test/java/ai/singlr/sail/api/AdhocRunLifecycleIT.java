@@ -11,7 +11,6 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.engine.AbstractIncusIT;
 import ai.singlr.sail.engine.AgentSession;
 import ai.singlr.sail.engine.AgentUnit;
@@ -28,7 +27,6 @@ import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
-import ai.singlr.sail.store.TestLogins;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
@@ -41,11 +39,12 @@ import org.junit.jupiter.api.Test;
 
 /**
  * The whole ad-hoc lifecycle against <strong>one real incus container</strong>: {@code startAdhoc}
- * reserves the container and launches the agent under its own {@code sail-agent-<runId>} unit, a
- * concurrent dispatch is refused while it is live, and the shared clean-stop procedure halts the
- * agent, verifies the kill, and releases the reservation — the run id addressing every step. A fake
- * {@code codex} binary stands in for the agent (sleeps) — no LLM, no API key. Runs only under the
- * {@code integration} profile against a real incus daemon; skips elsewhere.
+ * reserves the project's container and launches the agent under its own {@code sail-agent-<runId>}
+ * unit, a second ad-hoc session is refused while it is live (a spec's dispatch is not: it lives in
+ * the spec's own workspace, {@code AdhocDispatchTest}), and the shared clean-stop procedure halts
+ * the agent, verifies the kill, and releases the reservation — the run id addressing every step. A
+ * fake {@code codex} binary stands in for the agent (sleeps) — no LLM, no API key. Runs only under
+ * the {@code integration} profile against a real incus daemon; skips elsewhere.
  */
 class AdhocRunLifecycleIT extends AbstractIncusIT {
 
@@ -114,8 +113,6 @@ class AdhocRunLifecycleIT extends AbstractIncusIT {
       var specStore = new SpecStore(db);
       var runStore = new RunStore(db);
       new FdeStore(db).add(HANDLE, null, null, "admin");
-      TestLogins.store(db, HANDLE);
-      seedSpec(specStore, "spec-app", List.of("app"));
       var events = new CopyOnWriteArrayList<Event>();
       var dispatchOps =
           new DispatchOperations(
@@ -127,7 +124,7 @@ class AdhocRunLifecycleIT extends AbstractIncusIT {
               new FdeStore(db),
               events::add,
               new WatcherSpawner(refusingShell(), (command, logPath) -> 4242L),
-              (project, config) -> "",
+              TestWorkspaces.over(shell),
               DispatchOperations.shellLauncher(shell),
               DispatchOperations.Listener.NONE,
               SessionYield.NONE);
@@ -151,12 +148,12 @@ class AdhocRunLifecycleIT extends AbstractIncusIT {
           new AgentSession(shell).queryStatus(CONTAINER, AgentUnit.recorded(run.id(), run.unit()));
       assertTrue(live != null && live.running(), "the ad-hoc agent runs under its own unit");
 
-      var dispatchRefusal = assertThrows(ApiException.class, () -> dispatchAsOperator(dispatchOps));
-      assertEquals(ErrorCode.AGENT_ALREADY_RUNNING, dispatchRefusal.failure().errorCode());
+      var secondRefusal = assertThrows(ApiException.class, () -> startAdhocAsOperator(dispatchOps));
+      assertEquals(ErrorCode.AGENT_ALREADY_RUNNING, secondRefusal.failure().errorCode());
       assertEquals(
-          SpecStatus.PENDING,
-          specStore.findById("spec-app").orElseThrow().status(),
-          "the refused dispatch claims nothing");
+          List.of(session.runId()),
+          runStore.listForProject(CONTAINER).stream().map(RunStore.RunRow::id).toList(),
+          "the refused session reserves nothing");
 
       var stopOps =
           new StopOperations(
@@ -170,7 +167,7 @@ class AdhocRunLifecycleIT extends AbstractIncusIT {
       var outcome =
           Acting.by(
               OPERATOR,
-              () -> stopOps.stop(new StopOperations.ProjectTarget(CONTAINER), HANDLE, false));
+              () -> stopOps.stop(new StopOperations.ProjectTarget(CONTAINER, null), HANDLE, false));
 
       var stopped = assertInstanceOf(StopOperations.Stopped.class, outcome);
       assertEquals(session.runId(), stopped.runId());
@@ -178,47 +175,20 @@ class AdhocRunLifecycleIT extends AbstractIncusIT {
       var afterStop =
           new AgentSession(shell).queryStatus(CONTAINER, AgentUnit.recorded(run.id(), run.unit()));
       assertTrue(afterStop == null || !afterStop.running(), "the verified halt left no process");
-      assertInstanceOf(
-          DispatchOperations.Dispatched.class,
-          dispatchAsOperator(dispatchOps),
-          "the released reservation admits the next dispatch");
+      assertNotNull(
+          startAdhocAsOperator(dispatchOps).runId(),
+          "the released reservation admits the next session");
     }
   }
 
-  private static DispatchOperations.Outcome dispatchAsOperator(DispatchOperations ops) {
+  private static DispatchOperations.AdhocSession startAdhocAsOperator(DispatchOperations ops) {
     return Acting.by(
         OPERATOR,
         () ->
-            ops.dispatch(
+            ops.startAdhoc(
                 CONTAINER,
-                new DispatchOperations.Request("spec-app", "background", false, null, false),
+                new DispatchOperations.AdhocRequest("sleep for a while", null, null, true, false),
                 HANDLE));
-  }
-
-  private static void seedSpec(SpecStore store, String id, List<String> repos) {
-    Acting.as(
-        HANDLE,
-        () -> {
-          store.create(
-              new SpecStore.SpecRow(
-                  id,
-                  CONTAINER,
-                  "Title " + id,
-                  SpecStatus.PENDING,
-                  HANDLE,
-                  "codex",
-                  null,
-                  null,
-                  null,
-                  0,
-                  HANDLE,
-                  null,
-                  null,
-                  HANDLE,
-                  List.of(),
-                  repos));
-          store.setContent(id, "Do " + id, "");
-        });
   }
 
   private static ShellExec refusingShell() {

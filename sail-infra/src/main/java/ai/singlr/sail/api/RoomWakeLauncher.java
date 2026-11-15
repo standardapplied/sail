@@ -7,12 +7,14 @@ package ai.singlr.sail.api;
 
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.common.Strings;
+import ai.singlr.sail.config.Lane;
 import ai.singlr.sail.config.ProjectDefinition;
 import ai.singlr.sail.config.Roster;
 import ai.singlr.sail.engine.AgentSession;
 import ai.singlr.sail.engine.AgentUnit;
 import ai.singlr.sail.engine.DispatchRepos;
 import ai.singlr.sail.engine.RoomWakePrompt;
+import ai.singlr.sail.engine.RunPlace;
 import ai.singlr.sail.harness.Harness;
 import ai.singlr.sail.harness.Harnesses;
 import ai.singlr.sail.identity.Actor;
@@ -24,6 +26,7 @@ import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SpecStore;
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.function.Supplier;
 
 /**
@@ -43,6 +46,7 @@ import java.util.function.Supplier;
 public final class RoomWakeLauncher {
 
   private final ProjectLoader projects;
+  private final RunPlaces places;
   private final SpecStore specStore;
   private final Supplier<RoomStore> roomStore;
   private final Supplier<MessageStore> messageStore;
@@ -50,17 +54,21 @@ public final class RoomWakeLauncher {
   private final RunReservation runReservation;
   private final RunLauncher runLauncher;
   private final RoomCommitGuard roomCommitGuard;
+  private final WorkBranch workBranch;
 
-  public RoomWakeLauncher(
+  RoomWakeLauncher(
       ProjectLoader projects,
+      RunPlaces places,
       SpecStore specStore,
       Supplier<RoomStore> roomStore,
       Supplier<MessageStore> messageStore,
       RunStore runStore,
       RunReservation runReservation,
       RunLauncher runLauncher,
-      RoomCommitGuard roomCommitGuard) {
+      RoomCommitGuard roomCommitGuard,
+      WorkBranch workBranch) {
     this.projects = projects;
+    this.places = places;
     this.specStore = specStore;
     this.roomStore = roomStore;
     this.messageStore = messageStore;
@@ -68,6 +76,7 @@ public final class RoomWakeLauncher {
     this.runReservation = runReservation;
     this.runLauncher = runLauncher;
     this.roomCommitGuard = roomCommitGuard;
+    this.workBranch = workBranch;
   }
 
   /** Launches a room wake for {@code specId} as this box's machinery, returning the run id. */
@@ -76,8 +85,7 @@ public final class RoomWakeLauncher {
   }
 
   private String launch(String project, String specId, String localHandle) {
-    var loaded = projects.loadRunning(project);
-    var config = loaded.config();
+    var config = projects.definition(project);
     if (config.agent() == null) {
       throw new ApiException(
           ErrorCode.AGENT_NOT_CONFIGURED, "The project's definition sets no agent.");
@@ -134,6 +142,8 @@ public final class RoomWakeLauncher {
             : List.<ProjectDefinition.Repo>of();
     var repoPaths = targetRepos.stream().map(ProjectDefinition.Repo::path).toList();
     var branch = full ? Objects.toString(spec.branch(), "") : "";
+    var checked =
+        places.check(project, config, specId, full ? Lane.ROOM_FULL : Lane.ROOM, localHandle);
     var env =
         runReservation.reserve(
             runId,
@@ -148,9 +158,12 @@ public final class RoomWakeLauncher {
             unit,
             config);
     try {
+      places.enter(checked, config, localHandle);
+      var place = (RunPlace.SpecWorkspace) checked.place();
       seedRoomDelivery(runId, built.renderedMessages());
+      workBranch.enter(place, targetRepos, branch, false, true, Optional.empty());
       if (!full) {
-        roomCommitGuard.captureRoomBaseline(project, config, runId);
+        roomCommitGuard.captureRoomBaseline(place, config, runId);
       }
       var model =
           engagement != null && engagement.model() != null ? engagement.model() : spec.model();
@@ -161,7 +174,7 @@ public final class RoomWakeLauncher {
       var launch =
           runLauncher.launchSession(
               new RunLauncher.LaunchSpec(
-                  project,
+                  place,
                   config,
                   workDir,
                   full,
@@ -179,10 +192,10 @@ public final class RoomWakeLauncher {
                   resumeSessionId,
                   RunLauncher.wokenBy(room)));
       runLauncher.finishLaunch(
-          new RunLauncher.RunContext(project, unit, runId, specId, agentType, role, true), launch);
+          new RunLauncher.RunContext(place, unit, runId, specId, agentType, role, true), launch);
       return runId;
     } catch (RuntimeException e) {
-      runReservation.releaseIfAbsent(runId, project, unit);
+      runReservation.releaseIfAbsent(runId, checked.place(), unit);
       throw e;
     }
   }
@@ -247,6 +260,8 @@ public final class RoomWakeLauncher {
     var role = full ? DispatchGate.ROOM_FULL_ROLE : DispatchGate.ROOM_ROLE;
     var targetRepos = full ? config.repos() : List.<ProjectDefinition.Repo>of();
     var repoPaths = targetRepos.stream().map(ProjectDefinition.Repo::path).toList();
+    var place =
+        places.check(project, config, null, full ? Lane.ROOM_FULL : Lane.ROOM, localHandle).place();
     var env =
         runReservation.reserve(
             runId,
@@ -264,7 +279,7 @@ public final class RoomWakeLauncher {
     try {
       seedRoomDelivery(runId, built.renderedMessages());
       if (!full) {
-        roomCommitGuard.captureRoomBaseline(project, config, runId);
+        roomCommitGuard.captureRoomBaseline(place, config, runId);
       }
       var workDir =
           full
@@ -273,7 +288,7 @@ public final class RoomWakeLauncher {
       var launch =
           runLauncher.launchSession(
               new RunLauncher.LaunchSpec(
-                  project,
+                  place,
                   config,
                   workDir,
                   full,
@@ -291,10 +306,10 @@ public final class RoomWakeLauncher {
                   null,
                   RunLauncher.wokenBy(conversation)));
       runLauncher.finishLaunch(
-          new RunLauncher.RunContext(project, unit, runId, roomId, agentType, role, true), launch);
+          new RunLauncher.RunContext(place, unit, runId, roomId, agentType, role, true), launch);
       return runId;
     } catch (RuntimeException e) {
-      runReservation.releaseIfAbsent(runId, project, unit);
+      runReservation.releaseIfAbsent(runId, place, unit);
       throw e;
     }
   }

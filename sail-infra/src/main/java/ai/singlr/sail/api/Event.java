@@ -145,7 +145,6 @@ public record Event(
     public static final String AGENT_TOOL_STARTED = "agent_tool_started";
     public static final String AGENT_TOOL_FINISHED = "agent_tool_finished";
     public static final String AGENT_LOG_CHUNK = "agent_log_chunk";
-    public static final String SNAPSHOT_CREATED = "snapshot_created";
     public static final String SNAPSHOT_RESTORED = "snapshot_restored";
     public static final String SNAPSHOT_DELETED = "snapshot_deleted";
     public static final String GUARDRAIL_TRIGGERED = "guardrail_triggered";
@@ -314,6 +313,13 @@ public record Event(
      * carries no {@link #EXIT_CODE}: the run did not end itself, so it has none of its own.
      */
     public static final String REASON = "reason";
+
+    /**
+     * A stop's flag that its run was lost: still recorded running, its process gone, and no exit or
+     * reason anyone observed, as only the missed-stop reconciler can find a run. The one reading of
+     * an unknown exit: a lost build is a failed one, never reviewed.
+     */
+    public static final String LOST = "lost";
 
     /**
      * Carried, as {@code true}, on an authoritative stop the missed-stop reconciler published for a

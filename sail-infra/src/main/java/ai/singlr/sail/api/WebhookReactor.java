@@ -34,7 +34,6 @@ public final class WebhookReactor implements EventSubscriber {
           Event.WellKnownTypes.AGENT_SESSION_STARTED,
           Event.WellKnownTypes.AGENT_SESSION_STOPPED,
           Event.WellKnownTypes.AGENT_SESSION_COMPLETED,
-          Event.WellKnownTypes.SNAPSHOT_CREATED,
           Event.WellKnownTypes.GUARDRAIL_TRIGGERED);
 
   private final ProjectNotificationsResolver resolver;

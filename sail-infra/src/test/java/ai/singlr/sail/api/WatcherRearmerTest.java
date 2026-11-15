@@ -11,6 +11,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.common.DateTimeUtils;
+import ai.singlr.sail.engine.RunPlace;
 import ai.singlr.sail.engine.ScriptedShellExecutor;
 import ai.singlr.sail.engine.WatcherSpawner;
 import ai.singlr.sail.identity.Acting;
@@ -410,8 +411,8 @@ class WatcherRearmerTest {
         };
     var probe = WatcherRearmer.systemdUnitActiveProbe(shell);
 
-    assertTrue(probe.active("acme", liveRun, "sail-agent-" + liveRun));
-    assertFalse(probe.active("acme", goneRun, "sail-agent-" + goneRun));
+    assertTrue(probe.active(RunPlace.of("acme", null), liveRun, "sail-agent-" + liveRun));
+    assertFalse(probe.active(RunPlace.of("acme", null), goneRun, "sail-agent-" + goneRun));
     assertTrue(
         probed.stream().allMatch(c -> c.contains("is-active")),
         "the probe must consult systemd unit liveness, never the pid file");

@@ -15,6 +15,7 @@ import ai.singlr.sail.access.Refusal;
 import ai.singlr.sail.api.ApiException;
 import ai.singlr.sail.api.ErrorCode;
 import ai.singlr.sail.authority.WriteRefused;
+import ai.singlr.sail.common.Remedied;
 import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.engine.CliOperator;
 import ai.singlr.sail.engine.OperatorCommand;
@@ -61,6 +62,68 @@ class CliCommandTest {
 
     assertEquals("boom", error.getMessage());
     assertTrue(capturedErr.toString(StandardCharsets.UTF_8).contains("boom"));
+  }
+
+  /**
+   * Low 10: under {@code --json} a refusal is JSON on stdout in the API's error envelope, its code
+   * and its fix in it.
+   */
+  @Test
+  void aRefusalUnderJsonIsJsonOnStdout() {
+    var out = System.out;
+    var captured = new ByteArrayOutputStream();
+    System.setOut(new PrintStream(captured, true, StandardCharsets.UTF_8));
+    try {
+      assertThrows(
+          CliCommand.Printed.class,
+          () ->
+              CliCommand.run(
+                  true,
+                  () -> {
+                    throw new ApiException(
+                        ErrorCode.CONFLICT, "This box has no ZFS pool.", Remedy.of("Add one."));
+                  }));
+    } finally {
+      System.setOut(out);
+    }
+
+    assertEquals(
+        "{\"error\": {\"code\": \"conflict\", \"message\": \"This box has no ZFS pool.\","
+            + " \"action\": \"Add one.\", \"field_errors\": []}}",
+        captured.toString(StandardCharsets.UTF_8).strip());
+    assertEquals("", capturedErr.toString(StandardCharsets.UTF_8));
+  }
+
+  /**
+   * Under {@code --json} a failure sail did not decide is internal, and one with no fix names none;
+   * one it refused on purpose is an invalid request, its remedy kept.
+   */
+  @Test
+  void aRefusalWithNoFixUnderJsonIsItsErrorAlone() {
+    var out = System.out;
+    var captured = new ByteArrayOutputStream();
+    System.setOut(new PrintStream(captured, true, StandardCharsets.UTF_8));
+    try {
+      assertThrows(
+          CliCommand.Printed.class,
+          () ->
+              CliCommand.run(
+                  true,
+                  () -> {
+                    throw new IllegalStateException("boom");
+                  }));
+    } finally {
+      System.setOut(out);
+    }
+
+    assertEquals(
+        "{\"error\": {\"code\": \"internal\", \"message\": \"boom\", \"field_errors\": []}}",
+        captured.toString(StandardCharsets.UTF_8).strip());
+    assertEquals("invalid_request", CliCommand.refusalOf(new CliCommand.Refused("no")).code());
+    var remedied = CliCommand.refusalOf(Remedied.state("Gone.", Remedy.of("Make it.")));
+    assertEquals("internal", remedied.code());
+    assertEquals("Gone.", remedied.message());
+    assertEquals("Make it.", remedied.action());
   }
 
   @Test

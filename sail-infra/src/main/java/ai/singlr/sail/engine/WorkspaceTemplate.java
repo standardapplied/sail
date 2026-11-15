@@ -16,6 +16,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.TimeoutException;
+import java.util.function.LongSupplier;
 import java.util.function.Predicate;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -82,6 +83,27 @@ public final class WorkspaceTemplate {
     this.observer = Objects.requireNonNull(observer, "observer");
     this.shell = Objects.requireNonNull(shell, "shell");
     this.locks = Objects.requireNonNull(locks, "locks");
+  }
+
+  /**
+   * What a workspace made from {@code project}'s template is told when the template is older than
+   * the project's definition: it was cloned as it is, since only a person can build it again.
+   */
+  public record Stale(String project) implements Remedied {
+    @Override
+    public String reason() {
+      return "This spec's workspace was made from "
+          + project
+          + "'s template as it was last built, which is older than the project's definition.";
+    }
+
+    @Override
+    public Remedy remedy() {
+      return Remedy.of(
+          "Build it again for the next workspace: ",
+          Remedy.sail("project template build", project),
+          ".");
+    }
   }
 
   /** The name of project {@code project}'s template instance. */
@@ -195,6 +217,54 @@ public final class WorkspaceTemplate {
   }
 
   /**
+   * Project {@code project}'s template as its workspaces clone it now, built by nothing: its
+   * current version when one is recorded and its snapshot exists, on a ZFS pool among {@code zfs};
+   * empty when the project has no such template. What a dispatch clones, since only a person can
+   * build a template (its repos' tokens are theirs to give); {@code inputs()} is what it was built
+   * from, which a definition edited since no longer matches. It is read under the template's lock,
+   * so a read while a build is under way waits for it and answers what it built (W7), for at most
+   * {@link Workspaces#CREATE_WAIT} on {@code nanos}; past it, {@link Workspaces.Busy}.
+   */
+  Optional<Template> current(String project, List<String> zfs, LongSupplier nanos)
+      throws IOException, InterruptedException, TimeoutException {
+    var template = nameOf(project);
+    if (shell.isDryRun()) {
+      return recorded(project, template, zfs);
+    }
+    try (var held =
+        FileMutex.acquireUntil(
+                ContainerConfig.lockOf(locks, template),
+                nanos.getAsLong() + Workspaces.CREATE_WAIT.toNanos(),
+                nanos)
+            .orElseThrow(() -> Workspaces.Busy.building(project))) {
+      return recorded(project, template, zfs);
+    }
+  }
+
+  private Optional<Template> recorded(String project, String template, List<String> zfs)
+      throws IOException, InterruptedException, TimeoutException {
+    var found =
+        new BoxInstances(observer)
+            .named(template)
+            .filter(i -> i.kind() instanceof BoxInstances.Template(var of) && of.equals(project))
+            .filter(i -> zfs.contains(i.pool()));
+    var version = found.flatMap(i -> i.key(CURRENT_KEY));
+    if (version.isEmpty()
+        || new SnapshotManager(observer)
+            .list(template).stream().noneMatch(s -> s.name().equals(version.get()))) {
+      return Optional.empty();
+    }
+    return Optional.of(
+        new Template(
+            project,
+            template,
+            version.get(),
+            found.get().key(INPUTS_KEY).orElse(""),
+            found.get().pool(),
+            false));
+  }
+
+  /**
    * Provisions {@code template} and stops it. One this call starts, by launching it or starting it
    * stopped, is stopped again when the build fails, so a failed build leaves no template running.
    */
@@ -263,6 +333,15 @@ public final class WorkspaceTemplate {
    */
   static void requireUsable(ShellExec observer, String pool)
       throws IOException, InterruptedException, TimeoutException {
+    usable(observer, pool).ifPresent(degraded -> System.err.println("  ! " + degraded));
+  }
+
+  /**
+   * As {@link #requireUsable}, answering what it would say of a degraded mirror instead of saying
+   * it: what a door that answers in its own words (a dispatch's answer, a spec's room) says once.
+   */
+  static Optional<String> usable(ShellExec observer, String pool)
+      throws IOException, InterruptedException, TimeoutException {
     var held =
         pool == null
             ? Optional.<IncusStorage.Pool>empty()
@@ -270,7 +349,7 @@ public final class WorkspaceTemplate {
                 .find(pool)
                 .filter(found -> IncusStorage.devices(found.source()).size() == 2);
     if (held.isEmpty()) {
-      return;
+      return Optional.empty();
     }
     var zpool = Objects.requireNonNullElse(held.get().zpool(), pool);
     var health = PoolHealth.of(observer, zpool);
@@ -288,9 +367,9 @@ public final class WorkspaceTemplate {
               + zpool
               + ".");
     }
-    if (health.get().degraded()) {
-      System.err.println("  ! " + health.get().degradedNotice(zpool));
-    }
+    return health.get().degraded()
+        ? Optional.of(health.get().degradedNotice(zpool))
+        : Optional.empty();
   }
 
   /** {@code project}'s template instance name, when it is one Incus can have and no project's. */

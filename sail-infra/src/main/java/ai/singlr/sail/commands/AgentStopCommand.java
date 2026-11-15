@@ -19,9 +19,11 @@ import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.Banner;
 import ai.singlr.sail.engine.NameValidator;
 import ai.singlr.sail.engine.OperatorCommand;
+import ai.singlr.sail.engine.RunPlace;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.engine.WatcherSpawner;
+import ai.singlr.sail.engine.Workspaces;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.store.Sqlite;
 import java.util.LinkedHashMap;
@@ -50,6 +52,8 @@ public final class AgentStopCommand implements Runnable {
       description = "Project name (default: the current project).")
   private String name;
 
+  @Mixin private RunSelector selector = new RunSelector();
+
   @Option(names = "--dry-run", description = "Print what would be stopped instead of stopping.")
   private boolean dryRun;
 
@@ -62,7 +66,7 @@ public final class AgentStopCommand implements Runnable {
 
   @Override
   public void run() {
-    CliCommand.run(this::execute);
+    CliCommand.run(json, this::execute);
   }
 
   private void execute() throws Exception {
@@ -81,7 +85,7 @@ public final class AgentStopCommand implements Runnable {
     try (var operations =
         OperationsFactory.open(
             shell, hooks(shell, this::publishLifecycle, listener()), SessionYield.NONE)) {
-      var outcome = stopAsOperator(operations, name, handle, dryRun);
+      var outcome = stopAsOperator(operations, target(), handle, dryRun);
       render(outcome);
       if (!dryRun && outcome.mutated()) {
         sync.syncNow();
@@ -89,15 +93,17 @@ public final class AgentStopCommand implements Runnable {
     }
   }
 
-  /** Stops {@code project}'s run as this box's operator, a preview decided as the real stop is. */
+  /** What this stop names ({@link RunSelector#target}). */
+  StopOperations.Target target() {
+    return selector.target(name);
+  }
+
+  /** Stops {@code target} as this box's operator; a preview decided as the real stop is. */
   static StopOperations.Outcome stopAsOperator(
-      HostOperations operations, String project, String handle, boolean dryRun) {
+      HostOperations operations, StopOperations.Target target, String handle, boolean dryRun) {
     return Actor.call(
         operations.identity().operator(),
-        () ->
-            operations
-                .dispatching()
-                .stop(new StopOperations.ProjectTarget(project), handle, dryRun));
+        () -> operations.dispatching().stop(target, handle, dryRun));
   }
 
   /**
@@ -118,7 +124,7 @@ public final class AgentStopCommand implements Runnable {
     return new OperationHooks(
         events,
         new WatcherSpawner(shell, WatcherSpawner::spawnProcess),
-        DispatchOperations.autoSnapshotter(shell),
+        Workspaces.onThisBox(shell),
         DispatchOperations.shellLauncher(shell),
         DispatchOperations.Listener.NONE,
         listener);
@@ -127,7 +133,7 @@ public final class AgentStopCommand implements Runnable {
   private StopOperations.Listener listener() {
     return new StopOperations.Listener() {
       @Override
-      public void halting(String project, String unit, Integer pid) {
+      public void halting(String instance, String unit, Integer pid) {
         if (json) {
           return;
         }
@@ -141,7 +147,7 @@ public final class AgentStopCommand implements Runnable {
                     + " (unit "
                     + unit
                     + ") in "
-                    + project));
+                    + instance));
       }
     };
   }
@@ -160,7 +166,7 @@ public final class AgentStopCommand implements Runnable {
                     + " (PID "
                     + stopped.pid()
                     + ") in "
-                    + name));
+                    + RunPlace.of(name, stopped.specId()).instance()));
         printCancelled(stopped.specId(), stopped.specCancelled());
       }
       case StopOperations.NotRunning notRunning -> {

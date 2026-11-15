@@ -36,7 +36,7 @@ import ai.singlr.sail.engine.ContainerManager;
 import ai.singlr.sail.engine.ContainerState;
 import ai.singlr.sail.engine.HostInfo;
 import ai.singlr.sail.engine.NameValidator;
-import ai.singlr.sail.engine.SailPaths;
+import ai.singlr.sail.engine.RunPlace;
 import ai.singlr.sail.engine.SharedProjectFiles;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.ShellExecutor;
@@ -82,8 +82,6 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.TreeMap;
-import java.util.concurrent.Executor;
-import java.util.concurrent.Executors;
 import java.util.function.Function;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
@@ -420,7 +418,6 @@ public final class SailOperations implements HostOperations {
   private ProjectSkills projectSkills = ProjectSkills.none();
   private final StopOperations stopOps;
   private final FdeStore fdeStore;
-  private Executor launchExecutor = Executors.newVirtualThreadPerTaskExecutor();
   private MessageStore messageStore;
   private RoomStore roomStore;
   private BoxCredentialStore boxCredentialStore;
@@ -534,17 +531,6 @@ public final class SailOperations implements HostOperations {
   public SailOperations useRooms(RoomStore roomStore) {
     this.roomStore = Objects.requireNonNull(roomStore, "roomStore");
     this.dispatchOps.useRooms(roomStore);
-    return this;
-  }
-
-  /**
-   * Overrides the executor that runs the deferred half of a membership (the engage-time snapshot).
-   * Production keeps the default virtual-thread executor; a test injects {@code Runnable::run} to
-   * make the completion run inline, so its assertions and teardown see a finished launch. Returns
-   * {@code this}.
-   */
-  SailOperations useLaunchExecutor(Executor executor) {
-    this.launchExecutor = Objects.requireNonNull(executor, "executor");
     return this;
   }
 
@@ -677,7 +663,7 @@ public final class SailOperations implements HostOperations {
               if (eventBus != null) eventBus.publish(event);
             },
             new WatcherSpawner(shell, watcherFallback),
-            DispatchOperations.autoSnapshotter(shell),
+            Workspaces.onThisBox(shell),
             DispatchOperations.shellLauncher(shell),
             DispatchOperations.Listener.NONE,
             StopOperations.Listener.NONE));
@@ -731,7 +717,7 @@ public final class SailOperations implements HostOperations {
             fdeStore,
             hooks.events(),
             this.watcherSpawner,
-            hooks.snapshotter(),
+            hooks.workspaces(),
             hooks.launcher(),
             hooks.dispatchListener(),
             sessionYield);
@@ -907,10 +893,7 @@ public final class SailOperations implements HostOperations {
                       request.model(),
                       request.snapshot(),
                       localHandle);
-              if (launch.completion() != null) {
-                launchExecutor.execute(Actor.carrying(launch.completion()));
-              }
-              return new EngageResponse(launch.agent(), launch.mode(), launch.snapshot());
+              return new EngageResponse(launch.agent(), launch.mode());
             });
     if (result instanceof Result.Success<EngageResponse>) {
       triggerSyncAfterWrite();
@@ -1376,10 +1359,7 @@ public final class SailOperations implements HostOperations {
           var readable = readable(project);
           try {
             return new WorkspaceListResponse(
-                readable,
-                new Workspaces(shell, shell, System::nanoTime, SailPaths.locksDir())
-                    .list(readable)
-                    .workspaces());
+                readable, Workspaces.onThisBox(shell).list(readable).workspaces());
           } catch (Exception unread) {
             if (unread instanceof InterruptedException) {
               Thread.currentThread().interrupt();
@@ -1504,7 +1484,8 @@ public final class SailOperations implements HostOperations {
     if (stopOps == null) {
       return storeUnavailable("Run store").failure().asFailure();
     }
-    var outcome = safe(() -> stopOps.stop(new StopOperations.RunTarget(runId), localHandle, false));
+    var outcome =
+        safe(() -> stopOps.stop(new StopOperations.RunTarget(runId, null), localHandle, false));
     if (outcome instanceof Result.Failure<StopOperations.Outcome>) {
       return outcome.asFailure();
     }
@@ -1681,7 +1662,7 @@ public final class SailOperations implements HostOperations {
               null,
               DispatchedSpecView.from(dispatched.taskSpec(), dispatched.branch()),
               AgentStatusView.from(dispatched.agentType(), request.mode(), dispatched.session()),
-              dispatched.snapshotLabel(),
+              dispatched.workspace() == null ? null : dispatched.workspace().instance(),
               dispatched.branchCreated(),
               dispatched.restarted());
     };
@@ -1711,9 +1692,11 @@ public final class SailOperations implements HostOperations {
             .map(
                 run ->
                     AgentRunView.from(
-                        run, querySession(agentSession, project, StopOperations.runUnit(run))))
+                        run, querySession(agentSession, run.place(), StopOperations.runUnit(run))))
             .toList();
-    var newest = querySession(agentSession, project, StopOperations.runUnit(running.getFirst()));
+    var newest =
+        querySession(
+            agentSession, running.getFirst().place(), StopOperations.runUnit(running.getFirst()));
     return AgentStatusResponse.from(project, newest, runs);
   }
 
@@ -1734,7 +1717,7 @@ public final class SailOperations implements HostOperations {
     var logPath = AgentUnit.readableLogPath(run.id(), run.logPath());
     var cmd =
         ContainerExec.asDevUser(
-            run.project(), List.of("tail", "-n", String.valueOf(tail), "--", logPath));
+            run.place().instance(), List.of("tail", "-n", String.valueOf(tail), "--", logPath));
     var result = exec(cmd);
     if (!result.ok()) {
       if (result.stderr().contains("No such file")) {
@@ -1777,9 +1760,9 @@ public final class SailOperations implements HostOperations {
   }
 
   private AgentSession.SessionInfo querySession(
-      AgentSession session, String project, AgentUnit unit) {
+      AgentSession session, RunPlace place, AgentUnit unit) {
     try {
-      return session.queryStatus(project, unit);
+      return session.queryStatus(place.instance(), unit);
     } catch (Exception e) {
       throw new ApiException(ErrorCode.AGENT_STATUS_FAILED, "Failed to query agent status.", e);
     }

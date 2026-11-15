@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.commands;
 
+import ai.singlr.sail.api.HostOperations;
 import ai.singlr.sail.api.OperationsFactory;
 import ai.singlr.sail.api.ProjectSkills;
 import ai.singlr.sail.common.Remedied;
@@ -23,6 +24,7 @@ import ai.singlr.sail.engine.ProjectPhase;
 import ai.singlr.sail.engine.ProjectProvisioner;
 import ai.singlr.sail.engine.ProvisionListener;
 import ai.singlr.sail.engine.ProvisionTracker;
+import ai.singlr.sail.engine.RunPlace;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.engine.WorkspaceTemplate;
@@ -37,6 +39,7 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.Callable;
 import java.util.function.Predicate;
+import java.util.function.Supplier;
 import picocli.CommandLine.Model.CommandSpec;
 
 /**
@@ -91,11 +94,27 @@ final class WorkspaceVerbs {
 
   /** The workspaces of this box, reading Incus for real and changing it unless {@code dryRun}. */
   static Workspaces workspaces(boolean dryRun) {
-    return new Workspaces(
-        new ShellExecutor(false),
-        new ShellExecutor(dryRun),
-        System::nanoTime,
-        SailPaths.locksDir());
+    return Workspaces.onThisBox(new ShellExecutor(dryRun));
+  }
+
+  /**
+   * Whether a run of {@code project}'s spec, the one a workspace is, is live on the box whose
+   * handle is {@code handle}, as the runs {@code operations} opens say: what refuses a stop or
+   * delete of that workspace.
+   */
+  static Predicate<String> liveRun(
+      String project, Supplier<HostOperations> operations, String handle) {
+    return spec -> {
+      try (var opened = operations.get()) {
+        return opened.dispatching().runningRuns(project, handle).stream()
+            .anyMatch(run -> run.place().equals(RunPlace.of(project, spec)));
+      }
+    };
+  }
+
+  /** The person a workspace made on this box belongs to: the box's own, by its handle. */
+  static String owner() {
+    return Objects.toString(HostSync.handle(), "");
   }
 
   /**

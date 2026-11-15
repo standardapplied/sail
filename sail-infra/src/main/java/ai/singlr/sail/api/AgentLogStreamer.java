@@ -152,7 +152,7 @@ public final class AgentLogStreamer {
       var since = parseSince(exchange.getRequestURI().getQuery());
       String[] tailCommand;
       try {
-        tailCommand = buildTailCommand(run.project(), run.id(), run.logPath(), since);
+        tailCommand = buildTailCommand(run.place().instance(), run.id(), run.logPath(), since);
       } catch (IllegalArgumentException e) {
         sendError(exchange, 400, "invalid_request", e.getMessage(), null);
         return;
@@ -321,14 +321,15 @@ public final class AgentLogStreamer {
    * interpreted as shell syntax.
    */
   static String[] buildTailCommand(
-      String project, String runId, String recordedLogPath, int since) {
+      String container, String runId, String recordedLogPath, int since) {
     var logPath = AgentUnit.readableLogPath(runId, recordedLogPath);
     var script =
         since > 0
             ? "touch -- \"$1\" 2>/dev/null; exec tail -n \"+$2\" -f -- \"$1\""
             : "touch -- \"$1\" 2>/dev/null; exec tail -f -- \"$1\"";
     return ContainerExec.asDevUser(
-            project, List.of("bash", "-c", script, "sail-run-tail", logPath, String.valueOf(since)))
+            container,
+            List.of("bash", "-c", script, "sail-run-tail", logPath, String.valueOf(since)))
         .toArray(String[]::new);
   }
 

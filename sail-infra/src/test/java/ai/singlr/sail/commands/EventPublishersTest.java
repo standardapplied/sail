@@ -15,6 +15,7 @@ import ai.singlr.sail.api.Event;
 import ai.singlr.sail.api.EventBus;
 import ai.singlr.sail.api.EventSubscriber;
 import ai.singlr.sail.api.OperationsFactory;
+import ai.singlr.sail.api.ProjectReader;
 import ai.singlr.sail.api.RunTracker;
 import ai.singlr.sail.api.RunWatch;
 import ai.singlr.sail.api.SailApiServer;
@@ -22,10 +23,12 @@ import ai.singlr.sail.api.SailEventPublisher;
 import ai.singlr.sail.api.SailOperations;
 import ai.singlr.sail.api.SessionYield;
 import ai.singlr.sail.api.SpecLifecycleReactor;
+import ai.singlr.sail.api.StopOperations;
 import ai.singlr.sail.api.SyncRequest;
 import ai.singlr.sail.api.SyncScheduler;
 import ai.singlr.sail.api.TestAuth;
 import ai.singlr.sail.api.TestControlPlane;
+import ai.singlr.sail.api.TestWorkspaces;
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.config.SyncConfig;
@@ -126,7 +129,7 @@ class EventPublishersTest {
         cli(
             DispatchCommandWiringTest.shell()
                 .on("git -C /home/dev/workspace/app rev-parse --verify --quiet refs/heads/x", "")
-                .on("git -C /home/dev/workspace/app checkout -f x", ""));
+                .on("git -C /home/dev/workspace/app switch --quiet x", ""));
     var live =
         cli(
             DispatchCommandWiringTest.shell()
@@ -137,13 +140,13 @@ class EventPublishersTest {
     assertInstanceOf(
         DispatchOperations.Dispatched.class,
         DispatchCommand.dispatchAsOperator(cli, "acme", request(false), ME));
-    AgentStopCommand.stopAsOperator(cli, "acme", ME, false);
+    AgentStopCommand.stopAsOperator(cli, new StopOperations.ProjectTarget("acme", null), ME, false);
     Acting.system(
         () -> box.specs.updateReposAndStatus("auth", List.of("app"), SpecStatus.REVIEW, "x"));
     assertInstanceOf(
         DispatchOperations.Dispatched.class,
         DispatchCommand.dispatchAsOperator(cli, "acme", request(true), ME));
-    AgentStopCommand.stopAsOperator(cli, "acme", ME, false);
+    AgentStopCommand.stopAsOperator(cli, new StopOperations.ProjectTarget("acme", null), ME, false);
     Actor.call(
         live.identity().operator(),
         () ->
@@ -157,11 +160,9 @@ class EventPublishersTest {
     assertEquals(
         List.of(
             Event.WellKnownTypes.SPEC_DISPATCHED,
-            Event.WellKnownTypes.SNAPSHOT_CREATED,
             Event.WellKnownTypes.AGENT_CANCELLED,
             Event.WellKnownTypes.SPEC_RESTARTED,
             Event.WellKnownTypes.SPEC_DISPATCHED,
-            Event.WellKnownTypes.SNAPSHOT_CREATED,
             Event.WellKnownTypes.AGENT_CANCELLED,
             Event.WellKnownTypes.AGENT_SESSION_STARTED),
         types);
@@ -355,7 +356,7 @@ class EventPublishersTest {
             shell,
             this::publish,
             new WatcherSpawner(shell, (command, logPath) -> 4242L),
-            (project, config) -> "snap-1",
+            TestWorkspaces.ready(ProjectReader.ofCatalog(new ProjectStore(box.db)), "acme"),
             command -> 0,
             DispatchOperations.Listener.NONE,
             SessionYield.NONE,

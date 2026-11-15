@@ -164,7 +164,15 @@ class AgentLogCommandTest {
       HostOperations operations, String project, Optional<Lane> lane) {
     return Actor.readingAs(
         () -> operations.identity().operator(),
-        () -> AgentLogCommand.logPath(operations, project, "mady", lane));
+        () ->
+            AgentLogCommand.logPathFrom(
+                new RunSelector()
+                    .resolve(
+                        operations.dispatching(),
+                        "agent log",
+                        project,
+                        "mady",
+                        AgentLogCommand.inLane(lane))));
   }
 
   private static HostOperations operations(Sqlite db, Path dir) {

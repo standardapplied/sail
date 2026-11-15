@@ -13,6 +13,7 @@ import ai.singlr.sail.engine.AgentUnit;
 import ai.singlr.sail.engine.GuardrailChecker;
 import ai.singlr.sail.engine.GuardrailChecker.GuardrailResult.Triggered;
 import ai.singlr.sail.engine.GuardrailTrigger;
+import ai.singlr.sail.engine.RunPlace;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.SnapshotManager;
 import java.time.Duration;
@@ -150,7 +151,9 @@ public final class RunWatch {
     }
   }
 
+  private final RunPlace place;
   private final String project;
+  private final String instance;
   private final String runId;
   private final AgentUnit unit;
   private final Guardrails guardrails;
@@ -174,6 +177,7 @@ public final class RunWatch {
   private String snapshot = "";
 
   /**
+   * @param place where the run lives, whose instance is probed, stopped and snapshotted
    * @param unit the unit the run was launched as, as recorded on the run
    * @param guardrails the limits of the run's lane, as the project set them when the watcher was
    *     spawned
@@ -183,7 +187,7 @@ public final class RunWatch {
    * @param publisher where the stop goes, or null to publish none
    */
   public RunWatch(
-      String project,
+      RunPlace place,
       String runId,
       AgentUnit unit,
       Guardrails guardrails,
@@ -194,7 +198,9 @@ public final class RunWatch {
       StopPublisher publisher,
       Narrator narrator,
       Supplier<Instant> clock) {
-    this.project = Objects.requireNonNull(project, "project");
+    this.place = Objects.requireNonNull(place, "place");
+    this.project = place.project();
+    this.instance = place.instance();
     this.runId = Objects.requireNonNull(runId, "runId");
     this.unit = Objects.requireNonNull(unit, "unit");
     this.guardrails = Objects.requireNonNull(guardrails, "guardrails");
@@ -261,7 +267,7 @@ public final class RunWatch {
     if (!feed.live() && feed.reopen()) {
       activity = activity.seenAgainAt(now);
     }
-    var answered = session.answeredExitStatus(project, unit);
+    var answered = session.answeredExitStatus(instance, unit);
     if (answered.isEmpty()) {
       return knownGone();
     }
@@ -283,7 +289,7 @@ public final class RunWatch {
    * the watch with no stop: nothing here can say how the run ended.
    */
   private boolean knownGone() throws Exception {
-    var gone = presence.gone(project, unit);
+    var gone = presence.gone(place, unit);
     if (gone) {
       narrator.leftToTheReconciler();
     }
@@ -305,7 +311,7 @@ public final class RunWatch {
         return announced(limit, now);
       }
       enforcing = limit;
-      var beforeTheKill = session.answeredExitStatus(project, unit);
+      var beforeTheKill = session.answeredExitStatus(instance, unit);
       if (beforeTheKill.isEmpty()) {
         return false;
       }
@@ -314,7 +320,7 @@ public final class RunWatch {
         return true;
       }
     }
-    return switch (session.killAgent(project, unit)) {
+    return switch (session.killAgent(instance, unit)) {
       case AgentSession.Halt.Ended ended -> {
         reaped(limit, exit, now);
         yield true;
@@ -332,7 +338,7 @@ public final class RunWatch {
   }
 
   private boolean announced(Triggered limit, Instant now) throws Exception {
-    GuardrailTrigger.of(limit, now).write(shell, project, unit);
+    GuardrailTrigger.of(limit, now).write(shell, instance, unit);
     narrator.tripped(limit, Duration.between(startedAt, now), snapshot);
     notified = true;
     if (limit.stops()) {
@@ -351,7 +357,7 @@ public final class RunWatch {
    * and only then is the stop published, carrying why.
    */
   private void reaped(Triggered limit, AgentSession.ExitState exit, Instant now) throws Exception {
-    GuardrailTrigger.of(limit, now).write(shell, project, unit);
+    GuardrailTrigger.of(limit, now).write(shell, instance, unit);
     emitStop(publisher, project, exit, limit.cause());
     narrator.tripped(limit, Duration.between(startedAt, now), snapshot);
     narrator.ended();
@@ -419,15 +425,16 @@ public final class RunWatch {
   }
 
   /**
-   * The snapshot a {@code snapshot-and-stop} limit takes while the agent's state is still there;
-   * blank for every other action and on a dry run.
+   * The snapshot a {@code snapshot-and-stop} limit takes of the run's instance while the agent's
+   * state is still there; blank for every other action and on a dry run. A spec's workspace's
+   * snapshot goes with the workspace.
    */
   private String snapshotBefore(Triggered limit) throws Exception {
     if (dryRun || !"snapshot-and-stop".equals(limit.action())) {
       return "";
     }
     var label = "guardrail-" + SnapshotManager.defaultLabel().substring(5);
-    new SnapshotManager(shell).create(project, label);
+    new SnapshotManager(shell).create(instance, label);
     return label;
   }
 
@@ -439,7 +446,7 @@ public final class RunWatch {
    * name this run: a watcher started for a run that never launched has nothing to report.
    */
   public static boolean stopIfAlreadyEnded(
-      String project,
+      RunPlace place,
       String runId,
       AgentUnit unit,
       AgentSession agentSession,
@@ -447,9 +454,9 @@ public final class RunWatch {
       throws Exception {
     var ended =
         agentSession
-            .answeredExitStatus(project, unit)
+            .answeredExitStatus(place.instance(), unit)
             .filter(exit -> !exit.active() && runId.equals(exit.runId()));
-    ended.ifPresent(exit -> emitStop(publisher, project, exit, null));
+    ended.ifPresent(exit -> emitStop(publisher, place.project(), exit, null));
     return ended.isPresent();
   }
 

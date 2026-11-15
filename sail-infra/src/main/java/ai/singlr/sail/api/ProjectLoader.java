@@ -48,6 +48,15 @@ final class ProjectLoader {
     }
   }
 
+  /** Whether the catalog holds a project named {@code name}: an instance of its name is its own. */
+  boolean held(String name) {
+    try {
+      return definitions.read(name).isPresent();
+    } catch (ProjectReader.Unreadable e) {
+      return true;
+    }
+  }
+
   ProjectDefinition definition(String project) {
     try {
       return definitions.require(project);

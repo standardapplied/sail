@@ -6,6 +6,7 @@
 package ai.singlr.sail.api;
 
 import ai.singlr.sail.config.Lane;
+import ai.singlr.sail.engine.RunPlace;
 import ai.singlr.sail.engine.RunUsageReader;
 import ai.singlr.sail.harness.RunUsage;
 import ai.singlr.sail.store.DispatchGate;
@@ -120,5 +121,5 @@ public interface ReviewLanes {
    * @return the repos that had uncommitted work, now committed, each with the files it swept
    */
   List<Rescue> ensureCommitted(
-      String project, List<String> repos, String branch, String commitMessage) throws Exception;
+      RunPlace place, List<String> repos, String branch, String commitMessage) throws Exception;
 }
