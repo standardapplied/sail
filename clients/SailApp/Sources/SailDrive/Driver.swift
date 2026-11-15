@@ -217,11 +217,11 @@ final class Driver {
         if let limit = step.shownWithin {
             let figures = terminal.latency
             let ok = figures.outputToShown.max <= limit
-            let measure = measured(name, keys: 0, figures: figures, budgets: ["every output shown within \(Self.ms(limit)) ms": ok])
-            measures.append(measure)
+            let flood = measurement(name, keys: 0, figures: figures, budgets: ["every output shown within \(Self.ms(limit)) ms": ok])
+            measures.append(flood)
             return (ok, "the longest any output waited to be shown was \(Self.ms(figures.outputToShown.max)) ms; the longest refresh took "
                 + "\(Self.ms(figures.refresh.max)) ms, \(figures.lateOutputs) outputs were late; the main thread was held at most "
-                + "\(Self.ms(measure.mainThreadHeld)) ms, a thread of the drive's own \(Self.ms(measure.ownThreadHeld)) ms")
+                + "\(Self.ms(flood.mainThreadHeld)) ms, a thread of the drive's own \(Self.ms(flood.ownThreadHeld)) ms")
         }
         if let text = step.text {
             let found = await waitUntil(step.seconds ?? 10) { self.screenText.contains(text) }
@@ -286,12 +286,12 @@ final class Driver {
             "key to echo presented p95 <= 50 ms (reported presents only)": figures.keyToEcho.count == 0 || figures.keyToEcho.p95 <= 50,
             "every echo measured": figures.keyToEcho.count + figures.keyToEchoEstimated.count >= keys * 9 / 10,
         ]
-        measures.append(measured(name, keys: keys, figures: figures, budgets: budgets))
+        measures.append(measurement(name, keys: keys, figures: figures, budgets: budgets))
         let missed = budgets.filter { !$0.value }.keys.sorted()
         return (missed.isEmpty, missed.isEmpty ? "within every budget" : "missed: \(missed.joined(separator: "; "))")
     }
 
-    private func measured(_ name: String, keys: Int, figures: LatencyFigures, budgets: [String: Bool]) -> Measure {
+    private func measurement(_ name: String, keys: Int, figures: LatencyFigures, budgets: [String: Bool]) -> Measure {
         Measure(
             name: name, drawables: terminal.drawableCount, keys: keys, figures: figures, budgets: budgets,
             mainThreadHeld: mainThread.longest, ownThreadHeld: ownThread.longest
