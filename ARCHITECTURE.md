@@ -2911,7 +2911,7 @@ whether its sender speaks for this box, whether it retells, and whether this box
 | Approve | `review_iteration_started`, `review_stage_started`, `review_stage_passed`, `review_stage_failed`, `review_completed`, `review_errored`, `review_escalated` | main's sync bridge |
 | Narrate | `agent_session_started`, `agent_stop_nudged`, `agent_tool_started`, `agent_tool_finished` | the in-container hooks over the socket; the host CLI's dispatch and `sail run` (`agent_session_started`) |
 | Post | `spec_message_posted` | a node's sync, for each message it pulled |
-| Operate the box | `snapshot_created`, `board_updated` | no client since dispatch takes no snapshot (`snapshot_created`, which a room engagement's snapshot publishes on the server itself); a node's sync, for a round that changed the board |
+| Operate the box | `board_updated` | a node's sync, for a round that changed the board |
 
 Those the machinery acts on are taken first-hand only from whoever speaks for this box (its FDE,
 or an admin), and retold only by one who may take the action on the work, about a run this box

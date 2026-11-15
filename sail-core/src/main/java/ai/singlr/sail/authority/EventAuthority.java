@@ -73,7 +73,6 @@ public final class EventAuthority {
           Map.entry("review_errored", Action.APPROVE),
           Map.entry("review_escalated", Action.APPROVE),
           Map.entry("spec_message_posted", Action.POST),
-          Map.entry("snapshot_created", Action.OPERATE_BOX),
           Map.entry("board_updated", Action.OPERATE_BOX));
 
   private final SpecStore specs;
