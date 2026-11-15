@@ -1161,6 +1161,77 @@ class MissedStopReconcilerTest {
         "the replayed stop reaches the pipeline, which launches the spec's reviewer");
   }
 
+  /**
+   * The one reading of an unknown exit (MJ1): a build is lost only when it never recorded a
+   * process, or its instance is stopped or gone. One that recorded a process in an instance that
+   * runs, a limit or a code, or a row that had already ended, is not lost.
+   */
+  @Test
+  void aBuildIsLostOnlyWithNoProcessRecordedOrItsInstanceGone() throws Exception {
+    createInProgressSpec("auth");
+    assertEquals(false, lostOf(session("auth", "node-a", "build"), false, null));
+    assertEquals(true, lostOf(processless("auth"), false, null));
+    assertEquals(true, lostOf(session("auth", "node-a", "build"), true, null));
+    assertEquals(false, lostOf(processless("auth"), true, 2), "a code says how it ended");
+    assertEquals(false, lostOf(finishedSession("auth", "completed", null), true, null));
+  }
+
+  /** Whether the sweep's stop of {@code run} says it was lost, its instance gone or not. */
+  private Object lostOf(String run, boolean instanceGone, Integer code) throws Exception {
+    var latch = new CountDownLatch(1);
+    var stops = captureStops(latch);
+    var probe =
+        new MissedStopReconciler.UnitProbe() {
+          @Override
+          public boolean active(RunPlace place, String runId, String unit) {
+            return false;
+          }
+
+          @Override
+          public MissedStopReconciler.Ending ending(RunPlace place, String runId, String unit) {
+            return new MissedStopReconciler.Ending(code, null);
+          }
+
+          @Override
+          public boolean instanceGone(RunPlace place) {
+            return instanceGone;
+          }
+        };
+    reconciler(probe, PAST_GRACE).sweep();
+    BusTesting.awaitDelivery(latch);
+    var stop =
+        stops.stream()
+            .filter(event -> run.equals(event.data().get(Event.WellKnownData.RUN_ID)))
+            .findFirst()
+            .orElseThrow();
+    Acting.system(
+        () ->
+            sessionStore.finish(
+                run, sessionStore.findById(run).orElseThrow().status(), "stopped", null, null));
+    return Boolean.TRUE.equals(stop.data().get(Event.WellKnownData.LOST));
+  }
+
+  /** A build of {@code specId} still recorded running that never recorded a process. */
+  private String processless(String specId) {
+    return Acting.system(
+        () -> {
+          var id = DateTimeUtils.newId().toString();
+          return sessionStore.create(
+              id,
+              "test-project",
+              specId,
+              "node-a",
+              "build",
+              "claude-code",
+              "feat/test",
+              "task",
+              null,
+              null,
+              "/home/dev/.sail/runs/" + id + "/agent.log",
+              "sail-agent-" + id);
+        });
+  }
+
   @Test
   void replaysAMissedStopWithNoRecordedExitCodeAndStartsTheSpecsReview() throws Exception {
     createInProgressSpec("auth");

@@ -386,7 +386,9 @@ final class ReviewLoop implements AutoCloseable {
   String liveRun(String specId, String role) {
     var id = DateTimeUtils.newId().toString();
     container.started(id);
-    return run(id, specId, role);
+    run(id, specId, role);
+    Acting.system(() -> runs.updateProcess(id, Integer.valueOf(container.pidOf(id)), null, null));
+    return id;
   }
 
   /** As {@link #run(String, String)}, of a run of {@code agent}. */

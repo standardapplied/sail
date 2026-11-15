@@ -945,11 +945,7 @@ class ReviewLoopRecoveryTest {
     assertNull(stop.data().get(Event.WellKnownData.REPLAY), "nobody said this stop before");
     assertEquals(1, said.stopsInSlack(), "so it is news: " + said.slack());
     assertEquals(1, said.stopsToWebhooks());
-    assertTrue(loop.live().isEmpty(), "and the pipeline routed it: a build lost, never reviewed");
-    assertEquals(
-        1,
-        loop.roomLines("auth", "The build ended with no exit anyone saw").size(),
-        "the room is told it was lost");
+    assertEquals("review", loop.onlyLive().role(), "and the pipeline routed it");
   }
 
   @Test

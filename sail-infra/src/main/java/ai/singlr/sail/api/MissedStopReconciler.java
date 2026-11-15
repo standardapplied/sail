@@ -13,6 +13,7 @@ import ai.singlr.sail.engine.AgentPresence;
 import ai.singlr.sail.engine.AgentSession;
 import ai.singlr.sail.engine.AgentUnit;
 import ai.singlr.sail.engine.ContainerFilePush;
+import ai.singlr.sail.engine.ContainerState;
 import ai.singlr.sail.engine.GuardrailTrigger;
 import ai.singlr.sail.engine.RunPlace;
 import ai.singlr.sail.engine.RunUsageReader;
@@ -75,8 +76,9 @@ import java.util.stream.Stream;
  * UnitProbe#ending}): the non-zero exit code a failed unit still holds, and the limit the watcher
  * recorded beside the run before a stop that never arrived. A run nothing says ended badly carries
  * neither — a cleanly exited transient unit is collected, so there is no code to read — and the
- * pipeline judges it on the work it left. Every replayed stop carries {@code source=reconcile} so
- * the event log shows it was reconstructed, not observed.
+ * pipeline judges it on the work it left, unless it was lost ({@link #lost}): it never recorded a
+ * process, or its instance is stopped or gone, which no review judges. Every replayed stop carries
+ * {@code source=reconcile} so the event log shows it was reconstructed, not observed.
  *
  * <p>Best-effort by design: a failing spec is logged and skipped, a failing pass is logged and
  * retried on the next tick, and passes never overlap. Run after the bus subscribers are wired.
@@ -134,6 +136,11 @@ public final class MissedStopReconciler implements AutoCloseable {
      * default.
      */
     default void removeLaunchFiles(String instance, List<String> live) throws Exception {}
+
+    /** Whether {@code place}'s instance is stopped or gone; not, by default. */
+    default boolean instanceGone(RunPlace place) throws Exception {
+      return false;
+    }
   }
 
   /**
@@ -205,6 +212,15 @@ public final class MissedStopReconciler implements AutoCloseable {
     var presence = new AgentPresence(shell);
     var usage = new RunUsageReader(shell);
     return new UnitProbe() {
+      @Override
+      public boolean instanceGone(RunPlace place) throws Exception {
+        return switch (presence.state(place)) {
+          case ContainerState.Stopped stopped -> true;
+          case ContainerState.NotCreated absent -> true;
+          default -> false;
+        };
+      }
+
       @Override
       public boolean active(RunPlace place, String runId, String unit) throws Exception {
         return switch (presence.of(place, AgentUnit.recorded(runId, unit))) {
@@ -694,10 +710,30 @@ public final class MissedStopReconciler implements AutoCloseable {
             + "): "
             + why);
     var stop = stopEvent(session, code, reason);
-    if (code == null && reason == null && !RunStatus.isTerminal(session.status())) {
+    if (lost(session, code, reason)) {
       stop = lost(stop);
     }
     bus.publish(replay ? replayed(stop) : stop);
+  }
+
+  /**
+   * Whether {@code session}, still recorded running and ended with no exit or limit anyone saw, was
+   * lost: it never recorded a process (its dispatch died making its workspace), or its instance is
+   * stopped or gone (stopped by hand). A run that recorded a process in an instance that still runs
+   * ended on its own, a cleanly exited transient unit leaving no code, and is judged on its work.
+   */
+  private boolean lost(RunStore.RunRow session, Integer code, String reason) {
+    if (code != null || reason != null || RunStatus.isTerminal(session.status())) {
+      return false;
+    }
+    try {
+      return session.pid() == null || unitProbe.instanceGone(session.place());
+    } catch (Exception unreadable) {
+      if (unreadable instanceof InterruptedException) {
+        Thread.currentThread().interrupt();
+      }
+      return false;
+    }
   }
 
   /** {@code stop} marked lost ({@link Event.WellKnownData#LOST}). */
