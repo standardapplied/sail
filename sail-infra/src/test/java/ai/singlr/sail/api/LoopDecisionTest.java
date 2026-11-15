@@ -89,7 +89,7 @@ class LoopDecisionTest {
   }
 
   private static LoopTrigger buildEnded(String runId, Integer exitCode) {
-    return new LoopTrigger.BuildEnded(runId, exitCode);
+    return new LoopTrigger.BuildEnded(runId, exitCode, false);
   }
 
   private static LoopTrigger reviewerEnded(RunStore.RunRow run) {
@@ -175,6 +175,11 @@ class LoopDecisionTest {
             new LoopStep.SayBuildFailed(2)),
         row("A3 an exit of zero is no failure", facts(), buildEnded(null, 0), start(1)),
         row("A3 a stop with no exit code is no failure", facts(), buildEnded(null, null), start(1)),
+        row(
+            "A3 a build that ended with no exit anyone observed was lost",
+            facts(),
+            new LoopTrigger.BuildEnded(null, null, true),
+            new LoopStep.SayBuildLost()),
         row(
             "A4 a build whose spec has a review goes on from the rows",
             facts().review(ERRORED, List.of()),

@@ -156,6 +156,31 @@ class ReviewLanesTest {
         "the next stop in the project launches it: " + loop.live());
   }
 
+  /**
+   * High 2: a build whose process vanished (its dispatch killed mid-create, its workspace stopped
+   * by hand) is lost, never finished: the reconciler's stop with no exit starts no review, and the
+   * room says so, naming the dispatch that builds it again.
+   */
+  @Test
+  void aBuildLostWithNoExitIsNeverReviewedAndTheRoomNamesTheDispatchThatBuildsItAgain() {
+    loop = ReviewLoop.staged(tempDir, "codex", "claude-code");
+    loop.spec("auth", "api");
+    var build = loop.run("auth", "build");
+
+    var sweep = loop.reconciler(() -> Instant.now().plus(Duration.ofMinutes(5)));
+    sweep.sweep();
+
+    assertTrue(loop.container.live().isEmpty(), "no reviewer started");
+    assertTrue(loop.reviews.latestReviewForSpec("auth").isEmpty(), "and no review began");
+    assertEquals(SpecStatus.IN_PROGRESS, loop.specStatus("auth"));
+    assertEquals(
+        List.of(
+            "The build ended with no exit anyone saw (its process vanished, its workspace stopped,"
+                + " or its dispatch died while making the workspace), so nothing of it is reviewed."
+                + " Build it again: sail spec dispatch -p test-project --spec auth --restart."),
+        loop.roomLines("auth", "The build ended with no exit"));
+  }
+
   @Test
   void aFixRefusedForWantOfALoginSaysOnlyThatAndIsLaunchedOnceTheLoginIsStored() {
     loop = ReviewLoop.staged(tempDir, "codex", "claude-code");

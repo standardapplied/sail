@@ -36,9 +36,17 @@ sealed interface LoopTrigger {
 
   /**
    * A build, an ad-hoc run or a run of no known lane ended. {@code runId} is null when this box
-   * holds no row of the run, {@code exitCode} when the stop says none.
+   * holds no row of the run, {@code exitCode} when the stop says none. {@code lost} when the build
+   * ended with no exit anyone observed ({@link #lostBy}): its process vanished, its container
+   * stopped, its dispatch died while making its workspace, so nothing says it did its work, and its
+   * branch is never reviewed.
    */
-  record BuildEnded(String runId, Integer exitCode) implements LoopTrigger {}
+  record BuildEnded(String runId, Integer exitCode, boolean lost) implements LoopTrigger {}
+
+  /** Whether {@code stop} tells of a run lost ({@link Event.WellKnownData#LOST}). */
+  static boolean lostBy(Map<String, Object> stop) {
+    return Boolean.TRUE.equals(stop.get(Event.WellKnownData.LOST));
+  }
 
   /** A reviewer ended; {@code failure} is how it ended badly ({@link #failureOf}), if it did. */
   record ReviewerEnded(RunStore.RunRow run, Optional<String> failure) implements LoopTrigger {}

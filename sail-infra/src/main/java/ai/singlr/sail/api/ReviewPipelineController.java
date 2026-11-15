@@ -222,7 +222,9 @@ public final class ReviewPipelineController implements EventSubscriber {
             event.project(),
             event.spec(),
             new LoopTrigger.BuildEnded(
-                run.map(RunRow::id).orElse(null), Event.WellKnownData.exitCode(data)));
+                run.map(RunRow::id).orElse(null),
+                Event.WellKnownData.exitCode(data),
+                LoopTrigger.lostBy(data)));
     var failure = LoopTrigger.failureOf(data);
     return switch (Lane.of(role).orElse(null)) {
       case REVIEW -> run.map(it -> Routed.of(it, new LoopTrigger.ReviewerEnded(it, failure)));

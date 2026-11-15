@@ -64,6 +64,7 @@ final class LoopSteps {
     return switch (step) {
       case LoopStep.Nothing nothing -> Optional.empty();
       case LoopStep.SayBuildFailed failed -> sayBuildFailed(facts, failed);
+      case LoopStep.SayBuildLost lost -> sayBuildLost(facts);
       case LoopStep.ParkForAPerson park -> parkForAPerson(facts);
       case LoopStep.AwaitAnswer await -> awaitAnswer(facts, await);
       case LoopStep.CannotResume cannot -> cannotResume(facts, cannot);
@@ -90,6 +91,20 @@ final class LoopSteps {
     var detail = "exit " + step.exitCode();
     narrator.publishEvent(
         facts.project(), facts.specId(), Event.WellKnownTypes.AGENT_FAILED, detail);
+    return Optional.empty();
+  }
+
+  /**
+   * A lost build is a failed one: the spec stays in progress, unreviewed, and its room and a failed
+   * event say so, naming the dispatch that builds it again.
+   */
+  private Optional<LoopTrigger> sayBuildLost(LoopFacts facts) {
+    narrator.postRoom(facts.specId(), ReviewNarration.buildLost(facts.project(), facts.specId()));
+    narrator.publishEvent(
+        facts.project(),
+        facts.specId(),
+        Event.WellKnownTypes.AGENT_FAILED,
+        "lost: its process ended with no exit observed");
     return Optional.empty();
   }
 

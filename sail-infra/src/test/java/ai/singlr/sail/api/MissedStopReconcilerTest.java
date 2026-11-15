@@ -1834,7 +1834,9 @@ class MissedStopReconcilerTest {
     var frozen =
         incus(
             "[{\"name\": \"test-project\", \"status\": \"Frozen\"},"
-                + " {\"name\": \"test-project-auth\", \"status\": \"Frozen\"}]",
+                + " {\"name\": \"test-project-auth\", \"status\": \"Frozen\", \"config\":"
+                + " {\"user.sail.project\": \"test-project\", \"user.sail.workspace\": \"auth\","
+                + " \"user.sail.spec\": \"auth\", \"user.sail.ready\": \"1\"}}]",
             "frozen");
 
     assertEquals(0, reconciler(MissedStopReconciler.systemdUnitProbe(frozen), PAST_GRACE).sweep());

@@ -105,6 +105,9 @@ final class LoopDecision {
     if (build.exitCode() != null && build.exitCode() != 0) {
       return new LoopStep.SayBuildFailed(build.exitCode());
     }
+    if (build.lost()) {
+      return new LoopStep.SayBuildLost();
+    }
     if (rows.review().isPresent()) {
       return goOn(facts);
     }

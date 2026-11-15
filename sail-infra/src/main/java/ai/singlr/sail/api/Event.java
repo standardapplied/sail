@@ -316,6 +316,13 @@ public record Event(
     public static final String REASON = "reason";
 
     /**
+     * A stop's flag that its run was lost: still recorded running, its process gone, and no exit or
+     * reason anyone observed, as only the missed-stop reconciler can find a run. The one reading of
+     * an unknown exit: a lost build is a failed one, never reviewed.
+     */
+    public static final String LOST = "lost";
+
+    /**
      * Carried, as {@code true}, on an authoritative stop the missed-stop reconciler published for a
      * run whose stop was already said: it is published again only so the loop goes on from it. The
      * review pipeline routes it like any stop; whoever narrates stops to people says nothing for

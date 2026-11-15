@@ -120,6 +120,19 @@ final class ReviewNarration {
         + " holds it now re-dispatches it with --restart.";
   }
 
+  /**
+   * A build lost before it could say it was done (its process vanished, its workspace stopped, its
+   * dispatch died while making the workspace): nothing of it is reviewed, and the dispatch that
+   * builds it again is named as it works.
+   */
+  static String buildLost(String project, String specId) {
+    return "The build ended with no exit anyone saw (its process vanished, its workspace stopped,"
+        + " or its dispatch died while making the workspace), so nothing of it is reviewed. Build"
+        + " it again: "
+        + Remedy.of(RestartResolution.redispatch(project, specId)).plain()
+        + ".";
+  }
+
   /** The build goes on with the answer once the run that holds its claim ends. */
   static String resumeDeferred(String holder) {
     return "The build goes on with your answer once run `"

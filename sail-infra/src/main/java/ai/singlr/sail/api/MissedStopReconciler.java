@@ -6,6 +6,7 @@
 package ai.singlr.sail.api;
 
 import ai.singlr.sail.common.Strings;
+import ai.singlr.sail.config.RunStatus;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.AgentPresence;
@@ -679,7 +680,17 @@ public final class MissedStopReconciler implements AutoCloseable {
             + "): "
             + why);
     var stop = stopEvent(session, code, reason);
+    if (code == null && reason == null && !RunStatus.isTerminal(session.status())) {
+      stop = lost(stop);
+    }
     bus.publish(replay ? replayed(stop) : stop);
+  }
+
+  /** {@code stop} marked lost ({@link Event.WellKnownData#LOST}). */
+  private static Event lost(Event stop) {
+    var data = new LinkedHashMap<>(stop.data());
+    data.put(Event.WellKnownData.LOST, true);
+    return Event.of(stop.project(), stop.spec(), stop.type(), stop.agent(), stop.host(), data);
   }
 
   /**

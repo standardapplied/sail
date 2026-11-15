@@ -212,7 +212,7 @@ class ReviewLoopEveryStateTest {
             .filter(run -> RunStatus.isTerminal(run.status()))
             .findFirst();
     if (ended.isEmpty()) {
-      return new LoopTrigger.BuildEnded("build", 0);
+      return new LoopTrigger.BuildEnded("build", 0, false);
     }
     return Lane.FIX.matches(ended.get().role())
         ? new LoopTrigger.FixEnded(ended.get(), Optional.empty())
