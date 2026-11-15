@@ -9,6 +9,7 @@ import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.Engagement;
 import ai.singlr.sail.config.Guardrails;
+import ai.singlr.sail.config.Lane;
 import ai.singlr.sail.config.ProjectDefinition;
 import ai.singlr.sail.config.Roster;
 import ai.singlr.sail.engine.AgentPresence;
@@ -469,7 +470,11 @@ public final class LiveMembers implements RoomWakeReactor.Live, AutoCloseable {
             : "/home/" + ProjectDefinition.USER + "/workspace";
     var checked =
         places.check(
-            seat.project(), config, seat.spec() != null ? seat.spec().id() : null, localHandle);
+            seat.project(),
+            config,
+            seat.spec() != null ? seat.spec().id() : null,
+            full ? Lane.ROOM_FULL : Lane.ROOM,
+            localHandle);
     var runId = DateTimeUtils.newId().toString();
     var unit = AgentUnit.live(runId);
     var env =

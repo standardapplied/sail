@@ -16050,9 +16050,9 @@ seat an agent in ada-born-in-attic on ada's box as agent viewer ada-agent beta	d
 seat an agent in ada-born-in-attic on ada's box as agent viewer bob-agent acme	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot dispatch specs. | Ask an admin for a member or admin credential.
 seat an agent in ada-born-in-attic on ada's box as agent viewer bob-agent all	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot dispatch specs. | Ask an admin for a member or admin credential.
 seat an agent in ada-born-in-attic on ada's box as agent viewer bob-agent beta	denied ROOM_NOT_FOUND 404 Room 'ada-born-in-attic' was not found. | 
-seat an agent in ada-born-in-attic on ada's box as api admin root all	denied CONFLICT 409 acme has no template yet: | sail project template build acme
-seat an agent in ada-born-in-attic on ada's box as api member ada acme	denied CONFLICT 409 acme has no template yet: | sail project template build acme
-seat an agent in ada-born-in-attic on ada's box as api member ada all	denied CONFLICT 409 acme has no template yet: | sail project template build acme
+seat an agent in ada-born-in-attic on ada's box as api admin root all	denied CONFLICT 409 acme has no template yet: | sail project template build acme. Then engage or post in the room again.
+seat an agent in ada-born-in-attic on ada's box as api member ada acme	denied CONFLICT 409 acme has no template yet: | sail project template build acme. Then engage or post in the room again.
+seat an agent in ada-born-in-attic on ada's box as api member ada all	denied CONFLICT 409 acme has no template yet: | sail project template build acme. Then engage or post in the room again.
 seat an agent in ada-born-in-attic on ada's box as api member ada beta	denied ROOM_NOT_FOUND 404 Room 'ada-born-in-attic' was not found. | 
 seat an agent in ada-born-in-attic on ada's box as api member bob acme	denied FORBIDDEN_NOT_ASSIGNEE 403 Spec 'ada-born-in-attic' is assigned to 'ada', not you. | Ask ada to dispatch it, or have an admin reassign it before dispatching.
 seat an agent in ada-born-in-attic on ada's box as api member bob all	denied FORBIDDEN_NOT_ASSIGNEE 403 Spec 'ada-born-in-attic' is assigned to 'ada', not you. | Ask ada to dispatch it, or have an admin reassign it before dispatching.
@@ -16064,9 +16064,9 @@ seat an agent in ada-born-in-attic on ada's box as api viewer ada beta	denied RO
 seat an agent in ada-born-in-attic on ada's box as api viewer bob acme	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot dispatch specs. | Ask an admin for a member or admin credential.
 seat an agent in ada-born-in-attic on ada's box as api viewer bob all	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot dispatch specs. | Ask an admin for a member or admin credential.
 seat an agent in ada-born-in-attic on ada's box as api viewer bob beta	denied ROOM_NOT_FOUND 404 Room 'ada-born-in-attic' was not found. | 
-seat an agent in ada-born-in-attic on ada's box as cli admin root all	denied CONFLICT 409 acme has no template yet: | sail project template build acme
-seat an agent in ada-born-in-attic on ada's box as cli member ada acme	denied CONFLICT 409 acme has no template yet: | sail project template build acme
-seat an agent in ada-born-in-attic on ada's box as cli member ada all	denied CONFLICT 409 acme has no template yet: | sail project template build acme
+seat an agent in ada-born-in-attic on ada's box as cli admin root all	denied CONFLICT 409 acme has no template yet: | sail project template build acme. Then engage or post in the room again.
+seat an agent in ada-born-in-attic on ada's box as cli member ada acme	denied CONFLICT 409 acme has no template yet: | sail project template build acme. Then engage or post in the room again.
+seat an agent in ada-born-in-attic on ada's box as cli member ada all	denied CONFLICT 409 acme has no template yet: | sail project template build acme. Then engage or post in the room again.
 seat an agent in ada-born-in-attic on ada's box as cli member ada beta	denied ROOM_NOT_FOUND 404 Room 'ada-born-in-attic' was not found. | 
 seat an agent in ada-born-in-attic on ada's box as cli member bob acme	denied FORBIDDEN_NOT_ASSIGNEE 403 Spec 'ada-born-in-attic' is assigned to 'ada', not you. | Ask ada to dispatch it, or have an admin reassign it before dispatching.
 seat an agent in ada-born-in-attic on ada's box as cli member bob all	denied FORBIDDEN_NOT_ASSIGNEE 403 Spec 'ada-born-in-attic' is assigned to 'ada', not you. | Ask ada to dispatch it, or have an admin reassign it before dispatching.
@@ -16108,7 +16108,7 @@ seat an agent in ada-born-in-den on ada's box as agent viewer ada-agent beta	den
 seat an agent in ada-born-in-den on ada's box as agent viewer bob-agent acme	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot dispatch specs. | Ask an admin for a member or admin credential.
 seat an agent in ada-born-in-den on ada's box as agent viewer bob-agent all	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot dispatch specs. | Ask an admin for a member or admin credential.
 seat an agent in ada-born-in-den on ada's box as agent viewer bob-agent beta	denied ROOM_NOT_FOUND 404 Room 'ada-born-in-den' was not found. | 
-seat an agent in ada-born-in-den on ada's box as api admin root all	denied CONFLICT 409 acme has no template yet: | sail project template build acme
+seat an agent in ada-born-in-den on ada's box as api admin root all	denied CONFLICT 409 acme has no template yet: | sail project template build acme. Then engage or post in the room again.
 seat an agent in ada-born-in-den on ada's box as api member ada acme	denied FORBIDDEN_NOT_ASSIGNEE 403 Room 'den' belongs to 'bob', not you. | Ask bob to change it, or have an admin do it.
 seat an agent in ada-born-in-den on ada's box as api member ada all	denied FORBIDDEN_NOT_ASSIGNEE 403 Room 'den' belongs to 'bob', not you. | Ask bob to change it, or have an admin do it.
 seat an agent in ada-born-in-den on ada's box as api member ada beta	denied ROOM_NOT_FOUND 404 Room 'ada-born-in-den' was not found. | 
@@ -16122,7 +16122,7 @@ seat an agent in ada-born-in-den on ada's box as api viewer ada beta	denied ROOM
 seat an agent in ada-born-in-den on ada's box as api viewer bob acme	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot dispatch specs. | Ask an admin for a member or admin credential.
 seat an agent in ada-born-in-den on ada's box as api viewer bob all	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot dispatch specs. | Ask an admin for a member or admin credential.
 seat an agent in ada-born-in-den on ada's box as api viewer bob beta	denied ROOM_NOT_FOUND 404 Room 'ada-born-in-den' was not found. | 
-seat an agent in ada-born-in-den on ada's box as cli admin root all	denied CONFLICT 409 acme has no template yet: | sail project template build acme
+seat an agent in ada-born-in-den on ada's box as cli admin root all	denied CONFLICT 409 acme has no template yet: | sail project template build acme. Then engage or post in the room again.
 seat an agent in ada-born-in-den on ada's box as cli member ada acme	denied FORBIDDEN_NOT_ASSIGNEE 403 Room 'den' belongs to 'bob', not you. | Ask bob to change it, or have an admin do it.
 seat an agent in ada-born-in-den on ada's box as cli member ada all	denied FORBIDDEN_NOT_ASSIGNEE 403 Room 'den' belongs to 'bob', not you. | Ask bob to change it, or have an admin do it.
 seat an agent in ada-born-in-den on ada's box as cli member ada beta	denied ROOM_NOT_FOUND 404 Room 'ada-born-in-den' was not found. | 
@@ -16166,9 +16166,9 @@ seat an agent in ada-born-in-ghost on ada's box as agent viewer ada-agent beta	d
 seat an agent in ada-born-in-ghost on ada's box as agent viewer bob-agent acme	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot dispatch specs. | Ask an admin for a member or admin credential.
 seat an agent in ada-born-in-ghost on ada's box as agent viewer bob-agent all	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot dispatch specs. | Ask an admin for a member or admin credential.
 seat an agent in ada-born-in-ghost on ada's box as agent viewer bob-agent beta	denied ROOM_NOT_FOUND 404 Room 'ada-born-in-ghost' was not found. | 
-seat an agent in ada-born-in-ghost on ada's box as api admin root all	denied CONFLICT 409 acme has no template yet: | sail project template build acme
-seat an agent in ada-born-in-ghost on ada's box as api member ada acme	denied CONFLICT 409 acme has no template yet: | sail project template build acme
-seat an agent in ada-born-in-ghost on ada's box as api member ada all	denied CONFLICT 409 acme has no template yet: | sail project template build acme
+seat an agent in ada-born-in-ghost on ada's box as api admin root all	denied CONFLICT 409 acme has no template yet: | sail project template build acme. Then engage or post in the room again.
+seat an agent in ada-born-in-ghost on ada's box as api member ada acme	denied CONFLICT 409 acme has no template yet: | sail project template build acme. Then engage or post in the room again.
+seat an agent in ada-born-in-ghost on ada's box as api member ada all	denied CONFLICT 409 acme has no template yet: | sail project template build acme. Then engage or post in the room again.
 seat an agent in ada-born-in-ghost on ada's box as api member ada beta	denied ROOM_NOT_FOUND 404 Room 'ada-born-in-ghost' was not found. | 
 seat an agent in ada-born-in-ghost on ada's box as api member bob acme	denied FORBIDDEN_NOT_ASSIGNEE 403 Spec 'ada-born-in-ghost' is assigned to 'ada', not you. | Ask ada to dispatch it, or have an admin reassign it before dispatching.
 seat an agent in ada-born-in-ghost on ada's box as api member bob all	denied FORBIDDEN_NOT_ASSIGNEE 403 Spec 'ada-born-in-ghost' is assigned to 'ada', not you. | Ask ada to dispatch it, or have an admin reassign it before dispatching.
@@ -16180,9 +16180,9 @@ seat an agent in ada-born-in-ghost on ada's box as api viewer ada beta	denied RO
 seat an agent in ada-born-in-ghost on ada's box as api viewer bob acme	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot dispatch specs. | Ask an admin for a member or admin credential.
 seat an agent in ada-born-in-ghost on ada's box as api viewer bob all	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot dispatch specs. | Ask an admin for a member or admin credential.
 seat an agent in ada-born-in-ghost on ada's box as api viewer bob beta	denied ROOM_NOT_FOUND 404 Room 'ada-born-in-ghost' was not found. | 
-seat an agent in ada-born-in-ghost on ada's box as cli admin root all	denied CONFLICT 409 acme has no template yet: | sail project template build acme
-seat an agent in ada-born-in-ghost on ada's box as cli member ada acme	denied CONFLICT 409 acme has no template yet: | sail project template build acme
-seat an agent in ada-born-in-ghost on ada's box as cli member ada all	denied CONFLICT 409 acme has no template yet: | sail project template build acme
+seat an agent in ada-born-in-ghost on ada's box as cli admin root all	denied CONFLICT 409 acme has no template yet: | sail project template build acme. Then engage or post in the room again.
+seat an agent in ada-born-in-ghost on ada's box as cli member ada acme	denied CONFLICT 409 acme has no template yet: | sail project template build acme. Then engage or post in the room again.
+seat an agent in ada-born-in-ghost on ada's box as cli member ada all	denied CONFLICT 409 acme has no template yet: | sail project template build acme. Then engage or post in the room again.
 seat an agent in ada-born-in-ghost on ada's box as cli member ada beta	denied ROOM_NOT_FOUND 404 Room 'ada-born-in-ghost' was not found. | 
 seat an agent in ada-born-in-ghost on ada's box as cli member bob acme	denied FORBIDDEN_NOT_ASSIGNEE 403 Spec 'ada-born-in-ghost' is assigned to 'ada', not you. | Ask ada to dispatch it, or have an admin reassign it before dispatching.
 seat an agent in ada-born-in-ghost on ada's box as cli member bob all	denied FORBIDDEN_NOT_ASSIGNEE 403 Spec 'ada-born-in-ghost' is assigned to 'ada', not you. | Ask ada to dispatch it, or have an admin reassign it before dispatching.
@@ -16224,9 +16224,9 @@ seat an agent in ada-born-in-lobby on ada's box as agent viewer ada-agent beta	d
 seat an agent in ada-born-in-lobby on ada's box as agent viewer bob-agent acme	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot dispatch specs. | Ask an admin for a member or admin credential.
 seat an agent in ada-born-in-lobby on ada's box as agent viewer bob-agent all	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot dispatch specs. | Ask an admin for a member or admin credential.
 seat an agent in ada-born-in-lobby on ada's box as agent viewer bob-agent beta	denied ROOM_NOT_FOUND 404 Room 'ada-born-in-lobby' was not found. | 
-seat an agent in ada-born-in-lobby on ada's box as api admin root all	denied CONFLICT 409 acme has no template yet: | sail project template build acme
-seat an agent in ada-born-in-lobby on ada's box as api member ada acme	denied CONFLICT 409 acme has no template yet: | sail project template build acme
-seat an agent in ada-born-in-lobby on ada's box as api member ada all	denied CONFLICT 409 acme has no template yet: | sail project template build acme
+seat an agent in ada-born-in-lobby on ada's box as api admin root all	denied CONFLICT 409 acme has no template yet: | sail project template build acme. Then engage or post in the room again.
+seat an agent in ada-born-in-lobby on ada's box as api member ada acme	denied CONFLICT 409 acme has no template yet: | sail project template build acme. Then engage or post in the room again.
+seat an agent in ada-born-in-lobby on ada's box as api member ada all	denied CONFLICT 409 acme has no template yet: | sail project template build acme. Then engage or post in the room again.
 seat an agent in ada-born-in-lobby on ada's box as api member ada beta	denied ROOM_NOT_FOUND 404 Room 'ada-born-in-lobby' was not found. | 
 seat an agent in ada-born-in-lobby on ada's box as api member bob acme	denied FORBIDDEN_NOT_ASSIGNEE 403 Spec 'ada-born-in-lobby' is assigned to 'ada', not you. | Ask ada to dispatch it, or have an admin reassign it before dispatching.
 seat an agent in ada-born-in-lobby on ada's box as api member bob all	denied FORBIDDEN_NOT_ASSIGNEE 403 Spec 'ada-born-in-lobby' is assigned to 'ada', not you. | Ask ada to dispatch it, or have an admin reassign it before dispatching.
@@ -16238,9 +16238,9 @@ seat an agent in ada-born-in-lobby on ada's box as api viewer ada beta	denied RO
 seat an agent in ada-born-in-lobby on ada's box as api viewer bob acme	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot dispatch specs. | Ask an admin for a member or admin credential.
 seat an agent in ada-born-in-lobby on ada's box as api viewer bob all	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot dispatch specs. | Ask an admin for a member or admin credential.
 seat an agent in ada-born-in-lobby on ada's box as api viewer bob beta	denied ROOM_NOT_FOUND 404 Room 'ada-born-in-lobby' was not found. | 
-seat an agent in ada-born-in-lobby on ada's box as cli admin root all	denied CONFLICT 409 acme has no template yet: | sail project template build acme
-seat an agent in ada-born-in-lobby on ada's box as cli member ada acme	denied CONFLICT 409 acme has no template yet: | sail project template build acme
-seat an agent in ada-born-in-lobby on ada's box as cli member ada all	denied CONFLICT 409 acme has no template yet: | sail project template build acme
+seat an agent in ada-born-in-lobby on ada's box as cli admin root all	denied CONFLICT 409 acme has no template yet: | sail project template build acme. Then engage or post in the room again.
+seat an agent in ada-born-in-lobby on ada's box as cli member ada acme	denied CONFLICT 409 acme has no template yet: | sail project template build acme. Then engage or post in the room again.
+seat an agent in ada-born-in-lobby on ada's box as cli member ada all	denied CONFLICT 409 acme has no template yet: | sail project template build acme. Then engage or post in the room again.
 seat an agent in ada-born-in-lobby on ada's box as cli member ada beta	denied ROOM_NOT_FOUND 404 Room 'ada-born-in-lobby' was not found. | 
 seat an agent in ada-born-in-lobby on ada's box as cli member bob acme	denied FORBIDDEN_NOT_ASSIGNEE 403 Spec 'ada-born-in-lobby' is assigned to 'ada', not you. | Ask ada to dispatch it, or have an admin reassign it before dispatching.
 seat an agent in ada-born-in-lobby on ada's box as cli member bob all	denied FORBIDDEN_NOT_ASSIGNEE 403 Spec 'ada-born-in-lobby' is assigned to 'ada', not you. | Ask ada to dispatch it, or have an admin reassign it before dispatching.
@@ -16398,7 +16398,7 @@ seat an agent in bob-born-in-attic on bob's box as agent viewer ada-agent beta	d
 seat an agent in bob-born-in-attic on bob's box as agent viewer bob-agent acme	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot dispatch specs. | Ask an admin for a member or admin credential.
 seat an agent in bob-born-in-attic on bob's box as agent viewer bob-agent all	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot dispatch specs. | Ask an admin for a member or admin credential.
 seat an agent in bob-born-in-attic on bob's box as agent viewer bob-agent beta	denied ROOM_NOT_FOUND 404 Room 'bob-born-in-attic' was not found. | 
-seat an agent in bob-born-in-attic on bob's box as api admin root all	denied CONFLICT 409 acme has no template yet: | sail project template build acme
+seat an agent in bob-born-in-attic on bob's box as api admin root all	denied CONFLICT 409 acme has no template yet: | sail project template build acme. Then engage or post in the room again.
 seat an agent in bob-born-in-attic on bob's box as api member ada acme	denied FORBIDDEN_NOT_ASSIGNEE 403 Spec 'bob-born-in-attic' is assigned to 'bob', not you. | Ask bob to dispatch it, or have an admin reassign it before dispatching.
 seat an agent in bob-born-in-attic on bob's box as api member ada all	denied FORBIDDEN_NOT_ASSIGNEE 403 Spec 'bob-born-in-attic' is assigned to 'bob', not you. | Ask bob to dispatch it, or have an admin reassign it before dispatching.
 seat an agent in bob-born-in-attic on bob's box as api member ada beta	denied ROOM_NOT_FOUND 404 Room 'bob-born-in-attic' was not found. | 
@@ -16412,7 +16412,7 @@ seat an agent in bob-born-in-attic on bob's box as api viewer ada beta	denied RO
 seat an agent in bob-born-in-attic on bob's box as api viewer bob acme	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot dispatch specs. | Ask an admin for a member or admin credential.
 seat an agent in bob-born-in-attic on bob's box as api viewer bob all	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot dispatch specs. | Ask an admin for a member or admin credential.
 seat an agent in bob-born-in-attic on bob's box as api viewer bob beta	denied ROOM_NOT_FOUND 404 Room 'bob-born-in-attic' was not found. | 
-seat an agent in bob-born-in-attic on bob's box as cli admin root all	denied CONFLICT 409 acme has no template yet: | sail project template build acme
+seat an agent in bob-born-in-attic on bob's box as cli admin root all	denied CONFLICT 409 acme has no template yet: | sail project template build acme. Then engage or post in the room again.
 seat an agent in bob-born-in-attic on bob's box as cli member ada acme	denied FORBIDDEN_NOT_ASSIGNEE 403 Spec 'bob-born-in-attic' is assigned to 'bob', not you. | Ask bob to dispatch it, or have an admin reassign it before dispatching.
 seat an agent in bob-born-in-attic on bob's box as cli member ada all	denied FORBIDDEN_NOT_ASSIGNEE 403 Spec 'bob-born-in-attic' is assigned to 'bob', not you. | Ask bob to dispatch it, or have an admin reassign it before dispatching.
 seat an agent in bob-born-in-attic on bob's box as cli member ada beta	denied ROOM_NOT_FOUND 404 Room 'bob-born-in-attic' was not found. | 
@@ -16456,12 +16456,12 @@ seat an agent in bob-born-in-den on bob's box as agent viewer ada-agent beta	den
 seat an agent in bob-born-in-den on bob's box as agent viewer bob-agent acme	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot dispatch specs. | Ask an admin for a member or admin credential.
 seat an agent in bob-born-in-den on bob's box as agent viewer bob-agent all	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot dispatch specs. | Ask an admin for a member or admin credential.
 seat an agent in bob-born-in-den on bob's box as agent viewer bob-agent beta	denied ROOM_NOT_FOUND 404 Room 'bob-born-in-den' was not found. | 
-seat an agent in bob-born-in-den on bob's box as api admin root all	denied CONFLICT 409 acme has no template yet: | sail project template build acme
+seat an agent in bob-born-in-den on bob's box as api admin root all	denied CONFLICT 409 acme has no template yet: | sail project template build acme. Then engage or post in the room again.
 seat an agent in bob-born-in-den on bob's box as api member ada acme	denied FORBIDDEN_NOT_ASSIGNEE 403 Spec 'bob-born-in-den' is assigned to 'bob', not you. | Ask bob to dispatch it, or have an admin reassign it before dispatching.
 seat an agent in bob-born-in-den on bob's box as api member ada all	denied FORBIDDEN_NOT_ASSIGNEE 403 Spec 'bob-born-in-den' is assigned to 'bob', not you. | Ask bob to dispatch it, or have an admin reassign it before dispatching.
 seat an agent in bob-born-in-den on bob's box as api member ada beta	denied ROOM_NOT_FOUND 404 Room 'bob-born-in-den' was not found. | 
-seat an agent in bob-born-in-den on bob's box as api member bob acme	denied CONFLICT 409 acme has no template yet: | sail project template build acme
-seat an agent in bob-born-in-den on bob's box as api member bob all	denied CONFLICT 409 acme has no template yet: | sail project template build acme
+seat an agent in bob-born-in-den on bob's box as api member bob acme	denied CONFLICT 409 acme has no template yet: | sail project template build acme. Then engage or post in the room again.
+seat an agent in bob-born-in-den on bob's box as api member bob all	denied CONFLICT 409 acme has no template yet: | sail project template build acme. Then engage or post in the room again.
 seat an agent in bob-born-in-den on bob's box as api member bob beta	denied ROOM_NOT_FOUND 404 Room 'bob-born-in-den' was not found. | 
 seat an agent in bob-born-in-den on bob's box as api member machine all	denied FORBIDDEN_NOT_ASSIGNEE 403 Spec 'bob-born-in-den' is assigned to 'bob', not you. | Ask bob to dispatch it, or have an admin reassign it before dispatching.
 seat an agent in bob-born-in-den on bob's box as api viewer ada acme	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot dispatch specs. | Ask an admin for a member or admin credential.
@@ -16470,12 +16470,12 @@ seat an agent in bob-born-in-den on bob's box as api viewer ada beta	denied ROOM
 seat an agent in bob-born-in-den on bob's box as api viewer bob acme	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot dispatch specs. | Ask an admin for a member or admin credential.
 seat an agent in bob-born-in-den on bob's box as api viewer bob all	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot dispatch specs. | Ask an admin for a member or admin credential.
 seat an agent in bob-born-in-den on bob's box as api viewer bob beta	denied ROOM_NOT_FOUND 404 Room 'bob-born-in-den' was not found. | 
-seat an agent in bob-born-in-den on bob's box as cli admin root all	denied CONFLICT 409 acme has no template yet: | sail project template build acme
+seat an agent in bob-born-in-den on bob's box as cli admin root all	denied CONFLICT 409 acme has no template yet: | sail project template build acme. Then engage or post in the room again.
 seat an agent in bob-born-in-den on bob's box as cli member ada acme	denied FORBIDDEN_NOT_ASSIGNEE 403 Spec 'bob-born-in-den' is assigned to 'bob', not you. | Ask bob to dispatch it, or have an admin reassign it before dispatching.
 seat an agent in bob-born-in-den on bob's box as cli member ada all	denied FORBIDDEN_NOT_ASSIGNEE 403 Spec 'bob-born-in-den' is assigned to 'bob', not you. | Ask bob to dispatch it, or have an admin reassign it before dispatching.
 seat an agent in bob-born-in-den on bob's box as cli member ada beta	denied ROOM_NOT_FOUND 404 Room 'bob-born-in-den' was not found. | 
-seat an agent in bob-born-in-den on bob's box as cli member bob acme	denied CONFLICT 409 acme has no template yet: | sail project template build acme
-seat an agent in bob-born-in-den on bob's box as cli member bob all	denied CONFLICT 409 acme has no template yet: | sail project template build acme
+seat an agent in bob-born-in-den on bob's box as cli member bob acme	denied CONFLICT 409 acme has no template yet: | sail project template build acme. Then engage or post in the room again.
+seat an agent in bob-born-in-den on bob's box as cli member bob all	denied CONFLICT 409 acme has no template yet: | sail project template build acme. Then engage or post in the room again.
 seat an agent in bob-born-in-den on bob's box as cli member bob beta	denied ROOM_NOT_FOUND 404 Room 'bob-born-in-den' was not found. | 
 seat an agent in bob-born-in-den on bob's box as cli viewer ada acme	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot dispatch specs. | Ask an admin for a member or admin credential.
 seat an agent in bob-born-in-den on bob's box as cli viewer ada all	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot dispatch specs. | Ask an admin for a member or admin credential.
@@ -16514,12 +16514,12 @@ seat an agent in bob-born-in-ghost on bob's box as agent viewer ada-agent beta	d
 seat an agent in bob-born-in-ghost on bob's box as agent viewer bob-agent acme	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot dispatch specs. | Ask an admin for a member or admin credential.
 seat an agent in bob-born-in-ghost on bob's box as agent viewer bob-agent all	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot dispatch specs. | Ask an admin for a member or admin credential.
 seat an agent in bob-born-in-ghost on bob's box as agent viewer bob-agent beta	denied ROOM_NOT_FOUND 404 Room 'bob-born-in-ghost' was not found. | 
-seat an agent in bob-born-in-ghost on bob's box as api admin root all	denied CONFLICT 409 acme has no template yet: | sail project template build acme
+seat an agent in bob-born-in-ghost on bob's box as api admin root all	denied CONFLICT 409 acme has no template yet: | sail project template build acme. Then engage or post in the room again.
 seat an agent in bob-born-in-ghost on bob's box as api member ada acme	denied FORBIDDEN_NOT_ASSIGNEE 403 Spec 'bob-born-in-ghost' is assigned to 'bob', not you. | Ask bob to dispatch it, or have an admin reassign it before dispatching.
 seat an agent in bob-born-in-ghost on bob's box as api member ada all	denied FORBIDDEN_NOT_ASSIGNEE 403 Spec 'bob-born-in-ghost' is assigned to 'bob', not you. | Ask bob to dispatch it, or have an admin reassign it before dispatching.
 seat an agent in bob-born-in-ghost on bob's box as api member ada beta	denied ROOM_NOT_FOUND 404 Room 'bob-born-in-ghost' was not found. | 
-seat an agent in bob-born-in-ghost on bob's box as api member bob acme	denied CONFLICT 409 acme has no template yet: | sail project template build acme
-seat an agent in bob-born-in-ghost on bob's box as api member bob all	denied CONFLICT 409 acme has no template yet: | sail project template build acme
+seat an agent in bob-born-in-ghost on bob's box as api member bob acme	denied CONFLICT 409 acme has no template yet: | sail project template build acme. Then engage or post in the room again.
+seat an agent in bob-born-in-ghost on bob's box as api member bob all	denied CONFLICT 409 acme has no template yet: | sail project template build acme. Then engage or post in the room again.
 seat an agent in bob-born-in-ghost on bob's box as api member bob beta	denied ROOM_NOT_FOUND 404 Room 'bob-born-in-ghost' was not found. | 
 seat an agent in bob-born-in-ghost on bob's box as api member machine all	denied FORBIDDEN_NOT_ASSIGNEE 403 Spec 'bob-born-in-ghost' is assigned to 'bob', not you. | Ask bob to dispatch it, or have an admin reassign it before dispatching.
 seat an agent in bob-born-in-ghost on bob's box as api viewer ada acme	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot dispatch specs. | Ask an admin for a member or admin credential.
@@ -16528,12 +16528,12 @@ seat an agent in bob-born-in-ghost on bob's box as api viewer ada beta	denied RO
 seat an agent in bob-born-in-ghost on bob's box as api viewer bob acme	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot dispatch specs. | Ask an admin for a member or admin credential.
 seat an agent in bob-born-in-ghost on bob's box as api viewer bob all	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot dispatch specs. | Ask an admin for a member or admin credential.
 seat an agent in bob-born-in-ghost on bob's box as api viewer bob beta	denied ROOM_NOT_FOUND 404 Room 'bob-born-in-ghost' was not found. | 
-seat an agent in bob-born-in-ghost on bob's box as cli admin root all	denied CONFLICT 409 acme has no template yet: | sail project template build acme
+seat an agent in bob-born-in-ghost on bob's box as cli admin root all	denied CONFLICT 409 acme has no template yet: | sail project template build acme. Then engage or post in the room again.
 seat an agent in bob-born-in-ghost on bob's box as cli member ada acme	denied FORBIDDEN_NOT_ASSIGNEE 403 Spec 'bob-born-in-ghost' is assigned to 'bob', not you. | Ask bob to dispatch it, or have an admin reassign it before dispatching.
 seat an agent in bob-born-in-ghost on bob's box as cli member ada all	denied FORBIDDEN_NOT_ASSIGNEE 403 Spec 'bob-born-in-ghost' is assigned to 'bob', not you. | Ask bob to dispatch it, or have an admin reassign it before dispatching.
 seat an agent in bob-born-in-ghost on bob's box as cli member ada beta	denied ROOM_NOT_FOUND 404 Room 'bob-born-in-ghost' was not found. | 
-seat an agent in bob-born-in-ghost on bob's box as cli member bob acme	denied CONFLICT 409 acme has no template yet: | sail project template build acme
-seat an agent in bob-born-in-ghost on bob's box as cli member bob all	denied CONFLICT 409 acme has no template yet: | sail project template build acme
+seat an agent in bob-born-in-ghost on bob's box as cli member bob acme	denied CONFLICT 409 acme has no template yet: | sail project template build acme. Then engage or post in the room again.
+seat an agent in bob-born-in-ghost on bob's box as cli member bob all	denied CONFLICT 409 acme has no template yet: | sail project template build acme. Then engage or post in the room again.
 seat an agent in bob-born-in-ghost on bob's box as cli member bob beta	denied ROOM_NOT_FOUND 404 Room 'bob-born-in-ghost' was not found. | 
 seat an agent in bob-born-in-ghost on bob's box as cli viewer ada acme	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot dispatch specs. | Ask an admin for a member or admin credential.
 seat an agent in bob-born-in-ghost on bob's box as cli viewer ada all	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot dispatch specs. | Ask an admin for a member or admin credential.
@@ -16572,7 +16572,7 @@ seat an agent in bob-born-in-lobby on bob's box as agent viewer ada-agent beta	d
 seat an agent in bob-born-in-lobby on bob's box as agent viewer bob-agent acme	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot dispatch specs. | Ask an admin for a member or admin credential.
 seat an agent in bob-born-in-lobby on bob's box as agent viewer bob-agent all	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot dispatch specs. | Ask an admin for a member or admin credential.
 seat an agent in bob-born-in-lobby on bob's box as agent viewer bob-agent beta	denied ROOM_NOT_FOUND 404 Room 'bob-born-in-lobby' was not found. | 
-seat an agent in bob-born-in-lobby on bob's box as api admin root all	denied CONFLICT 409 acme has no template yet: | sail project template build acme
+seat an agent in bob-born-in-lobby on bob's box as api admin root all	denied CONFLICT 409 acme has no template yet: | sail project template build acme. Then engage or post in the room again.
 seat an agent in bob-born-in-lobby on bob's box as api member ada acme	denied FORBIDDEN_NOT_ASSIGNEE 403 Spec 'bob-born-in-lobby' is assigned to 'bob', not you. | Ask bob to dispatch it, or have an admin reassign it before dispatching.
 seat an agent in bob-born-in-lobby on bob's box as api member ada all	denied FORBIDDEN_NOT_ASSIGNEE 403 Spec 'bob-born-in-lobby' is assigned to 'bob', not you. | Ask bob to dispatch it, or have an admin reassign it before dispatching.
 seat an agent in bob-born-in-lobby on bob's box as api member ada beta	denied ROOM_NOT_FOUND 404 Room 'bob-born-in-lobby' was not found. | 
@@ -16586,7 +16586,7 @@ seat an agent in bob-born-in-lobby on bob's box as api viewer ada beta	denied RO
 seat an agent in bob-born-in-lobby on bob's box as api viewer bob acme	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot dispatch specs. | Ask an admin for a member or admin credential.
 seat an agent in bob-born-in-lobby on bob's box as api viewer bob all	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot dispatch specs. | Ask an admin for a member or admin credential.
 seat an agent in bob-born-in-lobby on bob's box as api viewer bob beta	denied ROOM_NOT_FOUND 404 Room 'bob-born-in-lobby' was not found. | 
-seat an agent in bob-born-in-lobby on bob's box as cli admin root all	denied CONFLICT 409 acme has no template yet: | sail project template build acme
+seat an agent in bob-born-in-lobby on bob's box as cli admin root all	denied CONFLICT 409 acme has no template yet: | sail project template build acme. Then engage or post in the room again.
 seat an agent in bob-born-in-lobby on bob's box as cli member ada acme	denied FORBIDDEN_NOT_ASSIGNEE 403 Spec 'bob-born-in-lobby' is assigned to 'bob', not you. | Ask bob to dispatch it, or have an admin reassign it before dispatching.
 seat an agent in bob-born-in-lobby on bob's box as cli member ada all	denied FORBIDDEN_NOT_ASSIGNEE 403 Spec 'bob-born-in-lobby' is assigned to 'bob', not you. | Ask bob to dispatch it, or have an admin reassign it before dispatching.
 seat an agent in bob-born-in-lobby on bob's box as cli member ada beta	denied ROOM_NOT_FOUND 404 Room 'bob-born-in-lobby' was not found. | 
@@ -16978,9 +16978,9 @@ seat an agent in s-ada on ada's box as agent viewer ada-agent beta	denied ROOM_N
 seat an agent in s-ada on ada's box as agent viewer bob-agent acme	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot dispatch specs. | Ask an admin for a member or admin credential.
 seat an agent in s-ada on ada's box as agent viewer bob-agent all	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot dispatch specs. | Ask an admin for a member or admin credential.
 seat an agent in s-ada on ada's box as agent viewer bob-agent beta	denied ROOM_NOT_FOUND 404 Room 's-ada' was not found. | 
-seat an agent in s-ada on ada's box as api admin root all	denied CONFLICT 409 acme has no template yet: | sail project template build acme
-seat an agent in s-ada on ada's box as api member ada acme	denied CONFLICT 409 acme has no template yet: | sail project template build acme
-seat an agent in s-ada on ada's box as api member ada all	denied CONFLICT 409 acme has no template yet: | sail project template build acme
+seat an agent in s-ada on ada's box as api admin root all	denied CONFLICT 409 acme has no template yet: | sail project template build acme. Then engage or post in the room again.
+seat an agent in s-ada on ada's box as api member ada acme	denied CONFLICT 409 acme has no template yet: | sail project template build acme. Then engage or post in the room again.
+seat an agent in s-ada on ada's box as api member ada all	denied CONFLICT 409 acme has no template yet: | sail project template build acme. Then engage or post in the room again.
 seat an agent in s-ada on ada's box as api member ada beta	denied ROOM_NOT_FOUND 404 Room 's-ada' was not found. | 
 seat an agent in s-ada on ada's box as api member bob acme	denied FORBIDDEN_NOT_ASSIGNEE 403 Spec 's-ada' is assigned to 'ada', not you. | Ask ada to dispatch it, or have an admin reassign it before dispatching.
 seat an agent in s-ada on ada's box as api member bob all	denied FORBIDDEN_NOT_ASSIGNEE 403 Spec 's-ada' is assigned to 'ada', not you. | Ask ada to dispatch it, or have an admin reassign it before dispatching.
@@ -16992,9 +16992,9 @@ seat an agent in s-ada on ada's box as api viewer ada beta	denied ROOM_NOT_FOUND
 seat an agent in s-ada on ada's box as api viewer bob acme	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot dispatch specs. | Ask an admin for a member or admin credential.
 seat an agent in s-ada on ada's box as api viewer bob all	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot dispatch specs. | Ask an admin for a member or admin credential.
 seat an agent in s-ada on ada's box as api viewer bob beta	denied ROOM_NOT_FOUND 404 Room 's-ada' was not found. | 
-seat an agent in s-ada on ada's box as cli admin root all	denied CONFLICT 409 acme has no template yet: | sail project template build acme
-seat an agent in s-ada on ada's box as cli member ada acme	denied CONFLICT 409 acme has no template yet: | sail project template build acme
-seat an agent in s-ada on ada's box as cli member ada all	denied CONFLICT 409 acme has no template yet: | sail project template build acme
+seat an agent in s-ada on ada's box as cli admin root all	denied CONFLICT 409 acme has no template yet: | sail project template build acme. Then engage or post in the room again.
+seat an agent in s-ada on ada's box as cli member ada acme	denied CONFLICT 409 acme has no template yet: | sail project template build acme. Then engage or post in the room again.
+seat an agent in s-ada on ada's box as cli member ada all	denied CONFLICT 409 acme has no template yet: | sail project template build acme. Then engage or post in the room again.
 seat an agent in s-ada on ada's box as cli member ada beta	denied ROOM_NOT_FOUND 404 Room 's-ada' was not found. | 
 seat an agent in s-ada on ada's box as cli member bob acme	denied FORBIDDEN_NOT_ASSIGNEE 403 Spec 's-ada' is assigned to 'ada', not you. | Ask ada to dispatch it, or have an admin reassign it before dispatching.
 seat an agent in s-ada on ada's box as cli member bob all	denied FORBIDDEN_NOT_ASSIGNEE 403 Spec 's-ada' is assigned to 'ada', not you. | Ask ada to dispatch it, or have an admin reassign it before dispatching.

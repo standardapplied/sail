@@ -597,7 +597,9 @@ class RoomWakeLaunchTest {
     }
 
     assertEquals(
-        List.of("acme has no template yet: sail project template build acme"),
+        List.of(
+            "acme has no template yet: sail project template build acme. Then engage or post in"
+                + " the room again."),
         messageStore.list("auth", null, 20).stream().map(MessageStore.MessageRow::body).toList());
     assertEquals(List.of(), runStore.listForSpec("auth"));
   }

@@ -76,7 +76,8 @@ final class ReviewLaneLauncher implements ReviewLanes {
   public Launch launch(Invocation invocation, String boxHandle, Runnable claimed) {
     var project = invocation.project();
     var config = projects.definition(project);
-    var checked = places.checkSpec(project, config, invocation.specId(), boxHandle);
+    var checked =
+        places.checkSpec(project, config, invocation.specId(), invocation.lane(), boxHandle);
     var runId = DateTimeUtils.newId().toString();
     var unit = AgentUnit.forRun(runId);
     var claim =
@@ -112,7 +113,8 @@ final class ReviewLaneLauncher implements ReviewLanes {
       String boxHandle) {
     var role = invocation.lane().wire();
     try {
-      var place = (RunPlace.SpecWorkspace) places.enter(checked, config, boxHandle).place();
+      places.enter(checked, config, boxHandle);
+      var place = (RunPlace.SpecWorkspace) checked.place();
       workBranch.enter(
           place,
           Objects.requireNonNullElse(config.repos(), List.<ProjectDefinition.Repo>of()).stream()

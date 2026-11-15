@@ -103,7 +103,12 @@ class WorkspaceIT extends AbstractIncusIT {
 
   private final ContainerManager containers = new ContainerManager(shell);
   private final Workspaces workspaces =
-      new Workspaces(shell, shell, System::nanoTime, SailPaths.locksDir());
+      new Workspaces(
+          shell,
+          shell,
+          System::nanoTime,
+          SailPaths.locksDir(),
+          Workspaces.memoryOf(new HostDetector()));
 
   private static ProjectDefinition definition() {
     return new ProjectDefinition(

@@ -127,6 +127,9 @@ class BuildDispatchCoverageTest {
   /** The box's workspaces when a test sets them; a ZFS box with acme's current template if not. */
   private Workspaces workspaces;
 
+  /** The memory of the default box, in megabytes. */
+  private long memoryMb = TestWorkspaces.ROOMY_MB;
+
   private static void asks(Sqlite db, String effort) {
     var row = auth("acme");
     Acting.system(
@@ -853,8 +856,8 @@ class BuildDispatchCoverageTest {
                     "t",
                     "l",
                     "u"));
-    var shell =
-        launching().on("incus query /1.0/resources", "{\"memory\": {\"total\": 6442450944}}");
+    var shell = launching();
+    memoryMb = 6144;
     var limited = YAML + "resources:\n  cpu: 2\n  memory: 4GB\n  disk: 50GB\n";
 
     var refused = assertThrows(ApiException.class, () -> dispatch(ops(shell, limited, db)));
@@ -902,8 +905,9 @@ class BuildDispatchCoverageTest {
 
       assertEquals(ErrorCode.RUNNER_BUSY, refused.failure().errorCode());
       assertEquals(
-          "This runner is making another workspace; dispatch again in a minute.",
+          "This runner is making another workspace, which takes about a minute.",
           refused.getMessage());
+      assertEquals("Then dispatch again.", refused.failure().remedy().plain());
       assertEquals(
           List.of("failed"),
           new RunStore(db).listForSpec("auth").stream().map(RunStore.RunRow::status).toList(),
@@ -1090,8 +1094,7 @@ class BuildDispatchCoverageTest {
   @Test
   void aBoxUnderItsCapMakesTheWorkspace() throws IOException {
     var db = seedDb();
-    var shell =
-        launching().on("incus query /1.0/resources", "{\"memory\": {\"total\": 68719476736}}");
+    var shell = launching();
     var limited = YAML + "resources:\n  cpu: 2\n  memory: 4GB\n  disk: 50GB\n";
 
     assertInstanceOf(DispatchOperations.Dispatched.class, dispatch(ops(shell, limited, db)));
@@ -1197,7 +1200,10 @@ class BuildDispatchCoverageTest {
         new FdeStore(db),
         events::add,
         new WatcherSpawner(happyPath(), (command, logPath) -> 4242L),
-        workspaces != null ? workspaces : TestWorkspaces.ready(TestProjects.reading(yaml), "acme"),
+        workspaces != null
+            ? workspaces
+            : TestWorkspaces.over(
+                TestWorkspaces.incus(TestProjects.reading(yaml), "acme"), () -> memoryMb),
         launcher,
         DispatchOperations.Listener.NONE,
         SessionYield.NONE);

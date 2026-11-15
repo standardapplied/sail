@@ -8,6 +8,7 @@ package ai.singlr.sail.api;
 import ai.singlr.sail.access.ReadFilter;
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.Engagement;
+import ai.singlr.sail.config.Lane;
 import ai.singlr.sail.config.Roster;
 import ai.singlr.sail.engine.HostInfo;
 import ai.singlr.sail.identity.Actor;
@@ -157,7 +158,9 @@ public final class MembershipService {
     var project = spec.project();
     var member = admit(agentYamlName, mode, model, localHandle);
     var config = projects.definition(project);
-    var checked = places.checkSpec(project, config, specId, localHandle);
+    var checked =
+        places.checkSpec(
+            project, config, specId, member.full() ? Lane.ROOM_FULL : Lane.ROOM, localHandle);
     if (checked.check().running()) {
       admission.requireInstalled(
           LaunchAdmission.resolveAgent(member.agent()), checked.place().instance());

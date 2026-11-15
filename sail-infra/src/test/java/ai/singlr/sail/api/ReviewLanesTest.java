@@ -109,11 +109,13 @@ class ReviewLanesTest {
 
   /**
    * A reviewer the loop launches on a box still making another workspace past the wait is busy: the
-   * room says so, the review stays owed its reviewer, never errored, and the next stop in the
-   * project launches it.
+   * wait is bounded, the room is told once with the loop's own remedy (never "dispatch again"), the
+   * review errors, which the loop retries within its budget, and the reconciler's next pass with
+   * the box free launches it.
    */
   @Test
-  void aReviewerOnABusyBoxWaitsForTheNextTriggerAndIsNeverAnErroredReview() throws Exception {
+  void aReviewerOnABusyBoxIsSaidOnceWithTheLoopsRemedyAndRetriedOnceTheBoxIsFree()
+      throws Exception {
     loop = ReviewLoop.staged(tempDir, "codex", "claude-code");
     loop.spec("auth", "api");
     var build = loop.run("auth", "build");
@@ -139,19 +141,27 @@ class ReviewLanesTest {
     }
 
     assertTrue(loop.container.live().isEmpty(), "no reviewer started");
-    assertEquals("running", loop.statusOf(loop.reviewOf("auth")), "owed its reviewer, not errored");
+    var errored = loop.reviews.latestReviewForSpec("auth").orElseThrow();
+    assertEquals("failed", errored.status(), "errored, a state the loop moves");
+    assertTrue(
+        errored
+            .error()
+            .endsWith(": This runner is making another workspace, which takes about a minute."),
+        errored.error());
     assertEquals(
-        List.of("This runner is making another workspace; dispatch again in a minute."),
+        List.of(
+            "This runner is making another workspace, which takes about a minute. The loop then"
+                + " tries again by itself, and hands the review to a person if it lasts."),
         loop.roomLines("auth", "This runner is making"),
-        "said once, however often the loop meets it");
+        "said once, with the remedy of the lane it was said for");
 
-    loop.spec("billing", "web");
-    loop.onEvent(ReviewLoop.buildStop("billing", loop.run("billing", "adhoc")));
+    loop.reconciler(() -> Instant.now().plus(Duration.ofMinutes(5))).sweep();
+    loop.settle();
 
     assertTrue(
         loop.live().stream()
             .anyMatch(run -> "auth".equals(run.specId()) && "review".equals(run.role())),
-        "the next stop in the project launches it: " + loop.live());
+        "the reconciler's retry launches it: " + loop.live());
   }
 
   /**

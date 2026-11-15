@@ -171,7 +171,7 @@ public final class BuildDispatch {
         WorkPrompt.build(
             taskSpec, specBody.isBlank() ? nextSpec.title() : specBody, room, List.of());
     var task = built.prompt();
-    var checked = places.checkSpec(project, config, nextSpec.id(), localHandle);
+    var checked = places.checkSpec(project, config, nextSpec.id(), Lane.BUILD, localHandle);
 
     Runnable claim = () -> claim(resolution, taskSpec, branch);
     if (request.dryRun()) {
@@ -211,16 +211,15 @@ public final class BuildDispatch {
             claim);
     var launching = false;
     try {
-      var entered = places.enter(checked, config, localHandle);
-      var workspace = DispatchOperations.WorkspaceUse.entered(entered);
+      var workspace = places.enter(checked, config, localHandle);
       listener.workspaceEntered(workspace);
       seedRoomDelivery(runId, built.renderedMessages());
       var branchCreated =
-          prepare(entered.place(), targetRepos, resolution, taskSpec, branch, task, request.mode());
+          prepare(checked.place(), targetRepos, resolution, taskSpec, branch, task, request.mode());
       launching = true;
       var launch =
           runLauncher.launchAgent(
-              entered.place(),
+              checked.place(),
               config,
               targetRepos,
               task,
@@ -234,7 +233,7 @@ public final class BuildDispatch {
       var status =
           runLauncher.finishLaunch(
               new RunLauncher.RunContext(
-                  entered.place(),
+                  checked.place(),
                   unit,
                   runId,
                   nextSpec.id(),
@@ -267,13 +266,15 @@ public final class BuildDispatch {
    * Gives back what the claim of {@code spec} took when its run could not be launched after the
    * reservation (the workspace busy, its create failed, a branch collision): the spec is pending
    * again, so the dispatch its refusal names works as printed. Only while the spec is still this
-   * claim's: in progress, its newest run this one. A cancel, or another claim, made meanwhile wins.
+   * claim's: in progress, its newest run this one (a box that keeps no runs knows no other claim).
+   * A cancel, or another claim, made meanwhile wins.
    */
   private void giveBack(String specId, String runId) {
-    if (runStore.listForSpec(specId).stream()
-        .findFirst()
-        .filter(run -> run.id().equals(runId))
-        .isPresent()) {
+    if (runStore == null
+        || runStore.listForSpec(specId).stream()
+            .findFirst()
+            .filter(run -> run.id().equals(runId))
+            .isPresent()) {
       specStore.compareAndSetStatus(specId, SpecStatus.IN_PROGRESS, SpecStatus.PENDING);
     }
   }
@@ -330,7 +331,7 @@ public final class BuildDispatch {
     var body = specStore.getContent(specId).map(SpecStore.SpecContent::body).orElse("");
     var built =
         WorkPrompt.build(spec, body.isBlank() ? spec.title() : body, room(specId), List.of());
-    var checked = places.checkSpec(project, config, specId, localHandle);
+    var checked = places.checkSpec(project, config, specId, Lane.BUILD, localHandle);
     var runId = DateTimeUtils.newId().toString();
     var unit = AgentUnit.forRun(runId);
     var claim =
@@ -350,12 +351,13 @@ public final class BuildDispatch {
     }
     var env = ((RunReservation.Claim.Claimed) claim).env();
     try {
-      var entered = places.enter(checked, config, localHandle);
+      places.enter(checked, config, localHandle);
+      var place = checked.place();
       seedRoomDelivery(runId, built.renderedMessages());
-      enterBranch(entered.place(), targetRepos, row.branch(), true, Optional.empty());
+      enterBranch(place, targetRepos, row.branch(), true, Optional.empty());
       var launch =
           runLauncher.launchAgent(
-              entered.place(),
+              place,
               config,
               targetRepos,
               built.prompt(),
@@ -368,7 +370,7 @@ public final class BuildDispatch {
               null);
       runLauncher.finishLaunch(
           new RunLauncher.RunContext(
-              entered.place(), unit, runId, specId, agentType, Lane.BUILD.wire(), true),
+              place, unit, runId, specId, agentType, Lane.BUILD.wire(), true),
           launch);
       return new ReviewLanes.Launch.Started();
     } catch (RuntimeException e) {
@@ -382,13 +384,12 @@ public final class BuildDispatch {
    * WorkBranch#enter}); answers whether a repo is on it.
    */
   private boolean enterBranch(
-      RunPlace place,
+      RunPlace.SpecWorkspace place,
       List<ProjectDefinition.Repo> targetRepos,
       String branch,
       boolean restart,
       Optional<Remedy.Command> redispatch) {
-    return place instanceof RunPlace.SpecWorkspace workspace
-        && workBranch.enter(workspace, targetRepos, branch, true, restart, redispatch);
+    return workBranch.enter(place, targetRepos, branch, true, restart, redispatch);
   }
 
   /** The newest messages of {@code specId}'s room that steer its agent: what its prompt shows. */
@@ -503,7 +504,7 @@ public final class BuildDispatch {
    * on the branch.
    */
   private boolean prepare(
-      RunPlace place,
+      RunPlace.SpecWorkspace place,
       List<ProjectDefinition.Repo> targetRepos,
       SpecResolution resolution,
       Spec taskSpec,

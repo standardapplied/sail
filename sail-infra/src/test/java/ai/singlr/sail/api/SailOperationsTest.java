@@ -3258,7 +3258,8 @@ class SailOperationsTest {
     assertError(ErrorCode.CONFLICT, refused);
     assertEquals(
         "Add one beside the box's pool with: sail host init --storage zfs --pool tank --disk"
-            + " <device>, or with --pool-file-size <size> in place of --disk to try ZFS in a file.",
+            + " <device>, or with --pool-file-size <size> in place of --disk to try ZFS in a file."
+            + " Then dispatch again.",
         refused.remedy().plain());
     assertEquals(List.of(), runs.get().listForProject("acme"), "nothing was reserved");
   }
@@ -3278,7 +3279,8 @@ class SailOperationsTest {
 
     assertError(ErrorCode.CONFLICT, refused);
     assertEquals("acme has no template yet:", refused.errorMessage());
-    assertEquals("sail project template build acme", refused.remedy().plain());
+    assertEquals(
+        "sail project template build acme. Then dispatch again.", refused.remedy().plain());
     assertEquals(List.of(), runs.get().listForProject("acme"), "nothing was reserved");
   }
 

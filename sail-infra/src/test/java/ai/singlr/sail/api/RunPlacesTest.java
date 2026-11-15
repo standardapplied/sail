@@ -6,16 +6,18 @@
 package ai.singlr.sail.api;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.common.DateTimeUtils;
+import ai.singlr.sail.config.Lane;
 import ai.singlr.sail.config.ProjectDefinition;
 import ai.singlr.sail.config.TestDefinitions;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.ContainerConfig;
 import ai.singlr.sail.engine.DeviceFixtures;
+import ai.singlr.sail.engine.HostDetector;
 import ai.singlr.sail.engine.RunPlace;
 import ai.singlr.sail.engine.ScriptedShellExecutor;
 import ai.singlr.sail.engine.ShellExec;
@@ -31,7 +33,6 @@ import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Optional;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
@@ -41,7 +42,7 @@ import org.junit.jupiter.api.io.TempDir;
 /**
  * Where a run goes, decided around its reservation, and what each way it can fail answers: a
  * project name too long to name a spec's workspace, an Incus that cannot be read or is interrupted,
- * a create that fails, and a box whose memory Incus does not say.
+ * a create that fails, a box whose memory cannot be read, and the remedy each lane is told.
  */
 class RunPlacesTest {
 
@@ -69,13 +70,37 @@ class RunPlacesTest {
   }
 
   private RunPlaces places(ShellExec incus, ShellExec shell) throws IOException {
+    return places(TestWorkspaces.over(incus), shell, runs("r.db"), RunLauncher.Room.NONE);
+  }
+
+  private RunPlaces places(
+      Workspaces workspaces, ShellExec shell, RunStore runs, RunLauncher.Room room)
+      throws IOException {
     return new RunPlaces(
-        new ProjectLoader(shell, definitions()),
-        TestWorkspaces.over(incus),
-        null,
-        shell,
-        RunLauncher.Room.NONE,
-        place -> {});
+        new ProjectLoader(shell, definitions()), workspaces, runs::liveSpecs, room, place -> {});
+  }
+
+  private RunStore runs(String file) {
+    var db = Sqlite.open(dir.resolve(file));
+    new SchemaManager(db).migrate();
+    return new RunStore(db);
+  }
+
+  private static void liveBuild(RunStore runs, String specId, String boxHandle) {
+    Acting.system(
+        () ->
+            runs.reserveDispatch(
+                DateTimeUtils.newId().toString(),
+                "acme",
+                specId,
+                boxHandle,
+                "build",
+                List.of("app"),
+                "claude-code",
+                null,
+                "t",
+                "l",
+                "u"));
   }
 
   /** A shell on which every command holding {@code fragment} is interrupted, and others answer. */
@@ -113,7 +138,8 @@ class RunPlacesTest {
 
     var refused =
         assertThrows(
-            ApiException.class, () -> places.checkSpec(project, config(), "a-long-spec-id", "eng"));
+            ApiException.class,
+            () -> places.checkSpec(project, config(), "a-long-spec-id", Lane.BUILD, "eng"));
 
     assertEquals(ErrorCode.BAD_REQUEST, refused.failure().errorCode());
     assertTrue(refused.getMessage().startsWith("Project '" + project + "' is 55 characters"));
@@ -126,13 +152,15 @@ class RunPlacesTest {
     var places = places(unreadable, new ScriptedShellExecutor());
 
     var refused =
-        assertThrows(ApiException.class, () -> places.checkSpec("acme", config(), "auth", "eng"));
+        assertThrows(
+            ApiException.class,
+            () -> places.checkSpec("acme", config(), "auth", Lane.BUILD, "eng"));
     var interrupted =
         assertThrows(
             ApiException.class,
             () ->
                 places(interrupting(unreadable, "incus storage list"), new ScriptedShellExecutor())
-                    .checkSpec("acme", config(), "auth", "eng"));
+                    .checkSpec("acme", config(), "auth", Lane.BUILD, "eng"));
 
     assertEquals(ErrorCode.COMMAND_FAILED, refused.failure().errorCode());
     assertEquals("Could not read this box's Incus: no daemon", refused.getMessage());
@@ -144,7 +172,7 @@ class RunPlacesTest {
   void aCreateThatFailsAnswersItsOwnReasonAndAnInterruptedOneKeepsTheInterrupt() throws Exception {
     var refusing = TestWorkspaces.incus(definitions(), "acme").onFail("incus copy", "disk full");
     var places = places(refusing, new ScriptedShellExecutor());
-    var check = places.checkSpec("acme", config(), "auth", "eng");
+    var check = places.checkSpec("acme", config(), "auth", Lane.BUILD, "eng");
 
     var failed = assertThrows(ApiException.class, () -> places.enter(check, config(), "eng"));
     var interrupted =
@@ -165,48 +193,87 @@ class RunPlacesTest {
     assertTrue(Thread.interrupted());
   }
 
+  /**
+   * D8 reads the box's memory as its host says it, and a box whose memory cannot be read refuses.
+   */
   @Test
-  void aBoxWhoseMemoryIncusDoesNotSayOrWillNotTellSetsNoCapEvenWithALiveWorkspace()
-      throws Exception {
-    var incus = TestWorkspaces.incus(definitions(), "acme");
-    var db = Sqlite.open(dir.resolve("r.db"));
-    new SchemaManager(db).migrate();
-    var runs = new RunStore(db);
-    Acting.system(
-        () ->
-            runs.reserveDispatch(
-                DateTimeUtils.newId().toString(),
-                "acme",
-                "other",
-                "eng",
-                "build",
-                List.of("app"),
-                "claude-code",
-                null,
-                "t",
-                "l",
-                "u"));
-    var unreadable =
-        new ScriptedShellExecutor().onThrow("incus query /1.0/resources", new IOException("x"));
-    var interrupted = interrupting(new ScriptedShellExecutor(), "incus query /1.0/resources");
-    var silent = new ScriptedShellExecutor().onOk("incus query /1.0/resources", "{}");
-    var roomy =
-        new ScriptedShellExecutor()
-            .onOk("incus query /1.0/resources", "{\"memory\": {\"total\": 68719476736}}");
+  void aBoxsMemoryIsReadFromItsHostAndOneThatCannotBeReadIsACommandFailure() throws Exception {
+    var meminfo = Files.writeString(dir.resolve("meminfo"), "MemTotal:       8388608 kB\n");
+    var osRelease = Files.writeString(dir.resolve("os-release"), "ID=ubuntu\n");
+    var hostname = Files.writeString(dir.resolve("hostname"), "box\n");
+    var cpuinfo = Files.writeString(dir.resolve("cpuinfo"), "processor\t: 0\n");
+    var runs = runs("memory.db");
+    liveBuild(runs, "other", "eng");
 
-    for (var shell : List.of(unreadable, silent, roomy, interrupted)) {
-      var places =
-          new RunPlaces(
-              new ProjectLoader(shell, definitions()),
-              TestWorkspaces.over(incus),
-              runs,
-              shell,
-              RunLauncher.Room.NONE,
-              place -> {});
-      assertInstanceOf(
-          RunPlaces.InWorkspace.class, places.checkSpec("acme", config(), "auth", "eng"));
+    assertEquals(
+        8192,
+        Workspaces.memoryOf(new HostDetector(osRelease, meminfo, hostname, cpuinfo)).getAsLong());
+    var unread =
+        assertThrows(
+            ApiException.class,
+            () ->
+                places(
+                        TestWorkspaces.over(
+                            TestWorkspaces.incus(definitions(), "acme"),
+                            Workspaces.memoryOf(
+                                new HostDetector(
+                                    osRelease, dir.resolve("missing"), hostname, cpuinfo))),
+                        new ScriptedShellExecutor(),
+                        runs,
+                        RunLauncher.Room.NONE)
+                    .checkSpec("acme", config(), "auth", Lane.BUILD, "eng"));
+    assertEquals(ErrorCode.COMMAND_FAILED, unread.failure().errorCode());
+    assertTrue(
+        unread.getMessage().startsWith("Could not read this box's memory: "), unread.getMessage());
+  }
+
+  /**
+   * A refusal carries the one remedy that fits the lane it is said for, in the room and to its
+   * caller alike: a person dispatches a build again, the loop retries its own lanes, and a room's
+   * turn is never told to dispatch, which would launch a build.
+   */
+  @Test
+  void eachLanesRefusalCarriesTheRemedyThatFitsItInTheRoomAndToItsCaller() throws Exception {
+    var runs = runs("lanes.db");
+    liveBuild(runs, "other", "eng");
+    var told = new ArrayList<String>();
+    var places =
+        places(
+            TestWorkspaces.over(TestWorkspaces.incus(definitions(), "acme"), () -> 4096),
+            new ScriptedShellExecutor(),
+            runs,
+            (specId, body) -> told.add(body));
+
+    var said = new ArrayList<String>();
+    for (var lane : List.of(Lane.BUILD, Lane.REVIEW, Lane.FIX, Lane.ROOM, Lane.ROOM_FULL)) {
+      var busy =
+          assertThrows(
+              ApiException.class, () -> places.checkSpec("acme", config(), "auth", lane, "eng"));
+      assertEquals(ErrorCode.RUNNER_BUSY, busy.failure().errorCode());
+      said.add(busy.failure().remedy().plain());
     }
-    assertTrue(Thread.interrupted(), "a box's memory read that was interrupted keeps it");
+
+    var full = "Wait for one of their runs to end. ";
+    assertEquals(
+        List.of(
+            full + "Then dispatch again.",
+            full
+                + "The loop then tries again by itself, and hands the review to a person if it lasts.",
+            full
+                + "The loop then tries again by itself, and hands the review to a person if it lasts.",
+            full + "Then engage or post in the room again.",
+            full + "Then engage or post in the room again."),
+        said);
+    assertEquals(
+        said.stream()
+            .map(
+                remedy ->
+                    "This box has 1 spec workspace with a live run, as many as its memory holds at"
+                        + " acme's 4GB each (a cap of 1), so no new workspace is made. "
+                        + remedy)
+            .toList(),
+        told,
+        "the room is told what the caller is");
   }
 
   @Test
@@ -218,12 +285,10 @@ class RunPlacesTest {
                 "[{\"name\": \"acme\", \"status\": \"Running\", \"state\": {}}]");
     var places = places(new ScriptedShellExecutor(), running);
 
-    var checked = places.check("acme", config(), null, "eng");
+    var checked = places.check("acme", config(), null, Lane.ROOM, "eng");
 
     assertEquals(new RunPlaces.InContainer(new RunPlace.ProjectContainer("acme")), checked);
-    assertEquals(
-        new RunPlaces.Entered(checked.place(), Optional.empty(), false, null),
-        places.enter(checked, config(), "eng"));
+    assertNull(places.enter(checked, config(), "eng"), "no workspace is entered");
   }
 
   @Test
@@ -253,25 +318,26 @@ class RunPlacesTest {
             .onOk("incus snapshot list acme--tmpl --format json", TestWorkspaces.V1);
     var told = new ArrayList<String>();
     var places =
-        new RunPlaces(
-            new ProjectLoader(new ScriptedShellExecutor(), definitions()),
+        places(
             TestWorkspaces.over(incus),
-            null,
             new ScriptedShellExecutor(),
-            (specId, body) -> told.add(body),
-            place -> {});
-    var check = places.checkSpec("acme", config(), "auth", "eng");
+            runs("reused.db"),
+            (specId, body) -> told.add(body));
+    var check = places.checkSpec("acme", config(), "auth", Lane.BUILD, "eng");
 
     var entered = places.enter(check, config(), "eng");
 
-    assertInstanceOf(Workspaces.Reused.class, entered.workspace().orElseThrow());
+    assertTrue(entered.reused());
     assertEquals(false, entered.stale());
     assertEquals(List.of(), told);
   }
 
-  /** Scenario 14: a degraded mirror is said in the spec's room and carried to the answer. */
+  /**
+   * Scenario 14: a degraded mirror is said in the spec's room and carried to the answer once, by
+   * the dispatch, never again at a review, fix or room turn's entry.
+   */
   @Test
-  void aWorkspaceMadeOnADegradedMirrorSaysSoInTheRoomAndTheAnswer() throws Exception {
+  void aWorkspaceMadeOnADegradedMirrorSaysSoOnceByTheDispatch() throws Exception {
     var mirror =
         """
         [{"name": "tank", "driver": "zfs", "config": {"source": "tank", "zfs.pool_name": "tank",
@@ -286,15 +352,22 @@ class RunPlacesTest {
                     .replace("devpool", "tank"));
     var told = new ArrayList<String>();
     var places =
-        new RunPlaces(
-            new ProjectLoader(new ScriptedShellExecutor(), definitions()),
+        places(
             TestWorkspaces.over(incus),
-            null,
             new ScriptedShellExecutor(),
-            (specId, body) -> told.add(body),
-            place -> {});
+            runs("degraded.db"),
+            (specId, body) -> told.add(body));
 
-    var entered = places.enter(places.checkSpec("acme", config(), "auth", "eng"), config(), "eng");
+    var entered =
+        places.enter(
+            places.checkSpec("acme", config(), "auth", Lane.BUILD, "eng"), config(), "eng");
+    for (var lane : List.of(Lane.REVIEW, Lane.FIX, Lane.ROOM)) {
+      assertNull(
+          places
+              .enter(places.checkSpec("acme", config(), "auth", lane, "eng"), config(), "eng")
+              .degraded(),
+          lane + " says nothing of it");
+    }
 
     assertTrue(entered.degraded().startsWith("Pool tank is DEGRADED"), entered.degraded());
     assertEquals(List.of(entered.degraded()), told);
@@ -302,7 +375,8 @@ class RunPlacesTest {
 
   /**
    * The cap again under the create lock: a spec that found room before its run was reserved is busy
-   * at its create when another spec's workspace, made meanwhile, holds the last of it.
+   * at its create when another spec's workspace, made meanwhile, holds the last of it. The runs
+   * counted are this box's, whoever the run acts for.
    */
   @Test
   void aCreateThatFindsTheCapReachedUnderTheCreateLockIsBusyAndMakesNothing() throws Exception {
@@ -315,37 +389,17 @@ class RunPlacesTest {
                     + ","
                     + TestWorkspaces.specWorkspace("acme", "other", "Running", "eng")
                     + "]");
-    var db = Sqlite.open(dir.resolve("cap.db"));
-    new SchemaManager(db).migrate();
-    var runs = new RunStore(db);
-    var memory =
-        new ScriptedShellExecutor()
-            .onOk("incus query /1.0/resources", "{\"memory\": {\"total\": 6442450944}}");
+    var runs = runs("cap.db");
     var places =
-        new RunPlaces(
-            new ProjectLoader(memory, definitions()),
-            TestWorkspaces.over(incus),
+        places(
+            TestWorkspaces.over(incus, () -> 6144),
+            new ScriptedShellExecutor(),
             runs,
-            memory,
-            RunLauncher.Room.NONE,
-            place -> {});
-    var check = places.checkSpec("acme", config(), "auth", "eng");
-    Acting.system(
-        () ->
-            runs.reserveDispatch(
-                DateTimeUtils.newId().toString(),
-                "acme",
-                "other",
-                "eng",
-                "build",
-                List.of("app"),
-                "claude-code",
-                null,
-                "t",
-                "l",
-                "u"));
+            RunLauncher.Room.NONE);
+    var check = places.checkSpec("acme", config(), "auth", Lane.BUILD, "eng");
+    liveBuild(runs, "other", "eng");
 
-    var busy = assertThrows(ApiException.class, () -> places.enter(check, config(), "eng"));
+    var busy = assertThrows(ApiException.class, () -> places.enter(check, config(), "alice"));
 
     assertEquals(ErrorCode.RUNNER_BUSY, busy.failure().errorCode());
     assertTrue(busy.getMessage().startsWith("This box has 1 spec workspace with a live run"));
@@ -358,16 +412,14 @@ class RunPlacesTest {
     var locks = Files.createDirectories(dir.resolve("locks"));
     var now = new AtomicLong();
     var places =
-        new RunPlaces(
-            new ProjectLoader(new ScriptedShellExecutor(), definitions()),
+        places(
             TestWorkspaces.over(
                 TestWorkspaces.incus(definitions(), "acme"),
                 () -> now.addAndGet(Workspaces.CREATE_WAIT.toNanos()),
                 locks),
-            null,
             new ScriptedShellExecutor(),
-            RunLauncher.Room.NONE,
-            place -> {});
+            runs("built.db"),
+            RunLauncher.Room.NONE);
     var refused = new AtomicReference<ApiException>();
     try (var build = ContainerConfig.hold(locks, "acme--tmpl")) {
       var checking =
@@ -375,7 +427,7 @@ class RunPlacesTest {
               .start(
                   () -> {
                     try {
-                      places.checkSpec("acme", config(), "auth", "eng");
+                      places.checkSpec("acme", config(), "auth", Lane.BUILD, "eng");
                     } catch (ApiException e) {
                       refused.set(e);
                     } catch (IOException e) {
@@ -387,7 +439,9 @@ class RunPlacesTest {
 
     assertEquals(ErrorCode.RUNNER_BUSY, refused.get().failure().errorCode());
     assertEquals(
-        "acme's template is being built; dispatch again once it is.", refused.get().getMessage());
+        "acme's template is being built, and no workspace is cloned from it until it is.",
+        refused.get().getMessage());
+    assertEquals("Then dispatch again.", refused.get().failure().remedy().plain());
   }
 
   @Test
@@ -399,16 +453,15 @@ class RunPlacesTest {
         new RunPlaces(
             new ProjectLoader(new ScriptedShellExecutor(), definitions()),
             TestWorkspaces.over(incus),
-            null,
-            new ScriptedShellExecutor(),
+            runs("made.db")::liveSpecs,
             RunLauncher.Room.NONE,
             pruned::add);
-    var check = places.checkSpec("acme", config(), "auth", "eng");
+    var check = places.checkSpec("acme", config(), "auth", Lane.BUILD, "eng");
     assertEquals(List.of(), pruned, "no run directory is pruned before the workspace is made");
 
     var entered = places.enter(check, config(), "eng");
 
-    assertInstanceOf(Workspaces.Made.class, entered.workspace().orElseThrow());
+    assertEquals(false, entered.reused());
     assertEquals(false, entered.stale());
     assertEquals(List.of(check.place()), pruned, "the run directories of the made workspace are");
   }

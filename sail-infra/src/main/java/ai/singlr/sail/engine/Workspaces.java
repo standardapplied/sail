@@ -14,6 +14,7 @@ import ai.singlr.sail.config.ProjectDefinition;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.io.PrintStream;
+import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.time.Duration;
@@ -302,11 +303,12 @@ public final class Workspaces {
     }
 
     static Busy creating() {
-      return new Busy("This runner is making another workspace; dispatch again in a minute.");
+      return new Busy("This runner is making another workspace, which takes about a minute.");
     }
 
     static Busy building(String project) {
-      return new Busy(project + "'s template is being built; dispatch again once it is.");
+      return new Busy(
+          project + "'s template is being built, and no workspace is cloned from it until it is.");
     }
   }
 
@@ -323,6 +325,7 @@ public final class Workspaces {
   private final ShellExec shell;
   private final LongSupplier nanos;
   private final Path locks;
+  private final LongSupplier memoryMb;
   private final BoxInstances box;
   private final ContainerManager containers;
 
@@ -331,12 +334,15 @@ public final class Workspaces {
    * @param shell makes every change, narrating it instead in a dry run
    * @param nanos the clock phases are measured on, {@code System::nanoTime} outside tests
    * @param locks the box's lock directory
+   * @param memoryMb the box's memory in megabytes, which bounds its spec workspaces (D8)
    */
-  public Workspaces(ShellExec observer, ShellExec shell, LongSupplier nanos, Path locks) {
+  public Workspaces(
+      ShellExec observer, ShellExec shell, LongSupplier nanos, Path locks, LongSupplier memoryMb) {
     this.observer = Objects.requireNonNull(observer, "observer");
     this.shell = Objects.requireNonNull(shell, "shell");
     this.nanos = Objects.requireNonNull(nanos, "nanos");
     this.locks = Objects.requireNonNull(locks, "locks");
+    this.memoryMb = Objects.requireNonNull(memoryMb, "memoryMb");
     this.box = new BoxInstances(observer);
     this.containers = new ContainerManager(shell);
   }
@@ -346,7 +352,28 @@ public final class Workspaces {
    * under the box's lock directory: what every door of the box uses.
    */
   public static Workspaces onThisBox(ShellExec shell) {
-    return new Workspaces(shell.observer(), shell, System::nanoTime, SailPaths.locksDir());
+    return new Workspaces(
+        shell.observer(),
+        shell,
+        System::nanoTime,
+        SailPaths.locksDir(),
+        memoryOf(new HostDetector()));
+  }
+
+  /** The memory {@code host} reads, in megabytes; unchecked when it cannot be read. */
+  public static LongSupplier memoryOf(HostDetector host) {
+    return () -> {
+      try {
+        return host.detect().memoryMb();
+      } catch (IOException e) {
+        throw new UncheckedIOException("Could not read this box's memory: " + e.getMessage(), e);
+      }
+    };
+  }
+
+  /** This box's memory in megabytes, as its host says it. */
+  public long memoryMb() {
+    return memoryMb.getAsLong();
   }
 
   /**
@@ -373,7 +400,7 @@ public final class Workspaces {
       var built =
           new WorkspaceTemplate(observer, shell, locks).ensure(config, source, template, zfs);
       return make(
-          config, name, instance, built, List.of(), owner, name, unfinished, files, () -> {});
+          config, name, instance, built, List.of(), owner, name, unfinished, files, whole -> {});
     }
   }
 
@@ -431,7 +458,7 @@ public final class Workspaces {
               "",
               found.isPresent(),
               files,
-              () -> room.accept(wholeSpecs())));
+              room));
     }
   }
 
@@ -484,7 +511,9 @@ public final class Workspaces {
    * Makes {@code instance}, workspace {@code name}: under the box's create lock, which it waits for
    * no longer than {@link #CREATE_WAIT}, the clone of {@code built} with the workspace's keys,
    * {@code keys} and the owner's added, its start, and its prepare onto {@code branch} (empty for
-   * none). One a create did not finish ({@code unfinished}) is deleted first.
+   * none). One a create did not finish ({@code unfinished}) is deleted first. Under the lock,
+   * before the clone, {@code room} is given the spec workspaces the box holds whole and refuses one
+   * more when the box has no room for it.
    */
   private Created make(
       ProjectDefinition config,
@@ -496,7 +525,7 @@ public final class Workspaces {
       String branch,
       boolean unfinished,
       Path files,
-      Room room)
+      Consumer<Set<String>> room)
       throws Exception {
     var project = config.name();
     if (unfinished) {
@@ -504,15 +533,9 @@ public final class Workspaces {
     }
     var started = nanos.getAsLong();
     try (var held = createLock(started)) {
-      room.require();
+      room.accept(wholeSpecs());
       return made(config, name, instance, built, keys, owner, branch, files, started);
     }
-  }
-
-  /** What a create checks under the create lock before it clones: room on the box for one more. */
-  @FunctionalInterface
-  private interface Room {
-    void require() throws Exception;
   }
 
   private FileMutex createLock(long started) throws IOException, InterruptedException {
@@ -703,7 +726,7 @@ public final class Workspaces {
   private static IllegalStateException noTemplate(String project) {
     return Remedied.state(
         project + " has no template yet:",
-        Remedy.of(Remedy.sail("project template build", project)));
+        Remedy.of(Remedy.sail("project template build", project), "."));
   }
 
   private void clone(
@@ -995,7 +1018,7 @@ public final class Workspaces {
             Remedy.of(
                 "Delete it if it is not wanted (",
                 Remedy.sail("project workspace delete", project, name),
-                "), then dispatch again."));
+                ")."));
       }
       if (!spec.get().equals(place.specId())) {
         throw new IllegalStateException(

@@ -7,6 +7,7 @@ package ai.singlr.sail.api;
 
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.common.Strings;
+import ai.singlr.sail.config.Lane;
 import ai.singlr.sail.config.ProjectDefinition;
 import ai.singlr.sail.config.Roster;
 import ai.singlr.sail.engine.AgentSession;
@@ -141,7 +142,8 @@ public final class RoomWakeLauncher {
             : List.<ProjectDefinition.Repo>of();
     var repoPaths = targetRepos.stream().map(ProjectDefinition.Repo::path).toList();
     var branch = full ? Objects.toString(spec.branch(), "") : "";
-    var checked = places.check(project, config, specId, localHandle);
+    var checked =
+        places.check(project, config, specId, full ? Lane.ROOM_FULL : Lane.ROOM, localHandle);
     var env =
         runReservation.reserve(
             runId,
@@ -156,7 +158,8 @@ public final class RoomWakeLauncher {
             unit,
             config);
     try {
-      var place = (RunPlace.SpecWorkspace) places.enter(checked, config, localHandle).place();
+      places.enter(checked, config, localHandle);
+      var place = (RunPlace.SpecWorkspace) checked.place();
       seedRoomDelivery(runId, built.renderedMessages());
       workBranch.enter(place, targetRepos, branch, false, true, Optional.empty());
       if (!full) {
@@ -257,7 +260,8 @@ public final class RoomWakeLauncher {
     var role = full ? DispatchGate.ROOM_FULL_ROLE : DispatchGate.ROOM_ROLE;
     var targetRepos = full ? config.repos() : List.<ProjectDefinition.Repo>of();
     var repoPaths = targetRepos.stream().map(ProjectDefinition.Repo::path).toList();
-    var place = places.check(project, config, null, localHandle).place();
+    var place =
+        places.check(project, config, null, full ? Lane.ROOM_FULL : Lane.ROOM, localHandle).place();
     var env =
         runReservation.reserve(
             runId,

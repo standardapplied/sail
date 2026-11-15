@@ -185,7 +185,7 @@ class WorkspacesTest {
   }
 
   private Workspaces workspaces(ShellExec shell, LongSupplier nanos) {
-    return new Workspaces(shell, shell, nanos, locks());
+    return new Workspaces(shell, shell, nanos, locks(), () -> 65536);
   }
 
   private WorkspaceTemplate templates(ShellExec shell) {
@@ -751,7 +751,7 @@ class WorkspacesTest {
             list(template("v1", INPUTS), workspace("acme", "fix-login", "Running", "v1")),
             snapshots("v1"));
     var hanging = new TimingOutShell(scripted, "zpool status");
-    var workspaces = new Workspaces(hanging, hanging, ticks(), locks());
+    var workspaces = new Workspaces(hanging, hanging, ticks(), locks(), () -> 65536);
     var refusal =
         "Pool tank is a mirror whose health Sail cannot tell: zpool status did not answer within"
             + " 10 s, so no workspace or template is changed on it. See sudo zpool status tank.";
@@ -1776,7 +1776,8 @@ class WorkspacesTest {
   private Object outcome(
       Box box, LongSupplier clock, String name, WorkspaceTemplate.Source source) {
     try {
-      return new Workspaces(box, box, clock, locks()).create(acme(), name, source, tempDir, "eng");
+      return new Workspaces(box, box, clock, locks(), () -> 65536)
+          .create(acme(), name, source, tempDir, "eng");
     } catch (Exception refused) {
       return refused.getMessage();
     }
@@ -2068,7 +2069,9 @@ class WorkspacesTest {
     }
 
     var busy = assertInstanceOf(Workspaces.Busy.class, refused.get());
-    assertEquals("acme's template is being built; dispatch again once it is.", busy.getMessage());
+    assertEquals(
+        "acme's template is being built, and no workspace is cloned from it until it is.",
+        busy.getMessage());
     assertFalse(shell.invocations().stream().anyMatch(c -> c.startsWith("incus copy")));
   }
 
@@ -2312,7 +2315,7 @@ class WorkspacesTest {
             .getMessage());
     for (var shell : List.of(noTemplate, noSnapshot)) {
       assertEquals(
-          "acme has no template yet: sail project template build acme",
+          "acme has no template yet: sail project template build acme.",
           assertThrows(
                   IllegalStateException.class,
                   () -> workspaces(shell, ticks()).checkSpec(FIX, INPUTS, name -> false))
@@ -2348,7 +2351,7 @@ class WorkspacesTest {
     assertEquals(
         "Workspace 'fix-login' of acme is a person's, not spec fix-login's, so no run of the spec"
             + " goes in it. Delete it if it is not wanted (sail project workspace delete acme"
-            + " fix-login), then dispatch again.",
+            + " fix-login).",
         assertThrows(
                 IllegalStateException.class,
                 () -> workspaces(persons, ticks()).checkSpec(FIX, INPUTS, name -> false))

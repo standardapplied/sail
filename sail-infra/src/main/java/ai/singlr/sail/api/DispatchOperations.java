@@ -10,7 +10,6 @@ import ai.singlr.sail.config.Engagement;
 import ai.singlr.sail.config.Spec;
 import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.engine.AgentSession;
-import ai.singlr.sail.engine.RunPlace;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.WatcherSpawner;
 import ai.singlr.sail.engine.Workspaces;
@@ -26,6 +25,7 @@ import java.io.IOException;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import java.util.function.Function;
 import java.util.function.Supplier;
 
@@ -110,22 +110,6 @@ public final class DispatchOperations {
           null,
           !check.whole() && check.stale(),
           check.degraded().orElse(null));
-    }
-
-    /** The workspace a run entered. */
-    static WorkspaceUse entered(RunPlaces.Entered entered) {
-      return entered
-          .workspace()
-          .map(
-              workspace ->
-                  new WorkspaceUse(
-                      workspace.instance(),
-                      ((RunPlace.SpecWorkspace) entered.place()).workspace(),
-                      workspace instanceof Workspaces.Reused,
-                      workspace instanceof Workspaces.Made made ? made.created().timings() : null,
-                      entered.stale(),
-                      entered.degraded()))
-          .orElse(null);
     }
   }
 
@@ -266,7 +250,12 @@ public final class DispatchOperations {
         new RunReservation(
             runStore, shell, listener, sessionYield, this::endLiveHolder, fdeStore, this::tellRoom);
     var places =
-        new RunPlaces(projects, workspaces, runStore, shell, this::tellRoom, runReservation::prune);
+        new RunPlaces(
+            projects,
+            workspaces,
+            runStore == null ? box -> Set.of() : runStore::liveSpecs,
+            this::tellRoom,
+            runReservation::prune);
     this.membership =
         new MembershipService(specStore, () -> roomStore, projects, admission, this.events, places);
     this.adhocRunner =

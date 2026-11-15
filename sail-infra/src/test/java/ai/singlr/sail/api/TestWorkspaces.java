@@ -86,6 +86,9 @@ public final class TestWorkspaces {
     };
   }
 
+  /** The memory of a box these tests make: room for every workspace they ask for. */
+  public static final long ROOMY_MB = 65536;
+
   /** The workspaces of a box whose Incus is {@code incus}. */
   public static Workspaces over(ShellExec incus) {
     try {
@@ -100,7 +103,21 @@ public final class TestWorkspaces {
    * locks}.
    */
   public static Workspaces over(ShellExec incus, LongSupplier nanos, Path locks) {
-    return new Workspaces(incus, incus, nanos, locks);
+    return over(incus, nanos, locks, () -> ROOMY_MB);
+  }
+
+  /** As {@link #over(ShellExec)}, on a box of {@code memoryMb} megabytes. */
+  public static Workspaces over(ShellExec incus, LongSupplier memoryMb) {
+    try {
+      return over(incus, System::nanoTime, Files.createTempDirectory("sail-test-locks"), memoryMb);
+    } catch (IOException e) {
+      throw new UncheckedIOException(e);
+    }
+  }
+
+  private static Workspaces over(
+      ShellExec incus, LongSupplier nanos, Path locks, LongSupplier memoryMb) {
+    return new Workspaces(incus, incus, nanos, locks, memoryMb);
   }
 
   /**
