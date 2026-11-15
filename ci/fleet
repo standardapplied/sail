@@ -75,9 +75,10 @@ Usage:
                                 two builds overlap, each in its own workspace of acme);
                                 the pull request, the room and every box's status are checked,
                                 main's measures of the spec count the reviews and the build runs listed for it,
-                                once eng marks it done its workspace and dataset go within two sweeps, the
-                                second spec's workspace, left awaiting merge, is stopped 10 minutes after
-                                its review, no secret reaches a log, and the pull request is closed
+                                the second spec's workspace, left awaiting merge, runs until 10 minutes after
+                                its review and is stopped then, once eng marks the first done its workspace
+                                and dataset go when idle, no secret reaches a log, and the pull request is
+                                closed
   ci/fleet storage RUN           client, a dir box running acme, adds a ZFS pool in a 20 GiB file: Incus has
                                 it beside devpool, acme and the base profile stay on devpool, a copy of a
                                 container's snapshot on it is a clone (zfs get origin), and the ZFS cache
@@ -1912,19 +1913,24 @@ print(rows[0]["state"] if rows else "absent")
 }
 
 workspace_and_dataset_gone() {
-  local state
+  local state listed
   state=$(workspace_state "$1" "$2" "$3") || return 1
   echo "$(date -u +%H:%M:%S) $3: $state"
   [[ $state == absent ]] || return 1
-  if on "$1" "$2" "sudo zfs list -H -o name tank/containers/acme-$3"; then
-    echo "its dataset is still there"
-    return 1
-  fi
+  listed=$(on "$1" "$2" "sudo zfs list -H -o name tank/containers/acme-$3 2>&1 || true") || return 1
+  echo "$listed"
+  [[ $listed == *"dataset does not exist"* ]]
 }
 
+# The done spec's workspace goes once idle: 10 minutes after its last run ended, plus the sweep's
+# minutes.
 workspace_goes() {
-  until_true 180 10 workspace_and_dataset_gone "$1" "$2" "$3" && return 0
-  echo "still there after 3 min"
+  local ended
+  ended=$(last_run_ended "$1" "$2" "$3") || return 1
+  [[ -n $ended ]] || { echo "no run of $3 ended"; return 1; }
+  until_true $((ended + 780 - $(date +%s) > 120 ? ended + 780 - $(date +%s) : 120)) 10 \
+    workspace_and_dataset_gone "$1" "$2" "$3" && return 0
+  echo "still there 3 min after its idle period ended"
   return 1
 }
 
@@ -1935,9 +1941,36 @@ workspace_is_stopped() {
   [[ $state == stopped ]]
 }
 
+# When spec $3's last run on box $2 ended, in epoch seconds.
+last_run_ended() {
+  local runs
+  runs=$(on "$1" "$2" "sudo sail agent sessions acme --json") || return 1
+  python3 -I -c '
+import json, sys
+from datetime import datetime
+ends = [datetime.fromisoformat(r["completed_at"].replace("Z", "+00:00")).timestamp()
+        for r in json.loads(sys.argv[2]).get("runs", [])
+        if r.get("spec_id") == sys.argv[1] and r.get("completed_at")]
+print(int(max(ends)) if ends else "")
+' "$3" "$runs"
+}
+
+# Spec $3's workspace is still running a minute before its 10-minute idle period ends, and
+# stopped within 3 minutes after it: a stop at minute 1 fails this, and it waits no longer than the
+# period itself and the sweep's minutes after it.
 workspace_stops() {
-  until_true 780 15 workspace_is_stopped "$1" "$2" "$3" && return 0
-  echo "not stopped after 13 min"
+  local run=$1 box=$2 spec=$3 ended before
+  ended=$(last_run_ended "$run" "$box" "$spec") || return 1
+  [[ -n $ended ]] || { echo "no run of $spec ended"; return 1; }
+  before=$((ended + 540 - $(date +%s)))
+  if ((before < 0)); then
+    echo "checked $((-before)) s past minute 9 of the idle period: too late to see it still running"
+    return 1
+  fi
+  sleep "$before"
+  workspace_state "$run" "$box" "$spec" | grep -qx running || { echo "stopped before its idle period ended"; return 1; }
+  until_true $((ended + 780 - $(date +%s))) 15 workspace_is_stopped "$run" "$box" "$spec" && return 0
+  echo "not stopped 3 min after its idle period ended"
   return 1
 }
 
@@ -1975,9 +2008,11 @@ loop() {
   check "$run" "eng dispatches it while the first builds, in the background" on "$run" eng "sudo sail spec dispatch -p acme --spec $beside --background"
   check "$run" "no agent key and no Sail credential is in any process's command line on eng while it builds and its hooks fire" no_key_in_any_command_line "$run" eng
   check "$run" "the build asks its question and waits, unreviewed" waits_on_its_question "$run" eng "$spec" 20
+  check "$run" "the second spec's review takes it to awaiting_merge" reaches_status "$run" eng "$beside" awaiting_merge 30
+  check "$run" "the second spec's workspace, left awaiting merge, is running until its idle period ends and stopped after it" \
+    workspace_stops "$run" eng "$beside"
   check "$run" "eng answers in the room" on "$run" eng "sudo sail spec comment $spec --body 'Call it Building.'"
   check "$run" "the answer resumes the build, and the review takes it to awaiting_merge" reaches_status "$run" eng "$spec" awaiting_merge 45
-  check "$run" "the second spec's review takes it to awaiting_merge" reaches_status "$run" eng "$beside" awaiting_merge 30
   check "$run" "the two builds ran at once, each in its own workspace of acme" each_ran_in_its_own_workspace "$run" eng "$spec" "$beside"
   check "$run" "the agent opened a pull request on $LOOP_REPO" opened_a_pull_request "$spec"
   check "$run" "the build ran on eng's stored login, by name and kind" the_build_ran_on_the_stored_login "$run" eng "$spec"
@@ -1987,10 +2022,8 @@ loop() {
   check "$run" "main's measures of it count the reviews and the build runs listed for it" measures_match_the_rows "$run" "$spec"
   check "$run" "eng marks it done" on "$run" eng "sudo sail spec update $spec --status done"
   check "$run" "every node syncs twice" sync_all "$run"
-  check "$run" "within two sweeps eng deletes the done spec's workspace and its dataset" \
+  check "$run" "once idle, eng deletes the done spec's workspace and its dataset" \
     workspace_goes "$run" eng "$spec"
-  check "$run" "the second spec's workspace, left awaiting merge, is stopped 10 minutes after its review" \
-    workspace_stops "$run" eng "$beside"
   check "$run" "its cost is dollars over every run listed for it, and its ready and done are the same on main and eng" \
     measures_record_the_cost_and_the_times "$run" "$spec" eng
   check "$run" "the fleet closes its pull request and deletes the branch" closes_the_pull_request "$spec" "$run"

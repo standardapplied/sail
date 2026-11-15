@@ -5,16 +5,18 @@
 
 package ai.singlr.sail.api;
 
-import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.common.Remedied;
 import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.common.Strings;
+import ai.singlr.sail.config.ProjectDefinition;
 import ai.singlr.sail.config.RunStatus;
 import ai.singlr.sail.config.SpecStatus;
+import ai.singlr.sail.engine.AgentPresence;
+import ai.singlr.sail.engine.AgentUnit;
 import ai.singlr.sail.engine.BoxInstances;
 import ai.singlr.sail.engine.ContainerConfig;
-import ai.singlr.sail.engine.ContainerExec;
 import ai.singlr.sail.engine.ContainerState;
+import ai.singlr.sail.engine.RunPlace;
 import ai.singlr.sail.engine.RunUsageReader;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.Workspaces;
@@ -27,85 +29,63 @@ import java.io.IOException;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Instant;
-import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeoutException;
-import java.util.function.Predicate;
 import java.util.function.Supplier;
-import java.util.regex.Pattern;
 
 /**
  * Keeps this box's spec workspaces to what their specs still need (D6), deciding each from what the
- * stores and Incus say now, never from an event (R8): a runner that restarts, a status that arrives
- * by sync, or an instance stopped by hand converges in the next sweep. Only a whole workspace
- * carrying {@value BoxInstances#SPEC_KEY} is swept; a person's, and one never made whole, are never
- * touched (R14, W12). A workspace a run of its spec is live in is left as it is (R13), unless its
- * spec or project was erased, which deletes it at once. Otherwise one whose spec is {@code done} or
- * {@code archived} is deleted, once every run of the spec here has its usage recorded and no repo
- * holds a commit no remote has (R4); one that fails either is kept, stopped, carrying {@value
- * BoxInstances#KEPT_KEY}, and said once in the spec's room. Any other is stopped {@link #IDLE}
- * after the spec's newest run here ended.
+ * stores and Incus say now, never from an event (R8), on a pass of its own that never holds up
+ * another. Only a whole workspace carrying {@value BoxInstances#SPEC_KEY} is swept; a person's, and
+ * one never made whole, are never touched (R14, W12). One whose spec or project was erased is
+ * deleted at once. Every other one is stopped once it is idle: no run of its spec live here (a
+ * room's member is one), no terminal open in it, for {@link #IDLE} since the later of its spec's
+ * last run here ending and this process starting (R13). An idle one whose spec is {@code done} or
+ * {@code archived} is decided once: deleted when nothing its runs made would be lost (R4), or
+ * marked {@value BoxInstances#KEPT_KEY} and said once in the spec's room, after which the sweep
+ * only stops it when idle, never starts or deletes it: its person does.
  *
- * <p>Each workspace is decided under the lock a run's entry takes, tried and never waited on: a run
- * reserved before the decision is seen live, and one reserved after it enters what the decision
- * left. A workspace whose lock another holds is left to the next sweep.
+ * <p>Each workspace is decided under the lock a run's entry takes, tried and never waited on, and a
+ * delete acts on the spec and its runs read again just before it, so a run reserved or a spec
+ * reopened meanwhile keeps the workspace.
  */
-public final class SpecWorkspaces {
+public final class SpecWorkspaces implements AutoCloseable {
 
-  /** How long a spec's workspace runs with no run of its spec live before it is stopped (D6). */
+  /** How long a spec's workspace is idle before it is stopped, or decided when done (D6). */
   public static final Duration IDLE = Duration.ofMinutes(10);
 
-  /**
-   * Prints, for each repository under {@code $1}, the commits that no remote has and, of those, the
-   * ones not on branch {@code $2} (all of them when it is empty or the repository has no such
-   * branch), then its path: {@code <unpushed> <off the branch> <path>}. Nothing is fetched, so a
-   * branch the forge deleted after its merge still counts as the remote's.
-   */
-  static final String UNPUSHED =
-      """
-      set -euo pipefail
-      cd "$1"
-      branch=$2
-      find . -mindepth 2 -maxdepth 3 -name .git -prune -printf '%h\\n' | sort | while IFS= read -r repo; do
-        repo=${repo#./}
-        unpushed=$(git -C "$repo" rev-list --count HEAD --branches --not --remotes)
-        off=$unpushed
-        if [ -n "$branch" ] && git -C "$repo" show-ref --verify --quiet "refs/heads/$branch"; then
-          off=$(git -C "$repo" rev-list --count HEAD --branches --not --remotes "refs/heads/$branch")
-        fi
-        printf '%s %s %s\\n' "$unpushed" "$off" "$repo"
-      done
-      """;
-
-  private static final Duration GIT_TIMEOUT = Duration.ofSeconds(30);
-  private static final Duration PUSH_TIMEOUT = Duration.ofMinutes(2);
-  private static final Pattern COUNTED = Pattern.compile("([0-9]+) ([0-9]+) (.+)");
-  private static final Pattern MILLIS = Pattern.compile("[0-9]{1,18}");
-  private static final Map<String, String> C_LOCALE = Map.of("LC_ALL", "C");
+  /** How often a pass starts. */
+  static final Duration INTERVAL = Duration.ofSeconds(60);
 
   private final Workspaces workspaces;
-  private final ShellExec shell;
   private final BoxInstances box;
   private final ContainerConfig config;
+  private final AgentPresence presence;
+  private final WorkspaceGit git;
+  private final RunUsageReader usage;
   private final SpecStore specs;
   private final RunStore runs;
   private final ChangeLog changeLog;
-  private final RunUsageReader usage;
+  private final ProjectReader definitions;
   private final RunLauncher.Room room;
   private final Supplier<String> localHandle;
   private final Supplier<Instant> clock;
+  private final Instant started;
+  private final PeriodicPass pass;
   private final Set<String> logged = ConcurrentHashMap.newKeySet();
+  private final Set<String> failing = ConcurrentHashMap.newKeySet();
 
   /**
    * @param workspaces the box's workspaces, whose doors start, stop and delete one
    * @param shell reads Incus and runs in a workspace, always for real
    * @param locks the box's lock directory
+   * @param definitions where a project's repos are read from
    * @param room where a kept workspace is said, as Sail ({@link RunLauncher.Room#tell})
+   * @param clock the time now; read once here as this process's start
    */
   public SpecWorkspaces(
       Workspaces workspaces,
@@ -114,32 +94,47 @@ public final class SpecWorkspaces {
       SpecStore specs,
       RunStore runs,
       ChangeLog changeLog,
+      ProjectReader definitions,
       RunLauncher.Room room,
       Supplier<String> localHandle,
       Supplier<Instant> clock) {
     this.workspaces = Objects.requireNonNull(workspaces, "workspaces");
-    this.shell = Objects.requireNonNull(shell, "shell");
     this.box = new BoxInstances(shell);
     this.config = new ContainerConfig(shell, locks);
+    this.presence = new AgentPresence(shell);
+    this.git = new WorkspaceGit(shell);
+    this.usage = new RunUsageReader(shell);
     this.specs = Objects.requireNonNull(specs, "specs");
     this.runs = Objects.requireNonNull(runs, "runs");
     this.changeLog = Objects.requireNonNull(changeLog, "changeLog");
-    this.usage = new RunUsageReader(shell);
+    this.definitions = Objects.requireNonNull(definitions, "definitions");
     this.room = Objects.requireNonNull(room, "room");
     this.localHandle = Objects.requireNonNull(localHandle, "localHandle");
     this.clock = Objects.requireNonNull(clock, "clock");
+    this.started = clock.get();
+    this.pass = new PeriodicPass("workspaces", this::sweep);
+  }
+
+  /** Starts the passes, one each {@link #INTERVAL}, a pass still running skipping the next. */
+  public void start() {
+    pass.start(INTERVAL);
+  }
+
+  @Override
+  public void close() {
+    pass.close();
   }
 
   /**
    * One pass over the box's spec workspaces, as this box's machinery. Never throws: a workspace
-   * that cannot be decided is logged and left to the next pass, and so is the box when Incus does
-   * not list it.
+   * that cannot be decided is logged once until a pass decides it, and the pass goes on to the
+   * next; a box whose Incus does not list is logged and left to the next pass.
    */
   public void sweep() {
-    Actor.run(Actor.system(), this::pass);
+    Actor.run(Actor.system(), this::sweepAll);
   }
 
-  private void pass() {
+  private void sweepAll() {
     List<BoxInstances.Instance> instances;
     try {
       instances = box.all();
@@ -159,11 +154,14 @@ public final class SpecWorkspaces {
       }
       try {
         tend(instance.name(), workspace, spec.get());
+        failing.remove(instance.name());
       } catch (InterruptedException e) {
         Thread.currentThread().interrupt();
         return;
       } catch (Exception e) {
-        log("could not tend " + instance.name() + ": " + e.getMessage());
+        if (failing.add(instance.name())) {
+          log("could not tend " + instance.name() + ": " + e.getMessage());
+        }
       }
     }
   }
@@ -192,63 +190,41 @@ public final class SpecWorkspaces {
       log("deleted " + found.name() + ": spec " + specId + " or its project was erased");
       return;
     }
-    var row = specs.findById(specId);
-    if (row.isEmpty() || !row.get().project().equals(project)) {
+    var row = specs.findById(specId).filter(spec -> spec.project().equals(project));
+    if (row.isEmpty()) {
       logOnce(
           found.name(),
-          row.isEmpty()
-              ? "spec " + specId + " is not on this box"
-              : "spec " + specId + " is filed under project " + row.get().project());
-      return;
-    }
-    var node = localHandle.get();
-    Predicate<String> live = spec -> runs.liveSpecs(node).contains(project + "/" + spec);
-    if (live.test(specId)) {
-      return;
-    }
-    var spec = row.get();
-    var theirs =
-        runs.listForSpec(specId).stream()
-            .filter(run -> run.ownedBy(node) && project.equals(run.project()))
-            .toList();
-    if (spec.status() == SpecStatus.DONE || spec.status() == SpecStatus.ARCHIVED) {
-      retire(found, workspace, spec, theirs, live);
-      return;
-    }
-    if (found.key(BoxInstances.KEPT_KEY).isPresent()) {
-      config.set(found.name(), List.of(BoxInstances.KEPT_KEY + "="));
-    }
-    if (found.state() instanceof ContainerState.Running
-        && idle(found, theirs)
-        && theirs.stream().noneMatch(SpecWorkspaces::unread)) {
-      workspaces.stop(project, workspace.workspace(), live);
-      log(
-          "stopped "
-              + found.name()
-              + ": no run of spec "
+          ": spec "
               + specId
-              + " for "
-              + IDLE.toMinutes()
-              + " min");
+              + " is not one of "
+              + project
+              + "'s on this box, so its workspace is stopped when idle and never deleted");
+    }
+    if (!idle(found, project, specId)) {
+      return;
+    }
+    if (row.isPresent() && done(row.get()) && found.key(BoxInstances.KEPT_KEY).isEmpty()) {
+      retire(found, workspace, row.get());
+      return;
+    }
+    if (found.state() instanceof ContainerState.Running) {
+      workspaces.stop(project, workspace.workspace(), spec -> false);
+      log("stopped " + found.name() + ": idle for " + IDLE.toMinutes() + " min");
     }
   }
 
   /**
-   * Deletes {@code found}, the workspace of done spec {@code spec}, once nothing its runs made
-   * would be lost (R4), starting it first when it is stopped, since neither read runs in a stopped
-   * instance. Otherwise it is kept, and stopped again unless it was running already, kept: then a
-   * person started it to push by hand, and it is left to them.
+   * Decides, once, the idle workspace {@code found} of done spec {@code spec}: started when
+   * stopped, since nothing runs in a stopped instance; deleted when nothing its runs made would be
+   * lost, as the spec and its runs say just before the delete; otherwise kept and stopped. A spec
+   * reopened, or a run started, during the reads leaves the workspace as it is, unkept, for a later
+   * pass.
    */
   private void retire(
-      BoxInstances.Instance found,
-      BoxInstances.Workspace workspace,
-      SpecStore.SpecRow spec,
-      List<RunStore.RunRow> theirs,
-      Predicate<String> live)
+      BoxInstances.Instance found, BoxInstances.Workspace workspace, SpecStore.SpecRow spec)
       throws Exception {
     var project = workspace.project();
-    var running = found.state() instanceof ContainerState.Running;
-    if (!running) {
+    if (!(found.state() instanceof ContainerState.Running)) {
       try {
         workspaces.start(project, workspace.workspace());
       } catch (IOException | TimeoutException | RuntimeException e) {
@@ -256,9 +232,13 @@ public final class SpecWorkspaces {
         return;
       }
     }
-    var lost = lost(found.name(), spec, theirs);
+    var lost = lost(found.name(), spec);
+    var now = specs.findById(spec.id()).filter(row -> row.project().equals(project));
+    if (now.isEmpty() || !done(now.get()) || !idle(found, project, spec.id())) {
+      return;
+    }
     if (lost.isEmpty()) {
-      workspaces.delete(project, workspace.workspace(), live, instance -> {});
+      workspaces.delete(project, workspace.workspace(), id -> false, instance -> {});
       log(
           "deleted "
               + found.name()
@@ -266,24 +246,21 @@ public final class SpecWorkspaces {
               + spec.id()
               + " is "
               + spec.status().wire()
-              + " and nothing it made is lost");
+              + " and nothing its runs made is lost");
       return;
     }
-    var theirsToFinish = running && found.key(BoxInstances.KEPT_KEY).isPresent();
     keep(found, workspace, spec, lost.get());
-    if (!theirsToFinish) {
-      workspaces.stop(project, workspace.workspace(), live);
-    }
+    workspaces.stop(project, workspace.workspace(), id -> false);
   }
 
   /**
    * What deleting the running workspace {@code instance} would lose, or nothing: a run's usage it
-   * does not answer, which is read and recorded here first, or a repo's commits no remote has, or
-   * repos that cannot be counted. When every commit missing is on the runs' branch, that branch is
-   * pushed, once in each repo holding some, and the repos are counted again.
+   * does not answer, which is read and recorded here first, then whatever its project's repos hold
+   * that no remote does ({@link WorkspaceGit#left}).
    */
-  private Optional<String> lost(
-      String instance, SpecStore.SpecRow spec, List<RunStore.RunRow> theirs) throws Exception {
+  private Optional<String> lost(String instance, SpecStore.SpecRow spec)
+      throws InterruptedException {
+    var theirs = theirs(spec.project(), spec.id());
     for (var run : theirs.stream().filter(SpecWorkspaces::unread).toList()) {
       var read = usage.read(run);
       if (read == null) {
@@ -291,101 +268,71 @@ public final class SpecWorkspaces {
       }
       runs.recordRead(run.id(), read);
     }
+    Optional<ProjectDefinition> definition;
+    try {
+      definition = definitions.read(spec.project());
+    } catch (RuntimeException unreadable) {
+      definition = Optional.empty();
+    }
+    if (definition.isEmpty()) {
+      return Optional.of(
+          "the definition of project "
+              + spec.project()
+              + " is not readable here, so neither are its repos");
+    }
+    var repos =
+        Objects.requireNonNullElse(definition.get().repos(), List.<ProjectDefinition.Repo>of())
+            .stream()
+            .map(ProjectDefinition.Repo::path)
+            .toList();
     var branch =
         theirs.stream()
             .map(RunStore.RunRow::branch)
             .filter(Strings::isNotBlank)
             .findFirst()
             .orElse(Objects.requireNonNullElse(spec.branch(), ""));
-    try {
-      var unpushed = unpushed(instance, branch);
-      var elsewhere = unpushed.stream().filter(repo -> !repo.onTheBranch()).findFirst();
-      if (unpushed.isEmpty() || elsewhere.isPresent()) {
-        return elsewhere.map(repo -> repo.why(branch));
-      }
-      for (var repo : unpushed) {
-        var pushed =
-            shell.exec(
-                ContainerExec.asDevUser(
-                    instance,
-                    null,
-                    C_LOCALE,
-                    List.of("git", "-C", repo.path(), "push", "origin", branch)),
-                null,
-                PUSH_TIMEOUT);
-        if (!pushed.ok()) {
-          return Optional.of(
-              repo.repo() + ": the push of " + branch + " failed: " + said(pushed.stderr()));
-        }
-      }
-      return unpushed(instance, branch).stream().findFirst().map(repo -> repo.why(branch));
-    } catch (Uncounted uncounted) {
-      return Optional.of(uncounted.getMessage());
-    }
-  }
-
-  /** One repo's commits that no remote has, and how many of them are off the runs' branch. */
-  private record Unpushed(String repo, int all, int off) {
-    String path() {
-      return ContainerExec.DEV_WORKSPACE + "/" + repo;
-    }
-
-    boolean onTheBranch() {
-      return off == 0;
-    }
-
-    String why(String branch) {
-      var count = onTheBranch() ? all : off;
-      var commits = count + (count == 1 ? " commit" : " commits");
-      return onTheBranch() || Strings.isBlank(branch)
-          ? repo + ": " + commits + " that no remote has"
-          : repo + ": " + commits + " on a branch other than " + branch + " that no remote has";
-    }
-  }
-
-  /** Repos {@link #UNPUSHED} could not count, which a delete would lose unseen. */
-  private static final class Uncounted extends Exception {
-    Uncounted(String why) {
-      super("its repos could not be counted: " + why);
-    }
-  }
-
-  /** Every repo of {@code instance} holding a commit no remote has, by path. */
-  private List<Unpushed> unpushed(String instance, String branch) throws Exception {
-    var counted =
-        shell.exec(
-            ContainerExec.asDevUser(
-                instance,
-                null,
-                C_LOCALE,
-                List.of(
-                    "bash", "-c", UNPUSHED, "sail-unpushed", ContainerExec.DEV_WORKSPACE, branch)),
-            null,
-            GIT_TIMEOUT);
-    if (!counted.ok()) {
-      throw new Uncounted(said(counted.reason()));
-    }
-    var unpushed = new ArrayList<Unpushed>();
-    for (var line : counted.stdout().lines().toList()) {
-      var fields = COUNTED.matcher(line);
-      if (!fields.matches()) {
-        throw new Uncounted(said(line));
-      }
-      var all = Integer.parseInt(fields.group(1));
-      if (all > 0) {
-        unpushed.add(new Unpushed(fields.group(3), all, Integer.parseInt(fields.group(2))));
-      }
-    }
-    return unpushed;
-  }
-
-  private static String said(String text) {
-    return Strings.oneLine(Objects.toString(text, "")).strip();
+    return git.left(instance, repos, branch);
   }
 
   /**
-   * Marks {@code found} kept for {@code why}, saying it in the spec's room only when it carried no
-   * mark before, and only once the mark is written: the mark is what remembers it was said.
+   * Whether {@code found} is idle: no run of the spec live on this box, a room's member included,
+   * no terminal open in it ({@link AgentUnit#TERMINAL}, a workspace that does not answer counting
+   * as one open), and {@link #IDLE} since the later of the spec's last run here ending and this
+   * process starting, so a restart never stops a workspace before the loop has replayed its runs.
+   */
+  private boolean idle(BoxInstances.Instance found, String project, String specId) {
+    if (runs.liveSpecs(localHandle.get()).contains(project + "/" + specId)) {
+      return false;
+    }
+    var since =
+        theirs(project, specId).stream()
+            .map(run -> Objects.requireNonNullElse(run.completedAt(), run.startedAt()))
+            .filter(Objects::nonNull)
+            .reduce(started, (a, b) -> a.isAfter(b) ? a : b);
+    if (since.plus(IDLE).isAfter(clock.get())) {
+      return false;
+    }
+    if (!(found.state() instanceof ContainerState.Running)) {
+      return true;
+    }
+    try {
+      return presence.gone(RunPlace.of(project, specId), AgentUnit.TERMINAL);
+    } catch (Exception unanswered) {
+      return false;
+    }
+  }
+
+  private List<RunStore.RunRow> theirs(String project, String specId) {
+    var node = localHandle.get();
+    return runs.listForSpec(specId).stream()
+        .filter(run -> run.ownedBy(node) && project.equals(run.project()))
+        .toList();
+  }
+
+  /**
+   * Marks {@code found} kept for {@code why} and says it in the spec's room, once: the room is told
+   * first and the mark written after, so a crash between the two says it again rather than never. A
+   * mark that cannot be written is logged, and a later pass decides the workspace again.
    */
   private void keep(
       BoxInstances.Instance found,
@@ -393,19 +340,13 @@ public final class SpecWorkspaces {
       SpecStore.SpecRow spec,
       String why)
       throws Exception {
-    var before = found.key(BoxInstances.KEPT_KEY);
-    if (before.equals(Optional.of(why))) {
-      return;
-    }
+    room.tell(spec.id(), notice(workspace, spec, why));
     var written = config.set(found.name(), List.of(BoxInstances.KEPT_KEY + "=" + why));
     if (!written.ok()) {
       log("could not mark " + found.name() + " kept (" + why + "): " + written.reason());
       return;
     }
-    if (before.isEmpty()) {
-      log("kept " + found.name() + ": " + why);
-      room.tell(spec.id(), notice(workspace, spec, why));
-    }
+    log("kept " + found.name() + ": " + why);
   }
 
   private static String notice(
@@ -425,33 +366,17 @@ public final class SpecWorkspaces {
             + why
             + ".",
         Remedy.of(
-            "Push what it holds by hand (",
+            "Sail will not delete it. Take what it holds by hand (",
             Remedy.sail("project workspace start", project, name),
             ", then ",
             Remedy.sail("project workspace shell", project, name),
-            "), and Sail deletes it once nothing is left to lose; or drop it with ",
+            "), then drop it with ",
             Remedy.sail("project workspace delete", project, name),
             "."));
   }
 
-  /**
-   * Whether {@link #IDLE} has passed since the newest of {@code theirs} ended, or, with none, since
-   * {@code found} was made whole.
-   */
-  private boolean idle(BoxInstances.Instance found, List<RunStore.RunRow> theirs) {
-    var since =
-        theirs.stream()
-            .findFirst()
-            .map(run -> Objects.requireNonNullElse(run.completedAt(), run.startedAt()))
-            .or(
-                () ->
-                    found
-                        .key(BoxInstances.READY_KEY)
-                        .filter(MILLIS.asMatchPredicate())
-                        .map(Long::parseLong)
-                        .map(DateTimeUtils::ofMillis))
-            .orElse(Instant.EPOCH);
-    return !clock.get().isBefore(since.plus(IDLE));
+  private static boolean done(SpecStore.SpecRow spec) {
+    return spec.status() == SpecStatus.DONE || spec.status() == SpecStatus.ARCHIVED;
   }
 
   /** Whether {@code run} finished with its report unread, as {@link RunStore#unread} reads it. */
@@ -459,9 +384,14 @@ public final class SpecWorkspaces {
     return RunStatus.isTerminal(run.status()) && run.usage() == null;
   }
 
-  private void logOnce(String instance, String why) {
-    if (logged.add(instance + ": " + why)) {
-      log(instance + " is left as it is: " + why);
+  private static String said(String text) {
+    return Strings.oneLine(Objects.toString(text, "")).strip();
+  }
+
+  /** Logs {@code instance} followed by {@code said}, once per workspace in this process. */
+  private void logOnce(String instance, String said) {
+    if (logged.add(instance + said)) {
+      log(instance + said);
     }
   }
 

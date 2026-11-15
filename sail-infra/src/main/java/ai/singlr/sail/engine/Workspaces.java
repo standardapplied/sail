@@ -641,6 +641,24 @@ public final class Workspaces {
     return new Listing(project, List.copyOf(rows));
   }
 
+  /**
+   * When spec {@code place}'s workspace was made: empty when it has none, the epoch for one that
+   * does not say. A session a run left in it is there only when the run ended after this.
+   */
+  public Optional<Instant> madeAt(RunPlace.SpecWorkspace place)
+      throws IOException, InterruptedException, TimeoutException {
+    return box.lookup(place.instance(), Duration.ofSeconds(BoxInstances.LOOKUP_SECONDS))
+        .filter(instance -> instance.isTheSpecs(place))
+        .map(
+            instance ->
+                instance
+                    .key(CREATED_KEY)
+                    .filter(MILLIS.asMatchPredicate())
+                    .map(Long::parseLong)
+                    .map(DateTimeUtils::ofMillis)
+                    .orElse(Instant.EPOCH));
+  }
+
   /** Starts workspace {@code name}, stopped or frozen, and says what its resume took. */
   public Changed start(String project, String name) throws Exception {
     var found = whole(project, name, "project start", true);

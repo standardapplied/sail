@@ -118,14 +118,6 @@ class MissedStopReconcilerTest {
 
   private MissedStopReconciler reconciler(
       MissedStopReconciler.UnitProbe probe, Supplier<String> localHandle, Supplier<Instant> clock) {
-    return reconciler(probe, localHandle, clock, () -> {});
-  }
-
-  private MissedStopReconciler reconciler(
-      MissedStopReconciler.UnitProbe probe,
-      Supplier<String> localHandle,
-      Supplier<Instant> clock,
-      Runnable workspaces) {
     return new MissedStopReconciler(
         specStore,
         sessionStore,
@@ -136,8 +128,7 @@ class MissedStopReconcilerTest {
         new WatcherCoverage(watched::contains, pid -> false),
         localHandle,
         clock,
-        new FdeStore(db),
-        workspaces);
+        new FdeStore(db));
   }
 
   private void createInProgressSpec(String id) {
@@ -724,43 +715,6 @@ class MissedStopReconcilerTest {
     assertEquals(RunUsage.NONE, sessionStore.findById(gone).orElseThrow().usage());
     assertNull(sessionStore.findById(foreign).orElseThrow().usage());
     assertEquals(false, asked.contains(foreign), "another box's run is its own to read");
-  }
-
-  /**
-   * Each pass ends with the sweep of the box's spec workspaces, after the usage read: a workspace
-   * is decided only once what the pass could read of its runs is recorded.
-   */
-  @Test
-  void eachPassSweepsTheSpecWorkspacesAfterTheUsageIsRead() {
-    var silent = runningSession("auth");
-    Acting.system(() -> assertTrue(sessionStore.claimStop(silent, "stopped", () -> {})));
-    var steps = new CopyOnWriteArrayList<String>();
-    MissedStopReconciler.UnitProbe probe =
-        new MissedStopReconciler.UnitProbe() {
-          @Override
-          public boolean active(RunPlace place, String runId, String unit) {
-            return false;
-          }
-
-          @Override
-          public RunUsage usage(RunStore.RunRow run) {
-            steps.add("usage of " + run.id());
-            return RunUsage.NONE;
-          }
-        };
-    var reconciler =
-        reconciler(
-            probe,
-            () -> "node-a",
-            Instant::now,
-            () ->
-                steps.add(
-                    "workspaces, usage "
-                        + sessionStore.findById(silent).orElseThrow().usage().source().wire()));
-
-    reconciler.sweep();
-
-    assertEquals(List.of("usage of " + silent, "workspaces, usage none"), steps);
   }
 
   @Test

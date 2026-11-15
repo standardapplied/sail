@@ -17,7 +17,8 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * pass makes the next tick a no-op rather than stacking), a throwing pass — {@link Throwable}
  * included, since an escaped {@link Error} would silently cancel every future tick — is logged with
  * its stack and never cancels the schedule, and {@link #close()} stops the timer after waiting out
- * any in-flight pass, so shutdown never interrupts a half-applied reconciliation. Shared by the
+ * any in-flight pass, so shutdown never interrupts a half-applied reconciliation. A tick that finds
+ * a pass still running is skipped and said once, not again until a pass has finished. Shared by the
  * reconciliation loops so their scheduling discipline cannot drift apart.
  */
 final class PeriodicPass implements AutoCloseable {
@@ -26,6 +27,7 @@ final class PeriodicPass implements AutoCloseable {
   private final Runnable pass;
   private final ScheduledExecutorService scheduler;
   private final AtomicBoolean running = new AtomicBoolean();
+  private final AtomicBoolean skipSaid = new AtomicBoolean();
 
   PeriodicPass(String name, Runnable pass) {
     this.name = name;
@@ -46,6 +48,9 @@ final class PeriodicPass implements AutoCloseable {
    */
   boolean runIfIdle() {
     if (!running.compareAndSet(false, true)) {
+      if (skipSaid.compareAndSet(false, true)) {
+        System.err.println("  [" + name + "] a pass is still running, so this one is skipped");
+      }
       return false;
     }
     try {
@@ -54,6 +59,7 @@ final class PeriodicPass implements AutoCloseable {
       System.err.println("  [" + name + "] pass failed: " + t);
       t.printStackTrace();
     } finally {
+      skipSaid.set(false);
       running.set(false);
     }
     return true;

@@ -13,12 +13,15 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import ai.singlr.sail.Sail;
 import ai.singlr.sail.commands.SailCommandLine;
 import ai.singlr.sail.common.DateTimeUtils;
+import ai.singlr.sail.config.ProjectDefinition;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.config.SyncConfig;
+import ai.singlr.sail.engine.AgentUnit;
 import ai.singlr.sail.engine.BoxInstances;
 import ai.singlr.sail.engine.ContainerSailSetup;
 import ai.singlr.sail.engine.RunPlace;
 import ai.singlr.sail.engine.SailPaths;
+import ai.singlr.sail.engine.ScriptedShellExecutor;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.SyncOperations;
 import ai.singlr.sail.engine.Workspaces;
@@ -49,31 +52,33 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
+import java.util.Set;
 import java.util.TreeMap;
+import java.util.TreeSet;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.regex.Pattern;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.condition.EnabledOnOs;
-import org.junit.jupiter.api.condition.OS;
 import org.junit.jupiter.api.io.TempDir;
 
 /**
  * The sweep of a box's spec workspaces through its production constructor, over real stores and a
  * box that answers only for the instances it holds, with the commands Incus and git would be given
- * read back. The clock is moved by hand and never past its horizon.
+ * read back. The clock is moved by hand and never past its horizon; the sweep's process starts at
+ * {@link #T0}, and runs end when the store's clock, moved with it, says.
  */
 class SpecWorkspacesTest {
 
   private static final Instant T0 = Instant.parse("2026-11-15T10:00:00Z");
   private static final String NODE = "eng";
-  private static final String BRANCH = "agent/a";
   private static final String KEPT = BoxInstances.KEPT_KEY;
-  private static final Duration IDLE_LESS_A_SECOND =
-      SpecWorkspaces.IDLE.minus(Duration.ofSeconds(1));
+  private static final Duration IDLE = SpecWorkspaces.IDLE;
+  private static final Duration A_SECOND = Duration.ofSeconds(1);
 
   @TempDir Path tempDir;
   private Clock wall;
@@ -82,6 +87,7 @@ class SpecWorkspacesTest {
   private RunStore runs;
   private Box box;
   private ManualClock clock;
+  private SpecWorkspaces sweeper;
   private final List<String> said = new CopyOnWriteArrayList<>();
 
   @BeforeEach
@@ -94,8 +100,9 @@ class SpecWorkspacesTest {
     HeldProjects.hold(db, "other");
     specs = new SpecStore(db);
     runs = new RunStore(db);
+    clock = new ManualClock(T0, Duration.ofHours(3));
     box = new Box();
-    clock = new ManualClock(T0, Duration.ofHours(2));
+    sweeper = sweeper(specs, runs, db, project -> Optional.of(definition(project)));
   }
 
   @AfterEach
@@ -105,7 +112,13 @@ class SpecWorkspacesTest {
     assertEquals(List.of(), box.unexpected, "the box was asked what it does not answer");
   }
 
+  /** This box's sweep, its process started at {@link #T0}. */
   private SpecWorkspaces sweeper() {
+    return sweeper;
+  }
+
+  private SpecWorkspaces sweeper(
+      SpecStore specs, RunStore runs, Sqlite db, ProjectReader definitions) {
     var locks = tempDir.resolve("locks");
     return new SpecWorkspaces(
         new Workspaces(box, box, System::nanoTime, locks, () -> 16_000L),
@@ -114,9 +127,28 @@ class SpecWorkspacesTest {
         specs,
         runs,
         new ChangeLog(db),
+        definitions,
         (specId, body) -> said.add(specId + ": " + body),
         () -> NODE,
         clock::instant);
+  }
+
+  /** A project of two repos, one at a nested path. */
+  private static ProjectDefinition definition(String project) {
+    return new ProjectDefinition(
+        project,
+        "",
+        null,
+        null,
+        null,
+        null,
+        List.of(
+            new ProjectDefinition.Repo("https://github.com/acme/app.git", "app", null),
+            new ProjectDefinition.Repo("https://github.com/acme/site.git", "web/site", null)),
+        null,
+        null,
+        null,
+        null);
   }
 
   private void spec(String id, SpecStatus status) {
@@ -124,7 +156,27 @@ class SpecWorkspacesTest {
   }
 
   private void spec(String id, String project, SpecStatus status) {
-    Acting.as("uday", () -> specs.create(row(id, project, status, "agent/" + id)));
+    Acting.as("uday", () -> specs.create(row(id, project, status)));
+  }
+
+  private static SpecStore.SpecRow row(String id, String project, SpecStatus status) {
+    return new SpecStore.SpecRow(
+        id,
+        project,
+        "Spec " + id,
+        status,
+        NODE,
+        "claude-code",
+        null,
+        null,
+        "agent/" + id,
+        0,
+        "uday",
+        null,
+        null,
+        "uday",
+        List.of(),
+        List.of("app"));
   }
 
   private void status(String id, SpecStatus status) {
@@ -133,6 +185,10 @@ class SpecWorkspacesTest {
 
   /** A run of spec {@code specId} on this box, live until it is finished. */
   private String run(String specId) {
+    return run(runs, specId);
+  }
+
+  private static String run(RunStore runs, String specId) {
     return Acting.system(
         () -> {
           var id = DateTimeUtils.newId().toString();
@@ -152,33 +208,36 @@ class SpecWorkspacesTest {
         });
   }
 
-  /** A run of {@code specId} that ended at the clock's start, its usage read. */
-  private String ended(String specId, String status) {
+  /** A run of {@code specId} that ends now, its usage read. */
+  private String ended(String specId) {
     var id = run(specId);
-    Acting.system(
-        () -> {
-          TestRuns.complete(runs, id, status, "failed".equals(status) ? 1 : null);
-          runs.recordRead(id, RunUsage.NONE);
-        });
+    finish(runs, id);
     return id;
   }
 
-  /** A run of {@code specId} that ended at the clock's start, its usage unread. */
+  private static void finish(RunStore runs, String id) {
+    Acting.system(
+        () -> {
+          TestRuns.complete(runs, id, "completed", null);
+          runs.recordRead(id, RunUsage.NONE);
+        });
+  }
+
+  /** A run of {@code specId} that ends now, its usage unread. */
   private String endedUnread(String specId) {
     var id = run(specId);
     Acting.system(() -> TestRuns.complete(runs, id, "stopped", null));
     return id;
   }
 
-  private static String instance(String specId) {
-    return RunPlace.of("acme", specId).instance();
+  /** Moves the sweep's clock by {@code by}, and the store's with it. */
+  private void later(Duration by) {
+    clock.advance(by);
+    DateTimeUtils.clock = Clock.fixed(clock.instant(), ZoneOffset.UTC);
   }
 
-  private List<String> commandsOn(String instance) {
-    return box.commands.stream()
-        .filter(command -> command.contains(instance))
-        .map(command -> String.join(" ", command))
-        .toList();
+  private static String instance(String specId) {
+    return RunPlace.of("acme", specId).instance();
   }
 
   private List<String> changesOf(String instance) {
@@ -187,6 +246,15 @@ class SpecWorkspacesTest {
         .filter(command -> List.of("start", "stop", "delete").contains(command.get(1)))
         .filter(command -> command.get(2).equals(instance))
         .map(command -> command.get(1))
+        .toList();
+  }
+
+  /** Every command run inside {@code instance}, each as {@link Box#what} names it. */
+  private List<String> askedOf(String instance) {
+    return box.commands.stream()
+        .filter(command -> command.size() > 3)
+        .filter(command -> command.subList(0, 3).equals(List.of("incus", "exec", instance)))
+        .map(command -> Box.what(command.subList(command.indexOf("--") + 1, command.size())))
         .toList();
   }
 
@@ -202,196 +270,293 @@ class SpecWorkspacesTest {
     return err.toString(StandardCharsets.UTF_8);
   }
 
-  /** Row 1 and R13: a live run holds its workspace running through every status but erased. */
+  /**
+   * The room's notice for spec {@code specId} of acme, kept while {@code status} for {@code why}.
+   */
+  private static String notice(String specId, String status, String why) {
+    return "Workspace "
+        + specId
+        + " of acme is kept, stopped, though spec "
+        + specId
+        + " is "
+        + status
+        + ": "
+        + why
+        + ". Sail will not delete it. Take what it holds by hand (sail project workspace start"
+        + " acme "
+        + specId
+        + ", then sail project workspace shell acme "
+        + specId
+        + "), then drop it with sail project workspace delete acme "
+        + specId
+        + ".";
+  }
+
+  /**
+   * R13, row 1: a live run holds its workspace through every status, nothing asked inside it, and
+   * only an erasure takes it.
+   */
   @Test
-  void aWorkspaceWithALiveRunIsNeitherStoppedNorDeletedWhateverItsSpecsStatusUnlessErased() {
-    var id = "a";
-    spec(id, SpecStatus.PENDING);
-    box.workspace(id, "Running");
-    ended(id, "stopped");
-    run(id);
-    clock.advance(Duration.ofMinutes(30));
+  void aWorkspaceWithALiveRunIsNeitherStoppedNorReadNorDeletedWhateverItsStatusUnlessErased() {
+    spec("a", SpecStatus.PENDING);
+    box.workspace("a", "Running").repo("app").repo("web/site").ahead("app", 1);
+    ended("a");
+    run("a");
+    later(Duration.ofHours(1));
     for (var status : SpecStatus.values()) {
-      status(id, status);
+      status("a", status);
       sweeper().sweep();
-      assertEquals(List.of(), changesOf(instance(id)), "a live run under " + status);
     }
+    assertEquals(List.of(), changesOf(instance("a")));
+    assertEquals(List.of(), askedOf(instance("a")), "nothing is read or pushed under a live run");
 
     Acting.as(
         "uday",
         () ->
             new Erasure(db)
-                .erase(List.of(new Erasure.Target(Erasure.SPEC, id)), ChangeLog.Entry.LOCAL));
+                .erase(List.of(new Erasure.Target(Erasure.SPEC, "a")), ChangeLog.Entry.LOCAL));
     sweeper().sweep();
 
-    assertEquals(List.of("delete"), changesOf(instance(id)));
-    assertFalse(box.holds(instance(id)));
+    assertEquals(List.of("delete"), changesOf(instance("a")));
     assertEquals(List.of(), said);
   }
 
   /**
-   * Rows 2 and 4, 7, 8: a workspace whose spec is awaiting merge, cancelled, or in progress after a
-   * failed run is stopped 10 minutes after its newest run ended, and not a moment before.
+   * Rows 2, 4, 7, 8: whatever the status, an idle workspace is stopped 10 minutes after its spec's
+   * last run here ended, and not a second before; a stopped one is left stopped.
    */
   @Test
-  void anIdleWorkspaceIsStoppedTenMinutesAfterItsNewestRunEndedAndNotBefore() {
+  void anIdleWorkspaceIsStoppedTenMinutesAfterTheLastRunEndedAndNotBefore() {
     spec("a", SpecStatus.AWAITING_MERGE);
     spec("c", SpecStatus.CANCELLED);
     spec("f", SpecStatus.IN_PROGRESS);
-    for (var id : List.of("a", "c", "f")) {
-      box.workspace(id, "Running");
-    }
-    ended("a", "completed");
-    ended("c", "stopped");
-    ended("f", "failed");
+    var ids = List.of("a", "c", "f");
+    ids.forEach(id -> box.workspace(id, "Running"));
+    later(Duration.ofMinutes(5));
+    ids.forEach(this::ended);
 
-    clock.advance(IDLE_LESS_A_SECOND);
+    later(IDLE.minus(A_SECOND));
     sweeper().sweep();
-    for (var id : List.of("a", "c", "f")) {
+    for (var id : ids) {
       assertEquals(List.of(), changesOf(instance(id)), id + " before 10 minutes");
     }
 
-    clock.advance(Duration.ofSeconds(1));
+    later(A_SECOND);
     sweeper().sweep();
-    for (var id : List.of("a", "c", "f")) {
-      assertEquals(List.of("stop"), changesOf(instance(id)), id + " at 10 minutes");
+    sweeper().sweep();
+    for (var id : ids) {
+      assertEquals(List.of("stop"), changesOf(instance(id)), id + " at 10 minutes, once");
       assertEquals("Stopped", box.state(instance(id)));
-    }
-
-    sweeper().sweep();
-    for (var id : List.of("a", "c", "f")) {
-      assertEquals(List.of("stop"), changesOf(instance(id)), id + ": a stopped one is left");
     }
     assertEquals(List.of(), said);
   }
 
-  /** The clock is the newest run: an older run long ended does not stop a workspace. */
+  /**
+   * Minor 1: the clock is the latest end of any run here, not the end of the newest-started run: a
+   * room turn that started after the build but ended before it does not stop the workspace early.
+   */
   @Test
-  void theIdleClockIsTheNewestRunsEnd() {
+  void theIdleClockIsTheLatestEndOfAnyRun() {
     spec("a", SpecStatus.REVIEW);
     box.workspace("a", "Running");
-    ended("a", "completed");
-    clock.advance(Duration.ofMinutes(20));
-    DateTimeUtils.clock = Clock.fixed(clock.instant(), ZoneOffset.UTC);
-    ended("a", "completed");
+    later(Duration.ofMinutes(15));
+    var build = run("a");
+    later(Duration.ofMinutes(40));
+    ended("a");
+    later(Duration.ofMinutes(10));
+    finish(runs, build);
 
-    clock.advance(IDLE_LESS_A_SECOND);
+    later(IDLE.minus(A_SECOND));
     sweeper().sweep();
     assertEquals(List.of(), changesOf(instance("a")));
 
-    clock.advance(Duration.ofSeconds(1));
-    sweeper().sweep();
-    assertEquals(List.of("stop"), changesOf(instance("a")));
-  }
-
-  /** Row 2: an idle workspace holding a run whose usage is still unread is not stopped yet. */
-  @Test
-  void anIdleWorkspaceIsStoppedOnlyOnceEveryRunsUsageIsRead() {
-    spec("a", SpecStatus.AWAITING_MERGE);
-    box.workspace("a", "Running");
-    var unread = endedUnread("a");
-    clock.advance(Duration.ofMinutes(15));
-
-    sweeper().sweep();
-    assertEquals(List.of(), changesOf(instance("a")));
-
-    Acting.system(() -> runs.recordRead(unread, RunUsage.NONE));
+    later(A_SECOND);
     sweeper().sweep();
     assertEquals(List.of("stop"), changesOf(instance("a")));
   }
 
   /**
-   * Scenarios 5, 20 and 37: a done spec's workspace, stopped with a run's usage unread, is started,
-   * the usage read and recorded, the repos found pushed, and only then deleted.
+   * Rule D and Major 4, in the reviewer's order: a reviewer's run ended long before sail-api came
+   * back; the first pass after the start, while the loop the replayed stop woke reads the
+   * workspace, does not stop it, nor does any pass while the loop's next run is live; it stops 10
+   * minutes after that run ends.
    */
   @Test
-  void aDoneSpecsStoppedWorkspaceIsStartedItsUsageReadAndThenDeleted() {
+  void aRestartNeverStopsAWorkspaceBeforeTheLoopItReplaysHasHadIt() {
+    spec("a", SpecStatus.REVIEW);
+    box.workspace("a", "Running");
+    ended("a");
+    later(Duration.ofMinutes(30));
+    var restarted = sweeper(specs, runs, db, project -> Optional.of(definition(project)));
+
+    restarted.sweep();
+    assertEquals(List.of(), changesOf(instance("a")), "the pass right after the start");
+
+    later(Duration.ofMinutes(5));
+    var fix = run("a");
+    later(Duration.ofMinutes(20));
+    restarted.sweep();
+    assertEquals(List.of(), changesOf(instance("a")), "the loop's run is live");
+
+    finish(runs, fix);
+    later(IDLE.minus(A_SECOND));
+    restarted.sweep();
+    assertEquals(List.of(), changesOf(instance("a")));
+    later(A_SECOND);
+    restarted.sweep();
+    assertEquals(List.of("stop"), changesOf(instance("a")));
+  }
+
+  /**
+   * Rule C and Major 3: a terminal open in a workspace keeps it, as one that does not say whether
+   * it is open does; once it is closed, the workspace stops.
+   */
+  @Test
+  void aTerminalOpenInTheWorkspaceOrOneThatCannotBeAskedKeepsItRunning() {
+    spec("a", SpecStatus.AWAITING_MERGE);
+    var held = box.workspace("a", "Running");
+    ended("a");
+    later(Duration.ofHours(1));
+
+    held.terminal = Box.Terminal.OPEN;
+    sweeper().sweep();
+    held.terminal = Box.Terminal.UNANSWERED;
+    sweeper().sweep();
+    assertEquals(List.of(), changesOf(instance("a")));
+
+    held.terminal = Box.Terminal.THROWS;
+    sweeper().sweep();
+    assertEquals(List.of(), changesOf(instance("a")));
+
+    held.terminal = Box.Terminal.CLOSED;
+    sweeper().sweep();
+    assertEquals(List.of("stop"), changesOf(instance("a")));
+  }
+
+  /** The sweep runs on a pass of its own, which its close stops. */
+  @Test
+  void theSweepStartsItsOwnPassAndCloseStopsIt() {
+    try (var own = sweeper(specs, runs, db, project -> Optional.empty())) {
+      own.start();
+    }
+    assertEquals(List.of(), box.commands, "the first pass is a minute away");
+  }
+
+  /**
+   * Scenarios 5, 20, 37: a done spec's idle workspace, stopped with a run's usage unread, is
+   * started, its usage read and recorded, its configured repos read, and only then deleted.
+   */
+  @Test
+  void aDoneSpecsStoppedWorkspaceIsStartedItsUsageAndReposReadAndThenDeleted() {
     spec("a", SpecStatus.DONE);
-    box.workspace("a", "Stopped").repo("app", 0, 0);
+    box.workspace("a", "Stopped").repo("app").repo("web/site");
     var unread = endedUnread("a");
+    later(IDLE);
 
     sweeper().sweep();
 
     assertFalse(box.holds(instance("a")));
     assertEquals(List.of("start", "delete"), changesOf(instance("a")));
-    var order =
-        commandsOn(instance("a")).stream()
-            .map(
-                command ->
-                    command.startsWith("incus start ")
-                        ? "start"
-                        : command.contains("tac --")
-                            ? "usage"
-                            : command.contains(SpecWorkspaces.UNPUSHED) ? "unpushed" : null)
-            .filter(step -> step != null)
-            .toList();
-    assertEquals(List.of("start", "usage", "unpushed"), order);
+    assertEquals(List.of("bus", "machinery", "usage", "left app web/site"), askedOf(instance("a")));
     assertEquals("none", runs.findById(unread).orElseThrow().usage().source().wire());
-    assertTrue(
-        commandsOn(instance("a")).getLast().equals("incus delete " + instance("a") + " --force"));
     assertEquals(List.of(), said);
   }
 
-  /** Scenario 41: a branch the forge merged and deleted still counts as pushed (no fetch). */
+  /** A done spec's workspace is decided only once it is idle, as any other is stopped. */
   @Test
-  void aDoneSpecsRunningWorkspaceWithNothingUnpushedIsDeletedWithoutAFetch() {
-    spec("a", SpecStatus.ARCHIVED);
-    box.workspace("a", "Running").repo("app", 0, 0).repo("web/site", 0, 0);
-    ended("a", "completed");
+  void aDoneSpecsWorkspaceIsDecidedOnlyOnceIdle() {
+    spec("a", SpecStatus.DONE);
+    box.workspace("a", "Running").repo("app").repo("web/site");
+    ended("a");
 
+    later(IDLE.minus(A_SECOND));
     sweeper().sweep();
+    assertTrue(box.holds(instance("a")));
+    assertEquals(List.of(), askedOf(instance("a")));
 
-    assertEquals(List.of("delete"), changesOf(instance("a")));
-    assertTrue(
-        box.commands.stream().noneMatch(command -> command.contains("fetch")), "no fetch is made");
+    later(A_SECOND);
+    sweeper().sweep();
+    assertFalse(box.holds(instance("a")));
   }
 
   /**
-   * Scenario 6 and the said-once rule: a done spec's workspace whose repo holds a commit on another
-   * branch is kept, stopped, carrying why; the room is told once over three sweeps.
+   * Rules A and B: each thing a repo holds that no remote has keeps a done spec's workspace,
+   * stopped, said once in one sentence naming each repo and what it holds; a configured repo that
+   * is missing keeps it too. Kept is final: later passes neither start, read nor say it again.
    */
   @Test
-  void aCommitOnAnotherBranchKeepsTheWorkspaceStoppedAndIsSaidOnceAcrossThreeSweeps() {
+  void anythingARepoHoldsKeepsTheWorkspaceSaidOnceAndKeptIsFinal() {
     spec("a", SpecStatus.DONE);
-    box.workspace("a", "Running").repo("app", 0, 1);
-    ended("a", "completed");
+    box.workspace("a", "Running").repo("app", "changes", "stash").repo("web/site", "commits");
+    spec("m", SpecStatus.ARCHIVED);
+    box.workspace("m", "Running").repo("app");
+    ended("a");
+    ended("m");
+    later(IDLE);
 
-    for (var sweep = 0; sweep < 3; sweep++) {
-      sweeper().sweep();
-    }
+    sweeper().sweep();
+    later(Duration.ofHours(1));
+    sweeper().sweep();
+    sweeper().sweep();
 
-    assertTrue(box.holds(instance("a")));
-    assertEquals("Stopped", box.state(instance("a")));
-    assertEquals(
-        "app: 1 commit on a branch other than agent/a that no remote has",
-        box.key(instance("a"), KEPT));
+    var why = "app holds uncommitted changes and a stash; web/site holds commits no remote has";
+    assertEquals(why, box.key(instance("a"), KEPT));
+    assertEquals("web/site is not in the workspace", box.key(instance("m"), KEPT));
     assertEquals(
         List.of(
-            "a: Workspace a of acme is kept, stopped, though spec a is done: app: 1 commit on a"
-                + " branch other than agent/a that no remote has. Push what it holds by hand (sail"
-                + " project workspace start acme a, then sail project workspace shell acme a), and"
-                + " Sail deletes it once nothing is left to lose; or drop it with sail project"
-                + " workspace delete acme a."),
+            "a: " + notice("a", "done", why),
+            "m: " + notice("m", "archived", "web/site is not in the workspace")),
         said);
-    assertTrue(
-        box.commands.stream().noneMatch(command -> command.contains("push")),
-        "a commit on another branch is never pushed");
+    assertEquals(List.of("stop"), changesOf(instance("a")));
+    assertEquals(List.of("stop"), changesOf(instance("m")));
+    assertEquals(
+        List.of("presence", "left app web/site", "presence"),
+        askedOf(instance("a")).stream().filter(step -> !step.equals("cat")).toList(),
+        "a kept workspace is read once");
+  }
+
+  /**
+   * Rules B and C: a kept workspace a person starts is never read or deleted by the sweep, and is
+   * stopped again once idle, as any other is; a terminal they open keeps it running meanwhile.
+   */
+  @Test
+  void aKeptWorkspaceAPersonStartsIsStoppedWhenIdleAndNeverReadAgain() {
+    spec("a", SpecStatus.DONE);
+    var held = box.workspace("a", "Running").repo("app", "commits").repo("web/site");
+    ended("a");
+    later(IDLE);
+    sweeper().sweep();
+    assertEquals("Stopped", box.state(instance("a")));
+
+    held.startedByHand();
+    held.terminal = Box.Terminal.OPEN;
+    sweeper().sweep();
+    assertEquals("Running", box.state(instance("a")));
+
+    held.terminal = Box.Terminal.CLOSED;
+    held.repo("app");
+    sweeper().sweep();
+    assertEquals("Stopped", box.state(instance("a")));
+    assertTrue(box.holds(instance("a")), "its person deletes it, never the sweep");
+    assertEquals(1, said.size());
+    assertEquals(
+        1, askedOf(instance("a")).stream().filter(step -> step.startsWith("left")).count());
   }
 
   /** Every command the kept notice names parses as Sail's command line, as printed. */
   @Test
   void everyCommandTheKeptNoticeNamesIsSailsAsPrinted() {
     spec("a", SpecStatus.DONE);
-    box.workspace("a", "Running").repo("app", 0, 1);
-    ended("a", "completed");
+    box.workspace("a", "Running").repo("app", "commits").repo("web/site");
+    ended("a");
+    later(IDLE);
     sweeper().sweep();
 
     var commands =
-        Pattern.compile("sail ((?:project workspace) [a-z]+ acme a)").matcher(said.get(0));
+        Pattern.compile("sail ((?:project workspace) [a-z]+ acme a)").matcher(said.getFirst());
     var parsed = new ArrayList<String>();
     while (commands.find()) {
-      var args = commands.group(1).split(" ");
-      var leaf = SailCommandLine.of(new Sail()).parseArgs(args);
+      var leaf = SailCommandLine.of(new Sail()).parseArgs(commands.group(1).split(" "));
       while (leaf.hasSubcommand()) {
         leaf = leaf.subcommand();
       }
@@ -410,152 +575,176 @@ class SpecWorkspacesTest {
         parsed);
   }
 
-  /** Unpushed commits on the runs' branch alone are pushed once, and the workspace then goes. */
+  /**
+   * Rule A's push: commits the runs' branch alone holds are pushed once in the read, and the
+   * workspace goes; a push that fails leaves them, which keeps it.
+   */
   @Test
-  void commitsOnlyOnTheRunsBranchArePushedOnceThenTheWorkspaceGoes() {
+  void theRunsBranchIsPushedOnceInTheReadAndAFailedPushKeepsTheWorkspace() {
     spec("a", SpecStatus.DONE);
-    box.workspace("a", "Stopped").repo("app", 2, 0);
-    ended("a", "completed");
+    spec("b", SpecStatus.DONE);
+    box.workspace("a", "Stopped").repo("app").repo("web/site").ahead("app", 2);
+    box.workspace("b", "Stopped").repo("app").repo("web/site").ahead("app", 1).pushFails = true;
+    ended("a");
+    ended("b");
+    later(IDLE);
 
     sweeper().sweep();
 
     assertEquals(
-        1,
-        box.commands.stream()
-            .filter(
-                c ->
-                    String.join(" ", c)
-                        .endsWith("git -C /home/dev/workspace/app push origin " + BRANCH))
-            .count());
-    assertEquals(List.of("start", "delete"), changesOf(instance("a")));
+        List.of(instance("a") + " app agent/a", instance("b") + " app agent/b"), box.pushes);
+    assertFalse(box.holds(instance("a")));
+    assertEquals("app holds commits no remote has", box.key(instance("b"), KEPT));
+    assertEquals(List.of("b: " + notice("b", "done", "app holds commits no remote has")), said);
+  }
+
+  /**
+   * Rule F and Major 1: a read that times out, fails, or says what it cannot mean keeps the
+   * workspace, stopped and said once, never left running unmarked.
+   */
+  @Test
+  void aReadThatTimesOutFailsOrSaysNonsenseKeepsTheWorkspaceStopped() {
+    var ids = List.of("t", "f", "n");
+    ids.forEach(id -> spec(id, SpecStatus.DONE));
+    box.workspace("t", "Stopped").repo("app").repo("web/site").leftTimesOut = true;
+    box.workspace("f", "Stopped").leftSays = new ShellExec.Result(128, "", "fatal: bad object\n");
+    box.workspace("n", "Stopped").leftSays = new ShellExec.Result(0, "warning: ambiguous\n", "");
+    ids.forEach(this::ended);
+    later(IDLE);
+
+    sweeper().sweep();
+    sweeper().sweep();
+
+    assertEquals(
+        "its repos could not be read: Command timed out after 180s", box.key(instance("t"), KEPT));
+    assertEquals("its repos could not be read: fatal: bad object", box.key(instance("f"), KEPT));
+    assertEquals("its repos could not be read: warning: ambiguous", box.key(instance("n"), KEPT));
+    for (var id : ids) {
+      assertEquals("Stopped", box.state(instance(id)), id);
+      assertEquals(List.of("start", "stop"), changesOf(instance(id)), id);
+    }
+    assertEquals(3, said.size());
+  }
+
+  /** Scenario 38: a start that fails keeps the workspace, said once, and is never started again. */
+  @Test
+  void aStartThatFailsKeepsTheWorkspaceSaidOnceAndItIsNeverStartedAgain() {
+    spec("a", SpecStatus.DONE);
+    box.workspace("a", "Stopped").startFails = true;
+    ended("a");
+    later(IDLE);
+
+    sweeper().sweep();
+    later(Duration.ofHours(1));
+    sweeper().sweep();
+
+    assertEquals(List.of("start"), changesOf(instance("a")));
+    assertEquals(
+        "it did not start: Failed to start container 'acme-a': Error: Failed to start device"
+            + " \"eth0\": no free address",
+        box.key(instance("a"), KEPT));
+    assertEquals(1, said.size());
+  }
+
+  /** A usage the started workspace does not answer keeps it, naming the run, before any git. */
+  @Test
+  void aUsageTheWorkspaceDoesNotAnswerKeepsItNamingTheRun() {
+    spec("a", SpecStatus.DONE);
+    box.workspace("a", "Stopped").repo("app").repo("web/site").usageAnswers = false;
+    var unread = endedUnread("a");
+    later(IDLE);
+
+    sweeper().sweep();
+
+    assertEquals("the usage of run " + unread + " could not be read", box.key(instance("a"), KEPT));
+    assertNull(runs.findById(unread).orElseThrow().usage());
+    assertTrue(askedOf(instance("a")).stream().noneMatch(step -> step.startsWith("left")));
+  }
+
+  /** A project whose definition this box cannot read keeps the done spec's workspace. */
+  @Test
+  void aProjectWhoseDefinitionCannotBeReadOrIsNotHereKeepsTheWorkspace() {
+    spec("a", SpecStatus.DONE);
+    spec("b", SpecStatus.DONE);
+    box.workspace("a", "Running");
+    box.workspace("b", "Running");
+    ended("a");
+    ended("b");
+    var unreadable =
+        sweeper(
+            specs,
+            runs,
+            db,
+            project -> {
+              throw new IllegalStateException("unreadable");
+            });
+    var absent = sweeper(specs, runs, db, project -> Optional.empty());
+    later(IDLE);
+
+    unreadable.sweep();
+    box.instances.get(instance("b")).keys.remove(KEPT);
+    box.instances.get(instance("b")).startedByHand();
+    absent.sweep();
+
+    var why = "the definition of project acme is not readable here, so neither are its repos";
+    assertEquals(why, box.key(instance("a"), KEPT));
+    assertEquals(why, box.key(instance("b"), KEPT));
+  }
+
+  /**
+   * Rule E and Major 7: the delete acts on the spec and its runs read again just before it: a spec
+   * reopened, or a run started, during the reads leaves the workspace, neither deleted nor kept.
+   */
+  @Test
+  void aSpecReopenedOrARunStartedDuringTheReadsLeavesTheWorkspaceUnkept() {
+    spec("a", SpecStatus.DONE);
+    spec("b", SpecStatus.DONE);
+    box.workspace("a", "Running").repo("app").repo("web/site");
+    box.workspace("b", "Running").repo("app").repo("web/site");
+    ended("a");
+    ended("b");
+    later(IDLE);
+    box.duringLeft.put(instance("a"), () -> status("a", SpecStatus.IN_PROGRESS));
+    box.duringLeft.put(instance("b"), () -> run("b"));
+
+    sweeper().sweep();
+
+    for (var id : List.of("a", "b")) {
+      assertTrue(box.holds(instance(id)), id);
+      assertNull(box.key(instance(id), KEPT), id);
+      assertEquals(List.of(), changesOf(instance(id)), id);
+    }
     assertEquals(List.of(), said);
   }
 
   /**
-   * A push that git took but after which the repo still holds what no remote has (a remote that
-   * tracks nothing the push sent) keeps the workspace: the count after the push is what decides.
+   * The decision reads the workspace again under its lock, never the list it began from: one
+   * stopped between the list and the lock is started for its reads, then deleted.
    */
   @Test
-  void aPushAfterWhichTheCommitsAreStillUnpushedKeepsTheWorkspace() {
+  void theDecisionReadsTheWorkspaceAgainUnderItsLock() {
     spec("a", SpecStatus.DONE);
-    box.workspace("a", "Running").repo("app", 1, 0).pushTracksNothing = true;
-    ended("a", "completed");
+    var held = box.workspace("a", "Running").repo("app").repo("web/site");
+    ended("a");
+    later(IDLE);
+    box.beforeLookup = () -> held.state = "Stopped";
 
     sweeper().sweep();
 
-    assertEquals("app: 1 commit that no remote has", box.key(instance("a"), KEPT));
-    assertEquals("Stopped", box.state(instance("a")));
-  }
-
-  /** Scenario 6: a push that fails keeps the workspace stopped, said once with git's reason. */
-  @Test
-  void aPushThatFailsKeepsTheWorkspaceAndSaysWhy() {
-    spec("a", SpecStatus.DONE);
-    box.workspace("a", "Running").repo("app", 1, 0).pushFails = true;
-    ended("a", "completed");
-
-    sweeper().sweep();
-    sweeper().sweep();
-
-    assertTrue(box.holds(instance("a")));
-    assertEquals("Stopped", box.state(instance("a")));
-    assertEquals(
-        "app: the push of agent/a failed: fatal: unable to access 'https://github.com/acme/app/':"
-            + " Could not connect",
-        box.key(instance("a"), KEPT));
-    assertEquals(1, said.size());
-    assertTrue(said.get(0).contains("the push of agent/a failed"), said.get(0));
-  }
-
-  /** Scenario 38: a start that fails keeps it, said once, and is tried again each sweep. */
-  @Test
-  void aStartThatFailsKeepsTheWorkspaceSaidOnceAndTriedAgainEachSweep() {
-    spec("a", SpecStatus.DONE);
-    var held = box.workspace("a", "Stopped").repo("app", 0, 0);
-    held.startFails = true;
-    endedUnread("a");
-
-    sweeper().sweep();
-    sweeper().sweep();
-
-    assertEquals(List.of("start", "start"), changesOf(instance("a")));
-    assertTrue(
-        box.key(instance("a"), KEPT).startsWith("it did not start: "),
-        box.key(instance("a"), KEPT));
-    assertEquals(1, said.size());
-
-    held.startFails = false;
-    sweeper().sweep();
-    assertFalse(box.holds(instance("a")));
-    assertEquals(1, said.size(), "it says nothing more as it goes");
-  }
-
-  /** A usage the started workspace still does not answer keeps it, naming the run. */
-  @Test
-  void aUsageTheStartedWorkspaceDoesNotAnswerKeepsItStopped() {
-    spec("a", SpecStatus.DONE);
-    box.workspace("a", "Stopped").repo("app", 0, 0).usageAnswers = false;
-    var unread = endedUnread("a");
-
-    sweeper().sweep();
-
-    assertEquals(List.of("start", "stop"), changesOf(instance("a")));
-    assertEquals("the usage of run " + unread + " could not be read", box.key(instance("a"), KEPT));
-    assertNull(runs.findById(unread).orElseThrow().usage());
+    assertEquals(List.of("start", "delete"), changesOf(instance("a")));
   }
 
   /**
-   * Scenario 43: a kept workspace a person started, pushed from by hand, goes on the next sweep,
-   * which says nothing more; while it is theirs and still unpushed, the sweep leaves it running.
-   */
-  @Test
-  void aKeptWorkspaceAPersonStartedIsLeftRunningUntilTheyPushThenDeletedSilently() {
-    spec("a", SpecStatus.DONE);
-    var held = box.workspace("a", "Running").repo("app", 0, 1);
-    ended("a", "completed");
-    sweeper().sweep();
-    assertEquals("Stopped", box.state(instance("a")));
-    assertEquals(1, said.size());
-
-    held.state = "Running";
-    sweeper().sweep();
-    assertEquals("Running", box.state(instance("a")), "the sweep never stops it under them");
-
-    held.repo("app", 0, 0);
-    sweeper().sweep();
-    assertFalse(box.holds(instance("a")));
-    assertEquals(1, said.size());
-  }
-
-  /** The said-once rule outlives the process: a restarted sweep finds the mark and says nothing. */
-  @Test
-  void aRestartedSweepFindsTheKeptMarkAndSaysNothingMore() {
-    spec("a", SpecStatus.DONE);
-    box.workspace("a", "Stopped").repo("app", 0, 1);
-    ended("a", "completed");
-    sweeper().sweep();
-    assertEquals(1, said.size());
-
-    sweeper().sweep();
-    sweeper().sweep();
-
-    assertEquals(1, said.size());
-    assertEquals(
-        List.of("start", "stop", "start", "stop", "start", "stop"), changesOf(instance("a")));
-  }
-
-  /**
-   * Scenario 24: a spec erased everywhere has its workspace deleted at once, its live agent ended
-   * with it, and nothing read or pushed; a project's erasure takes its specs' workspaces too.
+   * Scenario 24: a spec or project erased everywhere has its workspace deleted at once, live agent
+   * and all, and nothing read or pushed.
    */
   @Test
   void anErasedSpecsOrProjectsWorkspaceIsDeletedAtOnceAndNothingIsRead() {
     spec("a", SpecStatus.IN_PROGRESS);
     spec("o", "other", SpecStatus.REVIEW);
-    box.workspace("a", "Running").repo("app", 3, 3);
+    box.workspace("a", "Running").repo("app", "commits");
     box.workspace("other", "o", "Stopped");
     run("a");
-    endedUnread("a");
     Acting.as(
         "uday",
         () ->
@@ -570,47 +759,38 @@ class SpecWorkspacesTest {
 
     assertFalse(box.holds(instance("a")));
     assertFalse(box.holds("other-o"));
-    assertEquals(List.of("delete"), changesOf(instance("a")));
-    assertTrue(
-        box.commands.stream()
-            .noneMatch(
-                c ->
-                    c.contains("tac --")
-                        || c.contains(SpecWorkspaces.UNPUSHED)
-                        || c.contains("push")),
-        "nothing is read or pushed");
+    assertEquals(List.of(), askedOf(instance("a")));
     assertEquals(List.of(), said);
   }
 
   /**
-   * Scenario 44: a spec not on this box yet, or filed under another project, is left as it is and
-   * said once in the log, however many sweeps meet it.
+   * Ruling 3, Minor 10 and scenario 44: the workspace of a spec not on this box, or filed under
+   * another project now, stops when idle and is never deleted, said once in the log.
    */
   @Test
-  void aSpecNotHereOrFiledUnderAnotherProjectIsLeftAndLoggedOnce() {
+  void aSpecNotHereOrUnderAnotherProjectStopsWhenIdleNeverDeletedLoggedOnce() {
     spec("moved", "other", SpecStatus.DONE);
     box.workspace("absent", "Running");
     box.workspace("moved", "Running");
-    clock.advance(Duration.ofMinutes(30));
-
-    var logged =
-        stderrOf(
-            () -> {
-              sweeper().sweep();
-            });
+    later(IDLE);
     var sweeper = sweeper();
+
     var first = stderrOf(sweeper::sweep);
+    box.instances.get(instance("absent")).startedByHand();
     var again = stderrOf(sweeper::sweep);
 
-    assertEquals(List.of(), changesOf(instance("absent")));
-    assertEquals(List.of(), changesOf(instance("moved")));
-    assertTrue(
-        logged.contains("acme-absent is left as it is: spec absent is not on this box"), logged);
-    assertTrue(
-        logged.contains("acme-moved is left as it is: spec moved is filed under project other"),
-        logged);
-    assertEquals(2, first.lines().count(), first);
-    assertEquals("", again);
+    assertEquals(List.of("stop", "stop"), changesOf(instance("absent")));
+    assertEquals(List.of("stop"), changesOf(instance("moved")));
+    assertEquals(
+        "  [workspaces] acme-absent: spec absent is not one of acme's on this box, so its"
+            + " workspace is stopped when idle and never deleted\n"
+            + "  [workspaces] stopped acme-absent: idle for 10 min\n"
+            + "  [workspaces] acme-moved: spec moved is not one of acme's on this box, so its"
+            + " workspace is stopped when idle and never deleted\n"
+            + "  [workspaces] stopped acme-moved: idle for 10 min\n",
+        first);
+    assertEquals("  [workspaces] stopped acme-absent: idle for 10 min\n", again);
+    assertTrue(box.holds(instance("absent")) && box.holds(instance("moved")));
   }
 
   /** Scenario 42 and R14: a person's workspace and one never made whole are never swept. */
@@ -619,51 +799,14 @@ class SpecWorkspacesTest {
     spec("a", SpecStatus.DONE);
     box.person("try", "Running");
     box.workspace("a", "Running").ready = false;
-    clock.advance(Duration.ofHours(1));
+    later(Duration.ofHours(1));
 
     sweeper().sweep();
 
-    assertTrue(box.holds("acme-try"));
-    assertTrue(box.holds(instance("a")));
     assertEquals(
         List.of(List.of("incus", "list", "--format", "json")),
         box.commands,
         "nothing but the list is asked");
-  }
-
-  /** Scenario 40: a spec reopened before the sweep is read as it is now; nothing is deleted. */
-  @Test
-  void aSpecReopenedBeforeTheSweepKeepsItsWorkspaceAndLosesItsKeptMark() {
-    spec("a", SpecStatus.DONE);
-    box.workspace("a", "Running").repo("app", 0, 1);
-    ended("a", "completed");
-    sweeper().sweep();
-    assertEquals(
-        "app: 1 commit on a branch other than agent/a that no remote has",
-        box.key(instance("a"), KEPT));
-
-    status("a", SpecStatus.IN_PROGRESS);
-    sweeper().sweep();
-
-    assertTrue(box.holds(instance("a")));
-    assertEquals("", box.key(instance("a"), KEPT));
-    assertEquals(List.of("stop"), changesOf(instance("a")));
-  }
-
-  /**
-   * Scenario 39: after a reboot the first sweep, a new process with nothing remembered, stops a
-   * workspace Incus started again whose spec is in review and whose last run ended long ago.
-   */
-  @Test
-  void afterARebootTheFirstSweepStopsAWorkspaceIdleSinceBeforeIt() {
-    spec("a", SpecStatus.REVIEW);
-    box.workspace("a", "Running");
-    ended("a", "completed");
-    clock.advance(Duration.ofMinutes(45));
-
-    sweeper().sweep();
-
-    assertEquals(List.of("stop"), changesOf(instance("a")));
   }
 
   /** A workspace whose name lock another holds is left to the next sweep, nothing asked of it. */
@@ -671,8 +814,8 @@ class SpecWorkspacesTest {
   void aWorkspaceAnotherHoldsTheNameLockOfIsLeftToTheNextSweep() throws Exception {
     spec("a", SpecStatus.AWAITING_MERGE);
     box.workspace("a", "Running");
-    ended("a", "completed");
-    clock.advance(Duration.ofMinutes(15));
+    ended("a");
+    later(IDLE);
     var workspaces = new Workspaces(box, box, System::nanoTime, tempDir.resolve("locks"), () -> 1L);
     var taken = new CountDownLatch(1);
     var release = new CountDownLatch(1);
@@ -698,15 +841,13 @@ class SpecWorkspacesTest {
     assertEquals(List.of("stop"), changesOf(instance("a")));
   }
 
-  /**
-   * R8: the sweep reads the facts as they are now, not events: a status written straight to the
-   * store, as a sync applies one, converges on the next sweep.
-   */
+  /** R8: a status written straight to the store, as a sync applies one, is met on the next pass. */
   @Test
   void aStatusWrittenStraightToTheStoreConvergesOnTheNextSweep() {
     spec("a", SpecStatus.AWAITING_MERGE);
-    box.workspace("a", "Stopped").repo("app", 0, 0);
-    ended("a", "completed");
+    box.workspace("a", "Stopped").repo("app").repo("web/site");
+    ended("a");
+    later(IDLE);
     sweeper().sweep();
     assertTrue(box.holds(instance("a")));
 
@@ -717,53 +858,23 @@ class SpecWorkspacesTest {
   }
 
   /**
-   * Scenario 5 and 24 with real sync rounds: a status main writes reaches the node, whose next
-   * sweep deletes the done spec's workspace, and main's erasure of another spec, adopted by the
-   * node, takes that spec's workspace at once.
+   * Scenarios 5 and 24 with real sync rounds: a done status main writes reaches the node, whose
+   * next pass deletes the workspace, and main's erasure of another spec takes that one at once.
    */
   @Test
-  void aDoneThatArrivesBySyncAndAnErasureMainAuthoredEachTakeTheirWorkspaceOnTheNextSweep() {
+  void aDoneThatArrivesBySyncAndAnErasureMainAuthoredEachTakeTheirWorkspace() {
     try (var main = new SyncBox("main");
         var node = new SyncBox(NODE)) {
-      main.create(row("a", "acme", SpecStatus.AWAITING_MERGE, "agent/a"));
-      main.create(row("b", "acme", SpecStatus.IN_PROGRESS, "agent/b"));
+      main.create(row("a", "acme", SpecStatus.AWAITING_MERGE));
+      main.create(row("b", "acme", SpecStatus.IN_PROGRESS));
       SyncBox.quiesce(main, node);
       var nodeRuns = new RunStore(node.db);
-      for (var id : List.of("a", "b")) {
-        var run = DateTimeUtils.newId().toString();
-        Acting.system(
-            () -> {
-              nodeRuns.create(
-                  run,
-                  "acme",
-                  id,
-                  NODE,
-                  "build",
-                  "claude-code",
-                  "agent/" + id,
-                  "task",
-                  1,
-                  null,
-                  "/home/dev/.sail/runs/" + run + "/agent.log",
-                  "sail-agent-" + run);
-              TestRuns.complete(nodeRuns, run, "completed", null);
-              nodeRuns.recordRead(run, RunUsage.NONE);
-            });
-      }
-      box.workspace("a", "Running").repo("app", 0, 0);
+      List.of("a", "b").forEach(id -> finish(nodeRuns, run(nodeRuns, id)));
+      box.workspace("a", "Running").repo("app").repo("web/site");
       box.workspace("b", "Running");
-      var locks = tempDir.resolve("locks");
       var sweeper =
-          new SpecWorkspaces(
-              new Workspaces(box, box, System::nanoTime, locks, () -> 16_000L),
-              box,
-              locks,
-              node.specs,
-              nodeRuns,
-              new ChangeLog(node.db),
-              (specId, body) -> said.add(specId + ": " + body),
-              () -> NODE,
-              clock::instant);
+          sweeper(node.specs, nodeRuns, node.db, project -> Optional.of(definition(project)));
+      later(IDLE);
       sweeper.sweep();
       assertTrue(box.holds(instance("a")) && box.holds(instance("b")));
 
@@ -774,34 +885,12 @@ class SpecWorkspacesTest {
               new Erasure(main.db)
                   .erase(List.of(new Erasure.Target(Erasure.SPEC, "b")), ChangeLog.Entry.LOCAL));
       SyncBox.round(main, node);
-      assertEquals(SpecStatus.DONE, node.specs.findById("a").orElseThrow().status());
       sweeper.sweep();
 
       assertFalse(box.holds(instance("a")));
       assertFalse(box.holds(instance("b")));
       assertEquals(List.of(), said);
     }
-  }
-
-  private static SpecStore.SpecRow row(
-      String id, String project, SpecStatus status, String branch) {
-    return new SpecStore.SpecRow(
-        id,
-        project,
-        "Spec " + id,
-        status,
-        NODE,
-        "claude-code",
-        null,
-        null,
-        branch,
-        0,
-        "uday",
-        null,
-        null,
-        "uday",
-        List.of(),
-        List.of("app"));
   }
 
   /**
@@ -811,112 +900,40 @@ class SpecWorkspacesTest {
   @Test
   void theBoxsOwnSweepSaysAKeptWorkspaceInTheSpecsRoomAsSail() throws Exception {
     spec("a", SpecStatus.DONE);
-    box.workspace("a", "Running").repo("app", 0, 1);
-    ended("a", "completed");
+    box.workspace("a", "Running").usageAnswers = false;
+    var unread = endedUnread("a");
+    later(IDLE);
     var messages = new MessageStore(db);
     try (var operations =
-        OperationsFactory.create(db, box, null, SyncScheduler.disabled(), SessionYield.NONE)
-            .useControlPlane(
-                db,
-                tempDir,
-                new SyncOperations(
+            OperationsFactory.create(db, box, null, SyncScheduler.disabled(), SessionYield.NONE)
+                .useControlPlane(
                     db,
-                    NODE,
                     tempDir,
-                    SyncConfig::unset,
-                    target -> {
-                      throw new IOException("main unavailable");
-                    }))
-            .useMessages(messages)) {
-      operations.specWorkspaces(() -> NODE).sweep();
+                    new SyncOperations(
+                        db,
+                        NODE,
+                        tempDir,
+                        SyncConfig::unset,
+                        target -> {
+                          throw new IOException("main unavailable");
+                        }))
+                .useMessages(messages);
+        var sweeper = operations.specWorkspaces(() -> NODE)) {
+      later(IDLE);
+      sweeper.sweep();
     }
 
-    var posted = messages.list("a", null, 10);
     assertEquals(
         List.of(
             MessageStore.SAIL_AUTHOR
-                + ": Workspace a of acme is kept, stopped, though spec a is done: app: 1 commit"
-                + " on a branch other than agent/a that no remote has. Push what it holds by hand"
-                + " (sail project workspace start acme a, then sail project workspace shell acme"
-                + " a), and Sail deletes it once nothing is left to lose; or drop it with sail"
-                + " project workspace delete acme a."),
-        posted.stream().map(m -> m.author() + ": " + m.body()).toList());
+                + ": "
+                + notice("a", "done", "the usage of run " + unread + " could not be read")),
+        messages.list("a", null, 10).stream().map(m -> m.author() + ": " + m.body()).toList());
   }
 
   /**
-   * Scenario 41 and the count itself, by git: commits only on the runs' branch, commits off it in
-   * another repo, a detached commit, and a pushed branch the forge deleted after its merge, which
-   * still counts as pushed because nothing is fetched.
-   */
-  @Test
-  @EnabledOnOs(OS.LINUX)
-  void theCountByGitTellsTheRunsBranchFromTheRestAndTakesAMergedAndDeletedBranchAsPushed()
-      throws Exception {
-    var remote = tempDir.resolve("remote.git");
-    run(List.of("git", "init", "--quiet", "--bare", "-b", "main", remote.toString()));
-    var seed = tempDir.resolve("seed");
-    run(List.of("git", "init", "--quiet", "-b", "main", seed.toString()));
-    git(seed, "commit", "--quiet", "--allow-empty", "-m", "seed");
-    git(seed, "push", "--quiet", remote.toString(), "main");
-    var workspace = tempDir.resolve("workspace");
-    var app = workspace.resolve("app");
-    var site = workspace.resolve("web/site");
-    run(List.of("git", "clone", "--quiet", remote.toString(), app.toString()));
-    run(List.of("git", "clone", "--quiet", remote.toString(), site.toString()));
-    assertEquals("0 0 app\n0 0 web/site\n", unpushed(workspace, BRANCH));
-
-    git(app, "switch", "--quiet", "-c", BRANCH);
-    git(app, "commit", "--quiet", "--allow-empty", "-m", "built");
-    git(site, "switch", "--quiet", "-c", "other");
-    git(site, "commit", "--quiet", "--allow-empty", "-m", "by hand");
-    assertEquals("1 0 app\n1 1 web/site\n", unpushed(workspace, BRANCH));
-
-    git(app, "push", "--quiet", "origin", BRANCH);
-    git(remote, "branch", "--quiet", "-D", BRANCH);
-    assertEquals("0 0 app\n1 1 web/site\n", unpushed(workspace, BRANCH));
-
-    git(app, "switch", "--quiet", "--detach");
-    git(app, "commit", "--quiet", "--allow-empty", "-m", "detached");
-    assertEquals("1 1 app\n1 1 web/site\n", unpushed(workspace, BRANCH));
-    assertEquals("1 1 app\n1 1 web/site\n", unpushed(workspace, ""));
-  }
-
-  private static String unpushed(Path workspace, String branch) throws Exception {
-    return run(
-        List.of(
-            "bash", "-c", SpecWorkspaces.UNPUSHED, "sail-unpushed", workspace.toString(), branch));
-  }
-
-  private static String git(Path repo, String... args) throws Exception {
-    var command = new ArrayList<>(List.of("git", "-C", repo.toString()));
-    command.addAll(List.of(args));
-    return run(command);
-  }
-
-  /** {@code command} run here with git told who commits and nothing of this account's config. */
-  private static String run(List<String> command) throws Exception {
-    var builder = new ProcessBuilder(command).redirectErrorStream(true);
-    builder
-        .environment()
-        .putAll(
-            Map.of(
-                "GIT_AUTHOR_NAME", "it",
-                "GIT_AUTHOR_EMAIL", "it@sail.invalid",
-                "GIT_COMMITTER_NAME", "it",
-                "GIT_COMMITTER_EMAIL", "it@sail.invalid",
-                "GIT_CONFIG_GLOBAL", "/dev/null",
-                "GIT_CONFIG_NOSYSTEM", "1",
-                "LC_ALL", "C"));
-    var process = builder.start();
-    var output = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
-    assertTrue(process.waitFor(30, TimeUnit.SECONDS), String.join(" ", command));
-    assertEquals(0, process.exitValue(), String.join(" ", command) + ": " + output);
-    return output;
-  }
-
-  /**
-   * A box whose Incus does not list is left to the next sweep, said in the log; an interrupt, at
-   * the list or inside a workspace's decision, ends the pass with the interrupt kept.
+   * A box whose Incus does not list is left to the next pass, said in the log; an interrupt, at the
+   * list or inside a workspace's decision, ends the pass with the interrupt kept.
    */
   @Test
   void aListThatFailsIsLoggedAndAnInterruptEndsThePassKeepingIt() {
@@ -924,16 +941,15 @@ class SpecWorkspacesTest {
     spec("b", SpecStatus.AWAITING_MERGE);
     box.workspace("a", "Running");
     box.workspace("b", "Running");
-    ended("a", "completed");
-    ended("b", "completed");
-    clock.advance(Duration.ofMinutes(15));
+    ended("a");
+    ended("b");
+    later(IDLE);
 
     box.listFails = true;
-    var logged = stderrOf(() -> sweeper().sweep());
     assertEquals(
         "  [workspaces] could not list this box's instances: incus list failed: Error: Get"
             + " \"http://unix.socket/1.0\": dial unix: connect: no such file or directory\n",
-        logged);
+        stderrOf(() -> sweeper().sweep()));
 
     box.listFails = false;
     box.interruptOn = "incus list --format json";
@@ -947,117 +963,98 @@ class SpecWorkspacesTest {
     box.interruptOn = null;
   }
 
-  /** A workspace that cannot be decided is logged, and the pass goes on to the next. */
+  /**
+   * Rule C: a stop that fails is tried again each pass and logged once until it succeeds, and the
+   * pass goes on to the next workspace meanwhile.
+   */
   @Test
-  void aWorkspaceThatCannotBeDecidedIsLoggedAndTheRestGoOn() {
+  void aStopThatFailsIsTriedAgainEachPassLoggedOnceUntilItSucceeds() {
     spec("a", SpecStatus.AWAITING_MERGE);
     spec("b", SpecStatus.AWAITING_MERGE);
-    box.workspace("a", "Running").stopFails = true;
+    var held = box.workspace("a", "Running");
+    held.stopFails = true;
     box.workspace("b", "Running");
-    ended("a", "completed");
-    ended("b", "completed");
-    clock.advance(Duration.ofMinutes(15));
+    ended("a");
+    ended("b");
+    later(IDLE);
+    var sweeper = sweeper();
 
-    var logged = stderrOf(() -> sweeper().sweep());
+    var first = stderrOf(sweeper::sweep);
+    var second = stderrOf(sweeper::sweep);
+    held.stopFails = false;
+    sweeper.sweep();
+    held.startedByHand();
+    held.stopFails = true;
+    var after = stderrOf(sweeper::sweep);
 
-    assertEquals("Running", box.state(instance("a")));
-    assertEquals("Stopped", box.state(instance("b")));
-    assertTrue(
-        logged.contains(
-            "  [workspaces] could not tend acme-a: Failed to stop container 'acme-a': Error: The"
-                + " instance is busy\n"),
-        logged);
+    var failed =
+        "  [workspaces] could not tend acme-a: Failed to stop container 'acme-a': Error: The"
+            + " instance is busy\n";
+    assertTrue(first.startsWith(failed), first);
+    assertEquals("Stopped", box.state(instance("b")), "the pass went on");
+    assertEquals("", second);
+    assertEquals(List.of("stop", "stop", "stop", "stop"), changesOf(instance("a")));
+    assertEquals(failed, after, "a failure after a success is said again");
   }
 
   /**
-   * A kept mark that cannot be written is said nowhere, since the mark is what remembers it was
-   * said; the next sweep that writes it says it, once.
+   * Minor 4: the room is told before the mark is written, so a mark that cannot be written leaves
+   * the workspace to be decided again, saying it again, rather than never.
    */
   @Test
-  void aKeptMarkThatCannotBeWrittenSaysNothingUntilASweepWritesIt() {
+  void aMarkThatCannotBeWrittenIsDecidedAgainAndSaidAgain() {
     spec("a", SpecStatus.DONE);
-    var held = box.workspace("a", "Running").repo("app", 0, 1);
+    var held = box.workspace("a", "Running").repo("app", "commits").repo("web/site");
     held.configFails = true;
-    ended("a", "completed");
+    ended("a");
+    later(IDLE);
 
     var logged = stderrOf(() -> sweeper().sweep());
-    assertEquals(List.of(), said);
-    assertTrue(
-        logged.contains(
-            "  [workspaces] could not mark acme-a kept (app: 1 commit on a branch other than"
-                + " agent/a that no remote has): Error: config is locked"),
-        logged);
-
     held.configFails = false;
     sweeper().sweep();
     sweeper().sweep();
-    assertEquals(1, said.size());
-  }
 
-  /**
-   * Repos that cannot be counted, by git's failure or a line the count never prints, keep a done
-   * spec's workspace, saying why.
-   */
-  @Test
-  void reposThatCannotBeCountedKeepTheWorkspace() {
-    spec("a", SpecStatus.DONE);
-    spec("b", SpecStatus.DONE);
-    box.workspace("a", "Running").countSays =
-        new ShellExec.Result(128, "", "fatal: bad object HEAD\n");
-    box.workspace("b", "Running").countSays =
-        new ShellExec.Result(0, "warning: refname is ambiguous\n", "");
-    ended("a", "completed");
-    ended("b", "completed");
-
-    sweeper().sweep();
-
-    assertEquals(
-        "its repos could not be counted: fatal: bad object HEAD", box.key(instance("a"), KEPT));
-    assertEquals(
-        "its repos could not be counted: warning: refname is ambiguous",
-        box.key(instance("b"), KEPT));
-  }
-
-  /**
-   * A workspace no run of its spec here ever ended in is idle from when it was made whole, and a
-   * spec that names no branch has every unpushed commit said as such.
-   */
-  @Test
-  void aWorkspaceWithNoRunHereIsIdleFromItsReadyMarkAndNoBranchMeansNoPush() {
-    spec("a", SpecStatus.CANCELLED);
-    Acting.as("uday", () -> specs.create(row("n", "acme", SpecStatus.DONE, null)));
-    box.workspace("a", "Running");
-    box.workspace("n", "Running").repo("app", 0, 2);
-
-    sweeper().sweep();
-
-    assertEquals(List.of("stop"), changesOf(instance("a")));
-    assertEquals("app: 2 commits that no remote has", box.key(instance("n"), KEPT));
-    assertTrue(box.commands.stream().noneMatch(c -> c.contains("push")));
+    assertTrue(
+        logged.contains(
+            "  [workspaces] could not mark acme-a kept (app holds commits no remote has): Error:"
+                + " config is locked"),
+        logged);
+    assertEquals(2, said.size());
+    assertEquals("app holds commits no remote has", box.key(instance("a"), KEPT));
   }
 
   /**
    * A box that answers only for the instances it holds: Incus's list, start, stop, delete and
    * config writes, the readiness and machinery a start waits on, and inside a running workspace the
-   * usage read, the unpushed count and the push. Anything else, or any command to an instance it
-   * does not hold, is recorded as unexpected and fails, as on a box.
+   * terminal's presence, the usage read and {@link WorkspaceGit#LEFT}, answered from what each repo
+   * is said to hold. Anything else, or any command to an instance it does not hold, is recorded as
+   * unexpected and fails, as on a box.
    */
   static final class Box implements ShellExec {
+
+    enum Terminal {
+      CLOSED,
+      OPEN,
+      UNANSWERED,
+      THROWS
+    }
 
     static final class Held {
       final String project;
       final String workspace;
       volatile String state;
       final Map<String, String> keys = new LinkedHashMap<>();
-      final Map<String, int[]> repos = new TreeMap<>();
+      final Map<String, Set<String>> repos = new TreeMap<>();
+      final Map<String, Integer> ahead = new TreeMap<>();
+      volatile Terminal terminal = Terminal.CLOSED;
       volatile boolean ready = true;
       volatile boolean startFails;
+      volatile boolean stopFails;
+      volatile boolean configFails;
       volatile boolean pushFails;
       volatile boolean usageAnswers = true;
-      volatile boolean stopFails;
-      volatile boolean pushTracksNothing;
-      volatile boolean configFails;
-      volatile ShellExec.Result countSays;
+      volatile boolean leftTimesOut;
+      volatile ShellExec.Result leftSays;
 
       Held(String project, String workspace, String state) {
         this.project = project;
@@ -1066,18 +1063,30 @@ class SpecWorkspacesTest {
       }
 
       /**
-       * Repo {@code path} holds {@code onBranch} unpushed commits on the runs' branch, and {@code
-       * elsewhere} off it.
+       * Repo {@code path} is there, holding {@code kinds} as {@link WorkspaceGit#LEFT} names them.
        */
-      Held repo(String path, int onBranch, int elsewhere) {
-        repos.put(path, new int[] {onBranch, elsewhere});
+      Held repo(String path, String... kinds) {
+        repos.put(path, new TreeSet<>(List.of(kinds)));
         return this;
+      }
+
+      /** The runs' branch in repo {@code path} holds {@code commits} that no remote has. */
+      Held ahead(String path, int commits) {
+        ahead.put(path, commits);
+        return this;
+      }
+
+      void startedByHand() {
+        state = "Running";
       }
     }
 
     final Map<String, Held> instances = Collections.synchronizedMap(new TreeMap<>());
     final List<List<String>> commands = new CopyOnWriteArrayList<>();
     final List<String> unexpected = new CopyOnWriteArrayList<>();
+    final List<String> pushes = new CopyOnWriteArrayList<>();
+    final Map<String, Runnable> duringLeft = new LinkedHashMap<>();
+    volatile Runnable beforeLookup = () -> {};
     volatile boolean listFails;
     volatile String interruptOn;
 
@@ -1108,17 +1117,37 @@ class SpecWorkspacesTest {
     }
 
     String key(String instance, String key) {
-      return instances.get(instance).keys.getOrDefault(key, null);
+      return instances.get(instance).keys.get(key);
+    }
+
+    /** What a command inside a workspace is, in a word or two, for a test to read the order by. */
+    static String what(List<String> inner) {
+      if (inner.get(0).equals("bash") && inner.get(2).equals(WorkspaceGit.LEFT)) {
+        return "left " + String.join(" ", inner.subList(6, inner.size()));
+      }
+      if (inner.get(0).equals("bash") && inner.get(2).contains("/run/user/1000/bus")) {
+        return "bus";
+      }
+      if (inner.size() > 4 && inner.get(4).equals(ContainerSailSetup.STAMP_PATH)) {
+        return "machinery";
+      }
+      if (inner.get(0).equals("sh") && inner.get(2).contains("tac --")) {
+        return "usage";
+      }
+      if (ScriptedShellExecutor.reachableContainer(String.join(" ", inner)).isPresent()) {
+        return "presence";
+      }
+      return inner.get(0);
     }
 
     @Override
-    public Result exec(List<String> command) throws InterruptedException {
+    public Result exec(List<String> command) throws InterruptedException, TimeoutException {
       return exec(command, null, Duration.ZERO);
     }
 
     @Override
     public synchronized Result exec(List<String> command, Path workDir, Duration timeout)
-        throws InterruptedException {
+        throws InterruptedException, TimeoutException {
       commands.add(List.copyOf(command));
       var joined = String.join(" ", command);
       if (joined.startsWith(Objects.requireNonNullElse(interruptOn, "\0"))) {
@@ -1132,6 +1161,7 @@ class SpecWorkspacesTest {
         return ok(listed(instances.keySet().stream().toList()));
       }
       if (command.size() == 5 && joined.startsWith("incus list ^")) {
+        beforeLookup.run();
         var name = command.get(2).substring(1, command.get(2).length() - 1);
         return ok(listed(holds(name) ? List.of(name) : List.of()));
       }
@@ -1145,35 +1175,37 @@ class SpecWorkspacesTest {
         if (held == null) {
           return fail("Error: Instance not found");
         }
-        switch (command.get(1)) {
-          case "start" -> {
-            if (held.startFails) {
-              return fail("Error: Failed to start device \"eth0\": no free address");
-            }
-            held.state = "Running";
-            return ok("");
-          }
-          case "stop" -> {
-            if (held.stopFails) {
-              return fail("Error: The instance is busy");
-            }
-            held.state = "Stopped";
-            return ok("");
-          }
+        return switch (command.get(1)) {
+          case "start" -> start(held);
+          case "stop" -> stop(held);
           case "delete" -> {
             instances.values().remove(held);
-            return ok("");
+            yield ok("");
           }
-          case "config" -> {
-            return config(held, command);
-          }
-          case "exec" -> {
-            return inside(held, command.subList(command.indexOf("--") + 1, command.size()));
-          }
-          default -> {}
-        }
+          case "config" -> config(held, command);
+          case "exec" ->
+              inside(
+                  command.get(2), held, command.subList(command.indexOf("--") + 1, command.size()));
+          default -> unexpected(joined);
+        };
       }
       return unexpected(joined);
+    }
+
+    private static Result start(Held held) {
+      if (held.startFails) {
+        return fail("Error: Failed to start device \"eth0\": no free address");
+      }
+      held.startedByHand();
+      return ok("");
+    }
+
+    private static Result stop(Held held) {
+      if (held.stopFails) {
+        return fail("Error: The instance is busy");
+      }
+      held.state = "Stopped";
+      return ok("");
     }
 
     /**
@@ -1204,52 +1236,63 @@ class SpecWorkspacesTest {
       return unexpected(String.join(" ", command));
     }
 
-    private Result inside(Held held, List<String> inner) {
+    private Result inside(String name, Held held, List<String> inner) throws TimeoutException {
       if (!held.state.equals("Running")) {
         return fail("Error: Instance is not running");
       }
-      var joined = String.join(" ", inner);
-      if (inner.get(0).equals("bash") && inner.get(2).contains("/run/user/1000/bus")) {
-        return ok("");
+      var what = what(inner);
+      if (held.terminal == Terminal.THROWS && !what.startsWith("left ")) {
+        throw new TimeoutException("Command timed out after 120s");
       }
-      if (inner.size() > 4 && inner.get(4).equals(ContainerSailSetup.STAMP_PATH)) {
-        return ok("");
+      if (what.startsWith("left ")) {
+        return left(name, held, inner);
       }
-      if (inner.get(0).equals("sh") && inner.get(2).contains("tac --")) {
-        return held.usageAnswers ? ok("") : fail("Error: websocket: close 1006");
+      return switch (what) {
+        case "bus", "machinery" -> ok("");
+        case "usage" -> held.usageAnswers ? ok("") : fail("Error: websocket: close 1006");
+        case "presence" ->
+            held.terminal == Terminal.UNANSWERED
+                ? fail("Error: websocket: close 1006")
+                : ok(held.terminal == Terminal.OPEN ? "alive" : "gone");
+        case "cat" ->
+            inner.get(1).equals(AgentUnit.TERMINAL.pidPath()) && held.terminal == Terminal.OPEN
+                ? ok("4242")
+                : fail("cat: " + inner.get(1) + ": No such file or directory");
+        case "kill" -> held.terminal == Terminal.OPEN ? ok("") : fail("no such process");
+        default -> unexpected(String.join(" ", inner));
+      };
+    }
+
+    private Result left(String name, Held held, List<String> inner) throws TimeoutException {
+      Optional.ofNullable(duringLeft.get(name)).ifPresent(Runnable::run);
+      if (held.leftTimesOut) {
+        throw new TimeoutException("Command timed out after 180s");
       }
-      if (inner.get(0).equals("bash") && inner.get(2).equals(SpecWorkspaces.UNPUSHED)) {
-        if (held.countSays != null) {
-          return held.countSays;
+      if (held.leftSays != null) {
+        return held.leftSays;
+      }
+      var branch = inner.get(5);
+      var lines = new StringBuilder();
+      for (var path : inner.subList(6, inner.size())) {
+        var kinds = held.repos.get(path);
+        if (kinds == null) {
+          lines.append("missing ").append(path).append('\n');
+          continue;
         }
-        var branch = inner.get(5);
-        var lines = new StringBuilder();
-        held.repos.forEach(
-            (path, counts) -> {
-              var total = counts[0] + counts[1];
-              var elsewhere = branch.isEmpty() ? total : counts[1];
-              lines
-                  .append(total)
-                  .append(' ')
-                  .append(elsewhere)
-                  .append(' ')
-                  .append(path)
-                  .append('\n');
-            });
-        return ok(lines.toString());
-      }
-      if (inner.size() == 6 && inner.get(0).equals("git") && inner.get(3).equals("push")) {
-        var path = inner.get(2).substring("/home/dev/workspace/".length());
-        if (held.pushFails) {
-          return fail(
-              "fatal: unable to access 'https://github.com/acme/app/': Could not connect\n");
+        if (held.ahead.getOrDefault(path, 0) > 0) {
+          pushes.add(name + " " + path + " " + branch);
+          if (!held.pushFails) {
+            held.ahead.put(path, 0);
+          }
         }
-        if (!held.pushTracksNothing) {
-          held.repos.get(path)[0] = 0;
+        for (var kind : List.of("changes", "stash", "commits")) {
+          var aheadStill = kind.equals("commits") && held.ahead.getOrDefault(path, 0) > 0;
+          if (kinds.contains(kind) || aheadStill) {
+            lines.append(kind).append(' ').append(path).append('\n');
+          }
         }
-        return ok("");
       }
-      return unexpected(joined);
+      return ok(lines.toString());
     }
 
     private Result unexpected(String joined) {
@@ -1281,8 +1324,11 @@ class SpecWorkspacesTest {
                                 + "\"")
                     .toList());
         entries.add(
-            "{\"name\": \"%s\", \"status\": \"%s\", \"type\": \"container\", \"state\": {}, \"config\": {%s}}"
-                .formatted(name, held.state, keys));
+            "{\"name\": \"%s\", \"status\": \"%s\", \"type\": \"container\", \"state\": {},"
+                    .formatted(name, held.state)
+                + " \"config\": {"
+                + keys
+                + "}}");
       }
       return "[" + String.join(", ", entries) + "]";
     }

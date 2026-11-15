@@ -5,13 +5,17 @@
 
 package ai.singlr.sail.api;
 
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.config.TestDefinitions;
 import ai.singlr.sail.engine.ConnectEnvironment;
 import ai.singlr.sail.engine.LiveMemberPrompt;
 import ai.singlr.sail.engine.LiveStream;
+import ai.singlr.sail.engine.RunPlace;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.WatcherSpawner;
+import ai.singlr.sail.engine.Workspaces;
 import ai.singlr.sail.harness.RunUsage;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.Actor;
@@ -99,6 +103,11 @@ final class LiveRoom implements AutoCloseable {
   RoomWakeReactor reactor;
 
   private final ProjectReader reader;
+
+  /** The box's Incus, which outlives a restart of sail as the container does. */
+  private final ShellExec incus;
+
+  private final Workspaces workspaces;
   private final List<LiveMembers> abandoned = new CopyOnWriteArrayList<>();
   private final Settling settling = new Settling();
   private final Semaphore flushes = new Semaphore(0);
@@ -117,6 +126,8 @@ final class LiveRoom implements AutoCloseable {
     var projects = new ProjectStore(db);
     reader = ProjectReader.ofCatalog(projects);
     Acting.system(() -> projects.upsert(TestDefinitions.yaml(yaml)));
+    incus = TestWorkspaces.made(TestWorkspaces.incus(reader, PROJECT), container::made);
+    workspaces = TestWorkspaces.over(incus);
     new FdeStore(db).add(HANDLE, null, null, "admin");
     TestLogins.store(db, HANDLE);
     specs = new SpecStore(db);
@@ -179,7 +190,7 @@ final class LiveRoom implements AutoCloseable {
             new OperationHooks(
                 events::publish,
                 new WatcherSpawner(shell, null),
-                TestWorkspaces.ready(reader, container::made, PROJECT),
+                workspaces,
                 this::launch,
                 DispatchOperations.Listener.NONE,
                 StopOperations.Listener.NONE))
@@ -275,6 +286,14 @@ final class LiveRoom implements AutoCloseable {
     bus.close();
     abandoned.add(live);
     start();
+  }
+
+  /** Spec {@code spec}'s workspace is deleted, as the sweep or {@code workspace delete} does. */
+  void workspaceDeleted(String spec) throws Exception {
+    assertTrue(
+        incus
+            .exec(List.of("incus", "delete", RunPlace.of(PROJECT, spec).instance(), "--force"))
+            .ok());
   }
 
   /** Lets one deferred text flush through, as the window it waits out elapsing would. */

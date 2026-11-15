@@ -425,7 +425,6 @@ class LiveMemberLanesTest {
         WatcherCoverage.of(new WatcherSpawner(room.shell, null)),
         () -> HANDLE,
         () -> Instant.now().plus(Duration.ofMinutes(3)),
-        new FdeStore(room.db),
-        () -> {});
+        new FdeStore(room.db));
   }
 }

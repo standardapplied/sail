@@ -350,6 +350,29 @@ class LiveMemberTest {
     assertEquals("running", room.runs.findById(resumed.runId).orElseThrow().status());
   }
 
+  /**
+   * Rule G: a spec's workspace deleted after its member ended, by the sweep or by {@code workspace
+   * delete} alike, took the member's session with it, so the next message starts a new conversation
+   * in the workspace made for it rather than resume one that is not there.
+   */
+  @Test
+  void aMemberWhoseWorkspaceWasDeletedStartsANewConversationOnTheNextMessage() throws Exception {
+    var process = room.prompted(SPEC, "full", "first");
+    room.says(process, Lines.init("sess-1"), Lines.delta("One"), Lines.result("One"));
+    process.onClose(() -> process.exits(0));
+    room.later(Duration.ofMinutes(20));
+    room.live.sweep();
+    room.awaitStopped(process);
+    room.workspaceDeleted(SPEC);
+
+    room.says(SPEC, "second");
+
+    assertEquals(2, room.processes.starts.size());
+    assertEquals(
+        LiveRoom.invocation("--dangerously-skip-permissions"),
+        room.processes.starts.getLast().command());
+  }
+
   @Test
   void theGraceEachEndWaitsWithIsPinned() {
     assertEquals(

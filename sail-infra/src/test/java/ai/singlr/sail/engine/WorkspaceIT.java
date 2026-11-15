@@ -57,6 +57,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Predicate;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -412,9 +413,14 @@ class WorkspaceIT extends AbstractIncusIT {
   void aDoneSpecsWorkspaceIsPushedThenDeletedAndItsDatasetGoes() throws Exception {
     try (var db = Sqlite.open(Files.createTempDirectory("sail-it-idle").resolve("sail.db"))) {
       var said = new ArrayList<String>();
-      var instance = doneSpecsWorkspace(db, GONE, "git switch -q -c agent/gone", said);
+      var clock = new AtomicReference<>(Instant.now());
+      var sweeper = sweeper(db, said, clock);
+      var instance =
+          doneSpecsWorkspace(
+              db, GONE, "git switch -q -c agent/gone && git commit -q --allow-empty -m work");
+      clock.set(clock.get().plus(SpecWorkspaces.IDLE));
 
-      sweeper(db, said).sweep();
+      sweeper.sweep();
 
       assertEquals(Optional.empty(), new BoxInstances(shell).named(instance));
       assertFalse(
@@ -436,36 +442,61 @@ class WorkspaceIT extends AbstractIncusIT {
   }
 
   /**
-   * Scenario 6 on a real ZFS pool: a done spec's workspace holding a commit on another branch is
-   * kept, stopped, naming the repo, its dataset kept, and said once.
+   * Scenario 6 and rule A on a real ZFS pool: a done spec's workspace holding a commit on a branch
+   * that is not checked out, a stash and an untracked file is kept, stopped, its dataset kept, and
+   * said once naming all three; a person who starts it has it stopped again once idle, never
+   * deleted by the sweep.
    */
   @Test
-  void aDoneSpecsWorkspaceWithACommitOnAnotherBranchIsKeptStoppedWithItsDataset() throws Exception {
+  void aDoneSpecsWorkspaceHoldingWhatNoRemoteHasIsKeptStoppedWithItsDataset() throws Exception {
     try (var db = Sqlite.open(Files.createTempDirectory("sail-it-idle").resolve("sail.db"))) {
       var said = new ArrayList<String>();
-      var instance = doneSpecsWorkspace(db, KEPT, "git switch -q -c by-hand", said);
+      var clock = new AtomicReference<>(Instant.now());
+      var sweeper = sweeper(db, said, clock);
+      var instance =
+          doneSpecsWorkspace(
+              db,
+              KEPT,
+              "git switch -q -c by-hand && git commit -q --allow-empty -m work"
+                  + " && git checkout -q --detach HEAD^ && echo x > f && git add f"
+                  + " && git stash -q && echo y > untracked");
+      clock.set(clock.get().plus(SpecWorkspaces.IDLE));
 
-      sweeper(db, said).sweep();
-      sweeper(db, said).sweep();
+      sweeper.sweep();
+      sweeper.sweep();
 
       var kept = new BoxInstances(shell).named(instance).orElseThrow();
+      var why = "app holds uncommitted changes and a stash and commits no remote has";
       assertEquals(new ContainerState.Stopped(), kept.state());
-      assertEquals(
-          Optional.of("app: 1 commit on a branch other than agent/kept that no remote has"),
-          kept.key(BoxInstances.KEPT_KEY));
+      assertEquals(Optional.of(why), kept.key(BoxInstances.KEPT_KEY));
       assertEquals(
           POOL + "/containers/" + instance,
           zfs("list", "-H", "-o", "name", POOL + "/containers/" + instance));
+      assertEquals(
+          List.of(
+              "Workspace kept of sail-it-ws is kept, stopped, though spec kept is done: "
+                  + why
+                  + ". Sail will not delete it. Take what it holds by hand (sail project workspace"
+                  + " start sail-it-ws kept, then sail project workspace shell sail-it-ws kept),"
+                  + " then drop it with sail project workspace delete sail-it-ws kept."),
+          said);
+
+      workspaces.start(PROJECT, KEPT);
+      sweeper.sweep();
+      assertEquals(
+          new ContainerState.Stopped(),
+          new BoxInstances(shell).named(instance).orElseThrow().state(),
+          "a kept workspace a person started stops again once idle");
       assertEquals(1, said.size(), String.join("\n", said));
     }
   }
 
   /**
    * Spec {@code specId}, done, with one ended run on this box whose usage is read, and its
-   * workspace made as a dispatch makes it, holding one commit made after {@code onto} in its repo.
+   * workspace made as a dispatch makes it, after which {@code work} ran in its repo as the dev
+   * user.
    */
-  private String doneSpecsWorkspace(Sqlite db, String specId, String onto, List<String> said)
-      throws Exception {
+  private String doneSpecsWorkspace(Sqlite db, String specId, String work) throws Exception {
     new SchemaManager(db).migrate();
     HeldProjects.hold(db, PROJECT);
     var specs = new SpecStore(db);
@@ -499,17 +530,13 @@ class WorkspaceIT extends AbstractIncusIT {
         shell.exec(
             ContainerExec.asDevUser(
                 entered.instance(),
-                List.of(
-                    "bash",
-                    "-c",
-                    "cd /home/dev/workspace/app && "
-                        + onto
-                        + " && git commit -q --allow-empty -m work")));
+                List.of("bash", "-c", "cd /home/dev/workspace/app && " + work)));
     assertTrue(committed.ok(), committed.stderr());
     return entered.instance();
   }
 
-  private SpecWorkspaces sweeper(Sqlite db, List<String> said) {
+  /** The box's sweep over {@code db}, on {@code clock}, which a test moves past the idle period. */
+  private SpecWorkspaces sweeper(Sqlite db, List<String> said, AtomicReference<Instant> clock) {
     return new SpecWorkspaces(
         workspaces,
         shell,
@@ -517,9 +544,10 @@ class WorkspaceIT extends AbstractIncusIT {
         new SpecStore(db),
         new RunStore(db),
         new ChangeLog(db),
+        project -> Optional.of(definition()),
         (specId, body) -> said.add(body),
         () -> "eng",
-        Instant::now);
+        clock::get);
   }
 
   private static SpecStore.SpecRow spec(String id, SpecStatus status) {

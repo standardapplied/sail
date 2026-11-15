@@ -263,8 +263,7 @@ final class ReviewLoop implements AutoCloseable {
         watchers(),
         () -> HANDLE,
         clock,
-        new FdeStore(db),
-        () -> {});
+        new FdeStore(db));
   }
 
   private WatcherCoverage watchers() {

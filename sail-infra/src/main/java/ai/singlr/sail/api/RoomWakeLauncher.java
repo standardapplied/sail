@@ -127,8 +127,8 @@ public final class RoomWakeLauncher {
             : messages.steering(spec.roomIdOrIdentity(), 20);
     var resumeSessionId =
         engagement != null
-            ? engagedSessionId(specId, agentType, localHandle)
-            : resumableSessionId(specId, agentType, localHandle);
+            ? engagedSessionId(project, specId, agentType, localHandle)
+            : resumableSessionId(project, specId, agentType, localHandle);
     var built =
         RoomWakePrompt.build(
             spec, body.isBlank() ? spec.title() : body, room, resumeSessionId != null, engagement);
@@ -319,8 +319,10 @@ public final class RoomWakeLauncher {
    * can resume. A build session never qualifies — a working lane's conversation must not reopen
    * under a chat turn's contract, and the engaged agent's memory is its chat turns.
    */
-  private String engagedSessionId(String specId, String agentType, String localHandle) {
+  private String engagedSessionId(
+      String project, String specId, String agentType, String localHandle) {
     return runStore.listForSpec(specId).stream()
+        .filter(places.holdsSession(project, specId))
         .filter(RunStore.RunRow::chatRole)
         .filter(run -> run.ownedBy(localHandle))
         .filter(run -> Strings.isNotBlank(run.sessionId()))
@@ -331,8 +333,10 @@ public final class RoomWakeLauncher {
         .orElse(null);
   }
 
-  private String resumableSessionId(String specId, String agentType, String localHandle) {
+  private String resumableSessionId(
+      String project, String specId, String agentType, String localHandle) {
     return runStore.listForSpec(specId).stream()
+        .filter(places.holdsSession(project, specId))
         .filter(run -> run.ownedBy(localHandle))
         .filter(run -> Strings.isNotBlank(run.sessionId()))
         .filter(run -> agentType.equals(run.agent()))

@@ -1460,56 +1460,71 @@ Each row with the tests that prove it:
   `WorkspacesTest.aWholeWorkspaceWhoseMarkWasTakenOffByHandIsNeitherReplacedNorUsedButNamesItsDelete`,
   `WorkspacesTest.twoCreatesOfOneNameMakeOneWorkspaceAndTheOtherIsRefusedLeavingItWhole`.*
 - **W13. A spec's workspace stops when no run needs it and goes when its spec is done.** One
-  box-local sweep, `SpecWorkspaces.sweep`, ends every `MissedStopReconciler` pass, after the usage
-  read and the launch-file tidy. It walks the whole workspaces carrying `user.sail.spec` that
-  `BoxInstances` lists. It decides each under the workspace's own name lock, the one a run's entry
-  takes: the lock is tried, never waited on, and a held one is left to the next pass. The decision
-  reads the spec's row and this box's runs of it, looked up again inside the lock:
+  box-local sweep, `SpecWorkspaces`, runs on its own pass each minute (a pass still running when
+  the next is due skips it, said once), so it never holds up the missed-stop pass. It walks the
+  whole workspaces carrying `user.sail.spec` that `BoxInstances` lists and decides each under the
+  workspace's own name lock, the one a run's entry takes: tried, never waited on, a held one left
+  to the next pass, the instance looked up again inside it. One workspace's failure is logged once
+  until a pass decides it, and the pass goes on to the next.
+
+  A workspace is **idle** when no run of its spec is live on this box (a room's live member is
+  one), no terminal is open in it (`AgentUnit.TERMINAL`; one that does not answer counts as
+  open), and 10 minutes have passed since the later of its spec's last run here ending and this
+  sail-api process starting. The process start holds a restart's first passes off, so the loop
+  that replays a missed stop has the workspace first.
 
   | The spec is | The workspace is |
   |---|---|
-  | any status, with a run of it live on this box (`running` or `stopping`) | left as it is |
-  | `draft`, `pending`, `in_progress`, `review`, `awaiting_merge` or `cancelled`, 10 minutes after its newest run here ended (the ready mark when it has none), every run's usage read | stopped; a stopped one is left stopped |
-  | `done` or `archived` | started when stopped, since neither read runs in a stopped instance; deleted once the reads below pass, otherwise kept |
   | erased: the change log holds the erasure of the spec or of its project | deleted at once, ending any agent still in it; nothing is read or pushed |
-  | not on this box, or filed under another project | left as it is, said once in the log |
+  | `done` or `archived`, not kept, idle | decided once, below |
+  | anything else, or kept, or not one of the project's on this box, idle | stopped; never deleted by the sweep |
+  | not idle | left as it is |
 
-  - **The reads before a delete.** First, every run of the spec this box executed has its usage
-    recorded: one still unread is read by `RunUsageReader` and recorded with
-    `RunStore.recordRead`. Then every repository under `~/workspace` is counted with `git rev-list
-    --count HEAD --branches --not --remotes` (`SpecWorkspaces.UNPUSHED`). No fetch is made, so a
-    branch the forge deleted after its merge still counts as pushed. When the only commits no
-    remote has are on the runs' branch, that branch is pushed once in each repository holding
-    some (`git push origin <branch>`) and the repositories are counted again. A commit anywhere
-    else, a failed push, an unread usage, a count that fails or a start that fails keeps the
-    workspace.
-  - **Kept, said once.** A kept workspace carries `user.sail.kept=<repo: reason>`. The sweep that
-    first writes the key posts once in the spec's room as Sail, through the door every lane tells
-    a room through, naming `sail project workspace start`, `shell` and `delete`. The key is what
-    remembers that it was said, across restarts. Each later pass starts the workspace and checks
-    again. It deletes the workspace once the reads pass and says nothing more; otherwise it stops
-    the workspace again, unless it was already running when the pass came: then a person started
-    it to push by hand, and it is left running for them. A spec moved off `done` or `archived`
-    has its workspace's key cleared.
+  - **The decision.** A stopped workspace is started, since nothing runs in a stopped instance.
+    Each run's unread usage is read (`RunUsageReader`) and recorded. Then `WorkspaceGit.LEFT` runs
+    once in the workspace, within 3 minutes, over the repos the project's definition configures,
+    never found by search. In each repo it pushes the runs' branch once, within a minute, when the
+    branch holds commits no remote has. It then reads `git status --porcelain
+    --untracked-files=all`, `git stash list` and `git log HEAD --branches --tags --not
+    --remotes`. Nothing is fetched, so a branch the forge deleted after its merge counts as pushed
+    and is not pushed again. All three empty in every configured repo, and the spec still done
+    with nothing live when read again just before the delete: the workspace is deleted. A spec
+    reopened, or a run started, during the reads leaves it as it is, unkept, for a later pass.
+    Anything else keeps it: a repo that holds something, a configured repo that is missing, a
+    usage the workspace does not answer, a definition this box cannot read, a start that fails,
+    or a read that fails, times out or says what it cannot mean.
+  - **Kept is final for the sweep.** A kept workspace is stopped and carries
+    `user.sail.kept=<what each repo holds>`. The spec's room is told once, as Sail, through the
+    door every lane tells a room through, before the mark is written. The message names each repo
+    and what it holds (uncommitted changes, a stash, commits no remote has) and the commands
+    `sail project workspace start`, `shell` and `delete`. The sweep never starts, reads or deletes
+    a kept workspace again; it stops it when idle, as any other. Its person deletes it.
+  - **A deleted workspace takes its sessions.** The next run of the spec's conversation, a room's
+    member or wake, resumes only a session started since the spec's workspace was made
+    (`user.sail.created_ms`, `RunPlaces.holdsSession`), and none when the spec has no workspace,
+    so one deleted by the sweep, by `workspace delete`, by `project destroy` or by hand starts a
+    new conversation rather than resume one that is not there.
   - **R4. Nothing a run produced is lost by deleting its workspace.** Its usage is recorded, its
-    branch has nothing the remote lacks and its row survives; a workspace that fails either check
-    is kept, and that is said once.
+    configured repos hold nothing no remote has, and its row survives; a workspace that fails any
+    of it is kept, and that is said once.
   - **R8. The lifecycle is reconciled from facts, not events.** The sweep takes no event bus. A
     runner that restarts, a status that arrives by sync, or an instance stopped by hand converges
-    in the next sweep.
-  - **R13. A workspace with a live run is never stopped or deleted by the sweep,** except one
-    whose spec or project was erased. Its stop and delete also go through the workspace doors'
-    own live-run refusal.
+    in a later pass.
+  - **R13. A workspace with a live run, member or terminal is never stopped or deleted by the
+    sweep,** except one whose spec or project was erased.
   - **R14. The sweep never touches a person's workspace** (one without `user.sail.spec`), nor one
     without a ready mark (W12).
 
-  *`SpecWorkspacesTest` (every row, the reads in their order, the said-once rule across three
-  sweeps and across a restart, a status written straight to the store and one arriving by a
-  `SyncBox` round, an erasure adopted from main, the name lock, the kept notice's commands parsed
-  as printed, and the count run by git against real repositories),
-  `MissedStopReconcilerTest.eachPassSweepsTheSpecWorkspacesAfterTheUsageIsRead`,
-  `WorkspaceIT.aDoneSpecsWorkspaceIsPushedThenDeletedAndItsDatasetGoes`,
-  `WorkspaceIT.aDoneSpecsWorkspaceWithACommitOnAnotherBranchIsKeptStoppedWithItsDataset`.*
+  *`SpecWorkspacesTest` (every row; the reads in their order; kept is final; the restart race in
+  the reviewer's order; a terminal open; the latest end of any run; a spec reopened and a run
+  started during the reads; a timeout, a failure and nonsense from the read; a status written
+  straight to the store and one arriving by a `SyncBox` round; an erasure adopted from main; the
+  name lock; the notice's commands parsed as printed), `WorkspaceGitTest` (the read against real
+  repositories: a nested path, a branch not checked out, a stash, an untracked file, a tag-only
+  and a detached commit, a missing repo, the push, a merged and deleted branch, an unreachable
+  remote), `PeriodicPassTest`, `RoomWakeLaunchTest` and `LiveMemberTest` (a session a deleted
+  workspace took is not resumed), `WorkspaceIT.aDoneSpecsWorkspaceIsPushedThenDeletedAndItsDatasetGoes`,
+  `WorkspaceIT.aDoneSpecsWorkspaceHoldingWhatNoRemoteHasIsKeptStoppedWithItsDataset`.*
 
 **Known limits.**
 - **The template is its owner's.** A clone carries the box owner's GitHub token

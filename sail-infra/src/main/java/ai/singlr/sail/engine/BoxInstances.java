@@ -48,7 +48,8 @@ public final class BoxInstances {
 
   /**
    * Why a spec's workspace is kept though its spec is done: what deleting it would lose. Written by
-   * the sweep that first keeps it ({@code SpecWorkspaces}), which says it in the spec's room then.
+   * the sweep that keeps it ({@code SpecWorkspaces}) once it has said so in the spec's room; the
+   * sweep never starts, reads or deletes a workspace carrying it again.
    */
   public static final String KEPT_KEY = "user.sail.kept";
 

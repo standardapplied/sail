@@ -80,10 +80,6 @@ import java.util.stream.Stream;
  * process, or its instance is stopped or gone, which no review judges. Every replayed stop carries
  * {@code source=reconcile} so the event log shows it was reconstructed, not observed.
  *
- * <p>Each pass ends with the sweep of this box's spec workspaces ({@link SpecWorkspaces#sweep}),
- * after the usage read and the launch-file tidy, so a workspace is stopped or deleted only once
- * what this pass could read of its runs is recorded.
- *
  * <p>Best-effort by design: a failing spec is logged and skipped, a failing pass is logged and
  * retried on the next tick, and passes never overlap. Run after the bus subscribers are wired.
  */
@@ -167,7 +163,6 @@ public final class MissedStopReconciler implements AutoCloseable {
   private final Supplier<String> localHandle;
   private final Supplier<Instant> clock;
   private final FdeStore fdes;
-  private final Runnable workspaces;
   private final PeriodicPass pass;
   private volatile Instant tidiedSince = Instant.EPOCH;
   private final Set<String> untidied = ConcurrentHashMap.newKeySet();
@@ -183,8 +178,7 @@ public final class MissedStopReconciler implements AutoCloseable {
       WatcherCoverage coverage,
       Supplier<String> localHandle,
       Supplier<Instant> clock,
-      FdeStore fdes,
-      Runnable workspaces) {
+      FdeStore fdes) {
     this.specStore = specStore;
     this.sessionStore = sessionStore;
     this.eventStore = eventStore;
@@ -194,7 +188,6 @@ public final class MissedStopReconciler implements AutoCloseable {
     this.localHandle = localHandle;
     this.clock = clock;
     this.fdes = Objects.requireNonNull(fdes, "fdes");
-    this.workspaces = Objects.requireNonNull(workspaces, "workspaces");
     this.strandedReviews =
         new StrandedReviewRescue(
             specStore,
@@ -325,7 +318,6 @@ public final class MissedStopReconciler implements AutoCloseable {
       replayed += finalizeInterruptedStops();
       readUnreadUsage();
       removeLeftovers();
-      workspaces.run();
     } catch (Exception e) {
       System.err.println("  [reconcile] missed-stop sweep aborted: " + e.getMessage());
     }

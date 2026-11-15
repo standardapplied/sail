@@ -750,6 +750,7 @@ public final class SailOperations implements HostOperations {
         specStore,
         runStore,
         new ChangeLog(controlPlane),
+        ProjectReader.ofCatalog(projectStore),
         dispatchOps.room(),
         localHandle,
         DateTimeUtils::now);
