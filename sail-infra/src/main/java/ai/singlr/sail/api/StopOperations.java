@@ -9,6 +9,7 @@ import ai.singlr.sail.access.Access;
 import ai.singlr.sail.access.Action;
 import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.common.Strings;
+import ai.singlr.sail.config.RunStatus;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.engine.AgentPresence;
 import ai.singlr.sail.engine.AgentSession;
@@ -162,7 +163,7 @@ public final class StopOperations {
   public interface Listener {
     Listener NONE = new Listener() {};
 
-    default void halting(String project, String unit, Integer pid) {}
+    default void halting(String instance, String unit, Integer pid) {}
   }
 
   private final ShellExec shell;
@@ -239,9 +240,38 @@ public final class StopOperations {
     var run = live.isEmpty() ? null : live.getFirst();
     if (run != null) {
       authorize(run);
+    } else {
+      requireNotLiveElsewhere(project, specId, localHandle);
     }
     projects.requireExists(project);
     return run == null ? new NotRunning(null, null, false, false) : stopResolved(run, dryRun);
+  }
+
+  /**
+   * Refuses a stop of {@code project}'s run, spec {@code specId}'s when it names one, that this box
+   * does not run while another box does: said, with where it runs, rather than that nothing runs.
+   */
+  private void requireNotLiveElsewhere(String project, String specId, String localHandle) {
+    runStore.listForProject(project).stream()
+        .filter(other -> !RunStatus.isTerminal(other.status()))
+        .filter(other -> Strings.isBlank(specId) || specId.equals(other.specId()))
+        .filter(other -> !other.ownedBy(localHandle))
+        .findFirst()
+        .ifPresent(
+            elsewhere -> {
+              var node = Strings.isBlank(elsewhere.node()) ? "an unknown node" : elsewhere.node();
+              throw new ApiException(
+                  ErrorCode.RUN_ON_OTHER_NODE,
+                  "Run "
+                      + elsewhere.id()
+                      + (Strings.isBlank(elsewhere.specId())
+                          ? ""
+                          : " of spec " + elsewhere.specId())
+                      + " runs on "
+                      + node
+                      + ", not this box; only its executing box can stop it.",
+                  "Stop it from " + node + "'s box.");
+            });
   }
 
   /** The refusal of a stop that names no spec while {@code live}, several runs, run at once. */
@@ -319,7 +349,7 @@ public final class StopOperations {
       return new NotRunning(run.id(), specIdOf(run), recordIntent(run, spec), true);
     }
     requirePidOwnership(run, agent.pid());
-    listener.halting(run.project(), unit.unitName(), agent.pid());
+    listener.halting(run.place().instance(), unit.unitName(), agent.pid());
     if (dryRun) {
       return new Stopped(run.id(), specIdOf(run), agent.pid(), previewCancel(run, spec));
     }
@@ -371,7 +401,7 @@ public final class StopOperations {
       return new NotRunning(run.id(), specIdOf(run), false, true);
     }
     requirePidOwnership(run, agent.pid());
-    listener.halting(run.project(), unit.unitName(), agent.pid());
+    listener.halting(run.place().instance(), unit.unitName(), agent.pid());
     if (dryRun) {
       return new Stopped(run.id(), specIdOf(run), agent.pid(), false);
     }

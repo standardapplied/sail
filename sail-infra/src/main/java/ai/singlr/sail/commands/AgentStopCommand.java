@@ -19,6 +19,7 @@ import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.Banner;
 import ai.singlr.sail.engine.NameValidator;
 import ai.singlr.sail.engine.OperatorCommand;
+import ai.singlr.sail.engine.RunPlace;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.engine.WatcherSpawner;
@@ -152,7 +153,7 @@ public final class AgentStopCommand implements Runnable {
   private StopOperations.Listener listener() {
     return new StopOperations.Listener() {
       @Override
-      public void halting(String project, String unit, Integer pid) {
+      public void halting(String instance, String unit, Integer pid) {
         if (json) {
           return;
         }
@@ -166,7 +167,7 @@ public final class AgentStopCommand implements Runnable {
                     + " (unit "
                     + unit
                     + ") in "
-                    + project));
+                    + instance));
       }
     };
   }
@@ -185,7 +186,7 @@ public final class AgentStopCommand implements Runnable {
                     + " (PID "
                     + stopped.pid()
                     + ") in "
-                    + name));
+                    + RunPlace.of(name, stopped.specId()).instance()));
         printCancelled(stopped.specId(), stopped.specCancelled());
       }
       case StopOperations.NotRunning notRunning -> {

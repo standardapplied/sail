@@ -1157,6 +1157,48 @@ class StopOperationsTest {
     assertEquals("running", runStore.findById(R1).orElseThrow().status());
   }
 
+  /** Low 9: a stop of a spec's run that another box runs says where it runs, and stops nothing. */
+  @Test
+  void aStopOfASpecsRunAnotherBoxRunsSaysWhereItRuns() throws Exception {
+    var ops = stopOps(liveAgentShell(), failingHalter(), StopOperations.Listener.NONE);
+    seedSpec("auth", SpecStatus.IN_PROGRESS, LOCAL_HANDLE);
+    Acting.system(
+        () ->
+            runStore.create(
+                R2,
+                "acme",
+                "auth",
+                "eng",
+                "build",
+                "codex",
+                "feat/auth",
+                "do it",
+                124,
+                null,
+                "/home/dev/.sail/runs/" + R2 + "/agent.log",
+                "sail-agent-" + R2));
+
+    var refused =
+        assertThrows(
+            ApiException.class,
+            () ->
+                Actor.call(
+                    ADMIN,
+                    () ->
+                        ops.stop(
+                            new StopOperations.ProjectTarget("acme", "auth"),
+                            LOCAL_HANDLE,
+                            false)));
+
+    assertEquals(ErrorCode.RUN_ON_OTHER_NODE, refused.failure().errorCode());
+    assertEquals(
+        "Run "
+            + R2
+            + " of spec auth runs on eng, not this box; only its executing box can stop it.",
+        refused.getMessage());
+    assertEquals("running", runStore.findById(R2).orElseThrow().status());
+  }
+
   @Test
   void aDryRunResolvesAndProbesButWritesAndSignalsNothing() throws Exception {
     var halted = new ArrayList<String>();
@@ -1177,7 +1219,7 @@ class StopOperationsTest {
 
     var stopped = assertInstanceOf(StopOperations.Stopped.class, outcome);
     assertTrue(stopped.specCancelled());
-    assertEquals(List.of("acme/" + UNIT + "/123"), announced);
+    assertEquals(List.of("acme-auth/" + UNIT + "/123"), announced, "the instance the run lives in");
     assertTrue(halted.isEmpty());
     assertTrue(events.isEmpty());
     assertEquals(SpecStatus.IN_PROGRESS, specStore.findById("auth").orElseThrow().status());

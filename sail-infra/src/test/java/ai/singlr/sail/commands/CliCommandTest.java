@@ -77,9 +77,7 @@ class CliCommandTest {
                   true,
                   () -> {
                     throw new ApiException(
-                        ErrorCode.CONFLICT,
-                        "This box has no ZFS pool.",
-                        Remedy.of("Add one."));
+                        ErrorCode.CONFLICT, "This box has no ZFS pool.", Remedy.of("Add one."));
                   }));
     } finally {
       System.setOut(out);
