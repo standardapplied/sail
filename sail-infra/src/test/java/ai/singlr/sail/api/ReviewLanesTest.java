@@ -195,6 +195,32 @@ class ReviewLanesTest {
     assertFalse(loop.container.terminalOpen(), "the terminal it displaced is ended");
   }
 
+  /**
+   * Scenario 3 and R1 in the unit lane: the reviewer's launch and the read of its output, the fix's
+   * launch and its rescue commit all address the spec's workspace, and nothing of the spec's loop
+   * reaches the project's container.
+   */
+  @Test
+  void theReviewerAndTheFixLiveInTheSpecsWorkspaceAndNeverTouchTheProjectsContainer() {
+    loop = ReviewLoop.staged(tempDir, "codex", "claude-code");
+    loop.built("auth");
+    var reviewer = loop.onlyLive();
+    loop.finish(reviewer.id(), CRITICAL_FINDING);
+    var fix = loop.onlyLive();
+    loop.container.dirty("api", " M README.md");
+    loop.finish(fix.id(), "");
+
+    var execs =
+        loop.container.commands().stream()
+            .filter(command -> command.size() > 2 && "exec".equals(command.get(1)))
+            .map(command -> command.get(2))
+            .distinct()
+            .toList();
+    assertEquals(List.of("test-project-auth"), execs, "every command ran in the spec's workspace");
+    assertEquals("fix", fix.role());
+    assertFalse(loop.container.commits().isEmpty(), "the fix's work was committed there");
+  }
+
   @Test
   void aFixRefusedForWantOfALoginSaysOnlyThatAndIsLaunchedOnceTheLoginIsStored() {
     loop = ReviewLoop.staged(tempDir, "codex", "claude-code");

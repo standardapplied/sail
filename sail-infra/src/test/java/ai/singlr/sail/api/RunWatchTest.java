@@ -350,6 +350,7 @@ class RunWatchTest {
   void aSnapshotAndStopLimitSnapshotsTheSpecsWorkspaceAndNotTheProjectsContainer()
       throws Exception {
     var place = RunPlace.of(PROJECT, "fix-login");
+    container.holds("fix-login");
 
     new RunWatch(
             place,

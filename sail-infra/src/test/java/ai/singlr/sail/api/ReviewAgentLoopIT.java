@@ -43,6 +43,8 @@ import ai.singlr.sail.harness.Harness;
 import ai.singlr.sail.harness.Harnesses;
 import ai.singlr.sail.harness.RunUsage;
 import ai.singlr.sail.identity.Acting;
+import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.FileStore;
 import ai.singlr.sail.store.HeldProjects;
@@ -140,6 +142,7 @@ class ReviewAgentLoopIT extends AbstractIncusIT {
   private ReviewStore reviewStore;
   private RunStore runStore;
   private EventBus bus;
+  private String build;
   private final BlockingQueue<Event> heard = new LinkedBlockingQueue<>();
 
   @BeforeEach
@@ -238,12 +241,29 @@ class ReviewAgentLoopIT extends AbstractIncusIT {
                 () -> HANDLE)
             .useMessages(new MessageStore(db)));
     spec("auth");
-    made("auth");
+    build = built(dispatch, "auth");
   }
 
   /**
-   * Makes spec {@code specId}'s workspace as its build would have, so a test can set its fake
-   * agent's files before a reviewer of the spec is launched into it: the reviewer reuses it.
+   * Dispatches spec {@code specId}'s build, whose lane makes the spec's workspace as a real
+   * dispatch does; the fake agent ends at once. Returns the build's run, whose stop a test
+   * publishes as its watcher would.
+   */
+  private static String built(DispatchOperations dispatch, String specId) {
+    var outcome =
+        Acting.by(
+            new Actor(HANDLE, Role.ADMIN, Actor.Lane.CLI),
+            () ->
+                dispatch.dispatch(
+                    CONTAINER,
+                    new DispatchOperations.Request(specId, "background", false, null, true),
+                    HANDLE));
+    return assertInstanceOf(DispatchOperations.Dispatched.class, outcome).runId();
+  }
+
+  /**
+   * Makes spec {@code specId}'s workspace as a build would have, for a test whose scenario is not
+   * the build's: another spec's reviewer beside this one's.
    */
   private void made(String specId) throws Exception {
     var workspaces = TestWorkspaces.over(shell);
@@ -730,7 +750,8 @@ class ReviewAgentLoopIT extends AbstractIncusIT {
   }
 
   private Event buildStop() {
-    return buildStop("auth");
+    return RunStops.of(
+        Event.WellKnownData.SOURCE_WATCHER, CONTAINER, "auth", "codex", build, "build", 0, null);
   }
 
   /**

@@ -35,6 +35,7 @@ class FullFleetLoopIT {
         box.assertSpecStatus("s", SpecStatus.AWAITING_MERGE);
       }
       main.awaitSlackPosts(2);
+      sumesh.assertRanInItsWorkspace("s");
       assertEquals(0, sumesh.slackPosts());
       assertEquals(0, mady.slackPosts());
     }

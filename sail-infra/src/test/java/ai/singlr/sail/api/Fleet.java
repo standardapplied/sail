@@ -7,6 +7,7 @@ package ai.singlr.sail.api;
 
 import static ai.singlr.sail.api.ReviewScripts.CLEAN_REVIEW;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.fail;
@@ -20,6 +21,7 @@ import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.config.TestDefinitions;
 import ai.singlr.sail.engine.ConnectEnvironment;
+import ai.singlr.sail.engine.RunPlace;
 import ai.singlr.sail.engine.ScriptedShellExecutor;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.SlackPoster;
@@ -53,6 +55,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 
@@ -257,6 +260,7 @@ public final class Fleet implements AutoCloseable {
     private final SailApiServer server;
     private final CapturingPoster slack;
     private final DispatchOperations dispatcher;
+    private final FleetShell shell;
     private final StopOperations stopper;
     private final SailOperations operations;
     private final SpecStore specs;
@@ -283,7 +287,7 @@ public final class Fleet implements AutoCloseable {
       fdes.add(handle, handle, handle + "@example.dev", "admin");
       TestLogins.store(db, handle);
       bus = new EventBus();
-      var shell = new FleetShell();
+      shell = new FleetShell();
       dispatcher =
           new DispatchOperations(
               shell,
@@ -509,6 +513,17 @@ public final class Fleet implements AutoCloseable {
       return operations.roomMessages(specId, null, null, 50).orThrow().messages();
     }
 
+    /**
+     * Spec {@code specId}'s runs on this box lived in its own workspace: commands of them ran in
+     * {@code acme-<spec>}, and none in the project's container.
+     */
+    public void assertRanInItsWorkspace(String specId) {
+      assertTrue(
+          shell.asked.contains(RunPlace.of(PROJECT, specId).instance()), shell.asked.toString());
+      assertFalse(
+          shell.asked.contains(PROJECT), "the project's container was asked: " + shell.asked);
+    }
+
     public void assertSpecStatus(String id, SpecStatus status) {
       assertEquals(status, specs.findById(id).orElseThrow().status());
     }
@@ -558,6 +573,7 @@ public final class Fleet implements AutoCloseable {
    */
   private static final class FleetShell implements ShellExec {
     private final Map<String, String> instances = new ConcurrentHashMap<>();
+    private final Set<String> asked = ConcurrentHashMap.newKeySet();
 
     FleetShell() {
       instances.put(PROJECT, RUNNING_JSON);
@@ -581,17 +597,17 @@ public final class Fleet implements AutoCloseable {
     @Override
     public Result exec(List<String> command) {
       var joined = String.join(" ", command);
-      if (command.size() > 2
-          && command.get(0).equals("incus")
-          && command.get(1).equals("exec")
-          && !instances.containsKey(command.get(2))) {
-        return new Result(1, "", "Error: Instance not found");
+      if (command.size() > 2 && command.get(0).equals("incus") && command.get(1).equals("exec")) {
+        asked.add(command.get(2));
+        if (!instances.containsKey(command.get(2))) {
+          return new Result(1, "", "Error: Instance not found");
+        }
       }
       if (joined.contains("incus list")) {
-        var asked = command.size() > 2 ? command.get(2) : "";
-        return asked.startsWith("^") && asked.endsWith("$")
+        var named = command.size() > 2 ? command.get(2) : "";
+        return named.startsWith("^") && named.endsWith("$")
             ? new Result(
-                0, instances.getOrDefault(asked.substring(1, asked.length() - 1), "[]"), "")
+                0, instances.getOrDefault(named.substring(1, named.length() - 1), "[]"), "")
             : new Result(0, RUNNING_JSON, "");
       }
       return ScriptedShellExecutor.reachableContainer(joined)

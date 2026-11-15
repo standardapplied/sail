@@ -190,7 +190,10 @@ final class ReviewLoop implements AutoCloseable {
                 new FdeStore(db),
                 started::publish,
                 new WatcherSpawner(container, null),
-                TestWorkspaces.over(TestWorkspaces.incus(reader, PROJECT), leaping(), locks),
+                TestWorkspaces.over(
+                    TestWorkspaces.made(TestWorkspaces.incus(reader, PROJECT), container::made),
+                    leaping(),
+                    locks),
                 this::launch,
                 DispatchOperations.Listener.NONE,
                 SessionYield.NONE)
@@ -318,6 +321,7 @@ final class ReviewLoop implements AutoCloseable {
       String model,
       String reasoningEffort,
       List<String> repos) {
+    container.holds(id);
     Acting.as(
         null,
         () ->
@@ -401,6 +405,9 @@ final class ReviewLoop implements AutoCloseable {
   }
 
   private String run(String id, String specId, String role, String agent) {
+    if (specId != null) {
+      container.holds(specId);
+    }
     Acting.system(
         () ->
             runs.create(

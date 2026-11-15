@@ -30,6 +30,7 @@ class LiveRunReviewResilienceIT {
 
       assertEquals(1, sumesh.reviewCount("s"));
       sumesh.assertSpecStatus("s", SpecStatus.AWAITING_MERGE);
+      sumesh.assertRanInItsWorkspace("s");
     }
   }
 }
