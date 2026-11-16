@@ -595,6 +595,39 @@ class ReviewLanesTest {
     assertEquals(2, loop.runsIn("auth", "review").size(), "once");
   }
 
+  /**
+   * H1, the final review's probe L: every refusal is released by the pass, not only the first. One
+   * reconciler, two refusals of the same review, each followed by a stored login whose event is
+   * lost: each is launched again within two passes, once.
+   */
+  @Test
+  void aSecondRefusalOfTheSameReviewInOneProcessIsReleasedByThePassToo() {
+    loop = ReviewLoop.staged(tempDir, "codex", "claude-code");
+    loop.built("auth");
+    var reconciler = loop.reconciler(() -> Instant.now().plus(Duration.ofMinutes(5)));
+
+    for (var round = 0; round < 2; round++) {
+      var reviewer = loop.onlyLive();
+      var transcript = "/home/dev/.codex/sessions/rollout-lost-" + round + ".jsonl";
+      Acting.system(
+          () -> loop.runs.recordSession(reviewer.id(), "thread-1", "startup", transcript));
+      loop.container.wroteFile(transcript, RunLoginOutcomeTest.fixture("codex-refused-key.jsonl"));
+      loop.exit(reviewer.id(), "codex exec writes text, not its report\n", 1);
+      reconciler.sweep();
+      loop.settle();
+      assertTrue(loop.live().isEmpty(), "held, round " + round);
+
+      storeCodexKey();
+      for (var pass = 0; pass < 2; pass++) {
+        reconciler.sweep();
+        loop.settle();
+      }
+
+      assertEquals(1, loop.live().size(), "released within two passes, round " + round);
+      assertEquals(round + 2, loop.runsIn("auth", "review").size(), "once, round " + round);
+    }
+  }
+
   private void storeCodexKey() {
     var fdes = new FdeStore(loop.db);
     var person = fdes.byHandle(ReviewLoop.HANDLE).orElseThrow().id();
