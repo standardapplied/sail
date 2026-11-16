@@ -13,6 +13,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import ai.singlr.sail.api.EventBus;
 import ai.singlr.sail.api.LocalApiSocket;
 import ai.singlr.sail.api.ProjectReader;
+import ai.singlr.sail.api.RunLauncher;
+import ai.singlr.sail.api.RunReports;
 import ai.singlr.sail.api.SailOperations;
 import ai.singlr.sail.api.SessionYield;
 import ai.singlr.sail.api.SpecWorkspaces;
@@ -31,7 +33,7 @@ import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.ProjectDefinition;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.config.SyncConfig;
-import ai.singlr.sail.harness.RunUsage;
+import ai.singlr.sail.harness.RunReport;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.store.BoxCredentialStore;
 import ai.singlr.sail.store.ChangeLog;
@@ -662,7 +664,7 @@ class WorkspaceIT extends AbstractIncusIT {
               "/home/dev/.sail/runs/" + run + "/agent.log",
               "sail-agent-" + run);
           TestRuns.complete(runs, run, "completed", null);
-          runs.recordRead(run, RunUsage.NONE);
+          runs.recordRead(run, RunReport.NONE);
         });
     var place = (RunPlace.SpecWorkspace) RunPlace.of(PROJECT, specId);
     var check =
@@ -689,6 +691,7 @@ class WorkspaceIT extends AbstractIncusIT {
         new ChangeLog(db),
         project -> Optional.of(definition()),
         (specId, body) -> said.add(body),
+        RunReports.reading(shell, RunLauncher.Room.NONE, event -> {}),
         () -> "eng",
         clock::get);
   }

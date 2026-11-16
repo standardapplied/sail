@@ -1502,8 +1502,8 @@ Each row with the tests that prove it:
   | not idle | left as it is |
 
   - **The decision.** A stopped workspace is started, since nothing runs in a stopped instance.
-    Each run's unread usage is read (`RunUsageReader`) and recorded. Then `WorkspaceGit.LEFT` runs
-    once in the workspace, within 3 minutes, over the repos the project's definition configures,
+    Each run's unread report is read and recorded through `RunReports.finish`, as every
+    finisher's is. Then `WorkspaceGit.LEFT` runs once in the workspace, within 3 minutes, over the repos the project's definition configures,
     never found by search. In each repo it pushes the runs' branch once, within a minute, when the
     branch holds commits `origin` lacks. It then reads every place git itself names: each
     worktree `git worktree list --porcelain` gives (one under an ignored `.claude/worktrees/`, or

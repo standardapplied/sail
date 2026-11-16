@@ -23,7 +23,7 @@ import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.SyncOperations;
 import ai.singlr.sail.engine.Workspaces;
-import ai.singlr.sail.harness.RunUsage;
+import ai.singlr.sail.harness.RunReport;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.store.ChangeLog;
 import ai.singlr.sail.store.Erasure;
@@ -129,6 +129,7 @@ class SpecWorkspacesTest {
         new ChangeLog(db),
         definitions,
         (specId, body) -> said.add(specId + ": " + body),
+        RunReports.reading(box, RunLauncher.Room.NONE, event -> {}),
         () -> NODE,
         clock::instant);
   }
@@ -219,7 +220,7 @@ class SpecWorkspacesTest {
     Acting.system(
         () -> {
           TestRuns.complete(runs, id, "completed", null);
-          runs.recordRead(id, RunUsage.NONE);
+          runs.recordRead(id, RunReport.NONE);
         });
   }
 

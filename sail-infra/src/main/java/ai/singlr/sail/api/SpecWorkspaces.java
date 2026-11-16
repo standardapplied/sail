@@ -14,7 +14,6 @@ import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.engine.BoxInstances;
 import ai.singlr.sail.engine.ContainerConfig;
 import ai.singlr.sail.engine.ContainerState;
-import ai.singlr.sail.engine.RunUsageReader;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.Workspaces;
 import ai.singlr.sail.identity.Actor;
@@ -59,7 +58,8 @@ public final class SpecWorkspaces implements AutoCloseable {
   private final BoxInstances box;
   private final ContainerConfig config;
   private final WorkspaceGit git;
-  private final RunUsageReader usage;
+  private final RunReports reports;
+
   private final SpecStore specs;
   private final RunStore runs;
   private final ChangeLog changeLog;
@@ -76,8 +76,8 @@ public final class SpecWorkspaces implements AutoCloseable {
    * @param workspaces the box's workspaces, whose doors start, stop and delete one
    * @param shell reads Incus and runs in a workspace, always for real
    * @param locks the box's lock directory
-   * @param definitions where a project's repos are read from
-   * @param room where a kept workspace is said, as Sail ({@link RunLauncher.Room#tell})
+   * @param definitions where a project's repos are read from * @param room where a kept workspace
+   *     is said, as Sail ({@link RunLauncher.Room#tell})
    * @param clock the time now; read once here as this process's start
    */
   public SpecWorkspaces(
@@ -89,13 +89,15 @@ public final class SpecWorkspaces implements AutoCloseable {
       ChangeLog changeLog,
       ProjectReader definitions,
       RunLauncher.Room room,
+      RunReports reports,
       Supplier<String> localHandle,
       Supplier<Instant> clock) {
     this.workspaces = Objects.requireNonNull(workspaces, "workspaces");
     this.box = new BoxInstances(shell);
     this.config = new ContainerConfig(shell, locks);
     this.git = new WorkspaceGit(shell);
-    this.usage = new RunUsageReader(shell);
+    this.reports = Objects.requireNonNull(reports, "reports");
+
     this.specs = Objects.requireNonNull(specs, "specs");
     this.runs = Objects.requireNonNull(runs, "runs");
     this.changeLog = Objects.requireNonNull(changeLog, "changeLog");
@@ -249,11 +251,10 @@ public final class SpecWorkspaces implements AutoCloseable {
       throws IOException, TimeoutException, InterruptedException {
     var theirs = theirs(spec.project(), spec.id());
     for (var run : theirs.stream().filter(SpecWorkspaces::unread).toList()) {
-      var read = usage.read(run);
-      if (read == null) {
+      reports.finish(runs, run, report -> report != null && runs.recordRead(run.id(), report));
+      if (runs.findById(run.id()).filter(SpecWorkspaces::unread).isPresent()) {
         throw new IOException("the usage of run " + run.id() + " could not be read");
       }
-      runs.recordRead(run.id(), read);
     }
     var definition =
         definitions
