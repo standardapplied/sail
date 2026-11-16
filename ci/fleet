@@ -84,7 +84,7 @@ Usage:
                                 partition are refused, and its ext4 scratch disk until the row itself
                                 erases it with the wipefs the refusal names, then the scratch pool is
                                 made with Sail's last probe of the disk under a second before its
-                                incus storage create (strace); with a second scratch disk, the two
+                                incus storage create (audit log); with a second scratch disk, the two
                                 become one ZFS mirror (one incus storage create, never forced, the
                                 probes of both last), its re-run in the other order is kept, ONLINE
                                 after the reboot, and DEGRADED naming the disk once it is detached;
@@ -1310,11 +1310,71 @@ refuses_a_pool_on() {
     "sudo sail host init --storage zfs --pool refused --disk $device --yes"
 }
 
+# The commands a row's command runs are read from the kernel's audit log, not from strace: strace
+# up to 7.3 aborts its trace when a traced thread dies between its wait4 and its PTRACE_GETSIGINFO,
+# as any exiting multithreaded child can (strace/strace#433), and sends the command a SIGTERM.
+# Every execve of the operator's login sessions is kept under KEY while the command runs; daemons such
+# as incusd have no login uid, so this is the command's own tree, as strace -f saw it. The log keeps
+# every earlier run's records, so each run is given a key of its own.
+audited() {
+  local run=$1 box=$2 key=$3 rule said
+  shift 3
+  rule="always,exit -F arch=b64 -S execve -F auid=\$(id -u) -k $key"
+  on "$run" "$box" "sudo apt-get install -y -q auditd > /dev/null && sudo auditctl -a $rule > /dev/null" || return 1
+  said=0
+  on "$run" "$box" "$*" || said=$?
+  on "$run" "$box" "sudo auditctl -d $rule > /dev/null" || return 1
+  on "$run" "$box" "sudo auditctl -s" | grep -qx "lost 0" || { echo "the audit log lost records while it ran"; return 1; }
+  return "$said"
+}
+
+# The execs audited under a key, one line each as strace -f -tt -e trace=execve prints them. The
+# kernel logs a script's exec with its interpreter's argv, so Incus's /usr/bin/incus wrapper is a
+# /bin/sh line and each incus command Sail runs is the one line of the incus binary it execs.
+# ausearch reads its stdin when that is not a terminal, so it is told to read the logs.
+execs_of() {
+  on "$1" "$2" "sudo ausearch --input-logs -k $3 --raw" | python3 -I -c '
+import re, sys, time
+
+def text(value):
+    if value.startswith("\""):
+        return value[1:-1]
+    return bytes.fromhex(value).decode(errors="replace") if re.fullmatch("[0-9A-F]+", value) else value
+
+events = {}
+for line in sys.stdin:
+    record = re.match(r"type=(SYSCALL|EXECVE|PATH) msg=audit\((\d+)\.(\d+):(\d+)\): (.*)", line)
+    if not record:
+        continue
+    kind, seconds, millis, serial, rest = record.groups()
+    fields = dict(re.findall(r"(\S+?)=(\"[^\"]*\"|\S+)", rest))
+    at = time.strftime("%H:%M:%S", time.gmtime(int(seconds))) + "." + millis
+    event = events.setdefault(int(serial), {"at": at, "name": "?", "result": "?", "pid": "?", "args": {}})
+    if kind == "SYSCALL":
+        event["pid"], event["result"] = fields["pid"], fields["exit"]
+    elif kind == "PATH" and fields.get("item") == "0":
+        event["name"] = text(fields["name"])
+    elif kind == "EXECVE":
+        for key, value in fields.items():
+            arg = re.fullmatch(r"a(\d+)(?:\[(\d+)\])?", key)
+            if arg:
+                event["args"][(int(arg[1]), int(arg[2] or 0))] = text(value)
+for serial in sorted(events):
+    event = events[serial]
+    argv = {}
+    for (index, _), part in sorted(event["args"].items()):
+        argv[index] = argv.get(index, "") + part
+    quoted = ", ".join("\"%s\"" % argv[index] for index in sorted(argv))
+    print("%s %s execve(\"%s\", [%s]) = %s" % (event["pid"], event["at"], event["name"], quoted, event["result"]))
+'
+}
+
 probed_last_on() {
-  local run=$1 box=$2 device=$3 pool=$4 trace probe create gap
-  on "$run" "$box" "sudo apt-get install -y -q strace > /dev/null && sudo strace -f -tt -e trace=execve -o /tmp/sail-gap.trace sail host init --storage zfs --pool $pool --disk $device --yes" || return 1
+  local run=$1 box=$2 device=$3 pool=$4 key trace probe create gap
+  key=sail-gap-$(date +%s)
+  audited "$run" "$box" "$key" "sudo sail host init --storage zfs --pool $pool --disk $device --yes" || return 1
   on "$run" "$box" "sudo incus storage list --format csv" | grep -q "^$pool,zfs," || { echo "Incus has no zfs pool $pool"; return 1; }
-  trace=$(on "$run" "$box" "sudo cat /tmp/sail-gap.trace" | grep -E 'execve\("[^"]*/(wipefs|incus)", \["(wipefs", "--all|incus", "storage", "create)')
+  trace=$(execs_of "$run" "$box" "$key" | grep -E 'execve\("[^"]*/(wipefs|incus)", \["(wipefs", "--all|incus", "storage", "create)')
   echo "$trace"
   probe=$(grep -F '"wipefs", "--all"' <<< "$trace" | tail -1 | awk '{print $2}')
   create=$(grep -F '"incus", "storage", "create"' <<< "$trace" | tail -1 | awk '{print $2}')
@@ -1325,15 +1385,16 @@ probed_last_on() {
 }
 
 mirrored_on() {
-  local run=$1 box=$2 one=$3 other=$4 pool=$5 trace made last first create gap
-  on "$run" "$box" "sudo strace -f -tt -e trace=execve -o /tmp/sail-mirror.trace sail host init --storage zfs --pool $pool --disk $one --disk $other --yes" || return 1
+  local run=$1 box=$2 one=$3 other=$4 pool=$5 key trace made last first create gap
+  key=sail-mirror-$(date +%s)
+  audited "$run" "$box" "$key" "sudo sail host init --storage zfs --pool $pool --disk $one --disk $other --yes" || return 1
   on "$run" "$box" "sudo incus storage list --format csv" | grep -q "^$pool,zfs," || { echo "Incus has no zfs pool $pool"; return 1; }
   on "$run" "$box" "sudo zpool status -P $pool" | grep -q "mirror-0" || { echo "$pool is not a mirror"; return 1; }
   made=$(on "$run" "$box" "sudo zpool history $pool" | grep "zpool create")
   echo "$made"
   [[ $made == *" mirror "* && $made != *" -f "* ]] || { echo "the zpool was not made as an unforced mirror"; return 1; }
-  trace=$(on "$run" "$box" "sudo cat /tmp/sail-mirror.trace" | grep -E 'execve\("[^"]*/(wipefs|incus|realpath)", \["(wipefs", "--all|incus", "storage", "create|realpath)' \
-    | grep -E ' = 0$' | grep -vF 'execve("/opt/incus/')
+  trace=$(execs_of "$run" "$box" "$key" | grep -E 'execve\("[^"]*/(wipefs|incus|realpath)", \["(wipefs", "--all|incus", "storage", "create|realpath)' \
+    | grep -E ' = 0$')
   echo "$trace"
   [[ $(grep -c '"incus", "storage", "create"' <<< "$trace") == 1 ]] || { echo "Sail asked Incus for more than one create"; return 1; }
   grep -F '"incus", "storage", "create"' <<< "$trace" | grep -qF 'source=mirror=' || { echo "the create is not the mirror's"; return 1; }
