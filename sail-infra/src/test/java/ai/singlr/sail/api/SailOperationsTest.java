@@ -580,7 +580,7 @@ class SailOperationsTest {
   void aDryRunIsRefusedAsTheDispatchWouldBeWhenThePersonStoredNoLogin() throws Exception {
     var db = dryRunDatabase();
     var store = new SpecStore(db);
-    new FdeStore(db).add(LOCAL_HANDLE, null, null, "admin");
+    new FdeStore(db).add(LOCAL_HANDLE, null, LOCAL_HANDLE + "@sail.invalid", "admin");
     var observer = shell().on("incus list ^acme$", RUNNING_JSON);
 
     var error =

@@ -7,13 +7,18 @@ package ai.singlr.sail.engine;
 
 import ai.singlr.sail.common.Remedied;
 import ai.singlr.sail.ssh.SshPublicKey;
+import ai.singlr.sail.store.ProjectStore;
+import ai.singlr.sail.store.Sqlite;
 import java.io.IOException;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
 import java.util.concurrent.TimeoutException;
+import java.util.function.Predicate;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
@@ -42,6 +47,95 @@ public final class ContainerAuthorizedKeys {
 
   public ContainerAuthorizedKeys(ShellExec shell) {
     this.shell = shell;
+  }
+
+  /**
+   * A new workstation key for this box, one path for a pairing and {@code host config set
+   * ssh-public-key}: {@code replaced} out of every container, and {@code key} into the container of
+   * each project this box runs and the workspaces of its person, {@code boxHandle}. Answers a
+   * sentence for each container left behind; a box whose containers cannot be listed names the
+   * apply of every one instead, since the catalog holds projects this box never ran.
+   */
+  public static List<String> rekeyWorkstation(
+      ShellExec shell,
+      Path database,
+      String boxHandle,
+      Optional<SshPublicKey> replaced,
+      SshPublicKey key,
+      OperatorCommand operator)
+      throws InterruptedException {
+    var keys = new ContainerAuthorizedKeys(shell);
+    var unreached = new ArrayList<String>();
+    if (replaced.isPresent()) {
+      var old = replaced.get();
+      try {
+        keys.removeFromEach(old)
+            .forEach(c -> unreached.add(stillTrusts(c.container(), c.reason(), old)));
+      } catch (IOException | TimeoutException failure) {
+        unreached.add(stillTrusts("This box's containers", Remedied.reasonOf(failure), old));
+      }
+    }
+    List<String> projects;
+    try (var db = Sqlite.open(database)) {
+      projects = new ProjectStore(db).list().stream().map(ProjectStore.ProjectRow::name).toList();
+    }
+    if (projects.isEmpty()) {
+      return List.copyOf(unreached);
+    }
+    try {
+      var containers = new BoxInstances(shell).containers();
+      var kinds = new HashMap<String, BoxInstances.Kind>();
+      containers.forEach(instance -> kinds.put(instance.name(), instance.kind()));
+      keys.addTo(key, containers.stream().filter(trusting(projects, boxHandle)).toList())
+          .forEach(
+              c ->
+                  unreached.add(
+                      notTrustedYet(
+                          c.container(), kinds.get(c.container()), c.reason(), operator)));
+    } catch (IOException | TimeoutException failure) {
+      unreached.add(noneTrustYet(Remedied.reasonOf(failure).strip(), operator));
+    }
+    return List.copyOf(unreached);
+  }
+
+  /** A workspace takes its owner's keys at its start; {@code project apply} refuses one. */
+  public static String notTrustedYet(
+      String container, BoxInstances.Kind kind, String why, OperatorCommand operator) {
+    var told = container + " does not trust this key yet: " + why;
+    if (kind instanceof BoxInstances.Workspace w) {
+      var named = w.project() + " " + w.workspace();
+      return told
+          + ". It takes it at its next start: '"
+          + operator.sail("project workspace stop " + named)
+          + "', then '"
+          + operator.sail("project workspace start " + named)
+          + "'.";
+    }
+    return told + ". Make it: '" + operator.sail("project apply " + container) + "'.";
+  }
+
+  public static String noneTrustYet(String why, OperatorCommand operator) {
+    return "This box's containers do not trust this key yet: "
+        + why
+        + ". Once incus answers, make them: '"
+        + operator.sail("project apply --all")
+        + "'.";
+  }
+
+  private static String stillTrusts(String where, String why, SshPublicKey replaced) {
+    return where
+        + " may still trust the replaced workstation key "
+        + describe(replaced)
+        + ": "
+        + why.strip()
+        + ". Take its line out of every /home account's .ssh/authorized_keys there.";
+  }
+
+  /** A key as a person recognises it: its fingerprint, and its comment when it has one. */
+  public static String describe(SshPublicKey key) {
+    return key.comment() == null
+        ? key.fingerprint()
+        : key.fingerprint() + " (" + key.comment() + ")";
   }
 
   /** A container an edit did not reach, and why. */
@@ -78,24 +172,37 @@ public final class ContainerAuthorizedKeys {
   }
 
   /**
-   * Adds {@code key} to the SSH user's file in each container of {@code projects} this box runs
-   * that does not hold it yet, and returns those it could not, each with why: one container that
-   * cannot be written stops none of the others. A container bearing a project's name that carries
-   * no sail-api-sock device is not written but returned, as {@code project apply --all} names it:
-   * sail did not make it, or did not finish.
+   * The workstation key goes to the box person's workspaces alone (T2). A container bearing a
+   * project's name that carries no sail-api-sock device is returned, not written: sail did not make
+   * it, or did not finish.
    */
-  public List<Unreached> add(SshPublicKey key, Collection<String> projects)
+  public List<Unreached> add(SshPublicKey key, Collection<String> projects, String boxHandle)
       throws IOException, InterruptedException, TimeoutException {
+    return addTo(
+        key,
+        new BoxInstances(shell)
+            .containers().stream().filter(trusting(projects, boxHandle)).toList());
+  }
+
+  private static Predicate<BoxInstances.Instance> trusting(
+      Collection<String> projects, String boxHandle) {
+    return instance ->
+        instance.kind() instanceof BoxInstances.Plain && projects.contains(instance.name())
+            || BoxInstances.wholeWorkspaceOf(boxHandle).test(instance);
+  }
+
+  /** A person's own key goes to their own workspaces alone. */
+  public List<Unreached> addToWorkspacesOf(SshPublicKey key, String handle)
+      throws IOException, InterruptedException, TimeoutException {
+    return addTo(key, new BoxInstances(shell).wholeWorkspacesOf(handle));
+  }
+
+  private List<Unreached> addTo(SshPublicKey key, List<BoxInstances.Instance> reached)
+      throws InterruptedException {
     var entry = entry(key);
     var devices = new IncusDeviceManager(shell);
-    var ofProjects =
-        new BoxInstances(shell)
-            .containers().stream()
-                .filter(instance -> ofProject(instance, projects))
-                .map(BoxInstances.Instance::name)
-                .toList();
     return each(
-        ofProjects,
+        reached.stream().map(BoxInstances.Instance::name).toList(),
         container -> {
           if (!devices.sailManaged(container)) {
             throw new IOException(
@@ -142,21 +249,6 @@ public final class ContainerAuthorizedKeys {
 
   private List<String> containers() throws IOException, InterruptedException, TimeoutException {
     return new BoxInstances(shell).containers().stream().map(BoxInstances.Instance::name).toList();
-  }
-
-  /**
-   * Whether {@code instance} is the container or a whole workspace of one of {@code projects}: a
-   * new key reaches every workspace of the projects it is for, and no template, which takes it at
-   * its next build.
-   */
-  private static boolean ofProject(BoxInstances.Instance instance, Collection<String> projects) {
-    return switch (instance.kind()) {
-      case BoxInstances.Plain ignored -> projects.contains(instance.name());
-      case BoxInstances.Workspace workspace ->
-          workspace.ready() && projects.contains(workspace.project());
-      case BoxInstances.Template ignored -> false;
-      case BoxInstances.Stray ignored -> false;
-    };
   }
 
   private static Pattern entry(SshPublicKey key) {

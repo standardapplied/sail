@@ -498,7 +498,7 @@ public final class LiveMembers implements RoomWakeReactor.Live, AutoCloseable {
         reservation.releaseIfAbsent(runId, place, unit);
         return;
       }
-      places.enter(checked, config, localHandle);
+      places.enter(checked, config);
       if (place instanceof RunPlace.SpecWorkspace workspace) {
         workBranch.enter(workspace, repos, branch, false, true, Optional.empty());
       }

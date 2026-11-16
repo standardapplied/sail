@@ -7,12 +7,6 @@ package ai.singlr.sail.engine;
 
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.ProjectDefinition;
-import java.io.IOException;
-import java.net.URI;
-import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
-import java.time.Duration;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -32,7 +26,6 @@ import java.util.regex.Pattern;
 public final class GitCredentials {
 
   private static final String REFS = "/info/refs?service=git-upload-pack";
-  private static final Duration PROBE_TIMEOUT = Duration.ofSeconds(3);
 
   private static final Pattern HOST_PATTERN =
       Pattern.compile("^[A-Za-z0-9][A-Za-z0-9.-]*(?::[0-9]{1,5})?$");
@@ -147,16 +140,30 @@ public final class GitCredentials {
   /**
    * The https {@code repos} a run cannot clone with {@code tokens}: those whose host has no token
    * there and whose smart-HTTP refs {@code asks} says ask for credentials ({@link
-   * #asksForCredentials}). Any other answer, a public repo or a host that cannot be reached, asks
-   * for none, and the clone says what is wrong with it. The repos are asked at once, so the whole
-   * check takes as long as its slowest answer, which {@link #asksForCredentials} bounds.
+   * ShellExec#asksForCredentials}). Any other answer, a public repo or a host that cannot be
+   * reached, asks for none, and the clone says what is wrong with it. The repos are asked at once,
+   * so the whole check takes as long as its slowest answer, which {@link
+   * ShellExec#asksForCredentials} bounds.
    */
   public static List<String> askingForAToken(
       List<ProjectDefinition.Repo> repos, Map<String, String> tokens, Predicate<String> asks) {
+    return asking(repos, host -> Strings.isNotBlank(resolveTokenForHost(host, tokens)), asks)
+        .stream()
+        .map(ProjectDefinition.Repo::url)
+        .toList();
+  }
+
+  /**
+   * The https {@code repos} whose host {@code held} says no token is kept for and whose smart-HTTP
+   * refs {@code asks} says ask for credentials, as {@link #askingForAToken} asks them: at once,
+   * each bounded by {@link ShellExec#asksForCredentials}.
+   */
+  public static List<ProjectDefinition.Repo> asking(
+      List<ProjectDefinition.Repo> repos, Predicate<String> held, Predicate<String> asks) {
     var asked = new ArrayList<ProjectDefinition.Repo>();
     for (var repo : repos == null ? List.<ProjectDefinition.Repo>of() : repos) {
       var hosts = extractHttpsHosts(List.of(repo));
-      if (!hosts.isEmpty() && Strings.isBlank(resolveTokenForHost(hosts.getFirst(), tokens))) {
+      if (!hosts.isEmpty() && !held.test(hosts.getFirst())) {
         asked.add(repo);
       }
     }
@@ -165,10 +172,10 @@ public final class GitCredentials {
           asked.stream()
               .map(repo -> probes.submit(() -> asks.test(repo.url().replaceAll("/+$", "") + REFS)))
               .toList();
-      var asking = new ArrayList<String>();
+      var asking = new ArrayList<ProjectDefinition.Repo>();
       for (var i = 0; i < asked.size(); i++) {
         if (answers.get(i).get()) {
-          asking.add(asked.get(i).url());
+          asking.add(asked.get(i));
         }
       }
       return List.copyOf(asking);
@@ -177,33 +184,6 @@ public final class GitCredentials {
       return List.of();
     } catch (ExecutionException e) {
       throw new IllegalStateException("Could not ask whether a repo needs a token.", e.getCause());
-    }
-  }
-
-  /**
-   * Whether a plain GET of {@code url}, sent without credentials and following no redirect, asks
-   * for them: a {@code 401}, or a {@code 403} that carries an authentication challenge. A {@code
-   * 403} without one is a refusal no token would lift, and a URL that cannot be asked within 3 s to
-   * connect and 3 s more for the answer asks for nothing.
-   */
-  public static boolean asksForCredentials(String url) {
-    try (var client =
-        HttpClient.newBuilder()
-            .connectTimeout(PROBE_TIMEOUT)
-            .followRedirects(HttpClient.Redirect.NEVER)
-            .build()) {
-      var answer =
-          client.send(
-              HttpRequest.newBuilder(URI.create(url)).timeout(PROBE_TIMEOUT).GET().build(),
-              HttpResponse.BodyHandlers.discarding());
-      return answer.statusCode() == 401
-          || answer.statusCode() == 403
-              && answer.headers().firstValue("WWW-Authenticate").isPresent();
-    } catch (IOException | IllegalArgumentException e) {
-      return false;
-    } catch (InterruptedException e) {
-      Thread.currentThread().interrupt();
-      return false;
     }
   }
 

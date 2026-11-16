@@ -52,7 +52,7 @@ public final class SshGateway {
    * Commands the loopback API authorizes per request, as the session's FDE; under {@code agent},
    * only {@link #AGENT_API_VERBS}.
    */
-  public static final Set<String> API_COMMANDS = Set.of("spec", "agent", "events");
+  public static final Set<String> API_COMMANDS = Set.of("spec", "agent", "events", "git");
 
   /** The {@code agent} verbs that talk to the loopback API, as the session's FDE. */
   private static final Set<String> AGENT_API_VERBS =

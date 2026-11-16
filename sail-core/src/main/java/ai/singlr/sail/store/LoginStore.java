@@ -7,6 +7,7 @@ package ai.singlr.sail.store;
 
 import ai.singlr.sail.common.PrivateDirectory;
 import ai.singlr.sail.common.Strings;
+import ai.singlr.sail.engine.NameValidator;
 import ai.singlr.sail.harness.Harness;
 import ai.singlr.sail.harness.Harnesses;
 import ai.singlr.sail.harness.LoginKind;
@@ -25,7 +26,10 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HexFormat;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
+import java.util.Map;
 import java.util.NoSuchElementException;
 import java.util.Optional;
 import java.util.Set;
@@ -38,9 +42,11 @@ import java.util.stream.Stream;
  * this runner and never synced: a login must be replayed to its harness, so it cannot be hashed as
  * every bearer secret in the database is. A login is {@code <root>/<fde-id>/<harness>/<name>}, its
  * kind on the first line and its value on the second; {@code <harness>/.default} names the default,
- * a name no login can take. Directories are {@code 0700} and files {@code 0600}, each written whole
- * as a temporary file and renamed into place; the stored date is the file's modification time. It
- * is keyed by FDE id, not handle, since a handle can be given again once its person is removed.
+ * a name no login can take. A git token is {@code <root>/<fde-id>/git/<host>}, its value its one
+ * line, kept, moved and erased as a login is. Directories are {@code 0700} and files {@code 0600},
+ * each written whole as a temporary file and renamed into place; the stored date is the file's
+ * modification time. It is keyed by FDE id, not handle, since a handle can be given again once its
+ * person is removed.
  */
 public final class LoginStore {
 
@@ -51,9 +57,18 @@ public final class LoginStore {
   static final int MAX_VALUE_BYTES = 16 * 1024;
 
   private static final String DEFAULT_FILE = ".default";
+
+  /** What a git token is a login of: its name is its host, and it has no default. */
+  public static final String GIT = "git";
+
+  /** A sanity floor: no forge issues a token this short, so a shorter value is a mistake. */
+  static final int MIN_TOKEN = 16;
+
+  private static final String TOKEN = "token";
   private static final String TEMP_PREFIX = ".tmp-";
   private static final Pattern NAME = Pattern.compile("[a-z0-9][a-z0-9-]{0,31}");
   private static final Pattern FDE_ID = Pattern.compile("[A-Za-z0-9][A-Za-z0-9_-]{0,63}");
+  private static final Pattern PORT = Pattern.compile("([^:]+):([1-9][0-9]{0,4})");
   private static final Pattern VALUE = Pattern.compile("[\\x21-\\x7E&&[^\"'\\\\$`]]+");
   private static final Set<PosixFilePermission> DIRECTORY =
       PosixFilePermissions.fromString("rwx------");
@@ -111,7 +126,7 @@ public final class LoginStore {
     var declared = harness.loginKind(kind);
     requireValue(value);
     synchronized (WRITES) {
-      var dir = directory(fdeId, harness);
+      var dir = directory(fdeId, harness.yamlName());
       write(dir, named, declared.kind() + "\n" + value + "\n");
       if (defaultName(dir).filter(current -> Files.exists(dir.resolve(current))).isEmpty()) {
         write(dir, DEFAULT_FILE, named + "\n");
@@ -132,6 +147,8 @@ public final class LoginStore {
         known(harness).flatMap(known -> row(harness, known, name)).ifPresent(rows::add);
       }
     }
+    var git = person.resolve(GIT);
+    hosts(git).forEach(host -> gitRow(git, host).ifPresent(rows::add));
     rows.sort(Comparator.comparing(Row::harness).thenComparing(Row::name));
     return List.copyOf(rows);
   }
@@ -222,6 +239,72 @@ public final class LoginStore {
     }
   }
 
+  public Row storeGit(String fdeId, String host, String value) {
+    var named = requireHost(host);
+    requireValue(value);
+    if (value.length() < MIN_TOKEN) {
+      throw new IllegalArgumentException(
+          "A git token is at least "
+              + MIN_TOKEN
+              + " characters, as every forge's is: this value is too short to be one.");
+    }
+    synchronized (WRITES) {
+      var dir = directory(fdeId, GIT);
+      write(dir, named, value + "\n");
+      return gitRow(dir, named).orElseThrow();
+    }
+  }
+
+  public Optional<Row> removeGit(String fdeId, String host) {
+    var named = requireHost(host);
+    synchronized (WRITES) {
+      var dir = dirOf(fdeId, GIT);
+      var removed = dir == null ? Optional.<Row>empty() : gitRow(dir, named);
+      removed.ifPresent(row -> delete(dir.resolve(named)));
+      return removed;
+    }
+  }
+
+  /** Values and all: only a workspace's owner step reads them. */
+  public Map<String, String> gitTokens(String fdeId) {
+    var dir = dirOf(fdeId, GIT);
+    var tokens = new LinkedHashMap<String, String>();
+    if (dir != null) {
+      for (var host : hosts(dir)) {
+        readToken(dir.resolve(host)).ifPresent(value -> tokens.put(host, value));
+      }
+    }
+    return tokens;
+  }
+
+  /** A port is allowed because a repo's https URL may name one, and the refusal prints it. */
+  public static String requireHost(String host) {
+    var port = host == null ? null : PORT.matcher(host);
+    if (port != null && port.matches() && Integer.parseInt(port.group(2)) <= 65535) {
+      NameValidator.requireValidHost(port.group(1));
+    } else {
+      NameValidator.requireValidHost(host);
+    }
+    return host.toLowerCase(Locale.ROOT);
+  }
+
+  private Optional<Row> gitRow(Path dir, String host) {
+    var file = dir.resolve(host);
+    return readToken(file)
+        .map(value -> new Row(GIT, host, TOKEN, false, modified(file), fingerprint(value)));
+  }
+
+  private static Optional<String> readToken(Path file) {
+    return read(file).filter(lines -> lines.size() == 1).map(List::getFirst);
+  }
+
+  private static List<String> hosts(Path dir) {
+    return children(dir).stream()
+        .map(file -> file.getFileName().toString())
+        .filter(name -> !name.startsWith("."))
+        .toList();
+  }
+
   /** The first eight hex digits of the SHA-256 of {@code value}. */
   static String fingerprint(String value) {
     try {
@@ -281,17 +364,21 @@ public final class LoginStore {
   }
 
   private Path dirOf(String fdeId, Harness harness) {
-    var person = person(fdeId);
-    return person == null ? null : person.resolve(harness.yamlName());
+    return dirOf(fdeId, harness.yamlName());
   }
 
-  private Path directory(String fdeId, Harness harness) {
+  private Path dirOf(String fdeId, String kept) {
+    var person = person(fdeId);
+    return person == null ? null : person.resolve(kept);
+  }
+
+  private Path directory(String fdeId, String kept) {
     var person = person(fdeId);
     if (person == null) {
       throw new IllegalStateException(
           "This box keeps its database in memory, so it keeps no logins.");
     }
-    var dir = person.resolve(harness.yamlName());
+    var dir = person.resolve(kept);
     for (var each : List.of(root, person, dir)) {
       privateDirectory(each);
     }

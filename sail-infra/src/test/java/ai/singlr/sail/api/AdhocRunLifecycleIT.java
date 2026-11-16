@@ -112,7 +112,7 @@ class AdhocRunLifecycleIT extends AbstractIncusIT {
       HeldProjects.hold(db, CONTAINER);
       var specStore = new SpecStore(db);
       var runStore = new RunStore(db);
-      new FdeStore(db).add(HANDLE, null, null, "admin");
+      new FdeStore(db).add(HANDLE, null, HANDLE + "@sail.invalid", "admin");
       var events = new CopyOnWriteArrayList<Event>();
       var dispatchOps =
           new DispatchOperations(

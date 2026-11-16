@@ -233,7 +233,7 @@ class HostSyncCommandTest {
       new SchemaManager(db).migrate();
       var fdes = new FdeStore(db);
       fdes.add("ada", null, null, "admin");
-      fdes.disableUnlisted(List.of());
+      fdes.disableUnlisted(List.of(), null);
     }
 
     assertEquals(

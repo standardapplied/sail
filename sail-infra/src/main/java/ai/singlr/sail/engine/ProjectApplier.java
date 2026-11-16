@@ -149,7 +149,7 @@ public final class ProjectApplier {
       return ApplyResult.empty();
     }
 
-    ensureCredentialStore(name, sshUser, gitTokens, repos);
+    ensureCredentialStore(shell, name, sshUser, gitTokens, repos);
 
     var added = 0;
     var skipped = 0;
@@ -468,7 +468,25 @@ public final class ProjectApplier {
    * one credential entry per unique HTTPS host found in the repo URLs, and logs {@code gh} in for
    * each GitHub host among them with the same token.
    */
-  private void ensureCredentialStore(
+  public static void ensureCredentialStore(
+      ShellExec shell,
+      String name,
+      String sshUser,
+      Map<String, String> gitTokens,
+      List<ProjectDefinition.Repo> repos)
+      throws IOException, InterruptedException, TimeoutException {
+    if (writeCredentialStore(shell, name, sshUser, gitTokens, repos)) {
+      ForgeCliLogin.loginGitHub(shell, name, sshUser, gitTokens, repos);
+    }
+  }
+
+  /**
+   * The store half of {@link #ensureCredentialStore}: the {@code .git-credentials} file and its
+   * helper, which a fetch needs before the network a {@code gh} login asks is up. Whether there was
+   * a token to write.
+   */
+  public static boolean writeCredentialStore(
+      ShellExec shell,
       String name,
       String sshUser,
       Map<String, String> gitTokens,
@@ -476,7 +494,7 @@ public final class ProjectApplier {
       throws IOException, InterruptedException, TimeoutException {
     var credContent = GitCredentials.buildCredentialStore(gitTokens, repos);
     if (credContent.isEmpty()) {
-      return;
+      return false;
     }
     var credPath = "/home/" + sshUser + "/.git-credentials";
     ContainerFilePush.pushAsDev(shell, name, credPath, credContent, "0600");
@@ -487,6 +505,6 @@ public final class ProjectApplier {
     if (!helperResult.ok()) {
       throw new IOException("Failed to configure git credential helper: " + helperResult.stderr());
     }
-    ForgeCliLogin.loginGitHub(shell, name, sshUser, gitTokens, repos);
+    return true;
   }
 }

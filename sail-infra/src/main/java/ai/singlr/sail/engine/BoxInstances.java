@@ -16,6 +16,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.TimeoutException;
+import java.util.function.Predicate;
 
 /**
  * What every instance on this box is (W10), read from Incus in one {@code incus list} and told from
@@ -168,6 +169,23 @@ public final class BoxInstances {
   /** Every instance that is a system container, not a virtual machine: sail provisions none. */
   public List<Instance> containers() throws IOException, InterruptedException, TimeoutException {
     return all().stream().filter(instance -> "container".equals(instance.type())).toList();
+  }
+
+  /**
+   * Every whole workspace {@code handle} owns, running or not: what reaches a person's workspaces
+   * when their key or git token changes.
+   */
+  public List<Instance> wholeWorkspacesOf(String handle)
+      throws IOException, InterruptedException, TimeoutException {
+    return all().stream().filter(wholeWorkspaceOf(handle)).toList();
+  }
+
+  /** Whether an instance is a whole workspace {@code handle} owns. */
+  public static Predicate<Instance> wholeWorkspaceOf(String handle) {
+    return i ->
+        i.kind() instanceof Workspace workspace
+            && workspace.ready()
+            && i.key(OWNER_KEY).filter(handle::equals).isPresent();
   }
 
   /** Every plain instance, the only kind that can be a project's own container. */

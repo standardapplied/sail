@@ -12,14 +12,18 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.sun.net.httpserver.HttpServer;
 import java.io.IOException;
 import java.io.UncheckedIOException;
+import java.net.InetAddress;
+import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import org.junit.jupiter.api.Test;
@@ -262,6 +266,60 @@ class ShellExecutorTest {
       Files.writeString(path, "");
     } catch (IOException e) {
       throw new UncheckedIOException(e);
+    }
+  }
+
+  @Test
+  void onlyA401OrA403WithAChallengeAsksForCredentialsAndNoRedirectIsFollowed() throws Exception {
+    var elsewhere =
+        HttpServer.create(new InetSocketAddress(InetAddress.getLoopbackAddress(), 0), 0);
+    var followed = new CopyOnWriteArrayList<String>();
+    elsewhere.createContext(
+        "/",
+        exchange -> {
+          followed.add(exchange.getRequestURI().toString());
+          exchange.sendResponseHeaders(401, -1);
+          exchange.close();
+        });
+    var server = HttpServer.create(new InetSocketAddress(InetAddress.getLoopbackAddress(), 0), 0);
+    server.createContext(
+        "/",
+        exchange -> {
+          switch (exchange.getRequestURI().getPath()) {
+            case "/private" -> exchange.sendResponseHeaders(401, -1);
+            case "/challenged" -> {
+              exchange.getResponseHeaders().add("WWW-Authenticate", "Basic realm=\"git\"");
+              exchange.sendResponseHeaders(403, -1);
+            }
+            case "/forbidden" -> exchange.sendResponseHeaders(403, -1);
+            case "/moved" -> {
+              exchange
+                  .getResponseHeaders()
+                  .add(
+                      "Location",
+                      "http://127.0.0.1:" + elsewhere.getAddress().getPort() + "/private");
+              exchange.sendResponseHeaders(302, -1);
+            }
+            default -> exchange.sendResponseHeaders(200, -1);
+          }
+          exchange.close();
+        });
+    elsewhere.start();
+    server.start();
+    var probe = new ShellExecutor(false);
+    var at = "http://127.0.0.1:" + server.getAddress().getPort();
+    try {
+      assertTrue(probe.asksForCredentials(at + "/private"));
+      assertTrue(probe.asksForCredentials(at + "/challenged"));
+      assertFalse(probe.asksForCredentials(at + "/forbidden"), "a 403 no token lifts");
+      assertFalse(probe.asksForCredentials(at + "/public"));
+      assertFalse(probe.asksForCredentials(at + "/moved"));
+      assertEquals(List.of(), followed, "a redirect is not followed to another host");
+      assertFalse(probe.asksForCredentials("http://127.0.0.1:1/info/refs"));
+      assertFalse(probe.asksForCredentials("not a url"));
+    } finally {
+      server.stop(0);
+      elsewhere.stop(0);
     }
   }
 }

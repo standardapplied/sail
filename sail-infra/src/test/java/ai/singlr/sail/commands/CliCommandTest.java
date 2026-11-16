@@ -14,6 +14,7 @@ import ai.singlr.sail.Main;
 import ai.singlr.sail.access.Refusal;
 import ai.singlr.sail.api.ApiException;
 import ai.singlr.sail.api.ErrorCode;
+import ai.singlr.sail.api.SailApiClient;
 import ai.singlr.sail.authority.WriteRefused;
 import ai.singlr.sail.common.Remedied;
 import ai.singlr.sail.common.Remedy;
@@ -26,6 +27,7 @@ import java.io.PrintWriter;
 import java.io.StringWriter;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
+import java.util.Map;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -94,6 +96,40 @@ class CliCommandTest {
     assertEquals("", capturedErr.toString(StandardCharsets.UTF_8));
   }
 
+  /** Low 2 of the proof: a JSON refusal's action names each command whole, as this box types it. */
+  @Test
+  void aJsonRefusalsActionNamesItsCommandAsTyped() {
+    var out = System.out;
+    var captured = new ByteArrayOutputStream();
+    System.setOut(new PrintStream(captured, true, StandardCharsets.UTF_8));
+    try {
+      assertThrows(
+          CliCommand.Printed.class,
+          () ->
+              CliCommand.run(
+                  true,
+                  () -> {
+                    throw new ApiException(
+                        ErrorCode.CONFLICT,
+                        "No token.",
+                        Remedy.of("Store one: ", Remedy.sail("git login", "github.com"), "."));
+                  }));
+    } finally {
+      System.setOut(out);
+    }
+
+    assertTrue(
+        captured
+            .toString(StandardCharsets.UTF_8)
+            .contains(
+                "\"action\": \"Store one: "
+                    + OperatorCommand.here()
+                        .render(Remedy.of(Remedy.sail("git login", "github.com")))
+                    + ".\""),
+        captured.toString(StandardCharsets.UTF_8));
+    assertTrue(captured.toString(StandardCharsets.UTF_8).contains("sail git login github.com"));
+  }
+
   /**
    * Under {@code --json} a failure sail did not decide is internal, and one with no fix names none;
    * one it refused on purpose is an invalid request, its remedy kept.
@@ -120,6 +156,16 @@ class CliCommandTest {
         "{\"error\": {\"code\": \"internal\", \"message\": \"boom\", \"field_errors\": []}}",
         captured.toString(StandardCharsets.UTF_8).strip());
     assertEquals("invalid_request", CliCommand.refusalOf(new CliCommand.Refused("no")).code());
+    assertEquals(
+        "forbidden_admin_only",
+        CliCommand.refusalOf(
+                SailApiClient.Refused.of(Map.of("code", "forbidden_admin_only", "message", "No.")))
+            .code(),
+        "an API refusal keeps the API's code");
+    assertEquals(
+        "internal",
+        CliCommand.refusalOf(SailApiClient.Refused.of(Map.of("message", "No."))).code(),
+        "an envelope naming no code is an internal failure");
     var remedied = CliCommand.refusalOf(Remedied.state("Gone.", Remedy.of("Make it.")));
     assertEquals("internal", remedied.code());
     assertEquals("Gone.", remedied.message());

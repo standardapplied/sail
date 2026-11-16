@@ -99,7 +99,7 @@ class ConcurrentDispatchIT extends AbstractIncusIT {
       var specStore = new SpecStore(db);
       var reviewStore = new ReviewStore(db);
       var runStore = new RunStore(db);
-      new FdeStore(db).add(HANDLE, null, null, "admin");
+      new FdeStore(db).add(HANDLE, null, HANDLE + "@sail.invalid", "admin");
       TestLogins.store(db, HANDLE);
       seedSpec(specStore, "spec-a", List.of("app"));
       seedSpec(specStore, "spec-b", List.of("app"));

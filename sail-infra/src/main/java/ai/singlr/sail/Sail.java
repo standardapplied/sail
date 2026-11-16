@@ -12,6 +12,7 @@ import ai.singlr.sail.commands.EnrollCommand;
 import ai.singlr.sail.commands.EventsCommand;
 import ai.singlr.sail.commands.FdeCommand;
 import ai.singlr.sail.commands.GatewayCommand;
+import ai.singlr.sail.commands.GitCommand;
 import ai.singlr.sail.commands.HostCommand;
 import ai.singlr.sail.commands.InitCommand;
 import ai.singlr.sail.commands.JoinCommand;
@@ -48,6 +49,7 @@ import picocli.CommandLine.Help.Ansi;
       EnrollCommand.class,
       SpecCommand.class,
       AgentCommand.class,
+      GitCommand.class,
       EventsCommand.class,
       MigrateCommand.class,
       UpgradeCommand.class,

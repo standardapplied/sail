@@ -1840,7 +1840,8 @@ class ChangeFeedTest {
     void disable(String handle) {
       var fdes = new FdeStore(db);
       fdes.disableUnlisted(
-          fdes.list().stream().map(FdeStore.Fde::handle).filter(h -> !h.equals(handle)).toList());
+          fdes.list().stream().map(FdeStore.Fde::handle).filter(h -> !h.equals(handle)).toList(),
+          null);
     }
 
     /** Moves {@code room} to {@code project} as a sync from main applies it. */

@@ -42,6 +42,7 @@ import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.engine.SyncOperations;
 import ai.singlr.sail.engine.WatcherSpawner;
+import ai.singlr.sail.engine.WorkspaceOwner;
 import ai.singlr.sail.engine.Workspaces;
 import ai.singlr.sail.harness.Harness;
 import ai.singlr.sail.harness.Harnesses;
@@ -706,7 +707,16 @@ public final class SailOperations implements HostOperations {
             definitions,
             () -> attention);
     this.reviewOps = new ReviewOperations(reviewStore, specStore);
-    this.loginOps = new LoginOperations(fdeStore, runStore, this::publishOnBus);
+    var workspaces = hooks.workspaces();
+    this.loginOps =
+        new LoginOperations(
+            fdeStore,
+            runStore,
+            this::publishOnBus,
+            handle ->
+                workspaces.refresh(
+                    WorkspaceOwner.onThisBox(fdeStore, handle, box().handle()),
+                    projects::definition));
     this.dispatchOps =
         new DispatchOperations(
             shell,

@@ -18,6 +18,7 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.stream.Stream;
 
 /**
@@ -271,7 +272,7 @@ public abstract class AbstractIncusIT {
                 WorkspaceTemplate.CURRENT_KEY + "=v1",
                 WorkspaceTemplate.INPUTS_KEY
                     + "="
-                    + ProjectProvisioner.inputs(definition, WorkstationIdentity.registered())));
+                    + ProjectProvisioner.inputs(definition, Optional.empty())));
     assertTrue(recorded.ok(), recorded.reason());
     new SnapshotManager(shell).create(template, "v1");
   }

@@ -15,10 +15,8 @@ import ai.singlr.sail.config.ProjectDefinition;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.ContainerSailSetup;
 import ai.singlr.sail.engine.GitCredentials;
-import ai.singlr.sail.engine.LocalIdentity;
 import ai.singlr.sail.engine.NameValidator;
 import ai.singlr.sail.engine.OperatorCommand;
-import ai.singlr.sail.engine.PairingTrust;
 import ai.singlr.sail.engine.ProjectCatalog;
 import ai.singlr.sail.engine.ProjectPhase;
 import ai.singlr.sail.engine.ProjectProvisioner;
@@ -27,17 +25,16 @@ import ai.singlr.sail.engine.ProvisionTracker;
 import ai.singlr.sail.engine.RunPlace;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ShellExecutor;
+import ai.singlr.sail.engine.WorkspaceOwner;
 import ai.singlr.sail.engine.WorkspaceTemplate;
 import ai.singlr.sail.engine.Workspaces;
-import ai.singlr.sail.engine.WorkstationIdentity;
-import ai.singlr.sail.ssh.SshPublicKey;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Collection;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
-import java.util.concurrent.Callable;
 import java.util.function.Predicate;
 import java.util.function.Supplier;
 import picocli.CommandLine.Model.CommandSpec;
@@ -112,9 +109,11 @@ final class WorkspaceVerbs {
     };
   }
 
-  /** The person a workspace made on this box belongs to: the box's own, by its handle. */
-  static String owner() {
-    return Objects.toString(HostSync.handle(), "");
+  /** Person {@code handle} as the owner of a workspace of this box ({@link WorkspaceOwner#of}). */
+  static WorkspaceOwner ownerOf(String handle) {
+    try (var operations = OperationsFactory.open()) {
+      return operations.identity().workspaceOwner(handle);
+    }
   }
 
   /**
@@ -169,10 +168,10 @@ final class WorkspaceVerbs {
 
   /**
    * What {@code config}'s template is built from on this box: the base profile's pool ({@code
-   * host.yaml}'s, the default when it names none), the digest of the definition and the workstation
-   * key, the catalog's names, and a build that asks first whether a repo needs a token none was
-   * given for, outside the box's pairing lock, then under it runs the project's own provisioner
-   * against the template with its own progress file.
+   * host.yaml}'s, the default when it names none), the definition's digest, the catalog's names,
+   * and a build that asks first whether a repo needs a token none was given for, then runs the
+   * project's own provisioner against the template with its own progress file, with the caller's
+   * tokens for its clone and no git identity and no trusted key of anyone's.
    */
   static WorkspaceTemplate.Source source(
       ProjectDefinition config,
@@ -182,25 +181,23 @@ final class WorkspaceVerbs {
       OperatorCommand operator)
       throws IOException {
     var host = HostYaml.fromMap(YamlUtil.parseFile(SailPaths.hostConfigPath()));
-    var key = WorkstationIdentity.registered();
     var catalog = ProjectCatalog.here();
     var tokens = GitCredentials.known(config.repos(), gitToken);
     return source(
         host,
         config,
-        key,
+        tokens.values(),
         name -> catalog.read(name).isPresent(),
-        checkedThenPaired(
+        checked(
             config,
             tokens,
-            GitCredentials::asksForCredentials,
-            () -> dryRun ? null : PairingTrust.hold(SailPaths.controlPlaneDb()),
+            new ShellExecutor(false)::asksForCredentials,
             (into, fresh) -> {
               catalog.requireUnpruned(config.name());
               var tracker =
                   tracker(
                       progressOf(config.name()),
-                      ProjectProvisioner.inputs(config, WorkstationIdentity.registered()),
+                      ProjectProvisioner.inputs(config, Optional.empty()),
                       fresh,
                       dryRun);
               var listener = json ? ProvisionListener.NOOP : ConsoleProvisionListener.INSTANCE;
@@ -210,50 +207,45 @@ final class WorkspaceVerbs {
                         tracker,
                         listener,
                         new ProjectSkills(operations::projectFiles),
-                        WorkstationIdentity.registered(),
+                        Optional.empty(),
                         operator)
                     .provision(
-                        into,
-                        config,
-                        host,
-                        tokens,
-                        LocalIdentity.detect().git(),
-                        SailPaths.projectFilesDir(config.name()));
+                        into, config, host, tokens, null, SailPaths.projectFilesDir(config.name()));
               }
             }));
   }
 
   /**
    * A template build that asks first whether a repo needs a token none was given for ({@link
-   * #requireTokens}), outside the box's pairing lock, so a slow host holds up no other write of the
-   * box, then takes that lock ({@code pairing}, none in a dry run) while it {@code provision}s.
+   * #requireTokens}), then {@code provision}s.
    */
-  static WorkspaceTemplate.Build checkedThenPaired(
+  static WorkspaceTemplate.Build checked(
       ProjectDefinition config,
       Map<String, String> tokens,
       Predicate<String> asks,
-      Callable<? extends AutoCloseable> pairing,
       WorkspaceTemplate.Build provision) {
     return (into, fresh) -> {
       requireTokens(config, tokens, asks);
-      try (var held = pairing.call()) {
-        provision.into(into, fresh);
-      }
+      provision.into(into, fresh);
     };
   }
 
-  /** {@code config}'s template source on a box whose {@code host.yaml} is {@code host}. */
+  /**
+   * {@code config}'s template source on a box whose {@code host.yaml} is {@code host}: its digest
+   * is the definition's alone (T4), since a template holds no one's key.
+   */
   static WorkspaceTemplate.Source source(
       HostYaml host,
       ProjectDefinition config,
-      Optional<SshPublicKey> key,
+      Collection<String> tokens,
       Predicate<String> held,
       WorkspaceTemplate.Build build) {
     return new WorkspaceTemplate.Source(
         Objects.requireNonNullElse(host.pool(), HostYaml.DEFAULT_POOL),
-        ProjectProvisioner.inputs(config, key),
+        ProjectProvisioner.inputs(config, Optional.empty()),
         held,
-        build);
+        build,
+        tokens);
   }
 
   /** What a template build says it did. */

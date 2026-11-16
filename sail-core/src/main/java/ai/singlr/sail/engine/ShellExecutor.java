@@ -10,6 +10,10 @@ import java.io.FilterInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.time.Duration;
@@ -24,6 +28,8 @@ import java.util.function.Consumer;
  * mode (prints commands instead of executing) and configurable timeouts.
  */
 public final class ShellExecutor implements ShellExec {
+
+  private static final Duration PROBE_TIMEOUT = Duration.ofSeconds(3);
 
   private final boolean dryRun;
   private final Duration defaultTimeout;
@@ -52,6 +58,17 @@ public final class ShellExecutor implements ShellExec {
   @Override
   public Result exec(List<String> command, Path workDir, Duration timeout)
       throws IOException, InterruptedException, TimeoutException {
+    return exec(command, workDir, "", timeout);
+  }
+
+  @Override
+  public Result execWithInput(List<String> command, String input, Duration timeout)
+      throws IOException, InterruptedException, TimeoutException {
+    return exec(command, null, input, timeout);
+  }
+
+  private Result exec(List<String> command, Path workDir, String input, Duration timeout)
+      throws IOException, InterruptedException, TimeoutException {
     if (dryRun) {
       return dryRunResult(command);
     }
@@ -63,7 +80,9 @@ public final class ShellExecutor implements ShellExec {
     }
 
     var process = pb.start();
-    process.getOutputStream().close();
+    try (var stdin = process.getOutputStream()) {
+      stdin.write(input.getBytes(StandardCharsets.UTF_8));
+    }
 
     var stdout = new AtomicReference<String>("");
     var stderr = new AtomicReference<String>("");
@@ -224,6 +243,34 @@ public final class ShellExecutor implements ShellExec {
   @Override
   public boolean isDryRun() {
     return dryRun;
+  }
+
+  /**
+   * Whether a plain GET of {@code url}, sent without credentials and following no redirect, asks
+   * for them: a {@code 401}, or a {@code 403} that carries an authentication challenge. A {@code
+   * 403} without one is a refusal no token would lift, and a URL that cannot be asked within 3 s to
+   * connect and 3 s more for the answer asks for nothing.
+   */
+  @Override
+  public boolean asksForCredentials(String url) {
+    try (var client =
+        HttpClient.newBuilder()
+            .connectTimeout(PROBE_TIMEOUT)
+            .followRedirects(HttpClient.Redirect.NEVER)
+            .build()) {
+      var answer =
+          client.send(
+              HttpRequest.newBuilder(URI.create(url)).timeout(PROBE_TIMEOUT).GET().build(),
+              HttpResponse.BodyHandlers.discarding());
+      return answer.statusCode() == 401
+          || answer.statusCode() == 403
+              && answer.headers().firstValue("WWW-Authenticate").isPresent();
+    } catch (IOException | IllegalArgumentException e) {
+      return false;
+    } catch (InterruptedException e) {
+      Thread.currentThread().interrupt();
+      return false;
+    }
   }
 
   private static String readFully(InputStream in) {

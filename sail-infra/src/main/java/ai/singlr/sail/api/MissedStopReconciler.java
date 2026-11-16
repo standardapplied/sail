@@ -17,6 +17,7 @@ import ai.singlr.sail.engine.ContainerState;
 import ai.singlr.sail.engine.GuardrailTrigger;
 import ai.singlr.sail.engine.RunPlace;
 import ai.singlr.sail.engine.ShellExec;
+import ai.singlr.sail.engine.Workspaces;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.store.EventStore;
 import ai.singlr.sail.store.FdeStore;
@@ -28,13 +29,17 @@ import java.io.IOException;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.LongSupplier;
+import java.util.function.Predicate;
 import java.util.function.Supplier;
 import java.util.stream.Stream;
 
@@ -100,6 +105,9 @@ public final class MissedStopReconciler implements AutoCloseable {
    */
   static final Duration TIDY_LOOKBACK = Duration.ofMinutes(2);
 
+  /** How long a person stays disabled here before their stored logins are erased. */
+  static final Duration DISABLED_FOR = Duration.ofHours(24);
+
   /** How many unread reports of runs serving a review a pass reads before it replays a stop. */
   static final int READ_FIRST = 3;
 
@@ -137,6 +145,11 @@ public final class MissedStopReconciler implements AutoCloseable {
     default boolean instanceGone(RunPlace place) throws Exception {
       return false;
     }
+
+    /** None, by default ({@link Workspaces#disown}). */
+    default List<String> disown(Predicate<String> held) throws Exception {
+      return List.of();
+    }
   }
 
   /**
@@ -158,12 +171,17 @@ public final class MissedStopReconciler implements AutoCloseable {
   private final WatcherCoverage coverage;
   private final Supplier<String> localHandle;
   private final Supplier<Instant> clock;
+  private final Map<String, Long> disabledSince = new HashMap<>();
+  private LongSupplier nanos = System::nanoTime;
   private final FdeStore fdes;
   private final RunReports reports;
   private final PeriodicPass pass;
   private volatile Instant tidiedSince = Instant.EPOCH;
   private volatile Set<String> unansweredFirst = Set.of();
   private final Set<String> untidied = ConcurrentHashMap.newKeySet();
+  private final Set<String> undisowned = ConcurrentHashMap.newKeySet();
+  private volatile Map<String, String> lastRoster;
+  private volatile boolean unlisted;
   private final StrandedReviewRescue strandedReviews;
 
   public MissedStopReconciler(
@@ -258,6 +276,11 @@ public final class MissedStopReconciler implements AutoCloseable {
           throw new IOException("Container '" + instance + "' did not tidy its launch files.");
         }
       }
+
+      @Override
+      public List<String> disown(Predicate<String> held) throws Exception {
+        return Workspaces.onThisBox(shell).disown(held);
+      }
     };
   }
 
@@ -330,12 +353,13 @@ public final class MissedStopReconciler implements AutoCloseable {
    * Removes what may outlive a run but must not: the launch file of every run of this box that is
    * not live, which a launch that died before its wrapper read it left in its container (HL4), and
    * the logins of every person the roster no longer holds, which a removal that crashed before
-   * deleting them left on this runner (HL9), and what a push killed midway left in the host's
-   * staging directory. Only a container that had a run start or finish since {@link #TIDY_LOOKBACK}
-   * before the last pass is asked (every one, on the first pass after a start): a launch that dies
-   * leaves its file with a run that finishes, by its launch's cleanup or by this sweep. A container
-   * that does not answer, or does not run the tidy (a stopped one), is tried again on a later pass,
-   * and said once: not again until its tidy has succeeded.
+   * deleting them left on this runner (HL9), and their credentials in the workspaces they owned,
+   * and what a push killed midway left in the host's staging directory. Only a container that had a
+   * run start or finish since {@link #TIDY_LOOKBACK} before the last pass is asked (every one, on
+   * the first pass after a start): a launch that dies leaves its file with a run that finishes, by
+   * its launch's cleanup or by this sweep. A container that does not answer, or does not run the
+   * tidy (a stopped one), is tried again on a later pass, and said once: not again until its tidy
+   * has succeeded.
    */
   void removeLeftovers() {
     var pass = clock.get();
@@ -359,9 +383,80 @@ public final class MissedStopReconciler implements AutoCloseable {
       tidiedSince = pass.minus(TIDY_LOOKBACK);
     }
     ContainerFilePush.removeStaged(Duration.ofMinutes(1));
-    var swept = fdes.logins().sweep(id -> fdes.byId(id).isPresent());
+    var swept = fdes.logins().sweep(this::held);
     if (swept > 0) {
       System.err.println("  [reconcile] removed the logins of " + swept + " people removed");
+    }
+    disownRemoved();
+  }
+
+  /**
+   * Whether person {@code id} keeps their stored logins: unless their row is gone, or it has been
+   * disabled for {@link #DISABLED_FOR} of this process's monotonic time, so no clock step erases
+   * early, since a node cannot tell a person main removed from a round that did not list them, and
+   * disabling is undone by the next round that does. A restart starts the count again, which only
+   * keeps logins longer.
+   */
+  private boolean held(String id) {
+    var fde = fdes.byId(id);
+    if (fde.isEmpty() || fde.get().active()) {
+      disabledSince.remove(id);
+      return fde.isPresent();
+    }
+    var now = nanos.getAsLong();
+    return now - disabledSince.computeIfAbsent(id, seen -> now) < DISABLED_FOR.toNanos();
+  }
+
+  /** The monotonic clock the day a disabled person keeps their logins is counted on. */
+  MissedStopReconciler counting(LongSupplier elapsed) {
+    this.nanos = elapsed;
+    return this;
+  }
+
+  /**
+   * A person not active here, missing from the roster or disabled as a node marks one main removed,
+   * holds nothing usable here. Incus is listed only at start, when someone stopped being active (or
+   * a handle changed hands), or to retry a workspace not reached.
+   */
+  private void disownRemoved() {
+    var roster = new HashMap<String, String>();
+    fdes.list().stream()
+        .filter(FdeStore.Fde::active)
+        .forEach(fde -> roster.put(fde.handle(), fde.id()));
+    var gone = new HashSet<String>();
+    if (lastRoster != null) {
+      lastRoster.forEach(
+          (handle, id) -> {
+            if (!id.equals(roster.get(handle))) {
+              gone.add(handle);
+            }
+          });
+    }
+    if (lastRoster != null && gone.isEmpty() && undisowned.isEmpty()) {
+      lastRoster = roster;
+      return;
+    }
+    try {
+      var unreached =
+          unitProbe.disown(handle -> roster.containsKey(handle) && !gone.contains(handle));
+      var left = new HashSet<String>();
+      for (var line : unreached) {
+        var instance = line.substring(0, Math.max(0, line.indexOf(':')));
+        left.add(instance);
+        if (!undisowned.contains(instance)) {
+          System.err.println("  [reconcile] a removed person's credentials are left in " + line);
+        }
+      }
+      undisowned.clear();
+      undisowned.addAll(left);
+      lastRoster = roster;
+      unlisted = false;
+    } catch (Exception e) {
+      if (!unlisted) {
+        System.err.println(
+            "  [reconcile] could not take removed people's credentials out: " + e.getMessage());
+      }
+      unlisted = true;
     }
   }
 

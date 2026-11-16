@@ -36,7 +36,8 @@ public final class RemoteCommandRunner {
   private static final Set<String> MACHINE_VERBS = Set.of("_pty-child", "_pty-selftest");
   private static final List<String> LOCAL_TERMINAL_HOST = List.of("_pty-host", "--local");
   private static final Set<String> INTERACTIVE_COMMANDS = Set.of("shell", "exec");
-  private static final List<String> LOGIN = List.of("agent", "login");
+  private static final Set<List<String>> LOGINS =
+      Set.of(List.of("agent", "login"), List.of("git", "login"));
   private static final Set<String> LOGIN_VERBS = Set.of("list", "use", "remove");
   private static final Set<String> LOGIN_NO_VALUE = Set.of("--help", "-h", "--dry-run");
   private static final Set<String> LOGIN_VALUED_OPTIONS = Set.of("--name", "--kind", "--fde");
@@ -190,13 +191,13 @@ public final class RemoteCommandRunner {
   }
 
   /**
-   * Whether {@code args} store a login: {@code agent login} whose first positional word, past its
-   * options and their values, is not one of its verbs, and that asks for neither its help nor a dry
-   * run, so its value is never typed on this machine's echoing terminal. A login named {@code use}
-   * is a name, not the verb.
+   * Whether {@code args} store a login: {@code agent login} or {@code git login} whose first
+   * positional word, past its options and their values, is not one of its verbs, and that asks for
+   * neither its help nor a dry run, so its value is never typed on this machine's echoing terminal.
+   * A login named {@code use} is a name, not the verb.
    */
   private static boolean storesALogin(String... args) {
-    if (args.length < 3 || !List.of(args).subList(0, 2).equals(LOGIN)) {
+    if (args.length < 3 || !LOGINS.contains(List.of(args).subList(0, 2))) {
       return false;
     }
     var rest = List.of(args).subList(2, args.length);

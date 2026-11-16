@@ -29,6 +29,7 @@ import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -131,7 +132,8 @@ class WorkspacesTest {
         (into, fresh) -> {
           builtInto.add(into);
           builtFresh.add(fresh);
-        });
+        },
+        List.of());
   }
 
   private WorkspaceTemplate.Source source() {
@@ -185,7 +187,7 @@ class WorkspacesTest {
   }
 
   private Workspaces workspaces(ShellExec shell, LongSupplier nanos) {
-    return new Workspaces(shell, shell, nanos, locks(), () -> 65536);
+    return new Workspaces(shell, shell, nanos, locks(), () -> 65536, url -> false);
   }
 
   private WorkspaceTemplate templates(ShellExec shell) {
@@ -254,7 +256,8 @@ class WorkspacesTest {
         workspaces(
                 shell,
                 ticks(0, ms(210), ms(1110), ms(1110), ms(1200), ms(1300), ms(1400), ms(1410)))
-            .create(acme(), "fix-login", source(), tempDir.resolve("no-files"), "eng");
+            .create(
+                acme(), "fix-login", source(), tempDir.resolve("no-files"), "eng", TestOwners::of);
 
     assertEquals(
         List.of(new ProjectProvisioner.Instance("acme--tmpl", Optional.of("tank"), TEMPLATE_OF)),
@@ -319,7 +322,7 @@ class WorkspacesTest {
 
     var created =
         workspaces(shell, ticks(0, ms(150), ms(500), ms(500), ms(600), ms(650), ms(690), ms(700)))
-            .create(acme(), "fix-login", source(), tempDir, "eng");
+            .create(acme(), "fix-login", source(), tempDir, "eng", TestOwners::of);
 
     assertEquals(List.of(), builtInto);
     assertEquals(
@@ -350,7 +353,7 @@ class WorkspacesTest {
 
     var created =
         workspaces(shell, ticks(0, 1, 2, 3, 4, 5, 6, 7))
-            .create(acme(), "fix-login", source(), tempDir, "eng");
+            .create(acme(), "fix-login", source(), tempDir, "eng", TestOwners::of);
 
     assertEquals(List.of(false), builtFresh);
     var start = indexOf(shell, List.of("incus", "start", "acme--tmpl"));
@@ -405,7 +408,8 @@ class WorkspacesTest {
         name -> false,
         (into, fresh) -> {
           throw new IOException("apt-get failed");
-        });
+        },
+        List.of());
   }
 
   @Test
@@ -416,7 +420,10 @@ class WorkspacesTest {
 
     assertEquals("apt-get failed", failure.getMessage());
     assertEquals(
-        List.of("incus start acme--tmpl", "incus stop acme--tmpl"),
+        List.of(
+            "incus start acme--tmpl",
+            String.join(" ", strip("acme--tmpl")),
+            "incus stop acme--tmpl"),
         shell.invocations().stream()
             .filter(
                 c ->
@@ -508,7 +515,9 @@ class WorkspacesTest {
     var failure =
         assertThrows(
             IllegalStateException.class,
-            () -> workspaces(shell, ticks()).create(acme(), "fix-login", source(), tempDir, "eng"));
+            () ->
+                workspaces(shell, ticks())
+                    .create(acme(), "fix-login", source(), tempDir, "eng", TestOwners::of));
 
     assertEquals(
         "Incus has the ZFS pools fast, tank and the base profile's pool 'devpool' is none of them,"
@@ -529,9 +538,9 @@ class WorkspacesTest {
 
     List<Executable> verbs =
         List.of(
-            () -> workspaces.create(acme(), "fix-login", source(), tempDir, "eng"),
+            () -> workspaces.create(acme(), "fix-login", source(), tempDir, "eng", TestOwners::of),
             () -> templates(shell).ensure(acme(), source()),
-            () -> workspaces.start("acme", "fix-login"),
+            () -> workspaces.start(acme(), "fix-login", TestOwners::of),
             () -> workspaces.stop("acme", "fix-login", NO_RUN),
             () -> workspaces.delete("acme", "fix-login", NO_RUN, instance -> {}));
     for (var verb : verbs) {
@@ -638,7 +647,9 @@ class WorkspacesTest {
   void startResumesAStoppedWorkspaceAndSaysWhatItsResumeTook() throws Exception {
     var shell = incus(DIR_AND_ZFS, list(workspace("acme", "fix-login", "Stopped", "v1")), "[]");
 
-    var changed = workspaces(shell, ticks(ms(1000), ms(1350), ms(1800))).start("acme", "fix-login");
+    var changed =
+        workspaces(shell, ticks(ms(1000), ms(1350), ms(1800)))
+            .start(acme(), "fix-login", TestOwners::of);
 
     assertEquals(
         new Workspaces.Changed(
@@ -656,11 +667,33 @@ class WorkspacesTest {
     assertTrue(0 <= start && start < bus, String.join("\n", shell.invocations()));
   }
 
+  /** Low 1 of the proof: a start whose gh login fails says the workspace runs and what it lacks. */
+  @Test
+  void aStartWhoseGhLoginFailsSaysTheWorkspaceRunsAndIsGivenAgainAtItsNextStart() {
+    var shell =
+        incus(DIR_AND_ZFS, list(owned("acme-fix-login", "Stopped", "ana")), "[]")
+            .onFail("gh auth login", "error connecting to api.github.com");
+    var ana =
+        new WorkspaceOwner(
+            "ana", "Ana", "ana@sail.invalid", Map.of("github.com", "ghp_a"), List.of());
+
+    var failure =
+        assertThrows(
+            IOException.class,
+            () -> workspaces(shell, ticks(0, 1, 2)).start(acme(), "fix-login", handle -> ana));
+
+    assertEquals(
+        "Workspace fix-login of acme is running, but its owner's credentials were not all given,"
+            + " and are given again at its next start: Failed to log gh in for github.com in"
+            + " acme-fix-login: error connecting to api.github.com",
+        failure.getMessage());
+  }
+
   @Test
   void startingARunningWorkspaceChangesNothing() throws Exception {
     var shell = incus(DIR_AND_ZFS, list(workspace("acme", "fix-login", "Running", "v1")), "[]");
 
-    var changed = workspaces(shell, ticks()).start("acme", "fix-login");
+    var changed = workspaces(shell, ticks()).start(acme(), "fix-login", TestOwners::of);
 
     assertEquals(Workspaces.Change.ALREADY_RUNNING, changed.change());
     assertFalse(shell.invocations().stream().anyMatch(c -> c.startsWith("incus start")));
@@ -699,7 +732,13 @@ class WorkspacesTest {
         stderrOf(
             () ->
                 workspaces(shell, ticks(0, 1, 2, 3, 4, 5, 6, 7))
-                    .create(acme(), "fix-login", source(), tempDir.resolve("no-files"), "eng"));
+                    .create(
+                        acme(),
+                        "fix-login",
+                        source(),
+                        tempDir.resolve("no-files"),
+                        "eng",
+                        TestOwners::of));
 
     assertTrue(indexOf(shell, copyArgv("v1")) >= 0, String.join("\n", shell.invocations()));
     assertEquals(1, said.split("Pool tank is DEGRADED", -1).length - 1, said);
@@ -728,10 +767,12 @@ class WorkspacesTest {
 
     for (Executable verb :
         List.<Executable>of(
-            () -> workspaces.create(acme(), "second", source(), tempDir.resolve("no-files"), "eng"),
+            () ->
+                workspaces.create(
+                    acme(), "second", source(), tempDir.resolve("no-files"), "eng", TestOwners::of),
             () -> templates(shell).ensure(acme(), source()),
             () -> workspaces.stop("acme", "fix-login", NO_RUN),
-            () -> workspaces.start("acme", "fix-login"),
+            () -> workspaces.start(acme(), "fix-login", TestOwners::of),
             () -> workspaces.delete("acme", "fix-login", NO_RUN, instance -> {}))) {
       assertEquals(refusal, assertThrows(IllegalStateException.class, verb).getMessage());
     }
@@ -751,14 +792,16 @@ class WorkspacesTest {
             list(template("v1", INPUTS), workspace("acme", "fix-login", "Running", "v1")),
             snapshots("v1"));
     var hanging = new TimingOutShell(scripted, "zpool status");
-    var workspaces = new Workspaces(hanging, hanging, ticks(), locks(), () -> 65536);
+    var workspaces = new Workspaces(hanging, hanging, ticks(), locks(), () -> 65536, url -> false);
     var refusal =
         "Pool tank is a mirror whose health Sail cannot tell: zpool status did not answer within"
             + " 10 s, so no workspace or template is changed on it. See sudo zpool status tank.";
 
     for (Executable verb :
         List.<Executable>of(
-            () -> workspaces.create(acme(), "second", source(), tempDir.resolve("no-files"), "eng"),
+            () ->
+                workspaces.create(
+                    acme(), "second", source(), tempDir.resolve("no-files"), "eng", TestOwners::of),
             () -> workspaces.stop("acme", "fix-login", NO_RUN))) {
       assertEquals(refusal, assertThrows(IllegalStateException.class, verb).getMessage());
     }
@@ -880,13 +923,14 @@ class WorkspacesTest {
     var stop =
         assertThrows(IllegalArgumentException.class, () -> workspaces.stop("acme", "main", NO_RUN));
     var start =
-        assertThrows(IllegalArgumentException.class, () -> workspaces.start("acme", "main"));
+        assertThrows(
+            IllegalArgumentException.class, () -> workspaces.start(acme(), "main", TestOwners::of));
     var shellIn =
         assertThrows(IllegalArgumentException.class, () -> workspaces.running("acme", "main"));
     var create =
         assertThrows(
             IllegalArgumentException.class,
-            () -> workspaces.create(acme(), "main", source(), tempDir, "eng"));
+            () -> workspaces.create(acme(), "main", source(), tempDir, "eng", TestOwners::of));
 
     var prefix =
         "'main' is acme's default workspace, the project's own container, which workspace"
@@ -914,7 +958,9 @@ class WorkspacesTest {
     var failure =
         assertThrows(
             IllegalArgumentException.class,
-            () -> workspaces(shell, ticks()).create(config, "abcd", source(), tempDir, "eng"));
+            () ->
+                workspaces(shell, ticks())
+                    .create(config, "abcd", source(), tempDir, "eng", TestOwners::of));
 
     assertEquals(
         "Workspace 'abcd' of "
@@ -938,7 +984,9 @@ class WorkspacesTest {
     var failure =
         assertThrows(
             IllegalArgumentException.class,
-            () -> workspaces(shell, ticks()).create(config, "a", source(), tempDir, "eng"));
+            () ->
+                workspaces(shell, ticks())
+                    .create(config, "a", source(), tempDir, "eng", TestOwners::of));
 
     assertEquals(
         project
@@ -964,19 +1012,19 @@ class WorkspacesTest {
     var instance =
         assertThrows(
             IllegalArgumentException.class,
-            () -> workspaces.create(acme(), "taken", held, tempDir, "eng"));
+            () -> workspaces.create(acme(), "taken", held, tempDir, "eng", TestOwners::of));
     var project =
         assertThrows(
             IllegalArgumentException.class,
-            () -> workspaces.create(acme(), "billing", held, tempDir, "eng"));
+            () -> workspaces.create(acme(), "billing", held, tempDir, "eng", TestOwners::of));
     var existing =
         assertThrows(
             IllegalStateException.class,
-            () -> workspaces.create(acme(), "fix-login", held, tempDir, "eng"));
+            () -> workspaces.create(acme(), "fix-login", held, tempDir, "eng", TestOwners::of));
     var invalid =
         assertThrows(
             IllegalArgumentException.class,
-            () -> workspaces.create(acme(), "Fix_Login", held, tempDir, "eng"));
+            () -> workspaces.create(acme(), "Fix_Login", held, tempDir, "eng", TestOwners::of));
 
     assertEquals(
         "Workspace 'taken' of acme would be the instance 'acme-taken', which Incus already has."
@@ -1007,7 +1055,9 @@ class WorkspacesTest {
     var failure =
         assertThrows(
             IllegalArgumentException.class,
-            () -> workspaces(shell, ticks()).create(config, "tmpl", source(), tempDir, "eng"));
+            () ->
+                workspaces(shell, ticks())
+                    .create(config, "tmpl", source(), tempDir, "eng", TestOwners::of));
 
     assertEquals(
         "Workspace 'tmpl' of acme- would be the instance 'acme--tmpl', a name kept for templates."
@@ -1051,7 +1101,9 @@ class WorkspacesTest {
     var failure =
         assertThrows(
             IllegalStateException.class,
-            () -> workspaces(shell, ticks()).create(acme(), "fix-login", source(), tempDir, "eng"));
+            () ->
+                workspaces(shell, ticks())
+                    .create(acme(), "fix-login", source(), tempDir, "eng", TestOwners::of));
 
     assertEquals(
         "acme--tmpl is on pool 'devpool', which is not ZFS, so a copy of it would be a full copy,"
@@ -1072,7 +1124,7 @@ class WorkspacesTest {
             IOException.class,
             () ->
                 workspaces(shell, ticks(0, 1, 2))
-                    .create(acme(), "fix-login", source(), tempDir, "eng"));
+                    .create(acme(), "fix-login", source(), tempDir, "eng", TestOwners::of));
 
     assertEquals(
         "Workspace 'fix-login' could not be made its own: fatal: could not read from remote",
@@ -1093,7 +1145,8 @@ class WorkspacesTest {
         assertThrows(
             IOException.class,
             () ->
-                workspaces(shell, ticks(0)).create(acme(), "fix-login", source(), tempDir, "eng"));
+                workspaces(shell, ticks(0))
+                    .create(acme(), "fix-login", source(), tempDir, "eng", TestOwners::of));
 
     assertEquals(
         "Failed to clone acme--tmpl/v1 as 'acme-fix-login': Error: Instance name already in use",
@@ -1169,7 +1222,7 @@ class WorkspacesTest {
             IOException.class,
             () ->
                 workspaces(shell, ticks(0, 1, 2))
-                    .create(acme(), "fix-login", source(), tempDir, "eng"));
+                    .create(acme(), "fix-login", source(), tempDir, "eng", TestOwners::of));
 
     assertEquals(
         "Failed to delete container 'acme-fix-login': busy",
@@ -1184,7 +1237,8 @@ class WorkspacesTest {
 
     var failure =
         assertThrows(
-            IOException.class, () -> workspaces(shell, ticks(0, 1, 2)).start("acme", "fix-login"));
+            IOException.class,
+            () -> workspaces(shell, ticks(0, 1, 2)).start(acme(), "fix-login", TestOwners::of));
 
     assertEquals(
         "Workspace 'acme-fix-login' did not come up: the dev user's session bus did not come up"
@@ -1236,7 +1290,9 @@ class WorkspacesTest {
     var failure =
         assertThrows(
             IllegalArgumentException.class,
-            () -> workspaces(shell, ticks()).create(acme(), "fix", source(), tempDir, "eng"));
+            () ->
+                workspaces(shell, ticks())
+                    .create(acme(), "fix", source(), tempDir, "eng", TestOwners::of));
 
     assertEquals(
         "Workspace 'fix' of acme would be the instance 'acme-fix', which Incus already has. Give"
@@ -1255,11 +1311,11 @@ class WorkspacesTest {
     shells.addAll(List.of(fresh, stale, stopped, live));
 
     workspaces(fresh, ticks(0, 1, 2, 3, 4, 5, 6, 7))
-        .create(acme(), "fix-login", source(), tempDir, "eng");
+        .create(acme(), "fix-login", source(), tempDir, "eng", TestOwners::of);
     workspaces(fresh, ticks()).list("acme");
     workspaces(stale, ticks(0, 1, 2, 3, 4, 5, 6, 7))
-        .create(acme(), "fix-login", source(), tempDir, "eng");
-    workspaces(stopped, ticks(0, 1, 2)).start("acme", "w");
+        .create(acme(), "fix-login", source(), tempDir, "eng", TestOwners::of);
+    workspaces(stopped, ticks(0, 1, 2)).start(acme(), "w", TestOwners::of);
     workspaces(live, ticks()).running("acme", "w");
     workspaces(live, ticks()).stop("acme", "w", NO_RUN);
     workspaces(live, ticks()).delete("acme", "w", NO_RUN, instance -> {});
@@ -1292,8 +1348,12 @@ class WorkspacesTest {
         printf '%s\\n' "$project" > /etc/hostname
         hostname "$project"
         sed -i "s/^\\(127\\.0\\.1\\.1[[:space:]]*\\).*/\\1$project/" /etc/hosts
-        rm -f /etc/ssh/ssh_host_*
-        ssh-keygen -A >/dev/null
+        keys=$(mktemp -d /etc/ssh/sail-keys.XXXXXX)
+        mkdir -p "$keys/etc/ssh"
+        ssh-keygen -A -f "$keys" >/dev/null
+        for key in /etc/ssh/ssh_host_*; do [ -e "$keys/etc/ssh/${key##*/}" ] || rm -f "$key"; done
+        mv -f "$keys"/etc/ssh/ssh_host_* /etc/ssh/
+        rm -rf "$keys"
         step identity
         as_dev() { runuser -u dev -- env HOME=/home/dev "$@"; }
         retries=0
@@ -1338,7 +1398,19 @@ class WorkspacesTest {
         step repos
         printf 'sail-count fetch_retries %s\\n' "$retries"
         for _ in $(seq 1 300); do systemctl show --property=Version >/dev/null 2>&1 && break; sleep 0.1; done
-        systemctl try-restart ssh.service
+        for _ in $(seq 1 300); do
+          state=$(systemctl show --property=ActiveState --value ssh.service)
+          case $state in activating|deactivating|reloading) sleep 0.1 ;; *) break ;; esac
+        done
+        case $state in activating|deactivating|reloading)
+          echo "ssh.service was still $state after 30 s of waiting for it to finish starting" >&2
+          exit 1 ;;
+        esac
+        if ! systemctl try-restart ssh.service; then
+          printf 'ssh.service: %s; %s\\n' "$(systemctl show --property=Result --value ssh.service)" \\
+            "$(journalctl --unit ssh.service --lines 3 --output cat --no-pager 2>&1 | paste -s -d ';' -)" >&2
+          exit 1
+        fi
         step sshd
         for _ in $(seq 1 300); do [ -S /run/user/1000/bus ] && break; sleep 0.1; done
         if [ ! -S /run/user/1000/bus ]; then
@@ -1434,7 +1506,7 @@ class WorkspacesTest {
     var shell = incus(DIR_AND_ZFS, list(template("v1", INPUTS)), snapshots("v1"));
 
     workspaces(shell, ticks(0, 1, 2, 3, 4, 5, 6, 7))
-        .create(acme(), "fix-login", source(), files, "eng");
+        .create(acme(), "fix-login", source(), files, "eng", TestOwners::of);
 
     var calls = shell.invocations();
     var prepare = indexOf(shell, prepareArgv());
@@ -1485,7 +1557,7 @@ class WorkspacesTest {
             IOException.class,
             () ->
                 workspaces(shell, ticks(0, 1, 2, 3, 4, 5))
-                    .create(acme(), "fix-login", source(), tempDir, "eng"));
+                    .create(acme(), "fix-login", source(), tempDir, "eng", TestOwners::of));
 
     assertEquals(
         "Workspace 'fix-login' could not be marked whole: disk full", failure.getMessage());
@@ -1512,7 +1584,9 @@ class WorkspacesTest {
             + " it again, which replaces it: sail project workspace create acme fix-login.";
     assertEquals(
         refusal,
-        assertThrows(IllegalStateException.class, () -> workspaces.start("acme", "fix-login"))
+        assertThrows(
+                IllegalStateException.class,
+                () -> workspaces.start(acme(), "fix-login", TestOwners::of))
             .getMessage());
     assertEquals(
         refusal,
@@ -1522,7 +1596,7 @@ class WorkspacesTest {
         shell.invocations().stream()
             .anyMatch(c -> c.startsWith("incus start") || c.startsWith("incus exec")));
 
-    workspaces.create(acme(), "fix-login", source(), tempDir, "eng");
+    workspaces.create(acme(), "fix-login", source(), tempDir, "eng", TestOwners::of);
 
     var deleted = indexOf(shell, List.of("incus", "delete", "acme-fix-login", "--force"));
     assertTrue(
@@ -1548,8 +1622,8 @@ class WorkspacesTest {
 
     for (Executable verb :
         List.<Executable>of(
-            () -> workspaces.create(acme(), "fix-login", source(), tempDir, "eng"),
-            () -> workspaces.start("acme", "fix-login"),
+            () -> workspaces.create(acme(), "fix-login", source(), tempDir, "eng", TestOwners::of),
+            () -> workspaces.start(acme(), "fix-login", TestOwners::of),
             () -> workspaces.running("acme", "fix-login"))) {
       assertEquals(refusal, assertThrows(IllegalStateException.class, verb).getMessage());
     }
@@ -1630,7 +1704,9 @@ class WorkspacesTest {
     var failure =
         assertThrows(
             IllegalStateException.class,
-            () -> workspaces(shell, ticks()).create(acme(), "fix", source(), tempDir, "eng"));
+            () ->
+                workspaces(shell, ticks())
+                    .create(acme(), "fix", source(), tempDir, "eng", TestOwners::of));
 
     assertEquals(
         "Instance acme-backup carries the keys of workspace 'fix' of acme under another name."
@@ -1647,7 +1723,8 @@ class WorkspacesTest {
             "devpool",
             INPUTS,
             name -> false,
-            (into, fresh) -> held.add(Files.exists(locks().resolve("acme--tmpl.machinery.lock"))));
+            (into, fresh) -> held.add(Files.exists(locks().resolve("acme--tmpl.machinery.lock"))),
+            List.of());
 
     templates(shell).ensure(acme(), source);
 
@@ -1675,7 +1752,9 @@ class WorkspacesTest {
     var failure =
         assertThrows(
             IllegalArgumentException.class,
-            () -> workspaces(shell, ticks()).create(acme(), "fix-", source(), tempDir, "eng"));
+            () ->
+                workspaces(shell, ticks())
+                    .create(acme(), "fix-", source(), tempDir, "eng", TestOwners::of));
 
     assertEquals(
         "Workspace 'fix-' ends in '-', and Incus names no instance so. Give the workspace another"
@@ -1696,7 +1775,7 @@ class WorkspacesTest {
 
     var created =
         workspaces(shell, ticks(0, 1, 2, 3, 4, 5, 6, 7))
-            .create(acme(), "fix-login", source(), tempDir, "eng");
+            .create(acme(), "fix-login", source(), tempDir, "eng", TestOwners::of);
 
     assertEquals("tank", created.template().pool());
     assertTrue(indexOf(shell, copyArgv("v1")) >= 0);
@@ -1752,7 +1831,8 @@ class WorkspacesTest {
                 firstBuilding.countDown();
                 awaitParked(secondThread);
               }
-            });
+            },
+            List.of());
     var clock = ticks(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15);
     var first = new FutureTask<Object>(() -> outcome(box, clock, firstName, source));
     var second = new FutureTask<Object>(() -> outcome(box, clock, secondName, source));
@@ -1776,8 +1856,8 @@ class WorkspacesTest {
   private Object outcome(
       Box box, LongSupplier clock, String name, WorkspaceTemplate.Source source) {
     try {
-      return new Workspaces(box, box, clock, locks(), () -> 65536)
-          .create(acme(), name, source, tempDir, "eng");
+      return new Workspaces(box, box, clock, locks(), () -> 65536, url -> false)
+          .create(acme(), name, source, tempDir, "eng", TestOwners::of);
     } catch (Exception refused) {
       return refused.getMessage();
     }
@@ -1864,6 +1944,10 @@ class WorkspacesTest {
 
     synchronized int copies() {
       return copies;
+    }
+
+    synchronized String key(String name, String key) {
+      return instances.get(name).keys().get(key);
     }
 
     @Override
@@ -1985,7 +2069,12 @@ class WorkspacesTest {
             () -> {
               checked.set(workspaces.checkSpec(FIX, INPUTS, name -> false));
               workspaces.enterSpec(
-                  checked.get(), acme(), "uday", tempDir.resolve("no-files"), whole -> {});
+                  checked.get(),
+                  acme(),
+                  "uday",
+                  TestOwners::of,
+                  tempDir.resolve("no-files"),
+                  whole -> {});
             });
 
     assertTrue(
@@ -2095,7 +2184,8 @@ class WorkspacesTest {
     deleted.set(true);
 
     var entered =
-        workspaces.enterSpec(check, acme(), "uday", tempDir.resolve("no-files"), whole -> {});
+        workspaces.enterSpec(
+            check, acme(), "uday", TestOwners::of, tempDir.resolve("no-files"), whole -> {});
 
     assertInstanceOf(Workspaces.Made.class, entered);
     assertTrue(
@@ -2134,22 +2224,6 @@ class WorkspacesTest {
         refused.getMessage());
   }
 
-  /** A box with no handle of its own makes a workspace no one's, never an owner that is blank. */
-  @Test
-  void aWorkspaceMadeOnABoxWithNoHandleCarriesNoOwner() throws Exception {
-    var shell = incus(DIR_AND_ZFS, list(template("v1", INPUTS)), snapshots("v1"));
-
-    workspaces(shell, ticks(0, 1, 2, 3, 4, 5, 6, 7))
-        .create(acme(), "fix-login", source(), tempDir.resolve("no-files"), "");
-
-    var copy =
-        shell.invocations().stream()
-            .filter(c -> c.startsWith("incus copy "))
-            .findFirst()
-            .orElseThrow();
-    assertFalse(copy.contains("user.sail.owner"), copy);
-  }
-
   /**
    * High 2: a spec's workspace a create left half-made (its dispatch killed: {@code creating} set,
    * no ready mark) is never entered by a lane: the next entry deletes it and makes it again.
@@ -2172,7 +2246,8 @@ class WorkspacesTest {
 
     var check = workspaces.checkSpec(FIX, INPUTS, name -> false);
     var entered =
-        workspaces.enterSpec(check, acme(), "uday", tempDir.resolve("no-files"), whole -> {});
+        workspaces.enterSpec(
+            check, acme(), "uday", TestOwners::of, tempDir.resolve("no-files"), whole -> {});
 
     assertFalse(check.whole());
     assertInstanceOf(Workspaces.Made.class, entered);
@@ -2227,7 +2302,8 @@ class WorkspacesTest {
     var made =
         assertInstanceOf(
             Workspaces.Made.class,
-            workspaces.enterSpec(check, acme(), "uday", tempDir.resolve("no-files"), whole -> {}));
+            workspaces.enterSpec(
+                check, acme(), "uday", TestOwners::of, tempDir.resolve("no-files"), whole -> {}));
 
     assertFalse(check.whole());
     assertFalse(check.stale());
@@ -2382,7 +2458,7 @@ class WorkspacesTest {
     var reused =
         assertInstanceOf(
             Workspaces.Reused.class,
-            workspaces.enterSpec(check, acme(), "uday", tempDir, whole -> {}));
+            workspaces.enterSpec(check, acme(), "uday", TestOwners::of, tempDir, whole -> {}));
 
     assertEquals(new Workspaces.Reused("acme-fix-login", true), reused);
     var start = indexOf(shell, List.of("incus", "start", "acme-fix-login"));
@@ -2421,15 +2497,18 @@ class WorkspacesTest {
     var refused =
         assertThrows(
             IOException.class,
-            () -> workspaces.enterSpec(check, acme(), "uday", tempDir, whole -> {}));
+            () ->
+                workspaces.enterSpec(check, acme(), "uday", TestOwners::of, tempDir, whole -> {}));
 
     assertTrue(
         refused
             .getMessage()
             .startsWith(
-                "Workspace acme-fix-login could not be made uday's, so no run of theirs goes in"
-                    + " it: "),
+                "Workspace acme-fix-login could not be made nobody's, so no run goes in it: "),
         refused.getMessage());
+    assertFalse(
+        shell.invocations().stream().anyMatch(c -> c.contains("sail-strip")),
+        "nothing is given while the workspace is still labelled another's");
   }
 
   /**
@@ -2479,8 +2558,13 @@ class WorkspacesTest {
     var locks = locks();
 
     new Workspaces(
-            observer, new ShellExecutor(true), ticks(0, 1, 2, 3, 4, 5, 6, 7), locks, () -> 65536)
-        .create(acme(), "fix-login", source(), tempDir, "eng");
+            observer,
+            new ShellExecutor(true),
+            ticks(0, 1, 2, 3, 4, 5, 6, 7),
+            locks,
+            () -> 65536,
+            url -> false)
+        .create(acme(), "fix-login", source(), tempDir, "eng", TestOwners::of);
 
     assertFalse(Files.exists(locks.resolve("workspace-create.lock")));
   }
@@ -2499,7 +2583,7 @@ class WorkspacesTest {
     assertTrue(check.running());
     assertEquals(
         new Workspaces.Reused("acme-fix-login", false),
-        workspaces.enterSpec(check, acme(), "uday", tempDir, whole -> {}));
+        workspaces.enterSpec(check, acme(), "uday", TestOwners::of, tempDir, whole -> {}));
     assertFalse(
         shell.invocations().stream()
             .anyMatch(
@@ -2534,12 +2618,20 @@ class WorkspacesTest {
       var check = spec.checkSpec(FIX, INPUTS, name -> false);
       assertThrows(
           Workspaces.Busy.class,
-          () -> spec.enterSpec(check, acme(), "uday", tempDir.resolve("no-files"), whole -> {}));
+          () ->
+              spec.enterSpec(
+                  check, acme(), "uday", TestOwners::of, tempDir.resolve("no-files"), whole -> {}));
       assertThrows(
           Workspaces.Busy.class,
           () ->
               workspaces(shell, ticks(0, 0, waited))
-                  .create(acme(), "second", source(), tempDir.resolve("no-files"), "eng"));
+                  .create(
+                      acme(),
+                      "second",
+                      source(),
+                      tempDir.resolve("no-files"),
+                      "eng",
+                      TestOwners::of));
     } finally {
       release.countDown();
       other.join();
@@ -2599,5 +2691,701 @@ class WorkspacesTest {
     assertEquals(
         List.of("main:null:null", "fix-login:fix-login:uday"),
         rows.stream().map(row -> row.name() + ":" + row.spec() + ":" + row.owner()).toList());
+  }
+
+  private static final WorkspaceOwner UDAY =
+      new WorkspaceOwner(
+          "uday",
+          "Uday C",
+          "uday@sail.invalid",
+          Map.of("github.com", "ghp_uday"),
+          List.of("ssh-ed25519 AAAAuday uday@laptop", "ssh-ed25519 AAAAbox uday@box"));
+  private static final WorkspaceOwner ANA =
+      new WorkspaceOwner(
+          "ana",
+          "Ana",
+          "ana@sail.invalid",
+          Map.of("github.com", "ghp_ana"),
+          List.of("ssh-ed25519 AAAAana ana@laptop"));
+
+  /** A shell that keeps what each push carried, by destination, before its staging file goes. */
+  private static final class Pushing implements ShellExec {
+    private final ScriptedShellExecutor shell;
+    private final Map<String, String> pushed = new LinkedHashMap<>();
+
+    Pushing(ScriptedShellExecutor shell) {
+      this.shell = shell;
+    }
+
+    @Override
+    public Result exec(List<String> command) throws IOException {
+      keep(command);
+      return shell.exec(command);
+    }
+
+    @Override
+    public Result exec(List<String> command, Path workDir, Duration timeout) throws IOException {
+      keep(command);
+      return shell.exec(command, workDir, timeout);
+    }
+
+    @Override
+    public boolean isDryRun() {
+      return false;
+    }
+
+    private void keep(List<String> command) throws IOException {
+      if (command.size() > 3 && command.subList(0, 3).equals(List.of("incus", "file", "push"))) {
+        pushed.put(command.getLast(), Files.readString(Path.of(command.get(command.size() - 2))));
+      }
+    }
+  }
+
+  private static List<String> strip(String instance, String... identity) {
+    var argv =
+        new ArrayList<>(
+            List.of(
+                "incus",
+                "exec",
+                instance,
+                "--",
+                "bash",
+                "-c",
+                WorkspaceCredentials.STRIP,
+                "sail-strip"));
+    argv.addAll(List.of(identity));
+    return argv;
+  }
+
+  private static int indexWhere(ScriptedShellExecutor shell, Predicate<String> at) {
+    var invocations = shell.invocations();
+    for (var i = 0; i < invocations.size(); i++) {
+      if (at.test(invocations.get(i))) {
+        return i;
+      }
+    }
+    return -1;
+  }
+
+  /**
+   * Scenarios 2 and 8: a workspace is given its owner's credentials after its start and before its
+   * prepare, so the fetch uses their token: every credential it held goes, their name and email
+   * become its identity, their keys its authorized_keys and their token its store; gh is logged in
+   * after the prepare, once the network is up.
+   */
+  @Test
+  void aNewWorkspaceIsGivenItsOwnersCredentialsBetweenItsStartAndItsPrepare() throws Exception {
+    var scripted = incus(DIR_AND_ZFS, list(template("v1", INPUTS)), snapshots("v1"));
+    var shell = new Pushing(scripted);
+
+    new Workspaces(shell, shell, ticks(0, 1, 2, 3, 4, 5, 6, 7), locks(), () -> 65536, url -> false)
+        .create(
+            acme(), "fix-login", source(), tempDir.resolve("no-files"), UDAY.handle(), h -> UDAY);
+
+    var start = indexOf(scripted, List.of("incus", "start", "acme-fix-login"));
+    var stripped = indexOf(scripted, strip("acme-fix-login", "Uday C", "uday@sail.invalid"));
+    var keys =
+        indexWhere(scripted, c -> c.endsWith("acme-fix-login/home/dev/.ssh/authorized_keys"));
+    var store = indexWhere(scripted, c -> c.endsWith("acme-fix-login/home/dev/.git-credentials"));
+    var helper = indexWhere(scripted, c -> c.endsWith("credential.helper store"));
+    var prepare = indexWhere(scripted, c -> c.contains("sail-workspace acme fix-login"));
+    var gh = indexWhere(scripted, c -> c.contains("gh auth login --hostname"));
+    assertTrue(
+        0 <= start
+            && start < stripped
+            && stripped < keys
+            && keys < store
+            && store < helper
+            && helper < prepare
+            && prepare < gh,
+        String.join("\n", scripted.invocations()));
+    assertEquals(
+        "ssh-ed25519 AAAAuday uday@laptop\nssh-ed25519 AAAAbox uday@box\n",
+        shell.pushed.get("acme-fix-login/home/dev/.ssh/authorized_keys"));
+    assertEquals(
+        "https://oauth2:ghp_uday@github.com\n",
+        shell.pushed.get("acme-fix-login/home/dev/.git-credentials"));
+    assertTrue(
+        scripted.invocations().stream()
+            .anyMatch(c -> c.startsWith("incus copy ") && c.contains("user.sail.owner=uday")));
+    assertFalse(
+        scripted.invocations().stream().anyMatch(c -> c.contains("ghp_uday")),
+        "a token is never on a command line");
+  }
+
+  /**
+   * Scenario 7 for a person's own workspace: a creator the workspace could not be given to is
+   * refused before any template is built or anything copied.
+   */
+  @Test
+  void aPersonsCreateForAnOwnerWithNoEmailIsRefusedBeforeAnythingIsCopied() {
+    var shell = incus(DIR_AND_ZFS, list(template("v1", "an-older-definition")), snapshots("v1"));
+    var owner = new WorkspaceOwner("ana", "Ana", "", Map.of(), List.of());
+
+    var refused =
+        assertThrows(
+            IllegalStateException.class,
+            () ->
+                workspaces(shell, ticks())
+                    .create(
+                        acme(),
+                        "fix-login",
+                        source(),
+                        tempDir.resolve("no-files"),
+                        owner.handle(),
+                        h -> owner));
+
+    assertEquals(
+        "ana has no email on this box, and a workspace commits as its owner. Set it on main with"
+            + " sail fde update ana --email <email>.",
+        refused.getMessage());
+    assertEquals(List.of(), builtInto, "no template is built");
+    assertFalse(shell.invocations().stream().anyMatch(c -> c.startsWith("incus copy")));
+  }
+
+  /** Scenario 5: an owner who keeps no token is given no store and no gh login. */
+  @Test
+  void anOwnerWhoKeepsNoTokenGetsNoTokenStoreAndNoGhLogin() throws Exception {
+    var scripted = incus(DIR_AND_ZFS, list(template("v1", INPUTS)), snapshots("v1"));
+    var shell = new Pushing(scripted);
+    var owner =
+        new WorkspaceOwner(
+            "ana", "Ana", "ana@sail.invalid", Map.of(), List.of("ssh-ed25519 AAAAana"));
+
+    new Workspaces(shell, shell, ticks(0, 1, 2, 3, 4, 5, 6, 7), locks(), () -> 65536, url -> false)
+        .create(
+            acme(), "fix-login", source(), tempDir.resolve("no-files"), owner.handle(), h -> owner);
+
+    assertTrue(
+        scripted
+            .invocations()
+            .contains(String.join(" ", strip("acme-fix-login", "Ana", "ana@sail.invalid"))));
+    assertEquals(
+        List.of("acme-fix-login/home/dev/.ssh/authorized_keys"),
+        List.copyOf(shell.pushed.keySet()));
+    assertFalse(scripted.invocations().stream().anyMatch(c -> c.contains("gh auth login")));
+    assertFalse(scripted.invocations().stream().anyMatch(c -> c.contains("credential.helper")));
+  }
+
+  /**
+   * Scenario 6 (T3): a spec's workspace another person owns is stripped of all of theirs and given
+   * its new owner's before it is recorded as theirs, so nothing of the previous owner is left.
+   */
+  @Test
+  void aWorkspaceOfAnotherIsStrippedAndGivenItsNewOwnersBeforeItIsRecordedTheirs()
+      throws Exception {
+    var scripted =
+        incus(
+            DIR_AND_ZFS,
+            list(template("v1", INPUTS), specWorkspace("Running", "fix-login", "uday")),
+            snapshots("v1"));
+    var shell = new Pushing(scripted);
+    var workspaces = new Workspaces(shell, shell, ticks(0, 1), locks(), () -> 65536, url -> false);
+    var check = workspaces.checkSpec(FIX, INPUTS, name -> false);
+
+    workspaces.enterSpec(
+        check, acme(), ANA.handle(), h -> ANA, tempDir.resolve("no-files"), whole -> {});
+
+    var stripped = indexOf(scripted, strip("acme-fix-login", "Ana", "ana@sail.invalid"));
+    var gh = indexWhere(scripted, c -> c.contains("gh auth login --hostname"));
+    var owned =
+        indexOf(
+            scripted, List.of("incus", "config", "set", "acme-fix-login", "user.sail.owner=ana"));
+    assertTrue(
+        0 <= stripped && stripped < gh && gh < owned, String.join("\n", scripted.invocations()));
+    assertEquals(
+        "ssh-ed25519 AAAAana ana@laptop\n",
+        shell.pushed.get("acme-fix-login/home/dev/.ssh/authorized_keys"),
+        "nothing of uday's keys is left");
+    assertEquals(
+        "https://oauth2:ghp_ana@github.com\n",
+        shell.pushed.get("acme-fix-login/home/dev/.git-credentials"));
+  }
+
+  /** A spec's workspace already its owner's is entered as it is: nothing is taken or given. */
+  @Test
+  void aWorkspaceAlreadyItsOwnersIsEnteredWithNothingTakenOrGiven() throws Exception {
+    var shell =
+        incus(
+            DIR_AND_ZFS,
+            list(template("v1", INPUTS), specWorkspace("Running", "fix-login", "uday")),
+            snapshots("v1"));
+    var workspaces = workspaces(shell, ticks(0, 1));
+    var check = workspaces.checkSpec(FIX, INPUTS, name -> false);
+
+    workspaces.enterSpec(
+        check, acme(), UDAY.handle(), h -> UDAY, tempDir.resolve("no-files"), whole -> {});
+
+    assertFalse(shell.invocations().stream().anyMatch(c -> c.contains("sail-strip")));
+    assertFalse(shell.invocations().stream().anyMatch(c -> c.startsWith("incus file push")));
+  }
+
+  private static String owned(String instance, String status, String owner) {
+    return instance(
+        instance,
+        status,
+        "tank",
+        ("\"user.sail.project\": \"acme\", \"user.sail.workspace\": \"%s\","
+                + " \"user.sail.ready\": \"1\", \"user.sail.owner\": \"%s\"")
+            .formatted(instance.substring("acme-".length()), owner));
+  }
+
+  /**
+   * A token a person replaces reaches each running workspace of theirs at once, so its next fetch
+   * uses the new one; a stopped one, and another person's, are left as they are. N5: the owner is
+   * unchanged, so nothing is stripped: the store is written beside the old one and renamed over it,
+   * so a live run never meets the workspace without a token.
+   */
+  @Test
+  void aReplacedTokenReachesTheOwnersRunningWorkspacesAloneByTheOwnerStep() throws Exception {
+    var scripted =
+        incus(
+            DIR_AND_ZFS,
+            list(
+                owned("acme-a", "Running", "ana"),
+                owned("acme-b", "Stopped", "ana"),
+                owned("acme-c", "Running", "uday")),
+            "[]");
+    var shell = new Pushing(scripted);
+    var replaced =
+        new WorkspaceOwner(
+            "ana", "Ana", "ana@sail.invalid", Map.of("github.com", "ghp_new"), ANA.keys());
+
+    var unreached =
+        new Workspaces(shell, shell, ticks(), locks(), () -> 65536, url -> false)
+            .refresh(replaced, project -> acme());
+
+    assertEquals(List.of(), unreached);
+    assertFalse(
+        scripted.invocations().stream()
+            .anyMatch(
+                c ->
+                    c.contains("sail-strip")
+                        || c.contains("rm -f /home/dev/.git-credentials")
+                        || c.contains("file delete")),
+        "the token file is never removed");
+    assertEquals(
+        "https://oauth2:ghp_new@github.com\n",
+        shell.pushed.get("acme-a/home/dev/.git-credentials.sail-new"));
+    var pushed = indexWhere(scripted, c -> c.endsWith("acme-a/home/dev/.git-credentials.sail-new"));
+    var renamed =
+        indexWhere(
+            scripted,
+            c ->
+                c.startsWith("incus exec acme-a")
+                    && c.endsWith(
+                        "mv -f /home/dev/.git-credentials.sail-new /home/dev/.git-credentials"));
+    assertTrue(0 <= pushed && pushed < renamed, String.join("\n", scripted.invocations()));
+    assertTrue(
+        scripted.invocations().stream().anyMatch(c -> c.contains("sail-resolve github.com")));
+    assertFalse(
+        scripted.invocations().stream().anyMatch(c -> c.contains("acme-b") || c.contains("acme-c")),
+        "a stopped workspace and another person's are not touched");
+  }
+
+  /** A running workspace a token change cannot reach is said, and stops none of the others. */
+  @Test
+  void aWorkspaceATokenChangeCannotReachIsSaidAndStopsNoneOfTheOthers() throws Exception {
+    var shell =
+        incus(
+                DIR_AND_ZFS,
+                list(owned("acme-a", "Running", "ana"), owned("acme-d", "Running", "ana")),
+                "[]")
+            .onFail("acme-a/home/dev/.git-credentials.sail-new", "Error: Instance is not running");
+
+    var unreached = workspaces(shell, ticks()).refresh(ANA, project -> acme());
+
+    assertEquals(1, unreached.size(), unreached.toString());
+    assertTrue(unreached.getFirst().startsWith("acme-a: "), unreached.getFirst());
+    assertTrue(
+        shell.invocations().stream()
+            .anyMatch(c -> c.startsWith("incus exec acme-d") && c.contains("mv -f")),
+        String.join("\n", shell.invocations()));
+  }
+
+  /**
+   * A stopped workspace takes its owner's credentials as they are now when it starts, after its
+   * readiness: a token replaced or removed while it was stopped reaches it then.
+   */
+  @Test
+  void aStoppedWorkspaceTakesItsOwnersCredentialsAsTheyAreNowWhenItStarts() throws Exception {
+    var scripted = incus(DIR_AND_ZFS, list(owned("acme-fix-login", "Stopped", "ana")), "[]");
+    var shell = new Pushing(scripted);
+    var asked = new ArrayList<String>();
+
+    new Workspaces(shell, shell, ticks(0, 1, 2), locks(), () -> 65536, url -> false)
+        .start(
+            acme(),
+            "fix-login",
+            handle -> {
+              asked.add(handle);
+              return ANA;
+            });
+
+    assertEquals(List.of("ana"), asked);
+    var start = indexOf(scripted, List.of("incus", "start", "acme-fix-login"));
+    var stripped = indexOf(scripted, strip("acme-fix-login", "Ana", "ana@sail.invalid"));
+    assertTrue(0 <= start && start < stripped, String.join("\n", scripted.invocations()));
+    assertEquals(
+        "https://oauth2:ghp_ana@github.com\n",
+        shell.pushed.get("acme-fix-login/home/dev/.git-credentials"));
+  }
+
+  /** A workspace whose owner was taken away is started with nothing given and no one asked. */
+  @Test
+  void aWorkspaceWithNoOwnerIsStartedWithNothingGiven() throws Exception {
+    var shell = incus(DIR_AND_ZFS, list(owned("acme-fix-login", "Stopped", "")), "[]");
+
+    workspaces(shell, ticks(0, 1, 2))
+        .start(
+            acme(),
+            "fix-login",
+            handle -> {
+              throw new AssertionError("no owner is asked for");
+            });
+
+    assertFalse(shell.invocations().stream().anyMatch(c -> c.contains("sail-strip")));
+  }
+
+  /** A spec's stopped workspace its owner's run starts again is given their credentials anew. */
+  @Test
+  void aSpecsStoppedWorkspaceItsOwnersRunStartsIsGivenTheirCredentialsAnew() throws Exception {
+    var shell =
+        incus(
+            DIR_AND_ZFS,
+            list(template("v1", INPUTS), specWorkspace("Stopped", "fix-login", "ana")),
+            snapshots("v1"));
+    var workspaces = workspaces(shell, ticks(0, 1));
+    var check = workspaces.checkSpec(FIX, INPUTS, name -> false);
+
+    workspaces.enterSpec(
+        check, acme(), ANA.handle(), h -> ANA, tempDir.resolve("no-files"), whole -> {});
+
+    assertTrue(
+        shell
+            .invocations()
+            .contains(String.join(" ", strip("acme-fix-login", "Ana", "ana@sail.invalid"))));
+    assertFalse(
+        shell.invocations().contains("incus config set acme-fix-login user.sail.owner=ana"),
+        "already hers: no owner is written");
+  }
+
+  /**
+   * Rule 1 (review M1), and item 4 of round 3: a re-own cut short after the new owner's token is
+   * written, by a gh login that fails, is stripped again and left nobody's, holding no one's token,
+   * identity or key; so its previous owner's next entry strips it and gives it theirs again.
+   */
+  @Test
+  void aReOwnCutShortLeavesTheWorkspaceNobodysSoThePreviousOwnersNextEntryGivesTheirsAgain()
+      throws Exception {
+    var box = new Box();
+    box.put("acme--tmpl", "Stopped", template("v1", INPUTS), "v1");
+    box.put("acme-fix-login", "Running", specWorkspace("Running", "fix-login", "uday"));
+    var failing = new AtomicBoolean(true);
+    var ran = new ArrayList<String>();
+    var shell =
+        new ShellExec() {
+          @Override
+          public Result exec(List<String> command) {
+            var joined = String.join(" ", command);
+            ran.add(joined);
+            if (failing.get() && joined.contains("gh auth login")) {
+              return new Result(1, "", "error connecting to api.github.com");
+            }
+            return box.exec(command);
+          }
+
+          @Override
+          public Result exec(List<String> command, Path workDir, Duration timeout) {
+            return exec(command);
+          }
+
+          @Override
+          public boolean isDryRun() {
+            return false;
+          }
+        };
+    var workspaces =
+        new Workspaces(shell, shell, ticks(0, 1, 2, 3), locks(), () -> 65536, url -> false);
+
+    assertThrows(
+        IOException.class,
+        () ->
+            workspaces.enterSpec(
+                workspaces.checkSpec(FIX, INPUTS, name -> false),
+                acme(),
+                "ana",
+                handle -> ANA,
+                tempDir.resolve("no-files"),
+                whole -> {}));
+    assertEquals("", box.key("acme-fix-login", BoxInstances.OWNER_KEY), "nobody's, not uday's");
+    var gh = ran.stream().filter(line -> line.contains("gh auth login")).findFirst().orElseThrow();
+    assertEquals(
+        String.join(" ", strip("acme-fix-login")),
+        ran.subList(ran.indexOf(gh), ran.size()).stream()
+            .filter(line -> line.contains("sail-strip"))
+            .findFirst()
+            .orElse("no strip after gh failed"),
+        String.join("\n", ran));
+    failing.set(false);
+    ran.clear();
+    workspaces.enterSpec(
+        workspaces.checkSpec(FIX, INPUTS, name -> false),
+        acme(),
+        "uday",
+        handle -> UDAY,
+        tempDir.resolve("no-files"),
+        whole -> {});
+
+    assertTrue(
+        ran.contains(String.join(" ", strip("acme-fix-login", "Uday C", "uday@sail.invalid"))),
+        String.join("\n", ran));
+    assertEquals("uday", box.key("acme-fix-login", BoxInstances.OWNER_KEY));
+  }
+
+  /**
+   * Round 2, item 4: no Sail door restores a workspace's snapshot, so one is restored only by hand,
+   * and Incus brings the snapshot's owner label back with it. The current owner's next entry is
+   * then a re-own: stripped whole first, then given theirs, then labelled theirs, so none of the
+   * snapshot owner's token, identity or keys is left in use.
+   */
+  @Test
+  void aWorkspaceRestoredByHandToAnotherOwnersSnapshotIsStrippedThenGivenAtItsOwnersNextEntry()
+      throws Exception {
+    var box = new Box();
+    box.put("acme--tmpl", "Stopped", template("v1", INPUTS), "v1");
+    box.put("acme-fix-login", "Running", specWorkspace("Running", "fix-login", "uday"));
+    var ran = new ArrayList<String>();
+    var shell =
+        new ShellExec() {
+          @Override
+          public Result exec(List<String> command) {
+            ran.add(String.join(" ", command));
+            return box.exec(command);
+          }
+
+          @Override
+          public Result exec(List<String> command, Path workDir, Duration timeout) {
+            return exec(command);
+          }
+
+          @Override
+          public boolean isDryRun() {
+            return false;
+          }
+        };
+    var workspaces = new Workspaces(shell, shell, ticks(0, 1), locks(), () -> 65536, url -> false);
+
+    workspaces.enterSpec(
+        workspaces.checkSpec(FIX, INPUTS, name -> false),
+        acme(),
+        "ana",
+        handle -> ANA,
+        tempDir.resolve("no-files"),
+        whole -> {});
+
+    var stripped =
+        ran.indexOf(String.join(" ", strip("acme-fix-login", "Ana", "ana@sail.invalid")));
+    var keys = indexOfFirst(ran, c -> c.endsWith("acme-fix-login/home/dev/.ssh/authorized_keys"));
+    var store = indexOfFirst(ran, c -> c.endsWith("acme-fix-login/home/dev/.git-credentials"));
+    var labelled = ran.indexOf("incus config set acme-fix-login user.sail.owner=ana");
+    assertTrue(
+        0 <= stripped && stripped < keys && keys < store && store < labelled,
+        String.join("\n", ran));
+    assertEquals("ana", box.key("acme-fix-login", BoxInstances.OWNER_KEY));
+  }
+
+  /**
+   * Scenario 11: a removed person's workspaces, running or stopped, lose their token store, gh
+   * login and keys, and their owner, through their files; another's workspace is left as it is.
+   */
+  @Test
+  void aRemovedPersonsWorkspacesLoseTheirStoreGhLoginKeysAndOwnerAndNoOneElsesDo()
+      throws Exception {
+    var scripted =
+        incus(
+                DIR_AND_ZFS,
+                list(
+                    template("v1", INPUTS),
+                    instance(
+                        "acme-a",
+                        "Running",
+                        "tank",
+                        "\"user.sail.project\": \"acme\", \"user.sail.workspace\": \"a\","
+                            + " \"user.sail.ready\": \"1\", \"user.sail.owner\": \"uday\""),
+                    instance(
+                        "acme-b",
+                        "Stopped",
+                        "tank",
+                        "\"user.sail.project\": \"acme\", \"user.sail.workspace\": \"b\","
+                            + " \"user.sail.ready\": \"1\", \"user.sail.owner\": \"ana\"")),
+                snapshots("v1"))
+            .onFail("incus file delete acme-b/home/dev/.config/gh/hosts.yml", "Error: not found");
+    var shell = new Pushing(scripted);
+
+    var unreached =
+        new Workspaces(shell, shell, ticks(), locks(), () -> 65536, url -> false)
+            .disown(held -> !held.equals("ana"));
+
+    assertEquals(List.of(), unreached);
+    assertEquals(
+        List.of(
+            "incus file delete acme-b/home/dev/.git-credentials",
+            "incus file delete acme-b/home/dev/.git-credentials.sail-new",
+            "incus file delete acme-b/home/dev/.config/gh/hosts.yml",
+            "incus file delete acme-b/home/dev/.sail/gh-token",
+            "incus config set acme-b user.sail.owner="),
+        scripted.invocations().stream()
+            .filter(c -> c.contains("acme-") && !c.startsWith("incus file push"))
+            .toList());
+    assertEquals(Map.of("acme-b/home/dev/.ssh/authorized_keys", ""), shell.pushed);
+  }
+
+  /** A workspace a removal cannot reach is said, and stops none of the others. */
+  @Test
+  void aWorkspaceARemovalCannotReachIsSaidAndStopsNoneOfTheOthers() throws Exception {
+    var shell =
+        incus(
+                DIR_AND_ZFS,
+                list(
+                    instance(
+                        "acme-a",
+                        "Running",
+                        "tank",
+                        "\"user.sail.project\": \"acme\", \"user.sail.workspace\": \"a\","
+                            + " \"user.sail.owner\": \"ana\""),
+                    instance(
+                        "acme-b",
+                        "Running",
+                        "tank",
+                        "\"user.sail.project\": \"acme\", \"user.sail.workspace\": \"b\","
+                            + " \"user.sail.owner\": \"ana\"")),
+                "[]")
+            .onFail(
+                "incus file delete acme-a/home/dev/.git-credentials", "Error: permission denied");
+
+    var unreached = workspaces(shell, ticks()).disown(held -> !held.equals("ana"));
+
+    assertEquals(
+        List.of(
+            "acme-a: Could not delete /home/dev/.git-credentials in acme-a: Error: permission"
+                + " denied"),
+        unreached);
+    assertTrue(shell.invocations().contains("incus config set acme-b user.sail.owner="));
+  }
+
+  /**
+   * Scenario 1 (T1): a template build takes its builder's credentials out after the provisioner and
+   * checks none is left, both before the stop, the record and the snapshot.
+   */
+  @Test
+  void aBuildTakesItsBuildersCredentialsOutAndChecksNoneIsLeftBeforeItIsSnapshotted()
+      throws Exception {
+    var shell = incus(DIR_AND_ZFS, list(template("v1", "an-older-definition")), snapshots("v1"));
+
+    templates(shell).ensure(acme(), source());
+
+    var held =
+        List.of(
+            "incus",
+            "exec",
+            "acme--tmpl",
+            "--",
+            "bash",
+            "-c",
+            WorkspaceCredentials.HELD,
+            "sail-held");
+    var stripped = indexOf(shell, strip("acme--tmpl"));
+    var checked = indexOf(shell, held);
+    var stop = indexOf(shell, List.of("incus", "stop", "acme--tmpl"));
+    var snapshot = indexOf(shell, List.of("incus", "snapshot", "create", "acme--tmpl", "v2"));
+    assertTrue(
+        0 <= stripped && stripped < checked && checked < stop && stop < snapshot,
+        String.join("\n", shell.invocations()));
+  }
+
+  /** The check is given the build's tokens on its stdin, and none ever on a command line. */
+  @Test
+  void theCheckIsGivenTheBuildsTokensOnStdinNeverOnACommandLine() throws Exception {
+    var shell = incus(DIR_AND_ZFS, list(template("v1", "an-older-definition")), snapshots("v1"));
+    var source =
+        new WorkspaceTemplate.Source(
+            "devpool",
+            INPUTS,
+            name -> false,
+            (into, fresh) -> {},
+            List.of("ghp_one", "", " ", "glpat-two"));
+
+    templates(shell).ensure(acme(), source);
+
+    assertEquals(List.of("ghp_one\nglpat-two\n"), shell.inputs());
+    assertFalse(
+        shell.invocations().stream().anyMatch(c -> c.contains("ghp_one") || c.contains("glpat")));
+    assertFalse(source.toString().contains("ghp_one"), source.toString());
+  }
+
+  /**
+   * A build whose check finds something names it, never its value, and its remedy fits whatever
+   * wrote it: a step of the definition or a hand change to the template. One whose check cannot
+   * tell what it holds (exit 2) is never taken for clean.
+   */
+  @Test
+  void aFailedBuildNamesWhatItFoundAndOneThatCannotTellIsNeverClean() {
+    var found =
+        incus(DIR_AND_ZFS, list(template("v1", "an-older-definition")), snapshots("v1"))
+            .on(
+                "sail-held",
+                new ShellExec.Result(
+                    1, "", "a token this build was given in /home/dev/.netrc, a gh login\n"));
+    var unsure =
+        incus(DIR_AND_ZFS, list(template("v1", "an-older-definition")), snapshots("v1"))
+            .on(
+                "sail-held",
+                new ShellExec.Result(2, "", "the search for the build's tokens failed"));
+
+    var failure = assertThrows(IOException.class, () -> templates(found).ensure(acme(), source()));
+    var cannotTell =
+        assertThrows(IOException.class, () -> templates(unsure).ensure(acme(), source()));
+
+    assertEquals(
+        "acme--tmpl was not snapshotted: it still holds a token this build was given in"
+            + " /home/dev/.netrc, a gh login. Remove what wrote it, a step of acme's definition or a"
+            + " change made by hand in acme--tmpl, then build again: sail project template build"
+            + " acme.",
+        failure.getMessage());
+    assertEquals(
+        "acme--tmpl was not snapshotted, since Sail could not tell what it holds: the search for"
+            + " the build's tokens failed",
+        cannotTell.getMessage());
+    assertFalse(
+        unsure.invocations().stream().anyMatch(c -> c.contains("snapshot create")),
+        "nothing is snapshotted");
+  }
+
+  /**
+   * Scenario 12: a template that still holds a credential after its removal step, or whose removal
+   * step fails, fails its build: no version is recorded or snapshotted, the one before stays
+   * current, and the template it started is stopped.
+   */
+  @Test
+  void aTemplateStillHoldingACredentialFailsItsBuildAndTheVersionBeforeStaysCurrent() {
+    for (var failing : List.of("sail-held", "sail-strip")) {
+      var shell =
+          incus(DIR_AND_ZFS, list(template("v1", "an-older-definition")), snapshots("v1"))
+              .onFail(failing, "it still holds .git-credentials user.email");
+
+      var failure =
+          assertThrows(IOException.class, () -> templates(shell).ensure(acme(), source()));
+
+      assertTrue(
+          failure.getMessage().contains("it still holds .git-credentials user.email"),
+          failure.getMessage());
+      assertFalse(
+          shell.invocations().stream()
+              .anyMatch(
+                  c -> c.contains("user.sail.template.current=") || c.contains("snapshot create")),
+          failing);
+      assertTrue(shell.invocations().contains("incus stop acme--tmpl"), failing);
+    }
   }
 }
