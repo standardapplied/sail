@@ -5,51 +5,58 @@ import SailTerminal
 import SailTerminalView
 import SailTerminalWire
 import SailVT
+import SailWorkbench
 
-/// "This Mac": one terminal session on this Mac's own host, in the home folder with the login shell,
-/// signed in or not. The session's name is remembered; the next launch attaches to it while it
-/// lives. ⌥⌘L shows the latency of key to echo on glass. The terminal keeps the palette of the
-/// appearance it opened in (a screen's palette is set when it is made); the banner and the overlay
-/// follow the look.
+/// One pane: one terminal view drawing one session on this Mac's host, made and attached once (W2).
+/// The terminal keeps the palette it opened in (a screen's palette is set when it is made).
 @MainActor
 public final class TerminalPane: NSView {
-    static let sessionKey = "terminal.session"
+    public enum Start: Equatable, Sendable {
+        case open(folder: String)
+        case attach
+    }
 
+    /// How much of the terminal background lies over a pane that is not focused (Ghostty's
+    /// unfocused split opacity of 0.7).
+    public static let dimming = 0.3
+
+    public let id: PaneID
+    public let name: String
     public let terminal: TerminalView
     public let host: LocalHost
+    public let opened = ContinuousClock.now
     public private(set) var session: TerminalSession?
-    /// Told each time a session attaches.
-    public var onAttached: @MainActor (TerminalSession) -> Void = { _ in }
-    /// Told when a program names the window.
-    public var onTitle: @MainActor (String) -> Void = { _ in }
+    var onEvent: @MainActor (TerminalPane, SessionEvent) -> Void = { _, _ in }
 
-    /// The terminal's palette, the launch appearance's.
-    public let palette: Palette
-    /// The look the banner and the overlay are drawn in; a new one repaints them.
+    let palette: Palette
     var look: Look {
         didSet { paint() }
     }
 
+    public internal(set) var isDimmed = false {
+        didSet { scrim.isHidden = !isDimmed }
+    }
+
+    private let start: Start
     private let banner: StatusBanner
+    private let scrim = Scrim()
     private let latency = NSTextField(labelWithString: "")
     private var latencyTimer: Timer?
-    private var opened = false
 
-    init(fonts directory: URL, helper: String?, look: Look) throws(ShellError) {
+    init(_ pane: Pane, start: Start, host: LocalHost, fonts: TerminalFonts, points: Double, look: Look, palette: Palette) throws(ShellError) {
+        id = pane.id
+        name = pane.session
+        self.start = start
+        self.host = host
         self.look = look
-        palette = look.palette
+        self.palette = palette
         do {
-            terminal = try TerminalView(fonts: try TerminalFonts(directory: directory))
+            terminal = try TerminalView(fonts: fonts, points: points)
         } catch {
             throw .resources("the terminal cannot start: \(error)")
         }
-        do {
-            host = try LocalHost(binary: helper)
-        } catch {
-            throw .host("this Mac's terminal host has no place to listen: \(error)")
-        }
         banner = StatusBanner(look: look)
-        super.init(frame: .zero)
+        super.init(frame: NSRect(x: 0, y: 0, width: 640, height: 400))
         compose()
     }
 
@@ -58,30 +65,12 @@ public final class TerminalPane: NSView {
         nil
     }
 
-    /// Opens the session the first time the pane is shown.
-    func shown() {
-        window?.makeFirstResponder(terminal)
-        guard !opened else { return }
-        opened = true
-        Task { await open(fresh: false) }
-    }
-
-    /// Opens the remembered session when it still lives, else a new one.
-    public func open(fresh: Bool) async {
-        banner.show("Connecting to this Mac's terminal host")
-        do {
-            try await host.ensureServing()
-        } catch {
-            banner.show(Self.sentence(error.description), button: "Try Again") { [weak self] in
-                Task { await self?.open(fresh: fresh) }
-            }
-            return
-        }
-        let remembered = fresh ? nil : UserDefaults.standard.string(forKey: Self.sessionKey)
-        let listed = (try? await SessionListing.sessions(at: host.address)) ?? []
-        let grid = terminal.metrics.grid(fitting: PixelSize(
-            width: Int(Double(terminal.bounds.width) * terminal.metrics.scale),
-            height: Int(Double(terminal.bounds.height) * terminal.metrics.scale)
+    /// Opens or attaches the session at the grid the pane's frame holds; once.
+    func begin() {
+        guard session == nil else { return }
+        let metrics = terminal.metrics
+        let grid = metrics.grid(fitting: PixelSize(
+            width: Int(Double(bounds.width) * metrics.scale), height: Int(Double(bounds.height) * metrics.scale)
         ))
         let screen: Screen
         do {
@@ -90,29 +79,55 @@ public final class TerminalPane: NSView {
             banner.show(Self.sentence("the terminal screen could not be made: \(error)"))
             return
         }
-        let next: TerminalSession
-        if let remembered, listed.contains(where: { $0.name == remembered && $0.live }) {
-            next = TerminalSession(attach: remembered, write: true, door: .local(host.address), screen: screen)
-        } else {
-            let name = "mac-" + UUID().uuidString.prefix(8).lowercased()
-            UserDefaults.standard.set(name, forKey: Self.sessionKey)
-            next = TerminalSession(
-                open: SessionCreate(
-                    session: name, command: [], workingDirectory: NSHomeDirectory(), project: "", room: "",
-                    size: TerminalSize(columns: Int32(grid.columns), rows: Int32(grid.rows))
-                ),
+        let size = TerminalSize(columns: Int32(grid.columns), rows: Int32(grid.rows))
+        let next = switch start {
+        case let .open(folder):
+            TerminalSession(
+                open: SessionCreate(session: name, command: [], workingDirectory: folder, project: "", room: "", size: size),
                 door: .local(host.address), screen: screen
             )
+        case .attach:
+            TerminalSession(attach: name, write: true, door: .local(host.address), screen: screen)
         }
-        session?.close()
         session = next
+        banner.show("Connecting to this Mac's terminal host")
         terminal.onEvent = { [weak self] event in self?.handle(event) }
         terminal.attach(next)
         next.start()
     }
 
-    func close() {
+    /// Ends the session at the host, then this client's part: on this pane's connection when it is
+    /// attached, else on one of its own once this pane's is closed. A host that cannot be reached
+    /// keeps the session, which the next launch opens as a last tab.
+    func end() {
+        guard let session else { return }
+        let phase = session.state.phase
+        if case .attached = phase { try? session.kill() }
+        detach()
+        switch phase {
+        case .attached, .ended: return
+        default:
+            let (name, address) = (session.state.session, host.address)
+            Task.detached { try? await SessionListing.end(name, at: address) }
+        }
+    }
+
+    /// Ends this client's part only; the session lives on at the host.
+    func detach() {
         session?.close()
+        latencyTimer?.invalidate()
+    }
+
+    /// Whether ending the session may end a program the person is running: false only while the
+    /// attached cursor is on the shell's prompt, as the shell marked it (OSC 133), or the session is
+    /// over. A session not attached cannot say, so it may.
+    var mayEndAProgram: Bool {
+        guard let session else { return false }
+        switch session.state.phase {
+        case .ended: return false
+        case .attached: return !session.screen.cursorAtPrompt
+        default: return true
+        }
     }
 
     @objc public func toggleLatency(_: Any?) {
@@ -146,7 +161,6 @@ public final class TerminalPane: NSView {
         switch event {
         case .phase(.attached):
             banner.hide()
-            if let session { onAttached(session) }
         case .phase(.reconnecting):
             banner.show("Reconnecting to this Mac's terminal host")
         case let .phase(.parked(reason)):
@@ -157,14 +171,11 @@ public final class TerminalPane: NSView {
                 }
             }
         case let .phase(.ended(end)):
-            banner.show(Self.sentence(end.description), button: "Open a New Session") { [weak self] in
-                Task { await self?.open(fresh: true) }
-            }
-        case let .screen(.title(title)):
-            onTitle(title)
+            banner.show(Self.sentence(end.description))
         default:
             break
         }
+        onEvent(self, event)
     }
 
     private func compose() {
@@ -173,6 +184,12 @@ public final class TerminalPane: NSView {
         terminal.frame = bounds
         terminal.autoresizingMask = [.width, .height]
         addSubview(terminal)
+        scrim.frame = bounds
+        scrim.autoresizingMask = [.width, .height]
+        scrim.wantsLayer = true
+        scrim.layer?.backgroundColor = NSColor(palette.background).withAlphaComponent(Self.dimming).cgColor
+        scrim.isHidden = true
+        addSubview(scrim)
         banner.translatesAutoresizingMaskIntoConstraints = false
         addSubview(banner)
         latency.font = .monospacedDigitSystemFont(ofSize: Look.Step.micro.points, weight: .regular)
@@ -217,5 +234,13 @@ public final class TerminalPane: NSView {
     static func sentence(_ text: String) -> String {
         let capital = text.prefix(1).uppercased() + text.dropFirst()
         return capital.hasSuffix(".") ? capital : capital + "."
+    }
+}
+
+/// The terminal background at 30% over an unfocused pane; the pointer goes through it to the
+/// terminal, whose first click focuses it.
+final class Scrim: NSView {
+    override func hitTest(_: NSPoint) -> NSView? {
+        nil
     }
 }

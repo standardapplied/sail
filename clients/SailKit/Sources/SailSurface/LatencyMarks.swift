@@ -1,3 +1,4 @@
+import Foundation
 import SailTerminal
 
 /// The view's latency, on the host clock in seconds (`CACurrentMediaTime`, which key event and
@@ -34,11 +35,23 @@ public struct LatencyMarks: Sendable {
     private var keyToEcho: [Double] = []
     private var keyToEchoEstimated: [Double] = []
     private var refreshes: [Double] = []
+    private var refreshWork: [Double] = []
     private var late = 0
     private var screenUpdates = 0
     private var reported = 0
     private var unreported = 0
     private var presentedBeforeCommit = 0
+    private var longestToShown: Span?
+    private var longestBetweenCommits: Span?
+    private var inFlight: [UInt64: Flight] = [:]
+    private var commitToCompleted: [Double] = []
+    private var commitToPresentTold: [Double] = []
+
+    /// A frame not yet told presented: when it was committed, and when its commands completed.
+    private struct Flight: Sendable {
+        var committed: Double?
+        var completed: (time: Double, ok: Bool)?
+    }
 
     public init() {}
 
@@ -69,7 +82,13 @@ public struct LatencyMarks: Sendable {
             Self.keep(time - output.time, in: &outputToCommitted)
         }
         committed[frame] = (time, (committed[frame]?.outputs ?? []) + drawn)
+        if let lastFrame { Self.keepLongest(Span(lastFrame.committed, time), in: &longestBetweenCommits) }
         lastFrame = (frame, time)
+        if presentedAt[frame] == nil {
+            inFlight[frame, default: Flight()].committed = time
+            inFlight = inFlight.filter { $0.key + 64 > frame }
+        }
+        if let done = inFlight[frame]?.completed { Self.keep(done.time - time, in: &commitToCompleted) }
         if let presented = presentedAt[frame] {
             presentedBeforeCommit += 1
             settle(frame, presented)
@@ -93,6 +112,31 @@ public struct LatencyMarks: Sendable {
     /// `frame` reached the display at `time`; zero when the display reported no time. Metal can
     /// tell this before the frame's commit is marked (a frame dropped at once): its estimate is
     /// then made when the commit is.
+    /// `frame`'s commands completed on the GPU at `time`, `ok` unless they failed.
+    public mutating func completed(frame: UInt64, at time: Double, ok: Bool) {
+        if let committed = inFlight[frame]?.committed { Self.keep(time - committed, in: &commitToCompleted) }
+        if presentedAt[frame] == nil { inFlight[frame, default: Flight()].completed = (time, ok) }
+    }
+
+    /// `frame` reached the display at `time` (zero when the display reported no time), Metal
+    /// telling it at `told`.
+    public mutating func presented(frame: UInt64, at time: Double, told: Double) {
+        if let committed = inFlight.removeValue(forKey: frame)?.committed { Self.keep(told - committed, in: &commitToPresentTold) }
+        presented(frame: frame, at: time)
+    }
+
+    /// The frames committed and not yet told presented, oldest first, as of `now`.
+    public func unpresented(at now: Double) -> [UnpresentedFrame] {
+        inFlight.compactMap { frame, flight in
+            flight.committed.map { committed in
+                UnpresentedFrame(
+                    frame: frame, ageMs: (now - committed) * 1000,
+                    completedAfterMs: flight.completed.map { ($0.time - committed) * 1000 }, completedOK: flight.completed?.ok
+                )
+            }
+        }.sorted { $0.frame < $1.frame }
+    }
+
     public mutating func presented(frame: UInt64, at time: Double) {
         let presented = (time: max(time, 0), reported: time > 0)
         if presented.reported { reported += 1 } else { unreported += 1 }
@@ -101,9 +145,12 @@ public struct LatencyMarks: Sendable {
         settle(frame, presented)
     }
 
-    /// How long one refresh took, reading the screen to committing the frame or pausing.
-    public mutating func refreshed(taking seconds: Double) {
+    /// How long one refresh took, reading the screen to committing the frame or pausing: on the
+    /// wall clock, and the work it did on its thread's CPU clock (what a stall of the machine does
+    /// not add to).
+    public mutating func refreshed(taking seconds: Double, working work: Double) {
         Self.keep(seconds, in: &refreshes)
+        Self.keep(work, in: &refreshWork)
     }
 
     public var figures: LatencyFigures {
@@ -111,9 +158,12 @@ public struct LatencyMarks: Sendable {
             keyToWritten: Self.percentiles(keyToWritten), outputToCommitted: Self.percentiles(outputToCommitted),
             outputToPresented: Self.percentiles(outputToPresented), outputToPresentedEstimated: Self.percentiles(outputToPresentedEstimated),
             outputToShown: Self.percentiles(outputToShown), keyToEcho: Self.percentiles(keyToEcho),
-            keyToEchoEstimated: Self.percentiles(keyToEchoEstimated), refresh: Self.percentiles(refreshes), screenUpdates: screenUpdates,
+            keyToEchoEstimated: Self.percentiles(keyToEchoEstimated), refresh: Self.percentiles(refreshes),
+            refreshWork: Self.percentiles(refreshWork), screenUpdates: screenUpdates,
             lateOutputs: late, reportedPresents: reported, unreportedPresents: unreported,
-            presentedBeforeCommit: presentedBeforeCommit
+            presentedBeforeCommit: presentedBeforeCommit, longestToShown: longestToShown,
+            longestBetweenCommits: longestBetweenCommits, commitToCompleted: Self.percentiles(commitToCompleted),
+            commitToPresentTold: Self.percentiles(commitToPresentTold), unpresented: []
         )
     }
 
@@ -129,7 +179,9 @@ public struct LatencyMarks: Sendable {
         guard let drawn = committed.removeValue(forKey: frame) else { return }
         let shown = presented.reported ? presented.time : targets[frame] ?? drawn.time
         for output in drawn.outputs {
-            Self.keep((presented.reported ? presented.time : drawn.time) - output.time, in: &outputToShown)
+            let toShown = Span(output.time, presented.reported ? presented.time : drawn.time)
+            Self.keep(toShown.end - toShown.start, in: &outputToShown)
+            Self.keepLongest(toShown, in: &longestToShown)
             let echoes = output.keys.map { shown - $0 }
             if presented.reported {
                 Self.keep(shown - output.time, in: &outputToPresented)
@@ -145,6 +197,10 @@ public struct LatencyMarks: Sendable {
         guard seconds.isFinite, seconds >= 0 else { return }
         samples.append(seconds)
         if samples.count > capacity { samples.removeFirst() }
+    }
+
+    private static func keepLongest(_ span: Span, in longest: inout Span?) {
+        if span.length > longest?.length ?? -1 { longest = span }
     }
 
     private static func percentiles(_ seconds: [Double]) -> Percentiles {
@@ -167,6 +223,8 @@ public struct LatencyFigures: Equatable, Sendable, Codable {
     public var keyToEchoEstimated: Percentiles
     /// One refresh's time on the main thread.
     public var refresh: Percentiles
+    /// One refresh's work, on the main thread's CPU clock.
+    public var refreshWork: Percentiles
     /// Screen-update ticks told so far; one tick may hold several reads of output.
     public var screenUpdates: Int
     /// Output a refresh saw and could not draw, drawn by a later one.
@@ -175,4 +233,29 @@ public struct LatencyFigures: Equatable, Sendable, Codable {
     public var unreportedPresents: Int
     /// Frames Metal told presented before their commit was marked.
     public var presentedBeforeCommit: Int
+    /// When the output that waited longest to be shown was told and shown, in seconds.
+    public var longestToShown: Span?
+    /// The longest time between two committed frames, in seconds.
+    public var longestBetweenCommits: Span?
+    /// A frame's commit to its commands completing on the GPU, and to Metal telling it presented.
+    public var commitToCompleted: Percentiles
+    public var commitToPresentTold: Percentiles
+    /// The frames committed and not yet told presented when the figures were taken.
+    public var unpresented: [UnpresentedFrame]
+}
+
+/// A committed frame Metal has not told presented: how long ago it was committed, and how long
+/// after that its commands completed (nil while they have not), and whether they completed
+/// without error.
+public struct UnpresentedFrame: Equatable, Sendable, Codable, CustomStringConvertible {
+    public var frame: UInt64
+    public var ageMs: Double
+    public var completedAfterMs: Double?
+    public var completedOK: Bool?
+
+    public var description: String {
+        let commands = completedAfterMs.map { String(format: "its commands %@ %.1f ms after", completedOK == true ? "completed" : "failed", $0) }
+            ?? "its commands not completed"
+        return String(format: "frame %llu committed %.0f ms ago, ", frame, ageMs) + commands
+    }
 }
