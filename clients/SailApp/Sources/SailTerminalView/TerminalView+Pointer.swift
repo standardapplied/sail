@@ -54,12 +54,38 @@ extension TerminalView {
         }
     }
 
+    /// The right button goes to a program that tracks the mouse, in a focused view, without Shift;
+    /// otherwise it opens the view's context menu (``menu(for:)``), as Ghostty's does.
     override public func rightMouseDown(with event: NSEvent) {
+        guard programTakesTheButton(event) else { return super.rightMouseDown(with: event) }
+        rightReported = true
         report(event, .press, .right)
     }
 
     override public func rightMouseUp(with event: NSEvent) {
+        guard rightReported else { return super.rightMouseUp(with: event) }
+        rightReported = false
         report(event, .release, .right)
+    }
+
+    /// A right-click or a control-click the program does not take focuses the view, then offers
+    /// the context menu.
+    override public func menu(for event: NSEvent) -> NSMenu? {
+        guard event.type == .rightMouseDown || event.type == .leftMouseDown && event.modifierFlags.contains(.control),
+              !programTakesTheButton(event)
+        else { return nil }
+        if window?.firstResponder !== self { window?.makeFirstResponder(self) }
+        return contextMenu()
+    }
+
+    private func programTakesTheButton(_ event: NSEvent) -> Bool {
+        window?.firstResponder === self && link?.screen.tracksMouse == true && !event.modifierFlags.contains(.shift)
+    }
+
+    /// Edit > Select All: everything the terminal holds, its history included.
+    @objc override public func selectAll(_: Any?) {
+        guard let link, link.screen.select(.all) else { return }
+        needFrame()
     }
 
     override public func otherMouseDown(with event: NSEvent) {
@@ -194,5 +220,18 @@ extension NSColor {
     /// An sRGB colour from a token.
     public convenience init(_ rgb: RGB) {
         self.init(srgbRed: Double(rgb.red) / 255, green: Double(rgb.green) / 255, blue: Double(rgb.blue) / 255, alpha: 1)
+    }
+}
+
+extension TerminalView: NSMenuItemValidation {
+    /// Copy with a selection, Paste with text to paste, Select All with a session; the rest as the
+    /// responder chain says.
+    public func validateMenuItem(_ item: NSMenuItem) -> Bool {
+        switch item.action {
+        case #selector(copy(_:)): link?.screen.selectedText()?.isEmpty == false
+        case #selector(paste(_:)): link != nil && pasteboard.string(forType: .string)?.isEmpty == false
+        case #selector(selectAll(_:)): link != nil
+        default: responds(to: item.action)
+        }
     }
 }

@@ -622,6 +622,51 @@ import Testing
         #expect(harness.view.visibleText.contains("ticked"))
     }
 
+    /// P2: a focused view's blinking cursor hides and shows at the system's rate, each half one
+    /// frame; a key typed shows it at once; unfocused, it shows, steady, and nothing wakes.
+    @Test func aFocusedCursorBlinksAKeyShowsItAndUnfocusedItIsSteady() async throws {
+        let harness = try Harness(blinks: true)
+        await harness.drainMain()
+        await harness.tick()
+        await harness.tick()
+        #expect(harness.view.cursorOn)
+        let committed = Self.committed(harness.view)
+        #expect(await harness.until(2) { !harness.view.cursorOn }, "the cursor did not blink off")
+        await harness.tick()
+        #expect(Self.committed(harness.view) == committed + 1, "the blink drew one frame")
+        #expect(!harness.view.overlay.cursorOn)
+        harness.key("a", code: 0)
+        #expect(harness.view.cursorOn, "a key typed shows the cursor")
+        harness.window.makeFirstResponder(nil)
+        #expect(harness.view.cursorOn)
+        let woken = harness.view.blinkWakeups
+        try await Task.sleep(for: .seconds(1.2))
+        #expect(harness.view.blinkWakeups == woken, "an unfocused view woke to blink")
+        #expect(harness.view.cursorOn)
+    }
+
+    /// A program that asks for a steady cursor (DECSCUSR 2) gets one: no blink wakes the view.
+    @Test func aSteadyCursorNeverBlinks() async throws {
+        let harness = try Harness(blinks: true)
+        harness.link.output("\u{1b}[2 q")
+        await harness.drainMain()
+        await harness.tick()
+        await harness.tick()
+        let woken = harness.view.blinkWakeups
+        try await Task.sleep(for: .seconds(1.2))
+        #expect(harness.view.blinkWakeups == woken)
+        #expect(harness.view.cursorOn)
+    }
+
+    /// A program's clipboard write (OSC 52) from a session this client writes to reaches the
+    /// pasteboard.
+    @Test func aProgramsClipboardWriteReachesThePasteboard() async throws {
+        let harness = try Harness()
+        harness.pasteboard.clearContents()
+        harness.link.output("\u{1b}]52;c;aGVsbG8=\u{07}")
+        #expect(await harness.until { harness.pasteboard.string(forType: .string) == "hello" }, "the pasteboard holds \(harness.pasteboard.string(forType: .string) ?? "nothing")")
+    }
+
     static func committed(_ view: TerminalView) -> Int {
         guard let found = view.drawingState.range(of: "committed ") else { return -1 }
         return Int(view.drawingState[found.upperBound...].prefix { $0.isNumber }) ?? -1
@@ -650,16 +695,6 @@ import Testing
         await harness.tick()
         #expect(harness.view.accessibilityRole() == .textArea)
         #expect((harness.view.accessibilityValue() as? String)?.contains("visible words") == true)
-    }
-
-    /// The clipboard is touched only on the person's action: a program's OSC 52 write is refused.
-    @Test func aProgramCannotWriteTheClipboard() async throws {
-        let harness = try Harness()
-        harness.pasteboard.clearContents()
-        harness.pasteboard.setString("mine", forType: .string)
-        harness.link.output("\u{1b}]52;c;\(Data("theirs".utf8).base64EncodedString())\u{7}")
-        await harness.tick()
-        #expect(harness.pasteboard.string(forType: .string) == "mine")
     }
 
     @Test func aPasteCountsItsLines() {

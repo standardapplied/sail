@@ -223,6 +223,22 @@ import Testing
         _ = host
     }
 
+    /// A program's clipboard write reaches the app only from a session this client writes to: a
+    /// reader is watching someone else's program.
+    @Test func aClipboardWriteIsToldOnlyWhileThisClientHoldsTheWriteToken() async throws {
+        let (host, session, peer, watch) = try await attachedLocally()
+        try peer.send(output("\u{1b}]52;c;aGVsbG8=\u{07}mine"))
+        try await watch.text("mine")
+        #expect(watch.seen.contains(.screen(.clipboardWrite("hello"))))
+        try peer.send(.refused(HostRefusal(message: TerminalSession.notWriter, remedy: nil)))
+        try await watch.until("told the refusal") { watch.seen.contains { if case .refused = $0 { true } else { false } } }
+        try peer.send(output("\u{1b}]52;c;dGhlaXJz\u{07}theirs"))
+        try await watch.text("theirs")
+        #expect(!watch.seen.contains(.screen(.clipboardWrite("theirs"))))
+        session.close()
+        _ = host
+    }
+
     @Test func aReadOnlyAttachAnswersNoQuery() async throws {
         let host = try FakeHost()
         let session = TerminalSession(attach: "theirs", write: false, door: .local(host.address), screen: try screen(), timeout: 5, sleep: Naps().sleep)

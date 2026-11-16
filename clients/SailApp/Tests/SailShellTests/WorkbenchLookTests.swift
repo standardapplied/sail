@@ -1,6 +1,7 @@
 import AppKit
 import Foundation
 import SailLook
+import SailVT
 @testable import SailShell
 import SailTerminalView
 import SailTestPasskey
@@ -26,6 +27,7 @@ import Testing
     func theStripsTabsAreTheLooks(_ name: String, _ look: Look) throws {
         let shell = try Self.shell(look)
         let strip = shell.thisMac.strip
+        strip.showsTabs = true
         strip.show(Self.items(), selected: TabID(1))
         let selected = try #require(strip.tabs.first), other = try #require(strip.tabs.last)
         #expect(strip.layer?.backgroundColor == NSColor(look.chrome).cgColor, "\(name): the strip is not chrome")
@@ -33,7 +35,7 @@ import Testing
         #expect(selected.label.textColor == NSColor(look.text))
         #expect(other.layer?.backgroundColor == NSColor.clear.cgColor)
         #expect(other.label.textColor == NSColor(look.textSecondary))
-        #expect(!selected.close.isHidden && other.close.isHidden, "\(name): the close button shows on the selected tab only")
+        #expect(selected.close.isHidden && other.close.isHidden, "\(name): a close button shows without the pointer on its tab")
         other.mouseEntered(with: try #require(NSEvent.otherEvent(
             with: .applicationDefined, location: .zero, modifierFlags: [], timestamp: 0, windowNumber: 0, context: nil, subtype: 0, data1: 0, data2: 0
         )))
@@ -62,6 +64,96 @@ import Testing
         strip.onSelect = { pressed = $0 }
         #expect(other.accessibilityPerformPress())
         #expect(pressed == TabID(2), "VoiceOver's press selects no tab")
+    }
+
+    /// A tab's title is centred in the tab, to the point, at three widths, with the close button
+    /// shown (the pointer on the tab) and hidden; a title too long for the tab is cut in the middle,
+    /// still centred, clear of the close button and the zoom mark.
+    @Test(arguments: [100.0, 180.0, 240.0])
+    func aTabsTitleIsCentredInTheTab(_ width: Double) throws {
+        let hover = try #require(NSEvent.otherEvent(
+            with: .applicationDefined, location: .zero, modifierFlags: [], timestamp: 0, windowNumber: 0, context: nil, subtype: 0, data1: 0, data2: 0
+        ))
+        for title in ["api", "linuxuser@lightgrid: ~/a/rather/long/working/directory"] {
+            let tab = TabButton(id: TabID(1), look: .dark)
+            tab.frame = NSRect(x: 0, y: 0, width: width, height: 20)
+            tab.show(TabStrip.Item(id: TabID(1), title: title, zoomed: true), selected: true, look: .dark)
+            for hovered in [false, true] {
+                if hovered { tab.mouseEntered(with: hover) }
+                tab.layoutSubtreeIfNeeded()
+                let label = tab.label.alignmentRect(forFrame: tab.label.frame)
+                #expect(tab.close.isHidden == !hovered)
+                #expect(abs(label.midX - tab.bounds.midX) <= 0.5, "\(title) at \(width) pt, hovered \(hovered): the title's middle is \(label.midX), the tab's \(tab.bounds.midX)")
+                #expect(label.minX >= tab.close.frame.maxX - 1 && label.maxX <= tab.bounds.maxX - TabButton.titleInset + 1, "\(title) at \(width) pt overlaps the close button or the zoom mark: \(label)")
+            }
+            #expect(tab.label.lineBreakMode == .byTruncatingMiddle)
+        }
+    }
+
+    /// Mast's shell: one band across the window's top in the chrome (sampled under the buttons'
+    /// inset, in the middle and at the end), the rail's top edge at the band's bottom, the pane's
+    /// card beside it, and no view over a window button; in full screen the band is the window's
+    /// own top row, the tabs 8 pt in, the rail under it. Both panes, both looks.
+    @Test(arguments: [("dark", Look.dark), ("light", Look.light)])
+    func theBandRunsAcrossTheTopAndTheRailStartsUnderIt(_ name: String, _ look: Look) throws {
+        let shell = try Self.shell(look)
+        let window = shell.window
+        window.orderFront(nil)
+        defer { window.orderOut(nil) }
+        for pane in [Rail.Item.thisMac, .account] {
+            shell.select(pane)
+            for full in [false, true] {
+                shell.placeTheStrip(fullScreen: full)
+                window.layoutIfNeeded()
+                let root = try #require(window.contentView)
+                let band = full ? ShellApp.bandHeight : Double(root.bounds.height - window.contentLayoutRect.maxY)
+                let context = try #require(Self.drawn(root))
+                let pixels = try #require(context.data).bindMemory(to: UInt8.self, capacity: context.width * context.height * 4)
+                func isChrome(_ x: Double, _ y: Double) -> Bool {
+                    let at = (Int(y * 2) * context.width + Int(x * 2)) * 4
+                    let found = [pixels[at], pixels[at + 1], pixels[at + 2]], wanted = [look.chrome.red, look.chrome.green, look.chrome.blue]
+                    return zip(found, wanted).allSatisfy { abs(Int($0) - Int($1)) <= 2 }
+                }
+                for x in [40.0, Double(root.bounds.width) / 2, Double(root.bounds.width) - 6] {
+                    #expect(isChrome(x, band / 2), "\(name) \(pane) full \(full): the band at x \(x) is not the chrome")
+                }
+                #expect(isChrome(Rail.width / 2, band + 4), "\(name) \(pane) full \(full): the rail under the band is not the chrome")
+                let railTop = Double(root.bounds.height - shell.rail.frame.maxY)
+                #expect(abs(railTop - band) < 0.5, "\(name) \(pane) full \(full): the rail starts at \(railTop), the band ends at \(band)")
+                #expect(band >= 44, "\(name): the band is \(band) pt")
+                guard !full else {
+                    #expect(shell.thisMac.strip.leading == ShellApp.fullScreenInset)
+                    continue
+                }
+                let views: [NSView] = [shell.rail, shell.thisMac, shell.account, shell.thisMac.strip]
+                for kind in [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton] {
+                    let button = try #require(window.standardWindowButton(kind))
+                    let frame = button.convert(button.bounds, to: nil)
+                    #expect(abs(Double(frame.midY) - (Double(root.bounds.height) - band / 2)) < 1.5, "\(name): \(kind) is not centred in the band")
+                    for view in views where view.window != nil && !view.isHiddenOrHasHiddenAncestor {
+                        #expect(!view.convert(view.bounds, to: nil).intersects(frame), "\(name) \(pane): \(type(of: view)) lies over \(kind)")
+                    }
+                }
+                let strip = shell.thisMac.strip
+                let row = strip.convert(strip.bounds, to: nil)
+                #expect(abs(Double(row.height) - band) < 1 && abs(Double(row.maxX) - Double(root.bounds.width)) < 1,
+                        "\(name): the strip \(row) does not fill the band after the buttons (\(band) pt)")
+                #expect(abs(Double(strip.convert(NSPoint.zero, to: nil).x) + strip.leading - ShellApp.buttonsInset) < 0.5 || strip.leading == Look.Space.s,
+                        "\(name): the tabs do not start at the buttons' 96 pt inset")
+            }
+        }
+    }
+
+    static func drawn(_ view: NSView) -> CGContext? {
+        view.display()
+        let width = Int(view.bounds.width) * 2, height = Int(view.bounds.height) * 2
+        guard width > 0, height > 0, let layer = view.layer, let space = CGColorSpace(name: CGColorSpace.sRGB),
+              let context = CGContext(data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: width * 4, space: space,
+                                      bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
+        else { return nil }
+        context.scaleBy(x: 2, y: 2)
+        layer.render(in: context)
+        return context
     }
 
     /// The rename field: no system focus ring, ringed in the accent, its selection `fillSelected`
@@ -135,6 +227,30 @@ import Testing
         }
         #expect(!all.contains { $0.title.hasSuffix("…") || $0.title.hasSuffix("...") }, "a menu item ends in an ellipsis")
         #expect(!all.contains { $0.title == "Close" && $0.keyEquivalent == "w" && $0.action == #selector(NSWindow.performClose(_:)) }, "⌘W still closes the window")
+    }
+
+    /// P1: each command a context menu offers is a menu bar item with the same action and target,
+    /// so both are one action validated alike; a context menu's item shows no key (Apple's
+    /// guidelines), and with nothing to act on the workbench's commands are left out, not dimmed.
+    @Test func everyContextMenuCommandIsTheMenuBarsOwn() throws {
+        let shell = try Self.shell(.dark)
+        func items(_ menu: NSMenu) -> [NSMenuItem] {
+            menu.items.flatMap { [$0] + ($0.submenu.map(items) ?? []) }
+        }
+        let bar = items(shell.menu())
+        let workbench = shell.thisMac
+        let offered: [(Command, AnyObject?)] = [
+            (.copy, nil), (.paste, nil), (.selectAll, nil), (.splitRight, workbench), (.splitDown, workbench), (.zoomSplit, workbench),
+            (.close, workbench), (.renameTab, workbench), (.closeTab, workbench), (.closeOtherTabs, workbench), (.newTab, workbench),
+        ]
+        for (command, target) in offered {
+            let context = command.item(target: target, keyed: false)
+            #expect(context.keyEquivalent.isEmpty, "\(command.title) shows a key in a context menu")
+            #expect(bar.contains { $0.action == context.action && $0.target === context.target && $0.title == command.title }, "\(command.title) is not the menu bar's own")
+        }
+        let pane = workbench.paneMenu().items.map { $0.isSeparatorItem ? "-" : $0.title }
+        #expect(pane == ["Copy", "Paste", "Select All"], "with no terminal, only the edit commands, dimmed by the responder chain: \(pane)")
+        #expect(workbench.tabMenu().items.map(\.title) == ["New Tab"])
     }
 
     /// The workbench takes its own keys before the menu bar: each finds its menu item, shifted

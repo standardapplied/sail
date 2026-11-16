@@ -102,6 +102,27 @@ import Testing
         #expect(screen.feed(osc52).events.isEmpty)
     }
 
+    /// A clipboard write over ``ClipboardWritePolicy/largestText`` is refused and reported nowhere.
+    @Test func aClipboardWriteOverTheBoundIsRefused() throws {
+        let screen = try screen(columns: 20, rows: 1)
+        let largest = String(repeating: "x", count: ClipboardWritePolicy.largestText)
+        let write = { (text: String) in Array("\u{1b}]52;c;\(Data(text.utf8).base64EncodedString())\u{07}".utf8) }
+        #expect(screen.feed(write(largest)).events == [.clipboardWrite(largest)])
+        #expect(screen.feed(write(largest + "x")).events.isEmpty)
+    }
+
+    /// Kitty graphics are off until the app draws images: a query (`a=q`) gets no answer, which the
+    /// protocol's documentation says is how a terminal without support behaves ("query … followed
+    /// by a request for the primary device attributes; if you get back an answer for the device
+    /// attributes without also getting back an answer for the query the terminal does not support
+    /// the kitty graphics protocol", sw.kovidgoyal.net/kitty/graphics-protocol, "Querying support").
+    @Test func aKittyGraphicsQueryGetsNoAnswerOnlyTheDeviceAttributes() throws {
+        let screen = try screen(columns: 20, rows: 1)
+        let reply = String(decoding: screen.feed(Array("\u{1b}_Gi=31,s=1,v=1,a=q,t=d,f=24;AAAA\u{1b}\\\u{1b}[c".utf8)).reply, as: UTF8.self)
+        #expect(!reply.contains("\u{1b}_G"), "\(reply.debugDescription)")
+        #expect(reply.hasPrefix("\u{1b}[?"), "the device attributes are answered: \(reply.debugDescription)")
+    }
+
     @Test func aClipboardReadIsAnsweredEmpty() throws {
         let screen = try screen(columns: 20, rows: 1)
         #expect(screen.feed(Array("\u{1b}]52;c;?\u{07}".utf8)).reply == Array("\u{1b}]52;c;\u{07}".utf8))
@@ -141,6 +162,24 @@ import Testing
         try screen.setCellPixels(width: 9, height: 18)
         #expect(screen.feed(Array("\u{1b}[18t".utf8)).reply == Array("\u{1b}[8;4;30t".utf8))
         #expect(screen.feed(Array("\u{1b}[14t".utf8)).reply == Array("\u{1b}[4;72;270t".utf8))
+    }
+
+    /// Ghostty's default: a cursor blinks unless the program asks for a steady one (DECSCUSR 2, 4
+    /// or 6, or mode 12 reset); its default style (`CSI 0 q`) and a full reset blink again.
+    @Test func theCursorBlinksUnlessTheProgramAsksForASteadyOne() throws {
+        let screen = try screen(columns: 20, rows: 3)
+        #expect(try screen.frame().cursor.blinking, "a new terminal's cursor blinks")
+        for (sequence, blinking) in [("\u{1b}[2 q", false), ("\u{1b}[0 q", true), ("\u{1b}[6 q", false), ("\u{1b}[5 q", true), ("\u{1b}[?12l", false), ("\u{1b}c", true)] {
+            _ = screen.feed(Array(sequence.utf8))
+            #expect(try screen.frame().cursor.blinking == blinking, "after \(sequence.debugDescription)")
+        }
+    }
+
+    @Test func selectAllTakesEveryLineTheScrollbackIncluded() throws {
+        let screen = try screen(columns: 20, rows: 3)
+        _ = screen.feed(Array("first\r\nsecond\r\nthird\r\nfourth".utf8))
+        #expect(screen.select(.all))
+        #expect(screen.selectedText()?.hasPrefix("first\nsecond\nthird\nfourth") == true, "\(screen.selectedText() ?? "nil")")
     }
 
     @Test func aWordALineAndARangeAreSelected() throws {

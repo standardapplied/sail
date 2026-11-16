@@ -166,7 +166,7 @@ public final class TerminalPane: NSView {
         case let .phase(.parked(reason)):
             banner.show(Self.sentence("this Mac's terminal host does not answer: \(reason)"), button: "Try Again") { [weak self] in
                 Task {
-                    try? await self?.host.ensureServing()
+                    _ = try? await self?.host.ensureServing()
                     self?.session?.reconnectNow()
                 }
             }

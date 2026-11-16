@@ -25,12 +25,20 @@ public enum ScreenEvent: Equatable, Sendable {
     /// The program wrote the clipboard (OSC 52 and its kin) and the policy let it: the text it wrote.
     case clipboardWrite(String)
     case notification(title: String, body: String)
+
+    /// A program's clipboard write: the app takes it only from a session it writes to.
+    public var writesTheClipboard: Bool {
+        if case .clipboardWrite = self { true } else { false }
+    }
 }
 
-/// Whether a program may write the person's clipboard.
+/// Whether a program may write the person's clipboard; never more than ``largestText`` bytes of
+/// UTF-8 at once, so a runaway program cannot fill it with megabytes.
 public enum ClipboardWritePolicy: Equatable, Sendable {
     case allow
     case deny
+
+    public static let largestText = 1 << 20
 }
 
 /// What the terminal's callbacks collect during one call into it. It lives inside the screen's lock
@@ -102,11 +110,13 @@ final class EffectSink {
         let clipboardWrite: GhosttyTerminalClipboardWriteFn = { _, userdata, write in
             guard let write else { return }
             let sink = EffectSink.from(userdata)
+            let text = EffectSink.text(of: write.pointee)
             let allowed = sink.map { !$0.replaying && $0.clipboardPolicy == .allow } ?? false
+                && (text?.utf8.count ?? 0) <= ClipboardWritePolicy.largestText
             var reply = GhosttyClipboardWriteReply()
             reply.size = MemoryLayout<GhosttyClipboardWriteReply>.size
             reply.result = allowed ? GHOSTTY_CLIPBOARD_WRITE_RESULT_SUCCESS : GHOSTTY_CLIPBOARD_WRITE_RESULT_DENIED
-            if allowed, let text = EffectSink.text(of: write.pointee) {
+            if allowed, let text {
                 sink?.events.append(.clipboardWrite(text))
             }
             write.pointee.reply?(write, &reply)

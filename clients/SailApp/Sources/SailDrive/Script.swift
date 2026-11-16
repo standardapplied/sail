@@ -102,8 +102,6 @@ struct Step: Decodable {
     var accent: Bool?
     /// The window's title bar: transparent, the platform's buttons, the rail and the pane under it.
     var titleBar: Bool?
-    /// The window's own zoom, twice: the frame changes and comes back.
-    var zoomAndRestore: Bool?
     /// Searches everywhere a token could be left for the session token and for `sess_`.
     var sweep: Bool?
     /// The step runs only on a signed build, or only on an unsigned one; skipped otherwise.
@@ -132,6 +130,19 @@ struct Step: Decodable {
     var remember: Bool?
     /// The session `remember` kept is listed live by the host, or not, within `seconds`.
     var listed: Bool?
+    /// The context menu of the selected tab's pane, or of the tab, at `at`, asked as a right-click
+    /// asks it (a pane is focused first, a tab selected); it must hold `items` ("-" a separator),
+    /// and `choose` is done as a click on it.
+    var contextMenu: String?
+    var at: Int?
+    var items: [String]?
+    var choose: String?
+    /// The focused pane's cursor blinks: two frames a blink apart differ only in the cursor's cell;
+    /// unfocused, nothing is drawn and nothing wakes; the wakeups a second are reported.
+    var blink: Bool?
+    /// Another build's host was serving when the app opened: the app said so, ended it, and one
+    /// host serves now, from this build's copy.
+    var anotherBuildsHost: Bool?
     /// The tab strip's hit testing: a tab's middle reaches the tab, the empty end moves the window.
     var stripHits: Bool?
     /// The four-pane measure (scenario 32).

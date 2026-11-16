@@ -150,13 +150,16 @@ public protocol GlyphSource: AnyObject {
 }
 
 /// What a view adds to the screen's frame: whether it has focus (the cursor is hollow without
-/// it) and the text an input method is composing, drawn at the cursor.
+/// it), whether a blinking cursor is in its shown half (`cursorOn`), and the text an input method
+/// is composing, drawn at the cursor.
 public struct Overlay: Equatable, Sendable {
     public var focused: Bool
+    public var cursorOn: Bool
     public var marked: String
 
-    public init(focused: Bool = true, marked: String = "") {
+    public init(focused: Bool = true, cursorOn: Bool = true, marked: String = "") {
         self.focused = focused
+        self.cursorOn = cursorOn
         self.marked = marked
     }
 }
@@ -222,7 +225,8 @@ public struct InstanceBuilder: Sendable {
         }
         size = frame.size
         rebuilt = []
-        let overlaid = overlay.marked.isEmpty ? cursor(frame, focused: overlay.focused, glyphs: glyphs) : composing(overlay.marked, frame, glyphs: glyphs)
+        let overlaid: Overlaid = !overlay.marked.isEmpty ? composing(overlay.marked, frame, glyphs: glyphs)
+            : overlay.cursorOn ? cursor(frame, focused: overlay.focused, glyphs: glyphs) : ([], true)
         overlayComplete = overlaid.complete
         var memo = PlaceMemo()
         for y in frame.rows.indices {

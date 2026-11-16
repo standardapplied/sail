@@ -460,18 +460,22 @@ final class Driver {
         return path
     }()
 
-    /// What the floods' processes and their neighbours cost the machine now, as `ps` says.
-    static func processes() -> [String] {
-        ps(["-axo", "pid,pri,%cpu,comm", "-r"]).split(separator: "\n").prefix(16).map(String.init)
+    /// Every process whose command line holds `text`, as `ps` lists them.
+    static func processes(matching text: String) async -> [String] {
+        await ps(["-axo", "pid=,command="]).split(separator: "\n").map(String.init).filter { $0.contains(text) && !$0.contains("ps -axo") }
     }
 
-    /// The share of a CPU, in %, the terminal host and the app each used over the next `seconds`,
-    /// from their CPU times; nil for one `ps` did not list. The host is the bundled one, which may
-    /// have been started by an earlier launch, so it is found by its path, not by a pid kept.
-    static func cpuShares(over seconds: Double) async -> (host: Double?, app: Double?) {
-        let before = cpuTimes(), started = CACurrentMediaTime()
+    /// What the floods' processes and their neighbours cost the machine now, as `ps` says.
+    static func processes() async -> [String] {
+        await ps(["-axo", "pid,pri,%cpu,comm", "-r"]).split(separator: "\n").prefix(16).map(String.init)
+    }
+
+    /// The share of a CPU, in %, the terminal host (the process serving at the app's socket) and
+    /// the app each used over the next `seconds`, from their CPU times; nil for one `ps` did not list.
+    static func cpuShares(host: pid_t?, over seconds: Double) async -> (host: Double?, app: Double?) {
+        let before = await cpuTimes(host: host), started = CACurrentMediaTime()
         try? await Task.sleep(for: .seconds(seconds))
-        let after = cpuTimes(), elapsed = CACurrentMediaTime() - started
+        let after = await cpuTimes(host: host), elapsed = CACurrentMediaTime() - started
         func share(_ was: Double?, _ now: Double?) -> Double? {
             guard let was, let now else { return nil }
             return (now - was) / elapsed * 100
@@ -480,20 +484,25 @@ final class Driver {
     }
 
     /// The terminal host's and the app's CPU time so far in seconds, from `ps`'s `[[hh:]mm:]ss.ss`.
-    static func cpuTimes() -> (host: Double?, app: Double?) {
-        let helper = Bundle.main.bundleURL.appending(path: "Contents/Helpers/sail").path, app = getpid()
+    static func cpuTimes(host: pid_t?) async -> (host: Double?, app: Double?) {
+        let app = getpid()
         var times: (host: Double?, app: Double?) = (nil, nil)
-        for line in ps(["-axo", "pid=,time=,comm="]).split(separator: "\n") {
-            let fields = line.split(separator: " ", maxSplits: 2)
-            guard fields.count == 3, let pid = pid_t(fields[0]) else { continue }
+        for line in await ps(["-axo", "pid=,time="]).split(separator: "\n") {
+            let fields = line.split(separator: " ")
+            guard fields.count == 2, let pid = pid_t(fields[0]) else { continue }
             let time = fields[1].split(separator: ":").compactMap { Double($0) }.reduce(0) { $0 * 60 + $1 }
             if pid == app { times.app = time }
-            if fields[2] == helper { times.host = (times.host ?? 0) + time }
+            if pid == host { times.host = time }
         }
         return times
     }
 
-    private static func ps(_ arguments: [String]) -> String {
+    /// `ps`'s answer, run off the main thread: a wait for it never holds the frames a step judges.
+    private static func ps(_ arguments: [String]) async -> String {
+        await Task.detached { psNow(arguments) }.value
+    }
+
+    nonisolated private static func psNow(_ arguments: [String]) -> String {
         let ps = Process()
         ps.executableURL = URL(filePath: "/bin/ps")
         ps.arguments = arguments

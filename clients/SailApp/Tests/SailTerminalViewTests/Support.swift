@@ -15,6 +15,7 @@ final class FakeLink: TerminalLink {
     let screenChanges: AsyncStream<ContinuousClock.Instant>
     let events: AsyncStream<SessionEvent>
     let changesSink: AsyncStream<ContinuousClock.Instant>.Continuation
+    let eventsSink: AsyncStream<SessionEvent>.Continuation
     /// Ends when the screen stream's reader stops.
     let readerGone: AsyncStream<Void>
     private let sent = Mutex<[UInt8]>([])
@@ -27,7 +28,7 @@ final class FakeLink: TerminalLink {
         let (gone, goneSink) = AsyncStream.makeStream(of: Void.self)
         readerGone = gone
         changesSink.onTermination = { _ in goneSink.finish() }
-        events = AsyncStream { _ in }
+        (events, eventsSink) = AsyncStream.makeStream(of: SessionEvent.self)
     }
 
     var bytes: [UInt8] {
@@ -42,9 +43,10 @@ final class FakeLink: TerminalLink {
         sent.withLock { $0 = [] }
     }
 
-    /// Output from the program: fed to the screen, and the screen's tick told.
+    /// Output from the program: fed to the screen, what it asks of the app told as a writer's
+    /// session tells it, and the screen's tick told.
     func output(_ text: String) {
-        _ = screen.feed(Array(text.utf8))
+        screen.feed(Array(text.utf8)).events.forEach { eventsSink.yield(.screen($0)) }
         changesSink.yield(.now)
     }
 
@@ -130,7 +132,7 @@ struct Harness {
     static let fonts = URL(filePath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
         .appending(path: "Fonts")
 
-    init(columns: Int = 80, rows: Int = 24, size: NSSize = NSSize(width: 800, height: 500)) throws {
+    init(columns: Int = 80, rows: Int = 24, size: NSSize = NSSize(width: 800, height: 500), blinks: Bool = false) throws {
         _ = NSApplication.shared
         let view = try TerminalView(fonts: TerminalFonts(directory: Self.fonts))
         let clock = ManualClock()
@@ -142,6 +144,7 @@ struct Harness {
         let pasteboard = NSPasteboard(name: NSPasteboard.Name("sh.standardapplied.sail.tests.\(UUID().uuidString)"))
         view.pasteboard = pasteboard
         view.isOnScreen = { _ in true }
+        view.cursorBlinks = blinks
         let link = try FakeLink(columns: columns, rows: rows)
         view.attach(link)
         Self.flush(view)

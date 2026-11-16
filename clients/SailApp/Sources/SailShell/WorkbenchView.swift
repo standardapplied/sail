@@ -38,6 +38,8 @@ public final class WorkbenchView: NSView {
     static let keepDelay = 0.3
     /// The arrangement is the person's from here on: restored, so worth keeping.
     private(set) var restored = false
+    /// Every sentence the banner said on its own, in order: for the drive.
+    public private(set) var told: [String] = []
 
     init(fonts directory: URL, helper: String?, look: Look) throws(ShellError) {
         self.look = look
@@ -83,8 +85,9 @@ public final class WorkbenchView: NSView {
     private func restore() async {
         banner.show("Connecting to this Mac's terminal host")
         let listed: [SessionInfo]
+        let said: String?
         do {
-            try await host.ensureServing()
+            said = try await host.ensureServing()
             listed = try await SessionListing.sessions(at: host.address)
         } catch {
             banner.show(TerminalPane.sentence("\(error)"), button: "Try Again") { [weak self] in
@@ -93,6 +96,7 @@ public final class WorkbenchView: NSView {
             return
         }
         banner.hide()
+        tell([said, Self.translocatedOnce()].compactMap { $0 }.joined(separator: " "))
         let kept = UserDefaults.standard.data(forKey: Self.arrangementKey).flatMap { try? JSONDecoder().decode(Arrangement.self, from: $0) }
         model = Workbench.restore(kept, live: listed.filter(\.live).map(\.name), home: NSHomeDirectory())
         restored = true
@@ -199,6 +203,7 @@ public final class WorkbenchView: NSView {
             return nil
         }
         view.onEvent = { [weak self] view, event in self?.handle(event, from: view) }
+        view.terminal.contextMenu = { [weak self] in self?.paneMenu() }
         view.terminal.onFocus = { [weak self, id = pane.id] in self?.focusClicked(id) }
         panes[pane.id] = view
         tabView(tab.id).addPane(view)
@@ -301,6 +306,26 @@ public final class WorkbenchView: NSView {
         layoutSelected()
     }
 
+    /// Says `sentence` in the banner for 10 s, unless something else is said meanwhile.
+    private func tell(_ sentence: String) {
+        guard !sentence.isEmpty else { return }
+        told.append(sentence)
+        banner.show(sentence)
+        Task { [weak self] in
+            try? await Task.sleep(for: .seconds(10))
+            if self?.banner.shown == sentence { self?.banner.hide() }
+        }
+    }
+
+    /// Once a launch, when macOS runs the app from the temporary copy it makes of a download
+    /// (App Translocation): updates would replace that copy, not the app.
+    private static var translocationTold = false
+    static func translocatedOnce(bundle: String = Bundle.main.bundlePath) -> String? {
+        guard !translocationTold, bundle.contains("/AppTranslocation/") else { return nil }
+        translocationTold = true
+        return "Sail is running from a copy macOS made of the download. Move Sail to Applications and open it from there."
+    }
+
     private func openTab() {
         let place = newPlace()
         open(model.newTab(session: place.newSessionName, place: place), points: points)
@@ -338,6 +363,14 @@ public final class WorkbenchView: NSView {
         let views = tab.layout.leaves.compactMap { panes[$0] }
         guard views.count > 1 else { return closePane(nil) }
         confirm(ending: views, question: "Close this tab?", detail: "Its \(views.count) terminals will end.")
+    }
+
+    /// Closes every tab but the selected one, asking first as Close Tab does.
+    @objc public func closeOtherTabs(_: Any?) {
+        guard let kept = model.selectedTab?.id else { return }
+        let views = model.tabs.filter { $0.id != kept }.flatMap(\.layout.leaves).compactMap { panes[$0] }
+        guard !views.isEmpty else { return }
+        confirm(ending: views, question: "Close the other tabs?", detail: "Their \(views.count == 1 ? "terminal" : "\(views.count) terminals") will end.")
     }
 
     /// Ends `views`' sessions, asking first when one of them may end a running program, as one not
@@ -459,6 +492,7 @@ public final class WorkbenchView: NSView {
         emptyLabel.isHidden = true
         newTerminal.isHidden = true
         strip.onSelect = { [weak self] id in self?.change { $0.select(id) } }
+        strip.onMenu = { [weak self] in self?.tabMenu() }
         strip.onClose = { [weak self] id in
             self?.change { $0.select(id) }
             self?.closeTab(nil)
@@ -490,6 +524,7 @@ extension WorkbenchView: NSMenuItemValidation {
         let panes = model.selectedTab?.layout.leaves.count ?? 0
         switch item.action {
         case #selector(newTab(_:)): return true
+        case #selector(closeOtherTabs(_:)): return !isHidden && model.tabs.count > 1
         case #selector(zoomSplit(_:)), #selector(equalizeSplits(_:)), #selector(selectNextSplit(_:)), #selector(selectPreviousSplit(_:)):
             return !isHidden && panes > 1
         default: return !isHidden && panes > 0

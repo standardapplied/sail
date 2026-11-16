@@ -33,6 +33,10 @@ final class TerminalCore {
         try paint(palette)
         var clustering = GhosttyTerminalModeConfig(mode: ghostty_mode_new(2027, false), value: true)
         try set(terminal.pointer, GHOSTTY_TERMINAL_OPT_MODE_DEFAULT, &clustering)
+        var blinks = true
+        try set(terminal.pointer, GHOSTTY_TERMINAL_OPT_DEFAULT_CURSOR_BLINK, &blinks)
+        var noImages: UInt64 = 0
+        try set(terminal.pointer, GHOSTTY_TERMINAL_OPT_KITTY_IMAGE_STORAGE_LIMIT, &noImages)
         try resize(size)
     }
 
@@ -213,9 +217,15 @@ final class TerminalCore {
         case let .range(from, to): gridRef(from).flatMap { start in gridRef(to).map { GhosttySelection(start: start, end: $0, rectangle: false) } }
         case let .words(from, to): spanning(from, to, line: false)
         case let .lines(from, to): spanning(from, to, line: true)
+        case .all: everything()
         }
         guard var selection = made else { return false }
         return ghostty_terminal_set(handle, GHOSTTY_TERMINAL_OPT_SELECTION, &selection) == GHOSTTY_SUCCESS
+    }
+
+    private func everything() -> GhosttySelection? {
+        var selection = GhosttySelection()
+        return ghostty_terminal_select_all(handle, &selection) == GHOSTTY_SUCCESS ? selection : nil
     }
 
     /// The word or line at `point`; nil when the cell is outside the viewport or holds none.

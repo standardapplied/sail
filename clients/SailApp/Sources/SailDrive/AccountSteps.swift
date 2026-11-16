@@ -69,9 +69,6 @@ extension Driver {
         if step.titleBar == true {
             return titleBar()
         }
-        if step.zoomAndRestore == true {
-            return await zoomAndRestore()
-        }
         if step.sweep == true {
             return sweep()
         }
@@ -189,9 +186,9 @@ extension Driver {
         )
     }
 
-    /// A: the window's chrome is the look's. The title bar is transparent over a full-size content
-    /// view with the platform's buttons, and under it the rail's tint at the left and the selected
-    /// pane's surface beside it, as the window draws them.
+    /// A: the window's chrome is the look's, laid out as Mast's shell. The title bar is transparent
+    /// over a full-size content view with the platform's buttons centred in the band; the band is
+    /// the chrome under the buttons, in the middle and at the end, and the rail under it is too.
     private func titleBar() -> (Bool, String) {
         let window = shell.window
         guard window.styleMask.contains(.fullSizeContentView), window.titlebarAppearsTransparent,
@@ -199,30 +196,17 @@ extension Driver {
               let content = window.contentView, let context = Self.drawn(content), let bytes = context.data
         else { return (false, "the window's title bar is the system's, or a window button is missing") }
         let pixels = bytes.bindMemory(to: UInt8.self, capacity: context.width * context.height * 4)
-        func at(_ x: Double) -> UInt32 {
-            Self.pixel(pixels, (20 * context.width + Int(x * 2)) * 4)
+        let band = Double(content.bounds.height - window.contentLayoutRect.maxY)
+        func at(_ x: Double, _ y: Double) -> UInt32 {
+            Self.pixel(pixels, (Int(y * 2) * context.width + Int(x * 2)) * 4)
         }
-        let surface = Self.hex(shell.rail.selected == .thisMac ? shell.look.chrome : shell.look.canvas)
-        let rail = at(Rail.width / 2), pane = at(Double(content.bounds.width) - 30)
+        let chrome = Self.hex(shell.look.chrome)
+        let samples = [("under the buttons", at(40, band / 2)), ("mid-band", at(Double(content.bounds.width) / 2, band / 2)),
+                       ("the band's end", at(Double(content.bounds.width) - 6, band / 2)), ("the rail", at(Rail.width / 2, band + 4))]
         return (
-            Self.near(rail, Self.hex(shell.look.chrome)) && Self.near(pane, surface),
-            String(format: "under the title bar the rail is #%06X (wanted #%06X) and the pane #%06X (wanted #%06X)", rail, Self.hex(shell.look.chrome), pane, surface)
+            band >= 44 && samples.allSatisfy { Self.near($0.1, chrome) },
+            "the band is \(band) pt; " + samples.map { "\($0.0) #" + String(format: "%06X", $0.1) }.joined(separator: ", ") + String(format: " (wanted #%06X)", chrome)
         )
-    }
-
-    /// The window's own zoom (what its zoom button and, by default, a title bar double-click do)
-    /// changes the frame, and a second gives it back. The double-click itself is the owner's to see:
-    /// made input does not reach a hosted runner's title bar.
-    private func zoomAndRestore() async -> (Bool, String) {
-        let window = shell.window
-        window.setFrame(NSRect(x: 80, y: 80, width: 800, height: 640), display: true)
-        let before = window.frame
-        window.zoom(nil)
-        let zoomed = await waitUntil(5) { window.frame != before }
-        let after = window.frame
-        window.zoom(nil)
-        let back = await waitUntil(5) { window.frame == before }
-        return (zoomed && back, "the frame went from \(before) to \(after) and \(back ? "back" : "stayed at \(window.frame)")")
     }
 
     /// The sRGB colour at byte `offset` of an RGBA bitmap, as `0xRRGGBB`.

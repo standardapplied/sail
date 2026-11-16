@@ -4,7 +4,9 @@ import SailTerminalView
 import SailWorkbench
 
 /// The tabs in the title bar's row, laid out by ``TabRow``. A tab never moves the window; the
-/// strip's empty part is a plain view, so there the title bar's dragging and double-click stay.
+/// strip's empty part takes no mouse event of its own, so in the title bar's accessory the title
+/// bar's own view gets it: dragging, and the double-click System Settings names. With the tabs not
+/// shown (another pane selected) the strip stays, empty and clear, so the row stays the title bar's.
 @MainActor
 public final class TabStrip: NSView {
     public struct Item: Equatable, Sendable {
@@ -19,6 +21,8 @@ public final class TabStrip: NSView {
     /// A rename ended: the name typed, or nil when it was cancelled.
     var onRename: @MainActor (TabID, String?) -> Void = { _, _ in }
     var onMove: @MainActor (TabID, Int) -> Void = { _, _ in }
+    /// A tab's context menu, asked once the tab is selected.
+    var onMenu: @MainActor () -> NSMenu? = { nil }
 
     var look: Look {
         didSet { paint() }
@@ -26,6 +30,14 @@ public final class TabStrip: NSView {
 
     public private(set) var tabs: [TabButton] = []
     public let add: RingedButton
+
+    var showsTabs = true {
+        didSet {
+            subviews.forEach { $0.isHidden = !showsTabs }
+            if showsTabs { needsLayout = true }
+            paint()
+        }
+    }
 
     public var isRenaming: Bool {
         tabs.contains { $0.field != nil }
@@ -71,21 +83,32 @@ public final class TabStrip: NSView {
 
     private var selectedIndex: Int?
 
+    /// The strip's own empty space before the first tab, the title bar's to drag and double-click:
+    /// what the window buttons' inset leaves of it.
+    var leading = Look.Space.s {
+        didSet { needsLayout = true }
+    }
+
+    /// A tab's height, centred in the band.
+    static let tabHeight = 28.0
+
     private var row: TabRow {
-        TabRow(tabs: tabs.count, selected: selectedIndex, width: Double(bounds.width))
+        TabRow(tabs: tabs.count, selected: selectedIndex, width: Double(bounds.width) - leading)
     }
 
     override public func layout() {
         super.layout()
         let row = self.row
-        var x = 0.0
+        var x = leading
         for (index, tab) in tabs.enumerated() {
-            tab.isHidden = !row.shows(index)
+            tab.isHidden = !showsTabs || !row.shows(index)
             guard !tab.isHidden else { continue }
-            if !tab.dragging { tab.frame = CGRect(x: x, y: 4, width: row.width, height: max(0, Double(bounds.height) - 8)) }
+            let height = min(Self.tabHeight, max(0, Double(bounds.height) - 8))
+            if !tab.dragging { tab.frame = CGRect(x: x, y: (Double(bounds.height) - height) / 2, width: row.width, height: height) }
             x += row.width + TabRow.gap
         }
         add.frame = CGRect(x: x, y: (Double(bounds.height) - TabRow.addSide) / 2, width: TabRow.addSide, height: TabRow.addSide)
+        add.isHidden = !showsTabs
     }
 
     private func makeTab(_ id: TabID) -> TabButton {
@@ -94,6 +117,7 @@ public final class TabStrip: NSView {
         tab.onClose = { [weak self] in self?.onClose(id) }
         tab.onRename = { [weak self] name in self?.onRename(id, name) }
         tab.onDrop = { [weak self] tab in self?.drop(tab) }
+        tab.onMenu = { [weak self] in self?.onMenu() }
         addSubview(tab)
         return tab
     }
@@ -101,7 +125,7 @@ public final class TabStrip: NSView {
     /// A dragged tab let go: its place is where its middle is.
     private func drop(_ tab: TabButton) {
         let row = self.row
-        let place = Int((Double(tab.frame.midX) / (row.width + TabRow.gap)).rounded(.down))
+        let place = Int(((Double(tab.frame.midX) - leading) / (row.width + TabRow.gap)).rounded(.down))
         tab.dragging = false
         onMove(tab.id, row.first + min(max(0, place), row.shown - 1))
         needsLayout = true
@@ -112,7 +136,7 @@ public final class TabStrip: NSView {
     }
 
     private func paint() {
-        layer?.backgroundColor = NSColor(look.chrome).cgColor
+        layer?.backgroundColor = showsTabs ? NSColor(look.chrome).cgColor : NSColor.clear.cgColor
         add.paint(look)
         tabs.forEach { $0.look = look }
     }
@@ -129,6 +153,7 @@ public final class TabButton: NSView, NSTextFieldDelegate {
     var onClose: @MainActor () -> Void = {}
     var onRename: @MainActor (String?) -> Void = { _ in }
     var onDrop: @MainActor (TabButton) -> Void = { _ in }
+    var onMenu: @MainActor () -> NSMenu? = { nil }
     var dragging = false
     var look: Look {
         didSet { paint() }
@@ -147,7 +172,8 @@ public final class TabButton: NSView, NSTextFieldDelegate {
         wantsLayer = true
         layer?.cornerRadius = Look.contentRadius
         label.font = .systemFont(ofSize: Look.Step.callout.points)
-        label.lineBreakMode = .byTruncatingTail
+        label.lineBreakMode = .byTruncatingMiddle
+        label.alignment = .center
         close.target = self
         close.action = #selector(closeTab)
         for view in [label, close, zoomMark] as [NSView] {
@@ -155,10 +181,13 @@ public final class TabButton: NSView, NSTextFieldDelegate {
             addSubview(view)
         }
         NSLayoutConstraint.activate([
-            zoomMark.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Look.Space.s), zoomMark.centerYAnchor.constraint(equalTo: centerYAnchor),
-            label.leadingAnchor.constraint(equalTo: zoomMark.trailingAnchor, constant: 4), label.centerYAnchor.constraint(equalTo: centerYAnchor),
-            close.leadingAnchor.constraint(equalTo: label.trailingAnchor, constant: 4), close.centerYAnchor.constraint(equalTo: centerYAnchor),
-            close.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -4), close.widthAnchor.constraint(equalToConstant: 16),
+            close.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 4), close.centerYAnchor.constraint(equalTo: centerYAnchor),
+            close.widthAnchor.constraint(equalToConstant: 16),
+            zoomMark.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -4), zoomMark.centerYAnchor.constraint(equalTo: centerYAnchor),
+            zoomMark.widthAnchor.constraint(equalToConstant: 16),
+            label.centerXAnchor.constraint(equalTo: centerXAnchor), label.centerYAnchor.constraint(equalTo: centerYAnchor),
+            label.leadingAnchor.constraint(greaterThanOrEqualTo: leadingAnchor, constant: Self.titleInset),
+            label.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -Self.titleInset),
         ])
         label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         setAccessibilityElement(true)
@@ -170,6 +199,11 @@ public final class TabButton: NSView, NSTextFieldDelegate {
     required init?(coder: NSCoder) {
         nil
     }
+
+    /// The title's inset on both sides, room for the close button on the leading edge and the zoom
+    /// mark on the trailing one, so the title stays centred in the tab whichever shows: the model
+    /// of macOS's own window tabs, which Ghostty uses and Safari draws.
+    public static let titleInset = 24.0
 
     /// AppKit's subrole for a tab (`NSAccessibilityTabButtonSubrole`, `AXTabButton`).
     public static let tabButton = NSAccessibility.Subrole(rawValue: "AXTabButton")
@@ -244,6 +278,13 @@ public final class TabButton: NSView, NSTextFieldDelegate {
         onClose()
     }
 
+    /// A right-click or a control-click selects the tab, then offers its menu; none while renaming.
+    override public func menu(for event: NSEvent) -> NSMenu? {
+        guard field == nil, event.type == .rightMouseDown || event.modifierFlags.contains(.control) else { return nil }
+        onSelect()
+        return onMenu()
+    }
+
     /// The title becomes a field: Return, a click elsewhere or another tab selected names the tab
     /// what it holds (nothing clears the name); Escape leaves the name as it was.
     public func rename() {
@@ -301,7 +342,7 @@ public final class TabButton: NSView, NSTextFieldDelegate {
         label.textColor = NSColor(isSelected ? look.text : look.textSecondary)
         close.paint(look)
         zoomMark.contentTintColor = NSColor(look.textSecondary)
-        close.isHidden = !(isSelected || hovering)
+        close.isHidden = !hovering
         field?.textColor = NSColor(look.text)
         field?.backgroundColor = NSColor(look.surface)
         field?.layer?.borderColor = NSColor(look.accent).cgColor

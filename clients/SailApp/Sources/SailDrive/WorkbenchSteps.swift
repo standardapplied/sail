@@ -59,6 +59,15 @@ extension Driver {
         if step.stripHits == true {
             return stripHits()
         }
+        if let kind = step.contextMenu {
+            return contextMenu(kind, at: step.at ?? 0, items: step.items, choose: step.choose)
+        }
+        if step.blink == true {
+            return await blinks()
+        }
+        if step.anotherBuildsHost == true {
+            return await anotherBuildsHost()
+        }
         if step.panes4 == true {
             return await fourPanes()
         }
@@ -302,25 +311,32 @@ extension Driver {
         return ((view as? NSTextField).map { [$0.stringValue] } ?? []) + view.subviews.flatMap(texts)
     }
 
-    /// The window's own hit testing at a tab's middle reaches the tab, and at the strip's empty end
-    /// it reaches no tab (the title bar's, or the strip's own plain view).
+    /// The window's own hit testing: a tab's middle reaches the tab, which never moves the window;
+    /// the strip's empty end and the row just after the window's buttons reach no tab, and a view
+    /// inside the title bar's own view (`NSTitlebarView`), which takes the drag and performs the
+    /// double-click System Settings names. The double-click itself cannot be made in process (a
+    /// made event handed to the title bar's view crashes the app; see the spec's report).
     private func stripHits() -> (Bool, String) {
-        guard let frame = shell.window.contentView?.superview, let tab = workbench.strip.tabs.first, let middle = tabMiddle(0) else {
-            return (false, "no tab to hit")
-        }
-        let hit = frame.hitTest(middle)
+        let window = shell.window
+        guard let frame = window.contentView?.superview, let tab = workbench.strip.tabs.first, let middle = tabMiddle(0),
+              let zoom = window.standardWindowButton(.zoomButton)
+        else { return (false, "no tab to hit") }
         let strip = workbench.strip
-        let end = strip.convert(NSPoint(x: strip.bounds.maxX - 4, y: strip.bounds.midY), to: nil)
-        let empty = frame.hitTest(end)
-        let onTab = hit === tab || hit?.isDescendant(of: tab) == true
-        let emptyOnTab = empty.map { view in strip.tabs.contains { view === $0 || view.isDescendant(of: $0) } } ?? false
-        let emptyMoves = empty?.mouseDownCanMoveWindow == true
-        let tabStays = onTab && !tab.mouseDownCanMoveWindow
-        return (
-            tabStays && !emptyOnTab && emptyMoves,
-            "a tab's middle hits \(hit.map { "\(type(of: $0))" } ?? "nothing"), the strip's empty end \(empty.map { "\(type(of: $0))" } ?? "nothing")"
-                + " (it moves the window: \(empty?.mouseDownCanMoveWindow == true))"
-        )
+        let hit = frame.hitTest(middle)
+        let buttons = zoom.convert(zoom.bounds, to: nil)
+        let places = [
+            ("the strip's empty end", strip.convert(NSPoint(x: strip.bounds.maxX - 4, y: strip.bounds.midY), to: nil)),
+            ("just after the window's buttons", NSPoint(x: buttons.maxX + 2, y: buttons.midY)),
+        ]
+        let said = places.map { name, point -> (Bool, String) in
+            let empty = frame.hitTest(point)
+            let chain = empty.map { sequence(first: $0, next: \.superview).map { "\(type(of: $0))" } } ?? []
+            let onTab = empty.map { view in strip.tabs.contains { view === $0 || view.isDescendant(of: $0) } } ?? false
+            let titleBars = !onTab && chain.contains("NSTitlebarView") && empty?.mouseDownCanMoveWindow == true
+            return (titleBars, "\(name) hits \(chain.joined(separator: " < "))")
+        }
+        let onTab = (hit === tab || hit?.isDescendant(of: tab) == true) && !tab.mouseDownCanMoveWindow
+        return (onTab && said.allSatisfy(\.0), "a tab's middle hits \(hit.map { "\(type(of: $0))" } ?? "nothing"); " + said.map(\.1).joined(separator: "; "))
     }
 
     /// The most memory the process has held resident so far, in MB.
@@ -377,6 +393,7 @@ extension Driver {
             return (false, "the grid did not attach four panes: \(arrangementSaid)")
         }
         let four = Self.footprint
+        print("panes4 idle, the echo pane focused: \(await wakeups(for: 5))")
         panes4["main thread's longest stall making the grid ms"] = mainThread.longest
         let echo = grid[1], floods = [grid[0], grid[2], grid[3]]
         func focus(_ view: TerminalPane) {
@@ -403,12 +420,12 @@ extension Driver {
         print("panes4 CPU shares over the measure's first second: \(shares.said)")
         panes4["terminal host CPU share at the measure's start, %"] = shares.host
         panes4["app CPU share at the measure's start, %"] = shares.app
-        Self.processes().forEach { print("panes4 ps: \($0)") }
+        await Self.processes().forEach { print("panes4 ps: \($0)") }
         floods.forEach { $0.terminal.resetLatency() }
         let framesBefore = floods.map { Self.committed($0.terminal) }
         let (ok, said) = await measure(200, interval: 50, name: "panes4-echo")
         print(String(format: "panes4 phase echo measured %.3f", CACurrentMediaTime()))
-        Self.processes().forEach { print("panes4 ps at the echo's end: \($0)") }
+        await Self.processes().forEach { print("panes4 ps at the echo's end: \($0)") }
         FileManager.default.createFile(atPath: stop, contents: nil)
         panes4["main thread's longest stall while four ran ms"] = mainThread.longest
         panes4["a thread of the drive's own, longest stall while four ran ms"] = ownThread.longest
@@ -480,7 +497,9 @@ extension Driver {
 
     /// The terminal host's and the app's CPU shares, in %, over the next second.
     private func cpuShares() async -> (host: Double, app: Double, said: String) {
-        let shares = await Self.cpuShares(over: 1)
+        var host: pid_t?
+        if case let .unix(path) = workbench.host.address { host = LocalHost.serving(at: path)?.pid }
+        let shares = await Self.cpuShares(host: host, over: 1)
         guard let host = shares.host, let app = shares.app else {
             return (-1, -1, "not measured: ps listed \(shares.host == nil ? "no terminal host" : "the host") and \(shares.app == nil ? "not the app" : "the app")")
         }
@@ -510,6 +529,88 @@ extension Driver {
             print("panes4 unlimited flood \(index + 1) (reported, not gated): \(judged.said)")
             panes4["unlimited flood \(index + 1), ours, ms"] = judged.ours
         }
+    }
+
+    /// A right-click's menu, asked of the view as AppKit asks it before it would show it.
+    private func contextMenu(_ kind: String, at index: Int, items: [String]?, choose: String?) -> (Bool, String) {
+        shell.window.layoutIfNeeded()
+        let target: NSView?
+        switch kind {
+        case "pane": target = paneView(at: index)?.terminal
+        case "tab": target = workbench.strip.tabs.indices.contains(index) ? workbench.strip.tabs[index] : nil
+        default: target = nil
+        }
+        guard let target, let event = NSEvent.mouseEvent(
+            with: .rightMouseDown, location: target.convert(NSPoint(x: target.bounds.midX, y: target.bounds.midY), to: nil), modifierFlags: [],
+            timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: shell.window.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 1
+        ) else { return (false, "no \(kind) \(index)") }
+        guard let menu = target.menu(for: event) else { return (false, "the \(kind) offered no menu") }
+        let titles = menu.items.map { $0.isSeparatorItem ? "-" : $0.title }
+        let focused = kind != "pane" || shell.window.firstResponder === target
+        var said = "the menu holds \(titles); the \(kind) \(focused ? "was" : "was not") focused first"
+        guard items.map({ $0 == titles }) ?? true, focused else { return (false, said) }
+        if let choose {
+            guard let item = menu.items.firstIndex(where: { $0.title == choose }) else { return (false, said + "; no \(choose)") }
+            menu.performActionForItem(at: item)
+            said += "; chose \(choose)" + (workbench.strip.isRenaming ? ", a rename field is open" : "")
+        }
+        return (true, said)
+    }
+
+    /// P2: the focused pane's cursor in two frames a blink apart: they differ only inside the
+    /// cursor's cell. Unfocused, no frame is committed and the blink never wakes over two periods.
+    /// The blink's wakeups and the frames committed a second, idle, over 5 s, are reported.
+    private func blinks() async -> (Bool, String) {
+        let view = terminal
+        guard await waitUntil(3, { view.cursorOn }), let shown = try? view.snapshot(),
+              await waitUntil(3, { !view.cursorOn }), let hidden = try? view.snapshot(),
+              let cursor = view.lastFrame?.cursor.position
+        else { return (false, "the cursor did not blink: \(view.drawingState)") }
+        let metrics = view.metrics, origin = metrics.origin(of: cursor)
+        let cell = (minX: origin.x, minY: origin.y, maxX: origin.x + 2 * metrics.width, maxY: origin.y + metrics.height)
+        var outside = 0, inside = 0
+        for y in 0 ..< min(shown.height, hidden.height) {
+            for x in 0 ..< min(shown.width, hidden.width) {
+                let at = (y * shown.width + x) * 4
+                guard shown.bgra[at ..< at + 4] != hidden.bgra[at ..< at + 4] else { continue }
+                if (cell.minX ..< cell.maxX).contains(x), (cell.minY ..< cell.maxY).contains(y) { inside += 1 } else { outside += 1 }
+            }
+        }
+        let rate = await wakeups(for: 5)
+        shell.window.makeFirstResponder(nil)
+        _ = await waitUntil(2) { view.drawingState.contains("display link paused") && view.drawingState.contains("not awaiting a drawable") }
+        let frames = Self.committed(view), woken = view.blinkWakeups
+        try? await Task.sleep(for: .seconds(2 * (TerminalView.blinkPeriods.on + TerminalView.blinkPeriods.off)))
+        let still = Self.committed(view) == frames && view.blinkWakeups == woken && view.cursorOn
+        shell.window.makeFirstResponder(view)
+        print("blink: \(rate) with \(workbench.panes.count) panes")
+        return (
+            inside > 0 && outside == 0 && still,
+            "a blink apart, \(inside) pixels differ inside the cursor's cell and \(outside) outside it; unfocused, "
+                + (still ? "nothing drawn or woken" : "frames \(frames) -> \(Self.committed(view)), wakeups \(woken) -> \(view.blinkWakeups)") + "; \(rate)"
+        )
+    }
+
+    /// The blink's wakeups and the frames committed a second, across every pane, idle for `seconds`.
+    func wakeups(for seconds: Double) async -> String {
+        let views = workbench.panes.values.map(\.terminal)
+        let before = (views.map(\.blinkWakeups).reduce(0, +), views.map { Self.committed($0) }.reduce(0, +))
+        try? await Task.sleep(for: .seconds(seconds))
+        let after = (views.map(\.blinkWakeups).reduce(0, +), views.map { Self.committed($0) }.reduce(0, +))
+        return String(format: "%.1f blink wakeups and %.1f frames a second", Double(after.0 - before.0) / seconds, Double(after.1 - before.1) / seconds)
+    }
+
+    /// P4: the app found another build's host serving, said so once, ended it and started its own,
+    /// from this build's copy under Application Support; one host serves.
+    private func anotherBuildsHost() async -> (Bool, String) {
+        let said = await waitUntil(15) { self.workbench.told.contains(LocalHost.endingAnother) }
+        guard case let .unix(path) = workbench.host.address else { return (false, "the host listens on no socket") }
+        let serving = await waitUntil(15) { LocalHost.serving(at: path)?.executable.contains("/Application Support/Sail/Host/") == true }
+        let hosts = await Self.processes(matching: "_pty-host --local")
+        return (
+            said && serving && hosts.count == 1 && workbench.told.filter { $0 == LocalHost.endingAnother }.count == 1,
+            "said: \(workbench.told); serving: \(LocalHost.serving(at: path)?.executable ?? "none"); hosts: \(hosts)"
+        )
     }
 
     /// The lines `view`'s shell printed at each size change, `winch-<columns>`.

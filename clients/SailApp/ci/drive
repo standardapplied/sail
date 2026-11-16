@@ -3,6 +3,8 @@
 # here, each on a data directory of its own: one taking passkeys for sail.standardapplied.com on
 # 7979, with uday an admin and a ticket to enroll him, and one with no relying party on 7980.
 # Tests/Drive/first.json runs, then the app is quit and opened again for Tests/Drive/second.json.
+# Then, as an older build would leave it, a host runs from another bundle's path, and the app is
+# opened once more for Tests/Drive/third.json.
 # Each run's texts, images and report land in OUT; what it prints, and the servers' logs, beside
 # them. The ticket is handed to the drive in its environment and printed nowhere.
 set -euo pipefail
@@ -39,7 +41,15 @@ SAIL_DRIVE_TICKET=$("$sail" fde enroll uday --json | plutil -extract ticket raw 
 export SAIL_DRIVE_TICKET SAIL_DRIVE_PASSKEY=$out/software-passkey.json
 rm -f "$SAIL_DRIVE_PASSKEY"
 
-for run in first second; do
+for run in first second third; do
+  if [[ $run == third ]]; then
+    echo "ci/drive: a host from another build's bundle"
+    pkill -f '_pty-host --local' || true
+    other=$out/other-build/Sail.app/Contents/Helpers
+    mkdir -p "$other" && cp "$sail" "$other/sail"
+    ("$other/sail" _pty-host --local > "$out/other-host.log" 2>&1 &)
+    sleep 3
+  fi
   echo "ci/drive: $run"
   perl -e 'alarm shift; exec @ARGV' 600 "$drive" --drive "Tests/Drive/$run.json" --out "$out/$run" 2>&1 | tee "$out/$run-output.txt"
 done

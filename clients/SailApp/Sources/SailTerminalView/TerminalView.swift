@@ -52,13 +52,24 @@ public final class TerminalView: NSView {
     var hovered: CellPoint?
     /// The button went down on a view that was not focused: that click only focuses it.
     var focusingClick = false
+    /// The right button's press went to the program, so its release does too.
+    var rightReported = false
+    /// The menu a right-click or a control-click offers; none unless the app gives one.
+    public var contextMenu: @MainActor () -> NSMenu? = { nil }
     /// When the view last became its window's first responder, on the events' clock.
     var focusedAt = 0.0
     var gatherer = ScrollGatherer()
     private(set) var focused = false
-    private(set) var lastFrame: ScreenFrame?
+    public private(set) var lastFrame: ScreenFrame?
     private var needsDraw = true
     private var tasks: [Task<Void, Never>] = []
+    /// A blinking cursor is in its shown half.
+    public private(set) var cursorOn = true
+    /// Whether the cursor may blink at all; a test whose frames are counted turns it off.
+    var cursorBlinks = true
+    private var blink: Timer?
+    /// How many times the blink's timer woke the main thread: what the drive counts.
+    public private(set) var blinkWakeups = 0
 
     public init(fonts: TerminalFonts, points: Double = FontLadder.standard) throws(RenderError) {
         let scale = NSScreen.main.map { Double($0.backingScaleFactor) } ?? 2
@@ -125,9 +136,10 @@ public final class TerminalView: NSView {
     }
 
     /// Draws `link`'s screen and types into it, in place of any link before. A link is drawn by one
-    /// view for its life, since its streams have one reader: move the view, not the session.
-    /// Programs may not write the clipboard (it changes only on the person's action) and Option
-    /// types characters.
+    /// view for its life, since its streams have one reader: move the view, not the session. A
+    /// program's clipboard write (OSC 52) reaches the pasteboard: the session tells it only while
+    /// this client holds the write token, and the screen refuses one over 1 MiB; reads stay refused.
+    /// Option types characters.
     public func attach(_ link: any TerminalLink) {
         precondition(
             Self.canAttach(link),
@@ -136,7 +148,6 @@ public final class TerminalView: NSView {
         Self.attached.add(link)
         detach()
         self.link = link
-        link.screen.setClipboardWrites(.deny)
         link.screen.setOptionAsAlt(.none)
         let cell = (width: metrics.width, height: metrics.height)
         input.async { try? link.setCellPixels(width: cell.width, height: cell.height) }
@@ -172,6 +183,8 @@ public final class TerminalView: NSView {
     /// Stops drawing the session and typing into it, for good: the session itself is the caller's,
     /// and no view can attach it again.
     public func detach() {
+        blink?.invalidate()
+        blink = nil
         tasks.forEach { $0.cancel() }
         tasks = []
         link = nil
@@ -229,6 +242,7 @@ public final class TerminalView: NSView {
     override public func viewDidHide() {
         super.viewDidHide()
         pacer.pause()
+        updateBlink()
     }
 
     override public func viewDidUnhide() {
@@ -311,7 +325,7 @@ public final class TerminalView: NSView {
     }
 
     var overlay: Overlay {
-        Overlay(focused: focused, marked: composition.marked)
+        Overlay(focused: focused, cursorOn: cursorOn, marked: composition.marked)
     }
 
     /// Something the view shows changed: draw at the next refresh.
@@ -372,6 +386,7 @@ public final class TerminalView: NSView {
     /// The window was seen again: a shown view that owes a frame asks for its drawable.
     @objc private func visibilityChanged() {
         if owed, !isHiddenOrHasHiddenAncestor { fetchDrawable() }
+        updateBlink()
     }
 
     /// One display refresh, for the frame meant to reach the display at `target`: with no drawable
@@ -416,6 +431,7 @@ public final class TerminalView: NSView {
             marks.committed(frame: number, read: read, target: target)
             lastFrame = frame
             needsDraw = renderer.lastFrameWantsAnother
+            updateBlink()
             return true
         case .busy:
             marks.skipped(read: read)
@@ -433,6 +449,10 @@ public final class TerminalView: NSView {
     private func handle(_ event: SessionEvent) {
         if case .screen(.bell) = event, !NSApp.isActive {
             NSApp.requestUserAttention(.informationalRequest)
+        }
+        if case let .screen(.clipboardWrite(text)) = event {
+            pasteboard.clearContents()
+            pasteboard.setString(text, forType: .string)
         }
         onEvent(event)
     }
@@ -463,6 +483,65 @@ public final class TerminalView: NSView {
             input.async { link.setFocused(now) }
         }
         needFrame()
+        updateBlink()
+    }
+
+    /// The system's insertion-point blink: `NSTextInsertionPointBlinkPeriodOn` and `…Off`, in ms,
+    /// the keys AppKit's text view reads (Chromium's `ui/base/cocoa/defaults_utils.mm` reads them
+    /// for the same reason); 500 ms each when unset.
+    public static var blinkPeriods: (on: Double, off: Double) {
+        func period(_ key: String) -> Double {
+            let milliseconds = UserDefaults.standard.integer(forKey: key)
+            return milliseconds > 0 ? Double(milliseconds) / 1000 : 0.5
+        }
+        return (period("NSTextInsertionPointBlinkPeriodOn"), period("NSTextInsertionPointBlinkPeriodOff"))
+    }
+
+    /// The cursor blinks while the screen says it does (DECSCUSR, mode 12) and the view shows it
+    /// focused: never in a hidden, unfocused or unseen view (P2), nor while text is composed.
+    private var shouldBlink: Bool {
+        guard cursorBlinks, focused, !isHiddenOrHasHiddenAncestor, let window, isOnScreen(window), composition.marked.isEmpty,
+              let cursor = lastFrame?.cursor, cursor.blinking, cursor.visible, cursor.position != nil
+        else { return false }
+        return true
+    }
+
+    /// Starts or stops the blink as ``shouldBlink`` says; stopped, the cursor shows. `restart`
+    /// shows it for a whole period, as a key typed does, so it never blinks while keys come.
+    func updateBlink(restart: Bool = false) {
+        guard shouldBlink else {
+            blink?.invalidate()
+            blink = nil
+            showCursor()
+            return
+        }
+        guard restart || blink == nil else { return }
+        showCursor()
+        scheduleBlink(after: Self.blinkPeriods.on)
+    }
+
+    private func showCursor() {
+        guard !cursorOn else { return }
+        cursorOn = true
+        needFrame()
+    }
+
+    private func scheduleBlink(after seconds: Double) {
+        blink?.invalidate()
+        blink = Timer.scheduledTimer(withTimeInterval: seconds, repeats: false) { [weak self] _ in
+            MainActor.assumeIsolated { self?.blinked() }
+        }
+    }
+
+    /// Half a blink: the cursor shown or hidden, one frame drawn (P2: no row laid out again).
+    private func blinked() {
+        blinkWakeups += 1
+        blink = nil
+        guard shouldBlink else { return updateBlink() }
+        cursorOn.toggle()
+        needFrame()
+        let periods = Self.blinkPeriods
+        scheduleBlink(after: cursorOn ? periods.on : periods.off)
     }
 
     /// Sends what `key` encodes to, on the input queue, so the main thread never takes the
@@ -475,6 +554,7 @@ public final class TerminalView: NSView {
             input.async { link.send(key) }
             return
         }
+        updateBlink(restart: true)
         let marks = marks
         let interval = marks.keyBegan()
         input.async { [weak self] in
@@ -486,6 +566,7 @@ public final class TerminalView: NSView {
     }
 
     isolated deinit {
+        blink?.invalidate()
         tasks.forEach { $0.cancel() }
     }
 
