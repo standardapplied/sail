@@ -431,8 +431,10 @@ extension Driver {
     }
 
     /// How many times the app writes its user defaults while `act` runs and for `seconds` after it
-    /// (each write posts `UserDefaults.didChangeNotification` in the process).
+    /// (each write posts `UserDefaults.didChangeNotification` in the process), after a write the
+    /// steps before left pending has landed.
     private func arrangementWrites(within seconds: Double, _ act: () -> Void) async -> Int {
+        try? await Task.sleep(for: .seconds(1))
         let writes = Mutex(0)
         let watch = NotificationCenter.default.addObserver(forName: UserDefaults.didChangeNotification, object: nil, queue: nil) { _ in
             writes.withLock { $0 += 1 }
