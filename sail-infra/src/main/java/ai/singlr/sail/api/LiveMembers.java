@@ -388,7 +388,8 @@ public final class LiveMembers implements RoomWakeReactor.Live, AutoCloseable {
    * The conversation a new process picks up: the newest run of this room's member, in the same
    * lane, that recorded a session off its own stream. A wake's session, or one from before the
    * member was live, was told to post its own answers, and one from the other lane was told its
-   * tools were different, so none of those is resumed; a member with no such run starts fresh.
+   * tools were different, so none of those is resumed, nor one whose session went with a deleted
+   * workspace ({@link RunPlaces#holdsSession}); a member with no such run starts fresh.
    */
   private Optional<RunStore.RunRow> resumable(Seat seat, String role, String localHandle) {
     var runs =
@@ -396,6 +397,7 @@ public final class LiveMembers implements RoomWakeReactor.Live, AutoCloseable {
             ? runStore.listForSpec(seat.spec().id())
             : runStore.listForRoom(seat.roomId());
     return runs.stream()
+        .filter(places.holdsSession(seat.project(), seat.spec() == null ? null : seat.spec().id()))
         .filter(run -> role.equals(run.role()))
         .filter(run -> run.ownedBy(localHandle))
         .filter(run -> SESSION_SOURCE.equals(run.sessionSource()))

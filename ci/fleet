@@ -76,7 +76,10 @@ Usage:
                                 each in its own workspace of acme, committing as eng);
                                 the pull request, the room and every box's status are checked,
                                 main's measures of the spec count the reviews and the build runs listed for it,
-                                no secret reaches a log, and the pull request is closed
+                                the second spec's workspace, left awaiting merge, runs until 10 minutes after
+                                its review and is stopped then, and once eng marks that spec done it and its
+                                dataset go, watched in the background while the row goes on and read at its
+                                end, no secret reaches a log, and the pull request is closed
   ci/fleet storage RUN           client, a dir box running acme, adds a ZFS pool in a 20 GiB file: Incus has
                                 it beside devpool, acme and the base profile stay on devpool, a copy of a
                                 container's snapshot on it is a clone (zfs get origin), and the ZFS cache
@@ -84,7 +87,7 @@ Usage:
                                 partition are refused, and its ext4 scratch disk until the row itself
                                 erases it with the wipefs the refusal names, then the scratch pool is
                                 made with Sail's last probe of the disk under a second before its
-                                incus storage create (strace); with a second scratch disk, the two
+                                incus storage create (audit log); with a second scratch disk, the two
                                 become one ZFS mirror (one incus storage create, never forced, the
                                 probes of both last), its re-run in the other order is kept, ONLINE
                                 after the reboot, and DEGRADED naming the disk once it is detached;
@@ -1310,11 +1313,71 @@ refuses_a_pool_on() {
     "sudo sail host init --storage zfs --pool refused --disk $device --yes"
 }
 
+# The commands a row's command runs are read from the kernel's audit log, not from strace: strace
+# up to 7.3 aborts its trace when a traced thread dies between its wait4 and its PTRACE_GETSIGINFO,
+# as any exiting multithreaded child can (strace/strace#433), and sends the command a SIGTERM.
+# Every execve of the operator's login sessions is kept under KEY while the command runs; daemons such
+# as incusd have no login uid, so this is the command's own tree, as strace -f saw it. The log keeps
+# every earlier run's records, so each run is given a key of its own.
+audited() {
+  local run=$1 box=$2 key=$3 rule said
+  shift 3
+  rule="always,exit -F arch=b64 -S execve -F auid=\$(id -u) -k $key"
+  on "$run" "$box" "sudo apt-get install -y -q auditd > /dev/null && sudo auditctl -a $rule > /dev/null" || return 1
+  said=0
+  on "$run" "$box" "$*" || said=$?
+  on "$run" "$box" "sudo auditctl -d $rule > /dev/null" || return 1
+  on "$run" "$box" "sudo auditctl -s" | grep -qx "lost 0" || { echo "the audit log lost records while it ran"; return 1; }
+  return "$said"
+}
+
+# The execs audited under a key, one line each as strace -f -tt -e trace=execve prints them. The
+# kernel logs a script's exec with its interpreter's argv, so Incus's /usr/bin/incus wrapper is a
+# /bin/sh line and each incus command Sail runs is the one line of the incus binary it execs.
+# ausearch reads its stdin when that is not a terminal, so it is told to read the logs.
+execs_of() {
+  on "$1" "$2" "sudo ausearch --input-logs -k $3 --raw" | python3 -I -c '
+import re, sys, time
+
+def text(value):
+    if value.startswith("\""):
+        return value[1:-1]
+    return bytes.fromhex(value).decode(errors="replace") if re.fullmatch("[0-9A-F]+", value) else value
+
+events = {}
+for line in sys.stdin:
+    record = re.match(r"type=(SYSCALL|EXECVE|PATH) msg=audit\((\d+)\.(\d+):(\d+)\): (.*)", line)
+    if not record:
+        continue
+    kind, seconds, millis, serial, rest = record.groups()
+    fields = dict(re.findall(r"(\S+?)=(\"[^\"]*\"|\S+)", rest))
+    at = time.strftime("%H:%M:%S", time.gmtime(int(seconds))) + "." + millis
+    event = events.setdefault(int(serial), {"at": at, "name": "?", "result": "?", "pid": "?", "args": {}})
+    if kind == "SYSCALL":
+        event["pid"], event["result"] = fields["pid"], fields["exit"]
+    elif kind == "PATH" and fields.get("item") == "0":
+        event["name"] = text(fields["name"])
+    elif kind == "EXECVE":
+        for key, value in fields.items():
+            arg = re.fullmatch(r"a(\d+)(?:\[(\d+)\])?", key)
+            if arg:
+                event["args"][(int(arg[1]), int(arg[2] or 0))] = text(value)
+for serial in sorted(events):
+    event = events[serial]
+    argv = {}
+    for (index, _), part in sorted(event["args"].items()):
+        argv[index] = argv.get(index, "") + part
+    quoted = ", ".join("\"%s\"" % argv[index] for index in sorted(argv))
+    print("%s %s execve(\"%s\", [%s]) = %s" % (event["pid"], event["at"], event["name"], quoted, event["result"]))
+'
+}
+
 probed_last_on() {
-  local run=$1 box=$2 device=$3 pool=$4 trace probe create gap
-  on "$run" "$box" "sudo apt-get install -y -q strace > /dev/null && sudo strace -f -tt -e trace=execve -o /tmp/sail-gap.trace sail host init --storage zfs --pool $pool --disk $device --yes" || return 1
+  local run=$1 box=$2 device=$3 pool=$4 key trace probe create gap
+  key=sail-gap-$(date +%s)
+  audited "$run" "$box" "$key" "sudo sail host init --storage zfs --pool $pool --disk $device --yes" || return 1
   on "$run" "$box" "sudo incus storage list --format csv" | grep -q "^$pool,zfs," || { echo "Incus has no zfs pool $pool"; return 1; }
-  trace=$(on "$run" "$box" "sudo cat /tmp/sail-gap.trace" | grep -E 'execve\("[^"]*/(wipefs|incus)", \["(wipefs", "--all|incus", "storage", "create)')
+  trace=$(execs_of "$run" "$box" "$key" | grep -E 'execve\("[^"]*/(wipefs|incus)", \["(wipefs", "--all|incus", "storage", "create)')
   echo "$trace"
   probe=$(grep -F '"wipefs", "--all"' <<< "$trace" | tail -1 | awk '{print $2}')
   create=$(grep -F '"incus", "storage", "create"' <<< "$trace" | tail -1 | awk '{print $2}')
@@ -1325,15 +1388,16 @@ probed_last_on() {
 }
 
 mirrored_on() {
-  local run=$1 box=$2 one=$3 other=$4 pool=$5 trace made last first create gap
-  on "$run" "$box" "sudo strace -f -tt -e trace=execve -o /tmp/sail-mirror.trace sail host init --storage zfs --pool $pool --disk $one --disk $other --yes" || return 1
+  local run=$1 box=$2 one=$3 other=$4 pool=$5 key trace made last first create gap
+  key=sail-mirror-$(date +%s)
+  audited "$run" "$box" "$key" "sudo sail host init --storage zfs --pool $pool --disk $one --disk $other --yes" || return 1
   on "$run" "$box" "sudo incus storage list --format csv" | grep -q "^$pool,zfs," || { echo "Incus has no zfs pool $pool"; return 1; }
   on "$run" "$box" "sudo zpool status -P $pool" | grep -q "mirror-0" || { echo "$pool is not a mirror"; return 1; }
   made=$(on "$run" "$box" "sudo zpool history $pool" | grep "zpool create")
   echo "$made"
   [[ $made == *" mirror "* && $made != *" -f "* ]] || { echo "the zpool was not made as an unforced mirror"; return 1; }
-  trace=$(on "$run" "$box" "sudo cat /tmp/sail-mirror.trace" | grep -E 'execve\("[^"]*/(wipefs|incus|realpath)", \["(wipefs", "--all|incus", "storage", "create|realpath)' \
-    | grep -E ' = 0$' | grep -vF 'execve("/opt/incus/')
+  trace=$(execs_of "$run" "$box" "$key" | grep -E 'execve\("[^"]*/(wipefs|incus|realpath)", \["(wipefs", "--all|incus", "storage", "create|realpath)' \
+    | grep -E ' = 0$')
   echo "$trace"
   [[ $(grep -c '"incus", "storage", "create"' <<< "$trace") == 1 ]] || { echo "Sail asked Incus for more than one create"; return 1; }
   grep -F '"incus", "storage", "create"' <<< "$trace" | grep -qF 'source=mirror=' || { echo "the create is not the mirror's"; return 1; }
@@ -1825,6 +1889,16 @@ opened_a_pull_request() {
   [[ -n $listed ]]
 }
 
+# Every commit of spec $1's pull request is authored as $2: what its workspace committed as, read
+# on the forge, so the check holds whether or not the idle sweep has stopped the workspace since.
+pull_request_commits_as() {
+  local emails
+  emails=$(GH_TOKEN=$(secret fleet-github-token) gh pr list --repo "$LOOP_REPO" --head "agent/$1" \
+    --json commits --jq '[.[0].commits[]?.authors[]?.email] | unique | join(" ")')
+  echo "agent/$1 commits authored as: ${emails:-nothing}"
+  [[ $emails == "$2" ]]
+}
+
 asked_its_question() {
   said=$(on "$1" "$2" "sudo sail spec comments $3 --no-sync")
   grep -q "ended on its question" <<< "$said"
@@ -1949,6 +2023,101 @@ sys.exit(0 if own and mine and overlapped else 1)
 ' "$3" "$4" "$listed" "$runs"
 }
 
+# The state of spec $3's workspace of acme on box $2 as `workspace list` gives it, or "absent".
+workspace_state() {
+  local listed
+  listed=$(on "$1" "$2" "sudo sail project workspace list acme --json") || return 1
+  python3 -I -c '
+import json, sys
+rows = [r for r in json.loads(sys.argv[2])["workspaces"] if r.get("spec") == sys.argv[1]]
+print(rows[0]["state"] if rows else "absent")
+' "$3" "$listed"
+}
+
+workspace_and_dataset_gone() {
+  local state listed
+  state=$(workspace_state "$1" "$2" "$3") || return 1
+  echo "$(date -u +%H:%M:%S) $3: $state"
+  [[ $state == absent ]] || return 1
+  listed=$(on "$1" "$2" "sudo zfs list -H -o name tank/containers/acme-$3 2>&1 || true") || return 1
+  echo "$listed"
+  [[ $listed == *"dataset does not exist"* ]]
+}
+
+workspace_is_stopped() {
+  local state
+  state=$(workspace_state "$1" "$2" "$3") || return 1
+  echo "$(date -u +%H:%M:%S) $3: $state"
+  [[ $state == stopped ]]
+}
+
+# When spec $3's last run on box $2 ended, in epoch seconds.
+last_run_ended() {
+  local runs
+  runs=$(on "$1" "$2" "sudo sail agent sessions acme --json") || return 1
+  python3 -I -c '
+import json, sys
+from datetime import datetime
+ends = [datetime.fromisoformat(r["completed_at"].replace("Z", "+00:00")).timestamp()
+        for r in json.loads(sys.argv[2]).get("runs", [])
+        if r.get("spec_id") == sys.argv[1] and r.get("completed_at")]
+print(int(max(ends)) if ends else "")
+' "$3" "$runs"
+}
+
+# Spec $3's workspace is still running a minute before its 10-minute idle period ends, and
+# stopped within 3 minutes after it: a stop at minute 1 fails this, and it waits no longer than the
+# period itself and the sweep's minutes after it.
+workspace_stops() {
+  local run=$1 box=$2 spec=$3 ended before
+  ended=$(last_run_ended "$run" "$box" "$spec") || return 1
+  [[ -n $ended ]] || { echo "no run of $spec ended"; return 1; }
+  before=$((ended + 540 - $(date +%s)))
+  if ((before < 0)); then
+    echo "checked $((-before)) s past minute 9 of the idle period: too late to see it still running"
+    return 1
+  fi
+  sleep "$before"
+  workspace_state "$run" "$box" "$spec" | grep -qx running || { echo "stopped before its idle period ended"; return 1; }
+  until_true $((ended + 780 - $(date +%s))) 15 workspace_is_stopped "$run" "$box" "$spec" && return 0
+  echo "not stopped 3 min after its idle period ended"
+  return 1
+}
+
+# Run in the background from spec $3's dispatch: once its review takes it to awaiting_merge, its
+# workspace stops when idle (workspace_stops), its idle period running under the rest of the
+# loop; once it has stopped, and the loop has listed the workspaces ($4/listed), eng marks the
+# spec done and the workspace and its dataset go within the sweep's next passes. Each verdict is
+# written beside its output under $4, for polled to read at the row's end.
+workspace_stops_then_goes() {
+  local run=$1 box=$2 spec=$3 dir=$4 verdict=0
+  { reaches_status "$run" "$box" "$spec" awaiting_merge 30 &&
+    workspace_stops "$run" "$box" "$spec"; } > "$dir/stops.poll" 2>&1 || verdict=$?
+  echo "$verdict" > "$dir/stops.verdict"
+  if ((verdict != 0)); then
+    echo "not stopped, so not marked done" > "$dir/goes.poll"
+    echo 1 > "$dir/goes.verdict"
+    return
+  fi
+  verdict=0
+  { until_true 1200 5 test -e "$dir/listed" &&
+    on "$run" "$box" "sudo sail spec update $spec --status done" &&
+    until_true 180 10 workspace_and_dataset_gone "$run" "$box" "$spec"; } > "$dir/goes.poll" 2>&1 || verdict=$?
+  echo "$verdict" > "$dir/goes.verdict"
+}
+
+# What the background check whose files start $1 said, once its verdict is written, waiting no
+# longer than $2 seconds for it: past that the check fails.
+polled() {
+  local deadline=$((SECONDS + $2))
+  until [[ -s $1.verdict ]]; do
+    ((SECONDS < deadline)) || { echo "no verdict within $2 s"; return 1; }
+    sleep 5
+  done
+  cat "$1.poll"
+  return "$(cat "$1.verdict")"
+}
+
 loop_config() {
   check "$1" "main gives acme the nocaptcha repo, JDK 21 and Maven" \
     on "$1" main "echo '[{\"url\":\"https://github.com/$LOOP_REPO.git\",\"path\":\"nocaptcha\"}]' | sudo sail project config set acme repos - && echo '{\"jdk\":21,\"maven\":\"3.9.9\"}' | sudo sail project config set acme runtimes -"
@@ -1957,7 +2126,7 @@ loop_config() {
 }
 
 loop() {
-  local run=${1:-} spec beside
+  local run=${1:-} spec beside polls
   [[ -n $run ]] || usage
   spec="loop-$(date -u +%H%M%S)"
   beside="beside-${spec#loop-}"
@@ -1985,17 +2154,22 @@ loop() {
     on "$run" eng "cat > /tmp/beside.md && sudo sail spec create -p acme --id $beside --title 'A note beside the build' --body-file /tmp/beside.md --assignee eng" <<< "$BESIDE_BODY"
   check "$run" "eng makes it ready" on "$run" eng "sudo sail spec update $beside --status pending"
   check "$run" "eng dispatches it while the first builds, in the background" on "$run" eng "sudo sail spec dispatch -p acme --spec $beside --background"
+  polls="$(log_dir "$run")/beside-workspace"
+  mkdir -p "$polls"
+  rm -f "$polls"/*.verdict "$polls/listed"
+  workspace_stops_then_goes "$run" eng "$beside" "$polls" &
   check "$run" "no agent key and no Sail credential is in any process's command line on eng while it builds and its hooks fire" no_key_in_any_command_line "$run" eng
+  check "$run" "the second spec's review takes it to awaiting_merge" reaches_status "$run" eng "$beside" awaiting_merge 30
   check "$run" "the build asks its question and waits, unreviewed" waits_on_its_question "$run" eng "$spec" 20
+  check "$run" "the two builds ran at once, each in its own workspace of acme" each_ran_in_its_own_workspace "$run" eng "$spec" "$beside"
+  touch "$polls/listed"
   check "$run" "eng answers in the room" on "$run" eng "sudo sail spec comment $spec --body 'Call it Building.'"
   check "$run" "the answer resumes the build, and the review takes it to awaiting_merge" reaches_status "$run" eng "$spec" awaiting_merge 45
-  check "$run" "the second spec's review takes it to awaiting_merge" reaches_status "$run" eng "$beside" awaiting_merge 30
-  check "$run" "the two builds ran at once, each in its own workspace of acme" each_ran_in_its_own_workspace "$run" eng "$spec" "$beside"
-  check "$run" "each workspace commits as eng" \
-    commits_as "$run" eng "acme-$spec" eng@fleet.example
-  check "$run" "the second workspace commits as eng" \
-    commits_as "$run" eng "acme-$beside" eng@fleet.example
   check "$run" "the agent opened a pull request on $LOOP_REPO" opened_a_pull_request "$spec"
+  check "$run" "each workspace commits as eng: every commit of its pull request is authored so" \
+    pull_request_commits_as "$spec" eng@fleet.example
+  check "$run" "the second workspace commits as eng: every commit of its pull request is authored so" \
+    pull_request_commits_as "$beside" eng@fleet.example
   check "$run" "the build ran on eng's stored login, by name and kind" the_build_ran_on_the_stored_login "$run" eng "$spec"
   check "$run" "the room shows the review" the_room_shows_the_review "$run" eng "$spec"
   check "$run" "every node syncs twice" sync_all "$run"
@@ -2007,6 +2181,10 @@ loop() {
     measures_record_the_cost_and_the_times "$run" "$spec" eng
   check "$run" "the fleet closes its pull request and deletes the branch" closes_the_pull_request "$spec" "$run"
   check "$run" "the fleet closes the second spec's pull request and deletes its branch" closes_the_pull_request "$beside" "$run"
+  check "$run" "the second spec's workspace, left awaiting merge, was running until its idle period ended and stopped after it" \
+    polled "$polls/stops" 2400
+  check "$run" "marked done once stopped, the second spec's workspace and its dataset went within the sweep's next passes" \
+    polled "$polls/goes" 300
   check "$run" "still no secret appears in the run's logs" no_secret_in_logs "$run"
 }
 

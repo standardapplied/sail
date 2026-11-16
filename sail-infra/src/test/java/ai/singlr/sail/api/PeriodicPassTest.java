@@ -10,6 +10,9 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.identity.Actor;
+import java.io.ByteArrayOutputStream;
+import java.io.PrintStream;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
@@ -33,12 +36,25 @@ class PeriodicPassTest {
       var first = Thread.ofVirtual().start(pass::runIfIdle);
       assertTrue(entered.await(5, TimeUnit.SECONDS));
 
-      assertFalse(pass.runIfIdle());
+      var said = stderrOf(() -> assertFalse(pass.runIfIdle() || pass.runIfIdle()));
 
       release.countDown();
       first.join();
       assertTrue(pass.runIfIdle());
+      assertEquals("  [test] a pass is still running, so this one is skipped\n", said, "said once");
     }
+  }
+
+  private static String stderrOf(Runnable action) {
+    var err = new ByteArrayOutputStream();
+    var original = System.err;
+    System.setErr(new PrintStream(err, true, StandardCharsets.UTF_8));
+    try {
+      action.run();
+    } finally {
+      System.setErr(original);
+    }
+    return err.toString(StandardCharsets.UTF_8);
   }
 
   @Test

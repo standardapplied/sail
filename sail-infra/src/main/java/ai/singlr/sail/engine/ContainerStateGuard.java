@@ -32,6 +32,28 @@ public final class ContainerStateGuard {
     }
   }
 
+  /**
+   * As {@link #requireRunning(ContainerState, String)} for a run's {@code place}: a spec's
+   * workspace, stopped or frozen, names the workspace door that starts it, never the project's.
+   */
+  public static void requireRunning(ContainerState state, RunPlace place) {
+    if (place instanceof RunPlace.SpecWorkspace workspace
+        && (state instanceof ContainerState.Stopped || state instanceof ContainerState.Frozen)) {
+      throw Remedied.state(
+          "Workspace "
+              + workspace.workspace()
+              + " of "
+              + workspace.project()
+              + " is "
+              + (state instanceof ContainerState.Stopped ? "stopped" : "frozen")
+              + ".",
+          Remedy.of(
+              "Start it with: ",
+              Remedy.sail("project workspace start", workspace.project(), workspace.workspace())));
+    }
+    requireRunning(state, place.instance());
+  }
+
   public static void requireCreated(ContainerState state, String name) {
     switch (state) {
       case ContainerState.Running ignored -> {}

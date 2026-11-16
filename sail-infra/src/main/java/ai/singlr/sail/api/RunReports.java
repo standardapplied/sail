@@ -71,6 +71,16 @@ public final class RunReports {
    * login in the same transaction of {@code runs}. Returns whether the write recorded it.
    */
   public boolean finish(RunStore runs, RunStore.RunRow run, Predicate<RunReport> write) {
+    return finish(runs, run, write, false);
+  }
+
+  /** As {@link #finish}, for a run of a done spec: said as reopening it, not building it again. */
+  public boolean finishDone(RunStore runs, RunStore.RunRow run, Predicate<RunReport> write) {
+    return finish(runs, run, write, true);
+  }
+
+  private boolean finish(
+      RunStore runs, RunStore.RunRow run, Predicate<RunReport> write, boolean done) {
     var report = reader.apply(run);
     var said = new AtomicReference<String>();
     boolean wrote =
@@ -79,7 +89,7 @@ public final class RunReports {
               if (!write.test(report)) {
                 return false;
               }
-              said.set(say(runs, run, report, true));
+              said.set(say(runs, run, report, true, done));
               return true;
             });
     published(run, report, said.get());
@@ -91,17 +101,18 @@ public final class RunReports {
    * that the member's run goes on, so the sentence says nothing of it stopping.
    */
   public void heardLive(RunStore runs, RunStore.RunRow run, RunReport report) {
-    published(run, report, say(runs, run, report, false));
+    published(run, report, say(runs, run, report, false, false));
   }
 
   /** Says it in the room, best-effort; the sentence, or null when there is nothing to say. */
-  private String say(RunStore runs, RunStore.RunRow run, RunReport report, boolean ended) {
+  private String say(
+      RunStore runs, RunStore.RunRow run, RunReport report, boolean ended, boolean done) {
     var outcome = report == null ? Optional.<LoginOutcome>empty() : report.outcome();
     var kind = outcome.isEmpty() ? Optional.<LoginKind>empty() : kindOf(run);
     if (kind.isEmpty() || saidBefore(runs, run, outcome.get())) {
       return null;
     }
-    var said = sentence(run, kind.get(), outcome.get(), ended);
+    var said = sentence(run, kind.get(), outcome.get(), ended, done);
     if (outcome.get() instanceof LoginOutcome.Undelivered) {
       System.err.println("  [api] run " + run.id() + ": " + said);
       return null;
@@ -142,7 +153,8 @@ public final class RunReports {
    * when the run ended with it, so the sentence says the run stopped and, for a lane that commits,
    * where its work stays.
    */
-  static String sentence(RunStore.RunRow run, LoginKind kind, LoginOutcome outcome, boolean ended) {
+  static String sentence(
+      RunStore.RunRow run, LoginKind kind, LoginOutcome outcome, boolean ended, boolean done) {
     var harness = Harnesses.of(run.agent());
     var name = run.login().name();
     var login = RunLogins.named(run.owner(), name, kind);
@@ -154,7 +166,9 @@ public final class RunReports {
               ended && Lane.BUILD.matches(run.role())
                   ? RunLogins.howToReplace(harness, kind, name)
                       .then(
-                          " Then build it again: ",
+                          done
+                              ? " Its spec is done; to work on it again, reopen it with "
+                              : " Then build it again: ",
                           RestartResolution.redispatch(run.project(), run.specId()),
                           ".")
                   : RunLogins.howToReplace(harness, kind, name));
