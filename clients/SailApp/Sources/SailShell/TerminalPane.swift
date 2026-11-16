@@ -6,37 +6,38 @@ import SailTerminalView
 import SailTerminalWire
 import SailVT
 
-/// "Sail Terminal Preview": one window holding one terminal session on this Mac's own host, in the
-/// home folder with the login shell. The session's name is remembered; the next launch attaches to
-/// it while it lives. ⌥⌘L shows the latency of key to echo on glass.
+/// "This Mac": one terminal session on this Mac's own host, in the home folder with the login shell,
+/// signed in or not. The session's name is remembered; the next launch attaches to it while it
+/// lives. ⌥⌘L shows the latency of key to echo on glass. The terminal keeps the palette of the
+/// appearance it opened in (a screen's palette is set when it is made); the banner and the overlay
+/// follow the look.
 @MainActor
-public final class PreviewApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
-    public static let title = "Sail Terminal Preview"
+public final class TerminalPane: NSView {
     static let sessionKey = "terminal.session"
 
-    public let window: NSWindow
     public let terminal: TerminalView
     public let host: LocalHost
     public private(set) var session: TerminalSession?
-    /// Told each time a session attaches: the drive harness starts on the first.
+    /// Told each time a session attaches.
     public var onAttached: @MainActor (TerminalSession) -> Void = { _ in }
+    /// Told when a program names the window.
+    public var onTitle: @MainActor (String) -> Void = { _ in }
 
-    private let look: Look
+    /// The terminal's palette, the launch appearance's.
+    public let palette: Palette
+    /// The look the banner and the overlay are drawn in; a new one repaints them.
+    var look: Look {
+        didSet { paint() }
+    }
+
     private let banner: StatusBanner
     private let latency = NSTextField(labelWithString: "")
     private var latencyTimer: Timer?
+    private var opened = false
 
-    /// The app from its bundle: the fonts in `Contents/Resources/Fonts`, the host in
-    /// `Contents/Helpers/sail`.
-    public convenience init(bundle: Bundle) throws(PreviewError) {
-        guard let resources = bundle.resourceURL else { throw .resources("the app's bundle has no resources folder") }
-        let helper = bundle.bundleURL.appending(path: "Contents/Helpers/sail").path
-        try self.init(fonts: resources.appending(path: "Fonts"), helper: FileManager.default.isExecutableFile(atPath: helper) ? helper : nil)
-    }
-
-    public init(fonts directory: URL, helper: String?) throws(PreviewError) {
-        let dark = NSApplication.shared.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) != .aqua
-        look = dark ? .dark : .light
+    init(fonts directory: URL, helper: String?, look: Look) throws(ShellError) {
+        self.look = look
+        palette = look.palette
         do {
             terminal = try TerminalView(fonts: try TerminalFonts(directory: directory))
         } catch {
@@ -47,30 +48,22 @@ public final class PreviewApp: NSObject, NSApplicationDelegate, NSWindowDelegate
         } catch {
             throw .host("this Mac's terminal host has no place to listen: \(error)")
         }
-        window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 1180, height: 800), styleMask: [.titled, .closable, .miniaturizable, .resizable],
-            backing: .buffered, defer: false
-        )
         banner = StatusBanner(look: look)
-        super.init()
+        super.init(frame: .zero)
         compose()
     }
 
-    public func applicationDidFinishLaunching(_: Notification) {
-        NSApp.mainMenu = Self.menu(target: self)
-        window.center()
-        window.makeKeyAndOrderFront(nil)
-        window.makeFirstResponder(terminal)
-        NSApp.activate(ignoringOtherApps: true)
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        nil
+    }
+
+    /// Opens the session the first time the pane is shown.
+    func shown() {
+        window?.makeFirstResponder(terminal)
+        guard !opened else { return }
+        opened = true
         Task { await open(fresh: false) }
-    }
-
-    public func applicationShouldTerminateAfterLastWindowClosed(_: NSApplication) -> Bool {
-        true
-    }
-
-    public func applicationWillTerminate(_: Notification) {
-        session?.close()
     }
 
     /// Opens the remembered session when it still lives, else a new one.
@@ -92,7 +85,7 @@ public final class PreviewApp: NSObject, NSApplicationDelegate, NSWindowDelegate
         ))
         let screen: Screen
         do {
-            screen = try Screen(size: grid, scrollbackBytes: 10 << 20, palette: look.palette)
+            screen = try Screen(size: grid, scrollbackBytes: 10 << 20, palette: palette)
         } catch {
             banner.show(Self.sentence("the terminal screen could not be made: \(error)"))
             return
@@ -101,7 +94,7 @@ public final class PreviewApp: NSObject, NSApplicationDelegate, NSWindowDelegate
         if let remembered, listed.contains(where: { $0.name == remembered && $0.live }) {
             next = TerminalSession(attach: remembered, write: true, door: .local(host.address), screen: screen)
         } else {
-            let name = "preview-" + UUID().uuidString.prefix(8).lowercased()
+            let name = "mac-" + UUID().uuidString.prefix(8).lowercased()
             UserDefaults.standard.set(name, forKey: Self.sessionKey)
             next = TerminalSession(
                 open: SessionCreate(
@@ -118,7 +111,11 @@ public final class PreviewApp: NSObject, NSApplicationDelegate, NSWindowDelegate
         next.start()
     }
 
-    @objc func toggleLatency(_: Any?) {
+    func close() {
+        session?.close()
+    }
+
+    @objc public func toggleLatency(_: Any?) {
         if latencyTimer == nil {
             latency.isHidden = false
             updateLatency()
@@ -164,46 +161,47 @@ public final class PreviewApp: NSObject, NSApplicationDelegate, NSWindowDelegate
                 Task { await self?.open(fresh: true) }
             }
         case let .screen(.title(title)):
-            window.title = title.isEmpty ? Self.title : title
+            onTitle(title)
         default:
             break
         }
     }
 
     private func compose() {
-        window.title = Self.title
-        window.contentMinSize = NSSize(width: 480, height: 600)
-        window.delegate = self
-        window.isReleasedWhenClosed = false
-        window.backgroundColor = NSColor(look.palette.background)
-        guard let content = window.contentView else { return }
-        terminal.frame = content.bounds
+        wantsLayer = true
+        layer?.backgroundColor = NSColor(palette.background).cgColor
+        terminal.frame = bounds
         terminal.autoresizingMask = [.width, .height]
-        content.addSubview(terminal)
+        addSubview(terminal)
         banner.translatesAutoresizingMaskIntoConstraints = false
-        content.addSubview(banner)
-        latency.font = .monospacedDigitSystemFont(ofSize: 11, weight: .regular)
-        latency.textColor = NSColor(look.mutedForeground)
+        addSubview(banner)
+        latency.font = .monospacedDigitSystemFont(ofSize: Look.Step.micro.points, weight: .regular)
         latency.wantsLayer = true
         latency.drawsBackground = true
-        latency.backgroundColor = NSColor(look.surface)
+        paint()
         latency.isBezeled = false
         latency.maximumNumberOfLines = Self.latencyLines
         latency.isHidden = true
         latency.translatesAutoresizingMaskIntoConstraints = false
-        content.addSubview(latency)
+        addSubview(latency)
         NSLayoutConstraint.activate([
-            banner.centerXAnchor.constraint(equalTo: content.centerXAnchor),
-            banner.bottomAnchor.constraint(equalTo: content.bottomAnchor, constant: -32),
-            banner.leadingAnchor.constraint(greaterThanOrEqualTo: content.leadingAnchor, constant: 16),
-            latency.topAnchor.constraint(equalTo: content.topAnchor, constant: 8),
-            latency.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -12),
+            banner.centerXAnchor.constraint(equalTo: centerXAnchor),
+            banner.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -Look.Space.x3l),
+            banner.leadingAnchor.constraint(greaterThanOrEqualTo: leadingAnchor, constant: Look.Space.l),
+            latency.topAnchor.constraint(equalTo: topAnchor, constant: Look.Space.s),
+            latency.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Look.Space.m),
         ])
+    }
+
+    private func paint() {
+        banner.look = look
+        latency.textColor = NSColor(look.textSecondary)
+        latency.backgroundColor = NSColor(look.surface)
     }
 
     private func updateLatency() {
         let figures = terminal.latency
-        let hertz = window.screen?.maximumFramesPerSecond ?? 0
+        let hertz = window?.screen?.maximumFramesPerSecond ?? 0
         func ms(_ value: Double) -> String {
             String(format: "%.1f", value)
         }
@@ -219,37 +217,5 @@ public final class PreviewApp: NSObject, NSApplicationDelegate, NSWindowDelegate
     static func sentence(_ text: String) -> String {
         let capital = text.prefix(1).uppercased() + text.dropFirst()
         return capital.hasSuffix(".") ? capital : capital + "."
-    }
-
-    static func menu(target: PreviewApp) -> NSMenu {
-        let bar = NSMenu()
-        func submenu(_ title: String, _ items: [NSMenuItem]) {
-            let menu = NSMenu(title: title)
-            for item in items {
-                menu.addItem(item)
-            }
-            let holder = NSMenuItem(title: title, action: nil, keyEquivalent: "")
-            holder.submenu = menu
-            bar.addItem(holder)
-        }
-        func item(_ title: String, _ action: Selector, _ key: String, _ modifiers: NSEvent.ModifierFlags = .command) -> NSMenuItem {
-            let item = NSMenuItem(title: title, action: action, keyEquivalent: key)
-            item.keyEquivalentModifierMask = modifiers
-            return item
-        }
-        let bigger = item("Bigger", #selector(TerminalView.increaseFontSize(_:)), "=")
-        bigger.isHidden = true
-        bigger.allowsKeyEquivalentWhenHidden = true
-        let latency = item("Show Latency", #selector(PreviewApp.toggleLatency(_:)), "l", [.command, .option])
-        latency.target = target
-        submenu(title, [item("Quit \(title)", #selector(NSApplication.terminate(_:)), "q")])
-        submenu("Edit", [item("Copy", #selector(TerminalView.copy(_:)), "c"), item("Paste", #selector(TerminalView.paste(_:)), "v")])
-        submenu("View", [
-            item("Bigger", #selector(TerminalView.increaseFontSize(_:)), "+"), bigger,
-            item("Smaller", #selector(TerminalView.decreaseFontSize(_:)), "-"),
-            item("Actual Size", #selector(TerminalView.resetFontSize(_:)), "0"), .separator(), latency,
-        ])
-        submenu("Window", [item("Minimize", #selector(NSWindow.performMiniaturize(_:)), "m"), item("Close", #selector(NSWindow.performClose(_:)), "w")])
-        return bar
     }
 }
