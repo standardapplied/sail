@@ -76,7 +76,12 @@ class WorkspaceGitTest {
     git(app, "add", "f");
     git(app, "stash", "--quiet");
     Files.writeString(svc.resolve("untracked"), "y\n");
-    assertEquals("stash app\nchanges org/team/svc\n", left(BRANCH, REPOS));
+    assertEquals("stash app\nuntracked org/team/svc\n", left(BRANCH, REPOS));
+    Files.writeString(app.resolve("tracked"), "y\n");
+    git(app, "add", "tracked");
+    assertEquals("changes app\nstash app\nuntracked org/team/svc\n", left(BRANCH, REPOS));
+    git(app, "rm", "--quiet", "--cached", "tracked");
+    Files.delete(app.resolve("tracked"));
 
     Files.delete(svc.resolve("untracked"));
     git(svc, "switch", "--quiet", "--detach");
@@ -141,6 +146,25 @@ class WorkspaceGitTest {
     assertEquals("commits app\n", left(BRANCH, REPOS));
   }
 
+  /**
+   * The proof's {@code kh2}: a branch pushed to a second remote inside the workspace, the local
+   * branch then deleted, leaves the commit under {@code refs/remotes/backup/} alone, which the one
+   * read over every ref still finds.
+   */
+  @Test
+  void aCommitOnlyAnotherRemotesRefHoldsIsSaidOnceItsLocalBranchIsGone() throws Exception {
+    var backup = tempDir.resolve("backup.git");
+    run(List.of("git", "init", "--quiet", "--bare", "-b", "main", backup.toString()));
+    git(app, "remote", "add", "backup", backup.toString());
+    git(app, "switch", "--quiet", "-c", "side");
+    git(app, "commit", "--quiet", "--allow-empty", "-m", "backed up work");
+    git(app, "push", "--quiet", "backup", "side");
+    git(app, "switch", "--quiet", "-");
+    git(app, "branch", "--quiet", "-D", "side");
+
+    assertEquals("commits app\n", left(BRANCH, REPOS));
+  }
+
   /** A push that cannot reach its remote leaves the commits, which are said. */
   @Test
   void aPushThatCannotReachTheRemoteLeavesTheCommitsSaid() throws Exception {
@@ -151,13 +175,21 @@ class WorkspaceGitTest {
     assertEquals("commits app\n", left(BRANCH, REPOS));
   }
 
-  /** A repo git cannot read fails the whole read, which keeps the workspace. */
+  /**
+   * A repo git cannot read fails the whole read, which keeps the workspace; one with no commit yet
+   * reads as holding what its tree holds.
+   */
   @Test
-  void aRepoGitCannotReadFailsTheRead() throws Exception {
-    var scratch = workspace.resolve("scratch");
-    run(List.of("git", "init", "--quiet", scratch.toString()));
+  void aRepoGitCannotReadFailsTheReadAndOneWithNoCommitReadsItsTree() throws Exception {
+    var empty = workspace.resolve("empty");
+    run(List.of("git", "init", "--quiet", empty.toString()));
+    Files.writeString(empty.resolve("draft"), "x\n");
+    assertEquals("untracked empty\n", left(BRANCH, List.of("app", "empty")));
 
-    var read = bash(List.of(BRANCH, "app", "scratch"));
+    var broken = workspace.resolve("broken");
+    Files.createDirectories(broken);
+    Files.writeString(broken.resolve(".git"), "not a repository\n");
+    var read = bash(List.of(BRANCH, "app", "broken"));
 
     assertTrue(read.exit() != 0, read.output());
   }

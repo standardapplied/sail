@@ -598,6 +598,50 @@ class MissedStopReconcilerTest {
     assertEquals(2, tidyFailures(printed), "a failure after a success is said again");
   }
 
+  /**
+   * Low 3 of the proof: at a start, the tidy of a spec's workspace the sweep deleted says nothing,
+   * since there is nothing to tidy; the stopped ones are one line with their count; a running
+   * container that did not tidy is said by name; and none of it is said again on the next pass.
+   */
+  @Test
+  void aTidyOfAGoneWorkspaceSaysNothingAndTheStoppedOnesOneLineWithTheirCount() {
+    finishedSession("gone", "completed", null);
+    finishedSession("a", "completed", null);
+    finishedSession("b", "completed", null);
+    session(null, "node-a", "adhoc");
+    var shell =
+        new ScriptedShellExecutor()
+            .onFail("launch.env", "Error: Instance is not running")
+            .onOk("incus list ^test-project-gone$", "[]")
+            .onOk(
+                "incus list ^test-project-a$",
+                "[{\"name\": \"test-project-a\", \"status\": \"Stopped\"}]")
+            .onOk(
+                "incus list ^test-project-b$",
+                "[{\"name\": \"test-project-b\", \"status\": \"Stopped\"}]")
+            .onOk(
+                "incus list ^test-project$",
+                "[{\"name\": \"test-project\", \"status\": \"Running\"}]");
+    var reconciler = reconciler(MissedStopReconciler.systemdUnitProbe(shell), Instant::now);
+    var err = System.err;
+    var printed = new ByteArrayOutputStream();
+    System.setErr(new PrintStream(printed, true, StandardCharsets.UTF_8));
+    try {
+      reconciler.removeLeftovers();
+      reconciler.removeLeftovers();
+    } finally {
+      System.setErr(err);
+    }
+
+    assertEquals(
+        List.of(
+            "  [reconcile] could not tidy the launch files of test-project: Container"
+                + " 'test-project' did not tidy its launch files.",
+            "  [reconcile] 2 stopped instances hold launch files left to tidy; each is tidied once"
+                + " it runs again"),
+        printed.toString(StandardCharsets.UTF_8).lines().toList());
+  }
+
   private static long tidyFailures(ByteArrayOutputStream printed) {
     return printed
         .toString(StandardCharsets.UTF_8)

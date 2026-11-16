@@ -12,6 +12,7 @@ import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.AgentPresence;
 import ai.singlr.sail.engine.AgentSession;
 import ai.singlr.sail.engine.AgentUnit;
+import ai.singlr.sail.engine.BoxInstances;
 import ai.singlr.sail.engine.ContainerFilePush;
 import ai.singlr.sail.engine.ContainerState;
 import ai.singlr.sail.engine.GuardrailTrigger;
@@ -132,14 +133,22 @@ public final class MissedStopReconciler implements AutoCloseable {
 
     /**
      * Removes from {@code instance} the launch file of every run not in {@code live} ({@link
-     * AgentSession#removeLaunchFiles}), throwing when the instance did not run it; nothing, by
-     * default.
+     * AgentSession#removeLaunchFiles}), throwing when the instance did not run it, {@link
+     * NotRunning} when that was because it is stopped; an instance that is gone holds nothing to
+     * tidy. Nothing, by default.
      */
     default void removeLaunchFiles(String instance, List<String> live) throws Exception {}
 
     /** Whether {@code place}'s instance is stopped or gone; not, by default. */
     default boolean instanceGone(RunPlace place) throws Exception {
       return false;
+    }
+  }
+
+  /** A tidy an instance did not run because it is not running: asked again once it runs. */
+  public static final class NotRunning extends IOException {
+    NotRunning(String instance) {
+      super("Container '" + instance + "' is not running.");
     }
   }
 
@@ -259,9 +268,17 @@ public final class MissedStopReconciler implements AutoCloseable {
 
       @Override
       public void removeLaunchFiles(String instance, List<String> live) throws Exception {
-        if (!agentSession.removeLaunchFiles(instance, live)) {
-          throw new IOException("Container '" + instance + "' did not tidy its launch files.");
+        if (agentSession.removeLaunchFiles(instance, live)) {
+          return;
         }
+        var found = new BoxInstances(shell).lookup(instance, Duration.ofSeconds(3));
+        if (found.isEmpty()) {
+          return;
+        }
+        if (!(found.get().state() instanceof ContainerState.Running)) {
+          throw new NotRunning(instance);
+        }
+        throw new IOException("Container '" + instance + "' did not tidy its launch files.");
       }
     };
   }
@@ -331,20 +348,28 @@ public final class MissedStopReconciler implements AutoCloseable {
    * deleting them left on this runner (HL9), and what a push killed midway left in the host's
    * staging directory. Only a container that had a run start or finish since {@link #TIDY_LOOKBACK}
    * before the last pass is asked (every one, on the first pass after a start): a launch that dies
-   * leaves its file with a run that finishes, by its launch's cleanup or by this sweep. A container
-   * that does not answer, or does not run the tidy (a stopped one), is tried again on a later pass,
-   * and said once: not again until its tidy has succeeded.
+   * leaves its file with a run that finishes, by its launch's cleanup or by this sweep. One that is
+   * gone, a spec's deleted workspace say, has nothing to tidy. A container that does not answer, or
+   * does not run the tidy, is tried again on a later pass, and said once: not again until its tidy
+   * has succeeded; the stopped ones, which the idle sweep makes many of, in one line with their
+   * count.
    */
   void removeLeftovers() {
     var pass = clock.get();
     var tidied = true;
+    var stopped = 0;
     for (var place : sessionStore.liveRunsByPlace(localHandle.get(), tidiedSince).entrySet()) {
       try {
         unitProbe.removeLaunchFiles(place.getKey(), place.getValue());
         untidied.remove(place.getKey());
       } catch (Exception e) {
         tidied = false;
-        if (untidied.add(place.getKey())) {
+        if (!untidied.add(place.getKey())) {
+          continue;
+        }
+        if (e instanceof NotRunning) {
+          stopped++;
+        } else {
           System.err.println(
               "  [reconcile] could not tidy the launch files of "
                   + place.getKey()
@@ -352,6 +377,13 @@ public final class MissedStopReconciler implements AutoCloseable {
                   + e.getMessage());
         }
       }
+    }
+    if (stopped > 0) {
+      System.err.println(
+          "  [reconcile] "
+              + stopped
+              + (stopped == 1 ? " stopped instance holds" : " stopped instances hold")
+              + " launch files left to tidy; each is tidied once it runs again");
     }
     if (tidied) {
       tidiedSince = pass.minus(TIDY_LOOKBACK);

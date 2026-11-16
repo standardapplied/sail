@@ -307,6 +307,24 @@ public final class Workspaces {
       return new Busy("This runner is making another workspace, which takes about a minute.");
     }
 
+    static Busy changing(RunPlace.SpecWorkspace place) {
+      return new Busy(
+          "Workspace "
+              + place.workspace()
+              + " of "
+              + place.project()
+              + " is being stopped or deleted on this runner, and nothing enters it until that is"
+              + " done.");
+    }
+
+    static Busy unread(String instance) {
+      return new Busy(
+          "Incus lists instance "
+              + instance
+              + " without its keys, as it does while another change holds it, so whose it is"
+              + " cannot be told yet.");
+    }
+
     static Busy building(String project) {
       return new Busy(
           project + "'s template is being built, and no workspace is cloned from it until it is.");
@@ -421,7 +439,10 @@ public final class Workspaces {
             .current(place.project(), zfs, nanos)
             .orElseThrow(() -> noTemplate(place.project()));
     var degraded = WorkspaceTemplate.usable(observer, template.pool());
-    var found = requireTheSpecs(place, held, box.all());
+    Optional<BoxInstances.Instance> found;
+    try (var entry = entryLock(place)) {
+      found = requireTheSpecs(place, held, box.all());
+    }
     var space = new IncusStorage(observer).find(template.pool()).flatMap(IncusStorage.Pool::space);
     return new SpecCheck(
         place, template, found, !inputs.equals(template.inputs()), space, degraded);
@@ -444,7 +465,7 @@ public final class Workspaces {
       Consumer<Set<String>> room)
       throws Exception {
     var place = check.place();
-    try (var held = nameLock(place.instance())) {
+    try (var held = entryLock(place)) {
       var found = requireTheSpecs(place, name -> false, box.all());
       if (found.map(i -> ((BoxInstances.Workspace) i.kind()).ready()).orElse(false)) {
         return reuse(found.get(), owner);
@@ -520,7 +541,26 @@ public final class Workspaces {
    * enters it meanwhile waits and then finds what the change left. Empty while another holds it.
    */
   public Optional<FileMutex> holdIfFree(String instance) throws IOException, InterruptedException {
-    return FileMutex.acquireUntil(nameLockFile(instance), nanos.getAsLong(), nanos);
+    return FileMutex.acquireUntil(nameLockFile(instance), 0, () -> 0);
+  }
+
+  /**
+   * The lock a run's entry of {@code place}'s workspace holds, waited for while another change of
+   * it, the sweep's stop or delete, holds it, no longer than {@link #CREATE_WAIT} on the create
+   * lock's clock: past that the box is {@link Busy}, never a stranger's. None in a dry run.
+   */
+  private FileMutex entryLock(RunPlace.SpecWorkspace place)
+      throws IOException, InterruptedException {
+    if (shell.isDryRun()) {
+      return null;
+    }
+    var free = holdIfFree(place.instance());
+    if (free.isPresent()) {
+      return free.get();
+    }
+    return FileMutex.acquireUntil(
+            nameLockFile(place.instance()), nanos.getAsLong() + CREATE_WAIT.toNanos(), nanos)
+        .orElseThrow(() -> Busy.changing(place));
   }
 
   private Path nameLockFile(String instance) {
@@ -1074,6 +1114,11 @@ public final class Workspaces {
         throw markTakenOff(project, name);
       }
       return taken;
+    }
+    if (taken.isPresent()
+        && taken.get().state() instanceof ContainerState.Error
+        && taken.get().config().isEmpty()) {
+      throw Busy.unread(instance);
     }
     if (taken.isPresent() || held.test(instance)) {
       throw new IllegalArgumentException(

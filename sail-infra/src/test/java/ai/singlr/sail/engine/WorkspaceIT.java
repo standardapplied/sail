@@ -91,6 +91,7 @@ class WorkspaceIT extends AbstractIncusIT {
   private static final String GONE = "gone";
   private static final String KEPT = "kept";
   private static final String HELD = "held";
+  private static final String BACKED = "backed";
   private static final Path CONTAINER_DIR = Path.of("/var/lib/sail/run");
 
   private static final String SEAL =
@@ -182,6 +183,7 @@ class WorkspaceIT extends AbstractIncusIT {
     deleteContainerQuietly(PROJECT + "-" + GONE);
     deleteContainerQuietly(PROJECT + "-" + KEPT);
     deleteContainerQuietly(PROJECT + "-" + HELD);
+    deleteContainerQuietly(PROJECT + "-" + BACKED);
     deleteContainerQuietly(TEMPLATE);
     deleteContainerQuietly(PROJECT);
     try {
@@ -467,14 +469,15 @@ class WorkspaceIT extends AbstractIncusIT {
               SpecStatus.DONE,
               "git switch -q -c by-hand && git commit -q --allow-empty -m work"
                   + " && git checkout -q --detach HEAD^ && echo x > f && git add f"
-                  + " && git stash -q && echo y > untracked");
+                  + " && git stash -q && echo y > untracked && echo z >> README");
       clock.set(Instant.now().plus(SpecWorkspaces.IDLE).plusSeconds(1));
 
       sweeper.sweep();
       sweeper.sweep();
 
       var kept = new BoxInstances(shell).named(instance).orElseThrow();
-      var why = "app holds uncommitted changes and a stash and commits origin lacks";
+      var why =
+          "app holds uncommitted changes and untracked files and a stash and commits origin lacks";
       assertEquals(new ContainerState.Stopped(), kept.state());
       assertEquals(Optional.of(why), kept.key(BoxInstances.KEPT_KEY));
       assertEquals(
@@ -503,6 +506,37 @@ class WorkspaceIT extends AbstractIncusIT {
           new ContainerState.Stopped(),
           new BoxInstances(shell).named(instance).orElseThrow().state(),
           "a kept workspace a person started stops again once idle");
+      assertEquals(1, said.size(), String.join("\n", said));
+    }
+  }
+
+  /**
+   * The proof's {@code kh2} on a real Incus: a commit pushed to a second remote inside the
+   * workspace, its local branch then deleted, is held by that remote's ref alone, which origin
+   * lacks, so the done spec's workspace is kept, not deleted.
+   */
+  @Test
+  void aCommitOnlyAnotherRemotesRefHoldsKeepsTheDoneSpecsWorkspace() throws Exception {
+    try (var db = Sqlite.open(Files.createTempDirectory("sail-it-idle").resolve("sail.db"))) {
+      var said = new ArrayList<String>();
+      var clock = new AtomicReference<>(Instant.now());
+      var sweeper = sweeper(db, said, clock);
+      var instance =
+          doneSpecsWorkspace(
+              db,
+              BACKED,
+              SpecStatus.DONE,
+              "git init -q --bare /home/dev/backup.git && git remote add backup"
+                  + " /home/dev/backup.git && git switch -q -c side && git commit -q"
+                  + " --allow-empty -m 'backed up work' && git push -q backup side"
+                  + " && git checkout -q --detach HEAD^ && git branch -q -D side");
+      clock.set(Instant.now().plus(SpecWorkspaces.IDLE).plusSeconds(1));
+
+      sweeper.sweep();
+
+      var kept = new BoxInstances(shell).named(instance).orElseThrow();
+      assertEquals(new ContainerState.Stopped(), kept.state());
+      assertEquals(Optional.of("app holds commits origin lacks"), kept.key(BoxInstances.KEPT_KEY));
       assertEquals(1, said.size(), String.join("\n", said));
     }
   }

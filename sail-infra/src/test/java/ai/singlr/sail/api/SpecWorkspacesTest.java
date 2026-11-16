@@ -1324,7 +1324,7 @@ class SpecWorkspacesTest {
             held.ahead.put(path, 0);
           }
         }
-        for (var kind : List.of("changes", "stash", "commits")) {
+        for (var kind : List.of("changes", "untracked", "stash", "commits")) {
           var aheadStill = kind.equals("commits") && held.ahead.getOrDefault(path, 0) > 0;
           if (kinds.contains(kind) || aheadStill) {
             lines.append(kind).append(' ').append(path).append('\n');

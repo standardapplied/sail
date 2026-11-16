@@ -8,6 +8,7 @@ package ai.singlr.sail.engine;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -2507,6 +2508,131 @@ class WorkspacesTest {
                     c.startsWith("incus start")
                         || c.startsWith("incus copy")
                         || c.startsWith("incus config set")));
+  }
+
+  /**
+   * The proof's medium 1, in its order: the sweep holds the workspace's lock mid-stop, Incus
+   * listing the instance without its keys as it does then, when a dispatch's check arrives. The
+   * check waits for the lock, reads the workspace as the stop left it, stopped, and the entry
+   * starts it: never a stranger's instance, never a refusal.
+   */
+  @Test
+  void aDispatchThatArrivesWhileTheSweepStopsTheWorkspaceWaitsThenStartsIt() throws Exception {
+    var stoppedNow = new AtomicBoolean();
+    var midStop =
+        incus(
+            DIR_AND_ZFS,
+            list(template("v1", INPUTS), "{\"name\": \"acme-fix-login\", \"status\": \"Error\"}"),
+            snapshots("v1"));
+    var stopped =
+        incus(
+            DIR_AND_ZFS,
+            list(template("v1", INPUTS), specWorkspace("Stopped", "fix-login", "uday")),
+            snapshots("v1"));
+    var workspaces = workspaces(switching(stoppedNow, midStop, stopped), System::nanoTime);
+    var sweeping = new CountDownLatch(1);
+    var stopDone = new CountDownLatch(1);
+    var sweep =
+        Thread.ofPlatform()
+            .start(
+                () -> {
+                  try (var held = workspaces.holdIfFree("acme-fix-login").orElseThrow()) {
+                    sweeping.countDown();
+                    stopDone.await(30, TimeUnit.SECONDS);
+                    stoppedNow.set(true);
+                  } catch (Exception e) {
+                    throw new IllegalStateException(e);
+                  }
+                });
+    assertTrue(sweeping.await(30, TimeUnit.SECONDS));
+    var checked = new AtomicReference<Workspaces.SpecCheck>();
+    var failed = new AtomicReference<Exception>();
+    var dispatch =
+        Thread.ofPlatform()
+            .start(
+                () -> {
+                  try {
+                    checked.set(workspaces.checkSpec(FIX, INPUTS, name -> false));
+                  } catch (Exception e) {
+                    failed.set(e);
+                  }
+                });
+    var deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(30);
+    while (dispatch.getState() != Thread.State.TIMED_WAITING && System.nanoTime() < deadline) {
+      Thread.onSpinWait();
+    }
+    assertEquals(Thread.State.TIMED_WAITING, dispatch.getState(), "the check waits on the lock");
+    stopDone.countDown();
+    sweep.join(TimeUnit.SECONDS.toMillis(30));
+    dispatch.join(TimeUnit.SECONDS.toMillis(30));
+
+    assertNull(failed.get());
+    assertTrue(checked.get().whole());
+    assertEquals(
+        new Workspaces.Reused("acme-fix-login", true),
+        workspaces.enterSpec(checked.get(), acme(), "uday", tempDir, whole -> {}));
+  }
+
+  /**
+   * A change of the workspace that holds its lock past {@link Workspaces#CREATE_WAIT}, on the
+   * create lock's clock, makes the entry {@link Workspaces.Busy}; and Incus listing the spec's
+   * instance without its keys, as mid-change, is busy too, never a stranger's instance.
+   */
+  @Test
+  void anEntryPastTheWaitOrMeetingAnInstanceIncusCannotSayIsBusyNeverAStrangers() throws Exception {
+    var midStop =
+        incus(
+            DIR_AND_ZFS,
+            list(template("v1", INPUTS), "{\"name\": \"acme-fix-login\", \"status\": \"Error\"}"),
+            snapshots("v1"));
+    var unread =
+        assertThrows(
+            Workspaces.Busy.class,
+            () -> workspaces(midStop, ticks(0)).checkSpec(FIX, INPUTS, name -> false));
+    assertEquals(
+        "Incus lists instance acme-fix-login without its keys, as it does while another change"
+            + " holds it, so whose it is cannot be told yet.",
+        unread.getMessage());
+
+    var shell =
+        incus(
+            DIR_AND_ZFS,
+            list(template("v1", INPUTS), specWorkspace("Stopped", "fix-login", "uday")),
+            snapshots("v1"));
+    var workspaces = workspaces(shell, ticks(0, 0, Workspaces.CREATE_WAIT.toNanos()));
+    var refused = new AtomicReference<Exception>();
+    var release = new CountDownLatch(1);
+    var holding = new CountDownLatch(1);
+    var holder =
+        Thread.ofPlatform()
+            .start(
+                () -> {
+                  try (var held = workspaces.holdIfFree("acme-fix-login").orElseThrow()) {
+                    holding.countDown();
+                    release.await(30, TimeUnit.SECONDS);
+                  } catch (Exception e) {
+                    throw new IllegalStateException(e);
+                  }
+                });
+    assertTrue(holding.await(30, TimeUnit.SECONDS));
+    var entering =
+        Thread.ofPlatform()
+            .start(
+                () -> {
+                  try {
+                    workspaces.checkSpec(FIX, INPUTS, name -> false);
+                  } catch (Exception e) {
+                    refused.set(e);
+                  }
+                });
+    entering.join(TimeUnit.SECONDS.toMillis(30));
+    release.countDown();
+    holder.join(TimeUnit.SECONDS.toMillis(30));
+
+    assertEquals(
+        "Workspace fix-login of acme is being stopped or deleted on this runner, and nothing"
+            + " enters it until that is done.",
+        assertInstanceOf(Workspaces.Busy.class, refused.get()).getMessage());
   }
 
   /**

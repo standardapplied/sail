@@ -28,11 +28,14 @@ final class WorkspaceGit {
   /**
    * For each repository path after the root ({@code $1}) and the runs' branch ({@code $2}, empty
    * for none): the branch pushed once, within a minute, when it holds commits {@code origin} lacks;
-   * then a line for each thing the repository holds that a delete would lose, {@code missing},
-   * {@code changes} (anything {@code git status} shows, untracked files included), {@code stash} or
-   * {@code commits} (on any branch, tag or the checked-out commit, that {@code origin}, the remote
-   * the project clones from, lacks; another remote, one inside the workspace say, is no copy), each
-   * followed by the path. Nothing is fetched. Any git command that fails fails the script.
+   * then a line for each thing the repository holds that a delete would lose, each followed by the
+   * path: {@code missing}; {@code changes} to tracked files and {@code untracked} files, as {@code
+   * git status} shows them; a {@code stash}; and {@code commits} that {@code origin}, the remote
+   * the project clones from, lacks, read once over every ref the repository has, whatever its
+   * namespace (branches, tags, the checked-out commit, another remote's refs, one inside the
+   * workspace say), the stash said apart. Nothing is fetched. Any git command that fails fails the
+   * script. A commit only the reflog holds is not read: one a person dropped by hand, as every
+   * amend leaves behind.
    */
   static final String LEFT =
       """
@@ -51,10 +54,13 @@ final class WorkspaceGit {
             timeout 60 git -C "$dir" push --quiet origin "$branch" >/dev/null 2>&1 || true
           fi
         fi
-        changes=$(git -C "$dir" status --porcelain --untracked-files=all)
+        status=$(git -C "$dir" status --porcelain --untracked-files=all)
         stash=$(git -C "$dir" stash list)
-        commits=$(git -C "$dir" log --max-count=1 --format=%H HEAD --branches --tags --not --remotes=origin)
+        commits=$(git -C "$dir" rev-list --max-count=1 --exclude=refs/stash --all --not --remotes=origin)
+        changes=$(printf '%s\\n' "$status" | grep -v '^??' || true)
+        untracked=$(printf '%s\\n' "$status" | grep '^??' || true)
         [ -z "$changes" ] || printf 'changes %s\\n' "$repo"
+        [ -z "$untracked" ] || printf 'untracked %s\\n' "$repo"
         [ -z "$stash" ] || printf 'stash %s\\n' "$repo"
         [ -z "$commits" ] || printf 'commits %s\\n' "$repo"
       done
@@ -66,6 +72,7 @@ final class WorkspaceGit {
   private static final Map<String, String> SAID =
       Map.of(
           "changes", "uncommitted changes",
+          "untracked", "untracked files",
           "stash", "a stash",
           "commits", "commits origin lacks");
 

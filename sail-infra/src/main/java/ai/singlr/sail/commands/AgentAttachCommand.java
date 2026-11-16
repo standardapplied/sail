@@ -22,10 +22,14 @@ import ai.singlr.sail.engine.ContainerStateGuard;
 import ai.singlr.sail.engine.NameValidator;
 import ai.singlr.sail.engine.NodeIdentity;
 import ai.singlr.sail.engine.OperatorCommand;
+import ai.singlr.sail.engine.ProjectProvisioner;
 import ai.singlr.sail.engine.RunPlace;
+import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.engine.Stty;
+import ai.singlr.sail.engine.Workspaces;
+import ai.singlr.sail.engine.WorkstationIdentity;
 import ai.singlr.sail.harness.Harness;
 import ai.singlr.sail.harness.Harnesses;
 import ai.singlr.sail.store.DispatchGate;
@@ -412,7 +416,7 @@ public final class AgentAttachCommand implements Runnable {
     } else {
       announceResume(run, harness, sessionId, place.instance());
     }
-    requireRunning(place);
+    enter(place, run, operator);
     if (member) {
       endMember(run, operator);
     }
@@ -573,7 +577,47 @@ public final class AgentAttachCommand implements Runnable {
 
   private static void requireRunning(RunPlace place) throws Exception {
     var state = new AgentPresence(new ShellExecutor(false)).state(place);
-    ContainerStateGuard.requireRunning(state, place.instance());
+    ContainerStateGuard.requireRunning(state, place);
+  }
+
+  /**
+   * Puts the place of {@code run}'s conversation within reach: a spec's whole workspace is entered
+   * as a lane's run enters it ({@link #entered}), so one the sweep stopped is started; any other
+   * place must be running, as before.
+   */
+  private void enter(RunPlace place, RunStore.RunRow run, OperatorCommand operator)
+      throws Exception {
+    if (place instanceof RunPlace.SpecWorkspace workspace && run != null) {
+      ProjectDefinition config;
+      try (var operations = this.operations.apply(operator)) {
+        config = operations.catalog().definitions().require(name);
+      }
+      if (entered(Workspaces.onThisBox(new ShellExecutor(false)), config, workspace, run.owner())) {
+        return;
+      }
+    }
+    requireRunning(place);
+  }
+
+  /**
+   * Enters spec {@code place}'s workspace for {@code owner} through the lanes' own door ({@link
+   * Workspaces#enterSpec}, under the workspace's lock, after the sweep's stop or delete): a whole
+   * one, stopped or running, is started when it has to be; whether there was one to enter.
+   */
+  static boolean entered(
+      Workspaces workspaces, ProjectDefinition config, RunPlace.SpecWorkspace place, String owner)
+      throws Exception {
+    var check =
+        workspaces.checkSpec(
+            place,
+            ProjectProvisioner.inputs(config, WorkstationIdentity.registered()),
+            project -> false);
+    if (!check.whole()) {
+      return false;
+    }
+    workspaces.enterSpec(
+        check, config, owner, SailPaths.projectFilesDir(place.project()), whole -> {});
+    return true;
   }
 
   /**

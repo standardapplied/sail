@@ -1467,6 +1467,14 @@ Each row with the tests that prove it:
   to the next pass, the instance looked up again inside it. One workspace's failure is logged once
   until a pass decides it, and the pass goes on to the next.
 
+  **An entry waits for the sweep.** Every entry of a spec's workspace (a dispatch, a review, a
+  fix, a room wake, `agent attach`) takes the same name lock for its check and its entry, waiting
+  for a stop or delete the sweep holds it for, no longer than the create lock's 60 s on the same
+  clock, past which it is `runner_busy` with its lane's remedy. An instance Incus lists without its
+  keys, as it does while another change holds it, is busy too, never taken for a stranger's.
+  `agent attach` enters a stopped spec workspace through that door and starts it; a stopped or
+  frozen workspace any other door meets names `sail project workspace start <p> <w>`.
+
   A workspace is **idle** when nothing is in it and 10 minutes have passed since the latest of
   three times: its spec's last run here ending, Incus last starting it (`last_used_at`), and this
   sail-api process starting. Nothing in it means no run of its spec is live on this box (a room's
@@ -1489,19 +1497,25 @@ Each row with the tests that prove it:
     once in the workspace, within 3 minutes, over the repos the project's definition configures,
     never found by search. In each repo it pushes the runs' branch once, within a minute, when the
     branch holds commits `origin` lacks. It then reads `git status --porcelain
-    --untracked-files=all`, `git stash list` and `git log HEAD --branches --tags --not
-    --remotes=origin`. Only `origin`, the remote the project clones from, counts as a copy.
+    --untracked-files=all` (uncommitted changes and untracked files said apart), `git stash
+    list`, and one read of commits over every ref the repository has, whatever its namespace:
+    `git rev-list --exclude=refs/stash --all --not --remotes=origin` (branches, tags, the
+    checked-out commit, another remote's refs). Only `origin`, the remote the project clones
+    from, counts as a copy. A commit only the reflog holds is not read: a person can lose one by
+    deleting a branch by hand, and counting them would keep nearly every workspace, since every
+    amend leaves one.
     Nothing is fetched, so a branch the forge deleted after its merge counts as pushed
     and is not pushed again. All three empty in every configured repo, and the spec still done
     with nothing live when read again just before the delete: the workspace is deleted. A spec
     reopened, or a run started, during the reads leaves it as it is, unkept, for a later pass.
     Anything else keeps it: a repo that holds something, a configured repo that is missing, a
     usage the workspace does not answer, a definition this box cannot read, a start that fails,
-    or a read that fails, times out or says what it cannot mean.
+    or a read that fails, times out or says what it cannot mean. The read waits at most 3 minutes
+    (a push 1 of them), so one slow repo can hold its pass that long, never the missed-stop pass.
   - **Kept is final for the sweep.** A kept workspace is stopped and carries
     `user.sail.kept=<what each repo holds>`. The spec's room is told once, as Sail, through the
     door every lane tells a room through, before the mark is written. The message names each repo
-    and what it holds (uncommitted changes, a stash, commits origin lacks) and the commands
+    and what it holds (uncommitted changes, untracked files, a stash, commits origin lacks) and the commands
     `sail project workspace start`, `shell` and `delete`. The sweep never starts, reads or deletes
     a kept workspace again; it stops it when idle, as any other. Its person deletes it, or a run of
     the spec enters it (`Workspaces.enterSpec`), which clears the mark, so a spec done again is
