@@ -179,16 +179,23 @@ extension Driver {
         }
         mouse(.leftMouseDown, at: windowPoint(0), clicks: 1)
         var followed = 0
+        var handled: [Double] = []
+        let began = ContinuousClock.now
         for move in 1 ... max(1, moves) {
             let wanted = distance * Double(move) / Double(max(1, moves))
+            let sent = ContinuousClock.now
             mouse(.leftMouseDragged, at: windowPoint(wanted), clicks: 1)
+            handled.append((ContinuousClock.now - sent) / .milliseconds(1))
             let now = first?.frame ?? .zero
             let edge = along ? Double(now.maxX - before.maxX) : Double(now.maxY - before.maxY)
             if abs(edge - wanted) <= 1 { followed += 1 }
             try? await Task.sleep(for: .milliseconds(interval))
         }
         mouse(.leftMouseUp, at: windowPoint(distance), clicks: 1)
-        return (followed == max(1, moves), "the panes followed \(followed) of \(max(1, moves)) moves; \(arrangementSaid)")
+        let spent = (ContinuousClock.now - began) / .milliseconds(1)
+        let timing = String(format: "a move handled in p50 %.1f ms, at most %.1f ms; ", handled.sorted()[handled.count / 2], handled.max() ?? 0)
+            + "\(handled.count) moves in \(Int(spent)) ms"
+        return (followed == max(1, moves), "the panes followed \(followed) of \(max(1, moves)) moves; \(timing); \(arrangementSaid)")
     }
 
     private func tabMiddle(_ index: Int) -> NSPoint? {

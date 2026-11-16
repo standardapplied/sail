@@ -160,6 +160,7 @@ public final class WorkbenchView: NSView {
         let room = TabView(frame: bounds)
         room.autoresizingMask = [.width, .height]
         room.onDrag = { [weak self] path, position in self?.drag(path, to: position) }
+        room.onDragEnded = { [weak self] in self?.apply() }
         addSubview(room, positioned: .below, relativeTo: banner)
         tabViews[id] = room
         return room
@@ -274,9 +275,12 @@ public final class WorkbenchView: NSView {
         focused?.terminal.fontPoints ?? FontLadder.standard
     }
 
+    /// A divider dragged: only its tab is laid out again while it moves; the rest of the drawing
+    /// and the kept arrangement wait for the button to go up (``apply()``).
     private func drag(_ path: [Side], to position: Double) {
-        guard model.drag(path, to: position, in: room, minimum: minimum, scale: scale) else { return }
-        apply()
+        guard model.drag(path, to: position, in: room, minimum: minimum, scale: scale), let tab = model.selectedTab, let view = tabViews[tab.id]
+        else { return }
+        layout(tab, in: view)
     }
 
     private func openTab() {
@@ -451,6 +455,7 @@ extension WorkbenchView: NSMenuItemValidation {
 /// One tab's room: its panes, laid out by the workbench, and its dividers over them.
 final class TabView: NSView {
     var onDrag: @MainActor ([Side], Double) -> Void = { _, _ in }
+    var onDragEnded: @MainActor () -> Void = {}
     private var dividers: [DividerView] = []
 
     override var isFlipped: Bool {
@@ -469,6 +474,7 @@ final class TabView: NSView {
         while dividers.count < shown.count {
             let divider = DividerView()
             divider.onDrag = { [weak self] path, position in self?.onDrag(path, position) }
+            divider.onDragEnded = { [weak self] in self?.onDragEnded() }
             addSubview(divider)
             dividers.append(divider)
         }
@@ -481,6 +487,7 @@ final class TabView: NSView {
 /// A divider: a 1 pt line of `separatorStrong` in a 7 pt area the pointer drags.
 final class DividerView: NSView {
     var onDrag: @MainActor ([Side], Double) -> Void = { _, _ in }
+    var onDragEnded: @MainActor () -> Void = {}
     private var divider: Divider?
     private let line = CALayer()
 
@@ -516,6 +523,10 @@ final class DividerView: NSView {
     }
 
     override func mouseDown(with _: NSEvent) {}
+
+    override func mouseUp(with _: NSEvent) {
+        onDragEnded()
+    }
 
     override func mouseDragged(with event: NSEvent) {
         guard let divider, let room = superview else { return }
