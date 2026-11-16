@@ -96,15 +96,64 @@ class SpecCliHelperTest {
   }
 
   @Test
-  void commentAcceptsTheQuestionFlagInAnyOrder() {
-    var content = SpecCliHelper.scriptContent();
-    assertTrue(content.contains("--question) FIELDS+=(--data-urlencode \"question=true\")"));
+  void commentTakesItsFlagsInAnyOrder() throws Exception {
     assertTrue(
-        content.contains("comment accepts only --reply-to <message-id> and --question"),
-        "unknown comment options must still die loudly");
-    assertTrue(
-        content.contains("[--reply-to <message-id>] [--question]"),
+        SpecCliHelper.scriptContent().contains("[--reply-to <message-id>] [--question]"),
         "the usage text teaches the flag");
+
+    var home = Files.createTempDirectory("spec-shim");
+    try {
+      var socket = home.resolve("api.sock");
+      writeExecutable(
+          home.resolve("spec"),
+          SpecCliHelper.scriptContent()
+              .replace(SailPaths.apiSocketContainerPath().toString(), socket.toString()));
+      Files.writeString(home.resolve("box.credential"), "sailbox_test\n");
+      var bin = home.resolve("bin");
+      Files.createDirectories(bin);
+      writeExecutable(
+          bin.resolve("curl"),
+          FakeCurl.script(
+              """
+          exit 0
+          """));
+      try (var bound = bind(socket)) {
+        runShim(home, bin, Map.of(), "comment", "a", "--question", "--body", "which title?");
+        runShim(home, bin, Map.of(), "comment", "a", "--body", "which title?", "--question");
+        runShim(
+            home, bin, Map.of(), "comment", "a", "--reply-to", "m1", "--question", "--body", "-");
+        runShim(home, bin, Map.of(), "comment", "a", "--body", "plain");
+
+        var noBody = shim(home, bin, Map.of(), "comment", "a", "--question");
+        assertEquals(1, noBody.exit(), noBody.output());
+        assertTrue(noBody.output().contains("comment needs --body <text>|-"), noBody.output());
+        var unknown = shim(home, bin, Map.of(), "comment", "a", "--body", "x", "--loud");
+        assertEquals(1, unknown.exit(), unknown.output());
+        assertTrue(
+            unknown
+                .output()
+                .contains("comment accepts only --body <text>|-, --reply-to <message-id> and"),
+            unknown.output());
+        var noValue = shim(home, bin, Map.of(), "comment", "a", "--question", "--body");
+        assertEquals(1, noValue.exit(), noValue.output());
+      }
+      var calls = Files.readAllLines(home.resolve("curl.log"));
+      assertEquals(4, calls.size(), calls.toString());
+      for (var call : calls.subList(0, 2)) {
+        assertTrue(call.contains("body=which title?"), call);
+        assertTrue(call.contains("question=true"), call);
+        assertTrue(call.contains("/a/messages"), call);
+      }
+      assertTrue(calls.get(2).contains("body@-"), calls.get(2));
+      assertTrue(calls.get(2).contains("reply_to=m1"), calls.get(2));
+      assertTrue(calls.get(2).contains("question=true"), calls.get(2));
+      assertTrue(calls.get(3).contains("body=plain"), calls.get(3));
+      assertFalse(calls.get(3).contains("question"), calls.get(3));
+    } finally {
+      try (var walk = Files.walk(home)) {
+        walk.sorted(java.util.Comparator.reverseOrder()).forEach(path -> path.toFile().delete());
+      }
+    }
   }
 
   @Test
