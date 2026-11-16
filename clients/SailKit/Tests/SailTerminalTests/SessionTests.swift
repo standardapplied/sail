@@ -277,6 +277,24 @@ import Testing
         _ = host
     }
 
+    /// The reader can take a key's echo, and update the screen with it, before the writer has
+    /// marked the key sent: the key is still counted, once.
+    @Test func anEchoTakenBeforeItsKeyIsMarkedSentCountsTheKeyOnce() {
+        let start = ContinuousClock.now
+        var recorder = LatencyRecorder()
+        recorder.echoed(through: 1, at: start + .milliseconds(1))
+        recorder.screenUpdated(at: start + .milliseconds(2))
+        recorder.sent(1, handedIn: start, written: start + .milliseconds(3))
+        #expect(recorder.report.screen.count == 1)
+        recorder.echoed(through: 2, at: start + .milliseconds(5))
+        recorder.sent(2, handedIn: start + .milliseconds(4), written: start + .milliseconds(6))
+        recorder.screenUpdated(at: start + .milliseconds(7))
+        recorder.screenUpdated(at: start + .milliseconds(8))
+        let report = recorder.report
+        #expect(report.written.count == 2 && report.echoed.count == 2 && report.screen.count == 2)
+        #expect(report.echoed.max == 1 && report.screen.max == 3)
+    }
+
     @Test func takeWriteKillAndDetachAreTheirFrames() async throws {
         let (host, session, peer, watch) = try await attachedLocally()
         session.takeWrite()
