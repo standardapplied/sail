@@ -218,13 +218,16 @@ extension Driver {
         guard let start = tabMiddle(from), let end = tabMiddle(to) else { return (false, "no tab \(from) or \(to)") }
         let tab = workbench.strip.tabs[from]
         let before = tab.frame.minX
+        press("\(to + 1)", ["command"])
         mouse(.leftMouseDown, at: start, clicks: 1)
+        let pressed = workbench.model.tabs.firstIndex { $0.id == workbench.model.selected } == from
         for step in 1 ... 10 {
             mouse(.leftMouseDragged, at: NSPoint(x: start.x + (end.x - start.x) * Double(step) / 10, y: start.y), clicks: 1)
         }
         let moved = tab.frame.minX
         mouse(.leftMouseUp, at: end, clicks: 1)
-        return (true, "the dragged tab went from x \(Int(before)) to \(Int(moved)) before the release; " + arrangementSaid)
+        return (true, "the press \(pressed ? "selected" : "did not select") the tab; it went from x \(Int(before)) to \(Int(moved)) before the release; "
+            + arrangementSaid)
     }
 
     /// Scenario 29: a double-click on the tab, `text` typed into its field, then Return or Escape.
