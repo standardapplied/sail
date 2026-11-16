@@ -10,6 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import ai.singlr.sail.api.SyncRequest;
 import ai.singlr.sail.config.SyncConfig;
+import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.Sqlite;
 import ai.singlr.sail.sync.SyncTransportException;
@@ -46,11 +47,14 @@ class SyncDiagnosticTest {
   private SyncTransportException failure(SyncOperations.Channel channel) throws Exception {
     try (var db = Sqlite.open(home.resolve("sail.db"))) {
       new SchemaManager(db).migrate();
-      var config = new SyncConfig("node", "sail@main", "mady", "box-1");
-      var operations = new SyncOperations(db, "node", home, () -> config, target -> channel);
-      return assertThrows(
-          SyncTransportException.class, () -> operations.sync(new SyncRequest(null)));
+      return failure(db, channel);
     }
+  }
+
+  private SyncTransportException failure(Sqlite db, SyncOperations.Channel channel) {
+    var config = new SyncConfig("node", "sail@main", "mady", "box-1");
+    var operations = new SyncOperations(db, "node", home, () -> config, target -> channel);
+    return assertThrows(SyncTransportException.class, () -> operations.sync(new SyncRequest(null)));
   }
 
   private static SyncOperations.Channel closed(
@@ -115,6 +119,33 @@ class SyncDiagnosticTest {
             + AUTHORISE
             + "\n  ssh said: sail@10.128.0.25: Permission denied (publickey).",
         OperatorCommand.PLAIN.render(refused));
+  }
+
+  /**
+   * m3: a box that synced before, whose key main now refuses, is told main removed its person (or
+   * their key), that it syncs no more, and the line that brings it back.
+   */
+  @Test
+  void aKeyMainRefusesAfterABoxSyncedSaysMainRemovedItsPerson() throws Exception {
+    try (var db = Sqlite.open(home.resolve("sail.db"))) {
+      new SchemaManager(db).migrate();
+      new FdeStore(db).replicate("mady", "main-mady", null, null, "member", "active", null);
+
+      var refused =
+          failure(
+              db,
+              closed(
+                  "sail@10.128.0.25: Permission denied (publickey).",
+                  handle -> Optional.of(AUTHORISE.replace("mady", handle))));
+
+      assertEquals(
+          "hello: Sync channel closed before main replied. Main no longer knows this box's person,"
+              + " mady, or their key: main removed them. This box keeps running as them but syncs"
+              + " no more until an admin on main runs this line; then sync again:\n  "
+              + AUTHORISE
+              + "\n  ssh said: sail@10.128.0.25: Permission denied (publickey).",
+          OperatorCommand.PLAIN.render(refused));
+    }
   }
 
   @Test

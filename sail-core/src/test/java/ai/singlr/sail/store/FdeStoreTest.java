@@ -76,14 +76,15 @@ class FdeStoreTest {
   @Test
   void aRemovalThatRollsBackKeepsTheLoginsAndOneOffTheListIsForgottenAfterItsCommit() {
     var admin = store.add("solo", null, null, "admin");
-    var member = store.add("member", null, null, "member");
+    store.replicate("member", "main-member", null, null, "member", "active", null);
+    var member = store.byHandle("member").orElseThrow();
     var logins = LoginStore.beside(db);
     var claude = Harnesses.of("claude-code");
     logins.store(admin.id(), claude, null, null, "admin-token");
     logins.store(member.id(), claude, null, null, "member-token");
 
     assertThrows(IllegalStateException.class, () -> store.remove(admin.id()));
-    assertEquals(1, store.removeUnlisted(List.of("solo"), "solo"));
+    assertEquals(1, store.removeUndescribed(List.of(), "solo"));
 
     assertEquals(1, logins.list(admin.id()).size());
     assertEquals(List.of(), logins.list(member.id()));

@@ -29,7 +29,6 @@ import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.engine.SyncOperations;
 import ai.singlr.sail.identity.Acting;
-import ai.singlr.sail.identity.ProjectScope;
 import ai.singlr.sail.store.BlobStore;
 import ai.singlr.sail.store.ChangeLog;
 import ai.singlr.sail.store.ContentFixtures;
@@ -590,7 +589,7 @@ class SyncCommandTest {
               Map.of("handle", "ada", "role", "admin", "status", "active"),
               Map.of("handle", "bad", "role", "superuser", "status", "active"));
 
-      var rejected = SyncOperations.applyFdes(fdes, roster, ProjectScope.all(), "ada");
+      var rejected = SyncOperations.applyFdes(fdes, roster, "ada");
 
       assertEquals(List.of("bad"), rejected);
       assertEquals("admin", fdes.byHandle("ada").orElseThrow().role());

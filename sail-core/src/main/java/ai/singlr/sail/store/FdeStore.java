@@ -375,27 +375,72 @@ public final class FdeStore {
   }
 
   /**
-   * Removes, as {@link #remove} does, every person this box holds under a main id that main's whole
-   * roster, naming {@code mainIds}, no longer holds, but this box's own {@code own}: main removed
-   * them, or gave their handle to someone new under a new id. Main's statement by id is the only
-   * thing that erases a person's credentials on a node. Returns how many it removed.
+   * Removes, as {@link #remove} does, every person this box holds under a main id that main no
+   * longer holds at all, naming {@code liveIds}, but this box's own {@code own}: main removed them,
+   * or gave their handle to someone new under a new id. Main's statement by id is what erases a
+   * person's credentials on a node. Returns how many it removed.
    */
-  public int removeUndescribed(Collection<String> mainIds, String own) {
+  public int removeUndescribed(Collection<String> liveIds, String own) {
     return db.transaction(
         () -> {
-          var gone =
-              db
-                  .query(
-                      "SELECT id, main_id FROM fdes WHERE main_id IS NOT NULL AND handle != ?",
-                      row -> Map.entry(row.text(0), row.text(1)),
-                      Objects.toString(own, ""))
-                  .stream()
-                  .filter(row -> !mainIds.contains(row.getValue()))
-                  .map(Map.Entry::getKey)
-                  .toList();
+          var gone = describedBut(liveIds, own);
           gone.forEach(id -> byId(id).ifPresent(this::delete));
           return gone.size();
         });
+  }
+
+  /**
+   * Disables, and forgets the name and email of, every person main still holds but no longer lists
+   * to this box, naming {@code listedIds}, but its own {@code own}: they left its projects, which
+   * is undone when they are listed again, so what they stored here stays.
+   */
+  public void withdraw(Collection<String> listedIds, String own) {
+    db.transaction(
+        () ->
+            describedBut(listedIds, own)
+                .forEach(
+                    id ->
+                        db.execute(
+                            "UPDATE fdes SET status = 'disabled', display_name = NULL,"
+                                + " email = NULL WHERE id = ?",
+                            id)));
+  }
+
+  private List<String> describedBut(Collection<String> mainIds, String own) {
+    return db
+        .query(
+            "SELECT id, main_id FROM fdes WHERE main_id IS NOT NULL AND handle != ?",
+            row -> Map.entry(row.text(0), row.text(1)),
+            Objects.toString(own, ""))
+        .stream()
+        .filter(row -> !mainIds.contains(row.getValue()))
+        .map(Map.Entry::getKey)
+        .toList();
+  }
+
+  /** Whether {@code handle} is a person made here that main never described. */
+  public boolean undescribed(String handle) {
+    return db.queryOne(
+                "SELECT COUNT(*) FROM fdes WHERE handle = ? AND main_id IS NULL",
+                row -> row.integer(0),
+                handle)
+            .orElse(0L)
+        > 0;
+  }
+
+  /** Whether main has described anyone to this box yet: none before its first roster round. */
+  public boolean anyDescribed() {
+    return db.queryOne("SELECT COUNT(*) FROM fdes WHERE main_id IS NOT NULL", row -> row.integer(0))
+            .orElse(0L)
+        > 0;
+  }
+
+  /**
+   * Removes {@code handle}, a person made here that main never described, as {@link #remove} does:
+   * main has given the handle to someone else, who takes it.
+   */
+  public void giveUp(String handle) {
+    db.transaction(() -> byHandle(handle).ifPresent(this::delete));
   }
 
   /**
@@ -466,25 +511,6 @@ public final class FdeStore {
                   .orElseThrow(() -> new IllegalArgumentException("No FDE with id " + fdeId + "."));
           requireRemovable(fde);
           delete(fde);
-        });
-  }
-
-  /**
-   * Removes every FDE this box holds that main's roster, naming {@code listed}, does not, but this
-   * box's own {@code own}, as {@link #remove} does: how a scoped node holds exactly the roster main
-   * lists to it, and so neither the name nor the email of anyone outside its projects. An admin is
-   * never scoped, so main lists every admin to every node and the last-admin guard has nothing to
-   * guard here. Returns how many it removed.
-   */
-  public int removeUnlisted(Collection<String> listed, String own) {
-    return db.transaction(
-        () -> {
-          var unlisted =
-              list().stream()
-                  .filter(fde -> !listed.contains(fde.handle()) && !fde.handle().equals(own))
-                  .toList();
-          unlisted.forEach(this::delete);
-          return unlisted.size();
         });
   }
 

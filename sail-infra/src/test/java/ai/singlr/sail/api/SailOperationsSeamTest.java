@@ -284,7 +284,7 @@ class SailOperationsSeamTest {
               advance::accept,
               clock::instant);
       operations.useSyncScheduler(scheduler);
-      knownToMain(main, "owner", "member");
+      knownToMain(main, node, "owner", "member");
       var token = credential(node.db, "owner", "member", "token");
       scheduler.freshenRead();
       assertEquals(1, attempts.get());
@@ -686,9 +686,9 @@ class SailOperationsSeamTest {
                 targets.add(target);
                 return channel(main);
               }));
-      knownToMain(main, "member", "member");
-      knownToMain(main, "node", "member");
-      knownToMain(main, "admin", "admin");
+      knownToMain(main, node, "member", "member");
+      knownToMain(main, node, "node", "member");
+      knownToMain(main, node, "admin", "admin");
       var member = credential(node.db, "member", "member", lane);
       for (var body : List.of("{}", "{\"main\":\"untrusted-peer\"}")) {
         var denied = send(server, "POST", "/v1/sync", member, body);
@@ -866,8 +866,10 @@ class SailOperationsSeamTest {
   }
 
   /** A node's roster mirrors main's, so an FDE a node acts as must be on main's roster too. */
-  private static void knownToMain(SyncBox main, String handle, String role) {
-    new FdeStore(main.db).add(handle, null, null, role);
+  private static void knownToMain(SyncBox main, SyncBox node, String handle, String role) {
+    var known = new FdeStore(main.db).add(handle, null, handle + "@sail.invalid", role);
+    new FdeStore(node.db)
+        .replicate(handle, known.id(), null, known.email(), role, "active", known.createdAt());
   }
 
   private static String credential(Sqlite db, String handle, String role, String lane) {

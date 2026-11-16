@@ -27,7 +27,6 @@ import ai.singlr.sail.harness.LoginOutcome;
 import ai.singlr.sail.harness.RunReport;
 import ai.singlr.sail.harness.RunUsage;
 import ai.singlr.sail.identity.Acting;
-import ai.singlr.sail.identity.ProjectScope;
 import ai.singlr.sail.store.DispatchGate;
 import ai.singlr.sail.store.EventStore;
 import ai.singlr.sail.store.FdeStore;
@@ -577,7 +576,7 @@ class MissedStopReconcilerTest {
   }
 
   private void round(FdeStore fdes, List<Map<String, Object>> roster) {
-    Acting.system(() -> SyncOperations.applyFdes(fdes, roster, ProjectScope.all(), "ada"));
+    Acting.system(() -> SyncOperations.applyFdes(fdes, roster, "ada"));
   }
 
   /**

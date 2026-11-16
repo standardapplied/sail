@@ -352,6 +352,20 @@ public final class FdeCommand implements Runnable {
     }
   }
 
+  /** A node edits only a person made here that main never described: main's roster is not its. */
+  private static void requireRosterEdit(Box box, String action, String handle) {
+    if (box.node()) {
+      try (var db = Sqlite.open(box.database())) {
+        if (new FdeStore(db).undescribed(handle)) {
+          Refusals.enforce(
+              Access.atAll(Actor.reader(), Action.MANAGE_PEOPLE, Resource.Kind.PEOPLE));
+          return;
+        }
+      }
+    }
+    requireRosterEdit(box, action);
+  }
+
   static String rosterEditOnNodeMessage(String action) {
     return "The FDE roster is managed on the main devbox. "
         + action
@@ -617,7 +631,7 @@ public final class FdeCommand implements Runnable {
             var operator = operator();
             requireOneScopeChange(operator);
             var box = command.box.get();
-            requireRosterEdit(box, "Updating an FDE");
+            requireRosterEdit(box, "Updating an FDE", handle);
             if (displayName == null && email == null && role == null && !scoped && !unscoped) {
               throw new IllegalArgumentException(
                   "Nothing to update. Pass --name, --email, --role, --scoped (with --grant) or"
@@ -984,7 +998,7 @@ public final class FdeCommand implements Runnable {
           () -> {
             var operator = operator();
             var box = command.box.get();
-            requireRosterEdit(box, "Removing an FDE");
+            requireRosterEdit(box, "Removing an FDE", handle);
             if (!force) {
               ConsoleHelper.confirmDestructive(
                   "Remove FDE '" + handle + "' and revoke all its credentials?",

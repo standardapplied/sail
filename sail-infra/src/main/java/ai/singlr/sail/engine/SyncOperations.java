@@ -16,7 +16,6 @@ import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.identity.Actor;
-import ai.singlr.sail.identity.ProjectScope;
 import ai.singlr.sail.store.ChangeLog;
 import ai.singlr.sail.store.Erasure;
 import ai.singlr.sail.store.FdeStore;
@@ -45,6 +44,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
@@ -212,11 +212,23 @@ public final class SyncOperations {
       FileStore files,
       ProjectStore projects)
       throws Exception {
+    var failures = new ArrayList<SyncTransportException>();
+    List<Map<String, Object>> roster = null;
+    try {
+      roster = session.fetchFdes();
+    } catch (RuntimeException e) {
+      failures.add(transportFailure("fde", e));
+    }
+    if (roster != null) {
+      requireNoStrangers(
+          new FdeStore(db),
+          roster.stream().filter(entry -> entry.get("handle") != null).toList(),
+          handle);
+    }
     DemoSeeder.unseed(db);
     var settled = new ArrayList<>(NodeRound.begin(session, db, handle));
     session.keep(NodeRound.kept(settled));
     var types = new ArrayList<SyncSession.TypeReport>();
-    var failures = new ArrayList<SyncTransportException>();
     var knownMessages = messages.syncEntityIds();
     var knownProjects = names(projects);
     for (var entity : SyncedEntities.all()) {
@@ -231,11 +243,12 @@ public final class SyncOperations {
     settled.addAll(NodeRound.end(db, handle));
     settled.forEach(settlement -> notice.accept(Remedy.of(settlement.describe())));
     var pulledMessages = pulledMessageEvents(messages, specs, knownMessages, host);
-    try {
-      reportRejectedFdes(
-          applyFdes(new FdeStore(db), session.fetchFdes(), new SyncScope(db).held(), handle));
-    } catch (RuntimeException e) {
-      failures.add(transportFailure("fde", e));
+    if (roster != null) {
+      try {
+        reportRejectedFdes(applyFdes(new FdeStore(db), roster, handle));
+      } catch (RuntimeException e) {
+        failures.add(transportFailure("fde", e));
+      }
     }
     materialize(files);
     announceNewProjects(projects, knownProjects);
@@ -326,7 +339,7 @@ public final class SyncOperations {
       if (Strings.isBlank(said)) {
         throw e;
       }
-      throw closed(e, said, channel, config.handle(), target);
+      throw closed(e, said, channel, config.handle(), target, new FdeStore(db).anyDescribed());
     }
   }
 
@@ -335,7 +348,12 @@ public final class SyncOperations {
    * before ssh's words, else ssh's words and {@link #explained}'s remedy.
    */
   private static SyncTransportException closed(
-      SyncTransportException e, String said, Channel channel, String handle, String target) {
+      SyncTransportException e,
+      String said,
+      Channel channel,
+      String handle,
+      String target,
+      boolean synced) {
     var authorise =
         said.contains(KEY_REFUSED) ? channel.authorisation(handle) : Optional.<String>empty();
     if (authorise.isEmpty()) {
@@ -346,8 +364,14 @@ public final class SyncOperations {
         "unreachable",
         e.getMessage(),
         Remedy.of(
-            "Main has not authorised this box's key yet. Send its operator this line, then sync"
-                + " again:\n  "
+            (synced
+                    ? "Main no longer knows this box's person, "
+                        + handle
+                        + ", or their key: main removed them. This box keeps running as them but"
+                        + " syncs no more until an admin on main runs this line; then sync again:"
+                    : "Main has not authorised this box's key yet. Send its operator this line,"
+                        + " then sync again:")
+                + "\n  "
                 + authorise.get()
                 + "\n  ssh said: "
                 + said),
@@ -736,34 +760,44 @@ public final class SyncOperations {
 
   /**
    * Mirrors main's roster into the local FDE store, returning the handles of any entries rejected
-   * for a malformed role or status — dropped, never written with a bad authorization. Each round
-   * holds main's whole roster for this box, so a person main described by id and lists no more is
-   * removed with their credentials ({@link FdeStore#removeUndescribed}): main removed them, or gave
-   * their handle to someone new. A person main never described is disabled ({@link
-   * FdeStore#disableUnlisted}), unless main scoped this box to {@code scope}: then everyone it does
-   * not list is removed, so the box keeps no name or email outside its projects. This box's own
-   * FDE, {@code own}, is never removed or disabled. A roster from a main that sends no ids removes
-   * no one by id.
+   * for a malformed role or status — dropped, never written with a bad authorization. The roster
+   * lists the people main shows this box and, by id alone, everyone else main still holds. Once it
+   * names this box's own FDE, {@code own}: a person this box holds under a main id main no longer
+   * holds is removed with their credentials (main removed them, or gave their handle to someone
+   * new); one main holds but no longer lists here is withdrawn, disabled and their name and email
+   * forgotten, but what they stored kept for when they are listed again. A person main never
+   * described is disabled; one whose handle main lists for someone else (another email) gives it up
+   * to main's, but at this box's first round, which refuses instead ({@link #requireNoStrangers}).
+   * The box's own FDE is never removed, withdrawn or disabled. A roster from a main that sends no
+   * ids removes no one.
    */
   public static List<String> applyFdes(
-      FdeStore fdes, List<Map<String, Object>> roster, ProjectScope scope, String own) {
-    var listed = roster.stream().map(entry -> str(entry, "handle")).toList();
+      FdeStore fdes, List<Map<String, Object>> roster, String own) {
+    var listed = roster.stream().filter(entry -> entry.get("handle") != null).toList();
+    var handles = listed.stream().map(entry -> str(entry, "handle")).toList();
     var ids = roster.stream().map(entry -> str(entry, "id")).toList();
-    var removed = ids.contains(null) ? 0 : fdes.removeUndescribed(ids, own);
-    if (scope.unrestricted()) {
-      fdes.disableUnlisted(listed, own);
+    var strangers = requireNoStrangers(fdes, listed, own);
+    var removed = 0;
+    if (ids.contains(null) || !handles.contains(own)) {
+      var kept = strangers.stream().map(Stranger::handle).toList();
+      listed = listed.stream().filter(entry -> !kept.contains(str(entry, "handle"))).toList();
     } else {
-      removed += fdes.removeUnlisted(listed, own);
+      removed = fdes.removeUndescribed(ids, own);
+      fdes.withdraw(listed.stream().map(entry -> str(entry, "id")).toList(), own);
+      for (var stranger : strangers) {
+        fdes.giveUp(stranger.handle());
+        System.err.println(
+            "  roster: " + stranger.said() + " Main's " + stranger.handle() + " takes it.");
+      }
     }
+    fdes.disableUnlisted(handles, own);
     if (removed > 0) {
       System.err.println(
           Ansi.AUTO.string(
-              "  @|faint roster: removed "
-                  + removed
-                  + " FDE(s) main no longer lists to this box|@"));
+              "  @|faint roster: removed " + removed + " FDE(s) main removed or gave away|@"));
     }
     var rejected = new ArrayList<String>();
-    for (var entry : roster) {
+    for (var entry : listed) {
       try {
         fdes.replicate(
             str(entry, "handle"),
@@ -778,6 +812,68 @@ public final class SyncOperations {
       }
     }
     return List.copyOf(rejected);
+  }
+
+  /** A person made here under a handle main lists for someone else. */
+  record Stranger(String handle, String here, String main) {
+    String said() {
+      return handle
+          + " on this box ("
+          + here
+          + ") is not main's "
+          + handle
+          + " ("
+          + main
+          + "): main gave the handle to someone else.";
+    }
+  }
+
+  /**
+   * The people made here under a handle main's {@code listed} roster gives someone else: never
+   * described by main, not this box's {@code own}, and of another email. At this box's first round,
+   * before main has described anyone to it, they are refused, naming each and the ways out, and
+   * nothing changes.
+   */
+  static List<Stranger> requireNoStrangers(
+      FdeStore fdes, List<Map<String, Object>> listed, String own) {
+    var strangers = new ArrayList<Stranger>();
+    for (var entry : listed) {
+      var handle = str(entry, "handle");
+      var here = fdes.byHandle(handle).filter(fde -> fdes.undescribed(handle)).orElse(null);
+      var main = Objects.toString(str(entry, "email"), "");
+      if (here != null && !handle.equals(own) && !sameEmail(here.email(), main)) {
+        strangers.add(new Stranger(handle, Objects.toString(here.email(), ""), main));
+      }
+    }
+    if (!strangers.isEmpty() && !fdes.anyDescribed()) {
+      var told = new ArrayList<Object>();
+      for (var stranger : strangers) {
+        var h = stranger.handle();
+        told.addAll(
+            List.of(
+                stranger.said() + " If they are different people, remove " + h + " here: '",
+                Remedy.sail("fde rm", h, "--force"),
+                "'. If they are the same person, correct the email that is wrong: here '",
+                Remedy.sail("fde update", h, "--email", orPlaceholder(stranger.main())),
+                "', or on main '",
+                Remedy.sail("fde update", h, "--email", orPlaceholder(stranger.here())),
+                "'. "));
+      }
+      throw Remedied.state(
+          "This box's first round changes no one: a handle it holds is someone else's on main.",
+          Remedy.of(told.toArray()));
+    }
+    return strangers;
+  }
+
+  private static String orPlaceholder(String email) {
+    return Strings.isBlank(email) ? "<email>" : email;
+  }
+
+  private static boolean sameEmail(String here, String main) {
+    return here != null
+        && main != null
+        && here.strip().toLowerCase(Locale.ROOT).equals(main.strip().toLowerCase(Locale.ROOT));
   }
 
   private static String str(Map<String, Object> map, String key) {

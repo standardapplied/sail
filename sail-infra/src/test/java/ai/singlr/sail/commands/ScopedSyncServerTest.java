@@ -7,8 +7,10 @@ package ai.singlr.sail.commands;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.common.Remedied;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.engine.SyncOperations;
 import ai.singlr.sail.identity.Acting;
@@ -22,12 +24,10 @@ import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
 import ai.singlr.sail.store.TestLogins;
 import ai.singlr.sail.store.TokenStore;
-import ai.singlr.sail.store.WebauthnCredentialStore;
 import ai.singlr.sail.sync.SyncDatabase;
 import ai.singlr.sail.sync.SyncSession;
 import ai.singlr.sail.sync.SyncWire;
 import ai.singlr.sail.sync.SyncedEntities;
-import ai.singlr.sail.webauthn.RegisteredCredential;
 import java.io.BufferedInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -40,11 +40,13 @@ import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.stream.Collectors;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import picocli.CommandLine;
 
 /**
  * Main's {@code _sync} server as a token resolves it: the session of a scoped FDE is served its
@@ -97,9 +99,6 @@ class ScopedSyncServerTest {
   @Test
   void aScopedFdesSessionPullsItsProjectsAndTheRosterOfThoseWhoShareThem() throws Exception {
     var node = new FdeStore(nodeDb);
-    for (var known : List.of("ada", "sam", "yan")) {
-      node.add(known, known, known + "@old.dev", "member");
-    }
 
     var round = roundAs(tokenOf("nia"));
 
@@ -111,65 +110,142 @@ class ScopedSyncServerTest {
             entry("nia", "nia", "nia@x.dev", "member"),
             entry("sam", "sam", "", "member"),
             entry("uma", "Uma", "", "member")),
-        round.roster().stream().map(ScopedSyncServerTest::withoutCreatedAt).toList());
+        listed(round));
+    assertEquals(
+        List.of(Set.of("id"), Set.of("id")),
+        round.roster().stream().filter(fde -> !fde.containsKey("handle")).map(Map::keySet).toList(),
+        "everyone else main holds is said by id alone");
 
-    assertEquals(List.of(), SyncOperations.applyFdes(node, round.roster(), round.scope(), "nia"));
+    assertEquals(List.of(), SyncOperations.applyFdes(node, round.roster(), "nia"));
 
     assertTrue(node.byHandle("sam").orElseThrow().active(), "an assignee in alpha stays enabled");
     assertTrue(node.byHandle("ada").orElseThrow().active());
-    assertTrue(node.byHandle("yan").isEmpty(), "no one outside alpha stays on a scoped box");
+    assertTrue(node.byHandle("yan").isEmpty(), "no one outside alpha is on a scoped box");
     assertEquals("", node.byHandle("sam").orElseThrow().email());
     assertEquals("nia@x.dev", node.byHandle("nia").orElseThrow().email());
     assertEquals(ProjectScope.all(), node.scopeOf("nia"), "a node scopes no one");
   }
 
+  /**
+   * M2: on a scoped node, a person who leaves its projects is out of its sight, not removed: their
+   * row is disabled and their name and email forgotten, but what they stored stays, and works again
+   * once they are listed again. One main removes is erased.
+   */
   @Test
-  void aScopedNodeRemovesEveryoneMainNoLongerListsWithTheirCredentialsButItsOwnFde()
+  void aPersonWhoLeavesAScopedNodesProjectsIsWithdrawnAndComesBackWithTheirLogins()
       throws Exception {
+    syncAs("nia");
+    var sam = TestLogins.store(nodeDb, "sam");
     var node = new FdeStore(nodeDb);
-    var own = node.add("nia", "Nia", "nia@old.dev", "member");
-    var yan = node.add("yan", "Yan", "yan@x.dev", "member");
-    node.add("eng", "Eng", "eng@x.dev", "member");
-    node.add("sam", "Sam", "sam@x.dev", "member");
-    new TokenStore(nodeDb).create("mast-yan", "member", yan.id(), null);
-    new WebauthnCredentialStore(nodeDb)
-        .save(
-            new RegisteredCredential(new byte[] {7}, new byte[] {1}, -7, 0, null, false, false),
-            yan.id(),
-            "laptop");
-    new TokenStore(nodeDb).create("mast-nia", "member", own.id(), null);
-    node.disableUnlisted(List.of("nia", "sam"), null);
-    var round = roundAs(tokenOf("nia"));
+    Acting.system(() -> fdes.revoke("sam", "alpha"));
+
+    syncAs("nia");
+    var withdrawn = node.byHandle("sam").orElseThrow();
+    Acting.system(() -> fdes.grant("sam", "alpha"));
+    syncAs("nia");
+    var back = node.byHandle("sam").orElseThrow();
+    Acting.system(() -> fdes.remove(fdes.byHandle("sam").orElseThrow().id()));
+    syncAs("nia");
+
+    assertEquals("disabled", withdrawn.status());
+    assertEquals(null, withdrawn.email());
+    assertEquals(null, withdrawn.displayName());
+    assertEquals(sam, withdrawn.id());
+    assertTrue(back.active());
+    assertEquals(sam, back.id());
+    assertEquals("sam", back.displayName());
+    assertTrue(node.byHandle("sam").isEmpty());
+    assertEquals(List.of(), node.logins().list(sam));
+  }
+
+  /** m2: a roster that does not name this box's own person removes and withdraws no one. */
+  @Test
+  void aRosterWithoutTheBoxsOwnPersonRemovesNoOne() throws Exception {
+    syncAs("uma");
+    var yan = TestLogins.store(nodeDb, "yan");
+    var node = new FdeStore(nodeDb);
+
+    SyncOperations.applyFdes(node, List.of(), "uma");
+
+    assertEquals(yan, nodeId("yan"));
+    assertTrue(node.byHandle("yan").orElseThrow().active());
+    assertEquals(2, node.logins().list(yan).size());
+  }
+
+  /**
+   * M1: at this box's first round, a person made here under a handle main gives someone else
+   * (another email) is refused before anything changes, naming both emails and the ways out, each a
+   * command that parses as pasted.
+   */
+  @Test
+  void aFirstRoundRefusesAHandleMainGivesSomeoneElseAndChangesNothing() throws Exception {
+    var node = new FdeStore(nodeDb);
+    var kim = node.add("kim", "Kim Local", "kim@home.example", "member").id();
+    TestLogins.store(nodeDb, "kim");
+    fdes.add("kim", "Kim", "kim@x.dev", "member");
+    var round = roundAs(tokenOf("uma"));
+
+    var refused =
+        assertThrows(
+            Remedied.State.class, () -> SyncOperations.applyFdes(node, round.roster(), "uma"));
+
+    assertEquals(
+        "This box's first round changes no one: a handle it holds is someone else's on main.",
+        refused.reason());
+    assertEquals(
+        "kim on this box (kim@home.example) is not main's kim (kim@x.dev): main gave the handle to"
+            + " someone else. If they are different people, remove kim here: 'sail fde rm kim"
+            + " --force'. If they are the same person, correct the email that is wrong: here 'sail"
+            + " fde update kim --email kim@x.dev', or on main 'sail fde update kim --email"
+            + " kim@home.example'.",
+        refused.remedy().plain().strip());
+    for (var command : refused.remedy().commands()) {
+      assertTrue(
+          new CommandLine(new ai.singlr.sail.Sail())
+              .parseArgs(command.line().split(" "))
+              .hasSubcommand(),
+          command.line());
+    }
+    assertEquals(kim, nodeId("kim"));
+    assertEquals("kim@home.example", node.byHandle("kim").orElseThrow().email());
+    assertTrue(node.undescribed("kim"));
+    assertEquals(2, node.logins().list(kim).size());
+    assertTrue(node.byHandle("ada").isEmpty(), "nothing of main's roster was written");
+  }
+
+  /**
+   * M1, after the first round: main adds someone under a handle a person made here holds (another
+   * email). Main's person takes the handle: the local row and what it stored go, said once naming
+   * both. The same email, in any case, is the same person, who keeps everything.
+   */
+  @Test
+  void laterMainsPersonTakesAHandleMadeHereButTheSameEmailIsTheSamePerson() throws Exception {
+    syncAs("uma");
+    var node = new FdeStore(nodeDb);
+    var kim = node.add("kim", "Kim Local", "kim@home.example", "member").id();
+    var lee = node.add("lee", "Lee", "Lee@X.dev", "member").id();
+    TestLogins.store(nodeDb, "kim");
+    TestLogins.store(nodeDb, "lee");
+    fdes.add("kim", "Kim", "kim@x.dev", "member");
+    fdes.add("lee", "Lee", "lee@x.dev", "member");
     var err = new ByteArrayOutputStream();
     var originalErr = System.err;
     System.setErr(new PrintStream(err, true, StandardCharsets.UTF_8));
     try {
-      assertEquals(List.of(), SyncOperations.applyFdes(node, round.roster(), round.scope(), "nia"));
+      syncAs("uma");
     } finally {
       System.setErr(originalErr);
     }
 
+    assertNotEquals(kim, nodeId("kim"));
+    assertEquals("kim@x.dev", node.byHandle("kim").orElseThrow().email());
+    assertEquals(List.of(), node.logins().list(kim));
+    assertEquals(lee, nodeId("lee"));
+    assertEquals(2, node.logins().list(lee).size());
     assertEquals(
-        "  roster: removed 2 FDE(s) main no longer lists to this box\n",
+        "  roster: kim on this box (kim@home.example) is not main's kim (kim@x.dev): main gave the"
+            + " handle to someone else. Main's kim takes it.\n",
         err.toString(StandardCharsets.UTF_8));
-    assertEquals(
-        round.roster().stream().map(fde -> fde.get("handle")).toList(),
-        node.list().stream().map(FdeStore.Fde::handle).toList(),
-        "the node's roster, which its GET /v1/fdes lists whole, is main's list to it");
-    assertEquals(own.id(), node.byHandle("nia").orElseThrow().id());
-    assertEquals(
-        List.of("mast-nia"),
-        nodeDb.query("SELECT name FROM api_tokens", row -> row.text(0)),
-        "a removed FDE's token goes with it, and the box's own stays");
-    assertEquals(0L, count("SELECT count(*) FROM webauthn_credentials"));
-
-    var withoutItsOwn =
-        round.roster().stream().filter(fde -> !"nia".equals(fde.get("handle"))).toList();
-    SyncOperations.applyFdes(node, withoutItsOwn, round.scope(), "nia");
-    assertEquals(own.id(), node.byHandle("nia").orElseThrow().id(), "its own FDE is never removed");
-    assertEquals(
-        List.of("ada", "nia", "sam", "uma"),
-        node.list().stream().map(FdeStore.Fde::handle).toList());
   }
 
   @Test
@@ -178,7 +254,7 @@ class ScopedSyncServerTest {
     node.add("gone", "Gone", "gone@x.dev", "member");
     var round = roundAs(tokenOf("uma"));
 
-    SyncOperations.applyFdes(node, round.roster(), round.scope(), "uma");
+    SyncOperations.applyFdes(node, round.roster(), "uma");
 
     var gone = node.byHandle("gone").orElseThrow();
     assertEquals("disabled", gone.status());
@@ -191,9 +267,7 @@ class ScopedSyncServerTest {
 
     assertEquals(ProjectScope.of(List.of()), round.scope());
     assertEquals(0L, count("SELECT count(*) FROM change_log"));
-    assertEquals(
-        List.of(entry("bob", "bob", "bob@x.dev", "member")),
-        round.roster().stream().map(ScopedSyncServerTest::withoutCreatedAt).toList());
+    assertEquals(List.of(entry("bob", "bob", "bob@x.dev", "member")), listed(round));
   }
 
   @Test
@@ -213,7 +287,7 @@ class ScopedSyncServerTest {
   private FdeStore syncAs(String own) throws Exception {
     var round = roundAs(tokenOf(own));
     var node = new FdeStore(nodeDb);
-    assertEquals(List.of(), SyncOperations.applyFdes(node, round.roster(), round.scope(), own));
+    assertEquals(List.of(), SyncOperations.applyFdes(node, round.roster(), own));
     return node;
   }
 
@@ -248,17 +322,18 @@ class ScopedSyncServerTest {
   }
 
   /**
-   * Scenario 2 (N2): a box with people of its own joins a main that has the same handles. Each row
-   * takes main's id and keeps everything; a row main never described is only disabled, its logins
-   * kept. A row that took main's id goes, with its logins, once main removes that person.
+   * Scenario 2 (N2): a box with people of its own joins a main that has the same handles and the
+   * same emails, in any case. Each row takes main's id and keeps everything; a row main never
+   * described is only disabled, its logins kept. A row that took main's id goes, with its logins,
+   * once main removes that person.
    */
   @Test
   void aBoxWithItsOwnPeopleJoiningAMainDeletesNobodysLogins() throws Exception {
     var node = new FdeStore(nodeDb);
     node.add("uma", "Uma", "uma@old.dev", "member");
-    node.add("ada", "Ada", "ada@old.dev", "member");
+    node.add("ada", "Ada", "ADA@x.dev", "member");
     node.add("zed", "Zed", "zed@old.dev", "member");
-    node.add("sam", "Sam", "sam@old.dev", "member");
+    node.add("sam", "Sam", "sam@x.dev", "member");
     var ada = TestLogins.store(nodeDb, "ada");
     var zed = TestLogins.store(nodeDb, "zed");
     var sam = TestLogins.store(nodeDb, "sam");
@@ -296,7 +371,7 @@ class ScopedSyncServerTest {
             .toList();
 
     var node = new FdeStore(nodeDb);
-    SyncOperations.applyFdes(node, withoutIds, round.scope(), "uma");
+    SyncOperations.applyFdes(node, withoutIds, "uma");
 
     assertEquals(yan, nodeId("yan"));
     assertEquals(2, node.logins().list(yan).size());
@@ -354,7 +429,7 @@ class ScopedSyncServerTest {
         round.roster().stream().filter(fde -> !"uma".equals(fde.get("handle"))).toList();
 
     var node = new FdeStore(nodeDb);
-    SyncOperations.applyFdes(node, withoutItsOwn, round.scope(), "uma");
+    SyncOperations.applyFdes(node, withoutItsOwn, "uma");
 
     assertEquals(uma, nodeId("uma"));
     assertTrue(node.byHandle("uma").orElseThrow().active());
@@ -407,6 +482,13 @@ class ScopedSyncServerTest {
   private static Map<String, Object> entry(String handle, String name, String email, String role) {
     return Map.of(
         "handle", handle, "display_name", name, "email", email, "role", role, "status", "active");
+  }
+
+  private static List<Map<String, Object>> listed(Round round) {
+    return round.roster().stream()
+        .filter(fde -> fde.containsKey("handle"))
+        .map(ScopedSyncServerTest::withoutCreatedAt)
+        .toList();
   }
 
   private static Map<String, Object> withoutCreatedAt(Map<String, Object> fde) {

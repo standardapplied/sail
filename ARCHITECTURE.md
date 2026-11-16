@@ -1558,12 +1558,18 @@ Each row with the tests that prove it:
   keys as they are at its next start. A person removed (`fde rm`, or a scoped node's roster round)
   has every workspace they owned lose its token store, gh login and keys, and its owner, through
   its files, running or stopped, and their stored logins and git tokens on the box erased. A node
-  knows each person by main's id (`fdes.main_id`, sent in every roster entry): each round holds
-  main's whole roster for the node, so a person main described by id and lists no more, removed
-  or their handle given to someone new under a new id, is removed there with every credential of
-  theirs (`FdeStore.removeUndescribed`), which is the only way a node erases a person's stored
-  logins; a row made on the box before main described it takes main's id on first sight, and one
-  main never describes is only disabled. Main mints an id when a person is added and never
+  knows each person by main's id (`fdes.main_id`): each roster round lists the people main shows
+  the node and, by id alone, everyone else main still holds. A person main described whose id main
+  no longer holds at all, removed or their handle given to someone new under a new id, is removed
+  there with every credential of theirs (`FdeStore.removeUndescribed`); one main still holds but no
+  longer shows the node, who left its projects, is withdrawn (`FdeStore.withdraw`): disabled, their
+  name and email forgotten, what they stored kept, and enabled again when listed again. Nothing
+  is removed or withdrawn by a round that does not name the box's own person. A row made on the
+  box before main described it takes main's id on first sight only when it is the box's own person
+  or has the same email; under another email it is someone else: the box's first round is refused,
+  naming both emails and the commands that fix it (a node may correct or remove a person main never
+  described), and a later round lets main's person take the handle, removing the local row, said
+  once. A person main never describes is only disabled. Main mints an id when a person is added and never
   changes it, so a main rebuilt by adding its people again gives each a new id, and every node
   takes them as new people who store their logins again; only a main whose database file is
   restored keeps them. The box's own person is never removed or disabled by a round and takes a

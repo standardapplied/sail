@@ -704,7 +704,13 @@ class FdeCommandTest {
         db -> {
           new FdeStore(db)
               .replicate(
-                  handle, null, null, null, role, "active", Instant.parse("2026-10-01T00:00:00Z"));
+                  handle,
+                  "main-" + handle,
+                  null,
+                  null,
+                  role,
+                  "active",
+                  Instant.parse("2026-10-01T00:00:00Z"));
           return new FdeStore(db).byHandle(handle).orElseThrow();
         });
   }
@@ -715,7 +721,7 @@ class FdeCommandTest {
           new FdeStore(db)
               .replicate(
                   handle,
-                  null,
+                  "main-" + handle,
                   "Client",
                   email,
                   "member",
@@ -1873,6 +1879,24 @@ class FdeCommandTest {
     assertEquals("Unknown FDE 'bob'.", refusal);
   }
 
+  /**
+   * M1's ways out, as pasted on a node: a person made here that main never described is this box's
+   * own to correct or remove; one main described is not.
+   */
+  @Test
+  void aNodeCorrectsOrRemovesAPersonMadeHereThatMainNeverDescribed() {
+    main = "sail@main";
+    replicatedAs("ada", "admin");
+    inDb(
+        db ->
+            Acting.system(() -> new FdeStore(db).add("kim", "Kim", "kim@home.example", "member")));
+
+    assertEquals(0, fde("update", "kim", "--email", "kim@x.dev"), () -> refusal);
+    assertEquals("kim@x.dev", inDb(db -> new FdeStore(db).byHandle("kim").orElseThrow().email()));
+    assertEquals(0, fde("rm", "kim", "--force"), () -> refusal);
+    assertEquals(Optional.empty(), inDb(db -> new FdeStore(db).byHandle("kim")));
+  }
+
   @Test
   void aNodeRefusesToRemoveWithTheRosterSentence() {
     main = "sail@main";
@@ -2564,7 +2588,8 @@ class FdeCommandTest {
   void aDisabledFdeIsNotPaired() {
     inDb(
         db -> {
-          new FdeStore(db).replicate("ada", null, null, "ada@x.com", "member", "disabled", null);
+          new FdeStore(db)
+              .replicate("ada", "main-ada", null, "ada@x.com", "member", "disabled", null);
           return null;
         });
 
