@@ -300,7 +300,10 @@ class NativeFleetIT {
                       + ", now "
                       + main.query("SELECT id FROM catalog").strip()
                       + "). Restore main's database (/var/lib/sail/sail.db) from a copy, then"
-                      + " sync again."),
+                      + " sync again; or, to follow a different main on purpose, run '"),
+          refused::output);
+      assertTrue(
+          refused.output().contains("sail init --main sail@localhost --another-main', then sync"),
           refused::output);
       assertFalse(refused.output().contains("Already in sync"), refused::output);
       assertEquals(mainBefore, main.replicated());

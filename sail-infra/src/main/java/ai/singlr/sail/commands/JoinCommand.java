@@ -84,8 +84,15 @@ public final class JoinCommand implements Runnable {
   private boolean json;
 
   @Option(
+      names = "--another-main",
+      description =
+          "Follow a different main from now on, forgetting the one this box follows (without it,"
+              + " TARGET is this box's main at a new address).")
+  private boolean anotherMain;
+
+  @Option(
       names = "--yes",
-      description = "Follow another main without asking, on a box that already follows one.")
+      description = "With --another-main, follow the different main without asking.")
   private boolean yes;
 
   @Override
@@ -97,11 +104,15 @@ public final class JoinCommand implements Runnable {
     var operator = OperatorCommand.here();
     requireWritable(SailPaths.hostConfigPath());
     var normalized = normalizeTarget(target);
-    var repointing = repointing(SailPaths.hostConfigPath(), SailPaths.controlPlaneDb(), normalized);
-    if (repointing.isPresent()) {
-      confirmRepoint(
-          repointing.get(), yes, json, ConsoleHelper.hasConsole(), ConsoleHelper::confirmNo);
-    }
+    consent(
+        anotherMain,
+        SailPaths.hostConfigPath(),
+        SailPaths.controlPlaneDb(),
+        normalized,
+        yes,
+        json,
+        ConsoleHelper.hasConsole(),
+        ConsoleHelper::confirmNo);
     nonSailUserWarning(target)
         .ifPresent(warning -> System.err.println(Banner.errorLine(warning, Ansi.AUTO)));
     var resolvedHandle = resolveHandle();
@@ -119,21 +130,22 @@ public final class JoinCommand implements Runnable {
             resolvedEmail,
             SshSyncChannel::open,
             MainHostKey.here(),
-            operator);
+            operator,
+            anotherMain);
     System.out.println(render(plan, json, operator));
   }
 
   /**
-   * What following {@code target} instead does to a box, configured at {@code hostConfig} with its
-   * database at {@code db}, that already follows another main: said before anything changes. Empty
-   * for a box that follows no main, or follows {@code target} already.
+   * What following a different main at {@code target} does to a box, configured at {@code
+   * hostConfig} with its database at {@code db}, that follows a main now: said before anything
+   * changes, and only for {@code --another-main}. Empty for a box that follows no main.
    */
   static Optional<String> repointing(Path hostConfig, Path db, String target) throws Exception {
     if (!Files.exists(hostConfig)) {
       return Optional.empty();
     }
     var sync = HostYaml.fromMap(YamlUtil.parseFile(hostConfig)).sync();
-    if (!sync.isNode() || Strings.isBlank(sync.main()) || sync.main().equals(target)) {
+    if (!sync.isNode() || Strings.isBlank(sync.main())) {
       return Optional.empty();
     }
     var own = Objects.toString(sync.handle(), "");
@@ -155,26 +167,42 @@ public final class JoinCommand implements Runnable {
       }
     }
     return Optional.of(
-        "This box will stop following "
+        "This box will stop following the main it follows at "
             + sync.main()
-            + " and follow "
+            + " and follow a different main at "
             + target
-            + ". At its first sync with "
-            + target
-            + ", everyone "
-            + sync.main()
-            + " described here ("
+            + ". At its first sync with it, everyone the old main described here ("
             + described
             + (described == 1 ? " person" : " people")
             + "), all but this box's own person ("
             + own
             + "), is removed here with the logins they stored; edits made here and not yet pushed ("
             + unpushed
-            + ") are offered to "
-            + target
-            + "; the rows synced from "
-            + sync.main()
-            + " stay on this box.");
+            + ") are offered to the new main; the rows synced from the old main stay on this box.");
+  }
+
+  /**
+   * Whether this join may go on: a box given a new address for the main it follows ({@code
+   * anotherMain} false) is asked nothing; one told to follow another main says what that does and
+   * goes on only on the operator's yes ({@link #confirmRepoint}).
+   */
+  static void consent(
+      boolean anotherMain,
+      Path hostConfig,
+      Path db,
+      String target,
+      boolean yes,
+      boolean json,
+      boolean console,
+      Predicate<String> ask)
+      throws Exception {
+    if (!anotherMain) {
+      return;
+    }
+    var said = repointing(hostConfig, db, target);
+    if (said.isPresent()) {
+      confirmRepoint(said.get(), yes, json, console, ask);
+    }
   }
 
   /**
@@ -220,6 +248,38 @@ public final class JoinCommand implements Runnable {
       MainHostKey mainHostKey,
       OperatorCommand operator)
       throws Exception {
+    return plan(
+        hostConfig,
+        db,
+        identity,
+        target,
+        handle,
+        name,
+        email,
+        channels,
+        mainHostKey,
+        operator,
+        false);
+  }
+
+  /**
+   * As above; {@code anotherMain} makes {@code target} a different main this box follows from now
+   * on, forgetting the one it followed ({@link HandleChange#write}). Without it a box that follows
+   * a main takes {@code target} as that main at a new address.
+   */
+  static Plan plan(
+      Path hostConfig,
+      Path db,
+      SyncIdentity identity,
+      String target,
+      String handle,
+      String name,
+      String email,
+      SyncOperations.Channels channels,
+      MainHostKey mainHostKey,
+      OperatorCommand operator,
+      boolean anotherMain)
+      throws Exception {
     if (!Files.exists(hostConfig)) {
       throw HostInitCommand.notInitialized(operator);
     }
@@ -231,7 +291,7 @@ public final class JoinCommand implements Runnable {
     var updated =
         HostConfigSetCommand.applyChange(
             HostSyncCommand.configure(host, false, target), "sync-handle", handle);
-    HandleChange.write(hostConfig, db, host, updated, channels, operator);
+    HandleChange.write(hostConfig, db, host, updated, channels, operator, anotherMain);
     var publicKey = identity.ensure("sail-sync:" + handle);
     var mainHasKey = keyBefore && SyncOperations.welcomedAs(updated.sync(), channels, handle);
     var authorize =

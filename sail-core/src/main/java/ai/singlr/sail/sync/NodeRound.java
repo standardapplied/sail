@@ -73,9 +73,13 @@ public final class NodeRound {
             + synced.get()
             + ", now "
             + offered.orElse("none")
-            + "). Restore main's database ("
-            + MAIN_DATABASE
-            + ") from a copy, then sync again.",
+            + ").",
+        Remedy.of(
+            "Restore main's database ("
+                + MAIN_DATABASE
+                + ") from a copy, then sync again; or, to follow a different main on purpose, run '",
+            Remedy.sail("init --main", target, "--another-main"),
+            "', then sync again."),
         null);
   }
 

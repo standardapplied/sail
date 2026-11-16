@@ -310,10 +310,11 @@ class JoinCommandTest {
   }
 
   /**
-   * The closing look's n6: 'sail init --main <other>' on a box that follows a main says what
-   * following the other does before anything changes, with the counts, and goes on only when told
-   * yes; where nobody can answer it is refused with that text. Pointed at the main it follows, or
-   * on a box that follows none, it says and asks nothing.
+   * The closing look's n6, as 0.69.1 has it: 'sail init --main <address> --another-main' on a box
+   * that follows a main says what following a different main does before anything changes, with the
+   * counts, and goes on only when told yes; where nobody can answer it is refused with that text.
+   * Without the flag the address is the same main's, and nothing is said or asked; on a box that
+   * follows none, nothing either.
    */
   @Test
   void aBoxThatFollowsAnotherMainIsToldWhatFollowingThisOneDoesAndAskedFirst() throws Exception {
@@ -335,17 +336,12 @@ class JoinCommandTest {
     var said = JoinCommand.repointing(hostConfig, database, "sail@main2").orElseThrow();
 
     assertEquals(
-        "This box will stop following sail@main and follow sail@main2. At its first sync with"
-            + " sail@main2, everyone sail@main described here (2 people), all but this box's own"
-            + " person (rnode), is removed here with the logins they stored; edits made here and"
-            + " not yet pushed (1) are offered to sail@main2; the rows synced from sail@main stay"
-            + " on this box.",
+        "This box will stop following the main it follows at sail@main and follow a different"
+            + " main at sail@main2. At its first sync with it, everyone the old main described here"
+            + " (2 people), all but this box's own person (rnode), is removed here with the logins"
+            + " they stored; edits made here and not yet pushed (1) are offered to the new main;"
+            + " the rows synced from the old main stay on this box.",
         said);
-    assertEquals(Optional.empty(), JoinCommand.repointing(hostConfig, database, "sail@main"));
-    assertEquals(
-        Optional.empty(),
-        JoinCommand.repointing(writeHostConfig(), database, "sail@main2"),
-        "a box that follows no main is asked nothing");
     var asked = new ArrayList<String>();
     Predicate<String> never =
         prompt -> {
@@ -359,6 +355,15 @@ class JoinCommandTest {
       assertEquals(said + " Re-run with --yes to go on.", refused.getMessage());
     }
     JoinCommand.confirmRepoint(said, true, true, false, never);
+    JoinCommand.consent(false, hostConfig, database, "sail@10.0.0.9", false, true, false, never);
+    var withoutYes =
+        assertThrows(
+            CliCommand.Refused.class,
+            () ->
+                JoinCommand.consent(
+                    true, hostConfig, database, "sail@main2", false, true, false, never));
+    assertEquals(said + " Re-run with --yes to go on.", withoutYes.getMessage());
+    JoinCommand.consent(true, hostConfig, database, "sail@main2", true, true, false, never);
     JoinCommand.confirmRepoint(said, false, false, true, prompt -> asked.add(prompt));
     var declined =
         assertThrows(
@@ -366,6 +371,10 @@ class JoinCommandTest {
             () -> JoinCommand.confirmRepoint(said, false, false, true, prompt -> false));
     assertEquals(List.of(said + " Go on?"), asked);
     assertEquals("Aborted: this box still follows its main.", declined.getMessage());
+    assertEquals(
+        Optional.empty(),
+        JoinCommand.repointing(writeHostConfig(), database, "sail@main2"),
+        "a box that follows no main is asked nothing");
   }
 
   @Test

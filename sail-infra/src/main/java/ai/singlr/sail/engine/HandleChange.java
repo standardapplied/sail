@@ -93,13 +93,31 @@ public final class HandleChange {
       SyncOperations.Channels channels,
       OperatorCommand operator)
       throws Exception {
+    return write(hostYamlPath, dbPath, current, updated, channels, operator, false);
+  }
+
+  /**
+   * As {@link #write}; {@code anotherMain} says, as only {@code sail init --main <address>
+   * --another-main} says it, that the box follows a different main from now on, so the old main's
+   * catalog is forgotten. Without it a node given a new address follows the same main there.
+   */
+  public static List<String> write(
+      Path hostYamlPath,
+      Path dbPath,
+      HostYaml current,
+      HostYaml updated,
+      SyncOperations.Channels channels,
+      OperatorCommand operator,
+      boolean anotherMain)
+      throws Exception {
     return apply(
         dbPath,
         current.sync(),
         updated.sync(),
         channels,
         operator,
-        new HostYamlWrite(hostYamlPath, current.sync(), updated));
+        new HostYamlWrite(hostYamlPath, current.sync(), updated),
+        anotherMain);
   }
 
   /**
@@ -114,14 +132,14 @@ public final class HandleChange {
    * offer a run main would then hold under the old handle, and two overlapping writes cannot leave
    * the credential naming a handle other than the one written last: the write that waits is refused
    * when the identity it read is no longer the box's ({@link Write#requireCurrent}), so it cannot
-   * put the old one back. A node pointed at another main forgets the old main's catalog, so the new
-   * one, a database it never synced with, is taken as its main rather than refused as a rebuilt one
-   * (pointed at the same main again, it keeps it). A box that stops being a node forgets the scope
-   * main last named it ({@link SyncScope}): as main or standalone it holds every project, and a
-   * change that died before forgetting it is repaired at the next {@code sail migrate} or start
-   * ({@link BoxDatabase}). A box with no database yet has no sail-api to read a credential: its
-   * first start issues it ({@code sail server start}). Returns the runs stamped for the new
-   * identity.
+   * put the old one back. A node given a new address for its main keeps the main's catalog: an
+   * address is not an identity, so the next round admits only the database it synced with. Only a
+   * node told it follows another main ({@code --another-main}) forgets it. A box that stops being a
+   * node forgets the scope main last named it ({@link SyncScope}): as main or standalone it holds
+   * every project, and a change that died before forgetting it is repaired at the next {@code sail
+   * migrate} or start ({@link BoxDatabase}). A box with no database yet has no sail-api to read a
+   * credential: its first start issues it ({@code sail server start}). Returns the runs stamped for
+   * the new identity.
    */
   public static List<String> apply(
       Path dbPath,
@@ -131,6 +149,19 @@ public final class HandleChange {
       OperatorCommand operator,
       Write write)
       throws Exception {
+    return apply(dbPath, before, after, channels, operator, write, false);
+  }
+
+  /** As above; {@code anotherMain} as {@link #write} takes it. */
+  public static List<String> apply(
+      Path dbPath,
+      SyncConfig before,
+      SyncConfig after,
+      SyncOperations.Channels channels,
+      OperatorCommand operator,
+      Write write,
+      boolean anotherMain)
+      throws Exception {
     if (!Files.exists(dbPath)) {
       write.run();
       return List.of();
@@ -138,7 +169,7 @@ public final class HandleChange {
     try (var db = Sqlite.open(dbPath);
         var rounds = FileMutex.holdRounds(db.path())) {
       write.requireCurrent();
-      var stamped = change(db, before, after, channels, operator, write);
+      var stamped = change(db, before, after, channels, operator, write, anotherMain);
       issueBoxCredential(db, dbPath.getParent(), after.handle());
       return stamped;
     }
@@ -158,13 +189,13 @@ public final class HandleChange {
       SyncConfig after,
       SyncOperations.Channels channels,
       OperatorCommand operator,
-      Write write)
+      Write write,
+      boolean anotherMain)
       throws Exception {
     var renamed = !Objects.equals(before.handle(), after.handle());
     var promoted = after.isMain() && !before.isMain();
     var leftNode = before.isNode() && !after.isNode();
-    var repointed =
-        before.isNode() && after.isNode() && !Objects.equals(before.main(), after.main());
+    var repointed = anotherMain && before.isNode() && after.isNode();
     if (!(renamed || promoted || leftNode)) {
       write.run();
       if (repointed) {
