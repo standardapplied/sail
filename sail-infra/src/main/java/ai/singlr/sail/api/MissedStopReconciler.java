@@ -12,6 +12,7 @@ import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.AgentPresence;
 import ai.singlr.sail.engine.AgentSession;
 import ai.singlr.sail.engine.AgentUnit;
+import ai.singlr.sail.engine.BoxInstances;
 import ai.singlr.sail.engine.ContainerFilePush;
 import ai.singlr.sail.engine.ContainerState;
 import ai.singlr.sail.engine.GuardrailTrigger;
@@ -37,6 +38,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.TreeMap;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.BiPredicate;
 import java.util.function.Supplier;
@@ -132,8 +134,9 @@ public final class MissedStopReconciler implements AutoCloseable {
 
     /**
      * Removes from {@code instance} the launch file of every run not in {@code live} ({@link
-     * AgentSession#removeLaunchFiles}), throwing when the instance did not run it; nothing, by
-     * default.
+     * AgentSession#removeLaunchFiles}), throwing when the instance did not run it, {@link
+     * NotRunning} when that was because it is stopped; an instance that is gone holds nothing to
+     * tidy. Nothing, by default.
      */
     default void removeLaunchFiles(String instance, List<String> live) throws Exception {}
 
@@ -145,6 +148,13 @@ public final class MissedStopReconciler implements AutoCloseable {
     /** None, by default ({@link Workspaces#disown}). */
     default List<String> disown(BiPredicate<String, String> held) throws Exception {
       return List.of();
+    }
+  }
+
+  /** A tidy an instance did not run because it is not running: asked again once it runs. */
+  public static final class NotRunning extends IOException {
+    NotRunning(String instance) {
+      super("Container '" + instance + "' is not running.");
     }
   }
 
@@ -173,6 +183,7 @@ public final class MissedStopReconciler implements AutoCloseable {
   private volatile Instant tidiedSince = Instant.EPOCH;
   private volatile Set<String> unansweredFirst = Set.of();
   private final Set<String> untidied = ConcurrentHashMap.newKeySet();
+  private final Map<String, List<String>> stopped = new ConcurrentHashMap<>();
   private final Set<String> undisowned = ConcurrentHashMap.newKeySet();
   private volatile Map<String, String> lastRoster;
   private volatile boolean unlisted;
@@ -266,9 +277,17 @@ public final class MissedStopReconciler implements AutoCloseable {
 
       @Override
       public void removeLaunchFiles(String instance, List<String> live) throws Exception {
-        if (!agentSession.removeLaunchFiles(instance, live)) {
-          throw new IOException("Container '" + instance + "' did not tidy its launch files.");
+        if (agentSession.removeLaunchFiles(instance, live)) {
+          return;
         }
+        var found = new BoxInstances(shell).lookup(instance, Duration.ofSeconds(3));
+        if (found.isEmpty()) {
+          return;
+        }
+        if (!(found.get().state() instanceof ContainerState.Running)) {
+          throw new NotRunning(instance);
+        }
+        throw new IOException("Container '" + instance + "' did not tidy its launch files.");
       }
 
       @Override
@@ -351,17 +370,24 @@ public final class MissedStopReconciler implements AutoCloseable {
    * and what a push killed midway left in the host's staging directory. Only a container that had a
    * run start or finish since {@link #TIDY_LOOKBACK} before the last pass is asked (every one, on
    * the first pass after a start): a launch that dies leaves its file with a run that finishes, by
-   * its launch's cleanup or by this sweep. A container that does not answer, or does not run the
-   * tidy (a stopped one), is tried again on a later pass, and said once: not again until its tidy
-   * has succeeded.
+   * its launch's cleanup or by this sweep. One that is gone, a spec's deleted workspace say, has
+   * nothing to tidy. One that is stopped, as the idle sweep leaves many, is remembered by name and
+   * asked on each pass until it runs, and holds the window for no other. A container that does not
+   * answer, or does not run the tidy, is tried again on a later pass, and said once: not again
+   * until its tidy has succeeded.
    */
   void removeLeftovers() {
     var pass = clock.get();
     var tidied = true;
-    for (var place : sessionStore.liveRunsByPlace(localHandle.get(), tidiedSince).entrySet()) {
+    var places = new TreeMap<>(stopped);
+    places.putAll(sessionStore.liveRunsByPlace(localHandle.get(), tidiedSince));
+    for (var place : places.entrySet()) {
       try {
         unitProbe.removeLaunchFiles(place.getKey(), place.getValue());
         untidied.remove(place.getKey());
+        stopped.remove(place.getKey());
+      } catch (NotRunning notRunning) {
+        stopped.put(place.getKey(), place.getValue());
       } catch (Exception e) {
         tidied = false;
         if (untidied.add(place.getKey())) {

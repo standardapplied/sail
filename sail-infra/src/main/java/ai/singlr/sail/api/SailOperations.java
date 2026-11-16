@@ -37,6 +37,7 @@ import ai.singlr.sail.engine.ContainerState;
 import ai.singlr.sail.engine.HostInfo;
 import ai.singlr.sail.engine.NameValidator;
 import ai.singlr.sail.engine.RunPlace;
+import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.SharedProjectFiles;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.ShellExecutor;
@@ -744,6 +745,27 @@ public final class SailOperations implements HostOperations {
                 StopOperations.sessionHalter(shell),
                 hooks.stopListener())
             : null;
+  }
+
+  /**
+   * The sweep of this box's spec workspaces ({@link SpecWorkspaces}) over its control plane, for
+   * the box whose handle {@code localHandle} answers, telling a spec's room as every lane does.
+   */
+  public SpecWorkspaces specWorkspaces(Supplier<String> localHandle) {
+    requireHost(controlPlane);
+    return new SpecWorkspaces(
+        Workspaces.onThisBox(shell),
+        shell,
+        SailPaths.locksDir(),
+        specStore,
+        runStore,
+        new ChangeLog(controlPlane),
+        ProjectReader.ofCatalog(projectStore),
+        dispatchOps.room(),
+        dispatchOps.runReports(),
+        identity()::workspaceOwner,
+        localHandle,
+        DateTimeUtils::now);
   }
 
   /** The live members of this box's rooms — see {@link DispatchOperations#liveMembers}. */

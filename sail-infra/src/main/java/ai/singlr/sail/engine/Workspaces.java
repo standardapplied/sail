@@ -339,6 +339,26 @@ public final class Workspaces {
       return new Busy("This runner is making another workspace, which takes about a minute.");
     }
 
+    static Busy changing(RunPlace.SpecWorkspace place) {
+      return new Busy(
+          "Workspace "
+              + place.workspace()
+              + " of "
+              + place.project()
+              + " is being stopped or deleted on this runner, and nothing enters it until that is"
+              + " done.");
+    }
+
+    static Busy unread(String instance) {
+      return new Busy(
+          "Incus lists instance "
+              + instance
+              + " without its keys, as it does while another change holds it, so whose it is"
+              + " cannot be told yet. If it stays so, sudo incus info "
+              + instance
+              + " says why.");
+    }
+
     static Busy building(String project) {
       return new Busy(
           project + "'s template is being built, and no workspace is cloned from it until it is.");
@@ -478,7 +498,10 @@ public final class Workspaces {
             .current(place.project(), zfs, nanos)
             .orElseThrow(() -> noTemplate(place.project()));
     var degraded = WorkspaceTemplate.usable(observer, template.pool());
-    var found = requireTheSpecs(place, held, box.all());
+    Optional<BoxInstances.Instance> found;
+    try (var entry = entryLock(place)) {
+      found = requireTheSpecs(place, held, box.all());
+    }
     var space = new IncusStorage(observer).find(template.pool()).flatMap(IncusStorage.Pool::space);
     return new SpecCheck(
         place, template, found, !inputs.equals(template.inputs()), space, degraded);
@@ -486,12 +509,14 @@ public final class Workspaces {
 
   /**
    * Puts a spec's run into the workspace {@code check} found, or makes it, for {@code owner}, the
-   * person the run acts for: a whole one is started when stopped and kept as it is, tree and all;
-   * otherwise a clone of the checked template carrying the spec and the owner is made, with every
-   * repo left detached at its fetched base, under the box's create lock. Either way the workspace
-   * is {@code handle}'s, and holds their credentials alone, before anything of the run is staged
-   * (R12, T2, T3). A create that cannot have the create lock within {@link #CREATE_WAIT} is {@link
-   * Busy}.
+   * person the run acts for: a whole one is started when stopped and kept as it is, tree and all,
+   * losing only a kept mark ({@value BoxInstances#KEPT_KEY}), so a spec done again is decided
+   * again; otherwise a clone of the checked template carrying the spec and the owner is made, with
+   * every repo left detached at its fetched base, under the box's create lock. Either way the
+   * workspace is {@code handle}'s, and holds their credentials alone, before anything of the run is
+   * staged (R12, T2, T3), and {@code room}, given the other whole spec workspaces, is asked before
+   * a clone or a start. A create that cannot have the create lock within {@link #CREATE_WAIT} is
+   * {@link Busy}.
    */
   public Entered enterSpec(
       SpecCheck check,
@@ -502,9 +527,14 @@ public final class Workspaces {
       Consumer<Set<String>> room)
       throws Exception {
     var place = check.place();
-    try (var held = nameLock(place.instance())) {
+    try (var held = entryLock(place)) {
       var found = requireTheSpecs(place, name -> false, box.all());
       if (found.map(i -> ((BoxInstances.Workspace) i.kind()).ready()).orElse(false)) {
+        if (!(found.get().state() instanceof ContainerState.Running)) {
+          var others = wholeSpecs();
+          others.remove(place.project() + "/" + place.specId());
+          room.accept(others);
+        }
         return reuse(found.get(), config, new Owning(handle, owners));
       }
       return new Made(
@@ -539,6 +569,54 @@ public final class Workspaces {
     return specs;
   }
 
+  /**
+   * An attach's door: spec {@code place}'s whole workspace, started when stopped and given its
+   * recorded owner's credentials ({@code owners}) as any start is, under the entry's lock; nothing
+   * made, checked or cleared, and none refused naming the dispatch that makes one.
+   */
+  public void startExisting(
+      RunPlace.SpecWorkspace place,
+      ProjectDefinition config,
+      Function<String, WorkspaceOwner> owners)
+      throws Exception {
+    try (var held = entryLock(place)) {
+      var found =
+          requireTheSpecs(place, name -> false, box.all())
+              .filter(i -> ((BoxInstances.Workspace) i.kind()).ready())
+              .orElseThrow(
+                  () ->
+                      Remedied.state(
+                          "Spec "
+                              + place.specId()
+                              + " has no workspace of "
+                              + place.project()
+                              + " on this runner (a done spec's is deleted), and an attach makes"
+                              + " none: a run of the spec makes it.",
+                          Remedy.of(
+                              "Dispatch one, which reopens a done spec, with: ",
+                              Remedy.sail(
+                                  "spec dispatch",
+                                  "-p",
+                                  place.project(),
+                                  "--spec",
+                                  place.specId(),
+                                  "--restart"))));
+      var owner = found.key(BoxInstances.OWNER_KEY);
+      if (startIfStopped(found) && owner.isPresent()) {
+        giveAll(found.name(), config, owners.apply(owner.get()));
+      }
+    }
+  }
+
+  private boolean startIfStopped(BoxInstances.Instance found) throws Exception {
+    if (found.state() instanceof ContainerState.Running) {
+      return false;
+    }
+    containers.start(found.name());
+    awaitReady(found.name());
+    return true;
+  }
+
   /** Read afresh at each give: a token or key revoked since the check must not be written. */
   private record Owning(String handle, Function<String, WorkspaceOwner> owners) {
     WorkspaceOwner now(Workspaces workspaces, ProjectDefinition config) {
@@ -550,15 +628,11 @@ public final class Workspaces {
 
   /**
    * The label is cleared before the give and written after it, and a give cut short is stripped
-   * again: a re-own that fails is nobody's and holds nothing of anyone's.
+   * again: a re-own that fails is nobody's and holds nothing of anyone's. A kept mark is cleared.
    */
   private Reused reuse(BoxInstances.Instance found, ProjectDefinition config, Owning owning)
       throws Exception {
-    var started = !(found.state() instanceof ContainerState.Running);
-    if (started) {
-      containers.start(found.name());
-      awaitReady(found.name());
-    }
+    var started = startIfStopped(found);
     var labelled = found.key(BoxInstances.OWNER_KEY).orElse("");
     var labelledId = found.key(BoxInstances.OWNER_ID_KEY).filter(Strings::isNotBlank);
     var another =
@@ -579,6 +653,17 @@ public final class Workspaces {
       }
     } else if (started) {
       giveAll(found.name(), config, owning.owners().apply(owning.handle()));
+    }
+    if (found.key(BoxInstances.KEPT_KEY).isPresent()) {
+      var cleared =
+          new ContainerConfig(shell, locks).set(found.name(), List.of(BoxInstances.KEPT_KEY + "="));
+      if (!cleared.ok()) {
+        throw new IOException(
+            "Workspace "
+                + found.name()
+                + " keeps its kept mark, so no run goes in it: "
+                + cleared.reason());
+      }
     }
     return new Reused(found.name(), started);
   }
@@ -686,7 +771,39 @@ public final class Workspaces {
    * interleaves another's strip, give or label; none in a dry run, which makes nothing.
    */
   private FileMutex nameLock(String instance) throws IOException {
-    return shell.isDryRun() ? null : FileMutex.acquire(locks.resolve(instance + ".workspace.lock"));
+    return shell.isDryRun() ? null : FileMutex.acquire(nameLockFile(instance));
+  }
+
+  /**
+   * The lock a create or a run's entry of {@code instance} holds, when nothing holds it now: what a
+   * change of the workspace that no run asked for holds while it decides and acts, so a run that
+   * enters it meanwhile waits and then finds what the change left. Empty while another holds it.
+   */
+  public Optional<FileMutex> holdIfFree(String instance) throws IOException, InterruptedException {
+    return FileMutex.acquireUntil(nameLockFile(instance), 0, () -> 0);
+  }
+
+  /**
+   * The lock a run's entry of {@code place}'s workspace holds, waited for while another change of
+   * it, the sweep's stop or delete, holds it, no longer than {@link #CREATE_WAIT} on the create
+   * lock's clock: past that the box is {@link Busy}, never a stranger's. None in a dry run.
+   */
+  private FileMutex entryLock(RunPlace.SpecWorkspace place)
+      throws IOException, InterruptedException {
+    if (shell.isDryRun()) {
+      return null;
+    }
+    var free = holdIfFree(place.instance());
+    if (free.isPresent()) {
+      return free.get();
+    }
+    return FileMutex.acquireUntil(
+            nameLockFile(place.instance()), nanos.getAsLong() + CREATE_WAIT.toNanos(), nanos)
+        .orElseThrow(() -> Busy.changing(place));
+  }
+
+  private Path nameLockFile(String instance) {
+    return locks.resolve(instance + ".workspace.lock");
   }
 
   /**
@@ -811,6 +928,24 @@ public final class Workspaces {
             })
         .forEach(rows::add);
     return new Listing(project, List.copyOf(rows));
+  }
+
+  /**
+   * When spec {@code place}'s workspace was made: empty when it has none, the epoch for one that
+   * does not say. A session a run left in it is there only when the run ended after this.
+   */
+  public Optional<Instant> madeAt(RunPlace.SpecWorkspace place)
+      throws IOException, InterruptedException, TimeoutException {
+    return box.lookup(place.instance(), Duration.ofSeconds(BoxInstances.LOOKUP_SECONDS))
+        .filter(instance -> instance.isTheSpecs(place))
+        .map(
+            instance ->
+                instance
+                    .key(CREATED_KEY)
+                    .filter(MILLIS.asMatchPredicate())
+                    .map(Long::parseLong)
+                    .map(DateTimeUtils::ofMillis)
+                    .orElse(Instant.EPOCH));
   }
 
   /**
@@ -1244,6 +1379,11 @@ public final class Workspaces {
         throw markTakenOff(project, name);
       }
       return taken;
+    }
+    if (taken.isPresent()
+        && taken.get().state() instanceof ContainerState.Error
+        && taken.get().config().isEmpty()) {
+      throw Busy.unread(instance);
     }
     if (taken.isPresent() || held.test(instance)) {
       throw new IllegalArgumentException(
