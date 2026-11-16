@@ -47,6 +47,12 @@ public final class BoxInstances {
    */
   public static final String OWNER_KEY = "user.sail.owner";
 
+  /**
+   * The owner's id on this box, beside the handle: a handle main gives someone new arrives under a
+   * new id, so a workspace labelled with the old one is no one's, whatever the handle says.
+   */
+  public static final String OWNER_ID_KEY = "user.sail.owner_id";
+
   /** Written last when a workspace is made, so one without it is not whole (W12). */
   public static final String READY_KEY = "user.sail.ready";
 

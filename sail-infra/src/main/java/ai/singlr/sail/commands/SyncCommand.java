@@ -234,10 +234,28 @@ public final class SyncCommand implements Callable<Integer> {
       System.out.println(render(round, json, operator::render));
       return 0;
     } catch (Exception e) {
-      System.err.println(
-          Banner.errorLine("Sync with " + target + " failed: " + reason(e, operator), Ansi.AUTO));
-      return 1;
+      return failed(e, target, json, operator);
     }
+  }
+
+  /**
+   * A round that failed: under {@code --json}, the API's error envelope on stdout, code and all.
+   */
+  static int failed(Exception e, String target, boolean json, OperatorCommand operator) {
+    if (json) {
+      try {
+        CliCommand.run(
+            true,
+            () -> {
+              throw e;
+            });
+      } catch (CliCommand.Printed printed) {
+        return 1;
+      }
+    }
+    System.err.println(
+        Banner.errorLine("Sync with " + target + " failed: " + reason(e, operator), Ansi.AUTO));
+    return 1;
   }
 
   /** Why a round failed, as {@code operator} reads it. */

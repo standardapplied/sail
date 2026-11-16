@@ -32,7 +32,27 @@ public final class CliOperator {
     var roles = new RoleRule(() -> config, roster);
     return roles
         .principal(RoleRule.Credential.box())
-        .orElseThrow(() -> unplaced(roles.boxFde().orElse(null)));
+        .orElseThrow(
+            () -> {
+              var handle = roles.boxFde().orElse(null);
+              return handle != null && roster != null && roster.withdrawn(handle)
+                  ? withdrawn(handle)
+                  : unplaced(handle);
+            });
+  }
+
+  /**
+   * The refusal for this box's person, {@code handle}, whom main has taken off every project the
+   * box holds: a sync changes nothing until main grants them one again.
+   */
+  public static ApiException withdrawn(String handle) {
+    return new ApiException(
+        ErrorCode.CONFLICT,
+        handle
+            + " is no longer on any project this box holds, so this box gives them nothing until"
+            + " main grants them one again.",
+        Remedy.of(
+            "Ask an admin on main to run '", Remedy.sail("fde grant", handle, "<project>"), "'."));
   }
 
   /**

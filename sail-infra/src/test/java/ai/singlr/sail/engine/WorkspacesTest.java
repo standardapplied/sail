@@ -27,7 +27,6 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -1358,19 +1357,21 @@ class WorkspacesTest {
         as_dev() { runuser -u dev -- env HOME=/home/dev "$@"; }
         retries=0
         fetch() {
-          local until=$((SECONDS + 10))
-          while ! failed=$(as_dev env LC_ALL=C git -C "$1" fetch --quiet origin 2>&1); do
-            case $failed in
-              *"Could not resolve host"*) ;;
-              *) printf '%s\\n' "$failed" >&2; return 1 ;;
-            esac
-            if [ "$SECONDS" -ge "$until" ]; then
-              printf '%s\\n' "$failed" >&2
-              return 1
-            fi
-            retries=$((retries + 1))
-            sleep 0.1
-          done
+          local url host until=$((SECONDS + 10))
+          url=$(as_dev git -C "$1" remote get-url origin)
+          host=
+          case $url in *://*) host=${url#*://}; host=${host#*@}; host=${host%%[:/]*} ;; esac
+          if [ -n "$host" ]; then
+            until getent hosts "$host" >/dev/null; do
+              if [ "$SECONDS" -ge "$until" ]; then
+                echo "$host did not resolve within 10 s, so its repo could not be fetched" >&2
+                return 1
+              fi
+              retries=$((retries + 1))
+              sleep 0.1
+            done
+          fi
+          as_dev git -C "$1" fetch --quiet origin
         }
         if [ "$#" -gt 0 ]; then
           for _ in $(seq 1 300); do
@@ -1423,23 +1424,31 @@ class WorkspacesTest {
   }
 
   /**
-   * The fetch of {@link Workspaces#FETCH} run by bash, the dev user's {@code git} a stand-in that
-   * answers each attempt with the next of {@code answers}, a status and what it says, and each
-   * pause moving bash's {@code SECONDS} on by five, so the wall clock's own second ticking during
-   * the run cannot change how many pauses fit before the deadline; answered with the attempts made,
-   * the retries counted and what the fetch said.
+   * The fetch of {@link Workspaces#FETCH} run by bash: the dev user's {@code git} a stand-in that
+   * names {@code url} as the remote and answers the fetch with {@code fetch}, a status and what it
+   * says; {@code getent} one that answers each ask with the next of {@code resolves}; each pause
+   * moving bash's {@code SECONDS} on by five, so the wall clock cannot change how many fit before
+   * the deadline. Answered with the asks made, the retries counted and what the fetch said.
    */
-  private static ShellExec.Result fetched(Path dir, String... answers) throws Exception {
+  private static ShellExec.Result fetched(Path dir, String url, String fetch, String... resolves)
+      throws Exception {
     var script =
         Workspaces.FETCH
             + """
             sleep() { SECONDS=$((SECONDS + 5)); }
-            as_dev() {
-              n=$(($(cat "$TRIES") + 1)); echo "$n" > "$TRIES"; echo "$*" > "$TRIES.args"
-              eval "answer=\\${ANSWER_$n:-0}"
-              status=${answer%%|*}; said=${answer#*|}
-              [ "$said" = "$answer" ] || echo "$said" >&2
+            getent() {
+              n=$(($(cat "$TRIES") + 1)); echo "$n" > "$TRIES"
+              eval "status=\\${RESOLVE_$n:-0}"
               return "$status"
+            }
+            as_dev() {
+              case "$*" in
+                *"remote get-url origin") echo "$URL" ;;
+                *"fetch --quiet origin")
+                  status=${FETCH%%|*}; said=${FETCH#*|}
+                  [ "$said" = "$FETCH" ] || echo "$said" >&2
+                  return "$status" ;;
+              esac
             }
             fetch /home/dev/workspace/app
             status=$?
@@ -1450,42 +1459,47 @@ class WorkspacesTest {
     Files.writeString(tries, "0");
     var process = new ProcessBuilder("bash", "-c", script);
     process.environment().put("TRIES", tries.toString());
-    for (var i = 0; i < answers.length; i++) {
-      process.environment().put("ANSWER_" + (i + 1), answers[i]);
+    process.environment().put("URL", url);
+    process.environment().put("FETCH", fetch);
+    for (var i = 0; i < resolves.length; i++) {
+      process.environment().put("RESOLVE_" + (i + 1), resolves[i]);
     }
     var running = process.start();
     var out = new String(running.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
     var err = new String(running.getErrorStream().readAllBytes(), StandardCharsets.UTF_8);
-    assertEquals(
-        "env LC_ALL=C git -C /home/dev/workspace/app fetch --quiet origin",
-        Files.readString(dir.resolve("tries.args")).strip(),
-        "git is run in the C locale");
     return new ShellExec.Result(
-        running.waitFor(), "attempts=" + Files.readString(tries).strip() + " " + out, err);
+        running.waitFor(), "asks=" + Files.readString(tries).strip() + " " + out, err);
   }
 
+  /**
+   * A fetch waits out a host that does not resolve yet, asking the resolver, never reading git's
+   * words; says a host that never resolves within ten seconds; says any failed fetch in git's own
+   * words; and fetches a remote with no host at once.
+   */
   @Test
   @EnabledOnOs({OS.LINUX, OS.MAC})
-  void aFetchWaitsOutAHostThatDoesNotResolveForTenSecondsAndSaysAnyOtherFailureAtOnce()
-      throws Exception {
-    var unresolved =
-        "128|fatal: unable to access 'https://github.com/acme/app.git/': Could not resolve host:"
-            + " github.com";
+  void aFetchWaitsForItsHostToResolveAndSaysAnyFailedFetchInGitsOwnWords() throws Exception {
+    var github = "https://github.com/acme/app.git";
 
-    var late = fetched(tempDir, unresolved, unresolved, "0");
+    var late = fetched(tempDir, github, "0", "2", "2", "0");
     var refused =
-        fetched(tempDir, unresolved, "128|fatal: Authentication failed for 'https://github.com/'");
-    var never = fetched(tempDir, Collections.nCopies(50, unresolved).toArray(String[]::new));
+        fetched(tempDir, github, "128|fatal: Authentication failed for 'https://github.com/'");
+    var never = fetched(tempDir, github, "0", "2", "2", "2", "2", "2", "2");
+    var local = fetched(tempDir, "file:///srv/app.git", "0", "2");
 
-    assertEquals(new ShellExec.Result(0, "attempts=3 retries=2", ""), late);
+    assertEquals(new ShellExec.Result(0, "asks=3 retries=2", ""), late);
     assertEquals(
         new ShellExec.Result(
-            1, "attempts=2 retries=1", "fatal: Authentication failed for 'https://github.com/'\n"),
+            128, "asks=1 retries=0", "fatal: Authentication failed for 'https://github.com/'\n"),
         refused);
     assertEquals(
-        new ShellExec.Result(1, "attempts=3 retries=2", unresolved.substring(4) + "\n"),
+        new ShellExec.Result(
+            1,
+            "asks=3 retries=2",
+            "github.com did not resolve within 10 s, so its repo could not be fetched\n"),
         never,
         "ten seconds of asking, whatever the count");
+    assertEquals(new ShellExec.Result(0, "asks=0 retries=0", ""), local);
   }
 
   private static String incomplete(String project, String name) {
@@ -3195,12 +3209,19 @@ class WorkspacesTest {
     assertEquals("ana", box.key("acme-fix-login", BoxInstances.OWNER_KEY));
   }
 
+  /** Real Incus 7.6's own answer to a delete of a file that is not there, from the GCP proof. */
+  private static final String MISSING_FILE =
+      "Error: remove /home/dev/.git-credentials.sail-new: file does not exist";
+
   /**
-   * Scenario 11: a removed person's workspaces, running or stopped, lose their token store, gh
-   * login and keys, and their owner, through their files; another's workspace is left as it is.
+   * Scenario 11 and the proof's High 1: a removed person's workspaces lose everything a give wrote,
+   * stripped in the container by the give's own idempotent script (a stopped one is started for it
+   * and stopped again), and their owner; a workspace labelled with an owner id is judged by that
+   * id, one labelled by handle alone by its handle; another's is left as it is. Incus answers a
+   * delete of a missing file as it really does, so no strip may lean on a delete.
    */
   @Test
-  void aRemovedPersonsWorkspacesLoseTheirStoreGhLoginKeysAndOwnerAndNoOneElsesDo()
+  void aRemovedPersonsWorkspacesAreStrippedInTheContainerAndJudgedByTheirOwnerId()
       throws Exception {
     var scripted =
         incus(
@@ -3218,30 +3239,45 @@ class WorkspacesTest {
                         "Stopped",
                         "tank",
                         "\"user.sail.project\": \"acme\", \"user.sail.workspace\": \"b\","
-                            + " \"user.sail.ready\": \"1\", \"user.sail.owner\": \"ana\"")),
+                            + " \"user.sail.ready\": \"1\", \"user.sail.owner\": \"ana\""),
+                    instance(
+                        "acme-c",
+                        "Running",
+                        "tank",
+                        "\"user.sail.project\": \"acme\", \"user.sail.workspace\": \"c\","
+                            + " \"user.sail.ready\": \"1\", \"user.sail.owner\": \"tmp\","
+                            + " \"user.sail.owner_id\": \"fde_old_tmp\""),
+                    instance(
+                        "acme-d",
+                        "Running",
+                        "tank",
+                        "\"user.sail.project\": \"acme\", \"user.sail.workspace\": \"d\","
+                            + " \"user.sail.ready\": \"1\", \"user.sail.owner\": \"tmp\","
+                            + " \"user.sail.owner_id\": \"fde_new_tmp\"")),
                 snapshots("v1"))
-            .onFail("incus file delete acme-b/home/dev/.config/gh/hosts.yml", "Error: not found");
-    var shell = new Pushing(scripted);
+            .onFail("incus file delete", MISSING_FILE);
 
     var unreached =
-        new Workspaces(shell, shell, ticks(), locks(), () -> 65536, url -> false)
-            .disown(held -> !held.equals("ana"));
+        new Workspaces(scripted, scripted, ticks(), locks(), () -> 65536, url -> false)
+            .disown((handle, id) -> id == null ? !handle.equals("ana") : id.equals("fde_new_tmp"));
 
     assertEquals(List.of(), unreached);
     assertEquals(
         List.of(
-            "incus file delete acme-b/home/dev/.git-credentials",
-            "incus file delete acme-b/home/dev/.git-credentials.sail-new",
-            "incus file delete acme-b/home/dev/.config/gh/hosts.yml",
-            "incus file delete acme-b/home/dev/.sail/gh-token",
-            "incus config set acme-b user.sail.owner="),
+            "incus start acme-b",
+            String.join(" ", strip("acme-b")),
+            "incus stop acme-b",
+            "incus config set acme-b user.sail.owner=",
+            String.join(" ", strip("acme-c")),
+            "incus config set acme-c user.sail.owner="),
         scripted.invocations().stream()
-            .filter(c -> c.contains("acme-") && !c.startsWith("incus file push"))
+            .filter(c -> c.contains("acme-") && !c.startsWith("incus list"))
+            .map(c -> c.startsWith("incus stop acme-b") ? "incus stop acme-b" : c)
             .toList());
-    assertEquals(Map.of("acme-b/home/dev/.ssh/authorized_keys", ""), shell.pushed);
+    assertTrue(scripted.invocations().stream().noneMatch(c -> c.startsWith("incus file delete")));
   }
 
-  /** A workspace a removal cannot reach is said, and stops none of the others. */
+  /** A workspace a removal cannot strip is said, and stops none of the others. */
   @Test
   void aWorkspaceARemovalCannotReachIsSaidAndStopsNoneOfTheOthers() throws Exception {
     var shell =
@@ -3261,16 +3297,15 @@ class WorkspacesTest {
                         "\"user.sail.project\": \"acme\", \"user.sail.workspace\": \"b\","
                             + " \"user.sail.owner\": \"ana\"")),
                 "[]")
-            .onFail(
-                "incus file delete acme-a/home/dev/.git-credentials", "Error: permission denied");
+            .onFail("incus exec acme-a", "/home/dev/.ssh/authorized_keys still has a key");
 
-    var unreached = workspaces(shell, ticks()).disown(held -> !held.equals("ana"));
+    var unreached = workspaces(shell, ticks()).disown((handle, id) -> !handle.equals("ana"));
 
-    assertEquals(
-        List.of(
-            "acme-a: Could not delete /home/dev/.git-credentials in acme-a: Error: permission"
-                + " denied"),
-        unreached);
+    assertEquals(1, unreached.size(), unreached.toString());
+    assertTrue(
+        unreached.getFirst().startsWith("acme-a: ")
+            && unreached.getFirst().endsWith("/home/dev/.ssh/authorized_keys still has a key"),
+        unreached.getFirst());
     assertTrue(shell.invocations().contains("incus config set acme-b user.sail.owner="));
   }
 

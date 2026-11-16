@@ -34,7 +34,7 @@ public final class SyncTransportException extends RuntimeException implements Re
     this.remedy = remedy;
     this.kind =
         switch (kind) {
-          case "unreachable", "refused", "protocol", "store" -> kind;
+          case "unreachable", "refused", "removed", "protocol", "store" -> kind;
           case null, default -> "protocol";
         };
   }

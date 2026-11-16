@@ -554,6 +554,119 @@ class WorkspaceIT extends AbstractIncusIT {
     assertFalse(gone.ok(), "sshd refuses with no host keys: " + gone.stdout());
   }
 
+  private static final String STRIPPED_TOKEN = "tok-strip-0123456789abcdef";
+
+  private static WorkspaceOwner leaving() {
+    return new WorkspaceOwner(
+        "tmp",
+        "Tmp One",
+        "tmp@sail.invalid",
+        Map.of("example.invalid", STRIPPED_TOKEN),
+        List.of("ssh-ed25519 AAAAtmp tmp@laptop"),
+        "fde_old_tmp");
+  }
+
+  /**
+   * Plants the leftovers no give leaves on its own, and gh's login, as a cut-short change or the
+   * owner's own gh would leave them: under /home/dev, never /tmp, written in the container.
+   */
+  private void plantLeftovers(String instance) throws Exception {
+    var planted =
+        exec(
+            instance,
+            List.of(
+                "bash",
+                "-c",
+                "set -eu; install -d -o dev -g dev /home/dev/.sail /home/dev/.config/gh;"
+                    + " for f in /home/dev/.git-credentials.sail-new /home/dev/.sail/gh-token"
+                    + " /home/dev/.config/gh/hosts.yml; do echo "
+                    + STRIPPED_TOKEN
+                    + " > \"$f\"; chown dev:dev \"$f\"; done"));
+    assertTrue(planted.ok(), planted.stderr());
+  }
+
+  /** Nothing of the owner left, by search and by what git and the key file say. */
+  private void assertHoldsNoOnesCredentials(String instance) throws Exception {
+    var left =
+        exec(
+            instance,
+            List.of(
+                "bash",
+                "-c",
+                "found=0; for f in "
+                    + String.join(" ", WorkspaceCredentials.FILES)
+                    + "; do [ ! -e \"$f\" ] || { echo \"file $f\"; found=1; }; done;"
+                    + " runuser -u dev -- env HOME=/home/dev git config --global --get user.email"
+                    + " && found=1;"
+                    + " [ ! -s /home/dev/.ssh/authorized_keys ] || { echo keys; found=1; };"
+                    + " grep -r -l -F "
+                    + STRIPPED_TOKEN
+                    + " /home/dev && found=1;"
+                    + " exit $found"));
+    assertTrue(left.ok(), instance + " still holds: " + left.stdout() + left.stderr());
+  }
+
+  /**
+   * The proof's High 1 on a real Incus: the strip is one idempotent act in the container, the same
+   * whether none, some or all of what a give writes is there, and leaves no token, gh login,
+   * identity or key, found by search.
+   */
+  @Test
+  void theStripLeavesNothingWhetherNoneSomeOrAllOfWhatAGiveWroteIsThere() throws Exception {
+    var made = workspaces.create(definition(), FIX, source(), null, "tmp", h -> leaving());
+    plantLeftovers(made.instance());
+
+    WorkspaceCredentials.strip(shell, made.instance());
+    assertHoldsNoOnesCredentials(made.instance());
+    WorkspaceCredentials.strip(shell, made.instance());
+    assertHoldsNoOnesCredentials(made.instance());
+    var some =
+        exec(
+            made.instance(),
+            List.of(
+                "bash",
+                "-c",
+                "echo "
+                    + STRIPPED_TOKEN
+                    + " > /home/dev/.git-credentials; runuser -u dev -- env HOME=/home/dev git"
+                    + " config --global user.email tmp@sail.invalid"));
+    assertTrue(some.ok(), some.stderr());
+    WorkspaceCredentials.strip(shell, made.instance());
+    assertHoldsNoOnesCredentials(made.instance());
+  }
+
+  /**
+   * The proof's High 1 and Medium 1 on a real Incus: a removed person's workspaces, one running and
+   * one stopped, labelled with their id, are stripped in the container and made nobody's by the
+   * disown the pass runs; the stopped one is started for it and left stopped.
+   */
+  @Test
+  void aRemovedPersonsRunningAndStoppedWorkspacesAreStrippedAndMadeNobodys() throws Exception {
+    var running = workspaces.create(definition(), FIX, source(), null, "tmp", h -> leaving());
+    var stopped = workspaces.create(definition(), SECOND, source(), null, "tmp", h -> leaving());
+    plantLeftovers(running.instance());
+    plantLeftovers(stopped.instance());
+    workspaces.stop(PROJECT, SECOND, NO_RUN);
+    var instances = new BoxInstances(shell);
+    assertEquals(
+        Optional.of("fde_old_tmp"),
+        instances.named(running.instance()).orElseThrow().key(BoxInstances.OWNER_ID_KEY));
+
+    assertEquals(List.of(), workspaces.disown((handle, id) -> !"fde_old_tmp".equals(id)));
+
+    for (var made : List.of(running, stopped)) {
+      assertEquals(
+          Optional.of(""),
+          instances.named(made.instance()).orElseThrow().key(BoxInstances.OWNER_KEY));
+    }
+    assertFalse(
+        instances.named(stopped.instance()).orElseThrow().state() instanceof ContainerState.Running,
+        "a stopped workspace is left stopped");
+    assertHoldsNoOnesCredentials(running.instance());
+    containers.start(stopped.instance());
+    assertHoldsNoOnesCredentials(stopped.instance());
+  }
+
   private static WorkspaceOwner udayWith(String token) {
     return new WorkspaceOwner(
         "uday", "Uday", "uday@sail.invalid", Map.of("example.invalid", token), List.of());

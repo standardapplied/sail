@@ -10,6 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.api.SyncStatus;
 import ai.singlr.sail.config.HostYaml;
 import ai.singlr.sail.config.ListenConfig;
 import ai.singlr.sail.config.YamlUtil;
@@ -18,6 +19,7 @@ import ai.singlr.sail.engine.HostDetector;
 import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.ScriptedShellExecutor;
 import ai.singlr.sail.engine.ShellExec;
+import ai.singlr.sail.engine.SyncOperations;
 import ai.singlr.sail.engine.TimingOutShell;
 import java.io.ByteArrayOutputStream;
 import java.io.PrintStream;
@@ -596,5 +598,36 @@ class HostStatusCommandTest {
     assertEquals(
         List.of(),
         HostStatusCommand.doors(ListenConfig.none(), setting -> Optional.empty(), address -> true));
+  }
+
+  /**
+   * The proof's Low 3: host status says when main no longer knows the box's person, and only then.
+   */
+  @Test
+  void hostStatusSaysWhenMainNoLongerKnowsTheBoxsPerson() {
+    var removed =
+        new SyncStatus(
+            "node",
+            "sail@main",
+            null,
+            "failing",
+            null,
+            null,
+            1,
+            SyncOperations.REMOVED,
+            null,
+            null);
+    var unreachable =
+        new SyncStatus(
+            "node", "sail@main", null, "failing", null, null, 1, "unreachable", null, null);
+
+    assertEquals(
+        Optional.of(
+            "  Main no longer knows this box's person, eng: the box syncs no more until an admin on"
+                + " main adds them again. 'sail sync' prints the line to send them."),
+        HostStatusCommand.removedFromMain(removed, "eng", OperatorCommand.PLAIN));
+    assertEquals(
+        Optional.empty(),
+        HostStatusCommand.removedFromMain(unreachable, "eng", OperatorCommand.PLAIN));
   }
 }

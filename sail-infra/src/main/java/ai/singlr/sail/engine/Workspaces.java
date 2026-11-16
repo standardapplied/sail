@@ -9,6 +9,7 @@ import ai.singlr.sail.api.Mappable;
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.common.Remedied;
 import ai.singlr.sail.common.Remedy;
+import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.ProjectDefinition;
 import ai.singlr.sail.store.RunStore;
 import java.io.IOException;
@@ -30,6 +31,7 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.TimeoutException;
+import java.util.function.BiPredicate;
 import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.function.LongSupplier;
@@ -96,29 +98,31 @@ public final class Workspaces {
       """;
 
   /**
-   * Fetches the repository at {@code $1} as the dev user, in the C locale so git's words are the
-   * ones matched, asking again until 10 s have passed while its host does not resolve: a clone's
-   * network answers before its resolver does, by a fraction of a second and by more when several
-   * clones start at once. Each ask again adds one to {@code retries}. Any other failure, or one
-   * still unresolved at the deadline, is said with git's own words.
+   * Fetches the repository at {@code $1} as the dev user once its remote's host resolves, asked of
+   * the resolver itself ({@code getent}) for up to 10 s, never read from a failed fetch's words: a
+   * clone's network answers before its resolver does, by a fraction of a second and by more when
+   * several clones start at once. Each ask again adds one to {@code retries}. A remote with no host
+   * (a path, {@code file://}) is fetched at once; a failed fetch is said in git's own words.
    */
   static final String FETCH =
       """
       retries=0
       fetch() {
-        local until=$((SECONDS + 10))
-        while ! failed=$(as_dev env LC_ALL=C git -C "$1" fetch --quiet origin 2>&1); do
-          case $failed in
-            *"Could not resolve host"*) ;;
-            *) printf '%s\\n' "$failed" >&2; return 1 ;;
-          esac
-          if [ "$SECONDS" -ge "$until" ]; then
-            printf '%s\\n' "$failed" >&2
-            return 1
-          fi
-          retries=$((retries + 1))
-          sleep 0.1
-        done
+        local url host until=$((SECONDS + 10))
+        url=$(as_dev git -C "$1" remote get-url origin)
+        host=
+        case $url in *://*) host=${url#*://}; host=${host#*@}; host=${host%%[:/]*} ;; esac
+        if [ -n "$host" ]; then
+          until getent hosts "$host" >/dev/null; do
+            if [ "$SECONDS" -ge "$until" ]; then
+              echo "$host did not resolve within 10 s, so its repo could not be fetched" >&2
+              return 1
+            fi
+            retries=$((retries + 1))
+            sleep 0.1
+          done
+        fi
+        as_dev git -C "$1" fetch --quiet origin
       }
       """;
 
@@ -556,14 +560,19 @@ public final class Workspaces {
       awaitReady(found.name());
     }
     var labelled = found.key(BoxInstances.OWNER_KEY).orElse("");
-    var another = !owning.handle().equals(labelled);
+    var labelledId = found.key(BoxInstances.OWNER_ID_KEY).filter(Strings::isNotBlank);
+    var another =
+        !owning.handle().equals(labelled)
+            || labelledId.isPresent()
+                && !labelledId.get().equals(owning.owners().apply(owning.handle()).id());
     if (another && !labelled.isBlank()) {
       label(found.name(), "");
     }
     if (another) {
       try {
-        giveAll(found.name(), config, owning.now(this, config));
-        label(found.name(), owning.handle());
+        var owner = owning.now(this, config);
+        giveAll(found.name(), config, owner);
+        label(found.name(), owner.handle(), owner.id());
       } catch (Exception failure) {
         stripAfter(found.name(), failure);
         throw failure;
@@ -587,9 +596,16 @@ public final class Workspaces {
 
   private void label(String instance, String handle)
       throws IOException, InterruptedException, TimeoutException {
-    var owned =
-        new ContainerConfig(shell, locks)
-            .set(instance, List.of(BoxInstances.OWNER_KEY + "=" + handle));
+    label(instance, handle, null);
+  }
+
+  private void label(String instance, String handle, String id)
+      throws IOException, InterruptedException, TimeoutException {
+    var keys = new ArrayList<>(List.of(BoxInstances.OWNER_KEY + "=" + handle));
+    if (id != null) {
+      keys.add(BoxInstances.OWNER_ID_KEY + "=" + id);
+    }
+    var owned = new ContainerConfig(shell, locks).set(instance, keys);
     if (!owned.ok()) {
       throw new IOException(
           "Workspace "
@@ -629,21 +645,34 @@ public final class Workspaces {
   }
 
   /**
-   * Clears the owner too, so a person later given the handle is re-given theirs at their next
-   * entry. Answers those not reached.
+   * A workspace whose owner {@code held} says is not a person here, by its stored owner id when it
+   * has one, else by handle, is stripped in the container (started for it when stopped) and made
+   * nobody's. Clears the owner too, so a person later given the handle is re-given theirs at their
+   * next entry. Answers those not reached.
    */
-  public List<String> disown(Predicate<String> held)
+  public List<String> disown(BiPredicate<String, String> held)
       throws IOException, InterruptedException, TimeoutException {
     var unreached = new ArrayList<String>();
     for (var instance : box.all()) {
       var owner = instance.key(BoxInstances.OWNER_KEY).orElse("");
+      var id = instance.key(BoxInstances.OWNER_ID_KEY).filter(Strings::isNotBlank).orElse(null);
       if (!(instance.kind() instanceof BoxInstances.Workspace)
           || owner.isBlank()
-          || held.test(owner)) {
+          || held.test(owner, id)) {
         continue;
       }
       try (var locked = nameLock(instance.name())) {
-        WorkspaceCredentials.takeBack(shell, instance.name());
+        var stopped = !(instance.state() instanceof ContainerState.Running);
+        if (stopped) {
+          containers.start(instance.name());
+        }
+        try {
+          WorkspaceCredentials.strip(shell, instance.name());
+        } finally {
+          if (stopped) {
+            containers.stop(instance.name());
+          }
+        }
         label(instance.name(), "");
       } catch (IOException | TimeoutException failure) {
         unreached.add(instance.name() + ": " + Remedied.reasonOf(failure).strip());
@@ -721,6 +750,9 @@ public final class Workspaces {
       var running = nanos.getAsLong();
       var owner = owning.now(this, config);
       WorkspaceCredentials.give(shell, instance, config, owner);
+      if (owner.id() != null) {
+        label(instance, owner.handle(), owner.id());
+      }
       var steps = prepare(config, name, branch, instance, files);
       WorkspaceCredentials.logForgeIn(shell, instance, config, owner);
       var ready = nanos.getAsLong();

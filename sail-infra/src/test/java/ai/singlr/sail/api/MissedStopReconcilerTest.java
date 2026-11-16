@@ -60,6 +60,7 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.BiPredicate;
 import java.util.function.Function;
 import java.util.function.Predicate;
 import java.util.function.Supplier;
@@ -500,8 +501,8 @@ class MissedStopReconcilerTest {
     var probe =
         new CountingProbe(true) {
           @Override
-          public List<String> disown(Predicate<String> held) {
-            asked.add("ada " + held.test("ada") + ", gone " + held.test("gone"));
+          public List<String> disown(BiPredicate<String, String> held) {
+            asked.add("ada " + held.test("ada", null) + ", gone " + held.test("gone", null));
             return List.of("acme-b: Error: permission denied");
           }
         };
@@ -538,8 +539,8 @@ class MissedStopReconcilerTest {
     var probe =
         new CountingProbe(true) {
           @Override
-          public List<String> disown(Predicate<String> held) {
-            asked.add("ada " + held.test("ada") + ", bob " + held.test("bob"));
+          public List<String> disown(BiPredicate<String, String> held) {
+            asked.add("ada " + held.test("ada", null) + ", bob " + held.test("bob", null));
             return List.of();
           }
         };
@@ -594,8 +595,8 @@ class MissedStopReconcilerTest {
     var probe =
         new CountingProbe(true) {
           @Override
-          public List<String> disown(Predicate<String> held) {
-            asked.add("ada " + held.test("ada") + ", tmp " + held.test("tmp"));
+          public List<String> disown(BiPredicate<String, String> held) {
+            asked.add("ada " + held.test("ada", null) + ", tmp " + held.test("tmp", null));
             return List.of();
           }
         };
@@ -614,6 +615,37 @@ class MissedStopReconcilerTest {
     assertEquals(2, fdes.logins().list(ada).size());
     assertEquals("disabled", fdes.byHandle("zed").orElseThrow().status());
     assertEquals(2, fdes.logins().list(zed).size(), "a disabled person main never described keeps");
+  }
+
+  /**
+   * The proof's Medium 1: the pass decides from what each workspace's label stores, not from what
+   * it remembers. A sail-api started after main gave tmp's handle to someone new (a new id here)
+   * still takes the old tmp's workspace, labelled with the old id, at its first pass; one labelled
+   * with the new id is the new tmp's, and one labelled by handle alone is read by handle.
+   */
+  @Test
+  void theFirstPassAfterAStartTakesAWorkspaceWhoseOwnerIdIsNoActivePersons() {
+    TestLogins.store(db, "ada");
+    var hire = TestLogins.store(db, "tmp");
+    var asked = new ArrayList<String>();
+    var probe =
+        new CountingProbe(true) {
+          @Override
+          public List<String> disown(BiPredicate<String, String> held) {
+            asked.add(
+                "old "
+                    + held.test("tmp", "fde_old_tmp")
+                    + ", new "
+                    + held.test("tmp", hire)
+                    + ", by handle "
+                    + held.test("tmp", null));
+            return List.of();
+          }
+        };
+
+    reconciler(probe, PAST_GRACE).sweep();
+
+    assertEquals(List.of("old false, new true, by handle true"), asked);
   }
 
   /** A container that cannot be asked fails nothing: the next pass tries again. */

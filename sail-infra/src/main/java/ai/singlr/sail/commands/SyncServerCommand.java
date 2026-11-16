@@ -209,15 +209,23 @@ public final class SyncServerCommand implements Callable<Integer> {
   }
 
   /**
-   * Main's roster as {@code principal}'s node mirrors it ({@link FdeStore#visibleTo}), and the id
-   * alone of everyone else main holds, so a node tells a person out of its sight from one removed.
+   * Main's roster as {@code principal}'s node mirrors it: the people {@link FdeStore#visibleTo}
+   * shows it, each with their email, since one who works on that node commits there under it, and
+   * the id alone of everyone else main holds, so a node tells a person out of its sight from one
+   * removed.
    */
   static List<Map<String, Object>> roster(Sqlite db, Actor principal) {
     var fdes = new FdeStore(db);
-    var shown = fdes.visibleTo(principal.handle(), Access.audience(principal));
-    var roster = new ArrayList<>(shown.stream().map(SyncServerCommand::fdeToMap).toList());
-    var ids = shown.stream().map(FdeStore.Fde::id).collect(Collectors.toSet());
-    fdes.list().stream()
+    var everyone = fdes.list();
+    var ids =
+        fdes.visibleTo(principal.handle(), Access.audience(principal)).stream()
+            .map(FdeStore.Fde::id)
+            .collect(Collectors.toSet());
+    var roster = new ArrayList<Map<String, Object>>();
+    everyone.stream()
+        .filter(fde -> ids.contains(fde.id()))
+        .forEach(fde -> roster.add(fdeToMap(fde)));
+    everyone.stream()
         .filter(fde -> !ids.contains(fde.id()))
         .forEach(fde -> roster.add(Map.of("id", fde.id())));
     return List.copyOf(roster);

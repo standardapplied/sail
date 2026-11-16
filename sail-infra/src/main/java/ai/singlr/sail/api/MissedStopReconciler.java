@@ -38,7 +38,7 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.function.Predicate;
+import java.util.function.BiPredicate;
 import java.util.function.Supplier;
 import java.util.stream.Stream;
 
@@ -143,7 +143,7 @@ public final class MissedStopReconciler implements AutoCloseable {
     }
 
     /** None, by default ({@link Workspaces#disown}). */
-    default List<String> disown(Predicate<String> held) throws Exception {
+    default List<String> disown(BiPredicate<String, String> held) throws Exception {
       return List.of();
     }
   }
@@ -272,7 +272,7 @@ public final class MissedStopReconciler implements AutoCloseable {
       }
 
       @Override
-      public List<String> disown(Predicate<String> held) throws Exception {
+      public List<String> disown(BiPredicate<String, String> held) throws Exception {
         return Workspaces.onThisBox(shell).disown(held);
       }
     };
@@ -410,7 +410,11 @@ public final class MissedStopReconciler implements AutoCloseable {
     }
     try {
       var unreached =
-          unitProbe.disown(handle -> roster.containsKey(handle) && !gone.contains(handle));
+          unitProbe.disown(
+              (handle, id) ->
+                  id == null
+                      ? roster.containsKey(handle) && !gone.contains(handle)
+                      : roster.containsValue(id));
       var left = new HashSet<String>();
       for (var line : unreached) {
         var instance = line.substring(0, Math.max(0, line.indexOf(':')));

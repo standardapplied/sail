@@ -10,7 +10,8 @@ import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import ai.singlr.sail.common.Remedied;
+import ai.singlr.sail.Sail;
+import ai.singlr.sail.api.ApiException;
 import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.engine.SyncOperations;
@@ -30,10 +31,13 @@ import ai.singlr.sail.sync.SyncSession;
 import ai.singlr.sail.sync.SyncWire;
 import ai.singlr.sail.sync.SyncedEntities;
 import java.io.BufferedInputStream;
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.PipedInputStream;
 import java.io.PipedOutputStream;
+import java.io.PrintStream;
 import java.io.UncheckedIOException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -105,10 +109,10 @@ class ScopedSyncServerTest {
     assertEquals(List.of("a1"), nodeDb.query("SELECT id FROM specs", row -> row.text(0)));
     assertEquals(
         List.of(
-            entry("ada", "Ada", "", "admin"),
+            entry("ada", "Ada", "ada@x.dev", "admin"),
             entry("nia", "nia", "nia@x.dev", "member"),
-            entry("sam", "sam", "", "member"),
-            entry("uma", "Uma", "", "member")),
+            entry("sam", "sam", "sam@x.dev", "member"),
+            entry("uma", "Uma", "uma@x.dev", "member")),
         listed(round));
     assertEquals(
         List.of(Set.of("id"), Set.of("id")),
@@ -120,7 +124,10 @@ class ScopedSyncServerTest {
     assertTrue(node.byHandle("sam").orElseThrow().active(), "an assignee in alpha stays enabled");
     assertTrue(node.byHandle("ada").orElseThrow().active());
     assertTrue(node.byHandle("yan").isEmpty(), "no one outside alpha is on a scoped box");
-    assertEquals("", node.byHandle("sam").orElseThrow().email());
+    assertEquals(
+        "sam@x.dev",
+        node.byHandle("sam").orElseThrow().email(),
+        "a person who shares its projects commits there under their email");
     assertEquals("nia@x.dev", node.byHandle("nia").orElseThrow().email());
     assertEquals(ProjectScope.all(), node.scopeOf("nia"), "a node scopes no one");
   }
@@ -186,13 +193,13 @@ class ScopedSyncServerTest {
 
     var refused =
         assertThrows(
-            Remedied.State.class,
+            ApiException.class,
             () -> SyncOperations.applyFdes(node, round.roster(), "uma", notice -> {}));
 
     assertEquals(
         "This box's first round with this main changes no one: a handle it holds is someone else's"
             + " on main.",
-        refused.reason());
+        refused.getMessage());
     assertEquals(
         "kim on this box (kim@home.example) is not main's kim (kim@x.dev): main gave the handle to"
             + " someone else. If they are different people, remove kim here: 'sail fde rm kim"
@@ -202,9 +209,7 @@ class ScopedSyncServerTest {
         refused.remedy().plain().strip());
     for (var command : refused.remedy().commands()) {
       assertTrue(
-          new CommandLine(new ai.singlr.sail.Sail())
-              .parseArgs(command.line().split(" "))
-              .hasSubcommand(),
+          new CommandLine(new Sail()).parseArgs(command.line().split(" ")).hasSubcommand(),
           command.line());
     }
     assertEquals(kim, nodeId("kim"));
@@ -254,7 +259,7 @@ class ScopedSyncServerTest {
                 + " --force', or leave it: it stays, unusable."),
         notices.stream().map(Remedy::plain).toList());
     assertTrue(
-        new CommandLine(new ai.singlr.sail.Sail())
+        new CommandLine(new Sail())
             .parseArgs("fde", "rm", aside.handle(), "--force")
             .hasSubcommand());
   }
@@ -274,7 +279,7 @@ class ScopedSyncServerTest {
     var round = roundAs(tokenOf("uma"));
 
     assertThrows(
-        Remedied.State.class,
+        ApiException.class,
         () -> SyncOperations.applyFdes(node, round.roster(), "uma", notice -> {}));
     assertTrue(node.undescribed("kim"));
   }
@@ -294,7 +299,7 @@ class ScopedSyncServerTest {
 
     var refused =
         assertThrows(
-            Remedied.State.class,
+            ApiException.class,
             () -> SyncOperations.applyFdes(node, round.roster(), "uma", notice -> {}));
 
     assertTrue(node.undescribed("lee"), "a blank email adopts no one");
@@ -474,8 +479,20 @@ class ScopedSyncServerTest {
     var yan = TestLogins.store(nodeDb, "yan");
     Acting.system(() -> fdes.remove(fdes.byHandle("yan").orElseThrow().id()));
     fdes.add("late", "Late", "late@x.dev", "member");
+    var err = new ByteArrayOutputStream();
+    var originalErr = System.err;
+    System.setErr(new PrintStream(err, true, StandardCharsets.UTF_8));
+    FdeStore node;
+    try {
+      node = syncAs("uma");
+    } finally {
+      System.setErr(originalErr);
+    }
 
-    var node = syncAs("uma");
+    assertEquals(
+        "  roster: removed yan: main removed them, or gave the handle to someone new.\n",
+        err.toString(StandardCharsets.UTF_8),
+        "the line names whom, never an email");
 
     assertTrue(node.byHandle("yan").isEmpty());
     assertEquals(List.of(), node.logins().list(yan));

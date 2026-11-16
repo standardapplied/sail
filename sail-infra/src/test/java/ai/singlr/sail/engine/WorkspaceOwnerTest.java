@@ -79,7 +79,8 @@ class WorkspaceOwnerTest {
             "Uday C",
             "uday@example.com",
             Map.of("github.com", "ghp_uday_0123456789ab"),
-            List.of(UDAY_KEY.line(), WORKSTATION.line())),
+            List.of(UDAY_KEY.line(), WORKSTATION.line()),
+            fdes.byHandle("uday").orElseThrow().id()),
         owner);
     assertFalse(owner.toString().contains("ghp_uday_0123456789ab"), owner.toString());
   }
@@ -90,7 +91,13 @@ class WorkspaceOwnerTest {
     var owner = WorkspaceOwner.of(fdes, "ana", "uday", Optional.of(WORKSTATION));
 
     assertEquals(
-        new WorkspaceOwner("ana", "ana", "ana@example.com", Map.of(), List.of(ANA_KEY.line())),
+        new WorkspaceOwner(
+            "ana",
+            "ana",
+            "ana@example.com",
+            Map.of(),
+            List.of(ANA_KEY.line()),
+            fdes.byHandle("ana").orElseThrow().id()),
         owner);
   }
 

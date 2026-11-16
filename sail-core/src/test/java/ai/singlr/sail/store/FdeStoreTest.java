@@ -84,7 +84,7 @@ class FdeStoreTest {
     logins.store(member.id(), claude, null, null, "member-token");
 
     assertThrows(IllegalStateException.class, () -> store.remove(admin.id()));
-    assertEquals(1, store.removeUndescribed(List.of(), "solo"));
+    assertEquals(List.of("member"), store.removeUndescribed(List.of(), "solo"));
 
     assertEquals(1, logins.list(admin.id()).size());
     assertEquals(List.of(), logins.list(member.id()));

@@ -138,6 +138,7 @@ class SyncDiagnosticTest {
                   "sail@10.128.0.25: Permission denied (publickey).",
                   handle -> Optional.of(AUTHORISE.replace("mady", handle))));
 
+      assertEquals(SyncOperations.REMOVED, refused.kind(), "host status reads it by its kind");
       assertEquals(
           "hello: Sync channel closed before main replied. Main no longer knows this box's person,"
               + " mady, or their key: main removed them. This box keeps running as them but syncs"

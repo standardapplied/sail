@@ -6,6 +6,8 @@
 package ai.singlr.sail.engine;
 
 import ai.singlr.sail.SailVersion;
+import ai.singlr.sail.api.ApiException;
+import ai.singlr.sail.api.ErrorCode;
 import ai.singlr.sail.api.Event;
 import ai.singlr.sail.api.SailEventPublisher;
 import ai.singlr.sail.api.SyncReport;
@@ -97,6 +99,9 @@ public final class SyncOperations {
 
   private static final String HOST_KEY_FAILED = "Host key verification failed.";
   private static final String KEY_REFUSED = "Permission denied (publickey";
+
+  /** The kind of a round refused because main no longer knows this box's person. */
+  public static final String REMOVED = "removed";
 
   private final Sqlite db;
   private final String host;
@@ -358,7 +363,7 @@ public final class SyncOperations {
           "unreachable", e.getMessage() + " ssh said: " + said, explained(said, target), e);
     }
     return new SyncTransportException(
-        "unreachable",
+        synced ? REMOVED : "unreachable",
         e.getMessage(),
         Remedy.of(
             (synced
@@ -775,13 +780,14 @@ public final class SyncOperations {
     var handles = listed.stream().map(entry -> str(entry, "handle")).toList();
     var ids = roster.stream().map(entry -> str(entry, "id")).toList();
     var strangers = requireNoStrangers(fdes, roster, own);
-    var removed = 0;
+    var removed = List.<String>of();
+    var withdrawn = List.<String>of();
     if (ids.contains(null) || !handles.contains(own)) {
       var kept = strangers.stream().map(Stranger::handle).toList();
       listed = listed.stream().filter(entry -> !kept.contains(str(entry, "handle"))).toList();
     } else {
       removed = fdes.removeUndescribed(ids, own);
-      fdes.withdraw(listed.stream().map(entry -> str(entry, "id")).toList(), own);
+      withdrawn = fdes.withdraw(listed.stream().map(entry -> str(entry, "id")).toList(), own);
       for (var stranger : strangers) {
         var moved = fdes.moveAside(stranger.handle());
         notice.accept(
@@ -799,10 +805,17 @@ public final class SyncOperations {
       }
     }
     fdes.disableUnlisted(handles, own);
-    if (removed > 0) {
+    if (!removed.isEmpty()) {
       System.err.println(
-          Ansi.AUTO.string(
-              "  @|faint roster: removed " + removed + " FDE(s) main removed or gave away|@"));
+          "  roster: removed "
+              + String.join(", ", removed)
+              + ": main removed them, or gave the handle to someone new.");
+    }
+    if (!withdrawn.isEmpty()) {
+      System.err.println(
+          "  roster: withdrew "
+              + String.join(", ", withdrawn)
+              + ": no longer on this box's projects; what they stored here is kept.");
     }
     var rejected = new ArrayList<String>();
     for (var entry : listed) {
@@ -883,7 +896,8 @@ public final class SyncOperations {
                 "'. "));
       }
     }
-    throw Remedied.state(
+    throw new ApiException(
+        ErrorCode.CONFLICT,
         "This box's first round with this main changes no one: a handle it holds is someone"
             + " else's on main.",
         Remedy.of(told.toArray()));

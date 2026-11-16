@@ -60,6 +60,10 @@ import org.junit.jupiter.api.io.TempDir;
  */
 class ScopeChangeRoundTest {
 
+  /** Yan shares only beta, so a narrowing to acme takes them off this box's projects. */
+  private static final String WITHDREW =
+      "  roster: withdrew yan: no longer on this box's projects; what they stored here is kept.";
+
   private static final String WHY = " — main no longer grants this box the project";
 
   @TempDir Path tempDir;
@@ -192,6 +196,7 @@ class ScopeChangeRoundTest {
             "  ⚠ project beta: dropped from this box with the 5 rows it held here, unpushed work"
                 + " included (1 row never pushed)"
                 + WHY,
+            WITHDREW,
             "  ⚠ project beta: its container deleted, workspace and uncommitted work included"
                 + WHY),
         round());
@@ -208,7 +213,7 @@ class ScopeChangeRoundTest {
             "incus delete beta --force"),
         incus.invocations);
     assertEquals(
-        List.of("ada||active", "nia|nia@x.dev|active", "yan|null|disabled"),
+        List.of("ada|ada@x.dev|active", "nia|nia@x.dev|active", "yan|null|disabled"),
         nodeRoster(),
         "yan left this box's projects: withdrawn, not removed");
   }
@@ -222,6 +227,7 @@ class ScopeChangeRoundTest {
     assertEquals(
         List.of(
             "  ⚠ project beta: dropped from this box with the 3 rows it held here" + WHY,
+            WITHDREW,
             "  ⚠ project beta: container 'beta' kept — Sail did not provision it; remove it"
                 + " yourself if it holds the project's work"),
         round());
@@ -243,6 +249,7 @@ class ScopeChangeRoundTest {
     assertEquals(
         List.of(
             "  ⚠ project beta: dropped from this box with the 3 rows it held here" + WHY,
+            WITHDREW,
             "  ⚠ project beta: its container, if any, is deleted by the next round that can reach"
                 + " Incus (sail-api within a minute, or 'sail sync')"),
         round());
@@ -271,6 +278,7 @@ class ScopeChangeRoundTest {
     assertEquals(
         List.of(
             "  ⚠ project beta: dropped from this box with the 3 rows it held here" + WHY,
+            WITHDREW,
             "  ✗ Could not take project beta off this box (the next sync tries again): Failed to"
                 + " delete container 'beta': Error: instance is busy",
             "  ⚠ project gamma: its container deleted, workspace and uncommitted work included"
@@ -305,7 +313,8 @@ class ScopeChangeRoundTest {
             "  ⚠ project beta: kept this round, run '"
                 + run
                 + "' being still under way here; dropped on the first round after it ends"
-                + WHY),
+                + WHY,
+            WITHDREW),
         round());
     assertEquals(List.of("beta"), incus.names());
 
@@ -324,7 +333,7 @@ class ScopeChangeRoundTest {
     narrowTo("acme");
     round();
     assertEquals(List.of("a1"), nodeSpecs());
-    assertEquals(List.of("ada||active", "nia|nia@x.dev|active"), nodeRoster());
+    assertEquals(List.of("ada|ada@x.dev|active", "nia|nia@x.dev|active"), nodeRoster());
     incus.invocations.clear();
 
     fdes.unrestrict("nia");
@@ -366,7 +375,9 @@ class ScopeChangeRoundTest {
     assertEquals(List.of(), incus.names());
     assertEquals(
         List.of(
-            "ada||active", "client2|client2@rehearsal.invalid|disabled", "nia|nia@x.dev|active"),
+            "ada|ada@x.dev|active",
+            "client2|client2@rehearsal.invalid|disabled",
+            "nia|nia@x.dev|active"),
         nodeRoster(),
         "a person main never described is disabled, never removed");
   }

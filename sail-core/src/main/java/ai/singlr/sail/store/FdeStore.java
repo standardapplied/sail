@@ -14,6 +14,7 @@ import ai.singlr.sail.engine.NameValidator;
 import ai.singlr.sail.identity.ProjectScope;
 import ai.singlr.sail.ssh.SshPublicKey;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
 import java.util.Map;
@@ -378,32 +379,59 @@ public final class FdeStore {
    * Removes, as {@link #remove} does, every person this box holds under a main id that main no
    * longer holds at all, naming {@code liveIds}, but this box's own {@code own}: main removed them,
    * or gave their handle to someone new under a new id. Main's statement by id is what erases a
-   * person's credentials on a node. Returns how many it removed.
+   * person's credentials on a node. Returns their handles.
    */
-  public int removeUndescribed(Collection<String> liveIds, String own) {
+  public List<String> removeUndescribed(Collection<String> liveIds, String own) {
     return db.transaction(
         () -> {
-          var gone = describedBut(liveIds, own);
-          gone.forEach(id -> byId(id).ifPresent(this::delete));
-          return gone.size();
+          var gone = new ArrayList<String>();
+          for (var id : describedBut(liveIds, own)) {
+            byId(id)
+                .ifPresent(
+                    fde -> {
+                      gone.add(fde.handle());
+                      delete(fde);
+                    });
+          }
+          return List.copyOf(gone);
         });
   }
 
   /**
    * Disables, and forgets the name and email of, every person main still holds but no longer lists
    * to this box, naming {@code listedIds}, but its own {@code own}: they left its projects, which
-   * is undone when they are listed again, so what they stored here stays.
+   * is undone when they are listed again, so what they stored here stays. Returns the handles it
+   * withdrew this time.
    */
-  public void withdraw(Collection<String> listedIds, String own) {
-    db.transaction(
-        () ->
-            describedBut(listedIds, own)
-                .forEach(
-                    id ->
-                        db.execute(
-                            "UPDATE fdes SET status = 'disabled', display_name = NULL,"
-                                + " email = NULL WHERE id = ?",
-                            id)));
+  public List<String> withdraw(Collection<String> listedIds, String own) {
+    return db.transaction(
+        () -> {
+          var withdrawn = new ArrayList<String>();
+          for (var id : describedBut(listedIds, own)) {
+            byId(id)
+                .filter(Fde::active)
+                .ifPresent(
+                    fde -> {
+                      withdrawn.add(fde.handle());
+                      db.execute(
+                          "UPDATE fdes SET status = 'disabled', display_name = NULL, email = NULL"
+                              + " WHERE id = ?",
+                          id);
+                    });
+          }
+          return List.copyOf(withdrawn);
+        });
+  }
+
+  /** Whether {@code handle} is a person main described who has left this box's projects. */
+  public boolean withdrawn(String handle) {
+    return db.queryOne(
+                "SELECT COUNT(*) FROM fdes WHERE handle = ? AND status = 'disabled'"
+                    + " AND main_id IS NOT NULL",
+                row -> row.integer(0),
+                handle)
+            .orElse(0L)
+        > 0;
   }
 
   private List<String> describedBut(Collection<String> mainIds, String own) {

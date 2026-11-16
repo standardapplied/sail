@@ -5,7 +5,9 @@
 
 package ai.singlr.sail.commands;
 
+import ai.singlr.sail.api.OperationsFactory;
 import ai.singlr.sail.api.SailApiServer;
+import ai.singlr.sail.api.SyncStatus;
 import ai.singlr.sail.config.HostYaml;
 import ai.singlr.sail.config.ListenConfig;
 import ai.singlr.sail.config.YamlUtil;
@@ -23,6 +25,7 @@ import ai.singlr.sail.engine.PoolMembers;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.ShellExecutor;
+import ai.singlr.sail.engine.SyncOperations;
 import ai.singlr.sail.pty.PtySessionHost;
 import java.io.IOException;
 import java.io.PrintStream;
@@ -79,6 +82,29 @@ public final class HostStatusCommand implements Runnable {
         json,
         operator,
         System.out);
+    if (!json) {
+      try (var operations = OperationsFactory.open(operator::warn)) {
+        removedFromMain(operations.syncStatus(), hostYaml.sync().handle(), operator)
+            .ifPresent(System.out::println);
+      }
+    }
+  }
+
+  /**
+   * The line that says main no longer knows this box's person, {@code handle}, when its last round
+   * was refused for that.
+   */
+  static Optional<String> removedFromMain(
+      SyncStatus status, String handle, OperatorCommand operator) {
+    if (!SyncOperations.REMOVED.equals(status.lastErrorKind())) {
+      return Optional.empty();
+    }
+    return Optional.of(
+        "  Main no longer knows this box's person, "
+            + handle
+            + ": the box syncs no more until an admin on main adds them again. '"
+            + operator.sail("sync")
+            + "' prints the line to send them.");
   }
 
   static void report(

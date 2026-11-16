@@ -28,12 +28,23 @@ import java.util.function.Predicate;
 
 /** The workstation key goes only to the box's own person: it is their laptop's (T2). */
 public record WorkspaceOwner(
-    String handle, String name, String email, Map<String, String> tokens, List<String> keys) {
+    String handle,
+    String name,
+    String email,
+    Map<String, String> tokens,
+    List<String> keys,
+    String id) {
 
   public WorkspaceOwner {
     Objects.requireNonNull(handle, "handle");
     tokens = Map.copyOf(tokens);
     keys = List.copyOf(keys);
+  }
+
+  /** An owner whose id on this box is not known: its workspaces are labelled by handle alone. */
+  public WorkspaceOwner(
+      String handle, String name, String email, Map<String, String> tokens, List<String> keys) {
+    this(handle, name, email, tokens, keys, null);
   }
 
   /** Its own type so a refusal at the give is told apart from a create that failed. */
@@ -98,7 +109,8 @@ public record WorkspaceOwner(
         Strings.isBlank(fde.displayName()) ? handle : fde.displayName(),
         Objects.toString(fde.email(), ""),
         fdes.logins().gitTokens(fde.id()),
-        keys);
+        keys,
+        fde.id());
   }
 
   /** A workspace commits as its owner, and fetches as them: without either it cannot work. */
