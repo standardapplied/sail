@@ -35,11 +35,12 @@ public struct Stalls: Sendable {
         if gaps.count > Self.capacity { gaps.removeFirst() }
     }
 
-    /// How much of `wait` this thread was held too, in seconds: of each gap that overlaps it, the
-    /// gap less one tick, never below zero and never more than the overlap. A wait the machine
-    /// held every thread through is the machine's; a gap at another moment says nothing of it.
+    /// How much of `wait` this thread was held too, in seconds: the longest stall that overlaps
+    /// it, less one tick, never below zero and never more than the overlap. A stall the machine held
+    /// every thread through is the machine's; one at another moment says nothing of this wait, and
+    /// ticks merely late on a busy machine do not add up to one.
     public func shared(with wait: Span) -> Double {
-        gaps.reduce(0) { held, gap in held + min(gap.overlap(wait), max(0, gap.length - tick)) }
+        gaps.reduce(0) { held, gap in max(held, min(gap.overlap(wait), max(0, gap.length - tick))) }
     }
 
     public func net(of wait: Span) -> Double {
