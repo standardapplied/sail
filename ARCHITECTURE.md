@@ -1436,8 +1436,9 @@ Each row with the tests that prove it:
   said to be one. The read route declares `Gate.READS_IN_SCOPE` and reads through
   `ProjectGate.readable`. Entering a workspace, a terminal in it or making, starting, stopping or
   deleting one, is then **Enter a workspace** on its owner (R10): one decision,
-  `WorkspaceDoors.refusal` over `Resources.workspace` (`user.sail.owner`, read in one place,
-  `Workspaces.ownerOf`), for the host CLI verbs, the API routes and the terminal alike. Its owner
+  `WorkspaceDoors.refusal` over `Resources.workspace` (`user.sail.owner`, judged by the id its
+  label stores, `user.sail.owner_id`, and read in one place, `Workspaces.ownerOf`: a label whose
+  id is not its handle's active person's, or whose person is gone, is no one's), for the host CLI verbs, the API routes and the terminal alike. Its owner
   or an admin enters; a viewer and every agent never; one with no owner, made by hand or taken
   back when its owner left the box, an admin alone; one being made is its caller's. The routes
   are `POST /v1/projects/{p}/workspaces` (`{"name"}`, from the current template, which the server
