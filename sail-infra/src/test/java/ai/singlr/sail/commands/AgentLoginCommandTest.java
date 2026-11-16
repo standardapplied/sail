@@ -12,27 +12,36 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.api.EventBus;
 import ai.singlr.sail.api.OperationsFactory;
+import ai.singlr.sail.api.RunReports;
 import ai.singlr.sail.api.SailApiServer;
 import ai.singlr.sail.api.SessionYield;
 import ai.singlr.sail.api.SyncScheduler;
 import ai.singlr.sail.api.TestAuth;
 import ai.singlr.sail.api.TestControlPlane;
+import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.harness.Harnesses;
+import ai.singlr.sail.harness.LoginOutcome;
+import ai.singlr.sail.harness.RunReport;
+import ai.singlr.sail.harness.RunUsage;
+import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.store.FdeStore;
+import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.Sqlite;
 import ai.singlr.sail.store.TokenStore;
 import java.io.ByteArrayInputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import picocli.CommandLine;
 
 /**
  * {@code sail agent login} over a running API, as a person runs it: the value read from stdin,
@@ -120,6 +129,74 @@ class AgentLoginCommandTest {
     assertTrue(used.out().contains("Using claude-code login 'personal' (token, the default)"));
     assertEquals(0, removed.exit(), removed.err());
     assertTrue(sail("", "login", "list").out().contains("personal"));
+  }
+
+  /**
+   * Every command a run's login outcome names works as pasted: the refusal's for a named API key
+   * and the ending token's for the default replace exactly the login they name, which stays as it
+   * was otherwise (the default stays the default).
+   */
+  @Test
+  void theCommandARefusalNamesReplacesTheLoginItNamesWhenPastedAsPrinted() {
+    var uday = new FdeStore(db).byHandle("uday").orElseThrow().id();
+    var claude = Harnesses.of("claude-code");
+    new FdeStore(db).logins().store(uday, claude, null, "token", "sk-ant-oat01-old");
+    new FdeStore(db).logins().store(uday, claude, "work", "api-key", "sk-ant-api03-old");
+    var told = new ArrayList<String>();
+    var refused = new RunReport(RunUsage.NONE, new LoginOutcome.Refused());
+    var reports = new RunReports(run -> refused, (spec, body) -> told.add(body), event -> {});
+    var runs = new RunStore(db);
+    for (var login :
+        List.of(
+            new RunStore.RunLogin("work", "api-key"), new RunStore.RunLogin("default", "token"))) {
+      var id = DateTimeUtils.newId().toString();
+      Acting.system(
+          () -> {
+            runs.create(
+                id,
+                "acme",
+                "auth",
+                "uday",
+                "build",
+                "claude-code",
+                "b",
+                "t",
+                null,
+                null,
+                "/l",
+                "u");
+            runs.recordLaunch(id, new RunStore.Launched(null, null, null, login, null));
+          });
+      reports.finish(runs, runs.findById(id).orElseThrow(), report -> true);
+    }
+
+    for (var sentence : told) {
+      var printed =
+          sentence.substring(sentence.indexOf(", then ") + 7, sentence.indexOf(". Then build"));
+      var words = List.of(printed.split(" "));
+      assertEquals(List.of("sail", "agent", "login"), words.subList(0, 3), printed);
+      var ran = sail(KEY, words.subList(2, words.size()).toArray(String[]::new));
+      assertEquals(0, ran.exit(), printed + ": " + ran.err());
+      var next = sentence.substring(sentence.indexOf("again: ") + 7, sentence.length() - 1);
+      var dispatch = new DispatchCommand();
+      var parsed = List.of(next.split(" "));
+      assertEquals(List.of("sail", "spec", "dispatch"), parsed.subList(0, 3), next);
+      new CommandLine(dispatch).parseArgs(parsed.subList(3, parsed.size()).toArray(String[]::new));
+      assertEquals(
+          "-p acme --spec auth --restart",
+          String.join(" ", parsed.subList(3, parsed.size())),
+          "the build's next step, as the CLI prints it for a spec not pending");
+    }
+
+    var logins = new FdeStore(db).logins();
+    assertEquals(KEY, logins.defaultFor(uday, claude).orElseThrow().value());
+    assertEquals("token", logins.defaultFor(uday, claude).orElseThrow().row().kind());
+    assertEquals(
+        List.of("default token true", "work api-key false"),
+        logins.list(uday).stream()
+            .filter(row -> row.harness().equals("claude-code"))
+            .map(row -> row.name() + " " + row.kind() + " " + row.isDefault())
+            .toList());
   }
 
   @Test

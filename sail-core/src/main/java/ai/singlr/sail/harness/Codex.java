@@ -12,6 +12,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.OptionalInt;
+import java.util.regex.Pattern;
 
 /** Codex CLI: {@code codex exec}, whose hooks sail reaches through Codex's hook trust model. */
 final class Codex implements Harness {
@@ -19,6 +20,10 @@ final class Codex implements Harness {
   private static final String BINARY = "codex";
   private static final String TOKEN_COUNT = "\"type\":\"token_count\"";
   private static final String TURN_CONTEXT = "\"type\":\"turn_context\"";
+  private static final String TASK_COMPLETE = "\"type\":\"task_complete\"";
+
+  /** When a usage limit resets, as its message says it. */
+  private static final Pattern TRY_AGAIN = Pattern.compile("(?i)try again at ([^.]+)");
 
   /**
    * Codex takes whatever level the selected model advertises ({@code model_reasoning_effort}), so
@@ -135,7 +140,7 @@ final class Codex implements Harness {
 
   @Override
   public List<String> reportMarkers() {
-    return List.of(TOKEN_COUNT, TURN_CONTEXT);
+    return List.of(TOKEN_COUNT, TURN_CONTEXT, TASK_COMPLETE);
   }
 
   /**
@@ -158,8 +163,7 @@ final class Codex implements Harness {
             RunUsage.map(RunUsage.map(found.line(), "payload"), "info"), "total_token_usage");
     var input = RunUsage.count(total, "input_tokens");
     var cached = RunUsage.count(total, "cached_input_tokens");
-    var context =
-        RunUsage.last(report, TURN_CONTEXT, line -> "turn_context".equals(line.get("type"))).line();
+    var context = RunUsage.last(report, TURN_CONTEXT, Codex::isTurnContext).line();
     var model = context == null ? null : RunUsage.map(context, "payload").get("model");
     return new RunUsage(
         model instanceof String named ? named : null,
@@ -169,6 +173,52 @@ final class Codex implements Harness {
         RunUsage.count(total, "cache_write_input_tokens"),
         null,
         RunUsage.Source.TRANSCRIPT);
+  }
+
+  /**
+   * The {@code task_complete} of the transcript's last turn, the one whose {@code turn_id} its last
+   * {@code turn_context} names: a resumed session's rollout holds earlier runs' turns, and an end
+   * of one of theirs says nothing of this run. Its error's {@code codex_error_info} naming an HTTP
+   * 401 is a refusal, and {@code usage_limit_exceeded} a limit, with the time its message says to
+   * try again at. {@code codex exec} without {@code --json}, as Sail launches it, writes no {@code
+   * turn.failed}; this is where its end is recorded (codex-cli 0.163.0).
+   */
+  @Override
+  public Optional<LoginOutcome> loginOutcome(String report, LoginKind given) {
+    var context = RunUsage.last(report, TURN_CONTEXT, Codex::isTurnContext).line();
+    var turn = context == null ? null : RunUsage.map(context, "payload").get("turn_id");
+    var done =
+        RunUsage.last(
+                report,
+                TASK_COMPLETE,
+                line -> "task_complete".equals(RunUsage.map(line, "payload").get("type")))
+            .line();
+    if (turn == null
+        || done == null
+        || !turn.equals(RunUsage.map(done, "payload").get("turn_id"))) {
+      return Optional.empty();
+    }
+    var error = RunUsage.map(RunUsage.map(done, "payload"), "error");
+    var failed = RunUsage.map(RunUsage.map(error, "codex_error_info"), "http_connection_failed");
+    if (Long.valueOf(401).equals(RunUsage.count(failed, "http_status_code"))) {
+      return Optional.of(new LoginOutcome.Refused());
+    }
+    if (!"usage_limit_exceeded".equals(error.get("codex_error_info"))) {
+      return Optional.empty();
+    }
+    var message = error.get("message") instanceof String said ? said : "";
+    var resets =
+        TRY_AGAIN
+            .matcher(message)
+            .results()
+            .map(found -> found.group(1))
+            .reduce((first, last) -> last)
+            .map(LoginOutcome::resetTime);
+    return Optional.of(new LoginOutcome.Limited(resets.orElse(null)));
+  }
+
+  private static boolean isTurnContext(Map<String, Object> line) {
+    return "turn_context".equals(line.get("type"));
   }
 
   private static boolean counts(Map<String, Object> line) {
@@ -188,7 +238,9 @@ final class Codex implements Harness {
         new LoginKind(
             "api-key",
             "CODEX_API_KEY",
-            Remedy.of("Create an API key at platform.openai.com/api-keys")));
+            "API key",
+            Remedy.of("Create an API key at platform.openai.com/api-keys"),
+            null));
   }
 
   /**

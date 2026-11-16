@@ -801,6 +801,11 @@ public final class SailOperations implements HostOperations {
     return dispatchOps.reviewLanes();
   }
 
+  /** Where this box's finishers read run reports and say them — see {@code runReports}. */
+  public RunReports runReports() {
+    return dispatchOps.runReports();
+  }
+
   /** Runs the room commit guard through the shared dispatch executor. */
   public void guardRoomRun(String project, String runId) {
     dispatchOps.guardRoomRun(project, runId);

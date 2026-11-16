@@ -18,7 +18,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import ai.singlr.sail.config.Lane;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.engine.RunPlace;
-import ai.singlr.sail.harness.RunUsage;
+import ai.singlr.sail.harness.RunReport;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.store.Finding;
 import ai.singlr.sail.store.ReviewStore;
@@ -71,7 +71,9 @@ class LoopStepsTest {
     lanes.set(loop.operations.reviewLanes());
     var narrator = new LoopNarrator(loop.specs, loop.bus, this::sync);
     narrator.useMessages(loop.messages);
-    reader = new LoopFactsReader(loop.specs, loop.reviews, loop.runs, () -> ReviewLoop.HANDLE);
+    reader =
+        new LoopFactsReader(
+            loop.specs, loop.reviews, loop.runs, () -> ReviewLoop.HANDLE, run -> false);
     steps =
         new LoopSteps(
             loop.specs,
@@ -93,9 +95,13 @@ class LoopStepsTest {
               }
 
               @Override
-              public RunUsage usage(RunStore.RunRow run) {
+              public RunReports reports() {
+                return new RunReports(run -> RunReport.NONE, RunLauncher.Room.NONE, event -> {});
+              }
 
-                return RunUsage.NONE;
+              @Override
+              public boolean loginReplaced(RunStore.RunRow run) {
+                return false;
               }
 
               @Override
@@ -149,9 +155,13 @@ class LoopStepsTest {
           }
 
           @Override
-          public RunUsage usage(RunStore.RunRow run) {
+          public RunReports reports() {
+            return new RunReports(run -> RunReport.NONE, RunLauncher.Room.NONE, event -> {});
+          }
 
-            return RunUsage.NONE;
+          @Override
+          public boolean loginReplaced(RunStore.RunRow run) {
+            return false;
           }
 
           @Override
@@ -540,9 +550,13 @@ class LoopStepsTest {
           }
 
           @Override
-          public RunUsage usage(RunStore.RunRow run) {
+          public RunReports reports() {
+            return new RunReports(run -> RunReport.NONE, RunLauncher.Room.NONE, event -> {});
+          }
 
-            return RunUsage.NONE;
+          @Override
+          public boolean loginReplaced(RunStore.RunRow run) {
+            return false;
           }
 
           @Override
@@ -734,9 +748,13 @@ class LoopStepsTest {
           }
 
           @Override
-          public RunUsage usage(RunStore.RunRow run) {
+          public RunReports reports() {
+            return new RunReports(run -> RunReport.NONE, RunLauncher.Room.NONE, event -> {});
+          }
 
-            return RunUsage.NONE;
+          @Override
+          public boolean loginReplaced(RunStore.RunRow run) {
+            return false;
           }
 
           @Override

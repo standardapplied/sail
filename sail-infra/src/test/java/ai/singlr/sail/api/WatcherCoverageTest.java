@@ -50,6 +50,7 @@ class WatcherCoverageTest {
         null,
         null,
         null,
+        null,
         null);
   }
 

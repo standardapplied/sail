@@ -535,6 +535,7 @@ class AgentAttachCommandTest {
         null,
         null,
         null,
+        null,
         null);
   }
 

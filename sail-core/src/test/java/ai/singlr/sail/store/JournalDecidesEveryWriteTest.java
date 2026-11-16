@@ -16,7 +16,7 @@ import ai.singlr.sail.config.Lane;
 import ai.singlr.sail.config.ProjectDefinition.Section;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.config.TestDefinitions;
-import ai.singlr.sail.harness.RunUsage;
+import ai.singlr.sail.harness.RunReport;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.Role;
@@ -307,11 +307,12 @@ class JournalDecidesEveryWriteTest {
         owned(
             "RunStore.finishAsTurnsRecorded",
             f -> f.runs.finishAsTurnsRecorded(f.run, "completed", 0)),
-        owned("RunStore.recordRead", f -> f.runs.recordRead(f.unread, RunUsage.NONE)),
+        owned("RunStore.recordRead", f -> f.runs.recordRead(f.unread, RunReport.NONE)),
         owned("RunStore.claimStop", f -> f.runs.claimStop(f.run, "stopping", () -> {})),
         owned("RunStore.releaseStop", f -> f.runs.releaseStop(f.stopping, () -> {})),
         owned(
-            "RunStore.finish", f -> f.runs.finish(f.run, "running", "completed", 0, RunUsage.NONE)),
+            "RunStore.finish",
+            f -> f.runs.finish(f.run, "running", "completed", 0, RunReport.NONE)),
         owned(
             "RunStore.transitionUnstarted",
             f -> f.runs.transitionUnstarted(f.unstarted, "stopped")),

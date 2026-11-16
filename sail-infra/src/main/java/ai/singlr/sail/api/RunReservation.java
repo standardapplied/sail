@@ -6,6 +6,7 @@
 package ai.singlr.sail.api;
 
 import ai.singlr.sail.authority.WriteRefused;
+import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.Lane;
 import ai.singlr.sail.config.ProjectDefinition;
@@ -18,7 +19,7 @@ import ai.singlr.sail.engine.LaunchEnv;
 import ai.singlr.sail.engine.RunPlace;
 import ai.singlr.sail.engine.RunRetention;
 import ai.singlr.sail.engine.ShellExec;
-import ai.singlr.sail.harness.RunUsage;
+import ai.singlr.sail.harness.RunReport;
 import ai.singlr.sail.store.DispatchGate;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.LoginStore;
@@ -76,6 +77,7 @@ public final class RunReservation {
   private final SessionYield sessionYield;
   private final Displaceable displaceable;
   private final RunLogins logins;
+  private final FdeStore fdes;
 
   /**
    * {@code fdes} is the roster whose people's stored logins spec runs start with; {@code room} is
@@ -88,13 +90,22 @@ public final class RunReservation {
       SessionYield sessionYield,
       Displaceable displaceable,
       FdeStore fdes,
-      RunLauncher.Room room) {
+      RunLauncher.Room room,
+      DispatchOperations.EventSink events) {
     this.runStore = runStore;
     this.shell = shell;
     this.listener = listener;
     this.sessionYield = Objects.requireNonNull(sessionYield, "sessionYield");
     this.displaceable = Objects.requireNonNull(displaceable, "displaceable");
-    this.logins = new RunLogins(fdes, room);
+    this.logins = new RunLogins(fdes, room, listener, events, DateTimeUtils::now);
+    this.fdes = fdes;
+  }
+
+  /**
+   * Whether the login {@code run} was given has since been replaced ({@link RunLogins#replaced}).
+   */
+  boolean loginReplaced(RunStore.RunRow run) {
+    return fdes != null && RunLogins.replaced(fdes, run);
   }
 
   /**
@@ -215,29 +226,36 @@ public final class RunReservation {
       ProjectDefinition config,
       Runnable alongside) {
     var login = logins.forRun(specId, boxHandle, agentType);
-    return claim(
-        runId,
-        project,
-        specId,
-        role,
-        repos,
-        login,
+    var claim =
+        claim(
+            runId,
+            project,
+            specId,
+            role,
+            repos,
+            login,
+            () ->
+                runStore.reserveDispatch(
+                    runId,
+                    project,
+                    specId,
+                    roomId,
+                    boxHandle,
+                    role,
+                    repos,
+                    agentType,
+                    branch,
+                    task,
+                    unit.logPath(),
+                    unit.unitName(),
+                    configuredMaxDuration(config, role),
+                    alongside));
+    whenClaimed(
+        claim,
         () ->
-            runStore.reserveDispatch(
-                runId,
-                project,
-                specId,
-                roomId,
-                boxHandle,
-                role,
-                repos,
-                agentType,
-                branch,
-                task,
-                unit.logPath(),
-                unit.unitName(),
-                configuredMaxDuration(config, role),
-                alongside));
+            login.ifPresent(
+                stored -> runStore.findById(runId).ifPresent(run -> logins.ending(run, stored))));
+    return claim;
   }
 
   /** How a claim on a spec's repos was answered. */
@@ -572,7 +590,7 @@ public final class RunReservation {
   private void failRun(String runId) {
     runBookkeeping(
         "mark run failed " + runId,
-        () -> runStore.finish(runId, "running", "failed", null, RunUsage.NONE));
+        () -> runStore.finish(runId, "running", "failed", null, RunReport.NONE));
   }
 
   /**

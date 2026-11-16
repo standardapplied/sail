@@ -41,7 +41,7 @@ import ai.singlr.sail.engine.WorkstationIdentity;
 import ai.singlr.sail.gen.SpecSkillGenerator;
 import ai.singlr.sail.harness.Harness;
 import ai.singlr.sail.harness.Harnesses;
-import ai.singlr.sail.harness.RunUsage;
+import ai.singlr.sail.harness.RunReport;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.Role;
@@ -226,7 +226,10 @@ class ReviewAgentLoopIT extends AbstractIncusIT {
                         "no_critical"))));
     bus.subscribe(
         new RunTracker(
-            runStore, finished -> RunUsage.NONE, SyncScheduler.disabled(), () -> HANDLE));
+            runStore,
+            new RunReports(finished -> RunReport.NONE, RunLauncher.Room.NONE, event -> {}),
+            SyncScheduler.disabled(),
+            () -> HANDLE));
     bus.subscribe(listener());
     bus.subscribe(
         new ReviewPipelineController(

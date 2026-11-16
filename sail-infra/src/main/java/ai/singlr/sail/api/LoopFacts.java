@@ -87,12 +87,16 @@ record LoopFacts(
     record Retry(ReviewStore.ReviewRow review) implements Owed {}
 
     /**
-     * The review is running, no reviewer was ever launched for the stage it is in, and no wait is
-     * recorded: the launch was cut short before the gate answered.
+     * The review is running, no reviewer was ever launched for the stage it is in, or the one that
+     * was ended for its login, and no wait is recorded: the launch was cut short before the gate
+     * answered, or the stage waits for a login to be stored.
      */
     record Advance(ReviewStore.ReviewRow review) implements Owed {}
 
-    /** The review failed its gate, and neither a fix agent nor a wait was recorded for it. */
+    /**
+     * The review failed its gate, and neither a fix agent nor a wait was recorded for it, or the
+     * fix agent was ended for its login.
+     */
     record Fix(ReviewStore.ReviewRow review) implements Owed {}
 
     /**
@@ -163,6 +167,10 @@ record LoopFacts(
    * @param serving the runs this box executed that serve the review, newest first
    * @param newestLoopRun the spec's newest build, reviewer or fix run, whichever box executed it
    * @param holderEnded whether the run the review recorded that it waits on holds nothing any more
+   * @param heldForLogin whether the newest run serving the review, a reviewer or a fix agent, had
+   *     its login refused, however late its report was read, and that login is still what its
+   *     person's runs start with ({@link RunLogins#replaced}): the review is held, and moves once a
+   *     login replaces it, whether or not the store's event was heard
    */
   record Rows(
       String node,
@@ -171,7 +179,13 @@ record LoopFacts(
       List<ReviewStore.StageRow> stages,
       List<RunStore.RunRow> serving,
       Optional<RunStore.RunRow> newestLoopRun,
-      boolean holderEnded) {
+      boolean holderEnded,
+      boolean heldForLogin) {
+
+    /** The newest run serving the review, when its login was refused, held or since replaced. */
+    Optional<RunStore.RunRow> refusedItsLogin() {
+      return serving.stream().findFirst().filter(RunStore.RunRow::stoppedForLogin);
+    }
 
     /** Whether this box executed the newest run of the spec's loop, and so drives it. */
     boolean drivenHere() {
@@ -276,7 +290,7 @@ record LoopFacts(
         return new Owed.Nothing();
       }
       return newest
-          .filter(run -> Lane.REVIEW.matches(run.role()))
+          .filter(run -> Lane.REVIEW.matches(run.role()) && !run.stoppedForLogin())
           .filter(reviewer -> stageReviewedBy(reviewer).isPresent())
           .<Owed>map(reviewer -> new Owed.Stop(review, reviewer))
           .orElseGet(() -> unserved(review, new Owed.Advance(review)));
@@ -285,7 +299,7 @@ record LoopFacts(
     private static Owed afterGateFailure(
         ReviewStore.ReviewRow review, Optional<RunStore.RunRow> newest) {
       return newest
-          .filter(run -> Lane.FIX.matches(run.role()))
+          .filter(run -> Lane.FIX.matches(run.role()) && !run.stoppedForLogin())
           .<Owed>map(fix -> new Owed.Stop(review, fix))
           .orElseGet(() -> unserved(review, new Owed.Fix(review)));
     }

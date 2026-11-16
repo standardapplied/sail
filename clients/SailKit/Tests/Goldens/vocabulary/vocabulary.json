@@ -231,6 +231,7 @@
     "agent_conversation_started",
     "agent_failed",
     "agent_log_chunk",
+    "agent_login_outcome",
     "agent_presence",
     "agent_session_completed",
     "agent_session_started",

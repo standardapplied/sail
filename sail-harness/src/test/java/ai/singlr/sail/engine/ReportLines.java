@@ -9,9 +9,9 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * A container's answer to {@link RunUsageReader}'s command, as its script gives it over a file: for
- * each marker in turn, the last lines holding it, newest first; nothing, with tac's word on stderr,
- * when the file is not there; exit 0 either way.
+ * A container's answer to {@link RunReportReader}'s command, as its script gives it over a file:
+ * for each marker in turn, the last lines holding it, newest first; nothing, with tac's word on
+ * stderr, when the file is not there; exit 0 either way.
  */
 public final class ReportLines {
 
@@ -19,12 +19,12 @@ public final class ReportLines {
 
   /** Whether {@code command} is the reader's. */
   public static boolean asks(List<String> command) {
-    return command.contains(RunUsageReader.LAST_MARKED);
+    return command.contains(RunReportReader.LAST_MARKED);
   }
 
   /** The answer to {@code command} over {@code file}, which is not there when null. */
   public static ShellExec.Result answer(String file, List<String> command) {
-    var at = command.indexOf(RunUsageReader.LAST_MARKED);
+    var at = command.indexOf(RunReportReader.LAST_MARKED);
     var path = command.get(at + 2);
     if (file == null) {
       return new ShellExec.Result(

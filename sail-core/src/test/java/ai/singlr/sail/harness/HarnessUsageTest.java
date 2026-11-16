@@ -49,7 +49,7 @@ class HarnessUsageTest {
   }
 
   /** Only a report file's lines holding a marker: what the reader asks a container for. */
-  private static String marked(Harness harness, String report) {
+  static String marked(Harness harness, String report) {
     return String.join(
         "\n",
         report
