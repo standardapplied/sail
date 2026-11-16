@@ -253,12 +253,17 @@ public final class WorkbenchView: NSView {
     /// Where a new pane opens: as the focused one, in the folder its shell reported when that is
     /// on this Mac, else where it opened; in the home folder with no tab.
     private func newPlace() -> Place {
+        .thisMac(folder: model.folderForNewPane(hostNames: [Self.hostName], isFolder: Self.isFolder) ?? NSHomeDirectory())
+    }
+
+    /// This Mac's name as `hostname` says it, read from the kernel: `ProcessInfo.hostName` asks
+    /// the network, which can hold the main thread for seconds and has macOS ask the person for
+    /// local network access.
+    private static let hostName: String = {
         var name = [CChar](repeating: 0, count: 256)
         gethostname(&name, name.count)
-        let short = String(decoding: name.prefix { $0 != 0 }.map { UInt8(bitPattern: $0) }, as: UTF8.self)
-        let names: Set<String> = [ProcessInfo.processInfo.hostName, short]
-        return .thisMac(folder: model.folderForNewPane(hostNames: names, isFolder: Self.isFolder) ?? NSHomeDirectory())
-    }
+        return String(decoding: name.prefix { $0 != 0 }.map { UInt8(bitPattern: $0) }, as: UTF8.self)
+    }()
 
     private static func isFolder(_ path: String) -> Bool {
         var folder: ObjCBool = false
