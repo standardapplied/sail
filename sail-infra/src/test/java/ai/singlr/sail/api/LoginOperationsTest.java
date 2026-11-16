@@ -48,14 +48,16 @@ class LoginOperationsTest {
       var fdes = new FdeStore(db);
       fdes.add("uday", null, null, "member");
       fdes.add("ada", null, null, "admin");
-      fdes.disableUnlisted(List.of("ada"));
+      fdes.disableUnlisted(List.of("ada"), null);
       var doors = new LoginOperations(fdes, null, event -> {}, handle -> List.of());
 
       var store =
           assertThrows(
               ApiException.class,
               () ->
-                  Actor.call(UDAY, () -> doors.store("git", "github.com", "token", "ghp_x", null)));
+                  Actor.call(
+                      UDAY,
+                      () -> doors.store("git", "github.com", "token", "ghp_x_0123456789ab", null)));
       var use =
           assertThrows(
               ApiException.class, () -> Actor.call(UDAY, () -> doors.use("codex", "work")));
@@ -139,10 +141,13 @@ class LoginOperationsTest {
               });
 
       var stored =
-          Actor.call(UDAY, () -> doors.store("git", "github.com", "token", "ghp_one", null));
+          Actor.call(
+              UDAY, () -> doors.store("git", "github.com", "token", "ghp_one_0123456789ab", null));
       var removed = Actor.call(UDAY, () -> doors.remove("git", "github.com", null));
       var blind =
-          Actor.call(UDAY, () -> unreadable.store("git", "github.com", "token", "ghp_two", null));
+          Actor.call(
+              UDAY,
+              () -> unreadable.store("git", "github.com", "token", "ghp_two_0123456789ab", null));
       var interrupting =
           new LoginOperations(
               new FdeStore(db),
@@ -151,7 +156,9 @@ class LoginOperationsTest {
               handle -> {
                 throw new InterruptedException("stopped");
               });
-      Actor.call(UDAY, () -> interrupting.store("git", "github.com", "token", "ghp_three", null));
+      Actor.call(
+          UDAY,
+          () -> interrupting.store("git", "github.com", "token", "ghp_three_0123456789ab", null));
       assertTrue(Thread.interrupted(), "the interrupt is kept");
 
       assertEquals(List.of("uday", "uday"), reached);

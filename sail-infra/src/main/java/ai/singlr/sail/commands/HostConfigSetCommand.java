@@ -11,6 +11,7 @@ import ai.singlr.sail.config.ListenConfig;
 import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.config.WebauthnConfig;
 import ai.singlr.sail.config.YamlUtil;
+import ai.singlr.sail.engine.ContainerAuthorizedKeys;
 import ai.singlr.sail.engine.DaemonSecretInstaller;
 import ai.singlr.sail.engine.HandleChange;
 import ai.singlr.sail.engine.NetworkDetector;
@@ -317,7 +318,13 @@ public final class HostConfigSetCommand implements Runnable {
     List<String> unreached;
     try {
       unreached =
-          FdeCommand.Pair.trustWorkstationKey(FdeCommand.Box.here(), replaced, chosen, operator);
+          ContainerAuthorizedKeys.rekeyWorkstation(
+              new ShellExecutor(false),
+              SailPaths.controlPlaneDb(),
+              HostSync.handle(),
+              replaced,
+              chosen,
+              operator);
     } catch (InterruptedException e) {
       Thread.currentThread().interrupt();
       throw new IOException("Interrupted while the containers took the new key.", e);

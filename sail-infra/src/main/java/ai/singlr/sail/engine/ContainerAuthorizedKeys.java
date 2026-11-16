@@ -7,7 +7,10 @@ package ai.singlr.sail.engine;
 
 import ai.singlr.sail.common.Remedied;
 import ai.singlr.sail.ssh.SshPublicKey;
+import ai.singlr.sail.store.ProjectStore;
+import ai.singlr.sail.store.Sqlite;
 import java.io.IOException;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
@@ -42,6 +45,81 @@ public final class ContainerAuthorizedKeys {
 
   public ContainerAuthorizedKeys(ShellExec shell) {
     this.shell = shell;
+  }
+
+  /**
+   * A new workstation key for this box, one path for a pairing and {@code host config set
+   * ssh-public-key}: {@code replaced} out of every container, and {@code key} into the container of
+   * each project this box runs and the workspaces of its person, {@code boxHandle}. Answers a
+   * sentence for each container left behind; a box whose containers cannot be listed names the
+   * apply of every one instead, since the catalog holds projects this box never ran.
+   */
+  public static List<String> rekeyWorkstation(
+      ShellExec shell,
+      Path database,
+      String boxHandle,
+      Optional<SshPublicKey> replaced,
+      SshPublicKey key,
+      OperatorCommand operator)
+      throws InterruptedException {
+    var keys = new ContainerAuthorizedKeys(shell);
+    var unreached = new ArrayList<String>();
+    if (replaced.isPresent()) {
+      var old = replaced.get();
+      try {
+        keys.removeFromEach(old)
+            .forEach(c -> unreached.add(stillTrusts(c.container(), c.reason(), old)));
+      } catch (IOException | TimeoutException failure) {
+        unreached.add(stillTrusts("This box's containers", Remedied.reasonOf(failure), old));
+      }
+    }
+    List<String> projects;
+    try (var db = Sqlite.open(database)) {
+      projects = new ProjectStore(db).list().stream().map(ProjectStore.ProjectRow::name).toList();
+    }
+    if (projects.isEmpty()) {
+      return List.copyOf(unreached);
+    }
+    try {
+      keys.add(key, projects, boxHandle)
+          .forEach(c -> unreached.add(notTrustedYet(c.container(), c.reason(), operator)));
+    } catch (IOException | TimeoutException failure) {
+      unreached.add(noneTrustYet(Remedied.reasonOf(failure).strip(), operator));
+    }
+    return List.copyOf(unreached);
+  }
+
+  public static String notTrustedYet(String container, String why, OperatorCommand operator) {
+    return container
+        + " does not trust this key yet: "
+        + why
+        + ". Make it: '"
+        + operator.sail("project apply " + container)
+        + "'.";
+  }
+
+  public static String noneTrustYet(String why, OperatorCommand operator) {
+    return "This box's containers do not trust this key yet: "
+        + why
+        + ". Once incus answers, make them: '"
+        + operator.sail("project apply --all")
+        + "'.";
+  }
+
+  private static String stillTrusts(String where, String why, SshPublicKey replaced) {
+    return where
+        + " may still trust the replaced workstation key "
+        + describe(replaced)
+        + ": "
+        + why.strip()
+        + ". Take its line out of every /home account's .ssh/authorized_keys there.";
+  }
+
+  /** A key as a person recognises it: its fingerprint, and its comment when it has one. */
+  public static String describe(SshPublicKey key) {
+    return key.comment() == null
+        ? key.fingerprint()
+        : key.fingerprint() + " (" + key.comment() + ")";
   }
 
   /** A container an edit did not reach, and why. */

@@ -1526,7 +1526,6 @@ class SailOperationsSeamTest {
       assertTrue(operations.identity().sshKeys().isEmpty());
       assertEquals(
           "owner", operations.identity().workspaceOwner("owner").handle(), "the box's person");
-      assertEquals(List.of(), operations.identity().storedSecrets());
       assertTrue(operations.schema().version() > 0);
       assertEquals(
           "This box has no FDE identity. Set one with 'sail host config set sync-handle <handle>'"

@@ -63,7 +63,6 @@ import java.util.function.Function;
 import java.util.function.Supplier;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
-import java.util.stream.Stream;
 import picocli.CommandLine;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
@@ -240,32 +239,6 @@ public final class FdeCommand implements Runnable {
         + " Make it admin: @|bold "
         + operator.sail("fde update " + fde.handle() + " --role admin")
         + "|@";
-  }
-
-  static String stillTrusts(String where, String why, SshPublicKey replaced) {
-    return where
-        + " may still trust the replaced workstation key "
-        + Pair.describe(replaced)
-        + ": "
-        + why
-        + ". Take its line out of every /home account's .ssh/authorized_keys there.";
-  }
-
-  static String notTrustedYet(String container, String why, OperatorCommand operator) {
-    return container
-        + " does not trust this key yet: "
-        + why
-        + ". Make it: '"
-        + operator.sail("project apply " + container)
-        + "'.";
-  }
-
-  static String noneTrustYet(String why, OperatorCommand operator) {
-    return "This box's containers do not trust this key yet: "
-        + why
-        + ". Once incus answers, make them: '"
-        + operator.sail("project apply --all")
-        + "'.";
   }
 
   static String disabledForPairing(String handle, OperatorCommand operator) {
@@ -1183,70 +1156,13 @@ public final class FdeCommand implements Runnable {
         System.out.println("  Paste this code into Mast. It is a secret, and it is shown once:");
         System.out.println();
         System.out.println(code(box, address, pinned, key.privateKey(), token.token()));
-        var unreached = trustWorkstationKey(box, replaced, key.publicKey(), operator);
+        var unreached =
+            ContainerAuthorizedKeys.rekeyWorkstation(
+                box.shell(), box.database(), box.handle(), replaced, key.publicKey(), operator);
         if (!unreached.isEmpty()) {
           System.out.println();
           unreached.forEach(line -> System.out.println(Ansi.AUTO.string("  @|yellow ⚠|@ ") + line));
         }
-      }
-    }
-
-    /** One path for a pairing and {@code host config set ssh-public-key} alike. */
-    static List<String> trustWorkstationKey(
-        Box box, Optional<SshPublicKey> replaced, SshPublicKey key, OperatorCommand operator)
-        throws InterruptedException {
-      try (var db = Sqlite.open(box.database())) {
-        return Stream.concat(
-                untrustReplaced(box, replaced).stream(),
-                trustInContainers(box, db, key, operator).stream())
-            .toList();
-      }
-    }
-
-    /**
-     * Takes the workstation key this pairing {@code replaced} out of every container of this box,
-     * as unpair does, and names each that may still trust it. An apply would take it out of the SSH
-     * user's file alone, so the line it names is the one to take out by hand.
-     */
-    private static List<String> untrustReplaced(Box box, Optional<SshPublicKey> replaced)
-        throws InterruptedException {
-      if (replaced.isEmpty()) {
-        return List.of();
-      }
-      var old = replaced.get();
-      try {
-        return new ContainerAuthorizedKeys(box.shell())
-            .removeFromEach(old).stream()
-                .map(container -> stillTrusts(container.container(), container.reason(), old))
-                .toList();
-      } catch (IOException | TimeoutException failure) {
-        return List.of(
-            stillTrusts("This box's containers", Remedied.reasonOf(failure).strip(), old));
-      }
-    }
-
-    /**
-     * Writes {@code key} into the container of each project this box runs, and into the workspaces
-     * of the box's person, once its code is shown, and names each that does not trust it yet. The
-     * catalog holds projects this box never ran, so a box whose containers cannot be listed names
-     * the apply of every container it runs instead.
-     */
-    private static List<String> trustInContainers(
-        Box box, Sqlite db, SshPublicKey key, OperatorCommand operator)
-        throws InterruptedException {
-      var projects =
-          new ProjectStore(db).list().stream().map(ProjectStore.ProjectRow::name).toList();
-      if (projects.isEmpty()) {
-        return List.of();
-      }
-      try {
-        return new ContainerAuthorizedKeys(box.shell())
-            .add(key, projects, box.handle()).stream()
-                .map(
-                    container -> notTrustedYet(container.container(), container.reason(), operator))
-                .toList();
-      } catch (IOException | TimeoutException failure) {
-        return List.of(noneTrustYet(Remedied.reasonOf(failure).strip(), operator));
       }
     }
 
@@ -1337,9 +1253,7 @@ public final class FdeCommand implements Runnable {
     }
 
     private static String describe(SshPublicKey key) {
-      return key.comment() == null
-          ? key.fingerprint()
-          : key.fingerprint() + " (" + key.comment() + ")";
+      return ContainerAuthorizedKeys.describe(key);
     }
 
     /**

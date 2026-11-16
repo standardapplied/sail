@@ -746,7 +746,7 @@ public final class SyncOperations {
       FdeStore fdes, List<Map<String, Object>> roster, ProjectScope scope, String own) {
     var listed = roster.stream().map(entry -> str(entry, "handle")).toList();
     if (scope.unrestricted()) {
-      fdes.disableUnlisted(listed);
+      fdes.disableUnlisted(listed, own);
     } else {
       var removed = fdes.removeUnlisted(listed, own);
       if (removed > 0) {
@@ -760,6 +760,7 @@ public final class SyncOperations {
     var rejected = new ArrayList<String>();
     for (var entry : roster) {
       try {
+        fdes.forgetIfReused(str(entry, "handle"), Snapshots.instant(entry, "created_at"), own);
         fdes.replicate(
             str(entry, "handle"),
             str(entry, "display_name"),

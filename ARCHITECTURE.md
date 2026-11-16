@@ -1375,8 +1375,10 @@ Each row with the tests that prove it:
   `BoxInstancesTest.noProjectIsGivenAnInstanceThatIsAWorkspaceATemplateOrACopy`.*
 - **W5. A clone shares no machine identity.** The per-workspace step regenerates the machine-id
   and the SSH host keys, which every clone otherwise has from the template, the keys after the
-  hostname, so their comment names the project. Its template's keys are cleared with the ready
-  mark.
+  hostname, so their comment names the project. The new keys are made beside the template's and
+  renamed over them, so an sshd systemd starts meanwhile never finds none, and sshd is restarted
+  onto them only once its unit has finished starting; a restart that fails says the unit's result
+  and its last journal lines. Its template's keys are cleared with the ready mark.
   *`WorkspaceIT`; the script is pinned by `WorkspacesTest.theScriptThatMakesACloneItsOwnIsPinnedWhole`.*
 - **W6. Times are measured and said.** `create` and `start` print each phase and return it in
   JSON (`timings.clone_ms`, `start_ms`, `ready_ms`, `total_ms`), measured on `System.nanoTime`;
@@ -1471,14 +1473,15 @@ Each row with the tests that prove it:
   user's `user.name` and `user.email`, and every line of its `authorized_keys`. A check
   (`WorkspaceCredentials.HELD`) then proves the template holds nothing by content, not by a list
   of paths: (a) no token the build was given appears in any file of its root filesystem, grep
-  reading on stdin, as fixed-string patterns, every token the build was given and every login and
-  git token stored on this runner, never on a command line; (b) git reports
+  reading on stdin, as fixed-string patterns, the tokens the build was given and no one else's,
+  never on a command line (an empty pattern, which would match every file, fails the check, and
+  a stored git token is at least 16 characters); (b) git reports
   no user name or email at system or global level; (c) no `authorized_keys` under any home has a
   line; (d) gh reports no login. A search or a git or gh command that errors fails the build, as
   does anything found: nothing is recorded or snapshotted and the version before stays current. A
-  failed build is stripped too; what the strip does not remove (a file the project's own
-  provisioning wrote) is named, never its value, with the remedy to take that step out of the
-  definition and build again.
+  failed build is stripped too; what the strip does not remove is named, never its value, at most
+  three files and how many more, with the remedy to remove what wrote it, a step of the
+  definition or a hand change to the template, and build again.
   *`WorkspaceCredentialsTest` (both scripts run by real bash, grep and git: each of a–d found, the
   token hidden in `.netrc`, a gh temp file, a repo's remote URL and `/etc`, an unreadable git
   config failing as "cannot tell"),
@@ -1537,6 +1540,10 @@ Each row with the tests that prove it:
   reaches a person's workspaces by); a stopped one takes it when it next starts, since every start
   Sail makes (`workspace start`, a lane's re-entry) runs the owner step again. A workspace a
   change did not reach is said in the answer.
+  A token change for an owner a workspace already has is renewed in place under the workspace's
+  lock: the store written beside the old one and renamed over it, or removed when none is left,
+  and gh logged in again or out, never stripped, so a live run's fetch or push never meets the
+  workspace without a token. Strip-then-give stays for a create, a re-own and a start.
   *`LoginStoreTest`, `LoginRoutesTest.aPersonKeepsTheirOwnGitTokensByHostAndOnlyAnAdminReachesAnothersSeeingNoValue`,
   `GitCommandTest`, `WorkspacesTest.aReplacedTokenReachesTheOwnersRunningWorkspacesAloneByTheOwnerStep`,
   `WorkspacesTest.aStoppedWorkspaceTakesItsOwnersCredentialsAsTheyAreNowWhenItStarts`,
@@ -1544,17 +1551,22 @@ Each row with the tests that prove it:
   `WorkspaceIT.aReplacedTokenReachesARunningWorkspaceAtOnceAndAStoppedOneWhenItStarts`.*
 - **Keys follow owners.** One walker (`BoxInstances.wholeWorkspaceOf`) finds a person's
   workspaces for keys and tokens alike. A pairing and `host config set ssh-public-key` both
-  (`FdeCommand.Pair.trustWorkstationKey`) take the old workstation key out of every container and
+  (`ContainerAuthorizedKeys.rekeyWorkstation`) take the old workstation key out of every container and
   give the new one to the project's containers and the box person's workspaces; `sail fde key add`
   reaches that person's whole workspaces; a key removal (`fde key rm`, a replaced or unpaired
   workstation key) reaches every container and workspace; a stopped workspace takes its owner's
   keys as they are at its next start. A person removed (`fde rm`, or a scoped node's roster round)
   has every workspace they owned lose its token store, gh login and keys, and its owner, through
-  its files, running or stopped, and their stored logins and git tokens on the box erased. One
-  predicate decides who may hold credentials on a box, `FdeStore.Fde.active`: a person missing
-  from the roster, or `disabled` as a node marks a person main removed, holds none. It governs
-  the sweep, the give (never to a disabled person) and the login doors (a disabled person stores
-  and uses none). sail-api's pass reads the roster each minute and lists Incus only on its first
+  its files, running or stopped, and their stored logins and git tokens on the box erased. A
+  person `disabled` on a box (a node disables whom a roster round no longer lists, never its own
+  person) holds nothing usable there: their workspaces are stripped and made nobody's at once,
+  which their next entry undoes, and the give and the login doors refuse them, but their stored
+  logins stay, since a node cannot tell a person main removed from a round that did not list them;
+  they are erased once the person has been disabled for 24 hours by this box's clock, as
+  sail-api's process saw it, so a restart only keeps them longer. A handle main gave to a new
+  person (a roster entry made later than this box's row) is a new row: the old person's row, and
+  with it their logins, tokens and keys, goes, and their workspaces are disowned. sail-api's pass
+  reads the roster each minute and lists Incus only on its first
   pass, when someone stopped being active or their handle went to someone else, or to retry a
   workspace it could not reach, said once. Nobody stores a login for another person: a store
   naming one (`?fde=`) is refused.

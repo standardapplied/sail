@@ -8,6 +8,7 @@ package ai.singlr.sail.api;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -49,6 +50,7 @@ import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -560,50 +562,134 @@ class MissedStopReconcilerTest {
         List.of("ada true, bob true", "ada true, bob false", "ada false, bob false"), asked);
   }
 
+  private static Map<String, Object> rosterEntry(FdeStore.Fde fde) {
+    return rosterEntry(fde.handle(), fde.email(), fde.createdAt());
+  }
+
+  private static Map<String, Object> rosterEntry(String handle, String email, Instant created) {
+    return Map.of(
+        "handle",
+        handle,
+        "display_name",
+        handle,
+        "email",
+        email,
+        "role",
+        "member",
+        "status",
+        "active",
+        "created_at",
+        created.toEpochMilli());
+  }
+
+  private void round(FdeStore fdes, String own, List<Map<String, Object>> roster) {
+    Acting.system(() -> SyncOperations.applyFdes(fdes, roster, ProjectScope.all(), own));
+  }
+
+  /** What the removal pass asks of each of {@code handles}, one line a pass. */
+  private static CountingProbe asking(List<String> asked, String... handles) {
+    return new CountingProbe(true) {
+      @Override
+      public List<String> disown(Predicate<String> held) {
+        asked.add(
+            String.join(", ", Arrays.stream(handles).map(h -> h + " " + held.test(h)).toList()));
+        return List.of();
+      }
+    };
+  }
+
   /**
-   * High 1 of the proof: a node keeps a person main removed on its roster as {@code disabled}, the
-   * shape a sync round's roster leaves (main's roster no longer lists them). The pass after that
-   * takes their workspaces' credentials and erases every login they stored on this box.
+   * High 1 of the proof, as round 4 rules it: a node keeps a person a round no longer lists as
+   * {@code disabled}, the roster shape of the evidence. The next pass takes their workspaces' at
+   * once, but their stored logins, unusable while they are disabled, stay; only once they have been
+   * disabled for a day by this box's clock are they erased.
    */
   @Test
-  void aPersonANodeDisabledHoldsNoCredentialsFromThePassAfter() {
-    var adaId = TestLogins.store(db, "ada");
+  void aPersonANodeDisabledLosesTheirWorkspacesAtOnceAndTheirLoginsOnlyAfterADay() {
+    var ada = TestLogins.store(db, "ada");
     var tmp = TestLogins.store(db, "tmp");
     var fdes = new FdeStore(db);
-    fdes.logins().storeGit(tmp, "github.com", "ghp_tmp");
+    fdes.logins().storeGit(tmp, "github.com", "ghp_tmp_0123456789ab");
     var asked = new ArrayList<String>();
-    var probe =
-        new CountingProbe(true) {
-          @Override
-          public List<String> disown(Predicate<String> held) {
-            asked.add("ada " + held.test("ada") + ", tmp " + held.test("tmp"));
-            return List.of();
-          }
-        };
-    var reconciler = reconciler(probe, PAST_GRACE);
+    var now = new AtomicReference<>(Instant.now().plus(Duration.ofMinutes(3)));
+    var reconciler = reconciler(asking(asked, "ada", "tmp"), now::get);
 
     reconciler.sweep();
-    var ada = fdes.byHandle("ada").orElseThrow();
-    Acting.system(
-        () ->
-            SyncOperations.applyFdes(
-                fdes,
-                List.of(
-                    Map.of(
-                        "handle", "ada",
-                        "display_name", "Ada",
-                        "email", ada.email(),
-                        "role", ada.role(),
-                        "status", "active")),
-                ProjectScope.all(),
-                "ada"));
+    round(fdes, "ada", List.of(rosterEntry(fdes.byId(ada).orElseThrow())));
+    reconciler.sweep();
+    now.set(now.get().plus(MissedStopReconciler.DISABLED_FOR).minusSeconds(1));
+    reconciler.sweep();
+    var keptForADay = fdes.logins().gitTokens(tmp);
+    now.set(now.get().plusSeconds(1));
     reconciler.sweep();
 
     assertEquals("disabled", fdes.byHandle("tmp").orElseThrow().status());
     assertEquals(List.of("ada true, tmp true", "ada true, tmp false"), asked);
+    assertEquals(Map.of("github.com", "ghp_tmp_0123456789ab"), keptForADay);
     assertEquals(List.of(), fdes.logins().list(tmp));
     assertEquals(Map.of(), fdes.logins().gitTokens(tmp));
-    assertEquals(2, fdes.logins().list(adaId).size());
+    assertEquals(2, fdes.logins().list(ada).size());
+  }
+
+  /**
+   * The reviewer's probe: a round that leaves out the box's own person disables nothing of theirs.
+   */
+  @Test
+  void aRoundThatLeavesOutTheBoxsOwnPersonKeepsEveryLoginOfTheirs() {
+    var ada = TestLogins.store(db, "ada");
+    var fdes = new FdeStore(db);
+    fdes.logins().storeGit(ada, "github.com", "ghp_ada_0123456789ab");
+    var asked = new ArrayList<String>();
+    var now = new AtomicReference<>(Instant.now().plus(Duration.ofMinutes(3)));
+    var reconciler = reconciler(asking(asked, "ada"), now::get);
+
+    round(fdes, "ada", List.of());
+    reconciler.sweep();
+    now.set(now.get().plus(MissedStopReconciler.DISABLED_FOR).plusSeconds(1));
+    reconciler.sweep();
+
+    assertEquals("active", fdes.byHandle("ada").orElseThrow().status());
+    assertEquals(List.of("ada true"), asked);
+    assertEquals(3, fdes.logins().list(ada).size());
+  }
+
+  /**
+   * N4, the reviewer's probe: main removes tmp and gives the handle to a new hire within one round.
+   * The node's row is a new person's, so the new hire inherits none of the old one's logins, and
+   * the pass disowns the old one's workspaces.
+   */
+  @Test
+  void aHandleMainGaveToSomeoneNewInOneRoundPassesNothingOfTheOldPersons() {
+    var ada = TestLogins.store(db, "ada");
+    var old = TestLogins.store(db, "tmp");
+    var fdes = new FdeStore(db);
+    fdes.logins().storeGit(old, "github.com", "ghp_old_tmp_0123456789");
+    var asked = new ArrayList<String>();
+    var reconciler = reconciler(asking(asked, "ada", "tmp"), PAST_GRACE);
+    var hired = fdes.byId(old).orElseThrow().createdAt().plusSeconds(60);
+
+    reconciler.sweep();
+    round(
+        fdes,
+        "ada",
+        List.of(
+            rosterEntry(fdes.byId(ada).orElseThrow()),
+            rosterEntry("tmp", "newhire@example.com", hired)));
+    reconciler.sweep();
+    var hire = fdes.byHandle("tmp").orElseThrow();
+    round(
+        fdes,
+        "ada",
+        List.of(
+            rosterEntry(fdes.byId(ada).orElseThrow()),
+            rosterEntry("tmp", "newhire@example.com", hired)));
+
+    assertNotEquals(old, hire.id());
+    assertEquals("newhire@example.com", hire.email());
+    assertEquals(Map.of(), fdes.logins().gitTokens(hire.id()));
+    assertEquals(List.of(), fdes.logins().list(old));
+    assertEquals(hire.id(), fdes.byHandle("tmp").orElseThrow().id(), "the same person stays");
+    assertEquals(List.of("ada true, tmp true", "ada true, tmp false"), asked);
   }
 
   /** A container that cannot be asked fails nothing: the next pass tries again. */

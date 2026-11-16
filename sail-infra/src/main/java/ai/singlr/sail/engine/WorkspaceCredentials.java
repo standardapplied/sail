@@ -52,13 +52,17 @@ final class WorkspaceCredentials {
       as_dev() { runuser -u dev -- env HOME=/home/dev "$@"; }
       tokens=$(cat) || exit 2
       if [ -n "$tokens" ]; then
+        if printf '%s\n' "$tokens" | grep -q -x ''; then echo "an empty token matches every file" >&2; exit 2; fi
         set --
         for d in /* /.[!.]*; do
           [ -e "$d" ] && [ ! -L "$d" ] && ! mountpoint -q "$d" && set -- "$@" "$d"
         done
         found=$(printf '%s\n' "$tokens" | grep -r -l -F --devices=skip -f - -- "$@")
         case $? in
-          0) add "a token in $(echo $found)" ;;
+          0) count=$(printf '%s\n' "$found" | wc -l)
+             shown=$(printf '%s\n' "$found" | head -n 3 | paste -s -d ' ' -)
+             [ "$count" -le 3 ] || shown="$shown and $((count - 3)) more"
+             add "a token this build was given in $shown" ;;
           1) ;;
           *) echo "the search for the build's tokens failed" >&2; exit 2 ;;
         esac
@@ -117,17 +121,13 @@ final class WorkspaceCredentials {
       var project =
           template.substring(0, template.length() - BoxInstances.TEMPLATE_SUFFIX.length());
       throw Remedied.io(
-          template
-              + " was not snapshotted: it still holds "
-              + held.stderr().strip()
-              + ", which "
-              + project
-              + "'s own provisioning wrote and the strip does not take out, so it is left where it"
-              + " is.",
+          template + " was not snapshotted: it still holds " + held.stderr().strip() + ".",
           Remedy.of(
-              "Take the step that writes it out of "
+              "Remove what wrote it, a step of "
                   + project
-                  + "'s definition, then build again: ",
+                  + "'s definition or a change made by hand in "
+                  + template
+                  + ", then build again: ",
               Remedy.sail("project template build", project),
               "."));
     }
@@ -179,6 +179,39 @@ final class WorkspaceCredentials {
     shell.exec(ContainerExec.asRoot(instance, resolve));
     ForgeCliLogin.loginGitHub(
         shell, instance, ProjectDefinition.USER, owner.tokensFor(repos), repos);
+  }
+
+  /**
+   * A token change for the owner a workspace already has: the store replaced whole by a rename, or
+   * removed when they keep none for it, and gh logged in again or out, never stripped first, so a
+   * live run's fetch or push never finds the workspace without credentials.
+   */
+  static void renew(
+      ShellExec shell, String instance, ProjectDefinition config, WorkspaceOwner owner)
+      throws IOException, InterruptedException, TimeoutException {
+    var repos = owner.tokenRepos(config.repos());
+    var store = GitCredentials.buildCredentialStore(owner.tokensFor(repos), repos);
+    if (store.isEmpty()) {
+      asDev(shell, instance, "rm", "-f", STORE);
+    } else {
+      ContainerFilePush.pushAsDev(shell, instance, STORE + ".sail-new", store, "0600");
+      asDev(shell, instance, "mv", "-f", STORE + ".sail-new", STORE);
+      asDev(shell, instance, "git", "config", "--global", "credential.helper", "store");
+    }
+    if (GitCredentials.githubHosts(repos).isEmpty()) {
+      asDev(shell, instance, "rm", "-f", GH_HOSTS);
+    } else {
+      logForgeIn(shell, instance, config, owner);
+    }
+  }
+
+  private static void asDev(ShellExec shell, String instance, String... command)
+      throws IOException, InterruptedException, TimeoutException {
+    var ran = shell.exec(ContainerExec.asDevUser(instance, List.of(command)));
+    if (!ran.ok()) {
+      throw new IOException(
+          String.join(" ", command) + " failed in " + instance + ": " + ran.reason().strip());
+    }
   }
 
   /** Through files alone, so a stopped workspace is reached without starting it. */

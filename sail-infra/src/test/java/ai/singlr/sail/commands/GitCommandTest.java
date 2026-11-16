@@ -45,7 +45,7 @@ import picocli.CommandLine;
  */
 class GitCommandTest {
 
-  private static final String KEY = "ghp_cliValue777";
+  private static final String KEY = "ghp_cliValue777777";
 
   @TempDir Path tempDir;
   private Sqlite db;

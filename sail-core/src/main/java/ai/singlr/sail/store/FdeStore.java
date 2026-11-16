@@ -370,21 +370,41 @@ public final class FdeStore {
 
   /**
    * Disables every active FDE this box holds that main's roster, naming {@code listed}, no longer
-   * does: main removed it, so it is refused here as it is on main, never left acting with its last
-   * role. Its local row, and what references it, stays. Returns the handles it disabled.
+   * does, but this box's own {@code own}: main removed it, so it is refused here as it is on main,
+   * never left acting with its last role. Its local row, and what references it, stays. Returns the
+   * handles it disabled.
    */
-  public List<String> disableUnlisted(Collection<String> listed) {
+  public List<String> disableUnlisted(Collection<String> listed, String own) {
     return db.transaction(
         () -> {
           var unlisted =
               list().stream()
-                  .filter(fde -> fde.active() && !listed.contains(fde.handle()))
+                  .filter(
+                      fde ->
+                          fde.active()
+                              && !listed.contains(fde.handle())
+                              && !fde.handle().equals(own))
                   .map(Fde::handle)
                   .toList();
           unlisted.forEach(
               handle -> db.execute("UPDATE fdes SET status = 'disabled' WHERE handle = ?", handle));
           return unlisted;
         });
+  }
+
+  /**
+   * Removes the row of {@code handle} when main's, made at {@code createdAt}, is a later person
+   * than this box's: main gave the handle to someone new, who inherits nothing of the old person's
+   * (their logins, tokens and keys go with the row, and their workspaces are disowned). This box's
+   * own {@code own} is kept. Whether it removed one.
+   */
+  public boolean forgetIfReused(String handle, Instant createdAt, String own) {
+    var old =
+        byHandle(handle)
+            .filter(fde -> createdAt != null && !handle.equals(own))
+            .filter(fde -> createdAt.isAfter(fde.createdAt()));
+    old.ifPresent(fde -> db.transaction(() -> delete(fde)));
+    return old.isPresent();
   }
 
   /** Returns the number of FDEs that are active admins — the principals who can administer. */

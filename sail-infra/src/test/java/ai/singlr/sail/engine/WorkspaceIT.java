@@ -53,6 +53,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.TimeUnit;
 import java.util.function.Predicate;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -264,7 +265,7 @@ class WorkspaceIT extends AbstractIncusIT {
         List.of(
             List.of(
                 "echo 'machine example.invalid password " + FAKE_TOKEN + "' > /home/dev/.netrc",
-                "a token in /home/dev/.netrc"),
+                "a token this build was given in /home/dev/.netrc"),
             List.of(
                 "mkdir -p /home/dev/.sail && echo " + FAKE_TOKEN + " > /home/dev/.sail/gh-token-01",
                 "/home/dev/.sail/gh-token-01"),
@@ -522,21 +523,81 @@ class WorkspaceIT extends AbstractIncusIT {
     assertEquals("private", fetched.stdout().strip(), fetched.stderr());
   }
 
+  /**
+   * The fleet's ten-at-once failure, on a real Incus: with its host keys gone sshd refuses to
+   * start, which is what removing them before making new ones did to an ssh.service systemd was
+   * starting at that moment. Made beside the old ones and renamed over them, they are never gone:
+   * sshd, checked over and over the whole time, never refuses.
+   */
+  @Test
+  void aWorkspacesNewHostKeysNeverLeaveSshdWithNone() throws Exception {
+    var fix = workspaces.create(definition(), FIX, source(), null, "uday", h -> udayWith("tok-1"));
+
+    var swapped =
+        exec(
+            fix.instance(),
+            List.of(
+                "bash",
+                "-c",
+                "set -eu; mkdir -p /run/sshd; /usr/sbin/sshd -t\n"
+                    + "(for _ in $(seq 1 200); do /usr/sbin/sshd -t 2>/dev/null || echo refused; done)"
+                    + " & checking=$!\n"
+                    + Workspaces.HOST_KEYS
+                    + "wait $checking\n"));
+    var gone =
+        exec(
+            fix.instance(),
+            List.of("bash", "-c", "rm -f /etc/ssh/ssh_host_*; /usr/sbin/sshd -t 2>&1"));
+
+    assertTrue(swapped.ok(), swapped.stderr() + swapped.stdout());
+    assertFalse(swapped.stdout().contains("refused"), swapped.stdout());
+    assertFalse(gone.ok(), "sshd refuses with no host keys: " + gone.stdout());
+  }
+
   private static WorkspaceOwner udayWith(String token) {
     return new WorkspaceOwner(
         "uday", "Uday", "uday@sail.invalid", Map.of("example.invalid", token), List.of());
   }
 
+  private static final String WATCH =
+      """
+      touch /home/dev/.sail-it-watching
+      while [ ! -e /home/dev/.sail-it-stop ]; do
+        [ -e /home/dev/.git-credentials ] || { echo absent; break; }
+      done
+      echo watched
+      """;
+
   /**
    * On a real Incus: a token replaced while a workspace runs is in its store at once, the one its
-   * next fetch reads; one replaced while it is stopped is in it once it starts.
+   * next fetch reads, and a live run watching the store the whole time never finds it absent (N5);
+   * one replaced while it is stopped is in it once it starts.
    */
   @Test
   void aReplacedTokenReachesARunningWorkspaceAtOnceAndAStoppedOneWhenItStarts() throws Exception {
     var fix = workspaces.create(definition(), FIX, source(), null, "uday", h -> udayWith("tok-1"));
     var store = "/home/dev/.git-credentials";
+    var watcher =
+        new ProcessBuilder("incus", "exec", fix.instance(), "--", "bash", "-c", WATCH)
+            .redirectErrorStream(true)
+            .start();
+    watcher.getOutputStream().close();
+    var watching =
+        exec(
+            fix.instance(),
+            List.of(
+                "bash",
+                "-c",
+                "for _ in $(seq 1 300); do [ -e /home/dev/.sail-it-watching ] && exit 0; sleep 0.1;"
+                    + " done; exit 1"));
+    assertTrue(watching.ok(), "the live run is watching");
 
     assertEquals(List.of(), workspaces.refresh(udayWith("tok-2"), project -> definition()));
+    assertTrue(exec(fix.instance(), List.of("touch", "/home/dev/.sail-it-stop")).ok());
+    assertTrue(watcher.waitFor(60, TimeUnit.SECONDS), "the watch ends");
+    assertEquals(
+        "watched",
+        new String(watcher.getInputStream().readAllBytes(), StandardCharsets.UTF_8).strip());
     assertEquals("https://oauth2:tok-2@example.invalid\n", pulled(fix.instance(), store));
     workspaces.stop(PROJECT, FIX, NO_RUN);
     workspaces.refresh(udayWith("tok-3"), project -> definition());

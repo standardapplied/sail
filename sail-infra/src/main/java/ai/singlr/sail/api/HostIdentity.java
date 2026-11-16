@@ -12,7 +12,6 @@ import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.ssh.SshGateway;
 import ai.singlr.sail.store.FdeSshKeyStore;
 import ai.singlr.sail.store.FdeStore;
-import ai.singlr.sail.store.LoginStore;
 import ai.singlr.sail.store.TokenStore;
 import java.io.IOException;
 import java.nio.file.Path;
@@ -49,11 +48,6 @@ public interface HostIdentity {
    * the box's workstation key when they are the box's person.
    */
   WorkspaceOwner workspaceOwner(String handle);
-
-  /**
-   * Every login and git token stored on this runner, values and all ({@link LoginStore#values}).
-   */
-  List<String> storedSecrets();
 
   SshGateway.Decision authorizeGateway(String command, String handle);
 }

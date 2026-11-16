@@ -356,7 +356,7 @@ class ScopeChangeRoundTest {
     Files.writeString(projectsDir.resolve("beta").resolve("leftover"), "x\n");
     incus.sail("beta");
     new FdeStore(nodeDb).add("client2", "Client 2", "client2@rehearsal.invalid", "member");
-    new FdeStore(nodeDb).disableUnlisted(List.of("ada", "nia"));
+    new FdeStore(nodeDb).disableUnlisted(List.of("ada", "nia"), null);
 
     assertEquals(
         List.of(

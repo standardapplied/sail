@@ -86,17 +86,32 @@ public final class AgentLoginCommand implements Runnable {
       return;
     }
     var value = read(known.displayName() + " " + declared.kind(), declared.howToMake().plain());
-    var body = new LinkedHashMap<String, Object>();
-    body.put("kind", declared.kind());
-    body.put("value", value);
+    change(
+        connection,
+        json,
+        "Stored",
+        client ->
+            client.put(
+                "/v1/logins/" + known.yamlName() + "/" + named,
+                Map.of("kind", declared.kind(), "value", value)));
+  }
+
+  @FunctionalInterface
+  interface Call {
+    Map<String, Object> on(SailApiClient client) throws Exception;
+  }
+
+  /** One change at the login doors, its answer printed, or as JSON under {@code json}. */
+  static void change(ConnectionOptions connection, boolean json, String what, Call call)
+      throws Exception {
     var config = connection.resolve();
     try (var client = new SailApiClient(config.serverUrl(), config.token())) {
-      var result = client.put("/v1/logins/" + known.yamlName() + "/" + named, body);
+      var result = call.on(client);
       if (json) {
         System.out.println(YamlUtil.dumpJson(new LinkedHashMap<>(result)));
         return;
       }
-      printChange("Stored", result);
+      printChange(what, result);
     }
   }
 
@@ -351,15 +366,7 @@ public final class AgentLoginCommand implements Runnable {
               + "/"
               + LoginStore.requireName(name)
               + person(fde);
-      var config = connection.resolve();
-      try (var client = new SailApiClient(config.serverUrl(), config.token())) {
-        var result = client.delete(path);
-        if (json) {
-          System.out.println(YamlUtil.dumpJson(new LinkedHashMap<>(result)));
-          return;
-        }
-        printChange("Removed", result);
-      }
+      change(connection, json, "Removed", client -> client.delete(path));
     }
   }
 }

@@ -104,6 +104,9 @@ public final class MissedStopReconciler implements AutoCloseable {
    */
   static final Duration TIDY_LOOKBACK = Duration.ofMinutes(2);
 
+  /** How long a person stays disabled here before their stored logins are erased. */
+  static final Duration DISABLED_FOR = Duration.ofHours(24);
+
   /** How many unread reports of runs serving a review a pass reads before it replays a stop. */
   static final int READ_FIRST = 3;
 
@@ -167,6 +170,7 @@ public final class MissedStopReconciler implements AutoCloseable {
   private final WatcherCoverage coverage;
   private final Supplier<String> localHandle;
   private final Supplier<Instant> clock;
+  private final Map<String, Instant> disabledSince = new HashMap<>();
   private final FdeStore fdes;
   private final RunReports reports;
   private final PeriodicPass pass;
@@ -376,11 +380,26 @@ public final class MissedStopReconciler implements AutoCloseable {
       tidiedSince = pass.minus(TIDY_LOOKBACK);
     }
     ContainerFilePush.removeStaged(Duration.ofMinutes(1));
-    var swept = fdes.logins().sweep(id -> fdes.byId(id).filter(FdeStore.Fde::active).isPresent());
+    var swept = fdes.logins().sweep(id -> held(id, pass));
     if (swept > 0) {
       System.err.println("  [reconcile] removed the logins of " + swept + " people removed");
     }
     disownRemoved();
+  }
+
+  /**
+   * Whether person {@code id} keeps their stored logins: unless their row is gone, or it has been
+   * disabled for {@link #DISABLED_FOR} as this process saw it, since a node cannot tell a person
+   * main removed from a round that did not list them, and disabling is undone by the next round
+   * that does. A restart starts the count again, which only keeps logins longer.
+   */
+  private boolean held(String id, Instant pass) {
+    var fde = fdes.byId(id);
+    if (fde.isEmpty() || fde.get().active()) {
+      disabledSince.remove(id);
+      return fde.isPresent();
+    }
+    return pass.isBefore(disabledSince.computeIfAbsent(id, seen -> pass).plus(DISABLED_FOR));
   }
 
   /**

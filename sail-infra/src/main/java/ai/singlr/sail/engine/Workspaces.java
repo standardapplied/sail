@@ -134,6 +134,21 @@ public final class Workspaces {
    * returns, and it boots while the repositories are fetched), and the bus. It prints {@code
    * sail-step <step> <epoch ms>} as each step ends, which the create reads as the steps' times.
    */
+  /**
+   * The clone's own SSH host keys, made beside the template's and renamed over them, so the sshd
+   * systemd may be starting at that moment never finds itself with none: removing them first and
+   * then making new ones failed {@code ssh.service}'s start whenever the two met.
+   */
+  static final String HOST_KEYS =
+      """
+      keys=$(mktemp -d /etc/ssh/sail-keys.XXXXXX)
+      mkdir -p "$keys/etc/ssh"
+      ssh-keygen -A -f "$keys" >/dev/null
+      for key in /etc/ssh/ssh_host_*; do [ -e "$keys/etc/ssh/${key##*/}" ] || rm -f "$key"; done
+      mv -f "$keys"/etc/ssh/ssh_host_* /etc/ssh/
+      rm -rf "$keys"
+      """;
+
   static final String PREPARE =
       """
       set -eu
@@ -147,8 +162,9 @@ public final class Workspaces {
       printf '%s\\n' "$project" > /etc/hostname
       hostname "$project"
       sed -i "s/^\\(127\\.0\\.1\\.1[[:space:]]*\\).*/\\1$project/" /etc/hosts
-      rm -f /etc/ssh/ssh_host_*
-      ssh-keygen -A >/dev/null
+      """
+          + HOST_KEYS
+          + """
       step identity
       as_dev() { runuser -u dev -- env HOME=/home/dev "$@"; }
       """
@@ -163,7 +179,6 @@ public final class Workspaces {
           step network
           while [ "$#" -ge 2 ]; do
             repo=/home/dev/workspace/$1 base=$2
-            [ -e "$repo/.git" ] || { printf 'sail-missing-repo %s\\n' "$1"; exit 3; }
             shift 2
             fetch "$repo"
             if [ -z "$base" ]; then
@@ -181,7 +196,17 @@ public final class Workspaces {
           step repos
           printf 'sail-count fetch_retries %s\\n' "$retries"
           for _ in $(seq 1 300); do systemctl show --property=Version >/dev/null 2>&1 && break; sleep 0.1; done
-          systemctl try-restart ssh.service
+          for _ in $(seq 1 300); do
+            case $(systemctl show --property=ActiveState --value ssh.service) in
+              activating|deactivating|reloading) sleep 0.1 ;;
+              *) break ;;
+            esac
+          done
+          if ! systemctl try-restart ssh.service; then
+            printf 'ssh.service: %s; %s\\n' "$(systemctl show --property=Result --value ssh.service)" \\
+              "$(journalctl --unit ssh.service --lines 3 --output cat --no-pager 2>&1 | paste -s -d ';' -)" >&2
+            exit 1
+          fi
           step sshd
           """
           + AWAIT_BUS
@@ -574,7 +599,10 @@ public final class Workspaces {
     }
   }
 
-  /** Running ones only: a stopped one takes them at its next start. Answers those not reached. */
+  /**
+   * Running ones only, each under its workspace's lock and renewed in place, never stripped: a
+   * stopped one takes them at its next start. Answers those not reached.
+   */
   public List<String> refresh(WorkspaceOwner owner, Function<String, ProjectDefinition> definitions)
       throws IOException, InterruptedException, TimeoutException {
     var unreached = new ArrayList<String>();
@@ -582,9 +610,9 @@ public final class Workspaces {
       if (!(instance.state() instanceof ContainerState.Running)) {
         continue;
       }
-      try {
+      try (var held = nameLock(instance.name())) {
         var project = ((BoxInstances.Workspace) instance.kind()).project();
-        giveAll(instance.name(), definitions.apply(project), owner);
+        WorkspaceCredentials.renew(shell, instance.name(), definitions.apply(project), owner);
       } catch (IOException | TimeoutException | RuntimeException failure) {
         unreached.add(instance.name() + ": " + Remedied.reasonOf(failure).strip());
       }
@@ -612,14 +640,9 @@ public final class Workspaces {
           || held.test(owner)) {
         continue;
       }
-      try {
+      try (var locked = nameLock(instance.name())) {
         WorkspaceCredentials.takeBack(shell, instance.name());
-        var cleared =
-            new ContainerConfig(shell, locks)
-                .set(instance.name(), List.of(BoxInstances.OWNER_KEY + "="));
-        if (!cleared.ok()) {
-          throw new IOException(cleared.reason());
-        }
+        label(instance.name(), "");
       } catch (IOException | TimeoutException failure) {
         unreached.add(instance.name() + ": " + Remedied.reasonOf(failure).strip());
       }
@@ -627,7 +650,10 @@ public final class Workspaces {
     return List.copyOf(unreached);
   }
 
-  /** The lock one create of {@code instance} holds; none in a dry run, which makes nothing. */
+  /**
+   * The lock an entry, a start, a token change or a disown of {@code instance} holds, so none
+   * interleaves another's strip, give or label; none in a dry run, which makes nothing.
+   */
   private FileMutex nameLock(String instance) throws IOException {
     return shell.isDryRun() ? null : FileMutex.acquire(locks.resolve(instance + ".workspace.lock"));
   }
@@ -771,7 +797,7 @@ public final class Workspaces {
     awaitReady(found.name());
     var owner = found.key(BoxInstances.OWNER_KEY).filter(handle -> !handle.isBlank());
     if (owner.isPresent()) {
-      try {
+      try (var held = nameLock(found.name())) {
         giveAll(found.name(), config, owners.apply(owner.get()));
       } catch (IOException given) {
         throw new IOException(
@@ -937,17 +963,6 @@ public final class Workspaces {
       argv.add(Objects.requireNonNullElse(repo.branch(), ""));
     }
     var prepared = shell.exec(ContainerExec.asRoot(instance, argv), null, READY_TIMEOUT);
-    var missing =
-        prepared.stdout().lines().filter(l -> l.startsWith("sail-missing-repo ")).findFirst();
-    if (missing.isPresent()) {
-      throw Remedied.io(
-          "Workspace '"
-              + name
-              + "' could not be made its own: its template has no repo at "
-              + missing.get().substring("sail-missing-repo ".length())
-              + ", since it was built before the repo was added.",
-          Remedy.of("Build it again: ", Remedy.sail("project template build", config.name()), "."));
-    }
     if (!prepared.ok()) {
       throw new IOException(
           "Workspace '" + name + "' could not be made its own: " + prepared.reason());

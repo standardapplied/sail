@@ -1185,8 +1185,13 @@ class FdeCommandTest {
     var replacement = SshPublicKey.parse(TestSshKeys.ed25519("replacement", "me@new"));
 
     var unreached =
-        FdeCommand.Pair.trustWorkstationKey(
-            box(), Optional.of(LAPTOP), replacement, OperatorCommand.here());
+        ContainerAuthorizedKeys.rekeyWorkstation(
+            box().shell(),
+            box().database(),
+            box().handle(),
+            Optional.of(LAPTOP),
+            replacement,
+            OperatorCommand.here());
 
     for (var container : List.of("acme", "web")) {
       assertEquals(
@@ -2692,8 +2697,8 @@ class FdeCommandTest {
             FdeCommand.alreadyExists("ada", sudo),
             Ansi.OFF.string(FdeCommand.added(ada, true, sudo)),
             unknownProject,
-            FdeCommand.notTrustedYet("acme", "Error: I/O error", sudo),
-            FdeCommand.noneTrustYet("Error: I/O error", sudo),
+            ContainerAuthorizedKeys.notTrustedYet("acme", "Error: I/O error", sudo),
+            ContainerAuthorizedKeys.noneTrustYet("Error: I/O error", sudo),
             FdeCommand.disabledForPairing("ada", sudo),
             FdeCommand.noFdes(sudo),
             FdeCommand.unknownFde("ada", sudo),

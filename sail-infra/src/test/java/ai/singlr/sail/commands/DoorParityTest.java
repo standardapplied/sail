@@ -317,9 +317,8 @@ class DoorParityTest {
                 "runs_on_other_node",
                 "Spec 'e1' is assigned to 'eng', which runs on that FDE's devbox, not this node"
                     + " ('uday').",
-                "Reassign it to dispatch here: spec update e1 --assignee uday --force")
-            .onTheTerminal(
-                "Reassign it to dispatch here: sail spec update e1 --assignee uday --force"),
+                "Reassign it to dispatch here: spec update e1 --assignee uday")
+            .onTheTerminal("Reassign it to dispatch here: sail spec update e1 --assignee uday"),
         web("uday", "uday", "POST", "/v1/projects/acme/dispatch", dryRun),
         dispatch("uday"));
   }

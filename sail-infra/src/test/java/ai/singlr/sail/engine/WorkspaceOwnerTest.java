@@ -51,7 +51,7 @@ class WorkspaceOwnerTest {
     fdes.add("nomail", "No Mail", null, "member");
     fdes.sshKeys().add(uday.id(), UDAY_KEY);
     fdes.sshKeys().add(ana.id(), ANA_KEY);
-    fdes.logins().storeGit(uday.id(), "github.com", "ghp_uday");
+    fdes.logins().storeGit(uday.id(), "github.com", "ghp_uday_0123456789ab");
   }
 
   @AfterEach
@@ -78,10 +78,10 @@ class WorkspaceOwnerTest {
             "uday",
             "Uday C",
             "uday@example.com",
-            Map.of("github.com", "ghp_uday"),
+            Map.of("github.com", "ghp_uday_0123456789ab"),
             List.of(UDAY_KEY.line(), WORKSTATION.line())),
         owner);
-    assertFalse(owner.toString().contains("ghp_uday"), owner.toString());
+    assertFalse(owner.toString().contains("ghp_uday_0123456789ab"), owner.toString());
   }
 
   /** Scenario 3: another person is their own alone, named by handle when they have no name. */
@@ -212,9 +212,9 @@ class WorkspaceOwnerTest {
 
     assertEquals(
         List.of("https://GitHub.com/acme/api.git"), repos.stream().map(r -> r.url()).toList());
-    assertEquals(Map.of("GitHub.com", "ghp_uday"), uday.tokensFor(repos));
+    assertEquals(Map.of("GitHub.com", "ghp_uday_0123456789ab"), uday.tokensFor(repos));
     assertEquals(
-        "https://oauth2:ghp_uday@GitHub.com\n",
+        "https://oauth2:ghp_uday_0123456789ab@GitHub.com\n",
         GitCredentials.buildCredentialStore(uday.tokensFor(repos), repos));
   }
 }

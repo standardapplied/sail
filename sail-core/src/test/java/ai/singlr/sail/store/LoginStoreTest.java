@@ -18,7 +18,6 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermissions;
 import java.util.ArrayList;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.NoSuchElementException;
@@ -296,20 +295,6 @@ class LoginStoreTest {
     assertEquals(KEY, store.defaultFor(ANA, CLAUDE).orElseThrow().value());
   }
 
-  /** Low 4 of the proof: what a template's check searches for is every value on this box. */
-  @Test
-  void theValuesAreEveryPersonsLoginsAndGitTokens() {
-    var store = store();
-    store.store(UDAY, CLAUDE, null, null, TOKEN);
-    store.store(ANA, CLAUDE, null, null, KEY);
-    store.storeGit(ANA, "github.com", "ghp_ana");
-
-    assertEquals(Set.of(TOKEN, KEY, "ghp_ana"), new HashSet<>(store.values()));
-    try (var db = Sqlite.openMemory()) {
-      assertEquals(List.of(), LoginStore.beside(db).values());
-    }
-  }
-
   @Test
   void forgetDeletesAPersonsLoginsAndTheSweepDeletesThoseOfPeopleNoLongerHeld() {
     var store = store();
@@ -396,8 +381,8 @@ class LoginStoreTest {
       throws Exception {
     var store = store();
     store.store(UDAY, CLAUDE, null, null, TOKEN);
-    var stored = store.storeGit(UDAY, "GitHub.com", "ghp_uday");
-    store.storeGit(UDAY, "gitlab.example", "glpat-uday");
+    var stored = store.storeGit(UDAY, "GitHub.com", "ghp_uday_0123456789ab");
+    store.storeGit(UDAY, "gitlab.example", "glpat-uday_0123456789ab");
 
     assertEquals(
         new LoginStore.Row(
@@ -406,23 +391,24 @@ class LoginStoreTest {
             "token",
             false,
             stored.storedAt(),
-            LoginStore.fingerprint("ghp_uday")),
+            LoginStore.fingerprint("ghp_uday_0123456789ab")),
         stored);
     assertEquals(
-        Map.of("github.com", "ghp_uday", "gitlab.example", "glpat-uday"), store.gitTokens(UDAY));
+        Map.of("github.com", "ghp_uday_0123456789ab", "gitlab.example", "glpat-uday_0123456789ab"),
+        store.gitTokens(UDAY));
     assertEquals(
         List.of(
             "claude-code/default token default",
             "git/github.com token",
             "git/gitlab.example token"),
         described(store.list(UDAY)));
-    assertFalse(store.list(UDAY).toString().contains("ghp_uday"));
+    assertFalse(store.list(UDAY).toString().contains("ghp_uday_0123456789ab"));
     var git = dir.resolve("logins").resolve(UDAY).resolve("git");
     assertEquals("rwx------", PosixFilePermissions.toString(Files.getPosixFilePermissions(git)));
     assertEquals(
         "rw-------",
         PosixFilePermissions.toString(Files.getPosixFilePermissions(git.resolve("github.com"))));
-    assertEquals("ghp_uday\n", Files.readString(git.resolve("github.com")));
+    assertEquals("ghp_uday_0123456789ab\n", Files.readString(git.resolve("github.com")));
     try (Stream<Path> files = Files.list(git)) {
       assertEquals(2, files.count());
     }
@@ -431,10 +417,10 @@ class LoginStoreTest {
   @Test
   void aGitTokenStoredAgainIsReplacedAndOneRemovedTwiceIsRemovedOnce() {
     var store = store();
-    store.storeGit(UDAY, "github.com", "ghp_old");
-    store.storeGit(UDAY, "github.com", "ghp_new");
+    store.storeGit(UDAY, "github.com", "ghp_old_0123456789ab");
+    store.storeGit(UDAY, "github.com", "ghp_new_0123456789ab");
 
-    assertEquals(Map.of("github.com", "ghp_new"), store.gitTokens(UDAY));
+    assertEquals(Map.of("github.com", "ghp_new_0123456789ab"), store.gitTokens(UDAY));
     assertTrue(store.removeGit(UDAY, "github.com").isPresent());
     assertEquals(Optional.empty(), store.removeGit(UDAY, "github.com"));
     assertEquals(List.of(), store.list(UDAY));
@@ -450,16 +436,34 @@ class LoginStoreTest {
     assertEquals(VALUE_RULE, value.getMessage());
     assertEquals("git.example.com:8443", LoginStore.requireHost("Git.Example.com:8443"));
     for (var host : List.of("../x", "-github.com", "git hub", "", "h:0", "h:65536", "h:x")) {
-      assertThrows(IllegalArgumentException.class, () -> store.storeGit(UDAY, host, "ghp_x"));
+      assertThrows(
+          IllegalArgumentException.class, () -> store.storeGit(UDAY, host, "ghp_x_0123456789ab"));
     }
     assertEquals(List.of(), store.list(UDAY));
+  }
+
+  /**
+   * N2: a git token shorter than any forge's is refused at the store, and no harness is named git,
+   * so a harness's logins and the git tokens never share a directory.
+   */
+  @Test
+  void aGitTokenShorterThanAnyForgesIsRefusedAndNoHarnessIsNamedGit() {
+    var store = store();
+
+    var refused =
+        assertThrows(IllegalArgumentException.class, () -> store.storeGit(UDAY, "github.com", "a"));
+
+    assertEquals(
+        "A git token is at least 16 characters: this value is not one.", refused.getMessage());
+    assertEquals(Map.of(), store.gitTokens(UDAY));
+    assertTrue(Harnesses.all().stream().noneMatch(h -> h.yamlName().equals(LoginStore.GIT)));
   }
 
   @Test
   void forgettingAPersonDeletesTheirGitTokensWithTheirLogins() {
     var store = store();
-    store.storeGit(UDAY, "github.com", "ghp_uday");
-    store.storeGit(ANA, "github.com", "ghp_ana");
+    store.storeGit(UDAY, "github.com", "ghp_uday_0123456789ab");
+    store.storeGit(ANA, "github.com", "ghp_ana_0123456789ab");
 
     store.forget(UDAY);
     assertEquals(Map.of(), store.gitTokens(UDAY));

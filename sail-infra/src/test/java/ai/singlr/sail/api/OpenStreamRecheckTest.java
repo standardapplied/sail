@@ -321,7 +321,7 @@ class OpenStreamRecheckTest {
   void aDisabledFdesIdleStreamEndsAtItsNextHeartbeat() throws Exception {
     var frames = open();
 
-    fdes.disableUnlisted(List.of("mady"));
+    fdes.disableUnlisted(List.of("mady"), null);
     clock.advance(Duration.ofMillis(SseHandler.HEARTBEAT_MILLIS + 1));
 
     assertEquals(

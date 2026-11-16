@@ -5,10 +5,7 @@
 
 package ai.singlr.sail.commands;
 
-import ai.singlr.sail.api.SailApiClient;
-import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.store.LoginStore;
-import java.util.LinkedHashMap;
 import java.util.Map;
 import picocli.CommandLine;
 import picocli.CommandLine.Command;
@@ -61,7 +58,7 @@ public final class GitCommand implements Runnable {
     private void execute() throws Exception {
       var named = LoginStore.requireHost(host);
       var value = AgentLoginCommand.read(named + " token", null);
-      change(
+      AgentLoginCommand.change(
           connection,
           json,
           "Stored",
@@ -69,24 +66,6 @@ public final class GitCommand implements Runnable {
               client.put(
                   "/v1/logins/" + LoginStore.GIT + "/" + named,
                   Map.of("kind", "token", "value", value)));
-    }
-
-    @FunctionalInterface
-    private interface Call {
-      Map<String, Object> on(SailApiClient client) throws Exception;
-    }
-
-    private static void change(ConnectionOptions connection, boolean json, String what, Call call)
-        throws Exception {
-      var config = connection.resolve();
-      try (var client = new SailApiClient(config.serverUrl(), config.token())) {
-        var result = call.on(client);
-        if (json) {
-          System.out.println(YamlUtil.dumpJson(new LinkedHashMap<>(result)));
-          return;
-        }
-        AgentLoginCommand.printChange(what, result);
-      }
     }
 
     /** {@code sail git login list}: your git tokens, or {@code --fde}'s, never a value. */
@@ -141,7 +120,7 @@ public final class GitCommand implements Runnable {
         CliCommand.run(
             json,
             () ->
-                change(
+                AgentLoginCommand.change(
                     connection,
                     json,
                     "Removed",

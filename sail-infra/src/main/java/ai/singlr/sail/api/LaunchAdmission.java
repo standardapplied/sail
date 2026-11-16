@@ -131,11 +131,7 @@ public final class LaunchAdmission {
             + "', which runs on that FDE's devbox, not this node ('"
             + localHandle
             + "').",
-        Remedy.of(
-            "Reassign it to dispatch here: ",
-            spec.status() == null || spec.status().isReassignable()
-                ? claim
-                : Remedy.sail("spec update", spec.id(), "--assignee", localHandle, "--force")));
+        Remedy.of("Reassign it to dispatch here: ", claim));
   }
 
   /**

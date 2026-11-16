@@ -222,6 +222,48 @@ class WorkspaceCredentialsTest {
     assertTrue(checked.err().contains("git could not read"), checked.err());
   }
 
+  /**
+   * The search's own failures are never "no match": an empty token, which would match every file,
+   * and a grep that errors both fail the check as one that cannot tell.
+   */
+  @Test
+  void anEmptyTokenAndAGrepThatErrorsFailTheCheckAsOneThatCannotTell() throws Exception {
+    var empty = script(WorkspaceCredentials.HELD, "\n" + TOKEN + "\n");
+    var realGrep =
+        List.of(Path.of("/usr/bin/grep"), Path.of("/bin/grep")).stream()
+            .filter(Files::isExecutable)
+            .findFirst()
+            .orElseThrow();
+    stub(
+        "grep",
+        "case \" $* \" in *\" -r \"*) echo 'grep: a file: Input/output error' >&2; exit 2 ;; esac\n"
+            + "exec "
+            + realGrep
+            + " \"$@\"\n");
+    var broken = script(WorkspaceCredentials.HELD, TOKEN + "\n");
+
+    assertEquals(2, empty.exit(), empty.err());
+    assertTrue(empty.err().contains("an empty token matches every file"), empty.err());
+    assertEquals(2, broken.exit(), broken.err());
+    assertTrue(broken.err().contains("the search for the build's tokens failed"), broken.err());
+  }
+
+  /** A token in many files names three of them and how many more, never a list without end. */
+  @Test
+  void aTokenInManyFilesNamesThreeAndCountsTheRest() throws Exception {
+    var dir = Files.createDirectories(root.resolve("srv/copies"));
+    for (var i = 0; i < 5; i++) {
+      Files.writeString(dir.resolve("copy " + i), TOKEN + "\n");
+    }
+
+    var checked = script(WorkspaceCredentials.HELD, TOKEN + "\n");
+
+    assertEquals(1, checked.exit(), checked.err());
+    assertTrue(checked.err().contains("copy "), checked.err());
+    assertTrue(checked.err().strip().endsWith("and 2 more"), checked.err());
+    assertFalse(checked.err().contains(TOKEN), checked.err());
+  }
+
   /** A clean container passes, with no token given or with the build's. */
   @Test
   void aCleanContainerPasses() throws Exception {

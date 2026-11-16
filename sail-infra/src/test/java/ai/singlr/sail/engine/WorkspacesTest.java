@@ -1135,32 +1135,6 @@ class WorkspacesTest {
         String.join("\n", shell.invocations()));
   }
 
-  /**
-   * Low 6 of the proof: a repo added after the template was built is not in it, and the refusal
-   * names it and the build that brings it, a command that works as pasted.
-   */
-  @Test
-  void aRepoTheTemplateWasBuiltWithoutIsNamedWithTheBuildThatBringsIt() {
-    var shell =
-        incus(DIR_AND_ZFS, list(template("v1", INPUTS)), snapshots("v1"))
-            .on(
-                "sail-workspace acme fix-login",
-                new ShellExec.Result(3, "sail-step start 1\nsail-missing-repo private\n", ""));
-
-    var failure =
-        assertThrows(
-            IOException.class,
-            () ->
-                workspaces(shell, ticks(0, 1, 2))
-                    .create(acme(), "fix-login", source(), tempDir, "eng", TestOwners::of));
-
-    assertEquals(
-        "Workspace 'fix-login' could not be made its own: its template has no repo at private,"
-            + " since it was built before the repo was added. Build it again: sail project"
-            + " template build acme.",
-        failure.getMessage());
-  }
-
   @Test
   void aCloneIncusRefusesLeavesNothingToDelete() {
     var shell =
@@ -1374,8 +1348,12 @@ class WorkspacesTest {
         printf '%s\\n' "$project" > /etc/hostname
         hostname "$project"
         sed -i "s/^\\(127\\.0\\.1\\.1[[:space:]]*\\).*/\\1$project/" /etc/hosts
-        rm -f /etc/ssh/ssh_host_*
-        ssh-keygen -A >/dev/null
+        keys=$(mktemp -d /etc/ssh/sail-keys.XXXXXX)
+        mkdir -p "$keys/etc/ssh"
+        ssh-keygen -A -f "$keys" >/dev/null
+        for key in /etc/ssh/ssh_host_*; do [ -e "$keys/etc/ssh/${key##*/}" ] || rm -f "$key"; done
+        mv -f "$keys"/etc/ssh/ssh_host_* /etc/ssh/
+        rm -rf "$keys"
         step identity
         as_dev() { runuser -u dev -- env HOME=/home/dev "$@"; }
         retries=0
@@ -1403,7 +1381,6 @@ class WorkspacesTest {
         step network
         while [ "$#" -ge 2 ]; do
           repo=/home/dev/workspace/$1 base=$2
-          [ -e "$repo/.git" ] || { printf 'sail-missing-repo %s\\n' "$1"; exit 3; }
           shift 2
           fetch "$repo"
           if [ -z "$base" ]; then
@@ -1421,7 +1398,17 @@ class WorkspacesTest {
         step repos
         printf 'sail-count fetch_retries %s\\n' "$retries"
         for _ in $(seq 1 300); do systemctl show --property=Version >/dev/null 2>&1 && break; sleep 0.1; done
-        systemctl try-restart ssh.service
+        for _ in $(seq 1 300); do
+          case $(systemctl show --property=ActiveState --value ssh.service) in
+            activating|deactivating|reloading) sleep 0.1 ;;
+            *) break ;;
+          esac
+        done
+        if ! systemctl try-restart ssh.service; then
+          printf 'ssh.service: %s; %s\\n' "$(systemctl show --property=Result --value ssh.service)" \\
+            "$(journalctl --unit ssh.service --lines 3 --output cat --no-pager 2>&1 | paste -s -d ';' -)" >&2
+          exit 1
+        fi
         step sshd
         for _ in $(seq 1 300); do [ -S /run/user/1000/bus ] && break; sleep 0.1; done
         if [ ! -S /run/user/1000/bus ]; then
@@ -2942,9 +2929,10 @@ class WorkspacesTest {
   }
 
   /**
-   * A token a person replaces reaches each running workspace of theirs at once, by the step that
-   * gives a workspace its owner's credentials, so its next fetch uses the new one; a stopped one,
-   * and another person's, are left as they are.
+   * A token a person replaces reaches each running workspace of theirs at once, so its next fetch
+   * uses the new one; a stopped one, and another person's, are left as they are. N5: the owner is
+   * unchanged, so nothing is stripped: the store is written beside the old one and renamed over it,
+   * so a live run never meets the workspace without a token.
    */
   @Test
   void aReplacedTokenReachesTheOwnersRunningWorkspacesAloneByTheOwnerStep() throws Exception {
@@ -2966,13 +2954,26 @@ class WorkspacesTest {
             .refresh(replaced, project -> acme());
 
     assertEquals(List.of(), unreached);
-    assertTrue(
-        scripted
-            .invocations()
-            .contains(String.join(" ", strip("acme-a", "Ana", "ana@sail.invalid"))));
+    assertFalse(
+        scripted.invocations().stream()
+            .anyMatch(
+                c ->
+                    c.contains("sail-strip")
+                        || c.contains("rm -f /home/dev/.git-credentials")
+                        || c.contains("file delete")),
+        "the token file is never removed");
     assertEquals(
         "https://oauth2:ghp_new@github.com\n",
-        shell.pushed.get("acme-a/home/dev/.git-credentials"));
+        shell.pushed.get("acme-a/home/dev/.git-credentials.sail-new"));
+    var pushed = indexWhere(scripted, c -> c.endsWith("acme-a/home/dev/.git-credentials.sail-new"));
+    var renamed =
+        indexWhere(
+            scripted,
+            c ->
+                c.startsWith("incus exec acme-a")
+                    && c.endsWith(
+                        "mv -f /home/dev/.git-credentials.sail-new /home/dev/.git-credentials"));
+    assertTrue(0 <= pushed && pushed < renamed, String.join("\n", scripted.invocations()));
     assertTrue(
         scripted.invocations().stream().anyMatch(c -> c.contains("sail-resolve github.com")));
     assertFalse(
@@ -2988,14 +2989,16 @@ class WorkspacesTest {
                 DIR_AND_ZFS,
                 list(owned("acme-a", "Running", "ana"), owned("acme-d", "Running", "ana")),
                 "[]")
-            .onFail("incus exec acme-a -- bash -c", "Error: Instance is not running");
+            .onFail("acme-a/home/dev/.git-credentials.sail-new", "Error: Instance is not running");
 
     var unreached = workspaces(shell, ticks()).refresh(ANA, project -> acme());
 
-    assertEquals(1, unreached.size());
+    assertEquals(1, unreached.size(), unreached.toString());
     assertTrue(unreached.getFirst().startsWith("acme-a: "), unreached.getFirst());
     assertTrue(
-        shell.invocations().contains(String.join(" ", strip("acme-d", "Ana", "ana@sail.invalid"))));
+        shell.invocations().stream()
+            .anyMatch(c -> c.startsWith("incus exec acme-d") && c.contains("mv -f")),
+        String.join("\n", shell.invocations()));
   }
 
   /**
@@ -3303,7 +3306,11 @@ class WorkspacesTest {
     var shell = incus(DIR_AND_ZFS, list(template("v1", "an-older-definition")), snapshots("v1"));
     var source =
         new WorkspaceTemplate.Source(
-            "devpool", INPUTS, name -> false, (into, fresh) -> {}, List.of("ghp_one", "glpat-two"));
+            "devpool",
+            INPUTS,
+            name -> false,
+            (into, fresh) -> {},
+            List.of("ghp_one", "", " ", "glpat-two"));
 
     templates(shell).ensure(acme(), source);
 
@@ -3314,26 +3321,41 @@ class WorkspacesTest {
   }
 
   /**
-   * Low 3 of the proof: a build whose check finds something names it, never its value, and says
-   * what to do: the definition's step that writes it comes out before the next build.
+   * A build whose check finds something names it, never its value, and its remedy fits whatever
+   * wrote it: a step of the definition or a hand change to the template. One whose check cannot
+   * tell what it holds (exit 2) is never taken for clean.
    */
   @Test
-  void aFailedBuildNamesWhatItFoundAndTheStepToTakeOut() {
-    var shell =
+  void aFailedBuildNamesWhatItFoundAndOneThatCannotTellIsNeverClean() {
+    var found =
         incus(DIR_AND_ZFS, list(template("v1", "an-older-definition")), snapshots("v1"))
             .on(
                 "sail-held",
                 new ShellExec.Result(
-                    1, "", "a token in /home/dev/.netrc, a system git user.email\n"));
+                    1, "", "a token this build was given in /home/dev/.netrc, a gh login\n"));
+    var unsure =
+        incus(DIR_AND_ZFS, list(template("v1", "an-older-definition")), snapshots("v1"))
+            .on(
+                "sail-held",
+                new ShellExec.Result(2, "", "the search for the build's tokens failed"));
 
-    var failure = assertThrows(IOException.class, () -> templates(shell).ensure(acme(), source()));
+    var failure = assertThrows(IOException.class, () -> templates(found).ensure(acme(), source()));
+    var cannotTell =
+        assertThrows(IOException.class, () -> templates(unsure).ensure(acme(), source()));
 
     assertEquals(
-        "acme--tmpl was not snapshotted: it still holds a token in /home/dev/.netrc, a system git"
-            + " user.email, which acme's own provisioning wrote and the strip does not take out, so"
-            + " it is left where it is. Take the step that writes it out of acme's definition,"
-            + " then build again: sail project template build acme.",
+        "acme--tmpl was not snapshotted: it still holds a token this build was given in"
+            + " /home/dev/.netrc, a gh login. Remove what wrote it, a step of acme's definition or a"
+            + " change made by hand in acme--tmpl, then build again: sail project template build"
+            + " acme.",
         failure.getMessage());
+    assertEquals(
+        "acme--tmpl was not snapshotted, since Sail could not tell what it holds: the search for"
+            + " the build's tokens failed",
+        cannotTell.getMessage());
+    assertFalse(
+        unsure.invocations().stream().anyMatch(c -> c.contains("snapshot create")),
+        "nothing is snapshotted");
   }
 
   /**

@@ -61,6 +61,9 @@ public final class LoginStore {
   /** What a git token is a login of: its name is its host, and it has no default. */
   public static final String GIT = "git";
 
+  /** Shorter than any forge's token; a template's check would find a short value in every file. */
+  static final int MIN_TOKEN = 16;
+
   private static final String TOKEN = "token";
   private static final String TEMP_PREFIX = ".tmp-";
   private static final Pattern NAME = Pattern.compile("[a-z0-9][a-z0-9-]{0,31}");
@@ -239,6 +242,10 @@ public final class LoginStore {
   public Row storeGit(String fdeId, String host, String value) {
     var named = requireHost(host);
     requireValue(value);
+    if (value.length() < MIN_TOKEN) {
+      throw new IllegalArgumentException(
+          "A git token is at least " + MIN_TOKEN + " characters: this value is not one.");
+    }
     synchronized (WRITES) {
       var dir = directory(fdeId, GIT);
       write(dir, named, value + "\n");
@@ -254,22 +261,6 @@ public final class LoginStore {
       removed.ifPresent(row -> delete(dir.resolve(named)));
       return removed;
     }
-  }
-
-  /** Every value this runner keeps, every person's: what a template's check must find none of. */
-  public List<String> values() {
-    if (root == null) {
-      return List.of();
-    }
-    var values = new ArrayList<String>();
-    for (var person : children(root)) {
-      for (var harness : harnessDirectories(person)) {
-        names(harness)
-            .forEach(name -> readLogin(harness.resolve(name)).ifPresent(l -> values.add(l.get(1))));
-      }
-      values.addAll(gitTokens(person.getFileName().toString()).values());
-    }
-    return List.copyOf(values);
   }
 
   /** Values and all: only a workspace's owner step reads them. */

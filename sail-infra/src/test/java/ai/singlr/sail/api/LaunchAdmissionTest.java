@@ -342,7 +342,7 @@ class LaunchAdmissionTest {
   @Test
   void requireTrustedRosterRefusesADisabledHandle() {
     fdeStore.add("uday", "Uday", "uday@x");
-    fdeStore.disableUnlisted(List.of());
+    fdeStore.disableUnlisted(List.of(), null);
     var admission = new LaunchAdmission(shellExiting(0), fdeStore);
 
     var ex = assertThrows(ApiException.class, () -> admission.requireTrustedRoster("uday"));
