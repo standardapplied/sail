@@ -82,6 +82,36 @@ class HostStatusCommandTest {
     assertFalse(text(shell).contains("-listen"));
   }
 
+  /**
+   * Each door's JSON carries its setting as {@code host config set} takes it, beside what the
+   * service does with it, so a script reads the value it would put back with Sail's own command.
+   */
+  @Test
+  void eachDoorInJsonCarriesItsSettingAsHostConfigSetTakesIt() throws Exception {
+    var shell =
+        new ScriptedShellExecutor()
+            .onOk("incus list", "[]")
+            .onOk("incus version", "Client version: 6.21\nServer version: 6.21\n");
+
+    var said =
+        YamlUtil.parseMap(
+            report(
+                RECORDED_AT_INIT.withListen(new ListenConfig("100.64.0.7:7071", null)),
+                shell,
+                true));
+
+    assertEquals(
+        List.of(
+            Map.of(
+                "setting",
+                "api-listen",
+                "state",
+                "not listening (set to 100.64.0.7:7071)",
+                "set",
+                "100.64.0.7:7071")),
+        said.get("listen"));
+  }
+
   @Test
   void anIncusThatDoesNotAnswerReadsUnknown() throws Exception {
     var shell =
@@ -566,9 +596,13 @@ class HostStatusCommandTest {
   }
 
   private static String report(ShellExec shell, boolean json) throws Exception {
+    return report(RECORDED_AT_INIT, shell, json);
+  }
+
+  private static String report(HostYaml hostYaml, ShellExec shell, boolean json) throws Exception {
     var out = new ByteArrayOutputStream();
     HostStatusCommand.report(
-        RECORDED_AT_INIT,
+        hostYaml,
         HOST,
         shell,
         json,

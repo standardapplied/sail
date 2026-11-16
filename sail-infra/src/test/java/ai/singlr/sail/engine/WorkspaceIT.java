@@ -25,6 +25,7 @@ import ai.singlr.sail.commands.DownCommand;
 import ai.singlr.sail.commands.ExecCommand;
 import ai.singlr.sail.commands.ProjectDestroyCommand;
 import ai.singlr.sail.commands.RestoreCommand;
+import ai.singlr.sail.commands.ScopedNode;
 import ai.singlr.sail.commands.ShellCommand;
 import ai.singlr.sail.commands.SnapCommand;
 import ai.singlr.sail.commands.SnapDeleteCommand;
@@ -34,6 +35,7 @@ import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.ProjectDefinition;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.config.SyncConfig;
+import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.harness.RunReport;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.store.BoxCredentialStore;
@@ -55,6 +57,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermissions;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -62,12 +65,17 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.Callable;
+import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Predicate;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 import picocli.CommandLine;
 
 /**
@@ -1047,6 +1055,96 @@ class WorkspaceIT extends AbstractIncusIT {
         List.of(),
         new SnapshotManager(shell)
             .list(ws).stream().map(SnapshotManager.SnapshotInfo::name).toList());
+  }
+
+  /**
+   * Round 3's blocker on a real Incus: a workspace made and stopped on a node while the node's
+   * rounds run is still there afterwards, whole and with its keys. Each round lists the box through
+   * {@link #unrendering}, so it finds the workspace as Incus lists an instance it cannot render
+   * mid-stop, the listing that made a node take a workspace for a project of its own name, out of
+   * its scope, and delete it; every other call, the round's re-read and delete among them, reaches
+   * this host's Incus, and its locks are this box's.
+   */
+  @Test
+  void aWorkspaceMadeAndStoppedOnANodeWhileItsRoundsRunIsStillThereWithItsKeys(@TempDir Path dir)
+      throws Exception {
+    var instance = PROJECT + "-" + FIX;
+    var stopped = new AtomicBoolean();
+    var rounds = new AtomicInteger();
+    var runner = Executors.newSingleThreadExecutor();
+    try (var node = new ScopedNode(dir, PROJECT, unrendering(instance))) {
+      var running =
+          runner.submit(
+              () -> {
+                while (!stopped.get()) {
+                  node.round();
+                  rounds.incrementAndGet();
+                }
+                return null;
+              });
+      workspaces.create(definition(), FIX, source(), null, "eng", TestOwners::of);
+      workspaces.stop(PROJECT, FIX, NO_RUN);
+      stopped.set(true);
+      running.get(5, TimeUnit.MINUTES);
+      node.round();
+    } finally {
+      runner.shutdownNow();
+    }
+
+    assertTrue(rounds.get() > 0, "a round ran while the workspace was made and stopped");
+    var found = new BoxInstances(shell).named(instance).orElseThrow();
+    assertEquals(new ContainerState.Stopped(), found.state());
+    assertEquals(new BoxInstances.Workspace(PROJECT, FIX, true), found.kind());
+    assertEquals(Optional.of("eng"), found.key(BoxInstances.OWNER_KEY));
+    assertEquals(Optional.of(TestOwners.of("eng").id()), found.key(BoxInstances.OWNER_ID_KEY));
+  }
+
+  /**
+   * This host's Incus, except that a listing of every instance shows {@code instance} as Incus
+   * shows one it cannot render: its name, an Error status and no config.
+   */
+  private ShellExec unrendering(String instance) {
+    return new ShellExec() {
+      @Override
+      public Result exec(List<String> command)
+          throws IOException, InterruptedException, TimeoutException {
+        return rendered(command, shell.exec(command));
+      }
+
+      @Override
+      public Result exec(List<String> command, Path workDir, Duration timeout)
+          throws IOException, InterruptedException, TimeoutException {
+        return rendered(command, shell.exec(command, workDir, timeout));
+      }
+
+      @Override
+      public boolean isDryRun() {
+        return false;
+      }
+
+      private Result rendered(List<String> command, Result listed) {
+        if (!command.equals(List.of("incus", "list", "--format", "json")) || !listed.ok()) {
+          return listed;
+        }
+        var entries =
+            YamlUtil.parseList(listed.stdout()).stream()
+                .map(
+                    entry ->
+                        instance.equals(entry.get("name"))
+                            ? Map.<String, Object>of(
+                                "name",
+                                instance,
+                                "status",
+                                "Error",
+                                "status_code",
+                                400,
+                                "type",
+                                "container")
+                            : entry)
+                .toList();
+        return new Result(0, YamlUtil.dumpJsonValue(entries), listed.stderr());
+      }
+    };
   }
 
   @Test

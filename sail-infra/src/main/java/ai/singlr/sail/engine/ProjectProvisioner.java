@@ -63,8 +63,8 @@ public final class ProjectProvisioner {
   /**
    * The instance a run provisions, and how it is launched when it does not exist yet: on {@code
    * pool} when one is named, carrying {@code keys} from birth. The project's own container is
-   * launched on the base profile's pool with no key ({@link #of}); its template on the box's ZFS
-   * pool with the key that says whose template it is.
+   * launched on the base profile's pool carrying its project's key ({@link #of}); its template on
+   * the box's ZFS pool with the key that says whose template it is.
    */
   public record Instance(String name, Optional<String> pool, Map<String, String> keys) {
     public Instance {
@@ -73,9 +73,13 @@ public final class ProjectProvisioner {
       keys = Map.copyOf(keys);
     }
 
-    /** The project's own container, named after it, on the base profile's pool. */
+    /**
+     * The project's own container, named after it, on the base profile's pool, carrying {@link
+     * BoxInstances#PROJECT_KEY} of its name: what tells it positively from any other instance.
+     */
     public static Instance of(ProjectDefinition config) {
-      return new Instance(config.name(), Optional.empty(), Map.of());
+      return new Instance(
+          config.name(), Optional.empty(), Map.of(BoxInstances.PROJECT_KEY, config.name()));
     }
   }
 

@@ -19,6 +19,7 @@ import ai.singlr.sail.engine.AuthorizedKeysSync;
 import ai.singlr.sail.engine.PipedSyncChannel;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.SyncOperations;
+import ai.singlr.sail.engine.Workspaces;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.ProjectScope;
@@ -52,6 +53,9 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -219,7 +223,7 @@ class ScopeChangeRoundTest {
     assertEquals(
         List.of(
             "incus list --format json",
-            "incus config device get beta sail-api-sock source",
+            "incus list ^beta$ --format json",
             "incus delete beta --force"),
         incus.invocations);
     assertEquals(
@@ -402,9 +406,7 @@ class ScopeChangeRoundTest {
 
     assertEquals(List.of(), round());
 
-    assertEquals(
-        List.of("incus list --format json", "incus config device get scratch sail-api-sock source"),
-        incus.invocations);
+    assertEquals(List.of("incus list --format json"), incus.invocations);
     assertEquals(List.of("acme", "scratch"), incus.names());
   }
 
@@ -608,6 +610,138 @@ class ScopeChangeRoundTest {
     assertTrue(Files.readString(gatewayKeys).contains(nia));
   }
 
+  /**
+   * Round 3's blocker: a workspace of a project this box holds, listed while Incus cannot render it
+   * (as it lists an instance it cannot read mid-stop: a name, an Error status and no config), is
+   * never taken for the container of a project of its own name, nor deleted.
+   */
+  @Test
+  void aWorkspaceIncusListsWithoutItsKeysWhileItStopsIsNeverTakenForAProjectNorDeleted()
+      throws Exception {
+    narrowTo("acme");
+    round();
+    incus.sail("acme");
+    incus.keyed("acme-fleet-v", workspace("acme", "fleet-v"));
+    incus.unrendered.add("acme-fleet-v");
+    incus.invocations.clear();
+
+    assertEquals(List.of(), round());
+
+    assertEquals(List.of("acme", "acme-fleet-v"), incus.names());
+    assertEquals(List.of("incus list --format json"), incus.invocations);
+  }
+
+  /**
+   * A dropped project's container that Incus cannot render this round is neither deleted nor said
+   * to be another's: the round that next reads its keys deletes it.
+   */
+  @Test
+  void aDroppedProjectsContainerIncusCannotRenderIsLeftToTheRoundThatReadsIt() throws Exception {
+    round();
+    incus.sail("beta");
+    incus.unrendered.add("beta");
+    narrowTo("acme");
+
+    var said = round();
+    incus.unrendered.clear();
+    var next = round();
+
+    assertEquals(
+        List.of(
+            "  ⚠ project beta: dropped from this box with the 3 rows it held here" + WHY, WITHDREW),
+        said);
+    assertEquals(
+        List.of(
+            "  ⚠ project beta: its container deleted, workspace and uncommitted work included"
+                + WHY),
+        next);
+    assertEquals(List.of(), incus.names());
+  }
+
+  /**
+   * Only a project's own container, told by the project key Sail's launch writes, is deleted as it:
+   * an instance named after a leaving project that carries a workspace's keys is a copy, and stays.
+   */
+  @Test
+  void anInstanceNamedAfterALeavingProjectCarryingAWorkspacesKeysStays() throws Exception {
+    round();
+    incus.keyed("beta", workspace("beta", "w"));
+    narrowTo("acme");
+
+    var said = round();
+
+    assertEquals(List.of("beta"), incus.names());
+    assertEquals(
+        List.of(
+            "  ⚠ project beta: instance 'beta' kept — a copy carrying the project's keys under"
+                + " another name is not Sail's; delete it yourself if it is not wanted, as it holds"
+                + " the project's work"),
+        said.stream().filter(line -> line.contains("'beta'")).toList());
+    assertFalse(said.stream().anyMatch(line -> line.contains("deleted")), String.valueOf(said));
+  }
+
+  /**
+   * The instance is read again under its lock immediately before the delete: one that is no longer
+   * the leaving project's own container by then stays.
+   */
+  @Test
+  void aContainerThatIsNoLongerTheLeavingProjectsOwnWhenReadUnderItsLockStays() throws Exception {
+    round();
+    incus.sail("beta");
+    incus.relisted.put("beta", "");
+    narrowTo("acme");
+
+    var said = round();
+
+    assertEquals(List.of("beta"), incus.names());
+    assertFalse(said.stream().anyMatch(line -> line.contains("deleted")), String.valueOf(said));
+    assertFalse(incus.invocations.contains("incus delete beta --force"));
+  }
+
+  /**
+   * An instance whose lock another change holds, as a workspace's make, stop or delete does, is
+   * left as it is by the round, and taken by the first round that finds the lock free.
+   */
+  @Test
+  void anInstanceAnotherChangeHoldsIsLeftToTheNextRound() throws Exception {
+    round();
+    incus.sail("beta");
+    narrowTo("acme");
+    var held = new CountDownLatch(1);
+    var release = new CountDownLatch(1);
+    var holder = Executors.newSingleThreadExecutor();
+    List<String> during;
+    try {
+      var holding =
+          holder.submit(
+              () -> {
+                try (var lock = Workspaces.onThisBox(incus).holdIfFree("beta").orElseThrow()) {
+                  held.countDown();
+                  release.await();
+                }
+                return null;
+              });
+      assertTrue(held.await(10, TimeUnit.SECONDS), "the other change took the lock");
+      try {
+        during = round();
+      } finally {
+        release.countDown();
+      }
+      holding.get(10, TimeUnit.SECONDS);
+    } finally {
+      holder.shutdownNow();
+    }
+
+    assertEquals(List.of("beta"), incus.names());
+    assertFalse(during.stream().anyMatch(line -> line.contains("deleted")), String.valueOf(during));
+    assertEquals(
+        List.of(
+            "  ⚠ project beta: its container deleted, workspace and uncommitted work included"
+                + WHY),
+        round());
+    assertEquals(List.of(), incus.names());
+  }
+
   @Test
   void anUnscopedRoundNeverAsksIncus() throws Exception {
     round();
@@ -649,18 +783,22 @@ class ScopeChangeRoundTest {
   }
 
   /**
-   * This box's Incus: containers by name, each Sail's (it carries the API-socket device) or not,
-   * reachable or failing every call as an unprivileged round finds it.
+   * This box's Incus: containers by name, each Sail's (launched carrying its project's key, with
+   * the API-socket device) or not, reachable or failing every call as an unprivileged round finds
+   * it. One it cannot render is listed as Incus lists such an instance: its name, an Error status
+   * and no config; and one {@code relisted} is read alone with the keys it carries by then.
    */
   private static final class Incus implements ShellExec {
     private final Map<String, Boolean> containers = new LinkedHashMap<>();
     private final Map<String, String> keys = new LinkedHashMap<>();
     final List<String> invocations = new ArrayList<>();
     final Set<String> busy = new HashSet<>();
+    final Set<String> unrendered = new HashSet<>();
+    final Map<String, String> relisted = new LinkedHashMap<>();
     boolean reachable = true;
 
     void sail(String name) {
-      containers.put(name, true);
+      keyed(name, "\"user.sail.project\":\"" + name + "\"");
     }
 
     void foreign(String name) {
@@ -713,11 +851,16 @@ class ScopeChangeRoundTest {
             containers.keySet().stream()
                 .map(
                     name ->
-                        "{\"name\":\""
-                            + name
-                            + "\",\"status\":\"Running\",\"type\":\"container\",\"config\":{"
-                            + keys.getOrDefault(name, "")
-                            + "}}")
+                        unrendered.contains(name)
+                            ? "{\"name\":\""
+                                + name
+                                + "\",\"status\":\"Error\",\"status_code\":400,"
+                                + "\"type\":\"container\"}"
+                            : "{\"name\":\""
+                                + name
+                                + "\",\"status\":\"Running\",\"type\":\"container\",\"config\":{"
+                                + keys.getOrDefault(name, "")
+                                + "}}")
                 .collect(Collectors.joining(",", "[", "]")),
             "");
       }
@@ -729,7 +872,7 @@ class ScopeChangeRoundTest {
                 ? "[{\"name\":\""
                     + name
                     + "\",\"status\":\"Running\",\"type\":\"container\",\"config\":{"
-                    + keys.getOrDefault(name, "")
+                    + relisted.getOrDefault(name, keys.getOrDefault(name, ""))
                     + "}}]"
                 : "[]",
             "");

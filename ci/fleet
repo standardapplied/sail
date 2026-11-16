@@ -796,9 +796,12 @@ inside() {
     direct_terminal "$run" client main client
 }
 
+readonly LISTEN_SETTINGS='import json, sys
+said = {door["setting"]: door["set"] for door in json.load(sys.stdin).get("listen", [])}
+print(said.get("api-listen", "none"), said.get("terminal-listen", "none"))'
+
 readonly LISTEN_PRIVATELY='set -eu
 ip=$1 handle=${2:-client}
-[ -e /var/lib/sail/host.yaml.before-direct ] || sudo cp -p /var/lib/sail/host.yaml /var/lib/sail/host.yaml.before-direct
 sudo sail host config set api-listen "$ip:7071" > /dev/null
 sudo sail host config set terminal-listen "$ip:7072" > /dev/null
 sudo systemctl restart sail-api sail-pty-host
@@ -861,27 +864,28 @@ if kind != 31 or b"presented already" not in payload:
     raise SystemExit("the second presentation was not refused as used: frame %d" % kind)
 print("the same ticket, presented again, is refused")'
 
-readonly CLOSE_PRIVATELY='handle=${1:-client}
-if [ -e /var/lib/sail/host.yaml.before-direct ]; then
-  sudo mv /var/lib/sail/host.yaml.before-direct /var/lib/sail/host.yaml
-else
-  sudo sail host config set api-listen none > /dev/null
-  sudo sail host config set terminal-listen none > /dev/null
-fi
-sudo systemctl restart sail-api sail-pty-host
-sudo sail server token revoke "direct-$handle" > /dev/null 2>&1 || true'
+readonly CLOSE_PRIVATELY='handle=$1 api=$2 terminal=$3 status=0
+sudo sail host config set api-listen "$api" > /dev/null || status=1
+sudo sail host config set terminal-listen "$terminal" > /dev/null || status=1
+sudo systemctl restart sail-api sail-pty-host || status=1
+sudo sail server token revoke "direct-$handle" > /dev/null 2>&1 || true
+exit $status'
 
 # From box FROM, over box HOST's private address: a ticket HANDLE asks HOST's API for, to open a
 # terminal in acme's container, or in its WORKSPACE, opens a session over TCP that echoes a line.
-# HOST's listeners are set for it and put back as they were after it (its host.yaml, kept aside
-# first), whether it passed or not, and HOST's sail-api and pty host restart for each. That is safe
-# only where nothing else uses HOST meanwhile: each group runs on a fleet of its own and its
-# scenarios one after another, so inside (client) and storage (main) each have their box to
-# themselves when they call this, in a group and in the serial gate alike.
+# HOST's listeners are read first, set for it, and put back as they were after it, whether it passed
+# or not, all with Sail's own commands (host status --json, host config set); HOST's sail-api and
+# pty host restart for each. That is safe only where nothing else uses HOST meanwhile: each group
+# runs on a fleet of its own and its scenarios one after another, so inside (client) and storage
+# (main) each have their box to themselves when they call this, in a group and in the serial gate
+# alike.
 direct_terminal() {
-  local run=$1 host=$2 from=$3 handle=$4 workspace=${5:-} ip token status=0
+  local run=$1 host=$2 from=$3 handle=$4 workspace=${5:-} ip before token status=0
   ip=$(internal_ip "$run" "$host")
   [[ -n $ip ]] || { echo "$host has no address"; return 1; }
+  before=$(on "$run" "$host" "sudo sail host status --json" | python3 -I -c "$LISTEN_SETTINGS") || before=""
+  [[ $before =~ ^[^[:space:]]+\ [^[:space:]]+$ ]] || { echo "could not read $host's listeners: '$before'"; return 1; }
+  echo "$host's listeners before: api-listen ${before% *}, terminal-listen ${before#* }"
   token=$(on "$run" "$host" "cat > /tmp/sail-listen-privately && bash /tmp/sail-listen-privately $ip $handle" <<< "$LISTEN_PRIVATELY")
   if [[ -z $token ]]; then
     echo "no token for $handle"
@@ -890,7 +894,7 @@ direct_terminal() {
     on "$run" "$from" "cat > /tmp/sail-direct-terminal.py" <<< "$DIRECT_TERMINAL" || status=1
     [[ $status == 0 ]] && { on "$run" "$from" "python3 /tmp/sail-direct-terminal.py $ip $workspace" <<< "$token" || status=1; }
   fi
-  on "$run" "$host" "cat > /tmp/sail-close-privately && bash /tmp/sail-close-privately $handle" <<< "$CLOSE_PRIVATELY" || status=1
+  on "$run" "$host" "cat > /tmp/sail-close-privately && bash /tmp/sail-close-privately $handle $before" <<< "$CLOSE_PRIVATELY" || status=1
   return $status
 }
 
