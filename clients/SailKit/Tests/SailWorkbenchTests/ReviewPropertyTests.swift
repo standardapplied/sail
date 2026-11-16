@@ -51,7 +51,8 @@ import Testing
         return said
     }
 
-    struct Counts {
+    struct Counts: Sendable {
+        var sequences = 0
         var breaches: [String] = []
         var under: [String] = []
         var underStrict: [String] = []
@@ -60,12 +61,13 @@ import Testing
         var ops: [String: Int] = [:]
     }
 
-    @Test func reviewersGenerator() {
+    static func generate() -> Counts {
         var random = XorShift(state: 0xC0FFEE_1234_5678)
         var counts = Counts()
         let minimums = [CGSize(width: 10, height: 10), CGSize(width: 73.3, height: 41.7), CGSize(width: 110, height: 70)]
         let sizes = [CGSize(width: 1180, height: 760), CGSize(width: 640, height: 612), CGSize(width: 2560, height: 1400), CGSize(width: 401, height: 333)]
         for sequence in 0 ..< 20000 {
+            counts.sequences += 1
             var bench = Workbench()
             var made = 0
             let size = sizes.randomElement(using: &random)!
@@ -139,6 +141,15 @@ import Testing
                 counts.restoreWrong.append("seq \(sequence): got \(got.sorted()) wanted \(wanted.sorted()) \(Self.whole(restored))")
             }
         }
+        return counts
+    }
+
+    /// The generator runs on a thread of its own, so it holds none of the threads every other
+    /// test shares while it computes.
+    @Test func reviewersGenerator() async {
+        let counts = await onOwnThread(Self.generate)
+        print("ReviewPropertyTests ran \(counts.sequences) sequences")
+        #expect(counts.sequences == 20000)
         #expect(counts.breaches.isEmpty, "\(counts.breaches)")
         #expect(counts.under.isEmpty, "\(counts.under)")
         #expect(counts.underStrict.isEmpty, "\(counts.underStrict)")
