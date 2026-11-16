@@ -165,14 +165,135 @@ class WorkspaceGitTest {
     assertEquals("commits app\n", left(BRANCH, REPOS));
   }
 
-  /** A push that cannot reach its remote leaves the commits, which are said. */
+  /**
+   * Rule B of round 4: a push that cannot reach its remote fails the read, saying why, since it
+   * says nothing of what the repo holds.
+   */
   @Test
-  void aPushThatCannotReachTheRemoteLeavesTheCommitsSaid() throws Exception {
+  void aPushThatCannotReachTheRemoteFailsTheReadSayingWhy() throws Exception {
     git(app, "switch", "--quiet", "-c", BRANCH);
     git(app, "commit", "--quiet", "--allow-empty", "-m", "built");
     git(app, "remote", "set-url", "origin", tempDir.resolve("gone.git").toString());
 
-    assertEquals("commits app\n", left(BRANCH, REPOS));
+    var read = exec(command(List.of(BRANCH, "app")), true);
+
+    assertTrue(read.exit() != 0, read.output());
+    assertTrue(
+        read.output().contains("the push of agent/a in app did not reach origin: fatal:"),
+        read.output());
+  }
+
+  /** A push origin answers and refuses is what the repo holds: said, with the commits it lacks. */
+  @Test
+  void aPushOriginRefusesIsSaidWithTheCommitsItLacks() throws Exception {
+    git(app, "switch", "--quiet", "-c", BRANCH);
+    git(app, "commit", "--quiet", "--allow-empty", "-m", "built");
+    git(app, "push", "--quiet", "origin", BRANCH);
+    git(svc, "fetch", "--quiet", "origin");
+    git(svc, "switch", "--quiet", "-c", BRANCH, "origin/" + BRANCH);
+    git(svc, "commit", "--quiet", "--allow-empty", "-m", "theirs");
+    git(svc, "push", "--quiet", "origin", BRANCH);
+    git(app, "commit", "--quiet", "--allow-empty", "--amend", "-m", "rewritten");
+
+    assertEquals("refused app\ncommits app\n", left(BRANCH, List.of("app")));
+  }
+
+  /**
+   * S-B1: a linked worktree's edits are read where it lives, under a directory the repo ignores
+   * ({@code .claude/worktrees/}, where a harness puts one) or outside the configured path; one
+   * whose directory is gone holds nothing left to read.
+   */
+  @Test
+  void aLinkedWorktreesEditsAreSaidWhereverItLives() throws Exception {
+    Files.writeString(app.resolve(".git/info/exclude"), ".claude/\n");
+    git(app, "worktree", "add", "--quiet", "-b", "wt", ".claude/worktrees/w");
+    var inside = app.resolve(".claude/worktrees/w");
+    Files.writeString(inside.resolve("f"), "x\n");
+    git(inside, "add", "f");
+    Files.writeString(inside.resolve("new.java"), "y\n");
+    var outside = tempDir.resolve("outside");
+    git(svc, "worktree", "add", "--quiet", "-b", "out", outside.toString());
+    Files.writeString(outside.resolve("draft"), "z\n");
+
+    assertEquals(
+        "changes app/.claude/worktrees/w\n"
+            + "untracked app/.claude/worktrees/w\n"
+            + "untracked "
+            + outside.toRealPath()
+            + "\n",
+        left(BRANCH, REPOS));
+
+    run(List.of("rm", "-rf", inside.toString(), outside.toString()));
+    assertEquals("", left(BRANCH, REPOS));
+  }
+
+  /**
+   * S-M3: a submodule's commits its own origin lacks are said once the superproject's bump of it is
+   * pushed, as are its edits, a submodule's submodule included.
+   */
+  @Test
+  void aSubmodulesUnpushedCommitsAreSaidOnceTheSuperprojectsBumpIsPushed() throws Exception {
+    var lib = tempDir.resolve("lib.git");
+    run(List.of("git", "init", "--quiet", "--bare", "-b", "main", lib.toString()));
+    var seed = tempDir.resolve("lib-seed");
+    run(List.of("git", "clone", "--quiet", lib.toString(), seed.toString()));
+    git(seed, "commit", "--quiet", "--allow-empty", "-m", "lib");
+    git(seed, "push", "--quiet", "origin", "main");
+    git(
+        seed,
+        "-c",
+        "protocol.file.allow=always",
+        "submodule",
+        "add",
+        "--quiet",
+        lib.toString(),
+        "inner");
+    git(seed, "commit", "--quiet", "-m", "inner");
+    git(seed, "push", "--quiet", "origin", "main");
+    git(
+        app,
+        "-c",
+        "protocol.file.allow=always",
+        "submodule",
+        "add",
+        "--quiet",
+        lib.toString(),
+        "lib");
+    git(
+        app,
+        "-c",
+        "protocol.file.allow=always",
+        "submodule",
+        "update",
+        "--quiet",
+        "--init",
+        "--recursive");
+    git(app, "commit", "--quiet", "-m", "lib");
+    git(app, "push", "--quiet", "origin", "main");
+    assertEquals("", left(BRANCH, REPOS));
+
+    var sub = app.resolve("lib");
+    git(sub, "switch", "--quiet", "-c", "work");
+    git(sub, "commit", "--quiet", "--allow-empty", "-m", "unpushed");
+    git(app, "add", "lib");
+    git(app, "commit", "--quiet", "-m", "bump");
+    git(app, "push", "--quiet", "origin", "main");
+    Files.writeString(sub.resolve("inner/draft"), "x\n");
+
+    assertEquals(
+        "changes app\nchanges app/lib\ncommits app/lib\nuntracked app/lib/inner\n",
+        left(BRANCH, REPOS));
+  }
+
+  /** A worktree, or a submodule, git cannot read fails the whole read, which decides nothing. */
+  @Test
+  void aWorktreeGitCannotReadFailsTheRead() throws Exception {
+    git(app, "worktree", "add", "--quiet", "-b", "wt", tempDir.resolve("tree").toString());
+    Files.writeString(tempDir.resolve("tree/.git"), "gitdir: " + tempDir.resolve("nowhere") + "\n");
+
+    var read = bash(List.of(BRANCH, "app"));
+
+    assertTrue(read.exit() != 0, read.output());
   }
 
   /**
@@ -206,11 +327,15 @@ class WorkspaceGitTest {
   private record Ran(int exit, String output) {}
 
   private Ran bash(List<String> args) throws Exception {
+    return exec(command(args), false);
+  }
+
+  private List<String> command(List<String> args) {
     var command =
         new ArrayList<>(
             List.of("bash", "-c", WorkspaceGit.LEFT, "sail-left", workspace.toString()));
     command.addAll(args);
-    return exec(command, false);
+    return command;
   }
 
   private static String git(Path repo, String... args) throws Exception {

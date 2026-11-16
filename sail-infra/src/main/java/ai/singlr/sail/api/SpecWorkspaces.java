@@ -27,6 +27,7 @@ import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
@@ -35,21 +36,13 @@ import java.util.concurrent.TimeoutException;
 import java.util.function.Supplier;
 
 /**
- * Keeps this box's spec workspaces to what their specs still need (D6), deciding each from what the
- * stores and Incus say now, never from an event (R8), on a pass of its own that never holds up
- * another. Only a whole workspace carrying {@value BoxInstances#SPEC_KEY} is swept; a person's, and
- * one never made whole, are never touched (R14, W12). One whose spec or project was erased is
- * deleted at once. Every other one is stopped once it is idle: nothing in it (no run of its spec
- * live here, a room's member included, and no operation Incus runs on it, an exec above all) for
- * {@link #IDLE} since the latest of its spec's last run here ending, its last start and this
- * process starting (R13). An idle one whose spec is {@code done} or {@code archived} is decided
- * once: deleted when nothing its runs made would be lost (R4), or marked {@value
- * BoxInstances#KEPT_KEY} and said once in the spec's room, after which the sweep only stops it when
- * idle, never starts or deletes it: its person does.
- *
- * <p>Each workspace is decided under the lock a run's entry takes, tried and never waited on, and a
- * delete acts on the spec and its runs read again just before it, so a run reserved or a spec
- * reopened meanwhile keeps the workspace.
+ * Keeps this box's spec workspaces to what their specs still need (D6, W13), from what the stores
+ * and Incus say now (R8), on a pass of its own. A whole workspace carrying {@value
+ * BoxInstances#SPEC_KEY} is deleted at once when its spec or project was erased, and otherwise
+ * stopped once {@link #idle}; an idle one whose spec is {@code done} or {@code archived} is deleted
+ * when its repos hold nothing its runs made (R4), or marked {@value BoxInstances#KEPT_KEY} and said
+ * once in its room when they hold something. A failure decides nothing: logged once for its cause
+ * and tried again once idle. Each is decided under the lock a run's entry takes, never waited on.
  */
 public final class SpecWorkspaces implements AutoCloseable {
 
@@ -58,6 +51,9 @@ public final class SpecWorkspaces implements AutoCloseable {
 
   /** How often a pass starts. */
   static final Duration INTERVAL = Duration.ofSeconds(60);
+
+  /** How long a workspace is held with nothing started or ended in it before that is said. */
+  static final Duration HELD = Duration.ofHours(12);
 
   private final Workspaces workspaces;
   private final BoxInstances box;
@@ -73,8 +69,8 @@ public final class SpecWorkspaces implements AutoCloseable {
   private final Supplier<Instant> clock;
   private final Instant started;
   private final PeriodicPass pass;
-  private final Set<String> logged = ConcurrentHashMap.newKeySet();
-  private final Set<String> failing = ConcurrentHashMap.newKeySet();
+  private final Set<String> said = ConcurrentHashMap.newKeySet();
+  private final Map<String, Instant> lastHeld = new ConcurrentHashMap<>();
 
   /**
    * @param workspaces the box's workspaces, whose doors start, stop and delete one
@@ -121,11 +117,7 @@ public final class SpecWorkspaces implements AutoCloseable {
     pass.close();
   }
 
-  /**
-   * One pass over the box's spec workspaces, as this box's machinery. Never throws: a workspace
-   * that cannot be decided is logged once until a pass decides it, and the pass goes on to the
-   * next; a box whose Incus does not list is logged and left to the next pass.
-   */
+  /** One pass over the box's spec workspaces, as this box's machinery; never throws. */
   public void sweep() {
     Actor.run(Actor.system(), this::sweepAll);
   }
@@ -150,14 +142,12 @@ public final class SpecWorkspaces implements AutoCloseable {
       }
       try {
         tend(instance.name(), workspace, spec.get());
-        failing.remove(instance.name());
       } catch (InterruptedException e) {
         Thread.currentThread().interrupt();
         return;
       } catch (Exception e) {
-        if (failing.add(instance.name())) {
-          log("could not tend " + instance.name() + ": " + e.getMessage());
-        }
+        lastHeld.put(instance.name(), clock.get());
+        logOnce(instance.name(), ": left as it is, and tried again once idle: " + e.getMessage());
       }
     }
   }
@@ -210,27 +200,29 @@ public final class SpecWorkspaces implements AutoCloseable {
   }
 
   /**
-   * Decides, once, the idle workspace {@code found} of done spec {@code spec}: started when
-   * stopped, since nothing runs in a stopped instance; deleted when nothing its runs made would be
-   * lost, as the spec and its runs say just before the delete; otherwise kept and stopped. A spec
-   * reopened, or a run started, during the reads leaves the workspace as it is, unkept, for a later
-   * pass.
+   * Decides the idle workspace {@code found} of done spec {@code spec}: started when stopped, then
+   * deleted when nothing would be lost and the spec is still done and unoccupied, or kept and
+   * stopped. A start or read that fails throws, stopping again what this started.
    */
   private void retire(
       BoxInstances.Instance found, BoxInstances.Workspace workspace, SpecStore.SpecRow spec)
       throws Exception {
     var project = workspace.project();
-    if (!(found.state() instanceof ContainerState.Running)) {
-      try {
+    var stopped = !(found.state() instanceof ContainerState.Running);
+    Optional<String> lost;
+    try {
+      if (stopped) {
         workspaces.start(project, workspace.workspace());
-      } catch (IOException | TimeoutException | RuntimeException e) {
-        keep(found, workspace, spec, "it did not start: " + said(e.getMessage()));
-        return;
       }
+      lost = lost(found.name(), spec);
+    } catch (IOException | TimeoutException | RuntimeException failed) {
+      if (stopped) {
+        workspaces.stop(project, workspace.workspace(), id -> false);
+      }
+      throw failed;
     }
-    var lost = lost(found.name(), spec);
     var now = specs.findById(spec.id()).filter(row -> row.project().equals(project));
-    if (now.isEmpty() || !done(now.get()) || occupied(found, project, spec.id())) {
+    if (now.isEmpty() || !done(now.get()) || occupied(found.name(), true, project, spec.id())) {
       return;
     }
     if (lost.isEmpty()) {
@@ -250,35 +242,30 @@ public final class SpecWorkspaces implements AutoCloseable {
   }
 
   /**
-   * What deleting the running workspace {@code instance} would lose, or nothing: a run's usage it
-   * does not answer, which is read and recorded here first, then whatever its project's repos hold
-   * that no remote does ({@link WorkspaceGit#left}).
+   * What the repos of running workspace {@code instance} hold that no remote does ({@link
+   * WorkspaceGit#left}), once its runs' unread usage is recorded; throws on what cannot be read.
    */
   private Optional<String> lost(String instance, SpecStore.SpecRow spec)
-      throws InterruptedException {
+      throws IOException, TimeoutException, InterruptedException {
     var theirs = theirs(spec.project(), spec.id());
     for (var run : theirs.stream().filter(SpecWorkspaces::unread).toList()) {
       var read = usage.read(run);
       if (read == null) {
-        return Optional.of("the usage of run " + run.id() + " could not be read");
+        throw new IOException("the usage of run " + run.id() + " could not be read");
       }
       runs.recordRead(run.id(), read);
     }
-    Optional<ProjectDefinition> definition;
-    try {
-      definition = definitions.read(spec.project());
-    } catch (RuntimeException unreadable) {
-      definition = Optional.empty();
-    }
-    if (definition.isEmpty()) {
-      return Optional.of(
-          "the definition of project "
-              + spec.project()
-              + " is not readable here, so neither are its repos");
-    }
+    var definition =
+        definitions
+            .read(spec.project())
+            .orElseThrow(
+                () ->
+                    new IOException(
+                        "the definition of project "
+                            + spec.project()
+                            + " is not readable here, so neither are its repos"));
     var repos =
-        Objects.requireNonNullElse(definition.get().repos(), List.<ProjectDefinition.Repo>of())
-            .stream()
+        Objects.requireNonNullElse(definition.repos(), List.<ProjectDefinition.Repo>of()).stream()
             .map(ProjectDefinition.Repo::path)
             .toList();
     var branch =
@@ -291,38 +278,43 @@ public final class SpecWorkspaces implements AutoCloseable {
   }
 
   /**
-   * Whether {@code found} is idle: {@link #IDLE} since the latest of its spec's last run here
-   * ending, Incus last starting it, and this process starting, so neither a restart nor a start by
-   * hand stops it before it has had its ten minutes, and nothing in it now ({@link #occupied}).
+   * Whether {@code found} is idle: nothing in it now ({@link #occupied}), and {@link #IDLE} since
+   * the latest of its spec's last run here ending, Incus last starting it, this process starting
+   * and this sweep last finding it held. One held {@link #HELD} with nothing started or ended in it
+   * is said once.
    */
   private boolean idle(BoxInstances.Instance found, String project, String specId)
       throws InterruptedException {
-    var since =
+    var now = clock.get();
+    var ran =
         theirs(project, specId).stream()
             .map(run -> Objects.requireNonNullElse(run.completedAt(), run.startedAt()))
             .filter(Objects::nonNull)
-            .reduce(
-                found.lastStarted().isAfter(started) ? found.lastStarted() : started,
-                (a, b) -> a.isAfter(b) ? a : b);
-    return !since.plus(IDLE).isAfter(clock.get()) && !occupied(found, project, specId);
+            .reduce(latest(found.lastStarted(), started), SpecWorkspaces::latest);
+    if (occupied(found.name(), found.state() instanceof ContainerState.Running, project, specId)) {
+      lastHeld.put(found.name(), now);
+      if (!ran.plus(HELD).isAfter(now)) {
+        logOnce(
+            found.name(),
+            ": held 12 h with nothing started or ended in it (sudo incus operation list)");
+      }
+      return false;
+    }
+    return !latest(ran, lastHeld.getOrDefault(found.name(), Instant.EPOCH)).plus(IDLE).isAfter(now);
   }
 
   /**
-   * Whether something is in {@code found} now: a run of its spec live on this box, a room's member
-   * included, or, in a running one, any operation Incus runs on it, an {@code incus exec} that a
-   * person's shell, a terminal or a process holds open above all ({@link BoxInstances#inUse}). An
-   * Incus that does not say counts as one that says so.
+   * Whether something is in {@code instance} now: a run of its spec live on this box, a room's
+   * member included, or, when it is {@code running}, an operation Incus runs on it, an exec above
+   * all ({@link BoxInstances#inUse}). An Incus that does not say counts as one that does.
    */
-  private boolean occupied(BoxInstances.Instance found, String project, String specId)
+  private boolean occupied(String instance, boolean running, String project, String specId)
       throws InterruptedException {
     if (runs.liveSpecs(localHandle.get()).contains(project + "/" + specId)) {
       return true;
     }
-    if (!(found.state() instanceof ContainerState.Running)) {
-      return false;
-    }
     try {
-      return box.inUse().contains(found.name());
+      return running && box.inUse().contains(instance);
     } catch (IOException | TimeoutException unanswered) {
       return true;
     }
@@ -336,9 +328,8 @@ public final class SpecWorkspaces implements AutoCloseable {
   }
 
   /**
-   * Marks {@code found} kept for {@code why} and says it in the spec's room, once: the room is told
-   * first and the mark written after, so a crash between the two says it again rather than never. A
-   * mark that cannot be written is logged, and a later pass decides the workspace again.
+   * Says {@code found} kept for {@code why} in the spec's room, then marks it, so a crash between
+   * says it again rather than never; a mark not written is logged and decided again.
    */
   private void keep(
       BoxInstances.Instance found,
@@ -390,14 +381,14 @@ public final class SpecWorkspaces implements AutoCloseable {
     return RunStatus.isTerminal(run.status()) && run.usage() == null;
   }
 
-  private static String said(String text) {
-    return Strings.oneLine(Objects.toString(text, "")).strip();
+  private static Instant latest(Instant a, Instant b) {
+    return a.isAfter(b) ? a : b;
   }
 
-  /** Logs {@code instance} followed by {@code said}, once per workspace in this process. */
-  private void logOnce(String instance, String said) {
-    if (logged.add(instance + said)) {
-      log(instance + said);
+  /** Logs {@code instance} then {@code line}, once per pair in this process. */
+  private void logOnce(String instance, String line) {
+    if (said.add(instance + line)) {
+      log(instance + line);
     }
   }
 

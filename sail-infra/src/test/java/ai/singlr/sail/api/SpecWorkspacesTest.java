@@ -29,6 +29,7 @@ import ai.singlr.sail.store.ChangeLog;
 import ai.singlr.sail.store.Erasure;
 import ai.singlr.sail.store.HeldProjects;
 import ai.singlr.sail.store.MessageStore;
+import ai.singlr.sail.store.ProjectStore;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.SpecStore;
@@ -99,7 +100,7 @@ class SpecWorkspacesTest {
     HeldProjects.hold(db, "other");
     specs = new SpecStore(db);
     runs = new RunStore(db);
-    clock = new ManualClock(T0, Duration.ofHours(3));
+    clock = new ManualClock(T0, Duration.ofDays(1));
     box = new Box(clock::instant);
     sweeper = sweeper(specs, runs, db, project -> Optional.of(definition(project)));
   }
@@ -407,29 +408,68 @@ class SpecWorkspacesTest {
   }
 
   /**
-   * Ruling 1 of round 2: anything Incus runs on a workspace, an exec held open by a person's {@code
-   * workspace shell}, an attached terminal or a process, keeps it for as long as it runs, as an
-   * Incus that does not say does; once it ends, the workspace stops. The read is the box's one
-   * {@code incus operation list}, nothing asked inside the workspace.
+   * Ruling 1 of round 2 and rule C of round 4: anything Incus runs on a workspace, an exec held
+   * open by a person's {@code workspace shell}, an attached terminal or a process, keeps it for as
+   * long as it runs, as an Incus that does not say does, and for ten minutes from the last pass
+   * that found it so. The read is the box's one {@code incus operation list}, nothing asked inside
+   * the workspace. One held so with nothing run or started in it for 12 hours is said once.
    */
   @Test
-  void anExecRunningOnTheWorkspaceOrAnIncusThatDoesNotSayKeepsItRunning() {
+  void
+      anExecRunningOnTheWorkspaceOrAnIncusThatDoesNotSayKeepsItTenMinutesPastTheLastPassThatSawIt() {
     spec("a", SpecStatus.AWAITING_MERGE);
     var held = box.workspace("a", "Running");
     ended("a");
     later(Duration.ofHours(1));
 
     held.execOpen = true;
-    sweeper().sweep();
-    later(Duration.ofHours(1));
-    sweeper().sweep();
+    var first = stderrOf(sweeper()::sweep);
+    later(SpecWorkspaces.HELD);
+    var held12 = stderrOf(sweeper()::sweep);
+    var again = stderrOf(sweeper()::sweep);
     held.execOpen = false;
     box.operationsFail = true;
+    later(Duration.ofMinutes(1));
+    sweeper().sweep();
+    box.operationsFail = false;
+    later(IDLE.minus(A_SECOND));
     sweeper().sweep();
     assertEquals(List.of(), changesOf(instance("a")));
     assertEquals(List.of(), askedOf(instance("a")));
 
-    box.operationsFail = false;
+    later(A_SECOND);
+    sweeper().sweep();
+    assertEquals(List.of("stop"), changesOf(instance("a")));
+    assertEquals("", first);
+    assertEquals(
+        "  [workspaces] acme-a: held 12 h with nothing started or ended in it (sudo incus"
+            + " operation list)\n",
+        held12);
+    assertEquals("", again);
+  }
+
+  /**
+   * Rule C of round 4: a shell closed just after a pass has ten minutes from the last pass that
+   * found it, never stopped at the next pass because the run ended long before.
+   */
+  @Test
+  void aShellClosedHasTenMinutesFromTheLastPassThatFoundItOpen() {
+    spec("a", SpecStatus.IN_PROGRESS);
+    var held = box.workspace("a", "Running");
+    ended("a");
+    later(Duration.ofHours(1));
+    held.execOpen = true;
+    sweeper().sweep();
+    var seen = clock.instant();
+
+    held.execOpen = false;
+    later(Duration.ofSeconds(45));
+    sweeper().sweep();
+    later(IDLE.minus(Duration.ofSeconds(46)));
+    sweeper().sweep();
+    assertEquals(List.of(), changesOf(instance("a")), "ten minutes from " + seen + " not yet");
+
+    later(A_SECOND);
     sweeper().sweep();
     assertEquals(List.of("stop"), changesOf(instance("a")));
   }
@@ -581,6 +621,7 @@ class SpecWorkspacesTest {
 
     held.execOpen = false;
     held.repo("app");
+    later(IDLE);
     sweeper().sweep();
     assertEquals("Stopped", box.state(instance("a")));
     assertTrue(box.holds(instance("a")), "its person deletes it, never the sweep");
@@ -623,99 +664,94 @@ class SpecWorkspacesTest {
 
   /**
    * Rule A's push: commits the runs' branch alone holds are pushed once in the read, and the
-   * workspace goes; a push that fails leaves them, which keeps it.
+   * workspace goes; a push origin refuses leaves them, said, which keeps it; one that does not
+   * reach origin decides nothing (rule B of round 4).
    */
   @Test
-  void theRunsBranchIsPushedOnceInTheReadAndAFailedPushKeepsTheWorkspace() {
-    spec("a", SpecStatus.DONE);
-    spec("b", SpecStatus.DONE);
+  void theRunsBranchIsPushedOnceInTheReadAndAPushOriginRefusesKeepsTheWorkspace() {
+    var ids = List.of("a", "b", "c");
+    ids.forEach(id -> spec(id, SpecStatus.DONE));
     box.workspace("a", "Stopped").repo("app").repo("web/site").ahead("app", 2);
-    box.workspace("b", "Stopped").repo("app").repo("web/site").ahead("app", 1).pushFails = true;
-    ended("a");
-    ended("b");
+    box.workspace("b", "Stopped").repo("app").repo("web/site").ahead("app", 1).pushRefused = true;
+    box.workspace("c", "Stopped").repo("app").repo("web/site").ahead("app", 1).pushUnreached = true;
+    ids.forEach(this::ended);
     later(IDLE);
 
-    sweeper().sweep();
+    var logged = stderrOf(sweeper()::sweep);
 
-    assertEquals(
-        List.of(instance("a") + " app agent/a", instance("b") + " app agent/b"), box.pushes);
+    assertEquals(ids.stream().map(id -> instance(id) + " app agent/" + id).toList(), box.pushes);
     assertFalse(box.holds(instance("a")));
-    assertEquals("app holds commits origin lacks", box.key(instance("b"), KEPT));
-    assertEquals(List.of("b: " + notice("b", "done", "app holds commits origin lacks")), said);
+    var why = "app holds a push origin refused and commits origin lacks";
+    assertEquals(why, box.key(instance("b"), KEPT));
+    assertEquals(List.of("b: " + notice("b", "done", why)), said);
+    assertNull(box.key(instance("c"), KEPT));
+    assertEquals("Stopped", box.state(instance("c")));
+    assertTrue(
+        logged.contains(
+            "  [workspaces] acme-c: left as it is, and tried again once idle: its repos could not"
+                + " be read: the push of agent/c in app did not reach origin: fatal: unable to"
+                + " access\n"),
+        logged);
   }
 
   /**
-   * Rule F and Major 1: a read that times out, fails, or says what it cannot mean keeps the
-   * workspace, stopped and said once, never left running unmarked.
+   * Rule B of round 4: a read that times out, fails, or says what it cannot mean, and a start that
+   * fails, decide nothing: no mark, no room, the workspace stopped again when the sweep started it,
+   * each logged once for its cause and tried again once idle, never on every pass.
    */
   @Test
-  void aReadThatTimesOutFailsOrSaysNonsenseKeepsTheWorkspaceStopped() {
-    var ids = List.of("t", "f", "n");
+  void aReadOrStartThatFailsDecidesNothingAndIsTriedAgainOnceIdle() {
+    var ids = List.of("t", "f", "n", "s");
     ids.forEach(id -> spec(id, SpecStatus.DONE));
     box.workspace("t", "Stopped").repo("app").repo("web/site").leftTimesOut = true;
     box.workspace("f", "Stopped").leftSays = new ShellExec.Result(128, "", "fatal: bad object\n");
     box.workspace("n", "Stopped").leftSays = new ShellExec.Result(0, "warning: ambiguous\n", "");
+    box.workspace("s", "Stopped").repo("app").repo("web/site").startFails = true;
     ids.forEach(this::ended);
     later(IDLE);
+    var sweeper = sweeper();
 
-    sweeper().sweep();
-    sweeper().sweep();
-
-    assertEquals(
-        "its repos could not be read: Command timed out after 180s", box.key(instance("t"), KEPT));
-    assertEquals("its repos could not be read: fatal: bad object", box.key(instance("f"), KEPT));
-    assertEquals("its repos could not be read: warning: ambiguous", box.key(instance("n"), KEPT));
+    var first = stderrOf(sweeper::sweep);
+    later(IDLE.minus(A_SECOND));
+    var meanwhile = stderrOf(sweeper::sweep);
     for (var id : ids) {
+      assertNull(box.key(instance(id), KEPT), id);
       assertEquals("Stopped", box.state(instance(id)), id);
-      assertEquals(List.of("start", "stop"), changesOf(instance(id)), id);
+      assertEquals(
+          id.equals("s") ? List.of("start") : List.of("start", "stop"),
+          changesOf(instance(id)),
+          id);
     }
-    assertEquals(3, said.size());
+    assertEquals(List.of(), said);
+    for (var cause :
+        List.of(
+            "acme-f: left as it is, and tried again once idle: its repos could not be read: fatal:"
+                + " bad object",
+            "acme-n: left as it is, and tried again once idle: its repos could not be read:"
+                + " warning: ambiguous",
+            "acme-s: left as it is, and tried again once idle: Failed to start container"
+                + " 'acme-s': Error: Failed to start device \"eth0\": no free address",
+            "acme-t: left as it is, and tried again once idle: Command timed out after 180s")) {
+      assertTrue(first.contains("  [workspaces] " + cause + "\n"), first);
+    }
+    assertEquals("", meanwhile);
+
+    later(A_SECOND);
+    box.instances.get(instance("s")).startFails = false;
+    box.instances.get(instance("t")).leftTimesOut = false;
+    var again = stderrOf(sweeper::sweep);
+    assertFalse(box.holds(instance("s")));
+    assertFalse(box.holds(instance("t")));
+    assertEquals(List.of("start", "stop", "start", "stop"), changesOf(instance("f")));
+    assertFalse(again.contains("acme-f: left"), "the same cause is logged once");
   }
 
-  /** Scenario 38: a start that fails keeps the workspace, said once, and is never started again. */
+  /**
+   * A usage the started workspace does not answer, and a project whose definition this box cannot
+   * read or does not hold, decide nothing, before any git: logged, the workspace stopped again.
+   */
   @Test
-  void aStartThatFailsKeepsTheWorkspaceSaidOnceAndItIsNeverStartedAgain() {
-    spec("a", SpecStatus.DONE);
-    box.workspace("a", "Stopped").startFails = true;
-    ended("a");
-    later(IDLE);
-
-    sweeper().sweep();
-    later(Duration.ofHours(1));
-    sweeper().sweep();
-
-    assertEquals(List.of("start"), changesOf(instance("a")));
-    assertEquals(
-        "it did not start: Failed to start container 'acme-a': Error: Failed to start device"
-            + " \"eth0\": no free address",
-        box.key(instance("a"), KEPT));
-    assertEquals(1, said.size());
-  }
-
-  /** A usage the started workspace does not answer keeps it, naming the run, before any git. */
-  @Test
-  void aUsageTheWorkspaceDoesNotAnswerKeepsItNamingTheRun() {
-    spec("a", SpecStatus.DONE);
-    box.workspace("a", "Stopped").repo("app").repo("web/site").usageAnswers = false;
-    var unread = endedUnread("a");
-    later(IDLE);
-
-    sweeper().sweep();
-
-    assertEquals("the usage of run " + unread + " could not be read", box.key(instance("a"), KEPT));
-    assertNull(runs.findById(unread).orElseThrow().usage());
-    assertTrue(askedOf(instance("a")).stream().noneMatch(step -> step.startsWith("left")));
-  }
-
-  /** A project whose definition this box cannot read keeps the done spec's workspace. */
-  @Test
-  void aProjectWhoseDefinitionCannotBeReadOrIsNotHereKeepsTheWorkspace() {
-    spec("a", SpecStatus.DONE);
-    spec("b", SpecStatus.DONE);
-    box.workspace("a", "Running");
-    box.workspace("b", "Running");
-    ended("a");
-    ended("b");
+  void anUnansweredUsageOrAnUnreadableDefinitionDecidesNothing() {
     var unreadable =
         sweeper(
             specs,
@@ -725,17 +761,45 @@ class SpecWorkspacesTest {
               throw new IllegalStateException("unreadable");
             });
     var absent = sweeper(specs, runs, db, project -> Optional.empty());
+    spec("a", SpecStatus.DONE);
+    box.workspace("a", "Stopped").repo("app").repo("web/site").usageAnswers = false;
+    var unread = endedUnread("a");
     later(IDLE);
+    var logged = stderrOf(sweeper()::sweep);
 
-    unreadable.sweep();
-    box.instances.get(instance("b")).keys.remove(KEPT);
-    box.instances.get(instance("b")).startedByHand(clock.instant());
+    spec("b", SpecStatus.DONE);
+    box.workspace("b", "Running");
+    ended("b");
     later(IDLE);
-    absent.sweep();
+    var thrown = stderrOf(unreadable::sweep);
 
-    var why = "the definition of project acme is not readable here, so neither are its repos";
-    assertEquals(why, box.key(instance("a"), KEPT));
-    assertEquals(why, box.key(instance("b"), KEPT));
+    spec("c", SpecStatus.DONE);
+    box.workspace("c", "Running");
+    ended("c");
+    later(IDLE);
+    var empty = stderrOf(absent::sweep);
+
+    assertTrue(
+        logged.contains(
+            "acme-a: left as it is, and tried again once idle: the usage of run "
+                + unread
+                + " could not be read"),
+        logged);
+    assertNull(runs.findById(unread).orElseThrow().usage());
+    assertTrue(askedOf(instance("a")).stream().noneMatch(step -> step.startsWith("left")));
+    assertTrue(
+        thrown.contains("acme-b: left as it is, and tried again once idle: unreadable"), thrown);
+    assertTrue(
+        empty.contains(
+            "acme-c: left as it is, and tried again once idle: the definition of project acme is"
+                + " not readable here, so neither are its repos"),
+        empty);
+    for (var id : List.of("a", "b", "c")) {
+      assertNull(box.key(instance(id), KEPT), id);
+      assertTrue(box.holds(instance(id)), id);
+    }
+    assertEquals("Stopped", box.state(instance("a")));
+    assertEquals(List.of(), said);
   }
 
   /**
@@ -948,9 +1012,10 @@ class SpecWorkspacesTest {
   @Test
   void theBoxsOwnSweepSaysAKeptWorkspaceInTheSpecsRoomAsSail() throws Exception {
     spec("a", SpecStatus.DONE);
-    box.workspace("a", "Running").usageAnswers = false;
-    var unread = endedUnread("a");
+    box.workspace("a", "Running").repo("app", "commits").repo("web/site");
+    ended("a");
     later(IDLE);
+    Acting.system(() -> new ProjectStore(db).upsert(definition("acme")));
     var messages = new MessageStore(db);
     try (var operations =
             OperationsFactory.create(db, box, null, SyncScheduler.disabled(), SessionYield.NONE)
@@ -975,7 +1040,7 @@ class SpecWorkspacesTest {
         List.of(
             MessageStore.SAIL_AUTHOR
                 + ": "
-                + notice("a", "done", "the usage of run " + unread + " could not be read")),
+                + notice("a", "done", "app holds commits origin lacks")),
         messages.list("a", null, 10).stream().map(m -> m.author() + ": " + m.body()).toList());
   }
 
@@ -1012,11 +1077,11 @@ class SpecWorkspacesTest {
   }
 
   /**
-   * Rule C: a stop that fails is tried again each pass and logged once until it succeeds, and the
-   * pass goes on to the next workspace meanwhile.
+   * Rule B of round 4: a stop that fails is tried again once idle, logged once for its cause, and
+   * the pass goes on to the next workspace meanwhile.
    */
   @Test
-  void aStopThatFailsIsTriedAgainEachPassLoggedOnceUntilItSucceeds() {
+  void aStopThatFailsIsTriedAgainOnceIdleLoggedOnceForItsCause() {
     spec("a", SpecStatus.AWAITING_MERGE);
     spec("b", SpecStatus.AWAITING_MERGE);
     var held = box.workspace("a", "Running");
@@ -1029,21 +1094,22 @@ class SpecWorkspacesTest {
 
     var first = stderrOf(sweeper::sweep);
     var second = stderrOf(sweeper::sweep);
-    held.stopFails = false;
-    sweeper.sweep();
-    held.startedByHand(clock.instant());
     later(IDLE);
-    held.stopFails = true;
-    var after = stderrOf(sweeper::sweep);
+    var third = stderrOf(sweeper::sweep);
+    held.stopFails = false;
+    later(IDLE);
+    sweeper.sweep();
 
-    var failed =
-        "  [workspaces] could not tend acme-a: Failed to stop container 'acme-a': Error: The"
-            + " instance is busy\n";
-    assertTrue(first.startsWith(failed), first);
+    assertTrue(
+        first.startsWith(
+            "  [workspaces] acme-a: left as it is, and tried again once idle: Failed to stop"
+                + " container 'acme-a': Error: The instance is busy\n"),
+        first);
     assertEquals("Stopped", box.state(instance("b")), "the pass went on");
     assertEquals("", second);
-    assertEquals(List.of("stop", "stop", "stop", "stop"), changesOf(instance("a")));
-    assertEquals(failed, after, "a failure after a success is said again");
+    assertEquals("", third);
+    assertEquals(List.of("stop", "stop", "stop"), changesOf(instance("a")));
+    assertEquals("Stopped", box.state(instance("a")));
   }
 
   /**
@@ -1094,7 +1160,8 @@ class SpecWorkspacesTest {
       volatile boolean startFails;
       volatile boolean stopFails;
       volatile boolean configFails;
-      volatile boolean pushFails;
+      volatile boolean pushRefused;
+      volatile boolean pushUnreached;
       volatile boolean usageAnswers = true;
       volatile boolean leftTimesOut;
       volatile ShellExec.Result leftSays;
@@ -1320,7 +1387,20 @@ class SpecWorkspacesTest {
         }
         if (held.ahead.getOrDefault(path, 0) > 0) {
           pushes.add(name + " " + path + " " + branch);
-          if (!held.pushFails) {
+          if (held.pushUnreached) {
+            return new Result(
+                3,
+                "",
+                "the push of "
+                    + branch
+                    + " in "
+                    + path
+                    + " did not reach origin: fatal: unable to"
+                    + " access\n");
+          }
+          if (held.pushRefused) {
+            lines.append("refused ").append(path).append('\n');
+          } else {
             held.ahead.put(path, 0);
           }
         }

@@ -322,7 +322,9 @@ public final class Workspaces {
           "Incus lists instance "
               + instance
               + " without its keys, as it does while another change holds it, so whose it is"
-              + " cannot be told yet.");
+              + " cannot be told yet. If it stays so, sudo incus info "
+              + instance
+              + " says why.");
     }
 
     static Busy building(String project) {
@@ -453,8 +455,9 @@ public final class Workspaces {
    * person the run acts for: a whole one is started when stopped and kept as it is, tree and all,
    * losing only a kept mark ({@value BoxInstances#KEPT_KEY}), so a spec done again is decided
    * again; otherwise a clone of the checked template carrying the spec and the owner is made, with
-   * every repo left detached at its fetched base, under the box's create lock. Either way the
-   * workspace is {@code owner}'s before anything of the run is staged (R12). A create that cannot
+   * every repo left detached at its fetched base, under the box's create lock. Either way the *
+   * workspace is {@code owner}'s before anything of the run is staged (R12), and {@code room},
+   * given the other whole spec workspaces, is asked before a clone or a start. A create that cannot
    * have the create lock within {@link #CREATE_WAIT} is {@link Busy}.
    */
   public Entered enterSpec(
@@ -468,6 +471,11 @@ public final class Workspaces {
     try (var held = entryLock(place)) {
       var found = requireTheSpecs(place, name -> false, box.all());
       if (found.map(i -> ((BoxInstances.Workspace) i.kind()).ready()).orElse(false)) {
+        if (!(found.get().state() instanceof ContainerState.Running)) {
+          var others = wholeSpecs();
+          others.remove(place.project() + "/" + place.specId());
+          room.accept(others);
+        }
         return reuse(found.get(), owner);
       }
       return new Made(
@@ -502,12 +510,47 @@ public final class Workspaces {
     return specs;
   }
 
-  private Reused reuse(BoxInstances.Instance found, String owner) throws Exception {
-    var started = !(found.state() instanceof ContainerState.Running);
-    if (started) {
-      containers.start(found.name());
-      awaitReady(found.name());
+  /**
+   * An attach's door: spec {@code place}'s whole workspace, started when stopped, under the entry's
+   * lock; nothing made, checked or cleared, and none refused naming the dispatch that makes one.
+   */
+  public void startExisting(RunPlace.SpecWorkspace place) throws Exception {
+    try (var held = entryLock(place)) {
+      var found =
+          requireTheSpecs(place, name -> false, box.all())
+              .filter(i -> ((BoxInstances.Workspace) i.kind()).ready())
+              .orElseThrow(
+                  () ->
+                      Remedied.state(
+                          "Spec "
+                              + place.specId()
+                              + " has no workspace of "
+                              + place.project()
+                              + " on this runner, and an attach makes none: a run of the spec"
+                              + " makes it.",
+                          Remedy.of(
+                              "Dispatch one with: ",
+                              Remedy.sail(
+                                  "spec dispatch",
+                                  "-p",
+                                  place.project(),
+                                  "--spec",
+                                  place.specId()))));
+      startIfStopped(found);
     }
+  }
+
+  private boolean startIfStopped(BoxInstances.Instance found) throws Exception {
+    if (found.state() instanceof ContainerState.Running) {
+      return false;
+    }
+    containers.start(found.name());
+    awaitReady(found.name());
+    return true;
+  }
+
+  private Reused reuse(BoxInstances.Instance found, String owner) throws Exception {
+    var started = startIfStopped(found);
     var changes = new ArrayList<String>();
     if (Strings.isNotBlank(owner) && !owner.equals(found.key(BoxInstances.OWNER_KEY).orElse(""))) {
       changes.add(BoxInstances.OWNER_KEY + "=" + owner);

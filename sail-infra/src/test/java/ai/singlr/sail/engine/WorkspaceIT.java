@@ -92,6 +92,7 @@ class WorkspaceIT extends AbstractIncusIT {
   private static final String KEPT = "kept";
   private static final String HELD = "held";
   private static final String BACKED = "backed";
+  private static final String TREE = "tree";
   private static final Path CONTAINER_DIR = Path.of("/var/lib/sail/run");
 
   private static final String SEAL =
@@ -184,6 +185,7 @@ class WorkspaceIT extends AbstractIncusIT {
     deleteContainerQuietly(PROJECT + "-" + KEPT);
     deleteContainerQuietly(PROJECT + "-" + HELD);
     deleteContainerQuietly(PROJECT + "-" + BACKED);
+    deleteContainerQuietly(PROJECT + "-" + TREE);
     deleteContainerQuietly(TEMPLATE);
     deleteContainerQuietly(PROJECT);
     try {
@@ -542,9 +544,41 @@ class WorkspaceIT extends AbstractIncusIT {
   }
 
   /**
+   * S-B1 of the second look on a real Incus: edits in a linked worktree under a directory the repo
+   * ignores, where a harness puts its worktrees, are read where git names the worktree, and keep
+   * the done spec's workspace, though the repo's own worktree is clean.
+   */
+  @Test
+  void editsInALinkedWorktreeTheRepoIgnoresKeepTheDoneSpecsWorkspace() throws Exception {
+    try (var db = Sqlite.open(Files.createTempDirectory("sail-it-idle").resolve("sail.db"))) {
+      var said = new ArrayList<String>();
+      var clock = new AtomicReference<>(Instant.now());
+      var sweeper = sweeper(db, said, clock);
+      var instance =
+          doneSpecsWorkspace(
+              db,
+              TREE,
+              SpecStatus.DONE,
+              "echo .claude/ >> .git/info/exclude && git worktree add -q -b wt"
+                  + " .claude/worktrees/w && cd .claude/worktrees/w && echo x > f && git add f"
+                  + " && echo y > new.java");
+      clock.set(Instant.now().plus(SpecWorkspaces.IDLE).plusSeconds(1));
+
+      sweeper.sweep();
+
+      var kept = new BoxInstances(shell).named(instance).orElseThrow();
+      assertEquals(new ContainerState.Stopped(), kept.state());
+      assertEquals(
+          Optional.of("app/.claude/worktrees/w holds uncommitted changes and untracked files"),
+          kept.key(BoxInstances.KEPT_KEY));
+      assertEquals(1, said.size(), String.join("\n", said));
+    }
+  }
+
+  /**
    * Ruling 1 of round 2 on a real Incus: an {@code incus exec} held open in a spec's workspace, as
    * a person's shell holds one, keeps it running across a pass past its idle period; once the
-   * command ends, and with it the exec, the next pass stops it.
+   * command ends, and with it the exec, it stops ten minutes after the pass that last found it.
    */
   @Test
   void anExecHeldOpenKeepsTheWorkspaceRunningAcrossAPassAndItStopsOnceTheExecEnds()
@@ -572,7 +606,13 @@ class WorkspaceIT extends AbstractIncusIT {
         }
       }
       assertTrue(until(() -> !box.inUse().contains(instance)), "the exec is gone");
-      clock.set(Instant.now().plus(SpecWorkspaces.IDLE).plusSeconds(1));
+      var seen = clock.get();
+      clock.set(seen.plus(SpecWorkspaces.IDLE).minusSeconds(1));
+      sweeper.sweep();
+      assertTrue(
+          box.named(instance).orElseThrow().state() instanceof ContainerState.Running,
+          "ten minutes from the pass that found the exec, at " + seen + ", have not passed");
+      clock.set(seen.plus(SpecWorkspaces.IDLE).plusSeconds(1));
 
       sweeper.sweep();
 

@@ -160,7 +160,7 @@ final class RunPlaces {
    * its conversation goes: every one in the project's container; in a spec's workspace, those still
    * running or that ended after the workspace was made, and none when it has none, since a
    * workspace deleted, by the sweep or by hand, took its sessions with it and the next run makes a
-   * new one. When Incus cannot say, every one, as before there were workspaces to lose.
+   * new one. When Incus cannot say, none: a fresh session, never a resume of one that may be gone.
    */
   Predicate<RunStore.RunRow> holdsSession(String project, String specId) {
     if (Strings.isBlank(specId)) {
@@ -172,10 +172,10 @@ final class RunPlaces {
           made.isPresent()
               && (run.completedAt() == null || !run.completedAt().isBefore(made.get()));
     } catch (IOException | TimeoutException | ApiException unreadable) {
-      return run -> true;
+      return run -> false;
     } catch (InterruptedException e) {
       Thread.currentThread().interrupt();
-      return run -> true;
+      return run -> false;
     }
   }
 

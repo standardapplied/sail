@@ -600,11 +600,11 @@ class MissedStopReconcilerTest {
 
   /**
    * Low 3 of the proof: at a start, the tidy of a spec's workspace the sweep deleted says nothing,
-   * since there is nothing to tidy; the stopped ones are one line with their count; a running
+   * since there is nothing to tidy, nor does a stopped one's, tidied once it runs; a running
    * container that did not tidy is said by name; and none of it is said again on the next pass.
    */
   @Test
-  void aTidyOfAGoneWorkspaceSaysNothingAndTheStoppedOnesOneLineWithTheirCount() {
+  void aTidyOfAGoneOrStoppedWorkspaceSaysNothingAndARunningOneThatFailsIsSaidOnce() {
     finishedSession("gone", "completed", null);
     finishedSession("a", "completed", null);
     finishedSession("b", "completed", null);
@@ -636,10 +636,57 @@ class MissedStopReconcilerTest {
     assertEquals(
         List.of(
             "  [reconcile] could not tidy the launch files of test-project: Container"
-                + " 'test-project' did not tidy its launch files.",
-            "  [reconcile] 2 stopped instances hold launch files left to tidy; each is tidied once"
-                + " it runs again"),
+                + " 'test-project' did not tidy its launch files."),
         printed.toString(StandardCharsets.UTF_8).lines().toList());
+  }
+
+  /**
+   * S-M1 of the second look, its probe made the test: a stopped workspace never holds the tidy's
+   * window open. It is remembered by name and asked on each pass until it runs, when it is tidied
+   * and forgotten, while a running container tidied is not asked again once its run has left the
+   * window's two minutes.
+   */
+  @Test
+  void aStoppedWorkspaceIsTidiedWhenItRunsAndNeverHoldsTheWindowOpen() {
+    finishedSession("a", "completed", null);
+    finishedSession("b", "completed", null);
+    var shell =
+        new ScriptedShellExecutor()
+            .onceOnFail("exec test-project-a ", "Error: Instance is not running")
+            .onceOnFail("incus exec test-project-a", "Error: Instance is not running")
+            .onOk("exec test-project-")
+            .onOk(
+                "incus list ^test-project-a$",
+                "[{\"name\": \"test-project-a\", \"status\": \"Stopped\"}]");
+    var now = new AtomicReference<>(Instant.now());
+    var reconciler = reconciler(MissedStopReconciler.systemdUnitProbe(shell), now::get);
+    var asked = new ArrayList<List<String>>();
+    var err = System.err;
+    var printed = new ByteArrayOutputStream();
+    System.setErr(new PrintStream(printed, true, StandardCharsets.UTF_8));
+    try {
+      for (var pass = 0; pass < 4; pass++) {
+        var before = shell.invocations().size();
+        reconciler.removeLeftovers();
+        asked.add(
+            shell.invocations().subList(before, shell.invocations().size()).stream()
+                .filter(c -> c.startsWith("incus exec "))
+                .map(c -> c.split(" ")[2])
+                .toList());
+        now.set(now.get().plus(Duration.ofHours(1)));
+      }
+    } finally {
+      System.setErr(err);
+    }
+
+    assertEquals(
+        List.of(
+            List.of("test-project-a", "test-project-b"),
+            List.of("test-project-a", "test-project-b"),
+            List.of("test-project-a"),
+            List.of()),
+        asked);
+    assertEquals("", printed.toString(StandardCharsets.UTF_8));
   }
 
   private static long tidyFailures(ByteArrayOutputStream printed) {

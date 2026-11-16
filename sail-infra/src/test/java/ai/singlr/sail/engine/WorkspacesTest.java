@@ -13,6 +13,8 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.Sail;
+import ai.singlr.sail.commands.SailCommandLine;
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.ProjectDefinition;
 import ai.singlr.sail.config.YamlUtil;
@@ -41,6 +43,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 import java.util.function.LongSupplier;
@@ -1754,7 +1757,8 @@ class WorkspacesTest {
                 awaitParked(secondThread);
               }
             });
-    var clock = ticks(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15);
+    var ticks = new AtomicLong();
+    LongSupplier clock = ticks::getAndIncrement;
     var first = new FutureTask<Object>(() -> outcome(box, clock, firstName, source));
     var second = new FutureTask<Object>(() -> outcome(box, clock, secondName, source));
     Thread.ofPlatform().name("first").start(first);
@@ -2591,7 +2595,8 @@ class WorkspacesTest {
             () -> workspaces(midStop, ticks(0)).checkSpec(FIX, INPUTS, name -> false));
     assertEquals(
         "Incus lists instance acme-fix-login without its keys, as it does while another change"
-            + " holds it, so whose it is cannot be told yet.",
+            + " holds it, so whose it is cannot be told yet. If it stays so, sudo incus info"
+            + " acme-fix-login says why.",
         unread.getMessage());
 
     var shell =
@@ -2655,6 +2660,159 @@ class WorkspacesTest {
     assertEquals(
         List.of("incus config set acme-fix-login user.sail.kept="),
         shell.invocations().stream().filter(c -> c.startsWith("incus config set")).toList());
+  }
+
+  /**
+   * Rule G of round 4: an attach finds its spec's workspace under the entry's lock and starts it
+   * when stopped, and does nothing else: no pool or template read, no kept mark cleared, nothing
+   * made. One that is not there is refused naming the dispatch whose run makes it, as printed.
+   */
+  @Test
+  void anAttachStartsItsSpecsStoppedWorkspaceAndReadsClearsAndMakesNothingElse() throws Exception {
+    var kept =
+        specWorkspace("Stopped", "fix-login", "uday")
+            .replace(
+                "\"user.sail.ready\"",
+                "\"user.sail.kept\": \"app holds a stash\", \"user.sail.ready\"");
+    var stopped =
+        new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
+            .onOk("incus list --format json", list(kept));
+    var running =
+        new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
+            .onOk("incus list --format json", list(specWorkspace("Running", "fix-login", "uday")));
+    var absent =
+        new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
+            .onOk("incus list --format json", list());
+
+    workspaces(stopped, ticks(0)).startExisting(FIX);
+    workspaces(running, ticks(0)).startExisting(FIX);
+    var refused =
+        assertThrows(
+            IllegalStateException.class, () -> workspaces(absent, ticks(0)).startExisting(FIX));
+
+    assertTrue(stopped.invocations().contains("incus start acme-fix-login"));
+    for (var shell : List.of(stopped, running, absent)) {
+      assertTrue(
+          shell.invocations().stream()
+              .noneMatch(
+                  c ->
+                      c.startsWith("incus storage")
+                          || c.startsWith("incus snapshot")
+                          || c.startsWith("incus config set")
+                          || c.startsWith("incus copy")),
+          shell.invocations().toString());
+    }
+    assertTrue(running.invocations().stream().noneMatch(c -> c.startsWith("incus start")));
+    assertEquals(
+        "Spec fix-login has no workspace of acme on this runner, and an attach makes none: a run"
+            + " of the spec makes it. Dispatch one with: sail spec dispatch -p acme --spec"
+            + " fix-login",
+        refused.getMessage());
+    var leaf =
+        SailCommandLine.of(new Sail())
+            .parseArgs("spec", "dispatch", "-p", "acme", "--spec", "fix-login");
+    while (leaf.hasSubcommand()) {
+      leaf = leaf.subcommand();
+    }
+    assertEquals("sail spec dispatch", leaf.commandSpec().qualifiedName(" "));
+  }
+
+  /**
+   * Item 1 of round 4: an attach that meets the sweep holding its workspace's lock waits for it, on
+   * the create lock's clock, never refusing at once, and starts the workspace the stop left.
+   */
+  @Test
+  void anAttachWaitsForTheSweepsLockAndThenStartsTheWorkspace() throws Exception {
+    var shell =
+        new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
+            .onOk("incus list --format json", list(specWorkspace("Stopped", "fix-login", "uday")));
+    var release = new CountDownLatch(1);
+    var released = new CountDownLatch(1);
+    var reads = new AtomicInteger();
+    LongSupplier nanos =
+        () -> {
+          if (reads.getAndIncrement() == 0) {
+            return 0;
+          }
+          release.countDown();
+          try {
+            assertTrue(released.await(30, TimeUnit.SECONDS));
+          } catch (InterruptedException e) {
+            throw new IllegalStateException(e);
+          }
+          return Workspaces.CREATE_WAIT.toNanos() - 1;
+        };
+    var workspaces = workspaces(shell, nanos);
+    var holding = new CountDownLatch(1);
+    var sweep =
+        Thread.ofPlatform()
+            .start(
+                () -> {
+                  try (var held = workspaces.holdIfFree("acme-fix-login").orElseThrow()) {
+                    holding.countDown();
+                    release.await(30, TimeUnit.SECONDS);
+                  } catch (Exception e) {
+                    throw new IllegalStateException(e);
+                  }
+                  released.countDown();
+                });
+    assertTrue(holding.await(30, TimeUnit.SECONDS));
+
+    workspaces.startExisting(FIX);
+    sweep.join(TimeUnit.SECONDS.toMillis(30));
+
+    assertTrue(reads.get() >= 2, "the entry read the clock while it waited");
+    assertTrue(shell.invocations().contains("incus start acme-fix-login"));
+  }
+
+  /**
+   * Minor m2: a workspace the check saw running but the entry finds stopped, the sweep having
+   * stopped it between, starts only within the box's cap, counted over every other whole spec
+   * workspace, never itself; one still running asks nothing of the cap.
+   */
+  @Test
+  void anEntryThatStartsAStoppedWorkspaceCountsTheCapOverTheOthers() throws Exception {
+    var other =
+        instance(
+            "acme-other",
+            "Running",
+            "tank",
+            "\"user.sail.project\": \"acme\", \"user.sail.workspace\": \"other\","
+                + " \"user.sail.ready\": \"1762941601000\", \"user.sail.spec\": \"other\"");
+    var stoppedNow = new AtomicBoolean();
+    var running =
+        incus(
+            DIR_AND_ZFS,
+            list(template("v1", INPUTS), specWorkspace("Running", "fix-login", "uday"), other),
+            snapshots("v1"));
+    var stopped =
+        incus(
+            DIR_AND_ZFS,
+            list(template("v1", INPUTS), specWorkspace("Stopped", "fix-login", "uday"), other),
+            snapshots("v1"));
+    var workspaces = workspaces(switching(stoppedNow, running, stopped), System::nanoTime);
+    var check = workspaces.checkSpec(FIX, INPUTS, name -> false);
+    var counted = new ArrayList<Set<String>>();
+
+    workspaces.enterSpec(check, acme(), "uday", tempDir, counted::add);
+    stoppedNow.set(true);
+    var full =
+        assertThrows(
+            IllegalStateException.class,
+            () ->
+                workspaces.enterSpec(
+                    check,
+                    acme(),
+                    "uday",
+                    tempDir,
+                    whole -> {
+                      counted.add(whole);
+                      throw new IllegalStateException("full");
+                    }));
+
+    assertEquals("full", full.getMessage());
+    assertEquals(List.of(Set.of("acme/other")), counted);
+    assertTrue(stopped.invocations().stream().noneMatch(c -> c.startsWith("incus start")));
   }
 
   @Test

@@ -470,8 +470,8 @@ class RunPlacesTest {
   /**
    * Rule G at the seam every lane resumes through: a run of no spec always holds its session; a
    * spec's run holds one only while its workspace, made before the run ended, is there; and when
-   * Incus cannot say, or the spec cannot have a workspace, every run is taken as holding one, as
-   * before workspaces could be lost.
+   * Incus cannot say, or the spec cannot have a workspace, none does, so the next run starts fresh
+   * rather than resuming a session that may be gone (Minor 3 of the second look).
    */
   @Test
   void aRunHoldsItsSessionOnlyWhileTheWorkspaceItRanInIsThere() throws Exception {
@@ -530,10 +530,12 @@ class RunPlacesTest {
     assertEquals(false, after.holdsSession("acme", "auth").test(run.get()));
     assertEquals(false, gone.holdsSession("acme", "auth").test(run.get()));
     assertTrue(gone.holdsSession("acme", null).test(run.get()), "a run of no spec");
-    assertTrue(silent.holdsSession("acme", "auth").test(run.get()));
-    assertTrue(
-        gone.holdsSession("a".repeat(60), "auth").test(run.get()), "no workspace can be named");
-    assertTrue(interrupted.holdsSession("acme", "auth").test(run.get()));
+    assertEquals(false, silent.holdsSession("acme", "auth").test(run.get()));
+    assertEquals(
+        false,
+        gone.holdsSession("a".repeat(60), "auth").test(run.get()),
+        "no workspace can be named");
+    assertEquals(false, interrupted.holdsSession("acme", "auth").test(run.get()));
     assertTrue(Thread.interrupted(), "the interrupt is kept");
   }
 

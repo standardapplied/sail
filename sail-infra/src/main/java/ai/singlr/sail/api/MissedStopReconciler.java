@@ -34,9 +34,11 @@ import java.util.Comparator;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.TreeMap;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Supplier;
 import java.util.stream.Stream;
@@ -175,6 +177,7 @@ public final class MissedStopReconciler implements AutoCloseable {
   private final PeriodicPass pass;
   private volatile Instant tidiedSince = Instant.EPOCH;
   private final Set<String> untidied = ConcurrentHashMap.newKeySet();
+  private final Map<String, List<String>> stopped = new ConcurrentHashMap<>();
   private final StrandedReviewRescue strandedReviews;
 
   public MissedStopReconciler(
@@ -349,27 +352,26 @@ public final class MissedStopReconciler implements AutoCloseable {
    * staging directory. Only a container that had a run start or finish since {@link #TIDY_LOOKBACK}
    * before the last pass is asked (every one, on the first pass after a start): a launch that dies
    * leaves its file with a run that finishes, by its launch's cleanup or by this sweep. One that is
-   * gone, a spec's deleted workspace say, has nothing to tidy. A container that does not answer, or
-   * does not run the tidy, is tried again on a later pass, and said once: not again until its tidy
-   * has succeeded; the stopped ones, which the idle sweep makes many of, in one line with their
-   * count.
+   * gone, a spec's deleted workspace say, has nothing to tidy. One that is stopped, as the idle
+   * sweep leaves many, is remembered by name and asked on each pass until it runs, and holds the
+   * window for no other. A container that does not answer, or does not run the tidy, is tried again
+   * on a later pass, and said once: not again until its tidy has succeeded.
    */
   void removeLeftovers() {
     var pass = clock.get();
     var tidied = true;
-    var stopped = 0;
-    for (var place : sessionStore.liveRunsByPlace(localHandle.get(), tidiedSince).entrySet()) {
+    var places = new TreeMap<>(stopped);
+    places.putAll(sessionStore.liveRunsByPlace(localHandle.get(), tidiedSince));
+    for (var place : places.entrySet()) {
       try {
         unitProbe.removeLaunchFiles(place.getKey(), place.getValue());
         untidied.remove(place.getKey());
+        stopped.remove(place.getKey());
+      } catch (NotRunning notRunning) {
+        stopped.put(place.getKey(), place.getValue());
       } catch (Exception e) {
         tidied = false;
-        if (!untidied.add(place.getKey())) {
-          continue;
-        }
-        if (e instanceof NotRunning) {
-          stopped++;
-        } else {
+        if (untidied.add(place.getKey())) {
           System.err.println(
               "  [reconcile] could not tidy the launch files of "
                   + place.getKey()
@@ -377,13 +379,6 @@ public final class MissedStopReconciler implements AutoCloseable {
                   + e.getMessage());
         }
       }
-    }
-    if (stopped > 0) {
-      System.err.println(
-          "  [reconcile] "
-              + stopped
-              + (stopped == 1 ? " stopped instance holds" : " stopped instances hold")
-              + " launch files left to tidy; each is tidied once it runs again");
     }
     if (tidied) {
       tidiedSince = pass.minus(TIDY_LOOKBACK);

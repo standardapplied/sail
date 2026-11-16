@@ -14,8 +14,6 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.api.OperationsFactory;
-import ai.singlr.sail.api.ProjectReader;
-import ai.singlr.sail.api.TestWorkspaces;
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.TestDefinitions;
 import ai.singlr.sail.engine.AgentUnit;
@@ -666,36 +664,5 @@ class AgentAttachCommandTest {
       Acting.system(() -> new ProjectStore(db).upsert(TestDefinitions.yaml(definition)));
     }
     return dbPath;
-  }
-
-  /**
-   * The proof's medium 2: an attach enters its spec's workspace through the lanes' own door, so one
-   * the sweep stopped is started; one that is not there is left to the refusal it always had.
-   */
-  @Test
-  void anAttachStartsItsSpecsStoppedWorkspaceThroughTheLanesDoor() throws Exception {
-    var config = TestDefinitions.named("acme");
-    ProjectReader definitions = project -> Optional.of(config);
-    var place = (RunPlace.SpecWorkspace) RunPlace.of("acme", "u2");
-    var stopped =
-        TestWorkspaces.incus(definitions, "acme")
-            .onOk(
-                "incus list --format json",
-                "["
-                    + TestWorkspaces.currentTemplate(definitions, "acme")
-                    + ","
-                    + TestWorkspaces.specWorkspace("acme", "u2", "Stopped", "uday")
-                    + "]");
-    var gone = TestWorkspaces.incus(definitions, "acme");
-
-    assertTrue(AgentAttachCommand.entered(TestWorkspaces.over(stopped), config, place, "uday"));
-    assertFalse(AgentAttachCommand.entered(TestWorkspaces.over(gone), config, place, "uday"));
-
-    assertTrue(
-        stopped.invocations().contains("incus start acme-u2"), stopped.invocations().toString());
-    assertTrue(
-        gone.invocations().stream()
-            .noneMatch(c -> c.startsWith("incus start") || c.startsWith("incus copy")),
-        "nothing is made for an attach");
   }
 }
