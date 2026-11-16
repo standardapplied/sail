@@ -9,6 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assumptions.assumeFalse;
 
 import ai.singlr.sail.Sail;
+import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.SailPaths;
 import java.util.ArrayDeque;
@@ -187,6 +188,9 @@ class RootRequiredTest {
   private String refusal(String... args) {
     var ran = SailCli.run(args);
     assertEquals(1, ran.exit(), String.join(" ", args));
+    if (ran.err().isBlank()) {
+      return ((Map<?, ?>) YamlUtil.parseMap(ran.out()).get("error")).get("message").toString();
+    }
     var printed = ran.err().strip().lines().findFirst().orElse("");
     return printed.substring(printed.indexOf(' ') + 1);
   }

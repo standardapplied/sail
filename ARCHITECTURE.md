@@ -1550,22 +1550,33 @@ Each row with the tests that prove it:
   `WorkspaceIT.aReplacedTokenReachesARunningWorkspaceAtOnceAndAStoppedOneWhenItStarts`.*
 - **T6. A git token goes only to the host it was stored for.** The one source of a token is a
   person's `sail git login <host>`, keyed by the host as the command takes it, port included
-  (`GitCredentials.forRepos`, `resolveTokenForHost`): no substring, provider guess or wildcard, so
-  a definition naming any host gets nobody's token for it. A spec's workspace takes its owner's
-  (T2); the host commands that clone (`project apply`, `repo add`, `demo`, `template build`,
-  `workspace create`) take the box person's (`HostIdentity.gitTokens`), written into the project's
-  container by the same writer and selection as the owner step, and only through one seam
-  (`WorkspaceVerbs.cloneTokens`) that refuses first, so no host command has a token past the
-  refusal. `repo add` writes the store an apply writes, for every host the project's repos name,
-  not the added repo's alone. Nothing is read from a process's
-  environment: a repo whose host asks for credentials and has no stored token is refused before
-  anything is written, naming `sail git login <host>`, and when `GITHUB_TOKEN`, `GITLAB_TOKEN` or
-  `BITBUCKET_TOKEN` is set the refusal says Sail does not read it (only whether it is set is
-  read) (`GitCredentials.Missing`). No command takes a token on its command line.
-  *`GitCredentialsTest.aTokenStoredForOneHostIsNeverSentToAnother`,
-  `GitCredentialsTest.aHostWithAPortIsKeyedAndRefusedWithItsPort`,
-  `GitCredentialsTest.aTokenVariableSetIsNamedAsUnreadAndItsValueNeverSaid`,
-  `WorkspaceVerbsTest.theTokensAHostCommandWritesComeOnlyPastTheRefusal`,
+  (`GitCredentials.forRepos`, `resolveTokenForHost`): no substring, prefix, suffix, provider guess
+  or wildcard, so a definition naming any host gets nobody's token for it, and a URL that carries
+  a credential is refused naming its host alone. A spec's workspace takes its owner's (T2); the
+  host commands that clone (`project apply`, `repo add`, `demo`, `template build`, `workspace
+  create`) take the box person's (`HostIdentity.gitTokens`, `WorkspaceVerbs.Keeper`) as
+  `CheckedTokens`, which only `CheckedTokens.of` makes, past the refusal, and which the applier,
+  the provisioner and a template's source take instead of a map: a host command cannot write a
+  token without the check. Each command checks first, before it creates, starts, writes or asks
+  anything. The project's container is given them by the workspace's own renew step
+  (`WorkspaceCredentials.renew`): the store replaced whole, or removed with gh's login when nothing
+  is to be written, so a token removed, or for a host no repo names any more, leaves it at the next
+  apply; `repo add` writes the store an apply writes. Nothing is read from a process's
+  environment: a repo whose host asks for credentials with no stored token is refused
+  (`login_not_stored`, under `--json` too), naming `sail git login <host>`, or on a box that names
+  no person the setup that makes one first, and when `GITHUB_TOKEN`, `GITLAB_TOKEN` or
+  `BITBUCKET_TOKEN` is set the refusal says Sail does not read it (only whether it is set is read).
+  A template is searched for the tokens its build was given alone. No command takes a token on
+  its command line. A host the probe cannot reach asks for nothing, so its clone fails with git's
+  own words.
+  *`GitCredentialsTest.aTokenGoesToItsOwnHostAloneAndToNoHostThatMerelyContainsIt`,
+  `GitCredentialsTest.aBoxWithNoPersonIsToldToNameOneBeforeStoringALogin`,
+  `GitCredentialsTest.aRepoUrlThatCarriesACredentialIsRefusedWithoutEchoingIt`,
+  `ProjectApplierTest.anApplyWithNoTokenToGiveTakesTheStoreAndGhsLoginOut`,
+  `ProjectApplierTest.aTokenForAHostNoRepoNamesAnyMoreIsGoneAfterTheApply`,
+  `ProjectApplyCommandTest.anApplyWhoseRepoAsksForATokenNoneIsStoredForIsRefusedBeforeItTouchesAnything`,
+  `ProjectDemoCommandTest.aDemoWhoseRepoAsksForATokenNoneIsStoredForIsRefusedBeforeItWritesAnything`,
+  `WorkspaceVerbsTest.aTemplateIsSearchedForTheTokensItsBuildWasGivenAndNoOther`,
   `ProjectAddRepoCommandTest.addingARepoOnAnotherHostKeepsTheEarlierHostsTokenAndAddsNoOther`,
   `RootRequiredTest.noCommandTakesAGitTokenOnItsCommandLine`.*
 - **Keys follow owners.** One walker (`BoxInstances.wholeWorkspaceOf`) finds a person's

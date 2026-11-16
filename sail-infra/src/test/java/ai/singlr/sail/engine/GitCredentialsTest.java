@@ -12,9 +12,12 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.api.ApiException;
+import ai.singlr.sail.api.ErrorCode;
 import ai.singlr.sail.config.ProjectDefinition;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
@@ -44,6 +47,95 @@ class GitCredentialsTest {
         GitCredentials.buildCredentialStore(tokens, repos));
     assertNull(GitCredentials.resolveTokenForHost("gitlab.attacker.example", stored));
     assertNull(GitCredentials.resolveTokenForHost("github.com", Map.of("*", "tok")));
+  }
+
+  /**
+   * Round 1, item 2 (G1): the token goes to the host it was stored for exactly, case aside, and to
+   * no host that contains it, starts or ends with it, or names it with a port.
+   */
+  @Test
+  void aTokenGoesToItsOwnHostAloneAndToNoHostThatMerelyContainsIt() {
+    var stored = Map.of("github.com", "ghp_stored_for_github", "gitlab.com", "glpat_stored_for_gl");
+
+    for (var host :
+        List.of(
+            "github.com.attacker.example",
+            "attacker-github.com",
+            "github.com:8443",
+            "www.github.com",
+            "gitlab.attacker.example")) {
+      assertEquals(Map.of(), checked(host, stored).byHost(), host);
+    }
+    assertEquals(
+        Map.of("GitHub.com", "ghp_stored_for_github"), checked("GitHub.com", stored).byHost());
+  }
+
+  /**
+   * Round 1, minor 1: on a box that names no person, the refusal says so, and names the setup that
+   * makes one before the login, with the API's code for a login not stored.
+   */
+  @Test
+  void aBoxWithNoPersonIsToldToNameOneBeforeStoringALogin() {
+    var refused =
+        assertThrows(
+            ApiException.class,
+            () ->
+                CheckedTokens.of(
+                    project("github.com"), Optional.empty(), Map.of(), url -> true, Map.of()));
+
+    assertEquals(
+        "github.com asks for credentials to fetch acme's repo r, and this box names no person to"
+            + " keep a token for it.",
+        refused.reason());
+    assertEquals(
+        "Name one with sail init --as-main --handle <you>, or sail init --main <main>, then store a"
+            + " token with sail git login github.com.",
+        refused.remedy().plain());
+    assertEquals(ErrorCode.LOGIN_NOT_STORED, refused.failure().errorCode());
+  }
+
+  /** Round 1, minor 2: a URL that carries a credential is refused naming its host alone. */
+  @Test
+  void aRepoUrlThatCarriesACredentialIsRefusedWithoutEchoingIt() {
+    var secret = "ghp_EMBEDDEDSECRET0123456789";
+    var refused =
+        assertThrows(
+            ApiException.class,
+            () ->
+                GitCredentials.extractHttpsHosts(
+                    List.of(
+                        new ProjectDefinition.Repo(
+                            "https://x-access-token:" + secret + "@github.com/o/r.git",
+                            "r",
+                            null))));
+
+    assertEquals(
+        "A repository URL on github.com carries a credential, and a URL must not carry one.",
+        refused.reason());
+    assertEquals(
+        "Take it out of the URL and store the token with sail git login github.com.",
+        refused.remedy().plain());
+    assertFalse(refused.getMessage().contains(secret));
+    assertFalse(refused.remedy().plain().contains(secret));
+  }
+
+  private static CheckedTokens checked(String host, Map<String, String> stored) {
+    return CheckedTokens.of(project(host), Optional.of("eng"), stored, url -> false, Map.of());
+  }
+
+  private static ProjectDefinition project(String host) {
+    return new ProjectDefinition(
+        "acme",
+        null,
+        null,
+        null,
+        null,
+        null,
+        List.of(new ProjectDefinition.Repo("https://" + host + "/acme/r.git", "r", null)),
+        null,
+        null,
+        null,
+        null);
   }
 
   /** Scenario 5: a host with a port is its own host, keyed and refused with its port. */

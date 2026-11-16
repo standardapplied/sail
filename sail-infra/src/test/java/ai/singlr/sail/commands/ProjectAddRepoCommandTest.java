@@ -8,6 +8,7 @@ package ai.singlr.sail.commands;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
+import ai.singlr.sail.api.ApiException;
 import ai.singlr.sail.config.ProjectDefinition;
 import ai.singlr.sail.engine.ProjectApplier;
 import ai.singlr.sail.engine.ScriptedShellExecutor;
@@ -21,12 +22,13 @@ import java.time.Duration;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import org.junit.jupiter.api.Test;
 
 /** What {@code sail project repo add} writes into the project's container. */
 class ProjectAddRepoCommandTest {
 
-  private static final String STORE = "acme/home/dev/.git-credentials";
+  private static final String STORE = "acme/home/dev/.git-credentials.sail-new";
 
   /**
    * Adding a repo on another host writes the store an apply writes: the person's token for every
@@ -45,10 +47,12 @@ class ProjectAddRepoCommandTest {
                     "https://github.com/acme/api.git\n")
                 .onFail("test -d /home/dev/workspace/web", "not found"));
     var stored =
-        Map.of(
-            "github.com", "ghp_token_for_github",
-            "git.example.com", "tok_for_git_example",
-            "gitlab.com", "glpat_token_for_gitlab");
+        new WorkspaceVerbs.Keeper(
+            Optional.of("eng"),
+            Map.of(
+                "github.com", "ghp_token_for_github",
+                "git.example.com", "tok_for_git_example",
+                "gitlab.com", "glpat_token_for_gitlab"));
 
     var result =
         ProjectAddRepoCommand.cloned(
@@ -64,6 +68,12 @@ class ProjectAddRepoCommandTest {
             + "https://oauth2:tok_for_git_example@git.example.com\n",
         shell.pushed.get(STORE));
     assertEquals(1, result.added(), "only the added repo is cloned");
+    var logins =
+        shell.shell.invocations().stream().filter(command -> command.contains("gh auth login"));
+    assertEquals(
+        List.of(true),
+        logins.map(command -> command.contains(" sh github.com ")).toList(),
+        "gh is logged in once, for the GitHub host alone");
   }
 
   /** A repo whose host asks for a token none is stored for is refused before anything is run. */
@@ -73,19 +83,20 @@ class ProjectAddRepoCommandTest {
 
     var refused =
         assertThrows(
-            IllegalArgumentException.class,
+            ApiException.class,
             () ->
                 ProjectAddRepoCommand.cloned(
                     new ProjectApplier(shell, new PrintStream(OutputStream.nullOutputStream())),
                     "acme",
                     acme(),
-                    Map.of("github.com", "ghp_token_for_github"),
+                    new WorkspaceVerbs.Keeper(
+                        Optional.of("eng"), Map.of("github.com", "ghp_token_for_github")),
                     url -> true,
                     Map.of()));
 
     assertEquals(
-        "git.example.com asks for credentials to fetch acme's repo web, and this box's person keeps"
-            + " no token for it. Store one with sail git login git.example.com.",
+        "git.example.com asks for credentials to fetch acme's repo web, and eng keeps no token for"
+            + " it.",
         refused.getMessage());
     assertEquals(List.of(), shell.shell.invocations());
   }

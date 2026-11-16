@@ -35,6 +35,8 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.LinkedHashMap;
 import java.util.Optional;
+import java.util.function.Predicate;
+import java.util.function.Supplier;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
 import picocli.CommandLine.Model.CommandSpec;
@@ -56,6 +58,31 @@ public final class ProjectDemoCommand implements Runnable {
 
   @Option(names = "--json", description = "Output in JSON format.")
   private boolean json;
+
+  private final Supplier<ProjectDefinition> definition;
+  private final Supplier<WorkspaceVerbs.Keeper> keeper;
+  private final Predicate<String> asks;
+
+  public ProjectDemoCommand() {
+    this(
+        ProjectDemoCommand::demoDefinition,
+        WorkspaceVerbs.Keeper::here,
+        new ShellExecutor(false)::asksForCredentials);
+  }
+
+  /**
+   * @param definition the demo's definition, as the catalog holds it
+   * @param keeper whose stored tokens the demo clones with
+   * @param asks whether a repo's refs ask for credentials
+   */
+  ProjectDemoCommand(
+      Supplier<ProjectDefinition> definition,
+      Supplier<WorkspaceVerbs.Keeper> keeper,
+      Predicate<String> asks) {
+    this.definition = definition;
+    this.keeper = keeper;
+    this.asks = asks;
+  }
 
   /** A provisioning that installs {@code workstationKey} in the container it creates. */
   @FunctionalInterface
@@ -101,7 +128,7 @@ public final class ProjectDemoCommand implements Runnable {
 
   @Override
   public void run() {
-    CliCommand.run(this::execute);
+    CliCommand.run(json, this::execute);
   }
 
   private void execute() throws Exception {
@@ -132,7 +159,11 @@ public final class ProjectDemoCommand implements Runnable {
       out.println();
     }
 
-    var config = loadDemoDefinition(out, ansi);
+    var config = definition.get();
+    var tokens = keeper.get().check(config, asks, System.getenv());
+    if (!json) {
+      out.println(ansi.string("  @|green \u2713|@ demo project loaded from the catalog"));
+    }
     var registered = WorkstationIdentity.registered();
     var git = LocalIdentity.detect().git();
     if (!json) {
@@ -177,7 +208,6 @@ public final class ProjectDemoCommand implements Runnable {
     var tracker = new ProvisionTracker<>(ProjectPhase.class, stateFile, false);
     tracker.reset();
 
-    var tokens = WorkspaceVerbs.cloneTokens(config, shell::asksForCredentials);
     var listener = json ? ProvisionListener.NOOP : ConsoleProvisionListener.INSTANCE;
     provisionTrusting(
         SailPaths.controlPlaneDb(),
@@ -224,13 +254,9 @@ public final class ProjectDemoCommand implements Runnable {
     }
   }
 
-  private ProjectDefinition loadDemoDefinition(PrintStream out, Ansi ansi) {
+  private static ProjectDefinition demoDefinition() {
     try (var operations = OperationsFactory.open()) {
-      var definition = operations.catalog().demoDefinition();
-      if (!json) {
-        out.println(ansi.string("  @|green \u2713|@ demo project loaded from the catalog"));
-      }
-      return definition;
+      return operations.catalog().demoDefinition();
     }
   }
 

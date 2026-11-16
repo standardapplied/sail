@@ -53,7 +53,7 @@ public final class ProjectAddRepoCommand implements Runnable {
 
   @Override
   public void run() {
-    CliCommand.run(this::execute);
+    CliCommand.run(json, this::execute);
   }
 
   private void execute() throws Exception {
@@ -92,7 +92,7 @@ public final class ProjectAddRepoCommand implements Runnable {
             new ProjectApplier(shell, out),
             name,
             edited,
-            WorkspaceVerbs.storedTokens(),
+            WorkspaceVerbs.Keeper.here(),
             new ShellExecutor(false)::asksForCredentials,
             System.getenv());
     mutations.write(
@@ -127,22 +127,19 @@ public final class ProjectAddRepoCommand implements Runnable {
 
   /**
    * Clones what {@code edited} adds into {@code name}'s container, with the store an apply writes:
-   * the person's {@code stored} tokens for every host {@code edited}'s repos name ({@link
-   * WorkspaceVerbs#cloneTokens}), not the added repo's host alone, so no earlier repo loses its.
+   * {@code keeper}'s tokens for every host {@code edited}'s repos name ({@link
+   * WorkspaceVerbs.Keeper#check}), not the added repo's host alone, so no earlier repo loses its.
    */
   static ProjectApplier.ApplyResult cloned(
       ProjectApplier applier,
       String name,
       ProjectDefinition edited,
-      Map<String, String> stored,
+      WorkspaceVerbs.Keeper keeper,
       Predicate<String> asks,
       Map<String, String> env)
       throws IOException, InterruptedException, TimeoutException {
     return applier.applyRepos(
-        name,
-        edited.repos(),
-        ProjectDefinition.USER,
-        WorkspaceVerbs.cloneTokens(edited, stored, asks, env));
+        name, edited.repos(), ProjectDefinition.USER, keeper.check(edited, asks, env));
   }
 
   private ProjectDefinition.Repo collectRepoInteractively(PrintStream out, Ansi ansi) {

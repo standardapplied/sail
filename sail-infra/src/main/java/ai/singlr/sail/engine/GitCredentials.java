@@ -5,6 +5,8 @@
 
 package ai.singlr.sail.engine;
 
+import ai.singlr.sail.api.ApiException;
+import ai.singlr.sail.api.ErrorCode;
 import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.ProjectDefinition;
@@ -81,7 +83,7 @@ public final class GitCredentials {
           var afterScheme = url.substring(8);
           var slashIdx = afterScheme.indexOf('/');
           if (slashIdx > 0) {
-            hosts.add(afterScheme.substring(0, slashIdx));
+            hosts.add(withoutCredential(afterScheme.substring(0, slashIdx)));
           }
         }
       }
@@ -192,6 +194,26 @@ public final class GitCredentials {
     } catch (ExecutionException e) {
       throw new IllegalStateException("Could not ask whether a repo needs a token.", e.getCause());
     }
+  }
+
+  /**
+   * Refuses a URL's authority that carries a credential before its host, naming the host alone: a
+   * token in a definition would be echoed, logged and sent, and a token is stored with {@code sail
+   * git login} instead.
+   */
+  private static String withoutCredential(String authority) {
+    var at = authority.lastIndexOf('@');
+    if (at < 0) {
+      return authority;
+    }
+    var host = requireSafeHost(authority.substring(at + 1));
+    throw new ApiException(
+        ErrorCode.INVALID_REQUEST,
+        "A repository URL on " + host + " carries a credential, and a URL must not carry one.",
+        Remedy.of(
+            "Take it out of the URL and store the token with ",
+            Remedy.sail("git login", host),
+            "."));
   }
 
   private static String requireSafeHost(String host) {

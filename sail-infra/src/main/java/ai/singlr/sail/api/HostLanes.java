@@ -308,12 +308,11 @@ final class HostLanes {
     }
 
     @Override
-    public Map<String, String> gitTokens() {
+    public Optional<Map<String, String>> gitTokens() {
       var fdes = new FdeStore(db);
       return Optional.ofNullable(boxConfig.get().handle())
           .flatMap(fdes::byHandle)
-          .map(fde -> fdes.logins().gitTokens(fde.id()))
-          .orElse(Map.of());
+          .map(fde -> fdes.logins().gitTokens(fde.id()));
     }
 
     @Override

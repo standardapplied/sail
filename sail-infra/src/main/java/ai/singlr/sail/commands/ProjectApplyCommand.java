@@ -16,6 +16,7 @@ import ai.singlr.sail.config.ProjectDefinition;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.Banner;
 import ai.singlr.sail.engine.BoxInstances;
+import ai.singlr.sail.engine.CheckedTokens;
 import ai.singlr.sail.engine.ContainerExec;
 import ai.singlr.sail.engine.ContainerManager;
 import ai.singlr.sail.engine.ContainerManager.ContainerInfo;
@@ -97,18 +98,23 @@ public final class ProjectApplyCommand implements Runnable {
 
   private final Supplier<Box> box;
   private final Function<Boolean, ShellExec> shells;
+  private final Supplier<WorkspaceVerbs.Keeper> keeper;
 
   public ProjectApplyCommand() {
-    this(Box::here, ShellExecutor::new);
+    this(Box::here, ShellExecutor::new, WorkspaceVerbs.Keeper::here);
   }
 
   /**
    * @param box the box apply provisions on
    * @param shells the host shell, by whether this is a dry run
    */
-  ProjectApplyCommand(Supplier<Box> box, Function<Boolean, ShellExec> shells) {
+  ProjectApplyCommand(
+      Supplier<Box> box,
+      Function<Boolean, ShellExec> shells,
+      Supplier<WorkspaceVerbs.Keeper> keeper) {
     this.box = box;
     this.shells = shells;
+    this.keeper = keeper;
   }
 
   /** The box apply provisions on: its database, its host.yaml and sail-api's socket directory. */
@@ -141,7 +147,7 @@ public final class ProjectApplyCommand implements Runnable {
 
   @Override
   public void run() {
-    CliCommand.run(this::execute);
+    CliCommand.run(json, this::execute);
   }
 
   private void execute() throws Exception {
@@ -178,6 +184,7 @@ public final class ProjectApplyCommand implements Runnable {
             operator);
     requireReadyBox(operator);
     var observer = shells.apply(false);
+    var tokens = keeper.get().check(config, observer::asksForCredentials, System.getenv());
     var shell = shells.apply(dryRun);
     var observed = new ContainerManager(observer);
     var mgr = new ContainerManager(shell);
@@ -202,6 +209,7 @@ public final class ProjectApplyCommand implements Runnable {
     if (!ProjectProvisioner.provisionedFrom(recorded, config, workstationKey)) {
       provision(
           config,
+          tokens,
           git,
           shell,
           action == Action.CREATED,
@@ -216,7 +224,7 @@ public final class ProjectApplyCommand implements Runnable {
       System.out.println();
     }
 
-    var outcome = converge(observer, shell, config, git, operator);
+    var outcome = converge(observer, shell, config, tokens, git, operator);
 
     if (json) {
       System.out.println(YamlUtil.dumpJson(jsonSummary(config.name(), action, outcome)));
@@ -276,6 +284,7 @@ public final class ProjectApplyCommand implements Runnable {
 
     var workstationKey = WorkstationIdentity.registered();
     var git = LocalIdentity.detect().git();
+    var person = keeper.get();
     var rows = new ArrayList<LinkedHashMap<String, Object>>();
     var applied = 0;
     var failed = 0;
@@ -302,6 +311,10 @@ public final class ProjectApplyCommand implements Runnable {
           ProjectMutations.requireResources(definition.get(), operator);
         }
         var targetPlan = planTarget(target.state(), definition.orElse(null));
+        var tokens =
+            targetPlan.config() == null
+                ? null
+                : person.check(targetPlan.config(), observer::asksForCredentials, System.getenv());
         var action = targetPlan.action();
         if (action == Action.STARTED) {
           mgr.start(project);
@@ -313,6 +326,7 @@ public final class ProjectApplyCommand implements Runnable {
           if (!ProjectProvisioner.provisionedFrom(recorded, targetPlan.config(), workstationKey)) {
             provision(
                 targetPlan.config(),
+                tokens,
                 git,
                 shell,
                 false,
@@ -321,7 +335,7 @@ public final class ProjectApplyCommand implements Runnable {
                 operator);
             action = Action.CREATED;
           }
-          outcome = converge(observer, shell, targetPlan.config(), git, operator);
+          outcome = converge(observer, shell, targetPlan.config(), tokens, git, operator);
         } else {
           outcome = convergeMachineryOnly(observer, shell, project);
         }
@@ -451,11 +465,11 @@ public final class ProjectApplyCommand implements Runnable {
       ShellExec observer,
       ShellExec shell,
       ProjectDefinition config,
+      CheckedTokens tokens,
       LocalIdentity.GitIdentity git,
       OperatorCommand operator)
       throws Exception {
     var project = config.name();
-    var tokens = WorkspaceVerbs.cloneTokens(config, observer::asksForCredentials);
     var observed = new ContainerManager(observer);
     var mgr = new ContainerManager(shell);
     var hostnameRealigned = !observed.hostnameMatches(project) && mgr.setHostname(project);
@@ -615,6 +629,7 @@ public final class ProjectApplyCommand implements Runnable {
    */
   private void provision(
       ProjectDefinition config,
+      CheckedTokens tokens,
       LocalIdentity.GitIdentity git,
       ShellExec shell,
       boolean fresh,
@@ -662,7 +677,6 @@ public final class ProjectApplyCommand implements Runnable {
       ConsoleHelper.proceed("Create project " + config.name() + "?", "Not provisioned", "--yes");
     }
 
-    var gitTokens = WorkspaceVerbs.cloneTokens(config, shell::asksForCredentials);
     var listener = json ? ProvisionListener.NOOP : ConsoleProvisionListener.INSTANCE;
     try (var operations = OperationsFactory.open()) {
       var provisioner =
@@ -674,7 +688,7 @@ public final class ProjectApplyCommand implements Runnable {
               workstationKey,
               operator);
       provisioner.provision(
-          config, hostYaml, gitTokens, git, SailPaths.projectFilesDir(config.name()));
+          config, hostYaml, tokens, git, SailPaths.projectFilesDir(config.name()));
     }
 
     if (!json) {

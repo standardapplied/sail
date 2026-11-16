@@ -13,8 +13,8 @@ import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.config.HostYaml;
 import ai.singlr.sail.config.ProjectDefinition;
 import ai.singlr.sail.config.YamlUtil;
+import ai.singlr.sail.engine.CheckedTokens;
 import ai.singlr.sail.engine.ContainerSailSetup;
-import ai.singlr.sail.engine.GitCredentials;
 import ai.singlr.sail.engine.NameValidator;
 import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.ProjectCatalog;
@@ -144,36 +144,27 @@ final class WorkspaceVerbs {
   }
 
   /**
-   * The tokens a host command writes into {@code config}'s container, or builds its template with,
-   * to clone and fetch its repos: the person's {@code stored} ones for every host the repos name,
-   * keyed as each repo URL spells it ({@link GitCredentials#forRepos}), once no repo's host asks
-   * for credentials none of them answers. The one way a host command has tokens, so none writes one
-   * past the refusal, which names {@code sail git login <host>} and, when {@code env} sets a token
-   * variable, that Sail does not read it.
+   * This box's person, by handle, and the git tokens they stored: whose a host command clones with
+   * ({@code HostIdentity.gitTokens}). No person when the box names none on its roster.
    */
-  static Map<String, String> cloneTokens(
-      ProjectDefinition config,
-      Map<String, String> stored,
-      Predicate<String> asks,
-      Map<String, String> env) {
-    var tokens = GitCredentials.forRepos(stored, config.repos());
-    var missing = GitCredentials.missing(config.repos(), tokens, asks);
-    if (missing.isPresent()) {
-      throw Remedied.argument(
-          missing.get().reason(config.name(), "this box's person"), missing.get().remedy(env));
+  record Keeper(Optional<String> person, Map<String, String> tokens) {
+
+    static Keeper here() {
+      try (var operations = OperationsFactory.open()) {
+        var identity = operations.identity();
+        return identity
+            .gitTokens()
+            .map(tokens -> new Keeper(Optional.of(identity.box().handle()), tokens))
+            .orElseGet(() -> new Keeper(Optional.empty(), Map.of()));
+      }
     }
-    return tokens;
-  }
 
-  /** {@link #cloneTokens} of this box's person's stored tokens, in this process's environment. */
-  static Map<String, String> cloneTokens(ProjectDefinition config, Predicate<String> asks) {
-    return cloneTokens(config, storedTokens(), asks, System.getenv());
-  }
-
-  /** This box's person's stored git tokens, by host ({@link HostIdentity#gitTokens}). */
-  static Map<String, String> storedTokens() {
-    try (var operations = OperationsFactory.open()) {
-      return operations.identity().gitTokens();
+    /**
+     * The tokens a host command may write for {@code config}'s repos, or the refusal ({@link
+     * CheckedTokens#of}): the one way one has them.
+     */
+    CheckedTokens check(ProjectDefinition config, Predicate<String> asks, Map<String, String> env) {
+      return CheckedTokens.of(config, person, tokens, asks, env);
     }
   }
 
@@ -181,21 +172,23 @@ final class WorkspaceVerbs {
    * What {@code config}'s template is built from on this box: the base profile's pool ({@code
    * host.yaml}'s, the default when it names none), the definition's digest, the catalog's names,
    * and a build that runs the project's own provisioner against the template with its own progress
-   * file, with the box person's stored tokens for its clone ({@link #cloneTokens}, asked only when
-   * it builds) and no git identity and no trusted key of anyone's.
+   * file, with {@code tokens} for its clone and no git identity and no trusted key of anyone's.
    */
   static WorkspaceTemplate.Source source(
-      ProjectDefinition config, boolean dryRun, boolean json, OperatorCommand operator)
+      ProjectDefinition config,
+      CheckedTokens tokens,
+      boolean dryRun,
+      boolean json,
+      OperatorCommand operator)
       throws IOException {
     var host = HostYaml.fromMap(YamlUtil.parseFile(SailPaths.hostConfigPath()));
     var catalog = ProjectCatalog.here();
     return source(
         host,
         config,
-        storedTokens(),
-        new ShellExecutor(false)::asksForCredentials,
+        tokens,
         name -> catalog.read(name).isPresent(),
-        (into, fresh, tokens) -> {
+        (into, fresh) -> {
           catalog.requireUnpruned(config.name());
           var tracker =
               tracker(
@@ -218,34 +211,24 @@ final class WorkspaceVerbs {
         });
   }
 
-  /** A template build's provisioning, given the tokens {@link #cloneTokens} let it clone with. */
-  @FunctionalInterface
-  interface Provision {
-    void into(ProjectProvisioner.Instance template, boolean fresh, Map<String, String> tokens)
-        throws Exception;
-  }
-
   /**
    * {@code config}'s template source on a box whose {@code host.yaml} is {@code host}: its digest
-   * is the definition's alone (T4), since a template holds no one's key, and its build provisions
-   * with the person's {@code stored} tokens that {@link #cloneTokens} lets through. The built
-   * template is searched for those alone, the tokens already in it: a token for a host this build
-   * never used never enters the template, not even as a search pattern.
+   * is the definition's alone (T4), since a template holds no one's key, and the built template is
+   * searched for the {@code tokens} its build was given alone, the ones already in it: a token for
+   * a host this build never used never enters the template, not even as a search pattern.
    */
   static WorkspaceTemplate.Source source(
       HostYaml host,
       ProjectDefinition config,
-      Map<String, String> stored,
-      Predicate<String> asks,
+      CheckedTokens tokens,
       Predicate<String> held,
-      Provision provision) {
+      WorkspaceTemplate.Build build) {
     return new WorkspaceTemplate.Source(
         Objects.requireNonNullElse(host.pool(), HostYaml.DEFAULT_POOL),
         ProjectProvisioner.inputs(config, Optional.empty()),
         held,
-        (into, fresh) ->
-            provision.into(into, fresh, cloneTokens(config, stored, asks, System.getenv())),
-        GitCredentials.forRepos(stored, config.repos()).values());
+        build,
+        tokens.values());
   }
 
   /** What a template build says it did. */

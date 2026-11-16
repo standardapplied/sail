@@ -1507,13 +1507,14 @@ class SailOperationsSeamTest {
       fdes.logins().storeGit(uday.id(), "Git.Example:8443", "tok-stored-for-8443");
 
       assertEquals(
-          Map.of("git.example:8443", "tok-stored-for-8443"),
+          Optional.of(Map.of("git.example:8443", "tok-stored-for-8443")),
           new HostLanes.Identity(db, () -> new SyncConfig(null, null, "uday", null), null, null)
               .gitTokens());
       assertEquals(
-          Map.of(),
+          Optional.empty(),
           new HostLanes.Identity(db, () -> new SyncConfig(null, null, null, null), null, null)
-              .gitTokens());
+              .gitTokens(),
+          "a box that names no person");
     }
   }
 
@@ -1549,7 +1550,10 @@ class SailOperationsSeamTest {
       assertTrue(operations.identity().sshKeys().isEmpty());
       assertEquals(
           "owner", operations.identity().workspaceOwner("owner").handle(), "the box's person");
-      assertEquals(Map.of(), operations.identity().gitTokens(), "an in-memory box keeps none");
+      assertEquals(
+          Map.of(),
+          operations.identity().gitTokens().orElse(Map.of()),
+          "an in-memory box keeps none");
       assertTrue(operations.schema().version() > 0);
       assertEquals(
           "This box has no FDE identity. Set one with 'sail host config set sync-handle <handle>'"

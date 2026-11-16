@@ -14,6 +14,7 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.concurrent.TimeoutException;
 
 /** A template holds no one's credentials (T1); a workspace holds its owner's alone (T2, T3). */
@@ -155,9 +156,12 @@ final class WorkspaceCredentials {
         KEYS,
         owner.keys().stream().map(key -> key + "\n").reduce("", String::concat),
         List.of("--uid", ContainerExec.DEV_UID, "--gid", ContainerExec.DEV_GID, "--mode", "0600"));
-    var repos = owner.tokenRepos(config.repos());
-    ProjectApplier.writeCredentialStore(
-        shell, instance, ProjectDefinition.USER, owner.tokensFor(repos), repos);
+    var store =
+        GitCredentials.buildCredentialStore(owner.tokensFor(config.repos()), config.repos());
+    if (!store.isEmpty()) {
+      ContainerFilePush.pushAsDev(shell, instance, STORE, store, "0600");
+      asDev(shell, instance, "git", "config", "--global", "credential.helper", "store");
+    }
   }
 
   /** A container just started has no resolver yet, and gh's login asks its forge. */
@@ -171,40 +175,73 @@ final class WorkspaceCredentials {
   static void logForgeIn(
       ShellExec shell, String instance, ProjectDefinition config, WorkspaceOwner owner)
       throws IOException, InterruptedException, TimeoutException {
-    var repos = owner.tokenRepos(config.repos());
-    var hosts = GitCredentials.githubHosts(repos);
+    logForgeIn(shell, instance, config.repos(), owner.tokensFor(config.repos()));
+  }
+
+  private static void logForgeIn(
+      ShellExec shell,
+      String instance,
+      List<ProjectDefinition.Repo> repos,
+      Map<String, String> tokens)
+      throws IOException, InterruptedException, TimeoutException {
+    var hosts = forgeHosts(repos, tokens);
     if (hosts.isEmpty()) {
       return;
     }
     var resolve = new ArrayList<>(List.of("bash", "-c", RESOLVES, "sail-resolve"));
     resolve.addAll(hosts);
     shell.exec(ContainerExec.asRoot(instance, resolve));
-    ForgeCliLogin.loginGitHub(
-        shell, instance, ProjectDefinition.USER, owner.tokensFor(repos), repos);
+    ForgeCliLogin.loginGitHub(shell, instance, ProjectDefinition.USER, tokens, repos);
+  }
+
+  /** The GitHub hosts of {@code repos} that {@code tokens} holds a token for: gh's logins. */
+  private static List<String> forgeHosts(
+      List<ProjectDefinition.Repo> repos, Map<String, String> tokens) {
+    return GitCredentials.githubHosts(repos).stream().filter(tokens::containsKey).toList();
   }
 
   /**
-   * A token change for the owner a workspace already has: the store replaced whole by a rename, or
-   * removed when they keep none for it, and gh logged in again or out, never stripped first, so a
-   * live run's fetch or push never finds the workspace without credentials.
+   * A token change for the owner a workspace already has ({@link #renew(ShellExec, String, List,
+   * Map)}).
    */
   static void renew(
       ShellExec shell, String instance, ProjectDefinition config, WorkspaceOwner owner)
       throws IOException, InterruptedException, TimeoutException {
-    var repos = owner.tokenRepos(config.repos());
-    var store = GitCredentials.buildCredentialStore(owner.tokensFor(repos), repos);
+    renew(shell, instance, config.repos(), owner.tokensFor(config.repos()));
+  }
+
+  /**
+   * Gives {@code instance} exactly {@code tokens} for {@code repos}: the store replaced whole by a
+   * rename, or removed when there is nothing to write, and gh logged in again or out, never
+   * stripped first, so a live run's fetch or push never finds the container without credentials.
+   * The one step a workspace's token change and a project container's apply both take, so a token
+   * removed or no longer needed leaves either.
+   */
+  static void renew(
+      ShellExec shell,
+      String instance,
+      List<ProjectDefinition.Repo> repos,
+      Map<String, String> tokens)
+      throws IOException, InterruptedException, TimeoutException {
+    var store = GitCredentials.buildCredentialStore(tokens, repos);
     if (store.isEmpty()) {
       asDev(shell, instance, "rm", "-f", STORE);
     } else {
-      ContainerFilePush.pushAsDev(shell, instance, STORE + NEW, store, "0600");
-      asDev(shell, instance, "mv", "-f", STORE + NEW, STORE);
-      asDev(shell, instance, "git", "config", "--global", "credential.helper", "store");
+      writeStore(shell, instance, store);
     }
-    if (GitCredentials.githubHosts(repos).isEmpty()) {
+    if (forgeHosts(repos, tokens).isEmpty()) {
       asDev(shell, instance, "rm", "-f", GH_HOSTS);
     } else {
-      logForgeIn(shell, instance, config, owner);
+      logForgeIn(shell, instance, repos, tokens);
     }
+  }
+
+  /** The store written beside the old one and renamed over it, with git told to read it. */
+  private static void writeStore(ShellExec shell, String instance, String store)
+      throws IOException, InterruptedException, TimeoutException {
+    ContainerFilePush.pushAsDev(shell, instance, STORE + NEW, store, "0600");
+    asDev(shell, instance, "mv", "-f", STORE + NEW, STORE);
+    asDev(shell, instance, "git", "config", "--global", "credential.helper", "store");
   }
 
   private static void asDev(ShellExec shell, String instance, String... command)

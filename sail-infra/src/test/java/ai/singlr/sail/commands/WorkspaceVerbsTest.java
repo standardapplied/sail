@@ -8,7 +8,6 @@ package ai.singlr.sail.commands;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
-import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.api.OperationsFactory;
@@ -16,6 +15,7 @@ import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.HostYaml;
 import ai.singlr.sail.config.ProjectDefinition;
 import ai.singlr.sail.config.TestDefinitions;
+import ai.singlr.sail.engine.CheckedTokens;
 import ai.singlr.sail.engine.ProjectPhase;
 import ai.singlr.sail.engine.ProjectProvisioner;
 import ai.singlr.sail.engine.ProvisionTracker;
@@ -27,7 +27,6 @@ import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.Sqlite;
 import java.nio.file.Path;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -114,44 +113,6 @@ class WorkspaceVerbsTest {
         "a template that does not exist yet starts from the first step");
   }
 
-  /**
-   * The one seam every host command takes its tokens from (scenario 3): a repo that asks for
-   * credentials with no stored token refuses, naming the command that stores one, and a token
-   * variable in the shell is said to be unread, never used; otherwise it answers the stored tokens
-   * of the hosts the repos name, and no other.
-   */
-  @Test
-  void theTokensAHostCommandWritesComeOnlyPastTheRefusal() {
-    var failure =
-        assertThrows(
-            IllegalArgumentException.class,
-            () -> WorkspaceVerbs.cloneTokens(acme(), Map.of(), url -> true, Map.of()));
-    var withVariable =
-        assertThrows(
-            IllegalArgumentException.class,
-            () ->
-                WorkspaceVerbs.cloneTokens(
-                    acme(), Map.of(), url -> true, Map.of("GITHUB_TOKEN", "ghp_in_the_shell")));
-
-    assertEquals(
-        "github.com asks for credentials to fetch acme's repo app, and this box's person keeps no"
-            + " token for it. Store one with sail git login github.com.",
-        failure.getMessage());
-    assertEquals(
-        "github.com asks for credentials to fetch acme's repo app, and this box's person keeps no"
-            + " token for it. GITHUB_TOKEN is set but Sail does not read it. Store it: sail git"
-            + " login github.com.",
-        withVariable.getMessage());
-    assertEquals(
-        Map.of("github.com", "ghp_stored_for_github"),
-        WorkspaceVerbs.cloneTokens(
-            acme(),
-            Map.of("github.com", "ghp_stored_for_github", "gitlab.com", "glpat_stored_for_gitlab"),
-            url -> true,
-            Map.of()));
-    assertEquals(Map.of(), WorkspaceVerbs.cloneTokens(acme(), Map.of(), url -> false, Map.of()));
-  }
-
   @Test
   void aTemplateIsBuiltFromTheBaseProfilesPoolAndItsDigestIsTheDefinitionsAlone() throws Exception {
     var named =
@@ -161,46 +122,40 @@ class WorkspaceVerbsTest {
         new HostYaml(
             "dir", null, null, "incusbr0", "singlr-base", "ubuntu/24.04", "6.0", null, null);
 
-    var source =
-        WorkspaceVerbs.source(
-            named, acme(), Map.of(), url -> false, name -> false, (into, fresh, tokens) -> {});
+    var source = WorkspaceVerbs.source(named, acme(), none(), name -> false, (into, fresh) -> {});
 
     assertEquals("devpool", source.basePool());
     assertEquals(ProjectProvisioner.inputs(acme(), Optional.empty()), source.inputs());
     assertEquals(
         HostYaml.DEFAULT_POOL,
-        WorkspaceVerbs.source(
-                unnamed, acme(), Map.of(), url -> false, name -> false, (into, fresh, tokens) -> {})
+        WorkspaceVerbs.source(unnamed, acme(), none(), name -> false, (into, fresh) -> {})
             .basePool());
   }
 
   /**
    * sail#421 N1: the built template is searched for the tokens this build was given, the ones
    * already in it, and no other: a stored token for a host the project does not name never enters
-   * the template, not even as a search pattern. The build clones with those same tokens, past the
-   * refusal.
+   * the template, not even as a search pattern.
    */
   @Test
-  void aTemplateIsSearchedForTheTokensItsBuildWasGivenAndNoOther() throws Exception {
+  void aTemplateIsSearchedForTheTokensItsBuildWasGivenAndNoOther() {
     var host =
         new HostYaml(
             "dir", "devpool", null, "incusbr0", "singlr-base", "ubuntu/24.04", "6.0", null, null);
-    var given = new ArrayList<Map<String, String>>();
+    var given =
+        new WorkspaceVerbs.Keeper(
+                Optional.of("eng"),
+                Map.of(
+                    "github.com", "ghp_stored_for_github", "gitlab.com", "glpat_stored_for_gitlab"))
+            .check(acme(), url -> true, Map.of());
 
-    var source =
-        WorkspaceVerbs.source(
-            host,
-            acme(),
-            Map.of("github.com", "ghp_stored_for_github", "gitlab.com", "glpat_stored_for_gitlab"),
-            url -> true,
-            name -> false,
-            (into, fresh, tokens) -> given.add(tokens));
-    source
-        .build()
-        .into(
-            new ProjectProvisioner.Instance("acme--tmpl", Optional.of("devpool"), Map.of()), true);
+    var source = WorkspaceVerbs.source(host, acme(), given, name -> false, (into, fresh) -> {});
 
     assertEquals(List.of("ghp_stored_for_github"), List.copyOf(source.tokens()));
-    assertEquals(List.of(Map.of("github.com", "ghp_stored_for_github")), given);
+  }
+
+  private static CheckedTokens none() {
+    return new WorkspaceVerbs.Keeper(Optional.empty(), Map.of())
+        .check(acme(), url -> false, Map.of());
   }
 }

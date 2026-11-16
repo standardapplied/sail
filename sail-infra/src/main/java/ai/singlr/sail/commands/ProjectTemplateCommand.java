@@ -7,6 +7,7 @@ package ai.singlr.sail.commands;
 
 import ai.singlr.sail.engine.Banner;
 import ai.singlr.sail.engine.OperatorCommand;
+import ai.singlr.sail.engine.ShellExecutor;
 import picocli.CommandLine;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
@@ -54,7 +55,7 @@ public final class ProjectTemplateCommand implements Runnable {
 
     @Override
     public void run() {
-      CliCommand.run(this::execute);
+      CliCommand.run(json, this::execute);
     }
 
     private void execute() throws Exception {
@@ -62,13 +63,16 @@ public final class ProjectTemplateCommand implements Runnable {
       WorkspaceVerbs.requireRoot(dryRun, spec);
       CliCommand.requireJsonOrDryRun(json, dryRun);
       var config = WorkspaceVerbs.buildable(project, operator);
+      var tokens =
+          WorkspaceVerbs.Keeper.here()
+              .check(config, new ShellExecutor(false)::asksForCredentials, System.getenv());
       if (!json) {
         Banner.printBranding(System.out, Ansi.AUTO);
         System.out.println();
       }
       var template =
           WorkspaceVerbs.templates(dryRun)
-              .ensure(config, WorkspaceVerbs.source(config, dryRun, json, operator));
+              .ensure(config, WorkspaceVerbs.source(config, tokens, dryRun, json, operator));
       if (json) {
         System.out.println(CliJson.stringify(template));
         return;

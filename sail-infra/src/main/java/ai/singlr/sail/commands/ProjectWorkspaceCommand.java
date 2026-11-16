@@ -9,6 +9,7 @@ import ai.singlr.sail.api.OperationsFactory;
 import ai.singlr.sail.engine.Banner;
 import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.SailPaths;
+import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.engine.Workspaces;
 import java.util.ArrayList;
 import java.util.List;
@@ -78,7 +79,7 @@ public final class ProjectWorkspaceCommand implements Runnable {
 
     @Override
     public void run() {
-      CliCommand.run(this::execute);
+      CliCommand.run(json, this::execute);
     }
 
     private void execute() throws Exception {
@@ -86,6 +87,9 @@ public final class ProjectWorkspaceCommand implements Runnable {
       WorkspaceVerbs.requireRoot(dryRun, spec);
       CliCommand.requireJsonOrDryRun(json, dryRun);
       var config = WorkspaceVerbs.buildable(project, operator);
+      var tokens =
+          WorkspaceVerbs.Keeper.here()
+              .check(config, new ShellExecutor(false)::asksForCredentials, System.getenv());
       if (!json) {
         Banner.printBranding(System.out, Ansi.AUTO);
         System.out.println();
@@ -95,7 +99,7 @@ public final class ProjectWorkspaceCommand implements Runnable {
               .create(
                   config,
                   name,
-                  WorkspaceVerbs.source(config, dryRun, json, operator),
+                  WorkspaceVerbs.source(config, tokens, dryRun, json, operator),
                   SailPaths.projectFilesDir(config.name()),
                   Objects.toString(HostSync.handle(), ""),
                   WorkspaceVerbs::ownerOf);

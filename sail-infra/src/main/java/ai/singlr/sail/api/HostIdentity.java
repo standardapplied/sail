@@ -52,9 +52,9 @@ public interface HostIdentity {
 
   /**
    * The git tokens this box's person stored with {@code sail git login}, by lower-case host: the
-   * one source a host command clones with. None when the box names no person, or they store none.
+   * one source a host command clones with. Empty when the box names no person on its roster.
    */
-  Map<String, String> gitTokens();
+  Optional<Map<String, String>> gitTokens();
 
   SshGateway.Decision authorizeGateway(String command, String handle);
 }

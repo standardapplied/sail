@@ -19,7 +19,6 @@ import ai.singlr.sail.store.FdeSshKeyStore;
 import ai.singlr.sail.store.FdeStore;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
@@ -118,24 +117,9 @@ public record WorkspaceOwner(
     }
   }
 
-  /** Only these: a host without a token of its own gets none. */
-  List<ProjectDefinition.Repo> tokenRepos(List<ProjectDefinition.Repo> repos) {
-    return (repos == null ? List.<ProjectDefinition.Repo>of() : repos)
-        .stream()
-            .filter(
-                repo ->
-                    GitCredentials.extractHttpsHosts(List.of(repo)).stream()
-                        .anyMatch(this::keepsTokenFor))
-            .toList();
-  }
-
   /** Keyed as the repo URL spells the host ({@link GitCredentials#forRepos}). */
   Map<String, String> tokensFor(List<ProjectDefinition.Repo> repos) {
     return GitCredentials.forRepos(tokens, repos);
-  }
-
-  private boolean keepsTokenFor(String host) {
-    return tokens.containsKey(host.toLowerCase(Locale.ROOT));
   }
 
   @Override
