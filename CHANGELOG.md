@@ -2,6 +2,7 @@
 
 ## 0.70.0
 
+- **The Sail app counts a key's echo from when its bytes began to go out.** View > Show Latency and the drive's latency measures stamped a key written only after its write returned, and counted an output as its echo only after that stamp. An echo that reached the screen in between was put to the next output, overstating that key's latency, and the last key typed was never counted, so a measure waited its full 5 s. The view now takes the time before the write, an echo is the first output since then, and a key whose echo was already told, drawn or not yet presented, is put to it.
 - **The Sail app's terminal never waits for the window server on its main thread.** A frame asks for its drawable on a background queue at the moment it needs one and is drawn when it arrives, so typing, menus and window dragging stay live while every drawable is in use (before, the ask waited on the main thread up to a second, then retried every 0.25 s); nothing about what is drawn changes. Where the display gives no presentation time, an echo or output counts as shown when its frame's command buffer completed, and View > Show Latency says which measure it used.
 
 ## 0.69.1
