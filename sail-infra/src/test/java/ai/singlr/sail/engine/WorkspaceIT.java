@@ -454,6 +454,8 @@ class WorkspaceIT extends AbstractIncusIT {
                       "incus",
                       "file",
                       "push",
+                      "--mode",
+                      "0644",
                       cert.toString(),
                       TEMPLATE + "/usr/local/share/ca-certificates/sail-it.crt"))
               .ok());
