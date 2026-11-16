@@ -97,10 +97,14 @@ Usage:
                                 identity, key or gh login, a
                                 workspace of it is a clone of its snapshot with a machine-id of its
                                 own (create time in the report) that commits as client's person;
-                                eng makes her own through client's API, labelled hers by her id,
-                                committing as her with none of client's forge token, refused to
-                                client and to obs (a viewer), opened by her ticket over TCP from main,
-                                and deleted holding nothing; a second is made and stopped,
+                                on client's node eng is refused one of her own, told hers live on
+                                main; main is given a ZFS pool in a 10 GiB file and acme's template
+                                (built once, its time in the report), and there eng makes her own
+                                through main's API, labelled hers by her id, committing as her with
+                                none of main's person's forge token, refused to client and to obs
+                                (a viewer), opened by her ticket over TCP from client, refused a
+                                delete while a command runs in it, and deleted with force; a second
+                                is made and stopped,
                                 apply --all leaves both and the template alone; with acme's repos set
                                 to octocat/Hello-World for the row (and given back after), ten made at
                                 once are each whole on their own branch of it, each one's ready steps and
@@ -789,7 +793,7 @@ inside() {
   check "$run" "over HTTP, client cannot create a spec in beta" \
     http_door "$run" client client 404 POST /v1/specs '{"project":"beta","id":"http-beta'"$x"'","title":"over http"}'
   check "$run" "from main, over client's private address, a ticket opens a session over TCP that echoes a line, and is refused a second time" \
-    direct_terminal "$run"
+    direct_terminal "$run" client main client
 }
 
 readonly LISTEN_PRIVATELY='set -eu
@@ -862,21 +866,21 @@ sudo sail host config set terminal-listen none > /dev/null
 sudo systemctl restart sail-api sail-pty-host
 sudo sail server token revoke "direct-$handle" > /dev/null 2>&1 || true'
 
-# From main, over client's private address: a ticket HANDLE asks client's API for, to open a
+# From box FROM, over box HOST's private address: a ticket HANDLE asks HOST's API for, to open a
 # terminal in acme's container, or in its WORKSPACE, opens a session over TCP that echoes a line.
 direct_terminal() {
-  local run=$1 handle=${2:-client} workspace=${3:-} ip token status=0
-  ip=$(internal_ip "$run" client)
-  [[ -n $ip ]] || { echo "client has no address"; return 1; }
-  token=$(on "$run" client "cat > /tmp/sail-listen-privately && bash /tmp/sail-listen-privately $ip $handle" <<< "$LISTEN_PRIVATELY")
+  local run=$1 host=$2 from=$3 handle=$4 workspace=${5:-} ip token status=0
+  ip=$(internal_ip "$run" "$host")
+  [[ -n $ip ]] || { echo "$host has no address"; return 1; }
+  token=$(on "$run" "$host" "cat > /tmp/sail-listen-privately && bash /tmp/sail-listen-privately $ip $handle" <<< "$LISTEN_PRIVATELY")
   if [[ -z $token ]]; then
     echo "no token for $handle"
     status=1
   else
-    on "$run" main "cat > /tmp/sail-direct-terminal.py" <<< "$DIRECT_TERMINAL" || status=1
-    [[ $status == 0 ]] && { on "$run" main "python3 /tmp/sail-direct-terminal.py $ip $workspace" <<< "$token" || status=1; }
+    on "$run" "$from" "cat > /tmp/sail-direct-terminal.py" <<< "$DIRECT_TERMINAL" || status=1
+    [[ $status == 0 ]] && { on "$run" "$from" "python3 /tmp/sail-direct-terminal.py $ip $workspace" <<< "$token" || status=1; }
   fi
-  on "$run" client "cat > /tmp/sail-close-privately && bash /tmp/sail-close-privately $handle" <<< "$CLOSE_PRIVATELY" || status=1
+  on "$run" "$host" "cat > /tmp/sail-close-privately && bash /tmp/sail-close-privately $handle" <<< "$CLOSE_PRIVATELY" || status=1
   return $status
 }
 
@@ -1509,6 +1513,15 @@ owned_by() {
   [[ $owner == "$4" && -n $id ]]
 }
 
+timed_on() {
+  local run=$1 box=$2 started took
+  shift 2
+  started=$SECONDS
+  on "$run" "$box" "$@" || return 1
+  took=$((SECONDS - started))
+  echo "$* on $box: ${took} s" | tee -a "$(log_dir "$run")/report.txt"
+}
+
 commits_as() {
   local said
   said=$(on "$1" "$2" "sudo incus exec $3 -- runuser -u dev -- git config --global user.email") || return 1
@@ -1640,20 +1653,32 @@ storage() {
     workspace_on "$run" client
   check "$run" "the workspace commits as client's person" \
     commits_as "$run" client acme-fleet-w client@fleet.example
-  check "$run" "eng, a member, makes her own workspace of acme on client's runner through client's API" \
-    http_token_door "$run" client eng member 201 POST /v1/projects/acme/workspaces '{"name":"eng-own"}' '"owner": "eng"'
-  check "$run" "eng's workspace is labelled hers by her id" owned_by "$run" client acme-eng-own eng
-  check "$run" "eng's workspace commits as eng, with the email client's node was given for her" \
-    commits_as "$run" client acme-eng-own eng@fleet.example
-  check "$run" "eng's workspace holds none of client's forge token" holds_no_forge_token "$run" client acme-eng-own
-  check "$run" "client, the runner's own person and a member, is refused eng's workspace, naming her" \
-    http_token_door "$run" client client member 403 POST /v1/projects/acme/workspaces/eng-own/stop '' "belongs to 'eng'"
-  check "$run" "obs, a viewer, makes no workspace" \
-    http_token_door "$run" client obs viewer 403 POST /v1/projects/acme/workspaces '{"name":"obs-own"}' read_only_credential
-  check "$run" "from main, eng's ticket for her workspace opens a session in it over TCP that echoes a line" \
-    direct_terminal "$run" eng eng-own
-  check "$run" "eng deletes her workspace through the API, which holds nothing, so no force" \
-    http_token_door "$run" client eng member 200 DELETE /v1/projects/acme/workspaces/eng-own '' '"change": "deleted"'
+  check "$run" "on client's node, eng is refused a workspace of her own, told hers live on main" \
+    http_token_door "$run" client eng member 403 POST /v1/projects/acme/workspaces '{"name":"eng-node"}' "workspaces live on main"
+  check "$run" "main, the runner several people share, adds a ZFS pool in a 10 GiB file" \
+    allowed "$run" main "sudo sail host init --storage zfs --pool-file-size 10GiB --pool tank --yes"
+  check "$run" "main holds the forge token where only root reads it" place_secret "$run" main fleet-github-token gh
+  check "$run" "main's person stores the forge token as their own" \
+    on "$run" main "sudo sh -c 'sail git login github.com < /root/.fleet/gh'"
+  check "$run" "acme's template is built once on main, its time in the report" \
+    timed_on "$run" main "sudo sail project template build acme"
+  check "$run" "eng, a member, makes her own workspace of acme on main through main's API" \
+    http_token_door "$run" main eng member 201 POST /v1/projects/acme/workspaces '{"name":"eng-own"}' '"owner": "eng"'
+  check "$run" "eng's workspace is labelled hers by her id" owned_by "$run" main acme-eng-own eng
+  check "$run" "eng's workspace commits as eng" commits_as "$run" main acme-eng-own eng@fleet.example
+  check "$run" "eng's workspace holds none of main's person's forge token" holds_no_forge_token "$run" main acme-eng-own
+  check "$run" "client, a member, is refused eng's workspace on main, naming her" \
+    http_token_door "$run" main client member 403 POST /v1/projects/acme/workspaces/eng-own/stop '' "belongs to 'eng'"
+  check "$run" "obs, a viewer, makes no workspace on main" \
+    http_token_door "$run" main obs viewer 403 POST /v1/projects/acme/workspaces '{"name":"obs-own"}' read_only_credential
+  check "$run" "from client, eng's ticket for her workspace on main opens a session in it over TCP that echoes a line" \
+    direct_terminal "$run" main client eng eng-own
+  check "$run" "a command is left running in eng's workspace, as an open terminal would be" \
+    on "$run" main "sudo sh -c 'nohup incus exec acme-eng-own -- sleep 600 > /dev/null 2>&1 &'"
+  check "$run" "eng's delete without force is refused while it runs, naming what runs in it" \
+    until_true 30 2 http_token_door "$run" main eng member 409 DELETE /v1/projects/acme/workspaces/eng-own '' "is in use"
+  check "$run" "eng deletes it with force" \
+    http_token_door "$run" main eng member 200 DELETE '/v1/projects/acme/workspaces/eng-own?force=true' '' '"change": "deleted"'
   check "$run" "a second workspace of acme is made and stopped" \
     allowed "$run" client "sudo sail project workspace create acme fleet-v && sudo sail project workspace stop acme fleet-v"
   check "$run" "apply --all leaves the workspaces and the template as they are" \
