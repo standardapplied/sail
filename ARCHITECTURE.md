@@ -1467,11 +1467,15 @@ Each row with the tests that prove it:
   to the next pass, the instance looked up again inside it. One workspace's failure is logged once
   until a pass decides it, and the pass goes on to the next.
 
-  A workspace is **idle** when no run of its spec is live on this box (a room's live member is
-  one), no terminal is open in it (`AgentUnit.TERMINAL`; one that does not answer counts as
-  open), and 10 minutes have passed since the later of its spec's last run here ending and this
-  sail-api process starting. The process start holds a restart's first passes off, so the loop
-  that replays a missed stop has the workspace first.
+  A workspace is **idle** when nothing is in it and 10 minutes have passed since the latest of
+  three times: its spec's last run here ending, Incus last starting it (`last_used_at`), and this
+  sail-api process starting. Nothing in it means no run of its spec is live on this box (a room's
+  live member is one), and no operation Incus is running names the instance. That second check is
+  one `incus operation list`, `BoxInstances.inUse`: an exec held open by `workspace shell`,
+  `agent attach`, a live process or a person by hand keeps the workspace for as long as it runs.
+  An Incus that does not answer counts as one that says something is in it. The process start
+  holds a restart's first passes off, so the loop that replays a missed stop has the workspace
+  first. The last start gives a workspace started by hand, and not yet entered, its ten minutes.
 
   | The spec is | The workspace is |
   |---|---|
@@ -1484,9 +1488,10 @@ Each row with the tests that prove it:
     Each run's unread usage is read (`RunUsageReader`) and recorded. Then `WorkspaceGit.LEFT` runs
     once in the workspace, within 3 minutes, over the repos the project's definition configures,
     never found by search. In each repo it pushes the runs' branch once, within a minute, when the
-    branch holds commits no remote has. It then reads `git status --porcelain
+    branch holds commits `origin` lacks. It then reads `git status --porcelain
     --untracked-files=all`, `git stash list` and `git log HEAD --branches --tags --not
-    --remotes`. Nothing is fetched, so a branch the forge deleted after its merge counts as pushed
+    --remotes=origin`. Only `origin`, the remote the project clones from, counts as a copy.
+    Nothing is fetched, so a branch the forge deleted after its merge counts as pushed
     and is not pushed again. All three empty in every configured repo, and the spec still done
     with nothing live when read again just before the delete: the workspace is deleted. A spec
     reopened, or a run started, during the reads leaves it as it is, unkept, for a later pass.
@@ -1496,27 +1501,29 @@ Each row with the tests that prove it:
   - **Kept is final for the sweep.** A kept workspace is stopped and carries
     `user.sail.kept=<what each repo holds>`. The spec's room is told once, as Sail, through the
     door every lane tells a room through, before the mark is written. The message names each repo
-    and what it holds (uncommitted changes, a stash, commits no remote has) and the commands
+    and what it holds (uncommitted changes, a stash, commits origin lacks) and the commands
     `sail project workspace start`, `shell` and `delete`. The sweep never starts, reads or deletes
-    a kept workspace again; it stops it when idle, as any other. Its person deletes it.
+    a kept workspace again; it stops it when idle, as any other. Its person deletes it, or a run of
+    the spec enters it (`Workspaces.enterSpec`), which clears the mark, so a spec done again is
+    decided again.
   - **A deleted workspace takes its sessions.** The next run of the spec's conversation, a room's
     member or wake, resumes only a session started since the spec's workspace was made
     (`user.sail.created_ms`, `RunPlaces.holdsSession`), and none when the spec has no workspace,
     so one deleted by the sweep, by `workspace delete`, by `project destroy` or by hand starts a
     new conversation rather than resume one that is not there.
   - **R4. Nothing a run produced is lost by deleting its workspace.** Its usage is recorded, its
-    configured repos hold nothing no remote has, and its row survives; a workspace that fails any
+    configured repos hold nothing origin lacks, and its row survives; a workspace that fails any
     of it is kept, and that is said once.
   - **R8. The lifecycle is reconciled from facts, not events.** The sweep takes no event bus. A
     runner that restarts, a status that arrives by sync, or an instance stopped by hand converges
     in a later pass.
-  - **R13. A workspace with a live run, member or terminal is never stopped or deleted by the
-    sweep,** except one whose spec or project was erased.
+  - **R13. A workspace with a live run or member, or an exec running in it, is never stopped or
+    deleted by the sweep,** except one whose spec or project was erased.
   - **R14. The sweep never touches a person's workspace** (one without `user.sail.spec`), nor one
     without a ready mark (W12).
 
   *`SpecWorkspacesTest` (every row; the reads in their order; kept is final; the restart race in
-  the reviewer's order; a terminal open; the latest end of any run; a spec reopened and a run
+  the reviewer's order; an exec running on it; a start by hand; the latest end of any run; a spec reopened and a run
   started during the reads; a timeout, a failure and nonsense from the read; a status written
   straight to the store and one arriving by a `SyncBox` round; an erasure adopted from main; the
   name lock; the notice's commands parsed as printed), `WorkspaceGitTest` (the read against real
@@ -1524,7 +1531,10 @@ Each row with the tests that prove it:
   and a detached commit, a missing repo, the push, a merged and deleted branch, an unreachable
   remote), `PeriodicPassTest`, `RoomWakeLaunchTest` and `LiveMemberTest` (a session a deleted
   workspace took is not resumed), `WorkspaceIT.aDoneSpecsWorkspaceIsPushedThenDeletedAndItsDatasetGoes`,
-  `WorkspaceIT.aDoneSpecsWorkspaceHoldingWhatNoRemoteHasIsKeptStoppedWithItsDataset`.*
+  `WorkspaceIT.aDoneSpecsWorkspaceHoldingWhatNoRemoteHasIsKeptStoppedWithItsDataset`,
+  `WorkspaceIT.anExecHeldOpenKeepsTheWorkspaceRunningAcrossAPassAndItStopsOnceTheExecEnds`,
+  `BoxInstancesTest.anInstanceARunningOperationNamesIsInUse`,
+  `WorkspacesTest.aRunEnteringItsSpecsKeptWorkspaceClearsTheMark`.*
 
 **Known limits.**
 - **The template is its owner's.** A clone carries the box owner's GitHub token

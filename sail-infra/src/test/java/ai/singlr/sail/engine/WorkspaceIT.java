@@ -57,6 +57,8 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.Callable;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Predicate;
 import org.junit.jupiter.api.AfterEach;
@@ -88,6 +90,7 @@ class WorkspaceIT extends AbstractIncusIT {
   private static final String SPEC_ID = "sail-it-ws-probe";
   private static final String GONE = "gone";
   private static final String KEPT = "kept";
+  private static final String HELD = "held";
   private static final Path CONTAINER_DIR = Path.of("/var/lib/sail/run");
 
   private static final String SEAL =
@@ -178,6 +181,7 @@ class WorkspaceIT extends AbstractIncusIT {
     deleteContainerQuietly(PROJECT + "-" + SECOND);
     deleteContainerQuietly(PROJECT + "-" + GONE);
     deleteContainerQuietly(PROJECT + "-" + KEPT);
+    deleteContainerQuietly(PROJECT + "-" + HELD);
     deleteContainerQuietly(TEMPLATE);
     deleteContainerQuietly(PROJECT);
     try {
@@ -417,7 +421,10 @@ class WorkspaceIT extends AbstractIncusIT {
       var sweeper = sweeper(db, said, clock);
       var instance =
           doneSpecsWorkspace(
-              db, GONE, "git switch -q -c agent/gone && git commit -q --allow-empty -m work");
+              db,
+              GONE,
+              SpecStatus.DONE,
+              "git switch -q -c agent/gone && git commit -q --allow-empty -m work");
       clock.set(Instant.now().plus(SpecWorkspaces.IDLE).plusSeconds(1));
 
       sweeper.sweep();
@@ -457,6 +464,7 @@ class WorkspaceIT extends AbstractIncusIT {
           doneSpecsWorkspace(
               db,
               KEPT,
+              SpecStatus.DONE,
               "git switch -q -c by-hand && git commit -q --allow-empty -m work"
                   + " && git checkout -q --detach HEAD^ && echo x > f && git add f"
                   + " && git stash -q && echo y > untracked");
@@ -466,7 +474,7 @@ class WorkspaceIT extends AbstractIncusIT {
       sweeper.sweep();
 
       var kept = new BoxInstances(shell).named(instance).orElseThrow();
-      var why = "app holds uncommitted changes and a stash and commits no remote has";
+      var why = "app holds uncommitted changes and a stash and commits origin lacks";
       assertEquals(new ContainerState.Stopped(), kept.state());
       assertEquals(Optional.of(why), kept.key(BoxInstances.KEPT_KEY));
       assertEquals(
@@ -482,6 +490,14 @@ class WorkspaceIT extends AbstractIncusIT {
           said);
 
       workspaces.start(PROJECT, KEPT);
+      var started = new BoxInstances(shell).named(instance).orElseThrow().lastStarted();
+      clock.set(started.plus(SpecWorkspaces.IDLE).minusSeconds(30));
+      sweeper.sweep();
+      assertTrue(
+          new BoxInstances(shell).named(instance).orElseThrow().state()
+              instanceof ContainerState.Running,
+          "started by hand at " + started + ", it has ten minutes from Incus's start");
+      clock.set(Instant.now().plus(SpecWorkspaces.IDLE).plusSeconds(1));
       sweeper.sweep();
       assertEquals(
           new ContainerState.Stopped(),
@@ -492,15 +508,68 @@ class WorkspaceIT extends AbstractIncusIT {
   }
 
   /**
-   * Spec {@code specId}, done, with one ended run on this box whose usage is read, and its
-   * workspace made as a dispatch makes it, after which {@code work} ran in its repo as the dev
+   * Ruling 1 of round 2 on a real Incus: an {@code incus exec} held open in a spec's workspace, as
+   * a person's shell holds one, keeps it running across a pass past its idle period; once the
+   * command ends, and with it the exec, the next pass stops it.
+   */
+  @Test
+  void anExecHeldOpenKeepsTheWorkspaceRunningAcrossAPassAndItStopsOnceTheExecEnds()
+      throws Exception {
+    try (var db = Sqlite.open(Files.createTempDirectory("sail-it-idle").resolve("sail.db"))) {
+      var said = new ArrayList<String>();
+      var clock = new AtomicReference<>(Instant.now());
+      var sweeper = sweeper(db, said, clock);
+      var instance = doneSpecsWorkspace(db, HELD, SpecStatus.AWAITING_MERGE, "true");
+      var box = new BoxInstances(shell);
+      var held = new ProcessBuilder("incus", "exec", instance, "--", "sleep", "600").start();
+      try {
+        assertTrue(until(() -> box.inUse().contains(instance)), "the exec shows as running");
+        clock.set(Instant.now().plus(SpecWorkspaces.IDLE).plusSeconds(1));
+
+        sweeper.sweep();
+
+        assertTrue(
+            box.named(instance).orElseThrow().state() instanceof ContainerState.Running,
+            "an exec is running on it");
+      } finally {
+        shell.exec(List.of("incus", "exec", instance, "--", "pkill", "-x", "sleep"));
+        if (!held.waitFor(30, TimeUnit.SECONDS)) {
+          held.destroyForcibly();
+        }
+      }
+      assertTrue(until(() -> !box.inUse().contains(instance)), "the exec is gone");
+      clock.set(Instant.now().plus(SpecWorkspaces.IDLE).plusSeconds(1));
+
+      sweeper.sweep();
+
+      assertEquals(new ContainerState.Stopped(), box.named(instance).orElseThrow().state());
+      assertEquals(List.of(), said);
+    }
+  }
+
+  /** Whether {@code condition} holds within 30 s, asked again and again until then. */
+  private static boolean until(Callable<Boolean> condition) throws Exception {
+    var deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(30);
+    while (System.nanoTime() < deadline) {
+      if (condition.call()) {
+        return true;
+      }
+      Thread.onSpinWait();
+    }
+    return false;
+  }
+
+  /**
+   * Spec {@code specId}, at {@code status}, with one ended run on this box whose usage is read, and
+   * its workspace made as a dispatch makes it, after which {@code work} ran in its repo as the dev
    * user.
    */
-  private String doneSpecsWorkspace(Sqlite db, String specId, String work) throws Exception {
+  private String doneSpecsWorkspace(Sqlite db, String specId, SpecStatus status, String work)
+      throws Exception {
     new SchemaManager(db).migrate();
     HeldProjects.hold(db, PROJECT);
     var specs = new SpecStore(db);
-    Acting.as("it", () -> specs.create(spec(specId, SpecStatus.DONE)));
+    Acting.as("it", () -> specs.create(spec(specId, status)));
     var runs = new RunStore(db);
     var run = DateTimeUtils.newId().toString();
     Acting.system(

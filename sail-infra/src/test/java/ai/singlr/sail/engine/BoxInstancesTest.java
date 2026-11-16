@@ -15,10 +15,12 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.TimeoutException;
 import org.junit.jupiter.api.Test;
 
@@ -176,8 +178,49 @@ class BoxInstancesTest {
             null,
             null,
             Map.of(),
+            null,
             null),
         bare);
+    assertEquals(Instant.EPOCH, bare.lastStarted());
+    var info = new ContainerManager.ContainerInfo("w", new ContainerState.Stopped(), null);
+    assertEquals(
+        Instant.parse("2026-11-15T10:00:00.123456789Z"),
+        new BoxInstances.Instance(
+                info, null, null, Map.of(), null, "2026-11-15T10:00:00.123456789Z")
+            .lastStarted());
+    assertEquals(
+        Instant.EPOCH,
+        new BoxInstances.Instance(info, null, null, Map.of(), null, "never").lastStarted());
+  }
+
+  /**
+   * An instance a running operation names is in use, whatever made it and in whichever project's
+   * form Incus names it; a finished operation, or one naming no instance, is not.
+   */
+  @Test
+  void anInstanceARunningOperationNamesIsInUse() throws Exception {
+    var shell =
+        new ScriptedShellExecutor()
+            .onOk(
+                "incus operation list --format json",
+                """
+                [{"id": "1", "class": "websocket", "description": "Executing command",
+                  "status": "Running", "resources": {"instances": ["/1.0/instances/acme-a"]}},
+                 {"id": "2", "class": "websocket", "description": "Executing command",
+                  "status": "Running", "resources": {"instances": ["/1.0/instances/acme-b?project=default"]}},
+                 {"id": "3", "class": "task", "description": "Stopping instance",
+                  "status": "Success", "resources": {"instances": ["/1.0/instances/acme-c"]}},
+                 {"id": "4", "class": "task", "description": "Pruning images",
+                  "status": "Running", "resources": null}]
+                """);
+
+    assertEquals(Set.of("acme-a", "acme-b"), new BoxInstances(shell).inUse());
+    assertThrows(
+        IOException.class,
+        () ->
+            new BoxInstances(
+                    new ScriptedShellExecutor().onFail("incus operation list", "daemon down"))
+                .inUse());
   }
 
   @Test

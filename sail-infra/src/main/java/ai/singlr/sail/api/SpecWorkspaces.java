@@ -11,12 +11,9 @@ import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.ProjectDefinition;
 import ai.singlr.sail.config.RunStatus;
 import ai.singlr.sail.config.SpecStatus;
-import ai.singlr.sail.engine.AgentPresence;
-import ai.singlr.sail.engine.AgentUnit;
 import ai.singlr.sail.engine.BoxInstances;
 import ai.singlr.sail.engine.ContainerConfig;
 import ai.singlr.sail.engine.ContainerState;
-import ai.singlr.sail.engine.RunPlace;
 import ai.singlr.sail.engine.RunUsageReader;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.Workspaces;
@@ -42,12 +39,13 @@ import java.util.function.Supplier;
  * stores and Incus say now, never from an event (R8), on a pass of its own that never holds up
  * another. Only a whole workspace carrying {@value BoxInstances#SPEC_KEY} is swept; a person's, and
  * one never made whole, are never touched (R14, W12). One whose spec or project was erased is
- * deleted at once. Every other one is stopped once it is idle: no run of its spec live here (a
- * room's member is one), no terminal open in it, for {@link #IDLE} since the later of its spec's
- * last run here ending and this process starting (R13). An idle one whose spec is {@code done} or
- * {@code archived} is decided once: deleted when nothing its runs made would be lost (R4), or
- * marked {@value BoxInstances#KEPT_KEY} and said once in the spec's room, after which the sweep
- * only stops it when idle, never starts or deletes it: its person does.
+ * deleted at once. Every other one is stopped once it is idle: nothing in it (no run of its spec
+ * live here, a room's member included, and no operation Incus runs on it, an exec above all) for
+ * {@link #IDLE} since the latest of its spec's last run here ending, its last start and this
+ * process starting (R13). An idle one whose spec is {@code done} or {@code archived} is decided
+ * once: deleted when nothing its runs made would be lost (R4), or marked {@value
+ * BoxInstances#KEPT_KEY} and said once in the spec's room, after which the sweep only stops it when
+ * idle, never starts or deletes it: its person does.
  *
  * <p>Each workspace is decided under the lock a run's entry takes, tried and never waited on, and a
  * delete acts on the spec and its runs read again just before it, so a run reserved or a spec
@@ -64,7 +62,6 @@ public final class SpecWorkspaces implements AutoCloseable {
   private final Workspaces workspaces;
   private final BoxInstances box;
   private final ContainerConfig config;
-  private final AgentPresence presence;
   private final WorkspaceGit git;
   private final RunUsageReader usage;
   private final SpecStore specs;
@@ -101,7 +98,6 @@ public final class SpecWorkspaces implements AutoCloseable {
     this.workspaces = Objects.requireNonNull(workspaces, "workspaces");
     this.box = new BoxInstances(shell);
     this.config = new ContainerConfig(shell, locks);
-    this.presence = new AgentPresence(shell);
     this.git = new WorkspaceGit(shell);
     this.usage = new RunUsageReader(shell);
     this.specs = Objects.requireNonNull(specs, "specs");
@@ -234,7 +230,7 @@ public final class SpecWorkspaces implements AutoCloseable {
     }
     var lost = lost(found.name(), spec);
     var now = specs.findById(spec.id()).filter(row -> row.project().equals(project));
-    if (now.isEmpty() || !done(now.get()) || !idle(found, project, spec.id())) {
+    if (now.isEmpty() || !done(now.get()) || occupied(found, project, spec.id())) {
       return;
     }
     if (lost.isEmpty()) {
@@ -295,30 +291,40 @@ public final class SpecWorkspaces implements AutoCloseable {
   }
 
   /**
-   * Whether {@code found} is idle: no run of the spec live on this box, a room's member included,
-   * no terminal open in it ({@link AgentUnit#TERMINAL}, a workspace that does not answer counting
-   * as one open), and {@link #IDLE} since the later of the spec's last run here ending and this
-   * process starting, so a restart never stops a workspace before the loop has replayed its runs.
+   * Whether {@code found} is idle: {@link #IDLE} since the latest of its spec's last run here
+   * ending, Incus last starting it, and this process starting, so neither a restart nor a start by
+   * hand stops it before it has had its ten minutes, and nothing in it now ({@link #occupied}).
    */
-  private boolean idle(BoxInstances.Instance found, String project, String specId) {
-    if (runs.liveSpecs(localHandle.get()).contains(project + "/" + specId)) {
-      return false;
-    }
+  private boolean idle(BoxInstances.Instance found, String project, String specId)
+      throws InterruptedException {
     var since =
         theirs(project, specId).stream()
             .map(run -> Objects.requireNonNullElse(run.completedAt(), run.startedAt()))
             .filter(Objects::nonNull)
-            .reduce(started, (a, b) -> a.isAfter(b) ? a : b);
-    if (since.plus(IDLE).isAfter(clock.get())) {
-      return false;
-    }
-    if (!(found.state() instanceof ContainerState.Running)) {
+            .reduce(
+                found.lastStarted().isAfter(started) ? found.lastStarted() : started,
+                (a, b) -> a.isAfter(b) ? a : b);
+    return !since.plus(IDLE).isAfter(clock.get()) && !occupied(found, project, specId);
+  }
+
+  /**
+   * Whether something is in {@code found} now: a run of its spec live on this box, a room's member
+   * included, or, in a running one, any operation Incus runs on it, an {@code incus exec} that a
+   * person's shell, a terminal or a process holds open above all ({@link BoxInstances#inUse}). An
+   * Incus that does not say counts as one that says so.
+   */
+  private boolean occupied(BoxInstances.Instance found, String project, String specId)
+      throws InterruptedException {
+    if (runs.liveSpecs(localHandle.get()).contains(project + "/" + specId)) {
       return true;
     }
-    try {
-      return presence.gone(RunPlace.of(project, specId), AgentUnit.TERMINAL);
-    } catch (Exception unanswered) {
+    if (!(found.state() instanceof ContainerState.Running)) {
       return false;
+    }
+    try {
+      return box.inUse().contains(found.name());
+    } catch (IOException | TimeoutException unanswered) {
+      return true;
     }
   }
 

@@ -16,12 +16,10 @@ import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.ProjectDefinition;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.config.SyncConfig;
-import ai.singlr.sail.engine.AgentUnit;
 import ai.singlr.sail.engine.BoxInstances;
 import ai.singlr.sail.engine.ContainerSailSetup;
 import ai.singlr.sail.engine.RunPlace;
 import ai.singlr.sail.engine.SailPaths;
-import ai.singlr.sail.engine.ScriptedShellExecutor;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.SyncOperations;
 import ai.singlr.sail.engine.Workspaces;
@@ -60,6 +58,7 @@ import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.function.Supplier;
 import java.util.regex.Pattern;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -101,7 +100,7 @@ class SpecWorkspacesTest {
     specs = new SpecStore(db);
     runs = new RunStore(db);
     clock = new ManualClock(T0, Duration.ofHours(3));
-    box = new Box();
+    box = new Box(clock::instant);
     sweeper = sweeper(specs, runs, db, project -> Optional.of(definition(project)));
   }
 
@@ -408,29 +407,77 @@ class SpecWorkspacesTest {
   }
 
   /**
-   * Rule C and Major 3: a terminal open in a workspace keeps it, as one that does not say whether
-   * it is open does; once it is closed, the workspace stops.
+   * Ruling 1 of round 2: anything Incus runs on a workspace, an exec held open by a person's {@code
+   * workspace shell}, an attached terminal or a process, keeps it for as long as it runs, as an
+   * Incus that does not say does; once it ends, the workspace stops. The read is the box's one
+   * {@code incus operation list}, nothing asked inside the workspace.
    */
   @Test
-  void aTerminalOpenInTheWorkspaceOrOneThatCannotBeAskedKeepsItRunning() {
+  void anExecRunningOnTheWorkspaceOrAnIncusThatDoesNotSayKeepsItRunning() {
     spec("a", SpecStatus.AWAITING_MERGE);
     var held = box.workspace("a", "Running");
     ended("a");
     later(Duration.ofHours(1));
 
-    held.terminal = Box.Terminal.OPEN;
+    held.execOpen = true;
     sweeper().sweep();
-    held.terminal = Box.Terminal.UNANSWERED;
+    later(Duration.ofHours(1));
+    sweeper().sweep();
+    held.execOpen = false;
+    box.operationsFail = true;
     sweeper().sweep();
     assertEquals(List.of(), changesOf(instance("a")));
+    assertEquals(List.of(), askedOf(instance("a")));
 
-    held.terminal = Box.Terminal.THROWS;
-    sweeper().sweep();
-    assertEquals(List.of(), changesOf(instance("a")));
-
-    held.terminal = Box.Terminal.CLOSED;
+    box.operationsFail = false;
     sweeper().sweep();
     assertEquals(List.of("stop"), changesOf(instance("a")));
+  }
+
+  /**
+   * Ruling 1 of round 2: a workspace started by hand, and not yet entered, has its ten minutes from
+   * the start before it is stopped.
+   */
+  @Test
+  void aWorkspaceStartedByHandHasTenMinutesFromTheStart() {
+    spec("a", SpecStatus.CANCELLED);
+    var held = box.workspace("a", "Stopped");
+    ended("a");
+    later(Duration.ofHours(1));
+    held.startedByHand(clock.instant());
+
+    later(IDLE.minus(A_SECOND));
+    sweeper().sweep();
+    assertEquals(List.of(), changesOf(instance("a")));
+
+    later(A_SECOND);
+    sweeper().sweep();
+    assertEquals(List.of("stop"), changesOf(instance("a")));
+  }
+
+  /**
+   * Ruling 4 of round 2: a run of the spec entering its kept workspace clears the mark ({@link
+   * Workspaces#enterSpec}), so the spec, done again, is decided again and said again if kept again.
+   */
+  @Test
+  void aKeptWorkspaceAnotherRunEnteredIsDecidedAndSaidAgainOnceDone() {
+    spec("a", SpecStatus.DONE);
+    var held = box.workspace("a", "Running").repo("app", "commits").repo("web/site");
+    ended("a");
+    later(IDLE);
+    sweeper().sweep();
+    assertEquals(1, said.size());
+
+    status("a", SpecStatus.IN_PROGRESS);
+    held.keys.put(KEPT, "");
+    held.startedByHand(clock.instant());
+    ended("a");
+    status("a", SpecStatus.DONE);
+    later(IDLE);
+    sweeper().sweep();
+
+    assertEquals(2, said.size());
+    assertEquals("app holds commits origin lacks", box.key(instance("a"), KEPT));
   }
 
   /** The sweep runs on a pass of its own, which its close stops. */
@@ -499,7 +546,7 @@ class SpecWorkspacesTest {
     sweeper().sweep();
     sweeper().sweep();
 
-    var why = "app holds uncommitted changes and a stash; web/site holds commits no remote has";
+    var why = "app holds uncommitted changes and a stash; web/site holds commits origin lacks";
     assertEquals(why, box.key(instance("a"), KEPT));
     assertEquals("web/site is not in the workspace", box.key(instance("m"), KEPT));
     assertEquals(
@@ -510,17 +557,15 @@ class SpecWorkspacesTest {
     assertEquals(List.of("stop"), changesOf(instance("a")));
     assertEquals(List.of("stop"), changesOf(instance("m")));
     assertEquals(
-        List.of("presence", "left app web/site", "presence"),
-        askedOf(instance("a")).stream().filter(step -> !step.equals("cat")).toList(),
-        "a kept workspace is read once");
+        List.of("left app web/site"), askedOf(instance("a")), "a kept workspace is read once");
   }
 
   /**
-   * Rules B and C: a kept workspace a person starts is never read or deleted by the sweep, and is
-   * stopped again once idle, as any other is; a terminal they open keeps it running meanwhile.
+   * Rules B and C: a kept workspace a person starts is never read or deleted by the sweep; it runs
+   * while they are in it, however long, and is stopped once they have left it idle.
    */
   @Test
-  void aKeptWorkspaceAPersonStartsIsStoppedWhenIdleAndNeverReadAgain() {
+  void aKeptWorkspaceAPersonIsInRunsAndIsStoppedOnceTheyLeaveItIdle() {
     spec("a", SpecStatus.DONE);
     var held = box.workspace("a", "Running").repo("app", "commits").repo("web/site");
     ended("a");
@@ -528,12 +573,13 @@ class SpecWorkspacesTest {
     sweeper().sweep();
     assertEquals("Stopped", box.state(instance("a")));
 
-    held.startedByHand();
-    held.terminal = Box.Terminal.OPEN;
+    held.startedByHand(clock.instant());
+    held.execOpen = true;
+    later(Duration.ofHours(1));
     sweeper().sweep();
-    assertEquals("Running", box.state(instance("a")));
+    assertEquals("Running", box.state(instance("a")), "an hour into their shell");
 
-    held.terminal = Box.Terminal.CLOSED;
+    held.execOpen = false;
     held.repo("app");
     sweeper().sweep();
     assertEquals("Stopped", box.state(instance("a")));
@@ -594,8 +640,8 @@ class SpecWorkspacesTest {
     assertEquals(
         List.of(instance("a") + " app agent/a", instance("b") + " app agent/b"), box.pushes);
     assertFalse(box.holds(instance("a")));
-    assertEquals("app holds commits no remote has", box.key(instance("b"), KEPT));
-    assertEquals(List.of("b: " + notice("b", "done", "app holds commits no remote has")), said);
+    assertEquals("app holds commits origin lacks", box.key(instance("b"), KEPT));
+    assertEquals(List.of("b: " + notice("b", "done", "app holds commits origin lacks")), said);
   }
 
   /**
@@ -683,7 +729,8 @@ class SpecWorkspacesTest {
 
     unreadable.sweep();
     box.instances.get(instance("b")).keys.remove(KEPT);
-    box.instances.get(instance("b")).startedByHand();
+    box.instances.get(instance("b")).startedByHand(clock.instant());
+    later(IDLE);
     absent.sweep();
 
     var why = "the definition of project acme is not readable here, so neither are its repos";
@@ -776,7 +823,8 @@ class SpecWorkspacesTest {
     var sweeper = sweeper();
 
     var first = stderrOf(sweeper::sweep);
-    box.instances.get(instance("absent")).startedByHand();
+    box.instances.get(instance("absent")).startedByHand(clock.instant());
+    later(IDLE);
     var again = stderrOf(sweeper::sweep);
 
     assertEquals(List.of("stop", "stop"), changesOf(instance("absent")));
@@ -983,7 +1031,8 @@ class SpecWorkspacesTest {
     var second = stderrOf(sweeper::sweep);
     held.stopFails = false;
     sweeper.sweep();
-    held.startedByHand();
+    held.startedByHand(clock.instant());
+    later(IDLE);
     held.stopFails = true;
     var after = stderrOf(sweeper::sweep);
 
@@ -1016,28 +1065,21 @@ class SpecWorkspacesTest {
 
     assertTrue(
         logged.contains(
-            "  [workspaces] could not mark acme-a kept (app holds commits no remote has): Error:"
+            "  [workspaces] could not mark acme-a kept (app holds commits origin lacks): Error:"
                 + " config is locked"),
         logged);
     assertEquals(2, said.size());
-    assertEquals("app holds commits no remote has", box.key(instance("a"), KEPT));
+    assertEquals("app holds commits origin lacks", box.key(instance("a"), KEPT));
   }
 
   /**
    * A box that answers only for the instances it holds: Incus's list, start, stop, delete and
    * config writes, the readiness and machinery a start waits on, and inside a running workspace the
-   * terminal's presence, the usage read and {@link WorkspaceGit#LEFT}, answered from what each repo
-   * is said to hold. Anything else, or any command to an instance it does not hold, is recorded as
-   * unexpected and fails, as on a box.
+   * operations running on each, the usage read and {@link WorkspaceGit#LEFT}, answered from what
+   * each repo is said to hold. Anything else, or any command to an instance it does not hold, is
+   * recorded as unexpected and fails, as on a box.
    */
   static final class Box implements ShellExec {
-
-    enum Terminal {
-      CLOSED,
-      OPEN,
-      UNANSWERED,
-      THROWS
-    }
 
     static final class Held {
       final String project;
@@ -1046,7 +1088,8 @@ class SpecWorkspacesTest {
       final Map<String, String> keys = new LinkedHashMap<>();
       final Map<String, Set<String>> repos = new TreeMap<>();
       final Map<String, Integer> ahead = new TreeMap<>();
-      volatile Terminal terminal = Terminal.CLOSED;
+      volatile boolean execOpen;
+      volatile Instant started = T0.minus(Duration.ofDays(1));
       volatile boolean ready = true;
       volatile boolean startFails;
       volatile boolean stopFails;
@@ -1076,8 +1119,10 @@ class SpecWorkspacesTest {
         return this;
       }
 
-      void startedByHand() {
+      /** Incus started it at {@code at}. */
+      void startedByHand(Instant at) {
         state = "Running";
+        started = at;
       }
     }
 
@@ -1088,7 +1133,13 @@ class SpecWorkspacesTest {
     final Map<String, Runnable> duringLeft = new LinkedHashMap<>();
     volatile Runnable beforeLookup = () -> {};
     volatile boolean listFails;
+    volatile boolean operationsFail;
     volatile String interruptOn;
+    private final Supplier<Instant> clock;
+
+    Box(Supplier<Instant> clock) {
+      this.clock = clock;
+    }
 
     Held workspace(String specId, String state) {
       return workspace("acme", specId, state);
@@ -1134,9 +1185,6 @@ class SpecWorkspacesTest {
       if (inner.get(0).equals("sh") && inner.get(2).contains("tac --")) {
         return "usage";
       }
-      if (ScriptedShellExecutor.reachableContainer(String.join(" ", inner)).isPresent()) {
-        return "presence";
-      }
       return inner.get(0);
     }
 
@@ -1165,6 +1213,9 @@ class SpecWorkspacesTest {
         var name = command.get(2).substring(1, command.get(2).length() - 1);
         return ok(listed(holds(name) ? List.of(name) : List.of()));
       }
+      if (joined.equals("incus operation list --format json")) {
+        return operationsFail ? fail("Error: not found") : ok(operations());
+      }
       if (joined.equals("incus storage list --format json")) {
         return ok(
             "[{\"name\": \"tank\", \"driver\": \"zfs\", \"config\": {\"source\":"
@@ -1192,11 +1243,11 @@ class SpecWorkspacesTest {
       return unexpected(joined);
     }
 
-    private static Result start(Held held) {
+    private Result start(Held held) {
       if (held.startFails) {
         return fail("Error: Failed to start device \"eth0\": no free address");
       }
-      held.startedByHand();
+      held.startedByHand(clock.get());
       return ok("");
     }
 
@@ -1241,24 +1292,12 @@ class SpecWorkspacesTest {
         return fail("Error: Instance is not running");
       }
       var what = what(inner);
-      if (held.terminal == Terminal.THROWS && !what.startsWith("left ")) {
-        throw new TimeoutException("Command timed out after 120s");
-      }
       if (what.startsWith("left ")) {
         return left(name, held, inner);
       }
       return switch (what) {
         case "bus", "machinery" -> ok("");
         case "usage" -> held.usageAnswers ? ok("") : fail("Error: websocket: close 1006");
-        case "presence" ->
-            held.terminal == Terminal.UNANSWERED
-                ? fail("Error: websocket: close 1006")
-                : ok(held.terminal == Terminal.OPEN ? "alive" : "gone");
-        case "cat" ->
-            inner.get(1).equals(AgentUnit.TERMINAL.pidPath()) && held.terminal == Terminal.OPEN
-                ? ok("4242")
-                : fail("cat: " + inner.get(1) + ": No such file or directory");
-        case "kill" -> held.terminal == Terminal.OPEN ? ok("") : fail("no such process");
         default -> unexpected(String.join(" ", inner));
       };
     }
@@ -1295,6 +1334,22 @@ class SpecWorkspacesTest {
       return ok(lines.toString());
     }
 
+    /** The box's running operations: an exec on each instance whose exec is held open. */
+    private String operations() {
+      var running = new ArrayList<String>();
+      instances.forEach(
+          (name, held) -> {
+            if (held.execOpen) {
+              running.add(
+                  ("{\"class\": \"websocket\", \"description\": \"Executing command\","
+                          + " \"status\": \"Running\", \"resources\": {\"instances\":"
+                          + " [\"/1.0/instances/%s\"]}}")
+                      .formatted(name));
+            }
+          });
+      return "[" + String.join(", ", running) + "]";
+    }
+
     private Result unexpected(String joined) {
       unexpected.add(joined);
       return fail("unexpected: " + joined);
@@ -1326,6 +1381,9 @@ class SpecWorkspacesTest {
         entries.add(
             "{\"name\": \"%s\", \"status\": \"%s\", \"type\": \"container\", \"state\": {},"
                     .formatted(name, held.state)
+                + " \"last_used_at\": \""
+                + held.started
+                + "\","
                 + " \"config\": {"
                 + keys
                 + "}}");

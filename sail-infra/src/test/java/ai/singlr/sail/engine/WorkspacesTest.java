@@ -2509,6 +2509,28 @@ class WorkspacesTest {
                         || c.startsWith("incus config set")));
   }
 
+  /**
+   * Ruling 4 of round 2: a run of the spec entering its kept workspace clears the kept mark, so the
+   * spec, done again, is decided again.
+   */
+  @Test
+  void aRunEnteringItsSpecsKeptWorkspaceClearsTheMark() throws Exception {
+    var kept =
+        specWorkspace("Running", "fix-login", "uday")
+            .replace(
+                "\"user.sail.ready\"",
+                "\"user.sail.kept\": \"app holds a stash\", \"user.sail.ready\"");
+    var shell = incus(DIR_AND_ZFS, list(template("v1", INPUTS), kept), snapshots("v1"));
+    var workspaces = workspaces(shell, ticks(0));
+
+    workspaces.enterSpec(
+        workspaces.checkSpec(FIX, INPUTS, name -> false), acme(), "uday", tempDir, whole -> {});
+
+    assertEquals(
+        List.of("incus config set acme-fix-login user.sail.kept="),
+        shell.invocations().stream().filter(c -> c.startsWith("incus config set")).toList());
+  }
+
   @Test
   void aCreateThatCannotHaveTheBoxsCreateLockWithinItsWaitIsBusyAndMakesNothing() throws Exception {
     var shell = incus(DIR_AND_ZFS, list(template("v1", INPUTS)), snapshots("v1"));

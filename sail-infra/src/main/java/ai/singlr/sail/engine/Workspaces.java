@@ -429,11 +429,12 @@ public final class Workspaces {
 
   /**
    * Puts a spec's run into the workspace {@code check} found, or makes it, for {@code owner}, the
-   * person the run acts for: a whole one is started when stopped and kept as it is, tree and all;
-   * otherwise a clone of the checked template carrying the spec and the owner is made, with every
-   * repo left detached at its fetched base, under the box's create lock. Either way the workspace
-   * is {@code owner}'s before anything of the run is staged (R12). A create that cannot have the
-   * create lock within {@link #CREATE_WAIT} is {@link Busy}.
+   * person the run acts for: a whole one is started when stopped and kept as it is, tree and all,
+   * losing only a kept mark ({@value BoxInstances#KEPT_KEY}), so a spec done again is decided
+   * again; otherwise a clone of the checked template carrying the spec and the owner is made, with
+   * every repo left detached at its fetched base, under the box's create lock. Either way the
+   * workspace is {@code owner}'s before anything of the run is staged (R12). A create that cannot
+   * have the create lock within {@link #CREATE_WAIT} is {@link Busy}.
    */
   public Entered enterSpec(
       SpecCheck check,
@@ -486,10 +487,15 @@ public final class Workspaces {
       containers.start(found.name());
       awaitReady(found.name());
     }
+    var changes = new ArrayList<String>();
     if (Strings.isNotBlank(owner) && !owner.equals(found.key(BoxInstances.OWNER_KEY).orElse(""))) {
-      var owned =
-          new ContainerConfig(shell, locks)
-              .set(found.name(), List.of(BoxInstances.OWNER_KEY + "=" + owner));
+      changes.add(BoxInstances.OWNER_KEY + "=" + owner);
+    }
+    if (found.key(BoxInstances.KEPT_KEY).isPresent()) {
+      changes.add(BoxInstances.KEPT_KEY + "=");
+    }
+    if (!changes.isEmpty()) {
+      var owned = new ContainerConfig(shell, locks).set(found.name(), changes);
       if (!owned.ok()) {
         throw new IOException(
             "Workspace "

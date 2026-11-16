@@ -10,11 +10,15 @@ import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.config.YamlUtil;
 import java.io.IOException;
 import java.time.Duration;
+import java.time.Instant;
+import java.time.format.DateTimeParseException;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.TimeoutException;
 
 /**
@@ -49,7 +53,8 @@ public final class BoxInstances {
   /**
    * Why a spec's workspace is kept though its spec is done: what deleting it would lose. Written by
    * the sweep that keeps it ({@code SpecWorkspaces}) once it has said so in the spec's room; the
-   * sweep never starts, reads or deletes a workspace carrying it again.
+   * sweep never starts, reads or deletes a workspace carrying it again. A run of the spec entering
+   * the workspace clears it.
    */
   public static final String KEPT_KEY = "user.sail.kept";
 
@@ -82,14 +87,25 @@ public final class BoxInstances {
 
   /**
    * An instance as Incus lists it: its name, state and limits, its type, the pool its root disk is
-   * on (null when it names none), its own configuration keys, when Incus created it, and its kind.
+   * on (null when it names none), its own configuration keys, when Incus created it and last
+   * started it ({@code last_used_at}), and its kind.
    */
   public record Instance(
       ContainerManager.ContainerInfo info,
       String type,
       String pool,
       Map<String, String> config,
-      String createdAt) {
+      String createdAt,
+      String lastUsedAt) {
+
+    /** When Incus last started this instance; the epoch when it says none, or nothing it reads. */
+    public Instant lastStarted() {
+      try {
+        return lastUsedAt == null ? Instant.EPOCH : Instant.parse(lastUsedAt);
+      } catch (DateTimeParseException unreadable) {
+        return Instant.EPOCH;
+      }
+    }
 
     public String name() {
       return info.name();
@@ -180,6 +196,31 @@ public final class BoxInstances {
   /** Every plain instance, the only kind that can be a project's own container. */
   public List<Instance> plain() throws IOException, InterruptedException, TimeoutException {
     return all().stream().filter(Instance::plain).toList();
+  }
+
+  /**
+   * The instances something is acting in now: each one a running Incus operation names, an {@code
+   * incus exec} above all, however it was opened ({@code workspace shell}, {@code agent attach}, a
+   * live member's process, or by hand), read in one {@code incus operation list}.
+   */
+  public Set<String> inUse() throws IOException, InterruptedException, TimeoutException {
+    var result = shell.exec(List.of("incus", "operation", "list", "--format", "json"));
+    if (!result.ok()) {
+      throw new IOException("incus operation list failed: " + result.stderr());
+    }
+    var names = new HashSet<String>();
+    for (var operation : YamlUtil.parseList(result.stdout())) {
+      if (!"Running".equals(operation.get("status"))
+          || !(operation.get("resources") instanceof Map<?, ?> resources)
+          || !(resources.get("instances") instanceof List<?> instances)) {
+        continue;
+      }
+      for (var url : instances) {
+        var path = String.valueOf(url).replaceFirst("\\?.*$", "");
+        names.add(path.substring(path.lastIndexOf('/') + 1));
+      }
+    }
+    return names;
   }
 
   /** The instance named {@code name}, when Incus has one. */
@@ -325,6 +366,7 @@ public final class BoxInstances {
         Objects.toString(entry.get("type"), null),
         pool,
         Map.copyOf(config),
-        Objects.toString(entry.get("created_at"), null));
+        Objects.toString(entry.get("created_at"), null),
+        Objects.toString(entry.get("last_used_at"), null));
   }
 }

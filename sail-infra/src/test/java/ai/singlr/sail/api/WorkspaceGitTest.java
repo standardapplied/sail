@@ -125,6 +125,22 @@ class WorkspaceGitTest {
         "the merged branch is not brought back");
   }
 
+  /**
+   * Ruling 6 of round 2: pushed means on {@code origin}, the remote the project clones from; a
+   * commit only another remote has, one inside the workspace say, is said.
+   */
+  @Test
+  void aCommitOnlyAnotherRemoteHasIsSaid() throws Exception {
+    var backup = tempDir.resolve("backup.git");
+    run(List.of("git", "init", "--quiet", "--bare", "-b", "main", backup.toString()));
+    git(app, "remote", "add", "backup", backup.toString());
+    git(app, "switch", "--quiet", "-c", "kept");
+    git(app, "commit", "--quiet", "--allow-empty", "-m", "backed up");
+    git(app, "push", "--quiet", "backup", "kept");
+
+    assertEquals("commits app\n", left(BRANCH, REPOS));
+  }
+
   /** A push that cannot reach its remote leaves the commits, which are said. */
   @Test
   void aPushThatCannotReachTheRemoteLeavesTheCommitsSaid() throws Exception {
