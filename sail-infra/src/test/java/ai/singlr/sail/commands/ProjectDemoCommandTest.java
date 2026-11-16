@@ -6,10 +6,13 @@
 package ai.singlr.sail.commands;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.config.ProjectDefinition;
+import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.ContainerState;
 import ai.singlr.sail.engine.FileMutexTest;
 import ai.singlr.sail.engine.OperatorCommand;
@@ -17,6 +20,9 @@ import ai.singlr.sail.engine.PairingTrust;
 import java.io.PrintWriter;
 import java.io.StringWriter;
 import java.nio.file.Path;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.FutureTask;
 import org.junit.jupiter.api.Test;
@@ -33,7 +39,6 @@ class ProjectDemoCommandTest {
 
     assertTrue(usage.contains("--json"));
     assertTrue(usage.contains("--dry-run"));
-    assertTrue(usage.contains("--git-token"));
     assertTrue(usage.contains("demo project") || usage.contains("zero configuration"));
   }
 
@@ -72,6 +77,46 @@ class ProjectDemoCommandTest {
     return assertThrows(
             IllegalStateException.class, () -> ProjectDemoCommand.requireAbsent(state, operator))
         .getMessage();
+  }
+
+  /**
+   * Round 1, item 4: a demo whose repo asks for a token no one stored is refused before it writes
+   * its files or its progress, said first after it loads its definition; on a box that names no
+   * person, the refusal names the setup that makes one, and under {@code --json} it carries the
+   * API's code.
+   */
+  @Test
+  void aDemoWhoseRepoAsksForATokenNoneIsStoredForIsRefusedBeforeItWritesAnything() {
+    var definition =
+        new ProjectDefinition(
+            "demo",
+            null,
+            null,
+            null,
+            null,
+            null,
+            List.of(new ProjectDefinition.Repo("https://github.com/acme/private.git", "p", null)),
+            null,
+            null,
+            null,
+            null);
+    var noPerson = new WorkspaceVerbs.Keeper(Optional.empty(), Map.of(), url -> true, Map.of());
+
+    var ran = SailCli.run(new ProjectDemoCommand(() -> definition, () -> noPerson), "--dry-run");
+    var json =
+        SailCli.run(
+            new ProjectDemoCommand(() -> definition, () -> noPerson), "--dry-run", "--json");
+
+    assertEquals(1, ran.exit());
+    assertTrue(ran.err().contains("this box names no person to keep a token for it."), ran.err());
+    assertTrue(ran.err().contains("sail git login github.com"), ran.err());
+    assertFalse(ran.out().contains("demo project loaded"), ran.out());
+    assertFalse(ran.out().contains("Auto-detected configuration"), ran.out());
+    assertFalse(ran.out().contains("Would provision"), ran.out());
+    assertEquals(
+        "login_not_stored",
+        ((Map<?, ?>) YamlUtil.parseMap(json.out()).get("error")).get("code"),
+        json.out());
   }
 
   @Test

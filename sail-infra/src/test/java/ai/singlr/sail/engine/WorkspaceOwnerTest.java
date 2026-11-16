@@ -208,10 +208,8 @@ class WorkspaceOwnerTest {
     var uday = WorkspaceOwner.of(fdes, "uday", "uday", Optional.empty());
     var config = acme("https://GitHub.com/acme/api.git", "https://gitlab.com/acme/web.git");
 
-    var repos = uday.tokenRepos(config.repos());
+    var repos = config.repos();
 
-    assertEquals(
-        List.of("https://GitHub.com/acme/api.git"), repos.stream().map(r -> r.url()).toList());
     assertEquals(Map.of("GitHub.com", "ghp_uday_0123456789ab"), uday.tokensFor(repos));
     assertEquals(
         "https://oauth2:ghp_uday_0123456789ab@GitHub.com\n",

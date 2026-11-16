@@ -26,6 +26,7 @@ import java.nio.file.Path;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -33,12 +34,17 @@ class ProjectApplierTest {
 
   private static final String CONTAINER = "acme-health";
 
+  /**
+   * How the credential step removes a file, as a test's scripted shell sees it, before its path.
+   */
+  private static final String REMOVE = "rm -f \"$1\" sh ";
+
   @TempDir Path tempDir;
 
   @Test
   void applyPackagesInstallsMissingBaselineTools() throws Exception {
     var shell =
-        new ScriptedShellExecutor()
+        scripted()
             .onFail("dpkg -s gh", "package 'gh' is not installed")
             .onFail("dpkg -s ripgrep", "package 'ripgrep' is not installed")
             .onOk("dpkg -s")
@@ -62,7 +68,7 @@ class ProjectApplierTest {
 
   @Test
   void applyPackagesSkipsAptEntirelyWhenAllPresent() throws Exception {
-    var shell = new ScriptedShellExecutor().onOk("dpkg -s");
+    var shell = scripted().onOk("dpkg -s");
     var applier = applier(shell);
 
     var result = applier.applyPackages(CONTAINER, List.of("postgresql-client-16"));
@@ -77,7 +83,7 @@ class ProjectApplierTest {
   @Test
   void applyPackagesInstallsMissingConfigPackages() throws Exception {
     var shell =
-        new ScriptedShellExecutor()
+        scripted()
             .onFail("dpkg -s postgresql-client-16", "not installed")
             .onOk("dpkg -s")
             .onOk("apt-get update")
@@ -97,7 +103,7 @@ class ProjectApplierTest {
 
   @Test
   void applyPackagesDeduplicatesConfigPackagesAlreadyInBaseline() throws Exception {
-    var shell = new ScriptedShellExecutor().onOk("dpkg -s");
+    var shell = scripted().onOk("dpkg -s");
     var applier = applier(shell);
 
     var result = applier.applyPackages(CONTAINER, List.of("git", "ripgrep"));
@@ -108,7 +114,7 @@ class ProjectApplierTest {
   @Test
   void applyPackagesThrowsOnInstallFailure() {
     var shell =
-        new ScriptedShellExecutor()
+        scripted()
             .onFail("dpkg -s gh", "not installed")
             .onOk("dpkg -s")
             .onOk("apt-get update")
@@ -123,7 +129,7 @@ class ProjectApplierTest {
   @Test
   void applyPackagesThrowsOnAptUpdateFailure() {
     var shell =
-        new ScriptedShellExecutor()
+        scripted()
             .onFail("dpkg -s gh", "not installed")
             .onOk("dpkg -s")
             .onFail("apt-get update", "no network");
@@ -137,7 +143,7 @@ class ProjectApplierTest {
   @Test
   void applyServicesStartsNewService() throws Exception {
     var shell =
-        new ScriptedShellExecutor()
+        scripted()
             .onFail("podman container inspect postgres", "no such container")
             .onOk("podman run");
     var applier = applier(shell);
@@ -156,7 +162,7 @@ class ProjectApplierTest {
   @Test
   void deltaProbesRideTheProbeShellAndMutationsTheMutator() throws Exception {
     var probes =
-        new ScriptedShellExecutor()
+        scripted()
             .onFail("podman container inspect postgres", "no such container")
             .onFail("test -d", "not found")
             .onFail("which", "not found");
@@ -200,7 +206,7 @@ class ProjectApplierTest {
 
   @Test
   void applyServicesSkipsExistingService() throws Exception {
-    var shell = new ScriptedShellExecutor().onOk("podman container inspect postgres");
+    var shell = scripted().onOk("podman container inspect postgres");
     var applier = applier(shell);
 
     var services =
@@ -217,7 +223,7 @@ class ProjectApplierTest {
   @Test
   void applyServicesMixedNewAndExisting() throws Exception {
     var shell =
-        new ScriptedShellExecutor()
+        scripted()
             .onOk("podman container inspect postgres")
             .onFail("podman container inspect redis", "no such container")
             .onOk("podman run");
@@ -236,7 +242,7 @@ class ProjectApplierTest {
 
   @Test
   void applyServicesReturnsEmptyWhenNull() throws Exception {
-    var shell = new ScriptedShellExecutor();
+    var shell = scripted();
     var applier = applier(shell);
 
     var result = applier.applyServices(CONTAINER, null);
@@ -248,14 +254,12 @@ class ProjectApplierTest {
   @Test
   void applyReposClonesNewRepo() throws Exception {
     var shell =
-        new ScriptedShellExecutor()
-            .onFail("test -d /home/dev/workspace/backend", "not found")
-            .onOk("git clone");
+        scripted().onFail("test -d /home/dev/workspace/backend", "not found").onOk("git clone");
     var applier = applier(shell);
 
     var repos =
         List.of(new ProjectDefinition.Repo("https://github.com/org/backend.git", "backend", null));
-    var result = applier.applyRepos(CONTAINER, repos, "dev", null);
+    var result = applier.applyRepos(CONTAINER, repos, "dev", tokens(repos, Map.of()));
 
     assertEquals(1, result.added());
     assertTrue(shell.invocations().stream().anyMatch(c -> c.contains("git clone")));
@@ -264,7 +268,7 @@ class ProjectApplierTest {
   @Test
   void applyReposSkipsExistingRepo() throws Exception {
     var shell =
-        new ScriptedShellExecutor()
+        scripted()
             .onOk("test -d /home/dev/workspace/backend")
             .onOk("rev-parse --is-inside-work-tree --show-prefix", "true\n\n")
             .onOk(
@@ -274,14 +278,14 @@ class ProjectApplierTest {
 
     var repos =
         List.of(new ProjectDefinition.Repo("https://github.com/org/backend.git", "backend", null));
-    var result = applier.applyRepos(CONTAINER, repos, "dev", null);
+    var result = applier.applyRepos(CONTAINER, repos, "dev", tokens(repos, Map.of()));
 
     assertEquals(0, result.added());
     assertEquals(1, result.skipped());
   }
 
   private static ScriptedShellExecutor checkout(ShellExec.Result origin) {
-    return new ScriptedShellExecutor()
+    return scripted()
         .onOk("test -d /home/dev/workspace/backend")
         .onOk("rev-parse --is-inside-work-tree --show-prefix", "true\n\n")
         .on("git -C /home/dev/workspace/backend remote get-url origin", origin);
@@ -296,7 +300,7 @@ class ProjectApplierTest {
     var refused =
         assertThrows(
             IllegalStateException.class,
-            () -> applier(shell).applyRepos(CONTAINER, repos, "dev", null));
+            () -> applier(shell).applyRepos(CONTAINER, repos, "dev", tokens(repos, Map.of())));
 
     assertEquals(
         "Repo 'backend' is a clone of https://github.com/org/old.git, but the definition says"
@@ -305,7 +309,11 @@ class ProjectApplierTest {
     assertEquals(
         List.of(),
         shell.invocations().stream()
-            .filter(c -> c.contains("git clone") || c.contains("rm ") || c.contains("set-url"))
+            .filter(
+                c ->
+                    c.contains("git clone")
+                        || c.contains("rm ") && c.contains("/workspace/")
+                        || c.contains("set-url"))
             .toList());
   }
 
@@ -319,7 +327,7 @@ class ProjectApplierTest {
     var refused =
         assertThrows(
             IllegalStateException.class,
-            () -> applier(shell).applyRepos(CONTAINER, repos, "dev", null));
+            () -> applier(shell).applyRepos(CONTAINER, repos, "dev", tokens(repos, Map.of())));
 
     assertEquals(
         "Repo 'backend' is not a git checkout, but the definition says"
@@ -336,7 +344,7 @@ class ProjectApplierTest {
     var refused =
         assertThrows(
             IllegalStateException.class,
-            () -> applier(shell).applyRepos(CONTAINER, repos, "dev", null));
+            () -> applier(shell).applyRepos(CONTAINER, repos, "dev", tokens(repos, Map.of())));
 
     assertEquals(
         "Repo 'backend' is a clone with no origin, but the definition says"
@@ -355,7 +363,7 @@ class ProjectApplierTest {
     var refused =
         assertThrows(
             IllegalStateException.class,
-            () -> applier(shell).applyRepos(CONTAINER, repos, "dev", null));
+            () -> applier(shell).applyRepos(CONTAINER, repos, "dev", tokens(repos, Map.of())));
 
     assertEquals(
         "Repo 'backend' is a clone of https://github.com/org/old, but the definition says"
@@ -369,7 +377,7 @@ class ProjectApplierTest {
     var repos =
         List.of(new ProjectDefinition.Repo("git@github.com:org/backend.git", "backend", null));
 
-    var result = applier(shell).applyRepos(CONTAINER, repos, "dev", null);
+    var result = applier(shell).applyRepos(CONTAINER, repos, "dev", tokens(repos, Map.of()));
 
     assertEquals(1, result.skipped());
   }
@@ -377,7 +385,7 @@ class ProjectApplierTest {
   @Test
   void applyReposRefreshesCredentialStoreInsteadOfInjectingToken() throws Exception {
     var shell =
-        new ScriptedShellExecutor()
+        scripted()
             .onOk("incus file push")
             .onOk("chown")
             .onOk("git config")
@@ -389,7 +397,8 @@ class ProjectApplierTest {
 
     var repos =
         List.of(new ProjectDefinition.Repo("https://github.com/org/private.git", "private", null));
-    applier.applyRepos(CONTAINER, repos, "dev", Map.of("*", "ghp_secret123"));
+    applier.applyRepos(
+        CONTAINER, repos, "dev", tokens(repos, Map.of("github.com", "ghp_secret123")));
 
     var cloneCmd = shell.invocations().stream().filter(c -> c.contains("git clone")).findFirst();
     assertTrue(cloneCmd.isPresent());
@@ -440,14 +449,16 @@ class ProjectApplierTest {
         new ScriptedShellExecutor(new ShellExec.Result(0, "", "")).onFail("test -d", "not found");
     var applier = applier(shell);
 
-    applier.applyRepos(
-        CONTAINER,
+    var repos =
         List.of(
             new ProjectDefinition.Repo(
                 "https://git.example.com/org/api.git", "api", null, "github"),
-            new ProjectDefinition.Repo("https://gitlab.com/org/web.git", "web", null)),
+            new ProjectDefinition.Repo("https://gitlab.com/org/web.git", "web", null));
+    applier.applyRepos(
+        CONTAINER,
+        repos,
         "dev",
-        Map.of("*", "tok_wild"));
+        tokens(repos, Map.of("git.example.com", "tok_wild", "gitlab.com", "tok_wild")));
 
     assertGhLoggedIn(shell, "git.example.com", "tok_wild");
     assertEquals(
@@ -462,11 +473,8 @@ class ProjectApplierTest {
         new ScriptedShellExecutor(new ShellExec.Result(0, "", "")).onFail("test -d", "not found");
     var applier = applier(shell);
 
-    applier.applyRepos(
-        CONTAINER,
-        List.of(new ProjectDefinition.Repo("https://gitlab.com/org/web.git", "web", null)),
-        "dev",
-        Map.of("gitlab.com", "glpat_x"));
+    var repos = List.of(new ProjectDefinition.Repo("https://gitlab.com/org/web.git", "web", null));
+    applier.applyRepos(CONTAINER, repos, "dev", tokens(repos, Map.of("gitlab.com", "glpat_x")));
 
     assertTrue(shell.invocations().stream().noneMatch(c -> c.contains("gh auth login")));
     assertTrue(shell.invocations().stream().noneMatch(c -> c.contains("gh-token")));
@@ -478,17 +486,14 @@ class ProjectApplierTest {
         new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
             .onFail("gh auth login", "The token in GH_TOKEN is invalid.");
     var applier = applier(shell);
+    var repos = List.of(new ProjectDefinition.Repo("https://github.com/org/api.git", "api", null));
 
     var failed =
         assertThrows(
             java.io.IOException.class,
             () ->
                 applier.applyRepos(
-                    CONTAINER,
-                    List.of(
-                        new ProjectDefinition.Repo("https://github.com/org/api.git", "api", null)),
-                    "dev",
-                    Map.of("*", "ghp_bad")));
+                    CONTAINER, repos, "dev", tokens(repos, Map.of("github.com", "ghp_bad"))));
 
     assertEquals(
         "Failed to log gh in for github.com in acme-health: The token in GH_TOKEN is invalid.",
@@ -497,12 +502,12 @@ class ProjectApplierTest {
 
   @Test
   void applyReposUsesSpecifiedBranch() throws Exception {
-    var shell = new ScriptedShellExecutor().onFail("test -d", "not found").onOk("git clone");
+    var shell = scripted().onFail("test -d", "not found").onOk("git clone");
     var applier = applier(shell);
 
     var repos =
         List.of(new ProjectDefinition.Repo("https://github.com/org/repo.git", "repo", "develop"));
-    applier.applyRepos(CONTAINER, repos, "dev", null);
+    applier.applyRepos(CONTAINER, repos, "dev", tokens(repos, Map.of()));
 
     var cloneCmd = shell.invocations().stream().filter(c -> c.contains("git clone")).findFirst();
     assertTrue(cloneCmd.isPresent());
@@ -511,10 +516,10 @@ class ProjectApplierTest {
 
   @Test
   void applyReposReturnsEmptyWhenNull() throws Exception {
-    var shell = new ScriptedShellExecutor();
+    var shell = scripted();
     var applier = applier(shell);
 
-    var result = applier.applyRepos(CONTAINER, null, "dev", null);
+    var result = applier.applyRepos(CONTAINER, null, "dev", tokens(null, Map.of()));
 
     assertEquals(0, result.added());
   }
@@ -522,10 +527,7 @@ class ProjectApplierTest {
   @Test
   void applyAgentToolsInstallsMissingAgent() throws Exception {
     var shell =
-        new ScriptedShellExecutor()
-            .onFail("bash -lc which codex", "not found")
-            .onOk("which node")
-            .onOk("bash -c");
+        scripted().onFail("bash -lc which codex", "not found").onOk("which node").onOk("bash -c");
     var applier = applier(shell);
 
     var result = applier.applyAgentTools(CONTAINER, List.of("codex"));
@@ -536,7 +538,7 @@ class ProjectApplierTest {
 
   @Test
   void applyAgentToolsSkipsInstalledAgent() throws Exception {
-    var shell = new ScriptedShellExecutor().onOk("bash -lc which claude");
+    var shell = scripted().onOk("bash -lc which claude");
     var applier = applier(shell);
 
     var result = applier.applyAgentTools(CONTAINER, List.of("claude-code"));
@@ -547,7 +549,7 @@ class ProjectApplierTest {
 
   @Test
   void applyAgentToolsUsesLoginShellForWhichCheck() throws Exception {
-    var shell = new ScriptedShellExecutor().onOk("bash -lc which claude");
+    var shell = scripted().onOk("bash -lc which claude");
     var applier = applier(shell);
 
     applier.applyAgentTools(CONTAINER, List.of("claude-code"));
@@ -560,7 +562,7 @@ class ProjectApplierTest {
   @Test
   void applyAgentToolsInstallsNewAndSkipsExisting() throws Exception {
     var shell =
-        new ScriptedShellExecutor()
+        scripted()
             .onOk("bash -lc which claude")
             .onFail("bash -lc which codex", "not found")
             .onOk("which node")
@@ -575,7 +577,7 @@ class ProjectApplierTest {
 
   @Test
   void applyAgentToolsReturnsEmptyWhenNull() throws Exception {
-    var shell = new ScriptedShellExecutor();
+    var shell = scripted();
     var applier = applier(shell);
 
     var result = applier.applyAgentTools(CONTAINER, null);
@@ -806,7 +808,7 @@ class ProjectApplierTest {
 
   @Test
   void applySkillsSkipsWhenNoAgent() throws Exception {
-    var shell = new ScriptedShellExecutor();
+    var shell = scripted();
     var applier = applier(shell);
     var config =
         new ProjectDefinition(
@@ -831,7 +833,7 @@ class ProjectApplierTest {
   @Test
   void applyServicesThrowsOnStartFailure() {
     var shell =
-        new ScriptedShellExecutor()
+        scripted()
             .onFail("podman container inspect postgres", "no such container")
             .onFail("podman run", "image pull failed");
     var applier = applier(shell);
@@ -847,7 +849,7 @@ class ProjectApplierTest {
 
   @Test
   void applyServicesReturnsEmptyWhenEmpty() throws Exception {
-    var shell = new ScriptedShellExecutor();
+    var shell = scripted();
     var applier = applier(shell);
 
     var result = applier.applyServices(CONTAINER, Map.of());
@@ -859,24 +861,25 @@ class ProjectApplierTest {
   @Test
   void applyReposThrowsOnCloneFailure() {
     var shell =
-        new ScriptedShellExecutor()
-            .onFail("test -d", "not found")
-            .onFail("git clone", "authentication failed");
+        scripted().onFail("test -d", "not found").onFail("git clone", "authentication failed");
     var applier = applier(shell);
 
     var repos =
         List.of(new ProjectDefinition.Repo("https://github.com/org/backend.git", "backend", null));
-    var ex = assertThrows(Exception.class, () -> applier.applyRepos(CONTAINER, repos, "dev", null));
+    var ex =
+        assertThrows(
+            Exception.class,
+            () -> applier.applyRepos(CONTAINER, repos, "dev", tokens(repos, Map.of())));
 
     assertTrue(ex.getMessage().contains("Failed to clone"));
   }
 
   @Test
   void applyReposReturnsEmptyWhenEmpty() throws Exception {
-    var shell = new ScriptedShellExecutor();
+    var shell = scripted();
     var applier = applier(shell);
 
-    var result = applier.applyRepos(CONTAINER, List.of(), "dev", null);
+    var result = applier.applyRepos(CONTAINER, List.of(), "dev", tokens(List.of(), Map.of()));
 
     assertEquals(0, result.added());
   }
@@ -884,7 +887,7 @@ class ProjectApplierTest {
   @Test
   void applyReposTokenNeverInCloneUrlForAnyHost() throws Exception {
     var shell =
-        new ScriptedShellExecutor()
+        scripted()
             .onOk("incus file push")
             .onOk("chown")
             .onOk("git config")
@@ -894,7 +897,7 @@ class ProjectApplierTest {
 
     var repos =
         List.of(new ProjectDefinition.Repo("https://gitlab.com/org/repo.git", "repo", null));
-    applier.applyRepos(CONTAINER, repos, "dev", Map.of("*", "ghp_token"));
+    applier.applyRepos(CONTAINER, repos, "dev", tokens(repos, Map.of("gitlab.com", "ghp_token")));
 
     var cloneCmd = shell.invocations().stream().filter(c -> c.contains("git clone")).findFirst();
     assertTrue(cloneCmd.isPresent());
@@ -905,7 +908,7 @@ class ProjectApplierTest {
   @Test
   void applyAgentToolsThrowsOnInstallFailure() {
     var shell =
-        new ScriptedShellExecutor()
+        scripted()
             .onFail("bash -lc which claude", "not found")
             .onFail("bash -c", "npm install failed");
     var applier = applier(shell);
@@ -919,7 +922,7 @@ class ProjectApplierTest {
 
   @Test
   void applyAgentToolsReturnsEmptyWhenEmpty() throws Exception {
-    var shell = new ScriptedShellExecutor();
+    var shell = scripted();
     var applier = applier(shell);
 
     var result = applier.applyAgentTools(CONTAINER, List.of());
@@ -929,8 +932,7 @@ class ProjectApplierTest {
 
   @Test
   void applyAgentToolsSkipsNodeCheckForClaudeCode() throws Exception {
-    var shell =
-        new ScriptedShellExecutor().onFail("bash -lc which claude", "not found").onOk("bash -c");
+    var shell = scripted().onFail("bash -lc which claude", "not found").onOk("bash -c");
     var applier = applier(shell);
 
     var result = applier.applyAgentTools(CONTAINER, List.of("claude-code"));
@@ -941,7 +943,7 @@ class ProjectApplierTest {
 
   @Test
   void checkUnsupportedChangesWarnsWhenLiveLimitsDiffer() {
-    var shell = new ScriptedShellExecutor();
+    var shell = scripted();
     var applier = applier(shell);
     var config = minimalConfig("claude-code");
 
@@ -958,7 +960,7 @@ class ProjectApplierTest {
 
   @Test
   void aFreshBoxsSudoCallerIsToldToResizeWithSudo() {
-    var applier = applier(new ScriptedShellExecutor());
+    var applier = applier(scripted());
 
     var warnings =
         applier.checkUnsupportedChanges(
@@ -975,7 +977,7 @@ class ProjectApplierTest {
 
   @Test
   void checkUnsupportedChangesReturnsEmptyWhenNoResources() {
-    var shell = new ScriptedShellExecutor();
+    var shell = scripted();
     var applier = applier(shell);
     var agent =
         new ProjectDefinition.Agent("claude-code", true, "sail/", null, null, null, null, null);
@@ -990,10 +992,7 @@ class ProjectApplierTest {
   @Test
   void removeServicesStopsAndRemovesContainer() throws Exception {
     var shell =
-        new ScriptedShellExecutor()
-            .onOk("podman container inspect postgres")
-            .onOk("podman stop")
-            .onOk("podman rm");
+        scripted().onOk("podman container inspect postgres").onOk("podman stop").onOk("podman rm");
     var applier = applier(shell);
 
     var result = applier.removeServices(CONTAINER, List.of("postgres"));
@@ -1006,8 +1005,7 @@ class ProjectApplierTest {
 
   @Test
   void removeServicesSkipsWhenNotFound() throws Exception {
-    var shell =
-        new ScriptedShellExecutor().onFail("podman container inspect redis", "no such container");
+    var shell = scripted().onFail("podman container inspect redis", "no such container");
     var applier = applier(shell);
 
     var result = applier.removeServices(CONTAINER, List.of("redis"));
@@ -1018,7 +1016,7 @@ class ProjectApplierTest {
 
   @Test
   void removeServicesReturnsEmptyWhenNull() throws Exception {
-    var shell = new ScriptedShellExecutor();
+    var shell = scripted();
     var applier = applier(shell);
 
     var result = applier.removeServices(CONTAINER, null);
@@ -1028,7 +1026,7 @@ class ProjectApplierTest {
 
   @Test
   void removeServicesReturnsEmptyWhenEmpty() throws Exception {
-    var shell = new ScriptedShellExecutor();
+    var shell = scripted();
     var applier = applier(shell);
 
     var result = applier.removeServices(CONTAINER, List.of());
@@ -1043,7 +1041,7 @@ class ProjectApplierTest {
         [{"Names":["postgres"]},{"Names":["redis"]}]
         """;
     var shell =
-        new ScriptedShellExecutor()
+        scripted()
             .onOk("podman ps --format json", podmanPsJson)
             .onOk("podman stop")
             .onOk("podman rm");
@@ -1067,7 +1065,7 @@ class ProjectApplierTest {
         """
         [{"Names":["postgres"]}]
         """;
-    var shell = new ScriptedShellExecutor().onOk("podman ps --format json", podmanPsJson);
+    var shell = scripted().onOk("podman ps --format json", podmanPsJson);
     var applier = applier(shell);
 
     var services =
@@ -1081,7 +1079,7 @@ class ProjectApplierTest {
 
   @Test
   void reconcileServicesReturnsEmptyWhenNothingRunning() throws Exception {
-    var shell = new ScriptedShellExecutor().onFail("podman ps", "error");
+    var shell = scripted().onFail("podman ps", "error");
     var applier = applier(shell);
 
     var services =
@@ -1100,7 +1098,7 @@ class ProjectApplierTest {
         [{"Names":["postgres"]},{"Names":["redis"]}]
         """;
     var shell =
-        new ScriptedShellExecutor()
+        scripted()
             .onOk("podman ps --format json", podmanPsJson)
             .onOk("podman stop")
             .onOk("podman rm");
@@ -1117,7 +1115,7 @@ class ProjectApplierTest {
         """
         [{"Names":["postgres"],"State":"running"},{"Names":["redis"],"State":"running"}]
         """;
-    var shell = new ScriptedShellExecutor().onOk("podman ps --format json", podmanPsJson);
+    var shell = scripted().onOk("podman ps --format json", podmanPsJson);
     var applier = applier(shell);
 
     var names = applier.queryRunningServiceNames(CONTAINER);
@@ -1129,7 +1127,7 @@ class ProjectApplierTest {
 
   @Test
   void queryRunningServiceNamesReturnsEmptyOnFailure() throws Exception {
-    var shell = new ScriptedShellExecutor().onFail("podman ps", "error");
+    var shell = scripted().onFail("podman ps", "error");
     var applier = applier(shell);
 
     var names = applier.queryRunningServiceNames(CONTAINER);
@@ -1213,7 +1211,7 @@ class ProjectApplierTest {
 
   @Test
   void applyWorkspaceFilesReturnsEmptyWhenNoFilesDir() throws Exception {
-    var shell = new ScriptedShellExecutor();
+    var shell = scripted();
     var applier = applier(shell);
 
     var result = applier.applyWorkspaceFiles(CONTAINER, tempDir.resolve("files"), "dev");
@@ -1225,7 +1223,7 @@ class ProjectApplierTest {
   @Test
   void applyWorkspaceFilesReturnsEmptyWhenFilesDirEmpty() throws Exception {
     Files.createDirectories(tempDir.resolve("files"));
-    var shell = new ScriptedShellExecutor();
+    var shell = scripted();
     var applier = applier(shell);
 
     var result = applier.applyWorkspaceFiles(CONTAINER, tempDir.resolve("files"), "dev");
@@ -1235,7 +1233,7 @@ class ProjectApplierTest {
 
   @Test
   void applyWorkspaceFilesReturnsEmptyWhenNoFolderIsNamed() throws Exception {
-    var shell = new ScriptedShellExecutor();
+    var shell = scripted();
     var applier = applier(shell);
 
     var result = applier.applyWorkspaceFiles(CONTAINER, null, "dev");
@@ -1265,7 +1263,7 @@ class ProjectApplierTest {
   @Test
   void applyCleanupCronInstallsScriptsAndCron() throws Exception {
     var shell =
-        new ScriptedShellExecutor()
+        scripted()
             .onOk("crontab -l", "")
             .onFail("test -f", "not found")
             .onOk("mkdir")
@@ -1290,7 +1288,7 @@ class ProjectApplierTest {
   void applyCleanupCronSkipsWhenAlreadyCurrent() throws Exception {
     var cronWithScript = "*/15 * * * * /home/dev/.sail/cleanup-containers.sh >/dev/null 2>&1\n";
     var shell =
-        new ScriptedShellExecutor()
+        scripted()
             .onOk("crontab -l", cronWithScript)
             .onOk("test -f /home/dev/.sail/cleanup-containers.sh");
     var applier = applier(shell);
@@ -1306,7 +1304,7 @@ class ProjectApplierTest {
   void applyCleanupCronUpgradesAnOlderHourlyCadence() throws Exception {
     var hourly = "0 * * * * /home/dev/.sail/cleanup-containers.sh >/dev/null 2>&1\n";
     var shell =
-        new ScriptedShellExecutor()
+        scripted()
             .onOk("crontab -l", hourly)
             .onOk("test -f /home/dev/.sail/cleanup-containers.sh")
             .onOk("incus file push")
@@ -1324,7 +1322,7 @@ class ProjectApplierTest {
   void applyCleanupCronReplacesLegacyCron() throws Exception {
     var legacyCron = "0 * * * * podman system prune -f --filter \"until=1h\" >/dev/null 2>&1\n";
     var shell =
-        new ScriptedShellExecutor()
+        scripted()
             .onOk("crontab -l", legacyCron)
             .onFail("test -f", "not found")
             .onOk("mkdir")
@@ -1344,7 +1342,7 @@ class ProjectApplierTest {
     var existingCron =
         "30 2 * * * /usr/local/bin/backup.sh\n0 * * * * podman system prune -f --filter \"until=1h\" >/dev/null 2>&1\n";
     var shell =
-        new ScriptedShellExecutor()
+        scripted()
             .onOk("crontab -l", existingCron)
             .onFail("test -f", "not found")
             .onOk("mkdir")
@@ -1366,7 +1364,7 @@ class ProjectApplierTest {
   @Test
   void applyCleanupCronThrowsOnCrontabInstallFailure() {
     var shell =
-        new ScriptedShellExecutor()
+        scripted()
             .onOk("crontab -l", "")
             .onFail("test -f", "not found")
             .onOk("mkdir")
@@ -1378,6 +1376,213 @@ class ProjectApplierTest {
     var ex = assertThrows(Exception.class, () -> applier.applyCleanupCron(CONTAINER, "dev"));
 
     assertTrue(ex.getMessage().contains("Failed to install crontab"));
+  }
+
+  /**
+   * Round 1, item 1: an apply with no token to give any more, its repos public or gone, takes the
+   * store and gh's login out of the project's container by the step a workspace's token change
+   * takes, so a token removed or no longer needed leaves it.
+   */
+  @Test
+  void anApplyWithNoTokenToGiveTakesTheStoreAndGhsLoginOut() throws Exception {
+    for (var repos :
+        List.of(
+            List.of(new ProjectDefinition.Repo("https://github.com/acme/public.git", "pub", null)),
+            List.<ProjectDefinition.Repo>of())) {
+      var shell =
+          new ScriptedShellExecutor(new ShellExec.Result(0, "", "")).onFail("test -d", "no");
+
+      applier(shell).applyRepos(CONTAINER, repos, "dev", tokens(repos, Map.of()));
+
+      var ran = shell.invocations();
+      assertTrue(
+          ran.stream().anyMatch(c -> c.endsWith(REMOVE + "/home/dev/.git-credentials")),
+          ran.toString());
+      assertTrue(
+          ran.stream().anyMatch(c -> c.endsWith(REMOVE + "/home/dev/.config/gh/hosts.yml")),
+          ran.toString());
+      assertTrue(ran.stream().noneMatch(c -> c.contains("incus file push")), ran.toString());
+    }
+  }
+
+  /**
+   * Round 1, item 1: a token for a host no repo names any more is gone after the apply: the store
+   * is replaced whole with the hosts the repos name, and gh, with no GitHub host left, is logged
+   * out.
+   */
+  @Test
+  void aTokenForAHostNoRepoNamesAnyMoreIsGoneAfterTheApply() throws Exception {
+    var repos = List.of(new ProjectDefinition.Repo("https://gitlab.com/acme/web.git", "web", null));
+    var shell =
+        new WorkspacesTest.Pushing(
+            new ScriptedShellExecutor(new ShellExec.Result(0, "", "")).onFail("test -d", "no"));
+    var checked =
+        CheckedTokens.of(
+            new ProjectDefinition(
+                "acme", null, null, null, null, null, repos, null, null, null, null),
+            Optional.of("eng"),
+            Map.of("github.com", "ghp_github_was_used", "gitlab.com", "glpat_gitlab_still_used"),
+            url -> false,
+            Map.of());
+
+    applier(shell).applyRepos(CONTAINER, repos, "dev", checked);
+
+    assertEquals(
+        Map.of(
+            CONTAINER + "/home/dev/.git-credentials.sail-new",
+            "https://oauth2:glpat_gitlab_still_used@gitlab.com\n"),
+        shell.pushed);
+    var ran = shell.shell.invocations();
+    assertTrue(
+        ran.stream()
+            .anyMatch(
+                c ->
+                    c.endsWith(
+                        "mv -f /home/dev/.git-credentials.sail-new /home/dev/.git-credentials")),
+        ran.toString());
+    assertTrue(
+        ran.stream().anyMatch(c -> c.endsWith(REMOVE + "/home/dev/.config/gh/hosts.yml")),
+        ran.toString());
+  }
+
+  /**
+   * Round 3: gh is left logged in to exactly the GitHub hosts with a token, in place. With two
+   * GitHub hosts and one token removed, the removed host is logged out by its own name, and the
+   * kept host's login is never absent: gh's login file is not removed, the kept host is not logged
+   * out, and its unchanged token is not logged in again.
+   */
+  @Test
+  void aHostWhoseTokenWentIsLoggedOutAndTheKeptHostsLoginIsNeverAbsent() throws Exception {
+    var repos = twoGithubHosts();
+    var shell =
+        new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
+            .onFail("test -d", "no")
+            .onOk("sed -n", "github.com\nghe.example\n")
+            .onOk("gh auth token --hostname github.com", "ghp_github_kept\n");
+
+    applier(shell)
+        .applyRepos(
+            CONTAINER, repos, "dev", tokens(repos, Map.of("github.com", "ghp_github_kept")));
+
+    var ran = shell.invocations();
+    assertTrue(
+        ran.stream().anyMatch(c -> c.endsWith("gh auth logout --hostname ghe.example")),
+        ran.toString());
+    assertTrue(
+        ran.stream().noneMatch(c -> c.endsWith(REMOVE + "/home/dev/.config/gh/hosts.yml")),
+        ran.toString());
+    assertTrue(
+        ran.stream().noneMatch(c -> c.endsWith("gh auth logout --hostname github.com")),
+        ran.toString());
+    assertTrue(ran.stream().noneMatch(c -> c.contains("gh auth login")), ran.toString());
+  }
+
+  /**
+   * Round 3: a token replaced for one host logs that host in again, in place, and touches no other:
+   * nothing is logged out and gh's login file is not removed.
+   */
+  @Test
+  void aReplacedTokenLogsItsHostInAgainAndTouchesNoOther() throws Exception {
+    var repos = twoGithubHosts();
+    var shell =
+        new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
+            .onFail("test -d", "no")
+            .onOk("sed -n", "github.com\nghe.example\n")
+            .onOk("gh auth token --hostname github.com", "ghp_github_old\n")
+            .onOk("gh auth token --hostname ghe.example", "ghe_token_same\n");
+
+    applier(shell)
+        .applyRepos(
+            CONTAINER,
+            repos,
+            "dev",
+            tokens(repos, Map.of("github.com", "ghp_github_new", "ghe.example", "ghe_token_same")));
+
+    var ran = shell.invocations();
+    var logins = ran.stream().filter(c -> c.contains("gh auth login")).toList();
+    assertEquals(1, logins.size(), ran.toString());
+    assertTrue(logins.getFirst().contains(" sh github.com "), logins.toString());
+    assertTrue(ran.stream().noneMatch(c -> c.contains("gh auth logout")), ran.toString());
+    assertTrue(
+        ran.stream().noneMatch(c -> c.endsWith(REMOVE + "/home/dev/.config/gh/hosts.yml")),
+        ran.toString());
+  }
+
+  private static List<ProjectDefinition.Repo> twoGithubHosts() {
+    return List.of(
+        new ProjectDefinition.Repo("https://github.com/acme/api.git", "api", null),
+        new ProjectDefinition.Repo("https://ghe.example/acme/web.git", "web", null, "github"));
+  }
+
+  /**
+   * Round 2, item 2: what an apply removes with nothing written in its place, which may have been
+   * made by hand, is said in one line; nothing is said when there was nothing to remove.
+   */
+  @Test
+  void whatAnApplyRemovesWithNothingInItsPlaceIsSaid() throws Exception {
+    var repos = List.of(new ProjectDefinition.Repo("https://github.com/acme/pub.git", "pub", null));
+    var said = new ByteArrayOutputStream();
+    var none = new ByteArrayOutputStream();
+
+    new ProjectApplier(
+            new ScriptedShellExecutor(new ShellExec.Result(0, "", "")).onFail("test -d", "no"),
+            new PrintStream(said, true, StandardCharsets.UTF_8))
+        .applyRepos(CONTAINER, repos, "dev", tokens(repos, Map.of()));
+    new ProjectApplier(
+            new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
+                .onFail("test -d", "no")
+                .on(REMOVE, new ShellExec.Result(3, "", "")),
+            new PrintStream(none, true, StandardCharsets.UTF_8))
+        .applyRepos(CONTAINER, repos, "dev", tokens(repos, Map.of()));
+
+    assertTrue(
+        said.toString(StandardCharsets.UTF_8)
+            .contains(
+                "  [remove] acme-health's git credentials and gh login removed: no token is stored"
+                    + " for its repos' hosts, and Sail keeps only the tokens its git login stores.\n"),
+        said.toString(StandardCharsets.UTF_8));
+    assertFalse(none.toString(StandardCharsets.UTF_8).contains("[remove]"));
+  }
+
+  /**
+   * Round 2, item 3: tokens checked for one definition's repos are refused for another's, before
+   * anything is written.
+   */
+  @Test
+  void tokensCheckedForOtherReposAreNeverWritten() {
+    var checkedFor =
+        List.of(new ProjectDefinition.Repo("https://github.com/acme/a.git", "a", null));
+    var written = List.of(new ProjectDefinition.Repo("https://github.com/acme/b.git", "b", null));
+    var shell = new ScriptedShellExecutor(new ShellExec.Result(0, "", ""));
+
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            applier(shell)
+                .applyRepos(
+                    CONTAINER, written, "dev", tokens(checkedFor, Map.of("github.com", "ghp_x"))));
+    assertEquals(List.of(), shell.invocations());
+  }
+
+  /**
+   * {@code stored} as the checked tokens of a project whose repos are {@code repos}, none asking.
+   */
+  static CheckedTokens tokens(List<ProjectDefinition.Repo> repos, Map<String, String> stored) {
+    return CheckedTokens.of(
+        new ProjectDefinition("acme", null, null, null, null, null, repos, null, null, null, null),
+        Optional.of("eng"),
+        stored,
+        url -> false,
+        Map.of());
+  }
+
+  /** A shell that answers no command but those a test scripts, and the credential step's own. */
+  private static ScriptedShellExecutor scripted() {
+    return new ScriptedShellExecutor()
+        .onOk(REMOVE + "/home/dev/.git-credentials")
+        .onOk(REMOVE + "/home/dev/.config/gh/hosts.yml")
+        .onOk("mv -f /home/dev/.git-credentials.sail-new")
+        .onOk("sed -n");
   }
 
   private static ProjectApplier applier(ShellExec shell) {

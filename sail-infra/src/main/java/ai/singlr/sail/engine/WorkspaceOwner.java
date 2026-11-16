@@ -18,9 +18,7 @@ import ai.singlr.sail.ssh.SshPublicKey;
 import ai.singlr.sail.store.FdeSshKeyStore;
 import ai.singlr.sail.store.FdeStore;
 import java.util.ArrayList;
-import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
@@ -112,48 +110,16 @@ public record WorkspaceOwner(
               ? Remedy.of("Set it on main with ", update, ".")
               : Remedy.of("Ask an admin to run on main: ", update, "."));
     }
-    var asking = GitCredentials.asking(config.repos(), this::keepsTokenFor, asks);
-    if (!asking.isEmpty()) {
-      var repo = asking.getFirst();
-      var host = GitCredentials.extractHttpsHosts(List.of(repo)).getFirst();
+    var missing = GitCredentials.missing(config.repos(), tokensFor(config.repos()), asks);
+    if (missing.isPresent()) {
       throw new Refused(
-          host
-              + " asks for credentials to fetch "
-              + config.name()
-              + "'s repo "
-              + repo.path()
-              + ", and "
-              + handle
-              + " keeps no token for it.",
-          Remedy.of("Store one with ", Remedy.sail("git login", host), "."));
+          missing.get().reason(config.name(), handle), missing.get().remedy(Map.of()));
     }
   }
 
-  /** Only these, so a host without a token never falls back to one from the environment. */
-  List<ProjectDefinition.Repo> tokenRepos(List<ProjectDefinition.Repo> repos) {
-    return (repos == null ? List.<ProjectDefinition.Repo>of() : repos)
-        .stream()
-            .filter(
-                repo ->
-                    GitCredentials.extractHttpsHosts(List.of(repo)).stream()
-                        .anyMatch(this::keepsTokenFor))
-            .toList();
-  }
-
-  /** Keyed as the repo URL spells the host, which is the key the credential store matches. */
+  /** Keyed as the repo URL spells the host ({@link GitCredentials#forRepos}). */
   Map<String, String> tokensFor(List<ProjectDefinition.Repo> repos) {
-    var spelled = new LinkedHashMap<String, String>();
-    for (var host : GitCredentials.extractHttpsHosts(repos)) {
-      var token = tokens.get(host.toLowerCase(Locale.ROOT));
-      if (token != null) {
-        spelled.put(host, token);
-      }
-    }
-    return spelled;
-  }
-
-  private boolean keepsTokenFor(String host) {
-    return tokens.containsKey(host.toLowerCase(Locale.ROOT));
+    return GitCredentials.forRepos(tokens, repos);
   }
 
   @Override

@@ -131,7 +131,7 @@ public final class ProjectProvisioner {
   public void provision(
       ProjectDefinition config,
       HostYaml host,
-      Map<String, String> gitTokens,
+      CheckedTokens gitTokens,
       LocalIdentity.GitIdentity git,
       Path filesDir)
       throws Exception {
@@ -140,16 +140,17 @@ public final class ProjectProvisioner {
 
   /**
    * Provisions {@code config} into the instance {@code into} names, launched on its pool when it
-   * names one: what {@link #provision(ProjectDefinition, HostYaml, Map, LocalIdentity.GitIdentity,
-   * Path)} does for the project's own container, for another instance, such as its template. The
-   * definition, its digest and the project's skills are the project's whatever instance takes them.
-   * With no {@code git} identity none is set, as a template, which is no one's, is built.
+   * names one: what {@link #provision(ProjectDefinition, HostYaml, CheckedTokens,
+   * LocalIdentity.GitIdentity, Path)} does for the project's own container, for another instance,
+   * such as its template. The definition, its digest and the project's skills are the project's
+   * whatever instance takes them. With no {@code git} identity none is set, as a template, which is
+   * no one's, is built.
    */
   public void provision(
       Instance into,
       ProjectDefinition config,
       HostYaml host,
-      Map<String, String> gitTokens,
+      CheckedTokens gitTokens,
       LocalIdentity.GitIdentity git,
       Path filesDir)
       throws Exception {
@@ -913,7 +914,7 @@ public final class ProjectProvisioner {
     return baseUrl + version + "/binaries/apache-maven-" + version + "-bin.tar.gz";
   }
 
-  private void cloneRepos(ProjectDefinition config, String name, Map<String, String> gitTokens)
+  private void cloneRepos(ProjectDefinition config, String name, CheckedTokens gitTokens)
       throws Exception {
     currentPhase = ProjectPhase.REPOS_CLONED;
     if (tracker.isCompleted(currentPhase)) {
@@ -932,7 +933,9 @@ public final class ProjectProvisioner {
     var user = ProjectDefinition.USER;
     var cloned = 0;
 
-    ProjectApplier.ensureCredentialStore(shell, name, user, gitTokens, config.repos());
+    var removed =
+        WorkspaceCredentials.renew(
+            shell, name, config.repos(), gitTokens.byHostFor(config.repos()));
 
     execAsDevUser(name, List.of("mkdir", "-p", "/home/" + user + "/workspace"));
 
@@ -960,7 +963,14 @@ public final class ProjectProvisioner {
     }
 
     tracker.advance(currentPhase);
-    stepDone(13, "Cloned " + cloned + "/" + config.repos().size() + " repositories");
+    stepDone(
+        13,
+        "Cloned "
+            + cloned
+            + "/"
+            + config.repos().size()
+            + " repositories"
+            + (removed == null ? "" : "; " + removed));
   }
 
   private void pushWorkspaceFiles(String name, Path filesDir) throws Exception {

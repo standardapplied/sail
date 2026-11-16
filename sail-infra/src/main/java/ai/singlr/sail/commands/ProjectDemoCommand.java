@@ -15,7 +15,6 @@ import ai.singlr.sail.engine.ContainerManager;
 import ai.singlr.sail.engine.ContainerSailSetup;
 import ai.singlr.sail.engine.ContainerState;
 import ai.singlr.sail.engine.DemoProject;
-import ai.singlr.sail.engine.GitCredentials;
 import ai.singlr.sail.engine.HostInfo;
 import ai.singlr.sail.engine.LocalIdentity;
 import ai.singlr.sail.engine.OperatorCommand;
@@ -36,6 +35,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.LinkedHashMap;
 import java.util.Optional;
+import java.util.function.Supplier;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
 import picocli.CommandLine.Model.CommandSpec;
@@ -58,8 +58,22 @@ public final class ProjectDemoCommand implements Runnable {
   @Option(names = "--json", description = "Output in JSON format.")
   private boolean json;
 
-  @Option(names = "--git-token", description = "Access token for cloning private repos over HTTPS.")
-  private String gitToken;
+  private final Supplier<ProjectDefinition> definition;
+  private final Supplier<WorkspaceVerbs.Keeper> keeper;
+
+  public ProjectDemoCommand() {
+    this(ProjectDemoCommand::demoDefinition, WorkspaceVerbs.Keeper::here);
+  }
+
+  /**
+   * @param definition the demo's definition, as the catalog holds it
+   * @param keeper whose stored tokens the demo clones with
+   */
+  ProjectDemoCommand(
+      Supplier<ProjectDefinition> definition, Supplier<WorkspaceVerbs.Keeper> keeper) {
+    this.definition = definition;
+    this.keeper = keeper;
+  }
 
   /** A provisioning that installs {@code workstationKey} in the container it creates. */
   @FunctionalInterface
@@ -105,7 +119,7 @@ public final class ProjectDemoCommand implements Runnable {
 
   @Override
   public void run() {
-    CliCommand.run(this::execute);
+    CliCommand.run(json, this::execute);
   }
 
   private void execute() throws Exception {
@@ -136,7 +150,11 @@ public final class ProjectDemoCommand implements Runnable {
       out.println();
     }
 
-    var config = loadDemoDefinition(out, ansi);
+    var config = definition.get();
+    var tokens = keeper.get().check(config);
+    if (!json) {
+      out.println(ansi.string("  @|green \u2713|@ demo project loaded from the catalog"));
+    }
     var registered = WorkstationIdentity.registered();
     var git = LocalIdentity.detect().git();
     if (!json) {
@@ -188,11 +206,7 @@ public final class ProjectDemoCommand implements Runnable {
         workstationKey ->
             new ProjectProvisioner(shell, tracker, listener, workstationKey, operator)
                 .provision(
-                    config,
-                    hostYaml,
-                    GitCredentials.singleTokenMap(gitToken),
-                    git,
-                    SailPaths.projectFilesDir(config.name())));
+                    config, hostYaml, tokens, git, SailPaths.projectFilesDir(config.name())));
 
     if (json) {
       var map = new LinkedHashMap<String, Object>();
@@ -231,13 +245,9 @@ public final class ProjectDemoCommand implements Runnable {
     }
   }
 
-  private ProjectDefinition loadDemoDefinition(PrintStream out, Ansi ansi) {
+  private static ProjectDefinition demoDefinition() {
     try (var operations = OperationsFactory.open()) {
-      var definition = operations.catalog().demoDefinition();
-      if (!json) {
-        out.println(ansi.string("  @|green \u2713|@ demo project loaded from the catalog"));
-      }
-      return definition;
+      return operations.catalog().demoDefinition();
     }
   }
 
