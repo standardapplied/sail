@@ -10,6 +10,7 @@ import ai.singlr.sail.common.Remedied;
 import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.engine.FileMutex;
 import ai.singlr.sail.engine.SailPaths;
+import ai.singlr.sail.pty.PtyMessage;
 import ai.singlr.sail.pty.PtySessionHost;
 import java.io.IOException;
 import java.nio.file.Files;
@@ -69,6 +70,26 @@ final class PtyHostYield implements SessionYield {
     if (!failures.isEmpty()) {
       throw Remedied.io("", failures);
     }
+  }
+
+  @Override
+  public void endIn(String project, String workspace, String reason) throws IOException {
+    if (!Files.exists(socket)) {
+      return;
+    }
+    List<String> in;
+    try (var client = SessionClient.connect(socket, dispatchCredential(socket))) {
+      in =
+          client.list().stream()
+              .filter(
+                  info ->
+                      info.live()
+                          && info.project().equals(project)
+                          && info.workspace().equals(workspace))
+              .map(PtyMessage.SessionInfo::name)
+              .toList();
+    }
+    end(in, reason);
   }
 
   @Override

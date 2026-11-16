@@ -107,14 +107,16 @@ public struct SessionInfo: Equatable, Sendable {
     public var writerFDE: String
     public var room: String
     public var command: [String]
-    /// The workspace the session runs in, empty for the project's own container.
+    /// The project the session runs in, empty for none.
+    public var project: String
+    /// The workspace of that project the session runs in, empty for the project's own container.
     public var workspace: String
     /// The person who opened the session.
     public var opener: String
 
     public init(
         name: String, instanceID: String, live: Bool, attached: Int32, writerFDE: String, room: String,
-        command: [String], workspace: String = "", opener: String = ""
+        command: [String], project: String = "", workspace: String = "", opener: String = ""
     ) {
         self.name = name
         self.instanceID = instanceID
@@ -123,6 +125,7 @@ public struct SessionInfo: Equatable, Sendable {
         self.writerFDE = writerFDE
         self.room = room
         self.command = command
+        self.project = project
         self.workspace = workspace
         self.opener = opener
     }

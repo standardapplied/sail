@@ -152,7 +152,7 @@ private extension SessionInfo {
     /// Where it runs and who opened it, written after every other field of the frame, a page's after
     /// its cursor: the macOS lanes run the app against a pinned released host, which writes none.
     var place: [Field] {
-        [.string(workspace), .string(opener)]
+        [.string(project), .string(workspace), .string(opener)]
     }
 }
 
@@ -250,6 +250,7 @@ private struct Cursor {
     private mutating func placed(_ info: SessionInfo) throws(TerminalWireError) -> SessionInfo {
         guard remaining > 0 else { return info }
         var placed = info
+        placed.project = try string()
         placed.workspace = try string()
         placed.opener = try string()
         return placed
@@ -265,6 +266,7 @@ private struct Cursor {
                 throw .malformed("a page places \(placed) sessions but holds \(sessions.count)")
             }
             for index in sessions.indices {
+                sessions[index].project = try string()
                 sessions[index].workspace = try string()
                 sessions[index].opener = try string()
             }

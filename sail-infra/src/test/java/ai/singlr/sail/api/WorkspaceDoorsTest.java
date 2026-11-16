@@ -11,6 +11,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.config.ProjectDefinition;
+import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.engine.FileMutex;
 import ai.singlr.sail.engine.ScriptedShellExecutor;
 import ai.singlr.sail.engine.ShellExec;
@@ -20,23 +21,30 @@ import ai.singlr.sail.engine.Workspaces;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.Actors;
 import ai.singlr.sail.identity.ProjectScope;
+import ai.singlr.sail.identity.Role;
+import ai.singlr.sail.identity.RoleRule;
+import ai.singlr.sail.store.FdeStore;
+import ai.singlr.sail.store.SchemaManager;
+import ai.singlr.sail.store.Sqlite;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Consumer;
 import java.util.function.Function;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 /**
  * A person's workspace doors beside a terminal (R10): each decided as Enter a workspace on the
- * workspace's owner, over a box that answers only for the workspace it holds; a delete reads what
- * the workspace holds first, with the idle sweep's own reads.
+ * workspace's owner, by the id its label stores, on the instance the workspace's locked entry
+ * found, over a box that answers only the commands each door is given and fails any other; a delete
+ * reads what the workspace holds first, with the idle sweep's own reads, under the same lock.
  */
 class WorkspaceDoorsTest {
 
@@ -54,34 +62,120 @@ class WorkspaceDoorsTest {
           null,
           null);
   private static final Remedy FORCED = Remedy.of("delete it with force");
+  private static final String EXEC_IN_IT =
+      "[{\"status\": \"Running\", \"description\": \"Executing command\","
+          + " \"resources\": {\"instances\": [\"/1.0/instances/acme-try?project=default\"]}}]";
 
   @TempDir Path tempDir;
+  private final List<String> ended = new ArrayList<>();
+  private final SessionYield sessions =
+      new SessionYield() {
+        @Override
+        public Hold lock(String project) {
+          return NO_HOLD;
+        }
 
-  /** Workspace {@code try} of acme as Incus lists it: {@code state}, {@code owner}'s. */
+        @Override
+        public void end(List<String> names, String reason) {}
+
+        @Override
+        public void endIn(String project, String workspace, String reason) {
+          ended.add(project + "/" + workspace + ": " + reason);
+        }
+      };
+
+  /** Workspace {@code try} of acme as Incus lists it: {@code state}, {@code owner}'s by id. */
   private static String trying(String state, String owner) {
+    return workspace(
+        state,
+        ", \"user.sail.owner\": \"%s\", \"user.sail.owner_id\": \"fde_%s\""
+            .formatted(owner, owner));
+  }
+
+  /**
+   * Workspace {@code try} of acme as Incus lists it: {@code state}, labelled with {@code label}.
+   */
+  private static String workspace(String state, String label) {
     return """
         {"name": "acme-try", "status": "%s", "type": "container",
          "config": {"user.sail.project": "acme", "user.sail.workspace": "try",
-                    "user.sail.ready": "1762941601000", "user.sail.owner": "%s",
-                    "user.sail.owner_id": "fde_%s"},
+                    "user.sail.ready": "1762941601000"%s},
          "expanded_devices": {"root": {"path": "/", "pool": "tank", "type": "disk"}}}"""
-        .formatted(state, owner, owner);
+        .formatted(state, label);
   }
 
+  /**
+   * A box holding acme's current template and no workspace {@code try}, failing every command but
+   * the ones a create gives it.
+   */
+  private static ScriptedShellExecutor templated() {
+    return new ScriptedShellExecutor()
+        .onOk("incus list ^acme-try$", "[]")
+        .onOk(
+            "incus list --format json",
+            "[" + TestWorkspaces.currentTemplate(project -> Optional.of(ACME), "acme") + "]")
+        .onOk("incus snapshot list acme--tmpl --format json", TestWorkspaces.V1)
+        .onOk("incus storage list --format json", TestWorkspaces.POOL)
+        .onOk("incus query /1.0/storage-pools/tank/resources", "{}")
+        .onOk("incus copy")
+        .onOk("incus start acme-try")
+        .onOk("incus config set acme-try")
+        .onOk("incus file push")
+        .onOk("incus exec acme-try");
+  }
+
+  /** A box holding {@code workspace}, failing every command but the ones a door gives it. */
   private static ScriptedShellExecutor box(String workspace) {
-    return new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
-        .onOk("incus list ^acme-try$", "[" + workspace + "]")
+    return box(workspace, first -> {});
+  }
+
+  /**
+   * As {@link #box(String)}, with {@code first}'s answers ahead of every other: each by a pattern
+   * of its own, since an answer given again for the same pattern replaces the first.
+   */
+  private static ScriptedShellExecutor box(
+      String workspace, Consumer<ScriptedShellExecutor> first) {
+    var box = new ScriptedShellExecutor();
+    first.accept(box);
+    return box.onOk("incus list ^acme-try$", "[" + workspace + "]")
         .onOk("incus list --format json", "[" + workspace + "]")
-        .onOk("incus storage list --format json", TestWorkspaces.POOL);
+        .onOk("incus storage list --format json", TestWorkspaces.POOL)
+        .onOk("incus query /1.0/storage-pools/tank/resources", "{}")
+        .onOk("incus operation list --format json", "[]")
+        .onOk("incus start acme-try")
+        .onOk("incus stop acme-try")
+        .onOk("incus delete acme-try")
+        .onOk("incus file push")
+        .onOk("incus exec acme-try");
   }
 
   private WorkspaceDoors doors(ShellExec box) {
-    return new WorkspaceDoors(
-        TestWorkspaces.over(box, System::nanoTime, tempDir), box, TestOwners::of);
+    return doors(box, TestOwners::of, null);
+  }
+
+  private WorkspaceDoors doors(
+      ShellExec box, Function<String, WorkspaceOwner> owners, String keeper) {
+    return new WorkspaceDoors(over(box), box, owners, sessions, keeper);
+  }
+
+  private Workspaces over(ShellExec box) {
+    return TestWorkspaces.over(box, System::nanoTime, tempDir);
   }
 
   private static ApiException refused(Actor actor, Door door) {
     return assertThrows(ApiException.class, () -> Actor.call(actor, door::run));
+  }
+
+  private static List<String> changes(ScriptedShellExecutor box) {
+    return box.invocations().stream()
+        .filter(
+            c ->
+                c.startsWith("incus start")
+                    || c.startsWith("incus stop")
+                    || c.startsWith("incus delete")
+                    || c.contains("sail-left"))
+        .map(c -> c.contains("sail-left") ? "read" : c.split(" ")[1])
+        .toList();
   }
 
   @FunctionalInterface
@@ -100,14 +194,15 @@ class WorkspaceDoorsTest {
 
     assertEquals(ErrorCode.FORBIDDEN_NOT_ASSIGNEE, refused.failure().errorCode());
     assertEquals("Workspace 'try' belongs to 'bob', not you.", refused.getMessage());
-    assertEquals(1, box.invocations().stream().filter(c -> c.startsWith("incus start")).count());
+    assertEquals(List.of("start"), changes(box));
   }
 
   /**
-   * Scenario 45 and the agents: a viewer and every agent are refused; the owner stops their own.
+   * Scenario 45 and the agents: a viewer and every agent are refused; the owner stops their own,
+   * and its open terminals are told who stopped it.
    */
   @Test
-  void aViewerAndAnAgentAreRefusedAndTheOwnerStopsTheirOwn() throws Exception {
+  void aViewerAndAnAgentAreRefusedAndTheOwnerStopsTheirOwnTellingItsTerminals() throws Exception {
     var box = box(trying("Running", "ada"));
     var doors = doors(box);
 
@@ -117,15 +212,17 @@ class WorkspaceDoorsTest {
 
     assertEquals(ErrorCode.READ_ONLY_CREDENTIAL, viewer.failure().errorCode());
     assertEquals(ErrorCode.AGENT_LANE_FORBIDDEN, agent.failure().errorCode());
-    assertEquals(1, box.invocations().stream().filter(c -> c.startsWith("incus stop")).count());
+    assertEquals(List.of("stop"), changes(box));
+    assertEquals(List.of("acme/try: Workspace try of acme was stopped by ada."), ended);
   }
 
   /** A workspace the project does not have is not found, never refused. */
   @Test
   void aWorkspaceThatIsNotThereIsNotFound() {
-    var doors = doors(box("").onOk("incus list ^acme-try$", "[]"));
+    var doors = doors(box("").onOk("incus list --format json", "[]"));
 
-    var absent = refused(Actors.ADMIN, () -> doors.start(ACME, "try"));
+    var absent =
+        refused(Actors.ADMIN, () -> WorkspaceDoors.answered(() -> doors.start(ACME, "try")));
 
     assertEquals(ErrorCode.NOT_FOUND, absent.failure().errorCode());
     assertEquals("Project 'acme' has no workspace 'try' on this box.", absent.getMessage());
@@ -139,14 +236,8 @@ class WorkspaceDoorsTest {
    */
   @Test
   void aDeleteOfAWorkspaceThatHoldsWorkIsRefusedNamingItAndItsOwner() {
-    var stopped = "[" + trying("Stopped", "bob") + "]";
     var box =
-        new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
-            .onOk("incus storage list --format json", TestWorkspaces.POOL)
-            .onOk("incus list ^acme-try$", stopped)
-            .onceOnOk("incus list --format json", stopped)
-            .onOk("list --format json", "[" + trying("Running", "bob") + "]")
-            .onOk("sail-left", "changes app\nstash app\n");
+        box(trying("Stopped", "bob"), first -> first.onOk("sail-left", "changes app\nstash app\n"));
     var doors = doors(box);
 
     var refused =
@@ -160,39 +251,69 @@ class WorkspaceDoorsTest {
     assertEquals(
         "Take what it holds first, or delete it anyway: delete it with force",
         refused.failure().remedy().plain());
-    assertEquals(
-        List.of("start", "stop"),
-        box.invocations().stream()
-            .filter(c -> c.startsWith("incus start") || c.startsWith("incus stop"))
-            .map(c -> c.split(" ")[1])
-            .toList());
-    assertTrue(box.invocations().stream().noneMatch(c -> c.startsWith("incus delete")));
+    assertEquals(List.of("start", "read", "stop"), changes(box));
   }
 
   /** A read that fails cannot tell, and needs force too; the owner's own is not named. */
   @Test
   void aDeleteWhoseReadFailsCannotTellAndIsRefused() {
     var box =
-        box(trying("Running", "ada"))
-            .on("sail-left", new ShellExec.Result(128, "", "fatal: bad\ngit could not read app"));
-    var doors = doors(box);
+        box(
+            trying("Running", "ada"),
+            first ->
+                first.on(
+                    "sail-left",
+                    new ShellExec.Result(128, "", "fatal: bad\ngit could not read app")));
 
     var refused =
         refused(
             Actors.OWNER_API,
-            () -> doors.delete(ACME, "try", spec -> false, false, FORCED, i -> {}));
+            () -> doors(box).delete(ACME, "try", spec -> false, false, FORCED, i -> {}));
 
     assertEquals(ErrorCode.WORKSPACE_HOLDS_WORK, refused.failure().errorCode());
     assertEquals(
         "Whether workspace try of acme holds work cannot be told: git could not read app:"
             + " fatal: bad.",
         refused.getMessage());
+    assertEquals(List.of("read"), changes(box));
+  }
+
+  /**
+   * Ruling 2 of review 1: a workspace someone is in (a terminal, an attach or an exec, as Incus
+   * lists its operations) is not deleted without force, naming that; with it, its terminals are
+   * told who deleted it.
+   */
+  @Test
+  void aDeleteOfAWorkspaceSomeoneIsInWaitsForForceAndForceTellsTheirTerminals() throws Exception {
+    var box = box(trying("Running", "ada"), first -> first.onOk("operation list", EXEC_IN_IT));
+    var doors = doors(box);
+
+    var refused =
+        refused(
+            Actors.OWNER_API,
+            () -> doors.delete(ACME, "try", spec -> false, false, FORCED, i -> {}));
+    var deleted =
+        Actor.call(
+            Actors.OWNER_API,
+            () -> doors.delete(ACME, "try", spec -> false, true, FORCED, i -> {}));
+
+    assertEquals(ErrorCode.WORKSPACE_HOLDS_WORK, refused.failure().errorCode());
+    assertEquals(
+        "Workspace try of acme is in use: Incus runs a command in it (a terminal, an attach or"
+            + " an exec).",
+        refused.getMessage());
+    assertEquals(
+        "End what runs in it first, or delete it anyway: delete it with force",
+        refused.failure().remedy().plain());
+    assertEquals(Workspaces.Change.DELETED, deleted.change());
+    assertEquals(List.of("read", "delete"), changes(box));
+    assertEquals(List.of("acme/try: Workspace try of acme was deleted by ada."), ended);
   }
 
   /** Force deletes what it holds unread; a live run refuses the delete whatever is passed. */
   @Test
   void forceDeletesUnreadAndALiveRunRefusesWhateverIsPassed() throws Exception {
-    var held = box(trying("Running", "ada")).onOk("sail-left", "changes app\n");
+    var held = box(trying("Running", "ada"), first -> first.onOk("sail-left", "changes app\n"));
     var live =
         box(
             trying("Running", "ada")
@@ -209,28 +330,106 @@ class WorkspaceDoorsTest {
                     Actors.OWNER_API,
                     () -> doors(live).delete(ACME, "try", spec -> true, true, FORCED, i -> {})));
 
-    assertTrue(held.invocations().stream().noneMatch(c -> c.contains("sail-left")));
-    assertTrue(held.invocations().stream().anyMatch(c -> c.startsWith("incus delete")));
+    assertEquals(List.of("delete"), changes(held));
     assertTrue(refused.getMessage().contains("holds a live run of spec a"), refused.getMessage());
-    assertTrue(live.invocations().stream().noneMatch(c -> c.startsWith("incus delete")));
+    assertEquals(List.of(), changes(live));
   }
 
-  /** Scenario 30: a member makes their own workspace from the current template, owned by them. */
+  /** A workspace that holds nothing and no one is deleted without force, read first. */
   @Test
-  void aMemberMakesTheirOwnWorkspaceAndAViewerNone() throws Exception {
-    var definitions = (ProjectReader) project -> Optional.of(ACME);
-    var box =
-        TestWorkspaces.incus(definitions, "acme")
-            .onOk("incus list ^acme-try$", "[]")
-            .onOk("incus copy", "")
-            .onOk("incus start", "");
+  void aDeleteOfAWorkspaceThatHoldsNothingNeedsNoForce() throws Exception {
+    var box = box(trying("Running", "ada"));
+
+    Actor.call(
+        Actors.OWNER_API,
+        () -> doors(box).delete(ACME, "try", spec -> false, false, FORCED, i -> {}));
+
+    assertEquals(List.of("read", "delete"), changes(box));
+    var asked = box.invocations().indexOf("incus operation list --format json");
+    var deleted =
+        box.invocations()
+            .indexOf(
+                box.invocations().stream()
+                    .filter(c -> c.startsWith("incus delete"))
+                    .findFirst()
+                    .orElseThrow());
+    assertTrue(0 <= asked && asked < deleted, "who is in it is asked before the delete");
+  }
+
+  /**
+   * Review 1's B2 and M2: while another holds the workspace's lock (the sweep stopping or deleting
+   * it, or a terminal's start), a start or a delete waits no longer than the create wait and then
+   * says the runner is busy, having read, started and deleted nothing.
+   */
+  @Test
+  void aStartOrADeleteWaitsForTheWorkspacesLockAndThenSaysTheRunnerIsBusy() throws Exception {
+    var locks = Files.createDirectories(tempDir.resolve("locks"));
+    var deadline = Workspaces.CREATE_WAIT.toNanos();
+    var reads = new AtomicInteger();
+    var box = box(trying("Stopped", "ada"));
+    var workspaces = TestWorkspaces.over(box, () -> reads.getAndIncrement() * deadline, locks);
+    var doors = new WorkspaceDoors(workspaces, box, TestOwners::of, sessions, null);
+    var holding = new CountDownLatch(1);
+    var release = new CountDownLatch(1);
+    var other =
+        Thread.ofVirtual()
+            .start(
+                () -> {
+                  try (var held = workspaces.holdIfFree("acme-try").orElseThrow()) {
+                    holding.countDown();
+                    release.await();
+                  } catch (Exception e) {
+                    throw new IllegalStateException(e);
+                  }
+                });
+    assertTrue(holding.await(30, TimeUnit.SECONDS));
+    ApiException start;
+    ApiException delete;
+    try {
+      start =
+          refused(Actors.OWNER_API, () -> WorkspaceDoors.answered(() -> doors.start(ACME, "try")));
+      delete =
+          refused(
+              Actors.OWNER_API,
+              () ->
+                  WorkspaceDoors.answered(
+                      () -> doors.delete(ACME, "try", spec -> false, false, FORCED, i -> {})));
+    } finally {
+      release.countDown();
+      other.join();
+    }
+
+    for (var busy : List.of(start, delete)) {
+      assertEquals(ErrorCode.RUNNER_BUSY, busy.failure().errorCode());
+      assertEquals(
+          "Workspace try of acme is being stopped or deleted on this runner, and nothing enters it"
+              + " until that is done.",
+          busy.getMessage());
+    }
+    assertEquals(List.of(), changes(box));
+    assertTrue(box.invocations().stream().noneMatch(c -> c.startsWith("incus list")));
+  }
+
+  /**
+   * Scenario 30: a member makes their own workspace from the current template, owned by them; a
+   * viewer makes none, and nor does a credential that names no person.
+   */
+  @Test
+  void aMemberMakesTheirOwnWorkspaceAndAViewerAndANamelessCredentialNone() throws Exception {
+    var box = templated();
     var doors = doors(box);
+    var nameless = new Actor(null, Role.ADMIN, Actor.Lane.API);
 
     var viewer = refused(Actors.VIEWER, () -> doors.create(ACME, "try", tempDir, p -> false));
+    var noOne = refused(nameless, () -> doors.create(ACME, "try", tempDir, p -> false));
     var created =
         Actor.call(Actors.OWNER_API, () -> doors.create(ACME, "try", tempDir, p -> false));
 
     assertEquals(ErrorCode.READ_ONLY_CREDENTIAL, viewer.failure().errorCode());
+    assertEquals(ErrorCode.FORBIDDEN, noOne.failure().errorCode());
+    assertEquals(
+        "This credential names no person, and a workspace is made for the person who asks.",
+        noOne.getMessage());
     assertEquals("acme-try", created.instance());
     assertTrue(
         box.invocations().stream().anyMatch(c -> c.contains("user.sail.owner=ada")),
@@ -250,33 +449,16 @@ class WorkspaceDoorsTest {
 
     var unheld =
         assertThrows(
-            ApiException.class, () -> WorkspaceDoors.refusal(elsewhere, "acme", "try", "ada"));
+            ApiException.class,
+            () -> WorkspaceDoors.refusal(elsewhere, "acme", "try", "ada", null));
     var refused =
         assertThrows(
             ApiException.class,
-            () -> WorkspaceDoors.requireEnter(Actors.OTHER_API, "acme", "try", "ada"));
-    WorkspaceDoors.requireEnter(Actors.OWNER_API, "acme", "try", "ada");
+            () -> WorkspaceDoors.requireEnter(Actors.OTHER_API, "acme", "try", "ada", null));
+    WorkspaceDoors.requireEnter(Actors.OWNER_API, "acme", "try", "ada", null);
 
     assertEquals(ErrorCode.PROJECT_NOT_IN_CATALOG, unheld.failure().errorCode());
     assertEquals(ErrorCode.FORBIDDEN_NOT_ASSIGNEE, refused.failure().errorCode());
-  }
-
-  /** A workspace that holds nothing is deleted without force, its read made first. */
-  @Test
-  void aDeleteOfAWorkspaceThatHoldsNothingNeedsNoForce() throws Exception {
-    var box = box(trying("Running", "ada"));
-
-    Actor.call(
-        Actors.OWNER_API,
-        () -> doors(box).delete(ACME, "try", spec -> false, false, FORCED, i -> {}));
-
-    assertEquals(
-        List.of("sail-left", "incus delete"),
-        box.invocations().stream()
-            .map(c -> c.contains("sail-left") ? "sail-left" : c)
-            .filter(c -> c.equals("sail-left") || c.startsWith("incus delete"))
-            .map(c -> c.startsWith("incus delete") ? "incus delete" : c)
-            .toList());
   }
 
   /** The API says each failure of a door with its own code: a busy runner is not a conflict. */
@@ -285,14 +467,14 @@ class WorkspaceDoorsTest {
     var locks = Files.createDirectories(tempDir.resolve("locks"));
     var deadline = Workspaces.CREATE_WAIT.toNanos();
     var reads = new AtomicInteger();
-    var box =
-        TestWorkspaces.incus(project -> Optional.of(ACME), "acme")
-            .onOk("incus list ^acme-try$", "[]");
+    var box = templated();
     var doors =
         new WorkspaceDoors(
             TestWorkspaces.over(box, () -> reads.getAndIncrement() * deadline, locks),
             box,
-            TestOwners::of);
+            TestOwners::of,
+            sessions,
+            null);
     var holding = new CountDownLatch(1);
     var release = new CountDownLatch(1);
     var other =
@@ -317,30 +499,9 @@ class WorkspaceDoorsTest {
       release.countDown();
       other.join();
     }
-    var conflict =
-        assertThrows(
-            ApiException.class,
-            () ->
-                WorkspaceDoors.answered(
-                    () -> {
-                      throw new IllegalStateException("taken");
-                    }));
-    var incus =
-        assertThrows(
-            ApiException.class,
-            () ->
-                WorkspaceDoors.answered(
-                    () -> {
-                      throw new IOException("Error: Failed to start device");
-                    }));
-    var interrupted =
-        assertThrows(
-            ApiException.class,
-            () ->
-                WorkspaceDoors.answered(
-                    () -> {
-                      throw new InterruptedException();
-                    }));
+    var conflict = answered(new IllegalStateException("taken"));
+    var incus = answered(new IOException("Error: Failed to start device"));
+    var interrupted = answered(new InterruptedException());
     var kept = Thread.interrupted();
     var invalid = new IllegalArgumentException("Invalid workspace name: 'X'.");
 
@@ -363,46 +524,97 @@ class WorkspaceDoorsTest {
                     })));
   }
 
+  private static ApiException answered(Exception failure) {
+    return assertThrows(
+        ApiException.class,
+        () ->
+            WorkspaceDoors.answered(
+                () -> {
+                  throw failure;
+                }));
+  }
+
   /**
-   * #427: a workspace is its owner's by the id its label stores. Its handle given since to another
-   * person makes it nobody's, an admin's alone, and so does its person gone; the same label with
-   * the person's own id is theirs.
+   * #427 and review 1's M1: a workspace is its owner's by the id its label stores. Its handle given
+   * since to another person, its person gone, or a label with no id at all makes it nobody's, an
+   * admin's alone; the same label with the person's own id is theirs. An admin is told the truth of
+   * a gone person's workspace rather than given it.
    */
   @Test
-  void aWorkspaceIsItsOwnersByTheIdItsLabelStoresNotByItsHandle() throws Exception {
+  void aWorkspaceIsItsOwnersByTheIdItsLabelStoresAndALabelWithNoIdIsNobodys() throws Exception {
     var labelled = trying("Stopped", "ada").replace("fde_ada", "fde_old_ada");
-    Function<String, WorkspaceOwner> now =
-        handle ->
-            new WorkspaceOwner(
-                handle, handle, handle + "@sail.invalid", Map.of(), List.of(), "fde_" + handle);
     Function<String, WorkspaceOwner> gone =
         handle -> {
           throw new IllegalStateException(handle + " is not on this box's roster.");
         };
     var regiven = box(labelled);
     var removed = box(labelled);
-    var hers = box(labelled.replace("fde_old_ada", "fde_ada"));
+    var handleOnly = box(workspace("Stopped", ", \"user.sail.owner\": \"ada\""));
+    var hers = box(trying("Stopped", "ada"));
 
-    var notHers =
-        refused(
-            Actors.OWNER_API,
-            () -> new WorkspaceDoors(over(regiven), regiven, now).start(ACME, "try"));
-    var noOnes =
-        refused(
-            Actors.OWNER_API,
-            () -> new WorkspaceDoors(over(removed), removed, gone).start(ACME, "try"));
-    Actor.call(
-        Actors.OWNER_API, () -> new WorkspaceDoors(over(hers), hers, now).start(ACME, "try"));
+    var notHers = refused(Actors.OWNER_API, () -> doors(regiven).start(ACME, "try"));
+    var noOnes = refused(Actors.OWNER_API, () -> doors(removed, gone, null).start(ACME, "try"));
+    var noId = refused(Actors.OWNER_API, () -> doors(handleOnly).start(ACME, "try"));
+    var told =
+        assertThrows(
+            IllegalStateException.class,
+            () -> Actor.call(Actors.ADMIN, () -> doors(removed, gone, null).start(ACME, "try")));
+    Actor.call(Actors.OWNER_API, () -> doors(hers).start(ACME, "try"));
 
-    for (var refusal : List.of(notHers, noOnes)) {
+    for (var refusal : List.of(notHers, noOnes, noId)) {
       assertEquals(ErrorCode.FORBIDDEN_NOT_ASSIGNEE, refusal.failure().errorCode());
       assertEquals(
           "Workspace 'try' has no owner, so only an admin may enter it.", refusal.getMessage());
     }
-    assertTrue(hers.invocations().contains("incus start acme-try"));
+    assertEquals(
+        "Workspace 'try' of acme is ada's, who is no longer active here, so it is not started: the"
+            + " next pass makes it nobody's. Delete it meanwhile with: sail project workspace"
+            + " delete acme try --force.",
+        told.getMessage());
+    assertEquals(List.of(), changes(removed));
+    assertEquals(List.of("start"), changes(hers));
   }
 
-  private Workspaces over(ShellExec box) {
-    return TestWorkspaces.over(box, System::nanoTime, tempDir);
+  /**
+   * Review 1's B1: on a node, every person but its own acts as a viewer (the role rule's cap,
+   * kept), and is told their workspaces live on main; the node's own person keeps what nobody owns
+   * there, as an admin does on main, and on main the same member is refused it.
+   */
+  @Test
+  void onANodeOthersAreSentToMainAndItsOwnPersonKeepsWhatNobodyOwns() throws Exception {
+    try (var db = Sqlite.open(tempDir.resolve("roster.db"))) {
+      new SchemaManager(db).migrate();
+      var fdes = new FdeStore(db);
+      fdes.add("client", null, "client@x", "member");
+      fdes.add("eng", null, "eng@x", "member");
+      var node =
+          new RoleRule(() -> new SyncConfig("node", "sail@main", "client", "client-box"), fdes);
+      var eng = node.principal(RoleRule.Credential.token("eng", "member")).orElseThrow();
+      var client = node.principal(RoleRule.Credential.token("client", "member")).orElseThrow();
+      var onNode = box(workspace("Stopped", ""));
+      var onMain = box(workspace("Stopped", ""));
+
+      var capped =
+          refused(
+              eng,
+              () ->
+                  doors(onNode, TestOwners::of, "client").create(ACME, "new", tempDir, p -> false));
+      Actor.call(client, () -> doors(onNode, TestOwners::of, "client").start(ACME, "try"));
+      var mainRefuses = refused(client, () -> doors(onMain).start(ACME, "try"));
+
+      assertEquals(Role.VIEWER, eng.role());
+      assertEquals(ErrorCode.READ_ONLY_CREDENTIAL, capped.failure().errorCode());
+      assertEquals(
+          "This box is client's node, where only client makes or enters a workspace; another"
+              + " person's workspaces live on main.",
+          capped.getMessage());
+      assertEquals(
+          "Make yours on main: POST /v1/projects/<project>/workspaces on main's API.",
+          capped.failure().remedy().plain());
+      assertEquals(List.of("start"), changes(onNode));
+      assertEquals(
+          "Workspace 'try' has no owner, so only an admin may enter it.", mainRefuses.getMessage());
+      assertEquals(Optional.of("client"), node.nodeFde());
+    }
   }
 }

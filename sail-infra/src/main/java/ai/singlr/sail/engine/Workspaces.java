@@ -606,20 +606,27 @@ public final class Workspaces {
   }
 
   /**
-   * A terminal's door to workspace {@code name} of {@code project}: its own instance, found by name
-   * and keys under the entry's lock, started when stopped and given its recorded owner's
-   * credentials, as an attach is; one the project does not have, or that is not whole, is refused
-   * as {@link #start} refuses it. Nothing is made.
+   * What a door decides of the workspace it is entering, the instance the entry found under the
+   * workspace's lock: it refuses by throwing, and the entry then does nothing.
    */
-  public void startExisting(
-      String project,
-      String name,
-      ProjectDefinition config,
-      Function<String, WorkspaceOwner> owners)
+  @FunctionalInterface
+  public interface Entry {
+    Entry ANY = found -> {};
+
+    void decide(BoxInstances.Instance found) throws Exception;
+  }
+
+  /**
+   * A terminal's door to workspace {@code name} of {@code config}'s project: its own instance,
+   * found by name and keys under the entry's lock, decided by {@code enter}, started when stopped
+   * and given its recorded owner's credentials, as an attach is; one the project does not have, or
+   * that is not whole, is refused as {@link #start} refuses it. Nothing is made. Answers its
+   * instance.
+   */
+  public String startExisting(
+      ProjectDefinition config, String name, Function<String, WorkspaceOwner> owners, Entry enter)
       throws Exception {
-    try (var held = entryLock(project, name)) {
-      startGiving(whole(project, name, "project shell", false), config, owners);
-    }
+    return started(config, name, owners, enter, "project shell", false).instance();
   }
 
   /**
@@ -1136,30 +1143,53 @@ public final class Workspaces {
   public Changed start(
       ProjectDefinition config, String name, Function<String, WorkspaceOwner> owners)
       throws Exception {
+    return start(config, name, owners, Entry.ANY);
+  }
+
+  /**
+   * As {@link #start(ProjectDefinition, String, Function)}, under the workspace's lock, waited for
+   * no longer than {@link #CREATE_WAIT} (the sweep stopping or deleting it holds it), its instance
+   * decided by {@code enter} first.
+   */
+  public Changed start(
+      ProjectDefinition config, String name, Function<String, WorkspaceOwner> owners, Entry enter)
+      throws Exception {
+    return started(config, name, owners, enter, "project start", true);
+  }
+
+  private Changed started(
+      ProjectDefinition config,
+      String name,
+      Function<String, WorkspaceOwner> owners,
+      Entry enter,
+      String projectVerb,
+      boolean changes)
+      throws Exception {
     var project = config.name();
-    var found = whole(project, name, "project start", true);
-    if (found.state() instanceof ContainerState.Running) {
-      return new Changed(project, name, found.name(), Change.ALREADY_RUNNING, null);
-    }
-    var started = nanos.getAsLong();
-    containers.start(found.name());
-    var running = nanos.getAsLong();
-    awaitReady(found.name());
-    try (var held = nameLock(found.name())) {
+    try (var held = entryLock(project, name)) {
+      var found = whole(project, name, projectVerb, changes);
+      enter.decide(found);
+      if (found.state() instanceof ContainerState.Running) {
+        return new Changed(project, name, found.name(), Change.ALREADY_RUNNING, null);
+      }
+      var started = nanos.getAsLong();
+      containers.start(found.name());
+      var running = nanos.getAsLong();
+      awaitReady(found.name());
       giveOrStop(found, config, owners);
+      var ready = nanos.getAsLong();
+      return new Changed(
+          project,
+          name,
+          found.name(),
+          Change.STARTED,
+          new Timings(
+              null,
+              millis(running - started),
+              millis(ready - running),
+              millis(ready - started),
+              Map.of()));
     }
-    var ready = nanos.getAsLong();
-    return new Changed(
-        project,
-        name,
-        found.name(),
-        Change.STARTED,
-        new Timings(
-            null,
-            millis(running - started),
-            millis(ready - running),
-            millis(ready - started),
-            Map.of()));
   }
 
   /**
@@ -1179,13 +1209,27 @@ public final class Workspaces {
    * ({@code live} says of a spec), which is refused naming the stop that ends the run.
    */
   public Changed stop(String project, String name, Predicate<String> live) throws Exception {
-    var found = existing(project, name, "project stop", true);
-    requireNoLiveRun(project, name, found, live);
-    if (!found.state().live()) {
-      return new Changed(project, name, found.name(), Change.ALREADY_STOPPED, null);
+    return stop(project, name, live, Entry.ANY, Entry.ANY);
+  }
+
+  /**
+   * As {@link #stop(String, String, Predicate)}, under the workspace's lock, its instance decided
+   * by {@code enter} first, and {@code before} run on it just before it stops.
+   */
+  public Changed stop(
+      String project, String name, Predicate<String> live, Entry enter, Entry before)
+      throws Exception {
+    try (var held = entryLock(project, name)) {
+      var found = existing(project, name, "project stop", true);
+      enter.decide(found);
+      requireNoLiveRun(project, name, found, live);
+      if (!found.state().live()) {
+        return new Changed(project, name, found.name(), Change.ALREADY_STOPPED, null);
+      }
+      before.decide(found);
+      containers.stop(found.name());
+      return new Changed(project, name, found.name(), Change.STOPPED, null);
     }
-    containers.stop(found.name());
-    return new Changed(project, name, found.name(), Change.STOPPED, null);
   }
 
   /**
@@ -1197,30 +1241,63 @@ public final class Workspaces {
   public Changed delete(
       String project, String name, Predicate<String> live, Consumer<String> confirm)
       throws Exception {
-    var found = existing(project, name, "project destroy", true);
-    requireNoLiveRun(project, name, found, live);
-    confirm.accept(found.name());
-    containers.forceDelete(found.name());
-    return new Changed(project, name, found.name(), Change.DELETED, null);
+    return delete(project, name, live, Entry.ANY, found -> confirm.accept(found.name()));
   }
 
-  /** The instance of workspace {@code name}, when it runs: where a shell opens. */
-  public String running(String project, String name) throws Exception {
-    var found = whole(project, name, "project shell", false);
-    return switch (found.state()) {
-      case ContainerState.Running ignored -> found.name();
-      case ContainerState.Stopped ignored -> throw notRunning(project, name, "stopped");
-      case ContainerState.Frozen ignored -> throw notRunning(project, name, "frozen");
-      case ContainerState.NotCreated _, ContainerState.Error _ ->
-          throw new IllegalStateException(
-              "Workspace '"
-                  + name
-                  + "' of "
-                  + project
-                  + " is not running: Incus lists it as "
-                  + found.state()
-                  + ".");
-    };
+  /**
+   * As {@link #delete(String, String, Predicate, Consumer)}, under the workspace's lock from its
+   * decision to its delete: its instance decided by {@code enter}, then {@code before} run on it,
+   * then read again (still there, still holding no live run) immediately before the delete.
+   */
+  public Changed delete(
+      String project, String name, Predicate<String> live, Entry enter, Entry before)
+      throws Exception {
+    try (var held = entryLock(project, name)) {
+      var found = existing(project, name, "project destroy", true);
+      enter.decide(found);
+      requireNoLiveRun(project, name, found, live);
+      before.decide(found);
+      var now = existing(project, name, "project destroy", true);
+      requireNoLiveRun(project, name, now, live);
+      containers.forceDelete(now.name());
+      return new Changed(project, name, now.name(), Change.DELETED, null);
+    }
+  }
+
+  /**
+   * Runs {@code body} on workspace {@code found} running: started for it when stopped, and stopped
+   * again when {@code body} throws. Its caller holds the workspace's lock.
+   */
+  public void whileRunning(BoxInstances.Instance found, Entry body) throws Exception {
+    var started = startIfStopped(found);
+    try {
+      body.decide(found);
+    } catch (Exception refused) {
+      if (started) {
+        stopAgain(found.name(), refused);
+      }
+      throw refused;
+    }
+  }
+
+  /**
+   * The person workspace {@code found} is labelled for when that person is no longer active here
+   * ({@code owners} refuses them): one a start cannot give to, until the pass makes it nobody's.
+   */
+  public static Optional<String> goneOwner(
+      BoxInstances.Instance found, Function<String, WorkspaceOwner> owners) {
+    return found
+        .key(BoxInstances.OWNER_KEY)
+        .filter(Strings::isNotBlank)
+        .filter(
+            handle -> {
+              try {
+                owners.apply(handle);
+                return false;
+              } catch (IllegalStateException notActiveHere) {
+                return true;
+              }
+            });
   }
 
   /**
@@ -1693,16 +1770,36 @@ public final class Workspaces {
   }
 
   /** Project {@code project} has no workspace {@code name} here. */
-  public static IllegalStateException absent(String project, String name) {
-    return Remedied.state(
-        "Project '" + project + "' has no workspace '" + name + "' on this box.",
-        Remedy.of("List them with: ", Remedy.sail("project workspace list", project), "."));
+  public static Absent absent(String project, String name) {
+    return new Absent(project, name);
   }
 
-  private static IllegalStateException notRunning(String project, String name, String state) {
-    return Remedied.state(
-        "Workspace '" + name + "' of " + project + " is " + state + ".",
-        Remedy.of("Start it with: ", Remedy.sail("project workspace start", project, name), "."));
+  /** A workspace the project does not have on this box: what a door answers as not found. */
+  public static final class Absent extends IllegalStateException implements Remedied {
+    private final String reason;
+    private final transient Remedy remedy;
+
+    private Absent(String project, String name) {
+      this(
+          "Project '" + project + "' has no workspace '" + name + "' on this box.",
+          Remedy.of("List them with: ", Remedy.sail("project workspace list", project), "."));
+    }
+
+    private Absent(String reason, Remedy remedy) {
+      super(Remedied.message(reason, remedy));
+      this.reason = reason;
+      this.remedy = remedy;
+    }
+
+    @Override
+    public String reason() {
+      return reason;
+    }
+
+    @Override
+    public Remedy remedy() {
+      return remedy;
+    }
   }
 
   private static Row row(

@@ -410,27 +410,48 @@ final class HostLanes {
       if (found.isEmpty()) {
         throw new PtyAdmission.Absent(Workspaces.absent(project, workspace).getMessage());
       }
-      var owner = Workspaces.ownerOf(found.get(), owners).orElse(null);
-      var refused =
-          Actor.call(
-              who.actor(),
-              () -> WorkspaceDoors.refusal(Actor.current(), project, workspace, owner));
-      if (refused.isPresent()) {
-        throw Remedied.io(refused.get().message(), refused.get().fix());
-      }
+      decide(project, workspace, found.get(), who);
     }
 
     @Override
     public void enterWorkspace(String project, String workspace, PtyIdentity.Person who)
         throws IOException {
-      admitWorkspace(project, workspace, who);
       try {
-        workspaces.startExisting(project, workspace, definitions.require(project), owners);
+        workspaces.startExisting(
+            definitions.require(project),
+            workspace,
+            owners,
+            found -> {
+              decide(project, workspace, found, who);
+              Workspaces.goneOwner(found, owners)
+                  .ifPresent(
+                      gone -> {
+                        throw WorkspaceDoors.goneOwner(project, workspace, gone);
+                      });
+            });
       } catch (Exception failed) {
         if (failed instanceof InterruptedException) {
           Thread.currentThread().interrupt();
         }
         throw Remedied.io(Remedied.reasonOf(failed), Remedied.remedyOf(failed));
+      }
+    }
+
+    /**
+     * Refuses {@code who} workspace {@code found} unless they may enter it, as every workspace door
+     * decides, the node's own person keeping what nobody owns on a node.
+     */
+    private void decide(
+        String project, String workspace, BoxInstances.Instance found, PtyIdentity.Person who)
+        throws IOException {
+      var owner = Workspaces.ownerOf(found, owners).orElse(null);
+      var keeper = roles.nodeFde().orElse(null);
+      var refused =
+          Actor.call(
+              who.actor(),
+              () -> WorkspaceDoors.refusal(Actor.current(), project, workspace, owner, keeper));
+      if (refused.isPresent()) {
+        throw Remedied.io(refused.get().message(), refused.get().fix());
       }
     }
 

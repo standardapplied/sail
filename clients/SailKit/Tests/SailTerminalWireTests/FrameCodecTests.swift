@@ -191,7 +191,8 @@ import Testing
 
 let lounge = SessionInfo(
     name: "lounge", instanceID: "inst-1", live: true, attached: 2, writerFDE: "uday",
-    room: "harbor-design", command: ["claude", "--resume"], workspace: "dock", opener: "uday"
+    room: "harbor-design", command: ["claude", "--resume"], project: "harbor", workspace: "dock",
+    opener: "uday"
 )
 let shell = SessionInfo(
     name: "shell", instanceID: "inst-2", live: false, attached: 0, writerFDE: "", room: "", command: ["bash"]
@@ -225,13 +226,13 @@ func errWithoutRemedy(_ payload: [UInt8]) throws -> Int {
     1 + 4 + Int(try decodedLength(payload, at: 1))
 }
 
-/// Where `name`'s golden frame ends without its sessions' places: `lounge`'s in `dock` opened by
-/// `uday`, and `shell`'s in none.
+/// Where `name`'s golden frame ends without its sessions' places: `lounge`'s in `dock` of `harbor`
+/// opened by `uday`, and `shell`'s in none.
 func withoutWorkspace(_ name: String, _ payload: [UInt8]) -> Int {
-    let lounge = field("dock") + field("uday")
+    let lounge = field("harbor") + field("dock") + field("uday")
     return switch name {
     case "SessionInfo": payload.count - lounge
-    case "Sessions": payload.count - 4 - lounge - field("") - field("")
+    case "Sessions": payload.count - 4 - lounge - 3 * field("")
     default: payload.count
     }
 }

@@ -427,6 +427,7 @@ public final class SailOperations implements HostOperations {
   }
 
   private final ShellExec shell;
+  private final SessionYield sessionYield;
   private final WatcherSpawner watcherSpawner;
   private final EventBus eventBus;
   private final SpecStore specStore;
@@ -712,6 +713,7 @@ public final class SailOperations implements HostOperations {
       SessionYield sessionYield,
       OperationHooks hooks) {
     this.shell = shell;
+    this.sessionYield = sessionYield;
     this.watcherSpawner = hooks.watcher();
     this.eventBus = eventBus;
     this.specStore = specStore;
@@ -1505,7 +1507,13 @@ public final class SailOperations implements HostOperations {
   }
 
   private WorkspaceDoors workspaceDoors() {
-    return new WorkspaceDoors(Workspaces.onThisBox(shell), shell, identity()::workspaceOwner);
+    var box = box();
+    return new WorkspaceDoors(
+        Workspaces.onThisBox(shell),
+        shell,
+        identity()::workspaceOwner,
+        sessionYield,
+        box.isNode() ? box.handle() : null);
   }
 
   /** Whether a run of spec {@code spec} of {@code project} is live on this box. */

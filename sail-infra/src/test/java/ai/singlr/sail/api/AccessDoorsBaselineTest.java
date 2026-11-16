@@ -21,7 +21,7 @@ import ai.singlr.sail.engine.BoxInstances;
 import ai.singlr.sail.engine.HostAccess;
 import ai.singlr.sail.engine.HostToken;
 import ai.singlr.sail.engine.ScriptedShellExecutor;
-import ai.singlr.sail.engine.TestOwners;
+import ai.singlr.sail.engine.WorkspaceOwner;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.Role;
@@ -123,7 +123,7 @@ class AccessDoorsBaselineTest {
             TestControlPlane.on(
                 OperationsFactory.create(
                     world.db,
-                    workspacesOfAcme(new ScriptedShellExecutor())
+                    workspacesOfAcme(world, new ScriptedShellExecutor())
                         .onOk("incus list", "[]")
                         .onOk("incus storage list", "[{\"name\": \"tank\", \"driver\": \"zfs\"}]"),
                     bus,
@@ -165,18 +165,32 @@ class AccessDoorsBaselineTest {
    * other member's; {@code loose}, made by hand and no one's. Each running, holding nothing, and
    * stopped or deleted when asked.
    */
-  private static ScriptedShellExecutor workspacesOfAcme(ScriptedShellExecutor incus) {
+  private static ScriptedShellExecutor workspacesOfAcme(World world, ScriptedShellExecutor incus) {
+    var fdes = new FdeStore(world.db);
     var all = new ArrayList<String>();
+    all.add(TestWorkspaces.currentTemplate(ProjectReader.ofCatalog(world.projects), "acme"));
     for (var workspace : WORKSPACES.entrySet()) {
-      var listed = workspace(workspace.getKey(), workspace.getValue());
+      var owner = workspace.getValue();
+      var listed =
+          workspace(
+              workspace.getKey(),
+              owner.isBlank() ? "" : owner,
+              owner.isBlank() ? "" : fdes.byHandle(owner).orElseThrow().id());
       all.add(listed);
       incus.onOk("incus list ^acme-" + workspace.getKey() + "$", "[" + listed + "]");
     }
     return incus
         .onOk("incus list ^acme-", "[]")
+        .onOk("incus snapshot list acme--tmpl --format json", TestWorkspaces.V1)
+        .onOk("incus operation list --format json", "[]")
+        .onOk("incus copy acme--tmpl", "")
+        .onOk("incus start acme-", "")
+        .onOk("incus config set acme-", "")
+        .onOk("incus config device add acme-", "")
+        .onOk("incus file push", "")
+        .onOk("incus exec acme-", "")
         .onOk("incus stop acme-", "")
         .onOk("incus delete acme-", "")
-        .onOk("sail-left", "")
         .onOk("incus list --format json", "[" + String.join(",", all) + "]");
   }
 
@@ -184,13 +198,23 @@ class AccessDoorsBaselineTest {
   private static final Map<String, String> WORKSPACES =
       Map.of("try", Cast.OWNER, "spare", Cast.OTHER, "loose", "");
 
-  private static String workspace(String name, String owner) {
+  /**
+   * Workspace {@code name} of acme, running, owned by {@code owner} by id {@code id}: none for no
+   * one's.
+   */
+  private static String workspace(String name, String owner, String id) {
     return """
         {"name": "acme-%s", "status": "Running", "type": "container",
          "config": {"user.sail.project": "acme", "user.sail.workspace": "%s",
                     "user.sail.ready": "1762941601000"%s},
          "expanded_devices": {"root": {"path": "/", "pool": "tank", "type": "disk"}}}"""
-        .formatted(name, name, owner.isBlank() ? "" : ", \"user.sail.owner\": \"" + owner + "\"");
+        .formatted(
+            name,
+            name,
+            owner.isBlank()
+                ? ""
+                : ", \"user.sail.owner\": \"%s\", \"user.sail.owner_id\": \"%s\""
+                    .formatted(owner, id));
   }
 
   /**
@@ -262,9 +286,11 @@ class AccessDoorsBaselineTest {
             roles,
             new EventStore(world.db),
             new BoxInstances(new ScriptedShellExecutor()),
-            TestWorkspaces.over(workspacesOfAcme(new ScriptedShellExecutor())),
+            TestWorkspaces.over(workspacesOfAcme(world, new ScriptedShellExecutor())),
             project -> java.util.Optional.empty(),
-            TestOwners::of);
+            handle ->
+                WorkspaceOwner.of(
+                    new FdeStore(world.db), handle, Cast.OWNER, java.util.Optional.empty()));
     var socket = tempDir.resolve("pty.sock");
     try (var host =
         new PtySessionHost(

@@ -222,8 +222,8 @@ public sealed interface PtyMessage {
    * of it (see {@link PtySession.Origin}), so two corpses of one name are distinguishable. {@code
    * command} is the child as requested (the default login shell when none was), so a client can
    * tell an agent session from a plain shell; {@code room} is blank when the session is not
-   * room-bound, {@code workspace} when it runs in the project's own container; {@code opener} is
-   * the person who opened it.
+   * room-bound, {@code project} when it is in none, and {@code workspace} when it runs in the
+   * project's own container; {@code opener} is the person who opened it.
    */
   record SessionInfo(
       String name,
@@ -233,6 +233,7 @@ public sealed interface PtyMessage {
       String writerFde,
       String room,
       List<String> command,
+      String project,
       String workspace,
       String opener)
       implements PtyMessage {
@@ -246,13 +247,16 @@ public sealed interface PtyMessage {
         String writerFde,
         String room,
         List<String> command) {
-      this(name, instanceId, live, attached, writerFde, room, command, "", "");
+      this(name, instanceId, live, attached, writerFde, room, command, "", "", "");
     }
 
-    /** This session, run in {@code workspace} and opened by {@code opener}. */
-    public SessionInfo placed(String workspace, String opener) {
+    /**
+     * This session, run in workspace {@code workspace} of {@code project} (blank for the project's
+     * own container) and opened by {@code opener}.
+     */
+    public SessionInfo placed(String project, String workspace, String opener) {
       return new SessionInfo(
-          name, instanceId, live, attached, writerFde, room, command, workspace, opener);
+          name, instanceId, live, attached, writerFde, room, command, project, workspace, opener);
     }
   }
 

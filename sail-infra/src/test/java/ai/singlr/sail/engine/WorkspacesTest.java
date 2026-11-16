@@ -946,7 +946,9 @@ class WorkspacesTest {
         assertThrows(
             IllegalArgumentException.class, () -> workspaces.start(acme(), "main", TestOwners::of));
     var shellIn =
-        assertThrows(IllegalArgumentException.class, () -> workspaces.running("acme", "main"));
+        assertThrows(
+            IllegalArgumentException.class,
+            () -> workspaces.startExisting(acme(), "main", TestOwners::of, Workspaces.Entry.ANY));
     var create =
         assertThrows(
             IllegalArgumentException.class,
@@ -1174,29 +1176,27 @@ class WorkspacesTest {
     assertFalse(shell.invocations().stream().anyMatch(c -> c.startsWith("incus delete")));
   }
 
+  /** Ruling 6: a shell opens in a running workspace as it is, and starts a stopped one first. */
   @Test
-  void aShellOpensOnlyInARunningWorkspace() throws Exception {
+  void aShellEntersARunningWorkspaceAsItIsAndStartsAStoppedOne() throws Exception {
     var shell =
         incus(
             DIR_AND_ZFS,
             list(
                 workspace("acme", "fix-login", "Running", "v1"),
-                workspace("acme", "second", "Stopped", "v1"),
-                workspace("acme", "paused", "Frozen", "v1")),
+                workspace("acme", "second", "Stopped", "v1")),
             "[]");
-    var workspaces = workspaces(shell, ticks());
+    var workspaces = workspaces(shell, ticks(0, 1, 2, 3));
 
-    assertEquals("acme-fix-login", workspaces.running("acme", "fix-login"));
     assertEquals(
-        "Workspace 'second' of acme is stopped. Start it with: sail project workspace start acme"
-            + " second.",
-        assertThrows(IllegalStateException.class, () -> workspaces.running("acme", "second"))
-            .getMessage());
+        "acme-fix-login",
+        workspaces.startExisting(acme(), "fix-login", TestOwners::of, Workspaces.Entry.ANY));
     assertEquals(
-        "Workspace 'paused' of acme is frozen. Start it with: sail project workspace start acme"
-            + " paused.",
-        assertThrows(IllegalStateException.class, () -> workspaces.running("acme", "paused"))
-            .getMessage());
+        "acme-second",
+        workspaces.startExisting(acme(), "second", TestOwners::of, Workspaces.Entry.ANY));
+    assertEquals(
+        List.of("incus start acme-second"),
+        shell.invocations().stream().filter(c -> c.startsWith("incus start")).toList());
   }
 
   @Test
@@ -1267,7 +1267,7 @@ class WorkspacesTest {
   }
 
   @Test
-  void aWorkspaceInAStateIncusCannotRunIsListedAndRefusedAShell() throws Exception {
+  void aWorkspaceInAStateIncusCannotRunIsListedAsItIs() throws Exception {
     var shell =
         incus(
             DIR_AND_ZFS,
@@ -1287,11 +1287,6 @@ class WorkspacesTest {
             new Workspaces.Row("main", "acme", "not_created", null, null, null, null, null),
             new Workspaces.Row("odd", "acme-odd", "error", null, null, null, null, null)),
         workspaces.list("acme", id -> true).workspaces());
-    assertEquals(
-        "Workspace 'odd' of acme is not running: Incus lists it as"
-            + " Error[message=Unexpected container status: Error].",
-        assertThrows(IllegalStateException.class, () -> workspaces.running("acme", "odd"))
-            .getMessage());
   }
 
   @Test
@@ -1336,7 +1331,7 @@ class WorkspacesTest {
     workspaces(stale, ticks(0, 1, 2, 3, 4, 5, 6, 7))
         .create(acme(), "fix-login", source(), tempDir, "eng", TestOwners::of);
     workspaces(stopped, ticks(0, 1, 2)).start(acme(), "w", TestOwners::of);
-    workspaces(live, ticks()).running("acme", "w");
+    workspaces(live, ticks()).startExisting(acme(), "w", TestOwners::of, Workspaces.Entry.ANY);
     workspaces(live, ticks()).stop("acme", "w", NO_RUN);
     workspaces(live, ticks()).delete("acme", "w", NO_RUN, instance -> {});
 
@@ -1625,7 +1620,11 @@ class WorkspacesTest {
             .getMessage());
     assertEquals(
         refusal,
-        assertThrows(IllegalStateException.class, () -> workspaces.running("acme", "fix-login"))
+        assertThrows(
+                IllegalStateException.class,
+                () ->
+                    workspaces.startExisting(
+                        acme(), "fix-login", TestOwners::of, Workspaces.Entry.ANY))
             .getMessage());
     assertFalse(
         shell.invocations().stream()
@@ -1659,7 +1658,9 @@ class WorkspacesTest {
         List.<Executable>of(
             () -> workspaces.create(acme(), "fix-login", source(), tempDir, "eng", TestOwners::of),
             () -> workspaces.start(acme(), "fix-login", TestOwners::of),
-            () -> workspaces.running("acme", "fix-login"))) {
+            () ->
+                workspaces.startExisting(
+                    acme(), "fix-login", TestOwners::of, Workspaces.Entry.ANY))) {
       assertEquals(refusal, assertThrows(IllegalStateException.class, verb).getMessage());
     }
     assertTrue(

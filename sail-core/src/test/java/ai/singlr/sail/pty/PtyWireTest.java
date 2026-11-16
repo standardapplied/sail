@@ -377,11 +377,12 @@ class PtyWireTest {
         (PtyMessage.SessionInfo)
             roundTrip(
                 new PtyMessage.SessionInfo(
-                    "s", "i", true, 1, "ada", "", List.of("bash"), "try", "ada"));
+                    "s", "i", true, 1, "ada", "", List.of("bash"), "acme", "try", "ada"));
 
     assertEquals("try", create.workspace());
     assertEquals("try", ticket.workspace());
-    assertEquals(List.of("try", "ada"), List.of(info.workspace(), info.opener()));
+    assertEquals(
+        List.of("acme", "try", "ada"), List.of(info.project(), info.workspace(), info.opener()));
     assertEquals(
         "", new PtyMessage.Create("s", List.of(), "/tmp", "acme", "", 80, 24, "main").workspace());
     assertEquals("", new PtyMessage.Create("s", List.of(), "/tmp", "acme", "", 80, 24).workspace());
@@ -417,16 +418,16 @@ class PtyWireTest {
         "Corrupt pty frame: a page places 2 sessions but holds 1.",
         assertThrows(IOException.class, () -> readPayload(misplaced)).getMessage());
     assertEquals(
-        List.of("try", "ada"),
+        List.of("acme", "try", "ada"),
         ((PtyMessage.Sessions)
                 roundTrip(
                     new PtyMessage.Sessions(
                         List.of(
                             new PtyMessage.SessionInfo(
-                                "s", "i", true, 1, "", "", List.of(), "try", "ada")),
+                                "s", "i", true, 1, "", "", List.of(), "acme", "try", "ada")),
                         "")))
             .sessions().stream()
-                .flatMap(placed -> Stream.of(placed.workspace(), placed.opener()))
+                .flatMap(placed -> Stream.of(placed.project(), placed.workspace(), placed.opener()))
                 .toList());
   }
 }

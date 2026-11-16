@@ -172,12 +172,22 @@ class ClientGoldensTest {
           null,
           null,
           null);
-  private static final String DOCK =
-      """
-      {"name": "harbor-dock", "status": "Running", "type": "container",
-       "config": {"user.sail.project": "harbor", "user.sail.workspace": "dock",
-                  "user.sail.ready": "1762941601000", "user.sail.owner": "uday"},
-       "expanded_devices": {"root": {"path": "/", "pool": "tank", "type": "disk"}}}""";
+
+  /** Harbor's template, current at v1, as Incus lists it. */
+  private static final String TEMPLATE =
+      TestWorkspaces.template(PROJECT, ProjectProvisioner.inputs(HARBOR, Optional.empty()));
+
+  /** Workspace {@code dock} of harbor, running, uday's by {@code udayId}. */
+  private static String dock(String udayId) {
+    return """
+        {"name": "harbor-dock", "status": "Running", "type": "container",
+         "config": {"user.sail.project": "harbor", "user.sail.workspace": "dock",
+                    "user.sail.ready": "1762941601000", "user.sail.owner": "uday",
+                    "user.sail.owner_id": "%s"},
+         "expanded_devices": {"root": {"path": "/", "pool": "tank", "type": "disk"}}}"""
+        .formatted(udayId);
+  }
+
   private static final String RP_ID = "sail.standardapplied.com";
   private static final String ORIGIN = "https://" + RP_ID;
   private static final String PASSKEYS = "/v1/auth";
@@ -218,6 +228,7 @@ class ClientGoldensTest {
         var bus = new EventBus();
         var box = new Box(db, bus, tempDir)) {
       var uday = box.session("uday", "Uday", "uday@example.com", Role.ADMIN);
+      box.holdsDockOf("uday");
       var vik = box.token("vik", Role.VIEWER);
       var sam = box.scopedToken("sam");
       var http = new TreeMap<String, String>();
@@ -513,6 +524,7 @@ class ClientGoldensTest {
             "uday",
             ROOM,
             List.of("claude", "--resume"),
+            PROJECT,
             "dock",
             "uday");
     var shell = new PtyMessage.SessionInfo("shell", "inst-2", false, 0, "", "", List.of("bash"));
@@ -605,6 +617,7 @@ class ClientGoldensTest {
     private final Sqlite db;
     private final EventBus bus;
     private final SailOperations operations;
+    private final ScriptedShellExecutor incus;
     private final HttpServer server;
     private final ManualClock streamClock;
     private final SessionAwareAuth auth;
@@ -619,25 +632,14 @@ class ClientGoldensTest {
       this.db = db;
       this.bus = bus;
       this.streamClock = new ManualClock(AT, Duration.ofMinutes(1));
+      this.incus =
+          new ScriptedShellExecutor(new ShellExec.Result(0, "[]", ""))
+              .onOk("incus storage list", "[{\"name\": \"tank\", \"driver\": \"zfs\"}]")
+              .onOk("incus snapshot list harbor--tmpl --format json", TestWorkspaces.V1)
+              .onOk("incus list --format json", "[" + TEMPLATE + "]")
+              .onOk("sail-left", "changes app\n");
       this.operations =
-          OperationsFactory.create(
-                  db,
-                  new ScriptedShellExecutor(new ShellExec.Result(0, "[]", ""))
-                      .onOk("incus storage list", "[{\"name\": \"tank\", \"driver\": \"zfs\"}]")
-                      .onOk("incus snapshot list harbor--tmpl --format json", TestWorkspaces.V1)
-                      .onOk("incus list ^harbor-dock$", "[" + DOCK + "]")
-                      .onOk(
-                          "incus list --format json",
-                          "["
-                              + TestWorkspaces.template(
-                                  PROJECT, ProjectProvisioner.inputs(HARBOR, Optional.empty()))
-                              + ","
-                              + DOCK
-                              + "]")
-                      .onOk("sail-left", "changes app\n"),
-                  bus,
-                  SyncScheduler.disabled(),
-                  SessionYield.NONE)
+          OperationsFactory.create(db, incus, bus, SyncScheduler.disabled(), SessionYield.NONE)
               .useControlPlane(
                   db,
                   dir,
@@ -1082,6 +1084,14 @@ class ClientGoldensTest {
         }
         case null, default -> measured;
       };
+    }
+
+    /** Makes Incus list workspace {@code dock} of harbor, {@code handle}'s by their id. */
+    void holdsDockOf(String handle) {
+      var dock = dock(new FdeStore(db).byHandle(handle).orElseThrow().id());
+      incus
+          .onOk("incus list ^harbor-dock$", "[" + dock + "]")
+          .onOk("incus list --format json", "[" + TEMPLATE + "," + dock + "]");
     }
 
     /** Sends what a golden needs written first, which must succeed. */

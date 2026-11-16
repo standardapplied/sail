@@ -1295,6 +1295,7 @@ public final class PtySessionHost implements AutoCloseable {
         session.writerFde(),
         session.origin().room(),
         session.origin().command(),
+        session.origin().project(),
         session.origin().workspace(),
         session.ownerFde());
   }

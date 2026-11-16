@@ -242,7 +242,7 @@ public final class PtyWire {
    * none, and the app reads a frame's fields up to the place.
    */
   private static Writer encodePlace(Writer out, PtyMessage.SessionInfo info) {
-    return out.string(info.workspace()).string(info.opener());
+    return out.string(info.project()).string(info.workspace()).string(info.opener());
   }
 
   private static PtyMessage decode(ByteBuffer in) throws IOException {
@@ -280,7 +280,7 @@ public final class PtyWire {
       case 25 -> new PtyMessage.Paused();
       case 26 -> new PtyMessage.Continued();
       case 27 -> new PtyMessage.SessionEnded(string(in));
-      case 28 -> decodeInfo(in).placed(string(in), string(in));
+      case 28 -> decodeInfo(in).placed(string(in), string(in), string(in));
       case 29 -> {
         var count = bounded(in);
         var sessions = new ArrayList<PtyMessage.SessionInfo>(count);
@@ -294,7 +294,7 @@ public final class PtyWire {
               "Corrupt pty frame: a page places " + placed + " sessions but holds " + count + ".");
         }
         for (var i = 0; i < count; i++) {
-          sessions.set(i, sessions.get(i).placed(string(in), string(in)));
+          sessions.set(i, sessions.get(i).placed(string(in), string(in), string(in)));
         }
         yield new PtyMessage.Sessions(List.copyOf(sessions), next);
       }

@@ -176,8 +176,7 @@ public final class ProjectWorkspaceCommand implements Runnable {
 
     private void execute() throws Exception {
       var config = WorkspaceVerbs.readable(project, operator());
-      WorkspaceVerbs.entering(doors -> doors.start(config, name));
-      ShellCommand.open(WorkspaceVerbs.workspaces(false).running(project, name));
+      ShellCommand.open(WorkspaceVerbs.entering(false, doors -> doors.startExisting(config, name)));
     }
   }
 
@@ -196,9 +195,7 @@ public final class ProjectWorkspaceCommand implements Runnable {
           null,
           (workspaces, named) -> {
             var config = WorkspaceVerbs.readable(named.project, operator());
-            return named.dryRun
-                ? workspaces.start(config, named.name, WorkspaceVerbs::ownerOf)
-                : WorkspaceVerbs.entering(doors -> doors.start(config, named.name));
+            return WorkspaceVerbs.entering(named.dryRun, doors -> doors.start(config, named.name));
           });
     }
   }
@@ -216,9 +213,8 @@ public final class ProjectWorkspaceCommand implements Runnable {
           (workspaces, named) -> {
             var live =
                 WorkspaceVerbs.liveRun(named.project, OperationsFactory::open, HostSync.handle());
-            return named.dryRun
-                ? workspaces.stop(named.project, named.name, live)
-                : WorkspaceVerbs.entering(doors -> doors.stop(named.project, named.name, live));
+            return WorkspaceVerbs.entering(
+                named.dryRun, doors -> doors.stop(named.project, named.name, live));
           });
     }
   }
@@ -253,18 +249,15 @@ public final class ProjectWorkspaceCommand implements Runnable {
           (workspaces, named) -> {
             var live =
                 WorkspaceVerbs.liveRun(named.project, OperationsFactory::open, HostSync.handle());
-            if (named.dryRun) {
-              return workspaces.delete(
-                  named.project, named.name, live, instance -> confirm(yes, named));
-            }
             var config = WorkspaceVerbs.readable(named.project, operator());
             return WorkspaceVerbs.entering(
+                named.dryRun,
                 doors ->
                     doors.delete(
                         config,
                         named.name,
                         live,
-                        force,
+                        force || named.dryRun,
                         forcedDelete(named.project, named.name),
                         instance -> confirm(yes, named)));
           });
