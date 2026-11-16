@@ -18,6 +18,7 @@ import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.LoginStore;
 import ai.singlr.sail.store.RunStore;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.NoSuchElementException;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
@@ -40,10 +41,19 @@ public final class LoginOperations {
   private final RunStore runs;
   private final Consumer<Event> events;
 
-  LoginOperations(FdeStore fdes, RunStore runs, Consumer<Event> events) {
+  /** Answers each workspace a token change did not reach ({@code Workspaces#refresh}). */
+  @FunctionalInterface
+  interface Reach {
+    List<String> workspacesOf(String handle) throws Exception;
+  }
+
+  private final Reach reach;
+
+  LoginOperations(FdeStore fdes, RunStore runs, Consumer<Event> events, Reach reach) {
     this.fdes = fdes;
     this.runs = runs;
     this.events = events;
+    this.reach = reach;
   }
 
   /** The logins of {@code fde}, the caller when blank. */
@@ -55,8 +65,18 @@ public final class LoginOperations {
   }
 
   /** Stores {@code value} as the caller's login {@code name} of {@code harness}, or replaces it. */
-  LoginResponse store(String harness, String name, String kind, String value) {
+  LoginResponse store(String harness, String name, String kind, String value, String fde) {
     var person = caller();
+    if (Strings.isNotBlank(fde) && !fde.equals(person.handle())) {
+      throw new ApiException(
+          ErrorCode.FORBIDDEN,
+          "Nobody stores a login for another person: " + fde + " stores their own.");
+    }
+    if (LoginStore.GIT.equals(harness)) {
+      var row = stored(() -> logins().storeGit(person.id(), name, value));
+      announce(STORED, person, row);
+      return new LoginResponse(view(person, row), unreached(person));
+    }
     var named = LoginStore.requireName(name);
     var known = Harnesses.of(harness);
     var still = liveOn(person, known, named);
@@ -68,6 +88,11 @@ public final class LoginOperations {
   /** Makes the caller's login {@code name} of {@code harness} the default for launches after it. */
   LoginResponse use(String harness, String name) {
     var person = caller();
+    if (LoginStore.GIT.equals(harness)) {
+      throw new ApiException(
+          ErrorCode.BAD_REQUEST,
+          "A git token is no default: each host has its own, and each is used.");
+    }
     var row = found(() -> logins().use(person.id(), Harnesses.of(harness), name));
     announce(DEFAULT, person, row);
     return new LoginResponse(view(person, row), null);
@@ -79,6 +104,9 @@ public final class LoginOperations {
    */
   LoginResponse remove(String harness, String name, String fde) {
     var person = whose(fde);
+    if (LoginStore.GIT.equals(harness)) {
+      return removeGit(person, name);
+    }
     var known = Harnesses.of(harness);
     var removed = logins().remove(person.id(), known, name);
     if (removed.isEmpty()) {
@@ -95,6 +123,38 @@ public final class LoginOperations {
     var row = removed.get();
     announce(REMOVED, person, row);
     return new LoginResponse(view(person, row), liveOn(person, known, row.name()));
+  }
+
+  private String unreached(FdeStore.Fde person) {
+    try {
+      var left = reach.workspacesOf(person.handle());
+      return left.isEmpty()
+          ? null
+          : "These workspaces were not given all of it, and are given it again at their next start: "
+              + String.join("; ", left)
+              + ".";
+    } catch (Exception e) {
+      if (e instanceof InterruptedException) {
+        Thread.currentThread().interrupt();
+      }
+      return "This box's workspaces could not be read, so each is given it at its next start: "
+          + e.getMessage();
+    }
+  }
+
+  private LoginResponse removeGit(FdeStore.Fde person, String host) {
+    var removed = logins().removeGit(person.id(), host);
+    if (removed.isEmpty()) {
+      return new LoginResponse(
+          null,
+          "No git token for "
+              + LoginStore.requireHost(host)
+              + " is stored for "
+              + person.handle()
+              + "; nothing was removed.");
+    }
+    announce(REMOVED, person, removed.get());
+    return new LoginResponse(view(person, removed.get()), unreached(person));
   }
 
   private FdeStore roster() {
@@ -121,7 +181,12 @@ public final class LoginOperations {
                         ErrorCode.FORBIDDEN,
                         "This credential acts for no person, so it keeps no logins.",
                         "Use a token of your own, or sail on the host."));
-    return person(handle);
+    var person = person(handle);
+    if (!person.active()) {
+      throw new ApiException(
+          ErrorCode.FORBIDDEN, handle + " is disabled on this box, so they keep no logins here.");
+    }
+    return person;
   }
 
   /** {@code fde}'s roster entry, the caller's when blank or theirs; another's only to an admin. */
@@ -150,7 +215,7 @@ public final class LoginOperations {
   }
 
   /** What {@code store} stored, on a box that keeps logins. */
-  private static LoginStore.Row stored(Supplier<LoginStore.Row> store) {
+  private static <T> T stored(Supplier<T> store) {
     try {
       return store.get();
     } catch (IllegalStateException kept) {
@@ -197,6 +262,10 @@ public final class LoginOperations {
     data.put("name", row.name());
     data.put("kind", row.kind());
     data.put("fingerprint", row.fingerprint());
+    publish(type, data);
+  }
+
+  private void publish(String type, LinkedHashMap<String, Object> data) {
     events.accept(
         Event.of(
             Event.SAIL_AGENT,

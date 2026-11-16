@@ -236,7 +236,7 @@ class RunLoginIT extends AbstractIncusIT {
       throws Exception {
     try (var db = database()) {
       var fdes = new FdeStore(db);
-      var id = fdes.add(HANDLE, null, null, "admin").id();
+      var id = fdes.add(HANDLE, null, HANDLE + "@sail.invalid", "admin").id();
       fdes.logins().store(id, Harnesses.of("codex"), null, "api-key", KEY);
       seedSpec(new SpecStore(db), "spec-bg", "app");
       seedSpec(new SpecStore(db), "spec-fg", "web");
@@ -335,7 +335,7 @@ class RunLoginIT extends AbstractIncusIT {
   void anotherUserOfTheWorkspaceNeverSeesALaunchFileAtAnyInstant() throws Exception {
     try (var db = database()) {
       var fdes = new FdeStore(db);
-      var id = fdes.add(HANDLE, null, null, "admin").id();
+      var id = fdes.add(HANDLE, null, HANDLE + "@sail.invalid", "admin").id();
       fdes.logins().store(id, Harnesses.of("codex"), null, "api-key", KEY);
       var ops = operations(db);
       var runs = new ArrayList<DispatchOperations.Dispatched>();
@@ -368,7 +368,7 @@ class RunLoginIT extends AbstractIncusIT {
   @Test
   void aSpecRunWhosePersonStoredNoLoginIsRefusedWithNoRowAndNoUnit() throws Exception {
     try (var db = database()) {
-      new FdeStore(db).add(HANDLE, null, null, "admin");
+      new FdeStore(db).add(HANDLE, null, HANDLE + "@sail.invalid", "admin");
       seedSpec(new SpecStore(db), "spec-bg", "app");
 
       var refused =

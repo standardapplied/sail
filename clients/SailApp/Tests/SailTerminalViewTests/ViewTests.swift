@@ -144,6 +144,44 @@ import Testing
         #expect(move(6) == "\u{1b}[<35;7;2M", "the cell hovered before a drag, entered again after it")
     }
 
+    /// W5: a change of the view's size that keeps the grid still tells the session, so the
+    /// session's 60 ms hold counts from the view's last change, not the grid's.
+    @Test func aSizeChangeThatKeepsTheGridStillRestartsTheSessionsHold() throws {
+        let harness = try Harness()
+        harness.flush()
+        let grid = try #require(harness.view.grid)
+        let told = harness.link.resizes.count
+        var frame = harness.view.frame
+        frame.size.width += 1
+        harness.view.frame = frame
+        harness.flush()
+        #expect(harness.view.grid == grid, "a point more made another grid")
+        #expect(harness.link.resizes.count == told + 1)
+        #expect(harness.link.resizes.last == grid)
+    }
+
+    /// Scenario 21: the first click on a view that is not focused only focuses it: a program that
+    /// tracks the mouse gets no report of it, and nothing is selected; the next click is reported.
+    @Test func theFirstClickOnAnUnfocusedViewOnlyFocusesIt() throws {
+        let harness = try Harness()
+        harness.link.output("\u{1b}[?1000h\u{1b}[?1006habc")
+        harness.window.makeFirstResponder(nil)
+        harness.flush()
+        harness.link.forget()
+        harness.mouse(.leftMouseDown, column: 1, row: 0)
+        harness.mouse(.leftMouseDragged, column: 2, row: 0)
+        harness.mouse(.leftMouseUp, column: 2, row: 0)
+        harness.flush()
+        #expect(harness.window.firstResponder === harness.view)
+        #expect(harness.link.bytes.isEmpty, "the focusing click was reported: \(harness.link.bytes)")
+        #expect(harness.link.screen.selectedText() == nil)
+        harness.link.forget()
+        harness.mouse(.leftMouseDown, column: 1, row: 0)
+        harness.mouse(.leftMouseUp, column: 1, row: 0)
+        harness.flush()
+        #expect(String(decoding: harness.link.bytes, as: UTF8.self) == "\u{1b}[<0;2;1M\u{1b}[<0;2;1m")
+    }
+
     /// M3: a view draws a session for its life. Detaching ends its reading of the session's
     /// streams, and the session cannot be attached again; a view that is dropped stops reading too.
     @Test func aSessionIsDrawnByOneViewForLife() async throws {

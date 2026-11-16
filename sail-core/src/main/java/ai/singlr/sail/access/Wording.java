@@ -125,7 +125,8 @@ final class Wording {
           case SHARE ->
               List.of(
                   StageSkill.shareFromContainer("<folder>", id), StageSkill.unshare("<skill>", id));
-          case KEEP_LOGINS -> List.of(Remedy.sail("agent login", "<harness>"));
+          case KEEP_LOGINS ->
+              List.of(Remedy.sail("agent login", "<harness>"), Remedy.sail("git login", "<host>"));
           default -> List.<Remedy.Command>of();
         };
     return Remedy.of(

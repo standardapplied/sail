@@ -1,6 +1,7 @@
 import Foundation
 import os
 import QuartzCore
+import SailRenderer
 import SailSurface
 import Synchronization
 
@@ -24,7 +25,17 @@ final class ViewMarks: Sendable {
     }
 
     var figures: LatencyFigures {
-        marks.withLock { $0.figures }
+        let now = CACurrentMediaTime()
+        return marks.withLock { (marks: inout LatencyMarks) -> LatencyFigures in
+            var figures = marks.figures
+            figures.unpresented = marks.unpresented(at: now)
+            return figures
+        }
+    }
+
+    func completed(frame: UInt64, ok: Bool) {
+        let now = CACurrentMediaTime()
+        marks.withLock { $0.completed(frame: frame, at: now, ok: ok) }
     }
 
     func reset() {
@@ -61,9 +72,10 @@ final class ViewMarks: Sendable {
         marks.withLock { $0.committed(frame: frame, at: now, read: read, target: target) }
     }
 
-    func refreshed(since read: Double) {
+    func refreshed(since read: Double, workSince cpu: Duration) {
         let now = CACurrentMediaTime()
-        marks.withLock { $0.refreshed(taking: now - read) }
+        let work = (Duration.threadCPU - cpu) / .seconds(1)
+        marks.withLock { $0.refreshed(taking: now - read, working: work) }
     }
 
     func unchanged(read: Double) {
@@ -88,7 +100,8 @@ final class ViewMarks: Sendable {
             showing.presented = showing.presented.filter { $0 + 64 > frame }
             Self.endAll(frame, &showing)
         }
-        marks.withLock { $0.presented(frame: frame, at: time) }
+        let told = CACurrentMediaTime()
+        marks.withLock { $0.presented(frame: frame, at: time, told: told) }
     }
 
     private static func take(

@@ -114,7 +114,7 @@ final class ReviewLaneLauncher implements ReviewLanes {
       String boxHandle) {
     var role = invocation.lane().wire();
     try {
-      places.enter(checked, config, boxHandle);
+      places.enter(checked, config);
       var place = (RunPlace.SpecWorkspace) checked.place();
       workBranch.enter(
           place,

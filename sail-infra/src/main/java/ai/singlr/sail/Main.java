@@ -23,9 +23,19 @@ import picocli.CommandLine;
 
 public final class Main {
 
+  /**
+   * The JDK's poller mode for virtual threads' blocking I/O, set before any is done: platform
+   * poller threads. In the default mode, a sub-poller that is itself a virtual thread waits on a
+   * master poller, and in the native image that sub-poller sometimes never runs again after the
+   * master wakes it, so every descriptor it watches (the terminal host's listener among them) waits
+   * for good.
+   */
+  private static final String POLLER_MODE = "SYSTEM_THREADS";
+
   private Main() {}
 
   public static void main(String[] args) {
+    System.setProperty("jdk.pollerMode", POLLER_MODE);
     switch (RuntimeMode.detect()) {
       case RuntimeMode.Client client ->
           System.exit(new RemoteCommandRunner(client.config()).execute(args));

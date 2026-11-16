@@ -448,22 +448,39 @@ public final class Sqlite implements AutoCloseable {
   }
 
   /**
-   * Refuses a scope on a connection that SQLite says holds a transaction no scope opened: what a
-   * rollback that failed leaves, whose writes a new scope would otherwise join as if it were clean.
+   * Rolls back, once, a transaction SQLite says this connection holds that no scope opened: what a
+   * rollback that failed leaves, which no scope owns and a new scope would otherwise join as if it
+   * were clean. Refuses the scope only when SQLite still holds one after that (H3).
    */
   private void requireNoTransactionOpen() {
-    int autocommit;
+    if (!inTransaction()) {
+      return;
+    }
+    Throwable failed = null;
     try {
-      autocommit = (int) lib.autocommit.invokeExact(db);
+      execute("ROLLBACK");
+    } catch (Throwable e) {
+      failed = e;
+    }
+    if (inTransaction()) {
+      var refused =
+          new IllegalStateException(
+              "Database "
+                  + (path == null ? ":memory:" : path)
+                  + " holds a transaction that no scope opened and that would not roll back, so"
+                  + " it takes no new one: restart the process to reopen it.");
+      if (failed != null) {
+        refused.addSuppressed(failed);
+      }
+      throw refused;
+    }
+  }
+
+  private boolean inTransaction() {
+    try {
+      return (int) lib.autocommit.invokeExact(db) == 0;
     } catch (Throwable t) {
       throw new SqliteException("Failed to read the transaction state", t);
-    }
-    if (autocommit == 0) {
-      throw new IllegalStateException(
-          "Database "
-              + (path == null ? ":memory:" : path)
-              + " holds a transaction that no scope opened, left by a rollback that failed, so it"
-              + " takes no new one: restart the process to reopen it.");
     }
   }
 

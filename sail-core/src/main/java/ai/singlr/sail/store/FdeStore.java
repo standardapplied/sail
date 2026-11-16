@@ -138,6 +138,11 @@ public final class FdeStore {
     return LoginStore.beside(db);
   }
 
+  /** The SSH keys the people of this roster registered ({@code fde_ssh_keys}). */
+  public FdeSshKeyStore sshKeys() {
+    return new FdeSshKeyStore(db);
+  }
+
   public Optional<Fde> byId(String id) {
     return db.queryOne(SELECT + " WHERE id = ?", FdeStore::map, id);
   }
@@ -365,15 +370,20 @@ public final class FdeStore {
 
   /**
    * Disables every active FDE this box holds that main's roster, naming {@code listed}, no longer
-   * does: main removed it, so it is refused here as it is on main, never left acting with its last
-   * role. Its local row, and what references it, stays. Returns the handles it disabled.
+   * does, but this box's own {@code own}: main removed it, so it is refused here as it is on main,
+   * never left acting with its last role. Its local row, and what references it, stays. Returns the
+   * handles it disabled.
    */
-  public List<String> disableUnlisted(Collection<String> listed) {
+  public List<String> disableUnlisted(Collection<String> listed, String own) {
     return db.transaction(
         () -> {
           var unlisted =
               list().stream()
-                  .filter(fde -> fde.active() && !listed.contains(fde.handle()))
+                  .filter(
+                      fde ->
+                          fde.active()
+                              && !listed.contains(fde.handle())
+                              && !fde.handle().equals(own))
                   .map(Fde::handle)
                   .toList();
           unlisted.forEach(

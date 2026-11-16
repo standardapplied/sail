@@ -262,9 +262,10 @@ import Testing
 
     @Test func refreshTimesAreKept() {
         var marks = LatencyMarks()
-        marks.refreshed(taking: 0.002)
-        marks.refreshed(taking: 0.004)
+        marks.refreshed(taking: 0.002, working: 0.001)
+        marks.refreshed(taking: 0.004, working: 0.0015)
         #expect(abs(marks.figures.refresh.max - 4) < 1e-9)
+        #expect(abs(marks.figures.refreshWork.max - 1.5) < 1e-9)
     }
 
     /// Scenario 19's metric: output that waited through a stall of the main thread is seen however
@@ -284,5 +285,74 @@ import Testing
         unreported.committed(frame: 1, at: 1.5, read: 1.49, target: 1.516)
         unreported.presented(frame: 1, at: 0)
         #expect(abs(unreported.figures.outputToShown.max - 480) < 1e-6, "committed, where the display tells no time")
+        #expect(marks.figures.longestToShown == Span(1.020, 1.5), "the longest wait keeps when it was")
+        #expect(marks.figures.longestBetweenCommits == Span(1.001, 1.5), "and so does the longest gap between commits")
+    }
+}
+
+/// A frame Metal never tells presented says whether its commands completed: the window server
+/// had it, or the GPU work stalled.
+@Suite struct UnpresentedFrameTests {
+    @Test func eachCommittedFrameNotToldPresentedSaysItsAgeAndItsCommands() {
+        var marks = LatencyMarks()
+        marks.completed(frame: 1, at: 1.004, ok: true)
+        marks.committed(frame: 1, at: 1.001, read: 1.0, target: 1.016)
+        marks.committed(frame: 2, at: 1.020, read: 1.019, target: 1.033)
+        marks.completed(frame: 2, at: 1.026, ok: true)
+        marks.committed(frame: 3, at: 1.040, read: 1.039, target: 1.050)
+        marks.presented(frame: 1, at: 0, told: 2.0)
+        let left = marks.unpresented(at: 6.040)
+        #expect(left.map(\.frame) == [2, 3])
+        #expect(abs(left[0].ageMs - 5020) < 1e-6 && abs((left[0].completedAfterMs ?? 0) - 6) < 1e-6 && left[0].completedOK == true)
+        #expect(left[1].completedAfterMs == nil && left[1].completedOK == nil)
+        #expect(left[1].description == "frame 3 committed 5000 ms ago, its commands not completed")
+        let figures = marks.figures
+        #expect(figures.commitToCompleted.count == 2 && abs(figures.commitToCompleted.max - 6) < 1e-6, "a completion told before its commit mark counts too")
+        #expect(figures.commitToPresentTold.count == 1 && abs(figures.commitToPresentTold.max - 999) < 1e-6)
+    }
+}
+
+/// The drive's allowance for a hosted runner: a wait less only the drive's own thread's stall over
+/// that same wait, less the heartbeat's tick, never below zero and never more than the overlap.
+@Suite struct StallsTests {
+    static let wait = Span(10.0, 10.2)
+
+    static func own(_ gaps: Span...) -> Stalls {
+        var stalls = Stalls(tick: 0.01)
+        gaps.forEach { stalls.record($0) }
+        return stalls
+    }
+
+    @Test func aStallThatDoesNotOverlapTheWaitTakesNothing() {
+        #expect(Self.own(Span(9.0, 9.5), Span(10.3, 10.9)).net(of: Self.wait) == Self.wait.length)
+    }
+
+    @Test func aStallElsewhereInTheRunTakesNothingFromThisWait() {
+        let stalls = Self.own(Span(2.0, 2.5), Span(10.05, 10.07))
+        #expect(abs(stalls.net(of: Self.wait) - 0.19) < 1e-9, "the 500 ms stall at second 2 says nothing of a wait at second 10")
+    }
+
+    @Test func aPartlyOverlappingStallTakesTheOverlapLessTheTickAtMost() {
+        #expect(abs(Self.own(Span(10.15, 10.3)).net(of: Self.wait) - 0.15) < 1e-9, "only the 50 ms inside the wait")
+        #expect(abs(Self.own(Span(10.15, 10.17)).net(of: Self.wait) - 0.19) < 1e-9, "a 20 ms gap held the thread 10 ms")
+    }
+
+    @Test func aStallCoveringTheWaitTakesAllOfIt() {
+        #expect(Self.own(Span(9.9, 10.4)).net(of: Self.wait) == 0)
+        #expect(abs(Self.own(Span(10.0, 10.2)).net(of: Self.wait) - 0.01) < 1e-9, "a gap the length of the wait leaves its tick")
+    }
+
+    /// Under load every tick runs a little late; twenty ticks 5 ms late are not a 100 ms stall.
+    @Test func lateTicksDoNotAddUpToAStall() {
+        let late = (0 ..< 20).map { Span(10.0 + Double($0) * 0.015, 10.0 + Double($0 + 1) * 0.015) }
+        var stalls = Stalls(tick: 0.01)
+        late.forEach { stalls.record($0) }
+        #expect(abs(stalls.net(of: Span(10.0, 10.3)) - 0.295) < 1e-9)
+        #expect(abs(Self.own(Span(10.0, 10.05), Span(10.1, 10.2)).net(of: Self.wait) - 0.11) < 1e-9, "of two stalls, the longer counts")
+    }
+
+    @Test func aMainThreadStallAloneTakesNothing() {
+        #expect(Self.own().net(of: Self.wait) == Self.wait.length)
+        #expect(Self.own(Span(10.0, 10.01), Span(10.01, 10.02)).gaps.isEmpty, "ticks on time are not stalls")
     }
 }

@@ -100,7 +100,7 @@ import Testing
             ((view as? NSButton).map { [$0] } ?? []) + view.subviews.flatMap(buttons)
         }
         var walked = 0
-        for pane in [shell.account, shell.thisMac] as [NSView] {
+        for pane in [shell.account, shell.thisMac, shell.thisMac.strip] as [NSView] {
             for button in buttons(pane) {
                 walked += 1
                 #expect(button.keyEquivalent != "\r" || button is AccentButton, "\(name): \(button.title) is the system-drawn default")
@@ -110,8 +110,9 @@ import Testing
     }
 
     /// A: the title bar is transparent over a full-size content view, the platform's buttons in
-    /// place; under it the rail is drawn in `chrome` and the strip beside it in the pane's surface
-    /// (the layers' own colours; the drive checks the pixels of the running window).
+    /// place; under it the rail is drawn in `chrome`, and the row beside it in the account's surface,
+    /// or for "This Mac" in the tabs' `chrome` (the layers' own colours; the drive checks the pixels
+    /// of the running window).
     @MainActor @Test(arguments: [("dark", Look.dark), ("light", Look.light)])
     func theTitleBarShowsTheRailAndThePanesSurface(_ name: String, _ look: Look) throws {
         let folder = FileManager.default.temporaryDirectory.appending(path: "sail-look-\(UUID().uuidString.prefix(8))")
@@ -129,7 +130,7 @@ import Testing
         let content = try #require(window.contentView)
         #expect(window.contentLayoutRect.height < content.bounds.height, "\(name): the content view does not reach under the title bar")
         #expect(shell.rail.layer?.backgroundColor == NSColor(look.chrome).cgColor, "\(name): the rail is not chrome")
-        for (item, surface) in [(Rail.Item.account, look.canvas), (.thisMac, look.palette.background)] {
+        for (item, surface) in [(Rail.Item.account, look.canvas), (.thisMac, look.chrome)] {
             shell.select(item)
             #expect(content.layer?.backgroundColor == NSColor(surface).cgColor, "\(name) \(item): the strip under the title bar is not the pane's surface")
         }

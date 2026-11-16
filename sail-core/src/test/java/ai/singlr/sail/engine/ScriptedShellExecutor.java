@@ -32,6 +32,7 @@ public final class ScriptedShellExecutor implements ShellExec {
   private final List<String> invocations = new ArrayList<>();
   private final List<List<String>> arguments = new ArrayList<>();
   private final List<String> unbounded = new ArrayList<>();
+  private final List<String> inputs = new ArrayList<>();
   private final Result defaultResult;
 
   public ScriptedShellExecutor() {
@@ -129,6 +130,19 @@ public final class ScriptedShellExecutor implements ShellExec {
   @Override
   public Result exec(List<String> command) throws IOException {
     return exec(command, null, Duration.ZERO);
+  }
+
+  /** Answers as {@link #exec} does, keeping what was written to the command's stdin. */
+  @Override
+  public Result execWithInput(List<String> command, String input, Duration timeout)
+      throws IOException {
+    inputs.add(input);
+    return exec(command, null, timeout);
+  }
+
+  /** What each command run with input was given on its stdin, in order. */
+  public List<String> inputs() {
+    return Collections.unmodifiableList(inputs);
   }
 
   /** The commands run to exit with no deadline ({@link #run}), joined, in order. */

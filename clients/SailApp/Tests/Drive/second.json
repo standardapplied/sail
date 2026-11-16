@@ -3,7 +3,12 @@
   {"name": "still-signed-in", "signed": true, "pane": "Uday\n@uday\nadmin\nhttp://127.0.0.1:7979\nSigned in until ", "seconds": 20},
   {"name": "no-ceremony", "asked": 0},
   {"name": "this-mac", "select": "thisMac"},
-  {"name": "reattached-earlier-output", "line": "after-5", "seconds": 30},
+  {"name": "s27-the-window-as-it-was", "resize": [920, 720]},
+  {"name": "s27-the-same-tabs-names-ratios-and-focus", "arrangement": {"tabs": [1, 2, 1], "selected": 1, "focus": 0, "titles": ["This Mac", "api", "This Mac"], "frames": [[0, 0, 0.5, 1, 0, 0, 201, 0], [0.5, 0, 0.5, 1, 202, 0, -202, 0]]}, "seconds": 30},
+  {"name": "s27-reattached-earlier-output", "line": "kept-8", "seconds": 30},
+  {"name": "s28-the-order-survived", "press": "1", "modifiers": ["command"]},
+  {"name": "s28-tab-1-is-the-one-dragged-first", "arrangement": {"tabs": [1, 2, 1], "selected": 0}},
+  {"name": "s28-back-to-api", "press": "2", "modifiers": ["command"]},
   {"name": "still-live", "type": "echo again-$((3+4))\r"},
   {"name": "answers", "line": "again-7", "seconds": 10},
   {"name": "latency-overlay", "latencyOverlay": true},
@@ -25,5 +30,6 @@
   {"name": "the-old-item-said", "signed": true, "exactly": ["Sign in to Sail", "Your sign-in to http://127.0.0.1:7979 could not be read from the Keychain.", "Sign in again with your passkey."]},
   {"name": "the-old-item-removed", "signed": true, "keychain": "gone"},
   {"name": "the-window-zooms-and-restores", "zoomAndRestore": true},
-  {"name": "sweep", "sweep": true}
+  {"name": "sweep", "sweep": true},
+  {"name": "s32-panes4", "panes4": true}
 ]}

@@ -223,6 +223,13 @@ public final class Screen: Sendable {
         parts.withLock { $0.core.tracksMouse }
     }
 
+    /// Whether the cursor is on a shell's prompt now (OSC 133): a primary prompt row, from a shell
+    /// that marks its commands (C), none of them still running (no D since its C, so a nested
+    /// shell's prompt does not count); forgotten at a full reset. False with no marks.
+    public var cursorAtPrompt: Bool {
+        parts.withLock { $0.core.cursorAtPrompt }
+    }
+
     /// Scrolls `lines` (up is negative) at a pointer place: the wheel's report to a program that
     /// tracks the mouse, arrow keys to a full-screen program that asked for alternate scroll (mode
     /// 1007), or else the viewport through its history, which sends nothing.

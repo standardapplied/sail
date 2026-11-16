@@ -103,7 +103,8 @@ public final class ProjectWorkspaceCommand implements Runnable {
                   name,
                   WorkspaceVerbs.source(config, gitToken, dryRun, json, operator),
                   SailPaths.projectFilesDir(config.name()),
-                  WorkspaceVerbs.owner());
+                  Objects.toString(HostSync.handle(), ""),
+                  WorkspaceVerbs::ownerOf);
       if (json) {
         System.out.println(CliJson.stringify(created));
         return;
@@ -186,7 +187,13 @@ public final class ProjectWorkspaceCommand implements Runnable {
 
     @Override
     public void run() {
-      target.change(null, (workspaces, named) -> workspaces.start(named.project, named.name));
+      target.change(
+          null,
+          (workspaces, named) ->
+              workspaces.start(
+                  WorkspaceVerbs.readable(named.project, operator()),
+                  named.name,
+                  WorkspaceVerbs::ownerOf));
     }
   }
 

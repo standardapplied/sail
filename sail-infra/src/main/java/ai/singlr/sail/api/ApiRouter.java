@@ -767,7 +767,8 @@ public final class ApiRouter implements HttpHandler, RouteTable {
                 call.param("harness"),
                 call.param("name"),
                 body.get("kind") instanceof String kind ? kind : null,
-                body.get("value") instanceof String value ? value : null));
+                body.get("value") instanceof String value ? value : null,
+                call.query().get("fde")));
   }
 
   private ApiResponse useLogin(Call call) {

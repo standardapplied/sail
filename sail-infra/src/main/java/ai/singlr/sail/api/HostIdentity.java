@@ -7,6 +7,7 @@ package ai.singlr.sail.api;
 
 import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.engine.HostToken;
+import ai.singlr.sail.engine.WorkspaceOwner;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.ssh.SshGateway;
 import ai.singlr.sail.store.FdeSshKeyStore;
@@ -41,6 +42,12 @@ public interface HostIdentity {
   Optional<FdeStore.Fde> fde(String handle);
 
   List<FdeSshKeyStore.SshKeyInfo> sshKeys();
+
+  /**
+   * Person {@code handle} as the owner of a workspace of this box ({@link WorkspaceOwner#of}): with
+   * the box's workstation key when they are the box's person.
+   */
+  WorkspaceOwner workspaceOwner(String handle);
 
   SshGateway.Decision authorizeGateway(String command, String handle);
 }

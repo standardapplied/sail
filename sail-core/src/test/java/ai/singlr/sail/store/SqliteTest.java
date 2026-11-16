@@ -276,32 +276,24 @@ class SqliteTest {
   }
 
   /**
-   * Round 4, item 6: a connection SQLite says still holds a transaction that no scope opened, as a
-   * rollback that failed leaves one, is handed no new scope, write or read, as if it were clean:
-   * each is refused with a sentence that says what to do.
+   * H3: a connection SQLite says still holds a transaction that no scope opened, as a rollback that
+   * failed leaves one, is rolled back once before a new scope, write or read, begins: what that
+   * transaction held is dropped, the scope runs, and nothing waits for a restart.
    */
   @Test
-  void aConnectionLeftHoldingATransactionIsRefusedANewScopeWithASentence() {
+  void aConnectionLeftHoldingATransactionIsRolledBackOnceAndTakesTheNextScope() {
     db.execute("CREATE TABLE t (id INTEGER PRIMARY KEY)");
     db.execute("BEGIN");
     db.execute("INSERT INTO t VALUES (?)", 1);
 
-    var write =
-        assertThrows(
-            IllegalStateException.class,
-            () -> db.transaction(() -> db.execute("INSERT INTO t VALUES (?)", 2)));
-    var read = assertThrows(IllegalStateException.class, () -> db.read(() -> 0));
+    db.transaction(() -> db.execute("INSERT INTO t VALUES (?)", 2));
+    db.execute("BEGIN");
+    assertEquals(0, (int) db.read(() -> 0));
 
-    assertEquals(
-        "Database "
-            + tempDir.resolve("test.db")
-            + " holds a transaction that no scope opened, left by a rollback that failed, so it"
-            + " takes no new one: restart the process to reopen it.",
-        write.getMessage());
-    assertEquals(write.getMessage(), read.getMessage());
-    db.execute("ROLLBACK");
-    db.transaction(() -> db.execute("INSERT INTO t VALUES (?)", 3));
-    assertEquals(List.of(3L), db.query("SELECT id FROM t", row -> row.integer(0)));
+    assertEquals(List.of(2L), db.query("SELECT id FROM t", row -> row.integer(0)));
+    try (var other = Sqlite.open(tempDir.resolve("test.db"))) {
+      assertEquals(List.of(2L), other.query("SELECT id FROM t", row -> row.integer(0)));
+    }
   }
 
   @Test

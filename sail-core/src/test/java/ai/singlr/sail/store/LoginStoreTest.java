@@ -19,6 +19,7 @@ import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermissions;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.NoSuchElementException;
 import java.util.Optional;
 import java.util.Set;
@@ -373,6 +374,103 @@ class LoginStoreTest {
 
     assertEquals(List.of(), store.list(UDAY));
     assertEquals(Optional.empty(), store.defaultFor(UDAY, CLAUDE));
+  }
+
+  @Test
+  void aGitTokenIsKeptByHostBesideTheLoginsAndOnlyItsHostDateAndFingerprintAreShown()
+      throws Exception {
+    var store = store();
+    store.store(UDAY, CLAUDE, null, null, TOKEN);
+    var stored = store.storeGit(UDAY, "GitHub.com", "ghp_uday_0123456789ab");
+    store.storeGit(UDAY, "gitlab.example", "glpat-uday_0123456789ab");
+
+    assertEquals(
+        new LoginStore.Row(
+            "git",
+            "github.com",
+            "token",
+            false,
+            stored.storedAt(),
+            LoginStore.fingerprint("ghp_uday_0123456789ab")),
+        stored);
+    assertEquals(
+        Map.of("github.com", "ghp_uday_0123456789ab", "gitlab.example", "glpat-uday_0123456789ab"),
+        store.gitTokens(UDAY));
+    assertEquals(
+        List.of(
+            "claude-code/default token default",
+            "git/github.com token",
+            "git/gitlab.example token"),
+        described(store.list(UDAY)));
+    assertFalse(store.list(UDAY).toString().contains("ghp_uday_0123456789ab"));
+    var git = dir.resolve("logins").resolve(UDAY).resolve("git");
+    assertEquals("rwx------", PosixFilePermissions.toString(Files.getPosixFilePermissions(git)));
+    assertEquals(
+        "rw-------",
+        PosixFilePermissions.toString(Files.getPosixFilePermissions(git.resolve("github.com"))));
+    assertEquals("ghp_uday_0123456789ab\n", Files.readString(git.resolve("github.com")));
+    try (Stream<Path> files = Files.list(git)) {
+      assertEquals(2, files.count());
+    }
+  }
+
+  @Test
+  void aGitTokenStoredAgainIsReplacedAndOneRemovedTwiceIsRemovedOnce() {
+    var store = store();
+    store.storeGit(UDAY, "github.com", "ghp_old_0123456789ab");
+    store.storeGit(UDAY, "github.com", "ghp_new_0123456789ab");
+
+    assertEquals(Map.of("github.com", "ghp_new_0123456789ab"), store.gitTokens(UDAY));
+    assertTrue(store.removeGit(UDAY, "github.com").isPresent());
+    assertEquals(Optional.empty(), store.removeGit(UDAY, "github.com"));
+    assertEquals(List.of(), store.list(UDAY));
+    assertEquals(Map.of(), store.gitTokens(ANA));
+  }
+
+  @Test
+  void aGitTokenTakesTheLoginValueRuleAndAHostOutsideTheHostRuleIsRefused() {
+    var store = store();
+    var value =
+        assertThrows(
+            IllegalArgumentException.class, () -> store.storeGit(UDAY, "github.com", "a b"));
+    assertEquals(VALUE_RULE, value.getMessage());
+    assertEquals("git.example.com:8443", LoginStore.requireHost("Git.Example.com:8443"));
+    for (var host : List.of("../x", "-github.com", "git hub", "", "h:0", "h:65536", "h:x")) {
+      assertThrows(
+          IllegalArgumentException.class, () -> store.storeGit(UDAY, host, "ghp_x_0123456789ab"));
+    }
+    assertEquals(List.of(), store.list(UDAY));
+  }
+
+  /**
+   * F3: a git token shorter than any forge's is refused at the store, and no harness is named git,
+   * so a harness's logins and the git tokens never share a directory.
+   */
+  @Test
+  void aGitTokenShorterThanAnyForgesIsRefusedAndNoHarnessIsNamedGit() {
+    var store = store();
+
+    var refused =
+        assertThrows(IllegalArgumentException.class, () -> store.storeGit(UDAY, "github.com", "a"));
+
+    assertEquals(
+        "A git token is at least 16 characters, as every forge's is: this value is too short to be"
+            + " one.",
+        refused.getMessage());
+    assertEquals(Map.of(), store.gitTokens(UDAY));
+    assertTrue(Harnesses.all().stream().noneMatch(h -> h.yamlName().equals(LoginStore.GIT)));
+  }
+
+  @Test
+  void forgettingAPersonDeletesTheirGitTokensWithTheirLogins() {
+    var store = store();
+    store.storeGit(UDAY, "github.com", "ghp_uday_0123456789ab");
+    store.storeGit(ANA, "github.com", "ghp_ana_0123456789ab");
+
+    store.forget(UDAY);
+    assertEquals(Map.of(), store.gitTokens(UDAY));
+    assertEquals(1, store.sweep(id -> false));
+    assertEquals(Map.of(), store.gitTokens(ANA));
   }
 
   private static List<String> described(List<LoginStore.Row> rows) {

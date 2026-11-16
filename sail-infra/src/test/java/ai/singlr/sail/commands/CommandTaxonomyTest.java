@@ -58,6 +58,7 @@ class CommandTaxonomyTest {
             "init",
             "client",
             "host",
+            "git",
             "project",
             "server",
             "fde",
