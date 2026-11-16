@@ -36,20 +36,18 @@ public final class TerminalView: NSView {
     var composition = Composition()
     var committedDuringKey: [String]?
     var pointer = Pointer()
-    /// The layer's next drawable, asked on the main thread or, while one is awaited, off it; a
-    /// test hands out none. Sendable, so a closure made on the main actor is not bound to it.
+    /// The layer's next drawable, always asked off the main thread, where its wait of up to a
+    /// second blocks nothing (D1); a test withholds. Sendable, so it is not bound to the main actor.
     var nextDrawable: @Sendable (CAMetalLayer) -> (any CAMetalDrawable)? = { $0.nextDrawable() }
     /// Whether a window is on screen; a test, whose windows the window server never shows, says.
     var isOnScreen: (NSWindow) -> Bool = { $0.occlusionState.contains(.visible) }
-    /// The last refresh found no drawable.
-    private var awaitingDrawable = false
     private var committedFrames = 0
-    /// An ask for a drawable is under way off the main thread.
-    private var askingForDrawable = false
-    /// Whether the window was on screen when last looked at while a drawable was awaited.
-    private var wasOnScreen = false
-    /// A drawable that ask brought, for the next frame.
-    private var broughtDrawable: (any CAMetalDrawable)?
+    /// A drawable is being asked for off the main thread.
+    private var fetching = false
+    /// The drawable just brought, for the frame drawn on its arrival only.
+    private var fetched: (any CAMetalDrawable)?
+    /// A refresh wanted a frame and had no drawable: only then is one asked for.
+    private var owed = false
     /// The cell the pointer last moved into with no button held.
     var hovered: CellPoint?
     /// The button went down on a view that was not focused: that click only focuses it.
@@ -112,7 +110,7 @@ public final class TerminalView: NSView {
     public var drawingState: String {
         let figures = latency
         return "frames presented \(figures.reportedPresents + figures.unreportedPresents), committed \(committedFrames); the display link "
-            + "\(pacer.isIdle ? "paused" : "running") after \(figures.refresh.count) refreshes; \(awaitingDrawable ? "" : "not ")awaiting a drawable; "
+            + "\(pacer.isIdle ? "paused" : "running") after \(figures.refresh.count) refreshes; \(fetching ? "" : "not ")awaiting a drawable; "
             + "not yet told presented: \(figures.unpresented.isEmpty ? "none" : figures.unpresented.map(\.description).joined(separator: ", ")); "
             + String(format: "commit to completed p50 %.1f max %.1f ms, to told presented p50 %.1f max %.1f ms", figures.commitToCompleted.p50,
                      figures.commitToCompleted.max, figures.commitToPresentTold.p50, figures.commitToPresentTold.max)
@@ -327,67 +325,60 @@ public final class TerminalView: NSView {
     /// bottom). A paused link means the view is idle, the typing-echo case: the screen is read now
     /// and drawn if it changed, and only a frame drawn resumes the link, so a key that changed
     /// nothing leaves the view idle and its echo is drawn the moment it arrives, meeting the next
-    /// display refresh rather than the one after. A view paused for want of a drawable is not
-    /// idle: output does not ask for one again (an occluded window's ask can block for a second).
+    /// display refresh rather than the one after.
     func drawNowIfIdle() {
-        guard pacer.isIdle, !awaitingDrawable, !isHiddenOrHasHiddenAncestor, refresh(target: CACurrentMediaTime() + refreshInterval) else { return }
+        guard pacer.isIdle, !isHiddenOrHasHiddenAncestor, refresh(target: CACurrentMediaTime() + refreshInterval) else { return }
         pacer.resume()
     }
 
-    /// No drawable came: the link pauses, and nothing on the main thread asks for one again (an
-    /// ask can wait a second) until the window is seen again. While the window is on screen it is
-    /// asked for off the main thread, ``drawableRetry`` after each ask that brought none.
-    private func drawableUnavailable() {
-        awaitingDrawable = true
-        pacer.pause()
-        askForDrawable()
-    }
-
-    private func askForDrawable() {
-        guard awaitingDrawable, !askingForDrawable, let metalLayer else { return }
-        wasOnScreen = window.map(isOnScreen) ?? false
-        guard wasOnScreen else { return }
-        askingForDrawable = true
-        let ask = DrawableAsk(view: self, layer: metalLayer, next: nextDrawable)
-        DispatchQueue.global(qos: .userInitiated).asyncAfter(deadline: .now() + Self.drawableRetry) {
-            ask.drawable = ask.next(ask.layer)
+    /// Asks for the layer's next drawable on a background queue, at the moment a frame needs one
+    /// (Apple: acquire it as late as possible), unless an ask is under way or the window is off
+    /// screen, where the occlusion notification asks again.
+    private func fetchDrawable() {
+        guard !fetching, let metalLayer, window.map(isOnScreen) ?? false else { return }
+        fetching = true
+        marks.fetchStarted()
+        let fetch = DrawableFetch(view: self, layer: metalLayer, next: nextDrawable)
+        DispatchQueue.global(qos: .userInteractive).async {
+            fetch.drawable = fetch.next(fetch.layer)
             DispatchQueue.main.async {
-                MainActor.assumeIsolated { ask.view?.drawableAsked(ask.drawable) }
+                MainActor.assumeIsolated { fetch.view?.arrived(fetch.drawable) }
             }
         }
     }
 
-    private func drawableAsked(_ drawable: (any CAMetalDrawable)?) {
-        askingForDrawable = false
-        guard awaitingDrawable else { return }
-        guard let drawable else {
-            askForDrawable()
+    /// A drawable of the layer's size draws the owed frame now, reading the screen as it is (D2),
+    /// and is let go if that frame does not use it; none, the one-second wait over, asks again
+    /// while the frame is still owed and the view shown.
+    private func arrived(_ drawable: (any CAMetalDrawable)?) {
+        fetching = false
+        marks.fetchEnded()
+        guard let drawable, let metalLayer,
+              drawable.texture.width == Int(metalLayer.drawableSize.width), drawable.texture.height == Int(metalLayer.drawableSize.height)
+        else {
+            if owed, !isHiddenOrHasHiddenAncestor { fetchDrawable() }
             return
         }
-        broughtDrawable = drawable
-        awaitingDrawable = false
-        needFrame()
+        owed = false
+        fetched = drawable
+        defer { fetched = nil }
+        if !isHiddenOrHasHiddenAncestor, refresh(target: CACurrentMediaTime() + refreshInterval) { pacer.resume() }
     }
-
-    nonisolated static let drawableRetry = 0.25
 
     private var refreshInterval: Double {
         1 / Double(max(1, window?.screen?.maximumFramesPerSecond ?? 60))
     }
 
-    /// The window was seen again, having been off screen: a view that paused for want of a
-    /// drawable asks for one again. A notification that changes nothing the view saw does nothing.
+    /// The window was seen again: a shown view that owes a frame asks for its drawable.
     @objc private func visibilityChanged() {
-        let onScreen = window.map(isOnScreen) ?? false
-        defer { wasOnScreen = onScreen }
-        guard awaitingDrawable, onScreen, !wasOnScreen else { return }
-        awaitingDrawable = false
-        needFrame()
+        if owed, !isHiddenOrHasHiddenAncestor { fetchDrawable() }
     }
 
-    /// One display refresh, for the frame meant to reach the display at `target`: read the screen;
-    /// draw when it or the view changed, else pause until something does. True when the link is
-    /// wanted for the next refresh: a frame was drawn, or every buffer was still in flight.
+    /// One display refresh, for the frame meant to reach the display at `target`: with no drawable
+    /// just brought, ask for one and draw on its arrival; else read the screen and draw when it or
+    /// the view changed, or pause until something does. True when the link is wanted for the next
+    /// refresh: a frame was drawn, or every buffer was still in flight, or the frame could not be
+    /// encoded (tried again then).
     @discardableResult
     func refresh(target: Double) -> Bool {
         guard let link else {
@@ -397,6 +388,12 @@ public final class TerminalView: NSView {
         guard !isHiddenOrHasHiddenAncestor else {
             needsDraw = true
             pacer.pause()
+            return false
+        }
+        guard fetched != nil else {
+            owed = true
+            pacer.pause()
+            fetchDrawable()
             return false
         }
         let read = CACurrentMediaTime()
@@ -413,15 +410,9 @@ public final class TerminalView: NSView {
             pacer.pause()
             return false
         }
-        guard !awaitingDrawable else {
-            needsDraw = true
-            pacer.pause()
-            return false
-        }
-        switch renderer.draw(frame, overlay: overlay, from: { takeDrawable(metalLayer) }, presented: { [marks] in marks.presented(frame: $0, at: $1) }, completed: { [marks] in marks.completed(frame: $0, ok: $1) }) {
+        switch renderer.draw(frame, overlay: overlay, from: { defer { self.fetched = nil }; return self.fetched }, presented: { [marks] in marks.presented(frame: $0, at: $1) }, completed: { [marks] in marks.completed(frame: $0, ok: $1) }) {
         case let .drawn(number):
             committedFrames += 1
-            awaitingDrawable = false
             marks.committed(frame: number, read: read, target: target)
             lastFrame = frame
             needsDraw = renderer.lastFrameWantsAnother
@@ -435,15 +426,8 @@ public final class TerminalView: NSView {
             marks.skipped(read: read)
             renderer.invalidate()
             needsDraw = true
-            drawableUnavailable()
-            return false
+            return true
         }
-    }
-
-    private func takeDrawable(_ layer: CAMetalLayer) -> (any CAMetalDrawable)? {
-        guard let brought = broughtDrawable else { return nextDrawable(layer) }
-        broughtDrawable = nil
-        return brought
     }
 
     private func handle(_ event: SessionEvent) {
@@ -519,10 +503,11 @@ public final class TerminalView: NSView {
 }
 
 /// One ask for a drawable, carried to a background queue and its answer back to the main thread.
-/// Unchecked: Core Animation's `nextDrawable` may be called from any thread (render threads call
-/// it), and the ask is touched by one thread at a time, the main thread, then the queue, then the
-/// main thread again.
-private final class DrawableAsk: @unchecked Sendable {
+/// Apple's pages say `nextDrawable()` may block until a drawable is free, and that with
+/// `allowsNextDrawableTimeout` (on by default) it returns nil after one second; so it is not
+/// called on the main thread. Unchecked: the ask is touched by one thread at a time, the main
+/// thread, the queue, then the main thread.
+private final class DrawableFetch: @unchecked Sendable {
     weak var view: TerminalView?
     let layer: CAMetalLayer
     let next: @Sendable (CAMetalLayer) -> (any CAMetalDrawable)?

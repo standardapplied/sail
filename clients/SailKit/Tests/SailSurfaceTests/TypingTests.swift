@@ -204,26 +204,27 @@ import Testing
         marks.keyWritten(event: 1.000, written: 1.001)
         marks.output(at: 1.004)
         marks.committed(frame: 1, at: 1.010, read: 1.008, target: 1.0267)
-        marks.presented(frame: 1, at: 1.025)
+        marks.presented(frame: 1, at: 1.025, told: 1.025)
         let figures = marks.figures
         #expect(abs(figures.keyToWritten.p95 - 1) < 1e-6)
+        #expect(figures.keyWrites == [Span(1.000, 1.001)])
         #expect(abs(figures.outputToCommitted.p50 - 6) < 1e-6)
         #expect(abs(figures.outputToPresented.p50 - 21) < 1e-6)
         #expect(abs(figures.keyToEcho.p50 - 25) < 1e-6)
     }
 
-    /// Metal can tell a dropped frame's presentation before its commit is marked: the key's echo
-    /// is still estimated, at the refresh the frame was drawn for.
-    @Test func aFrameToldPresentedBeforeItsCommitStillEstimatesItsEcho() {
+    /// A frame's completion can be told before its commit is marked: where the display tells no
+    /// time, the key's echo counts at that completion once the commit is.
+    @Test func aFrameCompletedBeforeItsCommitStillCountsItsEcho() {
         var marks = LatencyMarks()
         marks.keyWritten(event: 1.000, written: 1.001)
         marks.output(at: 1.004)
-        marks.presented(frame: 1, at: 0)
+        marks.completed(frame: 1, at: 1.012, ok: true)
         marks.committed(frame: 1, at: 1.010, read: 1.008, target: 1.0267)
         let figures = marks.figures
         #expect(figures.keyToEchoEstimated.count == 1)
-        #expect(abs(figures.keyToEchoEstimated.p50 - 26.7) < 1e-6)
-        #expect(abs(figures.outputToPresentedEstimated.p50 - 22.7) < 1e-6)
+        #expect(abs(figures.keyToEchoEstimated.p50 - 12) < 1e-6)
+        #expect(abs(figures.outputToPresentedEstimated.p50 - 8) < 1e-6)
         #expect(figures.keyToEcho.count == 0, "nothing was measured on the display")
         #expect(figures.presentedBeforeCommit == 1)
     }
@@ -232,21 +233,67 @@ import Testing
         var marks = LatencyMarks()
         marks.committed(frame: 1, at: 1.002, read: 1.000, target: 1.0187)
         marks.output(at: 1.001)
-        marks.presented(frame: 1, at: 1.016)
+        marks.presented(frame: 1, at: 1.016, told: 1.016)
         marks.unchanged(read: 1.017)
         #expect(marks.figures.outputToPresented.count == 1)
         #expect(marks.figures.outputToCommitted.count == 0)
         marks.output(at: 1.020)
         marks.committed(frame: 2, at: 1.035, read: 1.033, target: 1.0517)
-        marks.presented(frame: 3, at: 0)
+        marks.presented(frame: 3, at: 0, told: 1.04)
         #expect(marks.figures.unreportedPresents == 1)
         #expect(marks.figures.outputToCommitted.count == 1)
-        marks.presented(frame: 2, at: 0)
+        marks.completed(frame: 2, at: 1.037, ok: true)
+        #expect(marks.figures.outputToPresentedEstimated.count == 0, "a display that reports times waits for the frame's own")
+        marks.presented(frame: 2, at: 0, told: 1.06)
         #expect(marks.figures.unreportedPresents == 2)
         #expect(marks.figures.reportedPresents == 1)
         #expect(marks.figures.outputToPresented.count == 1, "a frame with no reported time is not measured on the display")
-        #expect(abs(marks.figures.outputToPresentedEstimated.max - (1.0517 - 1.020) * 1000) < 1e-6, "it is estimated at its refresh's target")
-        #expect(abs(marks.figures.outputToShown.max - (1.035 - 1.020) * 1000) < 1e-6, "and shown when committed")
+        #expect(abs(marks.figures.outputToPresentedEstimated.max - (1.037 - 1.020) * 1000) < 1e-6, "a dropped frame counts at its completion")
+        #expect(abs(marks.figures.outputToShown.max - (1.037 - 1.020) * 1000) < 1e-6)
+    }
+
+    /// Where the display has told no presentation time, a frame counts as shown when its command
+    /// buffer completed (the `latency-overlay` red: a present callback late or never, the window
+    /// right); once and only once, never for a failed buffer, and not once the display tells times.
+    @Test func aCompletedFrameIsShownWhereTheDisplayTellsNoTime() {
+        var marks = LatencyMarks()
+        marks.keyWritten(event: 1.000, written: 1.001)
+        marks.output(at: 1.004)
+        marks.committed(frame: 1, at: 1.010, read: 1.008, target: 1.0267)
+        marks.completed(frame: 1, at: 1.0113, ok: true)
+        #expect(marks.figures.keyToEchoEstimated.count == 1, "counted without waiting for the present callback")
+        #expect(abs(marks.figures.keyToEchoEstimated.p50 - 11.3) < 1e-6)
+        marks.presented(frame: 1, at: 0, told: 2.9)
+        #expect(marks.figures.keyToEchoEstimated.count == 1, "the late callback counts it no second time")
+        marks.output(at: 3.0)
+        marks.committed(frame: 2, at: 3.010, read: 3.008, target: 3.0267)
+        marks.completed(frame: 2, at: 3.012, ok: false)
+        marks.presented(frame: 2, at: 0, told: 3.5)
+        #expect(marks.figures.outputToPresentedEstimated.count == 1, "a failed buffer shows nothing")
+        marks.output(at: 4.0)
+        marks.committed(frame: 3, at: 4.010, read: 4.008, target: 4.0267)
+        marks.presented(frame: 3, at: 4.025, told: 4.03)
+        marks.output(at: 5.0)
+        marks.committed(frame: 4, at: 5.010, read: 5.008, target: 5.0267)
+        marks.completed(frame: 4, at: 5.012, ok: true)
+        #expect(marks.figures.outputToPresented.count == 1 && marks.figures.outputToPresentedEstimated.count == 1, "a display that tells times waits for them")
+        marks.presented(frame: 4, at: 5.026, told: 5.03)
+        #expect(marks.figures.outputToPresented.count == 2)
+    }
+
+    /// The longest gap between commits says whether any output reached the screen inside it, and
+    /// for how long a drawable was being asked for in it.
+    @Test func theLongestCommitGapSaysWhatReachedTheScreenAndWhatWasAskedFor() {
+        var marks = LatencyMarks()
+        marks.committed(frame: 1, at: 10.0, read: 9.999, target: 10.016)
+        marks.output(at: 10.05)
+        marks.fetchStarted(at: 10.1)
+        marks.fetchEnded(at: 10.15)
+        marks.committed(frame: 2, at: 10.2, read: 10.199, target: 10.216)
+        let figures = marks.figures
+        #expect(figures.longestBetweenCommits == Span(10.0, 10.2))
+        #expect(figures.longestGapOutputs == 1)
+        #expect(abs(figures.longestGapFetching - 50) < 1e-6)
     }
 
     @Test func outputACallbackCouldNotDrawIsLate() {
@@ -275,16 +322,16 @@ import Testing
         var marks = LatencyMarks()
         marks.output(at: 1.000)
         marks.committed(frame: 1, at: 1.001, read: 1.0005, target: 1.016)
-        marks.presented(frame: 1, at: 1.016)
+        marks.presented(frame: 1, at: 1.016, told: 1.016)
         marks.output(at: 1.020)
         marks.committed(frame: 2, at: 1.5, read: 1.49, target: 1.5)
-        marks.presented(frame: 2, at: 1.5)
+        marks.presented(frame: 2, at: 1.5, told: 1.5)
         #expect(abs(marks.figures.outputToShown.max - 480) < 1e-6)
         var unreported = LatencyMarks()
         unreported.output(at: 1.020)
         unreported.committed(frame: 1, at: 1.5, read: 1.49, target: 1.516)
-        unreported.presented(frame: 1, at: 0)
-        #expect(abs(unreported.figures.outputToShown.max - 480) < 1e-6, "committed, where the display tells no time")
+        unreported.completed(frame: 1, at: 1.5, ok: true)
+        #expect(abs(unreported.figures.outputToShown.max - 480) < 1e-6, "at its completion, where the display tells no time")
         #expect(marks.figures.longestToShown == Span(1.020, 1.5), "the longest wait keeps when it was")
         #expect(marks.figures.longestBetweenCommits == Span(1.001, 1.5), "and so does the longest gap between commits")
     }
@@ -309,50 +356,5 @@ import Testing
         let figures = marks.figures
         #expect(figures.commitToCompleted.count == 2 && abs(figures.commitToCompleted.max - 6) < 1e-6, "a completion told before its commit mark counts too")
         #expect(figures.commitToPresentTold.count == 1 && abs(figures.commitToPresentTold.max - 999) < 1e-6)
-    }
-}
-
-/// The drive's allowance for a hosted runner: a wait less only the drive's own thread's stall over
-/// that same wait, less the heartbeat's tick, never below zero and never more than the overlap.
-@Suite struct StallsTests {
-    static let wait = Span(10.0, 10.2)
-
-    static func own(_ gaps: Span...) -> Stalls {
-        var stalls = Stalls(tick: 0.01)
-        gaps.forEach { stalls.record($0) }
-        return stalls
-    }
-
-    @Test func aStallThatDoesNotOverlapTheWaitTakesNothing() {
-        #expect(Self.own(Span(9.0, 9.5), Span(10.3, 10.9)).net(of: Self.wait) == Self.wait.length)
-    }
-
-    @Test func aStallElsewhereInTheRunTakesNothingFromThisWait() {
-        let stalls = Self.own(Span(2.0, 2.5), Span(10.05, 10.07))
-        #expect(abs(stalls.net(of: Self.wait) - 0.19) < 1e-9, "the 500 ms stall at second 2 says nothing of a wait at second 10")
-    }
-
-    @Test func aPartlyOverlappingStallTakesTheOverlapLessTheTickAtMost() {
-        #expect(abs(Self.own(Span(10.15, 10.3)).net(of: Self.wait) - 0.15) < 1e-9, "only the 50 ms inside the wait")
-        #expect(abs(Self.own(Span(10.15, 10.17)).net(of: Self.wait) - 0.19) < 1e-9, "a 20 ms gap held the thread 10 ms")
-    }
-
-    @Test func aStallCoveringTheWaitTakesAllOfIt() {
-        #expect(Self.own(Span(9.9, 10.4)).net(of: Self.wait) == 0)
-        #expect(abs(Self.own(Span(10.0, 10.2)).net(of: Self.wait) - 0.01) < 1e-9, "a gap the length of the wait leaves its tick")
-    }
-
-    /// Under load every tick runs a little late; twenty ticks 5 ms late are not a 100 ms stall.
-    @Test func lateTicksDoNotAddUpToAStall() {
-        let late = (0 ..< 20).map { Span(10.0 + Double($0) * 0.015, 10.0 + Double($0 + 1) * 0.015) }
-        var stalls = Stalls(tick: 0.01)
-        late.forEach { stalls.record($0) }
-        #expect(abs(stalls.net(of: Span(10.0, 10.3)) - 0.295) < 1e-9)
-        #expect(abs(Self.own(Span(10.0, 10.05), Span(10.1, 10.2)).net(of: Self.wait) - 0.11) < 1e-9, "of two stalls, the longer counts")
-    }
-
-    @Test func aMainThreadStallAloneTakesNothing() {
-        #expect(Self.own().net(of: Self.wait) == Self.wait.length)
-        #expect(Self.own(Span(10.0, 10.01), Span(10.01, 10.02)).gaps.isEmpty, "ticks on time are not stalls")
     }
 }

@@ -39,7 +39,7 @@ let package = Package(
         .executableTarget(
             name: "SailDrive",
             dependencies: [
-                "SailShell", "SailAccount", "SailTestPasskey", "SailTerminalView", "SailRenderer", kit("SailAPI"), kit("SailSurface"),
+                "SailShell", "SailAccount", "SailTestPasskey", "SailTerminalView", "SailRenderer", kit("SailAPI"), kit("SailMeasures"), kit("SailSurface"),
                 kit("SailTerminal"), kit("SailVT"), kit("SailWorkbench"),
             ],
             swiftSettings: strict

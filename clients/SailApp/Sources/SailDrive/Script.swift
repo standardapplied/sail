@@ -51,8 +51,8 @@ struct Step: Decodable {
     /// The visible text stays what it was when the step began while output reaches the screen,
     /// waited for at most `seconds`.
     var still: Bool?
-    /// No output waited longer than this many ms to be shown: to the frame that showed it, on the
-    /// display where it reported the time, else committed.
+    /// No output waited longer than this many ms to be shown, nor was the main thread held longer
+    /// over the measure, each net of the drive's own thread's stall during it.
     var shownWithin: Double?
     /// Types `measure` keys, one each `interval` ms (50 by default), and records the latency.
     var measure: Int?
@@ -66,6 +66,8 @@ struct Step: Decodable {
     var resetLatency: Bool?
     /// Kills the host the preview started, as a crash would.
     var killHost: Bool?
+    /// Makes the flood's bytes, once, at ``Driver/floodFiles``.
+    var floodFile: Bool?
     /// Stops this Mac's host (true) so nothing it is sent is answered, or lets it go on (false).
     var pauseHost: Bool?
     /// Waits until the session is attached; false, until it is not.
