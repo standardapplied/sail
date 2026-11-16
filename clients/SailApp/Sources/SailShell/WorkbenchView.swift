@@ -245,17 +245,14 @@ public final class WorkbenchView: NSView {
         }
     }
 
-    /// A pane became the first responder (a click): the model follows after AppKit has recorded
-    /// it, so the drawing never sets a first responder from inside another's change, and only if
-    /// that pane is the first responder still (a tab opened meanwhile has taken the keys).
+    /// A pane became the first responder (a click): the model follows at once, and the drawing on
+    /// the next turn, after AppKit has recorded the new responder, so no first responder is set
+    /// from inside another's change.
     private func focusClicked(_ id: PaneID) {
+        guard model.focusedPane?.id != id else { return }
+        model.focus(id)
         DispatchQueue.main.async { [weak self] in
-            MainActor.assumeIsolated {
-                guard let self, self.model.focusedPane?.id != id, let view = self.panes[id], self.window?.firstResponder === view.terminal
-                else { return }
-                self.model.focus(id)
-                self.apply()
-            }
+            MainActor.assumeIsolated { self?.apply() }
         }
     }
 
