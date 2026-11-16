@@ -59,11 +59,12 @@ extension Driver {
             return await fourPanes()
         }
         if step.onceResized == true {
-            let resized = await waitUntil(step.seconds ?? 5) { self.orderedPanes.allSatisfy(Self.resizedOnce) }
+            let holds = dragHolds
+            let resized = await waitUntil(step.seconds ?? 5) { self.orderedPanes.allSatisfy { Self.resizedPerHold($0, holds: holds) } }
             let said = orderedPanes.map { view in
                 "\(Self.winches(view)) for a grid of \(view.terminal.grid.map { "\($0.columns)" } ?? "none") columns"
             }
-            return (resized, said.joined(separator: "; "))
+            return (resized, "at most \(holds + 1) sizes allowed (the drag held \(holds) times); " + said.joined(separator: "; "))
         }
         if let text = step.occurs {
             let times = step.times ?? 1
@@ -180,6 +181,7 @@ extension Driver {
         mouse(.leftMouseDown, at: windowPoint(0), clicks: 1)
         var followed = 0
         var handled: [Double] = []
+        var sentAt: [ContinuousClock.Instant] = []
         let views = tab.layout.leaves.compactMap { workbench.panes[$0] }
         views.forEach { $0.terminal.resetLatency() }
         mainThread.reset()
@@ -188,6 +190,7 @@ extension Driver {
         for move in 1 ... max(1, moves) {
             let wanted = distance * Double(move) / Double(max(1, moves))
             let sent = ContinuousClock.now
+            sentAt.append(sent)
             mouse(.leftMouseDragged, at: windowPoint(wanted), clicks: 1)
             handled.append((ContinuousClock.now - sent) / .milliseconds(1))
             let now = first?.frame ?? .zero
@@ -197,8 +200,9 @@ extension Driver {
         }
         mouse(.leftMouseUp, at: windowPoint(distance), clicks: 1)
         let spent = (ContinuousClock.now - began) / .milliseconds(1)
+        dragHolds = zip(sentAt, sentAt.dropFirst()).filter { $1 - $0 >= TerminalSession.resizeHold }.count
         let timing = String(format: "a move handled in p50 %.1f ms, at most %.1f ms; ", handled.sorted()[handled.count / 2], handled.max() ?? 0)
-            + "\(handled.count) moves in \(Int(spent)) ms; the main thread held at most \(Int(mainThread.longest)) ms, a thread of the drive's own "
+            + "\(handled.count) moves in \(Int(spent)) ms, \(dragHolds) of the gaps between them \(Int(TerminalSession.resizeHold / .milliseconds(1))) ms or more; the main thread held at most \(Int(mainThread.longest)) ms, a thread of the drive's own "
             + "\(Int(ownThread.longest)) ms; the panes' longest refresh " + views.map { String(format: "%.1f ms", $0.terminal.latency.refresh.max) }.joined(separator: ", ")
         return (followed == max(1, moves), "the panes followed \(followed) of \(max(1, moves)) moves; \(timing); \(arrangementSaid)")
     }
@@ -375,10 +379,12 @@ extension Driver {
         return text.split(separator: "\n").map { $0.trimmingCharacters(in: .whitespaces) }.filter { $0.hasPrefix("winch-") }
     }
 
-    /// One size change reached `view`'s program, and it was the view's grid.
-    static func resizedOnce(_ view: TerminalPane) -> Bool {
+    /// A size reached `view`'s program only when the drag held (`holds` times) and once at its
+    /// end, and the last was the view's grid.
+    static func resizedPerHold(_ view: TerminalPane, holds: Int) -> Bool {
         guard let columns = view.terminal.grid?.columns else { return false }
-        return winches(view) == ["winch-\(columns)"]
+        let sizes = winches(view)
+        return (1 ... holds + 1).contains(sizes.count) && sizes.last == "winch-\(columns)"
     }
 
     /// Whether a line of `view`'s screen, trimmed, is `line`.

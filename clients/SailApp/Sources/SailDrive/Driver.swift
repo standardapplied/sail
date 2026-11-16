@@ -33,6 +33,8 @@ final class Driver {
     var remembered: String?
     /// The top line `markTop` kept.
     var markedTop: String?
+    /// How many times the last divider drag held still for the session's resize hold.
+    var dragHolds = 0
     lazy var standIn: TerminalView = {
         guard let fonts = Bundle.main.resourceURL.flatMap({ try? TerminalFonts(directory: $0.appending(path: "Fonts")) }),
               let view = try? TerminalView(fonts: fonts)

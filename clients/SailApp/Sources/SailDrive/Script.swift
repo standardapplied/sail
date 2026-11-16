@@ -136,9 +136,10 @@ struct Step: Decodable {
     var panes4: Bool?
     /// Waits this many seconds.
     var wait: Double?
-    /// Each pane of the selected tab shows exactly one line `winch-<columns>` (a program printing
-    /// one at each SIGWINCH), the columns its view's grid has, within `seconds`: one size reached
-    /// each program.
+    /// Each pane of the selected tab shows a line `winch-<columns>` (a program printing one at each
+    /// SIGWINCH) only for each time the last divider drag held still for the session's resize hold,
+    /// and once at its end, the last its view's grid, within `seconds`: one size per settle (W5),
+    /// whatever pace the machine let the moves keep.
     var onceResized: Bool?
     /// The focused pane's screen must not hold this text.
     var absent: String?
