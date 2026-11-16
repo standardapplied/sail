@@ -19,11 +19,14 @@ import Testing
     func aFixtureFedIn500SeededChunkingsLeavesItsGoldenEachTime(_ fixture: VTFixtures.Fixture) throws {
         let bytes = try fixture.bytes
         let golden = try fixture.golden
+        var chunkings = 0
         for seed in 1 ... 500 as ClosedRange<UInt64> {
             let fed = try dump(fixture, fed: chunking(of: bytes, seed: seed))
             #expect(fed == golden, "seed \(seed)")
             if fed != golden { return }
+            chunkings += 1
         }
+        print("FixtureTests fed \(fixture.name) in \(chunkings) of 500 seeded chunkings")
     }
 
     @Test func everyStreamTheSpecNamesHasAFixture() throws {

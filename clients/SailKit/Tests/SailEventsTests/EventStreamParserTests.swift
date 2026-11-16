@@ -9,9 +9,12 @@ import Testing
         let whole = parse([stream])
         #expect(whole.count == stream.split(separator: UInt8(ascii: "\n"), omittingEmptySubsequences: false)
             .filter { $0.starts(with: Array("data:".utf8)) }.count)
+        var cuts = 0
         for offset in 0 ... stream.count {
             #expect(parse(cut(stream, at: offset)) == whole, "cut at \(offset)")
+            cuts += 1
         }
+        print("EventStreamParserTests cut \(golden) at \(cuts) of \(stream.count + 1) offsets")
     }
 
     @Test(arguments: ["\r\n", "\r"])
@@ -19,12 +22,18 @@ import Testing
         let stream = try Goldens.bytes("events/stream.sse")
         let whole = parse([stream])
         let ended = Array(String(decoding: stream, as: UTF8.self).replacingNewlines(with: ending).utf8)
+        var cuts = 0
         for offset in 0 ... ended.count {
             #expect(parse(cut(ended, at: offset)) == whole, "cut at \(offset)")
+            cuts += 1
         }
+        var chunkings = 0
         for seed in UInt64(1) ... 500 {
             #expect(parse(chunking(of: ended, seed: seed)) == whole, "seed \(seed)")
+            chunkings += 1
         }
+        let name = ending == "\r\n" ? "CRLF" : "CR"
+        print("EventStreamParserTests ended \(name) at \(cuts) of \(ended.count + 1) offsets and in \(chunkings) of 500 seeded chunkings")
     }
 
     @Test(arguments: ["\n", "\r\n", "\r"])
