@@ -1562,8 +1562,10 @@ Each row with the tests that prove it:
   probe. Each command checks first, before it creates, starts, writes or asks
   anything. The project's container is given them by the workspace's own renew step
   (`WorkspaceCredentials.renew`): the store replaced whole, or removed when nothing is to be
-  written, and gh logged in anew for exactly the GitHub hosts with a token, so a token removed, or
-  for a host no repo names any more, leaves it at the next apply; what an apply removes with
+  written, and gh left logged in to exactly the GitHub hosts with a token, in place: a host with
+  none logged out by its own name, a kept host logged in again only when its token changed and
+  never logged out on the way, so a live run's `gh` never meets a gap. A token removed, or for a
+  host no repo names any more, thus leaves it at the next apply; what an apply removes with
   nothing in its place, which may have been made by hand, is said in its output; `repo add` writes
   the store an apply writes. Nothing is read from a process's
   environment: a repo whose host asks for credentials with no stored token is refused

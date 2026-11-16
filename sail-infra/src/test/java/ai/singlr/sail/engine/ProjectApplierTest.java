@@ -27,7 +27,6 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.function.Predicate;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -1447,28 +1446,72 @@ class ProjectApplierTest {
   }
 
   /**
-   * Round 2, item 1: gh is logged in to exactly the GitHub hosts with a token now. With two GitHub
-   * hosts and one token removed, gh's login file goes and the host that keeps its token is logged
-   * in anew; the other is not.
+   * Round 3: gh is left logged in to exactly the GitHub hosts with a token, in place. With two
+   * GitHub hosts and one token removed, the removed host is logged out by its own name, and the
+   * kept host's login is never absent: gh's login file is not removed, the kept host is not logged
+   * out, and its unchanged token is not logged in again.
    */
   @Test
-  void ghIsLeftLoggedInToExactlyTheGithubHostsWithATokenNow() throws Exception {
-    var repos =
-        List.of(
-            new ProjectDefinition.Repo("https://github.com/acme/api.git", "api", null),
-            new ProjectDefinition.Repo("https://ghe.example/acme/web.git", "web", null, "github"));
-    var shell = new ScriptedShellExecutor(new ShellExec.Result(0, "", "")).onFail("test -d", "no");
+  void aHostWhoseTokenWentIsLoggedOutAndTheKeptHostsLoginIsNeverAbsent() throws Exception {
+    var repos = twoGithubHosts();
+    var shell =
+        new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
+            .onFail("test -d", "no")
+            .onOk("sed -n", "github.com\nghe.example\n")
+            .onOk("gh auth token --hostname github.com", "ghp_github_kept\n");
 
     applier(shell)
         .applyRepos(
-            CONTAINER, repos, "dev", tokens(repos, Map.of("github.com", "ghp_github_still_here")));
+            CONTAINER, repos, "dev", tokens(repos, Map.of("github.com", "ghp_github_kept")));
 
     var ran = shell.invocations();
-    var removed = indexOf(ran, c -> c.endsWith(REMOVE + "/home/dev/.config/gh/hosts.yml"));
+    assertTrue(
+        ran.stream().anyMatch(c -> c.endsWith("gh auth logout --hostname ghe.example")),
+        ran.toString());
+    assertTrue(
+        ran.stream().noneMatch(c -> c.endsWith(REMOVE + "/home/dev/.config/gh/hosts.yml")),
+        ran.toString());
+    assertTrue(
+        ran.stream().noneMatch(c -> c.endsWith("gh auth logout --hostname github.com")),
+        ran.toString());
+    assertTrue(ran.stream().noneMatch(c -> c.contains("gh auth login")), ran.toString());
+  }
+
+  /**
+   * Round 3: a token replaced for one host logs that host in again, in place, and touches no other:
+   * nothing is logged out and gh's login file is not removed.
+   */
+  @Test
+  void aReplacedTokenLogsItsHostInAgainAndTouchesNoOther() throws Exception {
+    var repos = twoGithubHosts();
+    var shell =
+        new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
+            .onFail("test -d", "no")
+            .onOk("sed -n", "github.com\nghe.example\n")
+            .onOk("gh auth token --hostname github.com", "ghp_github_old\n")
+            .onOk("gh auth token --hostname ghe.example", "ghe_token_same\n");
+
+    applier(shell)
+        .applyRepos(
+            CONTAINER,
+            repos,
+            "dev",
+            tokens(repos, Map.of("github.com", "ghp_github_new", "ghe.example", "ghe_token_same")));
+
+    var ran = shell.invocations();
     var logins = ran.stream().filter(c -> c.contains("gh auth login")).toList();
     assertEquals(1, logins.size(), ran.toString());
     assertTrue(logins.getFirst().contains(" sh github.com "), logins.toString());
-    assertTrue(removed >= 0 && removed < ran.indexOf(logins.getFirst()), ran.toString());
+    assertTrue(ran.stream().noneMatch(c -> c.contains("gh auth logout")), ran.toString());
+    assertTrue(
+        ran.stream().noneMatch(c -> c.endsWith(REMOVE + "/home/dev/.config/gh/hosts.yml")),
+        ran.toString());
+  }
+
+  private static List<ProjectDefinition.Repo> twoGithubHosts() {
+    return List.of(
+        new ProjectDefinition.Repo("https://github.com/acme/api.git", "api", null),
+        new ProjectDefinition.Repo("https://ghe.example/acme/web.git", "web", null, "github"));
   }
 
   /**
@@ -1533,21 +1576,13 @@ class ProjectApplierTest {
         Map.of());
   }
 
-  private static int indexOf(List<String> ran, Predicate<String> which) {
-    for (var i = 0; i < ran.size(); i++) {
-      if (which.test(ran.get(i))) {
-        return i;
-      }
-    }
-    return -1;
-  }
-
   /** A shell that answers no command but those a test scripts, and the credential step's own. */
   private static ScriptedShellExecutor scripted() {
     return new ScriptedShellExecutor()
         .onOk(REMOVE + "/home/dev/.git-credentials")
         .onOk(REMOVE + "/home/dev/.config/gh/hosts.yml")
-        .onOk("mv -f /home/dev/.git-credentials.sail-new");
+        .onOk("mv -f /home/dev/.git-credentials.sail-new")
+        .onOk("sed -n");
   }
 
   private static ProjectApplier applier(ShellExec shell) {

@@ -12,6 +12,7 @@ import java.io.IOException;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -194,6 +195,50 @@ final class WorkspaceCredentials {
     ForgeCliLogin.loginGitHub(shell, instance, ProjectDefinition.USER, tokens, repos);
   }
 
+  /** The hosts gh's login file names: its top-level keys. None when there is no file. */
+  private static final String GH_LOGGED_IN =
+      "[ -f \"$1\" ] || exit 0; sed -n 's/^\\([^ #][^:]*\\):.*$/\\1/p' \"$1\"";
+
+  /**
+   * gh, already logged in to some hosts, left logged in to exactly {@code keep} in place: each
+   * other host it names logged out by its own name, and each kept host logged in again only when
+   * its token is not the one gh holds, which gh replaces in that host's entry alone. No host that
+   * keeps its token is ever without its login, so a live run's {@code gh} never fails for this.
+   */
+  private static void relogForge(
+      ShellExec shell,
+      String instance,
+      List<ProjectDefinition.Repo> repos,
+      Map<String, String> tokens,
+      List<String> keep)
+      throws IOException, InterruptedException, TimeoutException {
+    var named =
+        shell.exec(
+            ContainerExec.asDevUser(instance, List.of("sh", "-c", GH_LOGGED_IN, "sh", GH_HOSTS)));
+    if (!named.ok()) {
+      throw new IOException(
+          "Could not read gh's logins in " + instance + ": " + named.reason().strip());
+    }
+    for (var host : named.stdout().lines().map(String::strip).toList()) {
+      if (!host.isEmpty() && !keep.contains(host)) {
+        asDev(shell, instance, "gh", "auth", "logout", "--hostname", host);
+      }
+    }
+    var changed = new LinkedHashMap<String, String>();
+    for (var host : keep) {
+      var held =
+          shell.exec(
+              ContainerExec.asDevUser(
+                  instance, List.of("gh", "auth", "token", "--hostname", host)));
+      if (!held.ok() || !held.stdout().strip().equals(tokens.get(host))) {
+        changed.put(host, tokens.get(host));
+      }
+    }
+    if (!changed.isEmpty()) {
+      logForgeIn(shell, instance, repos, changed);
+    }
+  }
+
   /** The GitHub hosts of {@code repos} that {@code tokens} holds a token for: gh's logins. */
   private static List<String> forgeHosts(
       List<ProjectDefinition.Repo> repos, Map<String, String> tokens) {
@@ -213,11 +258,11 @@ final class WorkspaceCredentials {
   /**
    * Gives {@code instance} exactly {@code tokens} for {@code repos}: the store replaced whole by a
    * rename, never stripped first, so a live run's fetch or push never finds the container without
-   * one, or removed when there is nothing to write; and gh logged in anew for exactly the GitHub
-   * hosts with a token, any other host's login gone. The one step a workspace's token change and a
-   * project container's apply both take, so a token removed or no longer needed leaves either.
-   * Answers what it removed with nothing written in its place, which may have been made by hand and
-   * is said, or null.
+   * one, or removed when there is nothing to write; and gh left logged in to exactly the GitHub
+   * hosts with a token, each host kept never logged out on the way. The one step a workspace's
+   * token change and a project container's apply both take, so a token removed or no longer needed
+   * leaves either. Answers what it removed with nothing written in its place, which may have been
+   * made by hand and is said, or null.
    */
   static String renew(
       ShellExec shell,
@@ -234,11 +279,13 @@ final class WorkspaceCredentials {
     } else {
       writeStore(shell, instance, store);
     }
-    var loggedIn = remove(shell, instance, GH_HOSTS);
-    if (!forgeHosts(repos, tokens).isEmpty()) {
-      logForgeIn(shell, instance, repos, tokens);
-    } else if (loggedIn) {
-      removed.add("gh login");
+    var keep = forgeHosts(repos, tokens);
+    if (keep.isEmpty()) {
+      if (remove(shell, instance, GH_HOSTS)) {
+        removed.add("gh login");
+      }
+    } else {
+      relogForge(shell, instance, repos, tokens, keep);
     }
     return removed.isEmpty()
         ? null
