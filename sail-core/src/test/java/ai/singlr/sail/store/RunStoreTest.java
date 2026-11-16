@@ -2303,6 +2303,22 @@ class RunStoreTest {
   }
 
   @Test
+  void aMessageForgottenIsOwedAgainAndTheRestStayDelivered() {
+    var id = newRun("backend", "auth");
+    var messages = new MessageStore(db);
+    var read = messages.append("auth", "ada", "read", null).id();
+    var unread = messages.append("auth", "ada", "never read", null).id();
+    store.markDelivered(id, List.of(read, unread));
+
+    store.forgetDelivered(id, List.of(unread));
+    store.forgetDelivered(id, List.of(unread));
+
+    assertEquals(Set.of(read), store.deliveredMessageIds(id));
+    assertThrows(
+        IllegalArgumentException.class, () -> store.forgetDelivered(id, List.of("not-a-uuid")));
+  }
+
+  @Test
   void deletingARunCascadesAwayItsDeliveryLedger() {
     var id = newRun("backend", "auth");
     var messages = new MessageStore(db);

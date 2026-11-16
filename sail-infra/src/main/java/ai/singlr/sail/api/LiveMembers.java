@@ -376,10 +376,9 @@ public final class LiveMembers implements RoomWakeReactor.Live, AutoCloseable {
   private boolean hand(
       Member member, List<PromptConversation.Rendered<MessageStore.MessageRow>> pages) {
     for (var page : pages) {
-      if (!member.prompt(page.text())) {
+      if (!member.prompt(page.text(), page.fullyRendered())) {
         return false;
       }
-      markDelivered(member.runId, page.fullyRendered());
     }
     return true;
   }
@@ -555,7 +554,8 @@ public final class LiveMembers implements RoomWakeReactor.Live, AutoCloseable {
               ErrorCode.AGENT_LAUNCH_FAILED, "Failed to start the room's live member.", failed);
     }
     var started =
-        new Member(seat, config, runStore.findById(runId).orElseThrow(), unit, handle, full);
+        new Member(
+            seat, config, runStore.findById(runId).orElseThrow(), unit, handle, full, localHandle);
     members.put(seat.roomId(), started);
     Thread.ofVirtual().name("sail-live-" + runId).start(started::read);
     Optional<String> lost;
@@ -760,10 +760,12 @@ public final class LiveMembers implements RoomWakeReactor.Live, AutoCloseable {
    * finishes it ({@link RunStore#finishAsTurnsRecorded}). Finishing the row is what revokes its
    * credential and frees what it reserved.
    */
-  private void finish(RunStore.RunRow run, String status, Integer exitCode, String reason) {
+  private boolean finish(RunStore.RunRow run, String status, Integer exitCode, String reason) {
     if (runStore.finishAsTurnsRecorded(run.id(), status, exitCode)) {
       tellStopped(run, exitCode, reason);
+      return true;
     }
+    return false;
   }
 
   private void tellStopped(RunStore.RunRow run, Integer exitCode, String reason) {
@@ -811,6 +813,9 @@ public final class LiveMembers implements RoomWakeReactor.Live, AutoCloseable {
     private final Guardrails limits;
     private final Instant startedAt;
     private final Object pipe = new Object();
+    private final String localHandle;
+    private final List<MessageStore.MessageRow> taken = new ArrayList<>();
+    private boolean owesTheNext;
     private final StringBuilder said = new StringBuilder();
     private final StringBuilder unsent = new StringBuilder();
     private final Map<String, String> calls = new LinkedHashMap<>();
@@ -838,8 +843,10 @@ public final class LiveMembers implements RoomWakeReactor.Live, AutoCloseable {
         RunStore.RunRow run,
         AgentUnit unit,
         AgentProcess.Handle handle,
-        boolean full) {
+        boolean full,
+        String localHandle) {
       this.seat = seat;
+      this.localHandle = localHandle;
       this.config = config;
       this.run = run;
       this.runId = run.id();
@@ -853,8 +860,10 @@ public final class LiveMembers implements RoomWakeReactor.Live, AutoCloseable {
     }
 
     /**
-     * Writes {@code text} to the process as its next prompt, the lane's guard armed first. Answers
-     * {@code false} when the process is ending or gone, so the prompt is for whoever comes next.
+     * Writes {@code text} to the process as its next prompt, the lane's guard armed first, and
+     * records {@code messages} delivered to its run, still under {@code pipe}, so the reader's
+     * finish sees every message the process was handed. Answers {@code false} when the process is
+     * ending or gone, so the prompt is for whoever comes next.
      *
      * <p>The write is made outside this member's lock, under {@code pipe} alone: a process that has
      * stopped reading blocks it, and its lines must still be read and its end still be reached
@@ -863,7 +872,7 @@ public final class LiveMembers implements RoomWakeReactor.Live, AutoCloseable {
      * under {@code pipe} too, so a process's end is judged with every prompt taken or refused,
      * never with one half written.
      */
-    private boolean prompt(String text) {
+    private boolean prompt(String text, List<MessageStore.MessageRow> messages) {
       synchronized (pipe) {
         boolean owed;
         synchronized (this) {
@@ -876,6 +885,8 @@ public final class LiveMembers implements RoomWakeReactor.Live, AutoCloseable {
           lastLine = timing.clock().get();
         }
         if (written(text)) {
+          markDelivered(runId, messages);
+          took(messages);
           return true;
         }
         synchronized (this) {
@@ -940,6 +951,14 @@ public final class LiveMembers implements RoomWakeReactor.Live, AutoCloseable {
       synchronized (pipe) {
         attempt(this::finished);
       }
+      if (owesTheNext) {
+        attempt(() -> deliver(seat.conversation(), localHandle));
+      }
+    }
+
+    /** The process was handed {@code messages}: they are its to answer once it begins a turn. */
+    private synchronized void took(List<MessageStore.MessageRow> messages) {
+      taken.addAll(messages);
     }
 
     /** Runs {@code work} as sail; a failure is this line's, never the reader's. */
@@ -1024,6 +1043,7 @@ public final class LiveMembers implements RoomWakeReactor.Live, AutoCloseable {
     }
 
     private void begin() {
+      taken.clear();
       turnOpen = true;
       prompted = false;
       turn++;
@@ -1215,6 +1235,8 @@ public final class LiveMembers implements RoomWakeReactor.Live, AutoCloseable {
       leaving = true;
       try {
         flush();
+        var unread =
+            prompted && !turnOpen ? List.copyOf(taken) : List.<MessageStore.MessageRow>of();
         if (prompted && !turnOpen) {
           begin();
         }
@@ -1225,7 +1247,14 @@ public final class LiveMembers implements RoomWakeReactor.Live, AutoCloseable {
           closeTurn(said.toString(), true, why);
         }
         disarm();
-        finish(run, died ? "failed" : "stopped", exit.isPresent() ? exit.getAsInt() : null, why);
+        var finishedHere =
+            finish(
+                run, died ? "failed" : "stopped", exit.isPresent() ? exit.getAsInt() : null, why);
+        if (!unread.isEmpty()) {
+          runStore.forgetDelivered(
+              runId, unread.stream().map(MessageStore.MessageRow::id).toList());
+          owesTheNext = !ending && !finishedHere;
+        }
       } finally {
         members.remove(seat.roomId(), this);
         over = true;

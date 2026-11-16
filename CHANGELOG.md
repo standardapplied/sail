@@ -2,6 +2,7 @@
 
 ## 0.70.0
 
+- **A message to a room whose live member has just ended is answered by the next member.** When another process ended a room's live member and a person wrote in the moment between the agent exiting and Sail noticing it, the container's exec client could still take the message: it was recorded as delivered to the ended run, nothing was posted, and the next member counted it as read, so no one answered it. A member that ends before it begins to answer what it was handed now gives those messages back, and when its run was ended elsewhere the next member starts at once and answers them; a crash, or an end this box made, leaves them for the next member it starts.
 - **The Sail app's terminal never waits for the window server on its main thread.** A frame asks for its drawable on a background queue at the moment it needs one and is drawn when it arrives, so typing, menus and window dragging stay live while every drawable is in use (before, the ask waited on the main thread up to a second, then retried every 0.25 s); nothing about what is drawn changes. Where the display gives no presentation time, an echo or output counts as shown when its frame's command buffer completed, and View > Show Latency says which measure it used.
 
 ## 0.69.1

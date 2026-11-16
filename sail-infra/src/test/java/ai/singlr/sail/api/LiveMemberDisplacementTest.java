@@ -621,29 +621,37 @@ class LiveMemberDisplacementTest {
     var asks = new AtomicInteger();
     var freed = new AtomicReference<Boolean>();
     var aliveOnceFreed = new AtomicReference<Boolean>();
+    var displaced = new AtomicReference<FakeAgentProcess.Fake>();
     room.processes.slowToName(true);
     room.processes.onStart(
-        starting ->
-            starting
-                .onPidAsked(
-                    () -> {
-                      if (asks.incrementAndGet() == 1) {
-                        room.windowElapses();
-                      } else {
-                        named(starting);
-                      }
-                    })
-                .onWrite(
-                    line -> {
-                      freed.set(cli.endLiveMember(starting.runId, "displaced by a build"));
+        starting -> {
+          if (!displaced.compareAndSet(null, starting)) {
+            starting.onPidAsked(() -> named(starting));
+            return;
+          }
+          starting
+              .onPidAsked(
+                  () -> {
+                    if (asks.incrementAndGet() == 1) {
+                      room.windowElapses();
+                    } else {
                       named(starting);
-                      aliveOnceFreed.set(room.container.alive(starting.runId));
-                      starting.exits(143);
-                    }));
+                    }
+                  })
+              .onWrite(
+                  line -> {
+                    freed.set(cli.endLiveMember(starting.runId, "displaced by a build"));
+                    named(starting);
+                    aliveOnceFreed.set(room.container.alive(starting.runId));
+                    starting.exits(143);
+                  });
+        });
 
     var first = room.says(SPEC, "first");
 
-    var process = room.processes.latest();
+    var process = displaced.get();
+    process.settle();
+    room.settle();
     assertEquals(Boolean.TRUE, freed.get());
     assertEquals(
         Boolean.FALSE,
@@ -651,7 +659,11 @@ class LiveMemberDisplacementTest {
         "a prompted run records its process, so it is ended through its pid file before it is"
             + " freed: a wrapper slow to write its pid is waited for, never read as gone");
     assertEquals(1, process.written.size(), "it was prompted while its run still held its repos");
-    assertEquals(Set.of(first), room.runs.deliveredMessageIds(process.runId));
+    assertEquals(
+        Set.of(),
+        room.runs.deliveredMessageIds(process.runId),
+        "it ended before it began to answer, so the message is not its");
+    assertEquals(Set.of(first), room.runs.deliveredMessageIds(room.processes.latest().runId));
     assertEquals("stopped", room.run(process.runId).status());
     assertEquals(
         Integer.valueOf(room.container.pidOf(process.runId)), room.run(process.runId).pid());
@@ -736,6 +748,55 @@ class LiveMemberDisplacementTest {
 
     room.says(SPEC, "back?");
     assertEquals(2, room.processes.starts.size(), "and the room's next message resumes it");
+  }
+
+  /**
+   * A message meeting a member whose process has ended, before its reader has seen the end, finds
+   * the pipe gone: the message waits for the member to finish and starts the next one.
+   */
+  @Test
+  void aMessageMeetingAnEndedProcessWaitsForItsMemberToFinishAndStartsTheNext() throws Exception {
+    var process = idleMember();
+    assertTrue(
+        room.elsewhere().dispatching().endLiveMember(process.runId, AgentAttachWhy.TERMINAL));
+    room.settle();
+    process.holdsItsEnd();
+    process.exits(143);
+    process.awaitHeldEnd();
+
+    var said = Thread.ofVirtual().start(() -> room.says(SPEC, "back?"));
+    process.awaitRefusedWrite();
+    assertEquals(1, room.processes.starts.size(), "it waits for the member to finish");
+    process.releasesItsEnd();
+    said.join();
+
+    assertEquals(2, room.processes.starts.size(), "and starts the next one");
+    assertTrue(room.processes.latest().written.stream().anyMatch(line -> line.contains("back?")));
+  }
+
+  /**
+   * A message the client of an ended process took, before the member's reader saw the end, was
+   * never read: it is the next member's to answer, not lost with the old one.
+   */
+  @Test
+  void aMessageTheClientOfAnEndedProcessTookIsGivenToTheNextMember() {
+    var process = idleMember();
+    assertTrue(
+        room.elsewhere().dispatching().endLiveMember(process.runId, AgentAttachWhy.TERMINAL));
+    room.settle();
+    process.outlivedByItsClient().holdsItsEnd();
+    process.exits(143);
+    process.awaitHeldEnd();
+
+    room.says(SPEC, "back?");
+    assertTrue(
+        process.written.stream().anyMatch(line -> line.contains("back?")), "the client took it");
+    process.releasesItsEnd();
+    process.settle();
+    room.settle();
+
+    assertEquals(2, room.processes.starts.size(), "the next member is started for it");
+    assertTrue(room.processes.latest().written.stream().anyMatch(line -> line.contains("back?")));
   }
 
   @Test

@@ -1222,6 +1222,24 @@ public final class RunStore implements ConflictResolver, SyncedStore {
         });
   }
 
+  /**
+   * Takes {@code messageIds} back out of the run's ledger: messages its process was handed and
+   * ended without reading, which are owed to whoever answers next.
+   */
+  public void forgetDelivered(String id, Collection<String> messageIds) {
+    messageIds.forEach(Ids::requireUuid);
+    db.transaction(
+        () -> {
+          for (var messageId : messageIds) {
+            db.execute(
+                "DELETE FROM run_delivered_messages WHERE run_id = ? AND message_id = ?",
+                id,
+                messageId);
+          }
+          return null;
+        });
+  }
+
   /** The run's delivery ledger — see {@link #markDelivered}. */
   public Set<String> deliveredMessageIds(String id) {
     return new LinkedHashSet<>(
