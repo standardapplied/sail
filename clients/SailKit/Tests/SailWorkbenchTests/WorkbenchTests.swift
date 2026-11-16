@@ -357,20 +357,21 @@ import Testing
         #expect(three.tabs[0].layout == before, "equalize made a pane under the minimum")
     }
 
-    /// A tab of more panes than the window has points for, restored: focus is moved off a pane laid
-    /// out with no area.
+    /// A tab of more panes than its room has points for, restored: focus is moved off a pane laid
+    /// out with no area. Thirty deep, not hundreds: a test thread's stack is 512 KB on macOS.
     @Test func focusLeavesAPaneWithNoArea() throws {
         var node = Arrangement.Node.pane(session: "mac-0", place: Self.home)
-        for index in 1 ..< 450 {
+        for index in 1 ..< 30 {
             node = .split(axis: .sideBySide, ratio: 0.5, first: .pane(session: "mac-\(index)", place: Self.home), second: node)
         }
         var kept = Self.bench().arrangement
         kept.tabs[0].layout = node
         kept.tabs[0].focused = "mac-0"
-        var bench = Workbench.restore(kept, live: (0 ..< 450).map { "mac-\($0)" }, home: "/")
-        let size = CGSize(width: 420, height: 572)
+        var bench = Workbench.restore(kept, live: (0 ..< 30).map { "mac-\($0)" }, home: "/")
+        let size = CGSize(width: 40, height: 572)
         let deepest = try #require(bench.tabs[0].layout.leaves.last)
         #expect(bench.tabs[0].focused == deepest)
+        #expect(bench.frames(in: size, scale: 1).panes[deepest]?.width == 0)
         bench.fit(in: size, minimum: Self.least, scale: 1)
         let width = bench.frames(in: size, scale: 1).panes[bench.tabs[0].focused]?.width ?? 0
         #expect(width >= 1, "focus rests on a pane \(width) pt wide")
