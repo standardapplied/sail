@@ -344,6 +344,7 @@ extension Driver {
         grid.forEach { $0.terminal.resetLatency() }
         let (ok, said) = await measure(200, interval: 50, name: "panes4-echo")
         panes4["main thread's longest stall while four ran ms"] = mainThread.longest
+        panes4["a thread of the drive's own, longest stall while four ran ms"] = ownThread.longest
         let refresh = 1000 / Double(max(1, shell.window.screen?.maximumFramesPerSecond ?? 60))
         let echoed = echo.terminal.latency
         let presented = echoed.keyToEcho.count > 0
@@ -374,7 +375,7 @@ extension Driver {
         }
         press("w", ["command", "option"])
         _ = await sheet("Close", asking: "Its 4 terminals will end.", within: 5)
-        panes4.merge(Self.partsOfAPane()) { $1 }
+        panes4.merge(partsOfAPane()) { $1 }
         let splits = await timeSplits(10)
         budgets["⌘D to the new pane's first committed frame p95 <= 100 ms"] = splits.total <= 100
         panes4["⌘D to first committed frame p95 ms"] = splits.total
@@ -411,11 +412,12 @@ extension Driver {
     /// and its view made, its session opened) and of the main thread's longest stall. Each tab is
     /// closed after.
     private func timeSplits(_ count: Int) async -> (total: Double, handled: Double, held: Double) {
-        var totals: [Double] = [], handled: [Double] = [], held: [Double] = []
+        var totals: [Double] = [], handled: [Double] = [], held: [Double] = [], ownHeld: [Double] = []
         for _ in 0 ..< count {
             press("t", ["command"])
             _ = await waitUntil(10) { self.pane?.terminal.framesCommitted ?? 0 > 0 }
             mainThread.reset()
+            ownThread.reset()
             let began = ContinuousClock.now
             press("d", ["command"])
             handled.append((ContinuousClock.now - began) / .milliseconds(1))
@@ -425,15 +427,18 @@ extension Driver {
             }
             totals.append((ContinuousClock.now - began) / .milliseconds(1))
             held.append(mainThread.longest)
+            ownHeld.append(ownThread.longest)
             press("w", ["command", "option"])
             _ = await sheet("Close", asking: nil, within: 5)
         }
+        panes4["a thread of the drive's own, longest stall within a split p95 ms"] = Self.p95(ownHeld)
         return (Self.p95(totals), Self.p95(handled), Self.p95(held))
     }
 
     /// What making a pane's parts costs, each made five times, the median in ms: its terminal view
-    /// (the renderer: queue, faces, atlases) and its screen (10 MB of scrollback).
-    static func partsOfAPane() -> [String: Double] {
+    /// (the renderer: queue, faces, atlases), that view put into the window (its display link and
+    /// layer set up), and its screen (10 MB of scrollback).
+    func partsOfAPane() -> [String: Double] {
         guard let fonts = Bundle.main.resourceURL.flatMap({ try? TerminalFonts(directory: $0.appending(path: "Fonts")) }) else { return [:] }
         func median(_ make: () -> Void) -> Double {
             let times = (0 ..< 5).map { _ in
@@ -445,6 +450,11 @@ extension Driver {
         }
         return [
             "of a pane, a terminal view made median ms": median { _ = try? TerminalView(fonts: fonts) },
+            "of a pane, a terminal view put into the window median ms": median {
+                guard let view = try? TerminalView(fonts: fonts), let room = workbench.superview else { return }
+                room.addSubview(view)
+                view.removeFromSuperview()
+            },
             "of a pane, a screen with 10 MB of scrollback made median ms": median {
                 _ = try? Screen(size: GridSize(columns: 100, rows: 40), scrollbackBytes: 10 << 20, palette: .dark)
             },
