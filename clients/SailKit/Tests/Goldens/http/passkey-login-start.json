@@ -1,0 +1,23 @@
+{
+  "request": {
+    "body": {},
+    "method": "POST",
+    "path": "/v1/auth/login/start"
+  },
+  "response": {
+    "body": {
+      "challenge_id": "wac_golden9",
+      "origins": [
+        "https://sail.standardapplied.com"
+      ],
+      "public_key": {
+        "challenge": "Z29sZGVuIGNoYWxsZW5nZSAxMA",
+        "rpId": "sail.standardapplied.com",
+        "timeout": 300000,
+        "userVerification": "required"
+      },
+      "schema_version": 1
+    },
+    "status": 200
+  }
+}

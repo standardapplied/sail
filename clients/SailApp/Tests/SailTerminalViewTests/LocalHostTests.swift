@@ -1,5 +1,5 @@
 import Foundation
-@testable import SailPreview
+@testable import SailShell
 import SailTerminal
 import Testing
 

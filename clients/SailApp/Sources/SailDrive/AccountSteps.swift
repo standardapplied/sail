@@ -1,0 +1,303 @@
+import AppKit
+import SailAccount
+import SailAPI
+import SailShell
+import SailTestPasskey
+import SailVT
+import Security
+
+/// The drive's steps on the account: they act through the pane's own fields and buttons, and read
+/// what the pane says. No step's detail holds a ticket or a token.
+extension Driver {
+    func performAccount(_ step: Step) async -> (Bool, String)? {
+        let pane = shell.account
+        if let item = step.select {
+            guard let chosen = Rail.Item(rawValue: item), let button = shell.rail.button(chosen) else { return (false, "no rail item \(item)") }
+            button.performClick(nil)
+            return (shell.rail.selected == chosen, "the rail shows \(shell.rail.selected?.rawValue ?? "nothing")")
+        }
+        if let address = step.address {
+            pane.address.stringValue = address
+            return (true, "")
+        }
+        if let answer = step.passkey {
+            guard let chosen = SoftwarePasskey.Answer(rawValue: answer) else { return (false, "no passkey answer \(answer)") }
+            passkey.answer(chosen)
+            return (true, "")
+        }
+        if let variable = step.enroll {
+            guard let ticket = ProcessInfo.processInfo.environment[variable], !ticket.isEmpty else { return (false, "\(variable) holds no ticket") }
+            pane.ticket.stringValue = ticket
+            let idle = await settled(step) { pane.enroll.performClick(nil) }
+            return (idle && pane.ticket.stringValue.isEmpty, "the ticket field is \(pane.ticket.stringValue.isEmpty ? "empty" : "not empty"); \(said)")
+        }
+        if step.signIn == true {
+            let idle = await settled(step) { pane.signIn.performClick(nil) }
+            if signed, let plane = try? ControlPlane(address: pane.address.stringValue), let held = try? KeychainVault().session(for: plane) {
+                tokens.insert(held.sessionToken)
+            }
+            return (idle, said)
+        }
+        if step.signOut == true {
+            return (await settled(step) { pane.signOut.performClick(nil) }, said)
+        }
+        if let lines = step.exactly {
+            let found = await waitUntil(step.seconds ?? 10) { !pane.busy && pane.text.split(separator: "\n").map(String.init) == lines }
+            return (found, said)
+        }
+        if let text = step.pane {
+            let found = await waitUntil(step.seconds ?? 10) { !pane.busy && pane.text.contains(text) }
+            return (found, said)
+        }
+        if let words = step.sail {
+            return run(words.map { $0 == "{credential}" ? passkey.credentialIds.last ?? "" : $0 })
+        }
+        if step.activate == true {
+            let idle = await settled(step) { NotificationCenter.default.post(name: NSApplication.didBecomeActiveNotification, object: NSApp) }
+            return (idle, said)
+        }
+        if let count = step.asked {
+            let asked = passkey.asked - askedAtStart
+            return (asked == count, "the software passkey was asked \(asked) times")
+        }
+        if let wanted = step.keychain {
+            return keychain(wanted)
+        }
+        if step.accent == true {
+            return accent()
+        }
+        if step.titleBar == true {
+            return titleBar()
+        }
+        if step.zoomAndRestore == true {
+            return await zoomAndRestore()
+        }
+        if step.sweep == true {
+            return sweep()
+        }
+        return nil
+    }
+
+    /// What the pane says, as one line.
+    private var said: String {
+        "the pane says: " + shell.account.text.replacingOccurrences(of: "\n", with: " | ")
+    }
+
+    /// Does `act` and waits until the pane has ended what it started.
+    private func settled(_ step: Step, _ act: () -> Void) async -> Bool {
+        let before = shell.account.ended
+        act()
+        return await waitUntil(step.seconds ?? 20) { self.shell.account.ended > before && !self.shell.account.busy }
+    }
+
+    private func run(_ words: [String]) -> (Bool, String) {
+        let sail = Bundle.main.bundleURL.appending(path: "Contents/Helpers/sail")
+        let process = Process()
+        process.executableURL = sail
+        process.arguments = words
+        let output = Pipe()
+        process.standardOutput = output
+        process.standardError = output
+        do {
+            try process.run()
+        } catch {
+            return (false, "sail could not be started: \(error)")
+        }
+        let said = String(decoding: output.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+        process.waitUntilExit()
+        let shown = words.prefix(3).joined(separator: " ")
+        return (process.terminationStatus == 0, "sail \(shown) … exited \(process.terminationStatus): \(said.suffix(300))")
+    }
+
+    /// Scenarios 3, 16 and S2: the item as item 3 says, holding a session 30 days long, or gone; or
+    /// an item of the earlier shape put in its place, as a build before this one kept it.
+    private func keychain(_ wanted: String) -> (Bool, String) {
+        guard let plane = try? ControlPlane(address: shell.account.address.stringValue) else { return (false, "the address names no control plane") }
+        if wanted == "oldShape" {
+            var item = KeychainVault.item(plane)
+            item[kSecValueData as String] = Data(#"{"token":"old-shape-token","fde":"uday","expiresAt":815000000}"#.utf8)
+            item[kSecAttrAccessible as String] = kSecAttrAccessibleWhenUnlockedThisDeviceOnly
+            _ = SecItemDelete(KeychainVault.item(plane) as CFDictionary)
+            let added = SecItemAdd(item as CFDictionary, nil)
+            return (added == errSecSuccess, "an item of the earlier shape was kept: \(added)")
+        }
+        var query = KeychainVault.item(plane)
+        query[kSecReturnAttributes as String] = true
+        query[kSecMatchLimit as String] = kSecMatchLimitOne
+        var found: CFTypeRef?
+        let status = SecItemCopyMatching(query as CFDictionary, &found)
+        if wanted == "gone" { return (status == errSecItemNotFound, "the Keychain answered \(status)") }
+        guard status == errSecSuccess, let item = found as? [String: Any] else { return (false, "the Keychain answered \(status)") }
+        let group = item[kSecAttrAccessGroup as String] as? String ?? ""
+        let session = try? KeychainVault().session(for: plane)
+        let left = (session?.expiresAt.timeIntervalSinceNow ?? 0) / 3600
+        let checks = [
+            "a session for uday ending 30 days from now": session?.fde == "uday" && abs(left - 30 * 24) < 1,
+            "service": item[kSecAttrService as String] as? String == KeychainVault.service,
+            "account": item[kSecAttrAccount as String] as? String == plane.description,
+            "when unlocked, this device only": item[kSecAttrAccessible as String] as? String == kSecAttrAccessibleWhenUnlockedThisDeviceOnly as String,
+            "not synchronizable": (item[kSecAttrSynchronizable as String] as? Bool ?? false) == false,
+            "the app's default access group": group.hasSuffix(".sh.standardapplied.sail") && group.split(separator: ".").first?.count == 10,
+        ]
+        let failed = checks.filter { !$0.value }.keys.sorted()
+        return (failed.isEmpty, failed.isEmpty ? "the item is \(checks.keys.sorted().joined(separator: ", "))" : "the item is not: \(failed.joined(separator: ", "))")
+    }
+
+    /// `view` drawn by its layer into an sRGB bitmap at twice its size.
+    static func drawn(_ view: NSView) -> CGContext? {
+        view.display()
+        let scale = 2
+        let width = Int(view.bounds.width) * scale, height = Int(view.bounds.height) * scale
+        guard width > 0, height > 0, let layer = view.layer, let space = CGColorSpace(name: CGColorSpace.sRGB),
+              let context = CGContext(
+                  data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: width * 4, space: space,
+                  bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+              )
+        else { return nil }
+        context.scaleBy(x: CGFloat(scale), y: CGFloat(scale))
+        layer.render(in: context)
+        return context
+    }
+
+    /// The window's content as a PNG, for the owner to judge the look and for a failed step.
+    func windowImage() -> Data? {
+        guard let content = shell.window.contentView, let image = Self.drawn(content)?.makeImage() else { return nil }
+        return NSBitmapImageRep(cgImage: image).representation(using: .png, properties: [:])
+    }
+
+    /// Scenario 18: the sign-in button drawn into an sRGB bitmap, its commonest colour the fill and
+    /// the colour furthest from it the label, each within 2 of 255 of the token (the label `onAccent`:
+    /// white in the light appearance, ink in the dark), whatever the system accent is.
+    private func accent() -> (Bool, String) {
+        guard let context = Self.drawn(shell.account.signIn), let bytes = context.data else { return (false, "the button could not be drawn") }
+        let width = context.width, height = context.height
+        let pixels = bytes.bindMemory(to: UInt8.self, capacity: width * height * 4)
+        var counts: [UInt32: Int] = [:]
+        for index in 0 ..< width * height where pixels[index * 4 + 3] == 255 {
+            counts[Self.pixel(pixels, index * 4), default: 0] += 1
+        }
+        guard let fill = counts.max(by: { $0.value < $1.value })?.key,
+              let label = counts.keys.max(by: { Self.distance($0, fill) < Self.distance($1, fill) })
+        else { return (false, "the button drew nothing opaque") }
+        let wanted = Self.hex(shell.look.onAccent)
+        let system = NSColor.controlAccentColor.usingColorSpace(.sRGB).map {
+            String(format: "%02X%02X%02X", Int($0.redComponent * 255), Int($0.greenComponent * 255), Int($0.blueComponent * 255))
+        } ?? "unknown"
+        return (
+            Self.near(fill, 0xFC4926) && Self.near(label, wanted),
+            String(format: "fill #%06X, label #%06X (wanted #%06X); the system accent is #", fill, label, wanted) + system
+        )
+    }
+
+    /// A: the window's chrome is the look's. The title bar is transparent over a full-size content
+    /// view with the platform's buttons, and under it the rail's tint at the left and the selected
+    /// pane's surface beside it, as the window draws them.
+    private func titleBar() -> (Bool, String) {
+        let window = shell.window
+        guard window.styleMask.contains(.fullSizeContentView), window.titlebarAppearsTransparent,
+              [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton].allSatisfy({ window.standardWindowButton($0)?.isHidden == false }),
+              let content = window.contentView, let context = Self.drawn(content), let bytes = context.data
+        else { return (false, "the window's title bar is the system's, or a window button is missing") }
+        let pixels = bytes.bindMemory(to: UInt8.self, capacity: context.width * context.height * 4)
+        func at(_ x: Double) -> UInt32 {
+            Self.pixel(pixels, (20 * context.width + Int(x * 2)) * 4)
+        }
+        let surface = Self.hex(shell.rail.selected == .thisMac ? shell.look.palette.background : shell.look.canvas)
+        let rail = at(Rail.width / 2), pane = at(Rail.width + 200)
+        return (
+            Self.near(rail, Self.hex(shell.look.chrome)) && Self.near(pane, surface),
+            String(format: "under the title bar the rail is #%06X (wanted #%06X) and the pane #%06X (wanted #%06X)", rail, Self.hex(shell.look.chrome), pane, surface)
+        )
+    }
+
+    /// The window's own zoom (what its zoom button and, by default, a title bar double-click do)
+    /// changes the frame, and a second gives it back. The double-click itself is the owner's to see:
+    /// made input does not reach a hosted runner's title bar.
+    private func zoomAndRestore() async -> (Bool, String) {
+        let window = shell.window
+        window.setFrame(NSRect(x: 80, y: 80, width: 800, height: 640), display: true)
+        let before = window.frame
+        window.zoom(nil)
+        let zoomed = await waitUntil(5) { window.frame != before }
+        let after = window.frame
+        window.zoom(nil)
+        let back = await waitUntil(5) { window.frame == before }
+        return (zoomed && back, "the frame went from \(before) to \(after) and \(back ? "back" : "stayed at \(window.frame)")")
+    }
+
+    /// The sRGB colour at byte `offset` of an RGBA bitmap, as `0xRRGGBB`.
+    private static func pixel(_ pixels: UnsafeMutablePointer<UInt8>, _ offset: Int) -> UInt32 {
+        let red = UInt32(pixels[offset]), green = UInt32(pixels[offset + 1]), blue = UInt32(pixels[offset + 2])
+        return red << 16 | green << 8 | blue
+    }
+
+    private static func channels(_ rgb: UInt32) -> [Int] {
+        [Int(rgb >> 16 & 0xFF), Int(rgb >> 8 & 0xFF), Int(rgb & 0xFF)]
+    }
+
+    private static func near(_ found: UInt32, _ wanted: UInt32) -> Bool {
+        zip(channels(found), channels(wanted)).allSatisfy { pair in abs(pair.0 - pair.1) <= 2 }
+    }
+
+    private static func distance(_ one: UInt32, _ other: UInt32) -> Int {
+        zip(channels(one), channels(other)).reduce(0) { sum, pair in sum + abs(pair.0 - pair.1) }
+    }
+
+    private static func hex(_ rgb: RGB) -> UInt32 {
+        let red = UInt32(rgb.red), green = UInt32(rgb.green), blue = UInt32(rgb.blue)
+        return red << 16 | green << 8 | blue
+    }
+
+    /// Scenario 17: the session token, `sess_` and the enrollment ticket searched for in the
+    /// process's own memory of what it shows, every file named for the bundle id under the Library
+    /// folders, crash reports of Sail, `$TMPDIR`, the drive's output and its printed lines, the user
+    /// defaults as cfprefsd answers them, the last 15 minutes of the system log at every level,
+    /// every process's arguments and the pasteboard. Paths are reported, never what was found. An
+    /// image is searched as its bytes, which a drawn token would not be; the pasteboard is never
+    /// written by the drive, so it shows only that the app did not write there.
+    private func sweep() -> (Bool, String) {
+        let ticket = ProcessInfo.processInfo.environment["SAIL_DRIVE_TICKET"].map { [Data($0.utf8)] } ?? []
+        let needles = tokens.map { Data($0.utf8) } + [Data("sess_".utf8)] + ticket
+        var places: [String] = []
+        func search(_ data: Data, at place: String) {
+            if needles.contains(where: { data.range(of: $0) != nil }) { places.append(place) }
+        }
+        search(Data(shell.account.text.utf8), at: "the account pane")
+        search(Data(results.map(\.detail).joined(separator: "\n").utf8), at: "the drive's report")
+        let library = FileManager.default.homeDirectoryForCurrentUser.appending(path: "Library")
+        let named = ["Preferences", "Caches", "HTTPStorages", "Application Support", "Saved Application State"].flatMap {
+            Self.files(under: library.appending(path: $0)).filter { $0.path.contains("sh.standardapplied.sail") }
+        }
+        let crashes = Self.files(under: library.appending(path: "Logs/DiagnosticReports")).filter { $0.lastPathComponent.hasPrefix("Sail") }
+        let outputs = Self.files(under: out.deletingLastPathComponent()).filter { $0.lastPathComponent.hasSuffix("-output.txt") }
+        let searched = named + crashes + Self.files(under: out) + outputs + Self.files(under: FileManager.default.temporaryDirectory)
+        for file in searched {
+            if let data = try? Data(contentsOf: file, options: .mappedIfSafe) { search(data, at: file.path) }
+        }
+        let files = searched.count
+        search(Self.output(of: "/usr/bin/log", ["show", "--last", "15m", "--info", "--debug", "--style", "compact"]), at: "log show --last 15m --info --debug")
+        search(Self.output(of: "/usr/bin/defaults", ["export", "sh.standardapplied.sail", "-"]), at: "defaults export sh.standardapplied.sail")
+        search(Self.output(of: "/bin/ps", ["-axww", "-o", "args"]), at: "ps -axww -o args")
+        search(Data((NSPasteboard.general.string(forType: .string) ?? "").utf8), at: "the pasteboard")
+        let scope = "\(tokens.count) token(s), sess_ and \(ticket.count) ticket in \(files) files, the log, the defaults, the processes and the pasteboard"
+        return (places.isEmpty, places.isEmpty ? "found in none of \(scope)" : "found in \(places.joined(separator: ", ")) of \(scope)")
+    }
+
+    private static func files(under folder: URL) -> [URL] {
+        guard let walk = FileManager.default.enumerator(at: folder, includingPropertiesForKeys: [.isRegularFileKey]) else { return [] }
+        return walk.compactMap { $0 as? URL }.filter { (try? $0.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true }
+    }
+
+    private static func output(of tool: String, _ words: [String]) -> Data {
+        let process = Process()
+        process.executableURL = URL(filePath: tool)
+        process.arguments = words
+        let output = Pipe()
+        process.standardOutput = output
+        process.standardError = FileHandle.nullDevice
+        guard (try? process.run()) != nil else { return Data() }
+        let data = output.fileHandleForReading.readDataToEndOfFile()
+        process.waitUntilExit()
+        return data
+    }
+}

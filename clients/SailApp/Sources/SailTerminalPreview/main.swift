@@ -1,3 +1,0 @@
-import SailPreview
-
-PreviewApp.run()

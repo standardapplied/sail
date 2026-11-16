@@ -4125,13 +4125,17 @@ of last use; a cached row is laid out again when any of its items moved or found
 three instance buffers (`FrameLedger`), box
 drawing, blocks, underline styles and cursors drawn as pixel sprites, the Mac key-code table and
 the typing rules, pointer and wheel gestures, and the latency marks. `SailApp` holds the rest:
-`SailLook` (JetBrains Mono 2.304, vendored with its OFL and pinned by checksum, and the few Mast
-tokens the view uses), `SailRenderer` (Metal and Core Text, no AppKit), `SailTerminalView` (the
-`NSView`), `SailPreview` (the preview app), and two executables: `SailTerminalPreview`, shipped,
-and `SailDrive`, the drive harness, never shipped. `ci/bundle` assembles a `.app` from `swift build
--c release` (the bundled `sail` in `Contents/Helpers`), `ci/sign` signs with the hardened runtime
-(Developer ID from a keychain made for the run and deleted after it, or ad hoc without the
-secrets), `ci/notarize` notarizes and staples, `ci/drive` runs the drive scripts.
+`SailLook` (JetBrains Mono 2.304 and Newsreader 500, vendored with their OFLs and pinned by
+checksum, and the Sail look's tokens, type steps and spacing), `SailRenderer` (Metal and Core Text,
+no AppKit), `SailTerminalView` (the `NSView`), `SailAccount` (the platform's passkeys and the
+Keychain), `SailShell` (the app: window, rail, the account and "This Mac"), `SailTestPasskey` (a
+software passkey, never shipped), and two executables: `Sail`, shipped, and `SailDrive`, the drive
+harness, never shipped. `ci/bundle` assembles a `.app` from `swift build -c release` (the bundled
+`sail` in `Contents/Helpers`), `ci/sign` signs with the hardened runtime (Developer ID from a
+keychain made for the run and deleted after it, the provisioning profile embedded and
+`ci/Sail.entitlements` claimed by the app alone, or ad hoc with neither without the secrets),
+`ci/notarize` notarizes and staples, `ci/drive` runs the drive scripts against two control planes it
+starts.
 
 - **V1. Output shows on the next frame.** Output that finds the view idle (its display link
   paused) is drawn at once and the link resumed, so an echo meets the next display refresh;
@@ -4174,16 +4178,61 @@ paravirtual Metal device renders offscreen and reads back exactly: the renderer'
 frame fails past 0.1% of its pixels; emoji cells are left out of that and must hold colour), the
 view's input tests with synthesized events (every suite `swift test list` names, each in its own
 bounded run by `ci/test-suites`, which fails when a listed suite passes no test of its own or a
-test stands outside any suite), the preview driven against the pinned darwin `sail`'s
-local host with its latency budgets (the drive waits, at every step, until the view has drawn the
+test stands outside any suite), the app driven against the pinned darwin `sail`'s
+local host with its latency budgets and against two control planes that `sail` starts on the runner (the drive waits, at every step, until the view has drawn the
 screen's text in full; the renderer bench takes 300 full redraws, drawn offscreen with nothing read
 back, on the drawing thread's CPU clock with the wall clock beside it), and the bundle checked on
-every build. With all six signing secrets (`ci/signing`
-decides, and fails on some but not all) it is signed with Developer ID, notarized, stapled and
-assessed by Gatekeeper; without them it is uploaded as an unsigned build and the signed-only check
+every build. With all seven signing secrets (`ci/signing`
+decides, and fails on some but not all) it is signed with Developer ID, its profile embedded and
+its entitlements claimed, notarized, stapled and assessed by Gatekeeper; without them it is uploaded as an unsigned build and the signed-only check
 is skipped. Goldens are recorded only by the workflow's `record-goldens`
 input, never by a pull request's run. This job and the SailKit jobs run only when `clients/` or
 the workflow changed (a job skipped by `if:` reports success, so no required check waits on it).
+
+### The Sail app signs in with a passkey
+
+One control plane, its address in user defaults. SailKit's `Account` (in `SailAPI`, Linux-tested)
+holds the flow over two protocols: `PasskeyAuthenticator` (the platform's `PlatformPasskeys` in the
+app, `SoftwarePasskey` in the drive) and `TokenVault` (`KeychainVault`). Enrolling is two calls
+around one ceremony (`register/start` and `register/finish` with `X-Enrollment-Ticket`; the ticket
+is taken bare or from a link's `ticket`, and the field is cleared as it is read); it mints no
+session, so a first use is two sheets. Signing in is `login/start`, the ceremony, `login/finish`,
+the session into the vault, then `GET /v1/whoami`, asked again at launch and on activation.
+
+- **S1. The token lives in one place:** one generic-password item per control plane in the
+  data-protection keychain (service `sh.standardapplied.sail.session`, account the control plane's
+  address, `WhenUnlockedThisDeviceOnly`, not synchronizable, the app's default access group), and
+  memory for a request. The transport is ephemeral, so nothing an answer carries is written to disk.
+  An ad hoc build has no App ID, so the Keychain refuses it (`errSecMissingEntitlement`), said so.
+- **S2. Sign Out forgets** the item on this Mac; the session lives on at the server until it ends.
+- **S3. An ended session signs out,** decided by `invalid_bearer_token` or `missing_bearer_token`
+  from `whoami`, never by the status: a `403 forbidden` signs no one out.
+- **S4. The address rule holds before any byte is sent:** plain `http` only to an IP literal in
+  127.0.0.0/8, 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 100.64.0.0/10, `::1` or `fc00::/7`, parsed
+  from the text with no name looked up; `https` with the system's trust otherwise. App Transport
+  Security blocks plain HTTP to an IP address from macOS 14, so `Info.plist` excepts exactly these
+  ranges and nothing else. No redirect is followed (the transport refuses every one, and says so),
+  so no request, ticket or token reaches any server but the one the person named.
+- **S5. The ceremony is the server's:** challenge, relying party, user and excluded credentials go
+  to the authenticator unchanged, and a relying party other than `sail.standardapplied.com` is
+  refused before any sheet.
+- **S6. No software passkey ships:** `SailTestPasskey` is a dependency of `SailDrive` and the tests
+  only; every build checks the shipped binary holds neither its symbols nor its marker.
+
+The app claims `com.apple.developer.associated-domains` (`webcredentials:sail.standardapplied.com`)
+with `com.apple.application-identifier` and `com.apple.developer.team-identifier`, authorized by a
+Developer ID provisioning profile at `Contents/embedded.provisionprofile`; the domain's
+`apple-app-site-association` names the app. Cancelling and finding no passkey are one answer on
+Apple platforms, so a cancelled sign-in says what to do if this Mac holds none. The window is the
+Sail look: terracotta for every accent, drawn by the app so the system accent never reaches it, its
+label dark ink in the dark appearance and white in the light (3.43:1, so a label on the accent is
+always bold, large text by the HIG's measure), content corners at 6 pt, a 60 pt icon rail with "This
+Mac" and the account. The title bar is transparent over a full-size content view: the rail's tint and
+the pane's surface run to the top edge under the platform's own window buttons. Focus rings,
+selection and the caret are the accent's, through the window's own field editor; the look follows a
+dark/light change while the app runs (the terminal's palette at its next session). The artifact is the
+zip `ditto` made, uploaded unarchived, so one unzip gives `Sail.app`; CI checks the download as
+Finder unpacks it.
 
 ## Continuous integration
 

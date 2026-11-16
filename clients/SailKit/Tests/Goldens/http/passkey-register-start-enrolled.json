@@ -1,0 +1,52 @@
+{
+  "request": {
+    "body": {},
+    "method": "POST",
+    "path": "/v1/auth/register/start"
+  },
+  "response": {
+    "body": {
+      "challenge_id": "wac_golden7",
+      "public_key": {
+        "attestation": "none",
+        "authenticatorSelection": {
+          "residentKey": "required",
+          "userVerification": "required"
+        },
+        "challenge": "Z29sZGVuIGNoYWxsZW5nZSA4",
+        "excludeCredentials": [
+          {
+            "id": "Z29sZGVuIGNyZWRlbnRpYWxfaWQgNg",
+            "type": "public-key"
+          }
+        ],
+        "pubKeyCredParams": [
+          {
+            "alg": -7,
+            "type": "public-key"
+          },
+          {
+            "alg": -257,
+            "type": "public-key"
+          },
+          {
+            "alg": -8,
+            "type": "public-key"
+          }
+        ],
+        "rp": {
+          "id": "sail.standardapplied.com",
+          "name": "Sail"
+        },
+        "timeout": 300000,
+        "user": {
+          "displayName": "Uday",
+          "id": "Z29sZGVuIGlkIDI",
+          "name": "uday"
+        }
+      },
+      "schema_version": 1
+    },
+    "status": 200
+  }
+}

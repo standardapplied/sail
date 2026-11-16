@@ -42,6 +42,7 @@ public final class TerminalView: NSView {
     var isOnScreen: (NSWindow) -> Bool = { $0.occlusionState.contains(.visible) }
     /// The last refresh found no drawable.
     private var awaitingDrawable = false
+    private var committedFrames = 0
     /// An ask for a drawable is under way off the main thread.
     private var askingForDrawable = false
     /// Whether the window was on screen when last looked at while a drawable was awaited.
@@ -104,6 +105,14 @@ public final class TerminalView: NSView {
     }
 
     /// Starts the latency figures from nothing.
+    /// Where drawing stands, in words: frames presented and committed, the display link, its
+    /// refreshes, and whether a drawable is awaited. For a step whose frames did not come.
+    public var drawingState: String {
+        let figures = latency
+        return "frames presented \(figures.reportedPresents + figures.unreportedPresents), committed \(committedFrames); the display link "
+            + "\(pacer.isIdle ? "paused" : "running") after \(figures.refresh.count) refreshes; \(awaitingDrawable ? "" : "not ")awaiting a drawable"
+    }
+
     public func resetLatency() {
         marks.reset()
     }
@@ -376,6 +385,7 @@ public final class TerminalView: NSView {
         }
         switch renderer.draw(frame, overlay: overlay, from: { takeDrawable(metalLayer) }, presented: { [marks] in marks.presented(frame: $0, at: $1) }) {
         case let .drawn(number):
+            committedFrames += 1
             awaitingDrawable = false
             marks.committed(frame: number, read: read, target: target)
             lastFrame = frame

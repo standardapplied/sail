@@ -1,0 +1,22 @@
+{
+  "request": {
+    "body": {
+      "authenticator_data": "Z29sZGVuIGF1dGhlbnRpY2F0b3JfZGF0YSAxMg",
+      "challenge_id": "wac_golden9",
+      "client_data_json": "Z29sZGVuIGNsaWVudF9kYXRhX2pzb24gMTE",
+      "credential_id": "Z29sZGVuIGNyZWRlbnRpYWxfaWQgNg",
+      "signature": "Z29sZGVuIHNpZ25hdHVyZSAxMw"
+    },
+    "method": "POST",
+    "path": "/v1/auth/login/finish"
+  },
+  "response": {
+    "body": {
+      "expires_at": "2026-12-11T09:00:00.656Z",
+      "fde": "uday",
+      "schema_version": 1,
+      "session_token": "sess_golden14"
+    },
+    "status": 200
+  }
+}

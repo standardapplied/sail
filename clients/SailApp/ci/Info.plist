@@ -5,15 +5,17 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>en</string>
 	<key>CFBundleDisplayName</key>
-	<string>Sail Terminal Preview</string>
+	<string>Sail</string>
 	<key>CFBundleExecutable</key>
 	<string>@EXECUTABLE@</string>
+	<key>CFBundleIconFile</key>
+	<string>Sail.icns</string>
 	<key>CFBundleIdentifier</key>
 	<string>@IDENTIFIER@</string>
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
 	<key>CFBundleName</key>
-	<string>Sail Terminal Preview</string>
+	<string>Sail</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
@@ -30,17 +32,60 @@
 	<string>© Standard Applied</string>
 	<key>NSPrincipalClass</key>
 	<string>NSApplication</string>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>Sail connects to your control plane on your private network.</string>
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSExceptionDomains</key>
+		<dict>
+			<key>127.0.0.0/8</key>
+			<dict>
+				<key>NSExceptionAllowsInsecureHTTPLoads</key>
+				<true/>
+			</dict>
+			<key>10.0.0.0/8</key>
+			<dict>
+				<key>NSExceptionAllowsInsecureHTTPLoads</key>
+				<true/>
+			</dict>
+			<key>172.16.0.0/12</key>
+			<dict>
+				<key>NSExceptionAllowsInsecureHTTPLoads</key>
+				<true/>
+			</dict>
+			<key>192.168.0.0/16</key>
+			<dict>
+				<key>NSExceptionAllowsInsecureHTTPLoads</key>
+				<true/>
+			</dict>
+			<key>100.64.0.0/10</key>
+			<dict>
+				<key>NSExceptionAllowsInsecureHTTPLoads</key>
+				<true/>
+			</dict>
+			<key>::1</key>
+			<dict>
+				<key>NSExceptionAllowsInsecureHTTPLoads</key>
+				<true/>
+			</dict>
+			<key>fc00::/7</key>
+			<dict>
+				<key>NSExceptionAllowsInsecureHTTPLoads</key>
+				<true/>
+			</dict>
+		</dict>
+	</dict>
 	<key>NSSupportsAutomaticTermination</key>
 	<false/>
 	<key>NSDesktopFolderUsageDescription</key>
-	<string>A program running in Sail Terminal Preview wants to read your Desktop folder.</string>
+	<string>A program running in Sail wants to read your Desktop folder.</string>
 	<key>NSDocumentsFolderUsageDescription</key>
-	<string>A program running in Sail Terminal Preview wants to read your Documents folder.</string>
+	<string>A program running in Sail wants to read your Documents folder.</string>
 	<key>NSDownloadsFolderUsageDescription</key>
-	<string>A program running in Sail Terminal Preview wants to read your Downloads folder.</string>
+	<string>A program running in Sail wants to read your Downloads folder.</string>
 	<key>NSNetworkVolumesUsageDescription</key>
-	<string>A program running in Sail Terminal Preview wants to read a network volume.</string>
+	<string>A program running in Sail wants to read a network volume.</string>
 	<key>NSRemovableVolumesUsageDescription</key>
-	<string>A program running in Sail Terminal Preview wants to read a removable volume.</string>
+	<string>A program running in Sail wants to read a removable volume.</string>
 </dict>
 </plist>
