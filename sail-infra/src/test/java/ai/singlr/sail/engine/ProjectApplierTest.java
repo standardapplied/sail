@@ -389,7 +389,7 @@ class ProjectApplierTest {
 
     var repos =
         List.of(new ProjectDefinition.Repo("https://github.com/org/private.git", "private", null));
-    applier.applyRepos(CONTAINER, repos, "dev", Map.of("*", "ghp_secret123"));
+    applier.applyRepos(CONTAINER, repos, "dev", Map.of("github.com", "ghp_secret123"));
 
     var cloneCmd = shell.invocations().stream().filter(c -> c.contains("git clone")).findFirst();
     assertTrue(cloneCmd.isPresent());
@@ -447,7 +447,7 @@ class ProjectApplierTest {
                 "https://git.example.com/org/api.git", "api", null, "github"),
             new ProjectDefinition.Repo("https://gitlab.com/org/web.git", "web", null)),
         "dev",
-        Map.of("*", "tok_wild"));
+        Map.of("git.example.com", "tok_wild", "gitlab.com", "tok_wild"));
 
     assertGhLoggedIn(shell, "git.example.com", "tok_wild");
     assertEquals(
@@ -488,7 +488,7 @@ class ProjectApplierTest {
                     List.of(
                         new ProjectDefinition.Repo("https://github.com/org/api.git", "api", null)),
                     "dev",
-                    Map.of("*", "ghp_bad")));
+                    Map.of("github.com", "ghp_bad")));
 
     assertEquals(
         "Failed to log gh in for github.com in acme-health: The token in GH_TOKEN is invalid.",
@@ -894,7 +894,7 @@ class ProjectApplierTest {
 
     var repos =
         List.of(new ProjectDefinition.Repo("https://gitlab.com/org/repo.git", "repo", null));
-    applier.applyRepos(CONTAINER, repos, "dev", Map.of("*", "ghp_token"));
+    applier.applyRepos(CONTAINER, repos, "dev", Map.of("gitlab.com", "ghp_token"));
 
     var cloneCmd = shell.invocations().stream().filter(c -> c.contains("git clone")).findFirst();
     assertTrue(cloneCmd.isPresent());

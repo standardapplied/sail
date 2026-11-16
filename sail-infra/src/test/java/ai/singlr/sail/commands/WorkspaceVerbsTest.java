@@ -114,20 +114,34 @@ class WorkspaceVerbsTest {
         "a template that does not exist yet starts from the first step");
   }
 
+  /**
+   * Scenario 3: a repo that asks for credentials and has no stored token refuses the build, naming
+   * the command that stores one; a token variable in the shell is said to be unread, never used.
+   */
   @Test
-  void aTemplateIsNotBuiltWhenARepoAsksForATokenNoOneGave() {
+  void aTemplateIsNotBuiltWhenARepoAsksForATokenNoOneStored() {
     var failure =
         assertThrows(
             IllegalArgumentException.class,
-            () -> WorkspaceVerbs.requireTokens(acme(), Map.of(), url -> true));
+            () -> WorkspaceVerbs.requireTokens(acme(), Map.of(), url -> true, Map.of()));
+    var withVariable =
+        assertThrows(
+            IllegalArgumentException.class,
+            () ->
+                WorkspaceVerbs.requireTokens(
+                    acme(), Map.of(), url -> true, Map.of("GITHUB_TOKEN", "ghp_in_the_shell")));
 
     assertEquals(
-        "The template cannot clone https://github.com/acme/app.git: it asks for credentials and no"
-            + " token was given for its host. Pass one with --git-token <token>, or keep"
-            + " GITHUB_TOKEN through sudo with sudo --preserve-env=GITHUB_TOKEN.",
+        "github.com asks for credentials to fetch acme's repo app, and this box's person keeps no"
+            + " token for it. Store one with sail git login github.com.",
         failure.getMessage());
-    WorkspaceVerbs.requireTokens(acme(), Map.of("*", "tok"), url -> true);
-    WorkspaceVerbs.requireTokens(acme(), Map.of(), url -> false);
+    assertEquals(
+        "github.com asks for credentials to fetch acme's repo app, and this box's person keeps no"
+            + " token for it. GITHUB_TOKEN is set but Sail does not read it. Store it: sail git"
+            + " login github.com.",
+        withVariable.getMessage());
+    WorkspaceVerbs.requireTokens(acme(), Map.of("github.com", "tok"), url -> true, Map.of());
+    WorkspaceVerbs.requireTokens(acme(), Map.of(), url -> false, Map.of());
   }
 
   @Test

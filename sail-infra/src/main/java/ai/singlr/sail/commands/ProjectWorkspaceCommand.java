@@ -76,12 +76,6 @@ public final class ProjectWorkspaceCommand implements Runnable {
     @Option(names = "--dry-run", description = "Print commands instead of executing them.")
     private boolean dryRun;
 
-    @Option(
-        names = "--git-token",
-        description = "Access token for cloning private repos over HTTPS.",
-        defaultValue = "${GITHUB_TOKEN}")
-    private String gitToken;
-
     @Override
     public void run() {
       CliCommand.run(this::execute);
@@ -101,7 +95,7 @@ public final class ProjectWorkspaceCommand implements Runnable {
               .create(
                   config,
                   name,
-                  WorkspaceVerbs.source(config, gitToken, dryRun, json, operator),
+                  WorkspaceVerbs.source(config, dryRun, json, operator),
                   SailPaths.projectFilesDir(config.name()),
                   Objects.toString(HostSync.handle(), ""),
                   WorkspaceVerbs::ownerOf);

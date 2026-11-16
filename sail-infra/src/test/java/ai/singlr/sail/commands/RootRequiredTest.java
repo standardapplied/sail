@@ -11,6 +11,7 @@ import static org.junit.jupiter.api.Assumptions.assumeFalse;
 import ai.singlr.sail.Sail;
 import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.SailPaths;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
@@ -121,9 +122,7 @@ class RootRequiredTest {
       delimiter = '|',
       value = {
         "agent stream acme --token=s3cret --run r1|agent stream acme --token=<token> --run r1",
-        "agent stream acme --token s3cret --run r1|agent stream acme --token <token> --run r1",
-        "project demo --json --git-token ghp_x|project demo --json --git-token <token>",
-        "project demo --git-token=ghp_x --json|project demo --git-token=<token> --json"
+        "agent stream acme --token s3cret --run r1|agent stream acme --token <token> --run r1"
       })
   void aCommandAsTypedNeverEchoesAToken(String argv, String typed) {
     var parsed = new CommandLine(new Sail()).parseArgs(argv.split(" "));
@@ -134,11 +133,27 @@ class RootRequiredTest {
     assertEquals(typed, RootRequired.typed(parsed.commandSpec()).line());
   }
 
+  /**
+   * No secret on a command line: no command takes a git token as an argument, which {@code ps}
+   * shows every user of the host. A token is stored with {@code sail git login}, from stdin.
+   */
   @Test
-  void aRefusedDemoKeepsItsGitTokenOptionAndNotItsValue() {
+  void noCommandTakesAGitTokenOnItsCommandLine() {
+    var taking = new ArrayList<String>();
+    var commands = new ArrayDeque<CommandLine>(List.of(new CommandLine(new Sail())));
+    while (!commands.isEmpty()) {
+      var command = commands.pop();
+      if (command.getCommandSpec().findOption("--git-token") != null) {
+        taking.add(command.getCommandSpec().qualifiedName());
+      }
+      commands.addAll(command.getSubcommands().values());
+    }
+
+    assertEquals(List.of(), taking);
     assertEquals(
-        "Root privileges required. Run with: sudo sail project demo --git-token <token>",
-        refusal("project", "demo", "--git-token", "ghp_x"));
+        2,
+        new CommandLine(new Sail())
+            .execute("project", "apply", "acme", "--git-token", "ghp_x", "--dry-run"));
   }
 
   @Test

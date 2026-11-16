@@ -52,12 +52,6 @@ public final class ProjectTemplateCommand implements Runnable {
     @Option(names = "--dry-run", description = "Print commands instead of executing them.")
     private boolean dryRun;
 
-    @Option(
-        names = "--git-token",
-        description = "Access token for cloning private repos over HTTPS.",
-        defaultValue = "${GITHUB_TOKEN}")
-    private String gitToken;
-
     @Override
     public void run() {
       CliCommand.run(this::execute);
@@ -74,7 +68,7 @@ public final class ProjectTemplateCommand implements Runnable {
       }
       var template =
           WorkspaceVerbs.templates(dryRun)
-              .ensure(config, WorkspaceVerbs.source(config, gitToken, dryRun, json, operator));
+              .ensure(config, WorkspaceVerbs.source(config, dryRun, json, operator));
       if (json) {
         System.out.println(CliJson.stringify(template));
         return;

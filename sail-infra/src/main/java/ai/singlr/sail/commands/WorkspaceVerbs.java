@@ -145,44 +145,45 @@ final class WorkspaceVerbs {
   }
 
   /**
-   * Refuses, before anything is provisioned, a template whose https repos ask for credentials that
-   * {@code tokens} has none of, naming the flag that gives one.
+   * The git tokens this box's person stored for {@code config}'s repos, keyed as each repo URL
+   * spells its host ({@link GitCredentials#forRepos}): the one source a host command clones with.
+   */
+  static Map<String, String> boxTokens(ProjectDefinition config) {
+    try (var operations = OperationsFactory.open()) {
+      return GitCredentials.forRepos(operations.identity().gitTokens(), config.repos());
+    }
+  }
+
+  /**
+   * Refuses, before anything is provisioned, {@code config} when one of its https repos asks for
+   * credentials that {@code tokens} has none for, naming the {@code sail git login} that stores one
+   * and, when {@code env} sets a token variable, that Sail does not read it.
    */
   static void requireTokens(
-      ProjectDefinition config, Map<String, String> tokens, Predicate<String> asks) {
-    var asking = GitCredentials.askingForAToken(config.repos(), tokens, asks);
-    if (!asking.isEmpty()) {
+      ProjectDefinition config,
+      Map<String, String> tokens,
+      Predicate<String> asks,
+      Map<String, String> env) {
+    var missing = GitCredentials.missing(config.repos(), tokens, asks);
+    if (missing.isPresent()) {
       throw Remedied.argument(
-          "The template cannot clone "
-              + String.join(", ", asking)
-              + ": "
-              + (asking.size() == 1 ? "it asks" : "they ask")
-              + " for credentials and no token was given for "
-              + (asking.size() == 1 ? "its" : "their")
-              + " host.",
-          Remedy.of(
-              "Pass one with --git-token <token>, or keep GITHUB_TOKEN through sudo with sudo"
-                  + " --preserve-env=GITHUB_TOKEN."));
+          missing.get().reason(config.name(), "this box's person"), missing.get().remedy(env));
     }
   }
 
   /**
    * What {@code config}'s template is built from on this box: the base profile's pool ({@code
    * host.yaml}'s, the default when it names none), the definition's digest, the catalog's names,
-   * and a build that asks first whether a repo needs a token none was given for, then runs the
-   * project's own provisioner against the template with its own progress file, with the caller's
-   * tokens for its clone and no git identity and no trusted key of anyone's.
+   * and a build that asks first whether a repo needs a token none is stored for, then runs the
+   * project's own provisioner against the template with its own progress file, with the box
+   * person's stored tokens for its clone and no git identity and no trusted key of anyone's.
    */
   static WorkspaceTemplate.Source source(
-      ProjectDefinition config,
-      String gitToken,
-      boolean dryRun,
-      boolean json,
-      OperatorCommand operator)
+      ProjectDefinition config, boolean dryRun, boolean json, OperatorCommand operator)
       throws IOException {
     var host = HostYaml.fromMap(YamlUtil.parseFile(SailPaths.hostConfigPath()));
     var catalog = ProjectCatalog.here();
-    var tokens = GitCredentials.known(config.repos(), gitToken);
+    var tokens = boxTokens(config);
     return source(
         host,
         config,
@@ -216,7 +217,7 @@ final class WorkspaceVerbs {
   }
 
   /**
-   * A template build that asks first whether a repo needs a token none was given for ({@link
+   * A template build that asks first whether a repo needs a token none is stored for ({@link
    * #requireTokens}), then {@code provision}s.
    */
   static WorkspaceTemplate.Build checked(
@@ -225,7 +226,7 @@ final class WorkspaceVerbs {
       Predicate<String> asks,
       WorkspaceTemplate.Build provision) {
     return (into, fresh) -> {
-      requireTokens(config, tokens, asks);
+      requireTokens(config, tokens, asks, System.getenv());
       provision.into(into, fresh);
     };
   }

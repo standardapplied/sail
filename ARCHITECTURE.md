@@ -1466,9 +1466,8 @@ Each row with the tests that prove it:
   `WorkspacesTest.aWholeWorkspaceWhoseMarkWasTakenOffByHandIsNeitherReplacedNorUsedButNamesItsDelete`,
   `WorkspacesTest.twoCreatesOfOneNameMakeOneWorkspaceAndTheOtherIsRefusedLeavingItWhole`.*
 
-- **T1. A template holds no one's credentials.** A build provisions with its caller's tokens
-  (`--git-token`, or `GITHUB_TOKEN` and its kin) for its own clone and fetches, with no git
-  identity and no trusted key. After the provisioner and before the stop, one root step
+- **T1. A template holds no one's credentials.** A build provisions with the box person's stored
+  tokens (T6) for its own clone and fetches, with no git identity and no trusted key. After the provisioner and before the stop, one root step
   (`WorkspaceCredentials.STRIP`) removes `/home/dev/.git-credentials`, gh's `hosts.yml`, the dev
   user's `user.name` and `user.email`, and every line of its `authorized_keys`. A check
   (`WorkspaceCredentials.HELD`) then proves the template holds nothing by content, not by a list
@@ -1549,6 +1548,22 @@ Each row with the tests that prove it:
   `WorkspacesTest.aStoppedWorkspaceTakesItsOwnersCredentialsAsTheyAreNowWhenItStarts`,
   `LoginOperationsTest.aGitTokenChangeReachesThePersonsWorkspacesAndSaysEachItDidNot`,
   `WorkspaceIT.aReplacedTokenReachesARunningWorkspaceAtOnceAndAStoppedOneWhenItStarts`.*
+- **T6. A git token goes only to the host it was stored for.** The one source of a token is a
+  person's `sail git login <host>`, keyed by the host as the command takes it, port included
+  (`GitCredentials.forRepos`, `resolveTokenForHost`): no substring, provider guess or wildcard, so
+  a definition naming any host gets nobody's token for it. A spec's workspace takes its owner's
+  (T2); the host commands that clone (`project apply`, `repo add`, `demo`, `template build`,
+  `workspace create`) take the box person's (`HostIdentity.gitTokens`), written into the project's
+  container by the same writer and selection as the owner step. Nothing is read from a process's
+  environment: a repo whose host asks for credentials and has no stored token is refused before
+  anything is written, naming `sail git login <host>`, and when `GITHUB_TOKEN`, `GITLAB_TOKEN` or
+  `BITBUCKET_TOKEN` is set the refusal says Sail does not read it (only whether it is set is
+  read) (`GitCredentials.Missing`). No command takes a token on its command line.
+  *`GitCredentialsTest.aTokenStoredForOneHostIsNeverSentToAnother`,
+  `GitCredentialsTest.aHostWithAPortIsKeyedAndRefusedWithItsPort`,
+  `GitCredentialsTest.aTokenVariableSetIsNamedAsUnreadAndItsValueNeverSaid`,
+  `WorkspaceVerbsTest.aTemplateIsNotBuiltWhenARepoAsksForATokenNoOneStored`,
+  `RootRequiredTest.noCommandTakesAGitTokenOnItsCommandLine`.*
 - **Keys follow owners.** One walker (`BoxInstances.wholeWorkspaceOf`) finds a person's
   workspaces for keys and tokens alike. A pairing and `host config set ssh-public-key` both
   (`ContainerAuthorizedKeys.rekeyWorkstation`) take the old workstation key out of every container and
@@ -4123,9 +4138,9 @@ no pairing is removed through the gateway as before, and no key file is touched.
 - Dispatch gives a coding agent broad power inside its container by design. Dispatch is an
   explicit act of an FDE, the container is the isolation boundary, and the agent's output is
   untrusted.
-- A few flags take secrets as process arguments (`--git-token`, `--token`) as explicit
-  escape hatches; the environment, a token file or a prompt with echo off are the documented
-  ways.
+- One flag takes a secret as a process argument (`--token`, the API bearer) as an explicit escape
+  hatch; the environment, a token file or a prompt with echo off are the documented ways. A git
+  token is never an argument: `sail git login` reads it from stdin (T5).
 
 ## Native clients
 

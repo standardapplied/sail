@@ -5,7 +5,6 @@
 
 package ai.singlr.sail.commands;
 
-import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.DefinitionEdits;
 import ai.singlr.sail.config.ProjectDefinition;
 import ai.singlr.sail.config.ProjectDefinition.Section;
@@ -13,7 +12,6 @@ import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.Banner;
 import ai.singlr.sail.engine.ContainerManager;
 import ai.singlr.sail.engine.ContainerStateGuard;
-import ai.singlr.sail.engine.GitCredentials;
 import ai.singlr.sail.engine.NameValidator;
 import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.ProjectApplier;
@@ -40,12 +38,6 @@ public final class ProjectAddRepoCommand implements Runnable {
 
   @Option(names = "--dry-run", description = "Print commands instead of executing them.")
   private boolean dryRun;
-
-  @Option(
-      names = "--git-token",
-      description = "Access token for cloning private repos over HTTPS.",
-      defaultValue = "${GITHUB_TOKEN}")
-  private String gitToken;
 
   @Option(names = "--url", description = "Repository URL (non-interactive mode).")
   private String url;
@@ -92,11 +84,11 @@ public final class ProjectAddRepoCommand implements Runnable {
     }
 
     var edited = ProjectMutations.checked(DefinitionEdits.addRepo(config, repo));
-    var token = Strings.isNotBlank(gitToken) ? gitToken : null;
+    var tokens = WorkspaceVerbs.boxTokens(edited);
+    WorkspaceVerbs.requireTokens(
+        edited, tokens, new ShellExecutor(false)::asksForCredentials, System.getenv());
     var applier = new ProjectApplier(shell, out);
-    var result =
-        applier.applyRepos(
-            name, List.of(repo), ProjectDefinition.USER, GitCredentials.singleTokenMap(token));
+    var result = applier.applyRepos(name, List.of(repo), ProjectDefinition.USER, tokens);
     mutations.write(
         Section.REPOS,
         config,

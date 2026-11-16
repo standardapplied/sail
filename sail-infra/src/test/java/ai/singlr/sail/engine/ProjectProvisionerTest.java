@@ -1906,7 +1906,8 @@ class ProjectProvisionerTest {
     var provisioner =
         new ProjectProvisioner(shell, tracker(), null, Optional.empty(), OperatorCommand.PLAIN);
 
-    provisioner.provision(configWithRepo(), hostYaml(), Map.of("*", "ghp_test123"), GIT, null);
+    provisioner.provision(
+        configWithRepo(), hostYaml(), Map.of("github.com", "ghp_test123"), GIT, null);
 
     var cmds = shell.invocations();
     assertTrue(
@@ -1963,7 +1964,7 @@ class ProjectProvisionerTest {
             IOException.class,
             () ->
                 provisioner.provision(
-                    configWithRepo(), hostYaml(), Map.of("*", "ghp_bad"), GIT, null));
+                    configWithRepo(), hostYaml(), Map.of("github.com", "ghp_bad"), GIT, null));
 
     assertEquals(
         "Failed to log gh in for github.com in acme-health: The token in GH_TOKEN is invalid.",

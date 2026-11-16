@@ -15,7 +15,6 @@ import ai.singlr.sail.engine.ContainerManager;
 import ai.singlr.sail.engine.ContainerSailSetup;
 import ai.singlr.sail.engine.ContainerState;
 import ai.singlr.sail.engine.DemoProject;
-import ai.singlr.sail.engine.GitCredentials;
 import ai.singlr.sail.engine.HostInfo;
 import ai.singlr.sail.engine.LocalIdentity;
 import ai.singlr.sail.engine.OperatorCommand;
@@ -57,9 +56,6 @@ public final class ProjectDemoCommand implements Runnable {
 
   @Option(names = "--json", description = "Output in JSON format.")
   private boolean json;
-
-  @Option(names = "--git-token", description = "Access token for cloning private repos over HTTPS.")
-  private String gitToken;
 
   /** A provisioning that installs {@code workstationKey} in the container it creates. */
   @FunctionalInterface
@@ -181,6 +177,8 @@ public final class ProjectDemoCommand implements Runnable {
     var tracker = new ProvisionTracker<>(ProjectPhase.class, stateFile, false);
     tracker.reset();
 
+    var tokens = WorkspaceVerbs.boxTokens(config);
+    WorkspaceVerbs.requireTokens(config, tokens, shell::asksForCredentials, System.getenv());
     var listener = json ? ProvisionListener.NOOP : ConsoleProvisionListener.INSTANCE;
     provisionTrusting(
         SailPaths.controlPlaneDb(),
@@ -188,11 +186,7 @@ public final class ProjectDemoCommand implements Runnable {
         workstationKey ->
             new ProjectProvisioner(shell, tracker, listener, workstationKey, operator)
                 .provision(
-                    config,
-                    hostYaml,
-                    GitCredentials.singleTokenMap(gitToken),
-                    git,
-                    SailPaths.projectFilesDir(config.name())));
+                    config, hostYaml, tokens, git, SailPaths.projectFilesDir(config.name())));
 
     if (json) {
       var map = new LinkedHashMap<String, Object>();

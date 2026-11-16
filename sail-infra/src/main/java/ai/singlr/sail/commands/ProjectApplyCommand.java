@@ -21,7 +21,6 @@ import ai.singlr.sail.engine.ContainerManager;
 import ai.singlr.sail.engine.ContainerManager.ContainerInfo;
 import ai.singlr.sail.engine.ContainerSailSetup;
 import ai.singlr.sail.engine.ContainerState;
-import ai.singlr.sail.engine.GitCredentials;
 import ai.singlr.sail.engine.HostInfo;
 import ai.singlr.sail.engine.IncusDeviceManager;
 import ai.singlr.sail.engine.LocalIdentity;
@@ -50,7 +49,6 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
-import java.util.Map;
 import java.util.Optional;
 import java.util.function.Function;
 import java.util.function.Supplier;
@@ -96,12 +94,6 @@ public final class ProjectApplyCommand implements Runnable {
 
   @Option(names = "--yes", description = "Skip confirmation prompts (for non-interactive use).")
   private boolean yes;
-
-  @Option(
-      names = "--git-token",
-      description = "Access token for cloning private repos over HTTPS.",
-      defaultValue = "${GITHUB_TOKEN}")
-  private String gitToken;
 
   private final Supplier<Box> box;
   private final Function<Boolean, ShellExec> shells;
@@ -463,6 +455,8 @@ public final class ProjectApplyCommand implements Runnable {
       OperatorCommand operator)
       throws Exception {
     var project = config.name();
+    var tokens = WorkspaceVerbs.boxTokens(config);
+    WorkspaceVerbs.requireTokens(config, tokens, observer::asksForCredentials, System.getenv());
     var observed = new ContainerManager(observer);
     var mgr = new ContainerManager(shell);
     var hostnameRealigned = !observed.hostnameMatches(project) && mgr.setHostname(project);
@@ -473,14 +467,12 @@ public final class ProjectApplyCommand implements Runnable {
     var warnings =
         new ArrayList<>(applier.checkUnsupportedChanges(config, info.limits(), operator));
     var sshUser = ProjectDefinition.USER;
-    var token = Strings.isNotBlank(gitToken) ? gitToken : null;
 
     var results = new ArrayList<ProjectApplier.ApplyResult>();
     results.add(applier.applyPackages(project, config.packages()));
     results.add(applier.applyServices(project, config.services()));
     results.add(applier.reconcileServices(project, config.services()));
-    results.add(
-        applier.applyRepos(project, config.repos(), sshUser, GitCredentials.singleTokenMap(token)));
+    results.add(applier.applyRepos(project, config.repos(), sshUser, tokens));
     results.add(applier.applyWorkspaceFiles(project, SailPaths.projectFilesDir(project), sshUser));
     var agentInstall = config.agent() != null ? config.agent().installs() : null;
     results.add(applier.applyAgentTools(project, agentInstall));
@@ -671,7 +663,8 @@ public final class ProjectApplyCommand implements Runnable {
       ConsoleHelper.proceed("Create project " + config.name() + "?", "Not provisioned", "--yes");
     }
 
-    var gitTokens = resolveGitTokens(config, operator);
+    var gitTokens = WorkspaceVerbs.boxTokens(config);
+    WorkspaceVerbs.requireTokens(config, gitTokens, shell::asksForCredentials, System.getenv());
     var listener = json ? ProvisionListener.NOOP : ConsoleProvisionListener.INSTANCE;
     try (var operations = OperationsFactory.open()) {
       var provisioner =
@@ -729,38 +722,5 @@ public final class ProjectApplyCommand implements Runnable {
         + "\n    Then: "
         + operator.sail("project connect " + project)
         + " for SSH config snippet.";
-  }
-
-  private Map<String, String> resolveGitTokens(ProjectDefinition config, OperatorCommand operator) {
-    var known = GitCredentials.known(config.repos(), gitToken);
-    if (Strings.isNotBlank(gitToken)) {
-      return known;
-    }
-    var tokens = new LinkedHashMap<>(known);
-    var missingHosts =
-        GitCredentials.extractHttpsHosts(config.repos()).stream()
-            .filter(h -> !tokens.containsKey(h))
-            .toList();
-    if (missingHosts.isEmpty() || yes || json || dryRun) {
-      return Map.copyOf(tokens);
-    }
-    for (var host : missingHosts) {
-      try {
-        var prompted =
-            ConsoleHelper.readPassword("  Git access token for " + host + " (blank to skip): ");
-        if (Strings.isNotBlank(prompted)) {
-          tokens.put(host, prompted);
-        }
-      } catch (EchoDisabledUnavailableException e) {
-        throw new IllegalArgumentException(
-            "Unable to read git access token interactively in this terminal.\n\n"
-                + "Provide the token via one of:\n"
-                + "  --git-token <token>\n"
-                + "  GITHUB_TOKEN environment variable\n\n"
-                + "Then re-run: "
-                + operator.sail("project apply " + config.name()));
-      }
-    }
-    return Map.copyOf(tokens);
   }
 }

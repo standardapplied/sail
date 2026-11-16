@@ -33,7 +33,6 @@ class ProjectDemoCommandTest {
 
     assertTrue(usage.contains("--json"));
     assertTrue(usage.contains("--dry-run"));
-    assertTrue(usage.contains("--git-token"));
     assertTrue(usage.contains("demo project") || usage.contains("zero configuration"));
   }
 
