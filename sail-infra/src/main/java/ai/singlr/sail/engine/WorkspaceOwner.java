@@ -37,6 +37,40 @@ public record WorkspaceOwner(
     keys = List.copyOf(keys);
   }
 
+  /** A person refused as a workspace's owner, saying why and what to do. */
+  public static final class Refused extends IllegalStateException implements Remedied {
+    private final String reason;
+    private final transient Remedy remedy;
+
+    Refused(String reason, Remedy remedy) {
+      super(Remedied.message(reason, remedy));
+      this.reason = reason;
+      this.remedy = remedy;
+    }
+
+    @Override
+    public String reason() {
+      return reason;
+    }
+
+    @Override
+    public Remedy remedy() {
+      return remedy;
+    }
+  }
+
+  /**
+   * Person {@code handle} of this box's roster {@code fdes} as a workspace's owner, with this box's
+   * registered workstation key when they are the box's person, {@code boxHandle}: the one lookup
+   * every door makes.
+   */
+  public static WorkspaceOwner onThisBox(FdeStore fdes, String handle, String boxHandle) {
+    if (fdes == null) {
+      throw new IllegalStateException("This box keeps no roster, so no workspace has an owner.");
+    }
+    return of(fdes, handle, boxHandle, WorkstationIdentity.registered());
+  }
+
   /**
    * The person {@code handle} of {@code fdes}' roster as a workspace's owner: their display name
    * (else their handle), email, git tokens and keys, and {@code workstation} too when {@code
@@ -80,7 +114,7 @@ public record WorkspaceOwner(
    */
   public void require(ProjectDefinition config, Predicate<String> asks) {
     if (Strings.isBlank(email)) {
-      throw Remedied.state(
+      throw new Refused(
           handle + " has no email on this box, and a workspace commits as its owner.",
           Remedy.of("Set it with ", Remedy.sail("fde update", handle, "--email", "<email>"), "."));
     }
@@ -88,7 +122,7 @@ public record WorkspaceOwner(
     if (!asking.isEmpty()) {
       var repo = asking.getFirst();
       var host = GitCredentials.extractHttpsHosts(List.of(repo)).getFirst();
-      throw Remedied.state(
+      throw new Refused(
           host
               + " asks for credentials to fetch "
               + config.name()

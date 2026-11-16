@@ -14,7 +14,6 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
 import java.util.concurrent.TimeoutException;
-import java.util.function.Predicate;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
@@ -81,19 +80,25 @@ public final class ContainerAuthorizedKeys {
 
   /**
    * Adds {@code key}, the box's workstation key, to the SSH user's file in each container of {@code
-   * projects} this box runs and in each of their workspaces whose owner is {@code boxHandle}, the
-   * box's person, that does not hold it yet, and returns those it could not, each with why: one
-   * that cannot be written stops none of the others. A workspace of anyone else never takes it
-   * (T2). A container bearing a project's name that carries no sail-api-sock device is not written
-   * but returned, as {@code project apply --all} names it: sail did not make it, or did not finish.
+   * projects} this box runs and in each whole workspace whose owner is {@code boxHandle}, the box's
+   * person ({@link BoxInstances#wholeWorkspaceOf}), that does not hold it yet, and returns those it
+   * could not, each with why: one that cannot be written stops none of the others. A workspace of
+   * anyone else never takes it (T2). A container bearing a project's name that carries no
+   * sail-api-sock device is not written but returned, as {@code project apply --all} names it: sail
+   * did not make it, or did not finish.
    */
   public List<Unreached> add(SshPublicKey key, Collection<String> projects, String boxHandle)
       throws IOException, InterruptedException, TimeoutException {
-    return addWhere(
+    return addTo(
         key,
-        instance ->
-            ofProject(instance, projects)
-                && (instance.kind() instanceof BoxInstances.Plain || ownedBy(instance, boxHandle)));
+        new BoxInstances(shell)
+            .containers().stream()
+                .filter(
+                    instance ->
+                        instance.kind() instanceof BoxInstances.Plain
+                                && projects.contains(instance.name())
+                            || BoxInstances.wholeWorkspaceOf(boxHandle).test(instance))
+                .toList());
   }
 
   /**
@@ -102,23 +107,15 @@ public final class ContainerAuthorizedKeys {
    */
   public List<Unreached> addToWorkspacesOf(SshPublicKey key, String handle)
       throws IOException, InterruptedException, TimeoutException {
-    return addWhere(
-        key,
-        instance ->
-            instance.kind() instanceof BoxInstances.Workspace workspace
-                && workspace.ready()
-                && ownedBy(instance, handle));
+    return addTo(key, new BoxInstances(shell).wholeWorkspacesOf(handle));
   }
 
-  private List<Unreached> addWhere(SshPublicKey key, Predicate<BoxInstances.Instance> reached)
-      throws IOException, InterruptedException, TimeoutException {
+  private List<Unreached> addTo(SshPublicKey key, List<BoxInstances.Instance> reached)
+      throws InterruptedException {
     var entry = entry(key);
     var devices = new IncusDeviceManager(shell);
-    var instances =
-        new BoxInstances(shell)
-            .containers().stream().filter(reached).map(BoxInstances.Instance::name).toList();
     return each(
-        instances,
+        reached.stream().map(BoxInstances.Instance::name).toList(),
         container -> {
           if (!devices.sailManaged(container)) {
             throw new IOException(
@@ -127,10 +124,6 @@ public final class ContainerAuthorizedKeys {
           }
           addTo(container, homeAccounts(container), key, entry);
         });
-  }
-
-  private static boolean ownedBy(BoxInstances.Instance instance, String handle) {
-    return instance.key(BoxInstances.OWNER_KEY).filter(owner -> owner.equals(handle)).isPresent();
   }
 
   private static List<Unreached> each(List<String> containers, Edit edit)
@@ -169,20 +162,6 @@ public final class ContainerAuthorizedKeys {
 
   private List<String> containers() throws IOException, InterruptedException, TimeoutException {
     return new BoxInstances(shell).containers().stream().map(BoxInstances.Instance::name).toList();
-  }
-
-  /**
-   * Whether {@code instance} is the container or a whole workspace of one of {@code projects}, and
-   * no template, which holds no one's key.
-   */
-  private static boolean ofProject(BoxInstances.Instance instance, Collection<String> projects) {
-    return switch (instance.kind()) {
-      case BoxInstances.Plain ignored -> projects.contains(instance.name());
-      case BoxInstances.Workspace workspace ->
-          workspace.ready() && projects.contains(workspace.project());
-      case BoxInstances.Template ignored -> false;
-      case BoxInstances.Stray ignored -> false;
-    };
   }
 
   private static Pattern entry(SshPublicKey key) {

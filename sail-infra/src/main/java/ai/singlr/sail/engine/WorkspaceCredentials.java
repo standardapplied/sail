@@ -7,7 +7,9 @@ package ai.singlr.sail.engine;
 
 import ai.singlr.sail.config.ProjectDefinition;
 import java.io.IOException;
+import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.List;
 import java.util.Locale;
 import java.util.concurrent.TimeoutException;
@@ -45,18 +47,65 @@ final class WorkspaceCredentials {
       fi
       """;
 
-  /** Run as root: names each of the four a container still holds, failing when it holds one. */
+  /**
+   * Run as root on a quiet container, with the tokens its build was given on stdin, one per line:
+   * names what it still holds and exits 1, or exits 2 when it cannot tell, since an error is never
+   * "nothing found". It holds (a) a token, when the bytes of any appear in any file of its root
+   * filesystem (every top-level directory that is no mount point), grep reading the tokens as its
+   * fixed-string patterns from stdin, never as an argument; (b) a git identity, when git reports a
+   * user name or email at the system or the dev user's global level; (c) a key, when any {@code
+   * authorized_keys} under a home has a line; (d) a gh login, when gh reports one.
+   */
   static final String HELD =
       """
+      set -u
       held=""
       as_dev() { runuser -u dev -- env HOME=/home/dev "$@"; }
-      [ ! -e /home/dev/.git-credentials ] || held="$held .git-credentials"
-      [ ! -e /home/dev/.config/gh/hosts.yml ] || held="$held gh's hosts.yml"
-      if as_dev git config --global user.name >/dev/null; then held="$held user.name"; fi
-      if as_dev git config --global user.email >/dev/null; then held="$held user.email"; fi
-      [ ! -s /home/dev/.ssh/authorized_keys ] || held="$held authorized_keys"
+      tokens=$(cat) || exit 2
+      if [ -n "$tokens" ]; then
+        set --
+        for d in /* /.[!.]*; do
+          [ -e "$d" ] && [ ! -L "$d" ] && ! mountpoint -q "$d" && set -- "$@" "$d"
+        done
+        found=$(printf '%s\n' "$tokens" | grep -r -l -F --devices=skip -f - -- "$@")
+        case $? in
+          0) held="$held a token in $(printf '%s ' $found)" ;;
+          1) ;;
+          *) echo "the search for the build's tokens failed" >&2; exit 2 ;;
+        esac
+      fi
+      for key in user.name user.email; do
+        for scope in system global; do
+          if [ "$scope" = system ]; then git config --system --get "$key" >/dev/null
+          else as_dev git config --global --get "$key" >/dev/null; fi
+          case $? in
+            0) held="$held $scope $key" ;;
+            1) ;;
+            *) echo "git could not read the $scope $key" >&2; exit 2 ;;
+          esac
+        done
+      done
+      for keys in /root/.ssh/authorized_keys /home/*/.ssh/authorized_keys; do
+        [ -e "$keys" ] || continue
+        grep -q '[^[:space:]]' "$keys"
+        case $? in
+          0) held="$held $keys" ;;
+          1) ;;
+          *) echo "could not read $keys" >&2; exit 2 ;;
+        esac
+      done
+      if said=$(as_dev gh auth status 2>&1); then
+        held="$held a gh login"
+      else
+        case $said in
+          *"not logged in"*) ;;
+          *) printf 'gh could not say whether it is logged in: %s\n' "$said" >&2; exit 2 ;;
+        esac
+      fi
       if [ -n "$held" ]; then echo "it still holds$held" >&2; exit 1; fi
       """;
+
+  private static final Duration HELD_TIMEOUT = Duration.ofMinutes(10);
 
   private WorkspaceCredentials() {}
 
@@ -67,12 +116,20 @@ final class WorkspaceCredentials {
   }
 
   /**
-   * Refuses {@code template} when it still holds any of the four ({@link #HELD}): what a build asks
-   * before it records or snapshots a version (T1).
+   * Refuses {@code template} when it still holds a credential ({@link #HELD}), the build's {@code
+   * tokens} given to the check on stdin: what a build asks before it records or snapshots a version
+   * (T1).
    */
-  static void requireNone(ShellExec shell, String template)
+  static void requireNone(ShellExec shell, String template, Collection<String> tokens)
       throws IOException, InterruptedException, TimeoutException {
-    var held = shell.exec(ContainerExec.asRoot(template, List.of("bash", "-c", HELD, "sail-held")));
+    var held =
+        shell.execWithInput(
+            ContainerExec.asRoot(template, List.of("bash", "-c", HELD, "sail-held")),
+            tokens.stream()
+                .filter(token -> !token.isBlank())
+                .map(token -> token + "\n")
+                .reduce("", String::concat),
+            HELD_TIMEOUT);
     if (!held.ok()) {
       throw new IOException(
           template
@@ -107,12 +164,31 @@ final class WorkspaceCredentials {
   }
 
   /**
-   * Logs {@code gh} in for {@code owner}'s tokens of the GitHub hosts of {@code config}'s repos.
+   * Run as root: waits until each host named after it resolves, for at most 30 s, so a {@code gh}
+   * login, which asks its forge, does not run before a container just started has a resolver.
+   */
+  static final String RESOLVES =
+      """
+      for host in "$@"; do
+        for _ in $(seq 1 300); do getent hosts "$host" >/dev/null && break; sleep 0.1; done
+      done
+      """;
+
+  /**
+   * Logs {@code gh} in for {@code owner}'s tokens of the GitHub hosts of {@code config}'s repos,
+   * once each resolves ({@link #RESOLVES}).
    */
   static void logForgeIn(
       ShellExec shell, String instance, ProjectDefinition config, WorkspaceOwner owner)
       throws IOException, InterruptedException, TimeoutException {
     var repos = owner.tokenRepos(config.repos());
+    var hosts = GitCredentials.githubHosts(repos);
+    if (hosts.isEmpty()) {
+      return;
+    }
+    var resolve = new ArrayList<>(List.of("bash", "-c", RESOLVES, "sail-resolve"));
+    resolve.addAll(hosts);
+    shell.exec(ContainerExec.asRoot(instance, resolve));
     ForgeCliLogin.loginGitHub(
         shell, instance, ProjectDefinition.USER, owner.tokensFor(repos), repos);
   }

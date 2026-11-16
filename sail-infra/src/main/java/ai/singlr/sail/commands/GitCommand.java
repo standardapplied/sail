@@ -9,7 +9,6 @@ import ai.singlr.sail.api.SailApiClient;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.NameValidator;
 import ai.singlr.sail.store.LoginStore;
-import java.io.IOException;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -61,12 +60,12 @@ public final class GitCommand implements Runnable {
         CommandLine.usage(this, System.out);
         return;
       }
-      CliCommand.run(this::execute);
+      CliCommand.run(json, this::execute);
     }
 
     private void execute() throws Exception {
       var named = LoginStore.requireHost(host);
-      var value = read(named);
+      var value = AgentLoginCommand.read(named + " token", null);
       var config = connection.resolve();
       try (var client = new SailApiClient(config.serverUrl(), config.token())) {
         var result = client.put("/v1/git-logins/" + named, Map.of("value", value));
@@ -82,19 +81,13 @@ public final class GitCommand implements Runnable {
                     + result.get("host")
                     + ", fingerprint "
                     + result.get("fingerprint")
-                    + ". Workspaces made or re-owned for "
+                    + ". Every workspace of "
                     + result.get("fde")
-                    + " from now on use it."));
+                    + "'s takes it: a running one now, a stopped one when it next starts."));
+        if (result.get("note") != null) {
+          System.out.println("  " + result.get("note"));
+        }
       }
-    }
-
-    /** The token: typed at a terminal with echo off, or the whole of stdin, its newline dropped. */
-    private static String read(String host) throws IOException {
-      if (ConsoleHelper.hasConsole()) {
-        return ConsoleHelper.readPassword("  " + host + " token (input hidden): ");
-      }
-      System.err.println("  Reading the " + host + " token from stdin.");
-      return AgentLoginCommand.trimmed(System.in);
     }
 
     private static String person(String fde) {
@@ -122,7 +115,7 @@ public final class GitCommand implements Runnable {
 
       @Override
       public void run() {
-        CliCommand.run(this::execute);
+        CliCommand.run(json, this::execute);
       }
 
       @SuppressWarnings("unchecked")
@@ -173,7 +166,7 @@ public final class GitCommand implements Runnable {
 
       @Override
       public void run() {
-        CliCommand.run(this::execute);
+        CliCommand.run(json, this::execute);
       }
 
       private void execute() throws Exception {

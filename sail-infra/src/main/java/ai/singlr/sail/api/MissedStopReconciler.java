@@ -31,9 +31,11 @@ import java.io.IOException;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
@@ -177,6 +179,8 @@ public final class MissedStopReconciler implements AutoCloseable {
   private volatile Instant tidiedSince = Instant.EPOCH;
   private final Set<String> untidied = ConcurrentHashMap.newKeySet();
   private final Set<String> undisowned = ConcurrentHashMap.newKeySet();
+  private volatile Map<String, String> lastRoster;
+  private volatile boolean unlisted;
   private final StrandedReviewRescue strandedReviews;
 
   public MissedStopReconciler(
@@ -383,21 +387,49 @@ public final class MissedStopReconciler implements AutoCloseable {
 
   /**
    * Takes the credentials of every person the roster no longer holds out of the workspaces they
-   * owned, however they were removed (a host {@code fde rm}, a scoped node's roster round, or one
-   * whose own take-back could not reach Incus); a workspace not reached is said once, until it is.
+   * owned, however they were removed (a host {@code fde rm}, or a scoped node's roster round): on
+   * the first pass after a start, when a person left the roster or their handle was given to
+   * someone else since the last pass, and again while a workspace a pass could not reach is left.
+   * Each pass reads the roster alone; Incus is listed only then. A workspace not reached is said
+   * once, until it is.
    */
   private void disownRemoved() {
+    var roster = new HashMap<String, String>();
+    fdes.list().forEach(fde -> roster.put(fde.handle(), fde.id()));
+    var gone = new HashSet<String>();
+    if (lastRoster != null) {
+      lastRoster.forEach(
+          (handle, id) -> {
+            if (!id.equals(roster.get(handle))) {
+              gone.add(handle);
+            }
+          });
+    }
+    if (lastRoster != null && gone.isEmpty() && undisowned.isEmpty()) {
+      lastRoster = roster;
+      return;
+    }
     try {
-      var unreached = unitProbe.disown(handle -> fdes.byHandle(handle).isPresent());
-      for (var left : unreached) {
-        if (undisowned.add(left)) {
-          System.err.println("  [reconcile] a removed person's credentials are left in " + left);
+      var unreached =
+          unitProbe.disown(handle -> roster.containsKey(handle) && !gone.contains(handle));
+      var left = new HashSet<String>();
+      for (var line : unreached) {
+        var instance = line.substring(0, Math.max(0, line.indexOf(':')));
+        left.add(instance);
+        if (!undisowned.contains(instance)) {
+          System.err.println("  [reconcile] a removed person's credentials are left in " + line);
         }
       }
-      undisowned.retainAll(unreached);
+      undisowned.clear();
+      undisowned.addAll(left);
+      lastRoster = roster;
+      unlisted = false;
     } catch (Exception e) {
-      System.err.println(
-          "  [reconcile] could not take removed people's credentials out: " + e.getMessage());
+      if (!unlisted) {
+        System.err.println(
+            "  [reconcile] could not take removed people's credentials out: " + e.getMessage());
+      }
+      unlisted = true;
     }
   }
 

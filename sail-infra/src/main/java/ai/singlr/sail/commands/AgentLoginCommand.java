@@ -84,7 +84,7 @@ public final class AgentLoginCommand implements Runnable {
       rehearse(known.yamlName(), named, declared.kind());
       return;
     }
-    var value = read(known.displayName(), declared.kind(), declared.howToMake().plain());
+    var value = read(known.displayName() + " " + declared.kind(), declared.howToMake().plain());
     var body = new LinkedHashMap<String, Object>();
     body.put("kind", declared.kind());
     body.put("value", value);
@@ -149,12 +149,14 @@ public final class AgentLoginCommand implements Runnable {
    * The login's value: typed at a terminal with echo off, after saying how to make one, or the
    * whole of stdin, its one trailing newline dropped. More than a login may hold is refused unread.
    */
-  private static String read(String harness, String kind, String howToMake) throws IOException {
+  static String read(String what, String howToMake) throws IOException {
     if (ConsoleHelper.hasConsole()) {
-      System.out.println("  " + howToMake + ", then paste it here.");
-      return ConsoleHelper.readPassword("  " + harness + " " + kind + " (input hidden): ");
+      if (howToMake != null) {
+        System.out.println("  " + howToMake + ", then paste it here.");
+      }
+      return ConsoleHelper.readPassword("  " + what + " (input hidden): ");
     }
-    System.err.println("  Reading the " + harness + " " + kind + " from stdin.");
+    System.err.println("  Reading the " + what + " from stdin.");
     return trimmed(System.in);
   }
 

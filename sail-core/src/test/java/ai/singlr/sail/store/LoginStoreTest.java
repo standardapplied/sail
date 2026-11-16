@@ -425,7 +425,8 @@ class LoginStoreTest {
         assertThrows(
             IllegalArgumentException.class, () -> store.storeGit(UDAY, "github.com", "a b"));
     assertEquals(VALUE_RULE, value.getMessage());
-    for (var host : List.of("../x", "-github.com", "git hub", "")) {
+    assertEquals("git.example.com:8443", LoginStore.requireHost("Git.Example.com:8443"));
+    for (var host : List.of("../x", "-github.com", "git hub", "", "h:0", "h:65536", "h:x")) {
       assertThrows(IllegalArgumentException.class, () -> store.storeGit(UDAY, host, "ghp_x"));
     }
     assertEquals(List.of(), store.gitRows(UDAY));

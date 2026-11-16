@@ -38,6 +38,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Function;
@@ -545,7 +546,7 @@ class RunPlacesTest {
         owning(incus, RunPlacesTest::withoutEmail, new ArrayList<>())
             .checkSpec("acme", config(), "auth", Lane.REVIEW, "eng");
 
-    assertEquals("eng", check.owner().handle());
+    assertEquals("auth", check.place().specId(), "not refused");
   }
 
   /** Scenarios 6 and 7: a workspace another person owns is re-owned only for one who may own it. */
@@ -575,5 +576,40 @@ class RunPlacesTest {
     assertEquals(
         "Set it with sail fde update ana --email <email>. Then dispatch again.",
         refused.failure().remedy().plain());
+  }
+
+  /**
+   * Rule 4: what is given is read when it is given. A token removed between the check before the
+   * reservation and the give is refused there as the same refusal, the workspace being made is
+   * discarded, and nothing of the person's is written.
+   */
+  @Test
+  void aTokenRemovedBetweenTheCheckAndTheGiveIsRefusedThenAndNothingIsWritten() throws Exception {
+    var incus = TestWorkspaces.incus(definitions(), "acme");
+    var told = new ArrayList<String>();
+    var reads = new AtomicInteger();
+    Function<String, WorkspaceOwner> owners =
+        handle ->
+            new WorkspaceOwner(
+                handle,
+                handle,
+                handle + "@sail.invalid",
+                reads.getAndIncrement() == 0 ? Map.of("github.com", "ghp_gone") : Map.of(),
+                List.of());
+    var places = owning(incus, owners, told);
+    var check = places.checkSpec("acme", config(), "auth", Lane.BUILD, "ana");
+
+    var refused = assertThrows(ApiException.class, () -> places.enter(check, config()));
+
+    assertEquals(ErrorCode.CONFLICT, refused.failure().errorCode());
+    assertEquals(
+        "github.com asks for credentials to fetch acme's repo app, and ana keeps no token for it.",
+        refused.getMessage());
+    assertEquals(2, reads.get(), "read at the check and again at the give");
+    assertFalse(incus.invocations().stream().anyMatch(c -> c.contains("sail-strip")));
+    assertFalse(incus.invocations().stream().anyMatch(c -> c.startsWith("incus file push")));
+    assertTrue(
+        incus.invocations().stream().anyMatch(c -> c.contains("delete") && c.contains("acme-auth")),
+        String.join("\n", incus.invocations()));
   }
 }

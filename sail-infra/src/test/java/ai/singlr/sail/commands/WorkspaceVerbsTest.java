@@ -162,12 +162,14 @@ class WorkspaceVerbsTest {
         new HostYaml(
             "dir", null, null, "incusbr0", "singlr-base", "ubuntu/24.04", "6.0", null, null);
 
-    var source = WorkspaceVerbs.source(named, acme(), name -> false, (into, fresh) -> {});
+    var source =
+        WorkspaceVerbs.source(named, acme(), List.of(), name -> false, (into, fresh) -> {});
 
     assertEquals("devpool", source.basePool());
     assertEquals(ProjectProvisioner.inputs(acme(), Optional.empty()), source.inputs());
     assertEquals(
         HostYaml.DEFAULT_POOL,
-        WorkspaceVerbs.source(unnamed, acme(), name -> false, (into, fresh) -> {}).basePool());
+        WorkspaceVerbs.source(unnamed, acme(), List.of(), name -> false, (into, fresh) -> {})
+            .basePool());
   }
 }

@@ -8,14 +8,17 @@ package ai.singlr.sail.api;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.Sqlite;
+import java.io.IOException;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -28,7 +31,7 @@ class LoginOperationsTest {
 
   @Test
   void aBoxWithNoRosterKeepsNoLoginsAndSaysSo() {
-    var doors = new LoginOperations(null, null, event -> {});
+    var doors = new LoginOperations(null, null, event -> {}, handle -> List.of());
 
     var refused = assertThrows(ApiException.class, () -> Actor.call(UDAY, () -> doors.list(null)));
 
@@ -42,7 +45,7 @@ class LoginOperationsTest {
       new SchemaManager(db).migrate();
       new FdeStore(db).add("uday", null, null, "member");
       var events = new ArrayList<Event>();
-      var doors = new LoginOperations(new FdeStore(db), null, events::add);
+      var doors = new LoginOperations(new FdeStore(db), null, events::add, handle -> List.of());
 
       var stored = Actor.call(UDAY, () -> doors.store("codex", null, null, "sk-proj-1"));
       var removed = Actor.call(UDAY, () -> doors.remove("codex", "default", null));
@@ -64,7 +67,7 @@ class LoginOperationsTest {
     try (var db = Sqlite.openMemory()) {
       new SchemaManager(db).migrate();
       new FdeStore(db).add("uday", null, null, "member");
-      var doors = new LoginOperations(new FdeStore(db), null, event -> {});
+      var doors = new LoginOperations(new FdeStore(db), null, event -> {}, handle -> List.of());
 
       var refused =
           assertThrows(
@@ -74,6 +77,65 @@ class LoginOperationsTest {
       assertEquals(ErrorCode.COMMAND_FAILED, refused.failure().errorCode());
       assertEquals(
           "This box keeps its database in memory, so it keeps no logins.", refused.getMessage());
+    }
+  }
+
+  /**
+   * A stored, replaced or removed git token reaches the person's running workspaces at once; one it
+   * could not reach is said in the answer, and so is a box whose workspaces cannot be read.
+   */
+  @Test
+  void aGitTokenChangeReachesThePersonsWorkspacesAndSaysEachItDidNot() {
+    try (var db = Sqlite.open(tempDir.resolve("sail.db"))) {
+      new SchemaManager(db).migrate();
+      new FdeStore(db).add("uday", null, "uday@x", "member");
+      var reached = new ArrayList<String>();
+      var doors =
+          new LoginOperations(
+              new FdeStore(db),
+              null,
+              event -> {},
+              handle -> {
+                reached.add(handle);
+                return List.of("acme-a: Error: not running");
+              });
+      var unreadable =
+          new LoginOperations(
+              new FdeStore(db),
+              null,
+              event -> {},
+              handle -> {
+                throw new IOException("incus list failed: denied");
+              });
+
+      var stored = Actor.call(UDAY, () -> doors.gitStore("github.com", "ghp_one"));
+      var removed = Actor.call(UDAY, () -> doors.gitRemove("github.com", null));
+      var blind = Actor.call(UDAY, () -> unreadable.gitStore("github.com", "ghp_two"));
+      var interrupting =
+          new LoginOperations(
+              new FdeStore(db),
+              null,
+              event -> {},
+              handle -> {
+                throw new InterruptedException("stopped");
+              });
+      Actor.call(UDAY, () -> interrupting.gitStore("github.com", "ghp_three"));
+      assertTrue(Thread.interrupted(), "the interrupt is kept");
+
+      assertEquals(List.of("uday", "uday"), reached);
+      assertEquals(
+          "These workspaces keep the token they had until they next start: acme-a: Error: not"
+              + " running.",
+          stored.note());
+      assertEquals(stored.note(), stored.toMap().get("note"));
+      assertEquals(
+          "Removed uday's git token for github.com. These workspaces keep the token they had until"
+              + " they next start: acme-a: Error: not running.",
+          removed.note());
+      assertEquals(
+          "This box's workspaces could not be read, so each keeps the token it had until it next"
+              + " starts: incus list failed: denied",
+          blind.note());
     }
   }
 }

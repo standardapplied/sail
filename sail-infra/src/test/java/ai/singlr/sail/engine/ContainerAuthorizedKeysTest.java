@@ -58,7 +58,7 @@ class ContainerAuthorizedKeysTest {
 
   /**
    * Scenario 9: the box's workstation key reaches the project's container and its person's whole
-   * workspaces, never another person's workspace, a half-made one or a template.
+   * workspaces, of any project, never another person's workspace, a half-made one or a template.
    */
   @Test
   void theWorkstationKeyReachesTheContainerAndTheBoxPersonsWorkspacesAlone() throws Exception {
@@ -66,7 +66,7 @@ class ContainerAuthorizedKeysTest {
 
     new ContainerAuthorizedKeys(shell).add(LAPTOP, List.of("acme"), "uday");
 
-    assertEquals(List.of("acme", "acme-w"), reached(shell));
+    assertEquals(List.of("acme", "acme-w", "bravo-w"), reached(shell));
   }
 
   /**

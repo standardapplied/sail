@@ -22,7 +22,8 @@ import ai.singlr.sail.common.Remedied;
 import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.config.ProjectDefinition;
 import ai.singlr.sail.config.YamlUtil;
-import ai.singlr.sail.engine.ShellExecutor;
+import ai.singlr.sail.engine.ScriptedShellExecutor;
+import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.WorkspaceOwner;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.SchemaManager;
@@ -61,7 +62,7 @@ class GitCommandTest {
         TestControlPlane.standalone(
             OperationsFactory.create(
                 db,
-                new ShellExecutor(false),
+                new ScriptedShellExecutor(new ShellExec.Result(0, "[]", "")),
                 new EventBus(),
                 SyncScheduler.disabled(),
                 SessionYield.NONE),
@@ -105,7 +106,8 @@ class GitCommandTest {
     assertEquals(
         "  ✓ Stored uday's git token for github.com, fingerprint "
             + print
-            + ". Workspaces made or re-owned for uday from now on use it.\n",
+            + ". Every workspace of uday's takes it: a running one now, a stopped one when it next"
+            + " starts.\n",
         stored.out());
 
     var listed = sail("", "login", "list", "--json");
@@ -184,5 +186,52 @@ class GitCommandTest {
       var parsed = new CommandLine(new Sail()).parseArgs(args.toArray(String[]::new));
       assertTrue(parsed.hasSubcommand(), String.join(" ", args));
     }
+  }
+
+  /**
+   * Review minor 7: the refusal for a repo on a host with a port names a {@code sail git login}
+   * that works as printed, pasted with the token on stdin.
+   */
+  @Test
+  void theRefusalForAHostWithAPortNamesALoginThatWorksAsPasted() {
+    var config =
+        new ProjectDefinition(
+            "acme",
+            null,
+            null,
+            null,
+            null,
+            null,
+            List.of(
+                new ProjectDefinition.Repo(
+                    "https://git.example.com:8443/acme/api.git", "api", null)),
+            null,
+            null,
+            null,
+            null);
+    var owner = new WorkspaceOwner("uday", "Uday", "uday@example.com", Map.of(), List.of());
+    var refused =
+        assertThrows(IllegalStateException.class, () -> owner.require(config, url -> true));
+    var printed = Remedied.remedyOf(refused).commands().getFirst();
+
+    var args = new ArrayList<>(List.of(printed.verb().split(" ")));
+    args.addAll(printed.args());
+    var stored = sail(KEY, args.subList(1, args.size()).toArray(String[]::new));
+
+    assertEquals("git login git.example.com:8443", printed.line());
+    assertEquals(0, stored.exit(), stored.err());
+    var uday = new FdeStore(db).byHandle("uday").orElseThrow().id();
+    assertEquals(Map.of("git.example.com:8443", KEY), new FdeStore(db).logins().gitTokens(uday));
+  }
+
+  /** Review minor 6: a {@code --json} refusal is the API's error, its code included, on stdout. */
+  @SuppressWarnings("unchecked")
+  @Test
+  void aJsonRefusalCarriesTheApisErrorCode() {
+    var refused = sail("", "login", "remove", "github.com", "--fde", "nobody", "--json");
+
+    assertEquals(1, refused.exit());
+    var error = (Map<String, Object>) YamlUtil.parseMap(refused.out()).get("error");
+    assertEquals("forbidden_admin_only", error.get("code"), refused.out());
   }
 }

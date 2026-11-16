@@ -44,8 +44,8 @@ public interface HostIdentity {
   List<FdeSshKeyStore.SshKeyInfo> sshKeys();
 
   /**
-   * The box's person, {@code handle}, as the owner of a workspace made on this box ({@link
-   * WorkspaceOwner#of}), with the box's workstation key.
+   * Person {@code handle} as the owner of a workspace of this box ({@link WorkspaceOwner#of}): with
+   * the box's workstation key when they are the box's person.
    */
   WorkspaceOwner workspaceOwner(String handle);
 

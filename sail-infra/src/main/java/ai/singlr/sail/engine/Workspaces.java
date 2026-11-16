@@ -31,6 +31,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.TimeoutException;
 import java.util.function.Consumer;
+import java.util.function.Function;
 import java.util.function.LongSupplier;
 import java.util.function.Predicate;
 import java.util.regex.Pattern;
@@ -395,24 +396,25 @@ public final class Workspaces {
   }
 
   /**
-   * Creates workspace {@code name} of {@code config}'s project for {@code owner}, the person it
-   * belongs to, refused first when it could not be theirs ({@link #requireOwner}): a clone of its
-   * template's current version, built first when there is none or it is stale, then started, given
-   * its owner's credentials, made its own with every repo on a branch of its name, and marked
-   * whole. One create of a workspace runs at a time, under its lock: of two of one name, the second
-   * finds the first's workspace and is refused. An instance a create of it did not finish is
-   * deleted and made again.
+   * Creates workspace {@code name} of {@code config}'s project for {@code handle}, the person it
+   * belongs to, as {@code owners} answers them each time they are read, refused first when it could
+   * not be theirs ({@link #requireOwner}): a clone of its template's current version, built first
+   * when there is none or it is stale, then started, given its owner's credentials, made its own
+   * with every repo on a branch of its name, and marked whole. One create of a workspace runs at a
+   * time, under its lock: of two of one name, the second finds the first's workspace and is
+   * refused. An instance a create of it did not finish is deleted and made again.
    */
   public Created create(
       ProjectDefinition config,
       String name,
       WorkspaceTemplate.Source source,
       Path files,
-      WorkspaceOwner owner)
+      String handle,
+      Function<String, WorkspaceOwner> owners)
       throws Exception {
     var project = config.name();
     var instance = requireNewName(project, name);
-    requireOwner(owner, config);
+    requireOwner(owners.apply(handle), config);
     var zfs = WorkspaceTemplate.requireZfs(observer);
     var template = WorkspaceTemplate.requireName(project, source);
     try (var held = nameLock(instance)) {
@@ -420,7 +422,16 @@ public final class Workspaces {
       var built =
           new WorkspaceTemplate(observer, shell, locks).ensure(config, source, template, zfs);
       return make(
-          config, name, instance, built, List.of(), owner, name, unfinished, files, whole -> {});
+          config,
+          name,
+          instance,
+          built,
+          List.of(),
+          new Owning(handle, owners),
+          name,
+          unfinished,
+          files,
+          whole -> {});
     }
   }
 
@@ -451,14 +462,16 @@ public final class Workspaces {
    * person the run acts for: a whole one is started when stopped and kept as it is, tree and all;
    * otherwise a clone of the checked template carrying the spec and the owner is made, with every
    * repo left detached at its fetched base, under the box's create lock. Either way the workspace
-   * is {@code owner}'s, and holds their credentials alone, before anything of the run is staged
-   * (R12, T2, T3). A create that cannot have the create lock within {@link #CREATE_WAIT} is {@link
-   * Busy}.
+   * is {@code handle}'s, and holds their credentials alone as {@code owners} answers them at the
+   * moment they are given, before anything of the run is staged (R12, T2, T3); refused then, as
+   * before the reservation, when it could not be theirs. A create that cannot have the create lock
+   * within {@link #CREATE_WAIT} is {@link Busy}.
    */
   public Entered enterSpec(
       SpecCheck check,
       ProjectDefinition config,
-      WorkspaceOwner owner,
+      String handle,
+      Function<String, WorkspaceOwner> owners,
       Path files,
       Consumer<Set<String>> room)
       throws Exception {
@@ -466,7 +479,7 @@ public final class Workspaces {
     try (var held = nameLock(place.instance())) {
       var found = requireTheSpecs(place, name -> false, box.all());
       if (found.map(i -> ((BoxInstances.Workspace) i.kind()).ready()).orElse(false)) {
-        return reuse(found.get(), config, owner);
+        return reuse(found.get(), config, new Owning(handle, owners));
       }
       return new Made(
           make(
@@ -475,7 +488,7 @@ public final class Workspaces {
               place.instance(),
               check.template(),
               List.of(BoxInstances.SPEC_KEY + "=" + place.specId()),
-              owner,
+              new Owning(handle, owners),
               "",
               found.isPresent(),
               files,
@@ -501,34 +514,91 @@ public final class Workspaces {
   }
 
   /**
-   * Starts {@code found} when stopped and, when it is another's, takes their credentials away and
-   * gives it {@code owner}'s before it records them as its owner, so a re-own cut short is made
-   * again by the next entry.
+   * The person a workspace is made or entered for, read afresh each time their credentials are
+   * given: what is written is what is true when it is written.
    */
-  private Reused reuse(BoxInstances.Instance found, ProjectDefinition config, WorkspaceOwner owner)
+  private record Owning(String handle, Function<String, WorkspaceOwner> owners) {
+    /** The owner as the roster and the login store say now, refused when they could not own. */
+    WorkspaceOwner now(Workspaces workspaces, ProjectDefinition config) {
+      var owner = owners.apply(handle);
+      workspaces.requireOwner(owner, config);
+      return owner;
+    }
+  }
+
+  /**
+   * Starts {@code found} when stopped and, when it is another's or was stopped, gives it the
+   * owner's credentials as they are now. A workspace of another person loses its owner first, then
+   * is stripped and given the new owner's, and is recorded theirs last: one cut short between is
+   * nobody's, and the next entry, whoever's it is, strips and gives again.
+   */
+  private Reused reuse(BoxInstances.Instance found, ProjectDefinition config, Owning owning)
       throws Exception {
     var started = !(found.state() instanceof ContainerState.Running);
     if (started) {
       containers.start(found.name());
       awaitReady(found.name());
     }
-    if (!owner.handle().equals(found.key(BoxInstances.OWNER_KEY).orElse(""))) {
-      WorkspaceCredentials.give(shell, found.name(), config, owner);
-      WorkspaceCredentials.logForgeIn(shell, found.name(), config, owner);
-      var owned =
-          new ContainerConfig(shell, locks)
-              .set(found.name(), List.of(BoxInstances.OWNER_KEY + "=" + owner.handle()));
-      if (!owned.ok()) {
-        throw new IOException(
-            "Workspace "
-                + found.name()
-                + " could not be made "
-                + owner.handle()
-                + "'s, so no run of theirs goes in it: "
-                + owned.reason());
-      }
+    var labelled = found.key(BoxInstances.OWNER_KEY).orElse("");
+    var another = !owning.handle().equals(labelled);
+    if (another && !labelled.isBlank()) {
+      label(found.name(), "");
+    }
+    if (another) {
+      giveAll(found.name(), config, owning.now(this, config));
+    } else if (started) {
+      giveAll(found.name(), config, owning.owners().apply(owning.handle()));
+    }
+    if (another) {
+      label(found.name(), owning.handle());
     }
     return new Reused(found.name(), started);
+  }
+
+  private void label(String instance, String handle)
+      throws IOException, InterruptedException, TimeoutException {
+    var owned =
+        new ContainerConfig(shell, locks)
+            .set(instance, List.of(BoxInstances.OWNER_KEY + "=" + handle));
+    if (!owned.ok()) {
+      throw new IOException(
+          "Workspace "
+              + instance
+              + " could not be made "
+              + (handle.isBlank() ? "nobody's" : handle + "'s")
+              + ", so no run goes in it: "
+              + owned.reason());
+    }
+  }
+
+  /**
+   * Gives every running whole workspace of {@code owner} their credentials as they are now, a git
+   * token they stored, replaced or removed included, each with its project's definition ({@code
+   * definitions}); a stopped one takes them at its next start. Answers those it could not, each
+   * with why: one that cannot be reached stops none of the others.
+   */
+  public List<String> refresh(WorkspaceOwner owner, Function<String, ProjectDefinition> definitions)
+      throws IOException, InterruptedException, TimeoutException {
+    var unreached = new ArrayList<String>();
+    for (var instance : box.wholeWorkspacesOf(owner.handle())) {
+      if (!(instance.state() instanceof ContainerState.Running)) {
+        continue;
+      }
+      try {
+        var project = ((BoxInstances.Workspace) instance.kind()).project();
+        giveAll(instance.name(), definitions.apply(project), owner);
+      } catch (IOException | TimeoutException | RuntimeException failure) {
+        unreached.add(instance.name() + ": " + Remedied.reasonOf(failure).strip());
+      }
+    }
+    return List.copyOf(unreached);
+  }
+
+  /** {@code owner}'s credentials, gh's login among them, given to {@code instance}, running. */
+  private void giveAll(String instance, ProjectDefinition config, WorkspaceOwner owner)
+      throws IOException, InterruptedException, TimeoutException {
+    WorkspaceCredentials.give(shell, instance, config, owner);
+    WorkspaceCredentials.logForgeIn(shell, instance, config, owner);
   }
 
   /**
@@ -582,7 +652,7 @@ public final class Workspaces {
       String instance,
       WorkspaceTemplate.Template built,
       List<String> keys,
-      WorkspaceOwner owner,
+      Owning owning,
       String branch,
       boolean unfinished,
       Path files,
@@ -595,7 +665,7 @@ public final class Workspaces {
     var started = nanos.getAsLong();
     try (var held = createLock(started)) {
       room.accept(wholeSpecs());
-      return made(config, name, instance, built, keys, owner, branch, files, started);
+      return made(config, name, instance, built, keys, owning, branch, files, started);
     }
   }
 
@@ -614,19 +684,20 @@ public final class Workspaces {
       String instance,
       WorkspaceTemplate.Template built,
       List<String> keys,
-      WorkspaceOwner owner,
+      Owning owning,
       String branch,
       Path files,
       long started)
       throws Exception {
     var project = config.name();
     var copyKeys = new ArrayList<>(keys);
-    copyKeys.add(BoxInstances.OWNER_KEY + "=" + owner.handle());
+    copyKeys.add(BoxInstances.OWNER_KEY + "=" + owning.handle());
     clone(project, name, instance, built, copyKeys);
     try {
       var cloned = nanos.getAsLong();
       containers.start(instance);
       var running = nanos.getAsLong();
+      var owner = owning.now(this, config);
       WorkspaceCredentials.give(shell, instance, config, owner);
       var steps = prepare(config, name, branch, instance, files);
       WorkspaceCredentials.logForgeIn(shell, instance, config, owner);
@@ -688,8 +759,15 @@ public final class Workspaces {
     return new Listing(project, List.copyOf(rows));
   }
 
-  /** Starts workspace {@code name}, stopped or frozen, and says what its resume took. */
-  public Changed start(String project, String name) throws Exception {
+  /**
+   * Starts workspace {@code name} of {@code config}'s project, stopped or frozen, gives it its
+   * owner's credentials as they are now ({@code owners} answers a person by handle), since a token
+   * they replaced or removed while it was stopped reached it not, and says what its resume took.
+   */
+  public Changed start(
+      ProjectDefinition config, String name, Function<String, WorkspaceOwner> owners)
+      throws Exception {
+    var project = config.name();
     var found = whole(project, name, "project start", true);
     if (found.state() instanceof ContainerState.Running) {
       return new Changed(project, name, found.name(), Change.ALREADY_RUNNING, null);
@@ -698,6 +776,10 @@ public final class Workspaces {
     containers.start(found.name());
     var running = nanos.getAsLong();
     awaitReady(found.name());
+    var owner = found.key(BoxInstances.OWNER_KEY).filter(handle -> !handle.isBlank());
+    if (owner.isPresent()) {
+      giveAll(found.name(), config, owners.apply(owner.get()));
+    }
     var ready = nanos.getAsLong();
     return new Changed(
         project,

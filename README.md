@@ -467,7 +467,8 @@ sudo sail git login list                            # host, stored date, fingerp
 sudo sail git login remove github.com
 ```
 
-A workspace commits as you, with the name and email the roster holds for you (`sudo sail fde
+A token you store, replace or remove reaches your running workspaces at once, and a stopped one
+when it next starts. A workspace commits as you, with the name and email the roster holds for you (`sudo sail fde
 update <handle> --email <email>`), and trusts your registered SSH keys (plus the box's
 workstation key when you are its person). A dispatch whose workspace would need a token you did
 not store, for a repo that asks for one, is refused before anything starts, naming the `sail git

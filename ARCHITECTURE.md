@@ -1468,12 +1468,24 @@ Each row with the tests that prove it:
   (`--git-token`, or `GITHUB_TOKEN` and its kin) for its own clone and fetches, with no git
   identity and no trusted key. After the provisioner and before the stop, one root step
   (`WorkspaceCredentials.STRIP`) removes `/home/dev/.git-credentials`, gh's `hosts.yml`, the dev
-  user's `user.name` and `user.email`, and every line of its `authorized_keys`; a check
-  (`WorkspaceCredentials.HELD`) then reads that none of the four is there. A step or check that
-  fails fails the build: nothing is recorded or snapshotted and the version before stays current.
-  *`WorkspacesTest.aBuildTakesItsBuildersCredentialsOutAndChecksNoneIsLeftBeforeItIsSnapshotted`,
+  user's `user.name` and `user.email`, and every line of its `authorized_keys`. A check
+  (`WorkspaceCredentials.HELD`) then proves the template holds nothing by content, not by a list
+  of paths: (a) no token the build was given appears in any file of its root filesystem, grep
+  reading the tokens on stdin as fixed-string patterns, never on a command line; (b) git reports
+  no user name or email at system or global level; (c) no `authorized_keys` under any home has a
+  line; (d) gh reports no login. A search or a git or gh command that errors fails the build, as
+  does anything found: nothing is recorded or snapshotted and the version before stays current. A
+  failed build is stripped too, as far as it can be, so no builder's token waits in it for the
+  next.
+  *`WorkspaceCredentialsTest` (both scripts run by real bash, grep and git: each of a–d found, the
+  token hidden in `.netrc`, a gh temp file, a repo's remote URL and `/etc`, an unreadable git
+  config failing as "cannot tell"),
+  `WorkspacesTest.aBuildTakesItsBuildersCredentialsOutAndChecksNoneIsLeftBeforeItIsSnapshotted`,
+  `WorkspacesTest.theCheckIsGivenTheBuildsTokensOnStdinNeverOnACommandLine`,
   `WorkspacesTest.aTemplateStillHoldingACredentialFailsItsBuildAndTheVersionBeforeStaysCurrent`,
-  `WorkspaceIT.aTemplateBuiltWithItsBuildersCredentialsIsSnapshottedHoldingNone`.*
+  `WorkspaceIT.aTemplateBuiltWithItsBuildersCredentialsIsSnapshottedHoldingNone` (read from a copy
+  of the snapshot), `WorkspaceIT.aTemplateStillHoldingACredentialFailsItsBuildAndVersionOneStaysCurrent`,
+  `WorkspaceIT.theCheckFindsAGhLoginOnARealContainer`.*
 - **T2. A workspace holds only its owner's credentials.** Its owner (`user.sail.owner`) is the
   person its runs act for (every lane of a box runs for its person, `boxFde()`), or the creator of
   a person's workspace. The owner step (`WorkspaceCredentials.give`) runs after the clone's start
@@ -1485,15 +1497,20 @@ Each row with the tests that prove it:
   written, so no token of the process's environment ever lands in a workspace. A workspace is
   refused before a run's reservation, or before a person's copy, when it will be made or re-owned
   for someone with no email, or who keeps no token for a host that asks for credentials, naming
-  `sail fde update <h> --email <email>` or `sail git login <host>`.
+  `sail fde update <h> --email <email>` or `sail git login <host>` (a host with a port included).
+  What is written is what is true when it is written: the owner is read again at the give, and a
+  token or email gone since the check is refused there as the same refusal, the run given back.
   *`WorkspacesTest.aNewWorkspaceIsGivenItsOwnersCredentialsBetweenItsStartAndItsPrepare`,
   `WorkspacesTest.anOwnerWhoKeepsNoTokenGetsNoTokenStoreAndNoGhLogin`, `WorkspaceOwnerTest`,
   `RunPlacesTest.aWorkspaceItsOwnerCannotFetchIsRefusedBeforeItsReservationNamingTheLogin`,
-  `WorkspaceIT.twoWorkspacesOfTwoPeopleEachCommitAsTheirOwnerWithTheirOwnStore`.*
-- **T3. A re-own replaces them all before the new owner's run is staged.** The owner step runs
-  again, gh too, and only then is `user.sail.owner` set, so a re-own cut short is done again by
-  the next entry.
-  *`WorkspacesTest.aWorkspaceOfAnotherIsStrippedAndGivenItsNewOwnersBeforeItIsRecordedTheirs`,
+  `WorkspaceIT.twoWorkspacesOfTwoPeopleEachCommitAsTheirOwnerWithTheirOwnStore`,
+  `RunPlacesTest.aTokenRemovedBetweenTheCheckAndTheGiveIsRefusedThenAndNothingIsWritten`.*
+- **T3. A re-own replaces them all before the new owner's run is staged.** A workspace is never
+  labelled one person's while it holds another's: its owner is cleared first, then it is
+  stripped and given the new owner's (gh too), and only then is `user.sail.owner` written. A
+  re-own cut short between is nobody's, so the next entry, whoever's, strips and gives again.
+  *`WorkspacesTest.aReOwnCutShortLeavesTheWorkspaceNobodysSoThePreviousOwnersNextEntryGivesTheirsAgain`,
+  `WorkspacesTest.aWorkspaceOfAnotherIsStrippedAndGivenItsNewOwnersBeforeItIsRecordedTheirs`,
   `RunPlacesTest.aWorkspaceOfAnotherIsReOwnedOnlyForAPersonWithAnEmail`.*
 - **T4. A template's digest is its definition alone** (`ProjectProvisioner.inputs(config,
   Optional.empty())`): a workstation key revoked or replaced leaves it current. The project's own
@@ -1503,21 +1520,38 @@ Each row with the tests that prove it:
   it is `/var/lib/sail/logins/<fde-id>/git/<host>`, `0600` under `0700` directories, written whole
   and renamed, one line under the login value rule, never in the database, a log, an argv or an
   answer, and erased with the person's logins. `GET /v1/git-logins[?fde=]`, `PUT
-  /v1/git-logins/{host}` and `DELETE /v1/git-logins/{host}[?fde=]` are Keep logins doors.
+  /v1/git-logins/{host}` and `DELETE /v1/git-logins/{host}[?fde=]` are Keep logins doors. A token
+  stored, replaced or removed reaches each running workspace of its person at once, by the owner
+  step (`Workspaces.refresh`, over `BoxInstances.wholeWorkspacesOf`, the walker `fde key add`
+  reaches a person's workspaces by); a stopped one takes it when it next starts, since every start
+  Sail makes (`workspace start`, a lane's re-entry) runs the owner step again. A workspace a
+  change did not reach is said in the answer.
   *`LoginStoreTest`, `LoginRoutesTest.aPersonKeepsTheirOwnGitTokensByHostAndOnlyAnAdminReachesAnothersSeeingNoValue`,
-  `GitCommandTest`.*
-- **Keys follow owners.** A pairing reaches the project's container and the workspaces of the
-  box's person; `sail fde key add` reaches that person's whole workspaces; a key removal (`fde key
-  rm`, a replaced or unpaired workstation key) reaches every container and workspace. A person
-  removed (`fde rm`, or a scoped node's roster round) has every workspace they owned lose its
-  token store, gh login and keys, and its owner, through its files, running or stopped.
-  *`ContainerAuthorizedKeysTest`,
-  `WorkspacesTest.aRemovedPersonsWorkspacesLoseTheirStoreGhLoginKeysAndOwnerAndNoOneElsesDo`.*
+  `GitCommandTest`, `WorkspacesTest.aReplacedTokenReachesTheOwnersRunningWorkspacesAloneByTheOwnerStep`,
+  `WorkspacesTest.aStoppedWorkspaceTakesItsOwnersCredentialsAsTheyAreNowWhenItStarts`,
+  `LoginOperationsTest.aGitTokenChangeReachesThePersonsWorkspacesAndSaysEachItDidNot`,
+  `WorkspaceIT.aReplacedTokenReachesARunningWorkspaceAtOnceAndAStoppedOneWhenItStarts`.*
+- **Keys follow owners.** One walker (`BoxInstances.wholeWorkspaceOf`) finds a person's
+  workspaces for keys and tokens alike. A pairing and `host config set ssh-public-key` both
+  (`FdeCommand.Pair.trustWorkstationKey`) take the old workstation key out of every container and
+  give the new one to the project's containers and the box person's workspaces; `sail fde key add`
+  reaches that person's whole workspaces; a key removal (`fde key rm`, a replaced or unpaired
+  workstation key) reaches every container and workspace; a stopped workspace takes its owner's
+  keys as they are at its next start. A person removed (`fde rm`, or a scoped node's roster round)
+  has every workspace they owned lose its token store, gh login and keys, and its owner, through
+  its files, running or stopped: sail-api's pass reads the roster each minute and lists Incus only
+  on its first pass, when someone left the roster or their handle went to someone else, or to
+  retry a workspace it could not reach, said once.
+  *`ContainerAuthorizedKeysTest`, `FdeCommandTest.aWorkstationKeySetByHandReplacesTheOldInEveryContainerAsAPairingDoes`,
+  `WorkspacesTest.aRemovedPersonsWorkspacesLoseTheirStoreGhLoginKeysAndOwnerAndNoOneElsesDo`,
+  `MissedStopReconcilerTest`.*
 
 **Known limits.**
-- **A token stored after a workspace was made is not pushed into it.** The owner step runs at a
-  create and a re-own; a person who replaces their token has it in their next workspace.
-- **Key lines added to `authorized_keys` by hand** are replaced by the owner step of a re-own.
+- **Key lines added to `authorized_keys` by hand** are replaced by the owner step of a re-own, a
+  start and a token change.
+- **A workspace's own snapshots keep what it held.** A guardrail's `snapshot-and-stop` snapshot of
+  a workspace holds its owner then, token store included; neither a re-own nor a removal touches
+  snapshots. Only root reaches them, and no door restores a workspace snapshot.
 - **Hand copies are not Sail's.** A copy of a workspace made with `incus copy` carries the
   project's keys under another name: every verb refuses it, and it outlives its project, keeping
   the project's tree and the owner's credentials (and, through `deleted/`, the dataset of a

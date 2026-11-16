@@ -61,6 +61,7 @@ public final class LoginStore {
   private static final String TEMP_PREFIX = ".tmp-";
   private static final Pattern NAME = Pattern.compile("[a-z0-9][a-z0-9-]{0,31}");
   private static final Pattern FDE_ID = Pattern.compile("[A-Za-z0-9][A-Za-z0-9_-]{0,63}");
+  private static final Pattern PORT = Pattern.compile("([^:]+):([1-9][0-9]{0,4})");
   private static final Pattern VALUE = Pattern.compile("[\\x21-\\x7E&&[^\"'\\\\$`]]+");
   private static final Set<PosixFilePermission> DIRECTORY =
       PosixFilePermissions.fromString("rwx------");
@@ -288,12 +289,18 @@ public final class LoginStore {
 
   /**
    * {@code host}, lowercased, once it is a host a git token may be kept for: {@link
-   * NameValidator#requireValidHost}'s rule.
+   * NameValidator#requireValidHost}'s rule, with a port of 1 to 65535 after a colon when it has
+   * one, as a repo's https URL names it.
    *
    * @throws IllegalArgumentException naming the rule
    */
   public static String requireHost(String host) {
-    NameValidator.requireValidHost(host);
+    var port = host == null ? null : PORT.matcher(host);
+    if (port != null && port.matches() && Integer.parseInt(port.group(2)) <= 65535) {
+      NameValidator.requireValidHost(port.group(1));
+    } else {
+      NameValidator.requireValidHost(host);
+    }
     return host.toLowerCase(Locale.ROOT);
   }
 

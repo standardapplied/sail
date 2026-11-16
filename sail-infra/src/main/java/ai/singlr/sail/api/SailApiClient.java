@@ -115,23 +115,30 @@ public final class SailApiClient implements AutoCloseable {
   public static final class Refused extends IOException implements Remedied {
     private final String reason;
     private final transient Remedy remedy;
+    private final String code;
 
-    private Refused(String reason, Remedy remedy) {
+    private Refused(String reason, Remedy remedy, String code) {
       super(Remedied.message(reason, remedy));
       this.reason = reason;
       this.remedy = remedy;
+      this.code = code;
+    }
+
+    /** The API's error code of the refusal, or null when its envelope named none. */
+    public String code() {
+      return code;
     }
 
     /** The refusal an error envelope with {@code status} describes. */
     public static Refused of(int status, Map<String, Object> error) {
       var http = " (HTTP " + status + ")";
       if (error == null) {
-        return new Refused("API request failed" + http, Remedy.NONE);
+        return new Refused("API request failed" + http, Remedy.NONE, null);
       }
       var refused = of(error);
       return refused.remedy.isEmpty()
-          ? new Refused(refused.reason + http, Remedy.NONE)
-          : new Refused(refused.reason, refused.remedy.then(http));
+          ? new Refused(refused.reason + http, Remedy.NONE, refused.code)
+          : new Refused(refused.reason, refused.remedy.then(http), refused.code);
     }
 
     /** The refusal a response with {@code status} and an error envelope as its body describes. */
@@ -147,7 +154,7 @@ public final class SailApiClient implements AutoCloseable {
           error.get("remedy") instanceof List<?> parts
               ? Remedy.fromMaps(parts)
               : Result.words(Objects.toString(error.get("action"), null));
-      return new Refused(message, remedy);
+      return new Refused(message, remedy, Objects.toString(error.get("code"), null));
     }
 
     @Override

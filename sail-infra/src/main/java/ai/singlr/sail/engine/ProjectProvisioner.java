@@ -173,7 +173,7 @@ public final class ProjectProvisioner {
       configureTestcontainers(config, name);
       installJdk(config, name);
       installNode(config, name);
-      configureGit(config, name, gitTokens, git);
+      configureGit(name, git);
       installMaven(config, name);
       cloneRepos(config, name, gitTokens);
       pushWorkspaceFiles(name, filesDir);
@@ -806,12 +806,7 @@ public final class ProjectProvisioner {
     stepDone(10, "Node.js " + version);
   }
 
-  private void configureGit(
-      ProjectDefinition config,
-      String name,
-      Map<String, String> gitTokens,
-      LocalIdentity.GitIdentity git)
-      throws Exception {
+  private void configureGit(String name, LocalIdentity.GitIdentity git) throws Exception {
     currentPhase = ProjectPhase.GIT_CONFIGURED;
     if (tracker.isCompleted(currentPhase)) {
       stepSkipped(11, "git already configured");
@@ -819,8 +814,6 @@ public final class ProjectProvisioner {
     }
 
     step(11, "Configuring git identity...");
-
-    var user = ProjectDefinition.USER;
 
     if (git != null) {
       var nameResult =
@@ -833,22 +826,6 @@ public final class ProjectProvisioner {
       if (!emailResult.ok()) {
         throw new IOException("Failed to set git user.email: " + emailResult.stderr());
       }
-    }
-
-    if (gitTokens != null && !gitTokens.isEmpty()) {
-      var credContent = GitCredentials.buildCredentialStore(gitTokens, config.repos());
-      var credPath = "/home/" + user + "/.git-credentials";
-      pushFileToContainer(name, credPath, credContent, "0600");
-      var chownCred = execInContainer(name, List.of("chown", user + ":" + user, credPath));
-      if (!chownCred.ok()) {
-        throw new IOException("Failed to set ownership on " + credPath + ": " + chownCred.stderr());
-      }
-      var credHelper =
-          execAsDevUser(name, List.of("git", "config", "--global", "credential.helper", "store"));
-      if (!credHelper.ok()) {
-        throw new IOException("Failed to configure git credential helper: " + credHelper.stderr());
-      }
-      ForgeCliLogin.loginGitHub(shell, name, user, gitTokens, config.repos());
     }
 
     tracker.advance(currentPhase);
@@ -954,7 +931,7 @@ public final class ProjectProvisioner {
     var user = ProjectDefinition.USER;
     var cloned = 0;
 
-    refreshCredentialStore(config, gitTokens, name, user);
+    ProjectApplier.ensureCredentialStore(shell, name, user, gitTokens, config.repos());
 
     execAsDevUser(name, List.of("mkdir", "-p", "/home/" + user + "/workspace"));
 
@@ -983,28 +960,6 @@ public final class ProjectProvisioner {
 
     tracker.advance(currentPhase);
     stepDone(13, "Cloned " + cloned + "/" + config.repos().size() + " repositories");
-  }
-
-  private void refreshCredentialStore(
-      ProjectDefinition config, Map<String, String> gitTokens, String containerName, String user)
-      throws Exception {
-    var credContent = GitCredentials.buildCredentialStore(gitTokens, config.repos());
-    if (credContent.isEmpty()) {
-      return;
-    }
-    var credPath = "/home/" + user + "/.git-credentials";
-    pushFileToContainer(containerName, credPath, credContent, "0600");
-    var chownResult = execInContainer(containerName, List.of("chown", user + ":" + user, credPath));
-    if (!chownResult.ok()) {
-      throw new IOException("Failed to set ownership on " + credPath + ": " + chownResult.stderr());
-    }
-    var helperResult =
-        execAsDevUser(
-            containerName, List.of("git", "config", "--global", "credential.helper", "store"));
-    if (!helperResult.ok()) {
-      throw new IOException("Failed to configure git credential helper: " + helperResult.stderr());
-    }
-    ForgeCliLogin.loginGitHub(shell, containerName, user, gitTokens, config.repos());
   }
 
   private void pushWorkspaceFiles(String name, Path filesDir) throws Exception {

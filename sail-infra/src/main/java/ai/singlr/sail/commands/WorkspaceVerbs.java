@@ -31,6 +31,7 @@ import ai.singlr.sail.engine.Workspaces;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Collection;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
@@ -108,10 +109,10 @@ final class WorkspaceVerbs {
     };
   }
 
-  /** The person a workspace made on this box belongs to: the box's own, as its owner. */
-  static WorkspaceOwner owner() {
+  /** Person {@code handle} as the owner of a workspace of this box ({@link WorkspaceOwner#of}). */
+  static WorkspaceOwner ownerOf(String handle) {
     try (var operations = OperationsFactory.open()) {
-      return operations.identity().workspaceOwner(Objects.toString(HostSync.handle(), ""));
+      return operations.identity().workspaceOwner(handle);
     }
   }
 
@@ -185,6 +186,7 @@ final class WorkspaceVerbs {
     return source(
         host,
         config,
+        tokens.values(),
         name -> catalog.read(name).isPresent(),
         checked(
             config,
@@ -235,13 +237,15 @@ final class WorkspaceVerbs {
   static WorkspaceTemplate.Source source(
       HostYaml host,
       ProjectDefinition config,
+      Collection<String> tokens,
       Predicate<String> held,
       WorkspaceTemplate.Build build) {
     return new WorkspaceTemplate.Source(
         Objects.requireNonNullElse(host.pool(), HostYaml.DEFAULT_POOL),
         ProjectProvisioner.inputs(config, Optional.empty()),
         held,
-        build);
+        build,
+        tokens);
   }
 
   /** What a template build says it did. */

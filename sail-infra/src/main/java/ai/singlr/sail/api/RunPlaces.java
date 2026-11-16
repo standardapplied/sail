@@ -55,8 +55,7 @@ final class RunPlaces {
    * A spec's workspace, as {@link Workspaces#checkSpec} found it for a run of {@code lane} on the
    * box {@code boxHandle}, for {@code owner}, the box's person, whom every run of it acts for.
    */
-  record InWorkspace(Workspaces.SpecCheck check, Lane lane, String boxHandle, WorkspaceOwner owner)
-      implements Checked {
+  record InWorkspace(Workspaces.SpecCheck check, Lane lane, String boxHandle) implements Checked {
     @Override
     public RunPlace.SpecWorkspace place() {
       return check.place();
@@ -118,31 +117,27 @@ final class RunPlaces {
       if (!check.running()) {
         requireRoom(check, config, boxHandle);
       }
-      return new InWorkspace(check, lane, boxHandle, owner(check, config, boxHandle));
+      requireOwner(check, config, boxHandle);
+      return new InWorkspace(check, lane, boxHandle);
     } catch (ApiException refused) {
       throw told(specId, lane, refused);
     }
   }
 
   /**
-   * {@code handle} as the owner of {@code check}'s workspace, refused as {@link ErrorCode#CONFLICT}
-   * when the workspace will be made, or is another's, and could not be theirs.
+   * Refuses, as {@link ErrorCode#CONFLICT}, {@code handle} as the owner of {@code check}'s
+   * workspace when it will be made, or is another's, and could not be theirs: the early refusal,
+   * asked again when their credentials are given.
    */
-  private WorkspaceOwner owner(
-      Workspaces.SpecCheck check, ProjectDefinition config, String handle) {
+  private void requireOwner(Workspaces.SpecCheck check, ProjectDefinition config, String handle) {
+    var theirs =
+        check.whole()
+            && check.found().flatMap(i -> i.key(BoxInstances.OWNER_KEY)).orElse("").equals(handle);
+    if (theirs) {
+      return;
+    }
     try {
-      var owner = owners.apply(handle);
-      var theirs =
-          check.whole()
-              && check
-                  .found()
-                  .flatMap(i -> i.key(BoxInstances.OWNER_KEY))
-                  .orElse("")
-                  .equals(handle);
-      if (!theirs) {
-        workspaces.requireOwner(owner, config);
-      }
-      return owner;
+      workspaces.requireOwner(owners.apply(handle), config);
     } catch (IllegalStateException refused) {
       throw ApiException.of(ErrorCode.CONFLICT, refused);
     }
@@ -158,13 +153,13 @@ final class RunPlaces {
    * answers its own reason, and the caller releases the run.
    */
   DispatchOperations.WorkspaceUse enter(Checked checked, ProjectDefinition config) {
-    if (!(checked instanceof InWorkspace(var check, var lane, var boxHandle, var owner))) {
+    if (!(checked instanceof InWorkspace(var check, var lane, var boxHandle))) {
       return null;
     }
     var specId = check.place().specId();
     Workspaces.Entered entered;
     try {
-      entered = entered(check, config, owner, boxHandle);
+      entered = entered(check, config, boxHandle);
     } catch (ApiException refused) {
       throw told(specId, lane, refused);
     }
@@ -246,19 +241,19 @@ final class RunPlaces {
   }
 
   private Workspaces.Entered entered(
-      Workspaces.SpecCheck check,
-      ProjectDefinition config,
-      WorkspaceOwner owner,
-      String boxHandle) {
+      Workspaces.SpecCheck check, ProjectDefinition config, String boxHandle) {
     try {
       return workspaces.enterSpec(
           check,
           config,
-          owner,
+          boxHandle,
+          owners,
           SailPaths.projectFilesDir(check.place().project()),
           whole -> requireCapUnderLock(config, boxHandle, whole));
     } catch (Workspaces.Busy busy) {
       throw busy(busy);
+    } catch (WorkspaceOwner.Refused refused) {
+      throw ApiException.of(ErrorCode.CONFLICT, refused);
     } catch (ApiException refused) {
       throw refused;
     } catch (Exception e) {

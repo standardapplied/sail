@@ -1579,8 +1579,11 @@ record LoginView(
   }
 }
 
-/** A git token as any door shows it: whose, its host, when it was stored, its fingerprint. */
-record GitLoginView(String fde, String host, Instant storedAt, String fingerprint)
+/**
+ * A git token as any door shows it: whose, its host, when it was stored, its fingerprint, and what
+ * is said of workspaces a store did not reach ({@code note}, null when there are none).
+ */
+record GitLoginView(String fde, String host, Instant storedAt, String fingerprint, String note)
     implements Mappable {
   @Override
   public Map<String, Object> toMap() {
@@ -1589,6 +1592,9 @@ record GitLoginView(String fde, String host, Instant storedAt, String fingerprin
     m.put("host", host);
     m.put("stored_at", DateTimeUtils.format(storedAt));
     m.put("fingerprint", fingerprint);
+    if (note != null) {
+      m.put("note", note);
+    }
     return m;
   }
 }

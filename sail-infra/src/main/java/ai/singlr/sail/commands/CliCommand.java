@@ -9,6 +9,7 @@ import ai.singlr.sail.api.ApiError;
 import ai.singlr.sail.api.ApiException;
 import ai.singlr.sail.api.ErrorCode;
 import ai.singlr.sail.api.Refusals;
+import ai.singlr.sail.api.SailApiClient;
 import ai.singlr.sail.common.Remedied;
 import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.common.Strings;
@@ -89,6 +90,9 @@ public final class CliCommand {
   static ApiError refusalOf(Exception failure) {
     if (Refusals.translated(failure) instanceof ApiException refusal) {
       return refusal.error();
+    }
+    if (failure instanceof SailApiClient.Refused refused && refused.code() != null) {
+      return new ApiError(refused.code(), refused.reason(), refused.remedy(), List.of());
     }
     var code = decided(failure) ? ErrorCode.INVALID_REQUEST : ErrorCode.INTERNAL;
     return failure instanceof Remedied remedied

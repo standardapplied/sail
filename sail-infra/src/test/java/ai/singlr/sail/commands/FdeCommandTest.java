@@ -67,6 +67,7 @@ import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.FutureTask;
@@ -863,9 +864,7 @@ class FdeCommandTest {
   }
 
   /** What a revocation of {@code key} leaves in each container, and the incus it took. */
-  /** {@code after}: what the change asks of Incus once every container is edited. */
-  @SafeVarargs
-  private void assertContainersNoLongerTrust(SshPublicKey key, List<String>... after) {
+  private void assertContainersNoLongerTrust(SshPublicKey key) {
     assertEquals(othersMentioning(key), keygen.incus.file("acme", "/home/dev" + AUTHORIZED));
     assertEquals(LAPTOP.line() + "\n", keygen.incus.file("web", "/home/eng" + AUTHORIZED));
     assertEquals("", keygen.incus.file("docs", "/home/dev" + AUTHORIZED));
@@ -894,7 +893,6 @@ class FdeCommandTest {
               "<staged>",
               file));
     }
-    commands.addAll(List.of(after));
     assertEquals(commands, incusCommands());
   }
 
@@ -989,7 +987,7 @@ class FdeCommandTest {
             + " workstation key was its key and is removed. Containers of acme, web, docs, stray no"
             + " longer trust it.",
         printed().getLast());
-    assertContainersNoLongerTrust(key, List.of("incus", "list", "--format", "json"));
+    assertContainersNoLongerTrust(key);
     assertFalse(Files.exists(workstationKey()));
     assertEquals("", Files.readString(authorizedKeys()));
   }
@@ -1165,6 +1163,29 @@ class FdeCommandTest {
         "  ✓ Workstation key replaced: it was " + LAPTOP.fingerprint() + " (me@mac).",
         printed().get(2));
     assertEquals(printedCode(), printed().getLast());
+  }
+
+  /**
+   * Review M2: {@code host config set ssh-public-key} replaces the workstation key as a pairing
+   * does, by the one path both take: the old key leaves every container, the new reaches each the
+   * box's person's.
+   */
+  @Test
+  void aWorkstationKeySetByHandReplacesTheOldInEveryContainerAsAPairingDoes() throws Exception {
+    appliedContainers(LAPTOP.line() + "\n" + ENGINEER.line() + "\n");
+    var replacement = SshPublicKey.parse(TestSshKeys.ed25519("replacement", "me@new"));
+
+    var unreached =
+        FdeCommand.Pair.trustWorkstationKey(
+            box(), Optional.of(LAPTOP), replacement, OperatorCommand.here());
+
+    for (var container : List.of("acme", "web")) {
+      assertEquals(
+          ENGINEER.line() + "\n" + replacement.line() + "\n",
+          keygen.incus.file(container, "/home/dev" + AUTHORIZED));
+    }
+    assertEquals(ENGINEER.line() + "\n", keygen.incus.file("stray", "/home/dev" + AUTHORIZED));
+    assertEquals(List.of(), unreached);
   }
 
   @Test

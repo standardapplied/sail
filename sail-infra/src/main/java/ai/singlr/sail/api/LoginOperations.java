@@ -18,6 +18,7 @@ import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.LoginStore;
 import ai.singlr.sail.store.RunStore;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.NoSuchElementException;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
@@ -42,10 +43,22 @@ public final class LoginOperations {
   private final RunStore runs;
   private final Consumer<Event> events;
 
-  LoginOperations(FdeStore fdes, RunStore runs, Consumer<Event> events) {
+  /**
+   * Gives a person's running workspaces their credentials as they are now, by handle, answering
+   * each it could not reach and why ({@link ai.singlr.sail.engine.Workspaces#refresh}).
+   */
+  @FunctionalInterface
+  interface Reach {
+    List<String> workspacesOf(String handle) throws Exception;
+  }
+
+  private final Reach reach;
+
+  LoginOperations(FdeStore fdes, RunStore runs, Consumer<Event> events, Reach reach) {
     this.fdes = fdes;
     this.runs = runs;
     this.events = events;
+    this.reach = reach;
   }
 
   /** The logins of {@code fde}, the caller when blank. */
@@ -108,14 +121,34 @@ public final class LoginOperations {
   }
 
   /**
-   * Stores {@code value} as the caller's git token for {@code host}, or replaces it. A workspace
-   * made or re-owned for them after this takes it; one already theirs keeps the token it was given.
+   * Stores {@code value} as the caller's git token for {@code host}, or replaces it, and gives it
+   * to each running workspace of theirs; a stopped one takes it when it next starts.
    */
   GitLoginView gitStore(String host, String value) {
     var person = caller();
     var row = stored(() -> logins().storeGit(person.id(), host, value));
     announce(GIT_STORED, person, row);
-    return view(person, row);
+    return new GitLoginView(
+        person.handle(), row.host(), row.storedAt(), row.fingerprint(), unreached(person));
+  }
+
+  /** What is said of {@code person}'s running workspaces a token change did not reach, or null. */
+  private String unreached(FdeStore.Fde person) {
+    try {
+      var left = reach.workspacesOf(person.handle());
+      return left.isEmpty()
+          ? null
+          : "These workspaces keep the token they had until they next start: "
+              + String.join("; ", left)
+              + ".";
+    } catch (Exception e) {
+      if (e instanceof InterruptedException) {
+        Thread.currentThread().interrupt();
+      }
+      return "This box's workspaces could not be read, so each keeps the token it had until it"
+          + " next starts: "
+          + e.getMessage();
+    }
   }
 
   /**
@@ -136,8 +169,15 @@ public final class LoginOperations {
               + "; nothing was removed.");
     }
     announce(GIT_REMOVED, person, removed.get());
+    var left = unreached(person);
     return new LoginResponse(
-        null, "Removed " + person.handle() + "'s git token for " + named + ".");
+        null,
+        "Removed "
+            + person.handle()
+            + "'s git token for "
+            + named
+            + "."
+            + (left == null ? "" : " " + left));
   }
 
   private FdeStore roster() {
@@ -263,7 +303,7 @@ public final class LoginOperations {
   }
 
   private static GitLoginView view(FdeStore.Fde person, LoginStore.GitRow row) {
-    return new GitLoginView(person.handle(), row.host(), row.storedAt(), row.fingerprint());
+    return new GitLoginView(person.handle(), row.host(), row.storedAt(), row.fingerprint(), null);
   }
 
   private static LoginView view(FdeStore.Fde person, LoginStore.Row row) {

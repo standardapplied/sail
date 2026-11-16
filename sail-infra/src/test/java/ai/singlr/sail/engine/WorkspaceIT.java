@@ -8,6 +8,7 @@ package ai.singlr.sail.engine;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.api.EventBus;
@@ -41,6 +42,7 @@ import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
 import java.io.ByteArrayOutputStream;
+import java.io.IOException;
 import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -134,7 +136,8 @@ class WorkspaceIT extends AbstractIncusIT {
         name -> name.equals(PROJECT),
         (into, fresh) -> {
           throw new AssertionError("the sealed template is current, so nothing is built");
-        });
+        },
+        List.of());
   }
 
   @BeforeEach
@@ -184,13 +187,120 @@ class WorkspaceIT extends AbstractIncusIT {
     return pulled.ok() ? pulled.stdout() : null;
   }
 
+  private static final String FAKE_TOKEN = "ghp_itFakeBuilderToken0042";
+
+  /** Runs {@code script} as root in the template, running, and stops it again. */
+  private void plant(String script) throws Exception {
+    containers.start(TEMPLATE);
+    var planted = exec(TEMPLATE, List.of("bash", "-c", "set -eu; " + script));
+    assertTrue(planted.ok(), planted.stderr());
+    containers.stop(TEMPLATE);
+  }
+
+  /** A rebuild of the template, as the production lane makes one, given {@link #FAKE_TOKEN}. */
+  private WorkspaceTemplate.Template rebuild() throws Exception {
+    return new WorkspaceTemplate(shell, shell, SailPaths.locksDir())
+        .ensure(
+            definition(),
+            new WorkspaceTemplate.Source(
+                BASE_POOL,
+                "a-later-definition",
+                name -> name.equals(PROJECT),
+                (into, fresh) -> {},
+                List.of(FAKE_TOKEN)));
+  }
+
+  /**
+   * What {@code path} of snapshot {@code version} of the template holds, read from a copy of it.
+   */
+  private String inSnapshot(String version, String path) throws Exception {
+    var probe = PROJECT + "-probe";
+    deleteContainerQuietly(probe);
+    var copied = shell.exec(List.of("incus", "copy", TEMPLATE + "/" + version, probe));
+    assertTrue(copied.ok(), copied.reason());
+    try {
+      return pulled(probe, path);
+    } finally {
+      deleteContainerQuietly(probe);
+    }
+  }
+
   /**
    * Scenario 1 on a real Incus: a template its build left holding a fake token, gh's login, a git
-   * identity and a key is rebuilt as the production lane rebuilds it, and its new version holds
+   * identity and a key is rebuilt as the production lane rebuilds it, and its new snapshot holds
    * none of the four.
    */
   @Test
   void aTemplateBuiltWithItsBuildersCredentialsIsSnapshottedHoldingNone() throws Exception {
+    plant(
+        "install -d -o dev -g dev -m 700 /home/dev/.ssh /home/dev/.config/gh;"
+            + " echo https://oauth2:"
+            + FAKE_TOKEN
+            + "@example.invalid > /home/dev/.git-credentials;"
+            + " echo 'example.invalid: {oauth_token: "
+            + FAKE_TOKEN
+            + "}' > /home/dev/.config/gh/hosts.yml;"
+            + " echo 'ssh-ed25519 AAAAbuilder builder@box' > /home/dev/.ssh/authorized_keys;"
+            + " runuser -u dev -- env HOME=/home/dev git config --global user.name Builder;"
+            + " runuser -u dev -- env HOME=/home/dev git config --global user.email b@sail.invalid");
+
+    assertEquals("v2", rebuild().version());
+    assertEquals(null, inSnapshot("v2", "/home/dev/.git-credentials"), "no token store");
+    assertEquals(null, inSnapshot("v2", "/home/dev/.config/gh/hosts.yml"), "no gh login");
+    assertEquals("", inSnapshot("v2", "/home/dev/.ssh/authorized_keys"), "no key");
+    var gitconfig = inSnapshot("v2", "/home/dev/.gitconfig");
+    assertFalse(gitconfig != null && gitconfig.contains("b@sail.invalid"), gitconfig);
+    assertFalse(gitconfig != null && gitconfig.contains("Builder"), gitconfig);
+  }
+
+  /**
+   * Rule 2 on a real Incus: a template that still holds a credential after the strip fails its
+   * build, records no version and takes no snapshot, and v1 stays current: (a) the build's token in
+   * places no list names, (b) a system git identity, (c) a key in another home.
+   */
+  @Test
+  void aTemplateStillHoldingACredentialFailsItsBuildAndVersionOneStaysCurrent() throws Exception {
+    for (var leftover :
+        List.of(
+            List.of(
+                "echo 'machine example.invalid password " + FAKE_TOKEN + "' > /home/dev/.netrc",
+                "a token in /home/dev/.netrc"),
+            List.of(
+                "mkdir -p /home/dev/.sail && echo " + FAKE_TOKEN + " > /home/dev/.sail/gh-token-01",
+                "/home/dev/.sail/gh-token-01"),
+            List.of(
+                "runuser -u dev -- git -C /home/dev/workspace/app remote set-url origin"
+                    + " https://oauth2:"
+                    + FAKE_TOKEN
+                    + "@example.invalid/app.git",
+                "/home/dev/workspace/app/.git/config"),
+            List.of("git config --system user.email root@sail.invalid", "system user.email"),
+            List.of(
+                "mkdir -p /root/.ssh && echo 'ssh-ed25519 AAAAroot r' > /root/.ssh/authorized_keys",
+                "/root/.ssh/authorized_keys"))) {
+      plant(leftover.getFirst());
+
+      var failed = assertThrows(IOException.class, this::rebuild, leftover.getFirst());
+
+      assertTrue(failed.getMessage().contains(leftover.getLast()), failed.getMessage());
+      assertFalse(failed.getMessage().contains(FAKE_TOKEN), "the refusal never says the token");
+      var template = new BoxInstances(shell).named(TEMPLATE).orElseThrow();
+      assertEquals(Optional.of("v1"), template.key(WorkspaceTemplate.CURRENT_KEY));
+      assertEquals(
+          List.of("v1"),
+          new SnapshotManager(shell)
+              .list(TEMPLATE).stream().map(SnapshotManager.SnapshotInfo::name).toList());
+      plant(
+          "rm -f /home/dev/.netrc /home/dev/.sail/gh-token-01 /root/.ssh/authorized_keys;"
+              + " git config --system --unset-all user.email || true;"
+              + " runuser -u dev -- git -C /home/dev/workspace/app remote set-url origin"
+              + " file:///srv/app.git");
+    }
+  }
+
+  /** Rule 2 (d) on a real Incus: the check finds a gh login the dev user has. */
+  @Test
+  void theCheckFindsAGhLoginOnARealContainer() throws Exception {
     containers.start(TEMPLATE);
     var planted =
         exec(
@@ -198,26 +308,20 @@ class WorkspaceIT extends AbstractIncusIT {
             List.of(
                 "bash",
                 "-c",
-                "set -eu; install -d -o dev -g dev -m 700 /home/dev/.ssh /home/dev/.config/gh;"
-                    + " echo https://oauth2:fake-token@example.invalid > /home/dev/.git-credentials;"
-                    + " echo 'example.invalid: {oauth_token: fake-token}' >"
-                    + " /home/dev/.config/gh/hosts.yml;"
-                    + " echo 'ssh-ed25519 AAAAbuilder builder@box' > /home/dev/.ssh/authorized_keys"));
+                "install -d -o dev -g dev /home/dev/.config/gh && printf"
+                    + " 'github.com:\\n    oauth_token: x\\n    user: it\\n' >"
+                    + " /home/dev/.config/gh/hosts.yml && chown dev:dev"
+                    + " /home/dev/.config/gh/hosts.yml"));
     assertTrue(planted.ok(), planted.stderr());
-    containers.stop(TEMPLATE);
-    var rebuild =
-        new WorkspaceTemplate.Source(
-            BASE_POOL, "a-later-definition", name -> name.equals(PROJECT), (into, fresh) -> {});
 
-    var built =
-        new WorkspaceTemplate(shell, shell, SailPaths.locksDir()).ensure(definition(), rebuild);
+    var refused =
+        assertThrows(
+            IOException.class, () -> WorkspaceCredentials.requireNone(shell, TEMPLATE, List.of()));
 
-    assertEquals("v2", built.version());
-    assertEquals(null, pulled(TEMPLATE, "/home/dev/.git-credentials"), "no token store");
-    assertEquals(null, pulled(TEMPLATE, "/home/dev/.config/gh/hosts.yml"), "no gh login");
-    assertEquals("", pulled(TEMPLATE, "/home/dev/.ssh/authorized_keys"), "no key");
-    var gitconfig = pulled(TEMPLATE, "/home/dev/.gitconfig");
-    assertFalse(gitconfig != null && gitconfig.contains("email"), gitconfig);
+    assertTrue(
+        refused.getMessage().contains("a gh login")
+            || refused.getMessage().contains("gh could not"),
+        refused.getMessage());
   }
 
   /**
@@ -237,8 +341,8 @@ class WorkspaceIT extends AbstractIncusIT {
             Map.of("example.invalid", "tok-ana"),
             List.of("ssh-ed25519 AAAAana ana@laptop"));
 
-    var fix = workspaces.create(definition(), FIX, source(), null, uday);
-    var second = workspaces.create(definition(), SECOND, source(), null, ana);
+    var fix = workspaces.create(definition(), FIX, source(), null, uday.handle(), h -> uday);
+    var second = workspaces.create(definition(), SECOND, source(), null, ana.handle(), h -> ana);
 
     for (var made : List.of(Map.entry(fix, uday), Map.entry(second, ana))) {
       var instance = made.getKey().instance();
@@ -259,12 +363,38 @@ class WorkspaceIT extends AbstractIncusIT {
     }
   }
 
+  private static WorkspaceOwner udayWith(String token) {
+    return new WorkspaceOwner(
+        "uday", "Uday", "uday@sail.invalid", Map.of("example.invalid", token), List.of());
+  }
+
+  /**
+   * On a real Incus: a token replaced while a workspace runs is in its store at once, the one its
+   * next fetch reads; one replaced while it is stopped is in it once it starts.
+   */
+  @Test
+  void aReplacedTokenReachesARunningWorkspaceAtOnceAndAStoppedOneWhenItStarts() throws Exception {
+    var fix = workspaces.create(definition(), FIX, source(), null, "uday", h -> udayWith("tok-1"));
+    var store = "/home/dev/.git-credentials";
+
+    assertEquals(List.of(), workspaces.refresh(udayWith("tok-2"), project -> definition()));
+    assertEquals("https://oauth2:tok-2@example.invalid\n", pulled(fix.instance(), store));
+    workspaces.stop(PROJECT, FIX, NO_RUN);
+    workspaces.refresh(udayWith("tok-3"), project -> definition());
+    assertEquals(
+        "https://oauth2:tok-2@example.invalid\n",
+        pulled(fix.instance(), store),
+        "a stopped workspace is not reached");
+    workspaces.start(definition(), FIX, handle -> udayWith("tok-3"));
+    assertEquals("https://oauth2:tok-3@example.invalid\n", pulled(fix.instance(), store));
+  }
+
   @Test
   void workspacesAreClonesOfTheTemplateEachItsOwnMachineBesideTheProjectsContainer()
       throws Exception {
     var before = bystander();
-    var fix = workspaces.create(definition(), FIX, source(), null, TestOwners.of("eng"));
-    var second = workspaces.create(definition(), SECOND, source(), null, TestOwners.of("eng"));
+    var fix = workspaces.create(definition(), FIX, source(), null, "eng", TestOwners::of);
+    var second = workspaces.create(definition(), SECOND, source(), null, "eng", TestOwners::of);
     record("create " + FIX, fix.timings());
     record("create " + SECOND, second.timings());
 
@@ -355,7 +485,7 @@ class WorkspaceIT extends AbstractIncusIT {
 
   @Test
   void everyProjectVerbIsRefusedOnARealWorkspaceAndTemplateAndChangesNeither() throws Exception {
-    var fix = workspaces.create(definition(), FIX, source(), null, TestOwners.of("eng"));
+    var fix = workspaces.create(definition(), FIX, source(), null, "eng", TestOwners::of);
     var ws = fix.instance();
     var verbs =
         List.<Map.Entry<Object, List<String>>>of(
@@ -406,7 +536,7 @@ class WorkspaceIT extends AbstractIncusIT {
 
   @Test
   void aWorkspaceStopsAndResumesWithItsEditsAndAPauseListsAsFrozen() throws Exception {
-    var fix = workspaces.create(definition(), FIX, source(), null, TestOwners.of("eng"));
+    var fix = workspaces.create(definition(), FIX, source(), null, "eng", TestOwners::of);
     var edited = exec(fix.instance(), List.of("bash", "-c", "echo kept > /home/dev/edit"));
     assertTrue(edited.ok(), edited.stderr());
 
@@ -414,7 +544,7 @@ class WorkspaceIT extends AbstractIncusIT {
     assertEquals(
         new ContainerState.Stopped(),
         new BoxInstances(shell).named(fix.instance()).orElseThrow().state());
-    var resumed = workspaces.start(PROJECT, FIX);
+    var resumed = workspaces.start(definition(), FIX, TestOwners::of);
     record("start " + FIX, resumed.timings());
 
     assertEquals(Workspaces.Change.STARTED, resumed.change());
@@ -427,7 +557,8 @@ class WorkspaceIT extends AbstractIncusIT {
         workspaces.list(PROJECT).workspaces().stream()
             .map(row -> row.name() + " " + row.state())
             .toList());
-    assertEquals(Workspaces.Change.STARTED, workspaces.start(PROJECT, FIX).change());
+    assertEquals(
+        Workspaces.Change.STARTED, workspaces.start(definition(), FIX, TestOwners::of).change());
   }
 
   @Test
@@ -462,7 +593,7 @@ class WorkspaceIT extends AbstractIncusIT {
       TestControlPlane.on(operations, db, socketDir, new SyncConfig(null, null, "it"));
       try (var server = new LocalApiSocket(operations, socketDir.resolve("api.sock"))) {
         server.start();
-        var fix = workspaces.create(definition(), FIX, source(), null, TestOwners.of("eng"));
+        var fix = workspaces.create(definition(), FIX, source(), null, "eng", TestOwners::of);
         new IncusDeviceManager(shell).ensureEventSocket(fix.instance(), socketDir, CONTAINER_DIR);
 
         var board =

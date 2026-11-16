@@ -58,6 +58,17 @@ public final class ShellExecutor implements ShellExec {
   @Override
   public Result exec(List<String> command, Path workDir, Duration timeout)
       throws IOException, InterruptedException, TimeoutException {
+    return exec(command, workDir, "", timeout);
+  }
+
+  @Override
+  public Result execWithInput(List<String> command, String input, Duration timeout)
+      throws IOException, InterruptedException, TimeoutException {
+    return exec(command, null, input, timeout);
+  }
+
+  private Result exec(List<String> command, Path workDir, String input, Duration timeout)
+      throws IOException, InterruptedException, TimeoutException {
     if (dryRun) {
       return dryRunResult(command);
     }
@@ -69,7 +80,9 @@ public final class ShellExecutor implements ShellExec {
     }
 
     var process = pb.start();
-    process.getOutputStream().close();
+    try (var stdin = process.getOutputStream()) {
+      stdin.write(input.getBytes(StandardCharsets.UTF_8));
+    }
 
     var stdout = new AtomicReference<String>("");
     var stderr = new AtomicReference<String>("");

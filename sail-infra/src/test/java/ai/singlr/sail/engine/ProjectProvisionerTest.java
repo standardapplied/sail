@@ -1953,7 +1953,7 @@ class ProjectProvisionerTest {
   }
 
   @Test
-  void aFailedGhLoginFailsTheGitStepNamingTheHost() throws Exception {
+  void aFailedGhLoginFailsTheCloneStepThatWritesTheTokenStoreNamingTheHost() throws Exception {
     var shell = shellThroughStep10().onFail("gh auth login", "The token in GH_TOKEN is invalid.");
     var provisioner =
         new ProjectProvisioner(shell, tracker(), null, Optional.empty(), OperatorCommand.PLAIN);
@@ -1969,7 +1969,7 @@ class ProjectProvisionerTest {
         "Failed to log gh in for github.com in acme-health: The token in GH_TOKEN is invalid.",
         failed.getMessage());
     assertEquals(
-        ProjectPhase.GIT_CONFIGURED,
+        ProjectPhase.REPOS_CLONED,
         tracker()
             .load(ProjectProvisioner.inputs(configWithRepo(), Optional.empty()))
             .resumePoint()

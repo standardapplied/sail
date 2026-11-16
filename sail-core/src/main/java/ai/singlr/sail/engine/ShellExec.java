@@ -70,6 +70,16 @@ public interface ShellExec {
   boolean isDryRun();
 
   /**
+   * As {@link #exec(List, Path, Duration)}, with {@code input} written to the command's stdin and
+   * then closed: how a secret reaches a command without being one of its arguments. A shell that
+   * runs no process reads no input.
+   */
+  default Result execWithInput(List<String> command, String input, Duration timeout)
+      throws IOException, InterruptedException, TimeoutException {
+    return exec(command, null, timeout);
+  }
+
+  /**
    * Whether a plain GET of {@code url}, sent without credentials, asks for them: how a box learns
    * that a repo cannot be fetched without a token. The one shell that reaches the network, {@link
    * ShellExecutor}, asks it, a dry run included, since it is a read; any other shell reaches none,

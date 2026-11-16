@@ -504,6 +504,40 @@ class MissedStopReconcilerTest {
             .count());
   }
 
+  /**
+   * Review minor 5 and 4: Incus is asked for removed people's workspaces on the first pass, then
+   * only when the roster lost someone or gave a handle to someone else, never on a pass where
+   * nothing changed.
+   */
+  @Test
+  void theRemovalSweepAsksIncusOnlyAtStartAndWhenTheRosterLosesSomeone() {
+    TestLogins.store(db, "ada");
+    TestLogins.store(db, "bob");
+    var asked = new ArrayList<String>();
+    var probe =
+        new CountingProbe(true) {
+          @Override
+          public List<String> disown(Predicate<String> held) {
+            asked.add("ada " + held.test("ada") + ", bob " + held.test("bob"));
+            return List.of();
+          }
+        };
+    var reconciler = reconciler(probe, PAST_GRACE);
+    var fdes = new FdeStore(db);
+
+    reconciler.sweep();
+    reconciler.sweep();
+    Acting.system(() -> fdes.remove(fdes.byHandle("bob").orElseThrow().id()));
+    reconciler.sweep();
+    Acting.system(() -> fdes.remove(fdes.byHandle("ada").orElseThrow().id()));
+    TestLogins.store(db, "ada");
+    reconciler.sweep();
+    reconciler.sweep();
+
+    assertEquals(
+        List.of("ada true, bob true", "ada true, bob false", "ada false, bob false"), asked);
+  }
+
   /** A container that cannot be asked fails nothing: the next pass tries again. */
   @Test
   void aContainerThatCannotBeToldIsLeftForTheNextPass() {

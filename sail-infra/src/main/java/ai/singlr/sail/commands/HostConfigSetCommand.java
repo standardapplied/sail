@@ -21,6 +21,7 @@ import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.engine.SshSyncChannel;
 import ai.singlr.sail.engine.SystemdServiceInstaller;
+import ai.singlr.sail.engine.WorkstationIdentity;
 import ai.singlr.sail.ssh.SshPublicKey;
 import java.io.IOException;
 import java.nio.file.Files;
@@ -309,17 +310,30 @@ public final class HostConfigSetCommand implements Runnable {
           "[dry-run] Would set ssh-public-key (" + chosen.fingerprint() + ") in " + dest);
       return;
     }
+    var replaced =
+        WorkstationIdentity.registeredAt(dest)
+            .filter(old -> !old.fingerprint().equals(chosen.fingerprint()));
     installWorkstationKey(SailPaths.controlPlaneDb(), dest, chosen);
+    List<String> unreached;
+    try {
+      unreached =
+          FdeCommand.Pair.trustWorkstationKey(FdeCommand.Box.here(), replaced, chosen, operator);
+    } catch (InterruptedException e) {
+      Thread.currentThread().interrupt();
+      throw new IOException("Interrupted while the containers took the new key.", e);
+    }
     if (json) {
       var map = new LinkedHashMap<String, Object>();
       map.put("key", key);
       map.put("value", chosen.line());
       map.put("status", "updated");
+      map.put("unreached", unreached);
       System.out.println(YamlUtil.dumpJson(map));
       return;
     }
     System.out.println(
         Ansi.AUTO.string("  @|bold,green ✓|@ ssh-public-key set (" + chosen.fingerprint() + ")"));
+    unreached.forEach(line -> System.out.println(Ansi.AUTO.string("  @|yellow ⚠|@ ") + line));
   }
 
   /**

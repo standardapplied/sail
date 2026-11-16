@@ -29,7 +29,6 @@ import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.engine.SshIdentityProvisioner;
 import ai.singlr.sail.engine.SyncIdentity;
-import ai.singlr.sail.engine.Workspaces;
 import ai.singlr.sail.engine.WorkstationIdentity;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.ProjectScope;
@@ -61,7 +60,6 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.TimeoutException;
 import java.util.function.Function;
-import java.util.function.Predicate;
 import java.util.function.Supplier;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
@@ -437,32 +435,6 @@ public final class FdeCommand implements Runnable {
           Ansi.AUTO.string(
               "  @|yellow ⚠|@ This box's containers could not be read, so the key change reached"
                   + " none of them: "
-                  + Remedied.reasonOf(failure).strip()
-                  + "."));
-    }
-  }
-
-  /**
-   * Takes from every workspace of a person the roster no longer holds ({@code held}), {@code
-   * handle} just removed among them, their token store, {@code gh} login and keys, and says each it
-   * could not; sail-api's next pass takes those again.
-   */
-  private static void disown(Box box, String handle, Predicate<String> held)
-      throws InterruptedException {
-    try {
-      for (var unreached : Workspaces.onThisBox(box.shell()).disown(held)) {
-        System.out.println(
-            Ansi.AUTO.string(
-                "  @|yellow ⚠|@ A workspace may still hold a removed person's credentials until"
-                    + " sail-api's next pass: "
-                    + unreached));
-      }
-    } catch (IOException | TimeoutException failure) {
-      System.out.println(
-          Ansi.AUTO.string(
-              "  @|yellow ⚠|@ This box's workspaces could not be read, so they may hold "
-                  + handle
-                  + "'s credentials until sail-api's next pass: "
                   + Remedied.reasonOf(failure).strip()
                   + "."));
     }
@@ -1071,7 +1043,6 @@ public final class FdeCommand implements Runnable {
                       : PairingRevocation.revoke(box, db, fde.handle(), pairing);
               fdeStore.remove(fde.id());
               System.out.println(Ansi.AUTO.string("  @|green ✓|@ FDE removed: " + fde.handle()));
-              disown(box, fde.handle(), person -> fdeStore.byHandle(person).isPresent());
               System.out.println(
                   Ansi.AUTO.string(
                       "  @|faint Owned tokens, SSH keys, sessions, passkeys, and enrollment"
@@ -1211,15 +1182,27 @@ public final class FdeCommand implements Runnable {
         System.out.println("  Paste this code into Mast. It is a secret, and it is shown once:");
         System.out.println();
         System.out.println(code(box, address, pinned, key.privateKey(), token.token()));
-        var unreached =
-            Stream.concat(
-                    untrustReplaced(box, replaced).stream(),
-                    trustInContainers(box, db, key.publicKey(), operator).stream())
-                .toList();
+        var unreached = trustWorkstationKey(box, replaced, key.publicKey(), operator);
         if (!unreached.isEmpty()) {
           System.out.println();
           unreached.forEach(line -> System.out.println(Ansi.AUTO.string("  @|yellow ⚠|@ ") + line));
         }
+      }
+    }
+
+    /**
+     * Makes {@code key} the workstation key every container of this box and every workspace of its
+     * person trusts in place of {@code replaced}, as a pairing and {@code host config set
+     * ssh-public-key} both do, and names each that may still trust the old or not the new.
+     */
+    static List<String> trustWorkstationKey(
+        Box box, Optional<SshPublicKey> replaced, SshPublicKey key, OperatorCommand operator)
+        throws InterruptedException {
+      try (var db = Sqlite.open(box.database())) {
+        return Stream.concat(
+                untrustReplaced(box, replaced).stream(),
+                trustInContainers(box, db, key, operator).stream())
+            .toList();
       }
     }
 
