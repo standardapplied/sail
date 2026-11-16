@@ -286,6 +286,7 @@ extension Driver {
     private func fourPanes() async -> (Bool, String) {
         let before = Self.footprint
         let tabsBefore = workbench.model.tabs.count
+        mainThread.reset()
         press("t", ["command"])
         guard await waitUntil(10, { self.workbench.model.tabs.count == tabsBefore + 1 && self.pane?.session?.state.phase == .attached }) else {
             return (false, "⌘T made no attached tab: \(arrangementSaid)")
@@ -299,6 +300,7 @@ extension Driver {
             return (false, "the grid did not attach four panes: \(arrangementSaid)")
         }
         let four = Self.footprint
+        panes4["main thread's longest stall making the grid ms"] = mainThread.longest
         let echo = grid[1], floods = [grid[0], grid[2], grid[3]]
         func focus(_ view: TerminalPane) {
             view.window?.makeFirstResponder(view.terminal)
@@ -313,6 +315,7 @@ extension Driver {
         focus(echo)
         grid.forEach { $0.terminal.resetLatency() }
         let (ok, said) = await measure(200, interval: 50, name: "panes4-echo")
+        panes4["main thread's longest stall while four ran ms"] = mainThread.longest
         let refresh = 1000 / Double(max(1, shell.window.screen?.maximumFramesPerSecond ?? 60))
         let echoed = echo.terminal.latency
         let presented = echoed.keyToEcho.count > 0
@@ -344,9 +347,11 @@ extension Driver {
         press("w", ["command", "option"])
         _ = await sheet("Close", asking: "Its 4 terminals will end.", within: 5)
         let splits = await timeSplits(10)
-        budgets["⌘D to the new pane's first committed frame p95 <= 100 ms"] = splits <= 100
-        panes4["⌘D to first committed frame p95 ms"] = splits
-        panes4["main thread held at most ms"] = mainThread.longest
+        budgets["⌘D to the new pane's first committed frame p95 <= 100 ms"] = splits.total <= 100
+        panes4["⌘D to first committed frame p95 ms"] = splits.total
+        panes4["of which ⌘D handled (pane, view, session made) p95 ms"] = splits.handled
+        panes4["main thread's longest stall within a split p95 ms"] = splits.held
+
         let missed = budgets.filter { !$0.value }.keys.sorted()
         let numbers = panes4.sorted { $0.key < $1.key }.map { "\($0.key) \(String(format: "%.1f", $0.value))" }.joined(separator: ", ")
         return (ok && missed.isEmpty, (missed.isEmpty ? "within every budget" : "missed: \(missed.joined(separator: "; "))") + "; echo: \(said); \(numbers)")
@@ -371,23 +376,32 @@ extension Driver {
     }
 
     /// ⌘D in a new tab, `count` times: each from the key to the new pane's first committed frame,
-    /// in ms; the p95. Each tab is closed after.
-    private func timeSplits(_ count: Int) async -> Double {
-        var times: [Double] = []
+    /// in ms, the p95; beside it, of the same splits, the p95 of the key's own handling (the pane
+    /// and its view made, its session opened) and of the main thread's longest stall. Each tab is
+    /// closed after.
+    private func timeSplits(_ count: Int) async -> (total: Double, handled: Double, held: Double) {
+        var totals: [Double] = [], handled: [Double] = [], held: [Double] = []
         for _ in 0 ..< count {
             press("t", ["command"])
             _ = await waitUntil(10) { self.pane?.terminal.framesCommitted ?? 0 > 0 }
+            mainThread.reset()
             let began = ContinuousClock.now
             press("d", ["command"])
+            handled.append((ContinuousClock.now - began) / .milliseconds(1))
             let made = pane
             while (made?.terminal.framesCommitted ?? 0) == 0, ContinuousClock.now - began < .seconds(5) {
                 try? await Task.sleep(for: .milliseconds(1))
             }
-            times.append((ContinuousClock.now - began) / .milliseconds(1))
+            totals.append((ContinuousClock.now - began) / .milliseconds(1))
+            held.append(mainThread.longest)
             press("w", ["command", "option"])
             _ = await sheet("Close", asking: nil, within: 5)
         }
-        let sorted = times.sorted()
+        return (Self.p95(totals), Self.p95(handled), Self.p95(held))
+    }
+
+    static func p95(_ values: [Double]) -> Double {
+        let sorted = values.sorted()
         return sorted.isEmpty ? .infinity : sorted[min(sorted.count - 1, Int((Double(sorted.count) * 0.95).rounded(.up)) - 1)]
     }
 }
