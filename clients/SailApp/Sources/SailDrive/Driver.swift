@@ -278,7 +278,7 @@ final class Driver {
             let figures = terminal.latency
             let wait = Self.ours(figures.longestToShown, own: ownThread.stalls), held = mainHeld()
             if let gap = mainThread.stalls.longest() {
-                mainStacks.described(in: gap).forEach { print("main thread in its longest hold of the flood: \($0)") }
+                mainStacks.told(gap).forEach { print("main thread in its longest hold of the flood: \($0)") }
             }
             let ok = max(wait.ours, held.ours) <= limit
             let flood = measurement(name, keys: 0, figures: figures, budgets: ["every output shown within \(Self.ms(limit)) ms": ok])

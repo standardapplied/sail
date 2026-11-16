@@ -410,7 +410,7 @@ extension Driver {
             let gap = figures.longestBetweenCommits.map { Self.ours($0, own: own) }
             if let span = figures.longestBetweenCommits {
                 print(String(format: "panes4 flood %d longest gap %.3f–%.3f; refresh max %.1f ms", index + 1, span.start, span.end, figures.refresh.max))
-                mainStacks.described(in: span).forEach { print("panes4 flood \(index + 1) main thread in its longest gap: \($0)") }
+                mainStacks.told(span).forEach { print("panes4 flood \(index + 1) in its longest gap: \($0)") }
             }
             budgets["flood \(index + 1): no gap between committed frames over 100 ms in its \(frames[index]) frames (\(gap?.said ?? "no frame committed"))"] =
                 (gap?.ours ?? .infinity) <= 100
@@ -423,6 +423,7 @@ extension Driver {
         for gap in mainThread.stalls.gaps where gap.length > 0.06 {
             print(String(format: "panes4 main thread held %.3f–%.3f (%.1f ms), the drive's own thread %.1f ms of it", gap.start, gap.end, gap.length * 1000,
                          ownThread.stalls.shared(with: gap) * 1000))
+            mainStacks.told(gap).forEach { print("panes4 main thread held: \($0)") }
         }
         let work = grid.map { $0.terminal.latency.refreshWork.p95 }.reduce(0, +)
         budgets["the four views' refresh work p95 summed <= 8 ms (CPU time, the main thread's own clock)"] = work <= 8
