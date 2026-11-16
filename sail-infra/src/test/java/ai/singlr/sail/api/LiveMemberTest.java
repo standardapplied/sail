@@ -288,6 +288,41 @@ class LiveMemberTest {
     assertEquals(expected, ended.usage());
   }
 
+  /**
+   * RL4 for a live member: each turn's report is its process's {@code init} line and the turn's
+   * result, real lines of Claude Code refusing a fake token; the refusal is said once for the
+   * member's run however many turns meet it, and a credential its harness took instead of the login
+   * is recorded on the run.
+   */
+  @Test
+  void aMemberWhoseLoginWasRefusedSaysSoOnceAndOneThatRanOnAnotherIsRecorded() {
+    var refused =
+        RunLoginOutcomeTest.fixture("claude-code-refused-token.jsonl")
+            .lines()
+            .toArray(String[]::new);
+    var process = room.prompted(SPEC, "full", "first");
+    room.says(process, refused);
+    room.says(SPEC, "second");
+    room.says(process, refused);
+
+    assertEquals(
+        List.of(
+            "sail: Claude Code refused "
+                + LiveRoom.HANDLE
+                + "'s login 'default' (long-lived token). Run claude"
+                + " setup-token on a machine where Claude Code is signed in, then sail agent login"
+                + " claude-code."),
+        room.conversation(SPEC).stream().filter(line -> line.startsWith("sail: ")).toList());
+    assertEquals(1, room.events(Event.WellKnownTypes.AGENT_LOGIN_OUTCOME).size());
+
+    var helper = RunLoginOutcomeTest.fixture("claude-code-helper-init.jsonl").strip();
+    room.says(SPEC, "third");
+    room.says(process, helper, Lines.result("Three"));
+
+    assertEquals("apiKeyHelper", room.runs.findById(process.runId).orElseThrow().loginOverridden());
+    assertEquals(1, room.events(Event.WellKnownTypes.AGENT_LOGIN_OUTCOME).size(), "once a run");
+  }
+
   @Test
   void aLiveMemberThatReportedNothingFinishesWithNone() {
     var process = room.prompted(SPEC, "full", "first");

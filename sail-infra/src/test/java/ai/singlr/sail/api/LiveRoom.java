@@ -16,7 +16,6 @@ import ai.singlr.sail.engine.RunPlace;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.WatcherSpawner;
 import ai.singlr.sail.engine.Workspaces;
-import ai.singlr.sail.harness.RunUsage;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.Role;
@@ -166,8 +165,7 @@ final class LiveRoom implements AutoCloseable {
     started.subscribe(settling.counted(new SpecStoreAuditPersister(new EventStore(db))));
     started.subscribe(
         settling.counted(
-            new RunTracker(
-                runs, finished -> RunUsage.NONE, SyncScheduler.disabled(), () -> HANDLE)));
+            new RunTracker(runs, sail.runReports(), SyncScheduler.disabled(), () -> HANDLE)));
     started.subscribe(settling.counted(reactor));
     started.subscribe(settling.counted(recorder()));
   }

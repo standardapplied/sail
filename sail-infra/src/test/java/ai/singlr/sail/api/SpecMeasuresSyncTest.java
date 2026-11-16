@@ -9,6 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.SpecStatus;
+import ai.singlr.sail.harness.RunReport;
 import ai.singlr.sail.harness.RunUsage;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.store.AttentionStore;
@@ -135,7 +136,7 @@ class SpecMeasuresSyncTest {
         () -> {
           runs.reserveDispatch(
               id, "acme", spec, box.handle(), role, List.of(), "claude-code", "b", "t", "/l", "u");
-          runs.finish(id, "running", "completed", 0, usage);
+          runs.finish(id, "running", "completed", 0, new RunReport(usage, null));
         });
     return id;
   }
@@ -348,7 +349,8 @@ class SpecMeasuresSyncTest {
     SyncBox.assertConverged(main, ada);
     assertEquals("running", new RunStore(ada.db).findById(id).orElseThrow().status());
     at(10);
-    Acting.system(() -> runs.finish(id, "running", "completed", 0, reported(10, 2.0)));
+    Acting.system(
+        () -> runs.finish(id, "running", "completed", 0, new RunReport(reported(10, 2.0), null)));
     Acting.system(
         () ->
             new Erasure(main.db)

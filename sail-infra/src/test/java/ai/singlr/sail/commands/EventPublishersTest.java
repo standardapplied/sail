@@ -16,6 +16,8 @@ import ai.singlr.sail.api.EventBus;
 import ai.singlr.sail.api.EventSubscriber;
 import ai.singlr.sail.api.OperationsFactory;
 import ai.singlr.sail.api.ProjectReader;
+import ai.singlr.sail.api.RunLauncher;
+import ai.singlr.sail.api.RunReports;
 import ai.singlr.sail.api.RunTracker;
 import ai.singlr.sail.api.RunWatch;
 import ai.singlr.sail.api.SailApiServer;
@@ -40,7 +42,7 @@ import ai.singlr.sail.engine.PipedSyncChannel;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.SyncOperations;
 import ai.singlr.sail.engine.WatcherSpawner;
-import ai.singlr.sail.harness.RunUsage;
+import ai.singlr.sail.harness.RunReport;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.Role;
@@ -183,7 +185,11 @@ class EventPublishersTest {
     var tracked = new CountDownLatch(1);
     bus.subscribe(
         BusTesting.latching(
-            new RunTracker(runs, finished -> RunUsage.NONE, SyncScheduler.disabled(), () -> ME),
+            new RunTracker(
+                runs,
+                new RunReports(finished -> RunReport.NONE, RunLauncher.Room.NONE, event -> {}),
+                SyncScheduler.disabled(),
+                () -> ME),
             tracked));
 
     RunWatch.emitStop(

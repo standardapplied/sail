@@ -8,15 +8,23 @@ package ai.singlr.sail.api;
 import ai.singlr.sail.common.Remedied;
 import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.common.Strings;
+import ai.singlr.sail.config.Lane;
 import ai.singlr.sail.harness.Harness;
 import ai.singlr.sail.harness.Harnesses;
 import ai.singlr.sail.harness.LoginKind;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.LoginStore;
+import ai.singlr.sail.store.RunStore;
+import java.time.Duration;
+import java.time.Instant;
+import java.time.ZoneOffset;
+import java.time.format.DateTimeFormatter;
+import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.function.Supplier;
 
 /**
  * Which login a run starts its harness with, decided by the one fact a run is placed by, whether it
@@ -25,16 +33,36 @@ import java.util.Optional;
  * names none (an ad-hoc run, a spec-less room's member) uses whatever login its container has.
  * There is no fallback to another login, another person's, or the container's. A refusal of a run
  * is said in its spec's room once per cause, until the spec's runs start again, so a person who
- * stored no login learns it where the work is, however often Sail itself tries.
+ * stored no login learns it where the work is, however often Sail itself tries. A build's login of
+ * a kind that lasts a known time is said in its last {@link #ENDING} (RL5, {@link #ending}): a
+ * warning, and the run starts.
  */
 final class RunLogins {
 
+  /** How long before a login's end a build's dispatch says it is ending. */
+  static final Duration ENDING = Duration.ofDays(14);
+
   private final FdeStore fdes;
   private final RunLauncher.Room room;
+  private final DispatchOperations.Listener listener;
+  private final DispatchOperations.EventSink events;
+  private final Supplier<Instant> clock;
 
-  RunLogins(FdeStore fdes, RunLauncher.Room room) {
+  /**
+   * {@code room} is where a spec's run is said, {@code listener} the dispatch's own output and
+   * {@code events} the box's bus: where an ending login is said too.
+   */
+  RunLogins(
+      FdeStore fdes,
+      RunLauncher.Room room,
+      DispatchOperations.Listener listener,
+      DispatchOperations.EventSink events,
+      Supplier<Instant> clock) {
     this.fdes = fdes;
     this.room = Objects.requireNonNull(room, "room");
+    this.listener = Objects.requireNonNull(listener, "listener");
+    this.events = Objects.requireNonNull(events, "events");
+    this.clock = Objects.requireNonNull(clock, "clock");
   }
 
   /**
@@ -62,6 +90,108 @@ final class RunLogins {
       room.tell(specId, Remedied.message(refused.getMessage(), refused.failure().remedy()));
       throw refused;
     }
+  }
+
+  /**
+   * Says, once {@code run} is reserved, that the login {@code stored} it was given ends within
+   * {@link #ENDING}, when it is a build's (a dispatch, or a resumed build) and its kind has a known
+   * end: in the dispatch's own output, as an event, and in the spec's room. Said after the
+   * reservation, not before, so on a node the room's line has the run that keeps it there (a node
+   * posts only what its sync keeps), whether or not the spec ever ran on that box before.
+   */
+  void ending(RunStore.RunRow run, LoginStore.Login stored) {
+    if (!Lane.BUILD.matches(run.role())) {
+      return;
+    }
+    var harness = Harnesses.of(run.agent());
+    var now = clock.get();
+    var login = named(run.owner(), stored.row().name(), stored.kind());
+    stored
+        .kind()
+        .endsAt(stored.row().storedAt())
+        .filter(end -> end.isBefore(now.plus(ENDING)))
+        .map(
+            end ->
+                Remedied.message(
+                    harness.displayName()
+                        + (end.isAfter(now)
+                            ? " will refuse "
+                                + login
+                                + " from "
+                                + day(end)
+                                + ", "
+                                + within(now, end)
+                            : " refuses " + login + " since " + day(end))
+                        + ".",
+                    howToReplace(harness, stored.kind(), stored.row().name())))
+        .ifPresent(
+            said -> {
+              listener.loginEnding(said);
+              events.publish(
+                  RunReports.event(
+                      run,
+                      new RunStore.RunLogin(stored.row().name(), stored.kind().kind()),
+                      RunReports.ENDING,
+                      said));
+              room.tell(run.specId(), said);
+            });
+  }
+
+  private static String day(Instant at) {
+    return DateTimeFormatter.ISO_LOCAL_DATE.format(at.atOffset(ZoneOffset.UTC));
+  }
+
+  /** How many calendar days, in UTC, from {@code now} to {@code end}: the count its date reads. */
+  private static String within(Instant now, Instant end) {
+    var days =
+        ChronoUnit.DAYS.between(
+            now.atOffset(ZoneOffset.UTC).toLocalDate(), end.atOffset(ZoneOffset.UTC).toLocalDate());
+    return days == 0 ? "today" : days == 1 ? "tomorrow" : "in " + days + " days";
+  }
+
+  /**
+   * Whether the login {@code run} was given is no longer what its person's runs start with: their
+   * default login for its harness is another, or was stored after the run started. What mends a
+   * refusal is that state, whether or not the store's event was heard. {@code run} was given a
+   * stored login: only such a run's login is refused.
+   */
+  static boolean replaced(FdeStore fdes, RunStore.RunRow run) {
+    var harness = Harnesses.of(run.agent());
+    return Optional.ofNullable(run.owner())
+        .flatMap(fdes::byHandle)
+        .flatMap(person -> fdes.logins().defaultFor(person.id(), harness))
+        .map(LoginStore.Login::row)
+        .filter(
+            stored ->
+                !stored.name().equals(run.login().name())
+                    || stored.storedAt().isAfter(run.startedAt()))
+        .isPresent();
+  }
+
+  /** How a stored login is named where it is said: whose, its name and its kind. */
+  static String named(String owner, String name, LoginKind kind) {
+    return (Strings.isBlank(owner) ? "the" : owner + "'s")
+        + " login '"
+        + name
+        + "' ("
+        + kind.noun()
+        + ")";
+  }
+
+  /**
+   * How to make a login of {@code kind} anew and store it as {@code name}, where the one it
+   * replaces was: the command names only what differs from the defaults.
+   */
+  static Remedy howToReplace(Harness harness, LoginKind kind, String name) {
+    var args = new ArrayList<String>(List.of(harness.yamlName()));
+    if (!kind.equals(harness.loginKinds().getFirst())) {
+      args.addAll(List.of("--kind", kind.kind()));
+    }
+    if (!LoginStore.DEFAULT_NAME.equals(name)) {
+      args.addAll(List.of("--name", name));
+    }
+    return Remedy.of(
+        kind.howToMake(), ", then ", Remedy.sail("agent login", args.toArray(String[]::new)), ".");
   }
 
   /**
@@ -120,20 +250,10 @@ final class RunLogins {
   /** Each kind its harness takes, how to make one, and the command that stores it. */
   static Remedy howToStore(Harness harness) {
     var parts = new ArrayList<Object>();
-    var kinds = harness.loginKinds();
-    for (var i = 0; i < kinds.size(); i++) {
-      parts.add(i == 0 ? "" : " Or: ");
-      parts.add(kinds.get(i).howToMake());
-      parts.add(", then ");
-      parts.add(storeCommand(harness, kinds.get(i), i == 0));
-      parts.add(".");
+    for (var kind : harness.loginKinds()) {
+      parts.add(parts.isEmpty() ? "" : " Or: ");
+      parts.add(howToReplace(harness, kind, LoginStore.DEFAULT_NAME));
     }
     return Remedy.of(parts.toArray());
-  }
-
-  private static Remedy.Command storeCommand(Harness harness, LoginKind kind, boolean first) {
-    return first
-        ? Remedy.sail("agent login", harness.yamlName())
-        : Remedy.sail("agent login", harness.yamlName(), "--kind", kind.kind());
   }
 }

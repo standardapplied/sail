@@ -17,9 +17,7 @@ import ai.singlr.sail.engine.ContainerFilePush;
 import ai.singlr.sail.engine.ContainerState;
 import ai.singlr.sail.engine.GuardrailTrigger;
 import ai.singlr.sail.engine.RunPlace;
-import ai.singlr.sail.engine.RunUsageReader;
 import ai.singlr.sail.engine.ShellExec;
-import ai.singlr.sail.harness.RunUsage;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.store.EventStore;
 import ai.singlr.sail.store.FdeStore;
@@ -105,6 +103,12 @@ public final class MissedStopReconciler implements AutoCloseable {
    */
   static final Duration TIDY_LOOKBACK = Duration.ofMinutes(2);
 
+  /** How many unread reports of runs serving a review a pass reads before it replays a stop. */
+  static final int READ_FIRST = 3;
+
+  /** How long a pass starts reading those reports for. */
+  static final Duration READ_FIRST_FOR = Duration.ofSeconds(10);
+
   private static final SpecStore.SpecFilter IN_PROGRESS =
       new SpecStore.SpecFilter(null, "in_progress", null, null, null);
 
@@ -123,14 +127,6 @@ public final class MissedStopReconciler implements AutoCloseable {
     /** How the run ended, as far as its instance still says; nothing, by default. */
     default Ending ending(RunPlace place, String runId, String unit) throws Exception {
       return Ending.UNKNOWN;
-    }
-
-    /**
-     * What {@code run}'s harness reported it cost, as its container still holds it ({@link
-     * RunUsageReader}); unread, by default.
-     */
-    default RunUsage usage(RunStore.RunRow run) {
-      return null;
     }
 
     /**
@@ -174,6 +170,7 @@ public final class MissedStopReconciler implements AutoCloseable {
   private final Supplier<String> localHandle;
   private final Supplier<Instant> clock;
   private final FdeStore fdes;
+  private final RunReports reports;
   private final PeriodicPass pass;
   private volatile Instant tidiedSince = Instant.EPOCH;
   private final Set<String> untidied = ConcurrentHashMap.newKeySet();
@@ -190,7 +187,8 @@ public final class MissedStopReconciler implements AutoCloseable {
       WatcherCoverage coverage,
       Supplier<String> localHandle,
       Supplier<Instant> clock,
-      FdeStore fdes) {
+      FdeStore fdes,
+      RunReports reports) {
     this.specStore = specStore;
     this.sessionStore = sessionStore;
     this.eventStore = eventStore;
@@ -200,6 +198,7 @@ public final class MissedStopReconciler implements AutoCloseable {
     this.localHandle = localHandle;
     this.clock = clock;
     this.fdes = Objects.requireNonNull(fdes, "fdes");
+    this.reports = Objects.requireNonNull(reports, "reports");
     this.strandedReviews =
         new StrandedReviewRescue(
             specStore,
@@ -209,6 +208,7 @@ public final class MissedStopReconciler implements AutoCloseable {
             clock,
             LAUNCH_GRACE,
             this::gone,
+            run -> RunLogins.replaced(fdes, run),
             this::publishStop);
     this.pass = new PeriodicPass("reconcile", this::sweep);
   }
@@ -222,7 +222,6 @@ public final class MissedStopReconciler implements AutoCloseable {
   public static UnitProbe systemdUnitProbe(ShellExec shell) {
     var agentSession = new AgentSession(shell);
     var presence = new AgentPresence(shell);
-    var usage = new RunUsageReader(shell);
     return new UnitProbe() {
       @Override
       public boolean instanceGone(RunPlace place) throws Exception {
@@ -262,11 +261,6 @@ public final class MissedStopReconciler implements AutoCloseable {
                 .filter(GuardrailTrigger::stops)
                 .map(GuardrailTrigger::cause);
         return new Ending(exitCode.orElse(null), limit.orElse(null));
-      }
-
-      @Override
-      public RunUsage usage(RunStore.RunRow run) {
-        return usage.read(run);
       }
 
       @Override
@@ -313,9 +307,16 @@ public final class MissedStopReconciler implements AutoCloseable {
     return Actor.call(Actor.system(), this::reconcileAll);
   }
 
+  /**
+   * One pass. The unread reports of the runs that serve a review are read first, newest first, a
+   * few and for a while ({@link #READ_FIRST}, {@link #READ_FIRST_FOR}): a reviewer's late read can
+   * hold its review for a refused login, and its stop must not be replayed, nor its review rescued,
+   * before the pass knows. Every other unread report is read last, as before.
+   */
   private int reconcileAll() {
     var replayed = 0;
     try {
+      var readFirst = readServingFirst();
       var handledThisSweep = new HashSet<String>();
       for (var spec : specStore.list(IN_PROGRESS)) {
         try {
@@ -336,7 +337,7 @@ public final class MissedStopReconciler implements AutoCloseable {
       replayed += rescueStrandedReviews(handledThisSweep);
       replayed += finishDeadSessions(handledThisSweep);
       replayed += finalizeInterruptedStops();
-      readUnreadUsage();
+      read(unread().stream().filter(run -> !readFirst.contains(run.id())).toList());
       removeLeftovers();
     } catch (Exception e) {
       System.err.println("  [reconcile] missed-stop sweep aborted: " + e.getMessage());
@@ -463,7 +464,18 @@ public final class MissedStopReconciler implements AutoCloseable {
             + " ("
             + why
             + ")");
-    return sessionStore.finish(run.id(), "running", "stopped", exitCode, unitProbe.usage(run));
+    return finished(run, "running", exitCode);
+  }
+
+  /**
+   * {@code run} finished {@code expected → stopped} with what its report says, read here ({@link
+   * RunReports}); the write that finished it says what came of its login. Returns whether it did.
+   */
+  private boolean finished(RunStore.RunRow run, String expected, Integer exitCode) {
+    return reports.finish(
+        sessionStore,
+        run,
+        report -> sessionStore.finish(run.id(), expected, "stopped", exitCode, report));
   }
 
   /**
@@ -512,15 +524,49 @@ public final class MissedStopReconciler implements AutoCloseable {
    * container that was stopped, missing or slow as the run finished, or an operator's stop, which
    * never waits on one (M3). Whatever the container answers is recorded and journaled, once: a
    * report, or none when the report is gone, says nothing or does not parse; only an unanswered
-   * read is left for the next sweep, the run's directory kept by retention meanwhile. Returns how
-   * many were recorded.
+   * read is left for the next sweep, the run's directory kept by retention meanwhile; what it says
+   * of the run's login is said by the read that recorded it (the reconciler's late read). Returns
+   * how many were recorded.
    */
   int readUnreadUsage() {
+    return read(unread());
+  }
+
+  /**
+   * Reads, before any stop is replayed, the unread reports of at most {@link #READ_FIRST} runs that
+   * serve a review, newest first, starting none after {@link #READ_FIRST_FOR}: the pass's first
+   * replay waits at most that and one read ({@code RunReportReader.TIMEOUT}). A store that cannot
+   * list them costs the pass nothing but these reads. Returns the runs it read.
+   */
+  private Set<String> readServingFirst() {
+    var deadline = clock.get().plus(READ_FIRST_FOR);
+    var tried = new HashSet<String>();
+    try {
+      for (var run : unread().stream().filter(RunStore.RunRow::servesReview).toList().reversed()) {
+        if (tried.size() == READ_FIRST || !clock.get().isBefore(deadline)) {
+          break;
+        }
+        tried.add(run.id());
+        read(List.of(run));
+      }
+    } catch (RuntimeException e) {
+      System.err.println("  [reconcile] could not read reviewers' reports first: " + e);
+    }
+    return tried;
+  }
+
+  private List<RunStore.RunRow> unread() {
+    return sessionStore.unread(localHandle.get());
+  }
+
+  private int read(List<RunStore.RunRow> runs) {
     var recorded = 0;
-    for (var run : sessionStore.unread(localHandle.get())) {
+    for (var run : runs) {
       try {
-        var usage = unitProbe.usage(run);
-        if (usage != null && sessionStore.recordRead(run.id(), usage)) {
+        if (reports.finish(
+            sessionStore,
+            run,
+            report -> report != null && sessionStore.recordRead(run.id(), report))) {
           recorded++;
         }
       } catch (RuntimeException e) {
@@ -552,7 +598,7 @@ public final class MissedStopReconciler implements AutoCloseable {
         if (unitProbe.active(run.place(), run.id(), StopOperations.runUnit(run).unitName())) {
           continue;
         }
-        if (sessionStore.finish(run.id(), "stopping", "stopped", null, unitProbe.usage(run))) {
+        if (finished(run, "stopping", null)) {
           System.err.println(
               "  [reconcile] finalized interrupted stop "
                   + run.id()
@@ -586,6 +632,9 @@ public final class MissedStopReconciler implements AutoCloseable {
       return false;
     }
     var session = latest.get();
+    if (session.servesReview() && session.stoppedForLogin()) {
+      return false;
+    }
     var coverage = stopCoverage(spec.id(), session);
     var outcome = MissedStops.assess(session, coverage, clock.get(), LAUNCH_GRACE);
     return switch (outcome) {

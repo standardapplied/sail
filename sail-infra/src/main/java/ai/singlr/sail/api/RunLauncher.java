@@ -19,7 +19,6 @@ import ai.singlr.sail.engine.HostInfo;
 import ai.singlr.sail.engine.LaunchEnv;
 import ai.singlr.sail.engine.ProjectSkillInstaller;
 import ai.singlr.sail.engine.RunPlace;
-import ai.singlr.sail.engine.RunUsageReader;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.WatcherSpawner;
 import ai.singlr.sail.harness.Harnesses;
@@ -52,6 +51,7 @@ public final class RunLauncher {
   private final DispatchOperations.EventSink events;
   private final Supplier<ProjectSkills> projectSkills;
   private final Room room;
+  private final RunReports reports;
 
   /**
    * Where a launch says what it skipped, or why it could not start: the spec's room, when the run
@@ -73,7 +73,8 @@ public final class RunLauncher {
       RunStore runStore,
       DispatchOperations.EventSink events,
       Supplier<ProjectSkills> projectSkills,
-      Room room) {
+      Room room,
+      RunReports reports) {
     this.shell = shell;
     this.launcher = launcher;
     this.listener = listener;
@@ -82,6 +83,7 @@ public final class RunLauncher {
     this.events = events;
     this.projectSkills = projectSkills;
     this.room = room;
+    this.reports = reports;
   }
 
   record LaunchOutcome(int exitCode, Optional<WatcherSpawner.Spawned> watcher) {}
@@ -518,11 +520,7 @@ public final class RunLauncher {
         "complete run " + runId,
         () ->
             RunTracker.finish(
-                runStore,
-                new RunUsageReader(shell)::read,
-                runId,
-                exitCode == 0 ? "completed" : "failed",
-                exitCode));
+                runStore, reports, runId, exitCode == 0 ? "completed" : "failed", exitCode));
   }
 
   /**

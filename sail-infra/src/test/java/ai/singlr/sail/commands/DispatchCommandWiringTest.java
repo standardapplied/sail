@@ -52,8 +52,11 @@ import ai.singlr.sail.store.Sqlite;
 import ai.singlr.sail.store.TestLogins;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
+import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.attribute.FileTime;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -166,7 +169,10 @@ class DispatchCommandWiringTest {
     if (new FdeStore(db).byHandle(HANDLE).isEmpty()) {
       new FdeStore(db).add(HANDLE, null, null, "admin");
     }
-    TestLogins.store(db, HANDLE);
+    var person = new FdeStore(db).byHandle(HANDLE).orElseThrow().id();
+    if (new FdeStore(db).logins().list(person).isEmpty()) {
+      TestLogins.store(db, HANDLE);
+    }
     var command =
         new DispatchCommand(
             dryRun -> shell,
@@ -199,6 +205,55 @@ class DispatchCommandWiringTest {
     assertTrue(
         ran.out().contains("sail agent stop acme --spec auth"),
         "the stop it prints reaches this spec's run however many run: " + ran.out());
+  }
+
+  /**
+   * RL5 at the dispatch that causes it: a token in its last 14 days is said in the dispatch's own
+   * output, in the words the room gets, and the run starts.
+   */
+  @Test
+  void aDispatchOnATokenInItsLastFourteenDaysSaysSoInItsOwnOutput() throws Exception {
+    seedWithAnEndingToken();
+
+    var ran = dispatch(shell(), 0, "--background");
+
+    assertEquals(0, ran.exit(), ran.err());
+    assertTrue(
+        ran.out()
+            .contains("! Claude Code will refuse " + HANDLE + "'s login 'default' (long-lived"),
+        ran.out());
+    assertTrue(ran.out().contains("Launching agent in background..."), ran.out());
+  }
+
+  /** Round 4, item 5: under {@code --json} the warning is a field of the dispatch's own JSON. */
+  @Test
+  void aJsonDispatchOnATokenInItsLastFourteenDaysCarriesTheWarningAsAField() throws Exception {
+    seedWithAnEndingToken();
+
+    var ran = dispatch(shell(), 0, "--background", "--json");
+
+    assertEquals(0, ran.exit(), ran.err());
+    var said = YamlUtil.parseMap(ran.out().lines().findFirst().orElseThrow());
+    assertTrue(
+        said.get("login_ending")
+            .toString()
+            .startsWith(
+                "Claude Code will refuse "
+                    + HANDLE
+                    + "'s login 'default' (long-lived token) from "),
+        ran.out());
+    assertFalse(ran.out().contains("! Claude Code"), "said in the JSON alone: " + ran.out());
+  }
+
+  private void seedWithAnEndingToken() throws Exception {
+    seed();
+    new FdeStore(db).add(HANDLE, null, null, "admin");
+    TestLogins.store(db, HANDLE);
+    try (var files = Files.walk(db.path().getParent().resolve("logins"))) {
+      for (var file : files.filter(Files::isRegularFile).toList()) {
+        Files.setLastModifiedTime(file, FileTime.from(Instant.now().minus(Duration.ofDays(360))));
+      }
+    }
   }
 
   @Test

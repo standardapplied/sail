@@ -22,6 +22,7 @@ import ai.singlr.sail.engine.FileMutex;
 import ai.singlr.sail.engine.RunPlace;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.harness.Harnesses;
+import ai.singlr.sail.harness.RunReport;
 import ai.singlr.sail.harness.RunUsage;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.store.EventStore;
@@ -37,6 +38,8 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -352,6 +355,264 @@ class ReviewLanesTest {
         ReviewLoop.HANDLE,
         "host",
         Map.of("person", ReviewLoop.HANDLE, "harness", "claude-code"));
+  }
+
+  /**
+   * A reviewer whose harness refused its login holds the loop as a missing login does: the room is
+   * told once with the command that replaces it, the review stays owed its reviewer across every
+   * reconciler pass, never errored nor escalated, and the login stored as that command stores it
+   * launches the reviewer again.
+   */
+  @Test
+  void aReviewerWhoseKeyCodexRefusedHoldsTheReviewSaidOnceUntilTheLoginIsReplaced() {
+    loop = ReviewLoop.staged(tempDir, "codex", "claude-code");
+    loop.built("auth");
+    var reviewer = loop.onlyLive();
+    var transcript = "/home/dev/.codex/sessions/rollout-review.jsonl";
+    Acting.system(() -> loop.runs.recordSession(reviewer.id(), "thread-1", "startup", transcript));
+    loop.container.wroteFile(transcript, RunLoginOutcomeTest.fixture("codex-refused-key.jsonl"));
+    var before = sailLines("auth").size();
+
+    loop.exit(reviewer.id(), "codex exec writes text, not its report\n", 1);
+    var reconciler = loop.reconciler(() -> Instant.now().plus(Duration.ofMinutes(5)));
+    for (var pass = 0; pass <= LoopDecision.MAX_ERRORED_RETRIES; pass++) {
+      reconciler.sweep();
+    }
+    loop.settle();
+
+    var sentence =
+        "Codex CLI refused node-a's login 'default' (API key), so its run stopped. Create an API"
+            + " key at platform.openai.com/api-keys, then sail agent login codex.";
+    assertEquals(List.of(sentence), sailLines("auth").subList(before, sailLines("auth").size()));
+    var review = loop.reviewOf("auth");
+    assertEquals("running", loop.statusOf(review), "held, owed its reviewer, never errored");
+    assertTrue(loop.container.live().isEmpty(), "no reviewer relaunched on the same login");
+    assertEquals(1, stopsOf(reviewer.id()), "the held stop is acted on, never replayed");
+
+    var printed = List.of(sentence.substring(sentence.indexOf("then sail ") + 10).split("[ .]+"));
+    assertEquals(List.of("agent", "login", "codex"), printed, "the command as printed");
+    var person = new FdeStore(loop.db).byHandle(ReviewLoop.HANDLE).orElseThrow().id();
+    new FdeStore(loop.db).logins().store(person, Harnesses.of("codex"), null, null, "sk-new-key");
+    loop.onEvent(loginStored());
+
+    var relaunched = loop.onlyLive();
+    assertEquals("review", relaunched.role(), "the stored login launches the reviewer again");
+    assertEquals(review, relaunched.reviewId());
+  }
+
+  /**
+   * Round 3, item 2: a reviewer whose report is read late (its workspace did not answer as it
+   * stopped) gets its login mark from the read that records the report, the one finish every read
+   * goes through, and is held like any other: one line, no retry over the reconciler's passes, no
+   * escalation, and a stored login launches the review again.
+   */
+  @Test
+  void aReviewerWhoseRefusalIsReadLateIsHeldLikeAnyOtherUntilTheLoginIsReplaced() {
+    loop = ReviewLoop.staged(tempDir, "codex", "claude-code");
+    loop.built("auth");
+    var reviewer = loop.onlyLive();
+    var transcript = "/home/dev/.codex/sessions/rollout-late.jsonl";
+    Acting.system(() -> loop.runs.recordSession(reviewer.id(), "thread-1", "startup", transcript));
+    loop.container.wroteFile(transcript, RunLoginOutcomeTest.fixture("codex-refused-key.jsonl"));
+    var before = sailLines("auth").size();
+    loop.container.exited(reviewer.id(), "codex exec writes text, not its report\n", 1);
+    var stop = loop.watcherStop(reviewer.id(), null);
+    loop.container.unreachable(true);
+    loop.onEvent(stop);
+
+    assertNull(loop.runs.findById(reviewer.id()).orElseThrow().usage(), "read late");
+    loop.container.unreachable(false);
+    var reconciler = loop.reconciler(() -> Instant.now().plus(Duration.ofMinutes(5)));
+    for (var pass = 0; pass <= LoopDecision.MAX_ERRORED_RETRIES + 1; pass++) {
+      reconciler.sweep();
+    }
+    loop.settle();
+
+    var said = sailLines("auth").subList(before, sailLines("auth").size());
+    assertEquals(
+        1,
+        said.stream().filter(line -> line.startsWith("Codex CLI refused")).count(),
+        said.toString());
+    assertTrue(
+        said.stream().noneMatch(line -> line.contains("--restart")), "never escalated: " + said);
+    assertTrue(loop.runs.findById(reviewer.id()).orElseThrow().stoppedForLogin(), "marked late");
+    assertEquals(
+        1, stopsOf(reviewer.id()), "read before any replay: its stop is never replayed to retry");
+    assertTrue(loop.container.live().isEmpty(), "no reviewer relaunched on the same login");
+    assertEquals(1, loop.runsIn("auth", "review").size());
+
+    new FdeStore(loop.db)
+        .logins()
+        .store(
+            new FdeStore(loop.db).byHandle(ReviewLoop.HANDLE).orElseThrow().id(),
+            Harnesses.of("codex"),
+            null,
+            null,
+            "sk-new-key");
+    loop.onEvent(loginStored());
+
+    assertEquals("review", loop.onlyLive().role(), "the stored login launches the review again");
+  }
+
+  /** A fix agent whose harness refused its login holds the review, owed its fix, the same way. */
+  @Test
+  void aFixWhoseTokenClaudeCodeRefusedHoldsTheReviewOwedItsFixUntilTheLoginIsReplaced() {
+    loop = ReviewLoop.staged(tempDir, "codex", "claude-code");
+    loop.built("auth");
+    loop.finish(loop.onlyLive().id(), CRITICAL_FINDING);
+    var fix = loop.onlyLive();
+    assertEquals("fix", fix.role());
+    var before = sailLines("auth").size();
+
+    loop.exit(fix.id(), RunLoginOutcomeTest.fixture("claude-code-refused-token.jsonl"), 1);
+    var reconciler = loop.reconciler(() -> Instant.now().plus(Duration.ofMinutes(5)));
+    for (var pass = 0; pass <= LoopDecision.MAX_ERRORED_RETRIES; pass++) {
+      reconciler.sweep();
+    }
+    loop.settle();
+
+    var said = sailLines("auth").subList(before, sailLines("auth").size());
+    assertEquals(
+        List.of(
+            "Claude Code refused node-a's login 'default' (long-lived token), so its run stopped."
+                + " Run claude setup-token on a machine where Claude Code is signed in, then sail"
+                + " agent login claude-code."),
+        said);
+    assertEquals(SpecStatus.IN_PROGRESS, loop.specStatus("auth"), "not handed to a person");
+    assertEquals("failed", loop.statusOf(fix.reviewId()), "owed its fix, never escalated");
+    assertEquals(1, stopsOf(fix.id()), "the held stop is acted on, never replayed");
+    assertTrue(loop.container.live().isEmpty(), "no fix relaunched on the same login");
+
+    TestLogins.store(loop.db, ReviewLoop.HANDLE);
+    loop.onEvent(loginStored());
+
+    assertEquals("fix", loop.onlyLive().role(), "the stored login launches the fix again");
+  }
+
+  /**
+   * Round 4, item 1, the second review's probe: a reviewer out of its account's quota holds
+   * nothing. No run is marked for its login, each says the limit once with no branch (a reviewer
+   * commits nothing), and the review takes the ordinary errored path across passes five minutes, a
+   * day and a week later: retried, then escalated once its budget is spent.
+   */
+  @Test
+  void aReviewerOutOfQuotaTakesTheOrdinaryErroredPathAndIsNeverHeld() {
+    loop = ReviewLoop.staged(tempDir, "codex", "claude-code");
+    loop.built("auth");
+    var before = sailLines("auth").size();
+    var later = List.of(Duration.ofMinutes(5), Duration.ofDays(1), Duration.ofDays(7));
+    var reviewers = new ArrayList<String>();
+
+    for (var attempt = 0; attempt < LoopDecision.MAX_ERRORED_RETRIES; attempt++) {
+      var reviewer = loop.onlyLive();
+      reviewers.add(reviewer.id());
+      var transcript = "/home/dev/.codex/sessions/rollout-limit-" + attempt + ".jsonl";
+      Acting.system(
+          () -> loop.runs.recordSession(reviewer.id(), "thread-1", "startup", transcript));
+      loop.container.wroteFile(transcript, CODEX_OUT_OF_QUOTA);
+      loop.exit(reviewer.id(), "codex exec writes text, not its report\n", 1);
+      var offset = later.get(attempt);
+      loop.reconciler(() -> Instant.now().plus(offset)).sweep();
+      loop.settle();
+    }
+
+    assertTrue(loop.live().isEmpty(), "the budget is spent: no fourth reviewer launches");
+    assertEquals("escalated", loop.statusOf(loop.reviewOf("auth")));
+    for (var id : reviewers) {
+      assertNull(loop.runs.findById(id).orElseThrow().stopSource(), "a limit holds nothing");
+    }
+    var quota =
+        "Codex CLI says the account behind node-a's login 'default' (API key) is out of quota"
+            + " until 15:04, so its run stopped.";
+    var said = sailLines("auth").subList(before, sailLines("auth").size());
+    assertEquals(
+        Collections.nCopies(LoopDecision.MAX_ERRORED_RETRIES, quota),
+        said.stream().filter(line -> line.startsWith("Codex CLI")).toList(),
+        said.toString());
+  }
+
+  /**
+   * Round 4, item 2: the hold is the state of the login, not an event. A login stored while the
+   * reviewer still ran, its event heard before the refusal was recorded, replaces the refused one:
+   * the reviewer is launched again, once, however many passes follow.
+   */
+  @Test
+  void aLoginStoredBeforeTheRefusalIsRecordedLaunchesTheReviewerAgainOnce() {
+    loop = ReviewLoop.staged(tempDir, "codex", "claude-code");
+    loop.built("auth");
+    var reviewer = loop.onlyLive();
+    var transcript = "/home/dev/.codex/sessions/rollout-early.jsonl";
+    Acting.system(() -> loop.runs.recordSession(reviewer.id(), "thread-1", "startup", transcript));
+    loop.container.wroteFile(transcript, RunLoginOutcomeTest.fixture("codex-refused-key.jsonl"));
+    storeCodexKey();
+    loop.onEvent(loginStored());
+    loop.settle();
+
+    loop.exit(reviewer.id(), "codex exec writes text, not its report\n", 1);
+    var reconciler = loop.reconciler(() -> Instant.now().plus(Duration.ofMinutes(5)));
+    for (var pass = 0; pass <= LoopDecision.MAX_ERRORED_RETRIES; pass++) {
+      reconciler.sweep();
+      loop.settle();
+    }
+
+    assertTrue(loop.runs.findById(reviewer.id()).orElseThrow().stoppedForLogin());
+    assertEquals("review", loop.onlyLive().role(), "launched again on the login stored since");
+    assertEquals(2, loop.runsIn("auth", "review").size(), "once");
+    assertEquals("running", loop.statusOf(loop.reviewOf("auth")));
+  }
+
+  /**
+   * Round 4, item 2: a login stored whose event was lost to a sail-api restart releases the hold on
+   * the next pass of the reconciler the restart starts, once: the late event, or more passes,
+   * launch nothing more.
+   */
+  @Test
+  void aLoginStoredWhoseEventWasLostLaunchesTheReviewerAgainOnTheNextPassOnce() {
+    loop = ReviewLoop.staged(tempDir, "codex", "claude-code");
+    loop.built("auth");
+    var reviewer = loop.onlyLive();
+    var transcript = "/home/dev/.codex/sessions/rollout-lost.jsonl";
+    Acting.system(() -> loop.runs.recordSession(reviewer.id(), "thread-1", "startup", transcript));
+    loop.container.wroteFile(transcript, RunLoginOutcomeTest.fixture("codex-refused-key.jsonl"));
+    loop.exit(reviewer.id(), "codex exec writes text, not its report\n", 1);
+    var held = loop.reconciler(() -> Instant.now().plus(Duration.ofMinutes(5)));
+    held.sweep();
+    loop.settle();
+    assertTrue(loop.live().isEmpty(), "held while the refused login is the one stored");
+
+    storeCodexKey();
+    var restarted = loop.reconciler(() -> Instant.now().plus(Duration.ofMinutes(6)));
+    restarted.sweep();
+    loop.settle();
+
+    assertEquals("review", loop.onlyLive().role(), "the next pass launches it again");
+    for (var pass = 0; pass <= LoopDecision.MAX_ERRORED_RETRIES; pass++) {
+      restarted.sweep();
+    }
+    loop.onEvent(loginStored());
+    loop.settle();
+    assertEquals(1, loop.live().size());
+    assertEquals(2, loop.runsIn("auth", "review").size(), "once");
+  }
+
+  private void storeCodexKey() {
+    var fdes = new FdeStore(loop.db);
+    var person = fdes.byHandle(ReviewLoop.HANDLE).orElseThrow().id();
+    fdes.logins().store(person, Harnesses.of("codex"), null, null, "sk-new-key");
+  }
+
+  private static final String CODEX_OUT_OF_QUOTA =
+      "{\"type\":\"turn_context\",\"payload\":{\"turn_id\":\"t1\",\"model\":\"m\"}}\n"
+          + "{\"type\":\"event_msg\",\"payload\":{\"type\":\"task_complete\",\"turn_id\":\"t1\","
+          + "\"error\":{\"message\":\"You've hit your usage limit. Try again at 3:04 PM.\","
+          + "\"codex_error_info\":\"usage_limit_exceeded\"}}}\n";
+
+  /** How many stops of run {@code runId} reached the bus: its own, and any replay of it. */
+  private long stopsOf(String runId) {
+    loop.settle();
+    return loop.events(Event.WellKnownTypes.AGENT_SESSION_STOPPED).stream()
+        .filter(stop -> runId.equals(stop.data().get(Event.WellKnownData.RUN_ID)))
+        .count();
   }
 
   private List<String> sailLines(String specId) {
@@ -1380,11 +1641,11 @@ class ReviewLanesTest {
     Acting.system(() -> loop.runs.finish(unread, "running", "stopped", null, null));
     var read = loop.run("next", "build");
     loop.container.wrote(read, "read");
-    Acting.system(() -> loop.runs.finish(read, "running", "stopped", null, RunUsage.NONE));
+    Acting.system(() -> loop.runs.finish(read, "running", "stopped", null, RunReport.NONE));
     for (var newer = 0; newer < 20; newer++) {
       var run = loop.run("next", "build");
       loop.container.wrote(run, "newer");
-      Acting.system(() -> loop.runs.finish(run, "running", "completed", 0, RunUsage.NONE));
+      Acting.system(() -> loop.runs.finish(run, "running", "completed", 0, RunReport.NONE));
     }
 
     loop.built("next");

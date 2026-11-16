@@ -17,7 +17,6 @@ import ai.singlr.sail.config.TestDefinitions;
 import ai.singlr.sail.engine.AgentSession;
 import ai.singlr.sail.engine.AgentUnit;
 import ai.singlr.sail.engine.LaunchEnv;
-import ai.singlr.sail.engine.RunUsageReader;
 import ai.singlr.sail.engine.SharedProjectFiles;
 import ai.singlr.sail.engine.SlackPoster;
 import ai.singlr.sail.engine.StageSkill;
@@ -215,11 +214,7 @@ final class ReviewLoop implements AutoCloseable {
     started.subscribe(counted(new SpecStoreAuditPersister(new EventStore(db))));
     started.subscribe(
         counted(
-            new RunTracker(
-                runs,
-                new RunUsageReader(container)::read,
-                SyncScheduler.disabled(),
-                () -> HANDLE)));
+            new RunTracker(runs, operations.runReports(), SyncScheduler.disabled(), () -> HANDLE)));
     started.subscribe(counted(controller));
     started.subscribe(counted(recorder()));
   }
@@ -263,7 +258,8 @@ final class ReviewLoop implements AutoCloseable {
         watchers(),
         () -> HANDLE,
         clock,
-        new FdeStore(db));
+        new FdeStore(db),
+        operations.runReports());
   }
 
   private WatcherCoverage watchers() {

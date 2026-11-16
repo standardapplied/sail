@@ -99,9 +99,19 @@ public record StubHarness(String yamlName, HookFile hooks, OptionalInt loginTunn
   }
 
   @Override
+  public Optional<LoginOutcome> loginOutcome(String report, LoginKind given) {
+    return Optional.empty();
+  }
+
+  @Override
   public List<LoginKind> loginKinds() {
     return List.of(
-        new LoginKind("api-key", yamlName.toUpperCase().replace('-', '_') + "_KEY", Remedy.NONE));
+        new LoginKind(
+            "api-key",
+            yamlName.toUpperCase().replace('-', '_') + "_KEY",
+            "key",
+            Remedy.NONE,
+            null));
   }
 
   @Override

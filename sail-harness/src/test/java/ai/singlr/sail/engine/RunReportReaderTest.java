@@ -9,6 +9,8 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 
 import ai.singlr.sail.harness.Harnesses;
+import ai.singlr.sail.harness.LoginOutcome;
+import ai.singlr.sail.harness.RunReport;
 import ai.singlr.sail.harness.RunUsage;
 import ai.singlr.sail.store.RunStore;
 import java.io.ByteArrayOutputStream;
@@ -36,7 +38,7 @@ import org.junit.jupiter.api.io.TempDir;
  * that does not parse is none, said once; only a container that cannot be asked leaves the report
  * unread (M3).
  */
-class RunUsageReaderTest {
+class RunReportReaderTest {
 
   private static final String RUN = "01a17c6f-7c50-7000-8f79-8f9294e27ea5";
   private static final String LOG = AgentUnit.forRun(RUN).logPath();
@@ -45,7 +47,8 @@ class RunUsageReaderTest {
   private static final String CODEX_ROLLOUT = resource("codex-rollout.jsonl");
 
   private static String resource(String name) {
-    try (var in = RunUsageReaderTest.class.getResourceAsStream("/ai/singlr/sail/harness/" + name)) {
+    try (var in =
+        RunReportReaderTest.class.getResourceAsStream("/ai/singlr/sail/harness/" + name)) {
       return new String(in.readAllBytes(), StandardCharsets.UTF_8);
     } catch (IOException e) {
       throw new UncheckedIOException(e);
@@ -87,6 +90,10 @@ class RunUsageReaderTest {
   }
 
   private static RunStore.RunRow run(String agent, String transcript) {
+    return run(agent, transcript, null);
+  }
+
+  private static RunStore.RunRow run(String agent, String transcript, RunStore.RunLogin login) {
     return new RunStore.RunRow(
         RUN,
         "acme",
@@ -110,7 +117,17 @@ class RunUsageReaderTest {
         null,
         null,
         null,
-        transcript);
+        transcript,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        login,
+        null,
+        null);
   }
 
   private static ShellExec.Result printed(String stdout) {
@@ -138,7 +155,7 @@ class RunUsageReaderTest {
   void aClaudeCodeRunsLogIsReadFromItsLastResultLinesInTheCLocaleInOneTenSecondWait() {
     var container = holding(CLAUDE_LOG);
 
-    var usage = new RunUsageReader(container).read(run("claude-code", TRANSCRIPT));
+    var usage = new RunReportReader(container).read(run("claude-code", TRANSCRIPT)).usage();
 
     assertEquals(Harnesses.of("claude-code").usage(CLAUDE_LOG), usage);
     var asked = container.asked.getFirst();
@@ -154,7 +171,8 @@ class RunUsageReaderTest {
             "sh",
             LOG,
             "16",
-            "\"type\":\"result\""),
+            "\"type\":\"result\"",
+            "\"subtype\":\"init\""),
         asked.subList(asked.indexOf("LC_ALL=C") - 1, asked.size()));
     assertEquals(List.of(Duration.ofSeconds(10)), container.waited);
   }
@@ -162,20 +180,27 @@ class RunUsageReaderTest {
   @Test
   void aCodexRunsTranscriptIsItsReportAndARunWithNoTranscriptReportedNone() {
     var container = holding(CODEX_ROLLOUT);
-    var reader = new RunUsageReader(container);
+    var reader = new RunReportReader(container);
 
-    assertEquals(Harnesses.of("codex").usage(CODEX_ROLLOUT), reader.read(run("codex", TRANSCRIPT)));
+    assertEquals(
+        new RunReport(Harnesses.of("codex").usage(CODEX_ROLLOUT), null),
+        reader.read(run("codex", TRANSCRIPT)));
     var asked = container.asked.getFirst();
     assertEquals(
-        List.of(TRANSCRIPT, "16", "\"type\":\"token_count\"", "\"type\":\"turn_context\""),
-        asked.subList(asked.size() - 4, asked.size()));
-    assertEquals(RunUsage.NONE, reader.read(run("codex", null)));
-    assertEquals(RunUsage.NONE, reader.read(run("gemini", TRANSCRIPT)), "a harness not known");
+        List.of(
+            TRANSCRIPT,
+            "16",
+            "\"type\":\"token_count\"",
+            "\"type\":\"turn_context\"",
+            "\"type\":\"task_complete\""),
+        asked.subList(asked.size() - 5, asked.size()));
+    assertEquals(RunReport.NONE, reader.read(run("codex", null)));
+    assertEquals(RunReport.NONE, reader.read(run("gemini", TRANSCRIPT)), "a harness not known");
   }
 
   @Test
   void aReportFileThatIsNotThereIsNone() {
-    assertEquals(RunUsage.NONE, new RunUsageReader(holding(null)).read(run("claude-code", null)));
+    assertEquals(RunReport.NONE, new RunReportReader(holding(null)).read(run("claude-code", null)));
   }
 
   /** Review 1, major 3: a container that could not be asked leaves the report unread. */
@@ -195,7 +220,7 @@ class RunUsageReaderTest {
             new IOException("incus is not installed"),
             new TimeoutException("no answer in 10s"))) {
       assertNull(
-          new RunUsageReader(new Container(command -> answer)).read(run("claude-code", null)),
+          new RunReportReader(new Container(command -> answer)).read(run("claude-code", null)),
           String.valueOf(answer));
     }
   }
@@ -207,13 +232,13 @@ class RunUsageReaderTest {
   @Test
   void aLastReportThatDoesNotParseIsNoneSaidOnce() {
     var cut = CLAUDE_LOG.strip().substring(0, CLAUDE_LOG.strip().length() - 40);
-    var read = new AtomicReference<RunUsage>();
+    var read = new AtomicReference<RunReport>();
 
     var said =
         stderrWhile(
-            () -> read.set(new RunUsageReader(holding(cut)).read(run("claude-code", null))));
+            () -> read.set(new RunReportReader(holding(cut)).read(run("claude-code", null))));
 
-    assertEquals(RunUsage.NONE, read.get());
+    assertEquals(RunReport.NONE, read.get());
     assertEquals(
         "  [usage] the report of run " + RUN + " could not be parsed: recorded none\n", said);
   }
@@ -227,7 +252,7 @@ class RunUsageReaderTest {
     var filler = "{\"type\":\"system\",\"subtype\":\"hook_response\"}\n".repeat((6 << 20) / 44 + 1);
     var container = holding(filler);
 
-    assertEquals(RunUsage.NONE, new RunUsageReader(container).read(run("claude-code", null)));
+    assertEquals(RunReport.NONE, new RunReportReader(container).read(run("claude-code", null)));
     assertEquals(1, container.asked.size());
   }
 
@@ -238,7 +263,33 @@ class RunUsageReaderTest {
 
     assertEquals(
         Harnesses.of("claude-code").usage(CLAUDE_LOG),
-        new RunUsageReader(holding(log)).read(run("claude-code", null)));
+        new RunReportReader(holding(log)).read(run("claude-code", null)).usage());
+  }
+
+  /**
+   * RL1, RL4: a run given a stored login has what came of it read in the same read as its cost,
+   * from the same lines; a run given none (a container's own login) has nothing said of it,
+   * whatever its report holds.
+   */
+  @Test
+  void aRunGivenAStoredLoginHasItsOutcomeReadWithItsCostInTheOneRead() {
+    var refused = resource("claude-code-refused-token.jsonl");
+    var container = holding(refused);
+    var reader = new RunReportReader(container);
+
+    assertEquals(
+        new RunReport(RunUsage.NONE, new LoginOutcome.Refused()),
+        reader.read(run("claude-code", null, new RunStore.RunLogin("default", "token"))));
+    assertEquals(1, container.asked.size(), "one read");
+    assertEquals(
+        RunReport.NONE, reader.read(run("claude-code", null, RunStore.RunLogin.CONTAINER)));
+    assertEquals(
+        RunReport.NONE,
+        reader.read(run("claude-code", null, new RunStore.RunLogin("old", "no-such-kind"))));
+    assertEquals(
+        new RunReport(RunUsage.NONE, new LoginOutcome.Refused()),
+        new RunReportReader(holding(resource("codex-refused-key.jsonl")))
+            .read(run("codex", TRANSCRIPT, new RunStore.RunLogin("work", "api-key"))));
   }
 
   /**
@@ -275,7 +326,7 @@ class RunUsageReaderTest {
     if (transcript != null) {
       Files.writeString(path, transcript);
     }
-    return new RunUsageReader(new Local()).read(run("codex", path.toString()));
+    return new RunReportReader(new Local()).read(run("codex", path.toString())).usage();
   }
 
   /**
@@ -288,7 +339,7 @@ class RunUsageReaderTest {
   void aCodexTurnWithMoreCountsThanTheLinesReadStillGivesItsModel() throws IOException {
     var count =
         CODEX_ROLLOUT.lines().filter(line -> line.contains("\"type\":\"token_count\"")).toList();
-    var longTurn = CODEX_ROLLOUT + (count.getLast() + "\n").repeat(RunUsageReader.LINES + 4);
+    var longTurn = CODEX_ROLLOUT + (count.getLast() + "\n").repeat(RunReportReader.LINES + 4);
 
     assertEquals(Harnesses.of("codex").usage(longTurn), readLocally(longTurn));
     assertEquals("gpt-6-astra", readLocally(longTurn).model());

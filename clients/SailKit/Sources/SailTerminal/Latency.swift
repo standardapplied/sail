@@ -51,15 +51,21 @@ struct LatencyRecorder {
     private var written: [Duration] = []
     private var echoed: [Duration] = []
     private var screen: [Duration] = []
+    private var lastEcho: (applied: Int64, at: ContinuousClock.Instant, screen: ContinuousClock.Instant?)?
 
-    /// A key handed in at `handedIn` went out as input `sequence`, written at `written`.
+    /// A key handed in at `handedIn` went out as input `sequence`, written at `written`. The reader
+    /// may already have taken its echo, and updated the screen with it, before the writer got here.
     mutating func sent(_ sequence: Int64, handedIn: ContinuousClock.Instant, written: ContinuousClock.Instant) {
         if pending.count == Self.capacity { pending.removeFirst() }
         pending.append(Pending(sequence: sequence, handedIn: handedIn, written: written))
+        guard let lastEcho, sequence <= lastEcho.applied else { return }
+        pending[pending.count - 1].echoed = lastEcho.at
+        if let screen = lastEcho.screen { complete(at: screen) }
     }
 
     /// Output naming input `applied` as the last the host applied arrived at `now`.
     mutating func echoed(through applied: Int64, at now: ContinuousClock.Instant) {
+        if applied > lastEcho?.applied ?? .min { lastEcho = (applied, now, nil) }
         for index in pending.indices where pending[index].sequence <= applied && pending[index].echoed == nil {
             pending[index].echoed = now
         }
@@ -67,6 +73,11 @@ struct LatencyRecorder {
 
     /// The screen took that output at `now`: every key it echoed is complete.
     mutating func screenUpdated(at now: ContinuousClock.Instant) {
+        if lastEcho?.screen == nil { lastEcho?.screen = now }
+        complete(at: now)
+    }
+
+    private mutating func complete(at now: ContinuousClock.Instant) {
         for mark in pending {
             guard let echo = mark.echoed else { continue }
             Self.keep(mark.written - mark.handedIn, in: &written)
