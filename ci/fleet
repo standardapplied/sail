@@ -1828,6 +1828,16 @@ opened_a_pull_request() {
   [[ -n $listed ]]
 }
 
+# Every commit of spec $1's pull request is authored as $2: what its workspace committed as, read
+# on the forge, so the check holds whether or not the idle sweep has stopped the workspace since.
+pull_request_commits_as() {
+  local emails
+  emails=$(GH_TOKEN=$(secret fleet-github-token) gh pr list --repo "$LOOP_REPO" --head "agent/$1" \
+    --json commits --jq '[.[0].commits[]?.authors[]?.email] | unique | join(" ")')
+  echo "agent/$1 commits authored as: ${emails:-nothing}"
+  [[ $emails == "$2" ]]
+}
+
 asked_its_question() {
   said=$(on "$1" "$2" "sudo sail spec comments $3 --no-sync")
   grep -q "ended on its question" <<< "$said"
@@ -2089,16 +2099,16 @@ loop() {
   workspace_stops_then_goes "$run" eng "$beside" "$polls" &
   check "$run" "no agent key and no Sail credential is in any process's command line on eng while it builds and its hooks fire" no_key_in_any_command_line "$run" eng
   check "$run" "the second spec's review takes it to awaiting_merge" reaches_status "$run" eng "$beside" awaiting_merge 30
-  check "$run" "the second workspace commits as eng, while it still runs" \
-    commits_as "$run" eng "acme-$beside" eng@fleet.example
   check "$run" "the build asks its question and waits, unreviewed" waits_on_its_question "$run" eng "$spec" 20
   check "$run" "the two builds ran at once, each in its own workspace of acme" each_ran_in_its_own_workspace "$run" eng "$spec" "$beside"
   touch "$polls/listed"
   check "$run" "eng answers in the room" on "$run" eng "sudo sail spec comment $spec --body 'Call it Building.'"
   check "$run" "the answer resumes the build, and the review takes it to awaiting_merge" reaches_status "$run" eng "$spec" awaiting_merge 45
-  check "$run" "each workspace commits as eng" \
-    commits_as "$run" eng "acme-$spec" eng@fleet.example
   check "$run" "the agent opened a pull request on $LOOP_REPO" opened_a_pull_request "$spec"
+  check "$run" "each workspace commits as eng: every commit of its pull request is authored so" \
+    pull_request_commits_as "$spec" eng@fleet.example
+  check "$run" "the second workspace commits as eng: every commit of its pull request is authored so" \
+    pull_request_commits_as "$beside" eng@fleet.example
   check "$run" "the build ran on eng's stored login, by name and kind" the_build_ran_on_the_stored_login "$run" eng "$spec"
   check "$run" "the room shows the review" the_room_shows_the_review "$run" eng "$spec"
   check "$run" "every node syncs twice" sync_all "$run"
