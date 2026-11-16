@@ -31,10 +31,10 @@ import Testing
 
     /// Scenario 8 and V4: while にほん is marked nothing is sent; it is drawn at the cursor; the
     /// candidate window's rect is the cursor's cell on screen; the commit sends にほん once.
-    @Test func composingSendsNothingDrawsAtTheCursorAndCommitsOnce() throws {
+    @Test func composingSendsNothingDrawsAtTheCursorAndCommitsOnce() async throws {
         let harness = try Harness()
         harness.link.output("$ ")
-        harness.tick()
+        await harness.tick()
         let before = try #require(try harness.view.snapshot())
         for marked in ["に", "にほ", "にほん"] {
             harness.view.setMarkedText(marked, selectedRange: NSRange(location: marked.utf16.count, length: 0), replacementRange: NSRange(location: NSNotFound, length: 0))
@@ -42,7 +42,7 @@ import Testing
         harness.flush()
         #expect(harness.link.bytes.isEmpty, "composing sent \(harness.link.bytes.count) bytes")
         #expect(harness.view.hasMarkedText())
-        harness.tick()
+        await harness.tick()
         let composing = try #require(try harness.view.snapshot())
         let metrics = harness.view.metrics
         let cursor = metrics.origin(of: CellPoint(x: 2, y: 0))
@@ -112,9 +112,9 @@ import Testing
     /// The pointer moving with no button reaches a program that asked for every motion (1003).
     /// Motion with no button is reported once per cell entered, and only to a program that asked
     /// for every motion.
-    @Test func hoverIsReportedOncePerCellAndOnlyWhenAsked() throws {
+    @Test func hoverIsReportedOncePerCellAndOnlyWhenAsked() async throws {
         let harness = try Harness()
-        harness.tick()
+        await harness.tick()
         let metrics = harness.view.metrics
         func move(_ column: Int, nudge: Double = 0) -> String {
             let before = harness.link.bytes.count
@@ -224,7 +224,7 @@ import Testing
 
     /// Scenario 9: a drag across a wrapped line and ⌘C put the text on the pasteboard with the
     /// wrapped rows joined.
-    @Test func aDragAcrossAWrappedLineCopiesItJoined() throws {
+    @Test func aDragAcrossAWrappedLineCopiesItJoined() async throws {
         let harness = try Harness()
         let metrics = harness.view.metrics
         harness.window.setContentSize(NSSize(
@@ -234,7 +234,7 @@ import Testing
         harness.flush()
         #expect(harness.view.grid == GridSize(columns: 10, rows: 4))
         harness.link.output("abcdefghijklmno")
-        harness.tick()
+        await harness.tick()
         let grid = try #require(harness.view.grid)
         harness.mouse(.leftMouseDown, column: 0, row: 0)
         harness.mouse(.leftMouseDragged, column: 2, row: 1)
@@ -310,11 +310,11 @@ import Testing
         let harness = try Harness()
         await harness.drainMain()
         _ = harness.link.screen.feed(Array((1 ... 200).map { "line \($0)" }.joined(separator: "\r\n").utf8))
-        harness.tick()
+        await harness.tick()
         _ = harness.link.screen.scroll(lines: -50, x: 0, y: 0)
         harness.view.needFrame()
-        harness.tick()
-        harness.tick()
+        await harness.tick()
+        await harness.tick()
         #expect(harness.clock.isPaused)
         #expect(!harness.view.visibleText.contains("line 200"))
         harness.pasteboard.clearContents()
@@ -388,8 +388,8 @@ import Testing
     @Test func outputIsDrawnOnTheFirstRefreshAfterIt() async throws {
         let harness = try Harness()
         await harness.drainMain()
-        harness.tick()
-        harness.tick()
+        await harness.tick()
+        await harness.tick()
         try #require(harness.clock.isPaused, "nothing changed, so the link paused")
         harness.link.output("hello")
         await harness.clock.nextResume()
@@ -402,12 +402,13 @@ import Testing
     @Test func aKeysEchoIsDrawnAsItArrives() async throws {
         let harness = try Harness()
         await harness.drainMain()
-        harness.tick()
-        harness.tick()
+        await harness.tick()
+        await harness.tick()
         try #require(harness.clock.isPaused)
         let refreshes = harness.view.latency.refresh.count
         harness.key("e", code: 0x0E)
         await harness.drainMain()
+        await harness.drawn()
         #expect(harness.view.latency.refresh.count == refreshes + 1, "the key's hop read the screen")
         try #require(harness.clock.isPaused, "the key itself asked for no frame")
         harness.link.output("e")
@@ -415,62 +416,73 @@ import Testing
         #expect(harness.view.visibleText.contains("e"), "drawn as it arrived, before the next refresh")
     }
 
-    /// No drawable pauses the link rather than spin; output does not ask for a drawable again while
-    /// it waits, and the window being seen again resumes it.
-    @Test func noDrawablePausesTheLinkUntilTheWindowIsSeenAgain() throws {
-        let harness = try Harness()
-        harness.view.isOnScreen = { _ in true }
-        harness.tick()
-        harness.tick()
-        try #require(harness.clock.isPaused)
-        NotificationCenter.default.post(name: NSWindow.didChangeOcclusionStateNotification, object: harness.window)
-        #expect(harness.clock.isPaused, "the window seen again asks no frame of a view that has its drawables")
-        harness.view.isOnScreen = { _ in false }
-        harness.view.nextDrawable = { _ in nil }
-        harness.view.needFrame()
-        harness.tick()
-        #expect(harness.clock.isPaused, "no drawable came, so the link paused")
-        let refreshes = harness.view.latency.refresh.count
-        harness.link.output("more")
-        harness.view.drawNowIfIdle()
-        #expect(harness.view.latency.refresh.count == refreshes, "output did not ask for a drawable again")
-        #expect(harness.clock.isPaused)
-        NotificationCenter.default.post(name: NSWindow.didChangeOcclusionStateNotification, object: harness.window)
-        #expect(harness.clock.isPaused, "a notification while the window is still off screen")
-        harness.view.isOnScreen = { _ in true }
-        NotificationCenter.default.post(name: NSWindow.didChangeOcclusionStateNotification, object: harness.window)
-        #expect(!harness.clock.isPaused, "the window seen again resumed the link")
-        harness.view.nextDrawable = { $0.nextDrawable() }
-        harness.tick()
-        #expect(harness.view.visibleText.contains("more"))
-    }
-
-    /// A visible window with no drawable is asked again off the main thread, where an ask can wait
-    /// a second; a drawable that ask brings draws the next frame, and nothing asks on the main
-    /// thread meanwhile.
-    @Test func aVisibleWindowWithNoDrawableIsAskedAgainOffTheMainThread() async throws {
+    /// D1, D2: a drawable withheld holds no call on the main thread. Every ask runs off it; output
+    /// meanwhile is owed, and the frame the returned drawable brings draws all of it, once.
+    @Test func aWithheldDrawableNeverHoldsTheMainThread() async throws {
         let harness = try Harness()
         await harness.drainMain()
-        harness.view.isOnScreen = { _ in true }
-        let (asks, ask) = AsyncStream.makeStream(of: Bool.self)
-        let answers = Mutex(0)
+        await harness.tick()
+        await harness.tick()
+        try #require(harness.clock.isPaused)
+        let gate = DispatchSemaphore(value: 0)
+        let onMain = Mutex<[Bool]>([])
         harness.view.nextDrawable = { layer in
-            ask.yield(Thread.isMainThread)
-            return answers.withLock { $0 += 1; return $0 } < 3 ? nil : layer.nextDrawable()
+            onMain.withLock { $0.append(Thread.isMainThread) }
+            gate.wait()
+            return layer.nextDrawable()
         }
-        harness.link.output("asked")
-        harness.tick()
-        try #require(harness.clock.isPaused, "no drawable came, so the link paused")
-        harness.view.needFrame()
-        harness.tick()
-        var asked = asks.makeAsyncIterator()
-        #expect(await asked.next() == true, "the refresh asked on the main thread")
-        #expect(await asked.next() == false, "the retry asked off it")
-        #expect(await asked.next() == false, "and again, the first retry having brought none")
-        if harness.clock.isPaused { await harness.clock.nextResume() }
-        harness.tick()
-        #expect(harness.view.visibleText.contains("asked"), "the drawable it brought drew the frame")
-        ask.finish()
+        let committed = Self.committed(harness.view)
+        let began = ContinuousClock.now
+        harness.link.output("withheld")
+        harness.view.drawNowIfIdle()
+        harness.link.output(" and more")
+        harness.view.drawNowIfIdle()
+        #expect(ContinuousClock.now - began < .milliseconds(50), "the main thread waited for the drawable")
+        var beats: [ContinuousClock.Instant] = []
+        for _ in 0 ..< 30 {
+            await harness.drainMain()
+            beats.append(.now)
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        let longest = zip(beats, beats.dropFirst()).map { $1 - $0 }.max() ?? .zero
+        #expect(longest < .milliseconds(50), "the main queue stalled \(longest) while the drawable was withheld")
+        #expect(Self.committed(harness.view) == committed, "nothing drew without a drawable")
+        #expect(onMain.withLock { $0 } == [false], "one ask, off the main thread")
+        harness.view.nextDrawable = { $0.nextDrawable() }
+        gate.signal()
+        await harness.drawn()
+        #expect(Self.committed(harness.view) == committed + 1, "the returned drawable drew one frame")
+        #expect(harness.view.visibleText.contains("withheld and more"), "with all the output owed meanwhile")
+    }
+
+    /// A window off screen asks for no drawable; seen again, it asks and draws what it owes. An ask
+    /// that brings none (its second over) asks again at once, with no fixed wait.
+    @Test func anOffScreenWindowAsksWhenSeenAndANilAskAsksAgain() async throws {
+        let harness = try Harness()
+        await harness.drainMain()
+        await harness.tick()
+        await harness.tick()
+        try #require(harness.clock.isPaused)
+        harness.view.isOnScreen = { _ in false }
+        let asks = Mutex(0)
+        harness.view.nextDrawable = { layer in
+            asks.withLock { $0 += 1; return $0 } < 3 ? nil : layer.nextDrawable()
+        }
+        harness.link.output("owed")
+        harness.view.drawNowIfIdle()
+        await harness.drawn()
+        #expect(asks.withLock { $0 } == 0, "off screen, nothing asked")
+        harness.view.isOnScreen = { _ in true }
+        NotificationCenter.default.post(name: NSWindow.didChangeOcclusionStateNotification, object: harness.window)
+        while !harness.view.visibleText.contains("owed") {
+            try await Task.sleep(for: .milliseconds(1))
+        }
+        #expect(asks.withLock { $0 } == 3, "two asks brought none and were asked again")
+    }
+
+    static func committed(_ view: TerminalView) -> Int {
+        guard let found = view.drawingState.range(of: "committed ") else { return -1 }
+        return Int(view.drawingState[found.upperBound...].prefix { $0.isNumber }) ?? -1
     }
 
     /// V3: every start, pause, resume and stop of the display link ran on the main thread, the
@@ -490,21 +502,21 @@ import Testing
         #expect(records.allSatisfy { $0.onMainThread })
     }
 
-    @Test func theViewIsATextAreaShowingTheVisibleText() throws {
+    @Test func theViewIsATextAreaShowingTheVisibleText() async throws {
         let harness = try Harness()
         harness.link.output("visible words")
-        harness.tick()
+        await harness.tick()
         #expect(harness.view.accessibilityRole() == .textArea)
         #expect((harness.view.accessibilityValue() as? String)?.contains("visible words") == true)
     }
 
     /// The clipboard is touched only on the person's action: a program's OSC 52 write is refused.
-    @Test func aProgramCannotWriteTheClipboard() throws {
+    @Test func aProgramCannotWriteTheClipboard() async throws {
         let harness = try Harness()
         harness.pasteboard.clearContents()
         harness.pasteboard.setString("mine", forType: .string)
         harness.link.output("\u{1b}]52;c;\(Data("theirs".utf8).base64EncodedString())\u{7}")
-        harness.tick()
+        await harness.tick()
         #expect(harness.pasteboard.string(forType: .string) == "mine")
     }
 

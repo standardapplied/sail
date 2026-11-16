@@ -8,9 +8,11 @@ import SailTerminal
 /// drawn by the frame whose read of the screen came after it; output read by a frame that drew just
 /// before it was told is put to that frame, which did show it.
 ///
-/// A frame the display reports a presentation time for is measured on the display. A frame it
-/// reports none for (a dropped frame, or a virtual display) is not: its time on the display is only
-/// estimated, as the refresh it was drawn for, and kept apart from the measured figures.
+/// A frame the display reports a presentation time for is measured on the display. Where the
+/// display has reported no time yet (a virtual display), a frame counts as shown when its command
+/// buffer completed, the earliest it can be presented (Apple: a drawable is presented only after
+/// its command buffer completes); a frame dropped on a display that reports times counts the same
+/// way. Those are kept apart from the measured figures.
 public struct LatencyMarks: Sendable {
     public static let capacity = 4096
 
@@ -47,10 +49,12 @@ public struct LatencyMarks: Sendable {
     private var commitToCompleted: [Double] = []
     private var commitToPresentTold: [Double] = []
 
-    /// A frame not yet told presented: when it was committed, and when its commands completed.
+    /// A frame not yet told presented: when it was committed, and when its commands completed; or
+    /// one told presented before its commit was marked.
     private struct Flight: Sendable {
         var committed: Double?
         var completed: (time: Double, ok: Bool)?
+        var told = false
     }
 
     public init() {}
@@ -84,7 +88,9 @@ public struct LatencyMarks: Sendable {
         committed[frame] = (time, (committed[frame]?.outputs ?? []) + drawn)
         if let lastFrame { Self.keepLongest(Span(lastFrame.committed, time), in: &longestBetweenCommits) }
         lastFrame = (frame, time)
-        if presentedAt[frame] == nil {
+        if inFlight[frame]?.told == true {
+            inFlight[frame] = nil
+        } else {
             inFlight[frame, default: Flight()].committed = time
             inFlight = inFlight.filter { $0.key + 64 > frame }
         }
@@ -109,20 +115,26 @@ public struct LatencyMarks: Sendable {
         lastCallback = read
     }
 
-    /// `frame` reached the display at `time`; zero when the display reported no time. Metal can
-    /// tell this before the frame's commit is marked (a frame dropped at once): its estimate is
-    /// then made when the commit is.
-    /// `frame`'s commands completed on the GPU at `time`, `ok` unless they failed.
+    /// `frame`'s commands completed on the GPU at `time`, `ok` unless they failed: shown then where
+    /// the display has reported no presentation time. Either can be told before the commit is
+    /// marked, and the frame is then settled when it is.
     public mutating func completed(frame: UInt64, at time: Double, ok: Bool) {
         if let committed = inFlight[frame]?.committed { Self.keep(time - committed, in: &commitToCompleted) }
-        if presentedAt[frame] == nil { inFlight[frame, default: Flight()].completed = (time, ok) }
+        if inFlight[frame]?.told != true { inFlight[frame, default: Flight()].completed = (time, ok) }
+        if ok, reported == 0 { show(frame, (time, false)) }
     }
 
-    /// `frame` reached the display at `time` (zero when the display reported no time), Metal
-    /// telling it at `told`.
+    /// `frame` reached the display at `time`, Metal telling it at `told`; zero when the display
+    /// reported no time, and the frame then counts as shown at its completion, if it completed.
     public mutating func presented(frame: UInt64, at time: Double, told: Double) {
-        if let committed = inFlight.removeValue(forKey: frame)?.committed { Self.keep(told - committed, in: &commitToPresentTold) }
-        presented(frame: frame, at: time)
+        let flight = inFlight.removeValue(forKey: frame)
+        if let committed = flight?.committed { Self.keep(told - committed, in: &commitToPresentTold) } else { inFlight[frame] = Flight(told: true) }
+        guard time <= 0 else {
+            reported += 1
+            return show(frame, (time, true))
+        }
+        unreported += 1
+        if flight?.completed?.ok != false { show(frame, (flight?.completed?.time ?? targets[frame] ?? told, false)) }
     }
 
     /// The frames committed and not yet told presented, oldest first, as of `now`.
@@ -137,12 +149,10 @@ public struct LatencyMarks: Sendable {
         }.sorted { $0.frame < $1.frame }
     }
 
-    public mutating func presented(frame: UInt64, at time: Double) {
-        let presented = (time: max(time, 0), reported: time > 0)
-        if presented.reported { reported += 1 } else { unreported += 1 }
-        presentedAt[frame] = presented
+    private mutating func show(_ frame: UInt64, _ shown: (time: Double, reported: Bool)) {
+        presentedAt[frame] = shown
         presentedAt = presentedAt.filter { $0.key + 8 > frame }
-        settle(frame, presented)
+        settle(frame, shown)
     }
 
     /// How long one refresh took, reading the screen to committing the frame or pausing: on the
@@ -177,9 +187,9 @@ public struct LatencyMarks: Sendable {
 
     private mutating func settle(_ frame: UInt64, _ presented: (time: Double, reported: Bool)) {
         guard let drawn = committed.removeValue(forKey: frame) else { return }
-        let shown = presented.reported ? presented.time : targets[frame] ?? drawn.time
+        let shown = presented.time
         for output in drawn.outputs {
-            let toShown = Span(output.time, presented.reported ? presented.time : drawn.time)
+            let toShown = Span(output.time, shown)
             Self.keep(toShown.end - toShown.start, in: &outputToShown)
             Self.keepLongest(toShown, in: &longestToShown)
             let echoes = output.keys.map { shown - $0 }
@@ -210,14 +220,14 @@ public struct LatencyMarks: Sendable {
 
 /// The view's latency figures, in milliseconds. `outputToPresented` and `keyToEcho` count only
 /// frames the display reported a presentation time for; the `…Estimated` figures are the others,
-/// at the refresh they were drawn for.
+/// at their command buffer's completion.
 public struct LatencyFigures: Equatable, Sendable, Codable {
     public var keyToWritten: Percentiles
     public var outputToCommitted: Percentiles
     public var outputToPresented: Percentiles
     public var outputToPresentedEstimated: Percentiles
-    /// Each output to the frame that showed it: on the display when it reported the time, else
-    /// committed. Its maximum is the longest any output waited to be shown.
+    /// Each output to the frame that showed it: on the display when it reported the time, else at
+    /// its completion. Its maximum is the longest any output waited to be shown.
     public var outputToShown: Percentiles
     public var keyToEcho: Percentiles
     public var keyToEchoEstimated: Percentiles
@@ -231,7 +241,7 @@ public struct LatencyFigures: Equatable, Sendable, Codable {
     public var lateOutputs: Int
     public var reportedPresents: Int
     public var unreportedPresents: Int
-    /// Frames Metal told presented before their commit was marked.
+    /// Frames told presented or completed before their commit was marked.
     public var presentedBeforeCommit: Int
     /// When the output that waited longest to be shown was told and shown, in seconds.
     public var longestToShown: Span?
@@ -257,5 +267,24 @@ public struct UnpresentedFrame: Equatable, Sendable, Codable, CustomStringConver
         let commands = completedAfterMs.map { String(format: "its commands %@ %.1f ms after", completedOK == true ? "completed" : "failed", $0) }
             ?? "its commands not completed"
         return String(format: "frame %llu committed %.0f ms ago, ", frame, ageMs) + commands
+    }
+}
+
+/// A stretch of time on the host clock, in seconds.
+public struct Span: Equatable, Sendable, Codable {
+    public var start: Double
+    public var end: Double
+
+    public init(_ start: Double, _ end: Double) {
+        self.start = start
+        self.end = end
+    }
+
+    public var length: Double {
+        max(0, end - start)
+    }
+
+    public func overlap(_ other: Span) -> Double {
+        Span(max(start, other.start), min(end, other.end)).length
     }
 }

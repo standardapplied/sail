@@ -140,6 +140,7 @@ struct Harness {
         window.makeFirstResponder(view)
         let pasteboard = NSPasteboard(name: NSPasteboard.Name("sh.standardapplied.sail.tests.\(UUID().uuidString)"))
         view.pasteboard = pasteboard
+        view.isOnScreen = { _ in true }
         let link = try FakeLink(columns: columns, rows: rows)
         view.attach(link)
         Self.flush(view)
@@ -167,9 +168,19 @@ struct Harness {
         view.input.sync {}
     }
 
-    /// One display refresh, when the link runs.
-    func tick() {
-        if !clock.isPaused { view.refresh(target: CACurrentMediaTime() + 1.0 / 60) }
+    /// One display refresh, when the link runs, and the frame drawn on the arrival of the drawable
+    /// it asked for off the main thread.
+    func tick() async {
+        guard !clock.isPaused else { return }
+        view.refresh(target: CACurrentMediaTime() + 1.0 / 60)
+        await drawn()
+    }
+
+    /// Waits until no drawable the view asked for is still on its way.
+    func drawn() async {
+        while view.drawingState.contains("; awaiting a drawable") {
+            try? await Task.sleep(for: .milliseconds(1))
+        }
     }
 
     func key(_ characters: String, code: UInt16, ignoring: String? = nil, flags: NSEvent.ModifierFlags = []) {

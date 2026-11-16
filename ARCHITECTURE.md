@@ -4232,9 +4232,13 @@ starts.
   paused) is drawn at once and the link resumed, so an echo meets the next display refresh;
   otherwise the next refresh draws it. A key that changes nothing on screen asks for no frame,
   so the view is still idle when its echo comes. Nothing holds output to batch it. A refresh that
-  finds nothing changed, or no drawable, pauses the link; a view paused for want of a drawable is
-  not idle and asks nothing on the main thread: it asks again when its window is seen again, and
-  while the window is visible it is asked off the main thread every 0.25 s.
+  finds nothing changed pauses the link.
+- **D1. No call on the main thread waits for a drawable.** A frame asks for the layer's next
+  drawable on a background queue at the moment it needs one, and is drawn on the main thread when
+  it arrives, reading the screen then (D2: output that came meanwhile is drawn once, none lost); a
+  drawable the frame does not use is let go at once. An ask that brings none asks again while the
+  window is on screen, and an off-screen window asks when it is seen. Where the display reports no
+  presentation time, a frame counts as shown when its command buffer completed.
 - **V2. One screen, one source.** The view draws only what `Screen.frame()` says and sends only what
   the screen's encoders make; no source of the app spells an escape sequence (a sweep test).
 - **V3. Display-link changes happen on the main thread**, through one pacer that records each one.

@@ -51,9 +51,12 @@ struct Step: Decodable {
     /// The visible text stays what it was when the step began while output reaches the screen,
     /// waited for at most `seconds`.
     var still: Bool?
-    /// No output waited longer than this many ms to be shown: to the frame that showed it, on the
-    /// display where it reported the time, else committed.
+    /// No output waited longer than this many ms to be shown, nor was the main thread held longer
+    /// over the measure, each net of the drive's own thread's stall during it.
     var shownWithin: Double?
+    /// Every free drawable of the focused view's layer held this many seconds while a command
+    /// echoes.
+    var starve: Double?
     /// Types `measure` keys, one each `interval` ms (50 by default), and records the latency.
     var measure: Int?
     var interval: Int?

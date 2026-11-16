@@ -275,11 +275,11 @@ final class Driver {
         }
         if let limit = step.shownWithin {
             let figures = terminal.latency
-            let wait = Self.ours(figures.longestToShown, own: ownThread.stalls)
-            let ok = wait.ours <= limit
+            let wait = Self.ours(figures.longestToShown, own: ownThread.stalls), held = mainHeld()
+            let ok = max(wait.ours, held.ours) <= limit
             let flood = measurement(name, keys: 0, figures: figures, budgets: ["every output shown within \(Self.ms(limit)) ms": ok])
             measures.append(flood)
-            return (ok, "the longest any output waited to be shown: \(wait.said); the longest refresh took "
+            return (ok, "the longest any output waited to be shown: \(wait.said); the main thread's longest hold: \(held.said); the longest refresh took "
                 + "\(Self.ms(figures.refresh.max)) ms, \(figures.lateOutputs) outputs were late; the main thread was held at most "
                 + "\(Self.ms(flood.mainThreadHeld)) ms")
         }
@@ -371,6 +371,15 @@ final class Driver {
         let wait = wait ?? Span(0, 0)
         let shared = own.shared(with: wait) * 1000, ours = own.net(of: wait) * 1000
         return (ours, "waited \(ms(wait.length * 1000)) ms, the drive's own thread held \(ms(shared)) ms of it, ours \(ms(ours)) ms")
+    }
+
+    /// The main thread's longest hold, its heartbeat's longest gap (in `span` when given) less one
+    /// tick, judged as ``ours(_:own:)`` judges a wait.
+    func mainHeld(in span: Span? = nil) -> (ours: Double, said: String) {
+        let gap = mainThread.stalls.longest(in: span) ?? Span(0, 0)
+        let own = ownThread.stalls
+        let held = max(0, gap.length - Heartbeat.interval) * 1000, ours = max(0, own.net(of: gap) - Heartbeat.interval) * 1000
+        return (ours, "held \(Self.ms(held)) ms, the drive's own thread held \(Self.ms(own.shared(with: gap) * 1000)) ms of it, ours \(Self.ms(ours)) ms")
     }
 
     static func ms(_ milliseconds: Double) -> String {
