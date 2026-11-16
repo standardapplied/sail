@@ -73,6 +73,8 @@ import Testing
             #expect(window.standardWindowButton(button).map { !$0.isHidden } == true, "\(name): the window lacks its \(button) button")
         }
         let content = try #require(window.contentView)
+        window.orderFront(nil)
+        defer { window.orderOut(nil) }
         #expect(window.contentLayoutRect.height < content.bounds.height, "\(name): the content view does not reach under the title bar")
         for (item, surface) in [(Rail.Item.account, look.canvas), (.thisMac, look.palette.background)] {
             shell.select(item)
@@ -96,6 +98,7 @@ import Testing
                   bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
               ), let bytes = context.data
         else { return nil }
+        view.display()
         layer.render(in: context)
         let pixels = bytes.bindMemory(to: UInt8.self, capacity: width * height * 4)
         let index = (Int(fromTop) * width + Int(x)) * 4
@@ -145,6 +148,8 @@ import Testing
         let passkey = SoftwarePasskey(file: folder.appending(path: "passkey.json"))
         let shell = try ShellApp(fonts: Self.fonts, helper: nil, look: look) { _ in passkey }
         shell.select(.account)
+        shell.window.orderFront(nil)
+        defer { shell.window.orderOut(nil) }
         let pane = shell.account
         let cases: [(NSTextField, NSButton, NSButton)] = [(pane.ticket, pane.enroll, pane.signIn), (pane.address, pane.signIn, pane.enroll)]
         for (field, button, other) in cases {

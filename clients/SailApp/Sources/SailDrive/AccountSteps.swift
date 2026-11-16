@@ -204,40 +204,60 @@ extension Driver {
     /// A double-click in the title bar does what the person's setting says (System Settings, Desktop
     /// & Dock, "Double-click a window's title bar to"): zoom (or fill) changes the frame and a second
     /// double-click gives it back, minimize puts the window in the Dock, nothing does nothing. The
-    /// clicks are posted to the event queue, as the title bar tracks the mouse from the queue.
+    /// clicks go first as the mouse's own, at the system's event tap; where the runner drops those
+    /// (an app not trusted for input), as a double-click handed to the title bar view itself, with
+    /// its mouse-up queued for the title bar's tracking. The line says which way it went.
     private func zoomByTitleBar() async -> (Bool, String) {
         let window = shell.window
         let setting = UserDefaults.standard.persistentDomain(forName: UserDefaults.globalDomain)?["AppleActionOnDoubleClick"] as? String
         window.setFrame(NSRect(x: 80, y: 80, width: 800, height: 640), display: true)
         let before = window.frame
-        func doubleClick() {
-            let point = NSPoint(x: before.width / 2, y: window.frame.height - 12)
-            for (type, clicks) in [(NSEvent.EventType.leftMouseDown, 1), (.leftMouseUp, 1), (.leftMouseDown, 2), (.leftMouseUp, 2)] {
-                guard let event = NSEvent.mouseEvent(
-                    with: type, location: point, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
-                    windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: clicks, pressure: 1
-                ) else { continue }
-                NSApp.postEvent(event, atStart: false)
+        var way = "the mouse"
+        func byTheMouse() {
+            let top = NSScreen.screens.first?.frame.maxY ?? 0
+            let point = CGPoint(x: window.frame.midX, y: top - (window.frame.maxY - 12))
+            for (type, clicks) in [(CGEventType.leftMouseDown, 1), (.leftMouseUp, 1), (.leftMouseDown, 2), (.leftMouseUp, 2)] {
+                let event = CGEvent(mouseEventSource: nil, mouseType: type, mouseCursorPosition: point, mouseButton: .left)
+                event?.setIntegerValueField(.mouseEventClickState, value: Int64(clicks))
+                event?.post(tap: .cghidEventTap)
             }
+        }
+        func toTheTitleBar() {
+            guard let bar = window.standardWindowButton(.closeButton)?.superview else { return }
+            let point = NSPoint(x: window.frame.width / 2, y: window.frame.height - 12)
+            func event(_ type: NSEvent.EventType) -> NSEvent? {
+                NSEvent.mouseEvent(
+                    with: type, location: point, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+                    windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 2, pressure: 1
+                )
+            }
+            guard let down = event(.leftMouseDown), let up = event(.leftMouseUp) else { return }
+            NSApp.postEvent(up, atStart: true)
+            bar.mouseDown(with: down)
+        }
+        func doubleClick(_ changed: @escaping @MainActor () -> Bool) async -> Bool {
+            if way == "the mouse" {
+                byTheMouse()
+                if await waitUntil(3, changed) { return true }
+                way = "the title bar view"
+            }
+            toTheTitleBar()
+            return await waitUntil(5, changed)
         }
         let said = "the setting is \(setting ?? "unset, which zooms")"
         switch setting ?? "" {
         case "None":
-            doubleClick()
-            let moved = await waitUntil(2) { window.frame != before }
+            let moved = await doubleClick { window.frame != before }
             return (!moved, "\(said); the frame \(moved ? "changed" : "stayed")")
         case "Minimize":
-            doubleClick()
-            let docked = await waitUntil(5) { window.isMiniaturized }
+            let docked = await doubleClick { window.isMiniaturized }
             window.deminiaturize(nil)
-            return (docked, "\(said); the window went \(docked ? "" : "not ")to the Dock")
+            return (docked, "\(said); the window went \(docked ? "" : "not ")to the Dock, by \(way)")
         default:
-            doubleClick()
-            let zoomed = await waitUntil(5) { window.frame != before && !window.inLiveResize }
+            let zoomed = await doubleClick { window.frame != before && !window.inLiveResize }
             let after = window.frame
-            doubleClick()
-            let back = await waitUntil(5) { window.frame == before }
-            return (zoomed && back, "\(said); the frame went from \(before) to \(after) and \(back ? "back" : "stayed at \(window.frame)")")
+            let back = await doubleClick { window.frame == before }
+            return (zoomed && back, "\(said); by \(way) the frame went from \(before) to \(after) and \(back ? "back" : "stayed at \(window.frame)")")
         }
     }
 

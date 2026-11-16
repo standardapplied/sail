@@ -7,8 +7,9 @@ import SailTerminalView
 /// with a Ticket (a secure field, cleared as soon as it is read). Signed in: who, `@handle`, role,
 /// the control plane, until when, and Sign Out. A refusal shows under the buttons, line by line:
 /// the sentence, what to do, the server's words, the system's. The field being edited takes a ring
-/// in the accent, and Return does what that field is for: Enroll in the ticket field, Sign In
-/// otherwise.
+/// in the accent, its selection the selection fill and its caret the accent (set on the field
+/// editor once the field has set it up, as it resets them), and Return does what that field is for:
+/// Enroll in the ticket field, Sign In otherwise.
 @MainActor
 public final class AccountPane: NSView, NSMenuItemValidation {
     static let addressKey = "controlPlane.address"
@@ -166,8 +167,13 @@ public final class AccountPane: NSView, NSMenuItemValidation {
         focus()
     }
 
-    /// The field being edited ringed in the accent, and Return given to its button.
+    /// The field being edited ringed in the accent, its editor's selection and caret the look's, and
+    /// Return given to its button.
     private func focus() {
+        if let editor = window?.firstResponder as? NSTextView, editor.isFieldEditor {
+            editor.selectedTextAttributes = [.backgroundColor: NSColor(look.fillSelected), .foregroundColor: NSColor(look.text)]
+            editor.insertionPointColor = NSColor(look.accent)
+        }
         for field in [address, ticket] {
             field.layer?.borderWidth = field.currentEditor() == nil ? 0 : 2
             field.layer?.borderColor = NSColor(look.accent).cgColor
