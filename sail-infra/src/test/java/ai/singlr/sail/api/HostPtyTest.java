@@ -159,7 +159,8 @@ class HostPtyTest {
         """
         {"name": "acme-try", "status": "Stopped", "type": "container",
          "config": {"user.sail.project": "acme", "user.sail.workspace": "try",
-                    "user.sail.ready": "1762941601000", "user.sail.owner": "ada"},
+                    "user.sail.ready": "1762941601000", "user.sail.owner": "ada",
+                    "user.sail.owner_id": "fde_ada"},
          "expanded_devices": {"root": {"path": "/", "pool": "tank", "type": "disk"}}}""";
     var box =
         new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
@@ -205,7 +206,8 @@ class HostPtyTest {
         """
         {"name": "acme-try", "status": "Stopped", "type": "container",
          "config": {"user.sail.project": "acme", "user.sail.workspace": "try",
-                    "user.sail.ready": "1762941601000", "user.sail.owner": "ada"},
+                    "user.sail.ready": "1762941601000", "user.sail.owner": "ada",
+                    "user.sail.owner_id": "fde_ada"},
          "expanded_devices": {"root": {"path": "/", "pool": "tank", "type": "disk"}}}""";
     var interrupting =
         new ShellExec() {

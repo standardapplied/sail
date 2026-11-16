@@ -682,7 +682,7 @@ class WorkspacesTest {
             .onceOnFail("gh auth login", "error connecting to api.github.com");
     var ana =
         new WorkspaceOwner(
-            "ana", "Ana", "ana@sail.invalid", Map.of("github.com", "ghp_a"), List.of());
+            "ana", "Ana", "ana@sail.invalid", Map.of("github.com", "ghp_a"), List.of(), "fde_ana");
 
     var failure =
         assertThrows(
@@ -2083,8 +2083,9 @@ class WorkspacesTest {
         "tank",
         ("\"user.sail.project\": \"acme\", \"user.sail.workspace\": \"fix-login\","
                 + " \"user.sail.template\": \"v1\", \"user.sail.ready\": \"1762941601000\","
-                + " \"user.sail.spec\": \"%s\", \"user.sail.owner\": \"%s\"")
-            .formatted(spec, owner));
+                + " \"user.sail.spec\": \"%s\", \"user.sail.owner\": \"%s\","
+                + " \"user.sail.owner_id\": \"fde_%s\"")
+            .formatted(spec, owner, owner));
   }
 
   /**
@@ -2509,7 +2510,7 @@ class WorkspacesTest {
                 "set",
                 "acme-fix-login",
                 "user.sail.owner=uday",
-                "user.sail.owner_id="));
+                "user.sail.owner_id=fde_uday"));
     assertTrue(0 <= start && start < owned, String.join("\n", shell.invocations()));
     assertFalse(shell.invocations().stream().anyMatch(c -> c.startsWith("incus copy")));
   }
@@ -2818,7 +2819,7 @@ class WorkspacesTest {
     assertTrue(shell.invocations().stream().anyMatch(c -> c.contains("sail-strip")), "given");
     assertEquals(
         List.of(
-            "incus config set acme-fix-login user.sail.owner=ana user.sail.owner_id=",
+            "incus config set acme-fix-login user.sail.owner=ana user.sail.owner_id=fde_ana",
             "incus config set acme-fix-login user.sail.kept="),
         shell.invocations().stream().filter(c -> c.startsWith("incus config set")).toList());
   }
@@ -3086,7 +3087,7 @@ class WorkspacesTest {
    * N4: a listing shows a workspace's owner by the id its label stores. One whose id is no active
    * person's (the handle given to someone new) is shown as removed, never under the handle the new
    * holder now has; one whose id is active is shown by its handle; a label with a handle alone is
-   * shown by it, as before ids were stored.
+   * nobody's, shown with no owner.
    */
   @Test
   void aListingShowsAWorkspaceWhoseOwnerIdIsNoActivePersonsAsRemoved() throws Exception {
@@ -3094,15 +3095,20 @@ class WorkspacesTest {
         incus(
             DIR_AND_ZFS,
             list(
-                owned("acme-a", "Running", "tmp\", \"user.sail.owner_id\": \"fde_old_tmp"),
-                owned("acme-b", "Running", "tmp\", \"user.sail.owner_id\": \"fde_new_tmp"),
-                owned("acme-c", "Running", "uday")),
+                owned("acme-a", "Running", "tmp").replace("\"fde_tmp\"", "\"fde_old_tmp\""),
+                owned("acme-b", "Running", "tmp").replace("\"fde_tmp\"", "\"fde_new_tmp\""),
+                owned("acme-c", "Running", "uday"),
+                owned("acme-d", "Running", "ana")
+                    .replace(", \"user.sail.owner_id\": \"fde_ana\"", "")),
             "[]");
 
-    var rows = workspaces(shell, ticks()).list("acme", id -> id.equals("fde_new_tmp")).workspaces();
+    var rows =
+        workspaces(shell, ticks())
+            .list("acme", id -> List.of("fde_new_tmp", "fde_uday").contains(id))
+            .workspaces();
 
     assertEquals(
-        List.of("main:null", "a:" + Workspaces.REMOVED_OWNER, "b:tmp", "c:uday"),
+        List.of("main:null", "a:" + Workspaces.REMOVED_OWNER, "b:tmp", "c:uday", "d:null"),
         rows.stream().map(row -> row.name() + ":" + row.owner()).toList());
   }
 
@@ -3112,14 +3118,16 @@ class WorkspacesTest {
           "Uday C",
           "uday@sail.invalid",
           Map.of("github.com", "ghp_uday"),
-          List.of("ssh-ed25519 AAAAuday uday@laptop", "ssh-ed25519 AAAAbox uday@box"));
+          List.of("ssh-ed25519 AAAAuday uday@laptop", "ssh-ed25519 AAAAbox uday@box"),
+          "fde_uday");
   private static final WorkspaceOwner ANA =
       new WorkspaceOwner(
           "ana",
           "Ana",
           "ana@sail.invalid",
           Map.of("github.com", "ghp_ana"),
-          List.of("ssh-ed25519 AAAAana ana@laptop"));
+          List.of("ssh-ed25519 AAAAana ana@laptop"),
+          "fde_ana");
 
   /** A shell that keeps what each push carried, by destination, before its staging file goes. */
   static final class Pushing implements ShellExec {
@@ -3233,7 +3241,7 @@ class WorkspacesTest {
   @Test
   void aPersonsCreateForAnOwnerWithNoEmailIsRefusedBeforeAnythingIsCopied() {
     var shell = incus(DIR_AND_ZFS, list(template("v1", "an-older-definition")), snapshots("v1"));
-    var owner = new WorkspaceOwner("ana", "Ana", "", Map.of(), List.of());
+    var owner = new WorkspaceOwner("ana", "Ana", "", Map.of(), List.of(), "fde_ana");
 
     var refused =
         assertThrows(
@@ -3263,7 +3271,7 @@ class WorkspacesTest {
     var shell = new Pushing(scripted);
     var owner =
         new WorkspaceOwner(
-            "ana", "Ana", "ana@sail.invalid", Map.of(), List.of("ssh-ed25519 AAAAana"));
+            "ana", "Ana", "ana@sail.invalid", Map.of(), List.of("ssh-ed25519 AAAAana"), "fde_ana");
 
     new Workspaces(shell, shell, ticks(0, 1, 2, 3, 4, 5, 6, 7), locks(), () -> 65536, url -> false)
         .create(
@@ -3310,7 +3318,7 @@ class WorkspacesTest {
                 "set",
                 "acme-fix-login",
                 "user.sail.owner=ana",
-                "user.sail.owner_id="));
+                "user.sail.owner_id=fde_ana"));
     assertTrue(
         0 <= stripped && stripped < gh && gh < owned, String.join("\n", scripted.invocations()));
     assertEquals(
@@ -3399,8 +3407,9 @@ class WorkspacesTest {
         status,
         "tank",
         ("\"user.sail.project\": \"acme\", \"user.sail.workspace\": \"%s\","
-                + " \"user.sail.ready\": \"1\", \"user.sail.owner\": \"%s\"")
-            .formatted(instance.substring("acme-".length()), owner));
+                + " \"user.sail.ready\": \"1\", \"user.sail.owner\": \"%s\","
+                + " \"user.sail.owner_id\": \"fde_%s\"")
+            .formatted(instance.substring("acme-".length()), owner, owner));
   }
 
   /**
@@ -3422,7 +3431,12 @@ class WorkspacesTest {
     var shell = new Pushing(scripted);
     var replaced =
         new WorkspaceOwner(
-            "ana", "Ana", "ana@sail.invalid", Map.of("github.com", "ghp_new"), ANA.keys());
+            "ana",
+            "Ana",
+            "ana@sail.invalid",
+            Map.of("github.com", "ghp_new"),
+            ANA.keys(),
+            "fde_ana");
 
     var unreached =
         new Workspaces(shell, shell, ticks(), locks(), () -> 65536, url -> false)
@@ -3541,7 +3555,8 @@ class WorkspacesTest {
     assertFalse(
         shell
             .invocations()
-            .contains("incus config set acme-fix-login user.sail.owner=ana user.sail.owner_id="),
+            .contains(
+                "incus config set acme-fix-login user.sail.owner=ana user.sail.owner_id=fde_ana"),
         "already hers: no owner is written");
   }
 
@@ -3664,7 +3679,8 @@ class WorkspacesTest {
     var keys = indexOfFirst(ran, c -> c.endsWith("acme-fix-login/home/dev/.ssh/authorized_keys"));
     var store = indexOfFirst(ran, c -> c.endsWith("acme-fix-login/home/dev/.git-credentials"));
     var labelled =
-        ran.indexOf("incus config set acme-fix-login user.sail.owner=ana user.sail.owner_id=");
+        ran.indexOf(
+            "incus config set acme-fix-login user.sail.owner=ana user.sail.owner_id=fde_ana");
     assertTrue(
         0 <= stripped && stripped < keys && keys < store && store < labelled,
         String.join("\n", ran));

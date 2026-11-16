@@ -353,14 +353,20 @@ class WorkspaceIT extends AbstractIncusIT {
   void twoWorkspacesOfTwoPeopleEachCommitAsTheirOwnerWithTheirOwnStore() throws Exception {
     var uday =
         new WorkspaceOwner(
-            "uday", "Uday", "uday@sail.invalid", Map.of("example.invalid", "tok-uday"), List.of());
+            "uday",
+            "Uday",
+            "uday@sail.invalid",
+            Map.of("example.invalid", "tok-uday"),
+            List.of(),
+            "fde_uday");
     var ana =
         new WorkspaceOwner(
             "ana",
             "Ana",
             "ana@sail.invalid",
             Map.of("example.invalid", "tok-ana"),
-            List.of("ssh-ed25519 AAAAana ana@laptop"));
+            List.of("ssh-ed25519 AAAAana ana@laptop"),
+            "fde_ana");
 
     var fix = workspaces.create(definition(), FIX, source(), null, uday.handle(), h -> uday);
     var second = workspaces.create(definition(), SECOND, source(), null, ana.handle(), h -> ana);
@@ -505,7 +511,12 @@ class WorkspaceIT extends AbstractIncusIT {
             null);
     var owner =
         new WorkspaceOwner(
-            "uday", "Uday", "uday@sail.invalid", Map.of(host, "tok-private"), List.of());
+            "uday",
+            "Uday",
+            "uday@sail.invalid",
+            Map.of(host, "tok-private"),
+            List.of(),
+            "fde_uday");
 
     var made =
         workspaces.create(
@@ -770,7 +781,12 @@ class WorkspaceIT extends AbstractIncusIT {
 
   private static WorkspaceOwner udayWith(String token) {
     return new WorkspaceOwner(
-        "uday", "Uday", "uday@sail.invalid", Map.of("example.invalid", token), List.of());
+        "uday",
+        "Uday",
+        "uday@sail.invalid",
+        Map.of("example.invalid", token),
+        List.of(),
+        "fde_uday");
   }
 
   private static final String WATCH =

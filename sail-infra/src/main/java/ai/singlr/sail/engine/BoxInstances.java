@@ -201,12 +201,18 @@ public final class BoxInstances {
   }
 
   /**
-   * Every whole workspace {@code handle} owns, running or not: what reaches a person's workspaces
-   * when their key or git token changes.
+   * Every whole workspace the person whose id is {@code ownerId} owns, by the id its label stores,
+   * running or not: what reaches a person's workspaces when their key or git token changes.
    */
-  public List<Instance> wholeWorkspacesOf(String handle)
+  public List<Instance> wholeWorkspacesOf(String ownerId)
       throws IOException, InterruptedException, TimeoutException {
-    return all().stream().filter(wholeWorkspaceOf(handle)).toList();
+    return all().stream()
+        .filter(
+            i ->
+                i.kind() instanceof Workspace workspace
+                    && workspace.ready()
+                    && i.key(OWNER_ID_KEY).filter(id -> id.equals(ownerId)).isPresent())
+        .toList();
   }
 
   /** Whether an instance is a whole workspace {@code handle} owns. */

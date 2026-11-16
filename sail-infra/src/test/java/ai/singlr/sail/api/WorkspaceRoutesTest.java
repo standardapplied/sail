@@ -66,15 +66,17 @@ class WorkspaceRoutesTest {
   private String ada;
   private String sam;
   private String obs;
+  private String samId;
 
-  /** Workspace {@code try} of acme, sam's, as Incus lists it in {@code state}. */
-  private static String trying(String state) {
+  /** Workspace {@code try} of acme, sam's by his id, as Incus lists it in {@code state}. */
+  private String trying(String state) {
     return """
         {"name": "acme-try", "status": "%s", "type": "container",
          "config": {"user.sail.project": "acme", "user.sail.workspace": "try",
-                    "user.sail.ready": "1762941601000", "user.sail.owner": "sam"},
+                    "user.sail.ready": "1762941601000", "user.sail.owner": "sam",
+                    "user.sail.owner_id": "%s"},
          "expanded_devices": {"root": {"path": "/", "pool": "tank", "type": "disk"}}}"""
-        .formatted(state);
+        .formatted(state, samId);
   }
 
   @BeforeEach
@@ -92,10 +94,8 @@ class WorkspaceRoutesTest {
               tokens
                   .create("ada", "admin", fdes.add("ada", "Ada", "ada@x", "admin").id(), null)
                   .token();
-          sam =
-              tokens
-                  .create("sam", "member", fdes.add("sam", "Sam", "sam@x", "member").id(), null)
-                  .token();
+          samId = fdes.add("sam", "Sam", "sam@x", "member").id();
+          sam = tokens.create("sam", "member", samId, null).token();
           obs =
               tokens
                   .create("obs", "viewer", fdes.add("obs", "Obs", "obs@x", "viewer").id(), null)

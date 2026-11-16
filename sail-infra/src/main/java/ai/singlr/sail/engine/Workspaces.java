@@ -624,10 +624,9 @@ public final class Workspaces {
 
   /**
    * The person workspace {@code found} is, by handle: its labelled owner while the id its label
-   * stores (none for an owner whose id this box does not know) is the id of that handle's active
-   * person ({@code owners}); none for one made by hand, taken back, whose person is gone or
-   * disabled, or whose handle is now another person's. The one read of the label every door decides
-   * by.
+   * stores is the id of that handle's active person ({@code owners}); none for one made by hand,
+   * taken back, labelled with no id, whose person is gone or disabled, or whose handle is now
+   * another person's. The one read of the label every door decides by.
    */
   public static Optional<String> ownerOf(
       BoxInstances.Instance found, Function<String, WorkspaceOwner> owners) {
@@ -801,8 +800,7 @@ public final class Workspaces {
     var labelledId = found.key(BoxInstances.OWNER_ID_KEY).filter(Strings::isNotBlank);
     var another =
         !owning.handle().equals(labelled)
-            || labelledId.isPresent()
-                && !labelledId.get().equals(owning.owners().apply(owning.handle()).id());
+            || !labelledId.equals(Optional.ofNullable(owning.owners().apply(owning.handle()).id()));
     boolean started;
     if (another) {
       started = startIfStopped(found);
@@ -880,7 +878,7 @@ public final class Workspaces {
   public List<String> refresh(WorkspaceOwner owner, Function<String, ProjectDefinition> definitions)
       throws IOException, InterruptedException, TimeoutException {
     var unreached = new ArrayList<String>();
-    for (var instance : box.wholeWorkspacesOf(owner.handle())) {
+    for (var instance : box.wholeWorkspacesOf(owner.id())) {
       if (!(instance.state() instanceof ContainerState.Running)) {
         continue;
       }
@@ -1166,11 +1164,14 @@ public final class Workspaces {
 
   /**
    * Whether workspace {@code found} is still {@code holder}'s, the active person of its labelled
-   * handle: its label stores no id (made before ids were stored), or theirs.
+   * handle: its label stores their id. A label with no id is nobody's.
    */
   private static boolean labelledFor(BoxInstances.Instance found, WorkspaceOwner holder) {
-    var id = found.key(BoxInstances.OWNER_ID_KEY).filter(Strings::isNotBlank);
-    return id.isEmpty() || id.get().equals(holder.id());
+    return found
+        .key(BoxInstances.OWNER_ID_KEY)
+        .filter(Strings::isNotBlank)
+        .filter(id -> id.equals(holder.id()))
+        .isPresent();
   }
 
   /**
@@ -1722,9 +1723,9 @@ public final class Workspaces {
         createdAt,
         ipv4,
         instance.key(BoxInstances.SPEC_KEY).orElse(null),
-        owner != null && ownerId.isPresent() && !activeId.test(ownerId.get())
-            ? REMOVED_OWNER
-            : owner);
+        owner == null || ownerId.isEmpty()
+            ? null
+            : activeId.test(ownerId.get()) ? owner : REMOVED_OWNER);
   }
 
   private static String word(ContainerState state) {

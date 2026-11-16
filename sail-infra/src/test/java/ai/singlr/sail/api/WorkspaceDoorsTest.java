@@ -62,9 +62,10 @@ class WorkspaceDoorsTest {
     return """
         {"name": "acme-try", "status": "%s", "type": "container",
          "config": {"user.sail.project": "acme", "user.sail.workspace": "try",
-                    "user.sail.ready": "1762941601000", "user.sail.owner": "%s"},
+                    "user.sail.ready": "1762941601000", "user.sail.owner": "%s",
+                    "user.sail.owner_id": "fde_%s"},
          "expanded_devices": {"root": {"path": "/", "pool": "tank", "type": "disk"}}}"""
-        .formatted(state, owner);
+        .formatted(state, owner, owner);
   }
 
   private static ScriptedShellExecutor box(String workspace) {
@@ -369,11 +370,7 @@ class WorkspaceDoorsTest {
    */
   @Test
   void aWorkspaceIsItsOwnersByTheIdItsLabelStoresNotByItsHandle() throws Exception {
-    var labelled =
-        trying("Stopped", "ada")
-            .replace(
-                "\"user.sail.owner\": \"ada\"",
-                "\"user.sail.owner\": \"ada\", \"user.sail.owner_id\": \"fde_old_ada\"");
+    var labelled = trying("Stopped", "ada").replace("fde_ada", "fde_old_ada");
     Function<String, WorkspaceOwner> now =
         handle ->
             new WorkspaceOwner(

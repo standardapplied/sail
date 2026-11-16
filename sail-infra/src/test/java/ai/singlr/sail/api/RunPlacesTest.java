@@ -579,7 +579,7 @@ class RunPlacesTest {
   }
 
   private static WorkspaceOwner withoutEmail(String handle) {
-    return new WorkspaceOwner(handle, handle, "", Map.of(), List.of());
+    return new WorkspaceOwner(handle, handle, "", Map.of(), List.of(), "fde_" + handle);
   }
 
   /**
@@ -683,7 +683,8 @@ class RunPlacesTest {
                 handle,
                 handle + "@sail.invalid",
                 reads.getAndIncrement() == 0 ? Map.of("github.com", "ghp_gone") : Map.of(),
-                List.of());
+                List.of(),
+                "fde_" + handle);
     var places = owning(incus, owners, told);
     var check = places.checkSpec("acme", config(), "auth", Lane.BUILD, "ana");
 
