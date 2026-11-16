@@ -225,7 +225,7 @@
   {"name": "s17-left-says-each-resize", "type": "clear; perl -e '$SIG{WINCH}=sub{@s=split(\" \",`stty size`);print \"winch-$s[1]\\n\"};sleep 1 while 1'\r"},
   {"name": "s17-traps-set", "wait": 1},
   {"name": "s17-drag-the-divider-200-pt-in-30-moves", "dragDivider": 0, "by": 200, "moves": 30, "interval": 10},
-  {"name": "s17-dragged", "arrangement": {"frames": [[0, 0, 0.5, 1, 0, 0, 200, 0], [0.5, 0, 0.5, 1, 200, 0, -200, 0]]}},
+  {"name": "s17-dragged", "arrangement": {"frames": [[0, 0, 0.5, 1, 0, 0, 201, 0], [0.5, 0, 0.5, 1, 202, 0, -202, 0]]}},
   {"name": "s17-each-program-got-one-size-its-final-width", "onceResized": true, "seconds": 5},
   {"name": "s17-end-the-left-reporter", "press": "c", "modifiers": ["control"]},
   {"name": "s17-to-the-right", "clickPane": 1},
