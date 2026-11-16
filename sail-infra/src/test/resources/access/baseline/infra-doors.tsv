@@ -4,6 +4,10 @@ a machine token asks a ticket to open a terminal in acme	denied FORBIDDEN 403 To
 a machine token asks a ticket to open a terminal in beta	denied FORBIDDEN 403 Token 'corpus-ci' is bound to no FDE, so it is issued no ticket: the host's own token is the box's person, who exists only on the unix socket, and a machine token acts for no one. Use a token of your own. | 
 a machine token asks a ticket to open a terminal in delta	denied FORBIDDEN 403 Token 'corpus-ci' is bound to no FDE, so it is issued no ticket: the host's own token is the box's person, who exists only on the unix socket, and a machine token acts for no one. Use a token of your own. | 
 a machine token asks a ticket to open a terminal in omega	denied FORBIDDEN 403 Token 'corpus-ci' is bound to no FDE, so it is issued no ticket: the host's own token is the box's person, who exists only on the unix socket, and a machine token acts for no one. Use a token of your own. | 
+a machine token asks a ticket to open a terminal in workspace ghost of acme	denied FORBIDDEN 403 Token 'corpus-ci' is bound to no FDE, so it is issued no ticket: the host's own token is the box's person, who exists only on the unix socket, and a machine token acts for no one. Use a token of your own. | 
+a machine token asks a ticket to open a terminal in workspace loose of acme	denied FORBIDDEN 403 Token 'corpus-ci' is bound to no FDE, so it is issued no ticket: the host's own token is the box's person, who exists only on the unix socket, and a machine token acts for no one. Use a token of your own. | 
+a machine token asks a ticket to open a terminal in workspace spare of acme	denied FORBIDDEN 403 Token 'corpus-ci' is bound to no FDE, so it is issued no ticket: the host's own token is the box's person, who exists only on the unix socket, and a machine token acts for no one. Use a token of your own. | 
+a machine token asks a ticket to open a terminal in workspace try of acme	denied FORBIDDEN 403 Token 'corpus-ci' is bound to no FDE, so it is issued no ticket: the host's own token is the box's person, who exists only on the unix socket, and a machine token acts for no one. Use a token of your own. | 
 approve review-ada as agent member ada-agent acme	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot approve reviews. | Only an operator lane (CLI or API token) may do this.
 approve review-ada as agent member ada-agent all	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot approve reviews. | Only an operator lane (CLI or API token) may do this.
 approve review-ada as agent member ada-agent beta	denied NOT_FOUND 404 Review 'review-ada' not found. | 
@@ -1860,6 +1864,238 @@ delete spec s-open-ada as room viewer ada-room beta	denied SPEC_NOT_FOUND 404 Sp
 delete spec s-open-ada as room viewer bob-room acme	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot change specs. | Ask an admin for a member or admin credential.
 delete spec s-open-ada as room viewer bob-room all	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot change specs. | Ask an admin for a member or admin credential.
 delete spec s-open-ada as room viewer bob-room beta	denied SPEC_NOT_FOUND 404 Spec 's-open-ada' was not found. | 
+delete workspace ghost of acme as agent member ada-agent acme	denied NOT_FOUND 404 Project 'acme' has no workspace 'ghost' on this box. | List them with: sail project workspace list acme.
+delete workspace ghost of acme as agent member ada-agent all	denied NOT_FOUND 404 Project 'acme' has no workspace 'ghost' on this box. | List them with: sail project workspace list acme.
+delete workspace ghost of acme as agent member ada-agent beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+delete workspace ghost of acme as agent member bob-agent acme	denied NOT_FOUND 404 Project 'acme' has no workspace 'ghost' on this box. | List them with: sail project workspace list acme.
+delete workspace ghost of acme as agent member bob-agent all	denied NOT_FOUND 404 Project 'acme' has no workspace 'ghost' on this box. | List them with: sail project workspace list acme.
+delete workspace ghost of acme as agent member bob-agent beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+delete workspace ghost of acme as agent viewer ada-agent acme	denied NOT_FOUND 404 Project 'acme' has no workspace 'ghost' on this box. | List them with: sail project workspace list acme.
+delete workspace ghost of acme as agent viewer ada-agent all	denied NOT_FOUND 404 Project 'acme' has no workspace 'ghost' on this box. | List them with: sail project workspace list acme.
+delete workspace ghost of acme as agent viewer ada-agent beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+delete workspace ghost of acme as agent viewer bob-agent acme	denied NOT_FOUND 404 Project 'acme' has no workspace 'ghost' on this box. | List them with: sail project workspace list acme.
+delete workspace ghost of acme as agent viewer bob-agent all	denied NOT_FOUND 404 Project 'acme' has no workspace 'ghost' on this box. | List them with: sail project workspace list acme.
+delete workspace ghost of acme as agent viewer bob-agent beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+delete workspace ghost of acme as api admin root all	denied NOT_FOUND 404 Project 'acme' has no workspace 'ghost' on this box. | List them with: sail project workspace list acme.
+delete workspace ghost of acme as api member ada acme	denied NOT_FOUND 404 Project 'acme' has no workspace 'ghost' on this box. | List them with: sail project workspace list acme.
+delete workspace ghost of acme as api member ada all	denied NOT_FOUND 404 Project 'acme' has no workspace 'ghost' on this box. | List them with: sail project workspace list acme.
+delete workspace ghost of acme as api member ada beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+delete workspace ghost of acme as api member bob acme	denied NOT_FOUND 404 Project 'acme' has no workspace 'ghost' on this box. | List them with: sail project workspace list acme.
+delete workspace ghost of acme as api member bob all	denied NOT_FOUND 404 Project 'acme' has no workspace 'ghost' on this box. | List them with: sail project workspace list acme.
+delete workspace ghost of acme as api member bob beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+delete workspace ghost of acme as api member machine all	denied NOT_FOUND 404 Project 'acme' has no workspace 'ghost' on this box. | List them with: sail project workspace list acme.
+delete workspace ghost of acme as api viewer ada acme	denied NOT_FOUND 404 Project 'acme' has no workspace 'ghost' on this box. | List them with: sail project workspace list acme.
+delete workspace ghost of acme as api viewer ada all	denied NOT_FOUND 404 Project 'acme' has no workspace 'ghost' on this box. | List them with: sail project workspace list acme.
+delete workspace ghost of acme as api viewer ada beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+delete workspace ghost of acme as api viewer bob acme	denied NOT_FOUND 404 Project 'acme' has no workspace 'ghost' on this box. | List them with: sail project workspace list acme.
+delete workspace ghost of acme as api viewer bob all	denied NOT_FOUND 404 Project 'acme' has no workspace 'ghost' on this box. | List them with: sail project workspace list acme.
+delete workspace ghost of acme as api viewer bob beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+delete workspace ghost of acme as cli admin root all	denied NOT_FOUND 404 Project 'acme' has no workspace 'ghost' on this box. | List them with: sail project workspace list acme.
+delete workspace ghost of acme as cli member ada acme	denied NOT_FOUND 404 Project 'acme' has no workspace 'ghost' on this box. | List them with: sail project workspace list acme.
+delete workspace ghost of acme as cli member ada all	denied NOT_FOUND 404 Project 'acme' has no workspace 'ghost' on this box. | List them with: sail project workspace list acme.
+delete workspace ghost of acme as cli member ada beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+delete workspace ghost of acme as cli member bob acme	denied NOT_FOUND 404 Project 'acme' has no workspace 'ghost' on this box. | List them with: sail project workspace list acme.
+delete workspace ghost of acme as cli member bob all	denied NOT_FOUND 404 Project 'acme' has no workspace 'ghost' on this box. | List them with: sail project workspace list acme.
+delete workspace ghost of acme as cli member bob beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+delete workspace ghost of acme as cli viewer ada acme	denied NOT_FOUND 404 Project 'acme' has no workspace 'ghost' on this box. | List them with: sail project workspace list acme.
+delete workspace ghost of acme as cli viewer ada all	denied NOT_FOUND 404 Project 'acme' has no workspace 'ghost' on this box. | List them with: sail project workspace list acme.
+delete workspace ghost of acme as cli viewer ada beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+delete workspace ghost of acme as cli viewer bob acme	denied NOT_FOUND 404 Project 'acme' has no workspace 'ghost' on this box. | List them with: sail project workspace list acme.
+delete workspace ghost of acme as cli viewer bob all	denied NOT_FOUND 404 Project 'acme' has no workspace 'ghost' on this box. | List them with: sail project workspace list acme.
+delete workspace ghost of acme as cli viewer bob beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+delete workspace ghost of acme as container admin root all	denied NOT_FOUND 404 Project 'acme' has no workspace 'ghost' on this box. | List them with: sail project workspace list acme.
+delete workspace ghost of acme as container member ada acme	denied NOT_FOUND 404 Project 'acme' has no workspace 'ghost' on this box. | List them with: sail project workspace list acme.
+delete workspace ghost of acme as container member ada all	denied NOT_FOUND 404 Project 'acme' has no workspace 'ghost' on this box. | List them with: sail project workspace list acme.
+delete workspace ghost of acme as container member ada beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+delete workspace ghost of acme as container member bob acme	denied NOT_FOUND 404 Project 'acme' has no workspace 'ghost' on this box. | List them with: sail project workspace list acme.
+delete workspace ghost of acme as container member bob all	denied NOT_FOUND 404 Project 'acme' has no workspace 'ghost' on this box. | List them with: sail project workspace list acme.
+delete workspace ghost of acme as container member bob beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+delete workspace ghost of acme as container viewer ada acme	denied NOT_FOUND 404 Project 'acme' has no workspace 'ghost' on this box. | List them with: sail project workspace list acme.
+delete workspace ghost of acme as container viewer ada all	denied NOT_FOUND 404 Project 'acme' has no workspace 'ghost' on this box. | List them with: sail project workspace list acme.
+delete workspace ghost of acme as container viewer ada beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+delete workspace ghost of acme as container viewer bob acme	denied NOT_FOUND 404 Project 'acme' has no workspace 'ghost' on this box. | List them with: sail project workspace list acme.
+delete workspace ghost of acme as container viewer bob all	denied NOT_FOUND 404 Project 'acme' has no workspace 'ghost' on this box. | List them with: sail project workspace list acme.
+delete workspace ghost of acme as container viewer bob beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+delete workspace ghost of acme as room viewer ada-room acme	denied NOT_FOUND 404 Project 'acme' has no workspace 'ghost' on this box. | List them with: sail project workspace list acme.
+delete workspace ghost of acme as room viewer ada-room all	denied NOT_FOUND 404 Project 'acme' has no workspace 'ghost' on this box. | List them with: sail project workspace list acme.
+delete workspace ghost of acme as room viewer ada-room beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+delete workspace ghost of acme as room viewer bob-room acme	denied NOT_FOUND 404 Project 'acme' has no workspace 'ghost' on this box. | List them with: sail project workspace list acme.
+delete workspace ghost of acme as room viewer bob-room all	denied NOT_FOUND 404 Project 'acme' has no workspace 'ghost' on this box. | List them with: sail project workspace list acme.
+delete workspace ghost of acme as room viewer bob-room beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+delete workspace loose of acme as agent member ada-agent acme	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot enter workspaces. | Only an operator lane (CLI or API token) may do this.
+delete workspace loose of acme as agent member ada-agent all	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot enter workspaces. | Only an operator lane (CLI or API token) may do this.
+delete workspace loose of acme as agent member ada-agent beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+delete workspace loose of acme as agent member bob-agent acme	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot enter workspaces. | Only an operator lane (CLI or API token) may do this.
+delete workspace loose of acme as agent member bob-agent all	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot enter workspaces. | Only an operator lane (CLI or API token) may do this.
+delete workspace loose of acme as agent member bob-agent beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+delete workspace loose of acme as agent viewer ada-agent acme	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
+delete workspace loose of acme as agent viewer ada-agent all	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
+delete workspace loose of acme as agent viewer ada-agent beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+delete workspace loose of acme as agent viewer bob-agent acme	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
+delete workspace loose of acme as agent viewer bob-agent all	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
+delete workspace loose of acme as agent viewer bob-agent beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+delete workspace loose of acme as api admin root all	ok WorkspaceChangeResponse
+delete workspace loose of acme as api member ada acme	denied FORBIDDEN_NOT_ASSIGNEE 403 Workspace 'loose' has no owner, so only an admin may enter it. | Have an admin enter it.
+delete workspace loose of acme as api member ada all	denied FORBIDDEN_NOT_ASSIGNEE 403 Workspace 'loose' has no owner, so only an admin may enter it. | Have an admin enter it.
+delete workspace loose of acme as api member ada beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+delete workspace loose of acme as api member bob acme	denied FORBIDDEN_NOT_ASSIGNEE 403 Workspace 'loose' has no owner, so only an admin may enter it. | Have an admin enter it.
+delete workspace loose of acme as api member bob all	denied FORBIDDEN_NOT_ASSIGNEE 403 Workspace 'loose' has no owner, so only an admin may enter it. | Have an admin enter it.
+delete workspace loose of acme as api member bob beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+delete workspace loose of acme as api member machine all	denied FORBIDDEN_NOT_ASSIGNEE 403 Workspace 'loose' has no owner, so only an admin may enter it. | Have an admin enter it.
+delete workspace loose of acme as api viewer ada acme	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
+delete workspace loose of acme as api viewer ada all	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
+delete workspace loose of acme as api viewer ada beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+delete workspace loose of acme as api viewer bob acme	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
+delete workspace loose of acme as api viewer bob all	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
+delete workspace loose of acme as api viewer bob beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+delete workspace loose of acme as cli admin root all	ok WorkspaceChangeResponse
+delete workspace loose of acme as cli member ada acme	denied FORBIDDEN_NOT_ASSIGNEE 403 Workspace 'loose' has no owner, so only an admin may enter it. | Have an admin enter it.
+delete workspace loose of acme as cli member ada all	denied FORBIDDEN_NOT_ASSIGNEE 403 Workspace 'loose' has no owner, so only an admin may enter it. | Have an admin enter it.
+delete workspace loose of acme as cli member ada beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+delete workspace loose of acme as cli member bob acme	denied FORBIDDEN_NOT_ASSIGNEE 403 Workspace 'loose' has no owner, so only an admin may enter it. | Have an admin enter it.
+delete workspace loose of acme as cli member bob all	denied FORBIDDEN_NOT_ASSIGNEE 403 Workspace 'loose' has no owner, so only an admin may enter it. | Have an admin enter it.
+delete workspace loose of acme as cli member bob beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+delete workspace loose of acme as cli viewer ada acme	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
+delete workspace loose of acme as cli viewer ada all	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
+delete workspace loose of acme as cli viewer ada beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+delete workspace loose of acme as cli viewer bob acme	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
+delete workspace loose of acme as cli viewer bob all	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
+delete workspace loose of acme as cli viewer bob beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+delete workspace loose of acme as container admin root all	denied AGENT_LANE_FORBIDDEN 403 The credential in a project container cannot enter workspaces. | Do it from outside the container: with sail on the host, or in Mast.
+delete workspace loose of acme as container member ada acme	denied AGENT_LANE_FORBIDDEN 403 The credential in a project container cannot enter workspaces. | Do it from outside the container: with sail on the host, or in Mast.
+delete workspace loose of acme as container member ada all	denied AGENT_LANE_FORBIDDEN 403 The credential in a project container cannot enter workspaces. | Do it from outside the container: with sail on the host, or in Mast.
+delete workspace loose of acme as container member ada beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+delete workspace loose of acme as container member bob acme	denied AGENT_LANE_FORBIDDEN 403 The credential in a project container cannot enter workspaces. | Do it from outside the container: with sail on the host, or in Mast.
+delete workspace loose of acme as container member bob all	denied AGENT_LANE_FORBIDDEN 403 The credential in a project container cannot enter workspaces. | Do it from outside the container: with sail on the host, or in Mast.
+delete workspace loose of acme as container member bob beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+delete workspace loose of acme as container viewer ada acme	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
+delete workspace loose of acme as container viewer ada all	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
+delete workspace loose of acme as container viewer ada beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+delete workspace loose of acme as container viewer bob acme	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
+delete workspace loose of acme as container viewer bob all	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
+delete workspace loose of acme as container viewer bob beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+delete workspace loose of acme as room viewer ada-room acme	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
+delete workspace loose of acme as room viewer ada-room all	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
+delete workspace loose of acme as room viewer ada-room beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+delete workspace loose of acme as room viewer bob-room acme	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
+delete workspace loose of acme as room viewer bob-room all	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
+delete workspace loose of acme as room viewer bob-room beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+delete workspace spare of acme as agent member ada-agent acme	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot enter workspaces. | Only an operator lane (CLI or API token) may do this.
+delete workspace spare of acme as agent member ada-agent all	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot enter workspaces. | Only an operator lane (CLI or API token) may do this.
+delete workspace spare of acme as agent member ada-agent beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+delete workspace spare of acme as agent member bob-agent acme	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot enter workspaces. | Only an operator lane (CLI or API token) may do this.
+delete workspace spare of acme as agent member bob-agent all	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot enter workspaces. | Only an operator lane (CLI or API token) may do this.
+delete workspace spare of acme as agent member bob-agent beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+delete workspace spare of acme as agent viewer ada-agent acme	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
+delete workspace spare of acme as agent viewer ada-agent all	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
+delete workspace spare of acme as agent viewer ada-agent beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+delete workspace spare of acme as agent viewer bob-agent acme	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
+delete workspace spare of acme as agent viewer bob-agent all	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
+delete workspace spare of acme as agent viewer bob-agent beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+delete workspace spare of acme as api admin root all	ok WorkspaceChangeResponse
+delete workspace spare of acme as api member ada acme	denied FORBIDDEN_NOT_ASSIGNEE 403 Workspace 'spare' belongs to 'bob', not you. | Ask bob to enter it, or have an admin do it.
+delete workspace spare of acme as api member ada all	denied FORBIDDEN_NOT_ASSIGNEE 403 Workspace 'spare' belongs to 'bob', not you. | Ask bob to enter it, or have an admin do it.
+delete workspace spare of acme as api member ada beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+delete workspace spare of acme as api member bob acme	ok WorkspaceChangeResponse
+delete workspace spare of acme as api member bob all	ok WorkspaceChangeResponse
+delete workspace spare of acme as api member bob beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+delete workspace spare of acme as api member machine all	denied FORBIDDEN_NOT_ASSIGNEE 403 Workspace 'spare' belongs to 'bob', not you. | Ask bob to enter it, or have an admin do it.
+delete workspace spare of acme as api viewer ada acme	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
+delete workspace spare of acme as api viewer ada all	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
+delete workspace spare of acme as api viewer ada beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+delete workspace spare of acme as api viewer bob acme	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
+delete workspace spare of acme as api viewer bob all	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
+delete workspace spare of acme as api viewer bob beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+delete workspace spare of acme as cli admin root all	ok WorkspaceChangeResponse
+delete workspace spare of acme as cli member ada acme	denied FORBIDDEN_NOT_ASSIGNEE 403 Workspace 'spare' belongs to 'bob', not you. | Ask bob to enter it, or have an admin do it.
+delete workspace spare of acme as cli member ada all	denied FORBIDDEN_NOT_ASSIGNEE 403 Workspace 'spare' belongs to 'bob', not you. | Ask bob to enter it, or have an admin do it.
+delete workspace spare of acme as cli member ada beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+delete workspace spare of acme as cli member bob acme	ok WorkspaceChangeResponse
+delete workspace spare of acme as cli member bob all	ok WorkspaceChangeResponse
+delete workspace spare of acme as cli member bob beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+delete workspace spare of acme as cli viewer ada acme	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
+delete workspace spare of acme as cli viewer ada all	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
+delete workspace spare of acme as cli viewer ada beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+delete workspace spare of acme as cli viewer bob acme	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
+delete workspace spare of acme as cli viewer bob all	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
+delete workspace spare of acme as cli viewer bob beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+delete workspace spare of acme as container admin root all	denied AGENT_LANE_FORBIDDEN 403 The credential in a project container cannot enter workspaces. | Do it from outside the container: with sail on the host, or in Mast.
+delete workspace spare of acme as container member ada acme	denied AGENT_LANE_FORBIDDEN 403 The credential in a project container cannot enter workspaces. | Do it from outside the container: with sail on the host, or in Mast.
+delete workspace spare of acme as container member ada all	denied AGENT_LANE_FORBIDDEN 403 The credential in a project container cannot enter workspaces. | Do it from outside the container: with sail on the host, or in Mast.
+delete workspace spare of acme as container member ada beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+delete workspace spare of acme as container member bob acme	denied AGENT_LANE_FORBIDDEN 403 The credential in a project container cannot enter workspaces. | Do it from outside the container: with sail on the host, or in Mast.
+delete workspace spare of acme as container member bob all	denied AGENT_LANE_FORBIDDEN 403 The credential in a project container cannot enter workspaces. | Do it from outside the container: with sail on the host, or in Mast.
+delete workspace spare of acme as container member bob beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+delete workspace spare of acme as container viewer ada acme	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
+delete workspace spare of acme as container viewer ada all	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
+delete workspace spare of acme as container viewer ada beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+delete workspace spare of acme as container viewer bob acme	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
+delete workspace spare of acme as container viewer bob all	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
+delete workspace spare of acme as container viewer bob beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+delete workspace spare of acme as room viewer ada-room acme	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
+delete workspace spare of acme as room viewer ada-room all	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
+delete workspace spare of acme as room viewer ada-room beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+delete workspace spare of acme as room viewer bob-room acme	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
+delete workspace spare of acme as room viewer bob-room all	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
+delete workspace spare of acme as room viewer bob-room beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+delete workspace try of acme as agent member ada-agent acme	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot enter workspaces. | Only an operator lane (CLI or API token) may do this.
+delete workspace try of acme as agent member ada-agent all	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot enter workspaces. | Only an operator lane (CLI or API token) may do this.
+delete workspace try of acme as agent member ada-agent beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+delete workspace try of acme as agent member bob-agent acme	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot enter workspaces. | Only an operator lane (CLI or API token) may do this.
+delete workspace try of acme as agent member bob-agent all	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot enter workspaces. | Only an operator lane (CLI or API token) may do this.
+delete workspace try of acme as agent member bob-agent beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+delete workspace try of acme as agent viewer ada-agent acme	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
+delete workspace try of acme as agent viewer ada-agent all	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
+delete workspace try of acme as agent viewer ada-agent beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+delete workspace try of acme as agent viewer bob-agent acme	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
+delete workspace try of acme as agent viewer bob-agent all	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
+delete workspace try of acme as agent viewer bob-agent beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+delete workspace try of acme as api admin root all	ok WorkspaceChangeResponse
+delete workspace try of acme as api member ada acme	ok WorkspaceChangeResponse
+delete workspace try of acme as api member ada all	ok WorkspaceChangeResponse
+delete workspace try of acme as api member ada beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+delete workspace try of acme as api member bob acme	denied FORBIDDEN_NOT_ASSIGNEE 403 Workspace 'try' belongs to 'ada', not you. | Ask ada to enter it, or have an admin do it.
+delete workspace try of acme as api member bob all	denied FORBIDDEN_NOT_ASSIGNEE 403 Workspace 'try' belongs to 'ada', not you. | Ask ada to enter it, or have an admin do it.
+delete workspace try of acme as api member bob beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+delete workspace try of acme as api member machine all	denied FORBIDDEN_NOT_ASSIGNEE 403 Workspace 'try' belongs to 'ada', not you. | Ask ada to enter it, or have an admin do it.
+delete workspace try of acme as api viewer ada acme	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
+delete workspace try of acme as api viewer ada all	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
+delete workspace try of acme as api viewer ada beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+delete workspace try of acme as api viewer bob acme	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
+delete workspace try of acme as api viewer bob all	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
+delete workspace try of acme as api viewer bob beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+delete workspace try of acme as cli admin root all	ok WorkspaceChangeResponse
+delete workspace try of acme as cli member ada acme	ok WorkspaceChangeResponse
+delete workspace try of acme as cli member ada all	ok WorkspaceChangeResponse
+delete workspace try of acme as cli member ada beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+delete workspace try of acme as cli member bob acme	denied FORBIDDEN_NOT_ASSIGNEE 403 Workspace 'try' belongs to 'ada', not you. | Ask ada to enter it, or have an admin do it.
+delete workspace try of acme as cli member bob all	denied FORBIDDEN_NOT_ASSIGNEE 403 Workspace 'try' belongs to 'ada', not you. | Ask ada to enter it, or have an admin do it.
+delete workspace try of acme as cli member bob beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+delete workspace try of acme as cli viewer ada acme	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
+delete workspace try of acme as cli viewer ada all	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
+delete workspace try of acme as cli viewer ada beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+delete workspace try of acme as cli viewer bob acme	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
+delete workspace try of acme as cli viewer bob all	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
+delete workspace try of acme as cli viewer bob beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+delete workspace try of acme as container admin root all	denied AGENT_LANE_FORBIDDEN 403 The credential in a project container cannot enter workspaces. | Do it from outside the container: with sail on the host, or in Mast.
+delete workspace try of acme as container member ada acme	denied AGENT_LANE_FORBIDDEN 403 The credential in a project container cannot enter workspaces. | Do it from outside the container: with sail on the host, or in Mast.
+delete workspace try of acme as container member ada all	denied AGENT_LANE_FORBIDDEN 403 The credential in a project container cannot enter workspaces. | Do it from outside the container: with sail on the host, or in Mast.
+delete workspace try of acme as container member ada beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+delete workspace try of acme as container member bob acme	denied AGENT_LANE_FORBIDDEN 403 The credential in a project container cannot enter workspaces. | Do it from outside the container: with sail on the host, or in Mast.
+delete workspace try of acme as container member bob all	denied AGENT_LANE_FORBIDDEN 403 The credential in a project container cannot enter workspaces. | Do it from outside the container: with sail on the host, or in Mast.
+delete workspace try of acme as container member bob beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+delete workspace try of acme as container viewer ada acme	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
+delete workspace try of acme as container viewer ada all	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
+delete workspace try of acme as container viewer ada beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+delete workspace try of acme as container viewer bob acme	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
+delete workspace try of acme as container viewer bob all	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
+delete workspace try of acme as container viewer bob beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+delete workspace try of acme as room viewer ada-room acme	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
+delete workspace try of acme as room viewer ada-room all	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
+delete workspace try of acme as room viewer ada-room beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+delete workspace try of acme as room viewer bob-room acme	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
+delete workspace try of acme as room viewer bob-room all	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
+delete workspace try of acme as room viewer bob-room beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
 dismiss finding-ada as agent member ada-agent acme	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot approve reviews. | Only an operator lane (CLI or API token) may do this.
 dismiss finding-ada as agent member ada-agent all	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot approve reviews. | Only an operator lane (CLI or API token) may do this.
 dismiss finding-ada as agent member ada-agent beta	denied NOT_FOUND 404 Review 'review-ada' not found. | 
@@ -2468,6 +2704,10 @@ fde ada asks a ticket to open a terminal in acme	ok TicketResponse
 fde ada asks a ticket to open a terminal in beta	ok TicketResponse
 fde ada asks a ticket to open a terminal in delta	ok TicketResponse
 fde ada asks a ticket to open a terminal in omega	denied NOT_FOUND 404 Project 'omega' is not in the catalog. Create it with 'sail project create omega', or sync it from main with 'sail sync'. | 
+fde ada asks a ticket to open a terminal in workspace ghost of acme	denied NOT_FOUND 404 Project 'acme' has no workspace 'ghost' on this box. List them with: sail project workspace list acme. | 
+fde ada asks a ticket to open a terminal in workspace loose of acme	ok TicketResponse
+fde ada asks a ticket to open a terminal in workspace spare of acme	ok TicketResponse
+fde ada asks a ticket to open a terminal in workspace try of acme	ok TicketResponse
 fde ada pins a terminal to attic on a node as cli admin root all	denied IOException Room 'attic' was not found. | 
 fde ada pins a terminal to attic on main as cli admin root all	denied IOException Room 'attic' was not found. | 
 fde ada pins a terminal to b-room on a node as cli admin root all	ok admitted
@@ -2488,6 +2728,10 @@ fde bob asks a ticket to open a terminal in acme	denied FORBIDDEN 403 Box 'ada' 
 fde bob asks a ticket to open a terminal in beta	denied FORBIDDEN 403 Box 'ada' belongs to 'ada', not you. Ask ada to operate it, or have an admin do it. | 
 fde bob asks a ticket to open a terminal in delta	denied FORBIDDEN 403 Box 'ada' belongs to 'ada', not you. Ask ada to operate it, or have an admin do it. | 
 fde bob asks a ticket to open a terminal in omega	denied FORBIDDEN 403 Box 'ada' belongs to 'ada', not you. Ask ada to operate it, or have an admin do it. | 
+fde bob asks a ticket to open a terminal in workspace ghost of acme	denied NOT_FOUND 404 Project 'acme' has no workspace 'ghost' on this box. List them with: sail project workspace list acme. | 
+fde bob asks a ticket to open a terminal in workspace loose of acme	denied FORBIDDEN 403 Workspace 'loose' has no owner, so only an admin may enter it. Have an admin enter it. | 
+fde bob asks a ticket to open a terminal in workspace spare of acme	ok TicketResponse
+fde bob asks a ticket to open a terminal in workspace try of acme	denied FORBIDDEN 403 Workspace 'try' belongs to 'ada', not you. Ask ada to enter it, or have an admin do it. | 
 fde bob pins a terminal to attic on a node as cli admin root all	denied IOException Room 'attic' was not found. | 
 fde bob pins a terminal to attic on main as cli admin root all	denied IOException Room 'attic' was not found. | 
 fde bob pins a terminal to b-room on a node as cli admin root all	denied Io Your credential is read-only and cannot post in rooms. | Ask an admin for a member or admin credential.
@@ -2506,6 +2750,10 @@ fde root asks a ticket to open a terminal in acme	ok TicketResponse
 fde root asks a ticket to open a terminal in beta	ok TicketResponse
 fde root asks a ticket to open a terminal in delta	ok TicketResponse
 fde root asks a ticket to open a terminal in omega	denied NOT_FOUND 404 Project 'omega' is not in the catalog. Create it with 'sail project create omega', or sync it from main with 'sail sync'. | 
+fde root asks a ticket to open a terminal in workspace ghost of acme	denied NOT_FOUND 404 Project 'acme' has no workspace 'ghost' on this box. List them with: sail project workspace list acme. | 
+fde root asks a ticket to open a terminal in workspace loose of acme	ok TicketResponse
+fde root asks a ticket to open a terminal in workspace spare of acme	ok TicketResponse
+fde root asks a ticket to open a terminal in workspace try of acme	ok TicketResponse
 fde root pins a terminal to attic on a node as cli admin root all	denied IOException Room 'attic' was not found. | 
 fde root pins a terminal to attic on main as cli admin root all	denied IOException Room 'attic' was not found. | 
 fde root pins a terminal to b-room on a node as cli admin root all	denied Io Your credential is read-only and cannot post in rooms. | Ask an admin for a member or admin credential.
@@ -2524,6 +2772,10 @@ fde sam asks a ticket to open a terminal in acme	denied FORBIDDEN 403 Box 'ada' 
 fde sam asks a ticket to open a terminal in beta	denied FORBIDDEN 403 Box 'ada' belongs to 'ada', not you. Ask ada to operate it, or have an admin do it. | 
 fde sam asks a ticket to open a terminal in delta	denied FORBIDDEN 403 Box 'ada' belongs to 'ada', not you. Ask ada to operate it, or have an admin do it. | 
 fde sam asks a ticket to open a terminal in omega	denied FORBIDDEN 403 Box 'ada' belongs to 'ada', not you. Ask ada to operate it, or have an admin do it. | 
+fde sam asks a ticket to open a terminal in workspace ghost of acme	denied NOT_FOUND 404 Project 'acme' is not in the catalog. Create it with 'sail project create acme', or sync it from main with 'sail sync'. | 
+fde sam asks a ticket to open a terminal in workspace loose of acme	denied NOT_FOUND 404 Project 'acme' is not in the catalog. Create it with 'sail project create acme', or sync it from main with 'sail sync'. | 
+fde sam asks a ticket to open a terminal in workspace spare of acme	denied NOT_FOUND 404 Project 'acme' is not in the catalog. Create it with 'sail project create acme', or sync it from main with 'sail sync'. | 
+fde sam asks a ticket to open a terminal in workspace try of acme	denied NOT_FOUND 404 Project 'acme' is not in the catalog. Create it with 'sail project create acme', or sync it from main with 'sail sync'. | 
 fde sam pins a terminal to attic on a node as cli admin root all	denied IOException Room 'attic' was not found. | 
 fde sam pins a terminal to attic on main as cli admin root all	denied IOException Room 'attic' was not found. | 
 fde sam pins a terminal to b-room on a node as cli admin root all	denied Io Your credential is read-only and cannot post in rooms. | Ask an admin for a member or admin credential.
@@ -2542,6 +2794,10 @@ fde vic asks a ticket to open a terminal in acme	denied FORBIDDEN 403 Box 'ada' 
 fde vic asks a ticket to open a terminal in beta	denied FORBIDDEN 403 Box 'ada' belongs to 'ada', not you. Ask ada to operate it, or have an admin do it. | 
 fde vic asks a ticket to open a terminal in delta	denied FORBIDDEN 403 Box 'ada' belongs to 'ada', not you. Ask ada to operate it, or have an admin do it. | 
 fde vic asks a ticket to open a terminal in omega	denied FORBIDDEN 403 Box 'ada' belongs to 'ada', not you. Ask ada to operate it, or have an admin do it. | 
+fde vic asks a ticket to open a terminal in workspace ghost of acme	denied NOT_FOUND 404 Project 'acme' has no workspace 'ghost' on this box. List them with: sail project workspace list acme. | 
+fde vic asks a ticket to open a terminal in workspace loose of acme	denied FORBIDDEN 403 Your credential is read-only and cannot enter workspaces. Ask an admin for a member or admin credential. | 
+fde vic asks a ticket to open a terminal in workspace spare of acme	denied FORBIDDEN 403 Your credential is read-only and cannot enter workspaces. Ask an admin for a member or admin credential. | 
+fde vic asks a ticket to open a terminal in workspace try of acme	denied FORBIDDEN 403 Your credential is read-only and cannot enter workspaces. Ask an admin for a member or admin credential. | 
 fde vic pins a terminal to attic on a node as cli admin root all	denied IOException Room 'attic' was not found. | 
 fde vic pins a terminal to attic on main as cli admin root all	denied IOException Room 'attic' was not found. | 
 fde vic pins a terminal to b-room on a node as cli admin root all	denied Io Your credential is read-only and cannot post in rooms. | Ask an admin for a member or admin credential.
@@ -3890,63 +4146,63 @@ list specs of omega as room viewer ada-room beta	denied PROJECT_NOT_IN_CATALOG 4
 list specs of omega as room viewer bob-room acme	denied PROJECT_NOT_IN_CATALOG 404 Project 'omega' is not in the catalog. | Create it with 'sail project create omega', or sync it from main with 'sail sync'.
 list specs of omega as room viewer bob-room all	denied PROJECT_NOT_IN_CATALOG 404 Project 'omega' is not in the catalog. | Create it with 'sail project create omega', or sync it from main with 'sail sync'.
 list specs of omega as room viewer bob-room beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'omega' is not in the catalog. | Create it with 'sail project create omega', or sync it from main with 'sail sync'.
-list the workspaces of acme as agent member ada-agent acme	ok WorkspaceListResponse main
-list the workspaces of acme as agent member ada-agent all	ok WorkspaceListResponse main
+list the workspaces of acme as agent member ada-agent acme	ok WorkspaceListResponse loose, main, spare, try
+list the workspaces of acme as agent member ada-agent all	ok WorkspaceListResponse loose, main, spare, try
 list the workspaces of acme as agent member ada-agent beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
-list the workspaces of acme as agent member bob-agent acme	ok WorkspaceListResponse main
-list the workspaces of acme as agent member bob-agent all	ok WorkspaceListResponse main
+list the workspaces of acme as agent member bob-agent acme	ok WorkspaceListResponse loose, main, spare, try
+list the workspaces of acme as agent member bob-agent all	ok WorkspaceListResponse loose, main, spare, try
 list the workspaces of acme as agent member bob-agent beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
-list the workspaces of acme as agent viewer ada-agent acme	ok WorkspaceListResponse main
-list the workspaces of acme as agent viewer ada-agent all	ok WorkspaceListResponse main
+list the workspaces of acme as agent viewer ada-agent acme	ok WorkspaceListResponse loose, main, spare, try
+list the workspaces of acme as agent viewer ada-agent all	ok WorkspaceListResponse loose, main, spare, try
 list the workspaces of acme as agent viewer ada-agent beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
-list the workspaces of acme as agent viewer bob-agent acme	ok WorkspaceListResponse main
-list the workspaces of acme as agent viewer bob-agent all	ok WorkspaceListResponse main
+list the workspaces of acme as agent viewer bob-agent acme	ok WorkspaceListResponse loose, main, spare, try
+list the workspaces of acme as agent viewer bob-agent all	ok WorkspaceListResponse loose, main, spare, try
 list the workspaces of acme as agent viewer bob-agent beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
-list the workspaces of acme as api admin root all	ok WorkspaceListResponse main
-list the workspaces of acme as api member ada acme	ok WorkspaceListResponse main
-list the workspaces of acme as api member ada all	ok WorkspaceListResponse main
+list the workspaces of acme as api admin root all	ok WorkspaceListResponse loose, main, spare, try
+list the workspaces of acme as api member ada acme	ok WorkspaceListResponse loose, main, spare, try
+list the workspaces of acme as api member ada all	ok WorkspaceListResponse loose, main, spare, try
 list the workspaces of acme as api member ada beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
-list the workspaces of acme as api member bob acme	ok WorkspaceListResponse main
-list the workspaces of acme as api member bob all	ok WorkspaceListResponse main
+list the workspaces of acme as api member bob acme	ok WorkspaceListResponse loose, main, spare, try
+list the workspaces of acme as api member bob all	ok WorkspaceListResponse loose, main, spare, try
 list the workspaces of acme as api member bob beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
-list the workspaces of acme as api member machine all	ok WorkspaceListResponse main
-list the workspaces of acme as api viewer ada acme	ok WorkspaceListResponse main
-list the workspaces of acme as api viewer ada all	ok WorkspaceListResponse main
+list the workspaces of acme as api member machine all	ok WorkspaceListResponse loose, main, spare, try
+list the workspaces of acme as api viewer ada acme	ok WorkspaceListResponse loose, main, spare, try
+list the workspaces of acme as api viewer ada all	ok WorkspaceListResponse loose, main, spare, try
 list the workspaces of acme as api viewer ada beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
-list the workspaces of acme as api viewer bob acme	ok WorkspaceListResponse main
-list the workspaces of acme as api viewer bob all	ok WorkspaceListResponse main
+list the workspaces of acme as api viewer bob acme	ok WorkspaceListResponse loose, main, spare, try
+list the workspaces of acme as api viewer bob all	ok WorkspaceListResponse loose, main, spare, try
 list the workspaces of acme as api viewer bob beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
-list the workspaces of acme as cli admin root all	ok WorkspaceListResponse main
-list the workspaces of acme as cli member ada acme	ok WorkspaceListResponse main
-list the workspaces of acme as cli member ada all	ok WorkspaceListResponse main
+list the workspaces of acme as cli admin root all	ok WorkspaceListResponse loose, main, spare, try
+list the workspaces of acme as cli member ada acme	ok WorkspaceListResponse loose, main, spare, try
+list the workspaces of acme as cli member ada all	ok WorkspaceListResponse loose, main, spare, try
 list the workspaces of acme as cli member ada beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
-list the workspaces of acme as cli member bob acme	ok WorkspaceListResponse main
-list the workspaces of acme as cli member bob all	ok WorkspaceListResponse main
+list the workspaces of acme as cli member bob acme	ok WorkspaceListResponse loose, main, spare, try
+list the workspaces of acme as cli member bob all	ok WorkspaceListResponse loose, main, spare, try
 list the workspaces of acme as cli member bob beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
-list the workspaces of acme as cli viewer ada acme	ok WorkspaceListResponse main
-list the workspaces of acme as cli viewer ada all	ok WorkspaceListResponse main
+list the workspaces of acme as cli viewer ada acme	ok WorkspaceListResponse loose, main, spare, try
+list the workspaces of acme as cli viewer ada all	ok WorkspaceListResponse loose, main, spare, try
 list the workspaces of acme as cli viewer ada beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
-list the workspaces of acme as cli viewer bob acme	ok WorkspaceListResponse main
-list the workspaces of acme as cli viewer bob all	ok WorkspaceListResponse main
+list the workspaces of acme as cli viewer bob acme	ok WorkspaceListResponse loose, main, spare, try
+list the workspaces of acme as cli viewer bob all	ok WorkspaceListResponse loose, main, spare, try
 list the workspaces of acme as cli viewer bob beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
-list the workspaces of acme as container admin root all	ok WorkspaceListResponse main
-list the workspaces of acme as container member ada acme	ok WorkspaceListResponse main
-list the workspaces of acme as container member ada all	ok WorkspaceListResponse main
+list the workspaces of acme as container admin root all	ok WorkspaceListResponse loose, main, spare, try
+list the workspaces of acme as container member ada acme	ok WorkspaceListResponse loose, main, spare, try
+list the workspaces of acme as container member ada all	ok WorkspaceListResponse loose, main, spare, try
 list the workspaces of acme as container member ada beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
-list the workspaces of acme as container member bob acme	ok WorkspaceListResponse main
-list the workspaces of acme as container member bob all	ok WorkspaceListResponse main
+list the workspaces of acme as container member bob acme	ok WorkspaceListResponse loose, main, spare, try
+list the workspaces of acme as container member bob all	ok WorkspaceListResponse loose, main, spare, try
 list the workspaces of acme as container member bob beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
-list the workspaces of acme as container viewer ada acme	ok WorkspaceListResponse main
-list the workspaces of acme as container viewer ada all	ok WorkspaceListResponse main
+list the workspaces of acme as container viewer ada acme	ok WorkspaceListResponse loose, main, spare, try
+list the workspaces of acme as container viewer ada all	ok WorkspaceListResponse loose, main, spare, try
 list the workspaces of acme as container viewer ada beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
-list the workspaces of acme as container viewer bob acme	ok WorkspaceListResponse main
-list the workspaces of acme as container viewer bob all	ok WorkspaceListResponse main
+list the workspaces of acme as container viewer bob acme	ok WorkspaceListResponse loose, main, spare, try
+list the workspaces of acme as container viewer bob all	ok WorkspaceListResponse loose, main, spare, try
 list the workspaces of acme as container viewer bob beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
-list the workspaces of acme as room viewer ada-room acme	ok WorkspaceListResponse main
-list the workspaces of acme as room viewer ada-room all	ok WorkspaceListResponse main
+list the workspaces of acme as room viewer ada-room acme	ok WorkspaceListResponse loose, main, spare, try
+list the workspaces of acme as room viewer ada-room all	ok WorkspaceListResponse loose, main, spare, try
 list the workspaces of acme as room viewer ada-room beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
-list the workspaces of acme as room viewer bob-room acme	ok WorkspaceListResponse main
-list the workspaces of acme as room viewer bob-room all	ok WorkspaceListResponse main
+list the workspaces of acme as room viewer bob-room acme	ok WorkspaceListResponse loose, main, spare, try
+list the workspaces of acme as room viewer bob-room all	ok WorkspaceListResponse loose, main, spare, try
 list the workspaces of acme as room viewer bob-room beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
 list the workspaces of beta as agent member ada-agent acme	denied PROJECT_NOT_IN_CATALOG 404 Project 'beta' is not in the catalog. | Create it with 'sail project create beta', or sync it from main with 'sail sync'.
 list the workspaces of beta as agent member ada-agent all	ok WorkspaceListResponse main
@@ -4122,6 +4378,64 @@ list the workspaces of omega as room viewer ada-room beta	denied PROJECT_NOT_IN_
 list the workspaces of omega as room viewer bob-room acme	denied PROJECT_NOT_IN_CATALOG 404 Project 'omega' is not in the catalog. | Create it with 'sail project create omega', or sync it from main with 'sail sync'.
 list the workspaces of omega as room viewer bob-room all	denied PROJECT_NOT_IN_CATALOG 404 Project 'omega' is not in the catalog. | Create it with 'sail project create omega', or sync it from main with 'sail sync'.
 list the workspaces of omega as room viewer bob-room beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'omega' is not in the catalog. | Create it with 'sail project create omega', or sync it from main with 'sail sync'.
+make a workspace of acme as agent member ada-agent acme	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot enter workspaces. | Only an operator lane (CLI or API token) may do this.
+make a workspace of acme as agent member ada-agent all	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot enter workspaces. | Only an operator lane (CLI or API token) may do this.
+make a workspace of acme as agent member ada-agent beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+make a workspace of acme as agent member bob-agent acme	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot enter workspaces. | Only an operator lane (CLI or API token) may do this.
+make a workspace of acme as agent member bob-agent all	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot enter workspaces. | Only an operator lane (CLI or API token) may do this.
+make a workspace of acme as agent member bob-agent beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+make a workspace of acme as agent viewer ada-agent acme	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
+make a workspace of acme as agent viewer ada-agent all	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
+make a workspace of acme as agent viewer ada-agent beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+make a workspace of acme as agent viewer bob-agent acme	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
+make a workspace of acme as agent viewer bob-agent all	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
+make a workspace of acme as agent viewer bob-agent beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+make a workspace of acme as api admin root all	denied CONFLICT 409 acme has no template yet: | sail project template build acme.
+make a workspace of acme as api member ada acme	denied CONFLICT 409 acme has no template yet: | sail project template build acme.
+make a workspace of acme as api member ada all	denied CONFLICT 409 acme has no template yet: | sail project template build acme.
+make a workspace of acme as api member ada beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+make a workspace of acme as api member bob acme	denied CONFLICT 409 acme has no template yet: | sail project template build acme.
+make a workspace of acme as api member bob all	denied CONFLICT 409 acme has no template yet: | sail project template build acme.
+make a workspace of acme as api member bob beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+make a workspace of acme as api member machine all	denied FORBIDDEN_NOT_ASSIGNEE 403 Workspace 'new' has no owner, so only an admin may enter it. | Have an admin enter it.
+make a workspace of acme as api viewer ada acme	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
+make a workspace of acme as api viewer ada all	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
+make a workspace of acme as api viewer ada beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+make a workspace of acme as api viewer bob acme	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
+make a workspace of acme as api viewer bob all	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
+make a workspace of acme as api viewer bob beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+make a workspace of acme as cli admin root all	denied CONFLICT 409 acme has no template yet: | sail project template build acme.
+make a workspace of acme as cli member ada acme	denied CONFLICT 409 acme has no template yet: | sail project template build acme.
+make a workspace of acme as cli member ada all	denied CONFLICT 409 acme has no template yet: | sail project template build acme.
+make a workspace of acme as cli member ada beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+make a workspace of acme as cli member bob acme	denied CONFLICT 409 acme has no template yet: | sail project template build acme.
+make a workspace of acme as cli member bob all	denied CONFLICT 409 acme has no template yet: | sail project template build acme.
+make a workspace of acme as cli member bob beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+make a workspace of acme as cli viewer ada acme	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
+make a workspace of acme as cli viewer ada all	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
+make a workspace of acme as cli viewer ada beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+make a workspace of acme as cli viewer bob acme	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
+make a workspace of acme as cli viewer bob all	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
+make a workspace of acme as cli viewer bob beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+make a workspace of acme as container admin root all	denied AGENT_LANE_FORBIDDEN 403 The credential in a project container cannot enter workspaces. | Do it from outside the container: with sail on the host, or in Mast.
+make a workspace of acme as container member ada acme	denied AGENT_LANE_FORBIDDEN 403 The credential in a project container cannot enter workspaces. | Do it from outside the container: with sail on the host, or in Mast.
+make a workspace of acme as container member ada all	denied AGENT_LANE_FORBIDDEN 403 The credential in a project container cannot enter workspaces. | Do it from outside the container: with sail on the host, or in Mast.
+make a workspace of acme as container member ada beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+make a workspace of acme as container member bob acme	denied AGENT_LANE_FORBIDDEN 403 The credential in a project container cannot enter workspaces. | Do it from outside the container: with sail on the host, or in Mast.
+make a workspace of acme as container member bob all	denied AGENT_LANE_FORBIDDEN 403 The credential in a project container cannot enter workspaces. | Do it from outside the container: with sail on the host, or in Mast.
+make a workspace of acme as container member bob beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+make a workspace of acme as container viewer ada acme	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
+make a workspace of acme as container viewer ada all	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
+make a workspace of acme as container viewer ada beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+make a workspace of acme as container viewer bob acme	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
+make a workspace of acme as container viewer bob all	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
+make a workspace of acme as container viewer bob beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+make a workspace of acme as room viewer ada-room acme	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
+make a workspace of acme as room viewer ada-room all	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
+make a workspace of acme as room viewer ada-room beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+make a workspace of acme as room viewer bob-room acme	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
+make a workspace of acme as room viewer bob-room all	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
+make a workspace of acme as room viewer bob-room beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
 post in b-room as agent member ada-agent acme	denied ROOM_NOT_FOUND 404 Room 'b-room' was not found. | 
 post in b-room as agent member ada-agent all	denied FORBIDDEN_NOT_ASSIGNEE 403 'claude/019fee00-0000-7000-8000-0000000ada01' may post only in its own work, not in 'b-room'. | An agent acts only on the work sail launched it for; draft a follow-up spec for anything else.
 post in b-room as agent member ada-agent beta	denied FORBIDDEN_NOT_ASSIGNEE 403 'claude/019fee00-0000-7000-8000-0000000ada01' may post only in its own work, not in 'b-room'. | An agent acts only on the work sail launched it for; draft a follow-up spec for anything else.
@@ -17836,6 +18150,238 @@ serve the stack of omega as room viewer ada-room beta	denied PROJECT_NOT_IN_CATA
 serve the stack of omega as room viewer bob-room acme	denied PROJECT_NOT_IN_CATALOG 404 Project 'omega' is not in the catalog. | Create it with 'sail project create omega', or sync it from main with 'sail sync'.
 serve the stack of omega as room viewer bob-room all	denied PROJECT_NOT_IN_CATALOG 404 Project 'omega' is not in the catalog. | Create it with 'sail project create omega', or sync it from main with 'sail sync'.
 serve the stack of omega as room viewer bob-room beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'omega' is not in the catalog. | Create it with 'sail project create omega', or sync it from main with 'sail sync'.
+start workspace ghost of acme as agent member ada-agent acme	denied NOT_FOUND 404 Project 'acme' has no workspace 'ghost' on this box. | List them with: sail project workspace list acme.
+start workspace ghost of acme as agent member ada-agent all	denied NOT_FOUND 404 Project 'acme' has no workspace 'ghost' on this box. | List them with: sail project workspace list acme.
+start workspace ghost of acme as agent member ada-agent beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+start workspace ghost of acme as agent member bob-agent acme	denied NOT_FOUND 404 Project 'acme' has no workspace 'ghost' on this box. | List them with: sail project workspace list acme.
+start workspace ghost of acme as agent member bob-agent all	denied NOT_FOUND 404 Project 'acme' has no workspace 'ghost' on this box. | List them with: sail project workspace list acme.
+start workspace ghost of acme as agent member bob-agent beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+start workspace ghost of acme as agent viewer ada-agent acme	denied NOT_FOUND 404 Project 'acme' has no workspace 'ghost' on this box. | List them with: sail project workspace list acme.
+start workspace ghost of acme as agent viewer ada-agent all	denied NOT_FOUND 404 Project 'acme' has no workspace 'ghost' on this box. | List them with: sail project workspace list acme.
+start workspace ghost of acme as agent viewer ada-agent beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+start workspace ghost of acme as agent viewer bob-agent acme	denied NOT_FOUND 404 Project 'acme' has no workspace 'ghost' on this box. | List them with: sail project workspace list acme.
+start workspace ghost of acme as agent viewer bob-agent all	denied NOT_FOUND 404 Project 'acme' has no workspace 'ghost' on this box. | List them with: sail project workspace list acme.
+start workspace ghost of acme as agent viewer bob-agent beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+start workspace ghost of acme as api admin root all	denied NOT_FOUND 404 Project 'acme' has no workspace 'ghost' on this box. | List them with: sail project workspace list acme.
+start workspace ghost of acme as api member ada acme	denied NOT_FOUND 404 Project 'acme' has no workspace 'ghost' on this box. | List them with: sail project workspace list acme.
+start workspace ghost of acme as api member ada all	denied NOT_FOUND 404 Project 'acme' has no workspace 'ghost' on this box. | List them with: sail project workspace list acme.
+start workspace ghost of acme as api member ada beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+start workspace ghost of acme as api member bob acme	denied NOT_FOUND 404 Project 'acme' has no workspace 'ghost' on this box. | List them with: sail project workspace list acme.
+start workspace ghost of acme as api member bob all	denied NOT_FOUND 404 Project 'acme' has no workspace 'ghost' on this box. | List them with: sail project workspace list acme.
+start workspace ghost of acme as api member bob beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+start workspace ghost of acme as api member machine all	denied NOT_FOUND 404 Project 'acme' has no workspace 'ghost' on this box. | List them with: sail project workspace list acme.
+start workspace ghost of acme as api viewer ada acme	denied NOT_FOUND 404 Project 'acme' has no workspace 'ghost' on this box. | List them with: sail project workspace list acme.
+start workspace ghost of acme as api viewer ada all	denied NOT_FOUND 404 Project 'acme' has no workspace 'ghost' on this box. | List them with: sail project workspace list acme.
+start workspace ghost of acme as api viewer ada beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+start workspace ghost of acme as api viewer bob acme	denied NOT_FOUND 404 Project 'acme' has no workspace 'ghost' on this box. | List them with: sail project workspace list acme.
+start workspace ghost of acme as api viewer bob all	denied NOT_FOUND 404 Project 'acme' has no workspace 'ghost' on this box. | List them with: sail project workspace list acme.
+start workspace ghost of acme as api viewer bob beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+start workspace ghost of acme as cli admin root all	denied NOT_FOUND 404 Project 'acme' has no workspace 'ghost' on this box. | List them with: sail project workspace list acme.
+start workspace ghost of acme as cli member ada acme	denied NOT_FOUND 404 Project 'acme' has no workspace 'ghost' on this box. | List them with: sail project workspace list acme.
+start workspace ghost of acme as cli member ada all	denied NOT_FOUND 404 Project 'acme' has no workspace 'ghost' on this box. | List them with: sail project workspace list acme.
+start workspace ghost of acme as cli member ada beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+start workspace ghost of acme as cli member bob acme	denied NOT_FOUND 404 Project 'acme' has no workspace 'ghost' on this box. | List them with: sail project workspace list acme.
+start workspace ghost of acme as cli member bob all	denied NOT_FOUND 404 Project 'acme' has no workspace 'ghost' on this box. | List them with: sail project workspace list acme.
+start workspace ghost of acme as cli member bob beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+start workspace ghost of acme as cli viewer ada acme	denied NOT_FOUND 404 Project 'acme' has no workspace 'ghost' on this box. | List them with: sail project workspace list acme.
+start workspace ghost of acme as cli viewer ada all	denied NOT_FOUND 404 Project 'acme' has no workspace 'ghost' on this box. | List them with: sail project workspace list acme.
+start workspace ghost of acme as cli viewer ada beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+start workspace ghost of acme as cli viewer bob acme	denied NOT_FOUND 404 Project 'acme' has no workspace 'ghost' on this box. | List them with: sail project workspace list acme.
+start workspace ghost of acme as cli viewer bob all	denied NOT_FOUND 404 Project 'acme' has no workspace 'ghost' on this box. | List them with: sail project workspace list acme.
+start workspace ghost of acme as cli viewer bob beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+start workspace ghost of acme as container admin root all	denied NOT_FOUND 404 Project 'acme' has no workspace 'ghost' on this box. | List them with: sail project workspace list acme.
+start workspace ghost of acme as container member ada acme	denied NOT_FOUND 404 Project 'acme' has no workspace 'ghost' on this box. | List them with: sail project workspace list acme.
+start workspace ghost of acme as container member ada all	denied NOT_FOUND 404 Project 'acme' has no workspace 'ghost' on this box. | List them with: sail project workspace list acme.
+start workspace ghost of acme as container member ada beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+start workspace ghost of acme as container member bob acme	denied NOT_FOUND 404 Project 'acme' has no workspace 'ghost' on this box. | List them with: sail project workspace list acme.
+start workspace ghost of acme as container member bob all	denied NOT_FOUND 404 Project 'acme' has no workspace 'ghost' on this box. | List them with: sail project workspace list acme.
+start workspace ghost of acme as container member bob beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+start workspace ghost of acme as container viewer ada acme	denied NOT_FOUND 404 Project 'acme' has no workspace 'ghost' on this box. | List them with: sail project workspace list acme.
+start workspace ghost of acme as container viewer ada all	denied NOT_FOUND 404 Project 'acme' has no workspace 'ghost' on this box. | List them with: sail project workspace list acme.
+start workspace ghost of acme as container viewer ada beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+start workspace ghost of acme as container viewer bob acme	denied NOT_FOUND 404 Project 'acme' has no workspace 'ghost' on this box. | List them with: sail project workspace list acme.
+start workspace ghost of acme as container viewer bob all	denied NOT_FOUND 404 Project 'acme' has no workspace 'ghost' on this box. | List them with: sail project workspace list acme.
+start workspace ghost of acme as container viewer bob beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+start workspace ghost of acme as room viewer ada-room acme	denied NOT_FOUND 404 Project 'acme' has no workspace 'ghost' on this box. | List them with: sail project workspace list acme.
+start workspace ghost of acme as room viewer ada-room all	denied NOT_FOUND 404 Project 'acme' has no workspace 'ghost' on this box. | List them with: sail project workspace list acme.
+start workspace ghost of acme as room viewer ada-room beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+start workspace ghost of acme as room viewer bob-room acme	denied NOT_FOUND 404 Project 'acme' has no workspace 'ghost' on this box. | List them with: sail project workspace list acme.
+start workspace ghost of acme as room viewer bob-room all	denied NOT_FOUND 404 Project 'acme' has no workspace 'ghost' on this box. | List them with: sail project workspace list acme.
+start workspace ghost of acme as room viewer bob-room beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+start workspace loose of acme as agent member ada-agent acme	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot enter workspaces. | Only an operator lane (CLI or API token) may do this.
+start workspace loose of acme as agent member ada-agent all	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot enter workspaces. | Only an operator lane (CLI or API token) may do this.
+start workspace loose of acme as agent member ada-agent beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+start workspace loose of acme as agent member bob-agent acme	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot enter workspaces. | Only an operator lane (CLI or API token) may do this.
+start workspace loose of acme as agent member bob-agent all	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot enter workspaces. | Only an operator lane (CLI or API token) may do this.
+start workspace loose of acme as agent member bob-agent beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+start workspace loose of acme as agent viewer ada-agent acme	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
+start workspace loose of acme as agent viewer ada-agent all	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
+start workspace loose of acme as agent viewer ada-agent beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+start workspace loose of acme as agent viewer bob-agent acme	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
+start workspace loose of acme as agent viewer bob-agent all	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
+start workspace loose of acme as agent viewer bob-agent beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+start workspace loose of acme as api admin root all	ok WorkspaceChangeResponse
+start workspace loose of acme as api member ada acme	denied FORBIDDEN_NOT_ASSIGNEE 403 Workspace 'loose' has no owner, so only an admin may enter it. | Have an admin enter it.
+start workspace loose of acme as api member ada all	denied FORBIDDEN_NOT_ASSIGNEE 403 Workspace 'loose' has no owner, so only an admin may enter it. | Have an admin enter it.
+start workspace loose of acme as api member ada beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+start workspace loose of acme as api member bob acme	denied FORBIDDEN_NOT_ASSIGNEE 403 Workspace 'loose' has no owner, so only an admin may enter it. | Have an admin enter it.
+start workspace loose of acme as api member bob all	denied FORBIDDEN_NOT_ASSIGNEE 403 Workspace 'loose' has no owner, so only an admin may enter it. | Have an admin enter it.
+start workspace loose of acme as api member bob beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+start workspace loose of acme as api member machine all	denied FORBIDDEN_NOT_ASSIGNEE 403 Workspace 'loose' has no owner, so only an admin may enter it. | Have an admin enter it.
+start workspace loose of acme as api viewer ada acme	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
+start workspace loose of acme as api viewer ada all	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
+start workspace loose of acme as api viewer ada beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+start workspace loose of acme as api viewer bob acme	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
+start workspace loose of acme as api viewer bob all	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
+start workspace loose of acme as api viewer bob beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+start workspace loose of acme as cli admin root all	ok WorkspaceChangeResponse
+start workspace loose of acme as cli member ada acme	denied FORBIDDEN_NOT_ASSIGNEE 403 Workspace 'loose' has no owner, so only an admin may enter it. | Have an admin enter it.
+start workspace loose of acme as cli member ada all	denied FORBIDDEN_NOT_ASSIGNEE 403 Workspace 'loose' has no owner, so only an admin may enter it. | Have an admin enter it.
+start workspace loose of acme as cli member ada beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+start workspace loose of acme as cli member bob acme	denied FORBIDDEN_NOT_ASSIGNEE 403 Workspace 'loose' has no owner, so only an admin may enter it. | Have an admin enter it.
+start workspace loose of acme as cli member bob all	denied FORBIDDEN_NOT_ASSIGNEE 403 Workspace 'loose' has no owner, so only an admin may enter it. | Have an admin enter it.
+start workspace loose of acme as cli member bob beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+start workspace loose of acme as cli viewer ada acme	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
+start workspace loose of acme as cli viewer ada all	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
+start workspace loose of acme as cli viewer ada beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+start workspace loose of acme as cli viewer bob acme	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
+start workspace loose of acme as cli viewer bob all	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
+start workspace loose of acme as cli viewer bob beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+start workspace loose of acme as container admin root all	denied AGENT_LANE_FORBIDDEN 403 The credential in a project container cannot enter workspaces. | Do it from outside the container: with sail on the host, or in Mast.
+start workspace loose of acme as container member ada acme	denied AGENT_LANE_FORBIDDEN 403 The credential in a project container cannot enter workspaces. | Do it from outside the container: with sail on the host, or in Mast.
+start workspace loose of acme as container member ada all	denied AGENT_LANE_FORBIDDEN 403 The credential in a project container cannot enter workspaces. | Do it from outside the container: with sail on the host, or in Mast.
+start workspace loose of acme as container member ada beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+start workspace loose of acme as container member bob acme	denied AGENT_LANE_FORBIDDEN 403 The credential in a project container cannot enter workspaces. | Do it from outside the container: with sail on the host, or in Mast.
+start workspace loose of acme as container member bob all	denied AGENT_LANE_FORBIDDEN 403 The credential in a project container cannot enter workspaces. | Do it from outside the container: with sail on the host, or in Mast.
+start workspace loose of acme as container member bob beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+start workspace loose of acme as container viewer ada acme	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
+start workspace loose of acme as container viewer ada all	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
+start workspace loose of acme as container viewer ada beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+start workspace loose of acme as container viewer bob acme	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
+start workspace loose of acme as container viewer bob all	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
+start workspace loose of acme as container viewer bob beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+start workspace loose of acme as room viewer ada-room acme	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
+start workspace loose of acme as room viewer ada-room all	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
+start workspace loose of acme as room viewer ada-room beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+start workspace loose of acme as room viewer bob-room acme	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
+start workspace loose of acme as room viewer bob-room all	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
+start workspace loose of acme as room viewer bob-room beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+start workspace spare of acme as agent member ada-agent acme	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot enter workspaces. | Only an operator lane (CLI or API token) may do this.
+start workspace spare of acme as agent member ada-agent all	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot enter workspaces. | Only an operator lane (CLI or API token) may do this.
+start workspace spare of acme as agent member ada-agent beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+start workspace spare of acme as agent member bob-agent acme	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot enter workspaces. | Only an operator lane (CLI or API token) may do this.
+start workspace spare of acme as agent member bob-agent all	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot enter workspaces. | Only an operator lane (CLI or API token) may do this.
+start workspace spare of acme as agent member bob-agent beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+start workspace spare of acme as agent viewer ada-agent acme	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
+start workspace spare of acme as agent viewer ada-agent all	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
+start workspace spare of acme as agent viewer ada-agent beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+start workspace spare of acme as agent viewer bob-agent acme	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
+start workspace spare of acme as agent viewer bob-agent all	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
+start workspace spare of acme as agent viewer bob-agent beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+start workspace spare of acme as api admin root all	ok WorkspaceChangeResponse
+start workspace spare of acme as api member ada acme	denied FORBIDDEN_NOT_ASSIGNEE 403 Workspace 'spare' belongs to 'bob', not you. | Ask bob to enter it, or have an admin do it.
+start workspace spare of acme as api member ada all	denied FORBIDDEN_NOT_ASSIGNEE 403 Workspace 'spare' belongs to 'bob', not you. | Ask bob to enter it, or have an admin do it.
+start workspace spare of acme as api member ada beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+start workspace spare of acme as api member bob acme	ok WorkspaceChangeResponse
+start workspace spare of acme as api member bob all	ok WorkspaceChangeResponse
+start workspace spare of acme as api member bob beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+start workspace spare of acme as api member machine all	denied FORBIDDEN_NOT_ASSIGNEE 403 Workspace 'spare' belongs to 'bob', not you. | Ask bob to enter it, or have an admin do it.
+start workspace spare of acme as api viewer ada acme	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
+start workspace spare of acme as api viewer ada all	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
+start workspace spare of acme as api viewer ada beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+start workspace spare of acme as api viewer bob acme	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
+start workspace spare of acme as api viewer bob all	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
+start workspace spare of acme as api viewer bob beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+start workspace spare of acme as cli admin root all	ok WorkspaceChangeResponse
+start workspace spare of acme as cli member ada acme	denied FORBIDDEN_NOT_ASSIGNEE 403 Workspace 'spare' belongs to 'bob', not you. | Ask bob to enter it, or have an admin do it.
+start workspace spare of acme as cli member ada all	denied FORBIDDEN_NOT_ASSIGNEE 403 Workspace 'spare' belongs to 'bob', not you. | Ask bob to enter it, or have an admin do it.
+start workspace spare of acme as cli member ada beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+start workspace spare of acme as cli member bob acme	ok WorkspaceChangeResponse
+start workspace spare of acme as cli member bob all	ok WorkspaceChangeResponse
+start workspace spare of acme as cli member bob beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+start workspace spare of acme as cli viewer ada acme	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
+start workspace spare of acme as cli viewer ada all	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
+start workspace spare of acme as cli viewer ada beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+start workspace spare of acme as cli viewer bob acme	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
+start workspace spare of acme as cli viewer bob all	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
+start workspace spare of acme as cli viewer bob beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+start workspace spare of acme as container admin root all	denied AGENT_LANE_FORBIDDEN 403 The credential in a project container cannot enter workspaces. | Do it from outside the container: with sail on the host, or in Mast.
+start workspace spare of acme as container member ada acme	denied AGENT_LANE_FORBIDDEN 403 The credential in a project container cannot enter workspaces. | Do it from outside the container: with sail on the host, or in Mast.
+start workspace spare of acme as container member ada all	denied AGENT_LANE_FORBIDDEN 403 The credential in a project container cannot enter workspaces. | Do it from outside the container: with sail on the host, or in Mast.
+start workspace spare of acme as container member ada beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+start workspace spare of acme as container member bob acme	denied AGENT_LANE_FORBIDDEN 403 The credential in a project container cannot enter workspaces. | Do it from outside the container: with sail on the host, or in Mast.
+start workspace spare of acme as container member bob all	denied AGENT_LANE_FORBIDDEN 403 The credential in a project container cannot enter workspaces. | Do it from outside the container: with sail on the host, or in Mast.
+start workspace spare of acme as container member bob beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+start workspace spare of acme as container viewer ada acme	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
+start workspace spare of acme as container viewer ada all	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
+start workspace spare of acme as container viewer ada beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+start workspace spare of acme as container viewer bob acme	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
+start workspace spare of acme as container viewer bob all	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
+start workspace spare of acme as container viewer bob beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+start workspace spare of acme as room viewer ada-room acme	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
+start workspace spare of acme as room viewer ada-room all	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
+start workspace spare of acme as room viewer ada-room beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+start workspace spare of acme as room viewer bob-room acme	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
+start workspace spare of acme as room viewer bob-room all	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
+start workspace spare of acme as room viewer bob-room beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+start workspace try of acme as agent member ada-agent acme	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot enter workspaces. | Only an operator lane (CLI or API token) may do this.
+start workspace try of acme as agent member ada-agent all	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot enter workspaces. | Only an operator lane (CLI or API token) may do this.
+start workspace try of acme as agent member ada-agent beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+start workspace try of acme as agent member bob-agent acme	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot enter workspaces. | Only an operator lane (CLI or API token) may do this.
+start workspace try of acme as agent member bob-agent all	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot enter workspaces. | Only an operator lane (CLI or API token) may do this.
+start workspace try of acme as agent member bob-agent beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+start workspace try of acme as agent viewer ada-agent acme	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
+start workspace try of acme as agent viewer ada-agent all	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
+start workspace try of acme as agent viewer ada-agent beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+start workspace try of acme as agent viewer bob-agent acme	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
+start workspace try of acme as agent viewer bob-agent all	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
+start workspace try of acme as agent viewer bob-agent beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+start workspace try of acme as api admin root all	ok WorkspaceChangeResponse
+start workspace try of acme as api member ada acme	ok WorkspaceChangeResponse
+start workspace try of acme as api member ada all	ok WorkspaceChangeResponse
+start workspace try of acme as api member ada beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+start workspace try of acme as api member bob acme	denied FORBIDDEN_NOT_ASSIGNEE 403 Workspace 'try' belongs to 'ada', not you. | Ask ada to enter it, or have an admin do it.
+start workspace try of acme as api member bob all	denied FORBIDDEN_NOT_ASSIGNEE 403 Workspace 'try' belongs to 'ada', not you. | Ask ada to enter it, or have an admin do it.
+start workspace try of acme as api member bob beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+start workspace try of acme as api member machine all	denied FORBIDDEN_NOT_ASSIGNEE 403 Workspace 'try' belongs to 'ada', not you. | Ask ada to enter it, or have an admin do it.
+start workspace try of acme as api viewer ada acme	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
+start workspace try of acme as api viewer ada all	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
+start workspace try of acme as api viewer ada beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+start workspace try of acme as api viewer bob acme	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
+start workspace try of acme as api viewer bob all	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
+start workspace try of acme as api viewer bob beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+start workspace try of acme as cli admin root all	ok WorkspaceChangeResponse
+start workspace try of acme as cli member ada acme	ok WorkspaceChangeResponse
+start workspace try of acme as cli member ada all	ok WorkspaceChangeResponse
+start workspace try of acme as cli member ada beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+start workspace try of acme as cli member bob acme	denied FORBIDDEN_NOT_ASSIGNEE 403 Workspace 'try' belongs to 'ada', not you. | Ask ada to enter it, or have an admin do it.
+start workspace try of acme as cli member bob all	denied FORBIDDEN_NOT_ASSIGNEE 403 Workspace 'try' belongs to 'ada', not you. | Ask ada to enter it, or have an admin do it.
+start workspace try of acme as cli member bob beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+start workspace try of acme as cli viewer ada acme	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
+start workspace try of acme as cli viewer ada all	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
+start workspace try of acme as cli viewer ada beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+start workspace try of acme as cli viewer bob acme	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
+start workspace try of acme as cli viewer bob all	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
+start workspace try of acme as cli viewer bob beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+start workspace try of acme as container admin root all	denied AGENT_LANE_FORBIDDEN 403 The credential in a project container cannot enter workspaces. | Do it from outside the container: with sail on the host, or in Mast.
+start workspace try of acme as container member ada acme	denied AGENT_LANE_FORBIDDEN 403 The credential in a project container cannot enter workspaces. | Do it from outside the container: with sail on the host, or in Mast.
+start workspace try of acme as container member ada all	denied AGENT_LANE_FORBIDDEN 403 The credential in a project container cannot enter workspaces. | Do it from outside the container: with sail on the host, or in Mast.
+start workspace try of acme as container member ada beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+start workspace try of acme as container member bob acme	denied AGENT_LANE_FORBIDDEN 403 The credential in a project container cannot enter workspaces. | Do it from outside the container: with sail on the host, or in Mast.
+start workspace try of acme as container member bob all	denied AGENT_LANE_FORBIDDEN 403 The credential in a project container cannot enter workspaces. | Do it from outside the container: with sail on the host, or in Mast.
+start workspace try of acme as container member bob beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+start workspace try of acme as container viewer ada acme	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
+start workspace try of acme as container viewer ada all	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
+start workspace try of acme as container viewer ada beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+start workspace try of acme as container viewer bob acme	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
+start workspace try of acme as container viewer bob all	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
+start workspace try of acme as container viewer bob beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+start workspace try of acme as room viewer ada-room acme	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
+start workspace try of acme as room viewer ada-room all	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
+start workspace try of acme as room viewer ada-room beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+start workspace try of acme as room viewer bob-room acme	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
+start workspace try of acme as room viewer bob-room all	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
+start workspace try of acme as room viewer bob-room beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
 stop 019fee00-0000-7000-8000-00000000dead on ada's box as agent member ada-agent acme	denied RUN_NOT_FOUND 404 No run '019fee00-0000-7000-8000-00000000dead'. | 
 stop 019fee00-0000-7000-8000-00000000dead on ada's box as agent member ada-agent all	denied RUN_NOT_FOUND 404 No run '019fee00-0000-7000-8000-00000000dead'. | 
 stop 019fee00-0000-7000-8000-00000000dead on ada's box as agent member ada-agent beta	denied RUN_NOT_FOUND 404 No run '019fee00-0000-7000-8000-00000000dead'. | 
@@ -18996,6 +19542,238 @@ stop the stack of omega as room viewer ada-room beta	denied PROJECT_NOT_IN_CATAL
 stop the stack of omega as room viewer bob-room acme	denied PROJECT_NOT_IN_CATALOG 404 Project 'omega' is not in the catalog. | Create it with 'sail project create omega', or sync it from main with 'sail sync'.
 stop the stack of omega as room viewer bob-room all	denied PROJECT_NOT_IN_CATALOG 404 Project 'omega' is not in the catalog. | Create it with 'sail project create omega', or sync it from main with 'sail sync'.
 stop the stack of omega as room viewer bob-room beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'omega' is not in the catalog. | Create it with 'sail project create omega', or sync it from main with 'sail sync'.
+stop workspace ghost of acme as agent member ada-agent acme	denied NOT_FOUND 404 Project 'acme' has no workspace 'ghost' on this box. | List them with: sail project workspace list acme.
+stop workspace ghost of acme as agent member ada-agent all	denied NOT_FOUND 404 Project 'acme' has no workspace 'ghost' on this box. | List them with: sail project workspace list acme.
+stop workspace ghost of acme as agent member ada-agent beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+stop workspace ghost of acme as agent member bob-agent acme	denied NOT_FOUND 404 Project 'acme' has no workspace 'ghost' on this box. | List them with: sail project workspace list acme.
+stop workspace ghost of acme as agent member bob-agent all	denied NOT_FOUND 404 Project 'acme' has no workspace 'ghost' on this box. | List them with: sail project workspace list acme.
+stop workspace ghost of acme as agent member bob-agent beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+stop workspace ghost of acme as agent viewer ada-agent acme	denied NOT_FOUND 404 Project 'acme' has no workspace 'ghost' on this box. | List them with: sail project workspace list acme.
+stop workspace ghost of acme as agent viewer ada-agent all	denied NOT_FOUND 404 Project 'acme' has no workspace 'ghost' on this box. | List them with: sail project workspace list acme.
+stop workspace ghost of acme as agent viewer ada-agent beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+stop workspace ghost of acme as agent viewer bob-agent acme	denied NOT_FOUND 404 Project 'acme' has no workspace 'ghost' on this box. | List them with: sail project workspace list acme.
+stop workspace ghost of acme as agent viewer bob-agent all	denied NOT_FOUND 404 Project 'acme' has no workspace 'ghost' on this box. | List them with: sail project workspace list acme.
+stop workspace ghost of acme as agent viewer bob-agent beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+stop workspace ghost of acme as api admin root all	denied NOT_FOUND 404 Project 'acme' has no workspace 'ghost' on this box. | List them with: sail project workspace list acme.
+stop workspace ghost of acme as api member ada acme	denied NOT_FOUND 404 Project 'acme' has no workspace 'ghost' on this box. | List them with: sail project workspace list acme.
+stop workspace ghost of acme as api member ada all	denied NOT_FOUND 404 Project 'acme' has no workspace 'ghost' on this box. | List them with: sail project workspace list acme.
+stop workspace ghost of acme as api member ada beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+stop workspace ghost of acme as api member bob acme	denied NOT_FOUND 404 Project 'acme' has no workspace 'ghost' on this box. | List them with: sail project workspace list acme.
+stop workspace ghost of acme as api member bob all	denied NOT_FOUND 404 Project 'acme' has no workspace 'ghost' on this box. | List them with: sail project workspace list acme.
+stop workspace ghost of acme as api member bob beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+stop workspace ghost of acme as api member machine all	denied NOT_FOUND 404 Project 'acme' has no workspace 'ghost' on this box. | List them with: sail project workspace list acme.
+stop workspace ghost of acme as api viewer ada acme	denied NOT_FOUND 404 Project 'acme' has no workspace 'ghost' on this box. | List them with: sail project workspace list acme.
+stop workspace ghost of acme as api viewer ada all	denied NOT_FOUND 404 Project 'acme' has no workspace 'ghost' on this box. | List them with: sail project workspace list acme.
+stop workspace ghost of acme as api viewer ada beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+stop workspace ghost of acme as api viewer bob acme	denied NOT_FOUND 404 Project 'acme' has no workspace 'ghost' on this box. | List them with: sail project workspace list acme.
+stop workspace ghost of acme as api viewer bob all	denied NOT_FOUND 404 Project 'acme' has no workspace 'ghost' on this box. | List them with: sail project workspace list acme.
+stop workspace ghost of acme as api viewer bob beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+stop workspace ghost of acme as cli admin root all	denied NOT_FOUND 404 Project 'acme' has no workspace 'ghost' on this box. | List them with: sail project workspace list acme.
+stop workspace ghost of acme as cli member ada acme	denied NOT_FOUND 404 Project 'acme' has no workspace 'ghost' on this box. | List them with: sail project workspace list acme.
+stop workspace ghost of acme as cli member ada all	denied NOT_FOUND 404 Project 'acme' has no workspace 'ghost' on this box. | List them with: sail project workspace list acme.
+stop workspace ghost of acme as cli member ada beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+stop workspace ghost of acme as cli member bob acme	denied NOT_FOUND 404 Project 'acme' has no workspace 'ghost' on this box. | List them with: sail project workspace list acme.
+stop workspace ghost of acme as cli member bob all	denied NOT_FOUND 404 Project 'acme' has no workspace 'ghost' on this box. | List them with: sail project workspace list acme.
+stop workspace ghost of acme as cli member bob beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+stop workspace ghost of acme as cli viewer ada acme	denied NOT_FOUND 404 Project 'acme' has no workspace 'ghost' on this box. | List them with: sail project workspace list acme.
+stop workspace ghost of acme as cli viewer ada all	denied NOT_FOUND 404 Project 'acme' has no workspace 'ghost' on this box. | List them with: sail project workspace list acme.
+stop workspace ghost of acme as cli viewer ada beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+stop workspace ghost of acme as cli viewer bob acme	denied NOT_FOUND 404 Project 'acme' has no workspace 'ghost' on this box. | List them with: sail project workspace list acme.
+stop workspace ghost of acme as cli viewer bob all	denied NOT_FOUND 404 Project 'acme' has no workspace 'ghost' on this box. | List them with: sail project workspace list acme.
+stop workspace ghost of acme as cli viewer bob beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+stop workspace ghost of acme as container admin root all	denied NOT_FOUND 404 Project 'acme' has no workspace 'ghost' on this box. | List them with: sail project workspace list acme.
+stop workspace ghost of acme as container member ada acme	denied NOT_FOUND 404 Project 'acme' has no workspace 'ghost' on this box. | List them with: sail project workspace list acme.
+stop workspace ghost of acme as container member ada all	denied NOT_FOUND 404 Project 'acme' has no workspace 'ghost' on this box. | List them with: sail project workspace list acme.
+stop workspace ghost of acme as container member ada beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+stop workspace ghost of acme as container member bob acme	denied NOT_FOUND 404 Project 'acme' has no workspace 'ghost' on this box. | List them with: sail project workspace list acme.
+stop workspace ghost of acme as container member bob all	denied NOT_FOUND 404 Project 'acme' has no workspace 'ghost' on this box. | List them with: sail project workspace list acme.
+stop workspace ghost of acme as container member bob beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+stop workspace ghost of acme as container viewer ada acme	denied NOT_FOUND 404 Project 'acme' has no workspace 'ghost' on this box. | List them with: sail project workspace list acme.
+stop workspace ghost of acme as container viewer ada all	denied NOT_FOUND 404 Project 'acme' has no workspace 'ghost' on this box. | List them with: sail project workspace list acme.
+stop workspace ghost of acme as container viewer ada beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+stop workspace ghost of acme as container viewer bob acme	denied NOT_FOUND 404 Project 'acme' has no workspace 'ghost' on this box. | List them with: sail project workspace list acme.
+stop workspace ghost of acme as container viewer bob all	denied NOT_FOUND 404 Project 'acme' has no workspace 'ghost' on this box. | List them with: sail project workspace list acme.
+stop workspace ghost of acme as container viewer bob beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+stop workspace ghost of acme as room viewer ada-room acme	denied NOT_FOUND 404 Project 'acme' has no workspace 'ghost' on this box. | List them with: sail project workspace list acme.
+stop workspace ghost of acme as room viewer ada-room all	denied NOT_FOUND 404 Project 'acme' has no workspace 'ghost' on this box. | List them with: sail project workspace list acme.
+stop workspace ghost of acme as room viewer ada-room beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+stop workspace ghost of acme as room viewer bob-room acme	denied NOT_FOUND 404 Project 'acme' has no workspace 'ghost' on this box. | List them with: sail project workspace list acme.
+stop workspace ghost of acme as room viewer bob-room all	denied NOT_FOUND 404 Project 'acme' has no workspace 'ghost' on this box. | List them with: sail project workspace list acme.
+stop workspace ghost of acme as room viewer bob-room beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+stop workspace loose of acme as agent member ada-agent acme	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot enter workspaces. | Only an operator lane (CLI or API token) may do this.
+stop workspace loose of acme as agent member ada-agent all	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot enter workspaces. | Only an operator lane (CLI or API token) may do this.
+stop workspace loose of acme as agent member ada-agent beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+stop workspace loose of acme as agent member bob-agent acme	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot enter workspaces. | Only an operator lane (CLI or API token) may do this.
+stop workspace loose of acme as agent member bob-agent all	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot enter workspaces. | Only an operator lane (CLI or API token) may do this.
+stop workspace loose of acme as agent member bob-agent beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+stop workspace loose of acme as agent viewer ada-agent acme	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
+stop workspace loose of acme as agent viewer ada-agent all	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
+stop workspace loose of acme as agent viewer ada-agent beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+stop workspace loose of acme as agent viewer bob-agent acme	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
+stop workspace loose of acme as agent viewer bob-agent all	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
+stop workspace loose of acme as agent viewer bob-agent beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+stop workspace loose of acme as api admin root all	ok WorkspaceChangeResponse
+stop workspace loose of acme as api member ada acme	denied FORBIDDEN_NOT_ASSIGNEE 403 Workspace 'loose' has no owner, so only an admin may enter it. | Have an admin enter it.
+stop workspace loose of acme as api member ada all	denied FORBIDDEN_NOT_ASSIGNEE 403 Workspace 'loose' has no owner, so only an admin may enter it. | Have an admin enter it.
+stop workspace loose of acme as api member ada beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+stop workspace loose of acme as api member bob acme	denied FORBIDDEN_NOT_ASSIGNEE 403 Workspace 'loose' has no owner, so only an admin may enter it. | Have an admin enter it.
+stop workspace loose of acme as api member bob all	denied FORBIDDEN_NOT_ASSIGNEE 403 Workspace 'loose' has no owner, so only an admin may enter it. | Have an admin enter it.
+stop workspace loose of acme as api member bob beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+stop workspace loose of acme as api member machine all	denied FORBIDDEN_NOT_ASSIGNEE 403 Workspace 'loose' has no owner, so only an admin may enter it. | Have an admin enter it.
+stop workspace loose of acme as api viewer ada acme	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
+stop workspace loose of acme as api viewer ada all	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
+stop workspace loose of acme as api viewer ada beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+stop workspace loose of acme as api viewer bob acme	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
+stop workspace loose of acme as api viewer bob all	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
+stop workspace loose of acme as api viewer bob beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+stop workspace loose of acme as cli admin root all	ok WorkspaceChangeResponse
+stop workspace loose of acme as cli member ada acme	denied FORBIDDEN_NOT_ASSIGNEE 403 Workspace 'loose' has no owner, so only an admin may enter it. | Have an admin enter it.
+stop workspace loose of acme as cli member ada all	denied FORBIDDEN_NOT_ASSIGNEE 403 Workspace 'loose' has no owner, so only an admin may enter it. | Have an admin enter it.
+stop workspace loose of acme as cli member ada beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+stop workspace loose of acme as cli member bob acme	denied FORBIDDEN_NOT_ASSIGNEE 403 Workspace 'loose' has no owner, so only an admin may enter it. | Have an admin enter it.
+stop workspace loose of acme as cli member bob all	denied FORBIDDEN_NOT_ASSIGNEE 403 Workspace 'loose' has no owner, so only an admin may enter it. | Have an admin enter it.
+stop workspace loose of acme as cli member bob beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+stop workspace loose of acme as cli viewer ada acme	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
+stop workspace loose of acme as cli viewer ada all	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
+stop workspace loose of acme as cli viewer ada beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+stop workspace loose of acme as cli viewer bob acme	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
+stop workspace loose of acme as cli viewer bob all	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
+stop workspace loose of acme as cli viewer bob beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+stop workspace loose of acme as container admin root all	denied AGENT_LANE_FORBIDDEN 403 The credential in a project container cannot enter workspaces. | Do it from outside the container: with sail on the host, or in Mast.
+stop workspace loose of acme as container member ada acme	denied AGENT_LANE_FORBIDDEN 403 The credential in a project container cannot enter workspaces. | Do it from outside the container: with sail on the host, or in Mast.
+stop workspace loose of acme as container member ada all	denied AGENT_LANE_FORBIDDEN 403 The credential in a project container cannot enter workspaces. | Do it from outside the container: with sail on the host, or in Mast.
+stop workspace loose of acme as container member ada beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+stop workspace loose of acme as container member bob acme	denied AGENT_LANE_FORBIDDEN 403 The credential in a project container cannot enter workspaces. | Do it from outside the container: with sail on the host, or in Mast.
+stop workspace loose of acme as container member bob all	denied AGENT_LANE_FORBIDDEN 403 The credential in a project container cannot enter workspaces. | Do it from outside the container: with sail on the host, or in Mast.
+stop workspace loose of acme as container member bob beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+stop workspace loose of acme as container viewer ada acme	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
+stop workspace loose of acme as container viewer ada all	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
+stop workspace loose of acme as container viewer ada beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+stop workspace loose of acme as container viewer bob acme	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
+stop workspace loose of acme as container viewer bob all	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
+stop workspace loose of acme as container viewer bob beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+stop workspace loose of acme as room viewer ada-room acme	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
+stop workspace loose of acme as room viewer ada-room all	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
+stop workspace loose of acme as room viewer ada-room beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+stop workspace loose of acme as room viewer bob-room acme	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
+stop workspace loose of acme as room viewer bob-room all	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
+stop workspace loose of acme as room viewer bob-room beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+stop workspace spare of acme as agent member ada-agent acme	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot enter workspaces. | Only an operator lane (CLI or API token) may do this.
+stop workspace spare of acme as agent member ada-agent all	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot enter workspaces. | Only an operator lane (CLI or API token) may do this.
+stop workspace spare of acme as agent member ada-agent beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+stop workspace spare of acme as agent member bob-agent acme	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot enter workspaces. | Only an operator lane (CLI or API token) may do this.
+stop workspace spare of acme as agent member bob-agent all	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot enter workspaces. | Only an operator lane (CLI or API token) may do this.
+stop workspace spare of acme as agent member bob-agent beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+stop workspace spare of acme as agent viewer ada-agent acme	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
+stop workspace spare of acme as agent viewer ada-agent all	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
+stop workspace spare of acme as agent viewer ada-agent beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+stop workspace spare of acme as agent viewer bob-agent acme	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
+stop workspace spare of acme as agent viewer bob-agent all	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
+stop workspace spare of acme as agent viewer bob-agent beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+stop workspace spare of acme as api admin root all	ok WorkspaceChangeResponse
+stop workspace spare of acme as api member ada acme	denied FORBIDDEN_NOT_ASSIGNEE 403 Workspace 'spare' belongs to 'bob', not you. | Ask bob to enter it, or have an admin do it.
+stop workspace spare of acme as api member ada all	denied FORBIDDEN_NOT_ASSIGNEE 403 Workspace 'spare' belongs to 'bob', not you. | Ask bob to enter it, or have an admin do it.
+stop workspace spare of acme as api member ada beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+stop workspace spare of acme as api member bob acme	ok WorkspaceChangeResponse
+stop workspace spare of acme as api member bob all	ok WorkspaceChangeResponse
+stop workspace spare of acme as api member bob beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+stop workspace spare of acme as api member machine all	denied FORBIDDEN_NOT_ASSIGNEE 403 Workspace 'spare' belongs to 'bob', not you. | Ask bob to enter it, or have an admin do it.
+stop workspace spare of acme as api viewer ada acme	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
+stop workspace spare of acme as api viewer ada all	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
+stop workspace spare of acme as api viewer ada beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+stop workspace spare of acme as api viewer bob acme	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
+stop workspace spare of acme as api viewer bob all	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
+stop workspace spare of acme as api viewer bob beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+stop workspace spare of acme as cli admin root all	ok WorkspaceChangeResponse
+stop workspace spare of acme as cli member ada acme	denied FORBIDDEN_NOT_ASSIGNEE 403 Workspace 'spare' belongs to 'bob', not you. | Ask bob to enter it, or have an admin do it.
+stop workspace spare of acme as cli member ada all	denied FORBIDDEN_NOT_ASSIGNEE 403 Workspace 'spare' belongs to 'bob', not you. | Ask bob to enter it, or have an admin do it.
+stop workspace spare of acme as cli member ada beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+stop workspace spare of acme as cli member bob acme	ok WorkspaceChangeResponse
+stop workspace spare of acme as cli member bob all	ok WorkspaceChangeResponse
+stop workspace spare of acme as cli member bob beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+stop workspace spare of acme as cli viewer ada acme	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
+stop workspace spare of acme as cli viewer ada all	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
+stop workspace spare of acme as cli viewer ada beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+stop workspace spare of acme as cli viewer bob acme	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
+stop workspace spare of acme as cli viewer bob all	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
+stop workspace spare of acme as cli viewer bob beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+stop workspace spare of acme as container admin root all	denied AGENT_LANE_FORBIDDEN 403 The credential in a project container cannot enter workspaces. | Do it from outside the container: with sail on the host, or in Mast.
+stop workspace spare of acme as container member ada acme	denied AGENT_LANE_FORBIDDEN 403 The credential in a project container cannot enter workspaces. | Do it from outside the container: with sail on the host, or in Mast.
+stop workspace spare of acme as container member ada all	denied AGENT_LANE_FORBIDDEN 403 The credential in a project container cannot enter workspaces. | Do it from outside the container: with sail on the host, or in Mast.
+stop workspace spare of acme as container member ada beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+stop workspace spare of acme as container member bob acme	denied AGENT_LANE_FORBIDDEN 403 The credential in a project container cannot enter workspaces. | Do it from outside the container: with sail on the host, or in Mast.
+stop workspace spare of acme as container member bob all	denied AGENT_LANE_FORBIDDEN 403 The credential in a project container cannot enter workspaces. | Do it from outside the container: with sail on the host, or in Mast.
+stop workspace spare of acme as container member bob beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+stop workspace spare of acme as container viewer ada acme	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
+stop workspace spare of acme as container viewer ada all	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
+stop workspace spare of acme as container viewer ada beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+stop workspace spare of acme as container viewer bob acme	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
+stop workspace spare of acme as container viewer bob all	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
+stop workspace spare of acme as container viewer bob beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+stop workspace spare of acme as room viewer ada-room acme	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
+stop workspace spare of acme as room viewer ada-room all	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
+stop workspace spare of acme as room viewer ada-room beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+stop workspace spare of acme as room viewer bob-room acme	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
+stop workspace spare of acme as room viewer bob-room all	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
+stop workspace spare of acme as room viewer bob-room beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+stop workspace try of acme as agent member ada-agent acme	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot enter workspaces. | Only an operator lane (CLI or API token) may do this.
+stop workspace try of acme as agent member ada-agent all	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot enter workspaces. | Only an operator lane (CLI or API token) may do this.
+stop workspace try of acme as agent member ada-agent beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+stop workspace try of acme as agent member bob-agent acme	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot enter workspaces. | Only an operator lane (CLI or API token) may do this.
+stop workspace try of acme as agent member bob-agent all	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot enter workspaces. | Only an operator lane (CLI or API token) may do this.
+stop workspace try of acme as agent member bob-agent beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+stop workspace try of acme as agent viewer ada-agent acme	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
+stop workspace try of acme as agent viewer ada-agent all	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
+stop workspace try of acme as agent viewer ada-agent beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+stop workspace try of acme as agent viewer bob-agent acme	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
+stop workspace try of acme as agent viewer bob-agent all	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
+stop workspace try of acme as agent viewer bob-agent beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+stop workspace try of acme as api admin root all	ok WorkspaceChangeResponse
+stop workspace try of acme as api member ada acme	ok WorkspaceChangeResponse
+stop workspace try of acme as api member ada all	ok WorkspaceChangeResponse
+stop workspace try of acme as api member ada beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+stop workspace try of acme as api member bob acme	denied FORBIDDEN_NOT_ASSIGNEE 403 Workspace 'try' belongs to 'ada', not you. | Ask ada to enter it, or have an admin do it.
+stop workspace try of acme as api member bob all	denied FORBIDDEN_NOT_ASSIGNEE 403 Workspace 'try' belongs to 'ada', not you. | Ask ada to enter it, or have an admin do it.
+stop workspace try of acme as api member bob beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+stop workspace try of acme as api member machine all	denied FORBIDDEN_NOT_ASSIGNEE 403 Workspace 'try' belongs to 'ada', not you. | Ask ada to enter it, or have an admin do it.
+stop workspace try of acme as api viewer ada acme	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
+stop workspace try of acme as api viewer ada all	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
+stop workspace try of acme as api viewer ada beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+stop workspace try of acme as api viewer bob acme	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
+stop workspace try of acme as api viewer bob all	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
+stop workspace try of acme as api viewer bob beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+stop workspace try of acme as cli admin root all	ok WorkspaceChangeResponse
+stop workspace try of acme as cli member ada acme	ok WorkspaceChangeResponse
+stop workspace try of acme as cli member ada all	ok WorkspaceChangeResponse
+stop workspace try of acme as cli member ada beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+stop workspace try of acme as cli member bob acme	denied FORBIDDEN_NOT_ASSIGNEE 403 Workspace 'try' belongs to 'ada', not you. | Ask ada to enter it, or have an admin do it.
+stop workspace try of acme as cli member bob all	denied FORBIDDEN_NOT_ASSIGNEE 403 Workspace 'try' belongs to 'ada', not you. | Ask ada to enter it, or have an admin do it.
+stop workspace try of acme as cli member bob beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+stop workspace try of acme as cli viewer ada acme	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
+stop workspace try of acme as cli viewer ada all	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
+stop workspace try of acme as cli viewer ada beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+stop workspace try of acme as cli viewer bob acme	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
+stop workspace try of acme as cli viewer bob all	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
+stop workspace try of acme as cli viewer bob beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+stop workspace try of acme as container admin root all	denied AGENT_LANE_FORBIDDEN 403 The credential in a project container cannot enter workspaces. | Do it from outside the container: with sail on the host, or in Mast.
+stop workspace try of acme as container member ada acme	denied AGENT_LANE_FORBIDDEN 403 The credential in a project container cannot enter workspaces. | Do it from outside the container: with sail on the host, or in Mast.
+stop workspace try of acme as container member ada all	denied AGENT_LANE_FORBIDDEN 403 The credential in a project container cannot enter workspaces. | Do it from outside the container: with sail on the host, or in Mast.
+stop workspace try of acme as container member ada beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+stop workspace try of acme as container member bob acme	denied AGENT_LANE_FORBIDDEN 403 The credential in a project container cannot enter workspaces. | Do it from outside the container: with sail on the host, or in Mast.
+stop workspace try of acme as container member bob all	denied AGENT_LANE_FORBIDDEN 403 The credential in a project container cannot enter workspaces. | Do it from outside the container: with sail on the host, or in Mast.
+stop workspace try of acme as container member bob beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+stop workspace try of acme as container viewer ada acme	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
+stop workspace try of acme as container viewer ada all	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
+stop workspace try of acme as container viewer ada beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+stop workspace try of acme as container viewer bob acme	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
+stop workspace try of acme as container viewer bob all	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
+stop workspace try of acme as container viewer bob beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+stop workspace try of acme as room viewer ada-room acme	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
+stop workspace try of acme as room viewer ada-room all	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
+stop workspace try of acme as room viewer ada-room beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+stop workspace try of acme as room viewer bob-room acme	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
+stop workspace try of acme as room viewer bob-room all	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
+stop workspace try of acme as room viewer bob-room beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
 store my claude-code login as agent member ada-agent acme	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot keep harness logins and git tokens. | Only an operator lane (CLI or API token) may do this.
 store my claude-code login as agent member ada-agent all	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot keep harness logins and git tokens. | Only an operator lane (CLI or API token) may do this.
 store my claude-code login as agent member ada-agent beta	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot keep harness logins and git tokens. | Only an operator lane (CLI or API token) may do this.
@@ -19060,6 +19838,10 @@ the host token asks a ticket to open a terminal in acme	denied FORBIDDEN 403 Tok
 the host token asks a ticket to open a terminal in beta	denied FORBIDDEN 403 Token 'admin' is bound to no FDE, so it is issued no ticket: the host's own token is the box's person, who exists only on the unix socket, and a machine token acts for no one. Use a token of your own. | 
 the host token asks a ticket to open a terminal in delta	denied FORBIDDEN 403 Token 'admin' is bound to no FDE, so it is issued no ticket: the host's own token is the box's person, who exists only on the unix socket, and a machine token acts for no one. Use a token of your own. | 
 the host token asks a ticket to open a terminal in omega	denied FORBIDDEN 403 Token 'admin' is bound to no FDE, so it is issued no ticket: the host's own token is the box's person, who exists only on the unix socket, and a machine token acts for no one. Use a token of your own. | 
+the host token asks a ticket to open a terminal in workspace ghost of acme	denied FORBIDDEN 403 Token 'admin' is bound to no FDE, so it is issued no ticket: the host's own token is the box's person, who exists only on the unix socket, and a machine token acts for no one. Use a token of your own. | 
+the host token asks a ticket to open a terminal in workspace loose of acme	denied FORBIDDEN 403 Token 'admin' is bound to no FDE, so it is issued no ticket: the host's own token is the box's person, who exists only on the unix socket, and a machine token acts for no one. Use a token of your own. | 
+the host token asks a ticket to open a terminal in workspace spare of acme	denied FORBIDDEN 403 Token 'admin' is bound to no FDE, so it is issued no ticket: the host's own token is the box's person, who exists only on the unix socket, and a machine token acts for no one. Use a token of your own. | 
+the host token asks a ticket to open a terminal in workspace try of acme	denied FORBIDDEN 403 Token 'admin' is bound to no FDE, so it is issued no ticket: the host's own token is the box's person, who exists only on the unix socket, and a machine token acts for no one. Use a token of your own. | 
 unseat the agent of ada-born-in-attic on ada's box as agent member ada-agent acme	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot dispatch specs. | Only an operator lane (CLI or API token) may do this.
 unseat the agent of ada-born-in-attic on ada's box as agent member ada-agent all	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot dispatch specs. | Only an operator lane (CLI or API token) may do this.
 unseat the agent of ada-born-in-attic on ada's box as agent member ada-agent beta	denied ROOM_NOT_FOUND 404 Room 'ada-born-in-attic' was not found. | 
