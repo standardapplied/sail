@@ -1,8 +1,10 @@
 import AppKit
 import Darwin
+import SailLook
 import SailShell
 import SailTerminal
 import SailTerminalView
+import SailVT
 import SailWorkbench
 
 /// The drive's steps on the workbench. Shortcuts are `press` steps, key events through the app's
@@ -372,6 +374,7 @@ extension Driver {
         }
         press("w", ["command", "option"])
         _ = await sheet("Close", asking: "Its 4 terminals will end.", within: 5)
+        panes4.merge(Self.partsOfAPane()) { $1 }
         let splits = await timeSplits(10)
         budgets["⌘D to the new pane's first committed frame p95 <= 100 ms"] = splits.total <= 100
         panes4["⌘D to first committed frame p95 ms"] = splits.total
@@ -426,6 +429,26 @@ extension Driver {
             _ = await sheet("Close", asking: nil, within: 5)
         }
         return (Self.p95(totals), Self.p95(handled), Self.p95(held))
+    }
+
+    /// What making a pane's parts costs, each made five times, the median in ms: its terminal view
+    /// (the renderer: queue, faces, atlases) and its screen (10 MB of scrollback).
+    static func partsOfAPane() -> [String: Double] {
+        guard let fonts = Bundle.main.resourceURL.flatMap({ try? TerminalFonts(directory: $0.appending(path: "Fonts")) }) else { return [:] }
+        func median(_ make: () -> Void) -> Double {
+            let times = (0 ..< 5).map { _ in
+                let began = ContinuousClock.now
+                make()
+                return (ContinuousClock.now - began) / .milliseconds(1)
+            }
+            return times.sorted()[2]
+        }
+        return [
+            "of a pane, a terminal view made median ms": median { _ = try? TerminalView(fonts: fonts) },
+            "of a pane, a screen with 10 MB of scrollback made median ms": median {
+                _ = try? Screen(size: GridSize(columns: 100, rows: 40), scrollbackBytes: 10 << 20, palette: .dark)
+            },
+        ]
     }
 
     static func p95(_ values: [Double]) -> Double {
