@@ -1,0 +1,32 @@
+{
+  "request": {
+    "body": {},
+    "method": "POST",
+    "path": "/v1/auth/login/start"
+  },
+  "response": {
+    "body": {
+      "error": {
+        "action": "Set the webauthn block in host.yaml or pass --origin to 'server start'.",
+        "code": "passkey_not_configured",
+        "field_errors": [],
+        "message": "Passkey login is not configured on this server.",
+        "remedy": [
+          {
+            "text": "Set the webauthn block in host.yaml or pass --origin to '"
+          },
+          {
+            "args": [],
+            "run": "sail",
+            "verb": "server start"
+          },
+          {
+            "text": "'."
+          }
+        ]
+      },
+      "schema_version": 1
+    },
+    "status": 503
+  }
+}

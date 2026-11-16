@@ -1,0 +1,21 @@
+{
+  "request": {
+    "body": {
+      "attestation_object": "Z29sZGVuIGF0dGVzdGF0aW9uX29iamVjdCA1",
+      "challenge_id": "wac_golden1",
+      "client_data_json": "Z29sZGVuIGNsaWVudF9kYXRhX2pzb24gNA",
+      "label": "Sail for Mac"
+    },
+    "method": "POST",
+    "path": "/v1/auth/register/finish"
+  },
+  "response": {
+    "body": {
+      "credential_id": "Z29sZGVuIGNyZWRlbnRpYWxfaWQgNg",
+      "fde": "uday",
+      "schema_version": 1,
+      "status": "registered"
+    },
+    "status": 200
+  }
+}

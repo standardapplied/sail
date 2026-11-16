@@ -60,8 +60,6 @@ struct Step: Decodable {
     /// Measures the renderer's CPU side in this release build: a full 200x60 redraw's p95 must be
     /// 4 ms or less.
     var bench: Bool?
-    /// The window's title must become this.
-    var title: String?
     /// ⌥⌘L, then the latency overlay must show its figures.
     var latencyOverlay: Bool?
     /// Starts the latency from nothing.
@@ -74,4 +72,38 @@ struct Step: Decodable {
     var newSession: Bool?
     /// The view's font size must be this many points.
     var fontPoints: Double?
+    /// The rail's item to select: "thisMac" or "account".
+    var select: String?
+    /// The control plane's address, typed into the account's field.
+    var address: String?
+    /// What the software passkey answers from now on: "credential", "none" or "cancel".
+    var passkey: String?
+    /// Enrolls with the ticket the environment variable of this name holds, then waits until the
+    /// pane is idle.
+    var enroll: String?
+    /// Signs in, or out, then waits until the pane is idle.
+    var signIn: Bool?
+    var signOut: Bool?
+    /// Waits until the account pane's text contains this, or, with `exactly`, equals these lines.
+    var pane: String?
+    var exactly: [String]?
+    /// Runs the bundled `sail` with these words, `{credential}` the software passkey's newest
+    /// credential; it must succeed.
+    var sail: [String]?
+    /// Tells the app it became active, as a click on its window does.
+    var activate: Bool?
+    /// The software passkey was asked for this many ceremonies since the drive started.
+    var asked: Int?
+    /// The Keychain item of `address`'s control plane: "kept", with item 3's attributes, or "gone".
+    var keychain: String?
+    /// The sign-in pane's button drawn: its fill terracotta and its label `onAccent`.
+    var accent: Bool?
+    /// The window's title bar: transparent, the platform's buttons, the rail and the pane under it.
+    var titleBar: Bool?
+    /// The window's own zoom, twice: the frame changes and comes back.
+    var zoomAndRestore: Bool?
+    /// Searches everywhere a token could be left for the session token and for `sess_`.
+    var sweep: Bool?
+    /// The step runs only on a signed build, or only on an unsigned one; skipped otherwise.
+    var signed: Bool?
 }

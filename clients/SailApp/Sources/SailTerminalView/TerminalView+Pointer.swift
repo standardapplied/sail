@@ -125,10 +125,12 @@ extension TerminalView {
         }
     }
 
-    /// The paste sheet: the line count, the risk in a sentence, Paste in the accent, and Cancel the
-    /// default, so Return does not run what the sheet warns of, and Escape cancels too. The keys are
-    /// given once the sheet is laid out, which gives the first button Return and Cancel Escape; a
-    /// button answers one key, so Escape is watched for while the sheet is up.
+    /// The paste sheet: the line count, the risk in a sentence, Paste in the accent (its label the
+    /// appearance's `onAccent`, bold, as text on the accent always is), and Cancel. Neither answers
+    /// Return: Paste would run what the sheet warns of, and a Cancel answering it would be drawn as
+    /// the default button, in the system accent. Escape cancels: the keys are given once the sheet is
+    /// laid out, which gives the first button Return (taken away here), and Escape is watched for while
+    /// the sheet is up.
     func presentPasteSheet(lines: Int, answer: @escaping @MainActor (Bool) -> Void) {
         guard let window else {
             answer(false)
@@ -138,9 +140,12 @@ extension TerminalView {
         alert.messageText = lines == 1 ? "Paste this line?" : "Paste \(lines) lines?"
         alert.informativeText = "The program in this terminal did not ask for pastes, so each line may run as a command as it arrives."
         let paste = alert.addButton(withTitle: "Paste")
-        let cancel = alert.addButton(withTitle: "Cancel")
-        paste.bezelColor = NSColor(Look.dark.accent)
-        paste.attributedTitle = NSAttributedString(string: "Paste", attributes: [.foregroundColor: NSColor(Look.dark.onAccent)])
+        _ = alert.addButton(withTitle: "Cancel")
+        let look: Look = window.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .aqua ? .light : .dark
+        paste.bezelColor = NSColor(look.accent)
+        paste.attributedTitle = NSAttributedString(
+            string: "Paste", attributes: [.foregroundColor: NSColor(look.onAccent), .font: NSFont.boldSystemFont(ofSize: NSFont.systemFontSize)]
+        )
         alert.beginSheetModal(for: window) { [weak self] response in
             MainActor.assumeIsolated {
                 self?.stopWatchingEscape()
@@ -148,7 +153,6 @@ extension TerminalView {
             }
         }
         paste.keyEquivalent = ""
-        cancel.keyEquivalent = "\r"
         watchEscape(cancelling: alert.window, on: window)
     }
 

@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+# Runs `xcrun stapler VERB APP` (staple or validate). Both ask Apple's ticket service over the
+# network: a call that failed because its connection to that service broke (its output names
+# NSURLErrorDomain and api.apple-cloudkit.com) is tried again, three tries at most, 30 s apart; any
+# other failure, a ticket that does not staple or does not validate, fails at once.
+set -euo pipefail
+
+[[ $# -eq 2 && ( $1 == staple || $1 == validate ) ]] || { echo "usage: ci/stapler staple|validate APP" >&2; exit 2; }
+readonly verb=$1 app=$2
+for attempt in 1 2 3; do
+  if said=$(xcrun stapler "$verb" "$app" 2>&1); then
+    echo "$said"
+    exit 0
+  fi
+  echo "$said" >&2
+  if ! grep -q NSURLErrorDomain <<< "$said" || ! grep -q api.apple-cloudkit.com <<< "$said"; then
+    echo "ci/stapler: stapler $verb failed for $app" >&2
+    exit 1
+  fi
+  (( attempt < 3 )) || { echo "ci/stapler: stapler $verb lost its connection to Apple's ticket service 3 times" >&2; exit 1; }
+  echo "ci/stapler: stapler $verb lost its connection to Apple's ticket service (try $attempt of 3); asking again in 30 s" >&2
+  sleep 30
+done

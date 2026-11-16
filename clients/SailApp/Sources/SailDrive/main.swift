@@ -1,8 +1,12 @@
+import AppKit
 import Foundation
-import SailPreview
+import SailShell
+import SailTestPasskey
 
-/// The preview, driven: `--drive <script.json> --out <directory>`. Never shipped: it is its own
-/// executable, bundled only for CI's drive runs.
+/// The app, driven: `--drive <script.json> --out <directory>`, the software passkey in the
+/// platform's place, its credentials kept in `SAIL_DRIVE_PASSKEY` (beside the output when unset)
+/// so a later launch signs in with them; `SAIL_SIGNING=on` says the build is signed. Never shipped:
+/// it is its own executable, bundled only for CI's drive runs.
 let arguments = CommandLine.arguments
 func value(after flag: String) -> String? {
     arguments.firstIndex(of: flag).flatMap { arguments.indices.contains($0 + 1) ? arguments[$0 + 1] : nil }
@@ -13,6 +17,7 @@ guard let scriptPath = value(after: "--drive"), let outPath = value(after: "--ou
     exit(2)
 }
 let out = URL(filePath: outPath)
+let environment = ProcessInfo.processInfo.environment
 let script: Script
 do {
     try FileManager.default.createDirectory(at: out, withIntermediateDirectories: true)
@@ -21,8 +26,11 @@ do {
     FileHandle.standardError.write(Data("the drive script \(scriptPath) cannot be read: \(error)\n".utf8))
     exit(2)
 }
+let passkey = SoftwarePasskey(
+    file: environment["SAIL_DRIVE_PASSKEY"].map { URL(filePath: $0) } ?? out.deletingLastPathComponent().appending(path: "software-passkey.json")
+)
 
-PreviewApp.run { preview in
-    let driver = Driver(preview: preview, script: script, out: out)
-    preview.onAttached = { _ in driver.start() }
+ShellApp.run(passkeys: { _ in passkey }) { shell in
+    let driver = Driver(shell: shell, passkey: passkey, signed: environment["SAIL_SIGNING"] == "on", script: script, out: out)
+    Task { @MainActor in driver.start() }
 }

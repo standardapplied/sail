@@ -146,10 +146,13 @@ jobs:
             echo "clients=false" >> "$GITHUB_OUTPUT"
           fi
 
-  # The macOS app: the Metal device first; the renderer's goldens and the view's input tests; the
-  # preview driven against the pinned darwin sail's own local host; the D3 answer for spec 3; then
-  # the shipped bundle signed with Developer ID and notarized when all six signing secrets exist
-  # (ci/signing says so), and otherwise an unsigned build, signed ad hoc and named unsigned.
+  # The macOS app: the Metal device first; the renderer's goldens, the view's input tests and the
+  # shell's; the app driven, with a software passkey, against the pinned darwin sail's own local host
+  # and two control planes it starts on this runner, under a graphite system accent; then
+  # the shipped bundle signed with Developer ID, its provisioning profile embedded and its
+  # entitlements claimed, and notarized, when all seven signing secrets exist (ci/signing says so),
+  # and otherwise an unsigned build, signed ad hoc with neither, and named unsigned. The drive build
+  # has the shipped bundle id and is signed the same way; it is never uploaded as the app.
   app:
     name: SailApp on macOS
     needs: changes
@@ -169,7 +172,7 @@ jobs:
       - name: Xcode
         run: sudo xcode-select --switch /Applications/Xcode_26.3.app
 
-      - name: Signing on or off (all six secrets, or none)
+      - name: Signing on or off (all seven secrets, or none)
         env:
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
@@ -177,6 +180,7 @@ jobs:
           APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
           APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
           APPLE_API_KEY_P8_BASE64: ${{ secrets.APPLE_API_KEY_P8_BASE64 }}
+          APPLE_PROVISIONING_PROFILE_BASE64: ${{ secrets.APPLE_PROVISIONING_PROFILE_BASE64 }}
         run: |
           mode=$(ci/signing)
           echo "SIGNING=$mode" | tee -a "$GITHUB_ENV"
@@ -232,38 +236,36 @@ jobs:
         if: ${{ !cancelled() }}
         run: |
           swift build -c release
-          ci/bundle SailTerminalPreview "$RUNNER_TEMP/app/Sail Terminal Preview.app" "$SAIL_BINARY"
-          ci/bundle SailDrive "$RUNNER_TEMP/drive/Sail Terminal Preview.app" "$SAIL_BINARY" sh.standardapplied.sail.terminal-preview.drive
-          ci/sign "$RUNNER_TEMP/drive/Sail Terminal Preview.app"
+          ci/bundle Sail "$RUNNER_TEMP/app/Sail.app" "$SAIL_BINARY"
+          ci/bundle SailDrive "$RUNNER_TEMP/drive/Sail.app" "$SAIL_BINARY"
+
+      - name: Sign the drive build as the shipped app is signed
+        if: ${{ !cancelled() }}
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          APPLE_API_KEY_P8_BASE64: ${{ secrets.APPLE_API_KEY_P8_BASE64 }}
+          APPLE_PROVISIONING_PROFILE_BASE64: ${{ secrets.APPLE_PROVISIONING_PROFILE_BASE64 }}
+        run: ci/sign "$RUNNER_TEMP/drive/Sail.app"
 
       - name: The bundled sail runs under the hardened runtime from inside the bundle
         if: ${{ !cancelled() }}
         run: |
-          selftest=$("$RUNNER_TEMP/drive/Sail Terminal Preview.app/Contents/Helpers/sail" _pty-selftest)
+          selftest=$("$RUNNER_TEMP/drive/Sail.app/Contents/Helpers/sail" _pty-selftest)
           echo "$selftest"
           grep -qx 'local-selftest: ok' <<< "$selftest"
 
-      - name: Drive the preview against this Mac's own host
+      # The system accent graphite first, so a view that took the system's accent would show it.
+      - name: Drive the app against this Mac's own host and two control planes
         if: ${{ !cancelled() }}
-        run: ci/drive "$RUNNER_TEMP/drive/Sail Terminal Preview.app" "$RUNNER_TEMP/drive-out"
-
-      # D3 of the plan: whether the control plane serves from the darwin binary in a temp data dir.
-      # The answer is reported for spec 3; it fails nothing.
-      - name: D3, the control plane on macOS (reported only)
-        if: ${{ !cancelled() }}
-        continue-on-error: true
+        env:
+          SAIL_SIGNING: ${{ env.SIGNING }}
         run: |
-          mkdir -p "$RUNNER_TEMP/drive-out"
-          home=$(mktemp -d)
-          HOME=$home "$SAIL_BINARY" server start --port 7979 > "$RUNNER_TEMP/drive-out/d3-server.log" 2>&1 &
-          server=$!
-          answer="no answer within 60 s"
-          for _ in $(seq 1 60); do
-            if body=$(curl -fsS http://127.0.0.1:7979/v1/health 2>/dev/null); then answer="GET /v1/health answered: $body"; break; fi
-            sleep 1
-          done
-          kill "$server" 2>/dev/null || true
-          echo "D3: $answer" | tee "$RUNNER_TEMP/drive-out/d3.txt"
+          defaults write -g AppleAccentColor -int -1
+          ci/drive "$RUNNER_TEMP/drive/Sail.app" "$RUNNER_TEMP/drive-out"
 
       - name: Sign the shipped app with Developer ID
         if: env.SIGNING == 'on'
@@ -274,11 +276,12 @@ jobs:
           APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
           APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
           APPLE_API_KEY_P8_BASE64: ${{ secrets.APPLE_API_KEY_P8_BASE64 }}
-        run: ci/sign "$RUNNER_TEMP/app/Sail Terminal Preview.app"
+          APPLE_PROVISIONING_PROFILE_BASE64: ${{ secrets.APPLE_PROVISIONING_PROFILE_BASE64 }}
+        run: ci/sign "$RUNNER_TEMP/app/Sail.app"
 
       - name: Sign the unsigned build ad hoc (no signing secrets)
         if: env.SIGNING == 'off'
-        run: ci/sign "$RUNNER_TEMP/app/Sail Terminal Preview.app"
+        run: ci/sign "$RUNNER_TEMP/app/Sail.app"
 
       - name: Notarize and staple
         if: env.SIGNING == 'on'
@@ -289,55 +292,159 @@ jobs:
           APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
           APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
           APPLE_API_KEY_P8_BASE64: ${{ secrets.APPLE_API_KEY_P8_BASE64 }}
-        run: ci/notarize "$RUNNER_TEMP/app/Sail Terminal Preview.app" "$RUNNER_TEMP/Sail-Terminal-Preview-${GITHUB_SHA:0:8}.zip"
+          APPLE_PROVISIONING_PROFILE_BASE64: ${{ secrets.APPLE_PROVISIONING_PROFILE_BASE64 }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/shipped"
+          ci/notarize "$RUNNER_TEMP/app/Sail.app" "$RUNNER_TEMP/shipped/Sail-$GITHUB_SHA.zip"
 
-      # Checked on every build: the bundle's shape, the hardened runtime, no harness in the shipped
-      # binary, and the bundled sail running from inside it.
+      # Checked on every build: the bundle's shape, the hardened runtime, no harness and no software
+      # passkey in the shipped binary, no entitlements on the bundled sail, the bundled sail running
+      # from inside it, and the app launching and staying up.
       - name: Check the bundle (every build)
         run: |
-          app="$RUNNER_TEMP/app/Sail Terminal Preview.app"
-          test "$(plutil -extract CFBundleExecutable raw "$app/Contents/Info.plist")" = SailTerminalPreview
-          test -x "$app/Contents/MacOS/SailTerminalPreview" && test -x "$app/Contents/Helpers/sail"
+          app="$RUNNER_TEMP/app/Sail.app"
+          test "$(plutil -extract CFBundleExecutable raw "$app/Contents/Info.plist")" = Sail
+          test "$(plutil -extract CFBundleIdentifier raw "$app/Contents/Info.plist")" = sh.standardapplied.sail
+          test -x "$app/Contents/MacOS/Sail" && test -x "$app/Contents/Helpers/sail"
           for font in Regular Bold Italic BoldItalic; do test -f "$app/Contents/Resources/Fonts/JetBrainsMono-$font.ttf"; done
           test -f "$app/Contents/Resources/Fonts/OFL.txt" && test -f "$app/Contents/Resources/Acknowledgements.txt"
+          test -f "$app/Contents/Resources/Fonts/Newsreader16pt-Medium.ttf" && test -f "$app/Contents/Resources/Fonts/Newsreader-OFL.txt"
+          icon=$(plutil -extract CFBundleIconFile raw "$app/Contents/Info.plist")
+          test -s "$app/Contents/Resources/$icon" || { echo "the icon the Info.plist names, $icon, is not in the bundle" >&2; exit 1; }
           codesign --verify --deep --strict --verbose=2 "$app"
           codesign -d --verbose=2 "$app" 2>&1 | grep -E 'flags=.*runtime'
           codesign -d --verbose=2 "$app/Contents/Helpers/sail" 2>&1 | grep -E 'flags=.*runtime'
-          if strings "$app/Contents/MacOS/SailTerminalPreview" | grep -q SailDrive; then echo "the drive harness is in the shipped app" >&2; exit 1; fi
+          if strings "$app/Contents/MacOS/Sail" | grep -q SailDrive; then echo "the drive harness is in the shipped app" >&2; exit 1; fi
+          # The marker string, and the module's name, which every Swift type's context descriptor
+          # carries as a string whatever the type's kind and even in a stripped binary (a symbol name
+          # is mangled with word substitutions and is gone once stripped).
+          if strings "$app/Contents/MacOS/Sail" | grep -Eq 'sail-test-passkey-not-for-shipping|SailTestPasskey'; then
+            echo "the software passkey is in the shipped app" >&2
+            exit 1
+          fi
+          inner=$(codesign -d --entitlements - --xml "$app/Contents/Helpers/sail" 2>/dev/null || true)
+          if [[ -n $inner ]] && [[ $(plutil -convert json -o - - <<< "$inner") != "{}" ]]; then
+            echo "the bundled sail claims entitlements" >&2
+            exit 1
+          fi
           selftest=$("$app/Contents/Helpers/sail" _pty-selftest)
           grep -qx 'local-selftest: ok' <<< "$selftest"
+          "$app/Contents/MacOS/Sail" &
+          launched=$!
+          sleep 5
+          kill -0 "$launched" || { wait "$launched"; echo "Sail did not stay up: it exited with $?" >&2; exit 1; }
+          kill "$launched"
 
-      # Checked only when signed: skipped, not passed, on an unsigned build.
-      - name: Check Developer ID, the stapled notarization and Gatekeeper (signed builds only)
+      # Checked only when signed: skipped, not passed, on an unsigned build. The entitlements are
+      # printed as codesign shows them; the profile never is, only its expiry.
+      - name: Check Developer ID, the profile, the entitlements, the stapled notarization and Gatekeeper (signed builds only)
         if: env.SIGNING == 'on'
         run: |
-          app="$RUNNER_TEMP/app/Sail Terminal Preview.app"
+          app="$RUNNER_TEMP/app/Sail.app"
+          claims="$RUNNER_TEMP/signed.entitlements"
+          profile="$RUNNER_TEMP/embedded.plist"
+          trap 'rm -f "$profile"' EXIT
+          codesign -d --entitlements - --xml "$app" 2>/dev/null | plutil -convert xml1 -o "$claims" -
+          echo "The entitlements as signed:"
+          cat "$claims"
+          security cms -D -i "$app/Contents/embedded.provisionprofile" -o "$profile" 2>/dev/null
+          team=$(/usr/libexec/PlistBuddy -c 'Print :TeamIdentifier:0' "$profile")
+          signed=$(codesign -dv "$app" 2>&1 | sed -n 's/^TeamIdentifier=//p')
+          [[ $signed == "$team" ]] || { echo "the profile's team is not the signature's" >&2; exit 1; }
+          [[ $(/usr/libexec/PlistBuddy -c 'Print :Entitlements:com.apple.application-identifier' "$profile") == "$team.sh.standardapplied.sail" ]] \
+            || { echo "the profile is not for the App ID sh.standardapplied.sail" >&2; exit 1; }
+          [[ $(/usr/libexec/PlistBuddy -c 'Print :com.apple.application-identifier' "$claims") == "$team.sh.standardapplied.sail" ]]
+          [[ $(/usr/libexec/PlistBuddy -c 'Print :com.apple.developer.team-identifier' "$claims") == "$team" ]]
+          [[ $(/usr/libexec/PlistBuddy -c 'Print :com.apple.developer.associated-domains:0' "$claims") == webcredentials:sail.standardapplied.com ]]
+          allowed=$(/usr/libexec/PlistBuddy -c 'Print :Entitlements:com.apple.developer.associated-domains' "$profile" 2>/dev/null || true)
+          if grep -qx '\*' <<< "$allowed"; then
+            echo "The profile allows every associated domain (*)."
+          elif grep -q 'webcredentials:sail.standardapplied.com' <<< "$allowed"; then
+            echo "The profile allows webcredentials:sail.standardapplied.com."
+          else
+            echo "the profile does not allow webcredentials:sail.standardapplied.com" >&2
+            exit 1
+          fi
+          expires=$(plutil -extract ExpirationDate raw "$profile")
+          days=$(( ($(date -j -u -f '%Y-%m-%dT%H:%M:%SZ' "$expires" +%s) - $(date -u +%s)) / 86400 ))
+          echo "The profile expires $expires, in $days days."
+          (( days >= 30 )) || { echo "the profile has fewer than 30 days left: make a new one" >&2; exit 1; }
           codesign -d --verbose=2 "$app" 2>&1 | grep -q '^Authority=Developer ID Application'
           codesign -d --verbose=2 "$app/Contents/Helpers/sail" 2>&1 | grep -q '^Authority=Developer ID Application'
-          xcrun stapler validate "$app"
+          ci/stapler validate "$app"
           spctl -a -vv -t exec "$app" 2>&1 | tee /dev/stderr | grep -q 'source=Notarized Developer ID'
+
+      # Reported, failing nothing: whether the association file and Apple's CDN copy name the app.
+      # The team id is matched, never printed.
+      - name: The association file and Apple's CDN copy (reported only)
+        continue-on-error: true
+        run: |
+          app="$RUNNER_TEMP/app/Sail.app"
+          wanted='\.sh\.standardapplied\.sail"'
+          if [[ -f $app/Contents/embedded.provisionprofile ]]; then
+            team=$(security cms -D -i "$app/Contents/embedded.provisionprofile" 2>/dev/null | plutil -extract TeamIdentifier.0 raw -)
+            wanted="\"$team\\.sh\\.standardapplied\\.sail\""
+          fi
+          mkdir -p "$RUNNER_TEMP/drive-out"
+          for url in https://sail.standardapplied.com/.well-known/apple-app-site-association \
+            https://app-site-association.cdn-apple.com/a/v1/sail.standardapplied.com; do
+            if body=$(curl -fsS --max-time 20 "$url" 2>&1); then
+              if grep -Eq "$wanted" <<< "$body"; then said="names the app"; else said="answers and does not name the app"; fi
+            else
+              said="does not answer: ${body//$'\n'/ }"
+            fi
+            echo "$url $said"
+          done | tee "$RUNNER_TEMP/drive-out/aasa.txt"
 
       - name: Zip the unsigned build
         if: env.SIGNING == 'off'
-        run: ditto -c -k --keepParent "$RUNNER_TEMP/app/Sail Terminal Preview.app" "$RUNNER_TEMP/Sail-Terminal-Preview-unsigned-${GITHUB_SHA:0:8}.zip"
+        run: |
+          mkdir -p "$RUNNER_TEMP/shipped"
+          ditto -c -k --keepParent "$RUNNER_TEMP/app/Sail.app" "$RUNNER_TEMP/shipped/Sail-unsigned-$GITHUB_SHA.zip"
 
-      - name: Leave the notarized app
-        if: env.SIGNING == 'on'
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      # The zip ditto made, uploaded as it is (not zipped again), so the download is that zip and
+      # one unzip gives Sail.app with its signature, stapled ticket, symlinks and modes; the
+      # artifact is named for the file.
+      - name: Leave the app, one zip
+        id: shipped
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: Sail-Terminal-Preview-${{ github.sha }}
-          path: ${{ runner.temp }}/Sail-Terminal-Preview-*.zip
+          path: ${{ runner.temp }}/shipped/Sail-*.zip
+          archive: false
           retention-days: 14
           if-no-files-found: error
 
-      - name: Leave the unsigned build
-        if: env.SIGNING == 'off'
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      - name: The download, as the artifact service hands it out
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          name: Sail-Terminal-Preview-unsigned-${{ github.sha }}
-          path: ${{ runner.temp }}/Sail-Terminal-Preview-unsigned-*.zip
-          retention-days: 14
-          if-no-files-found: error
+          artifact-ids: ${{ steps.shipped.outputs.artifact-id }}
+          path: ${{ runner.temp }}/download
+          skip-decompress: true
+
+      # What a person gets: the downloaded file is one zip; unpacked as Finder's Archive Utility
+      # does (ditto), with the quarantine a browser download carries, it is Sail.app alone, its
+      # executables executable, its symlinks those of the built app, its signature whole and, when
+      # signed, its stapled ticket valid and Gatekeeper's answer "Notarized Developer ID".
+      - name: Check the download as Finder unpacks it (every build)
+        run: |
+          shopt -s nullglob
+          downloaded=("$RUNNER_TEMP"/download/*)
+          (( ${#downloaded[@]} == 1 )) || { echo "the download is ${#downloaded[@]} files, not one zip" >&2; exit 1; }
+          [[ $(file -b "${downloaded[0]}") == Zip* ]] || { echo "the download is not a zip: $(file -b "${downloaded[0]}")" >&2; exit 1; }
+          unpacked="$RUNNER_TEMP/unpacked"
+          rm -rf "$unpacked"
+          ditto -x -k "${downloaded[0]}" "$unpacked"
+          [[ $(ls -A "$unpacked") == Sail.app ]] || { echo "one unzip gives $(ls -A "$unpacked" | tr '\n' ' '), not Sail.app" >&2; exit 1; }
+          app="$unpacked/Sail.app"
+          xattr -r -w com.apple.quarantine "0083;$(printf %x "$(date +%s)");Safari;" "$app"
+          test -x "$app/Contents/MacOS/Sail" && test -x "$app/Contents/Helpers/sail"
+          diff <(cd "$RUNNER_TEMP/app/Sail.app" && find . -type l | sort) <(cd "$app" && find . -type l | sort)
+          codesign --verify --deep --strict --verbose=2 "$app"
+          if [[ $SIGNING == on ]]; then
+            ci/stapler validate "$app"
+            spctl -a -vv -t exec "$app" 2>&1 | tee /dev/stderr | grep -q 'source=Notarized Developer ID'
+          fi
+          echo "One unzip of the download gives Sail.app, whole."
 
       - name: Leave the frames, the drive's images and reports
         if: always()
