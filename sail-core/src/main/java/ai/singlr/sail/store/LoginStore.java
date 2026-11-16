@@ -256,6 +256,22 @@ public final class LoginStore {
     }
   }
 
+  /** Every value this runner keeps, every person's: what a template's check must find none of. */
+  public List<String> values() {
+    if (root == null) {
+      return List.of();
+    }
+    var values = new ArrayList<String>();
+    for (var person : children(root)) {
+      for (var harness : harnessDirectories(person)) {
+        names(harness)
+            .forEach(name -> readLogin(harness.resolve(name)).ifPresent(l -> values.add(l.get(1))));
+      }
+      values.addAll(gitTokens(person.getFileName().toString()).values());
+    }
+    return List.copyOf(values);
+  }
+
   /** Values and all: only a workspace's owner step reads them. */
   public Map<String, String> gitTokens(String fdeId) {
     var dir = dirOf(fdeId, GIT);

@@ -18,6 +18,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermissions;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.NoSuchElementException;
@@ -293,6 +294,20 @@ class LoginStoreTest {
 
     assertEquals(TOKEN, store.defaultFor(UDAY, CLAUDE).orElseThrow().value());
     assertEquals(KEY, store.defaultFor(ANA, CLAUDE).orElseThrow().value());
+  }
+
+  /** Low 4 of the proof: what a template's check searches for is every value on this box. */
+  @Test
+  void theValuesAreEveryPersonsLoginsAndGitTokens() {
+    var store = store();
+    store.store(UDAY, CLAUDE, null, null, TOKEN);
+    store.store(ANA, CLAUDE, null, null, KEY);
+    store.storeGit(ANA, "github.com", "ghp_ana");
+
+    assertEquals(Set.of(TOKEN, KEY, "ghp_ana"), new HashSet<>(store.values()));
+    try (var db = Sqlite.openMemory()) {
+      assertEquals(List.of(), LoginStore.beside(db).values());
+    }
   }
 
   @Test

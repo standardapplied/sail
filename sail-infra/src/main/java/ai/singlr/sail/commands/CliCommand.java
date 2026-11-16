@@ -16,6 +16,7 @@ import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.engine.Banner;
 import ai.singlr.sail.engine.OperatorCommand;
 import java.io.PrintStream;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -66,7 +67,7 @@ public final class CliCommand {
    * As {@link #run(CheckedRunnable)}, but under {@code --json} ({@code json}) a failure is printed
    * as JSON on stdout in the API's error envelope, {@code {"error": {"code", "message", "action",
    * ...}}} ({@link #refusalOf}), so a caller that reads JSON reads a refusal, and its code, as it
-   * reads one from the API.
+   * reads one from the API; its {@code action} names each command as this box types it.
    */
   static void run(boolean json, CheckedRunnable runnable) {
     if (!json) {
@@ -77,7 +78,11 @@ public final class CliCommand {
       runnable.run();
     } catch (Exception e) {
       var refusal = refusalOf(e);
-      System.out.println(CliJson.stringify(Map.of("error", refusal.toMap())));
+      var error = new LinkedHashMap<>(refusal.toMap());
+      if (!refusal.remedy().isEmpty()) {
+        error.put("action", reader().render(refusal.remedy()));
+      }
+      System.out.println(CliJson.stringify(Map.of("error", error)));
       throw new Printed(refusal.message(), e);
     }
   }

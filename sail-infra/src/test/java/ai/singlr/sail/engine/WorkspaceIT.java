@@ -274,7 +274,7 @@ class WorkspaceIT extends AbstractIncusIT {
                     + FAKE_TOKEN
                     + "@example.invalid/app.git",
                 "/home/dev/workspace/app/.git/config"),
-            List.of("git config --system user.email root@sail.invalid", "system user.email"),
+            List.of("git config --system user.email root@sail.invalid", "a system git user.email"),
             List.of(
                 "mkdir -p /root/.ssh && echo 'ssh-ed25519 AAAAroot r' > /root/.ssh/authorized_keys",
                 "/root/.ssh/authorized_keys"))) {
@@ -361,6 +361,161 @@ class WorkspaceIT extends AbstractIncusIT {
           pulled(instance, "/home/dev/.ssh/authorized_keys"),
           instance);
     }
+  }
+
+  private static final String PRIVATE_GIT =
+      """
+      set -eu
+      for _ in $(seq 1 300); do ip -4 -o addr show dev eth0 | grep -q inet && break; sleep 0.1; done
+      ip=$(ip -4 -o addr show dev eth0 | awk '{print $4}' | cut -d/ -f1)
+      openssl req -x509 -newkey rsa:2048 -nodes -days 1 -subj /CN=sail-it -keyout /srv/tls.key \
+        -out /srv/tls.pem -addext "subjectAltName=IP:$ip" 2>/dev/null
+      git init --quiet --bare -b main /srv/app.git
+      git init --quiet -b main /tmp/private
+      git -C /tmp/private -c user.name=it -c user.email=it@sail.invalid commit --quiet \
+        --allow-empty -m private
+      git -C /tmp/private push --quiet /srv/app.git main
+      cat > /srv/serve.py <<'PY'
+      import base64, http.server, os, ssl, subprocess
+      class Git(http.server.BaseHTTPRequestHandler):
+          def do_GET(self): self.answer()
+          def do_POST(self): self.answer()
+          def answer(self):
+              sent = self.headers.get("Authorization", "")
+              if not sent.startswith("Basic "):
+                  self.send_response(401)
+                  self.send_header("WWW-Authenticate", 'Basic realm="private"')
+                  self.send_header("Content-Length", "0")
+                  self.end_headers()
+                  return
+              with open("/srv/seen", "a") as seen:
+                  seen.write(base64.b64decode(sent[6:]).decode() + "\\n")
+              path, _, query = self.path.partition("?")
+              body = self.rfile.read(int(self.headers.get("Content-Length") or 0))
+              env = dict(os.environ, GIT_PROJECT_ROOT="/srv", GIT_HTTP_EXPORT_ALL="1",
+                         PATH_INFO=path, QUERY_STRING=query, REQUEST_METHOD=self.command,
+                         CONTENT_TYPE=self.headers.get("Content-Type", ""),
+                         HTTP_CONTENT_ENCODING=self.headers.get("Content-Encoding", ""))
+              out = subprocess.run(["git", "http-backend"], input=body, env=env,
+                                   capture_output=True).stdout
+              head, _, rest = out.partition(b"\\r\\n\\r\\n")
+              self.send_response(200)
+              for line in head.decode().split("\\r\\n"):
+                  name, _, value = line.partition(": ")
+                  if name and name.lower() != "status":
+                      self.send_header(name, value)
+              self.send_header("Content-Length", str(len(rest)))
+              self.end_headers()
+              self.wfile.write(rest)
+      server = http.server.HTTPServer(("0.0.0.0", 8443), Git)
+      tls = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+      tls.load_cert_chain("/srv/tls.pem", "/srv/tls.key")
+      server.socket = tls.wrap_socket(server.socket, server_side=True)
+      server.serve_forever()
+      PY
+      systemd-run --quiet --unit sail-it-git python3 /srv/serve.py
+      for _ in $(seq 1 300); do (exec 3<>/dev/tcp/127.0.0.1/8443) 2>/dev/null && break; sleep 0.1; done
+      (exec 3<>/dev/tcp/127.0.0.1/8443)
+      printf '%s' "$ip"
+      """;
+
+  /**
+   * Item 6 of round 3 on a real Incus: a workspace's first fetch, from a server beside it that
+   * refuses anonymous reads, is made with its owner's token, the one the owner step wrote.
+   */
+  @Test
+  void theFirstFetchOfARepoThatRefusesAnonymousReadsUsesTheOwnersToken() throws Exception {
+    var served = exec(PROJECT, List.of("bash", "-c", PRIVATE_GIT));
+    assertTrue(served.ok(), served.stderr());
+    var host = served.stdout().strip() + ":8443";
+    var url = "https://" + host + "/app.git";
+    var anonymous =
+        exec(
+            PROJECT,
+            List.of(
+                "env",
+                "GIT_TERMINAL_PROMPT=0",
+                "git",
+                "-c",
+                "http.sslVerify=false",
+                "ls-remote",
+                url));
+    assertFalse(anonymous.ok(), "the repo refuses anonymous reads");
+    var cert = Files.createTempFile("sail-it", ".pem");
+    try {
+      assertTrue(
+          shell
+              .exec(List.of("incus", "file", "pull", PROJECT + "/srv/tls.pem", cert.toString()))
+              .ok());
+      assertTrue(
+          shell
+              .exec(
+                  List.of(
+                      "incus",
+                      "file",
+                      "push",
+                      cert.toString(),
+                      TEMPLATE + "/usr/local/share/ca-certificates/sail-it.crt"))
+              .ok());
+    } finally {
+      Files.deleteIfExists(cert);
+    }
+    plant(
+        "update-ca-certificates >/dev/null; runuser -u dev -- git -C /home/dev/workspace/app"
+            + " remote set-url origin "
+            + url);
+    rebuild();
+    var config =
+        new ProjectDefinition(
+            PROJECT,
+            "A private repo",
+            new ProjectDefinition.Resources(2, "2GB", "10GB"),
+            null,
+            null,
+            null,
+            List.of(new ProjectDefinition.Repo(url, "app", null)),
+            null,
+            null,
+            null,
+            null);
+    var owner =
+        new WorkspaceOwner(
+            "uday", "Uday", "uday@sail.invalid", Map.of(host, "tok-private"), List.of());
+
+    var made =
+        workspaces.create(
+            config,
+            FIX,
+            new WorkspaceTemplate.Source(
+                BASE_POOL,
+                "a-later-definition",
+                name -> name.equals(PROJECT),
+                (into, fresh) -> {
+                  throw new AssertionError("the rebuilt template is current");
+                },
+                List.of()),
+            null,
+            owner.handle(),
+            h -> owner);
+
+    var seen = pulled(PROJECT, "/srv/seen").lines().distinct().toList();
+    assertEquals(List.of("oauth2:tok-private"), seen);
+    var fetched =
+        exec(
+            made.instance(),
+            List.of(
+                "runuser",
+                "-u",
+                "dev",
+                "--",
+                "git",
+                "-C",
+                "/home/dev/workspace/app",
+                "log",
+                "-1",
+                "--format=%s",
+                "origin/main"));
+    assertEquals("private", fetched.stdout().strip(), fetched.stderr());
   }
 
   private static WorkspaceOwner udayWith(String token) {

@@ -667,6 +667,28 @@ class WorkspacesTest {
     assertTrue(0 <= start && start < bus, String.join("\n", shell.invocations()));
   }
 
+  /** Low 1 of the proof: a start whose gh login fails says the workspace runs and what it lacks. */
+  @Test
+  void aStartWhoseGhLoginFailsSaysTheWorkspaceRunsAndIsGivenAgainAtItsNextStart() {
+    var shell =
+        incus(DIR_AND_ZFS, list(owned("acme-fix-login", "Stopped", "ana")), "[]")
+            .onFail("gh auth login", "error connecting to api.github.com");
+    var ana =
+        new WorkspaceOwner(
+            "ana", "Ana", "ana@sail.invalid", Map.of("github.com", "ghp_a"), List.of());
+
+    var failure =
+        assertThrows(
+            IOException.class,
+            () -> workspaces(shell, ticks(0, 1, 2)).start(acme(), "fix-login", handle -> ana));
+
+    assertEquals(
+        "Workspace fix-login of acme is running, but its owner's credentials were not all given,"
+            + " and are given again at its next start: Failed to log gh in for github.com in"
+            + " acme-fix-login: error connecting to api.github.com",
+        failure.getMessage());
+  }
+
   @Test
   void startingARunningWorkspaceChangesNothing() throws Exception {
     var shell = incus(DIR_AND_ZFS, list(workspace("acme", "fix-login", "Running", "v1")), "[]");
@@ -1113,6 +1135,32 @@ class WorkspacesTest {
         String.join("\n", shell.invocations()));
   }
 
+  /**
+   * Low 6 of the proof: a repo added after the template was built is not in it, and the refusal
+   * names it and the build that brings it, a command that works as pasted.
+   */
+  @Test
+  void aRepoTheTemplateWasBuiltWithoutIsNamedWithTheBuildThatBringsIt() {
+    var shell =
+        incus(DIR_AND_ZFS, list(template("v1", INPUTS)), snapshots("v1"))
+            .on(
+                "sail-workspace acme fix-login",
+                new ShellExec.Result(3, "sail-step start 1\nsail-missing-repo private\n", ""));
+
+    var failure =
+        assertThrows(
+            IOException.class,
+            () ->
+                workspaces(shell, ticks(0, 1, 2))
+                    .create(acme(), "fix-login", source(), tempDir, "eng", TestOwners::of));
+
+    assertEquals(
+        "Workspace 'fix-login' could not be made its own: its template has no repo at private,"
+            + " since it was built before the repo was added. Build it again: sail project"
+            + " template build acme.",
+        failure.getMessage());
+  }
+
   @Test
   void aCloneIncusRefusesLeavesNothingToDelete() {
     var shell =
@@ -1355,6 +1403,7 @@ class WorkspacesTest {
         step network
         while [ "$#" -ge 2 ]; do
           repo=/home/dev/workspace/$1 base=$2
+          [ -e "$repo/.git" ] || { printf 'sail-missing-repo %s\\n' "$1"; exit 3; }
           shift 2
           fetch "$repo"
           if [ -z "$base" ]; then
@@ -2798,8 +2847,8 @@ class WorkspacesTest {
                         h -> owner));
 
     assertEquals(
-        "ana has no email on this box, and a workspace commits as its owner. Set it with sail fde"
-            + " update ana --email <email>.",
+        "ana has no email on this box, and a workspace commits as its owner. Set it on main with"
+            + " sail fde update ana --email <email>.",
         refused.getMessage());
     assertEquals(List.of(), builtInto, "no template is built");
     assertFalse(shell.invocations().stream().anyMatch(c -> c.startsWith("incus copy")));
@@ -3017,9 +3066,9 @@ class WorkspacesTest {
   }
 
   /**
-   * Rule 1 (review M1): a re-own cut short after the new owner's token is written, by a gh login
-   * that fails, leaves the workspace nobody's, never its previous owner's; so that owner's next
-   * entry strips it and gives it theirs again, and never runs with the other person's token.
+   * Rule 1 (review M1), and item 4 of round 3: a re-own cut short after the new owner's token is
+   * written, by a gh login that fails, is stripped again and left nobody's, holding no one's token,
+   * identity or key; so its previous owner's next entry strips it and gives it theirs again.
    */
   @Test
   void aReOwnCutShortLeavesTheWorkspaceNobodysSoThePreviousOwnersNextEntryGivesTheirsAgain()
@@ -3065,6 +3114,14 @@ class WorkspacesTest {
                 tempDir.resolve("no-files"),
                 whole -> {}));
     assertEquals("", box.key("acme-fix-login", BoxInstances.OWNER_KEY), "nobody's, not uday's");
+    var gh = ran.stream().filter(line -> line.contains("gh auth login")).findFirst().orElseThrow();
+    assertEquals(
+        String.join(" ", strip("acme-fix-login")),
+        ran.subList(ran.indexOf(gh), ran.size()).stream()
+            .filter(line -> line.contains("sail-strip"))
+            .findFirst()
+            .orElse("no strip after gh failed"),
+        String.join("\n", ran));
     failing.set(false);
     ran.clear();
     workspaces.enterSpec(
@@ -3254,6 +3311,29 @@ class WorkspacesTest {
     assertFalse(
         shell.invocations().stream().anyMatch(c -> c.contains("ghp_one") || c.contains("glpat")));
     assertFalse(source.toString().contains("ghp_one"), source.toString());
+  }
+
+  /**
+   * Low 3 of the proof: a build whose check finds something names it, never its value, and says
+   * what to do: the definition's step that writes it comes out before the next build.
+   */
+  @Test
+  void aFailedBuildNamesWhatItFoundAndTheStepToTakeOut() {
+    var shell =
+        incus(DIR_AND_ZFS, list(template("v1", "an-older-definition")), snapshots("v1"))
+            .on(
+                "sail-held",
+                new ShellExec.Result(
+                    1, "", "a token in /home/dev/.netrc, a system git user.email\n"));
+
+    var failure = assertThrows(IOException.class, () -> templates(shell).ensure(acme(), source()));
+
+    assertEquals(
+        "acme--tmpl was not snapshotted: it still holds a token in /home/dev/.netrc, a system git"
+            + " user.email, which acme's own provisioning wrote and the strip does not take out, so"
+            + " it is left where it is. Take the step that writes it out of acme's definition,"
+            + " then build again: sail project template build acme.",
+        failure.getMessage());
   }
 
   /**

@@ -5,6 +5,8 @@
 
 package ai.singlr.sail.engine;
 
+import ai.singlr.sail.common.Remedied;
+import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.config.ProjectDefinition;
 import java.io.IOException;
 import java.time.Duration;
@@ -46,6 +48,7 @@ final class WorkspaceCredentials {
       """
       set -u
       held=""
+      add() { held="${held:+$held, }$1"; }
       as_dev() { runuser -u dev -- env HOME=/home/dev "$@"; }
       tokens=$(cat) || exit 2
       if [ -n "$tokens" ]; then
@@ -55,7 +58,7 @@ final class WorkspaceCredentials {
         done
         found=$(printf '%s\n' "$tokens" | grep -r -l -F --devices=skip -f - -- "$@")
         case $? in
-          0) held="$held a token in $(printf '%s ' $found)" ;;
+          0) add "a token in $(echo $found)" ;;
           1) ;;
           *) echo "the search for the build's tokens failed" >&2; exit 2 ;;
         esac
@@ -65,7 +68,7 @@ final class WorkspaceCredentials {
           if [ "$scope" = system ]; then git config --system --get "$key" >/dev/null
           else as_dev git config --global --get "$key" >/dev/null; fi
           case $? in
-            0) held="$held $scope $key" ;;
+            0) add "a $scope git $key" ;;
             1) ;;
             *) echo "git could not read the $scope $key" >&2; exit 2 ;;
           esac
@@ -75,20 +78,20 @@ final class WorkspaceCredentials {
         [ -e "$keys" ] || continue
         grep -q '[^[:space:]]' "$keys"
         case $? in
-          0) held="$held $keys" ;;
+          0) add "a key in $keys" ;;
           1) ;;
           *) echo "could not read $keys" >&2; exit 2 ;;
         esac
       done
       if said=$(as_dev gh auth status 2>&1); then
-        held="$held a gh login"
+        add "a gh login"
       else
         case $said in
           *"not logged in"*) ;;
           *) printf 'gh could not say whether it is logged in: %s\n' "$said" >&2; exit 2 ;;
         esac
       fi
-      if [ -n "$held" ]; then echo "it still holds$held" >&2; exit 1; fi
+      if [ -n "$held" ]; then echo "$held" >&2; exit 1; fi
       """;
 
   private static final Duration HELD_TIMEOUT = Duration.ofMinutes(10);
@@ -110,10 +113,28 @@ final class WorkspaceCredentials {
                 .map(token -> token + "\n")
                 .reduce("", String::concat),
             HELD_TIMEOUT);
+    if (held.exitCode() == 1) {
+      var project =
+          template.substring(0, template.length() - BoxInstances.TEMPLATE_SUFFIX.length());
+      throw Remedied.io(
+          template
+              + " was not snapshotted: it still holds "
+              + held.stderr().strip()
+              + ", which "
+              + project
+              + "'s own provisioning wrote and the strip does not take out, so it is left where it"
+              + " is.",
+          Remedy.of(
+              "Take the step that writes it out of "
+                  + project
+                  + "'s definition, then build again: ",
+              Remedy.sail("project template build", project),
+              "."));
+    }
     if (!held.ok()) {
       throw new IOException(
           template
-              + " was not snapshotted, since a template holds no one's credentials and "
+              + " was not snapshotted, since Sail could not tell what it holds: "
               + held.reason().strip());
     }
   }

@@ -1039,10 +1039,11 @@ public final class FdeCommand implements Runnable {
               fdeStore.remove(fde.id());
               System.out.println(Ansi.AUTO.string("  @|green ✓|@ FDE removed: " + fde.handle()));
               System.out.println(
-                  "  Their workspaces on this box lose "
+                  "  On every box, "
                       + fde.handle()
-                      + "'s git tokens, gh login and keys at sail-api's next pass: within a"
-                      + " minute while it runs, or as it next starts.");
+                      + "'s workspaces lose their git tokens, gh login and keys, and their stored"
+                      + " logins are erased, at that box's next sail-api pass after it learns of the"
+                      + " removal: within a minute while it runs, or as it next starts.");
               System.out.println(
                   Ansi.AUTO.string(
                       "  @|faint Owned tokens, SSH keys, sessions, passkeys, and enrollment"

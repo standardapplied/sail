@@ -866,10 +866,11 @@ class FdeCommandTest {
   /** What a revocation of {@code key} leaves in each container, and the incus it took. */
   /** What {@code fde rm} says of the removed person's workspaces, sail-api up or not. */
   private static String disowned(String handle) {
-    return "  Their workspaces on this box lose "
+    return "  On every box, "
         + handle
-        + "'s git tokens, gh login and keys at sail-api's next pass: within a minute while it"
-        + " runs, or as it next starts.";
+        + "'s workspaces lose their git tokens, gh login and keys, and their stored logins are"
+        + " erased, at that box's next sail-api pass after it learns of the removal: within a"
+        + " minute while it runs, or as it next starts.";
   }
 
   private void assertContainersNoLongerTrust(SshPublicKey key) {

@@ -574,7 +574,7 @@ class RunPlacesTest {
         "ana has no email on this box, and a workspace commits as its owner.",
         refused.getMessage());
     assertEquals(
-        "Set it with sail fde update ana --email <email>. Then dispatch again.",
+        "Set it on main with sail fde update ana --email <email>. Then dispatch again.",
         refused.failure().remedy().plain());
   }
 

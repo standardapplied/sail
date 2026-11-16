@@ -302,6 +302,11 @@ final class HostLanes {
     }
 
     @Override
+    public List<String> storedSecrets() {
+      return new FdeStore(db).logins().values();
+    }
+
+    @Override
     public WorkspaceOwner workspaceOwner(String handle) {
       return WorkspaceOwner.onThisBox(new FdeStore(db), handle, boxConfig.get().handle());
     }

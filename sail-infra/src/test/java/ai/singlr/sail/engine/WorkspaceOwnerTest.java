@@ -11,6 +11,8 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.config.ProjectDefinition;
+import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.ssh.SshPublicKey;
 import ai.singlr.sail.ssh.TestSshKeys;
 import ai.singlr.sail.store.FdeStore;
@@ -113,17 +115,57 @@ class WorkspaceOwnerTest {
         "zed is not on this box's roster, so no workspace can be theirs.", gone.getMessage());
   }
 
-  /** Scenario 7: an owner with no email is refused, naming the command that sets one. */
+  /**
+   * Scenario 7: an owner with no email is refused. Its remedy is right for whoever reads it: the
+   * command for an admin, the same command for an admin to run for anyone else.
+   */
   @Test
-  void anOwnerWithNoEmailIsRefusedNamingTheUpdateThatSetsIt() {
+  void anOwnerWithNoEmailIsRefusedWithTheRemedyItsReaderCanUse() {
     var owner = WorkspaceOwner.of(fdes, "nomail", "uday", Optional.empty());
 
-    var refused =
-        assertThrows(IllegalStateException.class, () -> owner.require(acme(), url -> false));
+    var admin =
+        assertThrows(
+            IllegalStateException.class,
+            () ->
+                Actor.call(
+                    new Actor("uday", Role.ADMIN, Actor.Lane.CLI),
+                    () -> {
+                      owner.require(acme(), url -> false);
+                      return null;
+                    }));
+    var member =
+        assertThrows(
+            IllegalStateException.class,
+            () ->
+                Actor.call(
+                    new Actor("nomail", Role.MEMBER, Actor.Lane.CLI),
+                    () -> {
+                      owner.require(acme(), url -> false);
+                      return null;
+                    }));
 
     assertEquals(
-        "nomail has no email on this box, and a workspace commits as its owner. Set it with"
-            + " sail fde update nomail --email <email>.",
+        "nomail has no email on this box, and a workspace commits as its owner. Set it on main"
+            + " with sail fde update nomail --email <email>.",
+        admin.getMessage());
+    assertEquals(
+        "nomail has no email on this box, and a workspace commits as its owner. Ask an admin to"
+            + " run on main: sail fde update nomail --email <email>.",
+        member.getMessage());
+  }
+
+  /** High 1 of the proof: a person a node marks disabled, as main's removal does, owns nothing. */
+  @Test
+  void aDisabledPersonIsNoOwner() {
+    fdes.replicate("ana", null, "ana@example.com", "member", "disabled", null);
+
+    var refused =
+        assertThrows(
+            WorkspaceOwner.Refused.class,
+            () -> WorkspaceOwner.of(fdes, "ana", "uday", Optional.empty()));
+
+    assertEquals(
+        "ana is disabled on this box's roster, so no workspace can be theirs.",
         refused.getMessage());
   }
 

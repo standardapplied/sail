@@ -5,10 +5,15 @@
 
 package ai.singlr.sail.engine;
 
+import ai.singlr.sail.access.Access;
+import ai.singlr.sail.access.Action;
+import ai.singlr.sail.access.Decision;
+import ai.singlr.sail.access.Resources;
 import ai.singlr.sail.common.Remedied;
 import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.ProjectDefinition;
+import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.ssh.SshPublicKey;
 import ai.singlr.sail.store.FdeSshKeyStore;
 import ai.singlr.sail.store.FdeStore;
@@ -75,6 +80,11 @@ public record WorkspaceOwner(
                 () ->
                     new IllegalStateException(
                         handle + " is not on this box's roster, so no workspace can be theirs."));
+    if (!fde.active()) {
+      throw new Refused(
+          handle + " is disabled on this box's roster, so no workspace can be theirs.",
+          Remedy.NONE);
+    }
     var keys =
         new ArrayList<>(
             fdes.sshKeys().listForFde(fde.id()).stream()
@@ -94,9 +104,13 @@ public record WorkspaceOwner(
   /** A workspace commits as its owner, and fetches as them: without either it cannot work. */
   public void require(ProjectDefinition config, Predicate<String> asks) {
     if (Strings.isBlank(email)) {
+      var update = Remedy.sail("fde update", handle, "--email", "<email>");
       throw new Refused(
           handle + " has no email on this box, and a workspace commits as its owner.",
-          Remedy.of("Set it with ", Remedy.sail("fde update", handle, "--email", "<email>"), "."));
+          Access.decide(Actor.reader(), Action.MANAGE_PEOPLE, Resources.people())
+                  instanceof Decision.Allowed
+              ? Remedy.of("Set it on main with ", update, ".")
+              : Remedy.of("Ask an admin to run on main: ", update, "."));
     }
     var asking = GitCredentials.asking(config.repos(), this::keepsTokenFor, asks);
     if (!asking.isEmpty()) {

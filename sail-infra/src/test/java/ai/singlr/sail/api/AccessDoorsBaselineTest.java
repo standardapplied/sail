@@ -182,7 +182,7 @@ class AccessDoorsBaselineTest {
     doors.add(
         new Door(
             "store my claude-code login",
-            ops -> ops.logins().store("claude-code", "default", "token", "value")));
+            ops -> ops.logins().store("claude-code", "default", "token", "value", null)));
     doors.add(new Door("use my claude-code login", ops -> ops.logins().use("claude-code", "work")));
     doors.add(
         new Door(

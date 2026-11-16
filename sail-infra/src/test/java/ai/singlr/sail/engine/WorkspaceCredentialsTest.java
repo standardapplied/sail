@@ -180,9 +180,9 @@ class WorkspaceCredentialsTest {
     var global = script(WorkspaceCredentials.HELD, "");
 
     assertEquals(1, system.exit(), system.err());
-    assertTrue(system.err().contains("system user.email"), system.err());
+    assertTrue(system.err().contains("a system git user.email"), system.err());
     assertEquals(1, global.exit(), global.err());
-    assertTrue(global.err().contains("global user.name"), global.err());
+    assertTrue(global.err().contains("a global git user.name"), global.err());
   }
 
   /** (c) A line in any home's authorized_keys fails the check. */

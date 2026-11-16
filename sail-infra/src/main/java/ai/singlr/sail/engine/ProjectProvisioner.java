@@ -829,7 +829,8 @@ public final class ProjectProvisioner {
     }
 
     tracker.advance(currentPhase);
-    stepDone(11, "Git identity configured");
+    stepDone(
+        11, git == null ? "No git identity: the instance is no one's" : "Git identity configured");
   }
 
   private void installMaven(ProjectDefinition config, String name) throws Exception {

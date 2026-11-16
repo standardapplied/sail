@@ -96,6 +96,40 @@ class CliCommandTest {
     assertEquals("", capturedErr.toString(StandardCharsets.UTF_8));
   }
 
+  /** Low 2 of the proof: a JSON refusal's action names each command whole, as this box types it. */
+  @Test
+  void aJsonRefusalsActionNamesItsCommandAsTyped() {
+    var out = System.out;
+    var captured = new ByteArrayOutputStream();
+    System.setOut(new PrintStream(captured, true, StandardCharsets.UTF_8));
+    try {
+      assertThrows(
+          CliCommand.Printed.class,
+          () ->
+              CliCommand.run(
+                  true,
+                  () -> {
+                    throw new ApiException(
+                        ErrorCode.CONFLICT,
+                        "No token.",
+                        Remedy.of("Store one: ", Remedy.sail("git login", "github.com"), "."));
+                  }));
+    } finally {
+      System.setOut(out);
+    }
+
+    assertTrue(
+        captured
+            .toString(StandardCharsets.UTF_8)
+            .contains(
+                "\"action\": \"Store one: "
+                    + OperatorCommand.here()
+                        .render(Remedy.of(Remedy.sail("git login", "github.com")))
+                    + ".\""),
+        captured.toString(StandardCharsets.UTF_8));
+    assertTrue(captured.toString(StandardCharsets.UTF_8).contains("sail git login github.com"));
+  }
+
   /**
    * Under {@code --json} a failure sail did not decide is internal, and one with no fix names none;
    * one it refused on purpose is an invalid request, its remedy kept.

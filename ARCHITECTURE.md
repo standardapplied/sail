@@ -1471,12 +1471,14 @@ Each row with the tests that prove it:
   user's `user.name` and `user.email`, and every line of its `authorized_keys`. A check
   (`WorkspaceCredentials.HELD`) then proves the template holds nothing by content, not by a list
   of paths: (a) no token the build was given appears in any file of its root filesystem, grep
-  reading the tokens on stdin as fixed-string patterns, never on a command line; (b) git reports
+  reading on stdin, as fixed-string patterns, every token the build was given and every login and
+  git token stored on this runner, never on a command line; (b) git reports
   no user name or email at system or global level; (c) no `authorized_keys` under any home has a
   line; (d) gh reports no login. A search or a git or gh command that errors fails the build, as
   does anything found: nothing is recorded or snapshotted and the version before stays current. A
-  failed build is stripped too, as far as it can be, so no builder's token waits in it for the
-  next.
+  failed build is stripped too; what the strip does not remove (a file the project's own
+  provisioning wrote) is named, never its value, with the remedy to take that step out of the
+  definition and build again.
   *`WorkspaceCredentialsTest` (both scripts run by real bash, grep and git: each of a–d found, the
   token hidden in `.netrc`, a gh temp file, a repo's remote URL and `/etc`, an unreadable git
   config failing as "cannot tell"),
@@ -1500,6 +1502,11 @@ Each row with the tests that prove it:
   `sail fde update <h> --email <email>` or `sail git login <host>` (a host with a port included).
   What is written is what is true when it is written: the owner is read again at the give, and a
   token or email gone since the check is refused there as the same refusal, the run given back.
+  The no-email remedy is the command for an admin and "Ask an admin to run on main: …" for anyone
+  else. `fde_ssh_keys` is box-local (the storage table), never synced: a key registered on main reaches
+  no node's workspaces. On a node its person reaches their workspaces with the box's workstation
+  key (a pairing, or `host config set ssh-public-key`), and any other key is registered on that
+  node with `sudo sail fde key add`, which reaches that person's workspaces there.
   *`WorkspacesTest.aNewWorkspaceIsGivenItsOwnersCredentialsBetweenItsStartAndItsPrepare`,
   `WorkspacesTest.anOwnerWhoKeepsNoTokenGetsNoTokenStoreAndNoGhLogin`, `WorkspaceOwnerTest`,
   `RunPlacesTest.aWorkspaceItsOwnerCannotFetchIsRefusedBeforeItsReservationNamingTheLogin`,
@@ -1508,7 +1515,8 @@ Each row with the tests that prove it:
 - **T3. A re-own replaces them all before the new owner's run is staged.** A workspace is never
   labelled one person's while it holds another's: its owner is cleared first, then it is
   stripped and given the new owner's (gh too), and only then is `user.sail.owner` written. A
-  re-own cut short between is nobody's, so the next entry, whoever's, strips and gives again.
+  re-own cut short between is stripped again and left nobody's, so it holds nothing of anyone's,
+  and the next entry, whoever's, strips and gives again.
   *`WorkspacesTest.aReOwnCutShortLeavesTheWorkspaceNobodysSoThePreviousOwnersNextEntryGivesTheirsAgain`,
   `WorkspacesTest.aWorkspaceOfAnotherIsStrippedAndGivenItsNewOwnersBeforeItIsRecordedTheirs`,
   `RunPlacesTest.aWorkspaceOfAnotherIsReOwnedOnlyForAPersonWithAnEmail`.*
@@ -1542,9 +1550,14 @@ Each row with the tests that prove it:
   workstation key) reaches every container and workspace; a stopped workspace takes its owner's
   keys as they are at its next start. A person removed (`fde rm`, or a scoped node's roster round)
   has every workspace they owned lose its token store, gh login and keys, and its owner, through
-  its files, running or stopped: sail-api's pass reads the roster each minute and lists Incus only
-  on its first pass, when someone left the roster or their handle went to someone else, or to
-  retry a workspace it could not reach, said once.
+  its files, running or stopped, and their stored logins and git tokens on the box erased. One
+  predicate decides who may hold credentials on a box, `FdeStore.Fde.active`: a person missing
+  from the roster, or `disabled` as a node marks a person main removed, holds none. It governs
+  the sweep, the give (never to a disabled person) and the login doors (a disabled person stores
+  and uses none). sail-api's pass reads the roster each minute and lists Incus only on its first
+  pass, when someone stopped being active or their handle went to someone else, or to retry a
+  workspace it could not reach, said once. Nobody stores a login for another person: a store
+  naming one (`?fde=`) is refused.
   *`ContainerAuthorizedKeysTest`, `FdeCommandTest.aWorkstationKeySetByHandReplacesTheOldInEveryContainerAsAPairingDoes`,
   `WorkspacesTest.aRemovedPersonsWorkspacesLoseTheirStoreGhLoginKeysAndOwnerAndNoOneElsesDo`,
   `MissedStopReconcilerTest`.*

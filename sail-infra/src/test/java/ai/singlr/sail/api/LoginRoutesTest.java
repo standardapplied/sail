@@ -385,6 +385,48 @@ class LoginRoutesTest {
   }
 
   /**
+   * Medium 1 of the proof: nobody stores a credential for another person, an admin included, git
+   * token or harness login alike; a store naming another is refused with a sentence and changes
+   * nothing, the caller's own included.
+   */
+  @Test
+  void aStoreNamingAnotherPersonIsRefusedForAnAdminTooAndChangesNothing() throws Exception {
+    assertEquals(200, storeToken(ada, "github.com", TOKEN).status());
+
+    var git =
+        ask(
+            ada,
+            "PUT",
+            "/v1/logins/git/github.com?fde=sam",
+            YamlUtil.dumpJson(Map.of("kind", "token", "value", KEY)));
+    var harness =
+        ask(
+            ada,
+            "PUT",
+            "/v1/logins/claude-code/default?fde=sam",
+            YamlUtil.dumpJson(Map.of("kind", "token", "value", KEY)));
+    var own =
+        ask(
+            ada,
+            "PUT",
+            "/v1/logins/git/github.com?fde=ada",
+            YamlUtil.dumpJson(Map.of("kind", "token", "value", TOKEN)));
+
+    var sentence = "Nobody stores a login for another person: sam stores their own.";
+    assertEquals(403, git.status(), git.body());
+    assertEquals(sentence, ((Map<?, ?>) git.map().get("error")).get("message"));
+    assertEquals(403, harness.status(), harness.body());
+    assertEquals(sentence, ((Map<?, ?>) harness.map().get("error")).get("message"));
+    assertEquals(200, own.status(), own.body());
+    var fdes = new FdeStore(db);
+    assertEquals(
+        Map.of("github.com", TOKEN),
+        fdes.logins().gitTokens(fdes.byHandle("ada").orElseThrow().id()));
+    assertEquals(Map.of(), fdes.logins().gitTokens(fdes.byHandle("sam").orElseThrow().id()));
+    assertEquals(List.of(), fdes.logins().list(fdes.byHandle("sam").orElseThrow().id()));
+  }
+
+  /**
    * A host outside the host rule and a value outside the value rule are refused, naming the rule.
    */
   @Test

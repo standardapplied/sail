@@ -375,7 +375,7 @@ public final class MissedStopReconciler implements AutoCloseable {
       tidiedSince = pass.minus(TIDY_LOOKBACK);
     }
     ContainerFilePush.removeStaged(Duration.ofMinutes(1));
-    var swept = fdes.logins().sweep(id -> fdes.byId(id).isPresent());
+    var swept = fdes.logins().sweep(id -> fdes.byId(id).filter(FdeStore.Fde::active).isPresent());
     if (swept > 0) {
       System.err.println("  [reconcile] removed the logins of " + swept + " people removed");
     }
@@ -383,12 +383,15 @@ public final class MissedStopReconciler implements AutoCloseable {
   }
 
   /**
-   * However a person was removed, sail-api up or not, this catches it; Incus is listed only at
-   * start, when the roster lost someone (or a handle changed hands), or to retry one not reached.
+   * A person not active here, missing from the roster or disabled as a node marks one main removed,
+   * holds nothing usable here. Incus is listed only at start, when someone stopped being active (or
+   * a handle changed hands), or to retry a workspace not reached.
    */
   private void disownRemoved() {
     var roster = new HashMap<String, String>();
-    fdes.list().forEach(fde -> roster.put(fde.handle(), fde.id()));
+    fdes.list().stream()
+        .filter(FdeStore.Fde::active)
+        .forEach(fde -> roster.put(fde.handle(), fde.id()));
     var gone = new HashSet<String>();
     if (lastRoster != null) {
       lastRoster.forEach(

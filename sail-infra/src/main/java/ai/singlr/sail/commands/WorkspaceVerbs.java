@@ -31,6 +31,7 @@ import ai.singlr.sail.engine.Workspaces;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Map;
 import java.util.Objects;
@@ -183,10 +184,14 @@ final class WorkspaceVerbs {
     var host = HostYaml.fromMap(YamlUtil.parseFile(SailPaths.hostConfigPath()));
     var catalog = ProjectCatalog.here();
     var tokens = GitCredentials.known(config.repos(), gitToken);
+    var secrets = new ArrayList<>(tokens.values());
+    try (var operations = OperationsFactory.open()) {
+      secrets.addAll(operations.identity().storedSecrets());
+    }
     return source(
         host,
         config,
-        tokens.values(),
+        secrets,
         name -> catalog.read(name).isPresent(),
         checked(
             config,

@@ -1976,6 +1976,28 @@ class ProjectProvisionerTest {
             .orElseThrow());
   }
 
+  /** Low 7 of the proof: a build given no identity, as a template's is, says it wrote none. */
+  @Test
+  void theGitStepOfABuildGivenNoIdentitySaysItIsNoOnes() throws Exception {
+    var shell = minimalSuccessShell();
+    var steps = new ArrayList<String>();
+    var provisioner =
+        new ProjectProvisioner(
+            shell,
+            tracker(),
+            new RecordingListener(steps),
+            Optional.empty(),
+            OperatorCommand.PLAIN);
+
+    provisioner.provision(minimalConfig(), hostYaml(), null, null, null);
+
+    assertTrue(
+        steps.contains("done:11/19:No git identity: the instance is no one's"), steps.toString());
+    assertFalse(
+        shell.invocations().stream().anyMatch(c -> c.contains("git config --global user.")),
+        shell.invocations().toString());
+  }
+
   @Test
   void theGitStepGivesEveryContainerTheBoxsIdentity() throws Exception {
     var shell = minimalSuccessShell();

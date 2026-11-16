@@ -137,6 +137,23 @@ class GitCommandTest {
     assertFalse(value.err().contains("has a space"));
   }
 
+  /**
+   * Medium 1 at the gateway, which runs this CLI as the session's person: a store names no other
+   * person, so {@code --fde} on a login is refused before any value is read, never ignored.
+   */
+  @Test
+  void aLoginNamingAnotherPersonIsRefusedBeforeAnyValueIsRead() {
+    var git = sail(KEY + "\n", "login", "github.com", "--fde", "sam");
+    var harness = SailCli.run(new AgentLoginCommand(), "claude-code", "--fde", "sam");
+
+    assertEquals(2, git.exit(), git.out());
+    assertTrue(git.err().contains("Unknown options: '--fde', 'sam'"), git.err());
+    assertEquals(2, harness.exit(), harness.out());
+    assertTrue(harness.err().contains("Unknown options: '--fde', 'sam'"), harness.err());
+    var fdes = new FdeStore(db);
+    assertEquals(Map.of(), fdes.logins().gitTokens(fdes.byHandle("uday").orElseThrow().id()));
+  }
+
   @Test
   void withoutAHostItPrintsItsUsage() {
     var ran = sail("", "login");

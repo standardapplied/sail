@@ -163,6 +163,7 @@ public final class Workspaces {
           step network
           while [ "$#" -ge 2 ]; do
             repo=/home/dev/workspace/$1 base=$2
+            [ -e "$repo/.git" ] || { printf 'sail-missing-repo %s\\n' "$1"; exit 3; }
             shift 2
             fetch "$repo"
             if [ -z "$base" ]; then
@@ -517,8 +518,8 @@ public final class Workspaces {
   }
 
   /**
-   * The label is cleared before the give and written after it: a re-own cut short is nobody's, so
-   * whoever enters next strips and gives again.
+   * The label is cleared before the give and written after it, and a give cut short is stripped
+   * again: a re-own that fails is nobody's and holds nothing of anyone's.
    */
   private Reused reuse(BoxInstances.Instance found, ProjectDefinition config, Owning owning)
       throws Exception {
@@ -533,14 +534,28 @@ public final class Workspaces {
       label(found.name(), "");
     }
     if (another) {
-      giveAll(found.name(), config, owning.now(this, config));
+      try {
+        giveAll(found.name(), config, owning.now(this, config));
+        label(found.name(), owning.handle());
+      } catch (Exception failure) {
+        stripAfter(found.name(), failure);
+        throw failure;
+      }
     } else if (started) {
       giveAll(found.name(), config, owning.owners().apply(owning.handle()));
     }
-    if (another) {
-      label(found.name(), owning.handle());
-    }
     return new Reused(found.name(), started);
+  }
+
+  private void stripAfter(String instance, Exception failure) {
+    try {
+      WorkspaceCredentials.strip(shell, instance);
+    } catch (IOException | TimeoutException | InterruptedException stripping) {
+      if (stripping instanceof InterruptedException) {
+        Thread.currentThread().interrupt();
+      }
+      failure.addSuppressed(stripping);
+    }
   }
 
   private void label(String instance, String handle)
@@ -756,7 +771,19 @@ public final class Workspaces {
     awaitReady(found.name());
     var owner = found.key(BoxInstances.OWNER_KEY).filter(handle -> !handle.isBlank());
     if (owner.isPresent()) {
-      giveAll(found.name(), config, owners.apply(owner.get()));
+      try {
+        giveAll(found.name(), config, owners.apply(owner.get()));
+      } catch (IOException given) {
+        throw new IOException(
+            "Workspace "
+                + name
+                + " of "
+                + project
+                + " is running, but its owner's credentials were not all given, and are given again"
+                + " at its next start: "
+                + given.getMessage(),
+            given);
+      }
     }
     var ready = nanos.getAsLong();
     return new Changed(
@@ -910,6 +937,17 @@ public final class Workspaces {
       argv.add(Objects.requireNonNullElse(repo.branch(), ""));
     }
     var prepared = shell.exec(ContainerExec.asRoot(instance, argv), null, READY_TIMEOUT);
+    var missing =
+        prepared.stdout().lines().filter(l -> l.startsWith("sail-missing-repo ")).findFirst();
+    if (missing.isPresent()) {
+      throw Remedied.io(
+          "Workspace '"
+              + name
+              + "' could not be made its own: its template has no repo at "
+              + missing.get().substring("sail-missing-repo ".length())
+              + ", since it was built before the repo was added.",
+          Remedy.of("Build it again: ", Remedy.sail("project template build", config.name()), "."));
+    }
     if (!prepared.ok()) {
       throw new IOException(
           "Workspace '" + name + "' could not be made its own: " + prepared.reason());

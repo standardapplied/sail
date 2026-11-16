@@ -20,9 +20,11 @@ import ai.singlr.sail.engine.HostInfo;
 import ai.singlr.sail.engine.RunPlace;
 import ai.singlr.sail.engine.ScriptedShellExecutor;
 import ai.singlr.sail.engine.ShellExec;
+import ai.singlr.sail.engine.SyncOperations;
 import ai.singlr.sail.harness.Harnesses;
 import ai.singlr.sail.harness.RunUsage;
 import ai.singlr.sail.identity.Acting;
+import ai.singlr.sail.identity.ProjectScope;
 import ai.singlr.sail.store.DispatchGate;
 import ai.singlr.sail.store.EventStore;
 import ai.singlr.sail.store.FdeStore;
@@ -536,6 +538,52 @@ class MissedStopReconcilerTest {
 
     assertEquals(
         List.of("ada true, bob true", "ada true, bob false", "ada false, bob false"), asked);
+  }
+
+  /**
+   * High 1 of the proof: a node keeps a person main removed on its roster as {@code disabled}, the
+   * shape a sync round's roster leaves (main's roster no longer lists them). The pass after that
+   * takes their workspaces' credentials and erases every login they stored on this box.
+   */
+  @Test
+  void aPersonANodeDisabledHoldsNoCredentialsFromThePassAfter() {
+    var adaId = TestLogins.store(db, "ada");
+    var tmp = TestLogins.store(db, "tmp");
+    var fdes = new FdeStore(db);
+    fdes.logins().storeGit(tmp, "github.com", "ghp_tmp");
+    var asked = new ArrayList<String>();
+    var probe =
+        new CountingProbe(true) {
+          @Override
+          public List<String> disown(Predicate<String> held) {
+            asked.add("ada " + held.test("ada") + ", tmp " + held.test("tmp"));
+            return List.of();
+          }
+        };
+    var reconciler = reconciler(probe, PAST_GRACE);
+
+    reconciler.sweep();
+    var ada = fdes.byHandle("ada").orElseThrow();
+    Acting.system(
+        () ->
+            SyncOperations.applyFdes(
+                fdes,
+                List.of(
+                    Map.of(
+                        "handle", "ada",
+                        "display_name", "Ada",
+                        "email", ada.email(),
+                        "role", ada.role(),
+                        "status", "active")),
+                ProjectScope.all(),
+                "ada"));
+    reconciler.sweep();
+
+    assertEquals("disabled", fdes.byHandle("tmp").orElseThrow().status());
+    assertEquals(List.of("ada true, tmp true", "ada true, tmp false"), asked);
+    assertEquals(List.of(), fdes.logins().list(tmp));
+    assertEquals(Map.of(), fdes.logins().gitTokens(tmp));
+    assertEquals(2, fdes.logins().list(adaId).size());
   }
 
   /** A container that cannot be asked fails nothing: the next pass tries again. */

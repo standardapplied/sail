@@ -65,8 +65,13 @@ public final class LoginOperations {
   }
 
   /** Stores {@code value} as the caller's login {@code name} of {@code harness}, or replaces it. */
-  LoginResponse store(String harness, String name, String kind, String value) {
+  LoginResponse store(String harness, String name, String kind, String value, String fde) {
     var person = caller();
+    if (Strings.isNotBlank(fde) && !fde.equals(person.handle())) {
+      throw new ApiException(
+          ErrorCode.FORBIDDEN,
+          "Nobody stores a login for another person: " + fde + " stores their own.");
+    }
     if (LoginStore.GIT.equals(harness)) {
       var row = stored(() -> logins().storeGit(person.id(), name, value));
       announce(STORED, person, row);
@@ -125,15 +130,14 @@ public final class LoginOperations {
       var left = reach.workspacesOf(person.handle());
       return left.isEmpty()
           ? null
-          : "These workspaces keep the token they had until they next start: "
+          : "These workspaces were not given all of it, and are given it again at their next start: "
               + String.join("; ", left)
               + ".";
     } catch (Exception e) {
       if (e instanceof InterruptedException) {
         Thread.currentThread().interrupt();
       }
-      return "This box's workspaces could not be read, so each keeps the token it had until it"
-          + " next starts: "
+      return "This box's workspaces could not be read, so each is given it at its next start: "
           + e.getMessage();
     }
   }
@@ -177,7 +181,12 @@ public final class LoginOperations {
                         ErrorCode.FORBIDDEN,
                         "This credential acts for no person, so it keeps no logins.",
                         "Use a token of your own, or sail on the host."));
-    return person(handle);
+    var person = person(handle);
+    if (!person.active()) {
+      throw new ApiException(
+          ErrorCode.FORBIDDEN, handle + " is disabled on this box, so they keep no logins here.");
+    }
+    return person;
   }
 
   /** {@code fde}'s roster entry, the caller's when blank or theirs; another's only to an admin. */
