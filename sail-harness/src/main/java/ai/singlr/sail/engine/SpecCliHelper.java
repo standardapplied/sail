@@ -136,22 +136,26 @@ public final class SpecCliHelper {
           collect_fields "$@"
           api -X PUT "${FIELDS[@]}" "$BASE/$id/content";;
         comment)
-          [ $# -ge 3 ] || die "comment needs a spec id and --body <text>|-"
+          [ $# -ge 1 ] || die "comment needs a spec id and --body <text>|-"
           id="$1"; shift
-          [ "$1" = "--body" ] || die "comment needs --body <text>|-"
-          body="$2"; shift 2
-          if [ "$body" = "-" ]; then
-            FIELDS=(--data-urlencode "body@-")
-          else
-            FIELDS=(--data-urlencode "body=$body")
-          fi
+          FIELDS=()
+          said=""
           while [ $# -gt 0 ]; do
             case "$1" in
+              --body)
+                [ $# -ge 2 ] || die "comment needs --body <text>|-"
+                if [ "$2" = "-" ]; then
+                  FIELDS+=(--data-urlencode "body@-")
+                else
+                  FIELDS+=(--data-urlencode "body=$2")
+                fi
+                said=1; shift 2;;
               --reply-to) [ $# -ge 2 ] || die "--reply-to needs a message id"; FIELDS+=(--data-urlencode "reply_to=$2"); shift 2;;
               --question) FIELDS+=(--data-urlencode "question=true"); shift;;
-              *) die "comment accepts only --reply-to <message-id> and --question";;
+              *) die "comment accepts only --body <text>|-, --reply-to <message-id> and --question";;
             esac
           done
+          [ -n "$said" ] || die "comment needs --body <text>|-"
           api -X POST "${FIELDS[@]}" "$BASE/$id/messages";;
         comments)
           [ $# -ge 1 ] || die "comments needs a spec id"
