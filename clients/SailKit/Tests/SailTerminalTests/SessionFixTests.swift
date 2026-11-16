@@ -137,6 +137,25 @@ import Testing
         session.close()
     }
 
+    /// The reader can take the host's word that an input was applied before the writer has noted
+    /// the input sent: that input is confirmed, and a later replay with no output counts it kept.
+    @Test func anInputNamedAppliedBeforeItIsNotedSentIsNeverCountedLost() async throws {
+        let (host, session, peer, watch) = try await attachedLocally()
+        try peer.send([output("ready", applied: 0), output("ahead", applied: 1)])
+        try await watch.text("ahead")
+        session.send(KeyInput(key: .a, text: "a"))
+        #expect(try await peer.read() == .input(sequence: 1, bytes: Array("a".utf8)))
+        peer.close()
+        let again = try await host.accept()
+        try await again.welcome()
+        #expect(try await again.read() == .attach(session: "work", write: true))
+        let replays = session.replays
+        try again.send([.accepted, .replayBegin(safe: true), .replayEnd])
+        try await watch.until("finished the replay") { session.replays > replays }
+        #expect(session.state.possiblyLostInputs == 0)
+        session.close()
+    }
+
     /// Ruling 5 (the reviewer's s10): an attempt still being admitted when the person detaches is
     /// shut, and never sends an attach after the next one has.
     @Test func anAttemptOvertakenByADetachAndAnAttachSendsNothing() async throws {
@@ -416,6 +435,24 @@ import Testing
 @Suite(.timeLimit(.minutes(1))) struct SessionListingTests {
     static func info(_ name: String) -> SessionInfo {
         SessionInfo(name: name, instanceID: "i-\(name)", live: true, attached: 0, writerFDE: "", room: "", command: [])
+    }
+
+    /// Closing a pane that holds no connection ends its session at the host on one of its own.
+    @Test func aSessionIsEndedWithoutAttaching() async throws {
+        let host = try FakeHost()
+        async let ended: Void = SessionListing.end("mac-a", at: host.address, timeout: 5)
+        let peer = try await host.accept()
+        #expect(try await peer.welcome() == "")
+        #expect(try await peer.read() == .kill(session: "mac-a"))
+        try peer.send(.accepted)
+        try await ended
+        let refused = Task { try await SessionListing.end("mac-b", at: host.address, timeout: 5) }
+        let second = try await host.accept()
+        try await second.welcome()
+        _ = try await second.read()
+        let refusal = HostRefusal(message: "No session mac-b.", remedy: nil)
+        try second.send(.refused(refusal))
+        await #expect(throws: TerminalError.refused(refusal)) { try await refused.value }
     }
 
     @Test func everyPageIsReadInOrder() async throws {

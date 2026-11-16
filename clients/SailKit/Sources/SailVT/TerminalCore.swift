@@ -270,6 +270,25 @@ final class TerminalCore {
         return ghostty_terminal_get(handle, GHOSTTY_TERMINAL_DATA_MOUSE_TRACKING, &tracking) == GHOSTTY_SUCCESS && tracking
     }
 
+    var cursorAtPrompt: Bool {
+        var atPrompt = false
+        guard sink.commandsMarked, !sink.commandRunning,
+              ghostty_terminal_get(handle, GHOSTTY_TERMINAL_DATA_CURSOR_AT_PROMPT, &atPrompt) == GHOSTTY_SUCCESS, atPrompt
+        else { return false }
+        var row: UInt16 = 0
+        guard ghostty_terminal_get(handle, GHOSTTY_TERMINAL_DATA_CURSOR_Y, &row) == GHOSTTY_SUCCESS else { return false }
+        var place = GhosttyPoint()
+        place.tag = GHOSTTY_POINT_TAG_ACTIVE
+        place.value.coordinate = GhosttyPointCoordinate(x: 0, y: UInt32(row))
+        var ref = GhosttyGridRef()
+        var cells: GhosttyRow = 0
+        var semantic = GHOSTTY_ROW_SEMANTIC_NONE
+        guard ghostty_terminal_grid_ref(handle, place, &ref) == GHOSTTY_SUCCESS, ghostty_grid_ref_row(&ref, &cells) == GHOSTTY_SUCCESS,
+              ghostty_row_get(cells, GHOSTTY_ROW_DATA_SEMANTIC_PROMPT, &semantic) == GHOSTTY_SUCCESS
+        else { return false }
+        return semantic == GHOSTTY_ROW_SEMANTIC_PROMPT
+    }
+
     private var onAlternateScreen: Bool {
         var screen = GHOSTTY_TERMINAL_SCREEN_PRIMARY
         return ghostty_terminal_get(handle, GHOSTTY_TERMINAL_DATA_ACTIVE_SCREEN, &screen) == GHOSTTY_SUCCESS

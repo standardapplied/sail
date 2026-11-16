@@ -66,10 +66,10 @@ struct Step: Decodable {
     var resetLatency: Bool?
     /// Kills the host the preview started, as a crash would.
     var killHost: Bool?
-    /// Waits until the session is attached.
+    /// Stops this Mac's host (true) so nothing it is sent is answered, or lets it go on (false).
+    var pauseHost: Bool?
+    /// Waits until the session is attached; false, until it is not.
     var attached: Bool?
-    /// Opens a new session, as the banner's button does.
-    var newSession: Bool?
     /// The view's font size must be this many points.
     var fontPoints: Double?
     /// The rail's item to select: "thisMac" or "account".
@@ -106,4 +106,73 @@ struct Step: Decodable {
     var sweep: Bool?
     /// The step runs only on a signed build, or only on an unsigned one; skipped otherwise.
     var signed: Bool?
+    /// The workbench must come to this within `seconds` (5 by default).
+    var arrangement: Expected?
+    /// A click at the middle of the selected tab's pane at this place in reading order.
+    var clickPane: Int?
+    /// The selected tab's divider at this index dragged `by` points in `moves` moves `interval` ms
+    /// apart; the panes must follow each move.
+    var dragDivider: Int?
+    var by: Double?
+    var moves: Int?
+    /// The tab at the first index dragged to the middle of the tab at the second.
+    var dragTab: [Int]?
+    /// The tab at this index double-clicked, `rename` typed into its field, then `renameWith`
+    /// pressed ("enter" by default, "escape", or "none" to leave the field open).
+    var renameTab: Int?
+    var rename: String?
+    var renameWith: String?
+    /// The sheet on the window answered with its button of this title, the sheet saying `asking`
+    /// when given; "none": no sheet asks within a second.
+    var sheet: String?
+    var asking: String?
+    /// The focused pane's session kept for `listed`.
+    var remember: Bool?
+    /// The session `remember` kept is listed live by the host, or not, within `seconds`.
+    var listed: Bool?
+    /// The tab strip's hit testing: a tab's middle reaches the tab, the empty end moves the window.
+    var stripHits: Bool?
+    /// The four-pane measure (scenario 32).
+    var panes4: Bool?
+    /// Waits this many seconds.
+    var wait: Double?
+    /// Each pane of the selected tab shows a line `winch-<columns>` (a program printing one at each
+    /// SIGWINCH) only for each time the last divider drag held still for the session's resize hold,
+    /// and once at its end, the last its view's grid, within `seconds`: one size per settle (W5),
+    /// whatever pace the machine let the moves keep.
+    var onceResized: Bool?
+    /// The focused pane's screen must not hold this text.
+    var absent: String?
+    /// The focused pane's screen holds `occurs` exactly `times` times, within `seconds`.
+    var occurs: String?
+    var times: Int?
+    /// The focused pane's program sets its title this many times: no arrangement may be written.
+    var titleBurst: Int?
+    /// ⌃⌘→ pressed this many times at once: the arrangement is written once, after.
+    var dividerBurst: Int?
+    /// Keeps the focused pane's view; `heldPaused` finds its display link paused while its tab is
+    /// hidden, and `heldResumed` finds it drawing again once shown.
+    var hold: Bool?
+    var heldPaused: Bool?
+    var heldResumed: Bool?
+    /// Keeps the focused pane's top line; `sameTop` finds it there still.
+    var markTop: Bool?
+    var sameTop: Bool?
+
+    /// The workbench: panes in each tab, the selected tab and focused pane (from 0, reading order),
+    /// the selected tab's pane frames as fractions of its room `[x, y, width, height]`, and points
+    /// added to each when four more are given, within 1 pt;
+    /// whether a pane is zoomed, each tab's title.
+    struct Expected: Decodable {
+        var tabs: [Int]?
+        var selected: Int?
+        var focus: Int?
+        var frames: [[Double]]?
+        var zoomed: Bool?
+        var titles: [String]?
+        /// Which of the selected tab's panes lie under the scrim, in reading order.
+        var dimmed: [Bool]?
+        /// "No terminal is open" shows.
+        var empty: Bool?
+    }
 }
