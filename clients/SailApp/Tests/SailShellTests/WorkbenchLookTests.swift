@@ -44,7 +44,7 @@ import Testing
             #expect(button.contentTintColor == NSColor(look.textSecondary), "\(name): \(button.toolTip ?? "") is not textSecondary")
             #expect(button.keyEquivalent.isEmpty)
         }
-        #expect(selected.layer?.cornerRadius == Look.contentRadius)
+        #expect(selected.layer.map { Double($0.cornerRadius) } == Look.contentRadius)
         #expect(selected.label.font == NSFont.systemFont(ofSize: 13))
         #expect(selected.toolTip == "api")
         #expect(!selected.mouseDownCanMoveWindow && strip.mouseDownCanMoveWindow, "\(name): a tab moves the window, or the strip's empty part does not")

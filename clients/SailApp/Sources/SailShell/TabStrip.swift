@@ -37,7 +37,7 @@ public final class TabStrip: NSView {
     public let add: NSButton
 
     /// A tab's name is being typed.
-    var isRenaming: Bool {
+    public var isRenaming: Bool {
         tabs.contains { $0.field != nil }
     }
 
