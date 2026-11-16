@@ -26,6 +26,7 @@ import ai.singlr.sail.engine.RunPlace;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.engine.Stty;
+import ai.singlr.sail.engine.WorkspaceOwner;
 import ai.singlr.sail.engine.Workspaces;
 import ai.singlr.sail.harness.Harness;
 import ai.singlr.sail.harness.Harnesses;
@@ -413,7 +414,13 @@ public final class AgentAttachCommand implements Runnable {
     } else {
       announceResume(run, harness, sessionId, place.instance());
     }
-    reach(place, Workspaces.onThisBox(new ShellExecutor(false)));
+    try (var operations = this.operations.apply(operator)) {
+      reach(
+          place,
+          Workspaces.onThisBox(new ShellExecutor(false)),
+          operations.catalog().definitions()::require,
+          operations.identity()::workspaceOwner);
+    }
 
     if (member) {
       endMember(run, operator);
@@ -580,11 +587,17 @@ public final class AgentAttachCommand implements Runnable {
 
   /**
    * Puts {@code place} within an attach's reach: a spec's workspace through its own door ({@link
-   * Workspaces#startExisting}), started when stopped; any other place must be running.
+   * Workspaces#startExisting}), started when stopped and given its owner's credentials; any other
+   * place must be running.
    */
-  static void reach(RunPlace place, Workspaces workspaces) throws Exception {
+  static void reach(
+      RunPlace place,
+      Workspaces workspaces,
+      Function<String, ProjectDefinition> definitions,
+      Function<String, WorkspaceOwner> owners)
+      throws Exception {
     if (place instanceof RunPlace.SpecWorkspace workspace) {
-      workspaces.startExisting(workspace);
+      workspaces.startExisting(workspace, definitions.apply(workspace.project()), owners);
       return;
     }
     requireRunning(place);

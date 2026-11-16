@@ -136,7 +136,7 @@ class ScopedSyncServerTest {
             yan.id(),
             "laptop");
     new TokenStore(nodeDb).create("mast-nia", "member", own.id(), null);
-    node.disableUnlisted(List.of("nia", "sam"));
+    node.disableUnlisted(List.of("nia", "sam"), null);
     var round = roundAs(tokenOf("nia"));
     var err = new ByteArrayOutputStream();
     var originalErr = System.err;

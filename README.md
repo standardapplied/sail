@@ -456,6 +456,27 @@ An admin lists or removes another person's logins with `--fde
 <handle>`; nobody, an admin included, can read a value back. A login made by hand in a terminal
 (`claude` then `/login`) still works in that terminal, and an ad-hoc `sail agent run` uses it.
 
+### Your git token
+
+A project's template holds no one's credentials: it is built with your token for its own clone,
+then the token, gh's login, the git identity and every SSH key are taken out before it is
+snapshotted. Each workspace is given its owner's when it is made, and a run's workspace is its
+person's. Store the forge token your workspaces fetch, push and open pull requests with once, per
+host; it is read from stdin and never shown again:
+
+```bash
+sudo sail git login github.com                      # paste it, or pipe it: printf %s "$GITHUB_TOKEN" | sudo sail git login github.com
+sudo sail git login list                            # host, stored date, fingerprint
+sudo sail git login remove github.com
+```
+
+A token you store, replace or remove reaches your running workspaces at once, and a stopped one
+when it next starts. A workspace commits as you, with the name and email the roster holds for you (`sudo sail fde
+update <handle> --email <email>`), and trusts your registered SSH keys (plus the box's
+workstation key when you are its person). A dispatch whose workspace would need a token you did
+not store, for a repo that asks for one, is refused before anything starts, naming the `sail git
+login` that fixes it.
+
 ### A stage's brief
 
 The loop is sail's: a build, then review stages, then a fix when a stage fails. What the

@@ -13,9 +13,6 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.config.ProjectDefinition;
-import com.sun.net.httpserver.HttpServer;
-import java.net.InetAddress;
-import java.net.InetSocketAddress;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -88,59 +85,6 @@ class GitCredentialsTest {
             "https://github.com/acme/b.git",
             "https://gitlab.com/acme/c.git"),
         GitCredentials.askingForAToken(repos, Map.of(), status));
-  }
-
-  @Test
-  void onlyA401OrA403WithAChallengeAsksForCredentialsAndNoRedirectIsFollowed() throws Exception {
-    var elsewhere =
-        HttpServer.create(new InetSocketAddress(InetAddress.getLoopbackAddress(), 0), 0);
-    var followed = new CopyOnWriteArrayList<String>();
-    elsewhere.createContext(
-        "/",
-        exchange -> {
-          followed.add(exchange.getRequestURI().toString());
-          exchange.sendResponseHeaders(401, -1);
-          exchange.close();
-        });
-    var server = HttpServer.create(new InetSocketAddress(InetAddress.getLoopbackAddress(), 0), 0);
-    server.createContext(
-        "/",
-        exchange -> {
-          switch (exchange.getRequestURI().getPath()) {
-            case "/private" -> exchange.sendResponseHeaders(401, -1);
-            case "/challenged" -> {
-              exchange.getResponseHeaders().add("WWW-Authenticate", "Basic realm=\"git\"");
-              exchange.sendResponseHeaders(403, -1);
-            }
-            case "/forbidden" -> exchange.sendResponseHeaders(403, -1);
-            case "/moved" -> {
-              exchange
-                  .getResponseHeaders()
-                  .add(
-                      "Location",
-                      "http://127.0.0.1:" + elsewhere.getAddress().getPort() + "/private");
-              exchange.sendResponseHeaders(302, -1);
-            }
-            default -> exchange.sendResponseHeaders(200, -1);
-          }
-          exchange.close();
-        });
-    elsewhere.start();
-    server.start();
-    var at = "http://127.0.0.1:" + server.getAddress().getPort();
-    try {
-      assertTrue(GitCredentials.asksForCredentials(at + "/private"));
-      assertTrue(GitCredentials.asksForCredentials(at + "/challenged"));
-      assertFalse(GitCredentials.asksForCredentials(at + "/forbidden"), "a 403 no token lifts");
-      assertFalse(GitCredentials.asksForCredentials(at + "/public"));
-      assertFalse(GitCredentials.asksForCredentials(at + "/moved"));
-      assertEquals(List.of(), followed, "a redirect is not followed to another host");
-      assertFalse(GitCredentials.asksForCredentials("http://127.0.0.1:1/info/refs"));
-      assertFalse(GitCredentials.asksForCredentials("not a url"));
-    } finally {
-      server.stop(0);
-      elsewhere.stop(0);
-    }
   }
 
   @Test

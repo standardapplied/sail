@@ -31,8 +31,6 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.concurrent.Callable;
-import java.util.concurrent.atomic.AtomicBoolean;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -133,44 +131,30 @@ class WorkspaceVerbsTest {
   }
 
   @Test
-  void aBuildAsksAboutTokensBeforeItTakesThePairingLockAndARefusedOneNeverTakesIt()
-      throws Exception {
-    var held = new AtomicBoolean();
+  void aBuildAsksAboutTokensBeforeItProvisionsAndARefusedOneNeverProvisions() throws Exception {
     var seen = new ArrayList<String>();
-    Callable<AutoCloseable> pairing =
-        () -> {
-          seen.add("lock");
-          held.set(true);
-          return () -> held.set(false);
-        };
     var build =
-        WorkspaceVerbs.checkedThenPaired(
+        WorkspaceVerbs.checked(
             acme(),
             Map.of(),
             url -> {
-              seen.add("probe while held=" + held.get());
+              seen.add("probe");
               return false;
             },
-            pairing,
-            (into, fresh) -> seen.add("provision while held=" + held.get()));
+            (into, fresh) -> seen.add("provision"));
     var refused =
-        WorkspaceVerbs.checkedThenPaired(
-            acme(),
-            Map.of(),
-            url -> true,
-            pairing,
-            (into, fresh) -> seen.add("provisioned anyway"));
+        WorkspaceVerbs.checked(
+            acme(), Map.of(), url -> true, (into, fresh) -> seen.add("provisioned anyway"));
     var template = new ProjectProvisioner.Instance("acme--tmpl", Optional.of("tank"), Map.of());
 
     build.into(template, true);
     assertThrows(IllegalArgumentException.class, () -> refused.into(template, true));
 
-    assertEquals(List.of("probe while held=false", "lock", "provision while held=true"), seen);
-    assertFalse(held.get(), "the lock is let go after the build");
+    assertEquals(List.of("probe", "provision"), seen);
   }
 
   @Test
-  void aTemplateIsBuiltFromTheBaseProfilesPoolAndTheDigestApplyRecords() throws Exception {
+  void aTemplateIsBuiltFromTheBaseProfilesPoolAndItsDigestIsTheDefinitionsAlone() throws Exception {
     var named =
         new HostYaml(
             "dir", "devpool", null, "incusbr0", "singlr-base", "ubuntu/24.04", "6.0", null, null);
@@ -179,13 +163,13 @@ class WorkspaceVerbsTest {
             "dir", null, null, "incusbr0", "singlr-base", "ubuntu/24.04", "6.0", null, null);
 
     var source =
-        WorkspaceVerbs.source(named, acme(), Optional.empty(), name -> false, (into, fresh) -> {});
+        WorkspaceVerbs.source(named, acme(), List.of(), name -> false, (into, fresh) -> {});
 
     assertEquals("devpool", source.basePool());
     assertEquals(ProjectProvisioner.inputs(acme(), Optional.empty()), source.inputs());
     assertEquals(
         HostYaml.DEFAULT_POOL,
-        WorkspaceVerbs.source(unnamed, acme(), Optional.empty(), name -> false, (into, fresh) -> {})
+        WorkspaceVerbs.source(unnamed, acme(), List.of(), name -> false, (into, fresh) -> {})
             .basePool());
   }
 }

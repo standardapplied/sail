@@ -8,6 +8,7 @@ package ai.singlr.sail.engine;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.api.EventBus;
@@ -48,6 +49,7 @@ import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
 import ai.singlr.sail.store.TestRuns;
 import java.io.ByteArrayOutputStream;
+import java.io.IOException;
 import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -125,7 +127,8 @@ class WorkspaceIT extends AbstractIncusIT {
           shell,
           System::nanoTime,
           SailPaths.locksDir(),
-          Workspaces.memoryOf(new HostDetector()));
+          Workspaces.memoryOf(new HostDetector()),
+          url -> false);
 
   private static ProjectDefinition definition() {
     return new ProjectDefinition(
@@ -149,7 +152,8 @@ class WorkspaceIT extends AbstractIncusIT {
         name -> name.equals(PROJECT),
         (into, fresh) -> {
           throw new AssertionError("the sealed template is current, so nothing is built");
-        });
+        },
+        List.of());
   }
 
   @BeforeEach
@@ -196,12 +200,441 @@ class WorkspaceIT extends AbstractIncusIT {
     }
   }
 
+  /**
+   * What {@code path} of {@code instance} holds, running or stopped, or null when it is not there.
+   */
+  private String pulled(String instance, String path) throws Exception {
+    var pulled = shell.exec(List.of("incus", "file", "pull", instance + path, "-"));
+    return pulled.ok() ? pulled.stdout() : null;
+  }
+
+  private static final String FAKE_TOKEN = "ghp_itFakeBuilderToken0042";
+
+  /** Runs {@code script} as root in the template, running, and stops it again. */
+  private void plant(String script) throws Exception {
+    containers.start(TEMPLATE);
+    var planted = exec(TEMPLATE, List.of("bash", "-c", "set -eu; " + script));
+    assertTrue(planted.ok(), planted.stderr());
+    containers.stop(TEMPLATE);
+  }
+
+  /** A rebuild of the template, as the production lane makes one, given {@link #FAKE_TOKEN}. */
+  private WorkspaceTemplate.Template rebuild() throws Exception {
+    return new WorkspaceTemplate(shell, shell, SailPaths.locksDir())
+        .ensure(
+            definition(),
+            new WorkspaceTemplate.Source(
+                BASE_POOL,
+                "a-later-definition",
+                name -> name.equals(PROJECT),
+                (into, fresh) -> {},
+                List.of(FAKE_TOKEN)));
+  }
+
+  /**
+   * What {@code path} of snapshot {@code version} of the template holds, read from a copy of it.
+   */
+  private String inSnapshot(String version, String path) throws Exception {
+    var probe = PROJECT + "-probe";
+    deleteContainerQuietly(probe);
+    var copied = shell.exec(List.of("incus", "copy", TEMPLATE + "/" + version, probe));
+    assertTrue(copied.ok(), copied.reason());
+    try {
+      return pulled(probe, path);
+    } finally {
+      deleteContainerQuietly(probe);
+    }
+  }
+
+  /**
+   * Scenario 1 on a real Incus: a template its build left holding a fake token, gh's login, a git
+   * identity and a key is rebuilt as the production lane rebuilds it, and its new snapshot holds
+   * none of the four.
+   */
+  @Test
+  void aTemplateBuiltWithItsBuildersCredentialsIsSnapshottedHoldingNone() throws Exception {
+    plant(
+        "install -d -o dev -g dev -m 700 /home/dev/.ssh /home/dev/.config/gh;"
+            + " echo https://oauth2:"
+            + FAKE_TOKEN
+            + "@example.invalid > /home/dev/.git-credentials;"
+            + " echo 'example.invalid: {oauth_token: "
+            + FAKE_TOKEN
+            + "}' > /home/dev/.config/gh/hosts.yml;"
+            + " echo 'ssh-ed25519 AAAAbuilder builder@box' > /home/dev/.ssh/authorized_keys;"
+            + " runuser -u dev -- env HOME=/home/dev git config --global user.name Builder;"
+            + " runuser -u dev -- env HOME=/home/dev git config --global user.email b@sail.invalid");
+
+    assertEquals("v2", rebuild().version());
+    assertEquals(null, inSnapshot("v2", "/home/dev/.git-credentials"), "no token store");
+    assertEquals(null, inSnapshot("v2", "/home/dev/.config/gh/hosts.yml"), "no gh login");
+    assertEquals("", inSnapshot("v2", "/home/dev/.ssh/authorized_keys"), "no key");
+    var gitconfig = inSnapshot("v2", "/home/dev/.gitconfig");
+    assertFalse(gitconfig != null && gitconfig.contains("b@sail.invalid"), gitconfig);
+    assertFalse(gitconfig != null && gitconfig.contains("Builder"), gitconfig);
+  }
+
+  /**
+   * Rule 2 on a real Incus: a template that still holds a credential after the strip fails its
+   * build, records no version and takes no snapshot, and v1 stays current: (a) the build's token in
+   * places no list names, (b) a system git identity, (c) a key in another home.
+   */
+  @Test
+  void aTemplateStillHoldingACredentialFailsItsBuildAndVersionOneStaysCurrent() throws Exception {
+    for (var leftover :
+        List.of(
+            List.of(
+                "echo 'machine example.invalid password " + FAKE_TOKEN + "' > /home/dev/.netrc",
+                "a token this build was given in /home/dev/.netrc"),
+            List.of(
+                "mkdir -p /home/dev/.sail && echo " + FAKE_TOKEN + " > /home/dev/.sail/gh-token-01",
+                "/home/dev/.sail/gh-token-01"),
+            List.of(
+                "runuser -u dev -- git -C /home/dev/workspace/app remote set-url origin"
+                    + " https://oauth2:"
+                    + FAKE_TOKEN
+                    + "@example.invalid/app.git",
+                "/home/dev/workspace/app/.git/config"),
+            List.of("git config --system user.email root@sail.invalid", "a system git user.email"),
+            List.of(
+                "mkdir -p /root/.ssh && echo 'ssh-ed25519 AAAAroot r' > /root/.ssh/authorized_keys",
+                "/root/.ssh/authorized_keys"))) {
+      plant(leftover.getFirst());
+
+      var failed = assertThrows(IOException.class, this::rebuild, leftover.getFirst());
+
+      assertTrue(failed.getMessage().contains(leftover.getLast()), failed.getMessage());
+      assertFalse(failed.getMessage().contains(FAKE_TOKEN), "the refusal never says the token");
+      var template = new BoxInstances(shell).named(TEMPLATE).orElseThrow();
+      assertEquals(Optional.of("v1"), template.key(WorkspaceTemplate.CURRENT_KEY));
+      assertEquals(
+          List.of("v1"),
+          new SnapshotManager(shell)
+              .list(TEMPLATE).stream().map(SnapshotManager.SnapshotInfo::name).toList());
+      plant(
+          "rm -f /home/dev/.netrc /home/dev/.sail/gh-token-01 /root/.ssh/authorized_keys;"
+              + " git config --system --unset-all user.email || true;"
+              + " runuser -u dev -- git -C /home/dev/workspace/app remote set-url origin"
+              + " file:///srv/app.git");
+    }
+  }
+
+  /** Rule 2 (d) on a real Incus: the check finds a gh login the dev user has. */
+  @Test
+  void theCheckFindsAGhLoginOnARealContainer() throws Exception {
+    containers.start(TEMPLATE);
+    var planted =
+        exec(
+            TEMPLATE,
+            List.of(
+                "bash",
+                "-c",
+                "install -d -o dev -g dev /home/dev/.config/gh && printf"
+                    + " 'github.com:\\n    oauth_token: x\\n    user: it\\n' >"
+                    + " /home/dev/.config/gh/hosts.yml && chown dev:dev"
+                    + " /home/dev/.config/gh/hosts.yml"));
+    assertTrue(planted.ok(), planted.stderr());
+
+    var refused =
+        assertThrows(
+            IOException.class, () -> WorkspaceCredentials.requireNone(shell, TEMPLATE, List.of()));
+
+    assertTrue(
+        refused.getMessage().contains("a gh login")
+            || refused.getMessage().contains("gh could not"),
+        refused.getMessage());
+  }
+
+  /**
+   * Scenarios 2 and 3 on a real Incus: two workspaces made for two people each commit as their
+   * owner and hold their owner's token store alone.
+   */
+  @Test
+  void twoWorkspacesOfTwoPeopleEachCommitAsTheirOwnerWithTheirOwnStore() throws Exception {
+    var uday =
+        new WorkspaceOwner(
+            "uday", "Uday", "uday@sail.invalid", Map.of("example.invalid", "tok-uday"), List.of());
+    var ana =
+        new WorkspaceOwner(
+            "ana",
+            "Ana",
+            "ana@sail.invalid",
+            Map.of("example.invalid", "tok-ana"),
+            List.of("ssh-ed25519 AAAAana ana@laptop"));
+
+    var fix = workspaces.create(definition(), FIX, source(), null, uday.handle(), h -> uday);
+    var second = workspaces.create(definition(), SECOND, source(), null, ana.handle(), h -> ana);
+
+    for (var made : List.of(Map.entry(fix, uday), Map.entry(second, ana))) {
+      var instance = made.getKey().instance();
+      var owner = made.getValue();
+      var email =
+          exec(
+              instance,
+              List.of("runuser", "-u", "dev", "--", "git", "config", "--global", "user.email"));
+      assertEquals(owner.email(), email.stdout().strip(), instance);
+      assertEquals(
+          "https://oauth2:" + owner.tokens().get("example.invalid") + "@example.invalid\n",
+          pulled(instance, "/home/dev/.git-credentials"),
+          instance);
+      assertEquals(
+          owner.keys().stream().map(key -> key + "\n").reduce("", String::concat),
+          pulled(instance, "/home/dev/.ssh/authorized_keys"),
+          instance);
+    }
+  }
+
+  private static final String PRIVATE_GIT =
+      """
+      set -eu
+      for _ in $(seq 1 300); do ip -4 -o addr show dev eth0 | grep -q inet && break; sleep 0.1; done
+      ip=$(ip -4 -o addr show dev eth0 | awk '{print $4}' | cut -d/ -f1)
+      openssl req -x509 -newkey rsa:2048 -nodes -days 1 -subj /CN=sail-it -keyout /srv/tls.key \
+        -out /srv/tls.pem -addext "subjectAltName=IP:$ip" 2>/dev/null
+      git init --quiet --bare -b main /srv/app.git
+      git init --quiet -b main /tmp/private
+      git -C /tmp/private -c user.name=it -c user.email=it@sail.invalid commit --quiet \
+        --allow-empty -m private
+      git -C /tmp/private push --quiet /srv/app.git main
+      cat > /srv/serve.py <<'PY'
+      import base64, http.server, os, ssl, subprocess
+      class Git(http.server.BaseHTTPRequestHandler):
+          def do_GET(self): self.answer()
+          def do_POST(self): self.answer()
+          def answer(self):
+              sent = self.headers.get("Authorization", "")
+              if not sent.startswith("Basic "):
+                  self.send_response(401)
+                  self.send_header("WWW-Authenticate", 'Basic realm="private"')
+                  self.send_header("Content-Length", "0")
+                  self.end_headers()
+                  return
+              with open("/srv/seen", "a") as seen:
+                  seen.write(base64.b64decode(sent[6:]).decode() + "\\n")
+              path, _, query = self.path.partition("?")
+              body = self.rfile.read(int(self.headers.get("Content-Length") or 0))
+              env = dict(os.environ, GIT_PROJECT_ROOT="/srv", GIT_HTTP_EXPORT_ALL="1",
+                         PATH_INFO=path, QUERY_STRING=query, REQUEST_METHOD=self.command,
+                         CONTENT_TYPE=self.headers.get("Content-Type", ""),
+                         HTTP_CONTENT_ENCODING=self.headers.get("Content-Encoding", ""))
+              out = subprocess.run(["git", "http-backend"], input=body, env=env,
+                                   capture_output=True).stdout
+              head, _, rest = out.partition(b"\\r\\n\\r\\n")
+              self.send_response(200)
+              for line in head.decode().split("\\r\\n"):
+                  name, _, value = line.partition(": ")
+                  if name and name.lower() != "status":
+                      self.send_header(name, value)
+              self.send_header("Content-Length", str(len(rest)))
+              self.end_headers()
+              self.wfile.write(rest)
+      server = http.server.HTTPServer(("0.0.0.0", 8443), Git)
+      tls = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+      tls.load_cert_chain("/srv/tls.pem", "/srv/tls.key")
+      server.socket = tls.wrap_socket(server.socket, server_side=True)
+      server.serve_forever()
+      PY
+      systemd-run --quiet --unit sail-it-git python3 /srv/serve.py
+      for _ in $(seq 1 300); do (exec 3<>/dev/tcp/127.0.0.1/8443) 2>/dev/null && break; sleep 0.1; done
+      (exec 3<>/dev/tcp/127.0.0.1/8443)
+      printf '%s' "$ip"
+      """;
+
+  /**
+   * Item 6 of round 3 on a real Incus: a workspace's first fetch, from a server beside it that
+   * refuses anonymous reads, is made with its owner's token, the one the owner step wrote.
+   */
+  @Test
+  void theFirstFetchOfARepoThatRefusesAnonymousReadsUsesTheOwnersToken() throws Exception {
+    var served = exec(PROJECT, List.of("bash", "-c", PRIVATE_GIT));
+    assertTrue(served.ok(), served.stderr());
+    var host = served.stdout().strip() + ":8443";
+    var url = "https://" + host + "/app.git";
+    var anonymous =
+        exec(
+            PROJECT,
+            List.of(
+                "env",
+                "GIT_TERMINAL_PROMPT=0",
+                "git",
+                "-c",
+                "http.sslVerify=false",
+                "ls-remote",
+                url));
+    assertFalse(anonymous.ok(), "the repo refuses anonymous reads");
+    var cert = Files.createTempFile("sail-it", ".pem");
+    try {
+      assertTrue(
+          shell
+              .exec(List.of("incus", "file", "pull", PROJECT + "/srv/tls.pem", cert.toString()))
+              .ok());
+      assertTrue(
+          shell
+              .exec(
+                  List.of(
+                      "incus",
+                      "file",
+                      "push",
+                      "--mode",
+                      "0644",
+                      cert.toString(),
+                      TEMPLATE + "/usr/local/share/ca-certificates/sail-it.crt"))
+              .ok());
+    } finally {
+      Files.deleteIfExists(cert);
+    }
+    plant(
+        "git config --system http."
+            + url.substring(0, url.indexOf("/app.git") + 1)
+            + ".sslCAInfo /usr/local/share/ca-certificates/sail-it.crt; runuser -u dev -- git -C"
+            + " /home/dev/workspace/app remote set-url origin "
+            + url);
+    rebuild();
+    var config =
+        new ProjectDefinition(
+            PROJECT,
+            "A private repo",
+            new ProjectDefinition.Resources(2, "2GB", "10GB"),
+            null,
+            null,
+            null,
+            List.of(new ProjectDefinition.Repo(url, "app", null)),
+            null,
+            null,
+            null,
+            null);
+    var owner =
+        new WorkspaceOwner(
+            "uday", "Uday", "uday@sail.invalid", Map.of(host, "tok-private"), List.of());
+
+    var made =
+        workspaces.create(
+            config,
+            FIX,
+            new WorkspaceTemplate.Source(
+                BASE_POOL,
+                "a-later-definition",
+                name -> name.equals(PROJECT),
+                (into, fresh) -> {
+                  throw new AssertionError("the rebuilt template is current");
+                },
+                List.of()),
+            null,
+            owner.handle(),
+            h -> owner);
+
+    var seen = pulled(PROJECT, "/srv/seen").lines().distinct().toList();
+    assertEquals(List.of("oauth2:tok-private"), seen);
+    var fetched =
+        exec(
+            made.instance(),
+            List.of(
+                "runuser",
+                "-u",
+                "dev",
+                "--",
+                "git",
+                "-C",
+                "/home/dev/workspace/app",
+                "log",
+                "-1",
+                "--format=%s",
+                "origin/main"));
+    assertEquals("private", fetched.stdout().strip(), fetched.stderr());
+  }
+
+  /**
+   * The fleet's ten-at-once failure, on a real Incus: with its host keys gone sshd refuses to
+   * start, which is what removing them before making new ones did to an ssh.service systemd was
+   * starting at that moment. Made beside the old ones and renamed over them, they are never gone:
+   * sshd, checked over and over the whole time, never refuses.
+   */
+  @Test
+  void aWorkspacesNewHostKeysNeverLeaveSshdWithNone() throws Exception {
+    var fix = workspaces.create(definition(), FIX, source(), null, "uday", h -> udayWith("tok-1"));
+
+    var swapped =
+        exec(
+            fix.instance(),
+            List.of(
+                "bash",
+                "-c",
+                "set -eu; mkdir -p /run/sshd; /usr/sbin/sshd -t\n"
+                    + "(for _ in $(seq 1 200); do /usr/sbin/sshd -t 2>/dev/null || echo refused; done)"
+                    + " & checking=$!\n"
+                    + Workspaces.HOST_KEYS
+                    + "wait $checking\n"));
+    var gone =
+        exec(
+            fix.instance(),
+            List.of("bash", "-c", "rm -f /etc/ssh/ssh_host_*; /usr/sbin/sshd -t 2>&1"));
+
+    assertTrue(swapped.ok(), swapped.stderr() + swapped.stdout());
+    assertFalse(swapped.stdout().contains("refused"), swapped.stdout());
+    assertFalse(gone.ok(), "sshd refuses with no host keys: " + gone.stdout());
+  }
+
+  private static WorkspaceOwner udayWith(String token) {
+    return new WorkspaceOwner(
+        "uday", "Uday", "uday@sail.invalid", Map.of("example.invalid", token), List.of());
+  }
+
+  private static final String WATCH =
+      """
+      touch /home/dev/.sail-it-watching
+      while [ ! -e /home/dev/.sail-it-stop ]; do
+        [ -e /home/dev/.git-credentials ] || { echo absent; break; }
+      done
+      echo watched
+      """;
+
+  /**
+   * On a real Incus: a token replaced while a workspace runs is in its store at once, the one its
+   * next fetch reads, and a live run watching the store the whole time never finds it absent (N5);
+   * one replaced while it is stopped is in it once it starts.
+   */
+  @Test
+  void aReplacedTokenReachesARunningWorkspaceAtOnceAndAStoppedOneWhenItStarts() throws Exception {
+    var fix = workspaces.create(definition(), FIX, source(), null, "uday", h -> udayWith("tok-1"));
+    var store = "/home/dev/.git-credentials";
+    var watcher =
+        new ProcessBuilder("incus", "exec", fix.instance(), "--", "bash", "-c", WATCH)
+            .redirectErrorStream(true)
+            .start();
+    watcher.getOutputStream().close();
+    var watching =
+        exec(
+            fix.instance(),
+            List.of(
+                "bash",
+                "-c",
+                "for _ in $(seq 1 300); do [ -e /home/dev/.sail-it-watching ] && exit 0; sleep 0.1;"
+                    + " done; exit 1"));
+    assertTrue(watching.ok(), "the live run is watching");
+
+    assertEquals(List.of(), workspaces.refresh(udayWith("tok-2"), project -> definition()));
+    assertTrue(exec(fix.instance(), List.of("touch", "/home/dev/.sail-it-stop")).ok());
+    assertTrue(watcher.waitFor(60, TimeUnit.SECONDS), "the watch ends");
+    assertEquals(
+        "watched",
+        new String(watcher.getInputStream().readAllBytes(), StandardCharsets.UTF_8).strip());
+    assertEquals("https://oauth2:tok-2@example.invalid\n", pulled(fix.instance(), store));
+    workspaces.stop(PROJECT, FIX, NO_RUN);
+    workspaces.refresh(udayWith("tok-3"), project -> definition());
+    assertEquals(
+        "https://oauth2:tok-2@example.invalid\n",
+        pulled(fix.instance(), store),
+        "a stopped workspace is not reached");
+    workspaces.start(definition(), FIX, handle -> udayWith("tok-3"));
+    assertEquals("https://oauth2:tok-3@example.invalid\n", pulled(fix.instance(), store));
+  }
+
   @Test
   void workspacesAreClonesOfTheTemplateEachItsOwnMachineBesideTheProjectsContainer()
       throws Exception {
     var before = bystander();
-    var fix = workspaces.create(definition(), FIX, source(), null, "eng");
-    var second = workspaces.create(definition(), SECOND, source(), null, "eng");
+    var fix = workspaces.create(definition(), FIX, source(), null, "eng", TestOwners::of);
+    var second = workspaces.create(definition(), SECOND, source(), null, "eng", TestOwners::of);
     record("create " + FIX, fix.timings());
     record("create " + SECOND, second.timings());
 
@@ -292,7 +725,7 @@ class WorkspaceIT extends AbstractIncusIT {
 
   @Test
   void everyProjectVerbIsRefusedOnARealWorkspaceAndTemplateAndChangesNeither() throws Exception {
-    var fix = workspaces.create(definition(), FIX, source(), null, "eng");
+    var fix = workspaces.create(definition(), FIX, source(), null, "eng", TestOwners::of);
     var ws = fix.instance();
     var verbs =
         List.<Map.Entry<Object, List<String>>>of(
@@ -343,7 +776,7 @@ class WorkspaceIT extends AbstractIncusIT {
 
   @Test
   void aWorkspaceStopsAndResumesWithItsEditsAndAPauseListsAsFrozen() throws Exception {
-    var fix = workspaces.create(definition(), FIX, source(), null, "eng");
+    var fix = workspaces.create(definition(), FIX, source(), null, "eng", TestOwners::of);
     var edited = exec(fix.instance(), List.of("bash", "-c", "echo kept > /home/dev/edit"));
     assertTrue(edited.ok(), edited.stderr());
 
@@ -351,7 +784,7 @@ class WorkspaceIT extends AbstractIncusIT {
     assertEquals(
         new ContainerState.Stopped(),
         new BoxInstances(shell).named(fix.instance()).orElseThrow().state());
-    var resumed = workspaces.start(PROJECT, FIX);
+    var resumed = workspaces.start(definition(), FIX, TestOwners::of);
     record("start " + FIX, resumed.timings());
 
     assertEquals(Workspaces.Change.STARTED, resumed.change());
@@ -364,7 +797,8 @@ class WorkspaceIT extends AbstractIncusIT {
         workspaces.list(PROJECT).workspaces().stream()
             .map(row -> row.name() + " " + row.state())
             .toList());
-    assertEquals(Workspaces.Change.STARTED, workspaces.start(PROJECT, FIX).change());
+    assertEquals(
+        Workspaces.Change.STARTED, workspaces.start(definition(), FIX, TestOwners::of).change());
   }
 
   @Test
@@ -399,7 +833,7 @@ class WorkspaceIT extends AbstractIncusIT {
       TestControlPlane.on(operations, db, socketDir, new SyncConfig(null, null, "it"));
       try (var server = new LocalApiSocket(operations, socketDir.resolve("api.sock"))) {
         server.start();
-        var fix = workspaces.create(definition(), FIX, source(), null, "eng");
+        var fix = workspaces.create(definition(), FIX, source(), null, "eng", TestOwners::of);
         new IncusDeviceManager(shell).ensureEventSocket(fix.instance(), socketDir, CONTAINER_DIR);
 
         var board =
@@ -496,7 +930,7 @@ class WorkspaceIT extends AbstractIncusIT {
                   + " then drop it with sail project workspace delete sail-it-ws kept."),
           said);
 
-      workspaces.start(PROJECT, KEPT);
+      workspaces.start(definition(), KEPT, TestOwners::of);
       var started = new BoxInstances(shell).named(instance).orElseThrow().lastStarted();
       clock.set(started.plus(SpecWorkspaces.IDLE).minusSeconds(30));
       sweeper.sweep();
@@ -670,7 +1104,8 @@ class WorkspaceIT extends AbstractIncusIT {
     var check =
         workspaces.checkSpec(
             place, ProjectProvisioner.inputs(definition(), Optional.empty()), name -> false);
-    var entered = workspaces.enterSpec(check, definition(), "eng", null, whole -> {});
+    var entered =
+        workspaces.enterSpec(check, definition(), "eng", TestOwners::of, null, whole -> {});
     var committed =
         shell.exec(
             ContainerExec.asDevUser(
@@ -692,6 +1127,7 @@ class WorkspaceIT extends AbstractIncusIT {
         project -> Optional.of(definition()),
         (specId, body) -> said.add(body),
         RunReports.reading(shell, RunLauncher.Room.NONE, event -> {}),
+        TestOwners::of,
         () -> "eng",
         clock::get);
   }

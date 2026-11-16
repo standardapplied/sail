@@ -197,6 +197,7 @@ class RemoteCommandRunnerTest {
         "a login named use is a name, not the verb");
     assertTrue(RemoteCommandRunner.interactive("agent", "login", "--name", "list", "codex"));
     assertTrue(RemoteCommandRunner.interactive("shell", "acme"));
+    assertTrue(RemoteCommandRunner.interactive("git", "login", "github.com"));
     for (var args :
         List.of(
             new String[] {"agent", "login", "list", "--json"},
@@ -206,6 +207,8 @@ class RemoteCommandRunnerTest {
             new String[] {"agent", "login", "codex", "--dry-run"},
             new String[] {"agent", "login", "--json", "list"},
             new String[] {"agent", "login"},
+            new String[] {"git", "login", "list"},
+            new String[] {"git", "login", "remove", "github.com"},
             new String[] {"agent", "sessions", "acme"})) {
       assertFalse(RemoteCommandRunner.interactive(args), String.join(" ", args));
     }

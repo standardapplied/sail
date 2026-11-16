@@ -20,6 +20,7 @@ import ai.singlr.sail.engine.NameValidator;
 import ai.singlr.sail.engine.ProjectCatalogRename;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.SyncOperations;
+import ai.singlr.sail.engine.WorkspaceOwner;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.RoleRule;
 import ai.singlr.sail.pty.PtyIdentity;
@@ -298,6 +299,11 @@ final class HostLanes {
     @Override
     public List<FdeSshKeyStore.SshKeyInfo> sshKeys() {
       return new FdeSshKeyStore(db).list();
+    }
+
+    @Override
+    public WorkspaceOwner workspaceOwner(String handle) {
+      return WorkspaceOwner.onThisBox(new FdeStore(db), handle, boxConfig.get().handle());
     }
 
     @Override

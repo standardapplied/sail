@@ -410,7 +410,7 @@ class ProjectApplierTest {
   static void assertGhLoggedIn(ScriptedShellExecutor shell, String host, String token) {
     var push =
         shell.invocations().stream()
-            .filter(c -> c.contains("incus file push") && c.contains("/home/dev/.sail/gh-token-"))
+            .filter(c -> c.contains("incus file push") && c.contains("/home/dev/.sail/gh-token"))
             .findFirst()
             .orElseThrow(() -> new AssertionError("no token file pushed: " + shell.invocations()));
     assertTrue(push.contains("--uid 1000 --gid 1000 --mode 0600"), push);
@@ -469,7 +469,7 @@ class ProjectApplierTest {
         Map.of("gitlab.com", "glpat_x"));
 
     assertTrue(shell.invocations().stream().noneMatch(c -> c.contains("gh auth login")));
-    assertTrue(shell.invocations().stream().noneMatch(c -> c.contains("gh-token-")));
+    assertTrue(shell.invocations().stream().noneMatch(c -> c.contains("gh-token")));
   }
 
   @Test

@@ -22,6 +22,8 @@ import ai.singlr.sail.engine.RunPlace;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.SyncOperations;
+import ai.singlr.sail.engine.TestOwners;
+import ai.singlr.sail.engine.WorkspaceOwner;
 import ai.singlr.sail.engine.Workspaces;
 import ai.singlr.sail.harness.RunReport;
 import ai.singlr.sail.identity.Acting;
@@ -59,6 +61,7 @@ import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.function.Function;
 import java.util.function.Supplier;
 import java.util.regex.Pattern;
 import org.junit.jupiter.api.AfterEach;
@@ -105,6 +108,9 @@ class SpecWorkspacesTest {
     sweeper = sweeper(specs, runs, db, project -> Optional.of(definition(project)));
   }
 
+  /** Each person owns a workspace as tests give one: an email, no token, no key. */
+  private Function<String, WorkspaceOwner> owners = TestOwners::of;
+
   @AfterEach
   void tearDown() {
     DateTimeUtils.clock = wall;
@@ -121,7 +127,7 @@ class SpecWorkspacesTest {
       SpecStore specs, RunStore runs, Sqlite db, ProjectReader definitions) {
     var locks = tempDir.resolve("locks");
     return new SpecWorkspaces(
-        new Workspaces(box, box, System::nanoTime, locks, () -> 16_000L),
+        new Workspaces(box, box, System::nanoTime, locks, () -> 16_000L, url -> false),
         box,
         locks,
         specs,
@@ -130,6 +136,7 @@ class SpecWorkspacesTest {
         definitions,
         (specId, body) -> said.add(specId + ": " + body),
         RunReports.reading(box, RunLauncher.Room.NONE, event -> {}),
+        handle -> owners.apply(handle),
         () -> NODE,
         clock::instant);
   }
@@ -545,7 +552,10 @@ class SpecWorkspacesTest {
 
     assertFalse(box.holds(instance("a")));
     assertEquals(List.of("start", "delete"), changesOf(instance("a")));
-    assertEquals(List.of("bus", "machinery", "usage", "left app web/site"), askedOf(instance("a")));
+    assertEquals(
+        List.of("bus", "machinery", "give", "usage", "left app web/site"),
+        askedOf(instance("a")),
+        "its start gives its owner's credentials before the read that pushes");
     assertEquals("none", runs.findById(unread).orElseThrow().usage().source().wire());
     assertEquals(List.of(), said);
   }
@@ -773,6 +783,62 @@ class SpecWorkspacesTest {
   }
 
   /**
+   * The merge with #421, question 1: the sweep's start gives the recorded owner's credentials as
+   * any start does; an owner the box will not give them for (disabled on its roster) is a cause
+   * like any other: the workspace is stopped again, and the third try keeps it, said once.
+   */
+  @Test
+  void aGiveRefusedForTheOwnerIsACauseTriedThreeTimesThenKept() {
+    owners =
+        handle -> {
+          throw new IllegalStateException(
+              handle + " is disabled on this box's roster, so no workspace can be theirs.");
+        };
+    spec("g", SpecStatus.DONE);
+    box.workspace("g", "Stopped").repo("app").repo("web/site");
+    ended("g");
+    later(IDLE);
+    var sweeper = sweeper();
+
+    for (var pass = 0; pass < 40; pass++) {
+      sweeper.sweep();
+      later(Duration.ofMinutes(1));
+    }
+
+    var why = "eng is disabled on this box's roster, so no workspace can be theirs, 3 times";
+    assertEquals(
+        List.of("start", "stop", "start", "stop", "start", "stop"), changesOf(instance("g")));
+    assertTrue(askedOf(instance("g")).stream().noneMatch(step -> step.startsWith("left")));
+    assertEquals(why, box.key(instance("g"), KEPT));
+    assertEquals(List.of("g: " + notice("g", "done", why)), said);
+  }
+
+  /**
+   * The merge with #421, question 2: a workspace #421 disowned (its owner left the box) holds no
+   * token; its start gives nothing, and a push its read cannot make keeps it at once, saying why,
+   * since no later try can push either until a run re-owns it.
+   */
+  @Test
+  void aDisownedWorkspaceWhoseBranchCannotBePushedIsKeptAtOnceSayingItsOwnerIsGone() {
+    spec("d", SpecStatus.DONE);
+    var held = box.workspace("d", "Stopped").repo("app").repo("web/site").ahead("app", 1);
+    held.pushUnreached = true;
+    held.keys.remove(BoxInstances.OWNER_KEY);
+    ended("d");
+    later(IDLE);
+
+    sweeper().sweep();
+
+    var why =
+        "could not reach origin to push agent/d from app (its owner is no longer on this box, so"
+            + " it holds no token)";
+    assertEquals(List.of("start", "stop"), changesOf(instance("d")));
+    assertTrue(askedOf(instance("d")).stream().noneMatch("give"::equals), "nothing is given");
+    assertEquals(why, box.key(instance("d"), KEPT));
+    assertEquals(List.of("d: " + notice("d", "done", why)), said);
+  }
+
+  /**
    * A usage the started workspace does not answer, and a project whose definition this box cannot
    * read or does not hold, decide nothing, before any git: logged, the workspace stopped again.
    */
@@ -953,7 +1019,9 @@ class SpecWorkspacesTest {
     box.workspace("a", "Running");
     ended("a");
     later(IDLE);
-    var workspaces = new Workspaces(box, box, System::nanoTime, tempDir.resolve("locks"), () -> 1L);
+    var workspaces =
+        new Workspaces(
+            box, box, System::nanoTime, tempDir.resolve("locks"), () -> 1L, url -> false);
     var taken = new CountDownLatch(1);
     var release = new CountDownLatch(1);
     var holder =
@@ -1241,6 +1309,7 @@ class SpecWorkspacesTest {
       var place = (RunPlace.SpecWorkspace) RunPlace.of(project, specId);
       var held = new Held(project, place.workspace(), state);
       held.keys.put(BoxInstances.SPEC_KEY, specId);
+      held.keys.put(BoxInstances.OWNER_KEY, NODE);
       instances.put(place.instance(), held);
       return held;
     }
@@ -1267,6 +1336,9 @@ class SpecWorkspacesTest {
     static String what(List<String> inner) {
       if (inner.get(0).equals("bash") && inner.get(2).equals(WorkspaceGit.LEFT)) {
         return "left " + String.join(" ", inner.subList(6, inner.size()));
+      }
+      if (inner.get(0).equals("bash") && inner.size() > 3 && inner.get(3).equals("sail-strip")) {
+        return "give";
       }
       if (inner.get(0).equals("bash") && inner.get(2).contains("/run/user/1000/bus")) {
         return "bus";
@@ -1312,6 +1384,13 @@ class SpecWorkspacesTest {
         return ok(
             "[{\"name\": \"tank\", \"driver\": \"zfs\", \"config\": {\"source\":"
                 + " \"/var/lib/incus/disks/tank.img\", \"zfs.pool_name\": \"tank\"}}]");
+      }
+      if (joined.startsWith("incus file push ")) {
+        var target = command.get(command.size() - 1);
+        var held = instances.get(target.substring(0, Math.max(0, target.indexOf('/'))));
+        return held != null && held.state.equals("Running")
+            ? ok("")
+            : fail("Error: Instance not found");
       }
       if (command.get(0).equals("incus") && command.size() >= 3) {
         var held = instances.get(command.get(nameAt(command)));
@@ -1388,7 +1467,7 @@ class SpecWorkspacesTest {
         return left(name, held, inner);
       }
       return switch (what) {
-        case "bus", "machinery" -> ok("");
+        case "bus", "machinery", "give" -> ok("");
         case "usage" -> held.usageAnswers ? ok("") : fail("Error: websocket: close 1006");
         default -> unexpected(String.join(" ", inner));
       };

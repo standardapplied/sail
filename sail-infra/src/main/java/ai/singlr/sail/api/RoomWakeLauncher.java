@@ -158,7 +158,7 @@ public final class RoomWakeLauncher {
             unit,
             config);
     try {
-      places.enter(checked, config, localHandle);
+      places.enter(checked, config);
       var place = (RunPlace.SpecWorkspace) checked.place();
       seedRoomDelivery(runId, built.renderedMessages());
       workBranch.enter(place, targetRepos, branch, false, true, Optional.empty());

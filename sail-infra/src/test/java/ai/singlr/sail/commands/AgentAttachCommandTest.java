@@ -23,6 +23,7 @@ import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.RunPlace;
 import ai.singlr.sail.engine.ScriptedShellExecutor;
 import ai.singlr.sail.engine.ShellExec;
+import ai.singlr.sail.engine.TestOwners;
 import ai.singlr.sail.harness.Harnesses;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.Actor;
@@ -687,11 +688,14 @@ class AgentAttachCommandTest {
         new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
             .onOk("incus list --format json", "[]");
 
-    AgentAttachCommand.reach(place, TestWorkspaces.over(stopped));
+    AgentAttachCommand.reach(
+        place, TestWorkspaces.over(stopped), TestDefinitions::named, TestOwners::of);
     var refused =
         assertThrows(
             IllegalStateException.class,
-            () -> AgentAttachCommand.reach(place, TestWorkspaces.over(gone)));
+            () ->
+                AgentAttachCommand.reach(
+                    place, TestWorkspaces.over(gone), TestDefinitions::named, TestOwners::of));
 
     assertTrue(
         stopped.invocations().contains("incus start acme-u2"), stopped.invocations().toString());

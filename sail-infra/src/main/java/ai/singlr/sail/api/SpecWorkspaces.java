@@ -15,6 +15,7 @@ import ai.singlr.sail.engine.BoxInstances;
 import ai.singlr.sail.engine.ContainerConfig;
 import ai.singlr.sail.engine.ContainerState;
 import ai.singlr.sail.engine.ShellExec;
+import ai.singlr.sail.engine.WorkspaceOwner;
 import ai.singlr.sail.engine.Workspaces;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.store.ChangeLog;
@@ -32,6 +33,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeoutException;
+import java.util.function.Function;
 import java.util.function.Supplier;
 
 /**
@@ -62,6 +64,7 @@ public final class SpecWorkspaces implements AutoCloseable {
   private final ContainerConfig config;
   private final WorkspaceGit git;
   private final RunReports reports;
+  private final Function<String, WorkspaceOwner> owners;
 
   private final SpecStore specs;
   private final RunStore runs;
@@ -94,6 +97,7 @@ public final class SpecWorkspaces implements AutoCloseable {
       ProjectReader definitions,
       RunLauncher.Room room,
       RunReports reports,
+      Function<String, WorkspaceOwner> owners,
       Supplier<String> localHandle,
       Supplier<Instant> clock) {
     this.workspaces = Objects.requireNonNull(workspaces, "workspaces");
@@ -101,6 +105,7 @@ public final class SpecWorkspaces implements AutoCloseable {
     this.config = new ContainerConfig(shell, locks);
     this.git = new WorkspaceGit(shell);
     this.reports = Objects.requireNonNull(reports, "reports");
+    this.owners = Objects.requireNonNull(owners, "owners");
 
     this.specs = Objects.requireNonNull(specs, "specs");
     this.runs = Objects.requireNonNull(runs, "runs");
@@ -217,19 +222,37 @@ public final class SpecWorkspaces implements AutoCloseable {
     var stopped = !(found.state() instanceof ContainerState.Running);
     Optional<String> lost;
     try {
+      var definition =
+          definitions
+              .read(project)
+              .orElseThrow(
+                  () -> new IOException("could not read the definition of project " + project));
       if (stopped) {
-        workspaces.start(project, workspace.workspace());
+        workspaces.start(definition, workspace.workspace(), owners);
       }
-      lost = lost(found.name(), spec);
+      lost = lost(found.name(), spec, definition);
     } catch (IOException | TimeoutException | RuntimeException failed) {
       if (stopped) {
         workspaces.stop(project, workspace.workspace(), id -> false);
       }
-      var cause = Strings.oneLine(Objects.toString(failed.getMessage(), "")).split(": ", 2)[0];
-      if (failures.merge(found.name() + "\n" + cause, 1, Integer::sum) < TRIES) {
+      var cause =
+          Strings.oneLine(Objects.toString(failed.getMessage(), ""))
+              .split(": ", 2)[0]
+              .replaceFirst("\\.$", "");
+      var ownerless =
+          failed instanceof WorkspaceGit.Unpushed
+              && found.key(BoxInstances.OWNER_KEY).orElse("").isBlank();
+      if (!ownerless && failures.merge(found.name() + "\n" + cause, 1, Integer::sum) < TRIES) {
         throw failed;
       }
-      keep(found, workspace, spec, cause + ", " + TRIES + " times");
+      keep(
+          found,
+          workspace,
+          spec,
+          cause
+              + (ownerless
+                  ? " (its owner is no longer on this box, so it holds no token)"
+                  : ", " + TRIES + " times"));
       return;
     }
     var now = specs.findById(spec.id()).filter(row -> row.project().equals(project));
@@ -256,7 +279,8 @@ public final class SpecWorkspaces implements AutoCloseable {
    * What the repos of running workspace {@code instance} hold that no remote does ({@link
    * WorkspaceGit#left}), once its runs' unread usage is recorded; throws on what cannot be read.
    */
-  private Optional<String> lost(String instance, SpecStore.SpecRow spec)
+  private Optional<String> lost(
+      String instance, SpecStore.SpecRow spec, ProjectDefinition definition)
       throws IOException, TimeoutException, InterruptedException {
     var theirs = theirs(spec.project(), spec.id());
     for (var run : theirs.stream().filter(SpecWorkspaces::unread).toList()) {
@@ -265,12 +289,6 @@ public final class SpecWorkspaces implements AutoCloseable {
         throw new IOException("could not read the usage of run " + run.id());
       }
     }
-    var definition =
-        definitions
-            .read(spec.project())
-            .orElseThrow(
-                () ->
-                    new IOException("could not read the definition of project " + spec.project()));
     var repos =
         Objects.requireNonNullElse(definition.repos(), List.<ProjectDefinition.Repo>of()).stream()
             .map(ProjectDefinition.Repo::path)

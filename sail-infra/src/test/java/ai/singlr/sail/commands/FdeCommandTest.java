@@ -13,6 +13,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assumptions.assumeFalse;
 
+import ai.singlr.sail.Sail;
 import ai.singlr.sail.api.ApiException;
 import ai.singlr.sail.api.ErrorCode;
 import ai.singlr.sail.auth.EnrollmentTickets;
@@ -22,6 +23,7 @@ import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.config.TestDefinitions;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.AuthorizedKeysSync;
+import ai.singlr.sail.engine.BoxInstances;
 import ai.singlr.sail.engine.CliOperator;
 import ai.singlr.sail.engine.ContainerAuthorizedKeys;
 import ai.singlr.sail.engine.FileMutexTest;
@@ -67,10 +69,12 @@ import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.FutureTask;
 import java.util.function.Function;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.AfterEach;
@@ -863,6 +867,15 @@ class FdeCommandTest {
   }
 
   /** What a revocation of {@code key} leaves in each container, and the incus it took. */
+  /** What {@code fde rm} says of the removed person's workspaces, sail-api up or not. */
+  private static String disowned(String handle) {
+    return "  On every box, "
+        + handle
+        + "'s workspaces lose their git tokens, gh login and keys, and their stored logins are"
+        + " erased, at that box's next sail-api pass after it learns of the removal: within a"
+        + " minute while it runs, or as it next starts.";
+  }
+
   private void assertContainersNoLongerTrust(SshPublicKey key) {
     assertEquals(othersMentioning(key), keygen.incus.file("acme", "/home/dev" + AUTHORIZED));
     assertEquals(LAPTOP.line() + "\n", keygen.incus.file("web", "/home/eng" + AUTHORIZED));
@@ -1131,7 +1144,7 @@ class FdeCommandTest {
     appliedContainers(held);
 
     assertEquals(
-        List.of(), new ContainerAuthorizedKeys(keygen).add(LAPTOP, List.of("acme", "web")));
+        List.of(), new ContainerAuthorizedKeys(keygen).add(LAPTOP, List.of("acme", "web"), "uday"));
 
     assertEquals(held, keygen.incus.file("acme", "/home/dev" + AUTHORIZED));
     assertEquals(held, keygen.incus.file("web", "/home/dev" + AUTHORIZED));
@@ -1162,6 +1175,34 @@ class FdeCommandTest {
         "  ✓ Workstation key replaced: it was " + LAPTOP.fingerprint() + " (me@mac).",
         printed().get(2));
     assertEquals(printedCode(), printed().getLast());
+  }
+
+  /**
+   * Review M2: {@code host config set ssh-public-key} replaces the workstation key as a pairing
+   * does, by the one path both take: the old key leaves every container, the new reaches each the
+   * box's person's.
+   */
+  @Test
+  void aWorkstationKeySetByHandReplacesTheOldInEveryContainerAsAPairingDoes() throws Exception {
+    appliedContainers(LAPTOP.line() + "\n" + ENGINEER.line() + "\n");
+    var replacement = SshPublicKey.parse(TestSshKeys.ed25519("replacement", "me@new"));
+
+    var unreached =
+        ContainerAuthorizedKeys.rekeyWorkstation(
+            box().shell(),
+            box().database(),
+            box().handle(),
+            Optional.of(LAPTOP),
+            replacement,
+            OperatorCommand.here());
+
+    for (var container : List.of("acme", "web")) {
+      assertEquals(
+          ENGINEER.line() + "\n" + replacement.line() + "\n",
+          keygen.incus.file(container, "/home/dev" + AUTHORIZED));
+    }
+    assertEquals(ENGINEER.line() + "\n", keygen.incus.file("stray", "/home/dev" + AUTHORIZED));
+    assertEquals(List.of(), unreached);
   }
 
   @Test
@@ -1672,6 +1713,7 @@ class FdeCommandTest {
     assertEquals(
         List.of(
             "  ✓ FDE removed: ada",
+            disowned("ada"),
             "  Owned tokens, SSH keys, sessions, passkeys, and enrollment tickets are revoked.",
             "  ✓ Its Mast pairing is revoked: 1 key line removed from root's authorized_keys"
                 + " and token 'mast-ada' revoked."
@@ -1773,6 +1815,7 @@ class FdeCommandTest {
     assertEquals(
         List.of(
             "  ✓ FDE removed: ada",
+            disowned("ada"),
             "  Owned tokens, SSH keys, sessions, passkeys, and enrollment tickets are revoked.",
             "  ✓ Its Mast pairing is revoked: 1 key line removed from root's authorized_keys"
                 + " and token 'mast-ada' revoked."
@@ -1819,6 +1862,7 @@ class FdeCommandTest {
     assertEquals(
         List.of(
             "  ✓ FDE removed: bob",
+            disowned("bob"),
             "  Owned tokens, SSH keys, sessions, passkeys, and enrollment tickets are revoked."),
         printed());
     assertFalse(Files.exists(home().resolve(".ssh")));
@@ -2338,6 +2382,7 @@ class FdeCommandTest {
     assertEquals(
         List.of(
             "  ✓ FDE removed: bob",
+            disowned("bob"),
             "  Owned tokens, SSH keys, sessions, passkeys, and enrollment tickets are revoked."),
         printed());
     assertEquals(forced, Files.readString(authorizedKeys()));
@@ -2655,8 +2700,9 @@ class FdeCommandTest {
             FdeCommand.alreadyExists("ada", sudo),
             Ansi.OFF.string(FdeCommand.added(ada, true, sudo)),
             unknownProject,
-            FdeCommand.notTrustedYet("acme", "Error: I/O error", sudo),
-            FdeCommand.noneTrustYet("Error: I/O error", sudo),
+            ContainerAuthorizedKeys.notTrustedYet(
+                "acme", new BoxInstances.Plain(), "Error: I/O error", sudo),
+            ContainerAuthorizedKeys.noneTrustYet("Error: I/O error", sudo),
             FdeCommand.disabledForPairing("ada", sudo),
             FdeCommand.noFdes(sudo),
             FdeCommand.unknownFde("ada", sudo),
@@ -2666,6 +2712,44 @@ class FdeCommandTest {
             FdeCommand.Passkey.noMatchMessage("ada", "zz", List.of(), sudo),
             FdeCommand.noPasskeys("ada", sudo),
             Ansi.OFF.string(FdeCommand.noPasskeysLeft("ada", sudo))));
+  }
+
+  /**
+   * F6: the key fan-out's remedy for a container it missed is a command that works on that kind, as
+   * pasted: {@code project apply} for a project's container, which refuses a workspace, and a stop
+   * and start for a workspace, which takes its owner's keys as it starts.
+   */
+  @Test
+  void aKeyFanOutsRemedyIsACommandThatWorksOnTheKindItMissed() {
+    var plain = OperatorCommand.PLAIN;
+    var container =
+        ContainerAuthorizedKeys.notTrustedYet("acme", new BoxInstances.Plain(), "x", plain);
+    var workspace =
+        ContainerAuthorizedKeys.notTrustedYet(
+            "acme-try", new BoxInstances.Workspace("acme", "try", true), "x", plain);
+
+    assertEquals(
+        "acme does not trust this key yet: x. Make it: 'sail project apply acme'.", container);
+    assertEquals(
+        "acme-try does not trust this key yet: x. It takes it at its next start: 'sail project"
+            + " workspace stop acme try', then 'sail project workspace start acme try'.",
+        workspace);
+    var pasted = Pattern.compile("'sail ([^']+)'").matcher(container + workspace);
+    var verbs = new ArrayList<String>();
+    while (pasted.find()) {
+      var parsed = new CommandLine(new Sail()).parseArgs(pasted.group(1).split(" "));
+      var leaf = parsed;
+      while (leaf.hasSubcommand()) {
+        leaf = leaf.subcommand();
+      }
+      verbs.add(leaf.commandSpec().qualifiedName(" ") + " " + leaf.originalArgs().getLast());
+    }
+    assertEquals(
+        List.of(
+            "sail project apply acme",
+            "sail project workspace stop try",
+            "sail project workspace start try"),
+        verbs);
   }
 
   @Test

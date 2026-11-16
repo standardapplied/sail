@@ -36,8 +36,8 @@ import ai.singlr.sail.engine.SailSkills;
 import ai.singlr.sail.engine.SharedProjectFiles;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.StageSkill;
+import ai.singlr.sail.engine.TestOwners;
 import ai.singlr.sail.engine.WatcherSpawner;
-import ai.singlr.sail.engine.WorkstationIdentity;
 import ai.singlr.sail.gen.SpecSkillGenerator;
 import ai.singlr.sail.harness.Harness;
 import ai.singlr.sail.harness.Harnesses;
@@ -65,6 +65,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.OptionalInt;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.LinkedBlockingQueue;
@@ -273,9 +274,9 @@ class ReviewAgentLoopIT extends AbstractIncusIT {
     var check =
         workspaces.checkSpec(
             (RunPlace.SpecWorkspace) RunPlace.of(CONTAINER, specId),
-            ProjectProvisioner.inputs(definition, WorkstationIdentity.registered()),
+            ProjectProvisioner.inputs(definition, Optional.empty()),
             name -> false);
-    workspaces.enterSpec(check, definition, HANDLE, null, whole -> {});
+    workspaces.enterSpec(check, definition, HANDLE, TestOwners::of, null, whole -> {});
   }
 
   /** Records spec {@code id}, in progress under {@code codex}, working the whole container. */

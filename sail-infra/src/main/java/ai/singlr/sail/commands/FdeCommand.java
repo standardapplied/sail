@@ -63,7 +63,6 @@ import java.util.function.Function;
 import java.util.function.Supplier;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
-import java.util.stream.Stream;
 import picocli.CommandLine;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
@@ -242,32 +241,6 @@ public final class FdeCommand implements Runnable {
         + "|@";
   }
 
-  static String stillTrusts(String where, String why, SshPublicKey replaced) {
-    return where
-        + " may still trust the replaced workstation key "
-        + Pair.describe(replaced)
-        + ": "
-        + why
-        + ". Take its line out of every /home account's .ssh/authorized_keys there.";
-  }
-
-  static String notTrustedYet(String container, String why, OperatorCommand operator) {
-    return container
-        + " does not trust this key yet: "
-        + why
-        + ". Make it: '"
-        + operator.sail("project apply " + container)
-        + "'.";
-  }
-
-  static String noneTrustYet(String why, OperatorCommand operator) {
-    return "This box's containers do not trust this key yet: "
-        + why
-        + ". Once incus answers, make them: '"
-        + operator.sail("project apply --all")
-        + "'.";
-  }
-
   static String disabledForPairing(String handle, OperatorCommand operator) {
     return "FDE '"
         + handle
@@ -403,6 +376,36 @@ public final class FdeCommand implements Runnable {
 
   private static void applyKeys(Sqlite db, OperatorCommand operator) throws Exception {
     System.out.println(Ansi.AUTO.string(keysOutcome(new AuthorizedKeysSync().sync(db), operator)));
+  }
+
+  @FunctionalInterface
+  interface KeyChange {
+    List<ContainerAuthorizedKeys.Unreached> apply()
+        throws IOException, InterruptedException, TimeoutException;
+  }
+
+  /** Says only what a key change did not reach, so a clean change prints nothing. */
+  static void say(KeyChange change, String still) throws InterruptedException {
+    try {
+      for (var unreached : change.apply()) {
+        System.out.println(
+            Ansi.AUTO.string(
+                "  @|yellow ⚠|@ "
+                    + unreached.container()
+                    + " "
+                    + still
+                    + ": "
+                    + unreached.reason()
+                    + "."));
+      }
+    } catch (IOException | TimeoutException failure) {
+      System.out.println(
+          Ansi.AUTO.string(
+              "  @|yellow ⚠|@ This box's containers could not be read, so the key change reached"
+                  + " none of them: "
+                  + Remedied.reasonOf(failure).strip()
+                  + "."));
+    }
   }
 
   /**
@@ -1009,6 +1012,12 @@ public final class FdeCommand implements Runnable {
               fdeStore.remove(fde.id());
               System.out.println(Ansi.AUTO.string("  @|green ✓|@ FDE removed: " + fde.handle()));
               System.out.println(
+                  "  On every box, "
+                      + fde.handle()
+                      + "'s workspaces lose their git tokens, gh login and keys, and their stored"
+                      + " logins are erased, at that box's next sail-api pass after it learns of the"
+                      + " removal: within a minute while it runs, or as it next starts.");
+              System.out.println(
                   Ansi.AUTO.string(
                       "  @|faint Owned tokens, SSH keys, sessions, passkeys, and enrollment"
                           + " tickets are revoked.|@"));
@@ -1148,60 +1157,12 @@ public final class FdeCommand implements Runnable {
         System.out.println();
         System.out.println(code(box, address, pinned, key.privateKey(), token.token()));
         var unreached =
-            Stream.concat(
-                    untrustReplaced(box, replaced).stream(),
-                    trustInContainers(box, db, key.publicKey(), operator).stream())
-                .toList();
+            ContainerAuthorizedKeys.rekeyWorkstation(
+                box.shell(), box.database(), box.handle(), replaced, key.publicKey(), operator);
         if (!unreached.isEmpty()) {
           System.out.println();
           unreached.forEach(line -> System.out.println(Ansi.AUTO.string("  @|yellow ⚠|@ ") + line));
         }
-      }
-    }
-
-    /**
-     * Takes the workstation key this pairing {@code replaced} out of every container of this box,
-     * as unpair does, and names each that may still trust it. An apply would take it out of the SSH
-     * user's file alone, so the line it names is the one to take out by hand.
-     */
-    private static List<String> untrustReplaced(Box box, Optional<SshPublicKey> replaced)
-        throws InterruptedException {
-      if (replaced.isEmpty()) {
-        return List.of();
-      }
-      var old = replaced.get();
-      try {
-        return new ContainerAuthorizedKeys(box.shell())
-            .removeFromEach(old).stream()
-                .map(container -> stillTrusts(container.container(), container.reason(), old))
-                .toList();
-      } catch (IOException | TimeoutException failure) {
-        return List.of(
-            stillTrusts("This box's containers", Remedied.reasonOf(failure).strip(), old));
-      }
-    }
-
-    /**
-     * Writes {@code key} into the container of each project this box runs once its code is shown,
-     * and names each that does not trust it yet. The catalog holds projects this box never ran, so
-     * a box whose containers cannot be listed names the apply of every container it runs instead.
-     */
-    private static List<String> trustInContainers(
-        Box box, Sqlite db, SshPublicKey key, OperatorCommand operator)
-        throws InterruptedException {
-      var projects =
-          new ProjectStore(db).list().stream().map(ProjectStore.ProjectRow::name).toList();
-      if (projects.isEmpty()) {
-        return List.of();
-      }
-      try {
-        return new ContainerAuthorizedKeys(box.shell())
-            .add(key, projects).stream()
-                .map(
-                    container -> notTrustedYet(container.container(), container.reason(), operator))
-                .toList();
-      } catch (IOException | TimeoutException failure) {
-        return List.of(noneTrustYet(Remedied.reasonOf(failure).strip(), operator));
       }
     }
 
@@ -1292,9 +1253,7 @@ public final class FdeCommand implements Runnable {
     }
 
     private static String describe(SshPublicKey key) {
-      return key.comment() == null
-          ? key.fingerprint()
-          : key.fingerprint() + " (" + key.comment() + ")";
+      return ContainerAuthorizedKeys.describe(key);
     }
 
     /**
@@ -1507,6 +1466,10 @@ public final class FdeCommand implements Runnable {
       return command.database();
     }
 
+    private Box box() {
+      return command.box.get();
+    }
+
     @Command(
         name = "add",
         description = "Register an SSH public key for an FDE.",
@@ -1535,6 +1498,10 @@ public final class FdeCommand implements Runnable {
                         .orElseThrow(
                             () -> new IllegalArgumentException(unknownFde(handle, operator)));
                 registerKey(db, fde, publicKey, operator);
+                var keys = new ContainerAuthorizedKeys(key.box().shell());
+                say(
+                    () -> keys.addToWorkspacesOf(SshPublicKey.parse(publicKey), fde.handle()),
+                    "does not trust this key yet");
               }
             });
       }
@@ -1602,10 +1569,14 @@ public final class FdeCommand implements Runnable {
                 if (fingerprint.isEmpty()) {
                   return;
                 }
+                var removing = keyStore.findByFingerprint(fingerprint.get());
                 if (keyStore.remove(fingerprint.get())) {
                   System.out.println(
                       Ansi.AUTO.string("  @|green ✓|@ Removed key " + fingerprint.get()));
                   applyKeys(db, operator);
+                  var keys = new ContainerAuthorizedKeys(key.box().shell());
+                  var removed = SshPublicKey.parse(removing.orElseThrow().publicKey());
+                  say(() -> keys.removeFromEach(removed), "may still trust the removed key");
                 } else {
                   System.out.println(
                       Ansi.AUTO.string(

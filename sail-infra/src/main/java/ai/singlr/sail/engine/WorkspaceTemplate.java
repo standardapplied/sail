@@ -11,6 +11,7 @@ import ai.singlr.sail.config.HostYaml;
 import ai.singlr.sail.config.ProjectDefinition;
 import java.io.IOException;
 import java.nio.file.Path;
+import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -52,14 +53,27 @@ public final class WorkspaceTemplate {
   /**
    * What a project's template is built from on this box: the base profile's pool ({@code host.yaml}
    * names it), the digest of the definition and key a build provisions from ({@link
-   * ProjectProvisioner#inputs}), whether the catalog holds a project by a name, and the build.
+   * ProjectProvisioner#inputs}), whether the catalog holds a project by a name, the build, and the
+   * tokens the build is given, which its check searches the template for; {@link #toString} never
+   * shows them.
    */
-  public record Source(String basePool, String inputs, Predicate<String> held, Build build) {
+  public record Source(
+      String basePool,
+      String inputs,
+      Predicate<String> held,
+      Build build,
+      Collection<String> tokens) {
     public Source {
       Objects.requireNonNull(basePool, "basePool");
       Objects.requireNonNull(inputs, "inputs");
       Objects.requireNonNull(held, "held");
       Objects.requireNonNull(build, "build");
+      tokens = List.copyOf(tokens);
+    }
+
+    @Override
+    public String toString() {
+      return "Source[" + basePool + " " + inputs + ", " + tokens.size() + " tokens]";
     }
   }
 
@@ -267,6 +281,8 @@ public final class WorkspaceTemplate {
   /**
    * Provisions {@code template} and stops it. One this call starts, by launching it or starting it
    * stopped, is stopped again when the build fails, so a failed build leaves no template running.
+   * The check runs before the stop, not after the record, so a failed check leaves the version
+   * before current (W7); a failed build is stripped too, so no builder's token waits in it.
    */
   private void build(
       Source source,
@@ -287,7 +303,14 @@ public final class WorkspaceTemplate {
               new ProjectProvisioner.Instance(
                   template, Optional.of(pool), Map.of(BoxInstances.TEMPLATE_OF_KEY, project)),
               found.isEmpty());
+      WorkspaceCredentials.strip(shell, template);
+      WorkspaceCredentials.requireNone(shell, template, source.tokens());
     } catch (Exception failure) {
+      try {
+        WorkspaceCredentials.strip(shell, template);
+      } catch (IOException | TimeoutException stripping) {
+        failure.addSuppressed(stripping);
+      }
       if (startedHere) {
         try {
           containers.stop(template);

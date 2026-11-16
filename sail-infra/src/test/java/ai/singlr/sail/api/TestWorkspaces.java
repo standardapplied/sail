@@ -11,7 +11,6 @@ import ai.singlr.sail.engine.RunPlace;
 import ai.singlr.sail.engine.ScriptedShellExecutor;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.Workspaces;
-import ai.singlr.sail.engine.WorkstationIdentity;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.file.Files;
@@ -22,6 +21,7 @@ import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeoutException;
 import java.util.function.Consumer;
@@ -155,7 +155,7 @@ public final class TestWorkspaces {
 
   private static Workspaces over(
       ShellExec incus, LongSupplier nanos, Path locks, LongSupplier memoryMb) {
-    return new Workspaces(incus, incus, nanos, locks, memoryMb);
+    return new Workspaces(incus, incus, nanos, locks, memoryMb, url -> false);
   }
 
   /**
@@ -187,7 +187,14 @@ public final class TestWorkspaces {
         "incus snapshot list " + project + "--tmpl --format json",
         new ShellExec.Result(
             0, "[{\"name\": \"v1\", \"created_at\": \"2026-11-12T08:00:00Z\"}]", ""));
-    for (var change : List.of("incus copy", "incus start", "incus config set", "sail-workspace")) {
+    for (var change :
+        List.of(
+            "incus copy",
+            "incus start",
+            "incus config set",
+            "sail-strip",
+            "incus file push",
+            "sail-workspace")) {
       answers.put(change, new ShellExec.Result(0, "", ""));
     }
     return answers;
@@ -212,8 +219,7 @@ public final class TestWorkspaces {
   /** {@code project}'s template, current at {@code v1} and built from its definition as it is. */
   public static String currentTemplate(ProjectReader definitions, String project) {
     return template(
-        project,
-        ProjectProvisioner.inputs(definitions.require(project), WorkstationIdentity.registered()));
+        project, ProjectProvisioner.inputs(definitions.require(project), Optional.empty()));
   }
 
   /**

@@ -17,6 +17,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.function.Predicate;
 import picocli.CommandLine;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
@@ -84,18 +85,33 @@ public final class AgentLoginCommand implements Runnable {
       rehearse(known.yamlName(), named, declared.kind());
       return;
     }
-    var value = read(known.displayName(), declared.kind(), declared.howToMake().plain());
-    var body = new LinkedHashMap<String, Object>();
-    body.put("kind", declared.kind());
-    body.put("value", value);
+    var value = read(known.displayName() + " " + declared.kind(), declared.howToMake().plain());
+    change(
+        connection,
+        json,
+        "Stored",
+        client ->
+            client.put(
+                "/v1/logins/" + known.yamlName() + "/" + named,
+                Map.of("kind", declared.kind(), "value", value)));
+  }
+
+  @FunctionalInterface
+  interface Call {
+    Map<String, Object> on(SailApiClient client) throws Exception;
+  }
+
+  /** One change at the login doors, its answer printed, or as JSON under {@code json}. */
+  static void change(ConnectionOptions connection, boolean json, String what, Call call)
+      throws Exception {
     var config = connection.resolve();
     try (var client = new SailApiClient(config.serverUrl(), config.token())) {
-      var result = client.put("/v1/logins/" + known.yamlName() + "/" + named, body);
+      var result = call.on(client);
       if (json) {
         System.out.println(YamlUtil.dumpJson(new LinkedHashMap<>(result)));
         return;
       }
-      printChange("Stored", result);
+      printChange(what, result);
     }
   }
 
@@ -149,12 +165,14 @@ public final class AgentLoginCommand implements Runnable {
    * The login's value: typed at a terminal with echo off, after saying how to make one, or the
    * whole of stdin, its one trailing newline dropped. More than a login may hold is refused unread.
    */
-  private static String read(String harness, String kind, String howToMake) throws IOException {
+  static String read(String what, String howToMake) throws IOException {
     if (ConsoleHelper.hasConsole()) {
-      System.out.println("  " + howToMake + ", then paste it here.");
-      return ConsoleHelper.readPassword("  " + harness + " " + kind + " (input hidden): ");
+      if (howToMake != null) {
+        System.out.println("  " + howToMake + ", then paste it here.");
+      }
+      return ConsoleHelper.readPassword("  " + what + " (input hidden): ");
     }
-    System.err.println("  Reading the " + harness + " " + kind + " from stdin.");
+    System.err.println("  Reading the " + what + " from stdin.");
     return trimmed(System.in);
   }
 
@@ -171,7 +189,7 @@ public final class AgentLoginCommand implements Runnable {
   }
 
   @SuppressWarnings("unchecked")
-  private static void printChange(String what, Map<String, Object> result) {
+  static void printChange(String what, Map<String, Object> result) {
     var login = (Map<String, Object>) result.get("login");
     if (login == null) {
       System.out.println("  " + result.get("note"));
@@ -196,7 +214,7 @@ public final class AgentLoginCommand implements Runnable {
     }
   }
 
-  private static String person(String fde) {
+  static String person(String fde) {
     if (fde == null) {
       return "";
     }
@@ -221,37 +239,54 @@ public final class AgentLoginCommand implements Runnable {
 
     @Override
     public void run() {
-      CliCommand.run(this::execute);
+      CliCommand.run(json, this::execute);
     }
 
-    @SuppressWarnings("unchecked")
     private void execute() throws Exception {
-      var config = connection.resolve();
-      try (var client = new SailApiClient(config.serverUrl(), config.token())) {
-        var result = client.get("/v1/logins" + person(fde));
-        if (json) {
-          System.out.println(YamlUtil.dumpJson(new LinkedHashMap<>(result)));
-          return;
-        }
-        var logins = (List<Map<String, Object>>) result.get("logins");
-        if (logins.isEmpty()) {
-          System.out.println(
-              Ansi.AUTO.string("  @|faint No logins stored for " + result.get("fde") + ".|@"));
-          return;
-        }
+      list(connection, fde, json, login -> !LoginStore.GIT.equals(login.get("harness")), "logins");
+    }
+  }
+
+  /**
+   * Lists the logins of {@code fde}, the caller when blank, that {@code shown} keeps: the one list
+   * {@code sail agent login list} and {@code sail git login list} both print, as JSON or as a table
+   * a person reads, saying "No {@code noun} stored" when there are none.
+   */
+  @SuppressWarnings("unchecked")
+  static void list(
+      ConnectionOptions connection,
+      String fde,
+      boolean json,
+      Predicate<Map<String, Object>> shown,
+      String noun)
+      throws Exception {
+    var config = connection.resolve();
+    try (var client = new SailApiClient(config.serverUrl(), config.token())) {
+      var result = new LinkedHashMap<>(client.get("/v1/logins" + person(fde)));
+      var logins =
+          ((List<Map<String, Object>>) result.get("logins")).stream().filter(shown).toList();
+      result.put("logins", logins);
+      if (json) {
+        System.out.println(YamlUtil.dumpJson(result));
+        return;
+      }
+      if (logins.isEmpty()) {
+        System.out.println(
+            Ansi.AUTO.string("  @|faint No " + noun + " stored for " + result.get("fde") + ".|@"));
+        return;
+      }
+      System.out.printf(
+          "  %-12s %-24s %-8s %-8s %-25s %s%n",
+          "HARNESS", "NAME", "KIND", "DEFAULT", "STORED", "FINGERPRINT");
+      for (var login : logins) {
         System.out.printf(
-            "  %-12s %-16s %-8s %-8s %-25s %s%n",
-            "HARNESS", "NAME", "KIND", "DEFAULT", "STORED", "FINGERPRINT");
-        for (var login : logins) {
-          System.out.printf(
-              "  %-12s %-16s %-8s %-8s %-25s %s%n",
-              login.get("harness"),
-              login.get("name"),
-              login.get("kind"),
-              Boolean.TRUE.equals(login.get("default")) ? "yes" : "",
-              Objects.toString(login.get("stored_at"), ""),
-              login.get("fingerprint"));
-        }
+            "  %-12s %-24s %-8s %-8s %-25s %s%n",
+            login.get("harness"),
+            login.get("name"),
+            login.get("kind"),
+            Boolean.TRUE.equals(login.get("default")) ? "yes" : "",
+            Objects.toString(login.get("stored_at"), ""),
+            login.get("fingerprint"));
       }
     }
   }
@@ -331,15 +366,7 @@ public final class AgentLoginCommand implements Runnable {
               + "/"
               + LoginStore.requireName(name)
               + person(fde);
-      var config = connection.resolve();
-      try (var client = new SailApiClient(config.serverUrl(), config.token())) {
-        var result = client.delete(path);
-        if (json) {
-          System.out.println(YamlUtil.dumpJson(new LinkedHashMap<>(result)));
-          return;
-        }
-        printChange("Removed", result);
-      }
+      change(connection, json, "Removed", client -> client.delete(path));
     }
   }
 }

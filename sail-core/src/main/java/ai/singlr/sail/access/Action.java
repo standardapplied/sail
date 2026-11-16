@@ -99,15 +99,15 @@ public enum Action {
    */
   PURGE("Purge", "erase a project everywhere; a retention sweep", "purge"),
   /**
-   * Keeping one's own harness logins: storing, replacing, choosing the default of, listing or
-   * removing them. Each door acts on its caller's own logins; another person's are listed or
+   * Keeping one's own harness logins and git tokens: storing, replacing, choosing the default of,
+   * listing or removing them. Each door acts on its caller's own; another person's are listed or
    * removed only by whoever manages people, and no door ever answers a value.
    */
   KEEP_LOGINS(
       "Keep logins",
-      "store, replace, choose the default of, list or remove your own harness logins",
+      "store, replace, choose the default of, list or remove your own harness logins and git tokens",
       "keep",
-      "harness logins"),
+      "harness logins and git tokens"),
   /** Changing the roster: adding, re-roling, granting, removing, pairing, minting tokens. */
   MANAGE_PEOPLE("Manage people", "add, change role, grant, remove, pair, mint tokens", "manage"),
   /** Acting for a box: a sync round, its sync health and bus stats, the main it points at. */

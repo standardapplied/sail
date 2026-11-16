@@ -80,6 +80,13 @@ final class WorkspaceGit {
       done
       """;
 
+  /** A push of the runs' branch that did not reach {@code origin}. */
+  static final class Unpushed extends IOException {
+    Unpushed(String said) {
+      super(said);
+    }
+  }
+
   /** How long one read waits on its workspace, a push's minute included. */
   static final Duration TIMEOUT = Duration.ofMinutes(3);
 
@@ -116,6 +123,9 @@ final class WorkspaceGit {
               TIMEOUT);
     } catch (IOException | TimeoutException unanswered) {
       throw new IOException("Incus did not answer: " + unanswered.getMessage(), unanswered);
+    }
+    if (read.exitCode() == 3) {
+      throw new Unpushed(unread(read.reason()).getMessage());
     }
     if (!read.ok()) {
       throw unread(read.reason());

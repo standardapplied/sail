@@ -12,6 +12,7 @@ import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.engine.AgentSession;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.WatcherSpawner;
+import ai.singlr.sail.engine.WorkspaceOwner;
 import ai.singlr.sail.engine.Workspaces;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.store.FdeStore;
@@ -268,7 +269,8 @@ public final class DispatchOperations {
             workspaces,
             runStore == null ? box -> Set.of() : runStore::liveSpecs,
             this::tellRoom,
-            runReservation::prune);
+            runReservation::prune,
+            handle -> WorkspaceOwner.onThisBox(fdeStore, handle, handle));
     this.membership =
         new MembershipService(specStore, () -> roomStore, projects, admission, this.events, places);
     this.adhocRunner =

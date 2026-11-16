@@ -10,18 +10,20 @@ import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.Lane;
 import ai.singlr.sail.config.ProjectDefinition;
+import ai.singlr.sail.engine.BoxInstances;
 import ai.singlr.sail.engine.ProjectProvisioner;
 import ai.singlr.sail.engine.ResourceChecker;
 import ai.singlr.sail.engine.RunPlace;
 import ai.singlr.sail.engine.SailPaths;
+import ai.singlr.sail.engine.WorkspaceOwner;
 import ai.singlr.sail.engine.WorkspaceTemplate;
 import ai.singlr.sail.engine.Workspaces;
-import ai.singlr.sail.engine.WorkstationIdentity;
 import ai.singlr.sail.store.RunStore;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.util.HashSet;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.TimeoutException;
 import java.util.function.Consumer;
@@ -52,7 +54,7 @@ final class RunPlaces {
 
   /**
    * A spec's workspace, as {@link Workspaces#checkSpec} found it for a run of {@code lane} on the
-   * box {@code boxHandle}.
+   * box {@code boxHandle}, for {@code owner}, the box's person, whom every run of it acts for.
    */
   record InWorkspace(Workspaces.SpecCheck check, Lane lane, String boxHandle) implements Checked {
     @Override
@@ -66,22 +68,26 @@ final class RunPlaces {
   private final Function<String, Set<String>> liveSpecs;
   private final RunLauncher.Room room;
   private final Consumer<RunPlace> prune;
+  private final Function<String, WorkspaceOwner> owners;
 
   /**
    * {@code liveSpecs} answers the specs a box's live runs are of, by its handle ({@link
-   * RunStore#liveSpecs}): what its cap counts.
+   * RunStore#liveSpecs}): what its cap counts. {@code owners} answers a person, by handle, as the
+   * owner of a workspace ({@link WorkspaceOwner#of}).
    */
   RunPlaces(
       ProjectLoader projects,
       Workspaces workspaces,
       Function<String, Set<String>> liveSpecs,
       RunLauncher.Room room,
-      Consumer<RunPlace> prune) {
+      Consumer<RunPlace> prune,
+      Function<String, WorkspaceOwner> owners) {
     this.projects = Objects.requireNonNull(projects, "projects");
     this.workspaces = Objects.requireNonNull(workspaces, "workspaces");
     this.liveSpecs = Objects.requireNonNull(liveSpecs, "liveSpecs");
     this.room = Objects.requireNonNull(room, "room");
     this.prune = Objects.requireNonNull(prune, "prune");
+    this.owners = Objects.requireNonNull(owners, "owners");
   }
 
   /**
@@ -109,6 +115,7 @@ final class RunPlaces {
       if (!check.running()) {
         requireRoom(check, config, boxHandle);
       }
+      requireOwner(check, config, boxHandle);
       return new InWorkspace(check, lane, boxHandle);
     } catch (ApiException refused) {
       throw told(specId, lane, refused);
@@ -116,22 +123,40 @@ final class RunPlaces {
   }
 
   /**
-   * Puts a reserved run into the place {@code checked} found, for {@code owner}, the person it acts
-   * for: a spec's workspace is reused, started when stopped, or made, and is {@code owner}'s before
-   * anything of the run is staged; what it entered, none for the project's container. A workspace a
-   * dispatch made from a template older than the definition, or on a degraded mirror, says so once
-   * in the spec's room. A box still making another workspace past {@link Workspaces#CREATE_WAIT} is
-   * {@link ErrorCode#RUNNER_BUSY}; a create that fails answers its own reason, and the caller
-   * releases the run.
+   * The early refusal, before anything is reserved; the give asks again, since a token or email can
+   * go in between.
    */
-  DispatchOperations.WorkspaceUse enter(Checked checked, ProjectDefinition config, String owner) {
+  private void requireOwner(Workspaces.SpecCheck check, ProjectDefinition config, String handle) {
+    var theirs =
+        check.whole()
+            && check.found().flatMap(i -> i.key(BoxInstances.OWNER_KEY)).orElse("").equals(handle);
+    if (theirs) {
+      return;
+    }
+    try {
+      workspaces.requireOwner(owners.apply(handle), config);
+    } catch (IllegalStateException refused) {
+      throw ApiException.of(ErrorCode.CONFLICT, refused);
+    }
+  }
+
+  /**
+   * Puts a reserved run into the place {@code checked} found, for the person it acts for: a spec's
+   * workspace is reused, started when stopped, or made, and is theirs before anything of the run is
+   * staged; what it entered, none for the project's container. A workspace a dispatch made from a
+   * template older than the definition, or on a degraded mirror, says so once in the spec's room. A
+   * box still making another workspace past {@link Workspaces#CREATE_WAIT} is {@link
+   * ErrorCode#RUNNER_BUSY}; a create that fails answers its own reason, and the caller releases the
+   * run.
+   */
+  DispatchOperations.WorkspaceUse enter(Checked checked, ProjectDefinition config) {
     if (!(checked instanceof InWorkspace(var check, var lane, var boxHandle))) {
       return null;
     }
     var specId = check.place().specId();
     Workspaces.Entered entered;
     try {
-      entered = entered(check, config, owner, boxHandle);
+      entered = entered(check, config, boxHandle);
     } catch (ApiException refused) {
       throw told(specId, lane, refused);
     }
@@ -222,9 +247,7 @@ final class RunPlaces {
   private Workspaces.SpecCheck checked(RunPlace.SpecWorkspace place, ProjectDefinition config) {
     try {
       return workspaces.checkSpec(
-          place,
-          ProjectProvisioner.inputs(config, WorkstationIdentity.registered()),
-          projects::held);
+          place, ProjectProvisioner.inputs(config, Optional.empty()), projects::held);
     } catch (Workspaces.Busy busy) {
       throw busy(busy);
     } catch (IllegalStateException | IllegalArgumentException refused) {
@@ -239,16 +262,19 @@ final class RunPlaces {
   }
 
   private Workspaces.Entered entered(
-      Workspaces.SpecCheck check, ProjectDefinition config, String owner, String boxHandle) {
+      Workspaces.SpecCheck check, ProjectDefinition config, String boxHandle) {
     try {
       return workspaces.enterSpec(
           check,
           config,
-          owner,
+          boxHandle,
+          owners,
           SailPaths.projectFilesDir(check.place().project()),
           whole -> requireCapUnderLock(config, boxHandle, whole));
     } catch (Workspaces.Busy busy) {
       throw busy(busy);
+    } catch (WorkspaceOwner.Refused refused) {
+      throw ApiException.of(ErrorCode.CONFLICT, refused);
     } catch (ApiException refused) {
       throw refused;
     } catch (Exception e) {

@@ -94,7 +94,7 @@ class HomeRoomIT extends AbstractIncusIT {
     try (var db = Sqlite.open(stateDir.resolve("it.db"))) {
       new SchemaManager(db).migrate();
       HeldProjects.hold(db, CONTAINER);
-      new FdeStore(db).add(HANDLE, null, null, "member");
+      new FdeStore(db).add(HANDLE, null, HANDLE + "@sail.invalid", "member");
       var rooms = new RoomStore(db);
       var ops =
           new SailOperations(
