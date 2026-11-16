@@ -290,6 +290,28 @@ import Testing
     }
 }
 
+/// A frame Metal never tells presented says whether its commands completed: the window server
+/// had it, or the GPU work stalled.
+@Suite struct UnpresentedFrameTests {
+    @Test func eachCommittedFrameNotToldPresentedSaysItsAgeAndItsCommands() {
+        var marks = LatencyMarks()
+        marks.completed(frame: 1, at: 1.004, ok: true)
+        marks.committed(frame: 1, at: 1.001, read: 1.0, target: 1.016)
+        marks.committed(frame: 2, at: 1.020, read: 1.019, target: 1.033)
+        marks.completed(frame: 2, at: 1.026, ok: true)
+        marks.committed(frame: 3, at: 1.040, read: 1.039, target: 1.050)
+        marks.presented(frame: 1, at: 0, told: 2.0)
+        let left = marks.unpresented(at: 6.040)
+        #expect(left.map(\.frame) == [2, 3])
+        #expect(abs(left[0].ageMs - 5020) < 1e-6 && abs((left[0].completedAfterMs ?? 0) - 6) < 1e-6 && left[0].completedOK == true)
+        #expect(left[1].completedAfterMs == nil && left[1].completedOK == nil)
+        #expect(left[1].description == "frame 3 committed 5000 ms ago, its commands not completed")
+        let figures = marks.figures
+        #expect(figures.commitToCompleted.count == 2 && abs(figures.commitToCompleted.max - 6) < 1e-6, "a completion told before its commit mark counts too")
+        #expect(figures.commitToPresentTold.count == 1 && abs(figures.commitToPresentTold.max - 999) < 1e-6)
+    }
+}
+
 /// The drive's allowance for a hosted runner: a wait less only the drive's own thread's stall over
 /// that same wait, less the heartbeat's tick, never below zero and never more than the overlap.
 @Suite struct StallsTests {

@@ -112,7 +112,10 @@ public final class TerminalView: NSView {
     public var drawingState: String {
         let figures = latency
         return "frames presented \(figures.reportedPresents + figures.unreportedPresents), committed \(committedFrames); the display link "
-            + "\(pacer.isIdle ? "paused" : "running") after \(figures.refresh.count) refreshes; \(awaitingDrawable ? "" : "not ")awaiting a drawable"
+            + "\(pacer.isIdle ? "paused" : "running") after \(figures.refresh.count) refreshes; \(awaitingDrawable ? "" : "not ")awaiting a drawable; "
+            + "not yet told presented: \(figures.unpresented.isEmpty ? "none" : figures.unpresented.map(\.description).joined(separator: ", ")); "
+            + String(format: "commit to completed p50 %.1f max %.1f ms, to told presented p50 %.1f max %.1f ms", figures.commitToCompleted.p50,
+                     figures.commitToCompleted.max, figures.commitToPresentTold.p50, figures.commitToPresentTold.max)
     }
 
     public func resetLatency() {
@@ -415,7 +418,7 @@ public final class TerminalView: NSView {
             pacer.pause()
             return false
         }
-        switch renderer.draw(frame, overlay: overlay, from: { takeDrawable(metalLayer) }, presented: { [marks] in marks.presented(frame: $0, at: $1) }) {
+        switch renderer.draw(frame, overlay: overlay, from: { takeDrawable(metalLayer) }, presented: { [marks] in marks.presented(frame: $0, at: $1) }, completed: { [marks] in marks.completed(frame: $0, ok: $1) }) {
         case let .drawn(number):
             committedFrames += 1
             awaitingDrawable = false

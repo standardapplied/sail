@@ -124,10 +124,11 @@ public final class TerminalRenderer {
 
     /// Draws `frame` into the drawable `next` gives (a layer's next one) and presents it, asking
     /// for it only once a buffer is free; `presented` is told the frame's number and when it
-    /// reached the display (zero when it was dropped).
+    /// reached the display (zero when it was dropped), `completed` the number and whether its
+    /// commands completed without error.
     public func draw(
         _ frame: ScreenFrame, overlay: Overlay, from next: () -> (any CAMetalDrawable)?,
-        presented: @escaping @Sendable (UInt64, Double) -> Void
+        presented: @escaping @Sendable (UInt64, Double) -> Void, completed: @escaping @Sendable (UInt64, Bool) -> Void
     ) -> DrawOutcome {
         guard let slot = ledger.begin() else { return .busy }
         guard let drawable = next(), let commandBuffer = queue.makeCommandBuffer(),
@@ -138,7 +139,10 @@ public final class TerminalRenderer {
         }
         let ledger = ledger
         let number = slot.frame
-        commandBuffer.addCompletedHandler { _ in ledger.complete(number) }
+        commandBuffer.addCompletedHandler { buffer in
+            ledger.complete(number)
+            completed(number, buffer.status == .completed)
+        }
         drawable.addPresentedHandler { drawable in presented(number, drawable.presentedTime) }
         commandBuffer.present(drawable)
         commandBuffer.commit()
