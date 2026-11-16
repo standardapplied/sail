@@ -288,7 +288,7 @@
   {"name": "s29-the-first-renamed-and-left-open", "renameTab": 0, "rename": "web", "renameWith": "none"},
   {"name": "s29-another-tab-selected-while-renaming", "press": "3", "modifiers": ["command"]},
   {"name": "s29-the-switch-named-it", "arrangement": {"titles": ["web", "api", "This Mac"], "selected": 2}},
-  {"name": "s29-the-name-cleared", "renameTab": 0, "rename": "", "renameWith": "enter"},
+  {"name": "s29-a-name-of-spaces-clears-it", "renameTab": 0, "rename": "  ", "renameWith": "enter"},
   {"name": "s29-cleared", "arrangement": {"titles": ["This Mac", "api", "This Mac"], "selected": 0}},
   {"name": "s29-back-to-api", "press": "2", "modifiers": ["command"]},
   {"name": "s27-focus-the-earlier-output", "clickPane": 0},
