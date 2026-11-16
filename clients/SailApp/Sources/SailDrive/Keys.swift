@@ -58,13 +58,20 @@ enum Keys {
             return Key(code: code, characters: entry.text, ignoring: entry.text, flags: flags)
         }
         guard name.count == 1, let character = name.first, let code = Self.code(for: character) else { return nil }
-        var characters = name
+        let typed = flags.contains(.shift) ? Self.shiftedForm(of: character) : name
+        var characters = typed
         if flags.contains(.control), let scalar = name.uppercased().unicodeScalars.first, (0x40 ... 0x5F).contains(scalar.value),
            let control = Unicode.Scalar(scalar.value - 0x40)
         {
             characters = String(Character(control))
         }
-        return Key(code: code, characters: flags.contains(.command) ? name : characters, ignoring: name, flags: flags)
+        return Key(code: code, characters: flags.contains(.command) ? typed : characters, ignoring: typed, flags: flags)
+    }
+
+    /// What `character`'s key types with Shift held on a US keyboard, as AppKit's
+    /// `charactersIgnoringModifiers` gives it (Shift is the one modifier it keeps).
+    private static func shiftedForm(of character: Character) -> String {
+        shifted.first { $0.value == character }.map { String($0.key) } ?? character.uppercased()
     }
 
     private static func code(for character: Character) -> UInt16? {

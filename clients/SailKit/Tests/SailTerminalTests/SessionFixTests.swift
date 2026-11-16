@@ -418,6 +418,24 @@ import Testing
         SessionInfo(name: name, instanceID: "i-\(name)", live: true, attached: 0, writerFDE: "", room: "", command: [])
     }
 
+    /// Closing a pane that holds no connection ends its session at the host on one of its own.
+    @Test func aSessionIsEndedWithoutAttaching() async throws {
+        let host = try FakeHost()
+        async let ended: Void = SessionListing.end("mac-a", at: host.address, timeout: 5)
+        let peer = try await host.accept()
+        #expect(try await peer.welcome() == "")
+        #expect(try await peer.read() == .kill(session: "mac-a"))
+        try peer.send(.accepted)
+        try await ended
+        let refused = Task { try await SessionListing.end("mac-b", at: host.address, timeout: 5) }
+        let second = try await host.accept()
+        try await second.welcome()
+        _ = try await second.read()
+        let refusal = HostRefusal(message: "No session mac-b.", remedy: nil)
+        try second.send(.refused(refusal))
+        await #expect(throws: TerminalError.refused(refusal)) { try await refused.value }
+    }
+
     @Test func everyPageIsReadInOrder() async throws {
         let host = try FakeHost()
         async let listed = SessionListing.sessions(at: host.address, timeout: 5)
