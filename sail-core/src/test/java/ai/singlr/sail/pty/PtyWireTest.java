@@ -20,6 +20,7 @@ import java.nio.channels.Pipe;
 import java.nio.channels.ReadableByteChannel;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
+import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
 
 class PtyWireTest {
@@ -384,22 +385,70 @@ class PtyWireTest {
     assertEquals(
         "", new PtyMessage.Create("s", List.of(), "/tmp", "acme", "", 80, 24, "main").workspace());
     assertEquals("", new PtyMessage.Create("s", List.of(), "/tmp", "acme", "", 80, 24).workspace());
-    var older = new java.io.ByteArrayOutputStream();
-    var frame = java.nio.ByteBuffer.allocate(64);
-    frame.put((byte) 11);
-    for (var text : List.of("open", "acme", "tok")) {
-      var bytes = text.getBytes(StandardCharsets.UTF_8);
-      frame.putInt(bytes.length).put(bytes);
-    }
-    frame.flip();
-    var length = java.nio.ByteBuffer.allocate(4).putInt(frame.remaining()).array();
-    older.write(length);
-    older.write(frame.array(), 0, frame.remaining());
-    var read =
-        (PtyMessage.IssueTicket)
-            PtyWire.read(
-                java.nio.channels.Channels.newChannel(
-                    new java.io.ByteArrayInputStream(older.toByteArray())));
+    var read = (PtyMessage.IssueTicket) readPayload(texts((byte) 11, "open", "acme", "tok"));
     assertEquals("", read.workspace(), "a ticket request from before the field names none");
+  }
+
+  /** A session as a host before workspaces writes it: no place after its command. */
+  private static ByteBuffer olderSession(ByteBuffer out, String name) {
+    put(out, name);
+    put(out, "i");
+    out.put((byte) 1).putInt(0);
+    put(out, "");
+    put(out, "");
+    return out.putInt(0);
+  }
+
+  private static void put(ByteBuffer out, String text) {
+    var bytes = text.getBytes(StandardCharsets.UTF_8);
+    out.putInt(bytes.length).put(bytes);
+  }
+
+  private static ByteBuffer texts(byte type, String... texts) {
+    var out = ByteBuffer.allocate(256).put(type);
+    for (var text : texts) {
+      put(out, text);
+    }
+    return out;
+  }
+
+  /**
+   * A session and a page of them from a host before workspaces, which writes no place, read as in
+   * the project's container; a page placing other than its sessions is refused, never misread.
+   */
+  @Test
+  void aSessionFromAHostBeforeWorkspacesIsInTheContainerAndAPageMustPlaceEachOfItsSessions()
+      throws IOException {
+    var info =
+        (PtyMessage.SessionInfo)
+            readPayload(olderSession(ByteBuffer.allocate(256).put((byte) 28), "s"));
+    var page = ByteBuffer.allocate(256).put((byte) 29).putInt(2);
+    olderSession(olderSession(page, "a"), "b");
+    put(page, "");
+    var sessions = (PtyMessage.Sessions) readPayload(page);
+    var misplaced = ByteBuffer.allocate(256).put((byte) 29).putInt(1);
+    olderSession(misplaced, "a");
+    put(misplaced, "");
+    misplaced.putInt(2);
+
+    assertEquals(List.of("", ""), List.of(info.workspace(), info.opener()));
+    assertEquals(
+        List.of("", ""),
+        sessions.sessions().stream().map(PtyMessage.SessionInfo::workspace).toList());
+    assertEquals(
+        "Corrupt pty frame: a page places 2 sessions but holds 1.",
+        assertThrows(IOException.class, () -> readPayload(misplaced)).getMessage());
+    assertEquals(
+        List.of("try", "ada"),
+        ((PtyMessage.Sessions)
+                roundTrip(
+                    new PtyMessage.Sessions(
+                        List.of(
+                            new PtyMessage.SessionInfo(
+                                "s", "i", true, 1, "", "", List.of(), "try", "ada")),
+                        "")))
+            .sessions().stream()
+                .flatMap(placed -> Stream.of(placed.workspace(), placed.opener()))
+                .toList());
   }
 }

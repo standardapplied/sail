@@ -248,6 +248,12 @@ public sealed interface PtyMessage {
         List<String> command) {
       this(name, instanceId, live, attached, writerFde, room, command, "", "");
     }
+
+    /** This session, run in {@code workspace} and opened by {@code opener}. */
+    public SessionInfo placed(String workspace, String opener) {
+      return new SessionInfo(
+          name, instanceId, live, attached, writerFde, room, command, workspace, opener);
+    }
   }
 
   /** One page of sessions; {@code next} is blank on the last page, else the cursor to continue. */

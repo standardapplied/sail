@@ -111,6 +111,29 @@ import Testing
         }
         #expect(bare.workspace == "")
         #expect(workspace == "")
+        let info = Array(try golden("SessionInfo").dropFirst(4))
+        let page = Array(try golden("Sessions").dropFirst(4))
+        #expect(try FrameCodec.decode(payload: info[..<withoutWorkspace("SessionInfo", info)])
+            == .sessionInfo(SessionInfo(
+                name: "lounge", instanceID: "inst-1", live: true, attached: 2, writerFDE: "uday",
+                room: "harbor-design", command: ["claude", "--resume"]
+            )))
+        guard case let .sessions(older) = try FrameCodec.decode(payload: page[..<withoutWorkspace("Sessions", page)])
+        else {
+            Issue.record("a page without its places decodes as another frame")
+            return
+        }
+        #expect(older.sessions.map(\.workspace) == ["", ""])
+        #expect(older.next == "shell")
+    }
+
+    @Test func aPagePlacingOtherThanItsSessionsIsMalformed() throws {
+        var page = Array(try golden("Sessions").dropFirst(4))
+        let placed = withoutWorkspace("Sessions", page)
+        page.replaceSubrange(placed ..< placed + 4, with: [0, 0, 0, 3])
+        #expect(throws: TerminalWireError.malformed("a page places 3 sessions but holds 2")) {
+            try FrameCodec.decode(payload: page)
+        }
     }
 
     @Test func aFieldClaimingMoreBytesThanTheFrameHoldsIsTruncated() throws {
@@ -214,10 +237,22 @@ func errWithoutRemedy(_ payload: [UInt8]) throws -> Int {
     1 + 4 + Int(try decodedLength(payload, at: 1))
 }
 
-/// Where `name`'s golden frame ends without its trailing workspace, `dock`, which a host before
-/// workspaces never sent: its length and its bytes off the end.
+/// Where `name`'s golden frame ends without what a host before workspaces never sent: the
+/// workspace `dock` of a create or ticket, `lounge`'s place in `dock` opened by `uday`, and a
+/// page's places of `lounge` and of `shell`, which is in none.
 func withoutWorkspace(_ name: String, _ payload: [UInt8]) -> Int {
-    ["Create", "IssueTicket"].contains(name) ? payload.count - 4 - "dock".utf8.count : payload.count
+    let lounge = field("dock") + field("uday")
+    return switch name {
+    case "Create", "IssueTicket": payload.count - field("dock")
+    case "SessionInfo": payload.count - lounge
+    case "Sessions": payload.count - 4 - lounge - field("") - field("")
+    default: payload.count
+    }
+}
+
+/// The bytes a string field takes: its length and its UTF-8.
+func field(_ text: String) -> Int {
+    4 + text.utf8.count
 }
 
 /// The name of the host's `PtyMessage` record `frame` is.

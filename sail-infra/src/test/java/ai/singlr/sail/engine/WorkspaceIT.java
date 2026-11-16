@@ -692,7 +692,9 @@ class WorkspaceIT extends AbstractIncusIT {
    * Ruling 4 of {@code sail-a-workspace-is-its-creators} on a real Incus: a spec's workspace its
    * previous owner worked in, kept for what it holds and made nobody's when that owner left, is
    * entered by the box's person's run. It holds the previous work, and none of the previous owner's
-   * token, gh login, git identity or keys: only the new owner's.
+   * token, gh login, git identity or keys: only the new owner's. The work keeps its own history (a
+   * reflog entry the previous owner's checkout wrote names them, as a commit of theirs would); the
+   * identity a new commit takes is the new owner's alone.
    */
   @Test
   void aDisownedKeptWorkspaceEnteredByTheNextRunHoldsTheWorkAndOnlyItsNewOwnersCredentials()
@@ -757,7 +759,7 @@ class WorkspaceIT extends AbstractIncusIT {
                 "-c",
                 "grep -r -l -F -e "
                     + STRIPPED_TOKEN
-                    + " -e AAAAtmp -e tmp@sail.invalid /home/dev /root;"
+                    + " -e AAAAtmp /home/dev /root;"
                     + " runuser -u dev -- env HOME=/home/dev git config --global --get user.email;"
                     + " cat /home/dev/.ssh/authorized_keys; grep -c tok-ana /home/dev/.git-credentials"));
     assertEquals(

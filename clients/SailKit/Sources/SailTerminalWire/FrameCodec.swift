@@ -124,8 +124,10 @@ private extension Frame {
         case let .replayBegin(safe): [.bool(safe)]
         case let .writerChanged(fde): [.string(fde)]
         case let .sessionEnded(reason): [.string(reason)]
-        case let .sessionInfo(info): info.fields
-        case let .sessions(page): [.count(page.sessions.count)] + page.sessions.flatMap(\.fields) + [.string(page.next)]
+        case let .sessionInfo(info): info.fields + info.place
+        case let .sessions(page):
+            [.count(page.sessions.count)] + page.sessions.flatMap(\.fields) + [.string(page.next)]
+                + [.count(page.sessions.count)] + page.sessions.flatMap(\.place)
         case let .refused(refusal):
             [.string(refusal.message)] + (refusal.remedy.map { [.count($0.count)] + $0.flatMap(\.fields) } ?? [])
         case .takeWrite, .detach, .replayEnd, .paused, .continued, .accepted: []
@@ -143,8 +145,14 @@ private extension SessionInfo {
     var fields: [Field] {
         [
             .string(name), .string(instanceID), .bool(live), .int32(attached), .string(writerFDE), .string(room),
-            .strings(command), .string(workspace), .string(opener),
+            .strings(command),
         ]
+    }
+
+    /// Where it runs and who opened it, written after everything a host before workspaces wrote, so
+    /// a peer of that host reads the frame as before and a reader of one finds none.
+    var place: [Field] {
+        [.string(workspace), .string(opener)]
     }
 }
 
@@ -214,8 +222,8 @@ private struct Cursor {
         case 25: .paused
         case 26: .continued
         case 27: .sessionEnded(reason: try string())
-        case 28: .sessionInfo(try session())
-        case 29: .sessions(SessionPage(sessions: try list { (cursor: inout Cursor) throws(TerminalWireError) in try cursor.session() }, next: try string()))
+        case 28: .sessionInfo(try placed(try session()))
+        case 29: .sessions(try page())
         case 30: .accepted
         case 31: .refused(try refusal())
         case let other: throw .unknownType(other)
@@ -237,9 +245,34 @@ private struct Cursor {
     private mutating func session() throws(TerminalWireError) -> SessionInfo {
         SessionInfo(
             name: try string(), instanceID: try string(), live: try bool(), attached: try int32(),
-            writerFDE: try string(), room: try string(), command: try strings(),
-            workspace: try string(), opener: try string()
+            writerFDE: try string(), room: try string(), command: try strings()
         )
+    }
+
+    /// `info` with the place a frame ends with, when its host wrote one.
+    private mutating func placed(_ info: SessionInfo) throws(TerminalWireError) -> SessionInfo {
+        guard remaining > 0 else { return info }
+        var placed = info
+        placed.workspace = try string()
+        placed.opener = try string()
+        return placed
+    }
+
+    /// A page of sessions, each given the place the page ends with, when its host wrote them.
+    private mutating func page() throws(TerminalWireError) -> SessionPage {
+        var sessions = try list { (cursor: inout Cursor) throws(TerminalWireError) in try cursor.session() }
+        let next = try string()
+        if remaining > 0 {
+            let placed = try int32()
+            guard placed == sessions.count else {
+                throw .malformed("a page places \(placed) sessions but holds \(sessions.count)")
+            }
+            for index in sessions.indices {
+                sessions[index].workspace = try string()
+                sessions[index].opener = try string()
+            }
+        }
+        return SessionPage(sessions: sessions, next: next)
     }
 
     private mutating func refusal() throws(TerminalWireError) -> HostRefusal {
