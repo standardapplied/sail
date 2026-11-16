@@ -6,13 +6,15 @@ import SailVT
 /// The pointer, the wheel, copy, paste and the font size.
 extension TerminalView {
     /// A click on a view that is not the focused one only focuses it: the program gets no report and
-    /// nothing is selected, until the button goes up.
+    /// nothing is selected, until the button goes up. The window makes the clicked view its first
+    /// responder before it hands it the press, so the view also marks the click when it becomes
+    /// first responder under the pointer's press (``becomeFirstResponder()``).
     override public func mouseDown(with event: NSEvent) {
-        focusingClick = window?.firstResponder !== self
-        guard !focusingClick else {
+        if window?.firstResponder !== self {
             window?.makeFirstResponder(self)
-            return
+            focusingClick = true
         }
+        guard !focusingClick else { return }
         guard let link, let place = place(of: event) else { return }
         let action = pointer.down(
             at: place.cell, clicks: event.clickCount, shift: event.modifierFlags.contains(.shift), programTracksMouse: link.screen.tracksMouse

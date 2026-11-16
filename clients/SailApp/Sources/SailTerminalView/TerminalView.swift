@@ -442,9 +442,16 @@ public final class TerminalView: NSView {
     }
 
     override public func becomeFirstResponder() -> Bool {
+        focusingClick = isPressedHere(NSApp.currentEvent)
         updateFocus(responder: true)
         onFocus()
         return true
+    }
+
+    /// Whether `event` is the left button going down inside this view.
+    private func isPressedHere(_ event: NSEvent?) -> Bool {
+        guard let event, event.type == .leftMouseDown, event.window === window else { return false }
+        return bounds.contains(convert(event.locationInWindow, from: nil))
     }
 
     override public func resignFirstResponder() -> Bool {
