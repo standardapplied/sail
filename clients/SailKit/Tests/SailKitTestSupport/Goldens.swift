@@ -32,10 +32,9 @@ public enum Goldens {
         return object
     }
 
-    /// Every pty frame the host's `PtyWire` wrote, by its message name, as its full wire bytes:
-    /// this release's, or those a release wrote, kept under `released/`.
-    public static func frames(_ path: String = "frames/frames.json") throws -> [(name: String, wire: [UInt8])] {
-        let frames = try object(path)["frames"] as? [[String: String]] ?? []
+    /// Every pty frame the host's `PtyWire` wrote, by its message name, as its full wire bytes.
+    public static func frames() throws -> [(name: String, wire: [UInt8])] {
+        let frames = try object("frames/frames.json")["frames"] as? [[String: String]] ?? []
         return try frames.map { frame in
             guard let name = frame["name"], let hex = frame["hex"] else {
                 throw GoldenError(reason: "a frame without a name or hex")

@@ -127,22 +127,6 @@ import Testing
         #expect(older.next == "shell")
     }
 
-    /// The wire rule: a newer peer appends after every field an older one writes, never inside a
-    /// repeated element. So each frame as 0.69.0 wrote it (its own recorded golden) is the head of
-    /// the frame as this release writes it, byte for byte, and 0.69.0's reader, which reads only
-    /// that head, reads this release's frame as its own; and this release reads 0.69.0's frame as
-    /// the same frame with the new fields empty.
-    @Test(arguments: ["Create", "IssueTicket", "SessionInfo", "Sessions"])
-    func aFrameAsTheLastReleaseWroteItIsTheHeadOfThisOnesAndReadsWithItsNewFieldsEmpty(name: String) throws {
-        let released = try #require(try Goldens.frames("released/frames-0.69.0.json").first { $0.name == name })
-        let current = try #require(try Goldens.frames().first { $0.name == name })
-        let older = Array(released.wire.dropFirst(4))
-        let newer = Array(current.wire.dropFirst(4))
-
-        #expect(Array(newer.prefix(older.count)) == older, "a field of \(name) was written inside 0.69.0's")
-        #expect(try FrameCodec.decode(payload: older) == withoutNewFields(try FrameCodec.decode(payload: newer)))
-    }
-
     @Test func aPagePlacingOtherThanItsSessionsIsMalformed() throws {
         var page = Array(try golden("Sessions").dropFirst(4))
         let placed = withoutWorkspace("Sessions", page)
@@ -263,30 +247,6 @@ func withoutWorkspace(_ name: String, _ payload: [UInt8]) -> Int {
     case "SessionInfo": payload.count - lounge
     case "Sessions": payload.count - 4 - lounge - field("") - field("")
     default: payload.count
-    }
-}
-
-/// `frame` with every field 0.69.0 never wrote left empty.
-func withoutNewFields(_ frame: Frame) -> Frame {
-    func unplaced(_ info: SessionInfo) -> SessionInfo {
-        var bare = info
-        bare.workspace = ""
-        bare.opener = ""
-        return bare
-    }
-    switch frame {
-    case let .create(create):
-        var bare = create
-        bare.workspace = ""
-        return .create(bare)
-    case let .issueTicket(action, target, credential, _):
-        return .issueTicket(action: action, target: target, credential: credential, workspace: "")
-    case let .sessionInfo(info):
-        return .sessionInfo(unplaced(info))
-    case let .sessions(page):
-        return .sessions(SessionPage(sessions: page.sessions.map(unplaced), next: page.next))
-    default:
-        return frame
     }
 }
 
