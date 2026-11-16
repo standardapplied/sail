@@ -568,10 +568,13 @@ private final class Withheld: @unchecked Sendable {
         self.layer = layer
     }
 
-    /// Takes every drawable the layer gives, until one is not given within its second.
+    /// Takes the layer's drawables, at most its pool's count (more asks made the window server
+    /// allocate until it failed, and took the runner down), until one is not given within its
+    /// second: either way the pool is spent.
     func take() {
         Thread {
-            while let drawable = self.layer.nextDrawable() {
+            for _ in 0 ..< self.layer.maximumDrawableCount {
+                guard let drawable = self.layer.nextDrawable() else { break }
                 self.lock.withLock { self.drawables.append(drawable) }
             }
             self.lock.withLock { self.finished = true }

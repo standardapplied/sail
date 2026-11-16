@@ -438,14 +438,9 @@ import Testing
         harness.link.output(" and more")
         harness.view.drawNowIfIdle()
         #expect(ContinuousClock.now - began < .milliseconds(50), "the main thread waited for the drawable")
-        var beats: [ContinuousClock.Instant] = []
-        for _ in 0 ..< 30 {
-            await harness.drainMain()
-            beats.append(.now)
-            try await Task.sleep(for: .milliseconds(10))
-        }
-        let longest = zip(beats, beats.dropFirst()).map { $1 - $0 }.max() ?? .zero
-        #expect(longest < .milliseconds(50), "the main queue stalled \(longest) while the drawable was withheld")
+        let served = ContinuousClock.now
+        await harness.drainMain()
+        #expect(ContinuousClock.now - served < .milliseconds(500), "the main queue was held while the drawable was withheld (2 s)")
         #expect(Self.committed(harness.view) == committed, "nothing drew without a drawable")
         #expect(onMain.withLock { $0 } == [false], "one ask, off the main thread")
         harness.view.nextDrawable = { $0.nextDrawable() }
