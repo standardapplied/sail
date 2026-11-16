@@ -18,7 +18,7 @@ import Testing
         let frames = try Dictionary(uniqueKeysWithValues: Goldens.frames().map { ($0.name, try decoded($0.wire)) })
         #expect(frames["Create"] == .create(SessionCreate(
             session: "lounge", command: ["bash", "-l"], workingDirectory: "/home/dev", project: "harbor",
-            room: "harbor-design", size: TerminalSize(columns: 132, rows: 43)
+            room: "harbor-design", size: TerminalSize(columns: 132, rows: 43), workspace: "dock"
         )))
         #expect(frames["Attach"] == .attach(session: "lounge", write: true))
         #expect(frames["Input"] == .input(sequence: 42, bytes: Array("ls -la\r".utf8)))
@@ -28,7 +28,9 @@ import Testing
         #expect(frames["ListSessions"] == .listSessions(after: "", limit: 16))
         #expect(frames["Sessions"] == .sessions(SessionPage(sessions: [lounge, shell], next: "shell")))
         #expect(frames["SessionInfo"] == .sessionInfo(lounge))
-        #expect(frames["IssueTicket"] == .issueTicket(action: .known(.open), target: "harbor", credential: "sail_uday"))
+        #expect(frames["IssueTicket"] == .issueTicket(
+            action: .known(.open), target: "harbor", credential: "sail_uday", workspace: "dock"
+        ))
         #expect(frames["Ticket"] == .ticket("tkt_harbor"))
         #expect(frames["TicketRefused"] == .ticketRefused(kind: .known(.notFound), remedy: [
             .words("Project 'harbor' is not in the catalog. Run '"),
@@ -86,13 +88,29 @@ import Testing
     @Test func everyFrameCutShortIsTruncatedNeverAFrame() throws {
         for (name, wire) in try Goldens.frames() {
             let payload = Array(wire.dropFirst(4))
-            let complete = name == "Err" ? try errWithoutRemedy(payload) : payload.count
+            let complete = name == "Err" ? try errWithoutRemedy(payload) : withoutWorkspace(name, payload)
             for end in 0 ..< payload.count where end != complete {
                 #expect(throws: TerminalWireError.truncated, "\(name) cut at \(end)") {
                     try FrameCodec.decode(payload: payload[..<end])
                 }
             }
         }
+    }
+
+    @Test func aCreateOrATicketFromAHostBeforeWorkspacesIsForTheProjectsContainer() throws {
+        let create = Array(try golden("Create").dropFirst(4))
+        let ticket = Array(try golden("IssueTicket").dropFirst(4))
+
+        guard case let .create(bare) = try FrameCodec.decode(payload: create[..<withoutWorkspace("Create", create)]),
+              case let .issueTicket(_, _, _, workspace) = try FrameCodec.decode(
+                  payload: ticket[..<withoutWorkspace("IssueTicket", ticket)]
+              )
+        else {
+            Issue.record("a frame without its workspace decodes as another frame")
+            return
+        }
+        #expect(bare.workspace == "")
+        #expect(workspace == "")
     }
 
     @Test func aFieldClaimingMoreBytesThanTheFrameHoldsIsTruncated() throws {
@@ -162,7 +180,7 @@ import Testing
 
 let lounge = SessionInfo(
     name: "lounge", instanceID: "inst-1", live: true, attached: 2, writerFDE: "uday",
-    room: "harbor-design", command: ["claude", "--resume"]
+    room: "harbor-design", command: ["claude", "--resume"], workspace: "dock", opener: "uday"
 )
 let shell = SessionInfo(
     name: "shell", instanceID: "inst-2", live: false, attached: 0, writerFDE: "", room: "", command: ["bash"]
@@ -194,6 +212,12 @@ func decodedLength(_ wire: [UInt8], at offset: Int) throws -> Int32 {
 /// Where an `Err` payload ends when it carries its message alone, as an older host writes it.
 func errWithoutRemedy(_ payload: [UInt8]) throws -> Int {
     1 + 4 + Int(try decodedLength(payload, at: 1))
+}
+
+/// Where `name`'s golden frame ends without its trailing workspace, `dock`, which a host before
+/// workspaces never sent: its length and its bytes off the end.
+func withoutWorkspace(_ name: String, _ payload: [UInt8]) -> Int {
+    ["Create", "IssueTicket"].contains(name) ? payload.count - 4 - "dock".utf8.count : payload.count
 }
 
 /// The name of the host's `PtyMessage` record `frame` is.

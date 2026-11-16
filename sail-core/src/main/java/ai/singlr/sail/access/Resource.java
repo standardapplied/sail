@@ -43,6 +43,8 @@ public record Resource(
     REVIEW("review", "reviews", true),
     /** A run and its log. */
     RUN("run", "runs", true),
+    /** A workspace of a project: a clone of its template, its owner's. */
+    WORKSPACE("workspace", "workspaces", true),
     /** A project: its definition, files, skills, processes and snapshots. */
     PROJECT("project", "projects", true),
     /**

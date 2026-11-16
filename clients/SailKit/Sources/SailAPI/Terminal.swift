@@ -23,8 +23,11 @@ public struct TerminalTicket: Codable, Equatable, Sendable {
 
 extension Endpoint where Response == TerminalTicket {
     /// A ticket to open a session in `project`, and attach to it.
-    public static func terminalTicket(open project: String) throws(SailError) -> Self {
-        Self(.post, Route.terminalTickets, body: try SailJSON.encode(["action": "open", "project": project]))
+    public static func terminalTicket(open project: String, workspace: String = "") throws(SailError) -> Self {
+        let asked = workspace.isEmpty
+            ? ["action": "open", "project": project]
+            : ["action": "open", "project": project, "workspace": workspace]
+        return Self(.post, Route.terminalTickets, body: try SailJSON.encode(asked))
     }
 
     /// A ticket to attach to `session`.

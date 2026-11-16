@@ -1425,8 +1425,26 @@ Each row with the tests that prove it:
 - **W9. One decision.** Every verb first reads the project from the catalog as the box's person,
   through `ReadFilter`, which is what `project apply` asks. A catalog this account cannot read is
   said to be one. The read route declares `Gate.READS_IN_SCOPE` and reads through
-  `ProjectGate.readable`. No rule was added.
-  *`RouteGateSweepTest`, `ScopedReadsTest`, `OneDecisionSweepTest`, `AccessDoorsBaselineTest`.*
+  `ProjectGate.readable`. Entering a workspace, a terminal in it or making, starting, stopping or
+  deleting one, is then **Enter a workspace** on its owner (R10): one decision,
+  `WorkspaceDoors.refusal` over `Resources.workspace` (`user.sail.owner`, read in one place,
+  `Workspaces.ownerOf`), for the host CLI verbs, the API routes and the terminal alike. Its owner
+  or an admin enters; a viewer and every agent never; one with no owner, made by hand or taken
+  back when its owner left the box, an admin alone; one being made is its caller's. The routes
+  are `POST /v1/projects/{p}/workspaces` (`{"name"}`, from the current template, which the server
+  never builds: none is refused naming its build, a stale one is cloned and the answer says so),
+  `POST …/workspaces/{w}/start` and `…/stop`, and `DELETE …/workspaces/{w}[?force=true]`, each
+  declaring `Gate.decides(ENTER_WORKSPACE)`. A delete, at the CLI (`--force`) and the API alike,
+  first reads what the workspace holds with the idle sweep's reads (`WorkspaceGit`, a stopped one
+  started for it and stopped again when refused) and is refused (`workspace_holds_work`, 409)
+  naming what it holds, and its owner when the caller is not, or naming why it could not be read,
+  unless forced; a live run of its spec refuses it whatever is passed. Every door that makes,
+  starts, stops or deletes a workspace goes through `WorkspaceDoors`; today those are the API and
+  the host CLI, as the SSH gateway serves no `project workspace` command
+  (`SshGateway.API_COMMANDS`). A gateway verb for workspaces is added only through
+  `WorkspaceDoors`, so its delete reads what the workspace holds as the other doors do.
+  *`RouteGateSweepTest`, `ScopedReadsTest`, `OneDecisionSweepTest`, `AccessDoorsBaselineTest`,
+  `WorkspaceDoorsTest`, `WorkspaceRoutesTest`, `AccessTest.aWorkspaceIsEnteredByItsOwnerOrAnAdminAlone`.*
 - **W10. Every instance on a box is exactly one kind, told from its keys.** No command takes a
   workspace, a template or a stray for a project: each one that walks the box's instances asks
   `BoxInstances`, the only class that lists them.
@@ -3387,6 +3405,7 @@ a birth, as on main. A door's placement comes after `Access` too. The table is
 | Dispatch | dispatch or resume a spec; seat or remove a room agent | no | owner | yes | no | no | no |
 | Operate a run | stop it; attach to it; read its log | no | owner | yes | no | no | no |
 | Narrate | a run's reports about itself: events, session, inbox acks | no | owner | yes | its own | its own | no |
+| Enter a workspace | open a terminal in a workspace; make, start, stop or delete one | no | owner | yes | no | no | no |
 | Share | add, change or remove project files and skills | no | yes | yes | no | no | no |
 | Serve | start and stop the project's processes | no | yes | yes | own work | no | yes |
 | Restore | restore or delete a snapshot | no | yes | yes | no | no | no |
@@ -3428,11 +3447,20 @@ grant on its own work alone is refused there, since no work is in hand.
 
 - A spec runs only on its assignee's box, and a room's agents only on its owner's box: placement
   (`DispatchPolicy`, `LaunchAdmission`), asked after `Access`.
-- Opening a terminal needs the project on your own box: its person operates this box (Operate the
-  box on it, the question attaching asks of a session's opener's box: the box's own person, or an
-  admin) and holds the project, whatever their role (`HostLanes.Pty.admitBox`, then
-  `admitProject`, through `ProjectGate.readable`), asked in one place (`PtySessionHost.openRefusal`)
-  at the unix socket and for a ticket alike. A viewer on their own box opens one too.
+- Opening a terminal in a project's own container needs the project on your own box: its person
+  operates this box (Operate the box on it, the question attaching asks of a session's opener's
+  box: the box's own person, or an admin) and holds the project, whatever their role
+  (`HostLanes.Pty.admitBox`, then `admitProject`, through `ProjectGate.readable`), asked in one
+  place (`PtySessionHost.openRefusal`) at the unix socket and for a ticket alike. A viewer on their
+  own box opens one too.
+- Opening one in a workspace (`workspace` on the create, the ticket and `POST
+  /v1/terminal/tickets`; blank or `main` is the project's container) is entering it, a permission:
+  the project's audience, then Enter a workspace on its owner (`HostLanes.Pty.admitWorkspace`),
+  never operating the box, so a member opens one in their own workspace on another person's
+  runner. Its own instance is found by name and keys, started when stopped and given its owner's
+  credentials (`Workspaces.startExisting`, the attach's door), and the session runs there (R15).
+  A ticket opens only the project and workspace it was issued for (R16). A personal runner's host
+  has no workspaces and refuses one.
 - Admins are never scoped.
 
 **Whose a resource is.** `Resources` builds each resource from the row in hand, with the project

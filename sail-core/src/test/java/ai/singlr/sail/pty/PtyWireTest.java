@@ -357,4 +357,49 @@ class PtyWireTest {
     pipe.sink().close();
     PtyWire.read(pipe.source());
   }
+
+  /**
+   * R16's wire: a create, a ticket request and a listed session carry the workspace (and the
+   * listing its opener); the default workspace {@code main} is the project's own container, and a
+   * frame a peer sent before the field existed reads as none.
+   */
+  @Test
+  void theWorkspaceRidesTheCreateTheTicketAndTheListingAndMainIsTheContainer() throws IOException {
+    var create =
+        (PtyMessage.Create)
+            roundTrip(new PtyMessage.Create("s", List.of(), "/tmp", "acme", "", 80, 24, "try"));
+    var ticket =
+        (PtyMessage.IssueTicket)
+            roundTrip(
+                new PtyMessage.IssueTicket(PtyMessage.TicketAction.OPEN, "acme", "tok", "try"));
+    var info =
+        (PtyMessage.SessionInfo)
+            roundTrip(
+                new PtyMessage.SessionInfo(
+                    "s", "i", true, 1, "ada", "", List.of("bash"), "try", "ada"));
+
+    assertEquals("try", create.workspace());
+    assertEquals("try", ticket.workspace());
+    assertEquals(List.of("try", "ada"), List.of(info.workspace(), info.opener()));
+    assertEquals(
+        "", new PtyMessage.Create("s", List.of(), "/tmp", "acme", "", 80, 24, "main").workspace());
+    assertEquals("", new PtyMessage.Create("s", List.of(), "/tmp", "acme", "", 80, 24).workspace());
+    var older = new java.io.ByteArrayOutputStream();
+    var frame = java.nio.ByteBuffer.allocate(64);
+    frame.put((byte) 11);
+    for (var text : List.of("open", "acme", "tok")) {
+      var bytes = text.getBytes(StandardCharsets.UTF_8);
+      frame.putInt(bytes.length).put(bytes);
+    }
+    frame.flip();
+    var length = java.nio.ByteBuffer.allocate(4).putInt(frame.remaining()).array();
+    older.write(length);
+    older.write(frame.array(), 0, frame.remaining());
+    var read =
+        (PtyMessage.IssueTicket)
+            PtyWire.read(
+                java.nio.channels.Channels.newChannel(
+                    new java.io.ByteArrayInputStream(older.toByteArray())));
+    assertEquals("", read.workspace(), "a ticket request from before the field names none");
+  }
 }

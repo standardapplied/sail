@@ -45,6 +45,14 @@ package enum Route {
     package static func spec(_ id: String) -> [String] {
         specs + [id]
     }
+
+    package static func workspaces(project: String) -> [String] {
+        projects + [project, "workspaces"]
+    }
+
+    package static func workspace(_ name: String, project: String) -> [String] {
+        workspaces(project: project) + [name]
+    }
 }
 
 /// The server's JSON, read and written one way: each key as its model spells it, and an instant as

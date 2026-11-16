@@ -95,6 +95,7 @@ public final class PtyWire {
             .string(m.project())
             .string(m.room());
         out.i32(m.cols()).i32(m.rows());
+        out.string(m.workspace());
       }
       case PtyMessage.Attach m -> {
         out.type(2).string(m.session());
@@ -118,7 +119,11 @@ public final class PtyWire {
       case PtyMessage.Kill m -> out.type(8).string(m.session());
       case PtyMessage.Yield m -> out.type(10).string(m.session()).string(m.reason());
       case PtyMessage.IssueTicket m ->
-          out.type(11).string(m.action().wire()).string(m.target()).string(m.credential());
+          out.type(11)
+              .string(m.action().wire())
+              .string(m.target())
+              .string(m.credential())
+              .string(m.workspace());
       case PtyMessage.Ticket m -> out.type(33).string(m.ticket());
       case PtyMessage.TicketRefused m ->
           encodeRemedy(out.type(34).string(m.kind().wire()), m.detail());
@@ -224,7 +229,11 @@ public final class PtyWire {
   private static Writer encodeInfo(Writer out, PtyMessage.SessionInfo info) {
     out.string(info.name()).string(info.instanceId());
     out.bool(info.live()).i32(info.attached());
-    return out.string(info.writerFde()).string(info.room()).stringList(info.command());
+    return out.string(info.writerFde())
+        .string(info.room())
+        .stringList(info.command())
+        .string(info.workspace())
+        .string(info.opener());
   }
 
   private static PtyMessage decode(ByteBuffer in) throws IOException {
@@ -239,7 +248,8 @@ public final class PtyWire {
               string(in),
               string(in),
               in.getInt(),
-              in.getInt());
+              in.getInt(),
+              trailing(in));
       case 2 -> new PtyMessage.Attach(string(in), in.get() == 1);
       case 3 -> new PtyMessage.Input(in.getLong(), bytes(in));
       case 4 -> new PtyMessage.Resize(in.getInt(), in.getInt());
@@ -250,7 +260,7 @@ public final class PtyWire {
       case 10 -> new PtyMessage.Yield(string(in), string(in));
       case 11 ->
           new PtyMessage.IssueTicket(
-              PtyMessage.TicketAction.of(string(in)), string(in), string(in));
+              PtyMessage.TicketAction.of(string(in)), string(in), string(in), trailing(in));
       case 33 -> new PtyMessage.Ticket(string(in));
       case 34 -> new PtyMessage.TicketRefused(PtyMessage.TicketRefusal.of(string(in)), remedy(in));
       case 20 -> new PtyMessage.Output(in.getLong(), bytes(in));
@@ -279,7 +289,20 @@ public final class PtyWire {
 
   private static PtyMessage.SessionInfo decodeInfo(ByteBuffer in) throws IOException {
     return new PtyMessage.SessionInfo(
-        string(in), string(in), in.get() == 1, in.getInt(), string(in), string(in), stringList(in));
+        string(in),
+        string(in),
+        in.get() == 1,
+        in.getInt(),
+        string(in),
+        string(in),
+        stringList(in),
+        string(in),
+        string(in));
+  }
+
+  /** A string a frame ends with that a peer before it did not send: blank when absent. */
+  private static String trailing(ByteBuffer in) throws IOException {
+    return in.hasRemaining() ? string(in) : "";
   }
 
   private static String string(ByteBuffer in) throws IOException {

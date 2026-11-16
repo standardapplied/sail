@@ -351,6 +351,13 @@ current version. It gets:
   resolver can lag its address (`ready_steps.fetch_retries` counts how often);
 - none of the template's own keys.
 
+A workspace is its owner's: the person it was made for, or the one its spec's runs act for. Only
+its owner or an admin opens a terminal in it, or starts, stops or deletes it; a viewer makes
+none. `delete` first reads what the workspace holds (uncommitted changes, untracked files, a
+stash, commits origin lacks) and is refused naming it; `--force` deletes it anyway. The same
+doors are on the API (`POST /v1/projects/{p}/workspaces`, `…/{w}/start`, `…/{w}/stop`, `DELETE
+…/{w}`), and a terminal ticket names its workspace (`"workspace": "fix-login"`).
+
 `create` says how long each phase took, for example `Created fix-login from v1 in 3.2 s (clone 0.5 s,
 start 0.4 s, ready 2.3 s)`; `--json` breaks the readiness down step by step (`ready_steps`).
 

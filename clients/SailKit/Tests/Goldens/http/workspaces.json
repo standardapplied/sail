@@ -12,6 +12,12 @@
           "instance": "harbor",
           "name": "main",
           "state": "not_created"
+        },
+        {
+          "instance": "harbor-dock",
+          "name": "dock",
+          "owner": "uday",
+          "state": "running"
         }
       ]
     },

@@ -1,0 +1,32 @@
+{
+  "request": {
+    "body": {
+      "name": "new"
+    },
+    "method": "POST",
+    "path": "/v1/projects/harbor/workspaces"
+  },
+  "response": {
+    "body": {
+      "instance": "harbor-new",
+      "owner": "dana",
+      "project": "harbor",
+      "schema_version": 1,
+      "stale": false,
+      "template": "v1",
+      "timings": {
+        "clone_ms": 0,
+        "ready_ms": 0,
+        "ready_steps": {
+          "files": 0,
+          "machinery": 0,
+          "mark": 0
+        },
+        "start_ms": 0,
+        "total_ms": 0
+      },
+      "workspace": "new"
+    },
+    "status": 201
+  }
+}

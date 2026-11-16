@@ -8,6 +8,7 @@ package ai.singlr.sail.commands;
 import ai.singlr.sail.api.HostOperations;
 import ai.singlr.sail.api.OperationsFactory;
 import ai.singlr.sail.api.ProjectSkills;
+import ai.singlr.sail.api.WorkspaceDoors;
 import ai.singlr.sail.common.Remedied;
 import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.config.HostYaml;
@@ -28,6 +29,7 @@ import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.engine.WorkspaceOwner;
 import ai.singlr.sail.engine.WorkspaceTemplate;
 import ai.singlr.sail.engine.Workspaces;
+import ai.singlr.sail.identity.Actor;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -92,6 +94,28 @@ final class WorkspaceVerbs {
   /** The workspaces of this box, reading Incus for real and changing it unless {@code dryRun}. */
   static Workspaces workspaces(boolean dryRun) {
     return Workspaces.onThisBox(new ShellExecutor(dryRun));
+  }
+
+  /**
+   * {@code door} over this box's workspace doors ({@link WorkspaceDoors}), asked as this box's
+   * operator, so each verb is decided as Enter a workspace on the workspace's owner.
+   */
+  static <T> T entering(Door<T> door) throws Exception {
+    var doors =
+        new WorkspaceDoors(workspaces(false), new ShellExecutor(false), WorkspaceVerbs::ownerOf);
+    return Actor.call(SailCommandLine.operator(), () -> door.through(doors));
+  }
+
+  /** What a verb does through the workspace doors. */
+  @FunctionalInterface
+  interface Door<T> {
+    T through(WorkspaceDoors doors) throws Exception;
+  }
+
+  /** Refuses a create of workspace {@code name} of {@code project} its operator may not make. */
+  static void requireMaking(String project, String name) throws Exception {
+    var actor = SailCommandLine.operator();
+    WorkspaceDoors.requireEnter(actor, project, name, actor.handle());
   }
 
   /**

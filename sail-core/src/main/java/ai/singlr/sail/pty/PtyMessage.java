@@ -41,7 +41,9 @@ public sealed interface PtyMessage {
    * admits it through its {@link PtyAdmission} gate (the room exists in the session's project and
    * the caller holds its post right) before it rides into the child as {@code SAIL_ROOM_ID}, onto
    * the session's events, and back out on listings. {@code command} is capped at {@link
-   * #MAX_COMMAND_BYTES} as encoded on the wire.
+   * #MAX_COMMAND_BYTES} as encoded on the wire. {@code workspace} names a workspace of the project
+   * to run in, its owner's or an admin's to enter; blank (or {@code main}) is the project's own
+   * container.
    */
   record Create(
       String session,
@@ -50,8 +52,34 @@ public sealed interface PtyMessage {
       String project,
       String room,
       int cols,
-      int rows)
-      implements PtyMessage {}
+      int rows,
+      String workspace)
+      implements PtyMessage {
+
+    public Create {
+      workspace = workspaceOf(workspace);
+    }
+
+    /** A session in the project's own container, or on the host when it names no project. */
+    public Create(
+        String session,
+        List<String> command,
+        String cwd,
+        String project,
+        String room,
+        int cols,
+        int rows) {
+      this(session, command, cwd, project, room, cols, rows, "");
+    }
+  }
+
+  /**
+   * The workspace {@code named} names, blank for the project's own container: none, blank, or the
+   * default workspace {@code main}.
+   */
+  static String workspaceOf(String named) {
+    return named == null || named.isBlank() || named.equals("main") ? "" : named;
+  }
 
   record Attach(String session, boolean write) implements PtyMessage {}
 
@@ -112,7 +140,18 @@ public sealed interface PtyMessage {
    * alone, decides it as it decides that open or attach, and answers a {@link Ticket} or a {@link
    * TicketRefused}. The connection that asks admits no one by it.
    */
-  record IssueTicket(TicketAction action, String target, String credential) implements PtyMessage {
+  record IssueTicket(TicketAction action, String target, String credential, String workspace)
+      implements PtyMessage {
+
+    public IssueTicket {
+      workspace = workspaceOf(workspace);
+    }
+
+    /** A ticket for the project's own container, or to attach to a session. */
+    public IssueTicket(TicketAction action, String target, String credential) {
+      this(action, target, credential, "");
+    }
+
     @Override
     public String toString() {
       return "IssueTicket[action=" + action + ", target=" + target + "]";
@@ -183,7 +222,8 @@ public sealed interface PtyMessage {
    * of it (see {@link PtySession.Origin}), so two corpses of one name are distinguishable. {@code
    * command} is the child as requested (the default login shell when none was), so a client can
    * tell an agent session from a plain shell; {@code room} is blank when the session is not
-   * room-bound.
+   * room-bound, {@code workspace} when it runs in the project's own container; {@code opener} is
+   * the person who opened it.
    */
   record SessionInfo(
       String name,
@@ -192,8 +232,23 @@ public sealed interface PtyMessage {
       int attached,
       String writerFde,
       String room,
-      List<String> command)
-      implements PtyMessage {}
+      List<String> command,
+      String workspace,
+      String opener)
+      implements PtyMessage {
+
+    /** A session in no workspace, its opener unsaid. */
+    public SessionInfo(
+        String name,
+        String instanceId,
+        boolean live,
+        int attached,
+        String writerFde,
+        String room,
+        List<String> command) {
+      this(name, instanceId, live, attached, writerFde, room, command, "", "");
+    }
+  }
 
   /** One page of sessions; {@code next} is blank on the last page, else the cursor to continue. */
   record Sessions(List<SessionInfo> sessions, String next) implements PtyMessage {}

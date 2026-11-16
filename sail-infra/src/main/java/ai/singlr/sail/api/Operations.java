@@ -84,6 +84,23 @@ public interface Operations extends LocalLaneOperations {
   Result<WorkspaceListResponse> workspaces(String project);
 
   /**
+   * Makes workspace {@code name} of {@code project}, the caller's own, from its current template.
+   */
+  Result<WorkspaceCreateResponse> createWorkspace(String project, String name);
+
+  /** Starts workspace {@code name} of {@code project}, the caller's or, for an admin, anyone's. */
+  Result<WorkspaceChangeResponse> startWorkspace(String project, String name);
+
+  /** Stops workspace {@code name} of {@code project}, as {@link #startWorkspace} may. */
+  Result<WorkspaceChangeResponse> stopWorkspace(String project, String name);
+
+  /**
+   * Deletes workspace {@code name} of {@code project}, as {@link #startWorkspace} may: refused when
+   * it holds work, or cannot be read, unless {@code force}.
+   */
+  Result<WorkspaceChangeResponse> deleteWorkspace(String project, String name, boolean force);
+
+  /**
    * Accepts an async restore of the container to {@code label}: validation and the live-run gate
    * run inline, the mutation completes in the background and reports via {@code snapshot_restored}.
    * Refused while any run is live on this box's container — a restore discards its work.

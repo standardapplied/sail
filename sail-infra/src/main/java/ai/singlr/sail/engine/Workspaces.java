@@ -335,12 +335,12 @@ public final class Workspaces {
       return new Busy("This runner is making another workspace, which takes about a minute.");
     }
 
-    static Busy changing(RunPlace.SpecWorkspace place) {
+    static Busy changing(String project, String name) {
       return new Busy(
           "Workspace "
-              + place.workspace()
+              + name
               + " of "
-              + place.project()
+              + project
               + " is being stopped or deleted on this runner, and nothing enters it until that is"
               + " done.");
     }
@@ -495,7 +495,7 @@ public final class Workspaces {
             .orElseThrow(() -> noTemplate(place.project()));
     var degraded = WorkspaceTemplate.usable(observer, template.pool());
     Optional<BoxInstances.Instance> found;
-    try (var entry = entryLock(place)) {
+    try (var entry = entryLock(place.project(), place.workspace())) {
       found = requireTheSpecs(place, held, box.all());
     }
     var space = new IncusStorage(observer).find(template.pool()).flatMap(IncusStorage.Pool::space);
@@ -523,7 +523,7 @@ public final class Workspaces {
       Consumer<Set<String>> room)
       throws Exception {
     var place = check.place();
-    try (var held = entryLock(place)) {
+    try (var held = entryLock(place.project(), place.workspace())) {
       var found = requireTheSpecs(place, name -> false, box.all());
       if (found.map(i -> ((BoxInstances.Workspace) i.kind()).ready()).orElse(false)) {
         if (!(found.get().state() instanceof ContainerState.Running)) {
@@ -575,7 +575,7 @@ public final class Workspaces {
       ProjectDefinition config,
       Function<String, WorkspaceOwner> owners)
       throws Exception {
-    try (var held = entryLock(place)) {
+    try (var held = entryLock(place.project(), place.workspace())) {
       var found =
           requireTheSpecs(place, name -> false, box.all())
               .filter(i -> ((BoxInstances.Workspace) i.kind()).ready())
@@ -597,11 +597,95 @@ public final class Workspaces {
                                   "--spec",
                                   place.specId(),
                                   "--restart"))));
-      var owner = found.key(BoxInstances.OWNER_KEY);
-      if (startIfStopped(found) && owner.isPresent()) {
-        giveAll(found.name(), config, owners.apply(owner.get()));
-      }
+      entered(found, config, owners);
     }
+  }
+
+  /**
+   * A terminal's door to workspace {@code name} of {@code project}: its own instance, found by name
+   * and keys under the entry's lock, started when stopped and given its recorded owner's
+   * credentials, as an attach is; one the project does not have, or that is not whole, is refused
+   * as {@link #start} refuses it. Nothing is made.
+   */
+  public void startExisting(
+      String project,
+      String name,
+      ProjectDefinition config,
+      Function<String, WorkspaceOwner> owners)
+      throws Exception {
+    try (var held = entryLock(project, name)) {
+      entered(whole(project, name, "project shell", false), config, owners);
+    }
+  }
+
+  private void entered(
+      BoxInstances.Instance found,
+      ProjectDefinition config,
+      Function<String, WorkspaceOwner> owners)
+      throws Exception {
+    var owner = ownerOf(found);
+    if (startIfStopped(found) && owner.isPresent()) {
+      giveAll(found.name(), config, owners.apply(owner.get()));
+    }
+  }
+
+  /**
+   * The person workspace {@code found} is: its owner label, none for one made by hand or taken back
+   * when its owner left the box. The one read of the label every door decides by.
+   */
+  public static Optional<String> ownerOf(BoxInstances.Instance found) {
+    return found.key(BoxInstances.OWNER_KEY);
+  }
+
+  /**
+   * Makes workspace {@code name} of {@code config}'s project for {@code handle}, as {@link #create}
+   * does but from the project's current template as it is: none is refused naming its build, and
+   * one older than the definition is cloned as a dispatch clones it. What an API door makes, which
+   * builds nothing. {@code held} names the projects whose containers no workspace may take.
+   */
+  public Created createFromCurrent(
+      ProjectDefinition config,
+      String name,
+      Path files,
+      String handle,
+      Function<String, WorkspaceOwner> owners,
+      Predicate<String> held)
+      throws Exception {
+    var project = config.name();
+    var instance = requireNewName(project, name);
+    requireOwner(owners.apply(handle), config);
+    var zfs = WorkspaceTemplate.requireZfs(observer);
+    var template =
+        new WorkspaceTemplate(observer, shell, locks)
+            .current(project, zfs, nanos)
+            .orElseThrow(() -> noTemplate(project));
+    try (var lock = nameLock(instance)) {
+      var unfinished = requireUnclaimed(project, name, instance, held, box.all());
+      return make(
+          config,
+          name,
+          instance,
+          template,
+          List.of(),
+          new Owning(handle, owners),
+          name,
+          unfinished,
+          files,
+          whole -> {});
+    }
+  }
+
+  /**
+   * What the instance of workspace {@code name} of {@code project} is, and whose, when it is one.
+   */
+  public Optional<BoxInstances.Instance> find(String project, String name)
+      throws IOException, InterruptedException, TimeoutException {
+    return box.lookup(project + "-" + name, Duration.ofSeconds(BoxInstances.LOOKUP_SECONDS))
+        .filter(
+            instance ->
+                instance.kind() instanceof BoxInstances.Workspace(var p, var w, var ready)
+                    && p.equals(project)
+                    && w.equals(name));
   }
 
   private boolean startIfStopped(BoxInstances.Instance found) throws Exception {
@@ -759,18 +843,19 @@ public final class Workspaces {
    * it, the sweep's stop or delete, holds it, no longer than {@link #CREATE_WAIT} on the create
    * lock's clock: past that the box is {@link Busy}, never a stranger's. None in a dry run.
    */
-  private FileMutex entryLock(RunPlace.SpecWorkspace place)
+  private FileMutex entryLock(String project, String name)
       throws IOException, InterruptedException {
+    var instance = project + "-" + name;
     if (shell.isDryRun()) {
       return null;
     }
-    var free = holdIfFree(place.instance());
+    var free = holdIfFree(instance);
     if (free.isPresent()) {
       return free.get();
     }
     return FileMutex.acquireUntil(
-            nameLockFile(place.instance()), nanos.getAsLong() + CREATE_WAIT.toNanos(), nanos)
-        .orElseThrow(() -> Busy.changing(place));
+            nameLockFile(instance), nanos.getAsLong() + CREATE_WAIT.toNanos(), nanos)
+        .orElseThrow(() -> Busy.changing(project, name));
   }
 
   private Path nameLockFile(String instance) {
@@ -1462,12 +1547,7 @@ public final class Workspaces {
   }
 
   private static void requireWorkspaceName(String name) {
-    if (!NameValidator.isValidProjectName(name)) {
-      throw new IllegalArgumentException(
-          "Invalid workspace name: '"
-              + name
-              + "'. Must match [a-z0-9][a-z0-9-]*, as a project name does.");
-    }
+    NameValidator.requireValidWorkspaceName(name);
   }
 
   /** A workspace whose create finished and whose ready mark was taken off since, by hand. */
@@ -1485,7 +1565,8 @@ public final class Workspaces {
             "."));
   }
 
-  private static IllegalStateException absent(String project, String name) {
+  /** Project {@code project} has no workspace {@code name} here. */
+  public static IllegalStateException absent(String project, String name) {
     return Remedied.state(
         "Project '" + project + "' has no workspace '" + name + "' on this box.",
         Remedy.of("List them with: ", Remedy.sail("project workspace list", project), "."));

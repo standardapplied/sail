@@ -23,7 +23,7 @@ public enum Frame: Equatable, Sendable {
     /// Asks for a ticket for the holder of `credential` to take `action` on `target`, a project or a
     /// session, once over the host's TCP listener; the API asks it for a client, which is answered the
     /// ticket over HTTP.
-    case issueTicket(action: Open<TicketAction>, target: String, credential: String)
+    case issueTicket(action: Open<TicketAction>, target: String, credential: String, workspace: String = "")
     /// A ticket, presented as the `hello` token of one TCP connection to the host.
     case ticket(String)
     /// A ticket request refused: what kind of refusal, and its remedy as words and commands.
@@ -71,7 +71,8 @@ public struct TerminalSize: Equatable, Sendable {
     }
 }
 
-/// A session to start: `room` is the room it is pinned to, empty for none.
+/// A session to start: `room` is the room it is pinned to, empty for none; `workspace` the project's
+/// workspace it runs in, empty (or `main`) for the project's own container.
 public struct SessionCreate: Equatable, Sendable {
     public var session: String
     public var command: [String]
@@ -79,14 +80,19 @@ public struct SessionCreate: Equatable, Sendable {
     public var project: String
     public var room: String
     public var size: TerminalSize
+    public var workspace: String
 
-    public init(session: String, command: [String], workingDirectory: String, project: String, room: String, size: TerminalSize) {
+    public init(
+        session: String, command: [String], workingDirectory: String, project: String, room: String,
+        size: TerminalSize, workspace: String = ""
+    ) {
         self.session = session
         self.command = command
         self.workingDirectory = workingDirectory
         self.project = project
         self.room = room
         self.size = size
+        self.workspace = workspace
     }
 }
 
@@ -101,10 +107,14 @@ public struct SessionInfo: Equatable, Sendable {
     public var writerFDE: String
     public var room: String
     public var command: [String]
+    /// The workspace the session runs in, empty for the project's own container.
+    public var workspace: String
+    /// The person who opened the session.
+    public var opener: String
 
     public init(
         name: String, instanceID: String, live: Bool, attached: Int32, writerFDE: String, room: String,
-        command: [String]
+        command: [String], workspace: String = "", opener: String = ""
     ) {
         self.name = name
         self.instanceID = instanceID
@@ -113,6 +123,8 @@ public struct SessionInfo: Equatable, Sendable {
         self.writerFDE = writerFDE
         self.room = room
         self.command = command
+        self.workspace = workspace
+        self.opener = opener
     }
 }
 

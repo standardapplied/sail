@@ -109,14 +109,15 @@ private extension Frame {
             [
                 .string(create.session), .strings(create.command), .string(create.workingDirectory),
                 .string(create.project), .string(create.room),
-            ] + create.size.fields
+            ] + create.size.fields + [.string(create.workspace)]
         case let .attach(session, write): [.string(session), .bool(write)]
         case let .input(sequence, bytes): [.int64(sequence), .blob(bytes)]
         case let .resize(size), let .resized(size): size.fields
         case let .listSessions(after, limit): [.string(after), .int32(limit)]
         case let .kill(session): [.string(session)]
         case let .yield(session, reason): [.string(session), .string(reason)]
-        case let .issueTicket(action, target, credential): [.string(action.rawValue), .string(target), .string(credential)]
+        case let .issueTicket(action, target, credential, workspace):
+            [.string(action.rawValue), .string(target), .string(credential), .string(workspace)]
         case let .ticket(ticket): [.string(ticket)]
         case let .ticketRefused(kind, remedy): [.string(kind.rawValue), .count(remedy.count)] + remedy.flatMap(\.fields)
         case let .output(lastInputSequence, bytes): [.int64(lastInputSequence), .blob(bytes)]
@@ -142,7 +143,7 @@ private extension SessionInfo {
     var fields: [Field] {
         [
             .string(name), .string(instanceID), .bool(live), .int32(attached), .string(writerFDE), .string(room),
-            .strings(command),
+            .strings(command), .string(workspace), .string(opener),
         ]
     }
 }
@@ -198,7 +199,11 @@ private struct Cursor {
         case 7: .listSessions(after: try string(), limit: try int32())
         case 8: .kill(session: try string())
         case 10: .yield(session: try string(), reason: try string())
-        case 11: .issueTicket(action: Open(rawValue: try string()), target: try string(), credential: try string())
+        case 11:
+            .issueTicket(
+                action: Open(rawValue: try string()), target: try string(), credential: try string(),
+                workspace: try trailing()
+            )
         case 33: .ticket(try string())
         case 34: .ticketRefused(kind: Open(rawValue: try string()), remedy: try list { (cursor: inout Cursor) throws(TerminalWireError) in try cursor.part() })
         case 20: .output(lastInputSequence: try int64(), bytes: try blob())
@@ -220,14 +225,20 @@ private struct Cursor {
     private mutating func create() throws(TerminalWireError) -> SessionCreate {
         SessionCreate(
             session: try string(), command: try strings(), workingDirectory: try string(), project: try string(),
-            room: try string(), size: try size()
+            room: try string(), size: try size(), workspace: try trailing()
         )
+    }
+
+    /// A string a frame ends with that a host before it did not send: empty when absent.
+    private mutating func trailing() throws(TerminalWireError) -> String {
+        remaining > 0 ? try string() : ""
     }
 
     private mutating func session() throws(TerminalWireError) -> SessionInfo {
         SessionInfo(
             name: try string(), instanceID: try string(), live: try bool(), attached: try int32(),
-            writerFDE: try string(), room: try string(), command: try strings()
+            writerFDE: try string(), room: try string(), command: try strings(),
+            workspace: try string(), opener: try string()
         )
     }
 

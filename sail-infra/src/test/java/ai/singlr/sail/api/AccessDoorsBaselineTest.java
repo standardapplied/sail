@@ -21,6 +21,7 @@ import ai.singlr.sail.engine.BoxInstances;
 import ai.singlr.sail.engine.HostAccess;
 import ai.singlr.sail.engine.HostToken;
 import ai.singlr.sail.engine.ScriptedShellExecutor;
+import ai.singlr.sail.engine.TestOwners;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.Role;
@@ -212,7 +213,10 @@ class AccessDoorsBaselineTest {
             world.db,
             roles,
             new EventStore(world.db),
-            new BoxInstances(new ScriptedShellExecutor()));
+            new BoxInstances(new ScriptedShellExecutor()),
+            TestWorkspaces.over(new ScriptedShellExecutor()),
+            project -> java.util.Optional.empty(),
+            TestOwners::of);
     var socket = tempDir.resolve("pty.sock");
     try (var host =
         new PtySessionHost(
@@ -257,8 +261,8 @@ class AccessDoorsBaselineTest {
       }
       var door =
           new TerminalTickets(
-              (credential, action, target) ->
-                  SessionClient.ticket(socket, credential, action, target),
+              (credential, action, target, workspace) ->
+                  SessionClient.ticket(socket, credential, action, target, workspace),
               host.tcpAddress().orElseThrow());
       var askers = new LinkedHashMap<String, String>();
       for (var fde :
