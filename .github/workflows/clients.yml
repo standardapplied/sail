@@ -45,6 +45,7 @@ jobs:
     env:
       DARWIN_SAIL_TAG: v0.68.0
       DARWIN_SAIL_SHA256: bdae9ab430aecdefe6c4780fb8dacaa91838587b1f2215d361f31060c5f7f8d3
+      PROPERTY_SUITES: '^SailWorkbenchTests\.(WholenessTests|ReviewPropertyTests)/'
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
@@ -90,8 +91,18 @@ jobs:
       - name: Build
         run: swift build --build-tests
 
+      # The CPU-heavy property suites run on their own after the rest, so no other test shares the
+      # runner's cores with them. Test skips exactly what the next step runs, so every suite, one
+      # added later included, runs in one of the two; the next step fails unless both property
+      # suites ran every sequence.
       - name: Test
-        run: swift test
+        run: swift test --skip "$PROPERTY_SUITES"
+
+      - name: Property suites
+        run: |
+          swift test --skip-build --filter "$PROPERTY_SUITES" 2>&1 | tee "$RUNNER_TEMP/property-suites.log"
+          grep -q 'WholenessTests ran 10000 sequences' "$RUNNER_TEMP/property-suites.log"
+          grep -q 'ReviewPropertyTests ran 20000 sequences' "$RUNNER_TEMP/property-suites.log"
 
       # The scenarios ran in the Test step; this measures, on the machine the renderer will run on,
       # the screen's own overhead (release, as the app ships) and the echo through this machine's
