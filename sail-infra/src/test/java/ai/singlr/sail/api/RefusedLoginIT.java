@@ -133,7 +133,7 @@ class RefusedLoginIT extends AbstractIncusIT {
       new SchemaManager(db).migrate();
       HeldProjects.hold(db, PROJECT);
       var fdes = new FdeStore(db);
-      var id = fdes.add(HANDLE, null, null, "admin").id();
+      var id = fdes.add(HANDLE, null, HANDLE + "@sail.invalid", "admin").id();
       fdes.logins().store(id, Harnesses.of("claude-code"), null, "token", "sk-ant-oat01-it-fake");
       fdes.logins().store(id, Harnesses.of("codex"), null, "api-key", "sk-proj-it-fake-0000");
       var specs = new SpecStore(db);
