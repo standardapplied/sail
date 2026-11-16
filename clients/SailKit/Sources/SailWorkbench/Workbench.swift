@@ -1,3 +1,6 @@
+#if canImport(CoreGraphics)
+import CoreGraphics
+#endif
 import Foundation
 
 /// One tab: its panes' layout, the person's name for it, the focused pane, the panes in the order

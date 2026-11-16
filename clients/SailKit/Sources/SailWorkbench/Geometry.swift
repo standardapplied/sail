@@ -1,3 +1,6 @@
+#if canImport(CoreGraphics)
+import CoreGraphics
+#endif
 import Foundation
 
 /// Where a tab's panes and dividers go, in points from the tab's top left, every edge on a

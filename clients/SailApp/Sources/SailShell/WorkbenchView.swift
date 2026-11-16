@@ -341,24 +341,10 @@ public final class WorkbenchView: NSView {
         change { $0.focusNeighbour(next: true) }
     }
 
-    @objc public func selectSplitAbove(_: Any?) {
-        moveFocus(.up)
-    }
-
-    @objc public func selectSplitBelow(_: Any?) {
-        moveFocus(.down)
-    }
-
-    @objc public func selectSplitLeft(_: Any?) {
-        moveFocus(.left)
-    }
-
-    @objc public func selectSplitRight(_: Any?) {
-        moveFocus(.right)
-    }
-
-    private func moveFocus(_ direction: Direction) {
-        let (size, pixels) = (room, scale)
+    /// Focuses the pane the menu item's tag points to: its `Direction` in `Direction.allCases`.
+    @objc public func selectSplit(_ sender: NSMenuItem) {
+        guard Direction.allCases.indices.contains(sender.tag) else { return }
+        let (direction, size, pixels) = (Direction.allCases[sender.tag], room, scale)
         change { $0.moveFocus(direction, in: size, scale: pixels) }
     }
 
@@ -366,24 +352,11 @@ public final class WorkbenchView: NSView {
         change { $0.equalize() }
     }
 
-    @objc public func moveDividerUp(_: Any?) {
-        moveDivider(.up)
-    }
-
-    @objc public func moveDividerDown(_: Any?) {
-        moveDivider(.down)
-    }
-
-    @objc public func moveDividerLeft(_: Any?) {
-        moveDivider(.left)
-    }
-
-    @objc public func moveDividerRight(_: Any?) {
-        moveDivider(.right)
-    }
-
-    private func moveDivider(_ direction: Direction) {
-        let (size, least, pixels) = (room, minimum, scale)
+    /// Moves the focused pane's nearest divider 10 pt the way the menu item's tag points: its
+    /// `Direction` in `Direction.allCases`.
+    @objc public func moveDivider(_ sender: NSMenuItem) {
+        guard Direction.allCases.indices.contains(sender.tag) else { return }
+        let (direction, size, least, pixels) = (Direction.allCases[sender.tag], room, minimum, scale)
         change { $0.moveDivider(direction, by: Self.dividerStep, in: size, minimum: least, scale: pixels) }
     }
 

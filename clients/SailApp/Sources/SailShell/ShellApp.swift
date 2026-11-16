@@ -3,6 +3,7 @@ import SailAccount
 import SailAPI
 import SailLook
 import SailTerminalView
+import SailWorkbench
 
 /// "Sail": one window, 1180 by 800 and no smaller than 480 by 600, an icon rail beside the pane it
 /// selects: "This Mac" (the local terminals, in tabs and splits) or the account. The window's chrome
@@ -226,7 +227,6 @@ public final class ShellApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         func arrow(_ key: Int) -> String {
             UnicodeScalar(UInt16(key)).map { String(Character($0)) } ?? ""
         }
-        let (up, down, left, right) = (arrow(NSUpArrowFunctionKey), arrow(NSDownArrowFunctionKey), arrow(NSLeftArrowFunctionKey), arrow(NSRightArrowFunctionKey))
         let terminals = thisMac
         let tabs = (1 ... 8).map { number in
             let tab = hidden(item("Select Tab \(number)", #selector(WorkbenchView.selectTab(_:)), "\(number)", target: terminals))
@@ -258,18 +258,21 @@ public final class ShellApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
             item("Rename Tab", #selector(WorkbenchView.renameTab(_:)), "", target: terminals),
             item("Show Latency", #selector(WorkbenchView.toggleLatency(_:)), "l", [.command, .option], target: terminals),
         ]
+        func directed(_ title: String, _ action: Selector, _ direction: Direction, _ modifiers: NSEvent.ModifierFlags) -> NSMenuItem {
+            let keys: [Direction: Int] = [.left: NSLeftArrowFunctionKey, .right: NSRightArrowFunctionKey, .up: NSUpArrowFunctionKey, .down: NSDownArrowFunctionKey]
+            let made = item(title, action, arrow(keys[direction] ?? 0), modifiers, target: terminals)
+            made.tag = Direction.allCases.firstIndex(of: direction) ?? 0
+            return made
+        }
+        let select = #selector(WorkbenchView.selectSplit(_:)), move = #selector(WorkbenchView.moveDivider(_:))
         let selectSplit: [NSMenuItem] = [
-            item("Select Split Above", #selector(WorkbenchView.selectSplitAbove(_:)), up, [.command, .option], target: terminals),
-            item("Select Split Below", #selector(WorkbenchView.selectSplitBelow(_:)), down, [.command, .option], target: terminals),
-            item("Select Split Left", #selector(WorkbenchView.selectSplitLeft(_:)), left, [.command, .option], target: terminals),
-            item("Select Split Right", #selector(WorkbenchView.selectSplitRight(_:)), right, [.command, .option], target: terminals),
+            directed("Select Split Above", select, .up, [.command, .option]), directed("Select Split Below", select, .down, [.command, .option]),
+            directed("Select Split Left", select, .left, [.command, .option]), directed("Select Split Right", select, .right, [.command, .option]),
         ]
         let resizeSplit: [NSMenuItem] = [
             item("Equalize Splits", #selector(WorkbenchView.equalizeSplits(_:)), "=", [.command, .control], target: terminals), .separator(),
-            item("Move Divider Up", #selector(WorkbenchView.moveDividerUp(_:)), up, [.command, .control], target: terminals),
-            item("Move Divider Down", #selector(WorkbenchView.moveDividerDown(_:)), down, [.command, .control], target: terminals),
-            item("Move Divider Left", #selector(WorkbenchView.moveDividerLeft(_:)), left, [.command, .control], target: terminals),
-            item("Move Divider Right", #selector(WorkbenchView.moveDividerRight(_:)), right, [.command, .control], target: terminals),
+            directed("Move Divider Up", move, .up, [.command, .control]), directed("Move Divider Down", move, .down, [.command, .control]),
+            directed("Move Divider Left", move, .left, [.command, .control]), directed("Move Divider Right", move, .right, [.command, .control]),
         ]
         var windows: [NSMenuItem] = [
             item("Minimize", #selector(NSWindow.performMiniaturize(_:)), "m"), .separator(),
