@@ -688,6 +688,84 @@ class WorkspaceIT extends AbstractIncusIT {
     assertHoldsNoOnesCredentials(stopped.instance());
   }
 
+  /**
+   * Ruling 4 of {@code sail-a-workspace-is-its-creators} on a real Incus: a spec's workspace its
+   * previous owner worked in, kept for what it holds and made nobody's when that owner left, is
+   * entered by the box's person's run. It holds the previous work, and none of the previous owner's
+   * token, gh login, git identity or keys: only the new owner's.
+   */
+  @Test
+  void aDisownedKeptWorkspaceEnteredByTheNextRunHoldsTheWorkAndOnlyItsNewOwnersCredentials()
+      throws Exception {
+    var place = (RunPlace.SpecWorkspace) RunPlace.of(PROJECT, KEPT);
+    var inputs = ProjectProvisioner.inputs(definition(), Optional.empty());
+    var instance =
+        workspaces
+            .enterSpec(
+                workspaces.checkSpec(place, inputs, name -> false),
+                definition(),
+                "tmp",
+                h -> leaving(),
+                null,
+                whole -> {})
+            .instance();
+    plantLeftovers(instance);
+    var worked =
+        shell.exec(
+            ContainerExec.asDevUser(
+                instance,
+                List.of(
+                    "bash",
+                    "-c",
+                    "cd /home/dev/workspace/app && echo by-tmp >> README && echo mine > notes")));
+    assertTrue(worked.ok(), worked.stderr());
+    containers.stop(instance);
+    var kept =
+        shell.exec(
+            List.of("incus", "config", "set", instance, BoxInstances.KEPT_KEY + "=app holds work"));
+    assertTrue(kept.ok(), kept.reason());
+    assertEquals(
+        List.of(), workspaces.disown((handle, id) -> !"fde_old_tmp".equals(id), name -> true));
+    var ana =
+        new WorkspaceOwner(
+            "ana",
+            "Ana",
+            "ana@sail.invalid",
+            Map.of("example.invalid", "tok-ana-0123456789abcdef"),
+            List.of("ssh-ed25519 AAAAana ana@laptop"),
+            "fde_ana");
+
+    workspaces.enterSpec(
+        workspaces.checkSpec(place, inputs, name -> false),
+        definition(),
+        "ana",
+        h -> ana,
+        null,
+        whole -> {});
+
+    var entered = new BoxInstances(shell).named(instance).orElseThrow();
+    assertEquals(Optional.of("ana"), entered.key(BoxInstances.OWNER_KEY));
+    assertEquals(Optional.of("fde_ana"), entered.key(BoxInstances.OWNER_ID_KEY));
+    assertEquals(Optional.empty(), entered.key(BoxInstances.KEPT_KEY).filter(k -> !k.isBlank()));
+    assertEquals("seed\nby-tmp\n", pulled(instance, "/home/dev/workspace/app/README"));
+    assertEquals("mine\n", pulled(instance, "/home/dev/workspace/app/notes"));
+    var held =
+        exec(
+            instance,
+            List.of(
+                "bash",
+                "-c",
+                "grep -r -l -F -e "
+                    + STRIPPED_TOKEN
+                    + " -e AAAAtmp -e tmp@sail.invalid /home/dev /root;"
+                    + " runuser -u dev -- env HOME=/home/dev git config --global --get user.email;"
+                    + " cat /home/dev/.ssh/authorized_keys; grep -c tok-ana /home/dev/.git-credentials"));
+    assertEquals(
+        "ana@sail.invalid\nssh-ed25519 AAAAana ana@laptop\n1\n",
+        held.stdout(),
+        "only ana's credentials: " + held.stderr());
+  }
+
   private static WorkspaceOwner udayWith(String token) {
     return new WorkspaceOwner(
         "uday", "Uday", "uday@sail.invalid", Map.of("example.invalid", token), List.of());

@@ -15,6 +15,7 @@ import ai.singlr.sail.engine.FileMutex;
 import ai.singlr.sail.engine.ScriptedShellExecutor;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.TestOwners;
+import ai.singlr.sail.engine.WorkspaceOwner;
 import ai.singlr.sail.engine.Workspaces;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.Actors;
@@ -23,10 +24,12 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Function;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -357,5 +360,52 @@ class WorkspaceDoorsTest {
                     () -> {
                       throw invalid;
                     })));
+  }
+
+  /**
+   * #427: a workspace is its owner's by the id its label stores. Its handle given since to another
+   * person makes it nobody's, an admin's alone, and so does its person gone; the same label with
+   * the person's own id is theirs.
+   */
+  @Test
+  void aWorkspaceIsItsOwnersByTheIdItsLabelStoresNotByItsHandle() throws Exception {
+    var labelled =
+        trying("Stopped", "ada")
+            .replace(
+                "\"user.sail.owner\": \"ada\"",
+                "\"user.sail.owner\": \"ada\", \"user.sail.owner_id\": \"fde_old_ada\"");
+    Function<String, WorkspaceOwner> now =
+        handle ->
+            new WorkspaceOwner(
+                handle, handle, handle + "@sail.invalid", Map.of(), List.of(), "fde_" + handle);
+    Function<String, WorkspaceOwner> gone =
+        handle -> {
+          throw new IllegalStateException(handle + " is not on this box's roster.");
+        };
+    var regiven = box(labelled);
+    var removed = box(labelled);
+    var hers = box(labelled.replace("fde_old_ada", "fde_ada"));
+
+    var notHers =
+        refused(
+            Actors.OWNER_API,
+            () -> new WorkspaceDoors(over(regiven), regiven, now).start(ACME, "try"));
+    var noOnes =
+        refused(
+            Actors.OWNER_API,
+            () -> new WorkspaceDoors(over(removed), removed, gone).start(ACME, "try"));
+    Actor.call(
+        Actors.OWNER_API, () -> new WorkspaceDoors(over(hers), hers, now).start(ACME, "try"));
+
+    for (var refusal : List.of(notHers, noOnes)) {
+      assertEquals(ErrorCode.FORBIDDEN_NOT_ASSIGNEE, refusal.failure().errorCode());
+      assertEquals(
+          "Workspace 'try' has no owner, so only an admin may enter it.", refusal.getMessage());
+    }
+    assertTrue(hers.invocations().contains("incus start acme-try"));
+  }
+
+  private Workspaces over(ShellExec box) {
+    return TestWorkspaces.over(box, System::nanoTime, tempDir);
   }
 }
