@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.api;
 
+import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.ProjectProvisioner;
 import ai.singlr.sail.engine.RunPlace;
 import ai.singlr.sail.engine.ScriptedShellExecutor;
@@ -21,6 +22,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeoutException;
 import java.util.function.Consumer;
 import java.util.function.LongSupplier;
@@ -57,26 +59,62 @@ public final class TestWorkspaces {
     return over(made(incus(definitions, projects), made));
   }
 
-  /** {@code incus}, telling {@code made} each {@code incus copy} it answers done. */
+  /**
+   * {@code incus}, telling {@code made} each {@code incus copy} it answers done, and answering a
+   * lookup of an instance it copied by that name alone with the keys the copy gave it, whole.
+   */
   public static ShellExec made(ShellExec incus, Consumer<List<String>> made) {
+    var copies = new ConcurrentHashMap<String, Map<String, String>>();
     return new ShellExec() {
       @Override
       public Result exec(List<String> command)
           throws IOException, InterruptedException, TimeoutException {
-        return told(command, incus.exec(command));
+        return exec(command, null, Duration.ZERO);
       }
 
       @Override
       public Result exec(List<String> command, Path workDir, Duration timeout)
           throws IOException, InterruptedException, TimeoutException {
+        if (command.size() == 5
+            && command.get(1).equals("list")
+            && command.get(2).startsWith("^")) {
+          var keys = copies.get(command.get(2).substring(1, command.get(2).length() - 1));
+          if (keys != null) {
+            return new Result(0, YamlUtil.dumpJson(List.of(listed(command.get(2), keys))), "");
+          }
+        }
+        if (command.size() > 2 && command.get(1).equals("delete")) {
+          copies.remove(command.get(2));
+        }
         return told(command, incus.exec(command, workDir, timeout));
       }
 
       private Result told(List<String> command, Result result) {
         if (result.ok() && command.size() > 3 && command.get(1).equals("copy")) {
           made.accept(List.copyOf(command));
+          var keys = new LinkedHashMap<String, String>();
+          for (var at = 5; at < command.size(); at += 2) {
+            var assignment = command.get(at);
+            keys.put(
+                assignment.substring(0, assignment.indexOf('=')),
+                assignment.substring(assignment.indexOf('=') + 1));
+          }
+          keys.put("user.sail.ready", keys.getOrDefault("user.sail.created_ms", "1"));
+          copies.put(command.get(3), keys);
         }
         return result;
+      }
+
+      private static Map<String, Object> listed(String asked, Map<String, String> keys) {
+        return Map.of(
+            "name",
+            asked.substring(1, asked.length() - 1),
+            "status",
+            "Running",
+            "type",
+            "container",
+            "config",
+            keys);
       }
 
       @Override

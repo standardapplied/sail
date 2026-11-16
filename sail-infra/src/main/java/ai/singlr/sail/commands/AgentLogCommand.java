@@ -101,7 +101,7 @@ public final class AgentLogCommand implements Runnable {
     var run = resolveRun(name, lane(), operator);
     var shell = new ShellExecutor(false);
     var place = run.map(RunStore.RunRow::place).orElse(RunPlace.of(name, null));
-    ContainerStateGuard.requireRunning(new AgentPresence(shell).state(place), place.instance());
+    ContainerStateGuard.requireRunning(new AgentPresence(shell).state(place), place);
 
     if (run.isEmpty()) {
       printNoLog(operator);
