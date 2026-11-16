@@ -280,6 +280,21 @@ import Testing
         #expect(marks.figures.outputToPresented.count == 2)
     }
 
+    /// The longest gap between commits says whether any output reached the screen inside it, and
+    /// for how long a drawable was being asked for in it.
+    @Test func theLongestCommitGapSaysWhatReachedTheScreenAndWhatWasAskedFor() {
+        var marks = LatencyMarks()
+        marks.committed(frame: 1, at: 10.0, read: 9.999, target: 10.016)
+        marks.output(at: 10.05)
+        marks.fetchStarted(at: 10.1)
+        marks.fetchEnded(at: 10.15)
+        marks.committed(frame: 2, at: 10.2, read: 10.199, target: 10.216)
+        let figures = marks.figures
+        #expect(figures.longestBetweenCommits == Span(10.0, 10.2))
+        #expect(figures.longestGapOutputs == 1)
+        #expect(abs(figures.longestGapFetching - 50) < 1e-6)
+    }
+
     @Test func outputACallbackCouldNotDrawIsLate() {
         var marks = LatencyMarks()
         marks.output(at: 1.000)

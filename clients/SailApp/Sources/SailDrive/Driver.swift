@@ -345,7 +345,7 @@ final class Driver {
         let refresh = 1000 / Double(max(1, shell.window.screen?.maximumFramesPerSecond ?? 60))
         let measured = figures.outputToPresented.count > 0
         let stale = figures.unpresented.filter { $0.ageMs > 6 * refresh }
-        var budgets = [
+        let budgets = [
             "every committed frame told presented within 6 refreshes (reported presents only)": figures.reportedPresents == 0 || stale.isEmpty,
             "key to bytes written p95 <= 2 ms": figures.keyToWritten.p95 <= 2,
             "output to committed p50 <= 1 refresh": figures.outputToCommitted.p50 <= refresh,
