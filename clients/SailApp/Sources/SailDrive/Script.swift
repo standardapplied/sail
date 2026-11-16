@@ -68,8 +68,6 @@ struct Step: Decodable {
     var killHost: Bool?
     /// Waits until the session is attached.
     var attached: Bool?
-    /// Opens a new session, as the banner's button does.
-    var newSession: Bool?
     /// The view's font size must be this many points.
     var fontPoints: Double?
     /// The rail's item to select: "thisMac" or "account".
@@ -146,6 +144,15 @@ struct Step: Decodable {
     /// The focused pane's screen holds `occurs` exactly `times` times, within `seconds`.
     var occurs: String?
     var times: Int?
+    /// The focused pane's program sets its title this many times: no arrangement may be written.
+    var titleBurst: Int?
+    /// ⌃⌘→ pressed this many times at once: the arrangement is written once, after.
+    var dividerBurst: Int?
+    /// Keeps the focused pane's view; `heldPaused` finds its display link paused while its tab is
+    /// hidden, and `heldResumed` finds it drawing again once shown.
+    var hold: Bool?
+    var heldPaused: Bool?
+    var heldResumed: Bool?
     /// Keeps the focused pane's top line; `sameTop` finds it there still.
     var markTop: Bool?
     var sameTop: Bool?

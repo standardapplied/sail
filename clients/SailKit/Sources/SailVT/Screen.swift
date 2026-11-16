@@ -223,8 +223,10 @@ public final class Screen: Sendable {
         parts.withLock { $0.core.tracksMouse }
     }
 
-    /// Whether the cursor is on a shell's prompt or its input, as the shell marked them (OSC 133):
-    /// false when no marks came, and on the alternate screen.
+    /// Whether the cursor is on a shell's prompt or its input, as the shell marked them (OSC 133),
+    /// trusted only once the shell has marked a command's start (C) at least once: a shell marking
+    /// its prompt (A, B) but not its commands reads as "at a prompt" while a command runs. False
+    /// with no marks, and on the alternate screen.
     public var cursorAtPrompt: Bool {
         parts.withLock { $0.core.cursorAtPrompt }
     }

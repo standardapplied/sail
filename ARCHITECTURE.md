@@ -4165,7 +4165,10 @@ goes under 10 columns by 3 rows and the padding.
   ratios, names, focused sessions and the selected tab; at launch only panes whose sessions the host
   lists live come back, and nothing stored opens a session.
 - **W7. A close that may end a running program asks,** unless the cursor is on a prompt the shell
-  marked (OSC 133) or the session is over.
+  marked (OSC 133), from a shell that has marked a command's start (C) at least once, or the session
+  is over.
+- **The minimum is the tree's:** no drag, key, equalize or restore leaves any pane under 10 columns by
+  3 rows at its tab's largest font; a window made smaller keeps the ratios and the panes clip.
 
 The strip lies in the title bar's row after the zoom button, on `chrome`; a tab takes every click on
 it and never moves the window, and the strip's empty part is a plain view, so there the title bar's

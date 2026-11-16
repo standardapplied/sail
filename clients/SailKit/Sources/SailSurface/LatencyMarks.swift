@@ -34,6 +34,7 @@ public struct LatencyMarks: Sendable {
     private var keyToEcho: [Double] = []
     private var keyToEchoEstimated: [Double] = []
     private var refreshes: [Double] = []
+    private var refreshWork: [Double] = []
     private var late = 0
     private var screenUpdates = 0
     private var reported = 0
@@ -101,9 +102,12 @@ public struct LatencyMarks: Sendable {
         settle(frame, presented)
     }
 
-    /// How long one refresh took, reading the screen to committing the frame or pausing.
-    public mutating func refreshed(taking seconds: Double) {
+    /// How long one refresh took, reading the screen to committing the frame or pausing: on the
+    /// wall clock, and the work it did on its thread's CPU clock (what a stall of the machine does
+    /// not add to).
+    public mutating func refreshed(taking seconds: Double, working work: Double) {
         Self.keep(seconds, in: &refreshes)
+        Self.keep(work, in: &refreshWork)
     }
 
     public var figures: LatencyFigures {
@@ -111,7 +115,8 @@ public struct LatencyMarks: Sendable {
             keyToWritten: Self.percentiles(keyToWritten), outputToCommitted: Self.percentiles(outputToCommitted),
             outputToPresented: Self.percentiles(outputToPresented), outputToPresentedEstimated: Self.percentiles(outputToPresentedEstimated),
             outputToShown: Self.percentiles(outputToShown), keyToEcho: Self.percentiles(keyToEcho),
-            keyToEchoEstimated: Self.percentiles(keyToEchoEstimated), refresh: Self.percentiles(refreshes), screenUpdates: screenUpdates,
+            keyToEchoEstimated: Self.percentiles(keyToEchoEstimated), refresh: Self.percentiles(refreshes),
+            refreshWork: Self.percentiles(refreshWork), screenUpdates: screenUpdates,
             lateOutputs: late, reportedPresents: reported, unreportedPresents: unreported,
             presentedBeforeCommit: presentedBeforeCommit
         )
@@ -167,6 +172,8 @@ public struct LatencyFigures: Equatable, Sendable, Codable {
     public var keyToEchoEstimated: Percentiles
     /// One refresh's time on the main thread.
     public var refresh: Percentiles
+    /// One refresh's work, on the main thread's CPU clock.
+    public var refreshWork: Percentiles
     /// Screen-update ticks told so far; one tick may hold several reads of output.
     public var screenUpdates: Int
     /// Output a refresh saw and could not draw, drawn by a later one.

@@ -84,14 +84,10 @@ extension Layout {
         axis == .sideBySide ? size.width : size.height
     }
 
-    /// The least room the layout takes along `axis`, each pane at least `minimum`.
-    func minimum(along axis: Axis, pane minimum: CGSize) -> Double {
-        switch self {
-        case .pane: Self.extent(of: minimum, along: axis)
-        case let .split(own, _, first, second):
-            own == axis
-                ? first.minimum(along: axis, pane: minimum) + Self.dividerWidth + second.minimum(along: axis, pane: minimum)
-                : max(first.minimum(along: axis, pane: minimum), second.minimum(along: axis, pane: minimum))
+    /// Whether every pane of the layout is at least `minimum` in `size`, edges on `scale`'s pixels.
+    func fits(in size: CGSize, minimum: CGSize, scale: Double) -> Bool {
+        frames(in: CGRect(origin: .zero, size: size), scale: scale).panes.values.allSatisfy {
+            $0.width >= minimum.width - 1e-9 && $0.height >= minimum.height - 1e-9
         }
     }
 
@@ -119,15 +115,30 @@ extension Layout {
     }
 }
 
-/// How a strip shares its room between tabs: each as wide as the others, from `widest` down to
-/// `narrowest`; tabs past what fits at `narrowest` are left out of the strip (keys and the Window
-/// menu still reach them).
+/// How a strip of `width` shares its room between tabs: each as wide as the others, from
+/// ``widest`` down to ``narrowest``, with `+` and an empty stretch to drag the window by always
+/// left at its end. When not all fit at ``narrowest``, the strip shows the run of tabs around the
+/// selected one; the rest are reached by the keys and the Window menu.
 public struct TabRow: Equatable, Sendable {
+    public static let narrowest = 120.0
+    public static let widest = 240.0
+    public static let gap = 4.0
+    public static let addSide = 24.0
+    public static let stretch = 40.0
+
     public let width: Double
+    public let first: Int
     public let shown: Int
 
-    public init(tabs: Int, room: Double, narrowest: Double, widest: Double, gap: Double) {
-        shown = min(tabs, max(1, Int((room + gap) / (narrowest + gap))))
-        width = shown == 0 ? widest : min(widest, max(narrowest, (room - gap * Double(shown - 1)) / Double(shown)))
+    public init(tabs: Int, selected: Int?, width strip: Double) {
+        let room = strip - Self.addSide - Self.gap - Self.stretch
+        shown = min(tabs, max(1, Int((room + Self.gap) / (Self.narrowest + Self.gap))))
+        width = shown == 0 ? Self.widest : min(Self.widest, max(Self.narrowest, (room - Self.gap * Double(shown - 1)) / Double(shown)))
+        first = min(max(0, (selected ?? 0) - (shown - 1) / 2), max(0, tabs - shown))
+    }
+
+    /// Whether the tab at `index` is in the strip.
+    public func shows(_ index: Int) -> Bool {
+        (first ..< first + shown).contains(index)
     }
 }

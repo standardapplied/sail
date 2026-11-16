@@ -262,9 +262,10 @@ import Testing
 
     @Test func refreshTimesAreKept() {
         var marks = LatencyMarks()
-        marks.refreshed(taking: 0.002)
-        marks.refreshed(taking: 0.004)
+        marks.refreshed(taking: 0.002, working: 0.001)
+        marks.refreshed(taking: 0.004, working: 0.0015)
         #expect(abs(marks.figures.refresh.max - 4) < 1e-9)
+        #expect(abs(marks.figures.refreshWork.max - 1.5) < 1e-9)
     }
 
     /// Scenario 19's metric: output that waited through a stall of the main thread is seen however

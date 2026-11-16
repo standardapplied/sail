@@ -40,6 +40,10 @@ public final class WorkbenchView: NSView {
     private let emptyLabel = NSTextField(labelWithString: "No terminal is open")
     private let newTerminal: AccentButton
     private var started = false
+    private var pendingKeep: DispatchWorkItem?
+    /// The arrangement as last written.
+    private var kept: Data?
+    static let keepDelay = 0.3
     /// The arrangement is the person's from here on: restored, so worth keeping.
     private(set) var restored = false
 
@@ -70,10 +74,6 @@ public final class WorkbenchView: NSView {
 
     override public var isFlipped: Bool {
         true
-    }
-
-    public var saysNoTerminal: Bool {
-        !emptyLabel.isHidden
     }
 
     public var focused: TerminalPane? {
@@ -107,16 +107,18 @@ public final class WorkbenchView: NSView {
         for pane in model.panes.values.sorted(by: { $0.id < $1.id }) {
             if makeView(pane, start: .attach, points: FontLadder.standard) == nil { model.close(pane.id) }
         }
+        model.fit(in: room, minimum: minimum(of: Array(panes.values)), scale: scale)
         if model.tabs.isEmpty { openTab() } else { apply() }
     }
 
     func detachAll() {
+        keep()
         panes.values.forEach { $0.detach() }
     }
 
     /// Draws the model: each tab's view shown only when selected, each pane at its frame or
     /// hidden, the dividers, the scrim, the strip, the window's title; the focused pane the first
-    /// responder; the arrangement kept.
+    /// responder; the arrangement kept soon after.
     func apply() {
         for (id, view) in tabViews where !model.tabs.contains(where: { $0.id == id }) {
             view.removeFromSuperview()
@@ -130,10 +132,22 @@ public final class WorkbenchView: NSView {
         panes.values.forEach { $0.begin() }
         emptyLabel.isHidden = !model.tabs.isEmpty || !restored
         newTerminal.isHidden = emptyLabel.isHidden
+        showTitles()
+        if let focused, !isHidden, !strip.isRenaming, window?.firstResponder !== focused.terminal { window?.makeFirstResponder(focused.terminal) }
+        keepSoon()
+    }
+
+    /// The strip's tabs and the window's title, as the model names them.
+    private func showTitles() {
         strip.show(model.tabs.map { TabStrip.Item(id: $0.id, title: model.title(of: $0.id), zoomed: $0.zoomed != nil) }, selected: model.selected)
         onTitle(model.selectedTab.map { model.title(of: $0.id) } ?? ShellApp.title)
-        if let focused, !isHidden, !strip.isRenaming, window?.firstResponder !== focused.terminal { window?.makeFirstResponder(focused.terminal) }
-        keep()
+    }
+
+    /// The selected tab laid out again, the rest as it was: a divider moved by drag or key.
+    private func layoutSelected() {
+        guard let tab = model.selectedTab, let view = tabViews[tab.id] else { return }
+        layout(tab, in: view)
+        keepSoon()
     }
 
     override public func setFrameSize(_ size: NSSize) {
@@ -157,15 +171,30 @@ public final class WorkbenchView: NSView {
         let room = TabView(frame: bounds)
         room.autoresizingMask = [.width, .height]
         room.onDrag = { [weak self] path, position in self?.drag(path, to: position) }
-        room.onDragEnded = { [weak self] in self?.apply() }
+        room.onDragEnded = { [weak self] in self?.keepSoon() }
         addSubview(room, positioned: .below, relativeTo: banner)
         tabViews[id] = room
         return room
     }
 
+    /// Keeps the arrangement a moment after the last change, so a burst of changes (held keys, a
+    /// drag) writes once; quitting keeps it at once.
+    private func keepSoon() {
+        pendingKeep?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            MainActor.assumeIsolated { self?.keep() }
+        }
+        pendingKeep = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.keepDelay, execute: work)
+    }
+
+    /// Writes the arrangement when it differs from what was last written.
     private func keep() {
-        guard restored, let data = try? JSONEncoder().encode(model.arrangement) else { return }
+        pendingKeep?.cancel()
+        pendingKeep = nil
+        guard restored, let data = try? JSONEncoder().encode(model.arrangement), data != kept else { return }
         UserDefaults.standard.set(data, forKey: Self.arrangementKey)
+        kept = data
     }
 
     /// The view for `pane`, added once to its tab's view; nil, said in the banner, when it cannot
@@ -181,7 +210,6 @@ public final class WorkbenchView: NSView {
             return nil
         }
         view.onEvent = { [weak self] view, event in self?.handle(event, from: view) }
-        view.onReopen = { [weak self] view in self?.reopen(view) }
         view.terminal.onFocus = { [weak self, id = pane.id] in self?.focusClicked(id) }
         panes[pane.id] = view
         tabView(tab.id).addPane(view)
@@ -205,7 +233,7 @@ public final class WorkbenchView: NSView {
         switch event {
         case let .screen(.title(title)):
             model.setTitle(title, of: view.id)
-            apply()
+            showTitles()
         case let .screen(.workingDirectory(folder)):
             model.setFolder(folder, of: view.id)
         case let .phase(.ended(.ended(reason))) where Ending.closesPane(reason: reason, lived: ContinuousClock.now - view.opened):
@@ -217,18 +245,16 @@ public final class WorkbenchView: NSView {
         }
     }
 
-    private func reopen(_ view: TerminalPane) {
-        guard let place = model.panes[view.id]?.place, let id = model.reopen(view.id, session: place.newSessionName) else { return }
-        view.detach()
-        view.removeFromSuperview()
-        panes[view.id] = nil
-        open(id, points: view.terminal.fontPoints)
-    }
-
+    /// A pane became the first responder (a click): the model follows after AppKit has recorded
+    /// it, so the drawing never sets a first responder from inside another's change.
     private func focusClicked(_ id: PaneID) {
-        guard model.focusedPane?.id != id else { return }
-        model.focus(id)
-        apply()
+        DispatchQueue.main.async { [weak self] in
+            MainActor.assumeIsolated {
+                guard let self, self.model.focusedPane?.id != id, self.model.panes[id] != nil else { return }
+                self.model.focus(id)
+                self.apply()
+            }
+        }
     }
 
     private var scale: Double {
@@ -239,13 +265,19 @@ public final class WorkbenchView: NSView {
         bounds.size
     }
 
-    /// The least a pane may be: 10 columns by 3 rows and the padding, at the focused pane's font.
+    /// The least a pane of the selected tab may be: 10 columns by 3 rows and the padding, at the
+    /// largest font among its panes, so every pane keeps its own.
     private var minimum: CGSize {
-        guard let metrics = focused?.terminal.metrics else { return .zero }
-        return CGSize(
-            width: Double(10 * metrics.width + 2 * metrics.padding.width) / metrics.scale,
-            height: Double(3 * metrics.height + 2 * metrics.padding.height) / metrics.scale
-        )
+        minimum(of: (model.selectedTab?.layout.leaves ?? []).compactMap { panes[$0] })
+    }
+
+    private func minimum(of views: [TerminalPane]) -> CGSize {
+        var least = (width: 0.0, height: 0.0)
+        for metrics in views.map(\.terminal.metrics) {
+            least.width = max(least.width, Double(10 * metrics.width + 2 * metrics.padding.width) / metrics.scale)
+            least.height = max(least.height, Double(3 * metrics.height + 2 * metrics.padding.height) / metrics.scale)
+        }
+        return CGSize(width: least.width, height: least.height)
     }
 
     /// Where a new pane opens: as the focused one, in the folder its shell reported when that is
@@ -272,12 +304,10 @@ public final class WorkbenchView: NSView {
         focused?.terminal.fontPoints ?? FontLadder.standard
     }
 
-    /// A divider dragged: only its tab is laid out again while it moves; the rest of the drawing
-    /// and the kept arrangement wait for the button to go up (``apply()``).
+    /// A divider dragged: only its tab is laid out again while it moves.
     private func drag(_ path: [Side], to position: Double) {
-        guard model.drag(path, to: position, in: room, minimum: minimum, scale: scale), let tab = model.selectedTab, let view = tabViews[tab.id]
-        else { return }
-        layout(tab, in: view)
+        guard model.drag(path, to: position, in: room, minimum: minimum, scale: scale) else { return }
+        layoutSelected()
     }
 
     private func openTab() {
@@ -319,8 +349,10 @@ public final class WorkbenchView: NSView {
         confirm(ending: views, question: "Close this tab?", detail: "Its \(views.count) terminals will end.")
     }
 
-    /// Ends `views`' sessions, asking first when one of them may end a running program.
+    /// Ends `views`' sessions, asking first when one of them may end a running program; refused
+    /// with a beep while one is reconnecting, since its program would run on unseen.
     private func confirm(ending views: [TerminalPane], question: String, detail: String) {
+        guard views.allSatisfy(\.canEnd) else { return NSSound.beep() }
         guard views.contains(where: \.mayEndAProgram), let window else { return end(views) }
         Confirmation.ask(question, detail: detail + " Quitting Sail instead leaves every terminal running.", action: "Close", on: window) { [weak self] close in
             if close { self?.end(views) }
@@ -355,15 +387,16 @@ public final class WorkbenchView: NSView {
     }
 
     @objc public func equalizeSplits(_: Any?) {
-        change { $0.equalize() }
+        let (size, least, pixels) = (room, minimum, scale)
+        change { $0.equalize(in: size, minimum: least, scale: pixels) }
     }
 
     /// Moves the focused pane's nearest divider 10 pt the way the menu item's tag points: its
     /// `Direction` in `Direction.allCases`.
     @objc public func moveDivider(_ sender: NSMenuItem) {
         guard Direction.allCases.indices.contains(sender.tag) else { return }
-        let (direction, size, least, pixels) = (Direction.allCases[sender.tag], room, minimum, scale)
-        change { $0.moveDivider(direction, by: Self.dividerStep, in: size, minimum: least, scale: pixels) }
+        guard model.moveDivider(Direction.allCases[sender.tag], by: Self.dividerStep, in: room, minimum: minimum, scale: scale) else { return }
+        layoutSelected()
     }
 
     @objc public func showPreviousTab(_: Any?) {
@@ -393,12 +426,14 @@ public final class WorkbenchView: NSView {
     /// The workbench's own shortcuts are taken here, before the menu bar, as Ghostty's surface takes
     /// its bindings: the menu bar answers a key equivalent only after highlighting its menu's title,
     /// which held ⌘D 80 to 180 ms on the runner. The menu items stay the one list of commands and
-    /// keys (W8); this sends the matching item's action, validated as the menu would.
+    /// keys (W8); this sends the matching item's action, validated as the menu would. A key whose
+    /// item is disabled now does nothing, and reaches no program.
     override public func performKeyEquivalent(with event: NSEvent) -> Bool {
-        guard !isHidden, let item = Self.shortcut(for: event, in: NSApp.mainMenu, target: self), validateMenuItem(item), let action = item.action else {
+        guard !isHidden, let item = Self.shortcut(for: event, in: NSApp.mainMenu, target: self), let action = item.action else {
             return super.performKeyEquivalent(with: event)
         }
-        return NSApp.sendAction(action, to: self, from: item)
+        if validateMenuItem(item) { NSApp.sendAction(action, to: self, from: item) }
+        return true
     }
 
     static func shortcut(for event: NSEvent, in menu: NSMenu?, target: AnyObject) -> NSMenuItem? {
@@ -458,7 +493,9 @@ public final class WorkbenchView: NSView {
 }
 
 extension WorkbenchView: NSMenuItemValidation {
+    /// Every workbench command waits while a sheet is on the window.
     public func validateMenuItem(_ item: NSMenuItem) -> Bool {
+        guard window?.attachedSheet == nil else { return false }
         let panes = model.selectedTab?.layout.leaves.count ?? 0
         switch item.action {
         case #selector(newTab(_:)): return true

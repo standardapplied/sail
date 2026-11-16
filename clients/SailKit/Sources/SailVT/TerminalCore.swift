@@ -272,7 +272,7 @@ final class TerminalCore {
 
     var cursorAtPrompt: Bool {
         var atPrompt = false
-        return ghostty_terminal_get(handle, GHOSTTY_TERMINAL_DATA_CURSOR_AT_PROMPT, &atPrompt) == GHOSTTY_SUCCESS && atPrompt
+        return sink.commandsMarked && ghostty_terminal_get(handle, GHOSTTY_TERMINAL_DATA_CURSOR_AT_PROMPT, &atPrompt) == GHOSTTY_SUCCESS && atPrompt
     }
 
     private var onAlternateScreen: Bool {

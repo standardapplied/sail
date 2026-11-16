@@ -30,8 +30,6 @@ public final class TerminalPane: NSView {
     public let opened = ContinuousClock.now
     public private(set) var session: TerminalSession?
     var onEvent: @MainActor (TerminalPane, SessionEvent) -> Void = { _, _ in }
-    /// Told when the person asks for a new session in place of one that ended.
-    var onReopen: @MainActor (TerminalPane) -> Void = { _ in }
 
     let palette: Palette
     var look: Look {
@@ -101,8 +99,17 @@ public final class TerminalPane: NSView {
         next.start()
     }
 
-    /// Ends the session at the host, then this client's part: a session not attached now is left
-    /// to the host, and the next launch shows it as a tab of its own.
+    /// Whether ⌘W can do what its sheet says: the session is attached (the host ends it) or over.
+    /// While it reconnects or waits, a close would leave its program running unseen.
+    var canEnd: Bool {
+        guard let phase = session?.state.phase else { return true }
+        switch phase {
+        case .attached, .ended: return true
+        default: return false
+        }
+    }
+
+    /// Ends the session at the host, then this client's part.
     func end() {
         try? session?.kill()
         detach()
@@ -141,10 +148,6 @@ public final class TerminalPane: NSView {
         banner.shown
     }
 
-    public func pressBanner() {
-        banner.press()
-    }
-
     /// The latency overlay's lines, every one shown.
     public static let latencyLines = 4
 
@@ -167,10 +170,7 @@ public final class TerminalPane: NSView {
                 }
             }
         case let .phase(.ended(end)):
-            banner.show(Self.sentence(end.description), button: "Open a New Session") { [weak self] in
-                guard let self else { return }
-                onReopen(self)
-            }
+            banner.show(Self.sentence(end.description))
         default:
             break
         }

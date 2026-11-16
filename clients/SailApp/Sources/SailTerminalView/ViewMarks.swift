@@ -1,6 +1,7 @@
 import Foundation
 import os
 import QuartzCore
+import SailRenderer
 import SailSurface
 import Synchronization
 
@@ -61,9 +62,10 @@ final class ViewMarks: Sendable {
         marks.withLock { $0.committed(frame: frame, at: now, read: read, target: target) }
     }
 
-    func refreshed(since read: Double) {
+    func refreshed(since read: Double, workSince cpu: Duration) {
         let now = CACurrentMediaTime()
-        marks.withLock { $0.refreshed(taking: now - read) }
+        let work = (Duration.threadCPU - cpu) / .seconds(1)
+        marks.withLock { $0.refreshed(taking: now - read, working: work) }
     }
 
     func unchanged(read: Double) {

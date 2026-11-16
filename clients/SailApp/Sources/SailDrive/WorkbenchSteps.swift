@@ -4,6 +4,7 @@ import SailShell
 import SailTerminal
 import SailTerminalView
 import SailWorkbench
+import Synchronization
 
 /// The drive's steps on the workbench. Shortcuts are `press` steps, key events through the app's
 /// `sendEvent`, so they reach the menu as a person's do; clicks and drags are mouse events at window
@@ -78,6 +79,36 @@ extension Driver {
         if step.sameTop == true {
             return (lines.first == markedTop, "the top line is '\(lines.first ?? "")', it was '\(markedTop ?? "")'")
         }
+        if let times = step.titleBurst {
+            let writes = await arrangementWrites(within: 2) {
+                typeText("for i in $(seq 1 \(times)); do printf '\\e]2;t%s\\a' $i; done\r")
+            }
+            return (writes == 0, "the program set its title \(times) times; the arrangement was written \(writes) times")
+        }
+        if let times = step.dividerBurst {
+            let writes = await arrangementWrites(within: 1.5) {
+                for _ in 0 ..< times { press("arrowRight", ["command", "control"]) }
+            }
+            return (writes == 1, "⌃⌘→ \(times) times at once; the arrangement was written \(writes) times")
+        }
+        if step.hold == true {
+            guard let view = pane?.terminal else { return (false, "no pane is focused") }
+            held = (view, view.latency.refresh.count)
+            return (true, "")
+        }
+        if step.heldPaused == true {
+            guard let held else { return (false, "no view was kept") }
+            let refreshes = held.view.latency.refresh.count
+            try? await Task.sleep(for: .seconds(1))
+            let paused = held.view.drawingState.contains("display link paused")
+            let still = held.view.latency.refresh.count == refreshes
+            return (held.view.isHiddenOrHasHiddenAncestor && paused && still, "hidden \(held.view.isHiddenOrHasHiddenAncestor); \(held.view.drawingState)")
+        }
+        if step.heldResumed == true {
+            guard let held else { return (false, "no view was kept") }
+            let drew = await waitUntil(step.seconds ?? 2) { held.view.latency.refresh.count > held.refreshes }
+            return (drew && !held.view.isHiddenOrHasHiddenAncestor, held.view.drawingState)
+        }
         if let seconds = step.wait {
             try? await Task.sleep(for: .seconds(seconds))
             return (true, "")
@@ -128,7 +159,7 @@ extension Driver {
         }
         if let titles = expected.titles, titles != model.tabs.map({ model.title(of: $0.id) }) { misses.append("titles are not \(titles)") }
         if let zoomed = expected.zoomed, zoomed != (model.selectedTab?.zoomed != nil) { misses.append(zoomed ? "nothing is zoomed" : "a pane is zoomed") }
-        if let empty = expected.empty, empty != workbench.saysNoTerminal { misses.append(empty ? "'No terminal is open' is not shown" : "'No terminal is open' shows") }
+        if let empty = expected.empty, empty != saysNoTerminal { misses.append(empty ? "'No terminal is open' is not shown" : "'No terminal is open' shows") }
         guard let tab = model.selectedTab else { return misses + (expected.tabs == [] ? [] : ["no tab"]) }
         if let focus = expected.focus, tab.layout.leaves.firstIndex(of: tab.focused) != focus { misses.append("pane \(focus) is not focused") }
         if let dimmed = expected.dimmed, dimmed != orderedPanes.map(\.isDimmed) { misses.append("the dimmed panes are \(orderedPanes.map(\.isDimmed)), not \(dimmed)") }
@@ -363,16 +394,14 @@ extension Driver {
             panes4["flood \(index + 1) longest wait to be shown ms"] = figures.outputToShown.max
             panes4["flood \(index + 1) refresh p95 ms"] = figures.refresh.p95
         }
-        let work = grid.map { $0.terminal.latency.refresh.p95 }.reduce(0, +)
-        budgets["the four views' refresh work p95 summed <= 8 ms"] = work <= 8
-        panes4["four views' refresh p95 summed ms"] = work
+        let work = grid.map { $0.terminal.latency.refreshWork.p95 }.reduce(0, +)
+        budgets["the four views' refresh work p95 summed <= 8 ms (CPU time, the main thread's own clock)"] = work <= 8
+        panes4["four views' refresh work p95 summed, CPU time, ms"] = work
+        panes4["four views' refresh p95 summed, wall time, ms"] = grid.map { $0.terminal.latency.refresh.p95 }.reduce(0, +)
         panes4["echo key to echo p95 ms"] = keyToEcho
         panes4["echo output to committed p95 ms"] = echoed.outputToCommitted.p95
         panes4["peak resident memory at one pane MB"] = before
         panes4["peak resident memory at four panes MB"] = four
-        for (index, view) in grid.enumerated() {
-            panes4["atlas bytes, pane \(index + 1)"] = Double(view.terminal.atlasBytes)
-        }
         press("w", ["command", "option"])
         _ = await sheet("Close", asking: "Its 4 terminals will end.", within: 5)
         let splits = await timeSplits(10)
@@ -401,6 +430,30 @@ extension Driver {
         return (1 ... holds + 1).contains(sizes.count) && sizes.last == "winch-\(columns)"
     }
 
+    /// How many times the app writes its user defaults while `act` runs and for `seconds` after it
+    /// (each write posts `UserDefaults.didChangeNotification` in the process).
+    private func arrangementWrites(within seconds: Double, _ act: () -> Void) async -> Int {
+        let writes = Mutex(0)
+        let watch = NotificationCenter.default.addObserver(forName: UserDefaults.didChangeNotification, object: nil, queue: nil) { _ in
+            writes.withLock { $0 += 1 }
+        }
+        defer { NotificationCenter.default.removeObserver(watch) }
+        act()
+        try? await Task.sleep(for: .seconds(seconds))
+        return writes.withLock { $0 }
+    }
+
+    /// How many frames `view` has committed, as its drawing state says.
+    static func committed(_ view: TerminalView?) -> Int {
+        guard let state = view?.drawingState, let found = state.range(of: "committed ") else { return 0 }
+        return Int(state[found.upperBound...].prefix { $0.isNumber }) ?? 0
+    }
+
+    /// "No terminal is open" shows: its New Terminal button is on screen.
+    var saysNoTerminal: Bool {
+        Self.button("New Terminal", in: workbench).map { !$0.isHiddenOrHasHiddenAncestor } ?? false
+    }
+
     /// Whether a line of `view`'s screen, trimmed, is `line`.
     static func shows(_ view: TerminalPane, _ line: String) -> Bool {
         let text = (try? view.session?.screen.text()) ?? ""
@@ -413,28 +466,31 @@ extension Driver {
     /// closed after.
     private func timeSplits(_ count: Int) async -> (total: Double, ours: Double, said: String, handled: Double, held: Double) {
         var totals: [Double] = [], ours: [Double] = [], handled: [Double] = [], held: [Double] = [], ownHeld: [Double] = []
+        var samples: [String] = []
         for _ in 0 ..< count {
             press("t", ["command"])
-            _ = await waitUntil(10) { self.pane?.terminal.framesCommitted ?? 0 > 0 }
+            _ = await waitUntil(10) { Self.committed(self.pane?.terminal) > 0 }
             mainThread.reset()
             ownThread.reset()
             let began = ContinuousClock.now
             press("d", ["command"])
             handled.append((ContinuousClock.now - began) / .milliseconds(1))
             let made = pane
-            while (made?.terminal.framesCommitted ?? 0) == 0, ContinuousClock.now - began < .seconds(5) {
+            while Self.committed(made?.terminal) == 0, ContinuousClock.now - began < .seconds(5) {
                 try? await Task.sleep(for: .milliseconds(1))
             }
             totals.append((ContinuousClock.now - began) / .milliseconds(1))
             held.append(mainThread.longest)
             ownHeld.append(ownThread.longest)
             ours.append(Self.ours(totals.last ?? 0, ownHeld: ownThread.longest).ours)
+            samples.append(String(format: "handled %.1f, first frame %.1f, own thread %.1f, ours %.1f", handled.last ?? 0, totals.last ?? 0, ownThread.longest, ours.last ?? 0))
+            _ = await waitUntil(5) { made?.session?.state.phase == .attached }
             press("w", ["command", "option"])
             _ = await sheet("Close", asking: nil, within: 5)
         }
         panes4["a thread of the drive's own, longest stall within a split p95 ms"] = Self.p95(ownHeld)
         let said = "p95 waited \(Self.ms(Self.p95(totals))) ms, the drive's own thread held \(Self.ms(Self.p95(ownHeld))) ms, ours "
-            + "\(Self.ms(Self.p95(ours))) ms"
+            + "\(Self.ms(Self.p95(ours))) ms; each split in ms: " + samples.joined(separator: " | ")
         return (Self.p95(totals), Self.p95(ours), said, Self.p95(handled), Self.p95(held))
     }
 

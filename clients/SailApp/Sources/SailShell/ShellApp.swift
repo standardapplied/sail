@@ -124,9 +124,22 @@ public final class ShellApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         paintStrip()
     }
 
-    /// The tabs start a space after the window's zoom button, where the window put it.
+    public func windowDidEnterFullScreen(_: Notification) {
+        placeTheStrip()
+    }
+
+    public func windowDidExitFullScreen(_: Notification) {
+        placeTheStrip()
+    }
+
+    /// The tabs' row is the title bar's, and keeps this height in full screen, where the title bar
+    /// is hidden.
+    static let stripHeight = 28.0
+
+    /// The tabs start a space after the window's zoom button, where the window put it; in full
+    /// screen, where the buttons hide, after the rail.
     private func placeTheStrip() {
-        let zoomEnd = Double(window.standardWindowButton(.zoomButton)?.frame.maxX ?? 0)
+        let zoomEnd = window.styleMask.contains(.fullScreen) ? 0 : Double(window.standardWindowButton(.zoomButton)?.frame.maxX ?? 0)
         stripStart.constant = max(Rail.width, zoomEnd + Look.Space.s)
     }
 
@@ -184,14 +197,16 @@ public final class ShellApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         strip.isHidden = true
         window.contentView = root
         let belowTheTitleBar = (window.contentLayoutGuide as? NSLayoutGuide)?.topAnchor ?? root.topAnchor
+        let titleBarRow = strip.bottomAnchor.constraint(equalTo: belowTheTitleBar)
+        titleBarRow.priority = .defaultHigh
         NSLayoutConstraint.activate([
             rail.leadingAnchor.constraint(equalTo: root.leadingAnchor), rail.topAnchor.constraint(equalTo: root.topAnchor),
             rail.bottomAnchor.constraint(equalTo: root.bottomAnchor), content.leadingAnchor.constraint(equalTo: rail.trailingAnchor),
-            content.trailingAnchor.constraint(equalTo: root.trailingAnchor), content.topAnchor.constraint(equalTo: belowTheTitleBar),
+            content.trailingAnchor.constraint(equalTo: root.trailingAnchor), content.topAnchor.constraint(equalTo: strip.bottomAnchor),
             content.bottomAnchor.constraint(equalTo: root.bottomAnchor),
             stripStart,
             strip.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -Look.Space.s), strip.topAnchor.constraint(equalTo: root.topAnchor),
-            strip.bottomAnchor.constraint(equalTo: belowTheTitleBar),
+            strip.heightAnchor.constraint(greaterThanOrEqualToConstant: Self.stripHeight), titleBarRow,
         ])
         rail.onSelect = { [weak self] item in self?.select(item) }
         thisMac.onShow = { [weak self] in

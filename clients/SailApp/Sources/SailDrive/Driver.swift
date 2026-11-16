@@ -33,6 +33,8 @@ final class Driver {
     var remembered: String?
     /// The top line `markTop` kept.
     var markedTop: String?
+    /// The view `hold` kept, and how many refreshes it had made then.
+    var held: (view: TerminalView, refreshes: Int)?
     /// How many times the last divider drag held still for the session's resize hold.
     var dragHolds = 0
     lazy var standIn: TerminalView = {
@@ -306,11 +308,6 @@ final class Driver {
         if step.attached == true {
             let attached = await waitUntil(step.seconds ?? 20) { self.pane?.session?.state.phase == .attached }
             return (attached, "the session is \(pane?.session.map { "\($0.state.phase)" } ?? "none")")
-        }
-        if step.newSession == true {
-            guard let pane else { return (false, "no pane is focused") }
-            pane.pressBanner()
-            return (shell.thisMac.focused !== pane, "the banner's button gave the pane's place a new pane")
         }
         return (false, "the step names no action")
     }

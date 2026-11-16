@@ -40,6 +40,8 @@ final class EffectSink {
     var events: [ScreenEvent] = []
     var titleChanged = false
     var workingDirectoryChanged = false
+    /// The shell has marked a command's start (OSC 133 C) at least once.
+    var commandsMarked = false
     /// Between a replay's begin and end the stream is history: a replayed query is not answered
     /// again, nor a bell rung or a clipboard written for it.
     var replaying = false
@@ -136,7 +138,12 @@ final class EffectSink {
         try set(terminal, GHOSTTY_TERMINAL_OPT_CLIPBOARD_WRITE, unsafeBitCast(clipboardWrite, to: UnsafeRawPointer.self))
         try set(terminal, GHOSTTY_TERMINAL_OPT_CLIPBOARD_READ, unsafeBitCast(clipboardRead, to: UnsafeRawPointer.self))
         try set(terminal, GHOSTTY_TERMINAL_OPT_DESKTOP_NOTIFICATION, unsafeBitCast(notification, to: UnsafeRawPointer.self))
+        let prompt: GhosttyTerminalSemanticPromptFn = { _, userdata, event in
+            guard let event, event.pointee.kind == GHOSTTY_SEMANTIC_PROMPT_OUTPUT_START else { return }
+            EffectSink.from(userdata)?.commandsMarked = true
+        }
         try set(terminal, GHOSTTY_TERMINAL_OPT_RENDER_HOLD, unsafeBitCast(hold, to: UnsafeRawPointer.self))
+        try set(terminal, GHOSTTY_TERMINAL_OPT_SEMANTIC_PROMPT, unsafeBitCast(prompt, to: UnsafeRawPointer.self))
     }
 
     private static func from(_ userdata: UnsafeMutableRawPointer?) -> EffectSink? {

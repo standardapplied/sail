@@ -103,9 +103,8 @@ public struct Workbench: Hashable, Sendable {
     public mutating func split(_ axis: Axis, session: String, place: Place, in size: CGSize, minimum: CGSize, scale: Double) -> PaneID? {
         guard let index = selectedIndex else { return nil }
         let tab = tabs[index]
-        guard let frame = tab.layout.frames(in: CGRect(origin: .zero, size: size), scale: scale).panes[tab.focused] else { return nil }
-        let least = Layout.extent(of: minimum, along: axis)
-        guard 2 * least + Layout.dividerWidth <= Layout.extent(of: frame, along: axis) else { return nil }
+        let halved = tab.layout.replacing(tab.focused, with: .split(axis, ratio: 0.5, .pane(tab.focused), .pane(PaneID(0))))
+        guard halved.fits(in: size, minimum: minimum, scale: scale) else { return nil }
         let pane = makePane(session: session, place: place)
         tabs[index].layout = tab.layout.replacing(tab.focused, with: .split(axis, ratio: 0.5, .pane(tab.focused), .pane(pane)))
         tabs[index].zoomed = nil
@@ -142,18 +141,6 @@ public struct Workbench: Hashable, Sendable {
         let wasSelected = tabs[index].id == selected
         tabs.remove(at: index)
         if wasSelected { selected = tabs.isEmpty ? nil : tabs[max(0, index - 1)].id }
-    }
-
-    /// `pane` replaced in its place by a new pane on `session`, as the person asked once its own
-    /// session ended: a new pane, so a new view, never the old view on another session.
-    public mutating func reopen(_ pane: PaneID, session: String) -> PaneID? {
-        guard let index = index(holding: pane), let old = panes.removeValue(forKey: pane) else { return nil }
-        let new = makePane(session: session, place: old.place)
-        tabs[index].layout = tabs[index].layout.replacing(pane, with: .pane(new))
-        tabs[index].history = tabs[index].history.map { $0 == pane ? new : $0 }
-        if tabs[index].focused == pane { tabs[index].focused = new }
-        if tabs[index].zoomed == pane { tabs[index].zoomed = new }
-        return new
     }
 
     /// Focuses `pane` and selects its tab, as a click on it does; focusing another pane ends a zoom.
@@ -202,29 +189,51 @@ public struct Workbench: Hashable, Sendable {
     }
 
     /// Puts the divider of the split at `path` in the selected tab at `position` along its axis, in
-    /// points from the tab's top left, stopping where a pane would go under `minimum`; false when
-    /// nothing moved.
+    /// points from the tab's top left, or as near to it as leaves every pane of the tab at least
+    /// `minimum`; false when nothing moved. A tab already too small for its panes keeps its ratios.
     @discardableResult
     public mutating func drag(_ path: [Side], to position: Double, in size: CGSize, minimum: CGSize, scale: Double) -> Bool {
-        guard let index = selectedIndex, case let .split(axis, ratio, first, second)? = tabs[index].layout.node(at: path),
+        guard let index = selectedIndex, case let .split(axis, ratio, _, _)? = tabs[index].layout.node(at: path),
               let divider = tabs[index].layout.frames(in: CGRect(origin: .zero, size: size), scale: scale).dividers.first(where: { $0.path == path })
         else { return false }
+        let layout = tabs[index].layout
         let room = Layout.extent(of: divider.split, along: axis) - Layout.dividerWidth
         let start = axis == .sideBySide ? divider.split.minX : divider.split.minY
-        let least = first.minimum(along: axis, pane: minimum) / room
-        let most = 1 - second.minimum(along: axis, pane: minimum) / room
-        guard room > 0, least <= most else { return false }
-        let wanted = min(max((position - start) / room, least), most)
+        guard room > 0, layout.fits(in: size, minimum: minimum, scale: scale) else { return false }
+        func fits(_ candidate: Double) -> Bool {
+            layout.settingRatio(candidate, at: path).fits(in: size, minimum: minimum, scale: scale)
+        }
+        var (held, wanted) = (ratio, min(max((position - start) / room, Self.leastRatio), 1 - Self.leastRatio))
+        if !fits(wanted) {
+            for _ in 0 ..< 40 {
+                let middle = (held + wanted) / 2
+                if fits(middle) { held = middle } else { wanted = middle }
+            }
+            wanted = held
+        }
         guard wanted != ratio else { return false }
-        tabs[index].layout = tabs[index].layout.settingRatio(wanted, at: path)
+        tabs[index].layout = layout.settingRatio(wanted, at: path)
         return true
     }
 
-    /// Gives the selected tab's panes equal shares, by weight (see ``Layout/weight(along:)``).
-    public mutating func equalize() {
+    /// Gives the selected tab's panes equal shares, by weight (see ``Layout/weight(along:)``), unless
+    /// that would leave a pane under `minimum`.
+    public mutating func equalize(in size: CGSize, minimum: CGSize, scale: Double) {
         guard let index = selectedIndex else { return }
-        tabs[index].layout = tabs[index].layout.equalized()
+        let equal = tabs[index].layout.equalized()
+        if equal.fits(in: size, minimum: minimum, scale: scale) { tabs[index].layout = equal }
     }
+
+    /// Each tab too small at `size` for every pane to have `minimum` takes equal shares when they
+    /// fit; else it keeps its ratios and its panes are clipped (a window made too small).
+    public mutating func fit(in size: CGSize, minimum: CGSize, scale: Double) {
+        for index in tabs.indices where !tabs[index].layout.fits(in: size, minimum: minimum, scale: scale) {
+            let equal = tabs[index].layout.equalized()
+            if equal.fits(in: size, minimum: minimum, scale: scale) { tabs[index].layout = equal }
+        }
+    }
+
+    static let leastRatio = 1e-6
 
     /// Zooms the focused pane to fill its tab, or ends the zoom; a tab of one pane has none.
     public mutating func toggleZoom() {

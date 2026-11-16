@@ -125,7 +125,7 @@ import Testing
         let answer3 = row.drag([.second], to: inner.minX + 0.3 * (inner.width - 1), in: size, minimum: small, scale: 2)
         #expect(answer3)
         #expect([a, b, c].compactMap { Self.frame(row, $0, size: size)?.width } == [1201, 89.5, 209.5])
-        row.equalize()
+        row.equalize(in: size, minimum: small, scale: 2)
         let widths = [a, b, c].compactMap { Self.frame(row, $0, size: size)?.width }
         #expect(widths.count == 3 && (widths.max() ?? 0) - (widths.min() ?? 0) <= 1, "\(widths)")
 
@@ -135,7 +135,7 @@ import Testing
         _ = try Self.split(&stack, .stacked, "mac-bottom")
         let answer4 = stack.drag([], to: 800, in: Self.room, minimum: Self.least, scale: 2)
         #expect(answer4)
-        stack.equalize()
+        stack.equalize(in: Self.room, minimum: Self.least, scale: 2)
         #expect(Self.frame(stack, left)?.width == 500 && Self.frame(stack, top)?.width == 500)
     }
 
@@ -291,16 +291,82 @@ import Testing
         #expect(try JSONDecoder().decode(Arrangement.self, from: data) == bench.arrangement)
     }
 
-    @Test func reopeningGivesTheSamePlaceANewPane() throws {
+    /// The minimum is the tree's: a drag of an outer divider stops where a nested pane on the same
+    /// axis would go under it (the review's sequence), and a key's move does too.
+    @Test func noDragOrKeyLeavesANestedPaneUnderTheMinimum() throws {
+        var bench = Workbench()
+        let size = CGSize(width: 1001, height: 601)
+        bench.newTab(session: "mac-a", place: Self.home)
+        _ = try Self.split(&bench, .sideBySide, "mac-b", size: size)
+        let c = try Self.split(&bench, .sideBySide, "mac-c", size: size)
+        bench.drag([.second], to: 2000, in: size, minimum: Self.least, scale: 1)
+        bench.drag([], to: 2000, in: size, minimum: Self.least, scale: 1)
+        let frames = bench.frames(in: size, scale: 1).panes
+        #expect(frames.values.allSatisfy { $0.width >= Self.least.width }, "\(frames.values.map(\.width))")
+        #expect(frames[c]?.width == Self.least.width)
+        bench.focus(c)
+        for _ in 0 ..< 40 { bench.moveDivider(.right, by: 10, in: size, minimum: Self.least, scale: 1) }
+        #expect(bench.frames(in: size, scale: 1).panes.values.allSatisfy { $0.width >= Self.least.width })
+    }
+
+    /// A key moves the focused pane's nearest divider on its axis, not an outer one.
+    @Test func aKeyMovesTheNearestDivider() throws {
         var bench = Self.bench()
-        let old = try #require(bench.focusedPane?.id)
-        let other = try Self.split(&bench, .sideBySide, "mac-2")
-        bench.focus(old)
-        let madeNew = bench.reopen(old, session: "mac-3")
-        let new = try #require(madeNew)
-        #expect(new != old && bench.panes[old] == nil)
-        #expect(bench.tabs[0].layout.leaves == [new, other])
-        #expect(bench.focusedPane?.session == "mac-3")
+        let a = try #require(bench.focusedPane?.id)
+        let b = try Self.split(&bench, .sideBySide, "mac-b")
+        let c = try Self.split(&bench, .sideBySide, "mac-c")
+        let before = bench.frames(in: Self.room, scale: 2).panes
+        let moved = bench.moveDivider(.left, by: 10, in: Self.room, minimum: Self.least, scale: 2)
+        #expect(moved)
+        let after = bench.frames(in: Self.room, scale: 2).panes
+        #expect(after[a] == before[a], "the outer divider moved")
+        #expect(after[b].map { $0.width } == before[b].map { $0.width - 10 })
+        #expect(after[c].map { $0.width } == before[c].map { $0.width + 10 })
+    }
+
+    /// A ratio of zero is never stored, even with no minimum.
+    @Test func aDragNeverStoresARatioOfZeroOrOne() throws {
+        var bench = Self.bench()
+        let split = bench.split(.sideBySide, session: "mac-b", place: Self.home, in: Self.room, minimum: .zero, scale: 1)
+        _ = try #require(split)
+        for position in [-50.0, 5000] {
+            bench.drag([], to: position, in: Self.room, minimum: .zero, scale: 1)
+            guard case let .split(_, ratio, _, _) = bench.tabs[0].layout else { Issue.record("no split"); return }
+            #expect(ratio > 0 && ratio < 1, "ratio \(ratio)")
+        }
+    }
+
+    /// A tab too small for its panes keeps its ratios (they clip) when nothing fits, and takes equal
+    /// shares when those fit (a restored ratio made for a wider window); equalize never squeezes.
+    @Test func aTabTooSmallKeepsItsRatiosOrTakesEqualShares() throws {
+        var bench = Self.bench()
+        _ = try Self.split(&bench, .sideBySide, "mac-b")
+        bench.drag([], to: 850, in: Self.room, minimum: Self.least, scale: 2)
+        let wide = bench.tabs[0].layout
+        bench.fit(in: CGSize(width: 200, height: 601), minimum: Self.least, scale: 2)
+        #expect(bench.tabs[0].layout == wide, "a tab nothing fits changed its ratios")
+        bench.fit(in: CGSize(width: 400, height: 601), minimum: Self.least, scale: 2)
+        guard case let .split(_, ratio, _, _) = bench.tabs[0].layout else { Issue.record("no split"); return }
+        #expect(ratio == 0.5)
+        var three = Self.bench()
+        _ = try Self.split(&three, .sideBySide, "mac-x")
+        _ = try Self.split(&three, .sideBySide, "mac-y")
+        let small = CGSize(width: 300, height: 601)
+        let before = three.tabs[0].layout
+        three.equalize(in: small, minimum: Self.least, scale: 2)
+        #expect(three.tabs[0].layout == before, "equalize made a pane under the minimum")
+    }
+
+    /// Closing the selected tab selects the one before it, not the one after.
+    @Test func closingTheSelectedTabSelectsTheOneBefore() {
+        var bench = Self.bench(tabs: 3)
+        let ids = bench.tabs.map(\.id)
+        bench.select(ids[1])
+        bench.closeTab(ids[1])
+        #expect(bench.selected == ids[0])
+        bench.select(ids[0])
+        bench.closeTab(ids[0])
+        #expect(bench.selected == ids[2])
     }
 
     @Test(arguments: [

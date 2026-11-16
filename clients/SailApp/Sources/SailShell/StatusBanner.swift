@@ -72,10 +72,6 @@ final class StatusBanner: NSView {
         isHidden ? nil : message.stringValue
     }
 
-    func press() {
-        handler()
-    }
-
     @objc private func act() {
         handler()
     }

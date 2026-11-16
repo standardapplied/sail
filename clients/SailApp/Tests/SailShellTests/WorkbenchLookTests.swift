@@ -41,6 +41,7 @@ import Testing
         #expect(!other.close.isHidden)
         for button in [selected.close, other.close, strip.add] {
             #expect(!button.isBordered, "\(name): \(button.toolTip ?? "") draws the system's bezel")
+            #expect(button.focusRingType == .none, "\(name): \(button.toolTip ?? "") draws the system's focus ring")
             #expect(button.contentTintColor == NSColor(look.textSecondary), "\(name): \(button.toolTip ?? "") is not textSecondary")
             #expect(button.keyEquivalent.isEmpty)
         }
@@ -51,6 +52,10 @@ import Testing
         #expect(strip.accessibilityRole() == .tabGroup)
         #expect(selected.accessibilityRole() == .radioButton)
         #expect(selected.accessibilitySubrole() == TabButton.tabButton)
+        var pressed: TabID?
+        strip.onSelect = { pressed = $0 }
+        #expect(other.accessibilityPerformPress())
+        #expect(pressed == TabID(2), "VoiceOver's press selects no tab")
     }
 
     /// The rename field: no system focus ring, ringed in the accent, its selection `fillSelected`
@@ -153,6 +158,26 @@ import Testing
             let found = WorkbenchView.shortcut(for: event, in: menu, target: shell.thisMac)
             #expect(found?.action == action, "\(event.charactersIgnoringModifiers ?? "") found \(found?.title ?? "nothing")")
         }
+    }
+
+    /// A shortcut the workbench takes is validated as the menu would: with no tab, ⌘D does nothing
+    /// and is taken (no program gets it); a key no workbench item owns is left to the view and the
+    /// menu (⌘K to the program, ⌘C to Edit).
+    @Test func aDisabledShortcutDoesNothingAndAnUnownedKeyPassesOn() throws {
+        let shell = try Self.shell(.dark)
+        NSApp.mainMenu = shell.menu()
+        shell.select(.thisMac)
+        func key(_ characters: String, _ flags: NSEvent.ModifierFlags) throws -> NSEvent {
+            try #require(NSEvent.keyEvent(
+                with: .keyDown, location: .zero, modifierFlags: flags, timestamp: 0, windowNumber: 0, context: nil, characters: characters,
+                charactersIgnoringModifiers: characters, isARepeat: false, keyCode: 0
+            ))
+        }
+        #expect(shell.thisMac.model.tabs.isEmpty)
+        #expect(shell.thisMac.performKeyEquivalent(with: try key("d", .command)), "a disabled ⌘D was passed on")
+        #expect(shell.thisMac.model.tabs.isEmpty, "a disabled ⌘D acted")
+        #expect(!shell.thisMac.performKeyEquivalent(with: try key("k", .command)), "⌘K, no item's, was taken")
+        #expect(!shell.thisMac.performKeyEquivalent(with: try key("c", .command)), "⌘C, Edit's, was taken")
     }
 
     /// W2 and scenario 33: the workbench adds a pane's view in one place, `TabView.addPane`,

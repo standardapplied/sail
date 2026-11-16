@@ -107,14 +107,6 @@ public final class TerminalView: NSView {
         marks.figures
     }
 
-    public var atlasBytes: Int {
-        renderer.atlasUploadBytes
-    }
-
-    public var framesCommitted: Int {
-        committedFrames
-    }
-
     /// Where drawing stands, in words: frames presented and committed, the display link, its
     /// refreshes, and whether a drawable is awaited. For a step whose frames did not come.
     public var drawingState: String {
@@ -233,8 +225,14 @@ public final class TerminalView: NSView {
         layoutGrid()
     }
 
-    /// A hidden view draws nothing (its display link calls nothing, and output does not draw it);
-    /// shown again, it draws its screen as it is now at the next refresh.
+    /// A hidden view draws nothing: its display link pauses, output does not draw it, and a
+    /// refresh that comes anyway pauses it again; shown again, it draws its screen as it is now at
+    /// the next refresh.
+    override public func viewDidHide() {
+        super.viewDidHide()
+        pacer.pause()
+    }
+
     override public func viewDidUnhide() {
         super.viewDidUnhide()
         needFrame()
@@ -275,14 +273,20 @@ public final class TerminalView: NSView {
         )
     }
 
+    /// The layer at the view's pixel size and `scale`, changed only where it differs: a drawable
+    /// size set again, even to the same value, costs the layer its drawables.
     private func configureLayer(scale: Double) {
         guard let metalLayer else { return }
-        metalLayer.device = renderer.device
-        metalLayer.pixelFormat = .bgra8Unorm
-        metalLayer.colorspace = CGColorSpace(name: CGColorSpace.sRGB)
-        metalLayer.framebufferOnly = true
+        if metalLayer.device == nil {
+            metalLayer.device = renderer.device
+            metalLayer.pixelFormat = .bgra8Unorm
+            metalLayer.colorspace = CGColorSpace(name: CGColorSpace.sRGB)
+            metalLayer.framebufferOnly = true
+        }
+        let size = CGSize(width: pixelSize.width, height: pixelSize.height)
+        guard metalLayer.contentsScale != CGFloat(scale) || metalLayer.drawableSize != size else { return }
         metalLayer.contentsScale = scale
-        metalLayer.drawableSize = CGSize(width: pixelSize.width, height: pixelSize.height)
+        metalLayer.drawableSize = size
         needFrame()
     }
 
@@ -315,6 +319,7 @@ public final class TerminalView: NSView {
     /// Something the view shows changed: draw at the next refresh.
     func needFrame() {
         needsDraw = true
+        guard !isHiddenOrHasHiddenAncestor else { return }
         pacer.resume()
     }
 
@@ -389,8 +394,14 @@ public final class TerminalView: NSView {
             pacer.pause()
             return false
         }
+        guard !isHiddenOrHasHiddenAncestor else {
+            needsDraw = true
+            pacer.pause()
+            return false
+        }
         let read = CACurrentMediaTime()
-        defer { marks.refreshed(since: read) }
+        let work = Duration.threadCPU
+        defer { marks.refreshed(since: read, workSince: work) }
         guard let frame = try? link.screen.frame() else {
             pacer.pause()
             return false

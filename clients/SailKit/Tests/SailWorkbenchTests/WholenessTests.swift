@@ -54,37 +54,62 @@ import Testing
 
     static let directions = Direction.allCases
 
-    static func randomStep(_ bench: inout Workbench, _ random: inout Seeded, made: inout Int) -> String {
-        let size = CGSize(width: Double.random(in: 200 ... 1600, using: &random).rounded(), height: Double.random(in: 150 ... 1000, using: &random).rounded())
-        let least = CGSize(width: 50, height: 40)
+    /// Tab sizes from the least window's (420 by 572 beside the rail) to a large display's, with
+    /// the 10x3 minimum at 15 pt and at a large font, at scale 1 and 2.
+    static let windows = [
+        Window(size: CGSize(width: 420, height: 572), least: CGSize(width: 110, height: 70), scale: 2),
+        Window(size: CGSize(width: 1120, height: 772), least: CGSize(width: 110, height: 70), scale: 1),
+        Window(size: CGSize(width: 1120, height: 772), least: CGSize(width: 73.3, height: 41.7), scale: 2),
+        Window(size: CGSize(width: 2500, height: 1372), least: CGSize(width: 190, height: 120), scale: 2),
+    ]
+
+    /// The size invariant: no pane of any tab under the minimum.
+    static func panesUnderTheMinimum(_ bench: Workbench, _ window: Window) -> [String] {
+        bench.tabs.flatMap { tab in
+            bench.frames(of: tab.id, in: window.size, scale: window.scale).panes.compactMap { id, frame in
+                frame.width < window.least.width - 1e-9 || frame.height < window.least.height - 1e-9
+                    ? "tab \(tab.id.value)'s \(id) is \(frame.width) by \(frame.height), under \(window.least)" : nil
+            }
+        }
+    }
+
+    /// One window per sequence, as the app has: its tab's size, the panes' minimum and the scale.
+    struct Window {
+        let size: CGSize
+        let least: CGSize
+        let scale: Double
+    }
+
+    static func randomStep(_ bench: inout Workbench, _ random: inout Seeded, made: inout Int, window: Window) -> String {
+        let (size, least, scale) = (window.size, window.least, window.scale)
         let place = Place.thisMac(folder: "/f\(made % 3)")
         func session() -> String {
             made += 1
             return "mac-\(made)"
         }
         let panes = bench.panes.keys.sorted()
-        switch Int.random(in: 0 ..< 18, using: &random) {
+        switch Int.random(in: 0 ..< 22, using: &random) {
         case 0, 17: bench.newTab(session: session(), place: place); return "new tab"
         case 1, 2:
             let axis: Axis = Bool.random(using: &random) ? .sideBySide : .stacked
-            _ = bench.split(axis, session: session(), place: place, in: size, minimum: least, scale: 2); return "split \(axis)"
+            _ = bench.split(axis, session: session(), place: place, in: size, minimum: least, scale: scale); return "split \(axis)"
         case 3: if let pane = bench.focusedPane { bench.close(pane.id) }; return "close"
         case 4: if let tab = bench.selected { bench.closeTab(tab) }; return "close tab"
         case 5: if let pane = panes.randomElement(using: &random) { bench.focus(pane) }; return "focus"
         case 6:
             let direction = directions.randomElement(using: &random) ?? .left
-            bench.moveFocus(direction, in: size, scale: 2); return "move focus \(direction)"
+            bench.moveFocus(direction, in: size, scale: scale); return "move focus \(direction)"
         case 7: bench.focusNeighbour(next: Bool.random(using: &random)); return "neighbour"
         case 8:
             let direction = directions.randomElement(using: &random) ?? .left
-            bench.moveDivider(direction, by: 10, in: size, minimum: least, scale: 2); return "divider \(direction)"
+            bench.moveDivider(direction, by: 10, in: size, minimum: least, scale: scale); return "divider \(direction)"
         case 9:
-            let dividers = bench.frames(in: size, scale: 2).dividers
+            let dividers = bench.frames(in: size, scale: scale).dividers
             if let divider = dividers.randomElement(using: &random) {
-                bench.drag(divider.path, to: Double.random(in: -50 ... 1700, using: &random), in: size, minimum: least, scale: 2)
+                bench.drag(divider.path, to: Double.random(in: -50 ... 1700, using: &random), in: size, minimum: least, scale: scale)
             }
             return "drag"
-        case 10: bench.equalize(); return "equalize"
+        case 10: bench.equalize(in: size, minimum: least, scale: scale); return "equalize"
         case 11: bench.toggleZoom(); return "zoom"
         case 12: bench.selectNeighbourTab(next: Bool.random(using: &random)); return "neighbour tab"
         case 13:
@@ -96,9 +121,13 @@ import Testing
         case 15:
             if let pane = panes.randomElement(using: &random) { bench.setTitle("t\(made)", of: pane) }
             return "title"
+        case 16: if let tab = bench.tabs.randomElement(using: &random) { bench.select(tab.id) }; return "select"
+        case 18: bench.selectTab(at: Int.random(in: -1 ... 9, using: &random)); return "select at"
+        case 19: bench.selectLastTab(); return "last tab"
+        case 20: if let pane = panes.randomElement(using: &random) { bench.setFolder("file:///tmp", of: pane) }; return "folder"
         default:
-            if let pane = panes.randomElement(using: &random) { _ = bench.reopen(pane, session: session()) }
-            return "reopen"
+            let direction = directions.randomElement(using: &random) ?? .left
+            bench.moveDivider(direction, by: 400, in: size, minimum: least, scale: scale); return "far divider \(direction)"
         }
     }
 
@@ -110,12 +139,13 @@ import Testing
         for sequence in 0 ..< 10000 {
             var bench = Workbench()
             var made = 0
+            let window = Self.windows[sequence % Self.windows.count]
             bench.newTab(session: "mac-0", place: .thisMac(folder: "/"))
             var trail: [String] = ["new tab"]
             for _ in 0 ..< Int.random(in: 1 ... 30, using: &random) {
-                trail.append(Self.randomStep(&bench, &random, made: &made))
+                trail.append(Self.randomStep(&bench, &random, made: &made, window: window))
                 stepsRun += 1
-                let breaches = Self.breaches(bench)
+                let breaches = Self.breaches(bench) + Self.panesUnderTheMinimum(bench, window)
                 guard breaches.isEmpty else {
                     Issue.record("sequence \(sequence) after \(trail.joined(separator: ", ")): \(breaches.joined(separator: "; "))")
                     return

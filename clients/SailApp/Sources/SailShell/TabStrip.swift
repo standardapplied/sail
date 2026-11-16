@@ -18,11 +18,6 @@ public final class TabStrip: NSView {
         public let zoomed: Bool
     }
 
-    static let narrowest = 120.0
-    static let widest = 240.0
-    static let gap = 4.0
-    static let addSide = 24.0
-
     var onSelect: @MainActor (TabID) -> Void = { _ in }
     var onClose: @MainActor (TabID) -> Void = { _ in }
     var onNew: @MainActor () -> Void = {}
@@ -47,6 +42,7 @@ public final class TabStrip: NSView {
         super.init(frame: NSRect(x: 0, y: 0, width: 600, height: 28))
         wantsLayer = true
         add.isBordered = false
+        add.focusRingType = .none
         add.target = self
         add.action = #selector(addTab)
         add.toolTip = "New Tab"
@@ -76,12 +72,15 @@ public final class TabStrip: NSView {
         for (id, tab) in held where !items.contains(where: { $0.id == id }) {
             tab.removeFromSuperview()
         }
+        selectedIndex = items.firstIndex { $0.id == selected }
         setAccessibilityChildren(tabs)
         needsLayout = true
     }
 
+    private var selectedIndex: Int?
+
     private var row: TabRow {
-        TabRow(tabs: tabs.count, room: Double(bounds.width) - Self.addSide - Self.gap, narrowest: Self.narrowest, widest: Self.widest, gap: Self.gap)
+        TabRow(tabs: tabs.count, selected: selectedIndex, width: Double(bounds.width))
     }
 
     override public func layout() {
@@ -89,12 +88,12 @@ public final class TabStrip: NSView {
         let row = self.row
         var x = 0.0
         for (index, tab) in tabs.enumerated() {
-            tab.isHidden = index >= row.shown
+            tab.isHidden = !row.shows(index)
             guard !tab.isHidden else { continue }
             if !tab.dragging { tab.frame = CGRect(x: x, y: 4, width: row.width, height: max(0, Double(bounds.height) - 8)) }
-            x += row.width + Self.gap
+            x += row.width + TabRow.gap
         }
-        add.frame = CGRect(x: x, y: (Double(bounds.height) - Self.addSide) / 2, width: Self.addSide, height: Self.addSide)
+        add.frame = CGRect(x: x, y: (Double(bounds.height) - TabRow.addSide) / 2, width: TabRow.addSide, height: TabRow.addSide)
     }
 
     private func makeTab(_ id: TabID) -> TabButton {
@@ -110,9 +109,9 @@ public final class TabStrip: NSView {
     /// A dragged tab let go: its place is where its middle is.
     private func drop(_ tab: TabButton) {
         let row = self.row
-        let index = Int((Double(tab.frame.midX) / (row.width + Self.gap)).rounded(.down))
+        let place = Int((Double(tab.frame.midX) / (row.width + TabRow.gap)).rounded(.down))
         tab.dragging = false
-        onMove(tab.id, min(max(0, index), row.shown - 1))
+        onMove(tab.id, row.first + min(max(0, place), row.shown - 1))
         needsLayout = true
     }
 
@@ -159,6 +158,7 @@ public final class TabButton: NSView, NSTextFieldDelegate {
         label.font = .systemFont(ofSize: Look.Step.callout.points)
         label.lineBreakMode = .byTruncatingTail
         close.isBordered = false
+        close.focusRingType = .none
         close.target = self
         close.action = #selector(closeTab)
         close.toolTip = "Close Tab"
@@ -203,6 +203,11 @@ public final class TabButton: NSView, NSTextFieldDelegate {
 
     override public var mouseDownCanMoveWindow: Bool {
         false
+    }
+
+    override public func accessibilityPerformPress() -> Bool {
+        onSelect()
+        return true
     }
 
     /// The tab takes every click on it but its close button's and, while renaming, its field's: its

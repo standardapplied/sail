@@ -143,7 +143,18 @@ extension TerminalView {
         )
     }
 
+    /// The right or middle button: on a view that is not focused, its press only focuses it, as the
+    /// left button's does, and its release is not reported either.
     private func report(_ event: NSEvent, _ action: MouseAction, _ button: MouseButton) {
+        if action == .press, window?.firstResponder !== self {
+            window?.makeFirstResponder(self)
+            focusingClick = true
+            return
+        }
+        if action == .release, focusingClick {
+            focusingClick = false
+            return
+        }
         guard let link, link.screen.tracksMouse, !event.modifierFlags.contains(.shift), let place = place(of: event) else { return }
         let mouse = MouseInput(action: action, button: button, x: place.x, y: place.y, modifiers: Self.modifiers(event))
         input.async { link.send(mouse) }
