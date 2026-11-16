@@ -72,6 +72,11 @@ final class StatusBanner: NSView {
         isHidden ? nil : message.stringValue
     }
 
+    /// Runs what the button does, as a click on it does.
+    func press() {
+        handler()
+    }
+
     @objc private func act() {
         handler()
     }

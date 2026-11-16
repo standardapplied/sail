@@ -270,6 +270,11 @@ final class TerminalCore {
         return ghostty_terminal_get(handle, GHOSTTY_TERMINAL_DATA_MOUSE_TRACKING, &tracking) == GHOSTTY_SUCCESS && tracking
     }
 
+    var cursorAtPrompt: Bool {
+        var atPrompt = false
+        return ghostty_terminal_get(handle, GHOSTTY_TERMINAL_DATA_CURSOR_AT_PROMPT, &atPrompt) == GHOSTTY_SUCCESS && atPrompt
+    }
+
     private var onAlternateScreen: Bool {
         var screen = GHOSTTY_TERMINAL_SCREEN_PRIMARY
         return ghostty_terminal_get(handle, GHOSTTY_TERMINAL_DATA_ACTIVE_SCREEN, &screen) == GHOSTTY_SUCCESS

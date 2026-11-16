@@ -5,11 +5,12 @@ import SailLook
 import SailTerminalView
 
 /// "Sail": one window, 1180 by 800 and no smaller than 480 by 600, an icon rail beside the pane it
-/// selects: "This Mac" (the local terminal) or the account. The window's chrome is drawn from the
-/// look: a transparent title bar over a full-size content view, so the rail's tint and the pane's
-/// surface run to the top edge under the platform's own window buttons, which keep dragging and
-/// double-click to zoom. The look follows the appearance while the app runs. It asks the control
-/// plane who it is signed in as at launch and each time the app is activated.
+/// selects: "This Mac" (the local terminals, in tabs and splits) or the account. The window's chrome
+/// is drawn from the look: a transparent title bar over a full-size content view, so the rail's tint
+/// and the pane's surface run to the top edge under the platform's own window buttons, which keep
+/// dragging and double-click to zoom; with "This Mac" shown, its tabs fill the title bar's row after
+/// those buttons. The look follows the appearance while the app runs. It asks the control plane who
+/// it is signed in as at launch and each time the app is activated.
 @MainActor
 public final class ShellApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
     public static let title = "Sail"
@@ -18,12 +19,13 @@ public final class ShellApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
     public let window: NSWindow
     public let rail: Rail
     public let account: AccountPane
-    public let thisMac: TerminalPane
+    public let thisMac: WorkbenchView
     public private(set) var look: Look
 
     private let root = NSView()
     private let content = NSView()
     private var appearanceWatch: NSKeyValueObservation?
+    private var stripStart = NSLayoutConstraint()
 
     /// The app from its bundle: the fonts in `Contents/Resources/Fonts`, the host in
     /// `Contents/Helpers/sail`, the look the appearance names. `passkeys` makes the authenticator,
@@ -60,7 +62,7 @@ public final class ShellApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         } catch {
             throw .resources("the app's fonts cannot be read: \(error)")
         }
-        thisMac = try TerminalPane(fonts: fonts, helper: helper, look: look)
+        thisMac = try WorkbenchView(fonts: fonts, helper: helper, look: look)
         account = AccountPane(
             account: Account(authenticator: passkeys { [weak window] in window }, vault: KeychainVault()), look: look, title: title, mono: mono
         )
@@ -76,6 +78,7 @@ public final class ShellApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         }
         window.center()
         window.makeKeyAndOrderFront(nil)
+        placeTheStrip()
         select(UserDefaults.standard.string(forKey: Self.paneKey).flatMap { Rail.Item(rawValue: $0) } ?? .account)
         NSApp.activate(ignoringOtherApps: true)
     }
@@ -88,26 +91,24 @@ public final class ShellApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         true
     }
 
+    /// Quitting detaches every terminal and asks nothing: each session lives on at the host.
     public func applicationWillTerminate(_: Notification) {
-        thisMac.close()
+        thisMac.detachAll()
     }
 
     /// Shows `item`'s pane and remembers it for the next launch.
     public func select(_ item: Rail.Item) {
-        let pane: NSView = item == .thisMac ? thisMac : account
-        content.subviews.filter { $0 !== pane }.forEach { $0.removeFromSuperview() }
-        if pane.superview == nil {
-            pane.frame = content.bounds
-            pane.autoresizingMask = [.width, .height]
-            content.addSubview(pane)
-        }
+        thisMac.isHidden = item != .thisMac
+        thisMac.strip.isHidden = thisMac.isHidden
+        account.isHidden = !thisMac.isHidden
         rail.show(item)
         paintStrip()
         UserDefaults.standard.set(item.rawValue, forKey: Self.paneKey)
-        window.title = Self.title
         if item == .thisMac {
             thisMac.shown()
+            thisMac.apply()
         } else {
+            window.title = Self.title
             window.makeFirstResponder(account.address)
         }
     }
@@ -122,9 +123,15 @@ public final class ShellApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         paintStrip()
     }
 
-    /// The strip under the title bar beside the rail: the selected pane's surface.
+    /// The tabs start a space after the window's zoom button, where the window put it.
+    private func placeTheStrip() {
+        let zoomEnd = Double(window.standardWindowButton(.zoomButton)?.frame.maxX ?? 0)
+        stripStart.constant = max(Rail.width, zoomEnd + Look.Space.s)
+    }
+
+    /// The title bar's row beside the rail: the tabs' `chrome` for "This Mac", else the pane's surface.
     private func paintStrip() {
-        root.layer?.backgroundColor = NSColor(rail.selected == .thisMac ? thisMac.palette.background : look.canvas).cgColor
+        root.layer?.backgroundColor = NSColor(rail.selected == .thisMac ? look.chrome : look.canvas).cgColor
     }
 
     /// Runs the app, `configure` given it before it launches; a bundle missing its fonts or host
@@ -161,10 +168,19 @@ public final class ShellApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         window.titleVisibility = .hidden
         root.wantsLayer = true
         paintStrip()
-        rail.translatesAutoresizingMaskIntoConstraints = false
-        content.translatesAutoresizingMaskIntoConstraints = false
-        root.addSubview(rail)
-        root.addSubview(content)
+        let strip = thisMac.strip
+        stripStart = strip.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: Rail.width)
+        for view in [rail, content, strip] as [NSView] {
+            view.translatesAutoresizingMaskIntoConstraints = false
+            root.addSubview(view)
+        }
+        for side in [thisMac, account] as [NSView] {
+            side.frame = content.bounds
+            side.autoresizingMask = [.width, .height]
+            side.isHidden = true
+            content.addSubview(side)
+        }
+        strip.isHidden = true
         window.contentView = root
         let belowTheTitleBar = (window.contentLayoutGuide as? NSLayoutGuide)?.topAnchor ?? root.topAnchor
         NSLayoutConstraint.activate([
@@ -172,22 +188,29 @@ public final class ShellApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
             rail.bottomAnchor.constraint(equalTo: root.bottomAnchor), content.leadingAnchor.constraint(equalTo: rail.trailingAnchor),
             content.trailingAnchor.constraint(equalTo: root.trailingAnchor), content.topAnchor.constraint(equalTo: belowTheTitleBar),
             content.bottomAnchor.constraint(equalTo: root.bottomAnchor),
+            stripStart,
+            strip.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -Look.Space.s), strip.topAnchor.constraint(equalTo: root.topAnchor),
+            strip.bottomAnchor.constraint(equalTo: belowTheTitleBar),
         ])
         rail.onSelect = { [weak self] item in self?.select(item) }
+        thisMac.onShow = { [weak self] in
+            guard let self, rail.selected != .thisMac else { return }
+            select(.thisMac)
+        }
         thisMac.onTitle = { [weak self] title in
             guard let self, rail.selected == .thisMac else { return }
-            window.title = title.isEmpty ? Self.title : title
+            window.title = title
         }
     }
 
-    private func menu() -> NSMenu {
+    func menu() -> NSMenu {
         let bar = NSMenu()
-        func submenu(_ title: String, _ items: [NSMenuItem]) {
+        func submenu(_ title: String, _ items: [NSMenuItem]) -> NSMenuItem {
             let menu = NSMenu(title: title)
             items.forEach(menu.addItem)
             let holder = NSMenuItem(title: title, action: nil, keyEquivalent: "")
             holder.submenu = menu
-            bar.addItem(holder)
+            return holder
         }
         func item(_ title: String, _ action: Selector, _ key: String, _ modifiers: NSEvent.ModifierFlags = .command, target: AnyObject? = nil) -> NSMenuItem {
             let item = NSMenuItem(title: title, action: action, keyEquivalent: key)
@@ -195,24 +218,75 @@ public final class ShellApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
             item.target = target
             return item
         }
-        let bigger = item("Bigger", #selector(TerminalView.increaseFontSize(_:)), "=")
-        bigger.isHidden = true
-        bigger.allowsKeyEquivalentWhenHidden = true
-        submenu(Self.title, [
+        func hidden(_ item: NSMenuItem) -> NSMenuItem {
+            item.isHidden = true
+            item.allowsKeyEquivalentWhenHidden = true
+            return item
+        }
+        func arrow(_ key: Int) -> String {
+            UnicodeScalar(UInt16(key)).map { String(Character($0)) } ?? ""
+        }
+        let (up, down, left, right) = (arrow(NSUpArrowFunctionKey), arrow(NSDownArrowFunctionKey), arrow(NSLeftArrowFunctionKey), arrow(NSRightArrowFunctionKey))
+        let terminals = thisMac
+        let tabs = (1 ... 8).map { number in
+            let tab = hidden(item("Select Tab \(number)", #selector(WorkbenchView.selectTab(_:)), "\(number)", target: terminals))
+            tab.tag = number
+            return tab
+        }
+        let last = hidden(item("Select Last Tab", #selector(WorkbenchView.selectTab(_:)), "9", target: terminals))
+        last.tag = 9
+        let app: [NSMenuItem] = [
             item("Sign Out", #selector(AccountPane.signOutHere(_:)), "", target: account), .separator(),
             item("Quit \(Self.title)", #selector(NSApplication.terminate(_:)), "q"),
-        ])
-        submenu("Edit", [
+        ]
+        let file: [NSMenuItem] = [
+            item("New Tab", #selector(WorkbenchView.newTab(_:)), "t", target: terminals), .separator(),
+            item("Split Right", #selector(WorkbenchView.splitRight(_:)), "d", target: terminals),
+            item("Split Down", #selector(WorkbenchView.splitDown(_:)), "D", [.command, .shift], target: terminals), .separator(),
+            item("Close", #selector(WorkbenchView.closePane(_:)), "w", target: terminals),
+            item("Close Tab", #selector(WorkbenchView.closeTab(_:)), "w", [.command, .option], target: terminals),
+            item("Close Window", #selector(NSWindow.performClose(_:)), "W", [.command, .shift]),
+        ]
+        let edit: [NSMenuItem] = [
             item("Cut", #selector(NSText.cut(_:)), "x"), item("Copy", #selector(NSText.copy(_:)), "c"),
             item("Paste", #selector(NSText.paste(_:)), "v"), item("Select All", #selector(NSText.selectAll(_:)), "a"),
-        ])
-        submenu("View", [
-            item("Bigger", #selector(TerminalView.increaseFontSize(_:)), "+"), bigger,
+        ]
+        let view: [NSMenuItem] = [
+            item("Bigger", #selector(TerminalView.increaseFontSize(_:)), "+"), hidden(item("Bigger", #selector(TerminalView.increaseFontSize(_:)), "=")),
             item("Smaller", #selector(TerminalView.decreaseFontSize(_:)), "-"),
             item("Actual Size", #selector(TerminalView.resetFontSize(_:)), "0"), .separator(),
-            item("Show Latency", #selector(TerminalPane.toggleLatency(_:)), "l", [.command, .option], target: thisMac),
-        ])
-        submenu("Window", [item("Minimize", #selector(NSWindow.performMiniaturize(_:)), "m"), item("Close", #selector(NSWindow.performClose(_:)), "w")])
+            item("Rename Tab", #selector(WorkbenchView.renameTab(_:)), "", target: terminals),
+            item("Show Latency", #selector(WorkbenchView.toggleLatency(_:)), "l", [.command, .option], target: terminals),
+        ]
+        let selectSplit: [NSMenuItem] = [
+            item("Select Split Above", #selector(WorkbenchView.selectSplitAbove(_:)), up, [.command, .option], target: terminals),
+            item("Select Split Below", #selector(WorkbenchView.selectSplitBelow(_:)), down, [.command, .option], target: terminals),
+            item("Select Split Left", #selector(WorkbenchView.selectSplitLeft(_:)), left, [.command, .option], target: terminals),
+            item("Select Split Right", #selector(WorkbenchView.selectSplitRight(_:)), right, [.command, .option], target: terminals),
+        ]
+        let resizeSplit: [NSMenuItem] = [
+            item("Equalize Splits", #selector(WorkbenchView.equalizeSplits(_:)), "=", [.command, .control], target: terminals), .separator(),
+            item("Move Divider Up", #selector(WorkbenchView.moveDividerUp(_:)), up, [.command, .control], target: terminals),
+            item("Move Divider Down", #selector(WorkbenchView.moveDividerDown(_:)), down, [.command, .control], target: terminals),
+            item("Move Divider Left", #selector(WorkbenchView.moveDividerLeft(_:)), left, [.command, .control], target: terminals),
+            item("Move Divider Right", #selector(WorkbenchView.moveDividerRight(_:)), right, [.command, .control], target: terminals),
+        ]
+        var windows: [NSMenuItem] = [
+            item("Minimize", #selector(NSWindow.performMiniaturize(_:)), "m"), .separator(),
+            item("Zoom Split", #selector(WorkbenchView.zoomSplit(_:)), "\r", [.command, .shift], target: terminals),
+            item("Select Previous Split", #selector(WorkbenchView.selectPreviousSplit(_:)), "[", target: terminals),
+            item("Select Next Split", #selector(WorkbenchView.selectNextSplit(_:)), "]", target: terminals),
+            submenu("Select Split", selectSplit), submenu("Resize Split", resizeSplit), .separator(),
+            item("Show Previous Tab", #selector(WorkbenchView.showPreviousTab(_:)), "{", [.command, .shift], target: terminals),
+            item("Show Next Tab", #selector(WorkbenchView.showNextTab(_:)), "}", [.command, .shift], target: terminals),
+        ]
+        windows += tabs
+        windows.append(last)
+        bar.addItem(submenu(Self.title, app))
+        bar.addItem(submenu("File", file))
+        bar.addItem(submenu("Edit", edit))
+        bar.addItem(submenu("View", view))
+        bar.addItem(submenu("Window", windows))
         return bar
     }
 }

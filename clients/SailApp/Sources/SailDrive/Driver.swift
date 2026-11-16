@@ -1,4 +1,5 @@
 import AppKit
+import SailLook
 import SailRenderer
 import SailShell
 import SailSurface
@@ -6,6 +7,7 @@ import SailTerminal
 import SailTerminalView
 import SailTestPasskey
 import SailVT
+import SailWorkbench
 
 /// Runs a drive script in the real app against the real local host and a real control plane, the
 /// software passkey in the platform's place. Every key, click and drag is an `NSEvent` sent through
@@ -23,10 +25,19 @@ final class Driver {
     private let steps: [Step]
     let out: URL
     var results: [Result] = []
-    private var measures: [Measure] = []
+    var measures: [Measure] = []
     private var bench: [String: Double] = [:]
     private var started = false
-    private let mainThread = Heartbeat.onTheMainThread()
+    var panes4: [String: Double] = [:]
+    /// The session `remember` kept.
+    var remembered: String?
+    lazy var standIn: TerminalView = {
+        guard let fonts = Bundle.main.resourceURL.flatMap({ try? TerminalFonts(directory: $0.appending(path: "Fonts")) }),
+              let view = try? TerminalView(fonts: fonts)
+        else { fatalError("the drive's bundle has no fonts for a terminal view") }
+        return view
+    }()
+    let mainThread = Heartbeat.onTheMainThread()
     private let ownThread = Heartbeat.onItsOwnThread()
 
     struct Result: Encodable {
@@ -57,6 +68,7 @@ final class Driver {
         let steps: [Result]
         let measures: [Measure]
         let bench: [String: Double]
+        let panes4: [String: Double]
     }
 
     init(shell: ShellApp, passkey: SoftwarePasskey, signed: Bool, script: Script, out: URL) {
@@ -68,13 +80,20 @@ final class Driver {
         askedAtStart = passkey.asked
     }
 
+    /// The focused pane of "This Mac", which the terminal steps act on.
+    var pane: TerminalPane? {
+        shell.thisMac.focused
+    }
+
+    /// The focused pane's view; with none, a view that draws nothing, so a step that needs one fails
+    /// on what it finds.
     var terminal: TerminalView {
-        shell.thisMac.terminal
+        pane?.terminal ?? standIn
     }
 
     /// Whether the steps are on "This Mac" with a session drawn.
     var onTerminal: Bool {
-        shell.rail.selected == .thisMac && shell.thisMac.session != nil
+        shell.rail.selected == .thisMac && pane?.session != nil
     }
 
     /// Runs the script once. App Nap is held off for the run: it slows a window that is not in
@@ -124,7 +143,7 @@ final class Driver {
         let passed = results.count == steps.count && results.allSatisfy(\.ok)
         let report = Report(
             passed: passed, hertz: shell.window.screen?.maximumFramesPerSecond ?? 0, scale: terminal.metrics.scale, steps: results,
-            measures: measures, bench: bench
+            measures: measures, bench: bench, panes4: panes4
         )
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
@@ -136,6 +155,9 @@ final class Driver {
     private func perform(_ step: Step, name: String) async -> (Bool, String) {
         if let account = await performAccount(step) {
             return account
+        }
+        if let workbench = await performWorkbench(step) {
+            return workbench
         }
         if let text = step.type {
             for character in text { key(character) }
@@ -224,7 +246,8 @@ final class Driver {
             resetLatency()
             return (true, "")
         }
-        if let line = step.line {
+        if let wanted = step.line {
+            let line = wanted.replacingOccurrences(of: "{home}", with: NSHomeDirectory())
             let found = await waitUntil(step.seconds ?? 10) {
                 let lines = self.lines
                 return lines.indices.contains { index in
@@ -256,8 +279,8 @@ final class Driver {
             return (found, found ? "" : "the screen never showed '\(text)'")
         }
         if let banner = step.banner {
-            let found = await waitUntil(step.seconds ?? 15) { self.shell.thisMac.status?.contains(banner) == true }
-            return (found, "the banner says '\(shell.thisMac.status ?? "nothing")'")
+            let found = await waitUntil(step.seconds ?? 15) { self.pane?.status?.contains(banner) == true }
+            return (found, "the banner says '\(pane?.status ?? "nothing")'")
         }
         if step.still == true {
             let before = screenText
@@ -275,12 +298,13 @@ final class Driver {
             return (true, "")
         }
         if step.attached == true {
-            let attached = await waitUntil(step.seconds ?? 20) { self.shell.thisMac.session?.state.phase == .attached }
-            return (attached, "the session is \(shell.thisMac.session.map { "\($0.state.phase)" } ?? "none")")
+            let attached = await waitUntil(step.seconds ?? 20) { self.pane?.session?.state.phase == .attached }
+            return (attached, "the session is \(pane?.session.map { "\($0.state.phase)" } ?? "none")")
         }
         if step.newSession == true {
-            await shell.thisMac.open(fresh: true)
-            return (true, "")
+            guard let pane else { return (false, "no pane is focused") }
+            pane.pressBanner()
+            return (shell.thisMac.focused !== pane, "the banner's button gave the pane's place a new pane")
         }
         return (false, "the step names no action")
     }
@@ -290,7 +314,7 @@ final class Driver {
     /// refresh and p95 ≤ 2; and, on frames the display reported a presentation time for (the CI
     /// display reports few or none), output to presented p50 ≤ 1 refresh and p95 ≤ 2, and key to echo
     /// on the display p95 ≤ 50 ms. Estimated presentation times are reported, never gated.
-    private func measure(_ keys: Int, interval: Int, name: String) async -> (Bool, String) {
+    func measure(_ keys: Int, interval: Int, name: String) async -> (Bool, String) {
         resetLatency()
         let start = ContinuousClock.now
         for index in 1 ... max(1, keys) {
@@ -319,14 +343,14 @@ final class Driver {
         return (missed.isEmpty, missed.isEmpty ? "within every budget" : "missed: \(missed.joined(separator: "; "))")
     }
 
-    private func measurement(_ name: String, keys: Int, figures: LatencyFigures, budgets: [String: Bool]) -> Measure {
+    func measurement(_ name: String, keys: Int, figures: LatencyFigures, budgets: [String: Bool]) -> Measure {
         Measure(
             name: name, drawables: terminal.drawableCount, keys: keys, figures: figures, budgets: budgets,
             mainThreadHeld: mainThread.longest, ownThreadHeld: ownThread.longest
         )
     }
 
-    private func resetLatency() {
+    func resetLatency() {
         terminal.resetLatency()
         mainThread.reset()
         ownThread.reset()
@@ -338,7 +362,7 @@ final class Driver {
 
     /// Whether the app is active, its window on screen and key, and which app is in front: what a
     /// failed step's frames depended on.
-    private var whereTheWindowIs: String {
+    var whereTheWindowIs: String {
         let window = shell.window
         return "the app is \(NSApp.isActive ? "" : "not ")active, its window is \(window.occlusionState.contains(.visible) ? "" : "not ")"
             + "visible and \(window.isKeyWindow ? "" : "not ")key, the app in front is "
@@ -363,17 +387,17 @@ final class Driver {
     /// How long a step's screen may take to be drawn by the view before the step fails.
     static let drawDeadline = 5.0
 
-    private static func button(_ title: String, in view: NSView?) -> NSButton? {
+    static func button(_ title: String, in view: NSView?) -> NSButton? {
         guard let view else { return nil }
         if let button = view as? NSButton, button.title == title { return button }
         return view.subviews.lazy.compactMap { button(title, in: $0) }.first
     }
 
-    private var screenText: String {
-        (try? shell.thisMac.session?.screen.text()) ?? ""
+    var screenText: String {
+        (try? pane?.session?.screen.text()) ?? ""
     }
 
-    private var lines: [String] {
+    var lines: [String] {
         screenText.split(separator: "\n", omittingEmptySubsequences: false).map { $0.trimmingCharacters(in: .whitespaces) }
     }
 
@@ -385,7 +409,7 @@ final class Driver {
         let waited = (ContinuousClock.now - began) / .milliseconds(1)
         guard let toggle = Keys.named("l", modifiers: ["command", "option"]) else { return (false, "no ⌥⌘L") }
         send(toggle)
-        let shown = shell.thisMac.latencyShown ?? ""
+        let shown = pane?.latencyShown ?? ""
         let lines = shown.split(separator: "\n")
         let keys = shown.components(separatedBy: "(").dropFirst().compactMap { part in Int(part.prefix(while: \.isNumber)) }.reduce(0, +)
         let figures = terminal.latency
@@ -406,11 +430,11 @@ final class Driver {
         return true
     }
 
-    private func key(_ character: Character) {
+    func key(_ character: Character) {
         if let key = Keys.typing(character) { send(key) }
     }
 
-    private func send(_ key: Keys.Key) {
+    func send(_ key: Keys.Key) {
         for type in [NSEvent.EventType.keyDown, .keyUp] {
             guard let event = NSEvent.keyEvent(
                 with: type, location: .zero, modifierFlags: key.flags, timestamp: ProcessInfo.processInfo.systemUptime,

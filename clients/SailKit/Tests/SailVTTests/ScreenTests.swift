@@ -113,6 +113,20 @@ import Testing
         #expect(events == [.notification(title: "Build", body: "done"), .workingDirectory("file://box/srv")])
     }
 
+    /// Scenario 12: a prompt marked (OSC 133 A, then B) holds the cursor; output begun (C) does
+    /// not; and a shell that marks nothing is never at a prompt.
+    @Test func theCursorIsAtAPromptOnlyWhileTheShellSaysSo() throws {
+        let marked = try screen(columns: 20, rows: 3)
+        #expect(!marked.cursorAtPrompt)
+        _ = marked.feed(Array("\u{1b}]133;A\u{07}$ \u{1b}]133;B\u{07}".utf8))
+        #expect(marked.cursorAtPrompt)
+        _ = marked.feed(Array("ls\r\n\u{1b}]133;C\u{07}".utf8))
+        #expect(!marked.cursorAtPrompt)
+        let unmarked = try screen(columns: 20, rows: 3)
+        _ = unmarked.feed(Array("$ ".utf8))
+        #expect(!unmarked.cursorAtPrompt)
+    }
+
     @Test func aFocusReportGoesOnlyToAProgramThatAskedForThem() throws {
         let screen = try screen(columns: 20, rows: 1)
         #expect(screen.focus(false).isEmpty)

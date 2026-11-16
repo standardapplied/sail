@@ -15,6 +15,8 @@ import SailVT
 public final class TerminalView: NSView {
     /// What the session tells, as it tells it: phases, the title, the bell, the working directory.
     public var onEvent: @MainActor (SessionEvent) -> Void = { _ in }
+    /// Told when the view becomes its window's first responder.
+    public var onFocus: @MainActor () -> Void = {}
     /// The pasteboard ⌘C writes and ⌘V reads: the general one, unless a test gives another.
     public var pasteboard = NSPasteboard.general
     /// Asks the person whether to paste text of `lines` lines into a program that did not ask for
@@ -51,8 +53,8 @@ public final class TerminalView: NSView {
     private var broughtDrawable: (any CAMetalDrawable)?
     /// The cell the pointer last moved into with no button held.
     var hovered: CellPoint?
-    /// Watches for Escape while the paste sheet is up.
-    var escapeWatch: Any?
+    /// The button went down on a view that was not focused: that click only focuses it.
+    var focusingClick = false
     var gatherer = ScrollGatherer()
     private(set) var focused = false
     private(set) var lastFrame: ScreenFrame?
@@ -104,7 +106,16 @@ public final class TerminalView: NSView {
         marks.figures
     }
 
-    /// Starts the latency figures from nothing.
+    /// Bytes put into the view's atlases so far.
+    public var atlasBytes: Int {
+        renderer.atlasUploadBytes
+    }
+
+    /// How many frames the view has committed since it was made.
+    public var framesCommitted: Int {
+        committedFrames
+    }
+
     /// Where drawing stands, in words: frames presented and committed, the display link, its
     /// refreshes, and whether a drawable is awaited. For a step whose frames did not come.
     public var drawingState: String {
@@ -113,6 +124,7 @@ public final class TerminalView: NSView {
             + "\(pacer.isIdle ? "paused" : "running") after \(figures.refresh.count) refreshes; \(awaitingDrawable ? "" : "not ")awaiting a drawable"
     }
 
+    /// Starts the latency figures from nothing.
     public func resetLatency() {
         marks.reset()
     }
@@ -222,6 +234,13 @@ public final class TerminalView: NSView {
         layoutGrid()
     }
 
+    /// A hidden view draws nothing (its display link calls nothing, and output does not draw it);
+    /// shown again, it draws its screen as it is now at the next refresh.
+    override public func viewDidUnhide() {
+        super.viewDidUnhide()
+        needFrame()
+    }
+
     override public func setFrameSize(_ size: NSSize) {
         super.setFrameSize(size)
         configureLayer(scale: renderer.faces.scale)
@@ -301,7 +320,7 @@ public final class TerminalView: NSView {
     /// display refresh rather than the one after. A view paused for want of a drawable is not
     /// idle: output does not ask for one again (an occluded window's ask can block for a second).
     func drawNowIfIdle() {
-        guard pacer.isIdle, !awaitingDrawable, refresh(target: CACurrentMediaTime() + refreshInterval) else { return }
+        guard pacer.isIdle, !awaitingDrawable, !isHiddenOrHasHiddenAncestor, refresh(target: CACurrentMediaTime() + refreshInterval) else { return }
         pacer.resume()
     }
 
@@ -424,6 +443,7 @@ public final class TerminalView: NSView {
 
     override public func becomeFirstResponder() -> Bool {
         updateFocus(responder: true)
+        onFocus()
         return true
     }
 
@@ -466,7 +486,6 @@ public final class TerminalView: NSView {
 
     isolated deinit {
         tasks.forEach { $0.cancel() }
-        if let escapeWatch { NSEvent.removeMonitor(escapeWatch) }
     }
 
     override public func isAccessibilityElement() -> Bool {

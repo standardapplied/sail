@@ -5,8 +5,14 @@ import SailVT
 
 /// The pointer, the wheel, copy, paste and the font size.
 extension TerminalView {
+    /// A click on a view that is not the focused one only focuses it: the program gets no report and
+    /// nothing is selected, until the button goes up.
     override public func mouseDown(with event: NSEvent) {
-        window?.makeFirstResponder(self)
+        focusingClick = window?.firstResponder !== self
+        guard !focusingClick else {
+            window?.makeFirstResponder(self)
+            return
+        }
         guard let link, let place = place(of: event) else { return }
         let action = pointer.down(
             at: place.cell, clicks: event.clickCount, shift: event.modifierFlags.contains(.shift), programTracksMouse: link.screen.tracksMouse
@@ -18,11 +24,15 @@ extension TerminalView {
     /// reported whatever cell it is in.
     override public func mouseDragged(with event: NSEvent) {
         hovered = nil
-        guard let place = place(of: event) else { return }
+        guard !focusingClick, let place = place(of: event) else { return }
         apply(pointer.dragged(to: place.cell), MouseInput(action: .motion, button: .left, x: place.x, y: place.y, modifiers: Self.modifiers(event)))
     }
 
     override public func mouseUp(with event: NSEvent) {
+        guard !focusingClick else {
+            focusingClick = false
+            return
+        }
         guard let place = place(of: event) else { return }
         apply(pointer.up(), MouseInput(action: .release, button: .left, x: place.x, y: place.y, modifiers: Self.modifiers(event)))
     }
@@ -125,51 +135,14 @@ extension TerminalView {
         }
     }
 
-    /// The paste sheet: the line count, the risk in a sentence, Paste in the accent (its label the
-    /// appearance's `onAccent`, bold, as text on the accent always is), and Cancel. Neither answers
-    /// Return: Paste would run what the sheet warns of, and a Cancel answering it would be drawn as
-    /// the default button, in the system accent. Escape cancels: the keys are given once the sheet is
-    /// laid out, which gives the first button Return (taken away here), and Escape is watched for while
-    /// the sheet is up.
+    /// The paste sheet: the line count and the risk in a sentence, as a ``Confirmation``.
     func presentPasteSheet(lines: Int, answer: @escaping @MainActor (Bool) -> Void) {
-        guard let window else {
-            answer(false)
-            return
-        }
-        let alert = NSAlert()
-        alert.messageText = lines == 1 ? "Paste this line?" : "Paste \(lines) lines?"
-        alert.informativeText = "The program in this terminal did not ask for pastes, so each line may run as a command as it arrives."
-        let paste = alert.addButton(withTitle: "Paste")
-        _ = alert.addButton(withTitle: "Cancel")
-        let look: Look = window.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .aqua ? .light : .dark
-        paste.bezelColor = NSColor(look.accent)
-        paste.attributedTitle = NSAttributedString(
-            string: "Paste", attributes: [.foregroundColor: NSColor(look.onAccent), .font: NSFont.boldSystemFont(ofSize: NSFont.systemFontSize)]
+        guard let window else { return answer(false) }
+        Confirmation.ask(
+            lines == 1 ? "Paste this line?" : "Paste \(lines) lines?",
+            detail: "The program in this terminal did not ask for pastes, so each line may run as a command as it arrives.",
+            action: "Paste", on: window, answer: answer
         )
-        alert.beginSheetModal(for: window) { [weak self] response in
-            MainActor.assumeIsolated {
-                self?.stopWatchingEscape()
-                answer(response == .alertFirstButtonReturn)
-            }
-        }
-        paste.keyEquivalent = ""
-        watchEscape(cancelling: alert.window, on: window)
-    }
-
-    private func watchEscape(cancelling sheet: NSWindow, on window: NSWindow) {
-        stopWatchingEscape()
-        let escape: UInt16 = 0x35
-        escapeWatch = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak sheet, weak window] event in
-            guard event.keyCode == escape, let sheet, event.window === sheet else { return event }
-            MainActor.assumeIsolated { window?.endSheet(sheet, returnCode: .alertSecondButtonReturn) }
-            return nil
-        }
-    }
-
-    private func stopWatchingEscape() {
-        guard let watch = escapeWatch else { return }
-        NSEvent.removeMonitor(watch)
-        escapeWatch = nil
     }
 
     private func report(_ event: NSEvent, _ action: MouseAction, _ button: MouseButton) {

@@ -4147,6 +4147,32 @@ dark/light change while the app runs (the terminal's palette at its next session
 zip `ditto` made, uploaded unarchived, so one unzip gives `Sail.app`; CI checks the download as
 Finder unpacks it.
 
+### The Sail app's terminals: tabs and splits
+
+"This Mac" is a `Workbench` value (SailKit's `SailWorkbench`, Foundation only, Linux-tested): tabs in
+order, the selected one, and each tab's layout, a pane or a split (axis, ratio, two layouts), its name,
+focused pane, focus history and zoomed pane. Every command is an operation on the value; the app
+(`WorkbenchView`) opens or ends the sessions it names and draws the value, setting frames and
+`isHidden` only. Frames are rounded to the display's pixels; a divider is 1 pt in a 7 pt area; no pane
+goes under 10 columns by 3 rows and the padding.
+
+- **W1. The value is whole after every operation:** each split's ratio strictly inside (0, 1), no tab
+  empty, each tab's focused and zoomed panes in its tree, the selected tab one of the tabs, pane ids
+  and session names unique.
+- **W2. One view per session for life:** a pane's view is made once, attaches one session once, and
+  stays in its tab's view until the pane closes; "Open a New Session" makes a new pane in its place.
+- **W6. Persistence stores arrangement, never existence:** `workbench.arrangement` keeps tabs, trees,
+  ratios, names, focused sessions and the selected tab; at launch only panes whose sessions the host
+  lists live come back, and nothing stored opens a session.
+- **W7. A close that may end a running program asks,** unless the cursor is on a prompt the shell
+  marked (OSC 133) or the session is over.
+
+The strip lies in the title bar's row after the zoom button, on `chrome`; a tab takes every click on
+it and never moves the window, and the strip's empty part is a plain view, so there the title bar's
+dragging and double-click action stay the system's. A hidden view draws nothing and draws its screen
+as it is at the next refresh when shown. Shader library and pipelines are made once per Metal device
+and shared; each view keeps its own command queue, atlases and display link.
+
 ## Continuous integration
 
 One workflow, `.github/workflows/ci.yml`, runs on a pull request, on a push to main and on

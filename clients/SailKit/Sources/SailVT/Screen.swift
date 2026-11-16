@@ -223,6 +223,12 @@ public final class Screen: Sendable {
         parts.withLock { $0.core.tracksMouse }
     }
 
+    /// Whether the cursor is on a shell's prompt or its input, as the shell marked them (OSC 133):
+    /// false when no marks came, and on the alternate screen.
+    public var cursorAtPrompt: Bool {
+        parts.withLock { $0.core.cursorAtPrompt }
+    }
+
     /// Scrolls `lines` (up is negative) at a pointer place: the wheel's report to a program that
     /// tracks the mouse, arrow keys to a full-screen program that asked for alternate scroll (mode
     /// 1007), or else the viewport through its history, which sends nothing.

@@ -75,14 +75,9 @@ public final class TerminalRenderer {
         self.sides = sides
         guard let queue = device.makeCommandQueue() else { throw .unavailable("no Metal command queue could be made") }
         self.queue = queue
-        let library: any MTLLibrary
-        do {
-            library = try device.makeLibrary(source: Shaders.source, options: nil)
-        } catch {
-            throw .unavailable("the terminal's shaders did not compile: \(error)")
-        }
-        solidPipeline = try Self.pipeline(device, library, vertex: "solidVertex", fragment: "solidFragment")
-        glyphPipeline = try Self.pipeline(device, library, vertex: "glyphVertex", fragment: "glyphFragment")
+        let pipelines = try Self.pipelines(for: device)
+        solidPipeline = pipelines.0
+        glyphPipeline = pipelines.1
         let frames: FrameLedger
         do {
             frames = try FrameLedger()
@@ -331,6 +326,32 @@ public final class TerminalRenderer {
             throw .unavailable("the terminal font at \(points) pt: \(error)")
         }
     }
+
+    /// The two pipelines for `device`, their shaders compiled once in the process and shared by
+    /// every renderer on that device: compiling from source each time a pane opens costs a frame.
+    private static func pipelines(for device: any MTLDevice) throws(RenderError) -> (any MTLRenderPipelineState, any MTLRenderPipelineState) {
+        if let made = made.withLock({ $0[device.registryID] }) { return made.pipelines }
+        let library: any MTLLibrary
+        do {
+            library = try device.makeLibrary(source: Shaders.source, options: nil)
+        } catch {
+            throw .unavailable("the terminal's shaders did not compile: \(error)")
+        }
+        let pipelines = try (
+            pipeline(device, library, vertex: "solidVertex", fragment: "solidFragment"),
+            pipeline(device, library, vertex: "glyphVertex", fragment: "glyphFragment")
+        )
+        made.withLock { $0[device.registryID] = Pipelines(pipelines: pipelines) }
+        return pipelines
+    }
+
+    /// Pipeline states are thread-safe and immutable once made (Metal's own guarantee), so one
+    /// pair serves every renderer.
+    private struct Pipelines: @unchecked Sendable {
+        let pipelines: (any MTLRenderPipelineState, any MTLRenderPipelineState)
+    }
+
+    private static let made = Mutex<[UInt64: Pipelines]>([:])
 
     private static func pipeline(
         _ device: any MTLDevice, _ library: any MTLLibrary, vertex: String, fragment: String
