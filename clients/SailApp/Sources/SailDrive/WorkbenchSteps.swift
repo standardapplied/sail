@@ -207,7 +207,10 @@ extension Driver {
         return (followed == max(1, moves), "the panes followed \(followed) of \(max(1, moves)) moves; \(timing); \(arrangementSaid)")
     }
 
+    /// The middle of the tab at `index` in window points, the window laid out first as it is
+    /// before it is drawn: a tab is where a person sees it.
     private func tabMiddle(_ index: Int) -> NSPoint? {
+        shell.window.layoutIfNeeded()
         let tabs = workbench.strip.tabs
         guard tabs.indices.contains(index) else { return nil }
         return tabs[index].convert(NSPoint(x: tabs[index].bounds.midX, y: tabs[index].bounds.midY), to: nil)
@@ -216,9 +219,10 @@ extension Driver {
     /// Scenario 28: the tab at `from` pressed, dragged to the middle of the tab at `to`, let go.
     private func dragTab(from: Int, to: Int) -> (Bool, String) {
         guard let start = tabMiddle(from), let end = tabMiddle(to) else { return (false, "no tab \(from) or \(to)") }
+        press("\(to + 1)", ["command"])
+        shell.window.layoutIfNeeded()
         let tab = workbench.strip.tabs[from]
         let before = tab.frame.minX
-        press("\(to + 1)", ["command"])
         mouse(.leftMouseDown, at: start, clicks: 1)
         let pressed = workbench.model.tabs.firstIndex { $0.id == workbench.model.selected } == from
         for step in 1 ... 10 {
