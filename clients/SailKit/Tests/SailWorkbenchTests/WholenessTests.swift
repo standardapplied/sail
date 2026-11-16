@@ -187,9 +187,13 @@ import Testing
     }
 }
 
-/// `work`, blocking, on a thread of its own, its result awaited.
+/// `work`, blocking, on a thread of its own at background priority, its result awaited: on a
+/// runner with three cores, two such threads at the tests' own priority still took the cores the
+/// other tests needed.
 func onOwnThread<Value: Sendable>(_ work: @escaping @Sendable () -> Value) async -> Value {
     await withCheckedContinuation { result in
-        Thread { result.resume(returning: work()) }.start()
+        let thread = Thread { result.resume(returning: work()) }
+        thread.qualityOfService = .background
+        thread.start()
     }
 }
