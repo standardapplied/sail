@@ -111,6 +111,7 @@ public final class SyncOperations {
   private final Consumer<Event> events;
   private final Consumer<Remedy> notice;
   private final ShellExec shell;
+  private final AuthorizedKeysSync gatewayKeys;
   private SailEventPublisher publisher;
 
   /** A round whose notices print as {@link #PLAIN_NOTICES} prints them. */
@@ -159,6 +160,32 @@ public final class SyncOperations {
       Consumer<Event> events,
       Consumer<Remedy> notice,
       ShellExec shell) {
+    this(
+        db,
+        host,
+        projectsDir,
+        configuration,
+        channels,
+        events,
+        notice,
+        shell,
+        new AuthorizedKeysSync());
+  }
+
+  /**
+   * As above, keeping the SSH gateway's keys through {@code gatewayKeys}, which every round brings
+   * into line with the roster it leaves.
+   */
+  public SyncOperations(
+      Sqlite db,
+      String host,
+      Path projectsDir,
+      Supplier<SyncConfig> configuration,
+      Channels channels,
+      Consumer<Event> events,
+      Consumer<Remedy> notice,
+      ShellExec shell,
+      AuthorizedKeysSync gatewayKeys) {
     this.db = db;
     this.host = host;
     this.projectsDir = projectsDir;
@@ -167,6 +194,7 @@ public final class SyncOperations {
     this.events = events == null ? this::publishQuietly : events;
     this.notice = Objects.requireNonNull(notice, "notice");
     this.shell = Objects.requireNonNull(shell, "shell");
+    this.gatewayKeys = Objects.requireNonNull(gatewayKeys, "gatewayKeys");
   }
 
   public SyncConfig configuration() {
@@ -251,6 +279,7 @@ public final class SyncOperations {
       } catch (RuntimeException e) {
         failures.add(transportFailure("fde", e));
       }
+      keepGatewayKeys(failures);
     }
     materialize(files);
     announceNewProjects(projects, knownProjects);
@@ -396,6 +425,22 @@ public final class SyncOperations {
           Remedy.of("Join main again to mint one: '", Remedy.sail("join", "<main>"), "'."));
     }
     return config.boxId();
+  }
+
+  /**
+   * Brings the SSH gateway's {@code authorized_keys} into line with the roster this round left, in
+   * the same round: a person removed, withdrawn, moved aside or replaced keeps no line. A round
+   * that cannot write it fails loudly, and the next round tries again; one run without root writes
+   * nothing, and the next round of {@code sail-api}, which runs as root, writes it.
+   */
+  private void keepGatewayKeys(List<SyncTransportException> failures) {
+    try {
+      gatewayKeys.sync(db);
+    } catch (Exception e) {
+      failures.add(
+          new SyncTransportException(
+              "store", "the SSH gateway's keys could not be rewritten:", Remedied.whole(e), e));
+    }
   }
 
   private static SyncTransportException transportFailure(String context, RuntimeException e) {

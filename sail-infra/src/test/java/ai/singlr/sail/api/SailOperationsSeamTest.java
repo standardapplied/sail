@@ -1561,6 +1561,9 @@ class SailOperationsSeamTest {
       assertTrue(
           operations.identity().authorizeGateway("not-allowed", "owner")
               instanceof SshGateway.Rejected);
+      assertEquals(
+          new SshGateway.Rejected(SshGateway.NO_LONGER_HERE),
+          operations.identity().authorizeGatewayById("sail spec list", "fde_nobody"));
       operations
           .pty()
           .recordEvent(

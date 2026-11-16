@@ -21,6 +21,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.function.Supplier;
 
 /**
  * Forward Deployed Engineers — the human principals that own API tokens and are attributed on the
@@ -480,18 +481,37 @@ public final class FdeStore {
    * so everything it stored stays. Returns the new handle.
    */
   public String moveAside(String handle) {
+    return moveAside(handle, () -> Secrets.mint("", 2).substring(1));
+  }
+
+  /** How many suffixes {@link #moveAside} tries before it says every one it drew is taken. */
+  static final int ASIDE_TRIES = 16;
+
+  /** As {@link #moveAside(String)}, drawing each 4-hex suffix from {@code suffixes}. */
+  String moveAside(String handle, Supplier<String> suffixes) {
     return db.transaction(
         () -> {
           var stem = handle.length() > 52 ? handle.substring(0, 52) : handle;
-          var moved = stem + ".local-" + Secrets.mint("", 2).substring(1);
-          while (byHandle(moved).isPresent()) {
-            moved = stem + ".local-" + Secrets.mint("", 2).substring(1);
+          for (var tries = 0; tries < ASIDE_TRIES; tries++) {
+            var moved = stem + ".local-" + suffixes.get();
+            if (byHandle(moved).isEmpty()) {
+              db.execute(
+                  "UPDATE fdes SET handle = ?, status = 'disabled'"
+                      + " WHERE handle = ? AND main_id IS NULL",
+                  moved,
+                  handle);
+              return moved;
+            }
           }
-          db.execute(
-              "UPDATE fdes SET handle = ?, status = 'disabled' WHERE handle = ? AND main_id IS NULL",
-              moved,
-              handle);
-          return moved;
+          throw new IllegalStateException(
+              handle
+                  + " cannot be moved aside for main's "
+                  + handle
+                  + ": the "
+                  + ASIDE_TRIES
+                  + " handles "
+                  + stem
+                  + ".local-<4 hex> drawn for it are all taken.");
         });
   }
 

@@ -41,6 +41,7 @@ import java.util.Set;
 import java.util.TreeMap;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.BiPredicate;
+import java.util.function.Predicate;
 import java.util.function.Supplier;
 import java.util.stream.Stream;
 
@@ -146,7 +147,8 @@ public final class MissedStopReconciler implements AutoCloseable {
     }
 
     /** None, by default ({@link Workspaces#disown}). */
-    default List<String> disown(BiPredicate<String, String> held) throws Exception {
+    default List<String> disown(BiPredicate<String, String> held, Predicate<String> due)
+        throws Exception {
       return List.of();
     }
   }
@@ -184,7 +186,7 @@ public final class MissedStopReconciler implements AutoCloseable {
   private volatile Set<String> unansweredFirst = Set.of();
   private final Set<String> untidied = ConcurrentHashMap.newKeySet();
   private final Map<String, List<String>> stopped = new ConcurrentHashMap<>();
-  private final Set<String> undisowned = ConcurrentHashMap.newKeySet();
+  private final Map<String, Tries> stripTries = new ConcurrentHashMap<>();
   private volatile Map<String, String> lastRoster;
   private volatile boolean unlisted;
   private final StrandedReviewRescue strandedReviews;
@@ -291,8 +293,9 @@ public final class MissedStopReconciler implements AutoCloseable {
       }
 
       @Override
-      public List<String> disown(BiPredicate<String, String> held) throws Exception {
-        return Workspaces.onThisBox(shell).disown(held);
+      public List<String> disown(BiPredicate<String, String> held, Predicate<String> due)
+          throws Exception {
+        return Workspaces.onThisBox(shell).disown(held, due);
       }
     };
   }
@@ -411,10 +414,24 @@ public final class MissedStopReconciler implements AutoCloseable {
   }
 
   /**
+   * How many times a removed person's workspace is tried, an idle period apart, before it is left.
+   */
+  static final int STRIP_TRIES = 3;
+
+  /** The tries a workspace a removal did not reach has had, and when it last had one. */
+  private record Tries(int count, Instant at) {
+    boolean due(Instant now) {
+      return count < STRIP_TRIES && !now.isBefore(at.plus(SpecWorkspaces.IDLE));
+    }
+  }
+
+  /**
    * A person not active here, missing from the roster or disabled as one main never described,
    * holds nothing usable here; a handle whose id changed is another person. Incus is listed only at
-   * start, when someone stopped being active (or a handle changed hands), or to retry a workspace
-   * not reached.
+   * start, when someone stopped being active (or a handle changed hands), or when a workspace not
+   * reached is due again: {@link #STRIP_TRIES} tries an idle period apart, as the spec workspaces'
+   * sweep tries its own, then it is left as it is and said once; its next start strips it ({@link
+   * Workspaces#start}).
    */
   private void disownRemoved() {
     var roster = new HashMap<String, String>();
@@ -430,7 +447,10 @@ public final class MissedStopReconciler implements AutoCloseable {
             }
           });
     }
-    if (lastRoster != null && gone.isEmpty() && undisowned.isEmpty()) {
+    var now = clock.get();
+    if (lastRoster != null
+        && gone.isEmpty()
+        && stripTries.values().stream().noneMatch(tries -> tries.due(now))) {
       lastRoster = roster;
       return;
     }
@@ -440,17 +460,38 @@ public final class MissedStopReconciler implements AutoCloseable {
               (handle, id) ->
                   id == null
                       ? roster.containsKey(handle) && !gone.contains(handle)
-                      : roster.containsValue(id));
+                      : roster.containsValue(id),
+              instance -> {
+                var tries = stripTries.get(instance);
+                return tries == null || tries.due(now);
+              });
       var left = new HashSet<String>();
       for (var line : unreached) {
         var instance = line.substring(0, Math.max(0, line.indexOf(':')));
         left.add(instance);
-        if (!undisowned.contains(instance)) {
-          System.err.println("  [reconcile] a removed person's credentials are left in " + line);
+        var count =
+            stripTries
+                .merge(instance, new Tries(1, now), (was, one) -> new Tries(was.count() + 1, now))
+                .count();
+        if (count == 1) {
+          System.err.println(
+              "  [reconcile] a removed person's credentials are left in "
+                  + line
+                  + "; tried again once idle, "
+                  + STRIP_TRIES
+                  + " times in all");
+        } else if (count == STRIP_TRIES) {
+          System.err.println(
+              "  [reconcile] left "
+                  + line
+                  + ", after "
+                  + STRIP_TRIES
+                  + " tries: its next start takes the removed person's credentials out");
         }
       }
-      undisowned.clear();
-      undisowned.addAll(left);
+      stripTries
+          .entrySet()
+          .removeIf(tries -> !left.contains(tries.getKey()) && tries.getValue().due(now));
       lastRoster = roster;
       unlisted = false;
     } catch (Exception e) {

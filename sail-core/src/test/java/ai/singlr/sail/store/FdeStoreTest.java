@@ -12,6 +12,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import ai.singlr.sail.harness.Harnesses;
 import ai.singlr.sail.ssh.SshPublicKey;
 import java.nio.file.Path;
+import java.util.ArrayDeque;
 import java.util.List;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -34,6 +35,34 @@ class FdeStoreTest {
   @AfterEach
   void tearDown() {
     if (db != null) db.close();
+  }
+
+  /**
+   * The last look's n3: a person moved aside keeps their id and everything it holds, under a new
+   * handle, disabled; a suffix already taken is drawn again, and when every one drawn is taken the
+   * move is refused, changing nothing, rather than looping for ever.
+   */
+  @Test
+  void aPersonMovedAsideIsDisabledUnderAFreeHandleAndAMoveWithNoneFreeChangesNothing() {
+    var kim = store.add("kim", "Kim", "kim@home.example", "member").id();
+    store.add("kim.local-aaaa", null, null, "member");
+    var drawn = new ArrayDeque<>(List.of("aaaa", "aaaa", "b1c2"));
+
+    var moved = store.moveAside("kim", drawn::poll);
+
+    var aside = store.byId(kim).orElseThrow();
+    assertEquals("kim.local-b1c2", moved);
+    assertEquals("kim.local-b1c2", aside.handle());
+    assertEquals("disabled", aside.status());
+    store.add("lee", null, null, "member");
+    store.add("lee.local-aaaa", null, null, "member");
+    var refused =
+        assertThrows(IllegalStateException.class, () -> store.moveAside("lee", () -> "aaaa"));
+    assertEquals(
+        "lee cannot be moved aside for main's lee: the 16 handles lee.local-<4 hex> drawn for it"
+            + " are all taken.",
+        refused.getMessage());
+    assertEquals("active", store.byHandle("lee").orElseThrow().status());
   }
 
   @Test

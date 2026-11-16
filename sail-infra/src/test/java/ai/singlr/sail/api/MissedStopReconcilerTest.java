@@ -48,6 +48,7 @@ import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -490,40 +491,52 @@ class MissedStopReconcilerTest {
   }
 
   /**
-   * Scenario 11: each pass takes the credentials of every person the roster no longer holds out of
-   * their workspaces, however they were removed, asking of the roster as it is; one it cannot reach
-   * is said once and taken again by the next pass.
+   * Scenario 11 and the last look's n1: each pass takes the credentials of every person the roster
+   * no longer holds out of their workspaces, asking of the roster as it is. One it cannot reach is
+   * tried {@link MissedStopReconciler#STRIP_TRIES} times an idle period apart, never at every pass,
+   * said when first left and once more when left for good; Incus is not asked for it again.
    */
   @Test
-  void eachPassTakesARemovedPersonsCredentialsOutOfTheirWorkspacesAndSaysOneLeftOnce() {
+  void aWorkspaceARemovalCannotReachIsTriedThreeTimesAnIdlePeriodApartThenLeftAndSaidOnce() {
     TestLogins.store(db, "ada");
     var asked = new ArrayList<String>();
     var probe =
         new CountingProbe(true) {
           @Override
-          public List<String> disown(BiPredicate<String, String> held) {
-            asked.add("ada " + held.test("ada", null) + ", gone " + held.test("gone", null));
+          public List<String> disown(BiPredicate<String, String> held, Predicate<String> due) {
+            asked.add(
+                "ada "
+                    + held.test("ada", null)
+                    + ", gone "
+                    + held.test("gone", null)
+                    + ", due "
+                    + due.test("acme-b"));
             return List.of("acme-b: Error: permission denied");
           }
         };
+    var now = new AtomicReference<>(PAST_GRACE.get());
     var err = new ByteArrayOutputStream();
     var before = System.err;
     System.setErr(new PrintStream(err, true, StandardCharsets.UTF_8));
     try {
-      var reconciler = reconciler(probe, PAST_GRACE);
-      reconciler.sweep();
-      reconciler.sweep();
+      var reconciler = reconciler(probe, now::get);
+      for (var minutes : List.of(0, 1, 10, 15, 20, 30, 60)) {
+        now.set(PAST_GRACE.get().plus(Duration.ofMinutes(minutes)));
+        reconciler.sweep();
+      }
     } finally {
       System.setErr(before);
     }
 
-    assertEquals(List.of("ada true, gone false", "ada true, gone false"), asked);
+    assertEquals(Collections.nCopies(3, "ada true, gone false, due true"), asked);
+    var said = err.toString(StandardCharsets.UTF_8).lines().toList();
     assertEquals(
-        1,
-        err.toString(StandardCharsets.UTF_8)
-            .lines()
-            .filter(line -> line.contains("credentials are left in acme-b"))
-            .count());
+        List.of(
+            "  [reconcile] a removed person's credentials are left in acme-b: Error: permission"
+                + " denied; tried again once idle, 3 times in all",
+            "  [reconcile] left acme-b: Error: permission denied, after 3 tries: its next start"
+                + " takes the removed person's credentials out"),
+        said.stream().filter(line -> line.contains("acme-b")).toList());
   }
 
   /**
@@ -539,7 +552,7 @@ class MissedStopReconcilerTest {
     var probe =
         new CountingProbe(true) {
           @Override
-          public List<String> disown(BiPredicate<String, String> held) {
+          public List<String> disown(BiPredicate<String, String> held, Predicate<String> due) {
             asked.add("ada " + held.test("ada", null) + ", bob " + held.test("bob", null));
             return List.of();
           }
@@ -595,7 +608,7 @@ class MissedStopReconcilerTest {
     var probe =
         new CountingProbe(true) {
           @Override
-          public List<String> disown(BiPredicate<String, String> held) {
+          public List<String> disown(BiPredicate<String, String> held, Predicate<String> due) {
             asked.add("ada " + held.test("ada", null) + ", tmp " + held.test("tmp", null));
             return List.of();
           }
@@ -631,7 +644,7 @@ class MissedStopReconcilerTest {
     var probe =
         new CountingProbe(true) {
           @Override
-          public List<String> disown(BiPredicate<String, String> held) {
+          public List<String> disown(BiPredicate<String, String> held, Predicate<String> due) {
             asked.add(
                 "old "
                     + held.test("tmp", "fde_old_tmp")

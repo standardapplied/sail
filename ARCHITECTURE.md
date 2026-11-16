@@ -59,7 +59,7 @@ to do it. Every feature is judged by whether it helps coordinate agents.
    │   project) + Podman + agents│             │  + Podman + agents                         │
    └────────────────────────────┘             └──────────────────────────────────────────┘
          ▲                                                ▲
-         │ SSH (gateway: sail@box, _gateway --fde)        │
+         │ SSH (gateway: sail@box, _gateway --fde-id)     │
    ┌─────┴───────────┐                              GUI client / browser, HTTP via a TLS reverse
    │ Mac thin client │                              proxy with passkeys, to sail-api
    │ sail (darwin)   │
@@ -294,8 +294,12 @@ its erasure must reach the nodes that held it and never one that did not.
   written into a row main then serves. A scoped node therefore sends again the content of a
   row it changes when main already holds it; an unscoped session is asked only for what main
   lacks, as before;
-- the roster is `FdeStore.visibleTo`: everyone whose own scope admits one of the principal's
-  projects, without their emails, and the principal's own row whole;
+- the roster is everyone `FdeStore.visibleTo` shows (whose own scope admits one of the
+  principal's projects, and the principal), each row whole: handle, name, role, status and the
+  email they commit under, since one of them may own a workspace there; and every other person
+  main holds as their main id alone (`{"id": …}`), nothing else, so the node can tell a person
+  main removed from one it no longer shows. A person withdrawn there has their name and email
+  cleared again;
 - a push is decided for scope first (`ScopeRule.pushed`), before the erasure and staleness
   checks that would otherwise answer about a row the pusher may not see, and its denial
   carries no version; an erase request for an id outside the scope is answered as one main
@@ -764,7 +768,7 @@ word), and the sync repeats it (`SshSyncChannel.authorisation`) while it still n
 handle, key, main and pin, telling the node to send it to main's operator and sync again, before
 ssh's words. On main, that key sits on the locked `sail`
 user's `authorized_keys` as a forced command,
-`command="…/sail _gateway --fde <handle>",restrict …`. The gateway resolves the FDE and
+`command="…/sail _gateway --fde-id <id>",restrict …`. The gateway resolves the FDE by that id and
 admits the `_sync` session. The write gate lives next to the write: every commit of a `_sync`
 session is denied to a read-only viewer role, which may still pull.
 
@@ -913,8 +917,8 @@ clone a project's source repos into its container at provision time, not to move
   - FDE-gateway commands (`spec`, `events`, `fde`, and `agent stream|sessions|review`) target
     `sail@host`; the other `agent` verbs read the control plane directly as the box's own
     person, so the gateway refuses them and the client sends them to the plain host. The
-    engineer's SSH key hits the forced command `sail _gateway --fde <handle>`, which
-    resolves their FDE, mints a short-lived session token, and re-executes the command, so
+    engineer's SSH key hits the forced command `sail _gateway --fde-id <id>`, which
+    resolves their FDE by this box's id for them, mints a short-lived session token, and re-executes the command, so
     the loopback API sees who is acting and asks `Access` for each thing they do.
   - Everything else (project lifecycle, interactive `shell` and `exec`) is forwarded as the
     plain SSH host, because it needs host privileges the `sail` user must never have.
@@ -1556,7 +1560,8 @@ Each row with the tests that prove it:
     and what it holds (uncommitted changes, untracked files, a stash, commits origin lacks, a push
     origin refused) and the commands `sail project workspace start`, `shell` and `delete`. The
     sweep never starts, reads or deletes a kept workspace again; it stops it when idle, as any
-    other. Its person deletes it, or a run of the spec enters it (`Workspaces.enterSpec`), which
+    other. A removal outranks that promise: a removed person's kept workspace is started for the
+    strip that takes their credentials out, stopped again, and its kept mark left as it was. Its person deletes it, or a run of the spec enters it (`Workspaces.enterSpec`), which
     clears the mark, so a spec done again is decided again; an attach is not a run and leaves the
     mark.
   - **A deleted workspace takes its sessions.** The next run of the spec's conversation, a room's
@@ -1699,7 +1704,11 @@ Each row with the tests that prove it:
   command said; and their stored logins and git tokens on the box are erased. A workspace's label
   holds its owner's id on this box beside the handle (`user.sail.owner_id`), so the pass judges it
   by that stored id, at every pass and after a restart, and a handle main gave to someone new
-  never makes the old holder's workspace theirs. A node
+  never makes the old holder's workspace theirs. A workspace the pass cannot strip (it will not
+  start, or its strip fails) is tried three times an idle period apart, then left as it is and
+  said once with its cause; its next start, by anyone, strips it first, then makes it nobody's
+  when its handle is now another person's (never giving it to them), or refuses as before when
+  its person is not active here (`Workspaces.start`). A node
   knows each person by main's id (`fdes.main_id`): each roster round lists the people main shows
   the node and, by id alone, everyone else main still holds. A person main described whose id main
   no longer holds at all, removed or their handle given to someone new under a new id, is removed
@@ -3617,8 +3626,17 @@ default. There are exactly two identity doors, and both land on the same `fdes` 
 principal `RoleRule` resolves for it, and `Access`:
 
 1. **Terminal: SSH key to FDE.** Each registered key is pinned in the `sail` user's
-   `authorized_keys` to `command="…/sail _gateway --fde <handle>",restrict`, with no shell
-   and no forwarding. Command classification is default-deny: only `spec`, `agent`, and
+   `authorized_keys` to `command="…/sail _gateway --fde-id <id>",restrict`, with no shell
+   and no forwarding. The pin is the key's person by this box's id for them, never a handle:
+   a sync round can move a handle aside or main can give it to someone new, and a line written
+   before must then fail, not open the door for whoever holds the name. A line whose id is no
+   active person's is refused with one sentence (`SshGateway.authorizeById`). The file holds a
+   line for active people's keys only (`FdeSshKeyStore.list`), and every sync round brings it into
+   line with the roster it leaves, rewriting it only when it differs (`AuthorizedKeysSync`); a
+   round that cannot write it fails and the next round tries again. A line written before keys
+   were pinned by id (`--fde <handle>`) is still read by handle, in `GatewayCommand`, so an
+   upgraded box works until `migrate` regenerates the file, which the upgrade runs; no release
+   writes one any more. Command classification is default-deny: only `spec`, `agent`, and
    `events` reach the loopback API, `fde` is admin-gated at the gateway (with two
    self-service carve-outs: any active FDE may `fde passkey list|rm` and `fde enroll` its
    own pinned handle, which is what lets `sail enroll` self-mint an enrollment ticket),

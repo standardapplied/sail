@@ -50,4 +50,7 @@ public interface HostIdentity {
   WorkspaceOwner workspaceOwner(String handle);
 
   SshGateway.Decision authorizeGateway(String command, String handle);
+
+  /** As {@link #authorizeGateway}, for the person a key is pinned to by this box's id for them. */
+  SshGateway.Decision authorizeGatewayById(String command, String fdeId);
 }

@@ -692,6 +692,69 @@ class WorkspacesTest {
         failure.getMessage());
   }
 
+  /**
+   * The last look's n1: what a removal could not do to a stopped workspace its next start does
+   * first, whoever starts it. One whose handle is now another person (the stored id is not theirs)
+   * is stripped and made nobody's, never given to the new holder; one whose person is not active
+   * here is stripped and refused as before (#418's sweep counts that refusal as a cause).
+   */
+  @Test
+  void aStartOfAWorkspaceWhoseOwnerIsGoneOrNowSomeoneElseStripsItAndGivesNoOne() throws Exception {
+    var hire =
+        new WorkspaceOwner(
+            "tmp",
+            "New Hire",
+            "hire@sail.invalid",
+            Map.of("github.com", "ghp_hire_0123456789"),
+            List.of(),
+            "fde_new_tmp");
+    var replaced = labelledTmp();
+    var gone = labelledTmp();
+
+    var changed = workspaces(replaced, ticks(0, 1, 2)).start(acme(), "fix-login", handle -> hire);
+    var refused =
+        assertThrows(
+            IllegalStateException.class,
+            () ->
+                workspaces(gone, ticks(0, 1, 2))
+                    .start(
+                        acme(),
+                        "fix-login",
+                        handle -> {
+                          throw new IllegalStateException(
+                              handle + " is disabled on this box's roster.");
+                        }));
+
+    assertEquals(Workspaces.Change.STARTED, changed.change());
+    assertEquals("tmp is disabled on this box's roster.", refused.getMessage());
+    for (var shell : List.of(replaced, gone)) {
+      var calls = shell.invocations();
+      assertTrue(
+          calls.contains(String.join(" ", strip("acme-fix-login"))), String.join("\n", calls));
+      assertTrue(
+          calls.stream().noneMatch(c -> c.contains("hire") || c.contains("gh auth login")),
+          "nothing of the handle's new holder is given: " + String.join("\n", calls));
+    }
+    assertTrue(
+        replaced
+            .invocations()
+            .contains("incus config set acme-fix-login user.sail.owner= user.sail.owner_id="));
+  }
+
+  private ScriptedShellExecutor labelledTmp() {
+    return incus(
+        DIR_AND_ZFS,
+        list(
+            instance(
+                "acme-fix-login",
+                "Stopped",
+                "tank",
+                "\"user.sail.project\": \"acme\", \"user.sail.workspace\": \"fix-login\","
+                    + " \"user.sail.ready\": \"1\", \"user.sail.owner\": \"tmp\","
+                    + " \"user.sail.owner_id\": \"fde_old_tmp\"")),
+        "[]");
+  }
+
   @Test
   void startingARunningWorkspaceChangesNothing() throws Exception {
     var shell = incus(DIR_AND_ZFS, list(workspace("acme", "fix-login", "Running", "v1")), "[]");
@@ -3279,6 +3342,59 @@ class WorkspacesTest {
         shell.pushed.get("acme-fix-login/home/dev/.git-credentials"));
   }
 
+  /**
+   * The last look's n4: an entry judges a spec's workspace by the owner id its label stores. One
+   * labelled with ana's handle but an id that is not the entering ana's was another person's (the
+   * handle given to someone new), so it is stripped and given as another's, and labelled with the
+   * new id; one labelled with her own id is entered with nothing taken.
+   */
+  @Test
+  void anEntryJudgesAWorkspaceByItsStoredOwnerIdNotItsHandle() throws Exception {
+    var ana =
+        new WorkspaceOwner(
+            ANA.handle(), ANA.name(), ANA.email(), ANA.tokens(), ANA.keys(), "fde_new_ana");
+    for (var labelled : List.of("fde_old_ana", "fde_new_ana")) {
+      var scripted =
+          incus(
+              DIR_AND_ZFS,
+              list(
+                  template("v1", INPUTS),
+                  instance(
+                      "acme-fix-login",
+                      "Running",
+                      "tank",
+                      ("\"user.sail.project\": \"acme\", \"user.sail.workspace\": \"fix-login\","
+                              + " \"user.sail.template\": \"v1\", \"user.sail.ready\":"
+                              + " \"1762941601000\", \"user.sail.spec\": \"fix-login\","
+                              + " \"user.sail.owner\": \"ana\", \"user.sail.owner_id\": \"%s\"")
+                          .formatted(labelled))),
+              snapshots("v1"));
+      var shell = new Pushing(scripted);
+      var workspaces =
+          new Workspaces(shell, shell, ticks(0, 1), locks(), () -> 65536, url -> false);
+
+      workspaces.enterSpec(
+          workspaces.checkSpec(FIX, INPUTS, name -> false),
+          acme(),
+          "ana",
+          h -> ana,
+          tempDir.resolve("no-files"),
+          whole -> {});
+
+      var stripped = indexOf(scripted, strip("acme-fix-login", "Ana", "ana@sail.invalid")) >= 0;
+      var relabelled =
+          scripted
+              .invocations()
+              .contains(
+                  "incus config set acme-fix-login user.sail.owner=ana"
+                      + " user.sail.owner_id=fde_new_ana");
+      assertEquals(
+          labelled.equals("fde_old_ana") ? List.of(true, true) : List.of(false, false),
+          List.of(stripped, relabelled),
+          labelled + ": " + String.join("\n", scripted.invocations()));
+    }
+  }
+
   /** A spec's workspace already its owner's is entered as it is: nothing is taken or given. */
   @Test
   void aWorkspaceAlreadyItsOwnersIsEnteredWithNothingTakenOrGiven() throws Exception {
@@ -3583,8 +3699,11 @@ class WorkspacesTest {
    * Scenario 11 and the proof's High 1: a removed person's workspaces lose everything a give wrote,
    * stripped in the container by the give's own idempotent script (a stopped one is started for it
    * and stopped again), and their owner; a workspace labelled with an owner id is judged by that
-   * id, one labelled by handle alone by its handle; another's is left as it is. Incus answers a
-   * delete of a missing file as it really does, so no strip may lean on a delete.
+   * id, one labelled by handle alone by its handle; another's is left as it is, and so is one not
+   * yet due. A workspace #418's sweep kept is started for the strip all the same (a removed
+   * person's credentials outrank that sweep's promise), stopped again, and its kept mark left as it
+   * was. Incus answers a delete of a missing file as it really does, so no strip may lean on a
+   * delete.
    */
   @Test
   void aRemovedPersonsWorkspacesAreStrippedInTheContainerAndJudgedByTheirOwnerId()
@@ -3605,6 +3724,13 @@ class WorkspacesTest {
                         "Stopped",
                         "tank",
                         "\"user.sail.project\": \"acme\", \"user.sail.workspace\": \"b\","
+                            + " \"user.sail.ready\": \"1\", \"user.sail.owner\": \"ana\","
+                            + " \"user.sail.kept\": \"it holds commits no remote has\""),
+                    instance(
+                        "acme-e",
+                        "Running",
+                        "tank",
+                        "\"user.sail.project\": \"acme\", \"user.sail.workspace\": \"e\","
                             + " \"user.sail.ready\": \"1\", \"user.sail.owner\": \"ana\""),
                     instance(
                         "acme-c",
@@ -3625,7 +3751,9 @@ class WorkspacesTest {
 
     var unreached =
         new Workspaces(scripted, scripted, ticks(), locks(), () -> 65536, url -> false)
-            .disown((handle, id) -> id == null ? !handle.equals("ana") : id.equals("fde_new_tmp"));
+            .disown(
+                (handle, id) -> id == null ? !handle.equals("ana") : id.equals("fde_new_tmp"),
+                instance -> !instance.equals("acme-e"));
 
     assertEquals(List.of(), unreached);
     assertEquals(
@@ -3641,6 +3769,9 @@ class WorkspacesTest {
             .map(c -> c.startsWith("incus stop acme-b") ? "incus stop acme-b" : c)
             .toList());
     assertTrue(scripted.invocations().stream().noneMatch(c -> c.startsWith("incus file delete")));
+    assertTrue(
+        scripted.invocations().stream().noneMatch(c -> c.contains("user.sail.kept")),
+        "the kept mark is left as it was");
   }
 
   /** A workspace a removal cannot strip is said, and stops none of the others. */
@@ -3665,7 +3796,8 @@ class WorkspacesTest {
                 "[]")
             .onFail("incus exec acme-a", "/home/dev/.ssh/authorized_keys still has a key");
 
-    var unreached = workspaces(shell, ticks()).disown((handle, id) -> !handle.equals("ana"));
+    var unreached =
+        workspaces(shell, ticks()).disown((handle, id) -> !handle.equals("ana"), instance -> true);
 
     assertEquals(1, unreached.size(), unreached.toString());
     assertTrue(

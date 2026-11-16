@@ -311,6 +311,12 @@ final class HostLanes {
       return SshGateway.authorize(
           command, handle, new FdeStore(db), roles, new AuthSessionStore(db));
     }
+
+    @Override
+    public SshGateway.Decision authorizeGatewayById(String command, String fdeId) {
+      return SshGateway.authorizeById(
+          command, fdeId, new FdeStore(db), roles, new AuthSessionStore(db));
+    }
   }
 
   record Pty(Sqlite db, RoleRule roles, EventStore events, BoxInstances box) implements HostPty {

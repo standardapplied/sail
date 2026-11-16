@@ -10,6 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.config.SyncConfig;
+import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.RoleRule;
 import ai.singlr.sail.store.AuthSessionStore;
 import ai.singlr.sail.store.FdeStore;
@@ -54,6 +55,39 @@ class SshGatewayTest {
         fdes,
         new RoleRule(() -> new SyncConfig("main", null, "main-op", "box"), fdes),
         sessions);
+  }
+
+  private SshGateway.Decision authorizeById(String command, String fdeId) {
+    return SshGateway.authorizeById(
+        command,
+        fdeId,
+        fdes,
+        new RoleRule(() -> new SyncConfig("main", null, "main-op", "box"), fdes),
+        sessions);
+  }
+
+  /**
+   * G1: a key pinned to its person by this box's id opens a session for that id and no other; one
+   * whose person is gone or disabled is refused with one sentence, before its command is even read.
+   */
+  @Test
+  void aKeyPinnedByIdActsAsItsPersonAndOneWhosePersonIsGoneOrDisabledOpensNothing() {
+    var uday = fdes.byHandle("uday").orElseThrow().id();
+    var gone = fdes.add("gone", null, null, "member").id();
+    Acting.system(() -> fdes.remove(gone));
+    var off = fdes.add("off", null, null, "member").id();
+    db.execute("UPDATE fdes SET status = 'disabled' WHERE id = ?", off);
+
+    var authorized =
+        assertInstanceOf(SshGateway.Authorized.class, authorizeById("sail spec list", uday));
+
+    assertEquals(uday, sessions.validate(authorized.sessionToken()).orElseThrow().fdeId());
+    for (var id : List.of(gone, off, "fde_never")) {
+      assertEquals(
+          new SshGateway.Rejected(SshGateway.NO_LONGER_HERE),
+          authorizeById("sail project list", id),
+          id);
+    }
   }
 
   @Test

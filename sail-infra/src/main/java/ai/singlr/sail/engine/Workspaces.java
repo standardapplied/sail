@@ -733,11 +733,12 @@ public final class Workspaces {
 
   /**
    * A workspace whose owner {@code held} says is not a person here, by its stored owner id when it
-   * has one, else by handle, is stripped in the container (started for it when stopped) and made
-   * nobody's. Clears the owner too, so a person later given the handle is re-given theirs at their
-   * next entry. Answers those not reached.
+   * has one, else by handle, is stripped in the container (started for it when stopped, and stopped
+   * again) and made nobody's, when {@code due} says of its name that it is time to try. Clears the
+   * owner too, so a person later given the handle is re-given theirs at their next entry. Answers
+   * those not reached.
    */
-  public List<String> disown(BiPredicate<String, String> held)
+  public List<String> disown(BiPredicate<String, String> held, Predicate<String> due)
       throws IOException, InterruptedException, TimeoutException {
     var unreached = new ArrayList<String>();
     for (var instance : box.all()) {
@@ -745,7 +746,8 @@ public final class Workspaces {
       var id = instance.key(BoxInstances.OWNER_ID_KEY).filter(Strings::isNotBlank).orElse(null);
       if (!(instance.kind() instanceof BoxInstances.Workspace)
           || owner.isBlank()
-          || held.test(owner, id)) {
+          || held.test(owner, id)
+          || !due.test(instance.name())) {
         continue;
       }
       try (var locked = nameLock(instance.name())) {
@@ -952,7 +954,10 @@ public final class Workspaces {
 
   /**
    * Starts workspace {@code name}, stopped or frozen, and says what its resume took. It is given
-   * its owner's credentials again, since a token change while it was stopped did not reach it.
+   * its owner's credentials again, since a token change while it was stopped did not reach it. What
+   * a removal could not do while it was stopped is done first: one whose labelled handle is now
+   * another person (its stored id is not theirs) is stripped and made nobody's; one whose labelled
+   * person is not active here is stripped and refused as before, holding nothing.
    */
   public Changed start(
       ProjectDefinition config, String name, Function<String, WorkspaceOwner> owners)
@@ -969,7 +974,19 @@ public final class Workspaces {
     var owner = found.key(BoxInstances.OWNER_KEY).filter(handle -> !handle.isBlank());
     if (owner.isPresent()) {
       try (var held = nameLock(found.name())) {
-        giveAll(found.name(), config, owners.apply(owner.get()));
+        WorkspaceOwner holder;
+        try {
+          holder = owners.apply(owner.get());
+        } catch (IllegalStateException notActiveHere) {
+          WorkspaceCredentials.strip(shell, found.name());
+          throw notActiveHere;
+        }
+        if (labelledFor(found, holder)) {
+          giveAll(found.name(), config, holder);
+        } else {
+          WorkspaceCredentials.strip(shell, found.name());
+          label(found.name(), "");
+        }
       } catch (IOException given) {
         throw new IOException(
             "Workspace "
@@ -994,6 +1011,15 @@ public final class Workspaces {
             millis(ready - running),
             millis(ready - started),
             Map.of()));
+  }
+
+  /**
+   * Whether workspace {@code found} is still {@code holder}'s, the active person of its labelled
+   * handle: its label stores no id (made before ids were stored), or theirs.
+   */
+  private static boolean labelledFor(BoxInstances.Instance found, WorkspaceOwner holder) {
+    var id = found.key(BoxInstances.OWNER_ID_KEY).filter(Strings::isNotBlank);
+    return id.isEmpty() || id.get().equals(holder.id());
   }
 
   /**

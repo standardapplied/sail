@@ -281,7 +281,7 @@ class UpgradeE2EIT extends AbstractIncusIT {
     var forced = keys.lines().filter(line -> line.startsWith("command=")).toList();
     assertFalse(forced.isEmpty(), keys);
     for (var line : forced) {
-      assertTrue(line.startsWith("command=\"" + INSTALLED + " _gateway --fde "), line);
+      assertTrue(line.startsWith("command=\"" + INSTALLED + " _gateway --fde-id fde_"), line);
     }
     assertTrue(
         ok(List.of("cat", "/etc/systemd/system/sail-pty-host.service"))

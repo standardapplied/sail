@@ -6,6 +6,7 @@
 package ai.singlr.sail.commands;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -14,12 +15,19 @@ import ai.singlr.sail.Sail;
 import ai.singlr.sail.api.ApiException;
 import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.config.SpecStatus;
+import ai.singlr.sail.config.SyncConfig;
+import ai.singlr.sail.engine.AuthorizedKeysRenderer;
 import ai.singlr.sail.engine.SyncOperations;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.ProjectScope;
+import ai.singlr.sail.identity.RoleRule;
+import ai.singlr.sail.ssh.SshGateway;
+import ai.singlr.sail.ssh.SshPublicKey;
+import ai.singlr.sail.ssh.TestSshKeys;
 import ai.singlr.sail.store.AuthSessionStore;
 import ai.singlr.sail.store.BoxDatabase;
+import ai.singlr.sail.store.FdeSshKeyStore;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.SpecStore;
@@ -44,6 +52,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -234,6 +243,7 @@ class ScopedSyncServerTest {
     var lee = node.add("lee", "Lee", "Lee@X.dev", "member").id();
     TestLogins.store(nodeDb, "kim");
     TestLogins.store(nodeDb, "lee");
+    var kimsLine = keyLine(kim, "kim@laptop");
     fdes.add("kim", "Kim", "kim@x.dev", "member");
     fdes.add("lee", "Lee", "lee@x.dev", "member");
     notices.clear();
@@ -246,6 +256,11 @@ class ScopedSyncServerTest {
     assertEquals(2, node.logins().list(kim).size());
     assertNotEquals(kim, nodeId("kim"));
     assertEquals("kim@x.dev", node.byHandle("kim").orElseThrow().email());
+    assertEquals(
+        new SshGateway.Rejected(SshGateway.NO_LONGER_HERE),
+        opens(kimsLine, "uma"),
+        "the moved-aside Kim's key does not open main's kim's door");
+    assertEquals(nodeId("kim"), sessionOf(opens(keyLine(nodeId("kim"), "kim@work"), "uma")));
     assertEquals(lee, nodeId("lee"));
     assertEquals(2, node.logins().list(lee).size());
     assertEquals(
@@ -375,6 +390,7 @@ class ScopedSyncServerTest {
     var old = TestLogins.store(nodeDb, "tmp");
     new FdeStore(nodeDb).logins().storeGit(old, "github.com", "ghp_old_tmp_0123456789");
     new TokenStore(nodeDb).create("mast-tmp", "member", old, null);
+    var oldLine = keyLine(old, "tmp@laptop");
     Acting.system(() -> fdes.remove(fdes.byHandle("tmp").orElseThrow().id()));
     fdes.add("tmp", "New Hire", "newhire@x.dev", "member");
 
@@ -387,6 +403,48 @@ class ScopedSyncServerTest {
     assertEquals(List.of(), node.logins().list(old));
     assertEquals(Map.of(), node.logins().gitTokens(old));
     assertEquals(0L, count("SELECT count(*) FROM api_tokens WHERE name = 'mast-tmp'"));
+    assertEquals(
+        new SshGateway.Rejected(SshGateway.NO_LONGER_HERE),
+        opens(oldLine, "uma"),
+        "the old tmp's key line, written before the round, does not open the new tmp's door");
+    assertEquals(hire.id(), sessionOf(opens(keyLine(hire.id(), "hire@laptop"), "uma")));
+  }
+
+  private static final Pattern PINNED = Pattern.compile("_gateway --fde-id ([^\"]+)\"");
+
+  /**
+   * The gateway's {@code authorized_keys} line for a key registered now to the node's person {@code
+   * fdeId}, as the file renders it.
+   */
+  private String keyLine(String fdeId, String comment) {
+    var keys = new FdeSshKeyStore(nodeDb);
+    keys.add(fdeId, SshPublicKey.parse(TestSshKeys.ed25519(comment, comment)));
+    return AuthorizedKeysRenderer.render(
+            keys.list().stream().filter(key -> key.fdeId().equals(fdeId)).toList(), "sail")
+        .lines()
+        .skip(1)
+        .findFirst()
+        .orElseThrow();
+  }
+
+  /**
+   * What the node's gateway decides for a session through {@code line}, on the box of {@code own}.
+   */
+  private SshGateway.Decision opens(String line, String own) {
+    var pinned = PINNED.matcher(line);
+    assertTrue(pinned.find(), line);
+    var node = new FdeStore(nodeDb);
+    return SshGateway.authorizeById(
+        "sail spec list",
+        pinned.group(1),
+        node,
+        new RoleRule(() -> new SyncConfig("node", "main", own, "node-box"), node),
+        new AuthSessionStore(nodeDb));
+  }
+
+  private String sessionOf(SshGateway.Decision decision) {
+    var token = assertInstanceOf(SshGateway.Authorized.class, decision).sessionToken();
+    return new AuthSessionStore(nodeDb).validate(token).orElseThrow().fdeId();
   }
 
   /**
