@@ -535,6 +535,93 @@ import Testing
         #expect(await harness.until { harness.view.visibleText.contains("resized") }, "the owed frame was drawn")
     }
 
+    /// A drawable that came at the layer's old size is let go and another asked for, and the owed
+    /// frame is drawn on that one.
+    @Test func aDrawableOfAnotherSizeIsLetGoAndAnotherAskedFor() async throws {
+        let harness = try Harness()
+        await harness.drainMain()
+        await harness.tick()
+        await harness.tick()
+        try #require(harness.clock.isPaused)
+        let layer = try #require(harness.view.layer as? CAMetalLayer)
+        nonisolated(unsafe) let small = CAMetalLayer()
+        small.device = layer.device
+        small.pixelFormat = layer.pixelFormat
+        small.drawableSize = CGSize(width: 8, height: 8)
+        let asks = Mutex(0)
+        harness.view.nextDrawable = { layer in
+            let ask = asks.withLock { asks in
+                asks += 1
+                return asks
+            }
+            return ask == 1 ? small.nextDrawable() : layer.nextDrawable()
+        }
+        let committed = Self.committed(harness.view)
+        harness.link.output("refetched")
+        harness.view.drawNowIfIdle()
+        #expect(await harness.until { asks.withLock { $0 } == 2 }, "the drawable of another size was let go and another asked for")
+        await harness.drawn()
+        #expect(Self.committed(harness.view) == committed + 1, "one frame, on the second drawable")
+        #expect(harness.view.visibleText.contains("refetched"))
+    }
+
+    /// A pane closed while its ask is under way: the drawable that comes draws nothing and asks
+    /// for no other.
+    @Test func aPaneClosedWhileAnAskIsUnderWayDrawsNothingWhenItComes() async throws {
+        let harness = try Harness()
+        await harness.drainMain()
+        await harness.tick()
+        await harness.tick()
+        try #require(harness.clock.isPaused)
+        let gate = DispatchSemaphore(value: 0)
+        let asks = Mutex(0)
+        harness.view.nextDrawable = { layer in
+            asks.withLock { $0 += 1 }
+            _ = gate.wait(timeout: .now() + 2)
+            return layer.nextDrawable()
+        }
+        let committed = Self.committed(harness.view)
+        harness.link.output("closing")
+        harness.view.drawNowIfIdle()
+        #expect(await harness.until { asks.withLock { $0 } == 1 }, "the ask began")
+        harness.view.detach()
+        harness.window.contentView = nil
+        gate.signal()
+        await harness.drawn()
+        await harness.drainMain()
+        #expect(Self.committed(harness.view) == committed, "a closed pane drew nothing")
+        #expect(asks.withLock { $0 } == 1, "and asked for no other drawable")
+    }
+
+    /// A display-link tick while an ask is under way asks for no second drawable and draws
+    /// nothing; the one that comes draws the owed frame once.
+    @Test func aTickWhileAnAskIsUnderWayAsksForNoOther() async throws {
+        let harness = try Harness()
+        await harness.drainMain()
+        await harness.tick()
+        await harness.tick()
+        try #require(harness.clock.isPaused)
+        let gate = DispatchSemaphore(value: 0)
+        let asks = Mutex(0)
+        harness.view.nextDrawable = { layer in
+            asks.withLock { $0 += 1 }
+            _ = gate.wait(timeout: .now() + 2)
+            return layer.nextDrawable()
+        }
+        let committed = Self.committed(harness.view)
+        harness.link.output("ticked")
+        harness.view.drawNowIfIdle()
+        #expect(await harness.until { asks.withLock { $0 } == 1 }, "the ask began")
+        let wanted = (0 ..< 3).map { _ in harness.view.refresh(target: CACurrentMediaTime() + 1.0 / 60) }
+        #expect(wanted == [false, false, false], "a tick with no drawable keeps the link paused")
+        #expect(Self.committed(harness.view) == committed, "nothing drew without a drawable")
+        gate.signal()
+        await harness.drawn()
+        #expect(asks.withLock { $0 } == 1, "one ask for every tick")
+        #expect(Self.committed(harness.view) == committed + 1, "the drawable that came drew one frame")
+        #expect(harness.view.visibleText.contains("ticked"))
+    }
+
     static func committed(_ view: TerminalView) -> Int {
         guard let found = view.drawingState.range(of: "committed ") else { return -1 }
         return Int(view.drawingState[found.upperBound...].prefix { $0.isNumber }) ?? -1

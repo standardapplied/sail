@@ -1,5 +1,6 @@
-import SailMeasures
+@testable import SailMeasures
 import SailSurface
+import Synchronization
 import Testing
 
 /// The drive's allowance for a hosted runner: a wait less only the drive's own thread's stall over
@@ -122,6 +123,22 @@ import Testing
         #expect(abs(MachineShare.starved(in: Self.wait, looks: edges) - 0.1) < 1e-9)
     }
 
+    /// A tail budget's samples, each net of the own thread's stall over it alone.
+    @Test func eachSampleIsNetOfTheStallOverItAlone() {
+        var own = Stalls(tick: 0.01)
+        own.record(Span(10.0, 10.04))
+        own.record(Span(10.04, 10.0505))
+        let samples = [Span(10.0, 10.035), Span(10.0505, 10.0535), Span(10.02, 10.025), Span(10.0, 10.005), Span(10.0495, 10.0505), Span(10.03, 10.0505)]
+        let nets = MachineShare.net(samples, own: own)
+        #expect(nets.count == 6)
+        #expect(abs(nets[0] - 0.01) < 1e-9, "a 35 ms sample over the 30 ms held keeps the 10 ms the thread slept")
+        #expect(abs(nets[1] - 0.003) < 1e-9, "a sample after the stall keeps all its time")
+        #expect(nets[2] == 0, "a sample wholly inside the held part keeps nothing")
+        #expect(abs(nets[3] - 0.005) < 1e-9, "a sample while the thread slept keeps all its time")
+        #expect(abs(nets[4] - 0.0005) < 1e-9, "a tick late by half a millisecond takes half a millisecond")
+        #expect(abs(nets[5] - 0.0105) < 1e-9, "of two held parts over a sample, the longer is taken")
+    }
+
     /// Of the busy CPU that kept the main thread waiting, the share our own process used is ours.
     @Test func theCPUOurProcessUsedIsOurs() {
         #expect(abs(MachineShare.starved(in: Self.wait, looks: Self.looks(processPerLook: 0.015)) - 0.1) < 1e-9, "half the busy CPU was ours")
@@ -158,5 +175,25 @@ import Testing
         #expect(abs(verdict.shown - 0.201) < 1e-9, "a drawable withheld 200 ms while output waited, shown at its completion")
         let quiet = Self.figures(outputAt: 10.005, shownAt: 10.02, gapUntil: 10.03)
         #expect(abs(FloodVerdict.ours(quiet, mainHold: Span(10.0, 10.21), tick: 0.01, own: Stalls(tick: 0.01), main: []).held - 0.2) < 1e-9)
+    }
+}
+
+@Suite struct HeartbeatTests {
+    /// Each tick records the gap since the last on the clock it was given; a reset starts again.
+    @Test func ticksRecordTheirGapsOnTheClockGiven() {
+        let time = Mutex(100.0)
+        let beat = Heartbeat { time.withLock { $0 } }
+        for now in [100.008, 100.05, 100.059] {
+            time.withLock { $0 = now }
+            beat.tick()
+        }
+        #expect(beat.stalls.gaps == [Span(100.008, 100.05)], "only the gap over a tick is a stall")
+        #expect(abs(beat.longest - 42) < 1e-6)
+        #expect(beat.lastTick == 100.059)
+        time.withLock { $0 = 200 }
+        beat.reset()
+        #expect(beat.stalls.gaps.isEmpty)
+        #expect(beat.longest == 0)
+        #expect(beat.lastTick == 200)
     }
 }

@@ -337,14 +337,25 @@ extension Driver {
         for character in text { key(character) }
     }
 
-    /// Scenario 32, `panes4`: a tab of four panes in a 2x2 grid. Three flood (20 MiB of `x` folded
-    /// at 150, again and again until the echo is measured, then the marker) while the fourth echoes
-    /// 200 keys at one per 50 ms. Budgets: the echo pane's key to echo p95 ≤ 50 ms and output to
-    /// committed p95 ≤ 2 refreshes; each flood shows its last bytes, and none of its output waited,
-    /// nor was the main thread held, over 100 ms (``Driver/flood(_:)``); the four views' refresh
-    /// work p95, summed, ≤ 8 ms; ⌘D to the new pane's first committed frame, ten times, p95
-    /// ≤ 100 ms. Each wait is net of the machine's share of it. Reported: each flood's frames and
-    /// longest commit gap with what reached the screen and what was asked for in it, and memory.
+    /// What each of `panes4`'s three floods writes: ``lines`` lines of 151 bytes each ``period``
+    /// seconds, 2,114,000 bytes per second per pane. Twice a heavy build log's 1 MiB/s, and on the
+    /// 3-vCPU runner well within the 1.5 CPUs allowed the terminal host and the app together: at
+    /// it they took 0.43 (24 % and 19 %); unlimited, the same three floods took them 2.4 (sail#429).
+    static let paneLoad = (lines: 280, period: 0.02)
+    static var paneBytesPerSecond: Int {
+        Int((Double(paneLoad.lines * 151) / paneLoad.period).rounded())
+    }
+
+    /// Scenario 32, `panes4`: a tab of four panes in a 2x2 grid. Three flood (lines of 150 `x` at
+    /// ``paneLoad``, until the echo is measured, then the marker) while the fourth echoes 200 keys
+    /// at one per 50 ms. Budgets: the echo pane's key to echo p95 ≤ 50 ms and output to committed
+    /// p95 ≤ 2 refreshes; each flood shows its last bytes, and none of its output waited, nor was
+    /// the main thread held, over 100 ms (``Driver/flood(_:)``); the four views' refresh work p95,
+    /// summed, ≤ 8 ms; ⌘D to the new pane's first committed frame, ten times, p95 ≤ 100 ms. Each
+    /// wait is net of the machine's share of it. Reported: the host's and the app's CPU shares over
+    /// the measure's first second; each flood's frames and longest commit gap with what reached
+    /// the screen and what was asked for in it; memory; and, after, the same three floods unlimited
+    /// for 2.5 s, judged the same way and never gated.
     private func fourPanes() async -> (Bool, String) {
         let before = Self.footprint
         let tabsBefore = workbench.model.tabs.count
@@ -373,15 +384,25 @@ extension Driver {
         }
         focus(echo)
         typeText("cat\r")
-        let command = "clear; while [ ! -e \(stop) ]; do cat \(files.lines); done; cat \(files.tail); echo flood-$((1+1))\r"
-        for view in floods {
-            focus(view)
-            typeText(command)
+        func generate(_ block: Int, every period: Double, marker: Int) {
+            let command = "clear; perl \(Self.floodPacer) \(files.lines) \(stop) \(block) \(period); cat \(files.tail); echo flood-$((\(marker - 1)+1))\r"
+            for view in floods {
+                focus(view)
+                typeText(command)
+            }
+            focus(echo)
         }
-        focus(echo)
+        let rate = Self.paneBytesPerSecond
+        print("panes4 load: each flood pane writes \(rate) bytes per second (\(Self.paneLoad.lines) lines of 151 bytes every \(Int(Self.paneLoad.period * 1000)) ms)")
+        panes4["flood rate per pane, bytes per second"] = Double(rate)
+        generate(Self.paneLoad.lines * 151, every: Self.paneLoad.period, marker: 2)
         print(String(format: "panes4 phase floods typed %.3f", CACurrentMediaTime()))
         let begun = await waitUntil(10) { floods.allSatisfy { ((try? $0.session?.screen.text()) ?? "").contains("xxxxxxxxxx") } }
         print(String(format: "panes4 phase floods begun %.3f", CACurrentMediaTime()))
+        let shares = await cpuShares()
+        print("panes4 CPU shares over the measure's first second: \(shares.said)")
+        panes4["terminal host CPU share at the measure's start, %"] = shares.host
+        panes4["app CPU share at the measure's start, %"] = shares.app
         Self.processes().forEach { print("panes4 ps: \($0)") }
         floods.forEach { $0.terminal.resetLatency() }
         let framesBefore = floods.map { Self.committed($0.terminal) }
@@ -442,6 +463,7 @@ extension Driver {
         panes4["echo output to committed p95 ms"] = echoed.outputToCommitted.p95
         panes4["peak resident memory at one pane MB"] = before
         panes4["peak resident memory at four panes MB"] = four
+        await unlimitedFloods(floods, start: { generate(Self.paneLoad.lines * 151, every: 0, marker: 3) }, stop: stop)
         press("w", ["command", "option"])
         _ = await sheet("Close", asking: "Its 4 terminals will end.", within: 5)
         let splits = await timeSplits(10)
@@ -454,6 +476,40 @@ extension Driver {
         let missed = budgets.filter { !$0.value }.keys.sorted()
         let numbers = panes4.sorted { $0.key < $1.key }.map { "\($0.key) \(String(format: "%.1f", $0.value))" }.joined(separator: ", ")
         return (ok && missed.isEmpty, (missed.isEmpty ? "within every budget" : "missed: \(missed.joined(separator: "; "))") + "; echo: \(said); \(numbers)")
+    }
+
+    /// The terminal host's and the app's CPU shares, in %, over the next second.
+    private func cpuShares() async -> (host: Double, app: Double, said: String) {
+        let shares = await Self.cpuShares(over: 1)
+        guard let host = shares.host, let app = shares.app else {
+            return (-1, -1, "not measured: ps listed \(shares.host == nil ? "no terminal host" : "the host") and \(shares.app == nil ? "not the app" : "the app")")
+        }
+        return (host, app, String(format: "terminal host %.0f %%, app %.0f %%, together %.2f CPUs", host, app, (host + app) / 100))
+    }
+
+    /// Report-only: the three floods unlimited for 2.5 s, then their marker; each judged as the
+    /// gated floods are (``Driver/flood(_:)``), with the CPU shares over its first second.
+    private func unlimitedFloods(_ floods: [TerminalPane], start: () -> Void, stop: String) async {
+        try? FileManager.default.removeItem(atPath: stop)
+        floods.forEach { $0.terminal.resetLatency() }
+        mainThread.reset()
+        ownThread.reset()
+        let began = CACurrentMediaTime()
+        start()
+        let shares = await cpuShares()
+        try? await Task.sleep(for: .seconds(max(0, 2.5 - (CACurrentMediaTime() - began))))
+        FileManager.default.createFile(atPath: stop, contents: nil)
+        let marker = "xxxxxxxxxxxxxxxxxxxxflood-3"
+        let shown = await waitUntil(60) { floods.allSatisfy { Self.shows($0, marker) } }
+        print("panes4 unlimited 2.5 s (reported, not gated): CPU shares over its first second \(shares.said); "
+            + (shown ? "every flood shown to its last bytes" : "not every flood shown to its last bytes within 60 s"))
+        panes4["unlimited: terminal host CPU share, %"] = shares.host
+        panes4["unlimited: app CPU share, %"] = shares.app
+        for (index, view) in floods.enumerated() {
+            let judged = flood(view.terminal.latency)
+            print("panes4 unlimited flood \(index + 1) (reported, not gated): \(judged.said)")
+            panes4["unlimited flood \(index + 1), ours, ms"] = judged.ours
+        }
     }
 
     /// The lines `view`'s shell printed at each size change, `winch-<columns>`.

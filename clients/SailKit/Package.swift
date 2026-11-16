@@ -49,7 +49,7 @@ let package = Package(
         .target(name: "SailMeasures", dependencies: ["SailSurface"], swiftSettings: strict),
         .executableTarget(
             name: "sail-term-probe",
-            dependencies: ["SailAPI", "SailTerminal", "SailVT"],
+            dependencies: ["SailAPI", "SailMeasures", "SailSurface", "SailTerminal", "SailVT"],
             swiftSettings: strict
         ),
         .target(

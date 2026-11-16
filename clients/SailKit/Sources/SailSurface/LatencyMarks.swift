@@ -29,7 +29,7 @@ public struct LatencyMarks: Sendable {
     private var lastFrame: (number: UInt64, committed: Double)?
     private var lastCallback = -Double.infinity
 
-    private var keyToWritten: [Double] = []
+    private var keyWrites: [Span] = []
     private var outputToCommitted: [Double] = []
     private var outputToPresented: [Double] = []
     private var outputToPresentedEstimated: [Double] = []
@@ -64,7 +64,10 @@ public struct LatencyMarks: Sendable {
 
     /// A key that happened at `event` had its bytes written at `written`.
     public mutating func keyWritten(event: Double, written: Double) {
-        Self.keep(written - event, in: &keyToWritten)
+        if (written - event).isFinite, written >= event {
+            keyWrites.append(Span(event, written))
+            if keyWrites.count > Self.capacity { keyWrites.removeFirst() }
+        }
         awaitingEcho.append((event, written))
         if awaitingEcho.count > Self.capacity { awaitingEcho.removeFirst() }
     }
@@ -184,7 +187,7 @@ public struct LatencyMarks: Sendable {
 
     public var figures: LatencyFigures {
         LatencyFigures(
-            keyToWritten: Self.percentiles(keyToWritten), outputToCommitted: Self.percentiles(outputToCommitted),
+            keyToWritten: Self.percentiles(keyWrites.map(\.length)), keyWrites: keyWrites, outputToCommitted: Self.percentiles(outputToCommitted),
             outputToPresented: Self.percentiles(outputToPresented), outputToPresentedEstimated: Self.percentiles(outputToPresentedEstimated),
             outputToShown: Self.percentiles(outputToShown), keyToEcho: Self.percentiles(keyToEcho),
             keyToEchoEstimated: Self.percentiles(keyToEchoEstimated), refresh: Self.percentiles(refreshes),
@@ -244,6 +247,9 @@ public struct LatencyMarks: Sendable {
 /// at their command buffer's completion.
 public struct LatencyFigures: Equatable, Sendable, Codable {
     public var keyToWritten: Percentiles
+    /// Each key's time to its bytes written, in seconds on the host clock: what a tail budget
+    /// judges net of the measuring process's own stalls.
+    public var keyWrites: [Span]
     public var outputToCommitted: Percentiles
     public var outputToPresented: Percentiles
     public var outputToPresentedEstimated: Percentiles

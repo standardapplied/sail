@@ -26,6 +26,14 @@ public struct Stalls: Sendable {
         gaps.reduce(0) { held, gap in max(held, min(gap.overlap(wait), max(0, gap.length - tick))) }
     }
 
+    /// How much of a short `sample` this thread was held over, in seconds: the longest overlap
+    /// with the late part of a gap, after the tick the thread slept for was due. A sleeping thread
+    /// asks for no CPU, so only lateness is proof it was held; a tick late by a millisecond takes
+    /// a millisecond, not the sub-millisecond samples a tail budget is made of anywhere in its gap.
+    public func held(over sample: Span) -> Double {
+        gaps.reduce(0) { held, gap in max(held, Span(gap.start + tick, gap.end).overlap(sample)) }
+    }
+
     /// The longest gap, or the longest that overlaps `span`.
     public func longest(in span: Span? = nil) -> Span? {
         gaps.filter { gap in span.map { gap.overlap($0) > 0 } ?? true }.max { $0.length < $1.length }
@@ -80,6 +88,12 @@ public enum MachineShare {
             return from.runnable && to.runnable && to.cpu - from.cpu < interval / 10 && idle ? held + interval : held
         }
         return min(starved * (1 - ours), wait.length)
+    }
+
+    /// Each sample's length less the time the measuring process's own thread was held over it,
+    /// in seconds: a percentile taken of these is the code's, a stall of the whole process left out.
+    public static func net(_ samples: [Span], own: Stalls) -> [Double] {
+        samples.map { $0.length - own.held(over: $0) }
     }
 
     /// The machine's share of `wait`, in seconds: the larger of the stall of the drive's own

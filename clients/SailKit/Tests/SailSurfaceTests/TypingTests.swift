@@ -207,6 +207,7 @@ import Testing
         marks.presented(frame: 1, at: 1.025, told: 1.025)
         let figures = marks.figures
         #expect(abs(figures.keyToWritten.p95 - 1) < 1e-6)
+        #expect(figures.keyWrites == [Span(1.000, 1.001)])
         #expect(abs(figures.outputToCommitted.p50 - 6) < 1e-6)
         #expect(abs(figures.outputToPresented.p50 - 21) < 1e-6)
         #expect(abs(figures.keyToEcho.p50 - 25) < 1e-6)

@@ -503,8 +503,10 @@ public final class TerminalView: NSView {
 }
 
 /// One ask for a drawable, carried to a background queue and its answer back to the main thread.
-/// Unchecked: `CAMetalLayer` is thread-safe and its `nextDrawable` may be called from any thread,
-/// and the ask is touched by one thread at a time: the main thread, the queue, the main thread.
+/// Apple's pages say `nextDrawable()` may block until a drawable is free, and that with
+/// `allowsNextDrawableTimeout` (on by default) it returns nil after one second; so it is not
+/// called on the main thread. Unchecked: the ask is touched by one thread at a time, the main
+/// thread, the queue, then the main thread.
 private final class DrawableFetch: @unchecked Sendable {
     weak var view: TerminalView?
     let layer: CAMetalLayer
