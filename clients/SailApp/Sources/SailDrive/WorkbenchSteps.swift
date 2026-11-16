@@ -407,6 +407,7 @@ extension Driver {
                 (gap?.ours ?? .infinity) <= 100
             measures.append(measurement("panes4-flood-\(index + 1)", keys: 0, figures: figures, budgets: [:]))
             panes4["flood \(index + 1) longest gap between committed frames ms"] = (figures.longestBetweenCommits?.length ?? 0) * 1000
+            panes4["flood \(index + 1) longest gap between committed frames, less the drive's own thread's stall in it, ms"] = gap?.ours ?? -1
             panes4["flood \(index + 1) longest wait to be shown ms"] = figures.outputToShown.max
             panes4["flood \(index + 1) refresh p95 ms"] = figures.refresh.p95
         }
