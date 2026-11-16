@@ -1399,11 +1399,13 @@ class WorkspacesTest {
         printf 'sail-count fetch_retries %s\\n' "$retries"
         for _ in $(seq 1 300); do systemctl show --property=Version >/dev/null 2>&1 && break; sleep 0.1; done
         for _ in $(seq 1 300); do
-          case $(systemctl show --property=ActiveState --value ssh.service) in
-            activating|deactivating|reloading) sleep 0.1 ;;
-            *) break ;;
-          esac
+          state=$(systemctl show --property=ActiveState --value ssh.service)
+          case $state in activating|deactivating|reloading) sleep 0.1 ;; *) break ;; esac
         done
+        case $state in activating|deactivating|reloading)
+          echo "ssh.service was still $state after 30 s of waiting for it to finish starting" >&2
+          exit 1 ;;
+        esac
         if ! systemctl try-restart ssh.service; then
           printf 'ssh.service: %s; %s\\n' "$(systemctl show --property=Result --value ssh.service)" \\
             "$(journalctl --unit ssh.service --lines 3 --output cat --no-pager 2>&1 | paste -s -d ';' -)" >&2
@@ -3229,7 +3231,9 @@ class WorkspacesTest {
     assertEquals(
         List.of(
             "incus file delete acme-b/home/dev/.git-credentials",
+            "incus file delete acme-b/home/dev/.git-credentials.sail-new",
             "incus file delete acme-b/home/dev/.config/gh/hosts.yml",
+            "incus file delete acme-b/home/dev/.sail/gh-token",
             "incus config set acme-b user.sail.owner="),
         scripted.invocations().stream()
             .filter(c -> c.contains("acme-") && !c.startsWith("incus file push"))

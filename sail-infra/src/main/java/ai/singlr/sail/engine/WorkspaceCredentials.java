@@ -19,7 +19,9 @@ import java.util.concurrent.TimeoutException;
 /** A template holds no one's credentials (T1); a workspace holds its owner's alone (T2, T3). */
 final class WorkspaceCredentials {
 
-  static final String STORE = ContainerExec.DEV_HOME + "/.git-credentials";
+  private static final String DEV = ContainerExec.DEV_HOME + "/";
+  static final String STORE = DEV + ".git-credentials";
+  private static final String NEW = ".sail-new";
   static final String GH_HOSTS = ContainerExec.DEV_HOME + "/.config/gh/hosts.yml";
   static final String KEYS = ContainerExec.DEV_HOME + "/.ssh/authorized_keys";
 
@@ -28,7 +30,7 @@ final class WorkspaceCredentials {
       """
       set -eu
       as_dev() { runuser -u dev -- env HOME=/home/dev "$@"; }
-      rm -f /home/dev/.git-credentials /home/dev/.config/gh/hosts.yml
+      rm -f /home/dev/.git-credentials /home/dev/.git-credentials.sail-new /home/dev/.config/gh/hosts.yml /home/dev/.sail/gh-token
       for key in user.name user.email; do
         as_dev git config --global --unset-all "$key" || [ "$?" -eq 5 ]
       done
@@ -194,8 +196,8 @@ final class WorkspaceCredentials {
     if (store.isEmpty()) {
       asDev(shell, instance, "rm", "-f", STORE);
     } else {
-      ContainerFilePush.pushAsDev(shell, instance, STORE + ".sail-new", store, "0600");
-      asDev(shell, instance, "mv", "-f", STORE + ".sail-new", STORE);
+      ContainerFilePush.pushAsDev(shell, instance, STORE + NEW, store, "0600");
+      asDev(shell, instance, "mv", "-f", STORE + NEW, STORE);
       asDev(shell, instance, "git", "config", "--global", "credential.helper", "store");
     }
     if (GitCredentials.githubHosts(repos).isEmpty()) {
@@ -217,7 +219,7 @@ final class WorkspaceCredentials {
   /** Through files alone, so a stopped workspace is reached without starting it. */
   static void takeBack(ShellExec shell, String instance)
       throws IOException, InterruptedException, TimeoutException {
-    for (var file : List.of(STORE, GH_HOSTS)) {
+    for (var file : List.of(STORE, STORE + NEW, GH_HOSTS, DEV + ForgeCliLogin.TOKEN_FILE)) {
       var deleted = shell.exec(List.of("incus", "file", "delete", instance + file));
       if (!deleted.ok() && !absent(deleted.stderr())) {
         throw new IOException(

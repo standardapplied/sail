@@ -61,7 +61,7 @@ public final class LoginStore {
   /** What a git token is a login of: its name is its host, and it has no default. */
   public static final String GIT = "git";
 
-  /** Shorter than any forge's token; a template's check would find a short value in every file. */
+  /** A sanity floor: no forge issues a token this short, so a shorter value is a mistake. */
   static final int MIN_TOKEN = 16;
 
   private static final String TOKEN = "token";
@@ -244,7 +244,9 @@ public final class LoginStore {
     requireValue(value);
     if (value.length() < MIN_TOKEN) {
       throw new IllegalArgumentException(
-          "A git token is at least " + MIN_TOKEN + " characters: this value is not one.");
+          "A git token is at least "
+              + MIN_TOKEN
+              + " characters, as every forge's is: this value is too short to be one.");
     }
     synchronized (WRITES) {
       var dir = directory(fdeId, GIT);

@@ -1377,8 +1377,8 @@ Each row with the tests that prove it:
   and the SSH host keys, which every clone otherwise has from the template, the keys after the
   hostname, so their comment names the project. The new keys are made beside the template's and
   renamed over them, so an sshd systemd starts meanwhile never finds none, and sshd is restarted
-  onto them only once its unit has finished starting; a restart that fails says the unit's result
-  and its last journal lines. Its template's keys are cleared with the ready mark.
+  onto them only once its unit has finished starting, within 30 s or the prepare fails saying the
+  state it was still in; a restart that fails says the unit's result and its last journal lines. Its template's keys are cleared with the ready mark.
   *`WorkspaceIT`; the script is pinned by `WorkspacesTest.theScriptThatMakesACloneItsOwnIsPinnedWhole`.*
 - **W6. Times are measured and said.** `create` and `start` print each phase and return it in
   JSON (`timings.clone_ms`, `start_ms`, `ready_ms`, `total_ms`), measured on `System.nanoTime`;
@@ -1474,8 +1474,8 @@ Each row with the tests that prove it:
   (`WorkspaceCredentials.HELD`) then proves the template holds nothing by content, not by a list
   of paths: (a) no token the build was given appears in any file of its root filesystem, grep
   reading on stdin, as fixed-string patterns, the tokens the build was given and no one else's,
-  never on a command line (an empty pattern, which would match every file, fails the check, and
-  a stored git token is at least 16 characters); (b) git reports
+  never on a command line (an empty pattern, which would match every file, fails the check);
+  (b) git reports
   no user name or email at system or global level; (c) no `authorized_keys` under any home has a
   line; (d) gh reports no login. A search or a git or gh command that errors fails the build, as
   does anything found: nothing is recorded or snapshotted and the version before stays current. A
@@ -1562,10 +1562,11 @@ Each row with the tests that prove it:
   person) holds nothing usable there: their workspaces are stripped and made nobody's at once,
   which their next entry undoes, and the give and the login doors refuse them, but their stored
   logins stay, since a node cannot tell a person main removed from a round that did not list them;
-  they are erased once the person has been disabled for 24 hours by this box's clock, as
-  sail-api's process saw it, so a restart only keeps them longer. A handle main gave to a new
-  person (a roster entry made later than this box's row) is a new row: the old person's row, and
-  with it their logins, tokens and keys, goes, and their workspaces are disowned. sail-api's pass
+  they are erased once the person has been disabled for 24 hours of sail-api's monotonic time, so
+  neither a clock step nor a restart erases early. Until `sail-a-node-knows-a-person-by-mains-id`
+  lands, a handle main gives again within one sync round keeps the previous holder's stored logins
+  on a node. A stored git token is at least 16 characters, a sanity floor no forge's token is
+  under. sail-api's pass
   reads the roster each minute and lists Incus only on its first
   pass, when someone stopped being active or their handle went to someone else, or to retry a
   workspace it could not reach, said once. Nobody stores a login for another person: a store

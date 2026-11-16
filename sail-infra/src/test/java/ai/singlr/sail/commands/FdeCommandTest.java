@@ -13,6 +13,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assumptions.assumeFalse;
 
+import ai.singlr.sail.Sail;
 import ai.singlr.sail.api.ApiException;
 import ai.singlr.sail.api.ErrorCode;
 import ai.singlr.sail.auth.EnrollmentTickets;
@@ -22,6 +23,7 @@ import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.config.TestDefinitions;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.AuthorizedKeysSync;
+import ai.singlr.sail.engine.BoxInstances;
 import ai.singlr.sail.engine.CliOperator;
 import ai.singlr.sail.engine.ContainerAuthorizedKeys;
 import ai.singlr.sail.engine.FileMutexTest;
@@ -72,6 +74,7 @@ import java.util.Set;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.FutureTask;
 import java.util.function.Function;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.AfterEach;
@@ -2697,7 +2700,8 @@ class FdeCommandTest {
             FdeCommand.alreadyExists("ada", sudo),
             Ansi.OFF.string(FdeCommand.added(ada, true, sudo)),
             unknownProject,
-            ContainerAuthorizedKeys.notTrustedYet("acme", "Error: I/O error", sudo),
+            ContainerAuthorizedKeys.notTrustedYet(
+                "acme", new BoxInstances.Plain(), "Error: I/O error", sudo),
             ContainerAuthorizedKeys.noneTrustYet("Error: I/O error", sudo),
             FdeCommand.disabledForPairing("ada", sudo),
             FdeCommand.noFdes(sudo),
@@ -2708,6 +2712,44 @@ class FdeCommandTest {
             FdeCommand.Passkey.noMatchMessage("ada", "zz", List.of(), sudo),
             FdeCommand.noPasskeys("ada", sudo),
             Ansi.OFF.string(FdeCommand.noPasskeysLeft("ada", sudo))));
+  }
+
+  /**
+   * F6: the key fan-out's remedy for a container it missed is a command that works on that kind, as
+   * pasted: {@code project apply} for a project's container, which refuses a workspace, and a stop
+   * and start for a workspace, which takes its owner's keys as it starts.
+   */
+  @Test
+  void aKeyFanOutsRemedyIsACommandThatWorksOnTheKindItMissed() {
+    var plain = OperatorCommand.PLAIN;
+    var container =
+        ContainerAuthorizedKeys.notTrustedYet("acme", new BoxInstances.Plain(), "x", plain);
+    var workspace =
+        ContainerAuthorizedKeys.notTrustedYet(
+            "acme-try", new BoxInstances.Workspace("acme", "try", true), "x", plain);
+
+    assertEquals(
+        "acme does not trust this key yet: x. Make it: 'sail project apply acme'.", container);
+    assertEquals(
+        "acme-try does not trust this key yet: x. It takes it at its next start: 'sail project"
+            + " workspace stop acme try', then 'sail project workspace start acme try'.",
+        workspace);
+    var pasted = Pattern.compile("'sail ([^']+)'").matcher(container + workspace);
+    var verbs = new ArrayList<String>();
+    while (pasted.find()) {
+      var parsed = new CommandLine(new Sail()).parseArgs(pasted.group(1).split(" "));
+      var leaf = parsed;
+      while (leaf.hasSubcommand()) {
+        leaf = leaf.subcommand();
+      }
+      verbs.add(leaf.commandSpec().qualifiedName(" ") + " " + leaf.originalArgs().getLast());
+    }
+    assertEquals(
+        List.of(
+            "sail project apply acme",
+            "sail project workspace stop try",
+            "sail project workspace start try"),
+        verbs);
   }
 
   @Test

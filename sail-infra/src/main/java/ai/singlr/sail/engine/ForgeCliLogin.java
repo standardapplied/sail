@@ -5,7 +5,6 @@
 
 package ai.singlr.sail.engine;
 
-import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.ProjectDefinition;
 import java.io.IOException;
@@ -25,6 +24,9 @@ public final class ForgeCliLogin {
 
   private static final String LOGIN =
       "gh auth login --hostname \"$1\" --with-token < \"$2\"; s=$?; rm -f \"$2\"; exit $s";
+
+  /** One name, so a login cut short leaves a file the strip and a disown know to take. */
+  static final String TOKEN_FILE = ".sail/gh-token";
 
   private ForgeCliLogin() {}
 
@@ -52,7 +54,7 @@ public final class ForgeCliLogin {
   private static void login(
       ShellExec shell, String container, String user, String host, String token)
       throws IOException, InterruptedException, TimeoutException {
-    var file = "/home/" + user + "/.sail/gh-token-" + DateTimeUtils.newId();
+    var file = "/home/" + user + "/" + TOKEN_FILE;
     ContainerFilePush.pushAsDev(shell, container, file, token + "\n", "0600");
     var login =
         shell.exec(

@@ -8,7 +8,6 @@ package ai.singlr.sail.api;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -62,6 +61,7 @@ import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Function;
 import java.util.function.Predicate;
@@ -611,16 +611,16 @@ class MissedStopReconcilerTest {
     var fdes = new FdeStore(db);
     fdes.logins().storeGit(tmp, "github.com", "ghp_tmp_0123456789ab");
     var asked = new ArrayList<String>();
-    var now = new AtomicReference<>(Instant.now().plus(Duration.ofMinutes(3)));
-    var reconciler = reconciler(asking(asked, "ada", "tmp"), now::get);
+    var elapsed = new AtomicLong();
+    var reconciler = reconciler(asking(asked, "ada", "tmp"), PAST_GRACE).counting(elapsed::get);
 
     reconciler.sweep();
     round(fdes, "ada", List.of(rosterEntry(fdes.byId(ada).orElseThrow())));
     reconciler.sweep();
-    now.set(now.get().plus(MissedStopReconciler.DISABLED_FOR).minusSeconds(1));
+    elapsed.addAndGet(MissedStopReconciler.DISABLED_FOR.toNanos() - 1);
     reconciler.sweep();
     var keptForADay = fdes.logins().gitTokens(tmp);
-    now.set(now.get().plusSeconds(1));
+    elapsed.incrementAndGet();
     reconciler.sweep();
 
     assertEquals("disabled", fdes.byHandle("tmp").orElseThrow().status());
@@ -632,6 +632,30 @@ class MissedStopReconcilerTest {
   }
 
   /**
+   * F2, the reviewer's probe: a wall clock stepped 25 hours on, with no round between, erases no
+   * disabled person's logins, since the day is counted on the monotonic clock.
+   */
+  @Test
+  void aWallClockStepErasesNoDisabledPersonsLogins() {
+    var ada = TestLogins.store(db, "ada");
+    var eve = TestLogins.store(db, "eve");
+    var fdes = new FdeStore(db);
+    fdes.logins().storeGit(eve, "github.com", "ghp_eve_0123456789abcdef");
+    var wall = new AtomicReference<>(Instant.now().plus(Duration.ofMinutes(3)));
+    var elapsed = new AtomicLong();
+    var reconciler = reconciler(asking(new ArrayList<>(), "eve"), wall::get).counting(elapsed::get);
+
+    round(fdes, "ada", List.of(rosterEntry(fdes.byId(ada).orElseThrow())));
+    reconciler.sweep();
+    wall.set(wall.get().plus(Duration.ofHours(25)));
+    elapsed.addAndGet(Duration.ofMinutes(1).toNanos());
+    reconciler.sweep();
+
+    assertEquals("disabled", fdes.byId(eve).orElseThrow().status());
+    assertEquals(Map.of("github.com", "ghp_eve_0123456789abcdef"), fdes.logins().gitTokens(eve));
+  }
+
+  /**
    * The reviewer's probe: a round that leaves out the box's own person disables nothing of theirs.
    */
   @Test
@@ -640,12 +664,12 @@ class MissedStopReconcilerTest {
     var fdes = new FdeStore(db);
     fdes.logins().storeGit(ada, "github.com", "ghp_ada_0123456789ab");
     var asked = new ArrayList<String>();
-    var now = new AtomicReference<>(Instant.now().plus(Duration.ofMinutes(3)));
-    var reconciler = reconciler(asking(asked, "ada"), now::get);
+    var elapsed = new AtomicLong();
+    var reconciler = reconciler(asking(asked, "ada"), PAST_GRACE).counting(elapsed::get);
 
     round(fdes, "ada", List.of());
     reconciler.sweep();
-    now.set(now.get().plus(MissedStopReconciler.DISABLED_FOR).plusSeconds(1));
+    elapsed.addAndGet(MissedStopReconciler.DISABLED_FOR.toNanos() + 1);
     reconciler.sweep();
 
     assertEquals("active", fdes.byHandle("ada").orElseThrow().status());
@@ -654,42 +678,33 @@ class MissedStopReconcilerTest {
   }
 
   /**
-   * N4, the reviewer's probe: main removes tmp and gives the handle to a new hire within one round.
-   * The node's row is a new person's, so the new hire inherits none of the old one's logins, and
-   * the pass disowns the old one's workspaces.
+   * F1, the reviewer's two probes: a person main describes with a later {@code created_at} than
+   * this box's row (a box that kept its own roster joins a main that added them since, or a main
+   * rebuilt by adding its people again) is the same person, and nothing of theirs is deleted.
    */
   @Test
-  void aHandleMainGaveToSomeoneNewInOneRoundPassesNothingOfTheOldPersons() {
+  void aLaterCreatedAtFromMainDeletesNobodysLogins() {
     var ada = TestLogins.store(db, "ada");
-    var old = TestLogins.store(db, "tmp");
+    var bob = TestLogins.store(db, "bob");
     var fdes = new FdeStore(db);
-    fdes.logins().storeGit(old, "github.com", "ghp_old_tmp_0123456789");
-    var asked = new ArrayList<String>();
-    var reconciler = reconciler(asking(asked, "ada", "tmp"), PAST_GRACE);
-    var hired = fdes.byId(old).orElseThrow().createdAt().plusSeconds(60);
+    fdes.logins().storeGit(bob, "github.com", "ghp_bob_0123456789abcd");
+    var reconciler = reconciler(asking(new ArrayList<>(), "ada", "bob"), PAST_GRACE);
+    var later = fdes.byId(bob).orElseThrow().createdAt().plusSeconds(60);
 
     reconciler.sweep();
     round(
         fdes,
         "ada",
         List.of(
-            rosterEntry(fdes.byId(ada).orElseThrow()),
-            rosterEntry("tmp", "newhire@example.com", hired)));
+            rosterEntry("ada", "ada@sail.invalid", later),
+            rosterEntry("bob", "bob@sail.invalid", later)));
     reconciler.sweep();
-    var hire = fdes.byHandle("tmp").orElseThrow();
-    round(
-        fdes,
-        "ada",
-        List.of(
-            rosterEntry(fdes.byId(ada).orElseThrow()),
-            rosterEntry("tmp", "newhire@example.com", hired)));
 
-    assertNotEquals(old, hire.id());
-    assertEquals("newhire@example.com", hire.email());
-    assertEquals(Map.of(), fdes.logins().gitTokens(hire.id()));
-    assertEquals(List.of(), fdes.logins().list(old));
-    assertEquals(hire.id(), fdes.byHandle("tmp").orElseThrow().id(), "the same person stays");
-    assertEquals(List.of("ada true, tmp true", "ada true, tmp false"), asked);
+    assertEquals(bob, fdes.byHandle("bob").orElseThrow().id());
+    assertEquals(ada, fdes.byHandle("ada").orElseThrow().id());
+    assertEquals(Map.of("github.com", "ghp_bob_0123456789abcd"), fdes.logins().gitTokens(bob));
+    assertEquals(3, fdes.logins().list(bob).size());
+    assertEquals(2, fdes.logins().list(ada).size());
   }
 
   /** A container that cannot be asked fails nothing: the next pass tries again. */

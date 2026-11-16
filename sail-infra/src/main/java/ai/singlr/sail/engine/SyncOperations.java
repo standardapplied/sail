@@ -760,7 +760,6 @@ public final class SyncOperations {
     var rejected = new ArrayList<String>();
     for (var entry : roster) {
       try {
-        fdes.forgetIfReused(str(entry, "handle"), Snapshots.instant(entry, "created_at"), own);
         fdes.replicate(
             str(entry, "handle"),
             str(entry, "display_name"),

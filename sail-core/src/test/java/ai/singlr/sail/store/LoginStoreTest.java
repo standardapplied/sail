@@ -443,7 +443,7 @@ class LoginStoreTest {
   }
 
   /**
-   * N2: a git token shorter than any forge's is refused at the store, and no harness is named git,
+   * F3: a git token shorter than any forge's is refused at the store, and no harness is named git,
    * so a harness's logins and the git tokens never share a directory.
    */
   @Test
@@ -454,7 +454,9 @@ class LoginStoreTest {
         assertThrows(IllegalArgumentException.class, () -> store.storeGit(UDAY, "github.com", "a"));
 
     assertEquals(
-        "A git token is at least 16 characters: this value is not one.", refused.getMessage());
+        "A git token is at least 16 characters, as every forge's is: this value is too short to be"
+            + " one.",
+        refused.getMessage());
     assertEquals(Map.of(), store.gitTokens(UDAY));
     assertTrue(Harnesses.all().stream().noneMatch(h -> h.yamlName().equals(LoginStore.GIT)));
   }

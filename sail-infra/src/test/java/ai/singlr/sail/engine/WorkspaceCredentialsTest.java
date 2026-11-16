@@ -10,6 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -59,6 +60,14 @@ class WorkspaceCredentialsTest {
   }
 
   private record Ran(int exit, String err) {}
+
+  private static String read(Path file) {
+    try {
+      return Files.readString(file);
+    } catch (IOException e) {
+      throw new UncheckedIOException(e);
+    }
+  }
 
   private void git(String... args) throws Exception {
     var command = new ArrayList<>(List.of("git"));
@@ -134,6 +143,33 @@ class WorkspaceCredentialsTest {
     assertFalse(Files.exists(root.resolve("home/dev/.config/gh/hosts.yml")));
     assertEquals("", Files.readString(root.resolve("home/dev/.ssh/authorized_keys")));
     assertFalse(Files.readString(root.resolve("home/dev/.gitconfig")).contains("email"));
+  }
+
+  /**
+   * F4: a token change killed between its write and its rename, or a gh login cut short, leaves the
+   * previous owner's token beside the real files; the strip of a re-own takes those too.
+   */
+  @Test
+  void theStripTakesWhatATokenChangeCutShortLeftBeside() throws Exception {
+    Files.writeString(
+        root.resolve("home/dev/.git-credentials.sail-new"),
+        "https://oauth2:" + TOKEN + "@github.com\n");
+    Files.createDirectories(root.resolve("home/dev/.sail"));
+    Files.writeString(root.resolve("home/dev/.sail/gh-token"), TOKEN + "\n");
+
+    assertEquals(0, script(WorkspaceCredentials.STRIP, "", "Ana", "ana@sail.invalid").exit());
+
+    assertFalse(Files.exists(root.resolve("home/dev/.git-credentials.sail-new")));
+    assertFalse(Files.exists(root.resolve("home/dev/.sail/gh-token")));
+    try (var files = Files.walk(root.resolve("home"))) {
+      assertEquals(
+          List.of(),
+          files
+              .filter(Files::isRegularFile)
+              .filter(file -> read(file).contains(TOKEN))
+              .map(Path::toString)
+              .toList());
+    }
   }
 
   /** The strip given a name and email leaves them as the identity, and nothing else of anyone. */

@@ -392,21 +392,6 @@ public final class FdeStore {
         });
   }
 
-  /**
-   * Removes the row of {@code handle} when main's, made at {@code createdAt}, is a later person
-   * than this box's: main gave the handle to someone new, who inherits nothing of the old person's
-   * (their logins, tokens and keys go with the row, and their workspaces are disowned). This box's
-   * own {@code own} is kept. Whether it removed one.
-   */
-  public boolean forgetIfReused(String handle, Instant createdAt, String own) {
-    var old =
-        byHandle(handle)
-            .filter(fde -> createdAt != null && !handle.equals(own))
-            .filter(fde -> createdAt.isAfter(fde.createdAt()));
-    old.ifPresent(fde -> db.transaction(() -> delete(fde)));
-    return old.isPresent();
-  }
-
   /** Returns the number of FDEs that are active admins — the principals who can administer. */
   public long activeAdminCount() {
     return db.queryOne(

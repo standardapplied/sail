@@ -13,10 +13,12 @@ import java.io.IOException;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
 import java.util.concurrent.TimeoutException;
+import java.util.function.Predicate;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
@@ -81,21 +83,35 @@ public final class ContainerAuthorizedKeys {
       return List.copyOf(unreached);
     }
     try {
-      keys.add(key, projects, boxHandle)
-          .forEach(c -> unreached.add(notTrustedYet(c.container(), c.reason(), operator)));
+      var containers = new BoxInstances(shell).containers();
+      var kinds = new HashMap<String, BoxInstances.Kind>();
+      containers.forEach(instance -> kinds.put(instance.name(), instance.kind()));
+      keys.addTo(key, containers.stream().filter(trusting(projects, boxHandle)).toList())
+          .forEach(
+              c ->
+                  unreached.add(
+                      notTrustedYet(
+                          c.container(), kinds.get(c.container()), c.reason(), operator)));
     } catch (IOException | TimeoutException failure) {
       unreached.add(noneTrustYet(Remedied.reasonOf(failure).strip(), operator));
     }
     return List.copyOf(unreached);
   }
 
-  public static String notTrustedYet(String container, String why, OperatorCommand operator) {
-    return container
-        + " does not trust this key yet: "
-        + why
-        + ". Make it: '"
-        + operator.sail("project apply " + container)
-        + "'.";
+  /** A workspace takes its owner's keys at its start; {@code project apply} refuses one. */
+  public static String notTrustedYet(
+      String container, BoxInstances.Kind kind, String why, OperatorCommand operator) {
+    var told = container + " does not trust this key yet: " + why;
+    if (kind instanceof BoxInstances.Workspace w) {
+      var named = w.project() + " " + w.workspace();
+      return told
+          + ". It takes it at its next start: '"
+          + operator.sail("project workspace stop " + named)
+          + "', then '"
+          + operator.sail("project workspace start " + named)
+          + "'.";
+    }
+    return told + ". Make it: '" + operator.sail("project apply " + container) + "'.";
   }
 
   public static String noneTrustYet(String why, OperatorCommand operator) {
@@ -165,13 +181,14 @@ public final class ContainerAuthorizedKeys {
     return addTo(
         key,
         new BoxInstances(shell)
-            .containers().stream()
-                .filter(
-                    instance ->
-                        instance.kind() instanceof BoxInstances.Plain
-                                && projects.contains(instance.name())
-                            || BoxInstances.wholeWorkspaceOf(boxHandle).test(instance))
-                .toList());
+            .containers().stream().filter(trusting(projects, boxHandle)).toList());
+  }
+
+  private static Predicate<BoxInstances.Instance> trusting(
+      Collection<String> projects, String boxHandle) {
+    return instance ->
+        instance.kind() instanceof BoxInstances.Plain && projects.contains(instance.name())
+            || BoxInstances.wholeWorkspaceOf(boxHandle).test(instance);
   }
 
   /** A person's own key goes to their own workspaces alone. */
