@@ -13,6 +13,8 @@ import static org.junit.jupiter.api.Assertions.fail;
 
 import ai.singlr.sail.access.baseline.GoldenFiles;
 import ai.singlr.sail.api.Event.WellKnownTypes;
+import ai.singlr.sail.auth.EnrollmentService;
+import ai.singlr.sail.auth.PasskeyService;
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.config.Engagement;
@@ -33,11 +35,13 @@ import ai.singlr.sail.identity.RoleRule;
 import ai.singlr.sail.pty.PtyMessage;
 import ai.singlr.sail.pty.PtyWire;
 import ai.singlr.sail.store.AuthSessionStore;
+import ai.singlr.sail.store.EnrollmentTicketStore;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.FeedPositions;
 import ai.singlr.sail.store.Finding;
 import ai.singlr.sail.store.HeldProjects;
 import ai.singlr.sail.store.MessageStore;
+import ai.singlr.sail.store.PendingChallengeStore;
 import ai.singlr.sail.store.ReviewStore;
 import ai.singlr.sail.store.RoomStore;
 import ai.singlr.sail.store.RunStore;
@@ -45,7 +49,10 @@ import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
 import ai.singlr.sail.store.TokenStore;
+import ai.singlr.sail.store.WebauthnCredentialStore;
 import ai.singlr.sail.sync.SyncTransition;
+import ai.singlr.sail.webauthn.RelyingParty;
+import ai.singlr.sail.webauthn.TestAuthenticator;
 import com.sun.net.httpserver.HttpServer;
 import java.io.BufferedReader;
 import java.io.ByteArrayOutputStream;
@@ -71,6 +78,7 @@ import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Base64;
 import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -114,8 +122,9 @@ import org.junit.jupiter.api.io.TempDir;
  *
  * <p>Ids are random and times run on the clock, so the clock is pinned and every UUID is renamed by
  * the order it first appears in; the name of the machine that answered is written as {@code box};
- * JSON keys are sorted, since a map's iteration order is not part of the wire. Nothing else is
- * rewritten.
+ * the passkey ceremonies' random bytes, ids and secrets are written as fixed values of the same
+ * shape, each by the order it first appears in; JSON keys are sorted, since a map's iteration order
+ * is not part of the wire. Nothing else is rewritten.
  */
 @Timeout(value = 5, unit = TimeUnit.MINUTES)
 class ClientGoldensTest {
@@ -142,6 +151,25 @@ class ClientGoldensTest {
   private static final String ID = "id: ";
   private static final int STREAMS = 2;
   private static final SyncConfig OWNER = new SyncConfig(null, null, "uday");
+  private static final String RP_ID = "sail.standardapplied.com";
+  private static final String ORIGIN = "https://" + RP_ID;
+  private static final String PASSKEYS = "/v1/auth";
+  private static final Base64.Encoder B64URL = Base64.getUrlEncoder().withoutPadding();
+  private static final Base64.Decoder B64URL_DECODE = Base64.getUrlDecoder();
+
+  /** The fields of a passkey ceremony that hold random bytes, ids or secrets. */
+  private static final Set<String> CEREMONY_RANDOM =
+      Set.of(
+          "challenge",
+          "challenge_id",
+          "id",
+          "credential_id",
+          "session_token",
+          "client_data_json",
+          "attestation_object",
+          "authenticator_data",
+          "signature",
+          "user_handle");
 
   @TempDir Path tempDir;
   private Clock clock;
@@ -226,6 +254,7 @@ class ClientGoldensTest {
       box.record(http, "board-specs", "GET", "/v1/specs?project=" + PROJECT, uday, null);
       box.record(http, "board-rooms", "GET", "/v1/rooms?project=" + PROJECT, uday, null);
       box.record(http, "refusal-resync-required", "GET", "/v1/changes?since=999999999", uday, null);
+      box.recordPasskeys(http);
       var resumed = box.resumed(uday, beginning, "id: " + changes.get("next"));
       var resync = box.resumed(uday, "999999999", "event: resync");
 
@@ -521,7 +550,9 @@ class ClientGoldensTest {
     private final SailOperations operations;
     private final HttpServer server;
     private final ManualClock streamClock;
-    private final ApiAuth auth;
+    private final SessionAwareAuth auth;
+    private final HttpServer unconfigured;
+    private final Map<String, String> pinned = new LinkedHashMap<>();
     private final List<OpenStream> streams = new ArrayList<>();
     private final Map<String, String> ids = new LinkedHashMap<>();
 
@@ -574,7 +605,173 @@ class ClientGoldensTest {
               operations.changes(),
               STREAMS,
               streamClock));
+      PrivateAttributes.context(
+          server,
+          PASSKEYS,
+          new WebauthnAuthHandler(
+              new PasskeyService(
+                  new RelyingParty(RP_ID, "Sail", Set.of(ORIGIN)),
+                  new FdeStore(db),
+                  new WebauthnCredentialStore(db),
+                  new AuthSessionStore(db),
+                  new PendingChallengeStore(db),
+                  Duration.ofDays(30)),
+              enrollment(),
+              auth,
+              List.of(ORIGIN)));
       server.start();
+      this.unconfigured = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+      PrivateAttributes.context(
+          unconfigured, PASSKEYS, new WebauthnAuthHandler(null, null, auth, null));
+      unconfigured.start();
+    }
+
+    private EnrollmentService enrollment() {
+      return new EnrollmentService(new EnrollmentTicketStore(db), new FdeStore(db));
+    }
+
+    /**
+     * A passkey enrolled by ticket and signed in with, as a native client does it, each answer
+     * recorded: the ticket refused once spent, a second registration offering the enrolled passkey
+     * as excluded, a passkey the box never enrolled, an origin it does not accept, and the routes
+     * on a box with no relying party.
+     */
+    void recordPasskeys(Map<String, String> goldens) throws Exception {
+      var passkey = new TestAuthenticator(RP_ID);
+      var ticket = enrollment().issue("uday").ticket();
+      var started =
+          ceremony(goldens, "passkey-register-start", base(), "register/start", ticket, Map.of());
+      var made = passkey.register(challenge(started.get("public_key")), ORIGIN);
+      var finish = new LinkedHashMap<String, Object>();
+      finish.put("challenge_id", started.get("challenge_id"));
+      finish.put("client_data_json", B64URL.encodeToString(made.clientDataJson()));
+      finish.put("attestation_object", B64URL.encodeToString(made.attestationObject()));
+      finish.put("label", "Sail for Mac");
+      ceremony(goldens, "passkey-register-finish", base(), "register/finish", ticket, finish);
+      ceremony(goldens, "refusal-forbidden", base(), "register/start", ticket, Map.of());
+      ceremony(
+          goldens,
+          "passkey-register-start-enrolled",
+          base(),
+          "register/start",
+          enrollment().issue("uday").ticket(),
+          Map.of());
+      var signing = ceremony(goldens, "passkey-login-start", base(), "login/start", null, Map.of());
+      var assertion = passkey.assertResponse(challenge(signing.get("public_key")), ORIGIN);
+      var login = new LinkedHashMap<String, Object>();
+      login.put("challenge_id", signing.get("challenge_id"));
+      login.put("credential_id", B64URL.encodeToString(assertion.credentialId()));
+      login.put("client_data_json", B64URL.encodeToString(assertion.clientDataJson()));
+      login.put("authenticator_data", B64URL.encodeToString(assertion.authenticatorData()));
+      login.put("signature", B64URL.encodeToString(assertion.signature()));
+      ceremony(goldens, "passkey-login-finish", base(), "login/finish", null, login);
+      var stranger = new TestAuthenticator(RP_ID).assertResponse(new byte[32], ORIGIN);
+      var unknown = new LinkedHashMap<>(login);
+      unknown.put("credential_id", B64URL.encodeToString(stranger.credentialId()));
+      ceremony(goldens, "refusal-authentication-failed", base(), "login/finish", null, unknown);
+      var elsewhere = enrollment().issue("uday").ticket();
+      var restarted = ceremony(goldens, null, base(), "register/start", elsewhere, Map.of());
+      var foreign =
+          new TestAuthenticator(RP_ID)
+              .register(challenge(restarted.get("public_key")), "https://elsewhere.example");
+      var refused = new LinkedHashMap<String, Object>();
+      refused.put("challenge_id", restarted.get("challenge_id"));
+      refused.put("client_data_json", B64URL.encodeToString(foreign.clientDataJson()));
+      refused.put("attestation_object", B64URL.encodeToString(foreign.attestationObject()));
+      refused.put("label", "Sail for Mac");
+      ceremony(goldens, "refusal-invalid-request", base(), "register/finish", elsewhere, refused);
+      ceremony(
+          goldens,
+          "refusal-passkey-not-configured",
+          "http://127.0.0.1:" + unconfigured.getAddress().getPort(),
+          "login/start",
+          null,
+          Map.of());
+    }
+
+    private static byte[] challenge(Object options) {
+      return B64URL_DECODE.decode(((Map<?, ?>) options).get("challenge").toString());
+    }
+
+    /**
+     * Records {@code POST /v1/auth/<route>} at {@code base} as {@code name}, or sends it only when
+     * no name is given, with the enrollment ticket when given (never recorded), its random values
+     * pinned; answers the response body as the server sent it.
+     */
+    private Map<String, Object> ceremony(
+        Map<String, String> goldens,
+        String name,
+        String base,
+        String route,
+        String ticket,
+        Map<String, Object> body)
+        throws Exception {
+      var path = PASSKEYS + "/" + route;
+      var builder =
+          HttpRequest.newBuilder(URI.create(base + path))
+              .POST(HttpRequest.BodyPublishers.ofString(YamlUtil.dumpJson(body)));
+      if (ticket != null) {
+        builder.header("X-Enrollment-Ticket", ticket);
+      }
+      HttpResponse<String> response;
+      try (var client = HttpClient.newHttpClient()) {
+        response = client.send(builder.build(), HttpResponse.BodyHandlers.ofString());
+      }
+      if (response.statusCode() >= 500 && !name.startsWith("refusal-")) {
+        fail(path + " answered " + response.body());
+      }
+      var parsed = YamlUtil.parseMap(response.body());
+      pin(body);
+      pin(parsed);
+      var request = new LinkedHashMap<String, Object>();
+      request.put("method", "POST");
+      request.put("path", path);
+      request.put("body", body);
+      var answer = new LinkedHashMap<String, Object>();
+      answer.put("status", response.statusCode());
+      answer.put("body", parsed);
+      if (name != null) {
+        goldens.put(
+            name + ".json",
+            json(Scrub.canonical(Map.of("request", request, "response", answer), this::renamed)));
+      }
+      return parsed;
+    }
+
+    /**
+     * Pins every random value {@code value} holds under a ceremony's random fields; the relying
+     * party's id is its name, not a random one.
+     */
+    private void pin(Object value) {
+      switch (value) {
+        case Map<?, ?> map ->
+            map.forEach(
+                (key, item) -> {
+                  if ("rp".equals(key)) {
+                    return;
+                  }
+                  if (item instanceof String text && CEREMONY_RANDOM.contains(key.toString())) {
+                    pinned.computeIfAbsent(text, found -> golden(key.toString(), found));
+                  } else {
+                    pin(item);
+                  }
+                });
+        case List<?> list -> list.forEach(this::pin);
+        case null, default -> {}
+      }
+    }
+
+    /** A fixed value in {@code found}'s shape: a session or challenge id keeps its prefix. */
+    private String golden(String field, String found) {
+      var order = pinned.size() + 1;
+      if (found.startsWith(SessionAwareAuth.SESSION_PREFIX)) {
+        return SessionAwareAuth.SESSION_PREFIX + "golden" + order;
+      }
+      if (found.startsWith("wac_")) {
+        return "wac_golden" + order;
+      }
+      return B64URL.encodeToString(
+          ("golden " + field + " " + order).getBytes(StandardCharsets.UTF_8));
     }
 
     String session(String handle, String displayName, String email, Role role) {
@@ -912,6 +1109,9 @@ class ClientGoldensTest {
       if (text.equals(HostInfo.hostname())) {
         return "box";
       }
+      if (pinned.containsKey(text)) {
+        return pinned.get(text);
+      }
       var positioned =
           POSITION
               .matcher(text)
@@ -948,6 +1148,7 @@ class ClientGoldensTest {
     @Override
     public void close() {
       server.stop(0);
+      unconfigured.stop(0);
       operations.close();
     }
   }

@@ -5,7 +5,8 @@ import FoundationNetworking
 import Synchronization
 
 /// A ``Transport`` over one `URLSession`, which lives as long as a copy of the transport or a
-/// request it sent does. A stream is read through the session's data delegate rather than
+/// request it sent does. It follows no redirect: a 3xx is the answer, so no request, and no header
+/// it carries, reaches any server but the one at `base`. A stream is read through the session's data delegate rather than
 /// `bytes(for:)`, which Linux's `URLSession` does not have, so one adapter serves every platform.
 public struct URLSessionTransport: Transport {
     /// How many chunks of a stream wait for a reader that has fallen behind. One more and the
@@ -16,8 +17,9 @@ public struct URLSessionTransport: Transport {
     private let connection: Connection
 
     /// Requests reach the server at `base`, `https://box.example.com` say; a path in `base` is
-    /// kept in front of every request's.
-    public init(base: URL, configuration: URLSessionConfiguration = .default) {
+    /// kept in front of every request's. The session is ephemeral unless told otherwise: nothing it
+    /// learns, a cookie or a cached answer, is written to disk.
+    public init(base: URL, configuration: URLSessionConfiguration = .ephemeral) {
         let base = base.absoluteString
         root = base.hasSuffix("/") ? String(base.dropLast()) : base
         connection = Connection(configuration: configuration)
@@ -99,7 +101,8 @@ private extension URLResponse {
     }
 }
 
-/// The session's delegate: hands what arrives for a streamed task to that task's reader.
+/// The session's delegate: refuses every redirect, and hands what arrives for a streamed task to
+/// that task's reader.
 private final class Streams: NSObject, URLSessionDataDelegate, Sendable {
     private let readers = Mutex<[Int: StreamReader]>([:])
 
@@ -117,6 +120,13 @@ private final class Streams: NSObject, URLSessionDataDelegate, Sendable {
     ) {
         reader(of: dataTask)?.head.answer(.success(Head(status: response.status, headers: response.headers)))
         completionHandler(.allow)
+    }
+
+    func urlSession(
+        _ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse, newRequest request: URLRequest,
+        completionHandler: @escaping @Sendable (URLRequest?) -> Void
+    ) {
+        completionHandler(nil)
     }
 
     func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive data: Data) {

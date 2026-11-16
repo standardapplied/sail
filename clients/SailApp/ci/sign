@@ -1,23 +1,28 @@
 #!/usr/bin/env bash
-# Signs APP with the hardened runtime: the bundled sail first, then the app. When ci/signing says
-# signing is on, with the Developer ID from a keychain made for this run and deleted when it ends,
-# with the certificate file; when off, ad hoc, an unsigned build, so the hardened runtime still
-# applies to everything the lane runs.
+# Signs APP with the hardened runtime: the bundled sail first, with no entitlements, then the app.
+# When ci/signing says signing is on: with the Developer ID from a keychain made for this run and
+# deleted when it ends; the Developer ID provisioning profile embedded as
+# Contents/embedded.provisionprofile; and the app, never the inner sail, claiming ci/Sail.entitlements
+# with the team id the profile names, once the profile is shown to be for the app's own App ID. When
+# off, ad hoc with no profile and no entitlements, an unsigned build: a restricted entitlement with
+# no profile to authorize it would stop the app from launching, so the hardened runtime still applies
+# to everything the lane runs. Nothing it prints names the team or holds the profile.
 set -euo pipefail
 
 [[ $# -eq 1 ]] || { echo "usage: ci/sign APP" >&2; exit 2; }
-readonly app=$1
+readonly app=$1 here=$(dirname "$0")
 [[ -d $app/Contents/Helpers ]] || { echo "ci/sign: $app is not a bundle ci/bundle made" >&2; exit 1; }
 
 identity=-
 timestamp=--timestamp=none
 keychain=()
-mode=$("$(dirname "$0")/signing")
+entitlements=()
+mode=$("$here/signing")
 if [[ $mode == on ]]; then
   readonly temp=${RUNNER_TEMP:?ci/sign: RUNNER_TEMP is not set}
-  readonly chain=$temp/sail-signing.keychain-db
+  readonly chain=$temp/sail-signing.keychain-db profile=$app/Contents/embedded.provisionprofile
   password=$(uuidgen)
-  trap 'rm -f "$temp/signing.p12"; security delete-keychain "$chain" 2>/dev/null || true' EXIT
+  trap 'rm -f "$temp/signing.p12" "$temp/profile.plist" "$temp/Sail.entitlements"; security delete-keychain "$chain" 2>/dev/null || true' EXIT
   security create-keychain -p "$password" "$chain"
   security set-keychain-settings -lut 1800 "$chain"
   security unlock-keychain -p "$password" "$chain"
@@ -32,9 +37,22 @@ if [[ $mode == on ]]; then
   identity=$APPLE_SIGNING_IDENTITY
   timestamp=--timestamp
   keychain=(--keychain "$chain")
+
+  printf '%s' "$APPLE_PROVISIONING_PROFILE_BASE64" | base64 --decode > "$profile"
+  chmod 644 "$profile"
+  security cms -D -i "$profile" -o "$temp/profile.plist" 2>/dev/null \
+    || { echo "ci/sign: APPLE_PROVISIONING_PROFILE_BASE64 does not hold a signed provisioning profile" >&2; exit 1; }
+  team=$(/usr/libexec/PlistBuddy -c 'Print :TeamIdentifier:0' "$temp/profile.plist")
+  appid=$(/usr/libexec/PlistBuddy -c 'Print :Entitlements:com.apple.application-identifier' "$temp/profile.plist" 2>/dev/null || true)
+  identifier=$(plutil -extract CFBundleIdentifier raw "$app/Contents/Info.plist")
+  [[ $appid == "$team.$identifier" ]] \
+    || { echo "ci/sign: the provisioning profile is not for the App ID of $identifier; make a Developer ID profile for it" >&2; exit 1; }
+  sed -e "s/@TEAM@/$team/g" -e "s/@IDENTIFIER@/$identifier/g" "$here/Sail.entitlements" > "$temp/Sail.entitlements"
+  entitlements=(--entitlements "$temp/Sail.entitlements")
 fi
 
 codesign --force --options runtime "$timestamp" ${keychain[@]+"${keychain[@]}"} --sign "$identity" "$app/Contents/Helpers/sail"
-codesign --force --options runtime "$timestamp" ${keychain[@]+"${keychain[@]}"} --sign "$identity" "$app"
+codesign --force --options runtime "$timestamp" ${keychain[@]+"${keychain[@]}"} ${entitlements[@]+"${entitlements[@]}"} \
+  --sign "$identity" "$app"
 codesign --verify --deep --strict "$app"
-echo "ci/sign: $app signed $([[ $identity == - ]] && echo "ad hoc: an unsigned build" || echo "with Developer ID")"
+echo "ci/sign: $app signed $([[ $identity == - ]] && echo "ad hoc: an unsigned build" || echo "with Developer ID, its profile and entitlements")"

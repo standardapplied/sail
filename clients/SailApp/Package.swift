@@ -13,7 +13,7 @@ let package = Package(
     platforms: [.macOS(.v15)],
     products: [
         .library(name: "SailTerminalView", targets: ["SailTerminalView"]),
-        .executable(name: "SailTerminalPreview", targets: ["SailTerminalPreview"]),
+        .executable(name: "Sail", targets: ["Sail"]),
         .executable(name: "SailDrive", targets: ["SailDrive"]),
     ],
     dependencies: [.package(path: "../SailKit")],
@@ -25,15 +25,23 @@ let package = Package(
             dependencies: ["SailRenderer", "SailLook", kit("SailSurface"), kit("SailTerminal"), kit("SailVT")],
             swiftSettings: strict
         ),
+        .target(name: "SailAccount", dependencies: [kit("SailAPI")], swiftSettings: strict),
         .target(
-            name: "SailPreview",
-            dependencies: ["SailTerminalView", "SailLook", kit("SailSurface"), kit("SailTerminal"), kit("SailTerminalWire"), kit("SailVT")],
+            name: "SailShell",
+            dependencies: [
+                "SailAccount", "SailLook", "SailTerminalView", kit("SailAPI"), kit("SailSurface"), kit("SailTerminal"), kit("SailTerminalWire"),
+                kit("SailVT"),
+            ],
             swiftSettings: strict
         ),
-        .executableTarget(name: "SailTerminalPreview", dependencies: ["SailPreview"], swiftSettings: strict),
+        .executableTarget(name: "Sail", dependencies: ["SailShell"], swiftSettings: strict),
+        .target(name: "SailTestPasskey", dependencies: [kit("SailAPI")], swiftSettings: strict),
         .executableTarget(
             name: "SailDrive",
-            dependencies: ["SailPreview", "SailTerminalView", "SailRenderer", kit("SailSurface"), kit("SailTerminal"), kit("SailVT")],
+            dependencies: [
+                "SailShell", "SailAccount", "SailTestPasskey", "SailTerminalView", "SailRenderer", kit("SailAPI"), kit("SailSurface"),
+                kit("SailTerminal"), kit("SailVT"),
+            ],
             swiftSettings: strict
         ),
         .testTarget(
@@ -43,7 +51,12 @@ let package = Package(
         ),
         .testTarget(
             name: "SailTerminalViewTests",
-            dependencies: ["SailTerminalView", "SailPreview", "SailRenderer", "SailLook", kit("SailSurface"), kit("SailTerminal"), kit("SailVT")],
+            dependencies: ["SailTerminalView", "SailShell", "SailRenderer", "SailLook", kit("SailSurface"), kit("SailTerminal"), kit("SailVT")],
+            swiftSettings: strict
+        ),
+        .testTarget(
+            name: "SailShellTests",
+            dependencies: ["SailShell", "SailAccount", "SailLook", "SailTerminalView", "SailTestPasskey", kit("SailAPI"), kit("SailVT")],
             swiftSettings: strict
         ),
     ],

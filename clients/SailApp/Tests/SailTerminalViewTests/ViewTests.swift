@@ -246,11 +246,11 @@ import Testing
         }
         let keys = buttons(sheet.contentView).map { "\($0.title)=\($0.keyEquivalent.unicodeScalars.map(\.value))" }
         let returnKey = buttons(sheet.contentView).filter { $0.keyEquivalent == "\r" }.map(\.title)
-        #expect(returnKey == ["Cancel"], "Return cancels the paste the sheet warns of; the buttons' keys: \(keys)")
+        #expect(returnKey.isEmpty, "no button answers Return, so none is drawn as the system-accent default; the buttons' keys: \(keys)")
         harness.window.endSheet(sheet, returnCode: .alertSecondButtonReturn)
     }
 
-    /// Escape cancels the paste sheet, though Return is Cancel's key.
+    /// Escape cancels the paste sheet.
     @Test func escapeCancelsThePasteSheet() async throws {
         let harness = try Harness()
         let answers = Mutex<[Bool]>([])
@@ -484,7 +484,7 @@ import Testing
     @Test func noAppSourceSpellsAnEscapeSequence() throws {
         let sources = URL(filePath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
             .appending(path: "Sources")
-        let targets = ["SailLook", "SailRenderer", "SailTerminalView", "SailPreview", "SailTerminalPreview"]
+        let targets = ["SailLook", "SailRenderer", "SailTerminalView", "SailShell", "SailAccount", "Sail"]
         var read = 0
         for target in targets {
             let directory = sources.appending(path: target)

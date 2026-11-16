@@ -50,7 +50,7 @@ func answer<Response>(
 
 @Suite struct GoldenRoutesTests {
     @Test func everyRecordedExchangeIsOneThisClientMakes() throws {
-        #expect(Set(calls.keys).union(refusalsOfRoutesNotYetCalled).union(answersOfRoutesNotYetCalled)
+        #expect(Set(calls.keys).union(refusalsOfRoutesNotYetCalled).union(answersOfRoutesNotYetCalled).union(passkeyExchanges)
             == Set(try Goldens.names(in: "http")))
     }
 
