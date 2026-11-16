@@ -13,6 +13,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import ai.singlr.sail.ssh.SshPublicKey;
 import ai.singlr.sail.ssh.TestSshKeys;
 import java.nio.file.Path;
+import java.util.List;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -68,6 +69,25 @@ class FdeSshKeyStoreTest {
 
     assertEquals(3, store.list().size());
     assertEquals(2, store.listForFde(fdeId).size());
+  }
+
+  /**
+   * A disabled person's keys stay listed, with their state, for the operator, and the gateway
+   * admits none of them.
+   */
+  @Test
+  void aDisabledPersonsKeysAreListedWithTheirStateAndAdmittedByNoGateway() {
+    var other = new FdeStore(db).add("nova", null, null).id();
+    store.add(fdeId, key("uday", "a"));
+    store.add(other, key("nova", "b"));
+    db.execute("UPDATE fdes SET status = 'disabled' WHERE id = ?", other);
+
+    assertEquals(
+        List.of("nova disabled", "uday active"),
+        store.list().stream().map(k -> k.fdeHandle() + " " + k.state()).toList());
+    assertEquals(
+        List.of("uday"),
+        store.admitted().stream().map(FdeSshKeyStore.SshKeyInfo::fdeHandle).toList());
   }
 
   @Test

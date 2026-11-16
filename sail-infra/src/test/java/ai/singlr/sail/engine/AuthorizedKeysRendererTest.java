@@ -19,7 +19,7 @@ class AuthorizedKeysRendererTest {
 
   private static FdeSshKeyStore.SshKeyInfo key(String fdeId, String line) {
     return new FdeSshKeyStore.SshKeyInfo(
-        "SHA256:fp", fdeId, "uday", line, "c", Instant.parse("2026-01-01T00:00:00Z"));
+        "SHA256:fp", fdeId, "uday", line, "c", Instant.parse("2026-01-01T00:00:00Z"), "active");
   }
 
   @Test

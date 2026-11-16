@@ -306,7 +306,7 @@ final class HostLanes {
 
     @Override
     public List<FdeSshKeyStore.SshKeyInfo> sshKeys() {
-      return new FdeSshKeyStore(db).list();
+      return new FdeSshKeyStore(db).admitted();
     }
 
     @Override
