@@ -66,7 +66,9 @@ import Testing
         let passkey = SoftwarePasskey(file: folder.appending(path: "passkey.json"))
         let shell = try ShellApp(fonts: Self.fonts, helper: nil, look: look) { _ in passkey }
         let window = shell.window
-        #expect(window.styleMask.contains(.fullSizeContentView) && window.titlebarAppearsTransparent && window.titleVisibility == .hidden)
+        #expect(window.styleMask.contains(.fullSizeContentView))
+        #expect(window.titlebarAppearsTransparent)
+        #expect(window.titleVisibility == .hidden)
         for button in [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton] {
             #expect(window.standardWindowButton(button).map { !$0.isHidden } == true, "\(name): the window lacks its \(button) button")
         }
@@ -149,10 +151,13 @@ import Testing
             #expect(shell.window.makeFirstResponder(field), "\(name): the field took no focus")
             let editor = try #require(field.currentEditor() as? NSTextView)
             #expect(field.focusRingType == .none)
-            #expect(field.layer?.borderWidth == 2 && field.layer?.borderColor == NSColor(look.accent).cgColor, "\(name): the field is not ringed in the accent")
+            let ring = try #require(field.layer)
+            #expect(ring.borderWidth == 2, "\(name): the field is not ringed")
+            #expect(ring.borderColor == NSColor(look.accent).cgColor, "\(name): the ring is not the accent")
             #expect(editor.selectedTextAttributes[.backgroundColor] as? NSColor == NSColor(look.fillSelected))
             #expect(editor.insertionPointColor == NSColor(look.accent))
-            #expect(button.keyEquivalent == "\r" && other.keyEquivalent.isEmpty, "\(name): Return does not go to \(button.title)")
+            #expect(button.keyEquivalent == "\r", "\(name): Return does not go to \(button.title)")
+            #expect(other.keyEquivalent.isEmpty, "\(name): Return also goes to \(other.title)")
         }
     }
 

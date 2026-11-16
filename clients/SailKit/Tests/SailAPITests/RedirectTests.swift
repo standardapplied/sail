@@ -10,7 +10,8 @@ import Synchronization
 import Testing
 
 /// A loopback HTTP server that answers every request with `answer` and keeps the head of each
-/// request it was sent: its request line and headers, lowercased.
+/// request it was sent: its request line and headers, lowercased. It reads a request's body before
+/// it answers, so closing never resets a connection with bytes unread.
 final class HTTPListener: Sendable {
     let port: UInt16
     private let descriptor: Int32
@@ -38,12 +39,24 @@ final class HTTPListener: Sendable {
                 guard client >= 0 else { return }
                 var received: [UInt8] = []
                 var buffer = [UInt8](repeating: 0, count: 4096)
-                while !received.suffix(4).elementsEqual("\r\n\r\n".utf8) {
+                func headEnd() -> Int? {
+                    received.indices.dropLast(3).first { received[$0 ..< $0 + 4].elementsEqual("\r\n\r\n".utf8) }.map { $0 + 4 }
+                }
+                while headEnd() == nil {
                     let count = read(client, &buffer, buffer.count)
                     guard count > 0 else { break }
                     received += buffer.prefix(count)
                 }
-                let head = String(decoding: received, as: UTF8.self).lowercased()
+                let end = headEnd() ?? received.count
+                let head = String(decoding: received.prefix(end), as: UTF8.self).lowercased()
+                let length = head.split(separator: "\r\n").first { $0.hasPrefix("content-length:") }
+                    .flatMap { Int($0.dropFirst("content-length:".count).trimmingCharacters(in: .whitespaces)) } ?? 0
+                var body = received.count - end
+                while body < length {
+                    let count = read(client, &buffer, min(buffer.count, length - body))
+                    guard count > 0 else { break }
+                    body += count
+                }
                 heads.list.withLock { $0.append(head) }
                 let reply = Array(answer(head.split(separator: "\r\n").first.map(String.init) ?? "").utf8)
                 _ = reply.withUnsafeBytes { write(client, $0.baseAddress, $0.count) }
@@ -73,20 +86,11 @@ final class HTTPListener: Sendable {
     #endif
 }
 
-/// The bodies a redirect is tried with. Linux's Foundation, refused a redirect whose body is empty,
-/// waits out the request's timeout before it answers (no request is sent on either way), so the
-/// empty body is tried where the app runs, on Apple's.
-#if canImport(Darwin)
-let redirectBodies = ["", "{}"]
-#else
-let redirectBodies = ["{}"]
-#endif
-
 /// S1 and S4 past the first hop: a control plane answering with a redirect to a name the address
 /// rule refuses reaches nothing there. No request goes to the second server, so neither the ticket
 /// nor the token does, and the redirect is said.
 @Suite(.timeLimit(.minutes(1))) struct RedirectTests {
-    @Test(arguments: redirectBodies)
+    @Test(arguments: ["", "{}"])
     func aRedirectIsNeverFollowedAndIsSaid(_ body: String) async throws {
         let elsewhere = try HTTPListener { _ in "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}" }
         let port = elsewhere.port

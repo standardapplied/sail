@@ -165,7 +165,7 @@ extension Driver {
         let pixels = bytes.bindMemory(to: UInt8.self, capacity: width * height * 4)
         var counts: [UInt32: Int] = [:]
         for index in 0 ..< width * height where pixels[index * 4 + 3] == 255 {
-            counts[UInt32(pixels[index * 4]) << 16 | UInt32(pixels[index * 4 + 1]) << 8 | UInt32(pixels[index * 4 + 2]), default: 0] += 1
+            counts[Self.pixel(pixels, index * 4), default: 0] += 1
         }
         guard let fill = counts.max(by: { $0.value < $1.value })?.key,
               let label = counts.keys.max(by: { Self.distance($0, fill) < Self.distance($1, fill) })
@@ -191,8 +191,7 @@ extension Driver {
         else { return (false, "the window's title bar is the system's, or a window button is missing") }
         let pixels = bytes.bindMemory(to: UInt8.self, capacity: context.width * context.height * 4)
         func at(_ x: Double) -> UInt32 {
-            let index = (20 * context.width + Int(x * 2)) * 4
-            return UInt32(pixels[index]) << 16 | UInt32(pixels[index + 1]) << 8 | UInt32(pixels[index + 2])
+            Self.pixel(pixels, (20 * context.width + Int(x * 2)) * 4)
         }
         let surface = Self.hex(shell.rail.selected == .thisMac ? shell.look.palette.background : shell.look.canvas)
         let rail = at(Rail.width / 2), pane = at(Rail.width + 200)
@@ -242,16 +241,27 @@ extension Driver {
         }
     }
 
+    /// The sRGB colour at byte `offset` of an RGBA bitmap, as `0xRRGGBB`.
+    private static func pixel(_ pixels: UnsafeMutablePointer<UInt8>, _ offset: Int) -> UInt32 {
+        let red = UInt32(pixels[offset]), green = UInt32(pixels[offset + 1]), blue = UInt32(pixels[offset + 2])
+        return red << 16 | green << 8 | blue
+    }
+
+    private static func channels(_ rgb: UInt32) -> [Int] {
+        [Int(rgb >> 16 & 0xFF), Int(rgb >> 8 & 0xFF), Int(rgb & 0xFF)]
+    }
+
     private static func near(_ found: UInt32, _ wanted: UInt32) -> Bool {
-        [16, 8, 0].allSatisfy { abs(Int(found >> $0 & 0xFF) - Int(wanted >> $0 & 0xFF)) <= 2 }
+        zip(channels(found), channels(wanted)).allSatisfy { pair in abs(pair.0 - pair.1) <= 2 }
     }
 
     private static func distance(_ one: UInt32, _ other: UInt32) -> Int {
-        [16, 8, 0].map { abs(Int(one >> $0 & 0xFF) - Int(other >> $0 & 0xFF)) }.reduce(0, +)
+        zip(channels(one), channels(other)).reduce(0) { sum, pair in sum + abs(pair.0 - pair.1) }
     }
 
     private static func hex(_ rgb: RGB) -> UInt32 {
-        UInt32(rgb.red) << 16 | UInt32(rgb.green) << 8 | UInt32(rgb.blue)
+        let red = UInt32(rgb.red), green = UInt32(rgb.green), blue = UInt32(rgb.blue)
+        return red << 16 | green << 8 | blue
     }
 
     /// Scenario 17: the session token, `sess_` and the enrollment ticket searched for in the

@@ -137,9 +137,9 @@ final class Driver {
         if let account = await performAccount(step) {
             return account
         }
-        let reachesTheView = [step.type, step.press, step.paste].contains { $0 != nil } || step.compose != nil || step.measure != nil
-            || step.click != nil || step.drag != nil || step.scroll != nil || step.copy == true
-        if reachesTheView, let unseen = await presentedBeforeInput() {
+        let typed: [Bool] = [step.type != nil, step.press != nil, step.paste != nil, step.compose != nil, step.measure != nil]
+        let pointed: [Bool] = [step.click != nil, step.drag != nil, step.scroll != nil, step.copy == true]
+        if (typed + pointed).contains(true), let unseen = await presentedBeforeInput() {
             return unseen
         }
         if let text = step.type {
