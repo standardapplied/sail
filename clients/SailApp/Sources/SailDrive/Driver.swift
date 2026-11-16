@@ -479,12 +479,15 @@ final class Driver {
         screenText.split(separator: "\n", omittingEmptySubsequences: false).map { $0.trimmingCharacters(in: .whitespaces) }
     }
 
-    /// ⌥⌘L once the keys typed so far have an echo counted (a key is counted when the frame showing
-    /// its echo reaches the display): every line of the overlay shown, and a key count above zero.
+    /// ⌥⌘L after a burst of typed keys: the overlay shows key to echo from the echoes counted. It
+    /// waits up to `seconds` for 90% of the keys written to be counted, then passes on at least one
+    /// counted and shown, every line of the overlay there. Not on a fraction: a burst's echoes pair
+    /// with its keys only in part (7 to 18 of 20 counted after the wait in healthy runs), and every
+    /// echo is measured where keys come one at a time (`measure`, at least 90%).
     private func latencyOverlay(within seconds: Double) async -> (Bool, String) {
         let began = ContinuousClock.now
         let written = terminal.latency.keyToWritten.count
-        let counted = await waitUntil(seconds) {
+        _ = await waitUntil(seconds) {
             let figures = self.terminal.latency
             return written > 0 && (figures.keyToEcho.count + figures.keyToEchoEstimated.count) * 10 >= written * 9
         }
@@ -495,11 +498,11 @@ final class Driver {
         let lines = shown.split(separator: "\n")
         let keys = shown.components(separatedBy: "(").dropFirst().compactMap { part in Int(part.prefix(while: \.isNumber)) }.reduce(0, +)
         let figures = terminal.latency
-        let ok = counted && keys > 0 && lines.count <= TerminalPane.latencyLines && shown.contains("key → echo on glass")
-        let measured = "at least 90% of the keys written counted \(counted); keys written \(figures.keyToWritten.count), echoes counted on glass \(figures.keyToEcho.count) and estimated "
-            + "\(figures.keyToEchoEstimated.count), presents reported \(figures.reportedPresents) and not \(figures.unreportedPresents), "
-            + "told before their commit \(figures.presentedBeforeCommit), "
-            + "waited \(String(format: "%.0f", waited)) ms"
+        let counted = figures.keyToEcho.count + figures.keyToEchoEstimated.count
+        let ok = counted > 0 && keys > 0 && lines.count <= TerminalPane.latencyLines && shown.contains("key → echo on glass")
+        let measured = "counted \(counted) of \(figures.keyToWritten.count) keys written (on glass \(figures.keyToEcho.count), at completion "
+            + "\(figures.keyToEchoEstimated.count)), presents reported \(figures.reportedPresents) and not \(figures.unreportedPresents), "
+            + "told before their commit \(figures.presentedBeforeCommit), waited \(String(format: "%.0f", waited)) ms"
         return (ok, "\(measured); \(lines.count) lines of \(TerminalPane.latencyLines): \(lines.joined(separator: " | "))")
     }
 
