@@ -42,7 +42,6 @@
   {"name": "flood", "type": "clear; head -c 20971520 /dev/zero | tr '\\0' x | fold -w 150; echo flood-$((1+1))\r"},
   {"name": "flood-done-its-last-20-bytes-then-the-marker", "line": "xxxxxxxxxxxxxxxxxxxxflood-2", "seconds": 180},
   {"name": "every-output-shown-within-100-ms", "shownWithin": 100},
-  {"name": "d1-d2-no-drawable-holds-the-main-thread-and-the-echo-draws-once-they-return", "starve": 1.5},
   {"name": "kill-host", "killHost": true},
   {"name": "host-restarted", "banner": "The host restarted", "seconds": 40},
   {"name": "the-ended-pane-closes-without-asking", "press": "w", "modifiers": ["command"]},

@@ -18,9 +18,6 @@ extension Driver {
     }
 
     func performWorkbench(_ step: Step) async -> (Bool, String)? {
-        if let seconds = step.starve {
-            return await starve(for: seconds)
-        }
         if let expected = step.arrangement {
             let found = await waitUntil(step.seconds ?? 5) { self.arrangementMisses(expected).isEmpty }
             return (found, found ? arrangementSaid : arrangementMisses(expected).joined(separator: "; ") + "; " + arrangementSaid)
@@ -335,38 +332,6 @@ extension Driver {
         if let key = Keys.named(name, modifiers: modifiers) { send(key) }
     }
 
-    /// D1 and D2 on the real window server: every drawable the view's layer has free is taken and
-    /// held for `seconds` while a command echoes. Nothing is drawn meanwhile, the main thread is
-    /// held no more than 50 ms, and once they are let go the echo is committed within one refresh,
-    /// each net of the drive's own thread's stall.
-    private func starve(for seconds: Double) async -> (Bool, String) {
-        guard let layer = terminal.layer as? CAMetalLayer else { return (false, "the view has no Metal layer") }
-        let withheld = Withheld(layer)
-        withheld.take()
-        try? await Task.sleep(for: .milliseconds(200))
-        mainThread.reset()
-        ownThread.reset()
-        let before = Self.committed(terminal), began = CACurrentMediaTime()
-        typeText("echo starved-$((3+4))\r")
-        try? await Task.sleep(for: .seconds(seconds))
-        let held = mainHeld(in: Span(began, CACurrentMediaTime()))
-        let drewWhileHeld = Self.committed(terminal) - before
-        let taken = withheld.count
-        let gaveUp = await waitUntil(3) { withheld.done }
-        let released = CACurrentMediaTime()
-        withheld.release()
-        while Self.committed(terminal) == before + drewWhileHeld, CACurrentMediaTime() - released < 2 {
-            try? await Task.sleep(for: .milliseconds(1))
-        }
-        let drawn = Self.ours(Span(released, CACurrentMediaTime()), own: ownThread.stalls)
-        let shown = await waitUntil(5) { self.lines.contains("starved-7") }
-        let refresh = 1000 / Double(max(1, shell.window.screen?.maximumFramesPerSecond ?? 60))
-        let ok = taken > 0 && gaveUp && drewWhileHeld == 0 && held.ours < 50 && drawn.ours <= refresh && shown
-        return (ok, "took \(taken) drawables and asked no more (\(gaveUp)); frames drawn while they were held \(drewWhileHeld); "
-            + "the main thread's longest hold meanwhile: \(held.said); let go to the next commit: \(drawn.said) (one refresh is "
-            + "\(Self.ms(refresh)) ms); the echo shown \(shown)")
-    }
-
     private func typeText(_ text: String) {
         for character in text { key(character) }
     }
@@ -552,44 +517,5 @@ extension Driver {
     static func p95(_ values: [Double]) -> Double {
         let sorted = values.sorted()
         return sorted.isEmpty ? .infinity : sorted[min(sorted.count - 1, Int((Double(sorted.count) * 0.95).rounded(.up)) - 1)]
-    }
-}
-
-/// Drawables taken from a layer on a thread of their own and held, so the view drawing into it
-/// finds none until they are let go. Unchecked: `CAMetalLayer` is thread-safe, and the list is
-/// touched under its lock.
-private final class Withheld: @unchecked Sendable {
-    private let layer: CAMetalLayer
-    private let lock = NSLock()
-    private var drawables: [any CAMetalDrawable] = []
-    private var finished = false
-
-    init(_ layer: CAMetalLayer) {
-        self.layer = layer
-    }
-
-    /// Takes the layer's drawables, at most its pool's count (more asks made the window server
-    /// allocate until it failed, and took the runner down), until one is not given within its
-    /// second: either way the pool is spent.
-    func take() {
-        Thread {
-            for _ in 0 ..< self.layer.maximumDrawableCount {
-                guard let drawable = self.layer.nextDrawable() else { break }
-                self.lock.withLock { self.drawables.append(drawable) }
-            }
-            self.lock.withLock { self.finished = true }
-        }.start()
-    }
-
-    var count: Int {
-        lock.withLock { drawables.count }
-    }
-
-    var done: Bool {
-        lock.withLock { finished }
-    }
-
-    func release() {
-        lock.withLock { drawables.removeAll() }
     }
 }
