@@ -1962,12 +1962,15 @@ workspace_stops() {
   return 1
 }
 
-# Spec $3's workspace stops when idle (workspace_stops); once it has, eng marks the spec done and
-# the workspace and its dataset go within the sweep's next passes. Run in the background, each
-# verdict written beside its output under $4, for polled to read at the row's end.
+# Run in the background from spec $3's dispatch: once its review takes it to awaiting_merge, its
+# workspace stops when idle (workspace_stops), its idle period running under the rest of the
+# loop; once it has stopped, and the loop has listed the workspaces ($4/listed), eng marks the
+# spec done and the workspace and its dataset go within the sweep's next passes. Each verdict is
+# written beside its output under $4, for polled to read at the row's end.
 workspace_stops_then_goes() {
   local run=$1 box=$2 spec=$3 dir=$4 verdict=0
-  workspace_stops "$run" "$box" "$spec" > "$dir/stops.poll" 2>&1 || verdict=$?
+  { reaches_status "$run" "$box" "$spec" awaiting_merge 30 &&
+    workspace_stops "$run" "$box" "$spec"; } > "$dir/stops.poll" 2>&1 || verdict=$?
   echo "$verdict" > "$dir/stops.verdict"
   if ((verdict != 0)); then
     echo "not stopped, so not marked done" > "$dir/goes.poll"
@@ -1975,7 +1978,8 @@ workspace_stops_then_goes() {
     return
   fi
   verdict=0
-  { on "$run" "$box" "sudo sail spec update $spec --status done" &&
+  { until_true 1200 5 test -e "$dir/listed" &&
+    on "$run" "$box" "sudo sail spec update $spec --status done" &&
     until_true 180 10 workspace_and_dataset_gone "$run" "$box" "$spec"; } > "$dir/goes.poll" 2>&1 || verdict=$?
   echo "$verdict" > "$dir/goes.verdict"
 }
@@ -2024,14 +2028,15 @@ loop() {
     on "$run" eng "cat > /tmp/beside.md && sudo sail spec create -p acme --id $beside --title 'A note beside the build' --body-file /tmp/beside.md --assignee eng" <<< "$BESIDE_BODY"
   check "$run" "eng makes it ready" on "$run" eng "sudo sail spec update $beside --status pending"
   check "$run" "eng dispatches it while the first builds, in the background" on "$run" eng "sudo sail spec dispatch -p acme --spec $beside --background"
+  polls="$(log_dir "$run")/beside-workspace"
+  mkdir -p "$polls"
+  rm -f "$polls"/*.verdict "$polls/listed"
+  workspace_stops_then_goes "$run" eng "$beside" "$polls" &
   check "$run" "no agent key and no Sail credential is in any process's command line on eng while it builds and its hooks fire" no_key_in_any_command_line "$run" eng
   check "$run" "the build asks its question and waits, unreviewed" waits_on_its_question "$run" eng "$spec" 20
   check "$run" "the second spec's review takes it to awaiting_merge" reaches_status "$run" eng "$beside" awaiting_merge 30
   check "$run" "the two builds ran at once, each in its own workspace of acme" each_ran_in_its_own_workspace "$run" eng "$spec" "$beside"
-  polls="$(log_dir "$run")/beside-workspace"
-  mkdir -p "$polls"
-  rm -f "$polls"/*.verdict
-  workspace_stops_then_goes "$run" eng "$beside" "$polls" &
+  touch "$polls/listed"
   check "$run" "eng answers in the room" on "$run" eng "sudo sail spec comment $spec --body 'Call it Building.'"
   check "$run" "the answer resumes the build, and the review takes it to awaiting_merge" reaches_status "$run" eng "$spec" awaiting_merge 45
   check "$run" "the agent opened a pull request on $LOOP_REPO" opened_a_pull_request "$spec"
@@ -2047,7 +2052,7 @@ loop() {
   check "$run" "the fleet closes its pull request and deletes the branch" closes_the_pull_request "$spec" "$run"
   check "$run" "the fleet closes the second spec's pull request and deletes its branch" closes_the_pull_request "$beside" "$run"
   check "$run" "the second spec's workspace, left awaiting merge, was running until its idle period ended and stopped after it" \
-    polled "$polls/stops" 1200
+    polled "$polls/stops" 2400
   check "$run" "marked done once stopped, the second spec's workspace and its dataset went within the sweep's next passes" \
     polled "$polls/goes" 300
   check "$run" "still no secret appears in the run's logs" no_secret_in_logs "$run"
