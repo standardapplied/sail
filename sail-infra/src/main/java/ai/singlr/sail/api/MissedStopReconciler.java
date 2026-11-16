@@ -175,6 +175,7 @@ public final class MissedStopReconciler implements AutoCloseable {
   private final RunReports reports;
   private final PeriodicPass pass;
   private volatile Instant tidiedSince = Instant.EPOCH;
+  private volatile Set<String> unansweredFirst = Set.of();
   private final Set<String> untidied = ConcurrentHashMap.newKeySet();
   private final Set<String> undisowned = ConcurrentHashMap.newKeySet();
   private volatile Map<String, String> lastRoster;
@@ -593,23 +594,34 @@ public final class MissedStopReconciler implements AutoCloseable {
   /**
    * Reads, before any stop is replayed, the unread reports of at most {@link #READ_FIRST} runs that
    * serve a review, newest first, starting none after {@link #READ_FIRST_FOR}: the pass's first
-   * replay waits at most that and one read ({@code RunReportReader.TIMEOUT}). A store that cannot
-   * list them costs the pass nothing but these reads. Returns the runs it read.
+   * replay waits at most that and one read ({@code RunReportReader.TIMEOUT}). A run whose read here
+   * went unanswered is skipped by the next pass's, so one container that hangs never spends every
+   * pass's budget (H2). A store that cannot list them costs the pass nothing but these reads.
+   * Returns the runs it read.
    */
   private Set<String> readServingFirst() {
     var deadline = clock.get().plus(READ_FIRST_FOR);
     var tried = new HashSet<String>();
+    var unanswered = new HashSet<String>();
     try {
-      for (var run : unread().stream().filter(RunStore.RunRow::servesReview).toList().reversed()) {
+      for (var run :
+          unread().stream()
+              .filter(RunStore.RunRow::servesReview)
+              .filter(run -> !unansweredFirst.contains(run.id()))
+              .toList()
+              .reversed()) {
         if (tried.size() == READ_FIRST || !clock.get().isBefore(deadline)) {
           break;
         }
         tried.add(run.id());
-        read(List.of(run));
+        if (read(List.of(run)) == 0) {
+          unanswered.add(run.id());
+        }
       }
     } catch (RuntimeException e) {
       System.err.println("  [reconcile] could not read reviewers' reports first: " + e);
     }
+    unansweredFirst = Set.copyOf(unanswered);
     return tried;
   }
 
