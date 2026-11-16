@@ -576,7 +576,7 @@ class MissedStopReconcilerTest {
   }
 
   private void round(FdeStore fdes, List<Map<String, Object>> roster) {
-    Acting.system(() -> SyncOperations.applyFdes(fdes, roster, "ada"));
+    Acting.system(() -> SyncOperations.applyFdes(fdes, roster, "ada", notice -> {}));
   }
 
   /**

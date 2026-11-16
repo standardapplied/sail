@@ -43,6 +43,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.Callable;
 import java.util.function.Supplier;
+import java.util.stream.Collectors;
 import picocli.CommandLine.Command;
 
 /**
@@ -215,7 +216,7 @@ public final class SyncServerCommand implements Callable<Integer> {
     var fdes = new FdeStore(db);
     var shown = fdes.visibleTo(principal.handle(), Access.audience(principal));
     var roster = new ArrayList<>(shown.stream().map(SyncServerCommand::fdeToMap).toList());
-    var ids = shown.stream().map(FdeStore.Fde::id).toList();
+    var ids = shown.stream().map(FdeStore.Fde::id).collect(Collectors.toSet());
     fdes.list().stream()
         .filter(fde -> !ids.contains(fde.id()))
         .forEach(fde -> roster.add(Map.of("id", fde.id())));

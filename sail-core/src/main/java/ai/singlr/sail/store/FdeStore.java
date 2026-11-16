@@ -436,11 +436,35 @@ public final class FdeStore {
   }
 
   /**
-   * Removes {@code handle}, a person made here that main never described, as {@link #remove} does:
-   * main has given the handle to someone else, who takes it.
+   * Whether this box holds anyone the main whose ids are {@code mainIds} described: none at the
+   * first round with that main, though another main may have described some.
    */
-  public void giveUp(String handle) {
-    db.transaction(() -> byHandle(handle).ifPresent(this::delete));
+  public boolean describedBy(Collection<String> mainIds) {
+    return db
+        .query("SELECT main_id FROM fdes WHERE main_id IS NOT NULL", row -> row.text(0))
+        .stream()
+        .anyMatch(mainIds::contains);
+  }
+
+  /**
+   * Moves {@code handle}, a person made here that main never described, out of the way of main's
+   * person of that handle: renamed {@code <handle>.local-<4 hex>} and disabled, under the same id,
+   * so everything it stored stays. Returns the new handle.
+   */
+  public String moveAside(String handle) {
+    return db.transaction(
+        () -> {
+          var stem = handle.length() > 52 ? handle.substring(0, 52) : handle;
+          var moved = stem + ".local-" + Secrets.mint("", 2).substring(1);
+          while (byHandle(moved).isPresent()) {
+            moved = stem + ".local-" + Secrets.mint("", 2).substring(1);
+          }
+          db.execute(
+              "UPDATE fdes SET handle = ?, status = 'disabled' WHERE handle = ? AND main_id IS NULL",
+              moved,
+              handle);
+          return moved;
+        });
   }
 
   /**

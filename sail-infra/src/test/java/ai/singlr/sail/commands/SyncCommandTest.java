@@ -589,7 +589,7 @@ class SyncCommandTest {
               Map.of("handle", "ada", "role", "admin", "status", "active"),
               Map.of("handle", "bad", "role", "superuser", "status", "active"));
 
-      var rejected = SyncOperations.applyFdes(fdes, roster, "ada");
+      var rejected = SyncOperations.applyFdes(fdes, roster, "ada", notice -> {});
 
       assertEquals(List.of("bad"), rejected);
       assertEquals("admin", fdes.byHandle("ada").orElseThrow().role());

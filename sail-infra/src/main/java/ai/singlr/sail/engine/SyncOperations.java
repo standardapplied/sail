@@ -220,10 +220,7 @@ public final class SyncOperations {
       failures.add(transportFailure("fde", e));
     }
     if (roster != null) {
-      requireNoStrangers(
-          new FdeStore(db),
-          roster.stream().filter(entry -> entry.get("handle") != null).toList(),
-          handle);
+      requireNoStrangers(new FdeStore(db), roster, handle);
     }
     DemoSeeder.unseed(db);
     var settled = new ArrayList<>(NodeRound.begin(session, db, handle));
@@ -245,7 +242,7 @@ public final class SyncOperations {
     var pulledMessages = pulledMessageEvents(messages, specs, knownMessages, host);
     if (roster != null) {
       try {
-        reportRejectedFdes(applyFdes(new FdeStore(db), roster, handle));
+        reportRejectedFdes(applyFdes(new FdeStore(db), roster, handle, notice));
       } catch (RuntimeException e) {
         failures.add(transportFailure("fde", e));
       }
@@ -766,17 +763,18 @@ public final class SyncOperations {
    * holds is removed with their credentials (main removed them, or gave their handle to someone
    * new); one main holds but no longer lists here is withdrawn, disabled and their name and email
    * forgotten, but what they stored kept for when they are listed again. A person main never
-   * described is disabled; one whose handle main lists for someone else (another email) gives it up
-   * to main's, but at this box's first round, which refuses instead ({@link #requireNoStrangers}).
-   * The box's own FDE is never removed, withdrawn or disabled. A roster from a main that sends no
-   * ids removes no one.
+   * described is disabled, and never removed by a round: one whose handle main shows for someone
+   * else (not the same email) is moved aside, renamed and disabled with what they stored, and said
+   * once, but at this box's first round with this main, which refuses instead ({@link
+   * #requireNoStrangers}). The box's own FDE is never removed, withdrawn or disabled. A roster from
+   * a main that sends no ids removes no one.
    */
   public static List<String> applyFdes(
-      FdeStore fdes, List<Map<String, Object>> roster, String own) {
+      FdeStore fdes, List<Map<String, Object>> roster, String own, Consumer<Remedy> notice) {
     var listed = roster.stream().filter(entry -> entry.get("handle") != null).toList();
     var handles = listed.stream().map(entry -> str(entry, "handle")).toList();
     var ids = roster.stream().map(entry -> str(entry, "id")).toList();
-    var strangers = requireNoStrangers(fdes, listed, own);
+    var strangers = requireNoStrangers(fdes, roster, own);
     var removed = 0;
     if (ids.contains(null) || !handles.contains(own)) {
       var kept = strangers.stream().map(Stranger::handle).toList();
@@ -785,9 +783,19 @@ public final class SyncOperations {
       removed = fdes.removeUndescribed(ids, own);
       fdes.withdraw(listed.stream().map(entry -> str(entry, "id")).toList(), own);
       for (var stranger : strangers) {
-        fdes.giveUp(stranger.handle());
-        System.err.println(
-            "  roster: " + stranger.said() + " Main's " + stranger.handle() + " takes it.");
+        var moved = fdes.moveAside(stranger.handle());
+        notice.accept(
+            Remedy.of(
+                "roster: "
+                    + stranger.said()
+                    + " It is kept as "
+                    + moved
+                    + ", disabled,"
+                    + " with what it stored, and main's "
+                    + stranger.handle()
+                    + " takes the handle. Remove it with '",
+                Remedy.sail("fde rm", moved, "--force"),
+                "', or leave it: it stays, unusable."));
       }
     }
     fdes.disableUnlisted(handles, own);
@@ -829,50 +837,61 @@ public final class SyncOperations {
   }
 
   /**
-   * The people made here under a handle main's {@code listed} roster gives someone else: never
-   * described by main, not this box's {@code own}, and of another email. At this box's first round,
-   * before main has described anyone to it, they are refused, naming each and the ways out, and
-   * nothing changes.
+   * The people made here under a handle main's {@code roster} shows for someone else: never
+   * described by main, not this box's {@code own}, and not of the same email (a blank one is the
+   * same as no one's). At this box's first round with this main, when it holds no one this main's
+   * ids describe, they are refused, naming each and the ways out, and nothing changes.
    */
   static List<Stranger> requireNoStrangers(
-      FdeStore fdes, List<Map<String, Object>> listed, String own) {
+      FdeStore fdes, List<Map<String, Object>> roster, String own) {
     var strangers = new ArrayList<Stranger>();
-    for (var entry : listed) {
+    for (var entry : roster) {
       var handle = str(entry, "handle");
-      var here = fdes.byHandle(handle).filter(fde -> fdes.undescribed(handle)).orElse(null);
+      var here = handle == null || !fdes.undescribed(handle) ? null : fdes.byHandle(handle).get();
       var main = Objects.toString(str(entry, "email"), "");
       if (here != null && !handle.equals(own) && !sameEmail(here.email(), main)) {
         strangers.add(new Stranger(handle, Objects.toString(here.email(), ""), main));
       }
     }
-    if (!strangers.isEmpty() && !fdes.anyDescribed()) {
-      var told = new ArrayList<Object>();
-      for (var stranger : strangers) {
-        var h = stranger.handle();
+    if (strangers.isEmpty()
+        || fdes.describedBy(roster.stream().map(entry -> str(entry, "id")).toList())) {
+      return strangers;
+    }
+    var told = new ArrayList<Object>();
+    for (var stranger : strangers) {
+      var h = stranger.handle();
+      var remove = Remedy.sail("fde rm", h, "--force");
+      if (Strings.isBlank(stranger.main()) || Strings.isBlank(stranger.here())) {
+        told.addAll(
+            List.of(
+                stranger.said()
+                    + " This box cannot see both emails, so it cannot tell whether they are the"
+                    + " same person. Remove "
+                    + h
+                    + " here, which deletes what it stored on this box: '",
+                remove,
+                "'. "));
+      } else {
         told.addAll(
             List.of(
                 stranger.said() + " If they are different people, remove " + h + " here: '",
-                Remedy.sail("fde rm", h, "--force"),
+                remove,
                 "'. If they are the same person, correct the email that is wrong: here '",
-                Remedy.sail("fde update", h, "--email", orPlaceholder(stranger.main())),
+                Remedy.sail("fde update", h, "--email", stranger.main()),
                 "', or on main '",
-                Remedy.sail("fde update", h, "--email", orPlaceholder(stranger.here())),
+                Remedy.sail("fde update", h, "--email", stranger.here()),
                 "'. "));
       }
-      throw Remedied.state(
-          "This box's first round changes no one: a handle it holds is someone else's on main.",
-          Remedy.of(told.toArray()));
     }
-    return strangers;
-  }
-
-  private static String orPlaceholder(String email) {
-    return Strings.isBlank(email) ? "<email>" : email;
+    throw Remedied.state(
+        "This box's first round with this main changes no one: a handle it holds is someone"
+            + " else's on main.",
+        Remedy.of(told.toArray()));
   }
 
   private static boolean sameEmail(String here, String main) {
-    return here != null
-        && main != null
+    return Strings.isNotBlank(here)
+        && Strings.isNotBlank(main)
         && here.strip().toLowerCase(Locale.ROOT).equals(main.strip().toLowerCase(Locale.ROOT));
   }
 

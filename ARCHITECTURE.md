@@ -1564,12 +1564,16 @@ Each row with the tests that prove it:
   there with every credential of theirs (`FdeStore.removeUndescribed`); one main still holds but no
   longer shows the node, who left its projects, is withdrawn (`FdeStore.withdraw`): disabled, their
   name and email forgotten, what they stored kept, and enabled again when listed again. Nothing
-  is removed or withdrawn by a round that does not name the box's own person. A row made on the
-  box before main described it takes main's id on first sight only when it is the box's own person
-  or has the same email; under another email it is someone else: the box's first round is refused,
-  naming both emails and the commands that fix it (a node may correct or remove a person main never
-  described), and a later round lets main's person take the handle, removing the local row, said
-  once. A person main never describes is only disabled. Main mints an id when a person is added and never
+  is removed or withdrawn by a round that does not name the box's own person. The bare ids tell a
+  scoped node how many people main holds and their opaque ids, nothing else. A row made on the box
+  before main described it takes main's id on first sight only when it is the box's own person or
+  has the same, non-blank email; otherwise it is someone else. At the box's first round with a main
+  (it holds no one that main's ids describe) that is refused before anything changes, naming both
+  emails and the commands that fix it, or only the removal where the box cannot see both emails (a
+  node may correct or remove a person main never described). In a later round main's person takes
+  the handle and the local row is moved aside, renamed `<handle>.local-<4 hex>` and disabled with
+  everything it stored, said once with the command that removes it: a round never deletes a person
+  main never described, and only an id main no longer holds at all erases anyone. Main mints an id when a person is added and never
   changes it, so a main rebuilt by adding its people again gives each a new id, and every node
   takes them as new people who store their logins again; only a main whose database file is
   restored keeps them. The box's own person is never removed or disabled by a round and takes a

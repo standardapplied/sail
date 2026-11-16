@@ -11,6 +11,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.common.Remedied;
+import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.engine.SyncOperations;
 import ai.singlr.sail.identity.Acting;
@@ -29,15 +30,13 @@ import ai.singlr.sail.sync.SyncSession;
 import ai.singlr.sail.sync.SyncWire;
 import ai.singlr.sail.sync.SyncedEntities;
 import java.io.BufferedInputStream;
-import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.PipedInputStream;
 import java.io.PipedOutputStream;
-import java.io.PrintStream;
 import java.io.UncheckedIOException;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -116,7 +115,7 @@ class ScopedSyncServerTest {
         round.roster().stream().filter(fde -> !fde.containsKey("handle")).map(Map::keySet).toList(),
         "everyone else main holds is said by id alone");
 
-    assertEquals(List.of(), SyncOperations.applyFdes(node, round.roster(), "nia"));
+    assertEquals(List.of(), SyncOperations.applyFdes(node, round.roster(), "nia", notice -> {}));
 
     assertTrue(node.byHandle("sam").orElseThrow().active(), "an assignee in alpha stays enabled");
     assertTrue(node.byHandle("ada").orElseThrow().active());
@@ -165,7 +164,7 @@ class ScopedSyncServerTest {
     var yan = TestLogins.store(nodeDb, "yan");
     var node = new FdeStore(nodeDb);
 
-    SyncOperations.applyFdes(node, List.of(), "uma");
+    SyncOperations.applyFdes(node, List.of(), "uma", notice -> {});
 
     assertEquals(yan, nodeId("yan"));
     assertTrue(node.byHandle("yan").orElseThrow().active());
@@ -187,10 +186,12 @@ class ScopedSyncServerTest {
 
     var refused =
         assertThrows(
-            Remedied.State.class, () -> SyncOperations.applyFdes(node, round.roster(), "uma"));
+            Remedied.State.class,
+            () -> SyncOperations.applyFdes(node, round.roster(), "uma", notice -> {}));
 
     assertEquals(
-        "This box's first round changes no one: a handle it holds is someone else's on main.",
+        "This box's first round with this main changes no one: a handle it holds is someone else's"
+            + " on main.",
         refused.reason());
     assertEquals(
         "kim on this box (kim@home.example) is not main's kim (kim@x.dev): main gave the handle to"
@@ -214,9 +215,11 @@ class ScopedSyncServerTest {
   }
 
   /**
-   * M1, after the first round: main adds someone under a handle a person made here holds (another
-   * email). Main's person takes the handle: the local row and what it stored go, said once naming
-   * both. The same email, in any case, is the same person, who keeps everything.
+   * F1, after the first round: main adds someone under a handle a person made here holds (another
+   * email). Main never described the local person, so nothing of theirs is deleted: they are moved
+   * aside, renamed and disabled under the same id with everything they stored, said once with the
+   * command that removes them, and main's person takes the handle. The same email, in any case, is
+   * the same person, who keeps everything.
    */
   @Test
   void laterMainsPersonTakesAHandleMadeHereButTheSameEmailIsTheSamePerson() throws Exception {
@@ -228,24 +231,82 @@ class ScopedSyncServerTest {
     TestLogins.store(nodeDb, "lee");
     fdes.add("kim", "Kim", "kim@x.dev", "member");
     fdes.add("lee", "Lee", "lee@x.dev", "member");
-    var err = new ByteArrayOutputStream();
-    var originalErr = System.err;
-    System.setErr(new PrintStream(err, true, StandardCharsets.UTF_8));
-    try {
-      syncAs("uma");
-    } finally {
-      System.setErr(originalErr);
-    }
+    notices.clear();
+    syncAs("uma");
 
+    var aside = node.byId(kim).orElseThrow();
+    assertTrue(aside.handle().matches("kim\\.local-[0-9a-f]{4}"), aside.handle());
+    assertEquals("disabled", aside.status());
+    assertEquals("kim@home.example", aside.email());
+    assertEquals(2, node.logins().list(kim).size());
     assertNotEquals(kim, nodeId("kim"));
     assertEquals("kim@x.dev", node.byHandle("kim").orElseThrow().email());
-    assertEquals(List.of(), node.logins().list(kim));
     assertEquals(lee, nodeId("lee"));
     assertEquals(2, node.logins().list(lee).size());
     assertEquals(
-        "  roster: kim on this box (kim@home.example) is not main's kim (kim@x.dev): main gave the"
-            + " handle to someone else. Main's kim takes it.\n",
-        err.toString(StandardCharsets.UTF_8));
+        List.of(
+            "roster: kim on this box (kim@home.example) is not main's kim (kim@x.dev): main gave"
+                + " the handle to someone else. It is kept as "
+                + aside.handle()
+                + ", disabled, with what it stored, and main's kim takes the handle. Remove it with"
+                + " 'sail fde rm "
+                + aside.handle()
+                + " --force', or leave it: it stays, unusable."),
+        notices.stream().map(Remedy::plain).toList());
+    assertTrue(
+        new CommandLine(new ai.singlr.sail.Sail())
+            .parseArgs("fde", "rm", aside.handle(), "--force")
+            .hasSubcommand());
+  }
+
+  /**
+   * F1: the first round is per main. A box whose people another main described (ids this main does
+   * not hold) meets this main for the first time, and a handle it made itself that this main gives
+   * someone else is refused, not moved aside.
+   */
+  @Test
+  void aBoxPointedAtAnotherMainIsRefusedAtItsFirstRoundWithIt() throws Exception {
+    syncAs("uma");
+    nodeDb.execute("UPDATE fdes SET main_id = 'fde_other_main_' || handle");
+    var node = new FdeStore(nodeDb);
+    node.add("kim", "Kim Local", "kim@home.example", "member");
+    fdes.add("kim", "Kim", "kim@x.dev", "member");
+    var round = roundAs(tokenOf("uma"));
+
+    assertThrows(
+        Remedied.State.class,
+        () -> SyncOperations.applyFdes(node, round.roster(), "uma", notice -> {}));
+    assertTrue(node.undescribed("kim"));
+  }
+
+  /**
+   * m6 and m5: a blank email is no one's, so two blank emails are not the same person; and where
+   * this box cannot see both emails (a scoped node sees only its own), the refusal offers only what
+   * can work there, the removal, saying what it deletes.
+   */
+  @Test
+  void aBlankEmailMatchesNoOneAndARefusalThatCannotSeeEmailsOffersTheRemoval() throws Exception {
+    var node = new FdeStore(nodeDb);
+    var lee = node.add("lee", "Lee", "", "member").id();
+    node.logins().storeGit(lee, "github.com", "ghp_local_lee_0123456789");
+    fdes.add("lee", "Lee", null, "member");
+    var round = roundAs(tokenOf("uma"));
+
+    var refused =
+        assertThrows(
+            Remedied.State.class,
+            () -> SyncOperations.applyFdes(node, round.roster(), "uma", notice -> {}));
+
+    assertTrue(node.undescribed("lee"), "a blank email adopts no one");
+    assertEquals(Map.of("github.com", "ghp_local_lee_0123456789"), node.logins().gitTokens(lee));
+    assertEquals(
+        "lee on this box () is not main's lee (): main gave the handle to someone else. This box"
+            + " cannot see both emails, so it cannot tell whether they are the same person. Remove"
+            + " lee here, which deletes what it stored on this box: 'sail fde rm lee --force'.",
+        refused.remedy().plain().strip());
+    assertEquals(
+        List.of("fde rm lee --force"),
+        refused.remedy().commands().stream().map(Remedy.Command::line).toList());
   }
 
   @Test
@@ -254,7 +315,7 @@ class ScopedSyncServerTest {
     node.add("gone", "Gone", "gone@x.dev", "member");
     var round = roundAs(tokenOf("uma"));
 
-    SyncOperations.applyFdes(node, round.roster(), "uma");
+    SyncOperations.applyFdes(node, round.roster(), "uma", notice -> {});
 
     var gone = node.byHandle("gone").orElseThrow();
     assertEquals("disabled", gone.status());
@@ -284,10 +345,12 @@ class ScopedSyncServerTest {
   }
 
   /** One unscoped round as the box of {@code own}, applied to the node as the sync applies it. */
+  private final List<Remedy> notices = new ArrayList<>();
+
   private FdeStore syncAs(String own) throws Exception {
     var round = roundAs(tokenOf(own));
     var node = new FdeStore(nodeDb);
-    assertEquals(List.of(), SyncOperations.applyFdes(node, round.roster(), own));
+    assertEquals(List.of(), SyncOperations.applyFdes(node, round.roster(), own, notices::add));
     return node;
   }
 
@@ -371,7 +434,7 @@ class ScopedSyncServerTest {
             .toList();
 
     var node = new FdeStore(nodeDb);
-    SyncOperations.applyFdes(node, withoutIds, "uma");
+    SyncOperations.applyFdes(node, withoutIds, "uma", notice -> {});
 
     assertEquals(yan, nodeId("yan"));
     assertEquals(2, node.logins().list(yan).size());
@@ -429,7 +492,7 @@ class ScopedSyncServerTest {
         round.roster().stream().filter(fde -> !"uma".equals(fde.get("handle"))).toList();
 
     var node = new FdeStore(nodeDb);
-    SyncOperations.applyFdes(node, withoutItsOwn, "uma");
+    SyncOperations.applyFdes(node, withoutItsOwn, "uma", notice -> {});
 
     assertEquals(uma, nodeId("uma"));
     assertTrue(node.byHandle("uma").orElseThrow().active());
