@@ -92,6 +92,9 @@ public final class TerminalSession: Sendable {
         var replays = 0
         /// The numbers of inputs written but not yet named applied by an `Output`.
         var unconfirmed: [Int64] = []
+        /// The highest input number a live `Output` named applied, which the writer may only note
+        /// sent after the reader took it.
+        var appliedThrough: Int64 = -1
         /// The inputs left unconfirmed by a lost connection are accounted for by the next replay.
         var accounting = false
         var numbered = false
@@ -624,6 +627,7 @@ public final class TerminalSession: Sendable {
                 core.accounting = false
             } else if !core.replaying {
                 core.unconfirmed.removeAll { $0 <= applied }
+                core.appliedThrough = max(core.appliedThrough, applied)
             }
             if !core.numbered {
                 core.numbered = true
@@ -655,6 +659,7 @@ public final class TerminalSession: Sendable {
             let written = clock.now
             latency.withLock { $0.sent(last, handedIn: handedIn, written: written) }
             core.withLock { core in
+                guard last > core.appliedThrough else { return }
                 if core.unconfirmed.count == Self.unconfirmedLimit { core.unconfirmed.removeFirst() }
                 core.unconfirmed.append(last)
             }
