@@ -9,13 +9,16 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.api.ApiException;
 import ai.singlr.sail.api.SyncReport;
 import ai.singlr.sail.api.SyncRequest;
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.config.TestDefinitions;
+import ai.singlr.sail.engine.HandleChange;
 import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.PipedSyncChannel;
 import ai.singlr.sail.engine.ShellExec;
@@ -37,6 +40,7 @@ import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
+import ai.singlr.sail.store.TestLogins;
 import ai.singlr.sail.store.TestRuns;
 import ai.singlr.sail.sync.SyncDatabase;
 import ai.singlr.sail.sync.SyncSession;
@@ -50,6 +54,7 @@ import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -205,7 +210,10 @@ class MainRebuiltRoundTest {
         + new DatabaseCatalog(mains.getFirst().db()).id()
         + ", now "
         + new DatabaseCatalog(now.db()).id()
-        + "). Restore main's database (/var/lib/sail/sail.db) from a copy, then sync again.";
+        + "). Restore main's database (/var/lib/sail/sail.db) from a copy, then sync again; or, to"
+        + " follow a different main on purpose, run 'sail init --main "
+        + TARGET
+        + " --another-main', then sync again.";
   }
 
   @Test
@@ -241,6 +249,94 @@ class MainRebuiltRoundTest {
     assertEquals("refused", refused.kind());
     assertEquals(before, held(nodeDb));
     assertEquals(mainBefore, held(rebuilt.db()));
+  }
+
+  private static SyncConfig at(String main) {
+    return new SyncConfig(SyncConfig.ROLE_NODE, main, "nia", "node-box");
+  }
+
+  /** What 'sail init --main <address>' does to this node, with or without --another-main. */
+  private void pin(String address, boolean anotherMain) throws Exception {
+    HandleChange.apply(
+        tempDir.resolve("node.db"),
+        at(TARGET),
+        at(address),
+        target -> {
+          throw new AssertionError("a re-pin asks main nothing");
+        },
+        OperatorCommand.SUDO,
+        () -> {},
+        anotherMain);
+  }
+
+  /**
+   * 0.69.1: a main's new address is the same main. A node pinned to it without --another-main
+   * forgets nothing, so an empty main serving there is refused as another database, the box's
+   * record of its main and everything it holds kept.
+   */
+  @Test
+  void anEmptyMainAtTheNewAddressOfTheNodesMainIsRefusedAndNothingIsForgotten() throws Exception {
+    round();
+    write("g2");
+    var followed = new DatabaseCatalog(nodeDb).main();
+    var before = held(nodeDb);
+    pin("sail@10.0.0.9", false);
+    var rebuilt = main("b.db", "main-b", "demo");
+    serving = rebuilt;
+
+    var refused = assertThrows(SyncTransportException.class, this::round);
+
+    assertEquals(refusal(rebuilt), refused.getMessage());
+    assertEquals(followed, new DatabaseCatalog(nodeDb).main());
+    assertEquals(before, held(nodeDb));
+  }
+
+  /**
+   * 0.69.1, the fleet's rebuilt scenario: main restored from a copy at a new address is the
+   * database the node synced with, so its next round is admitted, asked nothing, and every login
+   * kept.
+   */
+  @Test
+  void theNodesMainRestoredAtANewAddressIsAdmittedAndEveryLoginIsKept() throws Exception {
+    serving = pulledAfterACopy("copy.db", "main-new", "r-late-1");
+    var ada = TestLogins.store(nodeDb, "ada");
+    pin("sail@10.0.0.9", false);
+
+    round();
+
+    assertEquals(2, new FdeStore(nodeDb).logins().list(ada).size());
+    assertEquals(specIds(serving.db()), specIds(nodeDb));
+  }
+
+  /**
+   * 0.69.1 and the re-proof's case 6: following a different main is said with --another-main, which
+   * forgets the old one, so the new main is not refused as another database; a person made here
+   * under a handle it gives someone else is refused at the first round, and once removed as the
+   * refusal says, the box follows the new main.
+   */
+  @Test
+  void anotherMainIsFollowedOnlyThroughTheFlagAndItsFirstRoundSaysWhoCollides() throws Exception {
+    round();
+    Acting.system(() -> new FdeStore(nodeDb).add("zed", "Zed", "zed@home.example", "member"));
+    var other = main("b.db", "main-b", "demo");
+    Acting.system(() -> new FdeStore(other.db()).add("zed", "Zed", "zed@x.dev", "member"));
+    pin("sail@main2", true);
+    serving = other;
+
+    var collided = assertThrows(ApiException.class, this::round);
+    Acting.system(
+        () -> new FdeStore(nodeDb).remove(new FdeStore(nodeDb).byHandle("zed").orElseThrow().id()));
+    round();
+
+    assertTrue(
+        collided
+            .getMessage()
+            .startsWith(
+                "This box's first round with this main changes no one: a handle it holds is"
+                    + " someone else's on main."),
+        collided.getMessage());
+    assertEquals(
+        Optional.of(new DatabaseCatalog(other.db()).id()), new DatabaseCatalog(nodeDb).main());
   }
 
   @Test
@@ -858,7 +954,8 @@ class MainRebuiltRoundTest {
         "Main at sail@main is not the database this box synced with (catalog "
             + new DatabaseCatalog(serving.db()).id()
             + ", now another). Restore main's database (/var/lib/sail/sail.db) from a copy, then"
-            + " sync again.",
+            + " sync again; or, to follow a different main on purpose, run 'sail init --main"
+            + " sail@main --another-main', then sync again.",
         refused.getMessage());
     assertEquals(1, refused.getSuppressed().length);
   }

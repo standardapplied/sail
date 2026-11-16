@@ -1,8 +1,10 @@
 import AppKit
 import Darwin
+import QuartzCore
 import SailLook
 import SailRenderer
 import SailShell
+import SailMeasures
 import SailSurface
 import SailTerminal
 import SailTerminalView
@@ -44,8 +46,9 @@ final class Driver {
         else { fatalError("the drive's bundle has no fonts for a terminal view") }
         return view
     }()
-    let mainThread = Heartbeat.onTheMainThread()
-    let ownThread = Heartbeat.onItsOwnThread()
+    let mainThread = Heartbeat.onTheMainThread { CACurrentMediaTime() }
+    let ownThread = Heartbeat.onItsOwnThread { CACurrentMediaTime() }
+    lazy var mainStacks = MainStacks(watching: mainThread)
 
     struct Result: Encodable {
         let index: Int
@@ -275,13 +278,15 @@ final class Driver {
         }
         if let limit = step.shownWithin {
             let figures = terminal.latency
-            let wait = Self.ours(figures.longestToShown, own: ownThread.stalls)
-            let ok = wait.ours <= limit
-            let flood = measurement(name, keys: 0, figures: figures, budgets: ["every output shown within \(Self.ms(limit)) ms": ok])
-            measures.append(flood)
-            return (ok, "the longest any output waited to be shown: \(wait.said); the longest refresh took "
-                + "\(Self.ms(figures.refresh.max)) ms, \(figures.lateOutputs) outputs were late; the main thread was held at most "
-                + "\(Self.ms(flood.mainThreadHeld)) ms")
+            let judged = flood(figures)
+            if let gap = mainThread.stalls.longest() {
+                mainStacks.told(gap).forEach { print("main thread in its longest hold of the flood: \($0)") }
+            }
+            let ok = judged.ours <= limit
+            let measured = measurement(name, keys: 0, figures: figures, budgets: ["every output shown within \(Self.ms(limit)) ms": ok])
+            measures.append(measured)
+            return (ok, "\(judged.said); the longest refresh took \(Self.ms(figures.refresh.max)) ms, \(figures.lateOutputs) outputs were late; "
+                + "the main thread was held at most \(Self.ms(measured.mainThreadHeld)) ms")
         }
         if let text = step.text {
             let found = await waitUntil(step.seconds ?? 10) { self.screenText.contains(text) }
@@ -300,6 +305,9 @@ final class Driver {
         }
         if let keys = step.measure {
             return await measure(keys, interval: step.interval ?? 50, name: name)
+        }
+        if step.floodFile == true {
+            return (FileManager.default.fileExists(atPath: Self.floodFiles.lines), Self.floodFiles.lines)
         }
         if step.killHost == true {
             guard shell.thisMac.host.startedPID != nil else { return (false, "the app started no host to kill") }
@@ -337,8 +345,12 @@ final class Driver {
         if let clear = Keys.named("u", modifiers: ["control"]) { send(clear) }
         let refresh = 1000 / Double(max(1, shell.window.screen?.maximumFramesPerSecond ?? 60))
         let measured = figures.outputToPresented.count > 0
+        let stale = figures.unpresented.filter { $0.ageMs > 6 * refresh }
+        let written = Percentiles(MachineShare.net(figures.keyWrites, own: ownThread.stalls).map { Duration.seconds($0) })
         let budgets = [
-            "key to bytes written p95 <= 2 ms": figures.keyToWritten.p95 <= 2,
+            "every committed frame told presented within 6 refreshes (reported presents only)": figures.reportedPresents == 0 || stale.isEmpty,
+            "key to bytes written p95 <= 2 ms, each net of the drive's own thread's stall over it "
+                + "(net \(Self.ms(written.p95)) ms, raw \(Self.ms(figures.keyToWritten.p95)) ms)": written.p95 <= 2,
             "output to committed p50 <= 1 refresh": figures.outputToCommitted.p50 <= refresh,
             "output to committed p95 <= 2 refreshes": figures.outputToCommitted.p95 <= 2 * refresh,
             "output to presented p50 <= 1 refresh (reported presents only)": !measured || figures.outputToPresented.p50 <= refresh,
@@ -348,7 +360,21 @@ final class Driver {
         ]
         measures.append(measurement(name, keys: keys, figures: figures, budgets: budgets))
         let missed = budgets.filter { !$0.value }.keys.sorted()
-        return (missed.isEmpty, missed.isEmpty ? "within every budget" : "missed: \(missed.joined(separator: "; "))")
+        let presents = figures.reportedPresents > 0
+            ? "\(stale.count) committed frames not told presented within 6 refreshes" : "the display tells no presentation time, so a frame never presented is not caught here"
+        let keys = "key to bytes written p95 \(Self.ms(written.p95)) ms net of the drive's own thread's stall, \(Self.ms(figures.keyToWritten.p95)) ms raw"
+        return (missed.isEmpty, (missed.isEmpty ? "within every budget" : "missed: \(missed.joined(separator: "; "))") + "; " + keys + "; " + presents)
+    }
+
+    /// A flood judged as the app's, in ms (``FloodVerdict``): the larger of its longest output's
+    /// wait and the main thread's longest hold over it, each less the machine's share; with the
+    /// words that say what each waited for and whose it was.
+    func flood(_ figures: LatencyFigures) -> (ours: Double, said: String) {
+        let verdict = FloodVerdict.ours(figures, mainHold: mainThread.stalls.longest(), tick: Heartbeat.interval, own: ownThread.stalls, main: mainStacks.looks)
+        let gap = figures.longestBetweenCommits?.length ?? 0
+        return (max(verdict.shown, verdict.held) * 1000, "the longest any output waited to be shown: \(ours(figures.longestToShown).said); "
+            + "the main thread's longest hold: \(mainHeld().said); its longest gap between commits \(Self.ms(gap * 1000)) ms, "
+            + "\(figures.longestGapOutputs) outputs reached the screen in it, a drawable was being asked for \(Self.ms(figures.longestGapFetching)) ms of it")
     }
 
     func measurement(_ name: String, keys: Int, figures: LatencyFigures, budgets: [String: Bool]) -> Measure {
@@ -359,18 +385,124 @@ final class Driver {
     }
 
     func resetLatency() {
+        _ = mainStacks
         terminal.resetLatency()
         mainThread.reset()
         ownThread.reset()
     }
 
-    /// A wait timed on a hosted runner, judged as the app's, in ms: less what the drive's own
-    /// heartbeat thread was held during that same wait, since a stall the machine shares is the
-    /// machine's (sail#417); what is left is ours, against the same budget as before.
-    static func ours(_ wait: Span?, own: Stalls) -> (ours: Double, said: String) {
+    /// A wait timed on a hosted runner, judged as the app's, in ms: less the machine's share of
+    /// that same wait (sail#417), the larger of the drive's own thread's stall over it and the time
+    /// the main thread was runnable and got no CPU while the machine had none idle; what is left
+    /// is ours, against the same budget as before.
+    func ours(_ wait: Span?, less tick: Double = 0) -> (ours: Double, said: String) {
         let wait = wait ?? Span(0, 0)
-        let shared = own.shared(with: wait) * 1000, ours = own.net(of: wait) * 1000
-        return (ours, "waited \(ms(wait.length * 1000)) ms, the drive's own thread held \(ms(shared)) ms of it, ours \(ms(ours)) ms")
+        let own = ownThread.stalls, looks = mainStacks.looks
+        let ownHeld = own.shared(with: wait), starved = MachineShare.starved(in: wait, looks: looks)
+        let ours = max(0, wait.length - tick - MachineShare.of(wait, own: own, main: looks)) * 1000
+        return (ours, "waited \(Self.ms((wait.length - tick) * 1000)) ms, the drive's own thread held \(Self.ms(ownHeld * 1000)) ms of it, "
+            + "the main thread runnable without CPU on a machine with none idle \(Self.ms(starved * 1000)) ms of it, ours \(Self.ms(ours)) ms")
+    }
+
+    /// The main thread's longest hold, its heartbeat's longest gap (in `span` when given) less one
+    /// tick, judged as ``ours(_:less:)`` judges a wait.
+    func mainHeld(in span: Span? = nil) -> (ours: Double, said: String) {
+        ours(mainThread.stalls.longest(in: span), less: Heartbeat.interval)
+    }
+
+    /// The bytes the spec's flood prints, made once so that one `cat` gives them (`head -c 20971520
+    /// /dev/zero | tr '\0' x | fold -w 150` printed nine processes' worth of CPU beside the
+    /// terminal it measured): 20 MiB of `x` folded at 150 columns in `lines`, its last 20 bytes
+    /// unended in `tail`. Printed again and again, `lines` keeps the same shape.
+    static let floodFiles: (lines: String, tail: String) = {
+        let lines = 20_971_520 / 150
+        let line = [UInt8](repeating: UInt8(ascii: "x"), count: 150) + [UInt8(ascii: "\n")]
+        var bytes = [UInt8]()
+        bytes.reserveCapacity(lines * 151)
+        for _ in 0 ..< lines { bytes += line }
+        FileManager.default.createFile(atPath: "/tmp/sail-drive-flood-lines", contents: Data(bytes))
+        FileManager.default.createFile(atPath: "/tmp/sail-drive-flood-tail", contents: Data(repeating: UInt8(ascii: "x"), count: 20_971_520 - lines * 150))
+        return ("/tmp/sail-drive-flood-lines", "/tmp/sail-drive-flood-tail")
+    }()
+
+    /// A pane's generator, run by the system's perl: it writes the prepared lines (its first
+    /// argument) `block` bytes at a time, one block each `period` seconds, until `stop` exists. A
+    /// block the pty took late is not made up for, so the rate is a ceiling; with a period of zero
+    /// it writes as fast as the pty takes them. Blocks are whole lines, so the tail after it ends
+    /// starts a line.
+    static let floodPacer: String = {
+        let path = "/tmp/sail-drive-flood-pace.pl"
+        let script = """
+            use strict;
+            use Time::HiRes qw(time sleep);
+            my ($file, $stop, $block, $period) = @ARGV;
+            open(my $in, '<:raw', $file) or die "$file: $!";
+            my $bytes = do { local $/; <$in> };
+            close $in;
+            binmode STDOUT;
+            my ($at, $due) = (0, time);
+            until (-e $stop) {
+                $at = 0 if $at + $block > length $bytes;
+                my $written = 0;
+                while ($written < $block) {
+                    my $count = syswrite(STDOUT, $bytes, $block - $written, $at + $written);
+                    die "write: $!" unless defined $count;
+                    $written += $count;
+                }
+                $at += $block;
+                $due = time if $due < time;
+                $due += $period;
+                my $wait = $due - time;
+                sleep($wait) if $wait > 0;
+            }
+            """
+        FileManager.default.createFile(atPath: path, contents: Data(script.utf8))
+        return path
+    }()
+
+    /// What the floods' processes and their neighbours cost the machine now, as `ps` says.
+    static func processes() -> [String] {
+        ps(["-axo", "pid,pri,%cpu,comm", "-r"]).split(separator: "\n").prefix(16).map(String.init)
+    }
+
+    /// The share of a CPU, in %, the terminal host and the app each used over the next `seconds`,
+    /// from their CPU times; nil for one `ps` did not list. The host is the bundled one, which may
+    /// have been started by an earlier launch, so it is found by its path, not by a pid kept.
+    static func cpuShares(over seconds: Double) async -> (host: Double?, app: Double?) {
+        let before = cpuTimes(), started = CACurrentMediaTime()
+        try? await Task.sleep(for: .seconds(seconds))
+        let after = cpuTimes(), elapsed = CACurrentMediaTime() - started
+        func share(_ was: Double?, _ now: Double?) -> Double? {
+            guard let was, let now else { return nil }
+            return (now - was) / elapsed * 100
+        }
+        return (share(before.host, after.host), share(before.app, after.app))
+    }
+
+    /// The terminal host's and the app's CPU time so far in seconds, from `ps`'s `[[hh:]mm:]ss.ss`.
+    static func cpuTimes() -> (host: Double?, app: Double?) {
+        let helper = Bundle.main.bundleURL.appending(path: "Contents/Helpers/sail").path, app = getpid()
+        var times: (host: Double?, app: Double?) = (nil, nil)
+        for line in ps(["-axo", "pid=,time=,comm="]).split(separator: "\n") {
+            let fields = line.split(separator: " ", maxSplits: 2)
+            guard fields.count == 3, let pid = pid_t(fields[0]) else { continue }
+            let time = fields[1].split(separator: ":").compactMap { Double($0) }.reduce(0) { $0 * 60 + $1 }
+            if pid == app { times.app = time }
+            if fields[2] == helper { times.host = (times.host ?? 0) + time }
+        }
+        return times
+    }
+
+    private static func ps(_ arguments: [String]) -> String {
+        let ps = Process()
+        ps.executableURL = URL(filePath: "/bin/ps")
+        ps.arguments = arguments
+        let pipe = Pipe()
+        ps.standardOutput = pipe
+        guard (try? ps.run()) != nil else { return "ps did not run" }
+        let listed = String(decoding: pipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+        ps.waitUntilExit()
+        return listed
     }
 
     static func ms(_ milliseconds: Double) -> String {
@@ -418,11 +550,18 @@ final class Driver {
         screenText.split(separator: "\n", omittingEmptySubsequences: false).map { $0.trimmingCharacters(in: .whitespaces) }
     }
 
-    /// ⌥⌘L once the keys typed so far have an echo counted (a key is counted when the frame showing
-    /// its echo reaches the display): every line of the overlay shown, and a key count above zero.
+    /// ⌥⌘L after a burst of typed keys: the overlay shows key to echo from the echoes counted. It
+    /// waits up to `seconds` for 90% of the keys written to be counted, then passes on at least one
+    /// counted and shown, every line of the overlay there. Not on a fraction: a burst's echoes pair
+    /// with its keys only in part (7 to 18 of 20 counted after the wait in healthy runs), and every
+    /// echo is measured where keys come one at a time (`measure`, at least 90%).
     private func latencyOverlay(within seconds: Double) async -> (Bool, String) {
         let began = ContinuousClock.now
-        let counted = await waitUntil(seconds) { self.terminal.latency.keyToEcho.count + self.terminal.latency.keyToEchoEstimated.count > 0 }
+        let written = terminal.latency.keyToWritten.count
+        _ = await waitUntil(seconds) {
+            let figures = self.terminal.latency
+            return written > 0 && (figures.keyToEcho.count + figures.keyToEchoEstimated.count) * 10 >= written * 9
+        }
         let waited = (ContinuousClock.now - began) / .milliseconds(1)
         guard let toggle = Keys.named("l", modifiers: ["command", "option"]) else { return (false, "no ⌥⌘L") }
         send(toggle)
@@ -430,11 +569,11 @@ final class Driver {
         let lines = shown.split(separator: "\n")
         let keys = shown.components(separatedBy: "(").dropFirst().compactMap { part in Int(part.prefix(while: \.isNumber)) }.reduce(0, +)
         let figures = terminal.latency
-        let ok = counted && keys > 0 && lines.count <= TerminalPane.latencyLines && shown.contains("key → echo on glass")
-        let measured = "keys written \(figures.keyToWritten.count), echoes counted on glass \(figures.keyToEcho.count) and estimated "
-            + "\(figures.keyToEchoEstimated.count), presents reported \(figures.reportedPresents) and not \(figures.unreportedPresents), "
-            + "told before their commit \(figures.presentedBeforeCommit), "
-            + "waited \(String(format: "%.0f", waited)) ms"
+        let counted = figures.keyToEcho.count + figures.keyToEchoEstimated.count
+        let ok = counted > 0 && keys > 0 && lines.count <= TerminalPane.latencyLines && shown.contains("key → echo on glass")
+        let measured = "counted \(counted) of \(figures.keyToWritten.count) keys written (on glass \(figures.keyToEcho.count), at completion "
+            + "\(figures.keyToEchoEstimated.count)), presents reported \(figures.reportedPresents) and not \(figures.unreportedPresents), "
+            + "told before their commit \(figures.presentedBeforeCommit), waited \(String(format: "%.0f", waited)) ms"
         return (ok, "\(measured); \(lines.count) lines of \(TerminalPane.latencyLines): \(lines.joined(separator: " | "))")
     }
 

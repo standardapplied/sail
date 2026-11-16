@@ -1,4 +1,6 @@
 import Foundation
+import SailMeasures
+import SailSurface
 import SailTerminal
 import SailVT
 import Synchronization
@@ -12,10 +14,14 @@ import Synchronization
 /// stays within 1 ms at p95, since the feeder lets it in between slices of ``Screen/feedSlice``.
 /// Maxima are reported. The wait includes the reader's wait for a CPU after the lock is free, so
 /// these are budgets for a machine with a core to spare: with every core busy the waits rise for
-/// small feeds as much as large ones (measured 2.2 and 3.2 ms p95), which no lock can help.
+/// small feeds as much as large ones (measured 2.2 and 3.2 ms p95), which no lock can help. So each
+/// wait is judged less the stall of a thread of the probe's own over it, before its p95 is taken,
+/// and the raw p95 is reported beside it: a stall of the whole process is the machine's.
 enum Bench {
     static func run() throws -> [Budget] {
         let clock = ContinuousClock()
+        let origin = clock.now
+        let own = Heartbeat.onItsOwnThread { (ContinuousClock.now - origin) / .seconds(1) }
         let chunk = Array(lines(count: 64).utf8.prefix(4096))
         let screen = try Screen(size: GridSize(columns: 200, rows: 60), scrollbackBytes: 10 << 20, palette: .dark)
         _ = try screen.frame()
@@ -39,16 +45,19 @@ enum Bench {
             Budget(name: "20 MiB fed, milliseconds per MiB (50 MiB/s is 20)", milliseconds: 1000 / rate, limit: 20),
         ]
         for (label, size) in [("1 MiB", 1 << 20), ("13 KiB", 13 * 1024)] {
+            own.reset()
             let (frames, waits) = try framesWhileFeeding(stride(from: 0, to: stream.count, by: size).map {
                 Array(stream[$0 ..< min(stream.count, $0 + size)])
-            })
+            }, origin: origin)
             let frame = Percentiles(frames)
-            let wait = Percentiles(waits)
+            let wait = Percentiles(MachineShare.net(waits, own: own.stalls).map { Duration.seconds($0) })
+            let raw = Percentiles(waits.map { Duration.seconds($0.length) })
             budgets += [
                 Budget(name: "frame() at 120 Hz, \(label) feeds back to back, p95", milliseconds: frame.p95, limit: 4),
                 Budget(name: "frame() at 120 Hz, \(label) feeds back to back, max (reported)", milliseconds: frame.max, limit: .infinity),
-                Budget(name: "frame()'s wait for the lock, \(label) feeds back to back, p95", milliseconds: wait.p95, limit: 1),
-                Budget(name: "frame()'s wait for the lock, \(label) feeds back to back, max (reported)", milliseconds: wait.max, limit: .infinity),
+                Budget(name: "frame()'s wait for the lock, \(label) feeds back to back, p95, each net of the probe's own stall", milliseconds: wait.p95, limit: 1),
+                Budget(name: "frame()'s wait for the lock, \(label) feeds back to back, p95 raw (reported)", milliseconds: raw.p95, limit: .infinity),
+                Budget(name: "frame()'s wait for the lock, \(label) feeds back to back, max raw (reported)", milliseconds: raw.max, limit: .infinity),
             ]
         }
         return budgets
@@ -57,9 +66,9 @@ enum Bench {
     /// How many times the stream is fed, so the frames taken meanwhile are enough to rank.
     static let rounds = 20
 
-    /// How long each `frame()` took, and waited for the lock, while `chunks` were fed ``rounds``
-    /// times back to back on another thread.
-    private static func framesWhileFeeding(_ chunks: [[UInt8]]) throws -> (frames: [Duration], waits: [Duration]) {
+    /// How long each `frame()` took, and when it waited for the lock (seconds since `origin`), while
+    /// `chunks` were fed ``rounds`` times back to back on another thread.
+    private static func framesWhileFeeding(_ chunks: [[UInt8]], origin: ContinuousClock.Instant) throws -> (frames: [Duration], waits: [Span]) {
         let clock = ContinuousClock()
         let screen = try Screen(size: GridSize(columns: 200, rows: 60), scrollbackBytes: 10 << 20, palette: .dark)
         let fed = Atomic<Bool>(false)
@@ -73,12 +82,13 @@ enum Bench {
         }
         feeder.start()
         var frames: [Duration] = []
-        var waits: [Duration] = []
+        var waits: [Span] = []
         while !fed.load(ordering: .acquiring) {
             let started = clock.now
             let waited = try screen.timedFrame().waited
             frames.append(clock.now - started)
-            waits.append(waited)
+            let at = (started - origin) / .seconds(1)
+            waits.append(Span(at, at + waited / .seconds(1)))
             Thread.sleep(forTimeInterval: 1.0 / 120)
         }
         return (frames, waits)

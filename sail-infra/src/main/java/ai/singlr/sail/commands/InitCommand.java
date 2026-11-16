@@ -83,8 +83,15 @@ public final class InitCommand implements Runnable {
   private String email;
 
   @Option(
+      names = "--another-main",
+      description =
+          "Follow a different main from now on, forgetting the one this box follows (without it,"
+              + " --main gives this box's main a new address).")
+  private boolean anotherMain;
+
+  @Option(
       names = "--yes",
-      description = "Follow another main without asking, on a box that already follows one.")
+      description = "With --another-main, follow the different main without asking.")
   private boolean yes;
 
   private final Supplier<Box> box;
@@ -330,12 +337,14 @@ public final class InitCommand implements Runnable {
   }
 
   private String[] joinArgs(String[] args) {
-    if (!yes) {
-      return args;
+    var joined = new ArrayList<>(List.of(args));
+    if (anotherMain) {
+      joined.add("--another-main");
     }
-    var withYes = new ArrayList<>(List.of(args));
-    withYes.add("--yes");
-    return withYes.toArray(String[]::new);
+    if (yes) {
+      joined.add("--yes");
+    }
+    return joined.toArray(String[]::new);
   }
 
   private static String[] withFde(String first, String fde, String name, String mail) {

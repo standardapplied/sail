@@ -56,7 +56,9 @@ class NodeRoundAdmitTest {
   private static String refusal(String now) {
     return "Main at sail@main is not the database this box synced with (catalog aaaa, now "
         + now
-        + "). Restore main's database (/var/lib/sail/sail.db) from a copy, then sync again.";
+        + "). Restore main's database (/var/lib/sail/sail.db) from a copy, then sync again; or, to"
+        + " follow a different main on purpose, run 'sail init --main sail@main --another-main',"
+        + " then sync again.";
   }
 
   @Test

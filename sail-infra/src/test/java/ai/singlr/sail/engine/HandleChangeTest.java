@@ -499,20 +499,28 @@ class HandleChangeTest {
   }
 
   /**
-   * The re-proof's case 6: a node pointed at another main ('sail init --main <other>') forgets the
-   * old main's catalog, so its first round with the new main is not refused as a rebuilt database;
-   * pointed at the same main again, it keeps it, so a main rebuilt there still is.
+   * 0.69.1: an address is not an identity. A node given a new address for its main keeps the main's
+   * catalog, so its next round admits only the database it synced with; only one told it follows
+   * another main ('--another-main') forgets it.
    */
   @Test
-  void aNodePointedAtAnotherMainForgetsTheOldCatalogAndOnePointedAtTheSameKeepsIt()
+  void aNodeGivenANewAddressForItsMainKeepsTheCatalogAndOnlyAnotherMainForgetsIt()
       throws Exception {
     new DatabaseCatalog(db).recordMain("cat-a");
+    var moved = new SyncConfig(SyncConfig.ROLE_NODE, "sail@10.0.0.9", "ada", "box");
 
-    apply(node("ada"), node("ada"));
-    var same = new DatabaseCatalog(db).main();
-    apply(node("ada"), new SyncConfig(SyncConfig.ROLE_NODE, "sail@main2", "ada", "box"));
+    apply(node("ada"), moved);
+    var kept = new DatabaseCatalog(db).main();
+    HandleChange.apply(
+        dbPath,
+        moved,
+        new SyncConfig(SyncConfig.ROLE_NODE, "sail@main2", "ada", "box"),
+        target -> PipedSyncChannel.to(main.server(ADA)),
+        OperatorCommand.PLAIN,
+        () -> written.set(true),
+        true);
 
-    assertEquals(Optional.of("cat-a"), same);
+    assertEquals(Optional.of("cat-a"), kept);
     assertEquals(Optional.empty(), new DatabaseCatalog(db).main());
   }
 
