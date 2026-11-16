@@ -7,6 +7,7 @@ package ai.singlr.sail.commands;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.api.SyncRequest;
@@ -14,6 +15,7 @@ import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.config.TestDefinitions;
+import ai.singlr.sail.engine.AuthorizedKeysSync;
 import ai.singlr.sail.engine.PipedSyncChannel;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.SyncOperations;
@@ -21,8 +23,11 @@ import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.ProjectScope;
 import ai.singlr.sail.identity.Role;
+import ai.singlr.sail.ssh.SshPublicKey;
+import ai.singlr.sail.ssh.TestSshKeys;
 import ai.singlr.sail.store.AuthSessionStore;
 import ai.singlr.sail.store.BoxDatabase;
+import ai.singlr.sail.store.FdeSshKeyStore;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.ProjectStore;
 import ai.singlr.sail.store.RunStore;
@@ -39,6 +44,7 @@ import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -60,6 +66,10 @@ import org.junit.jupiter.api.io.TempDir;
  */
 class ScopeChangeRoundTest {
 
+  /** Yan shares only beta, so a narrowing to acme takes them off this box's projects. */
+  private static final String WITHDREW =
+      "  roster: withdrew yan: no longer on this box's projects; what they stored here is kept.";
+
   private static final String WHY = " — main no longer grants this box the project";
 
   @TempDir Path tempDir;
@@ -70,10 +80,11 @@ class ScopeChangeRoundTest {
   private Path projectsDir;
   private Incus incus;
   private SyncOperations node;
+  private Path gatewayKeys;
   private final PrintStream originalErr = System.err;
 
   @BeforeEach
-  void setUp() {
+  void setUp() throws IOException {
     var mainPath = tempDir.resolve("main.db");
     try (var db = Sqlite.open(mainPath)) {
       BoxDatabase.prepare(db);
@@ -100,6 +111,8 @@ class ScopeChangeRoundTest {
     new SchemaManager(nodeDb).migrate();
     projectsDir = tempDir.resolve("projects");
     incus = new Incus();
+    gatewayKeys = tempDir.resolve("sail/.ssh/authorized_keys");
+    Files.createDirectories(gatewayKeys.getParent());
     node =
         new SyncOperations(
             nodeDb,
@@ -119,7 +132,8 @@ class ScopeChangeRoundTest {
                             () -> new SyncConfig(SyncConfig.ROLE_MAIN, null, "ada", "main"))),
             event -> {},
             SyncOperations.PLAIN_NOTICES,
-            incus);
+            incus,
+            new AuthorizedKeysSync(gatewayKeys, true, incus, () -> Path.of("/usr/local/bin/sail")));
     node.prepare();
   }
 
@@ -192,7 +206,7 @@ class ScopeChangeRoundTest {
             "  ⚠ project beta: dropped from this box with the 5 rows it held here, unpushed work"
                 + " included (1 row never pushed)"
                 + WHY,
-            "  roster: removed 1 FDE(s) main no longer lists to this box",
+            WITHDREW,
             "  ⚠ project beta: its container deleted, workspace and uncommitted work included"
                 + WHY),
         round());
@@ -208,7 +222,10 @@ class ScopeChangeRoundTest {
             "incus config device get beta sail-api-sock source",
             "incus delete beta --force"),
         incus.invocations);
-    assertEquals(List.of("ada||active", "nia|nia@x.dev|active"), nodeRoster());
+    assertEquals(
+        List.of("ada|ada@x.dev|active", "nia|nia@x.dev|active", "yan|null|disabled"),
+        nodeRoster(),
+        "yan left this box's projects: withdrawn, not removed");
   }
 
   @Test
@@ -220,7 +237,7 @@ class ScopeChangeRoundTest {
     assertEquals(
         List.of(
             "  ⚠ project beta: dropped from this box with the 3 rows it held here" + WHY,
-            "  roster: removed 1 FDE(s) main no longer lists to this box",
+            WITHDREW,
             "  ⚠ project beta: container 'beta' kept — Sail did not provision it; remove it"
                 + " yourself if it holds the project's work"),
         round());
@@ -242,7 +259,7 @@ class ScopeChangeRoundTest {
     assertEquals(
         List.of(
             "  ⚠ project beta: dropped from this box with the 3 rows it held here" + WHY,
-            "  roster: removed 1 FDE(s) main no longer lists to this box",
+            WITHDREW,
             "  ⚠ project beta: its container, if any, is deleted by the next round that can reach"
                 + " Incus (sail-api within a minute, or 'sail sync')"),
         round());
@@ -271,7 +288,7 @@ class ScopeChangeRoundTest {
     assertEquals(
         List.of(
             "  ⚠ project beta: dropped from this box with the 3 rows it held here" + WHY,
-            "  roster: removed 1 FDE(s) main no longer lists to this box",
+            WITHDREW,
             "  ✗ Could not take project beta off this box (the next sync tries again): Failed to"
                 + " delete container 'beta': Error: instance is busy",
             "  ⚠ project gamma: its container deleted, workspace and uncommitted work included"
@@ -307,7 +324,7 @@ class ScopeChangeRoundTest {
                 + run
                 + "' being still under way here; dropped on the first round after it ends"
                 + WHY,
-            "  roster: removed 1 FDE(s) main no longer lists to this box"),
+            WITHDREW),
         round());
     assertEquals(List.of("beta"), incus.names());
 
@@ -326,7 +343,7 @@ class ScopeChangeRoundTest {
     narrowTo("acme");
     round();
     assertEquals(List.of("a1"), nodeSpecs());
-    assertEquals(List.of("ada||active", "nia|nia@x.dev|active"), nodeRoster());
+    assertEquals(List.of("ada|ada@x.dev|active", "nia|nia@x.dev|active"), nodeRoster());
     incus.invocations.clear();
 
     fdes.unrestrict("nia");
@@ -360,14 +377,19 @@ class ScopeChangeRoundTest {
 
     assertEquals(
         List.of(
-            "  roster: removed 1 FDE(s) main no longer lists to this box",
             "  ⚠ project beta: its container deleted, workspace and uncommitted work included"
                 + WHY),
         round());
 
     assertEquals(List.of(), childrenOf(projectsDir));
     assertEquals(List.of(), incus.names());
-    assertEquals(List.of("ada||active", "nia|nia@x.dev|active"), nodeRoster());
+    assertEquals(
+        List.of(
+            "ada|ada@x.dev|active",
+            "client2|client2@rehearsal.invalid|disabled",
+            "nia|nia@x.dev|active"),
+        nodeRoster(),
+        "a person main never described is disabled, never removed");
   }
 
   @Test
@@ -535,6 +557,57 @@ class ScopeChangeRoundTest {
         + "\",\"user.sail.ready\":\"1\"";
   }
 
+  private String keyOf(String handle) {
+    var id = new FdeStore(nodeDb).byHandle(handle).orElseThrow().id();
+    new FdeSshKeyStore(nodeDb)
+        .add(id, SshPublicKey.parse(TestSshKeys.ed25519(handle, handle + "@laptop")));
+    return "_gateway --fde-id " + id + "\"";
+  }
+
+  /**
+   * G1: the round that withdraws a person rewrites the SSH gateway's keys without their line, in
+   * the same round; a round that changes no one writes nothing.
+   */
+  @Test
+  void aRoundThatWithdrawsSomeoneRewritesTheGatewaysKeysWithoutThemAndAnUnchangedOneWritesNothing()
+      throws Exception {
+    round();
+    var nia = keyOf("nia");
+    var yan = keyOf("yan");
+    round();
+    var both = Files.readString(gatewayKeys);
+    var written = incus.installs;
+    round();
+    narrowTo("acme");
+    var withdrew = round();
+    var after = Files.readString(gatewayKeys);
+
+    assertTrue(both.contains(nia) && both.contains(yan), both);
+    assertEquals(written, incus.installs - 1, "the unchanged round wrote nothing");
+    assertTrue(withdrew.contains(WITHDREW), String.join("\n", withdrew));
+    assertTrue(after.contains(nia), after);
+    assertFalse(after.contains(yan), "the withdrawn yan keeps no line: " + after);
+  }
+
+  /**
+   * G1: a round that cannot rewrite the gateway's keys fails loudly, and the next one writes them.
+   */
+  @Test
+  void aRoundThatCannotRewriteTheGatewaysKeysFailsAndTheNextOneWritesThem() throws Exception {
+    round();
+    var nia = keyOf("nia");
+    incus.installFails = true;
+
+    var failed = assertThrows(Exception.class, this::round);
+    incus.installFails = false;
+    round();
+
+    assertTrue(
+        failed.getMessage().contains("the SSH gateway's keys could not be rewritten"),
+        failed.getMessage());
+    assertTrue(Files.readString(gatewayKeys).contains(nia));
+  }
+
   @Test
   void anUnscopedRoundNeverAsksIncus() throws Exception {
     round();
@@ -604,8 +677,31 @@ class ScopeChangeRoundTest {
       return containers.keySet().stream().sorted().toList();
     }
 
+    /** The gateway's {@code install} of its keys, done as a copy and counted. */
+    private Result install(List<String> command) {
+      if (installFails) {
+        return new Result(1, "", "install: cannot create regular file: Read-only file system");
+      }
+      try {
+        Files.copy(
+            Path.of(command.get(command.size() - 2)),
+            Path.of(command.getLast()),
+            StandardCopyOption.REPLACE_EXISTING);
+      } catch (IOException e) {
+        return new Result(1, "", e.getMessage());
+      }
+      installs++;
+      return new Result(0, "", "");
+    }
+
+    int installs;
+    boolean installFails;
+
     @Override
     public Result exec(List<String> command) {
+      if (command.getFirst().equals("install")) {
+        return install(command);
+      }
       var joined = String.join(" ", command);
       invocations.add(joined);
       if (!reachable) {

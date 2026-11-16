@@ -15,10 +15,13 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.Sail;
 import ai.singlr.sail.api.ApiException;
+import ai.singlr.sail.api.ErrorCode;
 import ai.singlr.sail.api.HomeRoom;
 import ai.singlr.sail.api.SailOperations;
+import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.config.ProjectDefinition;
 import ai.singlr.sail.config.TestDefinitions;
+import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.Banner;
 import ai.singlr.sail.engine.BoxInstances;
 import ai.singlr.sail.engine.ContainerManager.ContainerInfo;
@@ -30,6 +33,7 @@ import ai.singlr.sail.engine.PairingTrust;
 import ai.singlr.sail.engine.ProvisionState;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ScriptedShellExecutor;
+import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.Actor;
@@ -46,8 +50,11 @@ import java.io.StringWriter;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Duration;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.FutureTask;
 import java.util.concurrent.atomic.AtomicBoolean;
 import org.junit.jupiter.api.Test;
@@ -281,7 +288,11 @@ class ProjectApplyCommandTest {
     catalogue(box.database(), "name: acme\nresources:\n  cpu: 2\n  memory: 4GB\n  disk: 50GB\n");
 
     for (var args : List.of(new String[] {"acme", "--yes"}, new String[] {"--all", "--yes"})) {
-      var ran = SailCli.run(new ProjectApplyCommand(() -> box, ShellExecutor::new), args);
+      var ran =
+          SailCli.run(
+              new ProjectApplyCommand(
+                  () -> box, ShellExecutor::new, ProjectApplyCommandTest::noPerson),
+              args);
 
       assertEquals(1, ran.exit());
       assertEquals("", ran.out());
@@ -297,6 +308,83 @@ class ProjectApplyCommandTest {
               + System.lineSeparator(),
           ran.err());
     }
+  }
+
+  /** A box whose person keeps no git token: what a test's apply clones with. */
+  static WorkspaceVerbs.Keeper noPerson() {
+    return new WorkspaceVerbs.Keeper(Optional.empty(), Map.of(), url -> false, Map.of());
+  }
+
+  /**
+   * Round 1, item 4: an apply whose repo asks for a token no one stored is refused before anything
+   * is created, started, written or asked: no Incus call, no progress, no prompt; under {@code
+   * --json} the refusal carries the API's code for a login not stored.
+   */
+  @Test
+  void anApplyWhoseRepoAsksForATokenNoneIsStoredForIsRefusedBeforeItTouchesAnything(
+      @TempDir Path dir) throws Exception {
+    var box = hostInitOnly(dir);
+    Files.createDirectories(box.apiSockets());
+    catalogue(
+        box.database(),
+        "name: acme\nresources:\n  cpu: 2\n  memory: 4GB\n  disk: 50GB\nrepos:\n"
+            + "  - url: https://github.com/acme/private.git\n    path: private\n");
+    var ran = new ArrayList<String>();
+    var shell =
+        new ShellExec() {
+          @Override
+          public Result exec(List<String> command) {
+            ran.add(String.join(" ", command));
+            return new Result(0, "", "");
+          }
+
+          @Override
+          public Result exec(List<String> command, Path workDir, Duration timeout) {
+            return exec(command);
+          }
+
+          @Override
+          public boolean isDryRun() {
+            return false;
+          }
+        };
+    var eng = new WorkspaceVerbs.Keeper(Optional.of("eng"), Map.of(), url -> true, Map.of());
+
+    var refused =
+        SailCli.run(new ProjectApplyCommand(() -> box, dryRun -> shell, () -> eng), "acme");
+    var json =
+        SailCli.run(
+            new ProjectApplyCommand(() -> box, dryRun -> shell, () -> eng), "acme", "--json");
+
+    assertEquals(1, refused.exit());
+    assertEquals("", refused.out(), "nothing printed, nothing asked");
+    assertTrue(
+        refused.err().contains("github.com asks for credentials to fetch acme's repo private,"),
+        refused.err());
+    assertTrue(refused.err().contains("sail git login github.com"), refused.err());
+    assertEquals(List.of(), ran, "no container probed, started or created");
+    assertEquals(
+        "login_not_stored",
+        ((Map<?, ?>) YamlUtil.parseMap(json.out()).get("error")).get("code"),
+        json.out());
+  }
+
+  /** Round 2, item 4: a project {@code --all --json} could not apply carries the API's code. */
+  @Test
+  void aProjectAnApplyOfAllCouldNotApplyCarriesTheRefusalsCode() {
+    var row =
+        ProjectApplyCommand.failedRow(
+            "acme",
+            new ApiException(
+                ErrorCode.LOGIN_NOT_STORED,
+                "github.com asks for credentials to fetch acme's repo private.",
+                Remedy.of("Store one with ", Remedy.sail("git login", "github.com"), ".")));
+
+    assertEquals("acme", row.get("name"));
+    var error = (Map<?, ?>) row.get("error");
+    assertEquals("login_not_stored", error.get("code"));
+    assertEquals(
+        "github.com asks for credentials to fetch acme's repo private.", error.get("message"));
   }
 
   /** Records {@code yaml}'s definition in the catalog at {@code database}. */
@@ -436,7 +524,8 @@ class ProjectApplyCommandTest {
                 () ->
                     new ProjectApplyCommand.Box(
                         database, database.resolveSibling("host.yaml"), database.getParent()),
-                ShellExecutor::new));
+                ShellExecutor::new,
+                ProjectApplyCommandTest::noPerson));
     command.setExecutionExceptionHandler((failure, line, parsed) -> 1);
     return new FutureTask<>(() -> command.execute(args));
   }

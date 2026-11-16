@@ -42,7 +42,7 @@ class FdeReplicateTest {
   @Test
   void replicateInsertsANewIdentity() {
     fdes.replicate(
-        "ada", "Ada", "ada@x.dev", "member", "active", Instant.parse("2026-01-01T00:00:00Z"));
+        "ada", null, "Ada", "ada@x.dev", "member", "active", Instant.parse("2026-01-01T00:00:00Z"));
 
     var ada = fdes.byHandle("ada").orElseThrow();
     assertEquals("Ada", ada.displayName());
@@ -54,7 +54,7 @@ class FdeReplicateTest {
   void replicateUpdatesRoleAndStatusButKeepsTheLocalId() {
     var local = fdes.add("ada", "Ada", "ada@x.dev", "member");
 
-    fdes.replicate("ada", "Ada Lovelace", "ada@x.dev", "admin", "disabled", null);
+    fdes.replicate("ada", null, "Ada Lovelace", "ada@x.dev", "admin", "disabled", null);
 
     var ada = fdes.byHandle("ada").orElseThrow();
     assertEquals(local.id(), ada.id(), "tokens and keys that reference the local id stay valid");
@@ -67,7 +67,7 @@ class FdeReplicateTest {
   void replicateRejectsAnInvalidRole() {
     assertThrows(
         IllegalArgumentException.class,
-        () -> fdes.replicate("ada", "Ada", null, "superuser", "active", null));
+        () -> fdes.replicate("ada", null, "Ada", null, "superuser", "active", null));
     assertTrue(fdes.byHandle("ada").isEmpty(), "nothing is written with a bad role");
   }
 
@@ -75,7 +75,7 @@ class FdeReplicateTest {
   void replicateRejectsAnInvalidStatus() {
     assertThrows(
         IllegalArgumentException.class,
-        () -> fdes.replicate("ada", "Ada", null, "member", "banned", null));
+        () -> fdes.replicate("ada", null, "Ada", null, "member", "banned", null));
     assertTrue(fdes.byHandle("ada").isEmpty());
   }
 
@@ -83,6 +83,6 @@ class FdeReplicateTest {
   void replicateRejectsAMalformedHandle() {
     assertThrows(
         IllegalArgumentException.class,
-        () -> fdes.replicate("Bad Handle!", "x", null, "member", "active", null));
+        () -> fdes.replicate("Bad Handle!", null, "x", null, "member", "active", null));
   }
 }

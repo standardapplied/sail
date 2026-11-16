@@ -84,13 +84,16 @@ final class GatewayNode implements AutoCloseable {
     return SyncDatabase.converge(path, "main");
   }
 
-  /** What main's SSH gateway decides of {@code command} by FDE {@code handle}. */
+  /**
+   * What main's SSH gateway decides of {@code command} through the line its {@code authorized_keys}
+   * pins to FDE {@code handle}'s key: by main's id for them, as every line is written.
+   */
   static SshGateway.Decision gateway(
       SyncDatabase main, SyncConfig mainConfig, String command, String handle) {
     var roster = new FdeStore(main.db());
-    return SshGateway.authorize(
+    return SshGateway.authorizeById(
         command,
-        handle,
+        roster.byHandle(handle).orElseThrow().id(),
         roster,
         new RoleRule(() -> mainConfig, roster),
         new AuthSessionStore(main.db()));

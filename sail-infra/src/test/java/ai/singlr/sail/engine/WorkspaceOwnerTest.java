@@ -79,7 +79,8 @@ class WorkspaceOwnerTest {
             "Uday C",
             "uday@example.com",
             Map.of("github.com", "ghp_uday_0123456789ab"),
-            List.of(UDAY_KEY.line(), WORKSTATION.line())),
+            List.of(UDAY_KEY.line(), WORKSTATION.line()),
+            fdes.byHandle("uday").orElseThrow().id()),
         owner);
     assertFalse(owner.toString().contains("ghp_uday_0123456789ab"), owner.toString());
   }
@@ -90,7 +91,13 @@ class WorkspaceOwnerTest {
     var owner = WorkspaceOwner.of(fdes, "ana", "uday", Optional.of(WORKSTATION));
 
     assertEquals(
-        new WorkspaceOwner("ana", "ana", "ana@example.com", Map.of(), List.of(ANA_KEY.line())),
+        new WorkspaceOwner(
+            "ana",
+            "ana",
+            "ana@example.com",
+            Map.of(),
+            List.of(ANA_KEY.line()),
+            fdes.byHandle("ana").orElseThrow().id()),
         owner);
   }
 
@@ -157,7 +164,7 @@ class WorkspaceOwnerTest {
   /** High 1 of the proof: a person a node marks disabled, as main's removal does, owns nothing. */
   @Test
   void aDisabledPersonIsNoOwner() {
-    fdes.replicate("ana", null, "ana@example.com", "member", "disabled", null);
+    fdes.replicate("ana", null, null, "ana@example.com", "member", "disabled", null);
 
     var refused =
         assertThrows(
@@ -208,10 +215,8 @@ class WorkspaceOwnerTest {
     var uday = WorkspaceOwner.of(fdes, "uday", "uday", Optional.empty());
     var config = acme("https://GitHub.com/acme/api.git", "https://gitlab.com/acme/web.git");
 
-    var repos = uday.tokenRepos(config.repos());
+    var repos = config.repos();
 
-    assertEquals(
-        List.of("https://GitHub.com/acme/api.git"), repos.stream().map(r -> r.url()).toList());
     assertEquals(Map.of("GitHub.com", "ghp_uday_0123456789ab"), uday.tokensFor(repos));
     assertEquals(
         "https://oauth2:ghp_uday_0123456789ab@GitHub.com\n",

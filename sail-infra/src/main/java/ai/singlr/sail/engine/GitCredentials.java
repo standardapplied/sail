@@ -5,13 +5,18 @@
 
 package ai.singlr.sail.engine;
 
+import ai.singlr.sail.api.ApiException;
+import ai.singlr.sail.api.ErrorCode;
+import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.ProjectDefinition;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Executors;
 import java.util.function.Predicate;
@@ -34,9 +39,7 @@ public final class GitCredentials {
 
   /**
    * Builds the contents of a {@code .git-credentials} file with one entry per unique HTTPS host
-   * found in the repo URLs. Looks up each host in the supplied token map, then falls back to
-   * provider-specific environment variables ({@code GITHUB_TOKEN}, {@code GITLAB_TOKEN}, {@code
-   * BITBUCKET_TOKEN}).
+   * found in the repo URLs that {@code tokens} holds a token for under that exact host.
    */
   public static String buildCredentialStore(
       Map<String, String> tokens, List<ProjectDefinition.Repo> repos) {
@@ -80,7 +83,7 @@ public final class GitCredentials {
           var afterScheme = url.substring(8);
           var slashIdx = afterScheme.indexOf('/');
           if (slashIdx > 0) {
-            hosts.add(afterScheme.substring(0, slashIdx));
+            hosts.add(withoutCredential(afterScheme.substring(0, slashIdx)));
           }
         }
       }
@@ -89,76 +92,82 @@ public final class GitCredentials {
   }
 
   /**
-   * Resolves the git credential token for a specific host. Checks the token map first (exact host,
-   * then wildcard "*"), then falls back to provider-specific environment variables.
+   * The token {@code tokens} holds for {@code host} exactly, as its repo URL spells it, or null:
+   * never one stored for another host, and never one from the environment (G1, G2).
    */
   public static String resolveTokenForHost(String host, Map<String, String> tokens) {
-    if (tokens != null) {
-      var explicit = tokens.get(host);
-      if (Strings.isNotBlank(explicit)) {
-        return explicit;
-      }
-      var wildcard = tokens.get("*");
-      if (Strings.isNotBlank(wildcard)) {
-        return wildcard;
-      }
-    }
-    return providerEnvToken(host);
-  }
-
-  private static String providerEnvToken(String host) {
-    if ("github.com".equals(host)) {
-      return System.getenv("GITHUB_TOKEN");
-    }
-    if ("gitlab.com".equals(host) || host.contains("gitlab")) {
-      return System.getenv("GITLAB_TOKEN");
-    }
-    if (host.contains("bitbucket")) {
-      return System.getenv("BITBUCKET_TOKEN");
-    }
-    return null;
+    return tokens == null ? null : tokens.get(host);
   }
 
   /**
-   * The tokens a run clones {@code repos} with, asking no one: {@code token} for every host when it
-   * is given, else each https host's own from its provider's environment variable.
+   * The tokens of {@code stored}, keyed by lower-case host as {@code sail git login} keeps them,
+   * for the hosts of {@code repos}, keyed as each repo URL spells its host: the key the credential
+   * store matches.
    */
-  public static Map<String, String> known(List<ProjectDefinition.Repo> repos, String token) {
-    if (Strings.isNotBlank(token)) {
-      return singleTokenMap(token);
-    }
-    var tokens = new LinkedHashMap<String, String>();
+  public static Map<String, String> forRepos(
+      Map<String, String> stored, List<ProjectDefinition.Repo> repos) {
+    var spelled = new LinkedHashMap<String, String>();
     for (var host : extractHttpsHosts(repos)) {
-      var found = resolveTokenForHost(host, null);
-      if (Strings.isNotBlank(found)) {
-        tokens.put(host, found);
+      var token = stored.get(host.toLowerCase(Locale.ROOT));
+      if (token != null) {
+        spelled.put(host, token);
       }
     }
-    return Map.copyOf(tokens);
+    return spelled;
   }
 
   /**
-   * The https {@code repos} a run cannot clone with {@code tokens}: those whose host has no token
-   * there and whose smart-HTTP refs {@code asks} says ask for credentials ({@link
-   * ShellExec#asksForCredentials}). Any other answer, a public repo or a host that cannot be
-   * reached, asks for none, and the clone says what is wrong with it. The repos are asked at once,
-   * so the whole check takes as long as its slowest answer, which {@link
-   * ShellExec#asksForCredentials} bounds.
+   * The first of {@code repos} whose host asks for credentials ({@code asks}) and {@code tokens}
+   * holds no token for, keyed as {@link #forRepos} keys them.
    */
-  public static List<String> askingForAToken(
+  public static Optional<Missing> missing(
       List<ProjectDefinition.Repo> repos, Map<String, String> tokens, Predicate<String> asks) {
     return asking(repos, host -> Strings.isNotBlank(resolveTokenForHost(host, tokens)), asks)
         .stream()
-        .map(ProjectDefinition.Repo::url)
-        .toList();
+        .findFirst()
+        .map(repo -> new Missing(extractHttpsHosts(List.of(repo)).getFirst(), repo));
+  }
+
+  /** A repo whose host asks for credentials that no stored token answers: what refuses a fetch. */
+  public record Missing(String host, ProjectDefinition.Repo repo) {
+
+    /** What people set and Sail never reads: a refusal names it when it is set (G2). */
+    static final List<String> IGNORED = List.of("GITHUB_TOKEN", "GITLAB_TOKEN", "BITBUCKET_TOKEN");
+
+    public String reason(String project, String who) {
+      return host
+          + " asks for credentials to fetch "
+          + project
+          + "'s repo "
+          + repo.path()
+          + ", and "
+          + who
+          + " keeps no token for it.";
+    }
+
+    /**
+     * The command that stores one for this host; when {@code env} sets a variable of {@link
+     * #IGNORED}, that Sail does not read it. Whether it is set is all that is read of it.
+     */
+    public Remedy remedy(Map<String, String> env) {
+      var store = Remedy.sail("git login", host);
+      return IGNORED.stream()
+          .filter(name -> Strings.isNotBlank(env.get(name)))
+          .findFirst()
+          .map(
+              name -> Remedy.of(name + " is set but Sail does not read it. Store it: ", store, "."))
+          .orElseGet(() -> Remedy.of("Store one with ", store, "."));
+    }
   }
 
   /**
    * The https {@code repos} whose host {@code held} says no token is kept for and whose smart-HTTP
-   * refs {@code asks} says ask for credentials, as {@link #askingForAToken} asks them: at once,
-   * each bounded by {@link ShellExec#asksForCredentials}.
+   * refs {@code asks} says ask for credentials: at once, each bounded by {@link
+   * ShellExec#asksForCredentials}, so the whole check takes as long as its slowest answer. Any
+   * other answer, a public repo or a host that cannot be reached, asks for none, and the clone says
+   * what is wrong with it.
    */
-  public static List<ProjectDefinition.Repo> asking(
+  private static List<ProjectDefinition.Repo> asking(
       List<ProjectDefinition.Repo> repos, Predicate<String> held, Predicate<String> asks) {
     var asked = new ArrayList<ProjectDefinition.Repo>();
     for (var repo : repos == null ? List.<ProjectDefinition.Repo>of() : repos) {
@@ -187,10 +196,24 @@ public final class GitCredentials {
     }
   }
 
-  /** Wraps a single token string into a wildcard token map. Returns empty map if null/blank. */
-  public static Map<String, String> singleTokenMap(String token) {
-    if (Strings.isBlank(token)) return Map.of();
-    return Map.of("*", token);
+  /**
+   * Refuses a URL's authority that carries a credential before its host, naming the host alone: a
+   * token in a definition would be echoed, logged and sent, and a token is stored with {@code sail
+   * git login} instead.
+   */
+  private static String withoutCredential(String authority) {
+    var at = authority.lastIndexOf('@');
+    if (at < 0) {
+      return authority;
+    }
+    var host = requireSafeHost(authority.substring(at + 1));
+    throw new ApiException(
+        ErrorCode.INVALID_REQUEST,
+        "A repository URL on " + host + " carries a credential, and a URL must not carry one.",
+        Remedy.of(
+            "Take it out of the URL and store the token with ",
+            Remedy.sail("git login", host),
+            "."));
   }
 
   private static String requireSafeHost(String host) {

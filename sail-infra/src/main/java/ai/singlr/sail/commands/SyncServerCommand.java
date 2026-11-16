@@ -36,12 +36,14 @@ import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.Callable;
 import java.util.function.Supplier;
+import java.util.stream.Collectors;
 import picocli.CommandLine.Command;
 
 /**
@@ -206,16 +208,32 @@ public final class SyncServerCommand implements Callable<Integer> {
     }
   }
 
-  /** Main's roster as {@code principal}'s node mirrors it ({@link FdeStore#visibleTo}). */
+  /**
+   * Main's roster as {@code principal}'s node mirrors it: the people {@link FdeStore#visibleTo}
+   * shows it, each with their email, since one who works on that node commits there under it, and
+   * the id alone of everyone else main holds, so a node tells a person out of its sight from one
+   * removed.
+   */
   static List<Map<String, Object>> roster(Sqlite db, Actor principal) {
-    return new FdeStore(db)
-        .visibleTo(principal.handle(), Access.audience(principal)).stream()
-            .map(SyncServerCommand::fdeToMap)
-            .toList();
+    var fdes = new FdeStore(db);
+    var everyone = fdes.list();
+    var ids =
+        fdes.visibleTo(principal.handle(), Access.audience(principal)).stream()
+            .map(FdeStore.Fde::id)
+            .collect(Collectors.toSet());
+    var roster = new ArrayList<Map<String, Object>>();
+    everyone.stream()
+        .filter(fde -> ids.contains(fde.id()))
+        .forEach(fde -> roster.add(fdeToMap(fde)));
+    everyone.stream()
+        .filter(fde -> !ids.contains(fde.id()))
+        .forEach(fde -> roster.add(Map.of("id", fde.id())));
+    return List.copyOf(roster);
   }
 
   private static Map<String, Object> fdeToMap(FdeStore.Fde fde) {
     var map = new LinkedHashMap<String, Object>();
+    map.put("id", fde.id());
     map.put("handle", fde.handle());
     map.put("display_name", fde.displayName());
     map.put("email", fde.email());

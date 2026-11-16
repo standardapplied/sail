@@ -44,6 +44,7 @@ import java.io.IOException;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.TimeoutException;
 import java.util.function.Function;
@@ -297,6 +298,11 @@ final class HostLanes {
     }
 
     @Override
+    public boolean activePerson(String fdeId) {
+      return new FdeStore(db).byId(fdeId).filter(FdeStore.Fde::active).isPresent();
+    }
+
+    @Override
     public List<FdeSshKeyStore.SshKeyInfo> sshKeys() {
       return new FdeSshKeyStore(db).list();
     }
@@ -307,9 +313,23 @@ final class HostLanes {
     }
 
     @Override
+    public Optional<Map<String, String>> gitTokens() {
+      var fdes = new FdeStore(db);
+      return Optional.ofNullable(boxConfig.get().handle())
+          .flatMap(fdes::byHandle)
+          .map(fde -> fdes.logins().gitTokens(fde.id()));
+    }
+
+    @Override
     public SshGateway.Decision authorizeGateway(String command, String handle) {
       return SshGateway.authorize(
           command, handle, new FdeStore(db), roles, new AuthSessionStore(db));
+    }
+
+    @Override
+    public SshGateway.Decision authorizeGatewayById(String command, String fdeId) {
+      return SshGateway.authorizeById(
+          command, fdeId, new FdeStore(db), roles, new AuthSessionStore(db));
     }
   }
 

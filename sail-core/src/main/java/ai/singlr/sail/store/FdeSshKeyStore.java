@@ -54,8 +54,14 @@ public final class FdeSshKeyStore {
     return db.queryOne(SELECT + " WHERE k.fingerprint = ?", FdeSshKeyStore::map, fingerprint);
   }
 
+  /**
+   * The keys the SSH gateway admits: those of active people. A disabled person (withdrawn, moved
+   * aside) keeps their keys here, and gets no line in {@code authorized_keys} until they are active
+   * again.
+   */
   public List<SshKeyInfo> list() {
-    return db.query(SELECT + " ORDER BY f.handle, k.created_at", FdeSshKeyStore::map);
+    return db.query(
+        SELECT + " WHERE f.status = 'active' ORDER BY f.handle, k.created_at", FdeSshKeyStore::map);
   }
 
   public List<SshKeyInfo> listForFde(String fdeId) {

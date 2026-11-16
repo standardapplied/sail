@@ -12,8 +12,9 @@ import java.io.IOException;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Locale;
+import java.util.Map;
 import java.util.concurrent.TimeoutException;
 
 /** A template holds no one's credentials (T1); a workspace holds its owner's alone (T2, T3). */
@@ -25,22 +26,43 @@ final class WorkspaceCredentials {
   static final String GH_HOSTS = ContainerExec.DEV_HOME + "/.config/gh/hosts.yml";
   static final String KEYS = ContainerExec.DEV_HOME + "/.ssh/authorized_keys";
 
-  /** Every give runs it whole, so nothing of a previous owner survives a re-own or a restart. */
+  /**
+   * Every file a give writes, and every leftover of one cut short: the strip takes exactly these,
+   * so the two cannot drift.
+   */
+  static final List<String> FILES =
+      List.of(STORE, STORE + NEW, GH_HOSTS, DEV + ForgeCliLogin.TOKEN_FILE);
+
+  /**
+   * Every give runs it whole, so nothing of a previous owner survives a re-own or a restart, and so
+   * does a disown. Each removal is idempotent and checked by what is left, never by what a failed
+   * command said.
+   */
   static final String STRIP =
       """
       set -eu
       as_dev() { runuser -u dev -- env HOME=/home/dev "$@"; }
-      rm -f /home/dev/.git-credentials /home/dev/.git-credentials.sail-new /home/dev/.config/gh/hosts.yml /home/dev/.sail/gh-token
+      rm -f %1$s
       for key in user.name user.email; do
         as_dev git config --global --unset-all "$key" || [ "$?" -eq 5 ]
       done
-      if [ -e /home/dev/.ssh/authorized_keys ]; then : > /home/dev/.ssh/authorized_keys; fi
+      if [ -e %2$s ]; then : > %2$s; fi
+      for file in %1$s; do
+        if [ -e "$file" ]; then echo "$file is still there" >&2; exit 1; fi
+      done
+      for key in user.name user.email; do
+        if as_dev git config --global --get "$key" >/dev/null; then
+          echo "the git $key is still set" >&2; exit 1
+        fi
+      done
+      if [ -s %2$s ]; then echo "%2$s still has a key" >&2; exit 1; fi
       if [ "$#" -eq 2 ]; then
         install -d -m 0700 -o dev -g dev /home/dev/.ssh
         as_dev git config --global user.name "$1"
         as_dev git config --global user.email "$2"
       fi
-      """;
+      """
+          .formatted(String.join(" ", FILES), KEYS);
 
   /**
    * Searches by content, not by a list of paths, because a token can hide where no list names it;
@@ -89,14 +111,7 @@ final class WorkspaceCredentials {
           *) echo "could not read $keys" >&2; exit 2 ;;
         esac
       done
-      if said=$(as_dev gh auth status 2>&1); then
-        add "a gh login"
-      else
-        case $said in
-          *"not logged in"*) ;;
-          *) printf 'gh could not say whether it is logged in: %s\n' "$said" >&2; exit 2 ;;
-        esac
-      fi
+      if [ -e /home/dev/.config/gh/hosts.yml ]; then add "a gh login"; fi
       if [ -n "$held" ]; then echo "$held" >&2; exit 1; fi
       """;
 
@@ -155,9 +170,12 @@ final class WorkspaceCredentials {
         KEYS,
         owner.keys().stream().map(key -> key + "\n").reduce("", String::concat),
         List.of("--uid", ContainerExec.DEV_UID, "--gid", ContainerExec.DEV_GID, "--mode", "0600"));
-    var repos = owner.tokenRepos(config.repos());
-    ProjectApplier.writeCredentialStore(
-        shell, instance, ProjectDefinition.USER, owner.tokensFor(repos), repos);
+    var store =
+        GitCredentials.buildCredentialStore(owner.tokensFor(config.repos()), config.repos());
+    if (!store.isEmpty()) {
+      ContainerFilePush.pushAsDev(shell, instance, STORE, store, "0600");
+      asDev(shell, instance, "git", "config", "--global", "credential.helper", "store");
+    }
   }
 
   /** A container just started has no resolver yet, and gh's login asks its forge. */
@@ -171,40 +189,149 @@ final class WorkspaceCredentials {
   static void logForgeIn(
       ShellExec shell, String instance, ProjectDefinition config, WorkspaceOwner owner)
       throws IOException, InterruptedException, TimeoutException {
-    var repos = owner.tokenRepos(config.repos());
-    var hosts = GitCredentials.githubHosts(repos);
+    logForgeIn(shell, instance, config.repos(), owner.tokensFor(config.repos()));
+  }
+
+  private static void logForgeIn(
+      ShellExec shell,
+      String instance,
+      List<ProjectDefinition.Repo> repos,
+      Map<String, String> tokens)
+      throws IOException, InterruptedException, TimeoutException {
+    var hosts = forgeHosts(repos, tokens);
     if (hosts.isEmpty()) {
       return;
     }
     var resolve = new ArrayList<>(List.of("bash", "-c", RESOLVES, "sail-resolve"));
     resolve.addAll(hosts);
     shell.exec(ContainerExec.asRoot(instance, resolve));
-    ForgeCliLogin.loginGitHub(
-        shell, instance, ProjectDefinition.USER, owner.tokensFor(repos), repos);
+    ForgeCliLogin.loginGitHub(shell, instance, ProjectDefinition.USER, tokens, repos);
+  }
+
+  /** The hosts gh's login file names: its top-level keys. None when there is no file. */
+  private static final String GH_LOGGED_IN =
+      "[ -f \"$1\" ] || exit 0; sed -n 's/^\\([^ #][^:]*\\):.*$/\\1/p' \"$1\"";
+
+  /**
+   * gh, already logged in to some hosts, left logged in to exactly {@code keep} in place: each
+   * other host it names logged out by its own name, and each kept host logged in again only when
+   * its token is not the one gh holds, which gh replaces in that host's entry alone. No host that
+   * keeps its token is ever without its login, so a live run's {@code gh} never fails for this.
+   */
+  private static void relogForge(
+      ShellExec shell,
+      String instance,
+      List<ProjectDefinition.Repo> repos,
+      Map<String, String> tokens,
+      List<String> keep)
+      throws IOException, InterruptedException, TimeoutException {
+    var named =
+        shell.exec(
+            ContainerExec.asDevUser(instance, List.of("sh", "-c", GH_LOGGED_IN, "sh", GH_HOSTS)));
+    if (!named.ok()) {
+      throw new IOException(
+          "Could not read gh's logins in " + instance + ": " + named.reason().strip());
+    }
+    for (var host : named.stdout().lines().map(String::strip).toList()) {
+      if (!host.isEmpty() && !keep.contains(host)) {
+        asDev(shell, instance, "gh", "auth", "logout", "--hostname", host);
+      }
+    }
+    var changed = new LinkedHashMap<String, String>();
+    for (var host : keep) {
+      var held =
+          shell.exec(
+              ContainerExec.asDevUser(
+                  instance, List.of("gh", "auth", "token", "--hostname", host)));
+      if (!held.ok() || !held.stdout().strip().equals(tokens.get(host))) {
+        changed.put(host, tokens.get(host));
+      }
+    }
+    if (!changed.isEmpty()) {
+      logForgeIn(shell, instance, repos, changed);
+    }
+  }
+
+  /** The GitHub hosts of {@code repos} that {@code tokens} holds a token for: gh's logins. */
+  private static List<String> forgeHosts(
+      List<ProjectDefinition.Repo> repos, Map<String, String> tokens) {
+    return GitCredentials.githubHosts(repos).stream().filter(tokens::containsKey).toList();
   }
 
   /**
-   * A token change for the owner a workspace already has: the store replaced whole by a rename, or
-   * removed when they keep none for it, and gh logged in again or out, never stripped first, so a
-   * live run's fetch or push never finds the workspace without credentials.
+   * A token change for the owner a workspace already has ({@link #renew(ShellExec, String, List,
+   * Map)}).
    */
-  static void renew(
+  static String renew(
       ShellExec shell, String instance, ProjectDefinition config, WorkspaceOwner owner)
       throws IOException, InterruptedException, TimeoutException {
-    var repos = owner.tokenRepos(config.repos());
-    var store = GitCredentials.buildCredentialStore(owner.tokensFor(repos), repos);
+    return renew(shell, instance, config.repos(), owner.tokensFor(config.repos()));
+  }
+
+  /**
+   * Gives {@code instance} exactly {@code tokens} for {@code repos}: the store replaced whole by a
+   * rename, never stripped first, so a live run's fetch or push never finds the container without
+   * one, or removed when there is nothing to write; and gh left logged in to exactly the GitHub
+   * hosts with a token, each host kept never logged out on the way. The one step a workspace's
+   * token change and a project container's apply both take, so a token removed or no longer needed
+   * leaves either. Answers what it removed with nothing written in its place, which may have been
+   * made by hand and is said, or null.
+   */
+  static String renew(
+      ShellExec shell,
+      String instance,
+      List<ProjectDefinition.Repo> repos,
+      Map<String, String> tokens)
+      throws IOException, InterruptedException, TimeoutException {
+    var removed = new ArrayList<String>();
+    var store = GitCredentials.buildCredentialStore(tokens, repos);
     if (store.isEmpty()) {
-      asDev(shell, instance, "rm", "-f", STORE);
+      if (remove(shell, instance, STORE)) {
+        removed.add("git credentials");
+      }
     } else {
-      ContainerFilePush.pushAsDev(shell, instance, STORE + NEW, store, "0600");
-      asDev(shell, instance, "mv", "-f", STORE + NEW, STORE);
-      asDev(shell, instance, "git", "config", "--global", "credential.helper", "store");
+      writeStore(shell, instance, store);
     }
-    if (GitCredentials.githubHosts(repos).isEmpty()) {
-      asDev(shell, instance, "rm", "-f", GH_HOSTS);
+    var keep = forgeHosts(repos, tokens);
+    if (keep.isEmpty()) {
+      if (remove(shell, instance, GH_HOSTS)) {
+        removed.add("gh login");
+      }
     } else {
-      logForgeIn(shell, instance, config, owner);
+      relogForge(shell, instance, repos, tokens, keep);
     }
+    return removed.isEmpty()
+        ? null
+        : instance
+            + "'s "
+            + String.join(" and ", removed)
+            + " removed: no token is stored for its repos' hosts, and Sail keeps only the tokens its"
+            + " git login stores.";
+  }
+
+  /** Exits 3 when there is no {@code $1}, so the step knows whether it removed one. */
+  private static final String REMOVE = "[ -e \"$1\" ] || exit 3; rm -f \"$1\"";
+
+  private static boolean remove(ShellExec shell, String instance, String file)
+      throws IOException, InterruptedException, TimeoutException {
+    var ran =
+        shell.exec(ContainerExec.asDevUser(instance, List.of("sh", "-c", REMOVE, "sh", file)));
+    if (ran.exitCode() == 3) {
+      return false;
+    }
+    if (!ran.ok()) {
+      throw new IOException(
+          "Could not remove " + file + " in " + instance + ": " + ran.reason().strip());
+    }
+    return true;
+  }
+
+  /** The store written beside the old one and renamed over it, with git told to read it. */
+  private static void writeStore(ShellExec shell, String instance, String store)
+      throws IOException, InterruptedException, TimeoutException {
+    ContainerFilePush.pushAsDev(shell, instance, STORE + NEW, store, "0600");
+    asDev(shell, instance, "mv", "-f", STORE + NEW, STORE);
+    asDev(shell, instance, "git", "config", "--global", "credential.helper", "store");
   }
 
   private static void asDev(ShellExec shell, String instance, String... command)
@@ -216,24 +343,6 @@ final class WorkspaceCredentials {
     }
   }
 
-  /** Through files alone, so a stopped workspace is reached without starting it. */
-  static void takeBack(ShellExec shell, String instance)
-      throws IOException, InterruptedException, TimeoutException {
-    for (var file : List.of(STORE, STORE + NEW, GH_HOSTS, DEV + ForgeCliLogin.TOKEN_FILE)) {
-      var deleted = shell.exec(List.of("incus", "file", "delete", instance + file));
-      if (!deleted.ok() && !absent(deleted.stderr())) {
-        throw new IOException(
-            "Could not delete " + file + " in " + instance + ": " + deleted.stderr().strip());
-      }
-    }
-    ContainerFilePush.push(
-        shell,
-        instance,
-        KEYS,
-        "",
-        List.of("--uid", ContainerExec.DEV_UID, "--gid", ContainerExec.DEV_GID, "--mode", "0600"));
-  }
-
   private static void run(ShellExec shell, String instance, List<String> args, String failure)
       throws IOException, InterruptedException, TimeoutException {
     var argv = new ArrayList<>(List.of("bash", "-c", STRIP, "sail-strip"));
@@ -242,10 +351,5 @@ final class WorkspaceCredentials {
     if (!stripped.ok()) {
       throw new IOException(failure + ": " + stripped.reason().strip());
     }
-  }
-
-  private static boolean absent(String stderr) {
-    var said = stderr.toLowerCase(Locale.ROOT);
-    return said.contains("not found") || said.contains("no such file");
   }
 }

@@ -17,6 +17,7 @@ import java.io.IOException;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 /** Tokens, FDEs, SSH keys and the gateway decision: who may reach this box. */
@@ -41,6 +42,9 @@ public interface HostIdentity {
 
   Optional<FdeStore.Fde> fde(String handle);
 
+  /** Whether {@code fdeId} is an active person's on this box. */
+  boolean activePerson(String fdeId);
+
   List<FdeSshKeyStore.SshKeyInfo> sshKeys();
 
   /**
@@ -49,5 +53,14 @@ public interface HostIdentity {
    */
   WorkspaceOwner workspaceOwner(String handle);
 
+  /**
+   * The git tokens this box's person stored with {@code sail git login}, by lower-case host: the
+   * one source a host command clones with. Empty when the box names no person on its roster.
+   */
+  Optional<Map<String, String>> gitTokens();
+
   SshGateway.Decision authorizeGateway(String command, String handle);
+
+  /** As {@link #authorizeGateway}, for the person a key is pinned to by this box's id for them. */
+  SshGateway.Decision authorizeGatewayById(String command, String fdeId);
 }

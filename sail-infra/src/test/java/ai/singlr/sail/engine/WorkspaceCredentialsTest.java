@@ -172,6 +172,31 @@ class WorkspaceCredentialsTest {
     }
   }
 
+  /**
+   * The proof's High 1: the strip is the same idempotent act whether none, some or all of what a
+   * give writes is there, and it checks by what is left: no file of {@link
+   * WorkspaceCredentials#FILES}, no identity and no key, every time, with exit 0.
+   */
+  @Test
+  void theStripLeavesNothingWhetherNoneSomeOrAllOfWhatAGiveWritesIsThere() throws Exception {
+    assertEquals(0, script(WorkspaceCredentials.STRIP, "").exit(), "none there");
+    Files.createDirectories(root.resolve("home/dev/.config/gh"));
+    Files.writeString(root.resolve("home/dev/.config/gh/hosts.yml"), "github.com: {}\n");
+    git("config", "--global", "user.email", "old@sail.invalid");
+    var some = script(WorkspaceCredentials.STRIP, "");
+    builderLeftEverything();
+    Files.writeString(root.resolve("home/dev/.git-credentials.sail-new"), TOKEN + "\n");
+    var all = script(WorkspaceCredentials.STRIP, "");
+
+    assertEquals(0, some.exit(), some.err());
+    assertEquals(0, all.exit(), all.err());
+    for (var file : WorkspaceCredentials.FILES) {
+      assertFalse(Files.exists(root.resolve(file.substring(1))), file);
+    }
+    assertEquals("", Files.readString(root.resolve("home/dev/.ssh/authorized_keys")));
+    assertFalse(Files.readString(root.resolve("home/dev/.gitconfig")).contains("user"));
+  }
+
   /** The strip given a name and email leaves them as the identity, and nothing else of anyone. */
   @Test
   void theStripGivenAnOwnersNameAndEmailSetsThemAsTheIdentity() throws Exception {

@@ -11,6 +11,8 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.api.ApiException;
+import ai.singlr.sail.api.ErrorCode;
 import ai.singlr.sail.api.Event;
 import ai.singlr.sail.api.OperationsFactory;
 import ai.singlr.sail.api.SessionYield;
@@ -29,7 +31,6 @@ import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.engine.SyncOperations;
 import ai.singlr.sail.identity.Acting;
-import ai.singlr.sail.identity.ProjectScope;
 import ai.singlr.sail.store.BlobStore;
 import ai.singlr.sail.store.ChangeLog;
 import ai.singlr.sail.store.ContentFixtures;
@@ -590,7 +591,7 @@ class SyncCommandTest {
               Map.of("handle", "ada", "role", "admin", "status", "active"),
               Map.of("handle", "bad", "role", "superuser", "status", "active"));
 
-      var rejected = SyncOperations.applyFdes(fdes, roster, ProjectScope.all(), "ada");
+      var rejected = SyncOperations.applyFdes(fdes, roster, "ada", notice -> {});
 
       assertEquals(List.of("bad"), rejected);
       assertEquals("admin", fdes.byHandle("ada").orElseThrow().role());
@@ -710,5 +711,33 @@ class SyncCommandTest {
                     null,
                     List.of(),
                     List.of("app"))));
+  }
+
+  /** The proof's Low 2: a refused round under --json is the API's error envelope, its code kept. */
+  @Test
+  void aRefusedRoundUnderJsonPrintsTheErrorEnvelopeWithItsCode() {
+    var out = System.out;
+    var captured = new ByteArrayOutputStream();
+    System.setOut(new PrintStream(captured, true, StandardCharsets.UTF_8));
+    int exit;
+    try {
+      exit =
+          SyncCommand.failed(
+              new ApiException(
+                  ErrorCode.CONFLICT,
+                  "This box's first round with this main changes no one.",
+                  Remedy.of("Remove it.")),
+              "sail@main",
+              true,
+              OperatorCommand.PLAIN);
+    } finally {
+      System.setOut(out);
+    }
+
+    assertEquals(1, exit);
+    var error =
+        (Map<?, ?>) YamlUtil.parseMap(captured.toString(StandardCharsets.UTF_8)).get("error");
+    assertEquals("conflict", error.get("code"));
+    assertEquals("This box's first round with this main changes no one.", error.get("message"));
   }
 }

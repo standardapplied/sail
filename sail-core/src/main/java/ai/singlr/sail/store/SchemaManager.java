@@ -8,8 +8,10 @@ package ai.singlr.sail.store;
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.common.Remedied;
 import ai.singlr.sail.common.Remedy;
+import ai.singlr.sail.sync.SyncTransportException;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 /**
  * Creates the one schema this release opens. A fresh database gets it in one shot, stamped {@value
@@ -264,7 +266,8 @@ public final class SchemaManager {
               status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'disabled')),
               created_at INTEGER NOT NULL,
               role TEXT NOT NULL DEFAULT 'member',
-              scope TEXT NOT NULL DEFAULT 'all' CHECK (scope IN ('all', 'granted'))
+              scope TEXT NOT NULL DEFAULT 'all' CHECK (scope IN ('all', 'granted')),
+              main_id TEXT
           )""",
           """
           CREATE TABLE api_tokens (
@@ -585,13 +588,16 @@ public final class SchemaManager {
               last_attempt_at INTEGER,
               last_success_at INTEGER,
               consecutive_failures INTEGER NOT NULL DEFAULT 0 CHECK (consecutive_failures >= 0),
-              last_error_kind TEXT
-                  CHECK (last_error_kind IN ('unreachable', 'refused', 'protocol', 'store')),
+              last_error_kind TEXT CHECK (last_error_kind IN (%s)),
               last_error TEXT,
               last_report TEXT,
               state TEXT NOT NULL CHECK (state IN ('in_sync', 'syncing', 'stale')),
               stale_since INTEGER
-          )""",
+          )"""
+              .formatted(
+                  SyncTransportException.KINDS.stream()
+                      .map(kind -> "'" + kind + "'")
+                      .collect(Collectors.joining(", "))),
           """
           CREATE TABLE change_heads (
               entity_type TEXT NOT NULL,
@@ -740,17 +746,34 @@ public final class SchemaManager {
    * made, adds only the feed's indexes it lacks ({@link #FEED_INDEXES}). Any other database is
    * refused naming what to do: an older one was made by a release before v1 and is replaced, as is
    * one holding tables but no version, or one stamped v1004 by a build before {@code
-   * runs.login_overridden}, and a newer one needs a newer binary.
+   * runs.login_overridden} or {@code fdes.main_id}, or before {@code sync_health.last_error_kind}
+   * took every kind a failure is recorded as, and a newer one needs a newer binary.
    */
   public void migrate() {
     db.execute(SCHEMA_VERSION_TABLE);
     if (currentVersion() == CURRENT_VERSION) {
-      if (lacksLoginOverridden()) {
+      for (var added : List.of("runs.login_overridden", "fdes.main_id")) {
+        if (lacks(added)) {
+          throw Remedied.state(
+              "Database "
+                  + db.path()
+                  + " was made by a build of schema v1004 before "
+                  + added
+                  + ", and none is converted: the box is reinstalled.",
+              freshStart());
+        }
+      }
+      var refused =
+          SyncTransportException.KINDS.stream()
+              .filter(kind -> !syncHealthDefinition().contains("'" + kind + "'"))
+              .toList();
+      if (!refused.isEmpty()) {
         throw Remedied.state(
             "Database "
                 + db.path()
-                + " was made by a build of schema v1004 before runs.login_overridden, and none"
-                + " is converted: the box is reinstalled.",
+                + " was made by a build of schema v1004 before sync_health.last_error_kind took "
+                + String.join(", ", refused)
+                + ", and none is converted: the box is reinstalled.",
             freshStart());
       }
       FEED_INDEXES.forEach(db::execute);
@@ -778,10 +801,20 @@ public final class SchemaManager {
     stamp(CURRENT_VERSION);
   }
 
-  private boolean lacksLoginOverridden() {
+  private String syncHealthDefinition() {
     return db.queryOne(
-                "SELECT COUNT(*) FROM pragma_table_info('runs') WHERE name = 'login_overridden'",
-                row -> row.integer(0))
+            "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'sync_health'",
+            row -> row.text(0))
+        .orElse("");
+  }
+
+  private boolean lacks(String column) {
+    var named = column.split("\\.");
+    return db.queryOne(
+                "SELECT COUNT(*) FROM pragma_table_info(?) WHERE name = ?",
+                row -> row.integer(0),
+                named[0],
+                named[1])
             .orElse(0L)
         == 0;
   }

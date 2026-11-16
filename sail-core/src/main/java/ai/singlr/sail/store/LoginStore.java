@@ -280,10 +280,16 @@ public final class LoginStore {
   /** A port is allowed because a repo's https URL may name one, and the refusal prints it. */
   public static String requireHost(String host) {
     var port = host == null ? null : PORT.matcher(host);
-    if (port != null && port.matches() && Integer.parseInt(port.group(2)) <= 65535) {
-      NameValidator.requireValidHost(port.group(1));
-    } else {
-      NameValidator.requireValidHost(host);
+    try {
+      NameValidator.requireValidHost(
+          port != null && port.matches() && Integer.parseInt(port.group(2)) <= 65535
+              ? port.group(1)
+              : host);
+    } catch (IllegalArgumentException invalid) {
+      throw new IllegalArgumentException(
+          "Invalid host: '"
+              + host
+              + "'. Must be a DNS name or an IP address, with an optional port.");
     }
     return host.toLowerCase(Locale.ROOT);
   }

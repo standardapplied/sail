@@ -5,7 +5,6 @@
 
 package ai.singlr.sail.commands;
 
-import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.DefinitionEdits;
 import ai.singlr.sail.config.ProjectDefinition;
 import ai.singlr.sail.config.ProjectDefinition.Section;
@@ -13,14 +12,14 @@ import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.Banner;
 import ai.singlr.sail.engine.ContainerManager;
 import ai.singlr.sail.engine.ContainerStateGuard;
-import ai.singlr.sail.engine.GitCredentials;
 import ai.singlr.sail.engine.NameValidator;
 import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.ProjectApplier;
 import ai.singlr.sail.engine.ShellExecutor;
+import java.io.IOException;
 import java.io.PrintStream;
 import java.util.LinkedHashMap;
-import java.util.List;
+import java.util.concurrent.TimeoutException;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
 import picocli.CommandLine.Option;
@@ -41,12 +40,6 @@ public final class ProjectAddRepoCommand implements Runnable {
   @Option(names = "--dry-run", description = "Print commands instead of executing them.")
   private boolean dryRun;
 
-  @Option(
-      names = "--git-token",
-      description = "Access token for cloning private repos over HTTPS.",
-      defaultValue = "${GITHUB_TOKEN}")
-  private String gitToken;
-
   @Option(names = "--url", description = "Repository URL (non-interactive mode).")
   private String url;
 
@@ -58,7 +51,7 @@ public final class ProjectAddRepoCommand implements Runnable {
 
   @Override
   public void run() {
-    CliCommand.run(this::execute);
+    CliCommand.run(json, this::execute);
   }
 
   private void execute() throws Exception {
@@ -92,11 +85,7 @@ public final class ProjectAddRepoCommand implements Runnable {
     }
 
     var edited = ProjectMutations.checked(DefinitionEdits.addRepo(config, repo));
-    var token = Strings.isNotBlank(gitToken) ? gitToken : null;
-    var applier = new ProjectApplier(shell, out);
-    var result =
-        applier.applyRepos(
-            name, List.of(repo), ProjectDefinition.USER, GitCredentials.singleTokenMap(token));
+    var result = cloned(new ProjectApplier(shell, out), name, edited, WorkspaceVerbs.Keeper.here());
     mutations.write(
         Section.REPOS,
         config,
@@ -125,6 +114,17 @@ public final class ProjectAddRepoCommand implements Runnable {
                 + "' added to "
                 + name
                 + " and its definition"));
+  }
+
+  /**
+   * Clones what {@code edited} adds into {@code name}'s container, with the store an apply writes:
+   * {@code keeper}'s tokens for every host {@code edited}'s repos name ({@link
+   * WorkspaceVerbs.Keeper#check}), not the added repo's host alone, so no earlier repo loses its.
+   */
+  static ProjectApplier.ApplyResult cloned(
+      ProjectApplier applier, String name, ProjectDefinition edited, WorkspaceVerbs.Keeper keeper)
+      throws IOException, InterruptedException, TimeoutException {
+    return applier.applyRepos(name, edited.repos(), ProjectDefinition.USER, keeper.check(edited));
   }
 
   private ProjectDefinition.Repo collectRepoInteractively(PrintStream out, Ansi ansi) {

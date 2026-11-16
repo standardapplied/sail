@@ -79,12 +79,37 @@ public final class SshGateway {
   /** The command is refused; {@code reason} is safe to show the caller. */
   public record Rejected(String reason) implements Decision {}
 
+  /** Why a key pinned to a person this box no longer holds, or holds disabled, opens nothing. */
+  public static final String NO_LONGER_HERE =
+      "This key's person is no longer active on this box, so the key opens nothing here.";
+
   /**
-   * Whether the FDE pinned to the calling key may run {@code originalCommand}, as the principal
-   * {@link RoleRule} resolves for it: an FDE that is disabled or unknown is refused every command,
-   * and an administration command is Manage people, which {@link Access} decides. The gateway opens
-   * a session for the FDE's roster row, so even this box's operator must be in {@code roster} to
-   * use it.
+   * As {@link #authorize}, for the person pinned to the calling key by this box's id for them, the
+   * line every {@code authorized_keys} now carries: a key stays with its person, so after a handle
+   * is moved aside or given to someone new, a line written before can only be refused.
+   */
+  public static Decision authorizeById(
+      String originalCommand,
+      String fdeId,
+      FdeStore roster,
+      RoleRule roles,
+      AuthSessionStore sessions) {
+    var person = roster.byId(fdeId);
+    if (person.isEmpty()
+        || roles.principal(Credential.person(person.get().handle(), Actor.Lane.API)).isEmpty()) {
+      return new Rejected(NO_LONGER_HERE);
+    }
+    return authorize(originalCommand, person.get().handle(), roster, roles, sessions);
+  }
+
+  /**
+   * Whether the FDE pinned to the calling key by handle may run {@code originalCommand}: the line
+   * {@code authorized_keys} carried before keys were pinned by id, read so an upgraded box works
+   * until its file is regenerated (which {@code migrate} does). Decided as the principal {@link
+   * RoleRule} resolves for it: an FDE that is disabled or unknown is refused every command, and an
+   * administration command is Manage people, which {@link Access} decides. The gateway opens a
+   * session for the FDE's roster row, so even this box's operator must be in {@code roster} to use
+   * it.
    */
   public static Decision authorize(
       String originalCommand,

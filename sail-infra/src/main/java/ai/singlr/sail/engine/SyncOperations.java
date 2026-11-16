@@ -6,6 +6,8 @@
 package ai.singlr.sail.engine;
 
 import ai.singlr.sail.SailVersion;
+import ai.singlr.sail.api.ApiException;
+import ai.singlr.sail.api.ErrorCode;
 import ai.singlr.sail.api.Event;
 import ai.singlr.sail.api.SailEventPublisher;
 import ai.singlr.sail.api.SyncReport;
@@ -16,7 +18,6 @@ import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.identity.Actor;
-import ai.singlr.sail.identity.ProjectScope;
 import ai.singlr.sail.store.ChangeLog;
 import ai.singlr.sail.store.Erasure;
 import ai.singlr.sail.store.FdeStore;
@@ -27,6 +28,7 @@ import ai.singlr.sail.store.ProjectStore;
 import ai.singlr.sail.store.Snapshots;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
+import ai.singlr.sail.store.SyncHealth;
 import ai.singlr.sail.store.SyncScope;
 import ai.singlr.sail.sync.NodeRound;
 import ai.singlr.sail.sync.Settlement;
@@ -45,6 +47,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
@@ -98,6 +101,9 @@ public final class SyncOperations {
   private static final String HOST_KEY_FAILED = "Host key verification failed.";
   private static final String KEY_REFUSED = "Permission denied (publickey";
 
+  /** The kind of a round refused because main no longer knows this box's person. */
+  public static final String REMOVED = "removed";
+
   private final Sqlite db;
   private final String host;
   private final Path projectsDir;
@@ -106,6 +112,7 @@ public final class SyncOperations {
   private final Consumer<Event> events;
   private final Consumer<Remedy> notice;
   private final ShellExec shell;
+  private final AuthorizedKeysSync gatewayKeys;
   private SailEventPublisher publisher;
 
   /** A round whose notices print as {@link #PLAIN_NOTICES} prints them. */
@@ -154,6 +161,32 @@ public final class SyncOperations {
       Consumer<Event> events,
       Consumer<Remedy> notice,
       ShellExec shell) {
+    this(
+        db,
+        host,
+        projectsDir,
+        configuration,
+        channels,
+        events,
+        notice,
+        shell,
+        new AuthorizedKeysSync());
+  }
+
+  /**
+   * As above, keeping the SSH gateway's keys through {@code gatewayKeys}, which every round brings
+   * into line with the roster it leaves.
+   */
+  public SyncOperations(
+      Sqlite db,
+      String host,
+      Path projectsDir,
+      Supplier<SyncConfig> configuration,
+      Channels channels,
+      Consumer<Event> events,
+      Consumer<Remedy> notice,
+      ShellExec shell,
+      AuthorizedKeysSync gatewayKeys) {
     this.db = db;
     this.host = host;
     this.projectsDir = projectsDir;
@@ -162,6 +195,7 @@ public final class SyncOperations {
     this.events = events == null ? this::publishQuietly : events;
     this.notice = Objects.requireNonNull(notice, "notice");
     this.shell = Objects.requireNonNull(shell, "shell");
+    this.gatewayKeys = Objects.requireNonNull(gatewayKeys, "gatewayKeys");
   }
 
   public SyncConfig configuration() {
@@ -212,11 +246,20 @@ public final class SyncOperations {
       FileStore files,
       ProjectStore projects)
       throws Exception {
+    var failures = new ArrayList<SyncTransportException>();
+    List<Map<String, Object>> roster = null;
+    try {
+      roster = session.fetchFdes();
+    } catch (RuntimeException e) {
+      failures.add(transportFailure("fde", e));
+    }
+    if (roster != null) {
+      requireNoStrangers(new FdeStore(db), roster, handle);
+    }
     DemoSeeder.unseed(db);
     var settled = new ArrayList<>(NodeRound.begin(session, db, handle));
     session.keep(NodeRound.kept(settled));
     var types = new ArrayList<SyncSession.TypeReport>();
-    var failures = new ArrayList<SyncTransportException>();
     var knownMessages = messages.syncEntityIds();
     var knownProjects = names(projects);
     for (var entity : SyncedEntities.all()) {
@@ -231,11 +274,13 @@ public final class SyncOperations {
     settled.addAll(NodeRound.end(db, handle));
     settled.forEach(settlement -> notice.accept(Remedy.of(settlement.describe())));
     var pulledMessages = pulledMessageEvents(messages, specs, knownMessages, host);
-    try {
-      reportRejectedFdes(
-          applyFdes(new FdeStore(db), session.fetchFdes(), new SyncScope(db).held(), handle));
-    } catch (RuntimeException e) {
-      failures.add(transportFailure("fde", e));
+    if (roster != null) {
+      try {
+        reportRejectedFdes(applyFdes(new FdeStore(db), roster, handle, notice));
+      } catch (RuntimeException e) {
+        failures.add(transportFailure("fde", e));
+      }
+      keepGatewayKeys(failures);
     }
     materialize(files);
     announceNewProjects(projects, knownProjects);
@@ -326,7 +371,7 @@ public final class SyncOperations {
       if (Strings.isBlank(said)) {
         throw e;
       }
-      throw closed(e, said, channel, config.handle(), target);
+      throw closed(e, said, channel, config.handle(), target, syncedWith(db, target));
     }
   }
 
@@ -335,7 +380,12 @@ public final class SyncOperations {
    * before ssh's words, else ssh's words and {@link #explained}'s remedy.
    */
   private static SyncTransportException closed(
-      SyncTransportException e, String said, Channel channel, String handle, String target) {
+      SyncTransportException e,
+      String said,
+      Channel channel,
+      String handle,
+      String target,
+      boolean synced) {
     var authorise =
         said.contains(KEY_REFUSED) ? channel.authorisation(handle) : Optional.<String>empty();
     if (authorise.isEmpty()) {
@@ -343,15 +393,30 @@ public final class SyncOperations {
           "unreachable", e.getMessage() + " ssh said: " + said, explained(said, target), e);
     }
     return new SyncTransportException(
-        "unreachable",
+        synced ? REMOVED : "unreachable",
         e.getMessage(),
         Remedy.of(
-            "Main has not authorised this box's key yet. Send its operator this line, then sync"
-                + " again:\n  "
+            (synced
+                    ? "Main no longer knows this box's person, "
+                        + handle
+                        + ", or their key: main removed them. This box keeps running as them but"
+                        + " syncs no more until an admin on main runs this line; then sync again:"
+                    : "Main has not authorised this box's key yet. Send its operator this line,"
+                        + " then sync again:")
+                + "\n  "
                 + authorise.get()
                 + "\n  ssh said: "
                 + said),
         e);
+  }
+
+  /**
+   * Whether this box has had a round with the main at {@code target}: only a main it synced with
+   * can have removed its person. A box pointed at a main that never knew it is told that main has
+   * not authorised it yet, whoever another main described here.
+   */
+  private static boolean syncedWith(Sqlite db, String target) {
+    return new SyncHealth(db).find(target).map(SyncHealth.Health::lastSuccessAt).isPresent();
   }
 
   /** The remedy for a channel ssh closed saying {@code said}, when it names one. */
@@ -370,6 +435,22 @@ public final class SyncOperations {
           Remedy.of("Join main again to mint one: '", Remedy.sail("join", "<main>"), "'."));
     }
     return config.boxId();
+  }
+
+  /**
+   * Brings the SSH gateway's {@code authorized_keys} into line with the roster this round left, in
+   * the same round: a person removed, withdrawn, moved aside or replaced keeps no line. A round
+   * that cannot write it fails loudly, and the next round tries again; one run without root writes
+   * nothing, and the next round of {@code sail-api}, which runs as root, writes it.
+   */
+  private void keepGatewayKeys(List<SyncTransportException> failures) {
+    try {
+      gatewayKeys.sync(db);
+    } catch (Exception e) {
+      failures.add(
+          new SyncTransportException(
+              "store", "the SSH gateway's keys could not be rewritten:", Remedied.whole(e), e));
+    }
   }
 
   private static SyncTransportException transportFailure(String context, RuntimeException e) {
@@ -736,32 +817,70 @@ public final class SyncOperations {
 
   /**
    * Mirrors main's roster into the local FDE store, returning the handles of any entries rejected
-   * for a malformed role or status — dropped, never written with a bad authorization. An FDE main
-   * no longer lists is disabled here ({@link FdeStore#disableUnlisted}), unless main scoped this
-   * box to {@code scope}: then it is removed with its credentials, as is anyone main lists to this
-   * box no more, so the box keeps no name or email outside its projects. This box's own FDE, {@code
-   * own}, is never removed.
+   * for a malformed role or status — dropped, never written with a bad authorization. The roster
+   * lists the people main shows this box and, by id alone, everyone else main still holds. Once it
+   * names this box's own FDE, {@code own}: a person this box holds under a main id main no longer
+   * holds is removed with their credentials (main removed them, or gave their handle to someone
+   * new); one main holds but no longer lists here is withdrawn, disabled and their name and email
+   * forgotten, but what they stored kept for when they are listed again. A person main never
+   * described is disabled, and never removed by a round: one whose handle main shows for someone
+   * else (not the same email) is moved aside, renamed and disabled with what they stored, and said
+   * once, but at this box's first round with this main, which refuses instead ({@link
+   * #requireNoStrangers}). The box's own FDE is never removed, withdrawn or disabled. A roster from
+   * a main that sends no ids removes no one.
    */
   public static List<String> applyFdes(
-      FdeStore fdes, List<Map<String, Object>> roster, ProjectScope scope, String own) {
-    var listed = roster.stream().map(entry -> str(entry, "handle")).toList();
-    if (scope.unrestricted()) {
-      fdes.disableUnlisted(listed, own);
+      FdeStore fdes, List<Map<String, Object>> roster, String own, Consumer<Remedy> notice) {
+    var listed = roster.stream().filter(entry -> entry.get("handle") != null).toList();
+    var handles = listed.stream().map(entry -> str(entry, "handle")).toList();
+    var ids = roster.stream().map(entry -> str(entry, "id")).toList();
+    var strangers = requireNoStrangers(fdes, roster, own);
+    var removed = List.<String>of();
+    var withdrawn = List.<String>of();
+    if (ids.contains(null) || !handles.contains(own)) {
+      var kept = strangers.stream().map(Stranger::handle).toList();
+      listed = listed.stream().filter(entry -> !kept.contains(str(entry, "handle"))).toList();
     } else {
-      var removed = fdes.removeUnlisted(listed, own);
-      if (removed > 0) {
-        System.err.println(
-            Ansi.AUTO.string(
-                "  @|faint roster: removed "
-                    + removed
-                    + " FDE(s) main no longer lists to this box|@"));
+      removed = fdes.removeUndescribed(ids, own);
+      withdrawn = fdes.withdraw(listed.stream().map(entry -> str(entry, "id")).toList(), own);
+      for (var stranger : strangers) {
+        var moved = fdes.moveAside(stranger.handle());
+        notice.accept(
+            Remedy.of(
+                "roster: "
+                    + stranger.handle()
+                    + " on this box is not main's "
+                    + stranger.handle()
+                    + ": their emails differ, so main gave the handle to someone else. It is kept"
+                    + " as "
+                    + moved
+                    + ", disabled,"
+                    + " with what it stored, and main's "
+                    + stranger.handle()
+                    + " takes the handle. Remove it with '",
+                Remedy.sail("fde rm", moved, "--force"),
+                "', or leave it: it stays, unusable."));
       }
     }
+    fdes.disableUnlisted(handles, own);
+    if (!removed.isEmpty()) {
+      System.err.println(
+          "  roster: removed "
+              + String.join(", ", removed)
+              + ": main removed them, or gave the handle to someone new.");
+    }
+    if (!withdrawn.isEmpty()) {
+      System.err.println(
+          "  roster: withdrew "
+              + String.join(", ", withdrawn)
+              + ": no longer on this box's projects; what they stored here is kept.");
+    }
     var rejected = new ArrayList<String>();
-    for (var entry : roster) {
+    for (var entry : listed) {
       try {
         fdes.replicate(
             str(entry, "handle"),
+            str(entry, "id"),
             str(entry, "display_name"),
             str(entry, "email"),
             str(entry, "role"),
@@ -772,6 +891,80 @@ public final class SyncOperations {
       }
     }
     return List.copyOf(rejected);
+  }
+
+  /** A person made here under a handle main lists for someone else. */
+  record Stranger(String handle, String here, String main) {
+    String said() {
+      return handle
+          + " on this box ("
+          + here
+          + ") is not main's "
+          + handle
+          + " ("
+          + main
+          + "): main gave the handle to someone else.";
+    }
+  }
+
+  /**
+   * The people made here under a handle main's {@code roster} shows for someone else: never
+   * described by main, not this box's {@code own}, and not of the same email (a blank one is the
+   * same as no one's). At this box's first round with this main, when it holds no one this main's
+   * ids describe, they are refused, naming each and the ways out, and nothing changes.
+   */
+  static List<Stranger> requireNoStrangers(
+      FdeStore fdes, List<Map<String, Object>> roster, String own) {
+    var strangers = new ArrayList<Stranger>();
+    for (var entry : roster) {
+      var handle = str(entry, "handle");
+      var here = handle == null || !fdes.undescribed(handle) ? null : fdes.byHandle(handle).get();
+      var main = Objects.toString(str(entry, "email"), "");
+      if (here != null && !handle.equals(own) && !sameEmail(here.email(), main)) {
+        strangers.add(new Stranger(handle, Objects.toString(here.email(), ""), main));
+      }
+    }
+    if (strangers.isEmpty()
+        || fdes.describedBy(roster.stream().map(entry -> str(entry, "id")).toList())) {
+      return strangers;
+    }
+    var told = new ArrayList<Object>();
+    for (var stranger : strangers) {
+      var h = stranger.handle();
+      var remove = Remedy.sail("fde rm", h, "--force");
+      if (Strings.isBlank(stranger.main()) || Strings.isBlank(stranger.here())) {
+        told.addAll(
+            List.of(
+                stranger.said()
+                    + " This box cannot see both emails, so it cannot tell whether they are the"
+                    + " same person. Remove "
+                    + h
+                    + " here, which deletes what it stored on this box: '",
+                remove,
+                "'. "));
+      } else {
+        told.addAll(
+            List.of(
+                stranger.said() + " If they are different people, remove " + h + " here: '",
+                remove,
+                "'. If they are the same person, correct the email that is wrong: here '",
+                Remedy.sail("fde update", h, "--email", stranger.main()),
+                "', or on main '",
+                Remedy.sail("fde update", h, "--email", stranger.here()),
+                "'. "));
+      }
+    }
+    throw new ApiException(
+        ErrorCode.CONFLICT,
+        "This box's first round with this main changes no one: a handle it holds is someone"
+            + " else's on main.",
+        Remedy.of(told.toArray()));
+  }
+
+  private static boolean sameEmail(String here, String main) {
+    return Strings.isNotBlank(here)
+        && Strings.isNotBlank(main)
+        && here.strip().toLowerCase(Locale.ROOT).equals(main.strip().toLowerCase(Locale.ROOT));
   }
 
   private static String str(Map<String, Object> map, String key) {

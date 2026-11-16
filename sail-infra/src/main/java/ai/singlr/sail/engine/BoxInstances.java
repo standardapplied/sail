@@ -52,6 +52,12 @@ public final class BoxInstances {
   public static final String OWNER_KEY = "user.sail.owner";
 
   /**
+   * The owner's id on this box, beside the handle: a handle main gives someone new arrives under a
+   * new id, so a workspace labelled with the old one is no one's, whatever the handle says.
+   */
+  public static final String OWNER_ID_KEY = "user.sail.owner_id";
+
+  /**
    * Why a spec's workspace is kept though its spec is done: what deleting it would lose. Written by
    * the sweep that keeps it ({@code SpecWorkspaces}) once it has said so in the spec's room; the
    * sweep never starts, reads or deletes a workspace carrying it again. A run of the spec entering

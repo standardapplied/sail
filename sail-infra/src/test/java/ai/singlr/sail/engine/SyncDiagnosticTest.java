@@ -7,9 +7,11 @@ package ai.singlr.sail.engine;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.api.SyncRequest;
 import ai.singlr.sail.config.SyncConfig;
+import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.Sqlite;
 import ai.singlr.sail.sync.SyncTransportException;
@@ -46,11 +48,14 @@ class SyncDiagnosticTest {
   private SyncTransportException failure(SyncOperations.Channel channel) throws Exception {
     try (var db = Sqlite.open(home.resolve("sail.db"))) {
       new SchemaManager(db).migrate();
-      var config = new SyncConfig("node", "sail@main", "mady", "box-1");
-      var operations = new SyncOperations(db, "node", home, () -> config, target -> channel);
-      return assertThrows(
-          SyncTransportException.class, () -> operations.sync(new SyncRequest(null)));
+      return failure(db, channel);
     }
+  }
+
+  private SyncTransportException failure(Sqlite db, SyncOperations.Channel channel) {
+    var config = new SyncConfig("node", "sail@main", "mady", "box-1");
+    var operations = new SyncOperations(db, "node", home, () -> config, target -> channel);
+    return assertThrows(SyncTransportException.class, () -> operations.sync(new SyncRequest(null)));
   }
 
   private static SyncOperations.Channel closed(
@@ -115,6 +120,69 @@ class SyncDiagnosticTest {
             + AUTHORISE
             + "\n  ssh said: sail@10.128.0.25: Permission denied (publickey).",
         OperatorCommand.PLAIN.render(refused));
+  }
+
+  /**
+   * m3: a box that synced with this main before, whose key it now refuses, is told main removed its
+   * person (or their key), that it syncs no more, and the line that brings it back.
+   */
+  @Test
+  void aKeyMainRefusesAfterABoxSyncedSaysMainRemovedItsPerson() throws Exception {
+    try (var db = Sqlite.open(home.resolve("sail.db"))) {
+      new SchemaManager(db).migrate();
+      new FdeStore(db).replicate("mady", "main-mady", null, null, "member", "active", null);
+      syncedOnceWith(db, "sail@main");
+
+      var refused =
+          failure(
+              db,
+              closed(
+                  "sail@10.128.0.25: Permission denied (publickey).",
+                  handle -> Optional.of(AUTHORISE.replace("mady", handle))));
+
+      assertEquals(SyncOperations.REMOVED, refused.kind(), "host status reads it by its kind");
+      assertEquals(
+          "hello: Sync channel closed before main replied. Main no longer knows this box's person,"
+              + " mady, or their key: main removed them. This box keeps running as them but syncs"
+              + " no more until an admin on main runs this line; then sync again:\n  "
+              + AUTHORISE
+              + "\n  ssh said: sail@10.128.0.25: Permission denied (publickey).",
+          OperatorCommand.PLAIN.render(refused));
+    }
+  }
+
+  /**
+   * N5: a box pointed at a main it never synced with, holding people another main described, is
+   * told this main has not authorised it yet, never that it removed anyone.
+   */
+  @Test
+  void aKeyRefusedByAMainThisBoxNeverSyncedWithSaysItIsNotAuthorisedYet() throws Exception {
+    try (var db = Sqlite.open(home.resolve("sail.db"))) {
+      new SchemaManager(db).migrate();
+      new FdeStore(db).replicate("mady", "old-main-mady", null, null, "member", "active", null);
+      syncedOnceWith(db, "sail@old-main");
+
+      var refused =
+          failure(
+              db,
+              closed(
+                  "sail@10.128.0.31: Permission denied (publickey).",
+                  handle -> Optional.of(AUTHORISE.replace("mady", handle))));
+
+      assertEquals("unreachable", refused.kind());
+      assertTrue(
+          OperatorCommand.PLAIN
+              .render(refused)
+              .contains("Main has not authorised this box's key yet."),
+          OperatorCommand.PLAIN.render(refused));
+    }
+  }
+
+  private static void syncedOnceWith(Sqlite db, String peer) {
+    db.execute(
+        "INSERT INTO sync_health (peer, last_attempt_at, last_success_at, state)"
+            + " VALUES (?, 1, 1, 'in_sync')",
+        peer);
   }
 
   @Test
