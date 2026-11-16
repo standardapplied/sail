@@ -20,6 +20,7 @@ import ai.singlr.sail.engine.AgentProcess;
 import ai.singlr.sail.engine.AgentUnit;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.ActingAs;
+import ai.singlr.sail.store.MessageStore;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.TestRuns;
 import java.io.IOException;
@@ -797,6 +798,117 @@ class LiveMemberDisplacementTest {
 
     assertEquals(2, room.processes.starts.size(), "the next member is started for it");
     assertTrue(room.processes.latest().written.stream().anyMatch(line -> line.contains("back?")));
+  }
+
+  /**
+   * Claude Code answers a message written while it is answering in its next turn, never in the
+   * running one (LiveStreamTest's recording). A member that dies before that turn begins never
+   * answered it: it is given back, the room says it waits, and the next member is handed it.
+   */
+  @Test
+  void aFollowUpHandedWhileTheMemberAnswersIsGivenBackWhenItDiesBeforeAnsweringIt() {
+    var process = room.prompted(LOUNGE, "full", "first");
+    room.says(process, Lines.init("sess-1"), Lines.delta("Working on it"));
+    var followUp = room.says(LOUNGE, "and the tests please");
+    assertTrue(process.written.stream().anyMatch(line -> line.contains("and the tests please")));
+
+    process.exits(1);
+    process.settle();
+    room.settle();
+
+    assertFalse(room.runs.deliveredMessageIds(process.runId).contains(followUp));
+    assertEquals(1, room.processes.starts.size(), "a crash starts nothing at once");
+    assertTrue(
+        room.conversation(LOUNGE).contains(waitingLine(LOUNGE, followUp)),
+        "the room says it waits");
+
+    room.says(LOUNGE, "anyone?");
+
+    assertEquals(2, room.processes.starts.size());
+    var prompt = String.join("\n", room.processes.latest().written);
+    assertTrue(prompt.contains("and the tests please"), "the next member is handed the follow-up");
+    assertTrue(prompt.contains("Your last process ended before it answered the message below"));
+  }
+
+  /**
+   * An end this box made (an operator's, a terminal's, a claim's) is not undone by starting the
+   * member again at once, even when another process finished its run first: what it was handed and
+   * never answered waits for the room's next message.
+   */
+  @Test
+  void aMessageHandedAsThisBoxEndsTheMemberWaitsForTheNextMessage() {
+    var process = idleMember(LOUNGE);
+    var second = room.says(LOUNGE, "second");
+    assertTrue(process.written.stream().anyMatch(line -> line.contains("second")));
+    process.onClose(() -> process.exits(0));
+    assertTrue(
+        room.elsewhere().dispatching().endLiveMember(process.runId, "stopped by an operator"));
+    room.settle();
+
+    room.sail.dispatching().endLiveMember(process.runId, "displaced by a terminal");
+    process.settle();
+    room.settle();
+
+    assertFalse(room.runs.deliveredMessageIds(process.runId).contains(second));
+    assertEquals(1, room.processes.starts.size(), "an end this box made starts nothing at once");
+    assertTrue(room.conversation(LOUNGE).contains(waitingLine(LOUNGE, second)));
+
+    room.says(LOUNGE, "anyone?");
+
+    assertEquals(2, room.processes.starts.size());
+    assertTrue(room.processes.latest().written.stream().anyMatch(line -> line.contains("second")));
+  }
+
+  /** A next member that cannot start at once (its repos held, its host refusing) is said. */
+  @Test
+  void aMessageWhoseNextMemberCannotStartAtOnceWaitsAndTheRoomSaysSo() {
+    var process = idleMember(LOUNGE);
+    var second = room.says(LOUNGE, "second");
+    assertTrue(
+        room.elsewhere().dispatching().endLiveMember(process.runId, AgentAttachWhy.TERMINAL));
+    room.settle();
+    room.processes.refusing(new IOException("no incus"));
+
+    process.exits(143);
+    process.settle();
+    room.settle();
+
+    assertEquals(1, room.processes.starts.size());
+    assertFalse(room.runs.deliveredMessageIds(process.runId).contains(second));
+    assertEquals(
+        1,
+        room.conversation(LOUNGE).stream().filter(waitingLine(LOUNGE, second)::equals).count(),
+        "said once");
+  }
+
+  /**
+   * The finish and the give-back are one transaction: a give-back that fails leaves the run
+   * unfinished, never finished with its message still marked delivered.
+   */
+  @Test
+  void aGiveBackThatFailsLeavesTheRunUnfinished() {
+    var process = idleMember(LOUNGE);
+    var second = room.says(LOUNGE, "second");
+    room.db.execute(
+        "CREATE TRIGGER no_give_back BEFORE DELETE ON run_delivered_messages"
+            + " BEGIN SELECT RAISE(ABORT, 'refused'); END");
+
+    process.exits(1);
+    process.settle();
+    room.settle();
+
+    assertEquals("running", room.run(process.runId).status(), "the finish rolled back with it");
+    assertTrue(room.runs.deliveredMessageIds(process.runId).contains(second));
+  }
+
+  private String waitingLine(String roomId, String... messageIds) {
+    var ids = List.of(messageIds);
+    return MessageStore.SAIL_AUTHOR
+        + ": "
+        + LiveMembers.waiting(
+            room.messages.list(roomId, null, 100).stream()
+                .filter(message -> ids.contains(message.id()))
+                .toList());
   }
 
   @Test

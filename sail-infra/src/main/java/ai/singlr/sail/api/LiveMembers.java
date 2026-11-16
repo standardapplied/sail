@@ -46,9 +46,12 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.OptionalInt;
+import java.util.Set;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import java.util.function.Supplier;
 
 /**
@@ -161,6 +164,9 @@ public final class LiveMembers implements RoomWakeReactor.Live, AutoCloseable {
   private final SessionYield terminals;
   private final Map<String, Member> members = new ConcurrentHashMap<>();
   private final Map<String, Object> roomLocks = new ConcurrentHashMap<>();
+  private final Map<String, Set<String>> handedAgain = new ConcurrentHashMap<>();
+  private final Set<Member> reading = ConcurrentHashMap.newKeySet();
+  private final RunLauncher.Room notices;
   private final ExecutorService timers = Executors.newVirtualThreadPerTaskExecutor();
   private final PeriodicPass sweepPass = new PeriodicPass("live-members", this::sweep);
   private volatile AgentProcess processes;
@@ -187,8 +193,10 @@ public final class LiveMembers implements RoomWakeReactor.Live, AutoCloseable {
       ShellExec shell,
       DispatchOperations.EventSink events,
       SessionYield terminals,
-      RunReports reports) {
+      RunReports reports,
+      RunLauncher.Room notices) {
     this.projects = projects;
+    this.notices = notices;
     this.places = places;
     this.specStore = specStore;
     this.rooms = rooms;
@@ -451,7 +459,11 @@ public final class LiveMembers implements RoomWakeReactor.Live, AutoCloseable {
     if (resumed.isPresent() && (unread.isEmpty() || terminalHolds(resumed.get()))) {
       return;
     }
-    var pages = resumed.isPresent() ? LiveMemberPrompt.messages(unread) : fresh(seat, tail, full);
+    var again = handedAgain.remove(seat.roomId());
+    var pages =
+        resumed.isPresent()
+            ? handedAgain(LiveMemberPrompt.messages(unread), unread, again)
+            : fresh(seat, tail, full);
     var prompt = pages.getFirst().text();
     var command =
         Harnesses.of(member.agent())
@@ -557,6 +569,7 @@ public final class LiveMembers implements RoomWakeReactor.Live, AutoCloseable {
         new Member(
             seat, config, runStore.findById(runId).orElseThrow(), unit, handle, full, localHandle);
     members.put(seat.roomId(), started);
+    reading.add(started);
     Thread.ofVirtual().name("sail-live-" + runId).start(started::read);
     Optional<String> lost;
     try {
@@ -797,7 +810,56 @@ public final class LiveMembers implements RoomWakeReactor.Live, AutoCloseable {
           .forEach(
               member -> ending.execute(() -> member.end("sail stopping", timing.grace().result())));
     }
+    List.copyOf(reading).forEach(Member::awaitReader);
     timers.shutdownNow();
+  }
+
+  /**
+   * The room's line for messages a member was handed and ended before answering, when nothing
+   * starts the next member at once: whose they are, and what answers them.
+   */
+  static String waiting(List<MessageStore.MessageRow> messages) {
+    var authors = messages.stream().map(MessageStore.MessageRow::author).distinct().toList();
+    var names =
+        authors.size() == 1
+            ? authors.getFirst()
+            : String.join(", ", authors.subList(0, authors.size() - 1))
+                + " and "
+                + authors.getLast();
+    return "The room's agent ended before it answered "
+        + names
+        + (messages.size() == 1 ? "'s message" : "'s messages")
+        + "; the room's next message starts it again, and it answers "
+        + (messages.size() == 1 ? "that one" : "them")
+        + " then.";
+  }
+
+  /**
+   * {@code pages} with a first line naming the messages handed again to a resumed session: its last
+   * process ended before it answered them, so the session may already hold them.
+   */
+  private static List<PromptConversation.Rendered<MessageStore.MessageRow>> handedAgain(
+      List<PromptConversation.Rendered<MessageStore.MessageRow>> pages,
+      List<MessageStore.MessageRow> unread,
+      Set<String> again) {
+    var repeated =
+        unread.stream().filter(message -> again != null && again.contains(message.id())).toList();
+    if (repeated.isEmpty()) {
+      return pages;
+    }
+    var first = pages.getFirst();
+    var line =
+        "Your last process ended before it answered "
+            + (repeated.size() == 1 ? "the message" : "the " + repeated.size() + " messages")
+            + " below from "
+            + String.join(
+                ", ", repeated.stream().map(MessageStore.MessageRow::author).distinct().toList())
+            + "; your session may already show "
+            + (repeated.size() == 1 ? "it" : "them")
+            + ", so answer each once.\n\n";
+    var rest = new ArrayList<>(pages);
+    rest.set(0, new PromptConversation.Rendered<>(line + first.text(), first.fullyRendered()));
+    return List.copyOf(rest);
   }
 
   /** One live process and the run it is. Every field a line or a prompt moves is guarded by it. */
@@ -815,6 +877,8 @@ public final class LiveMembers implements RoomWakeReactor.Live, AutoCloseable {
     private final Object pipe = new Object();
     private final String localHandle;
     private final List<MessageStore.MessageRow> taken = new ArrayList<>();
+    private List<MessageStore.MessageRow> handedBack = List.of();
+    private final CompletableFuture<Void> readerDone = new CompletableFuture<>();
     private boolean owesTheNext;
     private final StringBuilder said = new StringBuilder();
     private final StringBuilder unsent = new StringBuilder();
@@ -940,6 +1004,15 @@ public final class LiveMembers implements RoomWakeReactor.Live, AutoCloseable {
 
     private void read() {
       try {
+        readToTheEnd();
+      } finally {
+        reading.remove(this);
+        readerDone.complete(null);
+      }
+    }
+
+    private void readToTheEnd() {
+      try {
         String line;
         while ((line = handle.stdout().read()) != null) {
           var read = line;
@@ -951,9 +1024,32 @@ public final class LiveMembers implements RoomWakeReactor.Live, AutoCloseable {
       synchronized (pipe) {
         attempt(this::finished);
       }
+      if (handedBack.isEmpty()) {
+        return;
+      }
+      handedAgain
+          .computeIfAbsent(seat.roomId(), room -> ConcurrentHashMap.newKeySet())
+          .addAll(handedBack.stream().map(MessageStore.MessageRow::id).toList());
       if (owesTheNext) {
         attempt(() -> deliver(seat.conversation(), localHandle));
       }
+      if (members.get(seat.roomId()) == null) {
+        attempt(
+            () ->
+                notices.tell(
+                    seat.spec() != null ? seat.spec().id() : seat.roomId(), waiting(handedBack)));
+      }
+    }
+
+    /**
+     * Waits for the reader to be done with an ended process: what it says of the messages it gives
+     * back is said before sail lets go of the room.
+     */
+    private void awaitReader() {
+      readerDone
+          .copy()
+          .completeOnTimeout(null, timing.grace().whole().toMillis(), TimeUnit.MILLISECONDS)
+          .join();
     }
 
     /** The process was handed {@code messages}: they are its to answer once it begins a turn. */
@@ -1235,8 +1331,7 @@ public final class LiveMembers implements RoomWakeReactor.Live, AutoCloseable {
       leaving = true;
       try {
         flush();
-        var unread =
-            prompted && !turnOpen ? List.copyOf(taken) : List.<MessageStore.MessageRow>of();
+        var unread = List.copyOf(taken);
         if (prompted && !turnOpen) {
           begin();
         }
@@ -1247,14 +1342,21 @@ public final class LiveMembers implements RoomWakeReactor.Live, AutoCloseable {
           closeTurn(said.toString(), true, why);
         }
         disarm();
+        var status = died ? "failed" : "stopped";
+        var code = exit.isPresent() ? exit.getAsInt() : null;
+        var ids = unread.stream().map(MessageStore.MessageRow::id).toList();
         var finishedHere =
-            finish(
-                run, died ? "failed" : "stopped", exit.isPresent() ? exit.getAsInt() : null, why);
-        if (!unread.isEmpty()) {
-          runStore.forgetDelivered(
-              runId, unread.stream().map(MessageStore.MessageRow::id).toList());
-          owesTheNext = !ending && !finishedHere;
+            runStore.atomically(
+                () -> {
+                  var done = runStore.finishAsTurnsRecorded(runId, status, code);
+                  runStore.forgetDelivered(runId, ids);
+                  return done;
+                });
+        if (finishedHere) {
+          tellStopped(run, code, why);
         }
+        handedBack = unread;
+        owesTheNext = !unread.isEmpty() && !ending && !finishedHere;
       } finally {
         members.remove(seat.roomId(), this);
         over = true;
