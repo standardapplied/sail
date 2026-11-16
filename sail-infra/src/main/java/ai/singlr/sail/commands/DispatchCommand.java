@@ -352,6 +352,13 @@ public final class DispatchCommand implements Runnable {
       }
 
       @Override
+      public void loginEnding(String said) {
+        if (!json) {
+          System.out.println(Ansi.AUTO.string("  @|yellow !|@ " + said));
+        }
+      }
+
+      @Override
       public void claimed(Spec taskSpec, String task) {
         if (dryRun) {
           return;

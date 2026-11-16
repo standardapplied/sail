@@ -58,7 +58,7 @@ data: {"agent": "sail", "host": "box", "id": 28, "project": "harbor", "spec": "h
 
 data: {"agent": "sail", "host": "box", "id": 29, "project": "harbor", "spec": "harbor-docks", "ts": "2026-11-11T09:00:00.656Z", "type": "spec_stranded", "v": 1}
 
-data: {"agent": "claude-code", "data": {"detail": "Claude Code refused uday's login 'default' (long-lived token), so its run stopped. Run claude setup-token on a machine where Claude Code is signed in, then sail agent login claude-code.", "login": "default", "login_kind": "token", "outcome": "refused", "run_id": "run-1", "run_role": "build"}, "host": "box", "id": 30, "project": "harbor", "spec": "harbor-docks", "ts": "2026-11-11T09:00:00.656Z", "type": "agent_login_outcome", "v": 1}
+data: {"agent": "claude-code", "data": {"detail": "Claude Code refused uday's login 'default' (long-lived token), so its run stopped. Run claude setup-token on a machine where Claude Code is signed in, then sail agent login claude-code. Then build it again: sail spec dispatch -p harbor --spec harbor-docks --restart.", "login": "default", "login_kind": "token", "outcome": "refused", "run_id": "run-1", "run_role": "build"}, "host": "box", "id": 30, "project": "harbor", "spec": "harbor-docks", "ts": "2026-11-11T09:00:00.656Z", "type": "agent_login_outcome", "v": 1}
 
 data: {"agent": "sail", "host": "box", "id": 31, "project": "harbor", "spec": "harbor-design", "ts": "2026-11-11T09:00:00.656Z", "type": "spec_engaged", "v": 1}
 

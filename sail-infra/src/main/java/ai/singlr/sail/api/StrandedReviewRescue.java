@@ -17,6 +17,7 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.Predicate;
 import java.util.function.Supplier;
 import java.util.stream.Stream;
 
@@ -42,6 +43,7 @@ final class StrandedReviewRescue {
   private final Supplier<Instant> clock;
   private final Duration launchGrace;
   private final Gone gone;
+  private final Predicate<RunStore.RunRow> heldForLogin;
   private final StopPublisher publishStop;
   private final Set<String> rescued = ConcurrentHashMap.newKeySet();
 
@@ -53,6 +55,7 @@ final class StrandedReviewRescue {
       Supplier<Instant> clock,
       Duration launchGrace,
       Gone gone,
+      Predicate<RunStore.RunRow> heldForLogin,
       StopPublisher publishStop) {
     this.specStore = specStore;
     this.sessionStore = sessionStore;
@@ -61,6 +64,7 @@ final class StrandedReviewRescue {
     this.clock = clock;
     this.launchGrace = launchGrace;
     this.gone = gone;
+    this.heldForLogin = heldForLogin;
     this.publishStop = publishStop;
   }
 
@@ -158,7 +162,7 @@ final class StrandedReviewRescue {
             .latestLoopRun(spec.id())
             .filter(run -> run.ownedBy(node))
             .filter(run -> RunStatus.isTerminal(run.status()));
-    if (latest.isEmpty() || !gone.test(latest.get())) {
+    if (latest.isEmpty() || heldForLogin.test(latest.get()) || !gone.test(latest.get())) {
       return false;
     }
     publishStop.publish(latest.get(), latest.get().exitCode(), rescue.why());

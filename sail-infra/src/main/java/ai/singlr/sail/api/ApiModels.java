@@ -1868,7 +1868,8 @@ record RunView(
     String presence,
     String reviewId,
     RunStore.RunLogin login,
-    String dispatchedBy)
+    String dispatchedBy,
+    String loginOverridden)
     implements Mappable {
   static RunView from(RunStore.RunRow row) {
     return new RunView(
@@ -1893,7 +1894,8 @@ record RunView(
         RunPresence.of(row.status(), row.lastActivityAt(), DateTimeUtils.now()),
         row.reviewId(),
         row.login(),
-        row.dispatchedBy());
+        row.dispatchedBy(),
+        row.loginOverridden());
   }
 
   @Override
@@ -1925,6 +1927,7 @@ record RunView(
       if (login.kind() != null) m.put("login_kind", login.kind());
     }
     if (dispatchedBy != null) m.put("dispatched_by", dispatchedBy);
+    if (loginOverridden != null) m.put("login_overridden", loginOverridden);
     return m;
   }
 }

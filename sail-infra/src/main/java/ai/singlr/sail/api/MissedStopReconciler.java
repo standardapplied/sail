@@ -157,6 +157,7 @@ public final class MissedStopReconciler implements AutoCloseable {
   private final PeriodicPass pass;
   private volatile Instant tidiedSince = Instant.EPOCH;
   private final Set<String> untidied = ConcurrentHashMap.newKeySet();
+  private final Set<String> held = ConcurrentHashMap.newKeySet();
   private final StrandedReviewRescue strandedReviews;
 
   public MissedStopReconciler(
@@ -190,6 +191,7 @@ public final class MissedStopReconciler implements AutoCloseable {
             clock,
             LAUNCH_GRACE,
             this::gone,
+            this::heldForLogin,
             this::publishStop);
     this.pass = new PeriodicPass("reconcile", this::sweep);
   }
@@ -348,6 +350,26 @@ public final class MissedStopReconciler implements AutoCloseable {
     if (swept > 0) {
       System.err.println("  [reconcile] removed the logins of " + swept + " people removed");
     }
+  }
+
+  /**
+   * Whether {@code run}, a reviewer or a fix agent, was ended for its login: its review is held
+   * until a login is stored, so its stop is acted on and is not replayed. Said on the server's log
+   * once a hold.
+   */
+  boolean heldForLogin(RunStore.RunRow run) {
+    if (!run.servesReview() || !run.stoppedForLogin()) {
+      return false;
+    }
+    if (held.add(run.id())) {
+      System.err.println(
+          "  [reconcile] the review of spec "
+              + run.specId()
+              + " is held: run "
+              + run.id()
+              + " was ended for its login, and a stored login launches it again");
+    }
+    return true;
   }
 
   /** The sweep's rescue of stranded reviews, skipping the specs it already handled. */
@@ -560,6 +582,9 @@ public final class MissedStopReconciler implements AutoCloseable {
       return false;
     }
     var session = latest.get();
+    if (heldForLogin(session)) {
+      return false;
+    }
     var coverage = stopCoverage(spec.id(), session);
     var outcome = MissedStops.assess(session, coverage, clock.get(), LAUNCH_GRACE);
     return switch (outcome) {

@@ -396,6 +396,7 @@ class TestOperations implements Operations {
                 null,
                 null,
                 null,
+                null,
                 null)));
   }
 

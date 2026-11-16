@@ -409,7 +409,8 @@ class RunLauncherTest {
         List.of(
             "spec: Claude Code refused node's login 'default' (long-lived token), so its run"
                 + " stopped. Run claude setup-token on a machine where Claude Code is signed in,"
-                + " then sail agent login claude-code."),
+                + " then sail agent login claude-code. Then build it again: sail spec dispatch -p"
+                + " proj --spec spec --restart."),
         told);
   }
 

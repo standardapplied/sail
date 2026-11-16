@@ -385,6 +385,7 @@ class ReviewLanesTest {
     var review = loop.reviewOf("auth");
     assertEquals("running", loop.statusOf(review), "held, owed its reviewer, never errored");
     assertTrue(loop.container.live().isEmpty(), "no reviewer relaunched on the same login");
+    assertEquals(1, stopsOf(reviewer.id()), "the held stop is acted on, never replayed");
 
     var printed = List.of(sentence.substring(sentence.indexOf("then sail ") + 10).split("[ .]+"));
     assertEquals(List.of("agent", "login", "codex"), printed, "the command as printed");
@@ -395,6 +396,58 @@ class ReviewLanesTest {
     var relaunched = loop.onlyLive();
     assertEquals("review", relaunched.role(), "the stored login launches the reviewer again");
     assertEquals(review, relaunched.reviewId());
+  }
+
+  /**
+   * Round 3, item 2: a reviewer whose report is read late (its workspace did not answer as it
+   * stopped) gets its login mark from the read that records the report, the one finish every read
+   * goes through, and is held like any other: one line, no retry over the reconciler's passes, no
+   * escalation, and a stored login launches the review again.
+   */
+  @Test
+  void aReviewerWhoseRefusalIsReadLateIsHeldLikeAnyOtherUntilTheLoginIsReplaced() {
+    loop = ReviewLoop.staged(tempDir, "codex", "claude-code");
+    loop.built("auth");
+    var reviewer = loop.onlyLive();
+    var transcript = "/home/dev/.codex/sessions/rollout-late.jsonl";
+    Acting.system(() -> loop.runs.recordSession(reviewer.id(), "thread-1", "startup", transcript));
+    loop.container.wroteFile(transcript, RunLoginOutcomeTest.fixture("codex-refused-key.jsonl"));
+    var before = sailLines("auth").size();
+    loop.container.exited(reviewer.id(), "codex exec writes text, not its report\n", 1);
+    var stop = loop.watcherStop(reviewer.id(), null);
+    loop.container.unreachable(true);
+    loop.onEvent(stop);
+
+    assertNull(loop.runs.findById(reviewer.id()).orElseThrow().usage(), "read late");
+    loop.container.unreachable(false);
+    var reconciler = loop.reconciler(() -> Instant.now().plus(Duration.ofMinutes(5)));
+    for (var pass = 0; pass <= LoopDecision.MAX_ERRORED_RETRIES + 1; pass++) {
+      reconciler.sweep();
+    }
+    loop.settle();
+
+    var said = sailLines("auth").subList(before, sailLines("auth").size());
+    assertEquals(
+        1,
+        said.stream().filter(line -> line.startsWith("Codex CLI refused")).count(),
+        said.toString());
+    assertTrue(
+        said.stream().noneMatch(line -> line.contains("--restart")), "never escalated: " + said);
+    assertTrue(loop.runs.findById(reviewer.id()).orElseThrow().stoppedForLogin(), "marked late");
+    assertTrue(loop.container.live().isEmpty(), "no reviewer relaunched on the same login");
+    assertEquals(1, loop.runsIn("auth", "review").size());
+
+    new FdeStore(loop.db)
+        .logins()
+        .store(
+            new FdeStore(loop.db).byHandle(ReviewLoop.HANDLE).orElseThrow().id(),
+            Harnesses.of("codex"),
+            null,
+            null,
+            "sk-new-key");
+    loop.onEvent(loginStored());
+
+    assertEquals("review", loop.onlyLive().role(), "the stored login launches the review again");
   }
 
   /** A fix agent whose harness refused its login holds the review, owed its fix, the same way. */
@@ -423,12 +476,21 @@ class ReviewLanesTest {
         said);
     assertEquals(SpecStatus.IN_PROGRESS, loop.specStatus("auth"), "not handed to a person");
     assertEquals("failed", loop.statusOf(fix.reviewId()), "owed its fix, never escalated");
+    assertEquals(1, stopsOf(fix.id()), "the held stop is acted on, never replayed");
     assertTrue(loop.container.live().isEmpty(), "no fix relaunched on the same login");
 
     TestLogins.store(loop.db, ReviewLoop.HANDLE);
     loop.onEvent(loginStored());
 
     assertEquals("fix", loop.onlyLive().role(), "the stored login launches the fix again");
+  }
+
+  /** How many stops of run {@code runId} reached the bus: its own, and any replay of it. */
+  private long stopsOf(String runId) {
+    loop.settle();
+    return loop.events(Event.WellKnownTypes.AGENT_SESSION_STOPPED).stream()
+        .filter(stop -> runId.equals(stop.data().get(Event.WellKnownData.RUN_ID)))
+        .count();
   }
 
   private List<String> sailLines(String specId) {

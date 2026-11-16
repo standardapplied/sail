@@ -1612,8 +1612,15 @@ public final class RunStore implements ConflictResolver, SyncedStore {
           }
           var attributed = attributed(run.get(), report.usage());
           db.execute(
-              "UPDATE runs SET " + USAGE_SET + " WHERE id = ? AND usage_source IS NULL",
-              usageParameters(attributed.own(), report, id));
+              "UPDATE runs SET "
+                  + USAGE_SET
+                  + ", stop_source = COALESCE(stop_source, ?)"
+                  + " WHERE id = ? AND usage_source IS NULL",
+              usageParameters(
+                  attributed.own(),
+                  report,
+                  report.endedForItsLogin() ? STOPPED_FOR_LOGIN : null,
+                  id));
           keep(run.get(), attributed.session());
           recordRevision(id, ChangeLog.Entry.LOCAL, false);
           return true;

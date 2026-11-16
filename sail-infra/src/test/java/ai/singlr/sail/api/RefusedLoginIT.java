@@ -204,12 +204,15 @@ class RefusedLoginIT extends AbstractIncusIT {
           List.of(
               "Claude Code refused it-node's login 'default' (long-lived token), so its run"
                   + " stopped. Run claude setup-token on a machine where Claude Code is signed in,"
-                  + " then sail agent login claude-code."),
+                  + " then sail agent login claude-code. Then build it again: sail spec dispatch"
+                  + " -p sail-it-refused --spec spec-claude --restart."),
           said(messages, "spec-claude"));
       assertEquals(
           List.of(
               "Codex CLI refused it-node's login 'default' (API key), so its run stopped. Create"
-                  + " an API key at platform.openai.com/api-keys, then sail agent login codex."),
+                  + " an API key at platform.openai.com/api-keys, then sail agent login codex. Then"
+                  + " build it again: sail spec dispatch -p sail-it-refused --spec spec-codex"
+                  + " --restart."),
           said(messages, "spec-codex"));
     }
   }

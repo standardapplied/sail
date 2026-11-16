@@ -256,8 +256,10 @@ final class LoopDecision {
       return new LoopStep.Nothing();
     }
     var due = facts.rows().due();
-    return due instanceof Owed.Advance || due instanceof Owed.Fix
-        ? goOn(facts)
+    return due instanceof Owed.Advance
+            || due instanceof Owed.Fix
+            || (due instanceof Owed.Retry && facts.rows().heldForLogin())
+        ? owedStep(facts)
         : answered(facts, false);
   }
 
@@ -276,12 +278,18 @@ final class LoopDecision {
     return rows.owed() instanceof Owed.Waiting ? goOn(facts) : answered(facts, false);
   }
 
+  /** What the rows owe, unless the review is held for a login ({@code Rows.heldForLogin}). */
+  private static LoopStep goOn(LoopFacts facts) {
+    return facts.rows().heldForLogin() ? new LoopStep.Nothing() : owedStep(facts);
+  }
+
   /**
    * An errored review runs its iteration again — an infrastructure error burns none — within its
    * budget. One whose reviewer or fix agent has ended is left to that run's own stop, the only word
-   * on what its work is worth, and a wait holds its step while the run it waits on lives.
+   * on what its work is worth, and a wait holds its step while the run it waits on lives. A review
+   * held for a login is owed this too, which only a stored login takes ({@link #loginStored}).
    */
-  private static LoopStep goOn(LoopFacts facts) {
+  private static LoopStep owedStep(LoopFacts facts) {
     if (!facts.rows().loops()) {
       return new LoopStep.Nothing();
     }

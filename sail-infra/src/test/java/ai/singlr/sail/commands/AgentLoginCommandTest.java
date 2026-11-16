@@ -41,6 +41,7 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import picocli.CommandLine;
 
 /**
  * {@code sail agent login} over a running API, as a person runs it: the value read from stdin,
@@ -170,11 +171,21 @@ class AgentLoginCommandTest {
     }
 
     for (var sentence : told) {
-      var printed = sentence.substring(sentence.lastIndexOf(", then ") + 7, sentence.length() - 1);
+      var printed =
+          sentence.substring(sentence.indexOf(", then ") + 7, sentence.indexOf(". Then build"));
       var words = List.of(printed.split(" "));
       assertEquals(List.of("sail", "agent", "login"), words.subList(0, 3), printed);
       var ran = sail(KEY, words.subList(2, words.size()).toArray(String[]::new));
       assertEquals(0, ran.exit(), printed + ": " + ran.err());
+      var next = sentence.substring(sentence.indexOf("again: ") + 7, sentence.length() - 1);
+      var dispatch = new DispatchCommand();
+      var parsed = List.of(next.split(" "));
+      assertEquals(List.of("sail", "spec", "dispatch"), parsed.subList(0, 3), next);
+      new CommandLine(dispatch).parseArgs(parsed.subList(3, parsed.size()).toArray(String[]::new));
+      assertEquals(
+          "-p acme --spec auth --restart",
+          String.join(" ", parsed.subList(3, parsed.size())),
+          "the build's next step, as the CLI prints it for a spec not pending");
     }
 
     var logins = new FdeStore(db).logins();

@@ -910,7 +910,8 @@ class MissedStopReconcilerTest {
         List.of(
             "auth: Claude Code refused node-a's login 'default' (long-lived token), so its run"
                 + " stopped. Run claude setup-token on a machine where Claude Code is signed in,"
-                + " then sail agent login claude-code."),
+                + " then sail agent login claude-code. Then build it again: sail spec dispatch -p"
+                + " test-project --spec auth --restart."),
         roomLines);
   }
 

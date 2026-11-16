@@ -104,7 +104,8 @@ class RunReportsTest {
         List.of(
             "auth: Claude Code refused eng's login 'work' (API key), so its run stopped. Create an"
                 + " API key in the Claude Console, then sail agent login claude-code --kind api-key"
-                + " --name work.",
+                + " --name work. Then build it again: sail spec dispatch -p acme --spec auth"
+                + " --restart.",
             "auth: Claude Code says the account behind eng's login 'work' (API key) is out of"
                 + " quota, so its run stopped."),
         told);

@@ -102,7 +102,8 @@ class AgentResumeSessionIT extends AbstractIncusIT {
               hostYield,
               RunReservation.Displaceable.NONE,
               new FdeStore(db),
-              RunLauncher.Room.NONE);
+              RunLauncher.Room.NONE,
+              event -> {});
 
       try (var host =
           new PtySessionHost(

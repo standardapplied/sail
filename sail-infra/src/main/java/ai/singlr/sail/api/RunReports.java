@@ -7,6 +7,7 @@ package ai.singlr.sail.api;
 
 import ai.singlr.sail.common.Remedied;
 import ai.singlr.sail.common.Strings;
+import ai.singlr.sail.config.Lane;
 import ai.singlr.sail.engine.HostInfo;
 import ai.singlr.sail.engine.RunReportReader;
 import ai.singlr.sail.engine.ShellExec;
@@ -123,7 +124,12 @@ public final class RunReports {
 
   private void published(RunStore.RunRow run, RunReport report, String said) {
     if (said != null) {
-      events.publish(event(run, report.login(), said));
+      events.publish(
+          event(
+              run,
+              run.login(),
+              report.login().getClass().getSimpleName().toLowerCase(Locale.ROOT),
+              said));
     }
   }
 
@@ -147,7 +153,13 @@ public final class RunReports {
       case LoginOutcome.Refused refused ->
           Remedied.message(
               harness.displayName() + " refused " + login + stopped + ".",
-              RunLogins.howToReplace(harness, kind, name));
+              ended && Lane.BUILD.matches(run.role())
+                  ? RunLogins.howToReplace(harness, kind, name)
+                      .then(
+                          " Then build it again: ",
+                          RestartResolution.redispatch(run.project(), run.specId()),
+                          ".")
+                  : RunLogins.howToReplace(harness, kind, name));
       case LoginOutcome.Limited limited ->
           harness.displayName()
               + " says the account behind "
@@ -173,13 +185,17 @@ public final class RunReports {
     };
   }
 
-  private static Event event(RunStore.RunRow run, LoginOutcome outcome, String said) {
+  /**
+   * The {@code agent_login_outcome} of {@code run}, given {@code login}: {@code outcome} and the
+   * sentence {@code said}.
+   */
+  static Event event(RunStore.RunRow run, RunStore.RunLogin login, String outcome, String said) {
     var data = new LinkedHashMap<String, Object>();
     data.put(Event.WellKnownData.RUN_ID, run.id());
     data.put(Event.WellKnownData.RUN_ROLE, run.role());
-    data.put("outcome", outcome.getClass().getSimpleName().toLowerCase(Locale.ROOT));
-    data.put("login", run.login().name());
-    data.put("login_kind", run.login().kind());
+    data.put("outcome", outcome);
+    data.put("login", login.name());
+    data.put("login_kind", login.kind());
     data.put("detail", said);
     return Event.of(
         run.project(),

@@ -177,6 +177,15 @@ record LoopFacts(
       Optional<RunStore.RunRow> newestLoopRun,
       boolean holderEnded) {
 
+    /**
+     * Whether the review is held for a login: the newest run serving it, a reviewer or a fix agent,
+     * its harness ended for its login, however late its report was read. Only a stored login moves
+     * it ({@code LoopTrigger.LoginStored}).
+     */
+    boolean heldForLogin() {
+      return serving.stream().findFirst().filter(RunStore.RunRow::stoppedForLogin).isPresent();
+    }
+
     /** Whether this box executed the newest run of the spec's loop, and so drives it. */
     boolean drivenHere() {
       return newestLoopRun.filter(run -> run.ownedBy(node)).isPresent();

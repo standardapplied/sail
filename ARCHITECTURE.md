@@ -3915,17 +3915,25 @@ no pairing is removed through the gateway as before, and no key file is touched.
     the operator on the server's log alone: Sail's delivery failed, and the person is not told to
     replace a login that was never tried. An override is said once a spec, until its source
     changes. The sentence names the login by its person, name and kind and the command that
-    replaces it under the same name and kind (`RunLogins.howToReplace`); a limit says until when
-    and the branch its work stays on. The watcher's own `agent_session_stopped` cannot carry it:
+    replaces it under the same name and kind (`RunLogins.howToReplace`); a build's refusal then
+    names the build's next step, the `--restart` dispatch as the CLI prints it for a spec not
+    pending (`RestartResolution.redispatch`); a limit says until when and the branch its work stays
+    on. The watcher's own `agent_session_stopped` cannot carry it:
     the watcher is another process and publishes before the one read. A run on its container's own
     login says nothing. Nothing is retried on another login. A refusal or a limit also marks the
-    run in the finishing write (`stop_source` `login`, `RunStore.STOPPED_FOR_LOGIN`), and a
-    reviewer or fix agent so ended holds its review as a launch refused for want of a login does
-    (rows R1b, F1b): its review is owed the reviewer or the fix again, no reconciler pass retries
-    or escalates it, and storing a login (`LoopTrigger.LoginStored`) launches it. A build's login
+    run in the write that records its report, a late read's included (`stop_source` `login`,
+    `RunStore.STOPPED_FOR_LOGIN`), and a reviewer or fix agent so ended holds its review as a
+    launch refused for want of a login does (rows R1b, F1b; `LoopFacts.Rows.heldForLogin`): its
+    review is owed the reviewer, the fix or the errored iteration again, `GoOn` takes none of them,
+    the missed-stop reconciler neither replays nor rescues its stop (it logs the hold once), and
+    storing a login (`LoopTrigger.LoginStored`) takes the owed step. A build's login
     of a kind with a known lifetime (Claude Code's token: 365 days from the day it was stored,
-    `LoginKind.lifetime`) is said in the room in its last 14 days, as a warning, at each build
-    reservation, a resumed build's included (`RunLogins.forRun`).
+    `LoginKind.lifetime`) is warned in its last 14 days at each build reservation, a resumed
+    build's included (`RunLogins.ending`), its days counted by date in UTC: in the dispatch's own
+    output (`Listener.loginEnding`), as an `agent_login_outcome` event (`outcome` `ending`) and in
+    the room. It is said once the run is reserved, so on a node the run supports the room's line
+    and the node's sync keeps it, at a spec's first dispatch there too. `GET /v1/runs` (and `sail
+    agent sessions --json`) carries `login_overridden`.
   - *What it cannot hide.* A run's harness holds its person's login in its environment for the
     run's whole life. Whoever can prompt an agent acting for a person (a room's members, a spec's
     author, a repo's files the agent reads) can try to make it reveal that login, and Sail's

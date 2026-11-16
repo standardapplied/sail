@@ -100,7 +100,8 @@ class RunLoginOutcomeTest {
     var sentence =
         "Claude Code refused node-a's login 'default' (long-lived token), so its run stopped."
             + " Run claude setup-token on a machine where Claude Code is signed in, then sail"
-            + " agent login claude-code.";
+            + " agent login claude-code. Then build it again: sail spec dispatch -p test-project"
+            + " --spec auth --restart.";
     assertEquals(List.of(sentence), said());
     assertEquals(
         List.of(
@@ -270,7 +271,8 @@ class RunLoginOutcomeTest {
         List.of(
             "Claude Code refused node-a's login 'default' (long-lived token), so its run stopped."
                 + " Run claude setup-token on a machine where Claude Code is signed in, then sail"
-                + " agent login claude-code."),
+                + " agent login claude-code. Then build it again: sail spec dispatch -p test-project"
+                + " --spec auth --restart."),
         said());
     assertEquals(1, outcomes().size());
   }

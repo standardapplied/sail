@@ -89,13 +89,14 @@ public final class RunReservation {
       SessionYield sessionYield,
       Displaceable displaceable,
       FdeStore fdes,
-      RunLauncher.Room room) {
+      RunLauncher.Room room,
+      DispatchOperations.EventSink events) {
     this.runStore = runStore;
     this.shell = shell;
     this.listener = listener;
     this.sessionYield = Objects.requireNonNull(sessionYield, "sessionYield");
     this.displaceable = Objects.requireNonNull(displaceable, "displaceable");
-    this.logins = new RunLogins(fdes, room, DateTimeUtils::now);
+    this.logins = new RunLogins(fdes, room, listener, events, DateTimeUtils::now);
   }
 
   /**
@@ -215,30 +216,37 @@ public final class RunReservation {
       AgentUnit unit,
       ProjectDefinition config,
       Runnable alongside) {
-    var login = logins.forRun(specId, boxHandle, agentType, role);
-    return claim(
-        runId,
-        project,
-        specId,
-        role,
-        repos,
-        login,
+    var login = logins.forRun(specId, boxHandle, agentType);
+    var claim =
+        claim(
+            runId,
+            project,
+            specId,
+            role,
+            repos,
+            login,
+            () ->
+                runStore.reserveDispatch(
+                    runId,
+                    project,
+                    specId,
+                    roomId,
+                    boxHandle,
+                    role,
+                    repos,
+                    agentType,
+                    branch,
+                    task,
+                    unit.logPath(),
+                    unit.unitName(),
+                    configuredMaxDuration(config, role),
+                    alongside));
+    whenClaimed(
+        claim,
         () ->
-            runStore.reserveDispatch(
-                runId,
-                project,
-                specId,
-                roomId,
-                boxHandle,
-                role,
-                repos,
-                agentType,
-                branch,
-                task,
-                unit.logPath(),
-                unit.unitName(),
-                configuredMaxDuration(config, role),
-                alongside));
+            login.ifPresent(
+                stored -> runStore.findById(runId).ifPresent(run -> logins.ending(run, stored))));
+    return claim;
   }
 
   /** How a claim on a spec's repos was answered. */
@@ -271,7 +279,7 @@ public final class RunReservation {
       String task,
       AgentUnit unit,
       ProjectDefinition config) {
-    var login = logins.forRun(specId, boxHandle, agentType, lane.wire());
+    var login = logins.forRun(specId, boxHandle, agentType);
     return claim(
         runId,
         project,
