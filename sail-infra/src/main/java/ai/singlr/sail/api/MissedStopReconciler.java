@@ -282,9 +282,14 @@ public final class MissedStopReconciler implements AutoCloseable {
     return Actor.call(Actor.system(), this::reconcileAll);
   }
 
+  /**
+   * One pass. The reports left unread are read first: a reviewer's late read can mark it ended for
+   * its login, and its stop must not be replayed, nor its review rescued, before the pass knows.
+   */
   private int reconcileAll() {
     var replayed = 0;
     try {
+      readUnreadUsage();
       var handledThisSweep = new HashSet<String>();
       for (var spec : specStore.list(IN_PROGRESS)) {
         try {
@@ -305,7 +310,6 @@ public final class MissedStopReconciler implements AutoCloseable {
       replayed += rescueStrandedReviews(handledThisSweep);
       replayed += finishDeadSessions(handledThisSweep);
       replayed += finalizeInterruptedStops();
-      readUnreadUsage();
       removeLeftovers();
     } catch (Exception e) {
       System.err.println("  [reconcile] missed-stop sweep aborted: " + e.getMessage());

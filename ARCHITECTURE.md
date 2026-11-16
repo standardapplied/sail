@@ -3925,7 +3925,8 @@ no pairing is removed through the gateway as before, and no key file is touched.
     `RunStore.STOPPED_FOR_LOGIN`), and a reviewer or fix agent so ended holds its review as a
     launch refused for want of a login does (rows R1b, F1b; `LoopFacts.Rows.heldForLogin`): its
     review is owed the reviewer, the fix or the errored iteration again, `GoOn` takes none of them,
-    the missed-stop reconciler neither replays nor rescues its stop (it logs the hold once), and
+    the missed-stop reconciler neither replays nor rescues its stop (it logs the hold once; each
+    pass reads the reports left unread first, so a late read's mark lands before any replay), and
     storing a login (`LoopTrigger.LoginStored`) takes the owed step. A build's login
     of a kind with a known lifetime (Claude Code's token: 365 days from the day it was stored,
     `LoginKind.lifetime`) is warned in its last 14 days at each build reservation, a resumed

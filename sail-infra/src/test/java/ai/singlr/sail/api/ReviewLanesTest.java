@@ -434,6 +434,8 @@ class ReviewLanesTest {
     assertTrue(
         said.stream().noneMatch(line -> line.contains("--restart")), "never escalated: " + said);
     assertTrue(loop.runs.findById(reviewer.id()).orElseThrow().stoppedForLogin(), "marked late");
+    assertEquals(
+        1, stopsOf(reviewer.id()), "read before any replay: its stop is never replayed to retry");
     assertTrue(loop.container.live().isEmpty(), "no reviewer relaunched on the same login");
     assertEquals(1, loop.runsIn("auth", "review").size());
 
