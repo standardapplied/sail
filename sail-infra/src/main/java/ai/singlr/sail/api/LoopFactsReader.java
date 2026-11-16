@@ -16,9 +16,11 @@ import ai.singlr.sail.store.SpecStore;
 import java.util.HashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.function.BiFunction;
 import java.util.function.Function;
+import java.util.function.Predicate;
 import java.util.function.Supplier;
 
 /** The one reader of the stores for a decision of the review loop ({@link LoopFacts}). */
@@ -28,14 +30,21 @@ final class LoopFactsReader {
   private final ReviewStore reviews;
   private final RunStore runs;
   private final Supplier<String> localHandle;
+  private final Predicate<RunStore.RunRow> loginReplaced;
   private MessageStore messages;
 
+  /** {@code loginReplaced} says whether a run's refused login was since replaced. */
   LoopFactsReader(
-      SpecStore specs, ReviewStore reviews, RunStore runs, Supplier<String> localHandle) {
+      SpecStore specs,
+      ReviewStore reviews,
+      RunStore runs,
+      Supplier<String> localHandle,
+      Predicate<RunStore.RunRow> loginReplaced) {
     this.specs = specs;
     this.reviews = reviews;
     this.runs = runs;
     this.localHandle = localHandle;
+    this.loginReplaced = Objects.requireNonNull(loginReplaced, "loginReplaced");
   }
 
   /** Reads what runs said in their rooms from {@code messages}: the questions they ended on. */
@@ -88,14 +97,20 @@ final class LoopFactsReader {
   /** What the rows say of {@code specId}'s loop, as they stand now. */
   LoopFacts.Rows rows(String specId) {
     var review = reviews.latestReviewForSpec(specId);
+    var serving = review.map(latest -> serving(latest.id())).orElse(List.<RunStore.RunRow>of());
     return new LoopFacts.Rows(
         localHandle.get(),
         specs.findById(specId),
         review,
         review.map(latest -> reviews.stagesForReview(latest.id())).orElse(List.of()),
-        review.map(latest -> serving(latest.id())).orElse(List.of()),
+        serving,
         runs.latestLoopRun(specId),
-        review.map(ReviewStore.ReviewRow::waitingOn).filter(this::ended).isPresent());
+        review.map(ReviewStore.ReviewRow::waitingOn).filter(this::ended).isPresent(),
+        serving.stream()
+            .findFirst()
+            .filter(RunStore.RunRow::stoppedForLogin)
+            .filter(loginReplaced.negate())
+            .isPresent());
   }
 
   /**

@@ -27,6 +27,8 @@ import ai.singlr.sail.engine.RunPlace;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.harness.Harness;
 import ai.singlr.sail.harness.Harnesses;
+import ai.singlr.sail.harness.RunReport;
+import ai.singlr.sail.harness.RunUsage;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.Ownership;
 import ai.singlr.sail.store.DispatchGate;
@@ -155,6 +157,7 @@ public final class LiveMembers implements RoomWakeReactor.Live, AutoCloseable {
   private final RoomCommitGuard guard;
   private final ShellExec shell;
   private final DispatchOperations.EventSink events;
+  private final RunReports reports;
   private final SessionYield terminals;
   private final Map<String, Member> members = new ConcurrentHashMap<>();
   private final Map<String, Object> roomLocks = new ConcurrentHashMap<>();
@@ -183,7 +186,8 @@ public final class LiveMembers implements RoomWakeReactor.Live, AutoCloseable {
       RoomCommitGuard guard,
       ShellExec shell,
       DispatchOperations.EventSink events,
-      SessionYield terminals) {
+      SessionYield terminals,
+      RunReports reports) {
     this.projects = projects;
     this.places = places;
     this.specStore = specStore;
@@ -195,6 +199,7 @@ public final class LiveMembers implements RoomWakeReactor.Live, AutoCloseable {
     this.guard = guard;
     this.shell = shell;
     this.events = events;
+    this.reports = reports;
     this.terminals = terminals;
     this.processes = new ContainerAgentProcess(shell);
     this.workBranch = new WorkBranch(shell, DispatchOperations.Listener.NONE);
@@ -812,6 +817,8 @@ public final class LiveMembers implements RoomWakeReactor.Live, AutoCloseable {
     private Instant lastDelta = Instant.MIN;
     private Instant lastStamp = Instant.MIN;
     private String sessionId;
+    private String initLine;
+    private boolean loginSaid;
     private int turn;
     private boolean turnOpen;
     private boolean prompted;
@@ -949,7 +956,10 @@ public final class LiveMembers implements RoomWakeReactor.Live, AutoCloseable {
         lastStamp = lastLine;
       }
       switch (LiveStream.read(line)) {
-        case LiveStream.Step.Init init -> session(init.sessionId());
+        case LiveStream.Step.Init init -> {
+          initLine = line;
+          session(init.sessionId());
+        }
         case LiveStream.Step.TextStarted started -> {
           open();
           if (!said.isEmpty()) {
@@ -1077,12 +1087,27 @@ public final class LiveMembers implements RoomWakeReactor.Live, AutoCloseable {
 
     /**
      * What the run has spent once a turn ends: its harness's running total on the turn's result
-     * line, set on the run as it runs, so its finish records the last of them, once (M1).
+     * line, set on the run as it runs, so its finish records the last of them, once (M1). The
+     * turn's report, its process's {@code init} line and this result, also says what came of the
+     * login the member was given: recorded with it, and said once for the member's run (RL4).
      */
     private void spent(String line) {
-      var usage = Harnesses.of(run.agent()).usage(line);
-      if (usage != null && usage.reported()) {
-        runStore.recordUsage(runId, usage);
+      var harness = Harnesses.of(run.agent());
+      var usage = harness.usage(line);
+      var outcome =
+          harness
+              .declaredKind(run.loginKind())
+              .flatMap(
+                  kind ->
+                      harness.loginOutcome(initLine == null ? line : initLine + "\n" + line, kind))
+              .orElse(null);
+      var report = new RunReport(usage == null ? RunUsage.NONE : usage, outcome);
+      if (report.usage().reported() || report.overriddenBy() != null) {
+        runStore.recordUsage(runId, report);
+      }
+      if (outcome != null && !loginSaid) {
+        loginSaid = true;
+        reports.heardLive(runStore, run, report);
       }
     }
 

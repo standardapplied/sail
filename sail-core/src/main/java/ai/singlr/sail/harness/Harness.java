@@ -230,6 +230,13 @@ public interface Harness {
   RunUsage usage(String report);
 
   /**
+   * What came of the login of kind {@code given} a run gave this harness, as {@code report} (as
+   * {@link #usage} takes it) says: refused, limited or overridden, each read from the harness's own
+   * last word on it; empty for anything else, which is an ordinary end, nothing guessed.
+   */
+  Optional<LoginOutcome> loginOutcome(String report, LoginKind given);
+
+  /**
    * The static credentials this harness reads from its environment, the first its default kind. A
    * spec run starts with one its person stored; a login the harness refreshes is never one.
    */
@@ -253,6 +260,11 @@ public interface Harness {
     return List.of();
   }
 
+  /** The kind of login this harness declares as {@code kind}; empty for none, or a null kind. */
+  default Optional<LoginKind> declaredKind(String kind) {
+    return loginKinds().stream().filter(declared -> declared.kind().equals(kind)).findFirst();
+  }
+
   /**
    * The kind of login this harness declares as {@code kind}, its first when {@code kind} is blank.
    *
@@ -262,9 +274,7 @@ public interface Harness {
     if (Strings.isBlank(kind)) {
       return loginKinds().getFirst();
     }
-    return loginKinds().stream()
-        .filter(declared -> declared.kind().equals(kind))
-        .findFirst()
+    return declaredKind(kind)
         .orElseThrow(
             () ->
                 new IllegalArgumentException(

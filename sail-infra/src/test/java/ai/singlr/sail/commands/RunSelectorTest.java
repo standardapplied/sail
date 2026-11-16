@@ -79,6 +79,7 @@ class RunSelectorTest {
         null,
         null,
         null,
+        null,
         null);
   }
 

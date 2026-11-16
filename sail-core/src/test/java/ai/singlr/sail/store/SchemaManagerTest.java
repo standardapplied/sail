@@ -183,6 +183,28 @@ class SchemaManagerTest {
     assertEquals(LegacyConversion.VERSION, schema.currentVersion());
   }
 
+  /**
+   * A v1004 database a build made before {@code runs.login_overridden} is refused at the start,
+   * naming the reinstall, not at the first read of a run.
+   */
+  @Test
+  void aV1004DatabaseWithoutTheLoginOverriddenColumnIsRefusedAtTheStart() {
+    new SchemaManager(db).migrate();
+    db.execute("ALTER TABLE runs DROP COLUMN login_overridden");
+
+    var refusal = assertThrows(Remedied.State.class, new SchemaManager(db)::migrate);
+
+    assertEquals(
+        "Database "
+            + tempDir.resolve("test.db")
+            + " was made by a build of schema v1004 before runs.login_overridden, and none is"
+            + " converted: the box is reinstalled.",
+        refusal.reason());
+    assertEquals(
+        "Move " + tempDir.resolve("test.db") + " aside and run 'sail init' to make a fresh one.",
+        refusal.remedy().plain());
+  }
+
   @Test
   void migrateRefusesADatabaseNewerThanThisBinary() {
     var newer = SchemaManager.CURRENT_VERSION + 1;

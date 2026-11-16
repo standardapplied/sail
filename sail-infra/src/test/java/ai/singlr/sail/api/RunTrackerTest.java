@@ -13,6 +13,8 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.common.DateTimeUtils;
+import ai.singlr.sail.harness.LoginOutcome;
+import ai.singlr.sail.harness.RunReport;
 import ai.singlr.sail.harness.RunUsage;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.store.RunStore;
@@ -21,7 +23,9 @@ import ai.singlr.sail.store.Sqlite;
 import ai.singlr.sail.store.TestRuns;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
@@ -55,7 +59,12 @@ class RunTrackerTest {
             },
             Duration.ofMillis(1),
             Duration.ofMillis(1));
-    tracker = new RunTracker(runStore, finished -> RunUsage.NONE, scheduler, () -> "node-a");
+    tracker =
+        new RunTracker(
+            runStore,
+            new RunReports(finished -> RunReport.NONE, RunLauncher.Room.NONE, event -> {}),
+            scheduler,
+            () -> "node-a");
   }
 
   @AfterEach
@@ -364,7 +373,12 @@ class RunTrackerTest {
 
   @Test
   void aStandaloneBoxWithNoHandleClosesOutItsOwnBlankNodeRun() {
-    var standalone = new RunTracker(runStore, finished -> RunUsage.NONE, scheduler, () -> null);
+    var standalone =
+        new RunTracker(
+            runStore,
+            new RunReports(finished -> RunReport.NONE, RunLauncher.Room.NONE, event -> {}),
+            scheduler,
+            () -> null);
     var id = runningRunOn("backend", "auth", "");
 
     standalone.onEvent(stopped("backend", id, Map.of(Event.WellKnownData.EXIT_CODE, 0)));
@@ -412,5 +426,45 @@ class RunTrackerTest {
     assertTrue(
         runStore.findByCredential(reservation.credential()).isEmpty(),
         "the watcher's authoritative stop kills the run credential");
+  }
+
+  /**
+   * RL4: the tracker and the review pipeline both finish a watcher's stop; only the finish whose
+   * write recorded the report says what it said of the run's login, so it is said once.
+   */
+  @Test
+  void onlyTheFinishWhoseWriteRecordedTheReportSaysWhatItSaidOfTheLogin() {
+    var id = runningRun("p", "auth");
+    Acting.system(
+        () ->
+            runStore.recordLaunch(
+                id,
+                new RunStore.Launched(
+                    null, null, null, new RunStore.RunLogin("default", "token"), null)));
+    var told = new ArrayList<String>();
+    var refused = new RunReport(RunUsage.NONE, new LoginOutcome.Refused());
+    var losing =
+        new RunReports(
+            run -> {
+              assertTrue(runStore.finish(run.id(), "running", "stopped", 1, refused));
+              return refused;
+            },
+            (spec, body) -> told.add("loser: " + body),
+            event -> {});
+    var winning = new RunReports(run -> refused, (spec, body) -> told.add("winner"), event -> {});
+
+    Acting.system(() -> RunTracker.finish(runStore, losing, id, "stopped", 1));
+    Acting.system(() -> RunTracker.finish(runStore, winning, id, "stopped", 1));
+
+    assertEquals(List.of(), told, "the other finisher's write landed first: it says, not this one");
+    var next = runningRun("p", "auth");
+    Acting.system(
+        () ->
+            runStore.recordLaunch(
+                next,
+                new RunStore.Launched(
+                    null, null, null, new RunStore.RunLogin("default", "token"), null)));
+    assertTrue(Acting.system(() -> RunTracker.finish(runStore, winning, next, "stopped", 1)));
+    assertEquals(List.of("winner"), told);
   }
 }

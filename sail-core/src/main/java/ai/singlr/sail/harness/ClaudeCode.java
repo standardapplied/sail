@@ -9,6 +9,7 @@ import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.engine.BoxCredentialFile;
 import ai.singlr.sail.engine.ContainerExec;
 import ai.singlr.sail.engine.SailPaths;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -16,6 +17,8 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.OptionalInt;
 import java.util.SequencedMap;
+import java.util.Set;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 /** Claude Code: {@code claude}, launched headless with sail's own settings file of hooks. */
@@ -23,8 +26,27 @@ final class ClaudeCode implements Harness {
 
   private static final String BINARY = "claude";
   private static final String RESULT = "\"type\":\"result\"";
+  private static final String INIT = "\"subtype\":\"init\"";
+
+  /**
+   * The {@code apiKeySource} values that, for a login of each kind, name another credential than
+   * the one Sail gave: the sources Claude Code declares ({@code ANTHROPIC_API_KEY}, the configured
+   * {@code apiKeyHelper}, a {@code /login managed key}; 2.1.322's own schema) other than the
+   * kind's. Any other value, {@code none} and names never seen among them, says nothing.
+   */
+  private static final Map<String, Set<String>> OTHER_SOURCES =
+      Map.of(
+          "token", Set.of("ANTHROPIC_API_KEY", "apiKeyHelper", "/login managed key"),
+          "api-key", Set.of("apiKeyHelper", "/login managed key"));
+
+  /** A result that says the login's account is out of quota, and when it resets, if it says. */
+  private static final Pattern LIMIT =
+      Pattern.compile("You['\u2019]ve hit your .*?limit(?:\\s*\u00b7\\s*resets\\s+(.+))?");
 
   private static final List<String> EFFORTS = List.of("low", "medium", "high", "xhigh");
+
+  /** How long a token {@code claude setup-token} makes lasts from the day it is made. */
+  private static final Duration TOKEN_LIFETIME = Duration.ofDays(365);
 
   /**
    * The sail-owned settings file, passed to {@code claude} via {@code --settings} only when sail
@@ -243,7 +265,7 @@ final class ClaudeCode implements Harness {
 
   @Override
   public List<String> reportMarkers() {
-    return List.of(RESULT);
+    return List.of(RESULT, INIT);
   }
 
   /**
@@ -261,6 +283,55 @@ final class ClaudeCode implements Harness {
       return null;
     }
     return found.line() == null ? RunUsage.NONE : usageOf(found.line());
+  }
+
+  /**
+   * The last {@code result}, when it is an error, decides first: a 401 is a refusal, of the login
+   * or, when the last {@code init} line names another credential's source ({@link #OTHER_SOURCES}),
+   * of that credential, which the login never was; "Not logged in" is no login delivered at all
+   * (only a harness given no credential, or an empty one, prints it: 2.1.322, recorded); "You've
+   * hit your … limit" is a limit, with the time it resets. Otherwise the last {@code init} line
+   * naming a source that is another credential for the kind it was given ({@link #OTHER_SOURCES})
+   * is an override.
+   */
+  @Override
+  public Optional<LoginOutcome> loginOutcome(String report, LoginKind given) {
+    var other = otherSource(report, given);
+    var result = RunUsage.last(report, RESULT, line -> "result".equals(line.get("type"))).line();
+    if (result != null && Boolean.TRUE.equals(result.get("is_error"))) {
+      var said = result.get("result") instanceof String text ? text.strip() : "";
+      var limit = LIMIT.matcher(said);
+      if (Long.valueOf(401).equals(RunUsage.count(result, "api_error_status"))) {
+        return Optional.of(
+            other
+                .<LoginOutcome>map(LoginOutcome.RefusedOther::new)
+                .orElseGet(LoginOutcome.Refused::new));
+      }
+      if (said.startsWith("Not logged in")) {
+        return Optional.of(new LoginOutcome.Undelivered());
+      }
+      if (limit.matches()) {
+        return Optional.of(new LoginOutcome.Limited(LoginOutcome.resetTime(limit.group(1))));
+      }
+    }
+    return other.map(LoginOutcome.Overridden::new);
+  }
+
+  /**
+   * The source the last {@code init} line names, when it is another credential for {@code given}.
+   */
+  private static Optional<String> otherSource(String report, LoginKind given) {
+    var init =
+        RunUsage.last(
+                report,
+                INIT,
+                line -> "system".equals(line.get("type")) && "init".equals(line.get("subtype")))
+            .line();
+    return init != null
+            && init.get("apiKeySource") instanceof String source
+            && OTHER_SOURCES.getOrDefault(given.kind(), Set.of()).contains(source)
+        ? Optional.of(source)
+        : Optional.empty();
   }
 
   private static boolean reports(Map<String, Object> line) {
@@ -324,9 +395,15 @@ final class ClaudeCode implements Harness {
         new LoginKind(
             "token",
             "CLAUDE_CODE_OAUTH_TOKEN",
-            Remedy.of("Run claude setup-token on a machine where Claude Code is signed in")),
+            "long-lived token",
+            Remedy.of("Run claude setup-token on a machine where Claude Code is signed in"),
+            TOKEN_LIFETIME),
         new LoginKind(
-            "api-key", "ANTHROPIC_API_KEY", Remedy.of("Create an API key in the Claude Console")));
+            "api-key",
+            "ANTHROPIC_API_KEY",
+            "API key",
+            Remedy.of("Create an API key in the Claude Console"),
+            null));
   }
 
   /**

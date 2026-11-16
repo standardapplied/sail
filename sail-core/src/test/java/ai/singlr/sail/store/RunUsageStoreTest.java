@@ -13,6 +13,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.YamlUtil;
+import ai.singlr.sail.harness.LoginOutcome;
+import ai.singlr.sail.harness.RunReport;
 import ai.singlr.sail.harness.RunUsage;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.ActingAs;
@@ -96,7 +98,7 @@ class RunUsageStoreTest {
         id,
         new RunStore.Launched("opus", null, null, new RunStore.RunLogin("work", "token"), "ana"));
 
-    assertTrue(store.finish(id, "running", "completed", 0, REPORTED));
+    assertTrue(store.finish(id, "running", "completed", 0, read(REPORTED)));
 
     var row = store.findById(id).orElseThrow();
     assertEquals(new RunStore.RunLogin("work", "token"), row.login());
@@ -110,6 +112,48 @@ class RunUsageStoreTest {
     var copy = store.findById(adopted).orElseThrow();
     assertEquals(new RunStore.RunLogin("work", "token"), copy.login());
     assertEquals("ana", copy.dispatchedBy());
+  }
+
+  /**
+   * RL3: the credential source a harness reported using instead of its login is recorded in the
+   * write that records its report, journaled, adopted whole by another box, and never cleared by a
+   * later report that says nothing of it; a report that says the login was used records none.
+   */
+  @Test
+  void theSourceAHarnessUsedInsteadOfItsLoginIsRecordedWithItsReportAndCarried() {
+    var overridden = new RunReport(REPORTED, new LoginOutcome.Overridden("apiKeyHelper"));
+    var finished = run(null);
+    var live = run(null);
+    var refused = run(null);
+    var stopped = run(null);
+
+    assertTrue(store.finish(finished, "running", "completed", 0, overridden));
+    store.recordUsage(live, overridden);
+    store.recordUsage(live, read(REPORTED));
+    assertTrue(
+        store.finish(
+            refused,
+            "running",
+            "stopped",
+            1,
+            new RunReport(RunUsage.NONE, new LoginOutcome.Refused())));
+    assertTrue(store.claimStop(stopped, "stopped", () -> {}));
+    assertTrue(store.recordRead(stopped, overridden));
+
+    assertEquals("apiKeyHelper", store.findById(finished).orElseThrow().loginOverridden());
+    assertEquals("apiKeyHelper", journaled(finished).get("login_overridden"));
+    assertEquals("apiKeyHelper", store.findById(live).orElseThrow().loginOverridden());
+    assertNull(store.findById(refused).orElseThrow().loginOverridden());
+    assertTrue(store.findById(refused).orElseThrow().stoppedForLogin(), "ended for its login");
+    assertEquals(RunStore.STOPPED_FOR_LOGIN, journaled(refused).get("stop_source"));
+    assertFalse(
+        store.findById(finished).orElseThrow().stoppedForLogin(), "an override ends nothing");
+    assertTrue(
+        store.findById(stopped).orElseThrow().stoppedByOperator(), "an operator's stop stays");
+    assertEquals("apiKeyHelper", journaled(stopped).get("login_overridden"));
+    var adopted = DateTimeUtils.newId().toString();
+    store.applyRevision(adopted, store.comparableSnapshot(finished), "1-remote");
+    assertEquals("apiKeyHelper", store.findById(adopted).orElseThrow().loginOverridden());
   }
 
   /** A run that names no spec records the container's login, of no kind, and machinery no one. */
@@ -147,6 +191,29 @@ class RunUsageStoreTest {
     assertTrue(store.findById(adopted).isEmpty());
   }
 
+  /**
+   * Round 4, item 7: a run records as its override only a source a harness declares, so a node's
+   * row naming any other text is refused at the door it enters by, and nothing is adopted.
+   */
+  @Test
+  void anOverrideOfASourceNoHarnessDeclaresIsRefusedAtTheDoorANodesRowEntersBy() {
+    var id = run(null);
+    var base = new LinkedHashMap<>(store.comparableSnapshot(id));
+    for (var declared : List.of("ANTHROPIC_API_KEY", "apiKeyHelper", "/login managed key")) {
+      var snapshot = new LinkedHashMap<>(base);
+      snapshot.put("login_overridden", declared);
+      var adopted = DateTimeUtils.newId().toString();
+      store.applyRevision(adopted, snapshot, "1-remote");
+      assertEquals(declared, store.findById(adopted).orElseThrow().loginOverridden());
+    }
+    var hostile = new LinkedHashMap<>(base);
+    hostile.put("login_overridden", "sk-ant-api03-AbCdEf0123456789xyz");
+    var refused = DateTimeUtils.newId().toString();
+
+    assertThrows(SqliteException.class, () -> store.applyRevision(refused, hostile, "1-remote"));
+    assertTrue(store.findById(refused).isEmpty());
+  }
+
   /** M1: the finish and its usage are one write, so main hears them as one revision. */
   @Test
   void aFinishRecordsWhatTheHarnessReportedInTheRevisionThatFinishesTheRow() {
@@ -154,7 +221,7 @@ class RunUsageStoreTest {
     store.recordLaunch(
         id, new RunStore.Launched("opus", "high", null, RunStore.RunLogin.CONTAINER, null));
 
-    assertTrue(store.finish(id, "running", "completed", 0, REPORTED));
+    assertTrue(store.finish(id, "running", "completed", 0, read(REPORTED)));
 
     var row = store.findById(id).orElseThrow();
     assertEquals("completed", row.status());
@@ -191,7 +258,7 @@ class RunUsageStoreTest {
             "model", finished.get("model"),
             "effort", finished.get("effort")));
     assertFalse(
-        store.finish(id, "running", "failed", 1, RunUsage.NONE), "a finished run finishes once");
+        store.finish(id, "running", "failed", 1, RunReport.NONE), "a finished run finishes once");
     assertEquals(REPORTED, store.findById(id).orElseThrow().usage());
   }
 
@@ -202,7 +269,7 @@ class RunUsageStoreTest {
     store.recordLaunch(
         id, new RunStore.Launched("opus", null, null, RunStore.RunLogin.CONTAINER, null));
 
-    store.finish(id, "running", "completed", 0, RunUsage.NONE);
+    store.finish(id, "running", "completed", 0, RunReport.NONE);
 
     var row = store.findById(id).orElseThrow();
     assertEquals(RunUsage.NONE.source(), row.usage().source());
@@ -222,7 +289,12 @@ class RunUsageStoreTest {
     assertNull(store.findById(id).orElseThrow().usage());
     assertThrows(
         IllegalArgumentException.class,
-        () -> store.finish(id, "stopped", "stopping", null, RunUsage.NONE));
+        () -> store.finish(id, "stopped", "stopping", null, RunReport.NONE));
+  }
+
+  /** What a read of a report holding only {@code usage} gives. */
+  private static RunReport read(RunUsage usage) {
+    return new RunReport(usage, null);
   }
 
   private static RunUsage report(long tokens, double usd) {
@@ -230,7 +302,7 @@ class RunUsageStoreTest {
   }
 
   private void finish(String id, RunUsage usage) {
-    assertTrue(store.finish(id, "running", "completed", 0, usage));
+    assertTrue(store.finish(id, "running", "completed", 0, read(usage)));
   }
 
   private RunUsage usageOf(String id) {
@@ -353,12 +425,12 @@ class RunUsageStoreTest {
     var sibling = run("live");
     finish(sibling, report(100, 1.0));
     var id = run("live");
-    store.recordUsage(id, report(110, 1.1));
-    store.recordUsage(id, report(160, 1.6));
+    store.recordUsage(id, read(report(110, 1.1)));
+    store.recordUsage(id, read(report(160, 1.6)));
     assertEquals(60L, usageOf(id).tokensIn());
 
     assertTrue(store.finishAsTurnsRecorded(id, "completed", 0));
-    store.recordUsage(id, report(900, 9.0));
+    store.recordUsage(id, read(report(900, 9.0)));
 
     assertEquals(60L, usageOf(id).tokensIn(), "only while it runs");
     assertEquals(0.6, (Double) journaled(id).get("cost_usd"), 1e-9);
@@ -405,13 +477,14 @@ class RunUsageStoreTest {
     assertEquals(RunStore.STOPPED_BY_OPERATOR, store.findById(id).orElseThrow().stopSource());
     assertEquals(List.of(id), store.unread("node-a").stream().map(RunStore.RunRow::id).toList());
     assertEquals(List.of(), store.unread("node-b"));
-    assertTrue(store.recordRead(id, report(130, 1.3)));
-    assertFalse(store.recordRead(id, report(900, 9.0)), "recorded once");
+    assertTrue(store.recordRead(id, read(report(130, 1.3))));
+    assertFalse(store.recordRead(id, read(report(900, 9.0))), "recorded once");
     assertEquals(30L, usageOf(id).tokensIn());
     assertEquals(30, journaled(id).get("tokens_in"));
     assertEquals(List.of(), store.unread("node-a"));
     assertEquals(130L, kept().tokensIn());
-    assertFalse(store.recordRead(run(null), report(1, 1.0)), "a run still running is not read");
+    assertFalse(
+        store.recordRead(run(null), read(report(1, 1.0))), "a run still running is not read");
   }
 
   /**

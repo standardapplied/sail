@@ -114,6 +114,11 @@ final class LoopRows {
     return run(id, NODE, role, reviewId, "stopped", ENDED, exitCode);
   }
 
+  /** A run this box executed that its harness ended at {@link #ENDED} for its login, exit 1. */
+  static RunStore.RunRow endedForItsLogin(String id, String role, String reviewId) {
+    return run(id, NODE, role, reviewId, "stopped", ENDED, 1, RunStore.STOPPED_FOR_LOGIN);
+  }
+
   static RunStore.RunRow run(
       String id, String node, String role, String reviewId, String status, Instant completedAt) {
     return run(id, node, role, reviewId, status, completedAt, completedAt == null ? null : 0);
@@ -127,6 +132,18 @@ final class LoopRows {
       String status,
       Instant completedAt,
       Integer exitCode) {
+    return run(id, node, role, reviewId, status, completedAt, exitCode, null);
+  }
+
+  private static RunStore.RunRow run(
+      String id,
+      String node,
+      String role,
+      String reviewId,
+      String status,
+      Instant completedAt,
+      Integer exitCode,
+      String stopSource) {
     return new RunStore.RunRow(
         id,
         PROJECT,
@@ -154,6 +171,7 @@ final class LoopRows {
         null,
         null,
         reviewId,
+        stopSource,
         null,
         null,
         null,
@@ -199,6 +217,7 @@ final class LoopRows {
     private List<LoopFacts.Aged> failedStage = List.of();
     private long erroredAttempts;
     private boolean holderEnded;
+    private boolean loginReplaced;
     private MessageStore.Asked asked;
 
     Facts spec(SpecStatus status) {
@@ -272,6 +291,12 @@ final class LoopRows {
       return this;
     }
 
+    /** A login has replaced the one a serving run had refused since that run started. */
+    Facts loginReplaced() {
+      this.loginReplaced = true;
+      return this;
+    }
+
     /**
      * The newest loop run's newest question: answered or not, and an answer the run heard, as one
      * that came while it ran is.
@@ -297,7 +322,12 @@ final class LoopRows {
               stages,
               serving,
               Optional.ofNullable(newest),
-              holderEnded);
+              holderEnded,
+              !loginReplaced
+                  && serving.stream()
+                      .findFirst()
+                      .filter(RunStore.RunRow::stoppedForLogin)
+                      .isPresent());
       return new LoopFacts(
           PROJECT,
           SPEC,

@@ -175,6 +175,9 @@ public final class DispatchOperations {
     default void runsPruned(int count) {}
 
     default void sailSetupUpdated(boolean updated) {}
+
+    /** The run's login ends soon, or has ended: {@code said} is the warning, with its remedy. */
+    default void loginEnding(String said) {}
   }
 
   private final ShellExec shell;
@@ -201,6 +204,7 @@ public final class DispatchOperations {
   private final WatcherSpawner watcherSpawner;
   private final AgentLauncher launcher;
   private final Listener listener;
+  private final RunReports reports;
 
   /**
    * The one constructor: every collaborator is stated at the call site, so a wiring gap (a lane
@@ -236,6 +240,7 @@ public final class DispatchOperations {
     this.listener = Objects.requireNonNull(listener, "listener");
     this.sessionYield = Objects.requireNonNull(sessionYield, "sessionYield");
     this.roomCommitGuard = new RoomCommitGuard(runStore, projects, this.events, shell);
+    this.reports = RunReports.reading(shell, this::tellRoom, this.events);
     this.runLauncher =
         new RunLauncher(
             shell,
@@ -245,10 +250,18 @@ public final class DispatchOperations {
             runStore,
             this.events,
             () -> projectSkills,
-            this::tellRoom);
+            this::tellRoom,
+            reports);
     this.runReservation =
         new RunReservation(
-            runStore, shell, listener, sessionYield, this::endLiveHolder, fdeStore, this::tellRoom);
+            runStore,
+            shell,
+            listener,
+            sessionYield,
+            this::endLiveHolder,
+            fdeStore,
+            this::tellRoom,
+            this.events);
     var places =
         new RunPlaces(
             projects,
@@ -291,7 +304,8 @@ public final class DispatchOperations {
             roomCommitGuard,
             shell,
             this.events,
-            sessionYield);
+            sessionYield,
+            reports);
     this.buildDispatch =
         new BuildDispatch(
             projects,
@@ -315,7 +329,8 @@ public final class DispatchOperations {
             runLauncher,
             shell,
             new WorkBranch(shell, listener),
-            buildDispatch::resume);
+            buildDispatch::resume,
+            reports);
   }
 
   /**
@@ -504,6 +519,11 @@ public final class DispatchOperations {
    */
   public ReviewLanes reviewLanes() {
     return reviewLanes;
+  }
+
+  /** Where every finisher of this box's runs reads their reports and says them. */
+  public RunReports runReports() {
+    return reports;
   }
 
   /**

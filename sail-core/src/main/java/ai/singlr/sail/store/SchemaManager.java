@@ -485,7 +485,9 @@ public final class SchemaManager {
                   CHECK (usage_source IN ('result', 'transcript', 'none', 'unattributable')),
               login TEXT,
               login_kind TEXT CHECK (login_kind IN ('api-key', 'token')),
-              dispatched_by TEXT
+              dispatched_by TEXT,
+              login_overridden TEXT CHECK (login_overridden IN
+                  ('ANTHROPIC_API_KEY', 'apiKeyHelper', '/login managed key'))
           )""",
           RUN_COUNTED,
           RUN_RECOUNTED_FROM,
@@ -737,11 +739,20 @@ public final class SchemaManager {
    * Creates the schema on a fresh database and stamps it, atomically; on a database this release
    * made, adds only the feed's indexes it lacks ({@link #FEED_INDEXES}). Any other database is
    * refused naming what to do: an older one was made by a release before v1 and is replaced, as is
-   * one holding tables but no version, and a newer one needs a newer binary.
+   * one holding tables but no version, or one stamped v1004 by a build before {@code
+   * runs.login_overridden}, and a newer one needs a newer binary.
    */
   public void migrate() {
     db.execute(SCHEMA_VERSION_TABLE);
     if (currentVersion() == CURRENT_VERSION) {
+      if (lacksLoginOverridden()) {
+        throw Remedied.state(
+            "Database "
+                + db.path()
+                + " was made by a build of schema v1004 before runs.login_overridden, and none"
+                + " is converted: the box is reinstalled.",
+            freshStart());
+      }
       FEED_INDEXES.forEach(db::execute);
       return;
     }
@@ -765,6 +776,14 @@ public final class SchemaManager {
     BASELINE.forEach(db::execute);
     FEED_INDEXES.forEach(db::execute);
     stamp(CURRENT_VERSION);
+  }
+
+  private boolean lacksLoginOverridden() {
+    return db.queryOne(
+                "SELECT COUNT(*) FROM pragma_table_info('runs') WHERE name = 'login_overridden'",
+                row -> row.integer(0))
+            .orElse(0L)
+        == 0;
   }
 
   private boolean holdsOtherTables() {

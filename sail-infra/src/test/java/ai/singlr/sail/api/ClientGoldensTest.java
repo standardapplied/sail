@@ -28,6 +28,10 @@ import ai.singlr.sail.engine.HostInfo;
 import ai.singlr.sail.engine.ScriptedShellExecutor;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.SyncOperations;
+import ai.singlr.sail.harness.Harnesses;
+import ai.singlr.sail.harness.LoginOutcome;
+import ai.singlr.sail.harness.RunReport;
+import ai.singlr.sail.harness.RunUsage;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.Role;
@@ -40,6 +44,7 @@ import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.FeedPositions;
 import ai.singlr.sail.store.Finding;
 import ai.singlr.sail.store.HeldProjects;
+import ai.singlr.sail.store.LoginStore;
 import ai.singlr.sail.store.MessageStore;
 import ai.singlr.sail.store.PendingChallengeStore;
 import ai.singlr.sail.store.ReviewStore;
@@ -895,6 +900,39 @@ class ClientGoldensTest {
               WellKnownTypes.SNAPSHOT_DELETED,
               WellKnownTypes.SPEC_STRANDED)
           .forEach(type -> bus.publish(envelope(SPEC, type)));
+      var runs = new RunStore(db);
+      Acting.system(
+          () ->
+              runs.recordLaunch(
+                  run.id(),
+                  new RunStore.Launched(
+                      null, null, null, new RunStore.RunLogin("default", "token"), null)));
+      var launched = runs.findById(run.id()).orElseThrow();
+      Stream.of(
+              new LoginOutcome.Refused(),
+              new LoginOutcome.RefusedOther("apiKeyHelper"),
+              new LoginOutcome.Limited("15:00 UTC"),
+              new LoginOutcome.Overridden("ANTHROPIC_API_KEY"))
+          .map(outcome -> new RunReport(RunUsage.NONE, outcome))
+          .forEach(
+              report ->
+                  new RunReports(read -> report, RunLauncher.Room.NONE, bus::publish)
+                      .finish(runs, launched, recorded -> true));
+      var kind = Harnesses.of("claude-code").loginKind("token");
+      new RunLogins(
+              null, RunLauncher.Room.NONE, DispatchOperations.Listener.NONE, bus::publish, () -> AT)
+          .ending(
+              launched,
+              new LoginStore.Login(
+                  new LoginStore.Row(
+                      "claude-code",
+                      "default",
+                      "token",
+                      true,
+                      AT.minus(Duration.ofDays(360)),
+                      "0123abcd"),
+                  kind,
+                  "unused"));
       return Stream.of(
               WellKnownTypes.SPEC_ENGAGED,
               WellKnownTypes.SPEC_DISENGAGED,

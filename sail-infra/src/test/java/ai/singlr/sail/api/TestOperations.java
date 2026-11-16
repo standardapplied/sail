@@ -170,6 +170,7 @@ class TestOperations implements Operations {
         null,
         null,
         null,
+        null,
         null);
   }
 
@@ -387,6 +388,7 @@ class TestOperations implements Operations {
                 null,
                 null,
                 "/home/dev/.sail/runs/" + runId + "/agent.log",
+                null,
                 null,
                 null,
                 null,
