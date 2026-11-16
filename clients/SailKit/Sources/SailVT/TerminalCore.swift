@@ -270,9 +270,6 @@ final class TerminalCore {
         return ghostty_terminal_get(handle, GHOSTTY_TERMINAL_DATA_MOUSE_TRACKING, &tracking) == GHOSTTY_SUCCESS && tracking
     }
 
-    /// At a prompt now: the shell marks its commands, none it started is still running, and the
-    /// cursor's row is a primary prompt row, as the terminal itself says (a row reached after Enter
-    /// with no C is a continuation, and counts as a command).
     var cursorAtPrompt: Bool {
         var atPrompt = false
         guard sink.commandsMarked, !sink.commandRunning,

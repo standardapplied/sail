@@ -47,12 +47,9 @@ extension Workbench {
         }
     }
 
-    /// The workbench `arrangement` kept, holding only sessions `live` names: a pane whose session
-    /// is not live is gone and its split collapses, a tab left empty goes, and a live session of
-    /// this Mac's no pane holds opens as a last tab in `home`. A stored value that is not whole (an
-    /// unknown version, a ratio not strictly between 0 and 1, a session held twice) is not trusted:
-    /// the version drops all, the ratio is halved, the second holder is gone. Nothing here opens a
-    /// session.
+    /// The kept `arrangement` holding only sessions `live` names (W6); a live `mac-*` session no
+    /// pane holds opens as a last tab in `home`. An unknown version drops all, a ratio not strictly
+    /// inside (0, 1) is halved, a session held twice keeps its first holder.
     public static func restore(_ arrangement: Arrangement?, live: [String], home: String) -> Workbench {
         var bench = Workbench()
         var unheld = Set(live)

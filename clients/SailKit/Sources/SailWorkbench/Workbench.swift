@@ -3,8 +3,7 @@ import CoreGraphics
 #endif
 import Foundation
 
-/// One tab: its panes' layout, the person's name for it, the focused pane, the panes in the order
-/// they were last focused (each once, the focused one last), and the pane zoomed to fill it.
+/// One tab; `history` holds its panes in the order last focused, the focused one last.
 public struct Tab: Hashable, Sendable {
     public let id: TabID
     public internal(set) var layout: Layout
@@ -108,9 +107,8 @@ public struct Workbench: Hashable, Sendable {
         return pane
     }
 
-    /// Closes `pane`: its split's other side takes the split's room and the most recently focused
-    /// pane left takes focus; a tab left empty goes, and the tab before it, or else the first, is
-    /// selected. The pane closed, nil when there was none.
+    /// Closes `pane`: its sibling takes the split's room, the most recently focused pane the focus;
+    /// an emptied tab goes and the tab before it is selected.
     @discardableResult
     public mutating func close(_ pane: PaneID) -> Pane? {
         guard let index = index(holding: pane), let closed = panes.removeValue(forKey: pane) else { return nil }
@@ -263,7 +261,6 @@ public struct Workbench: Hashable, Sendable {
         selected = tabs[(index + (next ? 1 : tabs.count - 1)) % tabs.count].id
     }
 
-    /// Moves `tab` to `index` in the order, or the nearest end.
     public mutating func moveTab(_ tab: TabID, to index: Int) {
         guard let from = tabs.firstIndex(where: { $0.id == tab }) else { return }
         let moved = tabs.remove(at: from)

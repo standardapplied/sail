@@ -223,11 +223,9 @@ public final class Screen: Sendable {
         parts.withLock { $0.core.tracksMouse }
     }
 
-    /// Whether the cursor is on a shell's prompt or its input now, as the shell marked them (OSC
-    /// 133): only from a shell that marks its commands' starts (C), with no command it started still
-    /// running (no D since its C, so a nested shell's prompt inside a command does not count), and
-    /// with prompt cells on the cursor's row; everything forgotten at a full reset. False with no
-    /// marks, and on the alternate screen.
+    /// Whether the cursor is on a shell's prompt now (OSC 133): a primary prompt row, from a shell
+    /// that marks its commands (C), none of them still running (no D since its C, so a nested
+    /// shell's prompt does not count); forgotten at a full reset. False with no marks.
     public var cursorAtPrompt: Bool {
         parts.withLock { $0.core.cursorAtPrompt }
     }

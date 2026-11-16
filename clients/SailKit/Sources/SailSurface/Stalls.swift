@@ -42,7 +42,6 @@ public struct Stalls: Sendable {
         gaps.reduce(0) { held, gap in held + min(gap.overlap(wait), max(0, gap.length - tick)) }
     }
 
-    /// `wait` less what this thread shared of it, in seconds.
     public func net(of wait: Span) -> Double {
         max(0, wait.length - shared(with: wait))
     }

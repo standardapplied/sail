@@ -44,7 +44,6 @@ extension Layout {
     public static let dividerWidth = 1.0
     public static let dividerHitWidth = 7.0
 
-    /// Every pane's frame and every divider's line in `rect`, edges rounded to `scale`'s pixels.
     func frames(in rect: CGRect, scale: Double) -> Frames {
         var frames = Frames()
         place(in: rect, scale: scale, path: [], into: &frames)

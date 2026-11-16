@@ -1,8 +1,7 @@
 import Foundation
 import SailTerminalWire
 
-/// The sessions this machine's own host holds for its person: read page by page, or one ended
-/// without attaching to it.
+/// The sessions this machine's own host holds for its person: listed, or one ended unattached.
 public enum SessionListing {
     /// How many sessions one page asks for.
     public static let pageSize: Int32 = 100

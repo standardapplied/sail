@@ -413,11 +413,9 @@ public final class WorkbenchView: NSView {
         focused?.toggleLatency(sender)
     }
 
-    /// The workbench's own shortcuts are taken here, before the menu bar, as Ghostty's surface takes
-    /// its bindings: the menu bar answers a key equivalent only after highlighting its menu's title,
-    /// which held ⌘D 80 to 180 ms on the runner. The menu items stay the one list of commands and
-    /// keys (W8); this sends the matching item's action, validated as the menu would. A key whose
-    /// item is disabled now does nothing, and reaches no program.
+    /// The workbench's own shortcuts are taken here, before the menu bar, which answers only after
+    /// highlighting its menu's title (⌘D held 80 to 180 ms on the runner). The matching menu item's
+    /// action is sent, validated as the menu would; a disabled one does nothing.
     override public func performKeyEquivalent(with event: NSEvent) -> Bool {
         guard !isHidden, let item = Self.shortcut(for: event, in: NSApp.mainMenu, target: self), let action = item.action else {
             return super.performKeyEquivalent(with: event)

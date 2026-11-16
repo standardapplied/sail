@@ -224,9 +224,7 @@ public final class TerminalView: NSView {
         layoutGrid()
     }
 
-    /// A hidden view draws nothing: its display link pauses, output does not draw it, and a
-    /// refresh that comes anyway pauses it again; shown again, it draws its screen as it is now at
-    /// the next refresh.
+    /// A hidden view draws nothing and pauses its display link; shown, it draws its screen as it is.
     override public func viewDidHide() {
         super.viewDidHide()
         pacer.pause()

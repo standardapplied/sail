@@ -5,9 +5,8 @@ import SailVT
 
 /// The pointer, the wheel, copy, paste and the font size.
 extension TerminalView {
-    /// A click on a view that is not the focused one only focuses it: the program gets no report and
-    /// nothing is selected, until the button goes up. The window makes the clicked view its first
-    /// responder before it hands it the press, so a press older than the view's focus is that click.
+    /// A click on a view not focused only focuses it. The window makes the clicked view first
+    /// responder before handing it the press, so a press older than the view's focus is that click.
     override public func mouseDown(with event: NSEvent) {
         if window?.firstResponder !== self { window?.makeFirstResponder(self) }
         focusingClick = event.timestamp <= focusedAt
