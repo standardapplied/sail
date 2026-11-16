@@ -40,11 +40,12 @@ import org.junit.jupiter.api.Test;
  * Two specs on <strong>one repo</strong> dispatched one after the other on a real incus box with a
  * ZFS pool: both are admitted at once, each in its own workspace cloned from the project's template
  * (scenario 2, R5), and each launches under its own {@code sail-agent-<runId>} unit there. A fake
- * {@code codex} binary stands in for the agent (sleeps) — no LLM, no API key. The stop/review
- * lifecycle is covered deterministically by the unit suite and the multi-node fleet harness, not
- * here, so this IT stays free of agent-execution timing. Runs only under the {@code integration}
- * profile against a real incus daemon; skips elsewhere. What a create took is printed as a record,
- * not a gate.
+ * {@code codex} binary stands in for the agent — no LLM, no API key — and lives until the test's
+ * cleanup deletes its workspace, so both units are still running whenever the test asks, however
+ * long the second workspace takes to make on a busy runner. The stop/review lifecycle is covered
+ * deterministically by the unit suite and the multi-node fleet harness, not here, so this IT stays
+ * free of agent-execution timing. Runs only under the {@code integration} profile against a real
+ * incus daemon; skips elsewhere. What a create took is printed as a record, not a gate.
  */
 class ConcurrentDispatchIT extends AbstractIncusIT {
 
@@ -52,10 +53,14 @@ class ConcurrentDispatchIT extends AbstractIncusIT {
   private static final String HANDLE = "it-node";
   private static final Actor OPERATOR = new Actor(HANDLE, Role.ADMIN, Actor.Lane.CLI);
 
+  /**
+   * Runs until its workspace is deleted, bounded at ten minutes: never shorter than the test's own
+   * steps, which a fixed lifetime was (a 30 s agent ended before a second create that took 33 s).
+   */
   private static final String FAKE_AGENT =
       """
       #!/usr/bin/env bash
-      sleep 30
+      exec sleep 600
       """;
 
   private static final String YAML =
