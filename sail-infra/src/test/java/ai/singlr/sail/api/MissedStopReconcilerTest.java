@@ -899,6 +899,53 @@ class MissedStopReconcilerTest {
   }
 
   /**
+   * H2: a run whose early read went unanswered is skipped by the next pass's early reads, so the
+   * budget reaches the others: an older reviewer behind one whose container hangs is read before
+   * the next pass's first replay, and the one that hung is read first again a pass later.
+   */
+  @Test
+  void aRunWhoseEarlyReadWentUnansweredIsSkippedByTheNextPassesEarlyReads() {
+    createInProgressSpec("auth");
+    var build = runningSession("auth");
+    var older = session("docs", "node-a", "review");
+    var hanging = session("docs", "node-a", "review");
+    finishedUnread(List.of(older, hanging));
+    var clock = new ManualClock(PAST_GRACE.get(), Duration.ofMinutes(5));
+    var order = new CopyOnWriteArrayList<String>();
+    Function<RunStore.RunRow, RunReport> reads =
+        run -> {
+          order.add(run.id());
+          if (run.id().equals(hanging)) {
+            clock.advance(MissedStopReconciler.READ_FIRST_FOR);
+          }
+          return null;
+        };
+    MissedStopReconciler.UnitProbe probe =
+        (place, runId, unit) -> {
+          order.add("probe " + runId);
+          return false;
+        };
+    var reconciler = reconciler(probe, reads, clock::instant);
+
+    reconciler.sweep();
+    assertEquals(List.of(hanging), order.subList(0, order.indexOf("probe " + build)));
+    order.clear();
+    reconciler.sweep();
+
+    assertEquals(
+        List.of(older),
+        order.subList(0, order.indexOf("probe " + build)),
+        "the run that hung is skipped, so the older one is read first");
+    assertTrue(order.contains(hanging), "and read after the replays");
+    order.clear();
+    reconciler.sweep();
+    assertEquals(
+        List.of(hanging),
+        order.subList(0, order.indexOf("probe " + build)),
+        "skipped for one pass only: the older one, unanswered in turn, gives way");
+  }
+
+  /**
    * Round 4, item 3: a store that cannot list the unread reports costs the pass its replays not.
    */
   @Test

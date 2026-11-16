@@ -139,8 +139,9 @@ final class StrandedReviewRescue {
    * review's running stage, or the fix agent answering its gate failure, ended and nothing came of
    * it — that run's stop was never acted on. A review held for a refused login is left alone until
    * a login replaces it, whether or not its event was heard, and is then rescued in the shape it is
-   * owed. Replaying the stop of the spec's newest loop run, whichever lane it ran in, lets the
-   * pipeline kick off, retry, go on from the stage rows, launch the fix, or judge the run's work.
+   * owed, once for that refusal: a later refusal of the same review is rescued again. Replaying the
+   * stop of the spec's newest loop run, whichever lane it ran in, lets the pipeline kick off,
+   * retry, go on from the stage rows, launch the fix, or judge the run's work.
    *
    * <p>Every rescue is one-shot: keyed by the spec for a dropped kickoff, and by the review row and
    * its shape otherwise — a running review per stage, a waiting one per run it waits on — so a
@@ -176,6 +177,11 @@ final class StrandedReviewRescue {
     static Rescue of(ReviewStore.ReviewRow review, String shape, String why) {
       return new Rescue(review.id() + ":" + shape, "review " + review.id() + " " + why);
     }
+
+    /** This rescue spent once per refusal: after {@code refused}'s, released (H1). */
+    Rescue after(RunStore.RunRow refused) {
+      return new Rescue(key + ":" + refused.id(), why);
+    }
   }
 
   private Optional<Rescue> rescueFor(SpecStore.SpecRow spec) {
@@ -189,6 +195,13 @@ final class StrandedReviewRescue {
     if (rows.heldForLogin()) {
       return Optional.empty();
     }
+    return rows.refusedItsLogin()
+        .map(refused -> owed(rows).map(rescue -> rescue.after(refused)))
+        .orElseGet(() -> owed(rows));
+  }
+
+  /** The rescue of what the rows say the review is owed, in its shape. */
+  private Optional<Rescue> owed(LoopFacts.Rows rows) {
     return switch (rows.owed()) {
       case LoopFacts.Owed.Retry retry ->
           Optional.of(

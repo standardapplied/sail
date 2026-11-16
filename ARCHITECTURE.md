@@ -4060,12 +4060,14 @@ no pairing is removed through the gateway as before, and no key file is touched.
     stop. The hold is state, not an event: once its person's default login for the harness is
     another or was stored after the run started (`RunLogins.replaced`), any trigger takes the
     owed step, and the reconciler's next pass rescues it as it rescues any review so owed
-    (`StrandedReviewRescue`), so a `login_stored` event lost to a restart, or heard before the
-    refusal was recorded, costs one pass at most. A limit holds nothing: it resets by itself, so
-    its run takes the ordinary errored path (retried, then escalated). Each pass reads the unread reports of at most three runs that
-    serve a review first, newest first and starting none after ten seconds
-    (`MissedStopReconciler.READ_FIRST`, `READ_FIRST_FOR`), so a late read's mark lands before a
-    replay, and every other unread report last. A build's login
+    (`StrandedReviewRescue`), once for each refused run, so a `login_stored` event lost to a
+    restart, or heard before the refusal was recorded, costs one pass at most, however often the
+    review is refused. A limit holds nothing: it resets by itself, so its run takes the ordinary
+    errored path (retried, then escalated). Each pass reads the unread reports of at most three
+    runs that serve a review first, newest first and starting none after ten seconds
+    (`MissedStopReconciler.READ_FIRST`, `READ_FIRST_FOR`), skipping any whose early read went
+    unanswered on the pass before, so a late read's mark lands before a replay however one
+    container hangs, and every other unread report last. A build's login
     of a kind with a known lifetime (Claude Code's token: 365 days from the day it was stored,
     `LoginKind.lifetime`) is warned in its last 14 days at each build reservation, a resumed
     build's included (`RunLogins.ending`), its days counted by date in UTC: in the dispatch's own
