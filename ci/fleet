@@ -96,8 +96,11 @@ Usage:
                                 its snapshot holds no token (searched for by content), git
                                 identity, key or gh login, a
                                 workspace of it is a clone of its snapshot with a machine-id of its
-                                own (create time in the report) that commits as client's person, a
-                                second is made and stopped,
+                                own (create time in the report) that commits as client's person;
+                                eng makes her own through client's API, labelled hers by her id,
+                                committing as her with none of client's forge token, refused to
+                                client and to obs (a viewer), opened by her ticket over TCP from main,
+                                and deleted holding nothing; a second is made and stopped,
                                 apply --all leaves both and the template alone; with acme's repos set
                                 to octocat/Hello-World for the row (and given back after), ten made at
                                 once are each whole on their own branch of it, each one's ready steps and
@@ -790,7 +793,7 @@ inside() {
 }
 
 readonly LISTEN_PRIVATELY='set -eu
-ip=$1
+ip=$1 handle=${2:-client}
 sudo sail host config set api-listen "$ip:7071" > /dev/null
 sudo sail host config set terminal-listen "$ip:7072" > /dev/null
 sudo systemctl restart sail-api sail-pty-host
@@ -798,11 +801,12 @@ for attempt in $(seq 1 30); do
   curl -sf "http://$ip:7071/v1/health" > /dev/null && break
   sleep 1
 done
-sudo sail server token revoke direct-client > /dev/null 2>&1 || true
-sudo sail server token create direct-client member --fde client 2>/dev/null | sed -n 2p | tr -d " "'
+sudo sail server token revoke "direct-$handle" > /dev/null 2>&1 || true
+sudo sail server token create "direct-$handle" member --fde "$handle" 2>/dev/null | sed -n 2p | tr -d " "'
 
 readonly DIRECT_TERMINAL='import json, socket, struct, sys, urllib.request
 ip, token = sys.argv[1], sys.stdin.readline().strip()
+workspace = sys.argv[2] if len(sys.argv) > 2 else ""
 def text(value):
     raw = value.encode()
     return struct.pack(">i", len(raw)) + raw
@@ -828,14 +832,14 @@ def present(ticket):
     return conn, read(conn)
 asked = urllib.request.Request(
     "http://%s:7071/v1/terminal/tickets" % ip,
-    data=json.dumps({"action": "open", "project": "acme"}).encode(),
+    data=json.dumps({"action": "open", "project": "acme", "workspace": workspace}).encode(),
     headers={"Authorization": "Bearer " + token, "Content-Type": "application/json"})
 ticket = json.load(urllib.request.urlopen(asked, timeout=30))["ticket"]
 conn, (kind, _) = present(ticket)
 if kind != 32:
     raise SystemExit("the ticket was not welcomed: frame %d" % kind)
 create = text("direct") + struct.pack(">i", 0) + text("/tmp") + text("acme") + text("")
-conn.sendall(frame(1, create + struct.pack(">ii", 80, 24)))
+conn.sendall(frame(1, create + struct.pack(">ii", 80, 24) + text(workspace)))
 conn.sendall(frame(2, text("direct") + b"\x01"))
 line = b"echo $((6*7))-over-tcp\r"
 conn.sendall(frame(3, struct.pack(">q", 1) + struct.pack(">i", len(line)) + line))
@@ -852,24 +856,27 @@ if kind != 31 or b"presented already" not in payload:
     raise SystemExit("the second presentation was not refused as used: frame %d" % kind)
 print("the same ticket, presented again, is refused")'
 
-readonly CLOSE_PRIVATELY='sudo sail host config set api-listen none > /dev/null
+readonly CLOSE_PRIVATELY='handle=${1:-client}
+sudo sail host config set api-listen none > /dev/null
 sudo sail host config set terminal-listen none > /dev/null
 sudo systemctl restart sail-api sail-pty-host
-sudo sail server token revoke direct-client > /dev/null 2>&1 || true'
+sudo sail server token revoke "direct-$handle" > /dev/null 2>&1 || true'
 
+# From main, over client's private address: a ticket HANDLE asks client's API for, to open a
+# terminal in acme's container, or in its WORKSPACE, opens a session over TCP that echoes a line.
 direct_terminal() {
-  local run=$1 ip token status=0
+  local run=$1 handle=${2:-client} workspace=${3:-} ip token status=0
   ip=$(internal_ip "$run" client)
   [[ -n $ip ]] || { echo "client has no address"; return 1; }
-  token=$(on "$run" client "cat > /tmp/sail-listen-privately && bash /tmp/sail-listen-privately $ip" <<< "$LISTEN_PRIVATELY")
+  token=$(on "$run" client "cat > /tmp/sail-listen-privately && bash /tmp/sail-listen-privately $ip $handle" <<< "$LISTEN_PRIVATELY")
   if [[ -z $token ]]; then
-    echo "no token for client"
+    echo "no token for $handle"
     status=1
   else
     on "$run" main "cat > /tmp/sail-direct-terminal.py" <<< "$DIRECT_TERMINAL" || status=1
-    [[ $status == 0 ]] && { on "$run" main "python3 /tmp/sail-direct-terminal.py $ip" <<< "$token" || status=1; }
+    [[ $status == 0 ]] && { on "$run" main "python3 /tmp/sail-direct-terminal.py $ip $workspace" <<< "$token" || status=1; }
   fi
-  on "$run" client "cat > /tmp/sail-close-privately && bash /tmp/sail-close-privately" <<< "$CLOSE_PRIVATELY" || status=1
+  on "$run" client "cat > /tmp/sail-close-privately && bash /tmp/sail-close-privately $handle" <<< "$CLOSE_PRIVATELY" || status=1
   return $status
 }
 
@@ -1485,6 +1492,23 @@ template_holds_nothing() {
   return $status
 }
 
+# Workspace INSTANCE on BOX holds nothing of the fleet's forge token, which BOX's own person
+# stored: the token arrives on stdin as grep's pattern list, never on a command line.
+holds_no_forge_token() {
+  local found
+  found=$(on "$1" "$2" "sudo sh -c 'incus exec $3 -- grep -r -l -F -f - /home/dev /root < /root/.fleet/gh; echo exit \$?'") || return 1
+  echo "$found"
+  [[ $(tail -1 <<< "$found") == "exit 1" ]]
+}
+
+owned_by() {
+  local owner id
+  owner=$(on "$1" "$2" "sudo incus config get $3 user.sail.owner") || return 1
+  id=$(on "$1" "$2" "sudo incus config get $3 user.sail.owner_id") || return 1
+  echo "$3 is $owner's, by id '$id'"
+  [[ $owner == "$4" && -n $id ]]
+}
+
 commits_as() {
   local said
   said=$(on "$1" "$2" "sudo incus exec $3 -- runuser -u dev -- git config --global user.email") || return 1
@@ -1616,6 +1640,20 @@ storage() {
     workspace_on "$run" client
   check "$run" "the workspace commits as client's person" \
     commits_as "$run" client acme-fleet-w client@fleet.example
+  check "$run" "eng, a member, makes her own workspace of acme on client's runner through client's API" \
+    http_token_door "$run" client eng member 201 POST /v1/projects/acme/workspaces '{"name":"eng-own"}' '"owner": "eng"'
+  check "$run" "eng's workspace is labelled hers by her id" owned_by "$run" client acme-eng-own eng
+  check "$run" "eng's workspace commits as eng, with the email client's node was given for her" \
+    commits_as "$run" client acme-eng-own eng@fleet.example
+  check "$run" "eng's workspace holds none of client's forge token" holds_no_forge_token "$run" client acme-eng-own
+  check "$run" "client, the runner's own person and a member, is refused eng's workspace, naming her" \
+    http_token_door "$run" client client member 403 POST /v1/projects/acme/workspaces/eng-own/stop '' "belongs to 'eng'"
+  check "$run" "obs, a viewer, makes no workspace" \
+    http_token_door "$run" client obs viewer 403 POST /v1/projects/acme/workspaces '{"name":"obs-own"}' read_only_credential
+  check "$run" "from main, eng's ticket for her workspace opens a session in it over TCP that echoes a line" \
+    direct_terminal "$run" eng eng-own
+  check "$run" "eng deletes her workspace through the API, which holds nothing, so no force" \
+    http_token_door "$run" client eng member 200 DELETE /v1/projects/acme/workspaces/eng-own '' '"change": "deleted"'
   check "$run" "a second workspace of acme is made and stopped" \
     allowed "$run" client "sudo sail project workspace create acme fleet-v && sudo sail project workspace stop acme fleet-v"
   check "$run" "apply --all leaves the workspaces and the template as they are" \
