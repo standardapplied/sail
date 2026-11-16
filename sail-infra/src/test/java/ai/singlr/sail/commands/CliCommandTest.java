@@ -14,6 +14,7 @@ import ai.singlr.sail.Main;
 import ai.singlr.sail.access.Refusal;
 import ai.singlr.sail.api.ApiException;
 import ai.singlr.sail.api.ErrorCode;
+import ai.singlr.sail.api.SailApiClient;
 import ai.singlr.sail.authority.WriteRefused;
 import ai.singlr.sail.common.Remedied;
 import ai.singlr.sail.common.Remedy;
@@ -26,6 +27,7 @@ import java.io.PrintWriter;
 import java.io.StringWriter;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
+import java.util.Map;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -120,6 +122,16 @@ class CliCommandTest {
         "{\"error\": {\"code\": \"internal\", \"message\": \"boom\", \"field_errors\": []}}",
         captured.toString(StandardCharsets.UTF_8).strip());
     assertEquals("invalid_request", CliCommand.refusalOf(new CliCommand.Refused("no")).code());
+    assertEquals(
+        "forbidden_admin_only",
+        CliCommand.refusalOf(
+                SailApiClient.Refused.of(Map.of("code", "forbidden_admin_only", "message", "No.")))
+            .code(),
+        "an API refusal keeps the API's code");
+    assertEquals(
+        "internal",
+        CliCommand.refusalOf(SailApiClient.Refused.of(Map.of("message", "No."))).code(),
+        "an envelope naming no code is an internal failure");
     var remedied = CliCommand.refusalOf(Remedied.state("Gone.", Remedy.of("Make it.")));
     assertEquals("internal", remedied.code());
     assertEquals("Gone.", remedied.message());
