@@ -137,6 +137,25 @@ import Testing
         session.close()
     }
 
+    /// The reader can take the host's word that an input was applied before the writer has noted
+    /// the input sent: that input is confirmed, and a later replay with no output counts it kept.
+    @Test func anInputNamedAppliedBeforeItIsNotedSentIsNeverCountedLost() async throws {
+        let (host, session, peer, watch) = try await attachedLocally()
+        try peer.send([output("ready", applied: 0), output("ahead", applied: 1)])
+        try await watch.text("ahead")
+        session.send(KeyInput(key: .a, text: "a"))
+        #expect(try await peer.read() == .input(sequence: 1, bytes: Array("a".utf8)))
+        peer.close()
+        let again = try await host.accept()
+        try await again.welcome()
+        #expect(try await again.read() == .attach(session: "work", write: true))
+        let replays = session.replays
+        try again.send([.accepted, .replayBegin(safe: true), .replayEnd])
+        try await watch.until("finished the replay") { session.replays > replays }
+        #expect(session.state.possiblyLostInputs == 0)
+        session.close()
+    }
+
     /// Ruling 5 (the reviewer's s10): an attempt still being admitted when the person detaches is
     /// shut, and never sends an attach after the next one has.
     @Test func anAttemptOvertakenByADetachAndAnAttachSendsNothing() async throws {
