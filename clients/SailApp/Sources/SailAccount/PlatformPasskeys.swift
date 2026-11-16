@@ -64,6 +64,7 @@ final class Sheet: NSObject, @preconcurrency ASAuthorizationControllerDelegate, 
     private static var running: Set<Sheet> = []
     private let window: NSWindow
     private var answer: CheckedContinuation<Result<any Sendable, PasskeyFailure>, Never>?
+    private var timer: Task<Void, Never>?
 
     private init(window: NSWindow) {
         self.window = window
@@ -81,9 +82,9 @@ final class Sheet: NSObject, @preconcurrency ASAuthorizationControllerDelegate, 
             controller.delegate = sheet
             controller.presentationContextProvider = sheet
             controller.performRequests()
-            Task { @MainActor in
-                try? await Task.sleep(for: deadline)
-                guard sheet.answer != nil else { return }
+            sheet.timer = Task { @MainActor in
+                try? await Task.sleep(for: Sheet.deadline)
+                guard !Task.isCancelled, sheet.answer != nil else { return }
                 controller.cancel()
                 sheet.finish(.failure(.failed("macOS did not answer the passkey request within five minutes.")))
             }
@@ -121,6 +122,7 @@ final class Sheet: NSObject, @preconcurrency ASAuthorizationControllerDelegate, 
     private func finish(_ result: Result<any Sendable, PasskeyFailure>) {
         answer?.resume(returning: result)
         answer = nil
+        timer?.cancel()
         Self.running.remove(self)
     }
 }

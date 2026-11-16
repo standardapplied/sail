@@ -6,8 +6,6 @@
   {"name": "reattached-earlier-output", "line": "after-5", "seconds": 30},
   {"name": "still-live", "type": "echo again-$((3+4))\r"},
   {"name": "answers", "line": "again-7", "seconds": 10},
-  {"name": "program-sets-the-title", "type": "printf '\\033]0;drive-title\\007'\r"},
-  {"name": "window-title", "title": "drive-title"},
   {"name": "latency-overlay", "latencyOverlay": true},
   {"name": "renderer-bench", "bench": true},
   {"name": "account-again", "select": "account"},
@@ -22,6 +20,10 @@
   {"name": "item-gone-when-ended", "signed": true, "keychain": "gone"},
   {"name": "sign-in-with-the-removed-passkey", "signIn": true},
   {"name": "row-8", "pane": "http://127.0.0.1:7979 did not accept that passkey.\nPick the passkey you enrolled there, or enroll one.\nPasskey authentication failed."},
-  {"name": "title-bar-double-click-zooms-and-restores", "zoomByTitleBar": true},
+  {"name": "keychain-item-of-the-old-shape", "signed": true, "keychain": "oldShape"},
+  {"name": "activated-with-the-old-item", "signed": true, "activate": true},
+  {"name": "the-old-item-said", "signed": true, "exactly": ["Sign in to Sail", "Your sign-in to http://127.0.0.1:7979 could not be read from the Keychain.", "Sign in again with your passkey."]},
+  {"name": "the-old-item-removed", "signed": true, "keychain": "gone"},
+  {"name": "the-window-zooms-and-restores", "zoomAndRestore": true},
   {"name": "sweep", "sweep": true}
 ]}

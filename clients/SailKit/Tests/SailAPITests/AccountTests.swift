@@ -335,6 +335,16 @@ let held = PasskeySession(sessionToken: "sess_golden14", fde: "uday", expiresAt:
         #expect(refused?.reason == .ended)
     }
 
+    /// A kept sign-in the vault could not read (an item of an older shape) is removed by the vault and
+    /// said as gone, so the person signs in again; the address is the pane's to keep.
+    @Test func aSignInTheVaultCouldNotReadIsSaidAsGone() async throws {
+        let vault = MemoryVault(failing: VaultFailure(status: "the item is not a sign-in Sail kept", unreadable: true))
+        let (account, _) = try makeAccount([], vault: vault)
+        let refused = await refusal { () async throws(AccountRefusal) in try await account.current(at: try! plane()) }
+        #expect(refused?.reason == .unreadableSignIn)
+        #expect(refused?.lines == ["Your sign-in to \(preview) could not be read from the Keychain.", "Sign in again with your passkey."])
+    }
+
     @Test func aVaultThatCannotBeReadSaysItCouldNotRead() async throws {
         let (account, _) = try makeAccount([], vault: MemoryVault(failing: VaultFailure(status: "User interaction is not allowed. (-25308)")))
         let refused = await refusal { () async throws(AccountRefusal) in try await account.current(at: try! plane()) }

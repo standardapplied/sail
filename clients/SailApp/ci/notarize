@@ -1,10 +1,8 @@
 #!/usr/bin/env bash
 # Notarizes a Developer ID signed APP with the App Store Connect key (APPLE_API_KEY_P8_BASE64,
 # APPLE_API_KEY, APPLE_API_ISSUER), staples the ticket, validates it, and zips the stapled app to
-# ZIP. Stapling and validating each ask Apple's ticket service over the network: a call that failed
-# because its connection to that service broke (its output names NSURLErrorDomain and
-# api.apple-cloudkit.com) is tried again, three tries at most, 30 s apart; any other failure, a
-# ticket that does not staple or does not validate, fails at once.
+# ZIP. Stapling and validating go through ci/stapler, which tries a call again only when its
+# connection to Apple's ticket service broke.
 set -euo pipefail
 
 [[ $# -eq 2 ]] || { echo "usage: ci/notarize APP ZIP" >&2; exit 2; }
@@ -28,24 +26,7 @@ if [[ $status != Accepted ]]; then
   xcrun notarytool log "$id" --key "$key" --key-id "$APPLE_API_KEY" --issuer "$APPLE_API_ISSUER" >&2 || true
   exit 1
 fi
-ask_ticket_service() {
-  local verb=$1 attempt said
-  for attempt in 1 2 3; do
-    if said=$(xcrun stapler "$verb" "$app" 2>&1); then
-      echo "$said"
-      return 0
-    fi
-    echo "$said" >&2
-    if ! grep -q NSURLErrorDomain <<< "$said" || ! grep -q api.apple-cloudkit.com <<< "$said"; then
-      echo "ci/notarize: stapler $verb failed for $id" >&2
-      return 1
-    fi
-    (( attempt < 3 )) || { echo "ci/notarize: stapler $verb lost its connection to Apple's ticket service 3 times for $id" >&2; return 1; }
-    echo "ci/notarize: stapler $verb lost its connection to Apple's ticket service for $id (try $attempt of 3); asking again in 30 s" >&2
-    sleep 30
-  done
-}
-ask_ticket_service staple
-ask_ticket_service validate
+"$(dirname "$0")/stapler" staple "$app"
+"$(dirname "$0")/stapler" validate "$app"
 ditto -c -k --keepParent "$app" "$zip"
 echo "ci/notarize: $app notarized ($id) and stapled; $zip"

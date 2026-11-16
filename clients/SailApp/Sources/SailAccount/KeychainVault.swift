@@ -26,10 +26,16 @@ public struct KeychainVault: TokenVault {
         let status = SecItemCopyMatching(query as CFDictionary, &found)
         if status == errSecItemNotFound { return nil }
         guard status == errSecSuccess, let data = found as? Data else { throw Self.failure(status) }
-        guard let session = try? JSONDecoder().decode(PasskeySession.self, from: data) else {
-            throw VaultFailure(status: "the item for \(controlPlane) is not a sign-in Sail kept")
+        guard let session = Self.session(in: data) else {
+            try? forget(controlPlane)
+            throw VaultFailure(status: "the item for \(controlPlane) is not a sign-in this Sail kept", unreadable: true)
         }
         return session
+    }
+
+    /// The session `data` holds, nil when it is not one this build wrote.
+    static func session(in data: Data) -> PasskeySession? {
+        try? JSONDecoder().decode(PasskeySession.self, from: data)
     }
 
     public func keep(_ session: PasskeySession, for controlPlane: ControlPlane) throws(VaultFailure) {

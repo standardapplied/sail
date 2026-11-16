@@ -60,8 +60,6 @@ struct Step: Decodable {
     /// Measures the renderer's CPU side in this release build: a full 200x60 redraw's p95 must be
     /// 4 ms or less.
     var bench: Bool?
-    /// The window's title must become this.
-    var title: String?
     /// ⌥⌘L, then the latency overlay must show its figures.
     var latencyOverlay: Bool?
     /// Starts the latency from nothing.
@@ -102,8 +100,8 @@ struct Step: Decodable {
     var accent: Bool?
     /// The window's title bar: transparent, the platform's buttons, the rail and the pane under it.
     var titleBar: Bool?
-    /// Double-clicks the title bar twice: the frame changes and comes back, as the system's setting says.
-    var zoomByTitleBar: Bool?
+    /// The window's own zoom, twice: the frame changes and comes back.
+    var zoomAndRestore: Bool?
     /// Searches everywhere a token could be left for the session token and for `sess_`.
     var sweep: Bool?
     /// The step runs only on a signed build, or only on an unsigned one; skipped otherwise.

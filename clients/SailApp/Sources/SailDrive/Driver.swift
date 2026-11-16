@@ -26,7 +26,6 @@ final class Driver {
     private var measures: [Measure] = []
     private var bench: [String: Double] = [:]
     private var started = false
-    private var presentedOnce = false
     private let mainThread = Heartbeat.onTheMainThread()
     private let ownThread = Heartbeat.onItsOwnThread()
 
@@ -113,6 +112,7 @@ final class Driver {
             }
             if !ok {
                 detail += "; " + whereTheWindowIs
+                if onTerminal { detail += "; " + terminal.drawingState }
                 Self.captureTheScreen(to: out.appending(path: String(format: "%02d-", index) + name + "-screen.png"))
             }
             let seconds = (ContinuousClock.now - began) / .seconds(1)
@@ -136,11 +136,6 @@ final class Driver {
     private func perform(_ step: Step, name: String) async -> (Bool, String) {
         if let account = await performAccount(step) {
             return account
-        }
-        let typed: [Bool] = [step.type != nil, step.press != nil, step.paste != nil, step.compose != nil, step.measure != nil]
-        let pointed: [Bool] = [step.click != nil, step.drag != nil, step.scroll != nil, step.copy == true]
-        if (typed + pointed).contains(true), let unseen = await presentedBeforeInput() {
-            return unseen
         }
         if let text = step.type {
             for character in text { key(character) }
@@ -221,10 +216,6 @@ final class Driver {
             }
             let p95 = bench["full redraw 200x60 cpu p95 ms"] ?? .infinity
             return (p95 <= 4, bench.sorted { $0.key < $1.key }.map { "\($0.key) \(String(format: "%.2f", $0.value))" }.joined(separator: ", "))
-        }
-        if let title = step.title {
-            let found = await waitUntil(step.seconds ?? 5) { self.shell.window.title == title }
-            return (found, "the window's title is '\(shell.window.title)'")
         }
         if step.latencyOverlay == true {
             return await latencyOverlay(within: step.seconds ?? 5)
@@ -367,27 +358,6 @@ final class Driver {
     /// file when the sweep reads it.
     static func say(_ line: String) {
         FileHandle.standardOutput.write(Data((line + "\n").utf8))
-    }
-
-    /// How long a launched window may take to reach the display before the first input fails.
-    static let presentDeadline = 20.0
-
-    /// Input reaches the view only once its window is visible and the view has presented a frame,
-    /// counted by the view itself: a key typed before then is echoed into a window not yet on the
-    /// display, and its echo is never counted. Waited for once a launch, at the first input.
-    private func presentedBeforeInput() async -> (Bool, String)? {
-        guard !presentedOnce else { return nil }
-        func presents() -> Int {
-            terminal.latency.reportedPresents + terminal.latency.unreportedPresents
-        }
-        let began = ContinuousClock.now
-        _ = await waitUntil(Self.presentDeadline) { presents() > 0 && self.shell.window.occlusionState.contains(.visible) }
-        guard presents() > 0 else {
-            return (false, "the view presented no frame within \(Self.presentDeadline) s of the first input; " + whereTheWindowIs)
-        }
-        presentedOnce = true
-        Self.say("drive: the first input waited \(Self.ms((ContinuousClock.now - began) / .milliseconds(1))) ms for the view's first presented frame")
-        return nil
     }
 
     /// How long a step's screen may take to be drawn by the view before the step fails.

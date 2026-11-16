@@ -8,8 +8,9 @@ import SailTerminalView
 /// the control plane, until when, and Sign Out. A refusal shows under the buttons, line by line:
 /// the sentence, what to do, the server's words, the system's. The field being edited takes a ring
 /// in the accent, its selection the selection fill and its caret the accent (set on the field
-/// editor once the field has set it up, as it resets them), and Return does what that field is for:
-/// Enroll in the ticket field, Sign In otherwise.
+/// editor once the field has set it up, as it resets them). Return in a field sends that field's
+/// own action, Sign In from the address and Enroll from the ticket: no button is the window's default,
+/// which AppKit would paint in the system accent.
 @MainActor
 public final class AccountPane: NSView, NSMenuItemValidation {
     static let addressKey = "controlPlane.address"
@@ -131,7 +132,7 @@ public final class AccountPane: NSView, NSMenuItemValidation {
         do {
             try await act()
         } catch {
-            if error.reason == .ended { show(nil) }
+            if [.ended, .unreadableSignIn].contains(error.reason) { show(nil) }
             say(error.lines)
         }
     }
@@ -167,8 +168,7 @@ public final class AccountPane: NSView, NSMenuItemValidation {
         focus()
     }
 
-    /// The field being edited ringed in the accent, its editor's selection and caret the look's, and
-    /// Return given to its button.
+    /// The field being edited ringed in the accent, its editor's selection and caret the look's.
     private func focus() {
         if let editor = window?.firstResponder as? NSTextView, editor.isFieldEditor {
             editor.selectedTextAttributes = [.backgroundColor: NSColor(look.fillSelected), .foregroundColor: NSColor(look.text)]
@@ -178,9 +178,6 @@ public final class AccountPane: NSView, NSMenuItemValidation {
             field.layer?.borderWidth = field.currentEditor() == nil ? 0 : 2
             field.layer?.borderColor = NSColor(look.accent).cgColor
         }
-        let enrolling = ticket.currentEditor() != nil
-        enroll.keyEquivalent = enrolling ? "\r" : ""
-        signIn.keyEquivalent = enrolling ? "" : "\r"
     }
 
     private func paint() {
@@ -229,7 +226,10 @@ public final class AccountPane: NSView, NSMenuItemValidation {
         for field in [address, ticket] {
             field.focusRingType = .none
             field.wantsLayer = true
+            field.target = self
         }
+        address.action = #selector(signInWithPasskey(_:))
+        ticket.action = #selector(enrollWithTicket(_:))
         enroll.target = self
         enroll.action = #selector(enrollWithTicket(_:))
         signOut.target = self

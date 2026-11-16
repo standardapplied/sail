@@ -69,8 +69,8 @@ extension Driver {
         if step.titleBar == true {
             return titleBar()
         }
-        if step.zoomByTitleBar == true {
-            return await zoomByTitleBar()
+        if step.zoomAndRestore == true {
+            return await zoomAndRestore()
         }
         if step.sweep == true {
             return sweep()
@@ -109,9 +109,18 @@ extension Driver {
         return (process.terminationStatus == 0, "sail \(shown) … exited \(process.terminationStatus): \(said.suffix(300))")
     }
 
-    /// Scenarios 3, 16 and S2: the item as item 3 says, holding a session 30 days long, or gone.
+    /// Scenarios 3, 16 and S2: the item as item 3 says, holding a session 30 days long, or gone; or
+    /// an item of the earlier shape put in its place, as a build before this one kept it.
     private func keychain(_ wanted: String) -> (Bool, String) {
         guard let plane = try? ControlPlane(address: shell.account.address.stringValue) else { return (false, "the address names no control plane") }
+        if wanted == "oldShape" {
+            var item = KeychainVault.item(plane)
+            item[kSecValueData as String] = Data(#"{"token":"old-shape-token","fde":"uday","expiresAt":815000000}"#.utf8)
+            item[kSecAttrAccessible as String] = kSecAttrAccessibleWhenUnlockedThisDeviceOnly
+            _ = SecItemDelete(KeychainVault.item(plane) as CFDictionary)
+            let added = SecItemAdd(item as CFDictionary, nil)
+            return (added == errSecSuccess, "an item of the earlier shape was kept: \(added)")
+        }
         var query = KeychainVault.item(plane)
         query[kSecReturnAttributes as String] = true
         query[kSecMatchLimit as String] = kSecMatchLimitOne
@@ -201,78 +210,19 @@ extension Driver {
         )
     }
 
-    /// A double-click in the title bar does what the person's setting says (System Settings, Desktop
-    /// & Dock, "Double-click a window's title bar to"): zoom (or fill) changes the frame and a second
-    /// double-click gives it back, minimize puts the window in the Dock, nothing does nothing. The
-    /// clicks go first as the mouse's own, at the system's event tap; where the runner drops those
-    /// (an app not trusted for input), as a double-click handed to the title bar view itself, with
-    /// its mouse-up queued for the title bar's tracking. The line says which way it went. On the
-    /// runner neither reaches it (the frame stays), so there the step proves the window zooms and
-    /// comes back through its own zoom, and says the double-click is left for a person.
-    private func zoomByTitleBar() async -> (Bool, String) {
+    /// The window's own zoom (what its zoom button and, by default, a title bar double-click do)
+    /// changes the frame, and a second gives it back. The double-click itself is the owner's to see:
+    /// made input does not reach a hosted runner's title bar.
+    private func zoomAndRestore() async -> (Bool, String) {
         let window = shell.window
-        let setting = UserDefaults.standard.persistentDomain(forName: UserDefaults.globalDomain)?["AppleActionOnDoubleClick"] as? String
         window.setFrame(NSRect(x: 80, y: 80, width: 800, height: 640), display: true)
         let before = window.frame
-        var way = "the mouse"
-        func byTheMouse() {
-            let top = NSScreen.screens.first?.frame.maxY ?? 0
-            let point = CGPoint(x: window.frame.midX, y: top - (window.frame.maxY - 12))
-            for (type, clicks) in [(CGEventType.leftMouseDown, 1), (.leftMouseUp, 1), (.leftMouseDown, 2), (.leftMouseUp, 2)] {
-                let event = CGEvent(mouseEventSource: nil, mouseType: type, mouseCursorPosition: point, mouseButton: .left)
-                event?.setIntegerValueField(.mouseEventClickState, value: Int64(clicks))
-                event?.post(tap: .cghidEventTap)
-            }
-        }
-        func toTheTitleBar() {
-            guard let bar = window.standardWindowButton(.closeButton)?.superview else { return }
-            let point = NSPoint(x: window.frame.width / 2, y: window.frame.height - 12)
-            func event(_ type: NSEvent.EventType) -> NSEvent? {
-                NSEvent.mouseEvent(
-                    with: type, location: point, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
-                    windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 2, pressure: 1
-                )
-            }
-            guard let down = event(.leftMouseDown), let up = event(.leftMouseUp) else { return }
-            NSApp.postEvent(up, atStart: true)
-            bar.mouseDown(with: down)
-        }
-        func doubleClick(_ changed: @escaping @MainActor () -> Bool) async -> Bool {
-            if way == "the mouse" {
-                byTheMouse()
-                if await waitUntil(3, changed) { return true }
-                way = "the title bar view"
-            }
-            toTheTitleBar()
-            return await waitUntil(5, changed)
-        }
-        let said = "the setting is \(setting ?? "unset, which zooms")"
-        switch setting ?? "" {
-        case "None":
-            let moved = await doubleClick { window.frame != before }
-            return (!moved, "\(said); the frame \(moved ? "changed" : "stayed")")
-        case "Minimize":
-            let docked = await doubleClick { window.isMiniaturized }
-            window.deminiaturize(nil)
-            return (docked, "\(said); the window went \(docked ? "" : "not ")to the Dock, by \(way)")
-        default:
-            if await doubleClick({ window.frame != before && !window.inLiveResize }) {
-                let after = window.frame
-                let back = await doubleClick { window.frame == before }
-                return (back, "\(said); by \(way) the frame went from \(before) to \(after) and \(back ? "back" : "stayed at \(window.frame)")")
-            }
-            window.zoom(nil)
-            let zoomed = await waitUntil(5) { window.frame != before }
-            let after = window.frame
-            window.zoom(nil)
-            let back = await waitUntil(5) { window.frame == before }
-            return (
-                zoomed && back,
-                "\(said); a double-click made here reached no title bar (neither as the mouse's nor handed to the title bar view: "
-                    + "the frame stayed \(before)), so the double-click is the owner's to see; the window's own zoom took it to \(after) and "
-                    + (back ? "back" : "left it at \(window.frame)")
-            )
-        }
+        window.zoom(nil)
+        let zoomed = await waitUntil(5) { window.frame != before }
+        let after = window.frame
+        window.zoom(nil)
+        let back = await waitUntil(5) { window.frame == before }
+        return (zoomed && back, "the frame went from \(before) to \(after) and \(back ? "back" : "stayed at \(window.frame)")")
     }
 
     /// The sRGB colour at byte `offset` of an RGBA bitmap, as `0xRRGGBB`.

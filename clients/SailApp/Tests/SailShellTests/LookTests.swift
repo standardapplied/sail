@@ -56,6 +56,59 @@ import Testing
         }
     }
 
+    @Test func noSourceOfTheAppNamesTheSystemAccent() throws {
+        let sources = URL(filePath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+            .appending(path: "Sources")
+        var read = 0
+        for target in ["SailLook", "SailShell", "SailAccount", "Sail", "SailTerminalView", "SailRenderer"] {
+            let directory = sources.appending(path: target)
+            for name in try FileManager.default.contentsOfDirectory(atPath: directory.path) where name.hasSuffix(".swift") {
+                let text = try String(contentsOf: directory.appending(path: name), encoding: .utf8)
+                read += 1
+                for word in ["controlAccentColor", "accentColor", "AppleAccentColor", "selectedContentBackgroundColor", "keyboardFocusIndicatorColor"] {
+                    #expect(!text.contains(word), "\(target)/\(name) names \(word)")
+                }
+            }
+        }
+        #expect(read >= 12)
+    }
+
+    @Test func theTitleFontIsThePinnedNewsreaderMedium() throws {
+        let fonts = Self.fonts
+        let pins = [
+            "Newsreader16pt-Medium.ttf": "ee2f66ee4c6c313acf211c952211f8c6c0c0d9fa6a17cd0ec0ceba13418b1aed",
+            "Newsreader-OFL.txt": "fdfad38143ec470553cae82a1e45320bdd1b9ec70415d37bd0171051d8a4ded8",
+        ]
+        for (file, pin) in pins {
+            let digest = SHA256.hash(data: try Data(contentsOf: fonts.appending(path: file)))
+            #expect(digest.map { String(format: "%02x", $0) }.joined() == pin, "\(file) is not the pinned Newsreader file")
+        }
+        let title = try TitleFont(directory: fonts).font(.title2)
+        #expect(CTFontGetSize(title) == 22)
+    }
+
+    /// AppKit draws a push button answering Return as the window's default, in the system accent:
+    /// no button of the window answers Return unless it draws itself in the Sail accent.
+    @MainActor @Test(arguments: [("dark", Look.dark), ("light", Look.light)])
+    func noButtonIsTheSystemDrawnDefault(_ name: String, _ look: Look) throws {
+        let folder = FileManager.default.temporaryDirectory.appending(path: "sail-default-\(UUID().uuidString.prefix(8))")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let passkey = SoftwarePasskey(file: folder.appending(path: "passkey.json"))
+        let shell = try ShellApp(fonts: Self.fonts, helper: nil, look: look) { _ in passkey }
+        func buttons(_ view: NSView) -> [NSButton] {
+            ((view as? NSButton).map { [$0] } ?? []) + view.subviews.flatMap(buttons)
+        }
+        var walked = 0
+        for pane in [shell.account, shell.thisMac] as [NSView] {
+            for button in buttons(pane) {
+                walked += 1
+                #expect(button.keyEquivalent != "\r" || button is AccentButton, "\(name): \(button.title) is the system-drawn default")
+            }
+        }
+        #expect(walked >= 4)
+    }
+
     /// A: the title bar is transparent over a full-size content view, the platform's buttons in
     /// place; under it the rail is drawn in `chrome` and the strip beside it in the pane's surface
     /// (the layers' own colours; the drive checks the pixels of the running window).
@@ -87,8 +140,8 @@ import Testing
 
     /// Focus and selection are the look's accent, never the system's: a field being edited is
     /// ringed in the accent (the system's ring is off), text selected in it is on the selection fill,
-    /// and its caret is the accent; Return goes to Enroll in the ticket field and to Sign In in the
-    /// address field.
+    /// and its caret is the accent; Return in the ticket field enrolls and in the address field signs
+    /// in, through the field's own action, with no button answering Return.
     @MainActor @Test(arguments: [("dark", Look.dark), ("light", Look.light)])
     func focusSelectionAndReturnAreTheLooks(_ name: String, _ look: Look) throws {
         let folder = FileManager.default.temporaryDirectory.appending(path: "sail-focus-\(UUID().uuidString.prefix(8))")
@@ -100,8 +153,10 @@ import Testing
         shell.window.orderFront(nil)
         defer { shell.window.orderOut(nil) }
         let pane = shell.account
-        let cases: [(NSTextField, NSButton, NSButton)] = [(pane.ticket, pane.enroll, pane.signIn), (pane.address, pane.signIn, pane.enroll)]
-        for (field, button, other) in cases {
+        let cases: [(NSTextField, Selector)] = [
+            (pane.ticket, #selector(AccountPane.enrollWithTicket(_:))), (pane.address, #selector(AccountPane.signInWithPasskey(_:))),
+        ]
+        for (field, action) in cases {
             #expect(shell.window.makeFirstResponder(field), "\(name): the field took no focus")
             let editor = try #require(field.currentEditor() as? NSTextView)
             #expect(field.focusRingType == .none)
@@ -110,8 +165,10 @@ import Testing
             #expect(ring.borderColor == NSColor(look.accent).cgColor, "\(name): the ring is not the accent")
             #expect(editor.selectedTextAttributes[.backgroundColor] as? NSColor == NSColor(look.fillSelected))
             #expect(editor.insertionPointColor == NSColor(look.accent))
-            #expect(button.keyEquivalent == "\r", "\(name): Return does not go to \(button.title)")
-            #expect(other.keyEquivalent.isEmpty, "\(name): Return also goes to \(other.title)")
+            #expect(field.action == action, "\(name): Return in the field does not send \(action)")
+            #expect(field.target === pane)
+            #expect(pane.enroll.keyEquivalent.isEmpty, "\(name): Enroll answers Return")
+            #expect(pane.signIn.keyEquivalent.isEmpty, "\(name): Sign In answers Return")
         }
     }
 

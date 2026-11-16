@@ -20,6 +20,7 @@ public struct AccountRefusal: Error, Equatable, Sendable {
         case cancelled(signingIn: Bool)
         case keychain(String, String)
         case ended
+        case unreadableSignIn
         case redirected
         case refused
         case unreadable
@@ -149,6 +150,8 @@ public struct AccountRefusal: Error, Equatable, Sendable {
             return ("Sail could not \(verb) your sign-in in the Keychain: \(status).", nil)
         case .ended:
             return ("Your sign-in to \(address) has ended.", "Sign in again with your passkey.")
+        case .unreadableSignIn:
+            return ("Your sign-in to \(address) could not be read from the Keychain.", "Sign in again with your passkey.")
         case .refused:
             return (server?.message ?? "\(address) refused.", server?.action)
         case .unreadable:

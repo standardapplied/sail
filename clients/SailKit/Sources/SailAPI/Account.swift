@@ -39,14 +39,17 @@ public protocol TokenVault: Sendable {
     func forget(_ controlPlane: ControlPlane) throws(VaultFailure)
 }
 
-/// The vault refused: its status in words, and what to do when the vault knows.
+/// The vault refused: its status in words, and what to do when the vault knows. `unreadable` is a
+/// session it held and could not read, which it has removed.
 public struct VaultFailure: Error, Equatable, Sendable {
     public let status: String
     public let remedy: String?
+    public let unreadable: Bool
 
-    public init(status: String, remedy: String? = nil) {
+    public init(status: String, remedy: String? = nil, unreadable: Bool = false) {
         self.status = status
         self.remedy = remedy
+        self.unreadable = unreadable
     }
 }
 
@@ -122,10 +125,17 @@ public struct Account: Sendable {
         return try await standing(session, at: plane, on: transport)
     }
 
-    /// Who this Mac is signed in as, nil when it holds no session; a session the server ended is
-    /// forgotten and said.
+    /// Who this Mac is signed in as, nil when it holds no session; a session the server ended, or
+    /// one the vault could not read, is gone and said.
     public func current(at plane: ControlPlane) async throws(AccountRefusal) -> SignedIn? {
-        guard let stored = try vaulted("read", { () throws(VaultFailure) in try vault.session(for: plane) }) else { return nil }
+        let held: PasskeySession?
+        do {
+            held = try vault.session(for: plane)
+        } catch {
+            guard error.unreadable else { throw AccountRefusal(.keychain("read", error.status), remedy: error.remedy) }
+            throw AccountRefusal(.unreadableSignIn, at: plane)
+        }
+        guard let stored = held else { return nil }
         return try await standing(stored, at: plane, on: connect(plane))
     }
 

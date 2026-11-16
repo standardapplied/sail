@@ -371,7 +371,7 @@ jobs:
           (( days >= 30 )) || { echo "the profile has fewer than 30 days left: make a new one" >&2; exit 1; }
           codesign -d --verbose=2 "$app" 2>&1 | grep -q '^Authority=Developer ID Application'
           codesign -d --verbose=2 "$app/Contents/Helpers/sail" 2>&1 | grep -q '^Authority=Developer ID Application'
-          xcrun stapler validate "$app"
+          ci/stapler validate "$app"
           spctl -a -vv -t exec "$app" 2>&1 | tee /dev/stderr | grep -q 'source=Notarized Developer ID'
 
       # Reported, failing nothing: whether the association file and Apple's CDN copy name the app.
@@ -441,7 +441,7 @@ jobs:
           diff <(cd "$RUNNER_TEMP/app/Sail.app" && find . -type l | sort) <(cd "$app" && find . -type l | sort)
           codesign --verify --deep --strict --verbose=2 "$app"
           if [[ $SIGNING == on ]]; then
-            xcrun stapler validate "$app"
+            ci/stapler validate "$app"
             spctl -a -vv -t exec "$app" 2>&1 | tee /dev/stderr | grep -q 'source=Notarized Developer ID'
           fi
           echo "One unzip of the download gives Sail.app, whole."
