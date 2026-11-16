@@ -111,6 +111,32 @@ class RunReportsTest {
    * Round 4, item 1: a limit holds nothing, and its sentence is true for its lane: a build or a fix
    * keeps what it committed on its branch, and a reviewer, which commits nothing, says no branch.
    */
+  /**
+   * Minor F-m4 of the final look: a report the idle sweep reads late, for a done spec, says to
+   * reopen it with the restart that does, never to build it again.
+   */
+  @Test
+  void aDoneSpecsLateReportSaysToReopenItNotToBuildItAgain() {
+    var run = run("auth", null, new RunStore.RunLogin("work", "api-key"));
+
+    assertTrue(
+        Acting.system(
+            () ->
+                reporting(new LoginOutcome.Refused())
+                    .finishDone(
+                        runs,
+                        run,
+                        report -> runs.finish(run.id(), "running", "stopped", 1, report))));
+
+    assertEquals(
+        List.of(
+            "auth: Claude Code refused eng's login 'work' (API key), so its run stopped. Create an"
+                + " API key in the Claude Console, then sail agent login claude-code --kind api-key"
+                + " --name work. Its spec is done; to work on it again, reopen it with sail spec"
+                + " dispatch -p acme --spec auth --restart."),
+        told);
+  }
+
   @Test
   void aLimitSaysTheBranchOnlyForALaneThatCommitsAndHoldsNoLane() {
     var token = new RunStore.RunLogin("default", "token");

@@ -9,7 +9,10 @@ import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
+import ai.singlr.sail.Sail;
+import ai.singlr.sail.commands.SailCommandLine;
 import ai.singlr.sail.common.Remedied;
+import java.util.List;
 import org.junit.jupiter.api.Test;
 
 class ContainerStateGuardTest {
@@ -38,6 +41,44 @@ class ContainerStateGuardTest {
             () -> ContainerStateGuard.requireRunning(new ContainerState.Frozen(), "demo"));
     assertEquals(
         "Project 'demo' is frozen. Resume it with: sail project start demo", ex.getMessage());
+  }
+
+  /**
+   * The proof's medium 2: a spec's workspace stopped or frozen names the workspace door that starts
+   * it, which parses as Sail's own command as printed; the project's name door, which refuses a
+   * workspace, is never named for one.
+   */
+  @Test
+  void aStoppedOrFrozenWorkspaceNamesTheWorkspaceStartAsPrinted() {
+    var place = RunPlace.of("acme", "u2");
+    for (var state : List.of(new ContainerState.Stopped(), new ContainerState.Frozen())) {
+      var ex =
+          assertThrows(
+              IllegalStateException.class, () -> ContainerStateGuard.requireRunning(state, place));
+      var word = state instanceof ContainerState.Stopped ? "stopped" : "frozen";
+      assertEquals(
+          "Workspace u2 of acme is "
+              + word
+              + ". Start it with: sail project workspace start acme u2",
+          ex.getMessage());
+    }
+    var leaf =
+        SailCommandLine.of(new Sail()).parseArgs("project", "workspace", "start", "acme", "u2");
+    while (leaf.hasSubcommand()) {
+      leaf = leaf.subcommand();
+    }
+    assertEquals("sail project workspace start", leaf.commandSpec().qualifiedName(" "));
+    assertEquals(
+        List.of("acme", "u2"),
+        leaf.matchedPositionals().stream()
+            .map(p -> String.valueOf((Object) p.getValue()))
+            .toList());
+    assertThrows(
+        IllegalStateException.class,
+        () ->
+            ContainerStateGuard.requireRunning(
+                new ContainerState.Stopped(), RunPlace.of("acme", null)),
+        "a project's own container keeps its own door");
   }
 
   @Test

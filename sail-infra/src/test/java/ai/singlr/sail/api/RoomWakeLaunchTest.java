@@ -166,7 +166,7 @@ class RoomWakeLaunchTest {
             new WatcherSpawner(shell, (command, logPath) -> 4242L),
             workspaces != null
                 ? workspaces
-                : TestWorkspaces.ready(TestProjects.reading(yaml), "acme"),
+                : TestWorkspaces.ready(TestProjects.reading(yaml), copy -> {}, "acme"),
             launcher,
             DispatchOperations.Listener.NONE,
             SessionYield.NONE)
@@ -1007,7 +1007,24 @@ class RoomWakeLaunchTest {
 
   @Test
   void aRecordedSessionOfTheSameAgentIsResumed() throws Exception {
-    var ops = operations(liveAgentShell());
+    var definition = tempDir.resolve("held-" + System.nanoTime() + ".yaml");
+    Files.writeString(definition, YAML);
+    var ops =
+        operations(
+            liveAgentShell(),
+            YAML,
+            true,
+            command -> {
+              launched.set(command);
+              return 0;
+            },
+            TestWorkspaces.over(
+                TestWorkspaces.incus(TestProjects.reading(definition), "acme")
+                    .onOk(
+                        "incus list ^acme-auth$",
+                        "["
+                            + TestWorkspaces.specWorkspace("acme", "auth", "Running", HANDLE)
+                            + "]")));
     seedSpec("auth");
     var prior = DateTimeUtils.newId().toString();
     Acting.system(
@@ -1036,6 +1053,60 @@ class RoomWakeLaunchTest {
     assertFalse(
         runStore.findById(runId).orElseThrow().task().contains("Build the OAuth flow."),
         "a resumed conversation already carries the spec context");
+  }
+
+  /**
+   * Rule G: a session recorded in a workspace that is gone, or that ended before the spec's
+   * workspace now there was made, went with the workspace it was in, so the wake starts fresh.
+   */
+  @Test
+  void aSessionWhoseWorkspaceWasDeletedIsNeverResumed() throws Exception {
+    var definition = tempDir.resolve("held-" + System.nanoTime() + ".yaml");
+    Files.writeString(definition, YAML);
+    var remade =
+        TestWorkspaces.specWorkspace("acme", "auth", "Running", HANDLE)
+            .replace(
+                "\"user.sail.ready\"",
+                "\"user.sail.created_ms\": \""
+                    + DateTimeUtils.toMillis(DateTimeUtils.now().plusSeconds(60))
+                    + "\", \"user.sail.ready\"");
+    for (var listed : List.of("[]", "[" + remade + "]")) {
+      var ops =
+          operations(
+              liveAgentShell(),
+              YAML,
+              true,
+              command -> {
+                launched.set(command);
+                return 0;
+              },
+              TestWorkspaces.over(
+                  TestWorkspaces.incus(TestProjects.reading(definition), "acme")
+                      .onOk("incus list ^acme-auth$", listed)));
+      seedSpec("auth");
+      var prior = DateTimeUtils.newId().toString();
+      Acting.system(
+          () ->
+              runStore.create(
+                  prior,
+                  "acme",
+                  "auth",
+                  HANDLE,
+                  "build",
+                  "claude-code",
+                  null,
+                  "t",
+                  null,
+                  null,
+                  null,
+                  "sail-agent-" + prior));
+      Acting.system(() -> runStore.recordSession(prior, "sess-42", "startup", null));
+      Acting.system(() -> TestRuns.complete(runStore, prior, "completed", 0));
+
+      ops.startRoomRun("acme", "auth", HANDLE);
+
+      assertFalse(String.join(" ", launched.get()).contains("--resume"), listed);
+    }
   }
 
   @Test

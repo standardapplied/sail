@@ -76,7 +76,10 @@ Usage:
                                 each in its own workspace of acme, committing as eng);
                                 the pull request, the room and every box's status are checked,
                                 main's measures of the spec count the reviews and the build runs listed for it,
-                                no secret reaches a log, and the pull request is closed
+                                the second spec's workspace, left awaiting merge, runs until 10 minutes after
+                                its review and is stopped then, and once eng marks that spec done it and its
+                                dataset go, watched in the background while the row goes on and read at its
+                                end, no secret reaches a log, and the pull request is closed
   ci/fleet storage RUN           client, a dir box running acme, adds a ZFS pool in a 20 GiB file: Incus has
                                 it beside devpool, acme and the base profile stay on devpool, a copy of a
                                 container's snapshot on it is a clone (zfs get origin), and the ZFS cache
@@ -1886,6 +1889,16 @@ opened_a_pull_request() {
   [[ -n $listed ]]
 }
 
+# Every commit of spec $1's pull request is authored as $2: what its workspace committed as, read
+# on the forge, so the check holds whether or not the idle sweep has stopped the workspace since.
+pull_request_commits_as() {
+  local emails
+  emails=$(GH_TOKEN=$(secret fleet-github-token) gh pr list --repo "$LOOP_REPO" --head "agent/$1" \
+    --json commits --jq '[.[0].commits[]?.authors[]?.email] | unique | join(" ")')
+  echo "agent/$1 commits authored as: ${emails:-nothing}"
+  [[ $emails == "$2" ]]
+}
+
 asked_its_question() {
   said=$(on "$1" "$2" "sudo sail spec comments $3 --no-sync")
   grep -q "ended on its question" <<< "$said"
@@ -2010,6 +2023,101 @@ sys.exit(0 if own and mine and overlapped else 1)
 ' "$3" "$4" "$listed" "$runs"
 }
 
+# The state of spec $3's workspace of acme on box $2 as `workspace list` gives it, or "absent".
+workspace_state() {
+  local listed
+  listed=$(on "$1" "$2" "sudo sail project workspace list acme --json") || return 1
+  python3 -I -c '
+import json, sys
+rows = [r for r in json.loads(sys.argv[2])["workspaces"] if r.get("spec") == sys.argv[1]]
+print(rows[0]["state"] if rows else "absent")
+' "$3" "$listed"
+}
+
+workspace_and_dataset_gone() {
+  local state listed
+  state=$(workspace_state "$1" "$2" "$3") || return 1
+  echo "$(date -u +%H:%M:%S) $3: $state"
+  [[ $state == absent ]] || return 1
+  listed=$(on "$1" "$2" "sudo zfs list -H -o name tank/containers/acme-$3 2>&1 || true") || return 1
+  echo "$listed"
+  [[ $listed == *"dataset does not exist"* ]]
+}
+
+workspace_is_stopped() {
+  local state
+  state=$(workspace_state "$1" "$2" "$3") || return 1
+  echo "$(date -u +%H:%M:%S) $3: $state"
+  [[ $state == stopped ]]
+}
+
+# When spec $3's last run on box $2 ended, in epoch seconds.
+last_run_ended() {
+  local runs
+  runs=$(on "$1" "$2" "sudo sail agent sessions acme --json") || return 1
+  python3 -I -c '
+import json, sys
+from datetime import datetime
+ends = [datetime.fromisoformat(r["completed_at"].replace("Z", "+00:00")).timestamp()
+        for r in json.loads(sys.argv[2]).get("runs", [])
+        if r.get("spec_id") == sys.argv[1] and r.get("completed_at")]
+print(int(max(ends)) if ends else "")
+' "$3" "$runs"
+}
+
+# Spec $3's workspace is still running a minute before its 10-minute idle period ends, and
+# stopped within 3 minutes after it: a stop at minute 1 fails this, and it waits no longer than the
+# period itself and the sweep's minutes after it.
+workspace_stops() {
+  local run=$1 box=$2 spec=$3 ended before
+  ended=$(last_run_ended "$run" "$box" "$spec") || return 1
+  [[ -n $ended ]] || { echo "no run of $spec ended"; return 1; }
+  before=$((ended + 540 - $(date +%s)))
+  if ((before < 0)); then
+    echo "checked $((-before)) s past minute 9 of the idle period: too late to see it still running"
+    return 1
+  fi
+  sleep "$before"
+  workspace_state "$run" "$box" "$spec" | grep -qx running || { echo "stopped before its idle period ended"; return 1; }
+  until_true $((ended + 780 - $(date +%s))) 15 workspace_is_stopped "$run" "$box" "$spec" && return 0
+  echo "not stopped 3 min after its idle period ended"
+  return 1
+}
+
+# Run in the background from spec $3's dispatch: once its review takes it to awaiting_merge, its
+# workspace stops when idle (workspace_stops), its idle period running under the rest of the
+# loop; once it has stopped, and the loop has listed the workspaces ($4/listed), eng marks the
+# spec done and the workspace and its dataset go within the sweep's next passes. Each verdict is
+# written beside its output under $4, for polled to read at the row's end.
+workspace_stops_then_goes() {
+  local run=$1 box=$2 spec=$3 dir=$4 verdict=0
+  { reaches_status "$run" "$box" "$spec" awaiting_merge 30 &&
+    workspace_stops "$run" "$box" "$spec"; } > "$dir/stops.poll" 2>&1 || verdict=$?
+  echo "$verdict" > "$dir/stops.verdict"
+  if ((verdict != 0)); then
+    echo "not stopped, so not marked done" > "$dir/goes.poll"
+    echo 1 > "$dir/goes.verdict"
+    return
+  fi
+  verdict=0
+  { until_true 1200 5 test -e "$dir/listed" &&
+    on "$run" "$box" "sudo sail spec update $spec --status done" &&
+    until_true 180 10 workspace_and_dataset_gone "$run" "$box" "$spec"; } > "$dir/goes.poll" 2>&1 || verdict=$?
+  echo "$verdict" > "$dir/goes.verdict"
+}
+
+# What the background check whose files start $1 said, once its verdict is written, waiting no
+# longer than $2 seconds for it: past that the check fails.
+polled() {
+  local deadline=$((SECONDS + $2))
+  until [[ -s $1.verdict ]]; do
+    ((SECONDS < deadline)) || { echo "no verdict within $2 s"; return 1; }
+    sleep 5
+  done
+  cat "$1.poll"
+  return "$(cat "$1.verdict")"
+}
+
 loop_config() {
   check "$1" "main gives acme the nocaptcha repo, JDK 21 and Maven" \
     on "$1" main "echo '[{\"url\":\"https://github.com/$LOOP_REPO.git\",\"path\":\"nocaptcha\"}]' | sudo sail project config set acme repos - && echo '{\"jdk\":21,\"maven\":\"3.9.9\"}' | sudo sail project config set acme runtimes -"
@@ -2018,7 +2126,7 @@ loop_config() {
 }
 
 loop() {
-  local run=${1:-} spec beside
+  local run=${1:-} spec beside polls
   [[ -n $run ]] || usage
   spec="loop-$(date -u +%H%M%S)"
   beside="beside-${spec#loop-}"
@@ -2046,17 +2154,22 @@ loop() {
     on "$run" eng "cat > /tmp/beside.md && sudo sail spec create -p acme --id $beside --title 'A note beside the build' --body-file /tmp/beside.md --assignee eng" <<< "$BESIDE_BODY"
   check "$run" "eng makes it ready" on "$run" eng "sudo sail spec update $beside --status pending"
   check "$run" "eng dispatches it while the first builds, in the background" on "$run" eng "sudo sail spec dispatch -p acme --spec $beside --background"
+  polls="$(log_dir "$run")/beside-workspace"
+  mkdir -p "$polls"
+  rm -f "$polls"/*.verdict "$polls/listed"
+  workspace_stops_then_goes "$run" eng "$beside" "$polls" &
   check "$run" "no agent key and no Sail credential is in any process's command line on eng while it builds and its hooks fire" no_key_in_any_command_line "$run" eng
+  check "$run" "the second spec's review takes it to awaiting_merge" reaches_status "$run" eng "$beside" awaiting_merge 30
   check "$run" "the build asks its question and waits, unreviewed" waits_on_its_question "$run" eng "$spec" 20
+  check "$run" "the two builds ran at once, each in its own workspace of acme" each_ran_in_its_own_workspace "$run" eng "$spec" "$beside"
+  touch "$polls/listed"
   check "$run" "eng answers in the room" on "$run" eng "sudo sail spec comment $spec --body 'Call it Building.'"
   check "$run" "the answer resumes the build, and the review takes it to awaiting_merge" reaches_status "$run" eng "$spec" awaiting_merge 45
-  check "$run" "the second spec's review takes it to awaiting_merge" reaches_status "$run" eng "$beside" awaiting_merge 30
-  check "$run" "the two builds ran at once, each in its own workspace of acme" each_ran_in_its_own_workspace "$run" eng "$spec" "$beside"
-  check "$run" "each workspace commits as eng" \
-    commits_as "$run" eng "acme-$spec" eng@fleet.example
-  check "$run" "the second workspace commits as eng" \
-    commits_as "$run" eng "acme-$beside" eng@fleet.example
   check "$run" "the agent opened a pull request on $LOOP_REPO" opened_a_pull_request "$spec"
+  check "$run" "each workspace commits as eng: every commit of its pull request is authored so" \
+    pull_request_commits_as "$spec" eng@fleet.example
+  check "$run" "the second workspace commits as eng: every commit of its pull request is authored so" \
+    pull_request_commits_as "$beside" eng@fleet.example
   check "$run" "the build ran on eng's stored login, by name and kind" the_build_ran_on_the_stored_login "$run" eng "$spec"
   check "$run" "the room shows the review" the_room_shows_the_review "$run" eng "$spec"
   check "$run" "every node syncs twice" sync_all "$run"
@@ -2068,6 +2181,10 @@ loop() {
     measures_record_the_cost_and_the_times "$run" "$spec" eng
   check "$run" "the fleet closes its pull request and deletes the branch" closes_the_pull_request "$spec" "$run"
   check "$run" "the fleet closes the second spec's pull request and deletes its branch" closes_the_pull_request "$beside" "$run"
+  check "$run" "the second spec's workspace, left awaiting merge, was running until its idle period ended and stopped after it" \
+    polled "$polls/stops" 2400
+  check "$run" "marked done once stopped, the second spec's workspace and its dataset went within the sweep's next passes" \
+    polled "$polls/goes" 300
   check "$run" "still no secret appears in the run's logs" no_secret_in_logs "$run"
 }
 

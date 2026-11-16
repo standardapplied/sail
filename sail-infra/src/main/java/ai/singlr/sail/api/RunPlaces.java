@@ -28,6 +28,7 @@ import java.util.Set;
 import java.util.concurrent.TimeoutException;
 import java.util.function.Consumer;
 import java.util.function.Function;
+import java.util.function.Predicate;
 import java.util.function.Supplier;
 
 /**
@@ -177,6 +178,30 @@ final class RunPlaces {
         entered instanceof Workspaces.Made fresh ? fresh.created().timings() : null,
         stale,
         degraded);
+  }
+
+  /**
+   * Which runs of {@code specId} (none for a run of no spec) left a session where the next run of
+   * its conversation goes: every one in the project's container; in a spec's workspace, those still
+   * running or that ended after the workspace was made, and none when it has none, since a
+   * workspace deleted, by the sweep or by hand, took its sessions with it and the next run makes a
+   * new one. When Incus cannot say, none: a fresh session, never a resume of one that may be gone.
+   */
+  Predicate<RunStore.RunRow> holdsSession(String project, String specId) {
+    if (Strings.isBlank(specId)) {
+      return run -> true;
+    }
+    try {
+      var made = workspaces.madeAt(workspaceOf(project, specId));
+      return run ->
+          made.isPresent()
+              && (run.completedAt() == null || !run.completedAt().isBefore(made.get()));
+    } catch (IOException | TimeoutException | ApiException unreadable) {
+      return run -> false;
+    } catch (InterruptedException e) {
+      Thread.currentThread().interrupt();
+      return run -> false;
+    }
   }
 
   /**

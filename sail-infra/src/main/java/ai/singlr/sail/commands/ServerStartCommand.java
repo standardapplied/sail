@@ -302,6 +302,7 @@ public final class ServerStartCommand implements Runnable {
             DateTimeUtils::now,
             roster,
             operations.runReports());
+    var specWorkspaces = operations.specWorkspaces(NodeIdentity::handle);
     var rearmer =
         new WatcherRearmer(
             runStore,
@@ -319,6 +320,7 @@ public final class ServerStartCommand implements Runnable {
         .register(ptyEventBridge)
         .register(reconciler)
         .register(missedStops)
+        .register(specWorkspaces)
         .register(rearmer)
         .register(presenceEmitter);
     try {
@@ -354,6 +356,7 @@ public final class ServerStartCommand implements Runnable {
                 "  @|green ✓|@ Replayed " + replayed + " agent stop(s) missed while offline"));
       }
       missedStops.start();
+      specWorkspaces.start();
       var refreshed =
           ContainerSetupSweep.sweep(
               new ShellExecutor(false),
