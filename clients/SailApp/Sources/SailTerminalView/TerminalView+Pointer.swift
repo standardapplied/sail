@@ -134,7 +134,6 @@ extension TerminalView {
         }
     }
 
-    /// The paste sheet: the line count and the risk in a sentence, as a ``Confirmation``.
     func presentPasteSheet(lines: Int, answer: @escaping @MainActor (Bool) -> Void) {
         guard let window else { return answer(false) }
         Confirmation.ask(

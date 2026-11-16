@@ -15,7 +15,6 @@ import SailVT
 public final class TerminalView: NSView {
     /// What the session tells, as it tells it: phases, the title, the bell, the working directory.
     public var onEvent: @MainActor (SessionEvent) -> Void = { _ in }
-    /// Told when the view becomes its window's first responder.
     public var onFocus: @MainActor () -> Void = {}
     /// The pasteboard ⌘C writes and ⌘V reads: the general one, unless a test gives another.
     public var pasteboard = NSPasteboard.general
@@ -108,12 +107,10 @@ public final class TerminalView: NSView {
         marks.figures
     }
 
-    /// Bytes put into the view's atlases so far.
     public var atlasBytes: Int {
         renderer.atlasUploadBytes
     }
 
-    /// How many frames the view has committed since it was made.
     public var framesCommitted: Int {
         committedFrames
     }
