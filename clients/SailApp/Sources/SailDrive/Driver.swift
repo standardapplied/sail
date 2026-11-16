@@ -212,8 +212,9 @@ final class Driver {
             guard let copy = Keys.named("c", modifiers: ["command"]) else { return (false, "no ⌘C") }
             send(copy)
             let held = NSPasteboard.general.string(forType: .string) ?? ""
-            if let expected = step.pasteboard { return (held == expected, "the pasteboard holds \(held.count) characters") }
-            return (!held.isEmpty, "the pasteboard holds \(held.count) characters")
+            let said = "the pasteboard holds \(held.count) characters" + (held.count <= 40 ? ": '\(held)'" : "")
+            if let expected = step.pasteboard { return (held == expected, said) }
+            return (!held.isEmpty, said)
         }
         if let text = step.paste {
             NSPasteboard.general.clearContents()
