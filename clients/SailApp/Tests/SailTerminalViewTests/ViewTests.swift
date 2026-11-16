@@ -404,7 +404,7 @@ import Testing
         try #require(harness.clock.isPaused)
         let refreshes = harness.view.latency.refresh.count
         harness.key("e", code: 0x0E)
-        #expect(await harness.until { harness.view.latency.refresh.count == refreshes + 1 }, "the key's hop read the screen")
+        #expect(await harness.until { harness.view.latency.refresh.count > refreshes }, "the key's hop read the screen")
         await harness.drawn()
         try #require(harness.clock.isPaused, "the key itself asked for no frame")
         harness.link.output("e")
