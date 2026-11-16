@@ -77,6 +77,8 @@ import java.net.http.HttpResponse;
 import java.nio.channels.Channels;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -479,6 +481,13 @@ class ClientGoldensTest {
         new PtyMessage.Yield("lounge", "a dispatch took the repos"),
         new PtyMessage.IssueTicket(PtyMessage.TicketAction.OPEN, PROJECT, "sail_uday"),
         new PtyMessage.Ticket("tkt_harbor"),
+        new PtyMessage.PutBegin(7, "", 64L << 20),
+        new PtyMessage.PutChunk(7, Long.MAX_VALUE, chunk()),
+        new PtyMessage.PutEnd(7, sha256(chunk())),
+        new PtyMessage.PutCancel(Integer.MAX_VALUE),
+        new PtyMessage.PutAck(7, 65536),
+        new PtyMessage.PutStored(7, "/tmp/sail-paste/inst-1/1-shot.png"),
+        new PtyMessage.PutRefused(-1, PtyMessage.PutRefusal.TOO_LARGE, 64L << 20),
         new PtyMessage.TicketRefused(
             PtyMessage.TicketRefusal.NOT_FOUND,
             Remedy.of("Project 'harbor' is not in the catalog. Run '", Remedy.sail("sync"), "'.")),
@@ -499,6 +508,23 @@ class ClientGoldensTest {
                     new Remedy.Words("You do not hold the write token. Run "),
                     new Remedy.Command(Remedy.Runs.SAIL, "session", List.of("take", "lounge")),
                     new Remedy.Words(" to take it.")))));
+  }
+
+  /** The largest chunk an upload carries, every byte value in turn. */
+  private static byte[] chunk() {
+    var chunk = new byte[64 << 10];
+    for (var i = 0; i < chunk.length; i++) {
+      chunk[i] = (byte) i;
+    }
+    return chunk;
+  }
+
+  private static byte[] sha256(byte[] bytes) {
+    try {
+      return MessageDigest.getInstance("SHA-256").digest(bytes);
+    } catch (NoSuchAlgorithmException e) {
+      throw new IllegalStateException(e);
+    }
   }
 
   private static byte[] wire(PtyMessage message) throws IOException {

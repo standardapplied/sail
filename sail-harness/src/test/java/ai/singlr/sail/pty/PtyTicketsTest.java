@@ -193,6 +193,10 @@ class PtyTicketsTest {
             new PtyMessage.Input(1, new byte[] {'a'}),
             new PtyMessage.Resize(80, 24),
             new PtyMessage.TakeWrite(),
+            new PtyMessage.PutBegin(1, "shot.png", 5),
+            new PtyMessage.PutChunk(1, 0, new byte[] {'a'}),
+            new PtyMessage.PutEnd(1, new byte[32]),
+            new PtyMessage.PutCancel(1),
             new PtyMessage.Detach())) {
       assertNull(ATTACH_LOUNGE.refusal(driving, null));
     }

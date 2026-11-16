@@ -51,6 +51,7 @@ public final class TerminalSession: Sendable {
     private let sequence = Mutex<Int64>(0)
     private let latency = Mutex(LatencyRecorder())
     private let tap = Mutex<(@Sendable ([UInt8]) -> Void)?>(nil)
+    private let uploads = Uploads()
     private let alarm: Alarm
     private let sleep: @Sendable (Duration) async throws -> Void
     private let timeout: Int
@@ -326,6 +327,75 @@ public final class TerminalSession: Sendable {
         self.tap.withLock { $0 = tap }
     }
 
+    /// Uploads `source` as `name` into the session's own workspace, on the attached connection: the
+    /// path the host stored it at, which needs no quoting. One upload goes at a time; a later one
+    /// waits its turn. Refused with an ``UploadRefusal`` before a byte is sent when this machine's
+    /// own host serves the session (it has no workspace), the file is larger than
+    /// ``UploadPacing/largest``, or this client is known to be watching, not writing; refused by the
+    /// host for its own reasons; and ended as ``UploadRefusal/Kind/sessionEnded`` when the session
+    /// or its connection ends first. Cancelling the task cancels the upload, and the host keeps
+    /// nothing of it. `progress` hears the bytes the host holds as they grow.
+    public func upload(
+        name: String, source: UploadSource, progress: @escaping @Sendable (Int64) -> Void = { _ in }
+    ) async throws -> String {
+        let refusal = { (kind: UploadRefusal.Kind, limit: Int64) in
+            UploadRefusal(kind: .known(kind), limit: limit, file: name, size: source.size)
+        }
+        if case .local = door { throw refusal(.noContainer, 0) }
+        guard source.size <= UploadPacing.largest else { throw refusal(.tooLarge, UploadPacing.largest) }
+        await uploads.enter()
+        defer { uploads.leave() }
+        try Task.checkCancellation()
+        let (connection, writing) = core.withLock { ($0.connection, $0.writing) }
+        guard let connection else { throw refusal(.sessionEnded, 0) }
+        guard writing else { throw refusal(.notWriter, 0) }
+        let flight = uploads.begin(on: connection)
+        defer { uploads.finish(flight) }
+        let outcome: UploadFlight.Outcome
+        do {
+            outcome = try await send(source, as: name, on: flight, progress: progress)
+        } catch is TerminalError {
+            connection.close()
+            throw refusal(.sessionEnded, 0)
+        } catch {
+            try? connection.send(.putCancel(id: flight.id))
+            throw refusal(.failed, 0)
+        }
+        switch outcome {
+        case let .stored(path):
+            progress(source.size)
+            return path
+        case let .refused(kind, limit): throw UploadRefusal(kind: kind, limit: limit, file: name, size: source.size)
+        case .ended: throw refusal(.sessionEnded, 0)
+        case .cancelled:
+            try? connection.send(.putCancel(id: flight.id))
+            throw CancellationError()
+        }
+    }
+
+    /// Sends `source` on `flight`, paced by ``UploadPacing``: the outcome, or the error sending or
+    /// reading it.
+    private func send(
+        _ source: UploadSource, as name: String, on flight: UploadFlight, progress: @Sendable (Int64) -> Void
+    ) async throws -> UploadFlight.Outcome {
+        let connection = flight.connection
+        try connection.send(.putBegin(id: flight.id, name: name, size: source.size))
+        if let early = await flight.wait(until: 0) { return early }
+        var digest = SHA256()
+        var offset: Int64 = 0
+        while offset < source.size {
+            let bytes = try source.read(Int(min(Int64(UploadPacing.chunk), source.size - offset)))
+            guard !bytes.isEmpty else { throw UploadSourceShrank() }
+            digest.update(bytes)
+            try connection.send(.putChunk(id: flight.id, offset: offset, bytes: bytes))
+            offset += Int64(bytes.count)
+            if let early = await flight.wait(until: offset - Int64(UploadPacing.window * UploadPacing.chunk)) { return early }
+            progress(flight.acked)
+        }
+        try connection.send(.putEnd(id: flight.id, sha256: digest.finalize()))
+        return await flight.outcome()
+    }
+
     /// Asks the host for the write token, which it grants to any attached client; once granted, the
     /// view's size goes to the host, so the pty takes the new writer's size.
     public func takeWrite() {
@@ -485,6 +555,7 @@ public final class TerminalSession: Sendable {
         let attached = clock.now
         var outcome = read(connection, since: attached)
         connection.close()
+        uploads.ended(connection)
         core.withLock { core in
             if core.connection === connection { core.connection = nil }
             if case .dropped = outcome, core.detaching { outcome = .detached }
@@ -608,6 +679,8 @@ public final class TerminalSession: Sendable {
             emit(.refused(refusal))
         case .accepted:
             if core.withLock({ $0.detaching }) { return .detached }
+        case .putAck, .putStored, .putRefused:
+            uploads.take(frame)
         default:
             return .finished(.protocolViolation("it sent \(frame.name) to an attached client"))
         }

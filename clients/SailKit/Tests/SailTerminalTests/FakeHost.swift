@@ -79,6 +79,15 @@ final class FakeHost: Sendable {
         private let socket: Socket
         private let frames = Mutex(FrameReader())
         private let unread = Mutex<[Frame]>([])
+        private let link = Mutex<Link?>(nil)
+
+        /// A link of `rate` bytes a second between the client and this host: what the host has read
+        /// arrives no sooner than the link carries it, a packet at a time.
+        private struct Link {
+            let rate: Int
+            let start = ContinuousClock.now
+            var carried = 0
+        }
 
         init(socket: Socket) {
             self.socket = socket
@@ -111,15 +120,38 @@ final class FakeHost: Sendable {
             return token
         }
 
+        /// Holds `count` bytes read until the link has carried them.
+        private func carry(_ count: Int) {
+            let due = link.withLock { link -> ContinuousClock.Instant? in
+                guard var carrying = link else { return nil }
+                carrying.carried += count
+                link = carrying
+                return carrying.start + .seconds(Double(carrying.carried) / Double(carrying.rate))
+            }
+            guard let due else { return }
+            let wait = due - ContinuousClock.now
+            if wait > .zero {
+                Thread.sleep(forTimeInterval: Double(wait.components.seconds) + Double(wait.components.attoseconds) / 1e18)
+            }
+        }
+
+        /// From now on the client's bytes reach this host through a link of `bytesPerSecond`, as a
+        /// slow network's would; the wait is the link's, the shape the measurement needs.
+        func shape(bytesPerSecond: Int) {
+            link.withLock { $0 = Link(rate: bytesPerSecond) }
+        }
+
         /// The next frame the client sent.
         func read() async throws -> Frame {
             if let frame = unread.withLock({ $0.isEmpty ? nil : $0.removeFirst() }) { return frame }
             return try await onThread { [self] in
-                var buffer = [UInt8](repeating: 0, count: 64 * 1024)
+                let shaped = self.link.withLock { $0 != nil }
+                var buffer = [UInt8](repeating: 0, count: shaped ? 1448 : 64 * 1024)
                 while true {
                     if let frame = self.unread.withLock({ $0.isEmpty ? nil : $0.removeFirst() }) { return frame }
                     let count = try self.socket.receive(into: &buffer)
                     guard count > 0 else { throw HostError("the client closed the connection") }
+                    self.carry(count)
                     let read = try self.frames.withLock { try $0.read(buffer[..<count]) }
                     self.unread.withLock { $0 += read }
                 }

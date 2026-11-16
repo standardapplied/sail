@@ -42,6 +42,7 @@ import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.locks.LockSupport;
+import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.function.LongSupplier;
 
@@ -195,6 +196,7 @@ public final class PtySessionHost implements AutoCloseable {
   private final PtyIdentity.Resolver identity;
   private final PtyAdmission admission;
   private final PtyEvents events;
+  private final PtyUploads uploads;
   private final String version;
   private final Limits limits;
   private final Handoff handoff;
@@ -323,12 +325,39 @@ public final class PtySessionHost implements AutoCloseable {
       Limits limits,
       Handoff handoff,
       Network network) {
+    this(
+        socketPath,
+        sessionsDir,
+        journalCapacity,
+        identity,
+        admission,
+        events,
+        version,
+        limits,
+        handoff,
+        network,
+        PtyUploads.intoContainers());
+  }
+
+  PtySessionHost(
+      Path socketPath,
+      Path sessionsDir,
+      long journalCapacity,
+      PtyIdentity.Resolver identity,
+      PtyAdmission admission,
+      PtyEvents events,
+      String version,
+      Limits limits,
+      Handoff handoff,
+      Network network,
+      PtyUploads uploads) {
+    this.uploads = uploads;
     this.socketPath = socketPath;
     this.sessionsDir = sessionsDir;
     this.journalCapacity = journalCapacity;
     this.identity = identity;
     this.admission = admission;
-    this.events = events;
+    this.events = endingUploads(events);
     this.version = version;
     this.limits = limits;
     this.handoff = handoff;
@@ -684,6 +713,8 @@ public final class PtySessionHost implements AutoCloseable {
     var bound = admission.bound();
     var principal = who.fde();
     String opened = null;
+    PtyUploads.Upload upload = null;
+    Consumer<PtyMessage> replies = msg -> reply(channel, msg);
     var me = new Admitted(channel, admission.credential(), who);
     admitted.add(me);
     try {
@@ -783,7 +814,35 @@ public final class PtySessionHost implements AutoCloseable {
                 attached.takeWrite(subscriberId, who.fde());
               }
             }
+            case PtyMessage.PutBegin m -> {
+              if (attached == null) {
+                reply(channel, new PtyMessage.Err("Attach before uploading."));
+              } else if (upload != null) {
+                reply(channel, new PtyMessage.PutRefused(m.id(), PtyMessage.PutRefusal.FAILED, 0));
+              } else {
+                upload = uploads.begin(m, attached, subscriberId, replies);
+              }
+            }
+            case PtyMessage.PutChunk m -> {
+              if (!uploads.chunk(upload, m, replies)) {
+                upload = null;
+              }
+            }
+            case PtyMessage.PutEnd m -> {
+              if (upload != null && upload.id() == m.id()) {
+                uploads.end(upload, m, replies);
+                upload = null;
+              }
+            }
+            case PtyMessage.PutCancel m -> {
+              if (upload != null && upload.id() == m.id()) {
+                uploads.discard(upload);
+                upload = null;
+              }
+            }
             case PtyMessage.Detach m -> {
+              uploads.discard(upload);
+              upload = null;
               if (attached != null) {
                 attached.detach(subscriberId);
                 attached = null;
@@ -809,6 +868,7 @@ public final class PtySessionHost implements AutoCloseable {
     } catch (IOException disconnected) {
       var unused = disconnected;
     } finally {
+      uploads.discard(upload);
       if (attached != null) {
         attached.detach(subscriberId);
       }
@@ -1015,6 +1075,32 @@ public final class PtySessionHost implements AutoCloseable {
         : ai.singlr.sail.engine.ContainerExec.asDevUserTty(project, env, origin.command());
   }
 
+  /** {@code events}, each session's uploads leaving its container as it ends (U8). */
+  private PtyEvents endingUploads(PtyEvents events) {
+    return new PtyEvents() {
+      @Override
+      public void sessionStarted(PtySession.Origin origin) {
+        events.sessionStarted(origin);
+      }
+
+      @Override
+      public void sessionAttached(PtySession.Origin origin, String fde) {
+        events.sessionAttached(origin, fde);
+      }
+
+      @Override
+      public void sessionEnded(PtySession.Origin origin, String reason) {
+        events.sessionEnded(origin, reason);
+        uploads.ended(origin);
+      }
+
+      @Override
+      public void typed(PtySession.Origin origin, String person) {
+        events.typed(origin, person);
+      }
+    };
+  }
+
   /**
    * What a ticket request hears on a connection that presented a token: tickets are asked by this
    * box's own process alone, on a connection that presented none, for the credential the request
@@ -1144,6 +1230,12 @@ public final class PtySessionHost implements AutoCloseable {
               m.project(),
               room,
               folder.command(m.command()));
+      uploads.sweep(
+          origin,
+          sessions.values().stream()
+              .filter(PtySession::live)
+              .map(live -> live.origin().instanceId())
+              .toList());
       var env = childEnv(room, version);
       env.putAll(folder.env());
       var argv = new ArrayList<>(handoff.shim().apply(files.exit()));

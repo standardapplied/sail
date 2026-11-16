@@ -3,6 +3,7 @@ import SailAPI
 import SailTerminal
 import SailTerminalWire
 import SailVT
+import Synchronization
 
 /// A terminal client with no window: it opens a session on this machine's host or on a runner,
 /// runs a script of steps against it, prints the screen, and leaves a JSON report.
@@ -53,6 +54,7 @@ struct Probe {
         )
         var host: LocalHostProcess?
         defer { host?.stop() }
+        var tickets: RecordingTickets?
         let session: TerminalSession
         let echoBudget: Double
         switch run.host {
@@ -74,7 +76,9 @@ struct Probe {
             remote.project = project
             remote.workingDirectory = "/tmp"
             let client = SailClient(transport: URLSessionTransport(base: api), token: token)
-            session = TerminalSession(open: remote, door: .runner(client), screen: screen)
+            let recorded = RecordingTickets(client)
+            tickets = recorded
+            session = TerminalSession(open: remote, door: .runner(recorded), screen: screen)
             echoBudget = echoBudgets.runner
         }
         let capture = try run.capture.map(Capture.init(path:))
@@ -82,10 +86,11 @@ struct Probe {
             session.tapOutput { capture.append($0) }
         }
         session.start()
-        let report = await Runner(session: session, host: host, echoBudget: echoBudget) { result in
+        var report = await Runner(session: session, host: host, echoBudget: echoBudget) { result in
             say("\(result.ok ? "ok" : "FAILED") \(result.step) (\(String(format: "%.1f", result.milliseconds)) ms)\(result.detail.map { ": \($0)" } ?? "")")
         }.run(script)
         session.close()
+        report.connections = tickets?.asked ?? []
         try capture?.close()
         print(try screen.text())
         report.budgets.forEach { say("\($0.name): \(String(format: "%.3f", $0.milliseconds)) ms (limit \($0.limit)) \($0.met ? "met" : "MISSED")") }
@@ -95,6 +100,31 @@ struct Probe {
 
     private static func say(_ line: String) {
         FileHandle.standardError.write(Data((line + "\n").utf8))
+    }
+}
+
+/// Tickets from the API, each request kept: one per connection the session makes to its host, so
+/// the report shows every connection the run opened.
+final class RecordingTickets: TicketSource {
+    private let source: any TicketSource
+    private let requests = Mutex<[String]>([])
+
+    init(_ source: any TicketSource) {
+        self.source = source
+    }
+
+    var asked: [String] {
+        requests.withLock { $0 }
+    }
+
+    func ticket(for request: TicketRequest) async throws(SailError) -> TerminalTicket {
+        let named =
+            switch request {
+            case let .open(project): "a ticket to open a session in \(project)"
+            case let .attach(session): "a ticket to attach to \(session)"
+            }
+        requests.withLock { $0.append(named) }
+        return try await source.ticket(for: request)
     }
 }
 

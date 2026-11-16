@@ -1,6 +1,6 @@
 import SailAPI
 
-/// One message of the `SAILPTY3` terminal protocol, in either direction: the host's `PtyMessage`.
+/// One message of the `SAILPTY4` terminal protocol, in either direction: the host's `PtyMessage`.
 /// The client sends the requests and receives the notifications; both are modelled so every frame
 /// round-trips through ``FrameCodec``.
 public enum Frame: Equatable, Sendable {
@@ -28,6 +28,21 @@ public enum Frame: Equatable, Sendable {
     case ticket(String)
     /// A ticket request refused: what kind of refusal, and its remedy as words and commands.
     case ticketRefused(kind: Open<TicketRefusal>, remedy: [RemedyPart])
+    /// Begins upload `id` of a file of `size` bytes named `name` into the attached session; the
+    /// host chooses where it is stored, from the name reduced to characters a shell takes as they
+    /// are.
+    case putBegin(id: Int32, name: String, size: Int64)
+    /// The bytes of upload `id` from `offset`, at most ``FrameCodec/maxPutChunk`` of them.
+    case putChunk(id: Int32, offset: Int64, bytes: [UInt8])
+    /// Upload `id` is all sent; `sha256` is the digest of its bytes, which the host checks.
+    case putEnd(id: Int32, sha256: [UInt8])
+    case putCancel(id: Int32)
+    /// The host holds the first `received` bytes of upload `id`: the client's window moves on.
+    case putAck(id: Int32, received: Int64)
+    /// Upload `id` is stored at `path`, in the session's own workspace.
+    case putStored(id: Int32, path: String)
+    /// Upload `id` refused: its kind and the bound it met, zero when none; the client words it.
+    case putRefused(id: Int32, kind: Open<UploadRefusal.Kind>, limit: Int64)
     case output(lastInputSequence: Int64, bytes: [UInt8])
     /// What follows until ``replayEnd`` is the session's journal replayed; `safe` says whether it
     /// starts on a clean terminal boundary.
@@ -128,13 +143,12 @@ public struct SessionPage: Equatable, Sendable {
 }
 
 /// The host's refusal: its message, and the remedy behind it as words and commands, the same parts
-/// an API refusal carries. `remedy` is nil when the host sent the message alone, as a host from
-/// before remedies does.
+/// an API refusal carries.
 public struct HostRefusal: Equatable, Sendable {
     public var message: String
-    public var remedy: [RemedyPart]?
+    public var remedy: [RemedyPart]
 
-    public init(message: String, remedy: [RemedyPart]?) {
+    public init(message: String, remedy: [RemedyPart]) {
         self.message = message
         self.remedy = remedy
     }

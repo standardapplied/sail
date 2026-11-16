@@ -20,13 +20,51 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # The darwin sail of this commit, built once per run as the release builds it, for the macOS
+  # lanes' own local host: a client and the host it is tested against always speak one protocol.
+  host:
+    name: The darwin sail of this commit
+    needs: changes
+    if: needs.changes.outputs.clients == 'true'
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - uses: graalvm/setup-graalvm@bef4b0e916c7dd079bf60fb95d49139f67e32c5f # v1
+        with:
+          java-version: '25'
+          distribution: 'graalvm'
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: ./.github/actions/maven-cache
+        with:
+          kind: release
+
+      - name: Build native image
+        run: mvn -B package -Pnative -DskipTests -Djacoco.skip=true -Dspotless.check.skip=true
+
+      - name: Smoke test
+        run: |
+          selftest=$(./sail-infra/target/sail _pty-selftest)
+          echo "$selftest"
+          grep -qx 'local-selftest: ok' <<< "$selftest"
+
+      - name: Leave the binary for the macOS lanes
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: sail-darwin-arm64
+          path: sail-infra/target/sail
+          retention-days: 3
+          if-no-files-found: error
+
   # SailKit builds and tests on both platforms. Linux builds libghostty-vt from its release
   # tarballs (scripts/libghostty-vt, cached under the script, which holds every pin); macOS takes
   # the pinned xcframework through SwiftPM and runs the terminal tests against this machine's own
-  # host from the pinned darwin release.
+  # host, the darwin sail of this commit.
   sailkit:
     name: SailKit on ${{ matrix.name }}
-    needs: changes
+    needs: [changes, host]
     if: needs.changes.outputs.clients == 'true'
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 20
@@ -43,8 +81,6 @@ jobs:
       run:
         working-directory: clients/SailKit
     env:
-      DARWIN_SAIL_TAG: v0.68.0
-      DARWIN_SAIL_SHA256: bdae9ab430aecdefe6c4780fb8dacaa91838587b1f2215d361f31060c5f7f8d3
       EXHAUSTIVE_SUITES: '^(SailWorkbenchTests\.(WholenessTests|ReviewPropertyTests)|SailEventsTests\.EventStreamParserTests|SailVTTests\.FixtureTests)/'
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
@@ -77,16 +113,18 @@ jobs:
             ~/.cache/org.swift.swiftpm
           key: swiftpm-${{ runner.os }}-${{ hashFiles('clients/SailKit/Package.swift') }}
 
-      - name: The pinned darwin sail, for this machine's own host
+      - name: The darwin sail of this commit
         if: runner.os == 'macOS'
-        env:
-          GH_TOKEN: ${{ github.token }}
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: sail-darwin-arm64
+          path: ${{ runner.temp }}/sail
+
+      - name: For this machine's own host
+        if: runner.os == 'macOS'
         run: |
-          mkdir -p "$RUNNER_TEMP/sail"
-          gh release download "$DARWIN_SAIL_TAG" --repo "$GITHUB_REPOSITORY" --dir "$RUNNER_TEMP/sail" --pattern sail-darwin-arm64
-          echo "$DARWIN_SAIL_SHA256  $RUNNER_TEMP/sail/sail-darwin-arm64" | shasum -a 256 -c -
-          chmod +x "$RUNNER_TEMP/sail/sail-darwin-arm64"
-          echo "SAIL_BINARY=$RUNNER_TEMP/sail/sail-darwin-arm64" >> "$GITHUB_ENV"
+          chmod +x "$RUNNER_TEMP/sail/sail"
+          echo "SAIL_BINARY=$RUNNER_TEMP/sail/sail" >> "$GITHUB_ENV"
 
       - name: Build
         run: swift build --build-tests
@@ -164,7 +202,7 @@ jobs:
           fi
 
   # The macOS app: the Metal device first; the renderer's goldens, the view's input tests and the
-  # shell's; the app driven, with a software passkey, against the pinned darwin sail's own local host
+  # shell's; the app driven, with a software passkey, against this commit's darwin sail's own local host
   # and two control planes it starts on this runner, under a graphite system accent; then
   # the shipped bundle signed with Developer ID, its provisioning profile embedded and its
   # entitlements claimed, and notarized, when all seven signing secrets exist (ci/signing says so),
@@ -172,7 +210,7 @@ jobs:
   # has the shipped bundle id and is signed the same way; it is never uploaded as the app.
   app:
     name: SailApp on macOS
-    needs: changes
+    needs: [changes, host]
     if: needs.changes.outputs.clients == 'true'
     runs-on: macos-15
     timeout-minutes: 45
@@ -180,8 +218,6 @@ jobs:
       run:
         working-directory: clients/SailApp
     env:
-      DARWIN_SAIL_TAG: v0.68.0
-      DARWIN_SAIL_SHA256: bdae9ab430aecdefe6c4780fb8dacaa91838587b1f2215d361f31060c5f7f8d3
       SAIL_RECORD_GOLDENS: ${{ inputs.record-goldens && '1' || '0' }}
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
@@ -221,22 +257,16 @@ jobs:
           path: ~/Library/Caches/org.swift.swiftpm
           key: swiftpm-app-${{ runner.os }}-${{ hashFiles('clients/SailKit/Package.swift', 'clients/SailApp/Package.swift') }}
 
-      - name: Install cosign
-        uses: sigstore/cosign-installer@398d4b0eeef1380460a10c8013a76f728fb906ac # v3
+      - name: The darwin sail of this commit
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: sail-darwin-arm64
+          path: ${{ runner.temp }}/sail
 
-      - name: The pinned darwin sail, checked by its checksum and its signature
-        env:
-          GH_TOKEN: ${{ github.token }}
+      - name: For the bundle and this machine's own host
         run: |
-          mkdir -p "$RUNNER_TEMP/sail"
-          gh release download "$DARWIN_SAIL_TAG" --repo "$GITHUB_REPOSITORY" --dir "$RUNNER_TEMP/sail" \
-            --pattern sail-darwin-arm64 --pattern sail-darwin-arm64.cosign.bundle
-          echo "$DARWIN_SAIL_SHA256  $RUNNER_TEMP/sail/sail-darwin-arm64" | shasum -a 256 -c -
-          cosign verify-blob --bundle "$RUNNER_TEMP/sail/sail-darwin-arm64.cosign.bundle" \
-            --certificate-identity-regexp '^https://github.com/standardapplied/sail/.github/workflows/release.yml@.*' \
-            --certificate-oidc-issuer https://token.actions.githubusercontent.com "$RUNNER_TEMP/sail/sail-darwin-arm64"
-          chmod +x "$RUNNER_TEMP/sail/sail-darwin-arm64"
-          echo "SAIL_BINARY=$RUNNER_TEMP/sail/sail-darwin-arm64" >> "$GITHUB_ENV"
+          chmod +x "$RUNNER_TEMP/sail/sail"
+          echo "SAIL_BINARY=$RUNNER_TEMP/sail/sail" >> "$GITHUB_ENV"
 
       - name: Build
         run: swift build --build-tests

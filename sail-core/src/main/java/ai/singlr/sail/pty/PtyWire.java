@@ -23,7 +23,7 @@ import java.util.List;
  */
 public final class PtyWire {
 
-  static final byte[] MAGIC = "SAILPTY3".getBytes(StandardCharsets.US_ASCII);
+  static final byte[] MAGIC = "SAILPTY4".getBytes(StandardCharsets.US_ASCII);
   static final int MAX_FRAME = 1 << 20;
 
   private PtyWire() {}
@@ -34,7 +34,7 @@ public final class PtyWire {
     var peer = ByteBuffer.allocate(MAGIC.length);
     readFully(in, peer);
     if (!ByteBuffer.wrap(MAGIC).equals(peer.flip())) {
-      throw new IOException("Peer is not speaking sail pty protocol v3; refusing the connection.");
+      throw new IOException("Peer is not speaking sail pty protocol v4; refusing the connection.");
     }
   }
 
@@ -119,6 +119,20 @@ public final class PtyWire {
       case PtyMessage.Yield m -> out.type(10).string(m.session()).string(m.reason());
       case PtyMessage.IssueTicket m ->
           out.type(11).string(m.action().wire()).string(m.target()).string(m.credential());
+      case PtyMessage.PutBegin m -> {
+        out.type(12).i32(m.id()).string(m.name());
+        out.i64(m.size());
+      }
+      case PtyMessage.PutChunk m -> {
+        out.type(13).i32(m.id()).i64(m.offset());
+        out.bytes(m.bytes());
+      }
+      case PtyMessage.PutEnd m -> out.type(14).i32(m.id()).bytes(m.sha256());
+      case PtyMessage.PutCancel m -> out.type(15).i32(m.id());
+      case PtyMessage.PutAck m -> out.type(35).i32(m.id()).i64(m.received());
+      case PtyMessage.PutStored m -> out.type(36).i32(m.id()).string(m.path());
+      case PtyMessage.PutRefused m ->
+          out.type(37).i32(m.id()).string(m.kind().wire()).i64(m.limit());
       case PtyMessage.Ticket m -> out.type(33).string(m.ticket());
       case PtyMessage.TicketRefused m ->
           encodeRemedy(out.type(34).string(m.kind().wire()), m.detail());
@@ -164,14 +178,15 @@ public final class PtyWire {
   private static int sizeHint(PtyMessage message) {
     return switch (message) {
       case PtyMessage.Output(var seq, var bytes) -> bytes.length + 16;
+      case PtyMessage.PutChunk(var id, var offset, var bytes) -> bytes.length + 24;
       case PtyMessage.SessionEnded(var reason) -> reason.length() + 16;
       default -> 512;
     };
   }
 
   /**
-   * A refusal's remedy, after the plain message an older peer reads alone and stops at: each part
-   * as words ({@code 0, text}) or a command ({@code 1, runs, verb, args}).
+   * A refusal's remedy, after its plain message, which a client shows as it is: each part as words
+   * ({@code 0, text}) or a command ({@code 1, runs, verb, args}).
    */
   private static void encodeRemedy(Writer out, Remedy remedy) {
     out.i32(remedy.parts().size());
@@ -188,8 +203,8 @@ public final class PtyWire {
   }
 
   private static PtyMessage.Err decodeErr(ByteBuffer in) throws IOException {
-    var message = string(in);
-    return in.hasRemaining() ? new PtyMessage.Err(remedy(in)) : new PtyMessage.Err(message);
+    string(in);
+    return new PtyMessage.Err(remedy(in));
   }
 
   /** A refusal's remedy as {@link #encodeRemedy} writes it: its parts, each words or a command. */
@@ -251,6 +266,15 @@ public final class PtyWire {
       case 11 ->
           new PtyMessage.IssueTicket(
               PtyMessage.TicketAction.of(string(in)), string(in), string(in));
+      case 12 -> new PtyMessage.PutBegin(in.getInt(), string(in), in.getLong());
+      case 13 -> new PtyMessage.PutChunk(in.getInt(), in.getLong(), bytes(in));
+      case 14 -> new PtyMessage.PutEnd(in.getInt(), bytes(in));
+      case 15 -> new PtyMessage.PutCancel(in.getInt());
+      case 35 -> new PtyMessage.PutAck(in.getInt(), in.getLong());
+      case 36 -> new PtyMessage.PutStored(in.getInt(), string(in));
+      case 37 ->
+          new PtyMessage.PutRefused(
+              in.getInt(), PtyMessage.PutRefusal.of(string(in)), in.getLong());
       case 33 -> new PtyMessage.Ticket(string(in));
       case 34 -> new PtyMessage.TicketRefused(PtyMessage.TicketRefusal.of(string(in)), remedy(in));
       case 20 -> new PtyMessage.Output(in.getLong(), bytes(in));

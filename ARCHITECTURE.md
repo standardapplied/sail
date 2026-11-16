@@ -3765,13 +3765,43 @@ tick, never once each. An accept that fails while the listener stays bound (out 
 passed over after 100 ms and never ends the door. A presented ticket's credential is resolved
 again against the roster. The connection then keeps `TCP_NODELAY` and TCP keepalive (a vanished peer
 found dead within about a minute, its slot, attachment and write token released), speaks the unix
-socket's `SAILPTY3` frames for its ticket's one action on its one target alone (an open ticket
+socket's `SAILPTY4` frames for its ticket's one action on its one target alone (an open ticket
 creates one session in its project and attaches to it), each frame decided again as on the unix
 socket, and is resolved again at every sweep and severed as a unix connection is. No ticket is
 issued for no credential, for the host's own token (the box's person exists only on the unix
 socket) or for a machine token. `sail _pty-selftest`, the release smoke test, opens a loopback
 door, issues a ticket, presents it and hears one echo (`tcp-selftest: ok`), so the native binary
 runs the door and its keepalive options.
+
+**Files pasted into a session (`PtyUploads`).** A client uploads a file on the terminal connection
+it already holds, in frames 12-15 (`PutBegin`, `PutChunk`, `PutEnd`, `PutCancel`) answered by 35-37
+(`PutAck`, `PutStored`, `PutRefused`, a kind and the bound it met, never a sentence: SailKit's
+`UploadRefusal.sentence` words each kind once). `PtyUploadsTest` drives each rule through a real host.
+- **U1. Only into the session's own workspace.** `PtyUploads.targetOf` alone names where a
+  session's files go: a session on the box itself has no container (`no_container`), and one in a
+  project's container shares it with every member's sessions (`shared_container`), so nothing is
+  stored there. The bytes never leave the connection to that host; the control plane never sees one.
+- **U3. Only the writer,** asked of the session (`PtySession.isWriter`) at `PutBegin`; a ticket admits
+  the four client frames as it admits input.
+- **U4. The host names every path:** `/tmp/sail-paste/<instanceId>/<n>-<name>`, the name reduced to
+  `[A-Za-z0-9._-]`, at most 96 bytes, `file` for nothing, `.` or `..` (`PtyUploads.named`, mirrored by
+  SailKit's `UploadName`); `<n>` is the first number from the session's count that no file of that
+  name holds, so nothing is overwritten, a host's successor's uploads included. The directory is
+  `0700`, the file `0600`, both the dev user's.
+- **U5. Bounded on the host:** 64 MiB a file (`ITEM`), 64 KiB a chunk (`CHUNK`), 256 files and 1 GiB a
+  session (`FILES`, `SESSION`), counted across the session's connections when an upload begins and
+  checked again against what its directory holds before each push.
+- **U6. Whole or nothing.** Chunks are appended in order to a private file in `SailPaths.stagingDir`
+  on the connection's own thread; one out of order, past the declared size, or a digest that is not
+  the bytes' SHA-256 is `failed` and nothing is pushed. The push runs on a thread of its own, so input
+  keeps flowing; a full disk is `no_space`. A refusal, a cancel, a detach or a dropped connection
+  deletes the staged file.
+- **U7. Typing first.** SailKit sends 32 KiB chunks, each frame written on its own, and no more than
+  two unacknowledged, so a key waits behind at most three chunks: measured at 77 ms worst through a
+  10 Mbit/s link (`UploadTests.typingStaysFirstThroughASlowLink`).
+- **U8. Gone with the session.** When a session ends its directory is removed as the dev user, under
+  the lock its pushes take, so a push lands before the removal or is refused `session_ended`; the
+  next session made in a container removes every upload directory there whose session is not live.
 
 **The terminal host on a person's own machine.** `sail _pty-host --local` (`LocalPtyHost`) is the
 same host wired for the account it runs as, with no server: the native app's launchd agent runs
@@ -4500,8 +4530,8 @@ paravirtual Metal device renders offscreen and reads back exactly: the renderer'
 frame fails past 0.1% of its pixels; emoji cells are left out of that and must hold colour), the
 view's input tests with synthesized events (every suite `swift test list` names, each in its own
 bounded run by `ci/test-suites`, which fails when a listed suite passes no test of its own or a
-test stands outside any suite), the app driven against the pinned darwin `sail`'s
-local host with its latency budgets and against two control planes that `sail` starts on the runner (the drive waits, at every step, until the view has drawn the
+test stands outside any suite), the app driven against the local host of this commit's darwin
+`sail` (built once per run by the workflow's `host` job, which both macOS lanes wait for) with its latency budgets and against two control planes that `sail` starts on the runner (the drive waits, at every step, until the view has drawn the
 screen's text in full; the renderer bench takes 300 full redraws, drawn offscreen with nothing read
 back, on the drawing thread's CPU clock with the wall clock beside it), and the bundle checked on
 every build. With all seven signing secrets (`ci/signing`

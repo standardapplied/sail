@@ -14,6 +14,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import ai.singlr.sail.common.Remedy;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
+import java.nio.BufferUnderflowException;
 import java.nio.ByteBuffer;
 import java.nio.channels.Channels;
 import java.nio.channels.Pipe;
@@ -33,8 +34,7 @@ class PtyWireTest {
   }
 
   @Test
-  void aRefusalKeepsItsCommandsAsDataAndLeadsWithThePlainMessageAnOlderPeerReads()
-      throws Exception {
+  void aRefusalKeepsItsCommandsAsDataAndLeadsWithItsPlainMessage() throws Exception {
     var detail =
         Remedy.of(
             "This box has no FDE identity. Set one with '",
@@ -60,9 +60,51 @@ class PtyWireTest {
   }
 
   @Test
-  void anOlderHostsRefusalIsReadAsWords() throws Exception {
+  void aRefusalWithoutItsRemedyIsTruncatedNotReadAsWords() {
+    assertThrows(BufferUnderflowException.class, () -> readPayload(err("No live session.")));
+  }
+
+  @Test
+  void everyUploadFrameSurvivesTheWireWithItsEdgeValues() throws Exception {
+    var chunk = new byte[64 << 10];
+    chunk[chunk.length - 1] = (byte) 255;
+    var sha = new byte[32];
+    sha[0] = 1;
     assertEquals(
-        new PtyMessage.Err(Remedy.of("No live session.")), readPayload(err("No live session.")));
+        new PtyMessage.PutBegin(0, "", Long.MAX_VALUE),
+        roundTrip(new PtyMessage.PutBegin(0, "", Long.MAX_VALUE)));
+    var sent = (PtyMessage.PutChunk) roundTrip(new PtyMessage.PutChunk(-1, Long.MAX_VALUE, chunk));
+    assertEquals(-1, sent.id());
+    assertEquals(Long.MAX_VALUE, sent.offset());
+    assertArrayEquals(chunk, sent.bytes());
+    var end = (PtyMessage.PutEnd) roundTrip(new PtyMessage.PutEnd(Integer.MAX_VALUE, sha));
+    assertEquals(Integer.MAX_VALUE, end.id());
+    assertArrayEquals(sha, end.sha256());
+    assertEquals(new PtyMessage.PutCancel(3), roundTrip(new PtyMessage.PutCancel(3)));
+    assertEquals(new PtyMessage.PutAck(3, 65536), roundTrip(new PtyMessage.PutAck(3, 65536)));
+    assertEquals(
+        new PtyMessage.PutStored(3, "/tmp/sail-paste/i/1-a.png"),
+        roundTrip(new PtyMessage.PutStored(3, "/tmp/sail-paste/i/1-a.png")));
+    for (var kind : PtyMessage.PutRefusal.values()) {
+      assertEquals(
+          new PtyMessage.PutRefused(3, kind, 7), roundTrip(new PtyMessage.PutRefused(3, kind, 7)));
+    }
+  }
+
+  @Test
+  void anUploadRefusalIsOneTheWireNamesOrRefused() {
+    var unknown = ByteBuffer.allocate(64);
+    unknown
+        .putInt(1 + 4 + 4 + 4 + 8)
+        .put((byte) 37)
+        .putInt(3)
+        .putInt(4)
+        .put("rude".getBytes(StandardCharsets.UTF_8))
+        .putLong(0)
+        .flip();
+    var refused = assertThrows(IOException.class, () -> PtyWire.read(channelOf(unknown)));
+    assertTrue(refused.getMessage().contains("'rude'"), refused.getMessage());
+    assertEquals("shared_container", PtyMessage.PutRefusal.SHARED_CONTAINER.wire());
   }
 
   @Test
@@ -301,12 +343,12 @@ class PtyWireTest {
 
     var v2 = Pipe.open();
     var v2Reply = Pipe.open();
-    v2.sink().write(ByteBuffer.wrap("SAILPTY2".getBytes(StandardCharsets.US_ASCII)));
+    v2.sink().write(ByteBuffer.wrap("SAILPTY3".getBytes(StandardCharsets.US_ASCII)));
     var skew =
         assertThrows(IOException.class, () -> PtyWire.handshake(v2.source(), v2Reply.sink()));
     assertTrue(
-        skew.getMessage().contains("v3"),
-        "a v2 peer predates the boot id and is refused by name: " + skew.getMessage());
+        skew.getMessage().contains("v4"),
+        "a v3 peer predates uploads and is refused by name: " + skew.getMessage());
   }
 
   @Test

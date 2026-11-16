@@ -103,7 +103,7 @@ import Testing
         try await peer.welcome()
         #expect(try await peer.read() == .attach(session: "theirs", write: true))
         let words = "There is no session 'theirs' on this box that you may attach."
-        try peer.send(.refused(HostRefusal(message: words, remedy: nil)))
+        try peer.send(.refused(HostRefusal(message: words, remedy: [.words(words)])))
         try await watch.phase(.ended(.refused(words)))
     }
 
@@ -353,7 +353,7 @@ import Testing
         session.start()
         let peer = try await host.accept()
         _ = try await peer.hello()
-        try peer.send(.refused(HostRefusal(message: "That token is not this machine's person.", remedy: nil)))
+        try peer.send(.refused(HostRefusal(message: "That token is not this machine's person.", remedy: [.words("That token is not this machine's person.")])))
         try await watch.phase(.ended(.refused("That token is not this machine's person.")))
     }
 }

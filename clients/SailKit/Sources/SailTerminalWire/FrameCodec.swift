@@ -1,11 +1,13 @@
 import SailAPI
 
-/// The `SAILPTY3` framing, byte for byte as the host's `PtyWire` writes it: a big-endian `Int32`
+/// The `SAILPTY4` framing, byte for byte as the host's `PtyWire` writes it: a big-endian `Int32`
 /// length, then the payload, a type byte and its fields. Integers are big-endian; strings and byte
 /// blobs are an `Int32` length and the bytes; a list is an `Int32` count and its entries.
 public enum FrameCodec {
     /// The largest payload either side accepts; anything larger is a protocol violation.
     public static let maxPayload = 1 << 20
+    /// The most bytes one `PutChunk` carries; the host refuses an upload that sends more.
+    public static let maxPutChunk = 64 * 1024
 
     /// `frame` as it travels: its length, then its payload.
     public static func encode(_ frame: Frame) throws(TerminalWireError) -> [UInt8] {
@@ -82,6 +84,10 @@ private extension Frame {
         case .hello: 9
         case .yield: 10
         case .issueTicket: 11
+        case .putBegin: 12
+        case .putChunk: 13
+        case .putEnd: 14
+        case .putCancel: 15
         case .output: 20
         case .replayBegin: 21
         case .replayEnd: 22
@@ -97,6 +103,9 @@ private extension Frame {
         case .welcome: 32
         case .ticket: 33
         case .ticketRefused: 34
+        case .putAck: 35
+        case .putStored: 36
+        case .putRefused: 37
         }
     }
 
@@ -119,6 +128,13 @@ private extension Frame {
         case let .issueTicket(action, target, credential): [.string(action.rawValue), .string(target), .string(credential)]
         case let .ticket(ticket): [.string(ticket)]
         case let .ticketRefused(kind, remedy): [.string(kind.rawValue), .count(remedy.count)] + remedy.flatMap(\.fields)
+        case let .putBegin(id, name, size): [.int32(id), .string(name), .int64(size)]
+        case let .putChunk(id, offset, bytes): [.int32(id), .int64(offset), .blob(bytes)]
+        case let .putEnd(id, sha256): [.int32(id), .blob(sha256)]
+        case let .putCancel(id): [.int32(id)]
+        case let .putAck(id, received): [.int32(id), .int64(received)]
+        case let .putStored(id, path): [.int32(id), .string(path)]
+        case let .putRefused(id, kind, limit): [.int32(id), .string(kind.rawValue), .int64(limit)]
         case let .output(lastInputSequence, bytes): [.int64(lastInputSequence), .blob(bytes)]
         case let .replayBegin(safe): [.bool(safe)]
         case let .writerChanged(fde): [.string(fde)]
@@ -126,7 +142,7 @@ private extension Frame {
         case let .sessionInfo(info): info.fields
         case let .sessions(page): [.count(page.sessions.count)] + page.sessions.flatMap(\.fields) + [.string(page.next)]
         case let .refused(refusal):
-            [.string(refusal.message)] + (refusal.remedy.map { [.count($0.count)] + $0.flatMap(\.fields) } ?? [])
+            [.string(refusal.message), .count(refusal.remedy.count)] + refusal.remedy.flatMap(\.fields)
         case .takeWrite, .detach, .replayEnd, .paused, .continued, .accepted: []
         }
     }
@@ -199,6 +215,13 @@ private struct Cursor {
         case 8: .kill(session: try string())
         case 10: .yield(session: try string(), reason: try string())
         case 11: .issueTicket(action: Open(rawValue: try string()), target: try string(), credential: try string())
+        case 12: .putBegin(id: try int32(), name: try string(), size: try int64())
+        case 13: .putChunk(id: try int32(), offset: try int64(), bytes: try blob())
+        case 14: .putEnd(id: try int32(), sha256: try blob())
+        case 15: .putCancel(id: try int32())
+        case 35: .putAck(id: try int32(), received: try int64())
+        case 36: .putStored(id: try int32(), path: try string())
+        case 37: .putRefused(id: try int32(), kind: Open(rawValue: try string()), limit: try int64())
         case 33: .ticket(try string())
         case 34: .ticketRefused(kind: Open(rawValue: try string()), remedy: try list { (cursor: inout Cursor) throws(TerminalWireError) in try cursor.part() })
         case 20: .output(lastInputSequence: try int64(), bytes: try blob())
@@ -232,9 +255,7 @@ private struct Cursor {
     }
 
     private mutating func refusal() throws(TerminalWireError) -> HostRefusal {
-        let message = try string()
-        guard remaining > 0 else { return HostRefusal(message: message, remedy: nil) }
-        return HostRefusal(message: message, remedy: try list { (cursor: inout Cursor) throws(TerminalWireError) in try cursor.part() })
+        HostRefusal(message: try string(), remedy: try list { (cursor: inout Cursor) throws(TerminalWireError) in try cursor.part() })
     }
 
     private mutating func part() throws(TerminalWireError) -> RemedyPart {

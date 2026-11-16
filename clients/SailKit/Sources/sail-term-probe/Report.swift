@@ -2,19 +2,22 @@ import Foundation
 import SailTerminal
 
 /// What a probe run leaves as evidence: each step and how it went, the latency numbers and the
-/// budgets they are held to. Never a byte of the terminal, a ticket or a token.
+/// budgets they are held to, each upload, and every ticket the run asked for, one per connection to
+/// the host. Never a byte of the terminal, a ticket or a token.
 struct Report: Encodable {
     var steps: [StepResult]
     var latency: LatencyReport?
     var droppedInputs: Int?
     var budgets: [Budget]
+    var uploads: [UploadResult] = []
+    var connections: [String] = []
 
     var passed: Bool {
         steps.allSatisfy(\.ok) && budgets.allSatisfy(\.met)
     }
 
     private enum Keys: String, CodingKey {
-        case passed, steps, latency, droppedInputs, budgets
+        case passed, steps, latency, droppedInputs, budgets, uploads, connections
     }
 
     func encode(to encoder: any Encoder) throws {
@@ -24,6 +27,8 @@ struct Report: Encodable {
         try fields.encodeIfPresent(latency, forKey: .latency)
         try fields.encodeIfPresent(droppedInputs, forKey: .droppedInputs)
         try fields.encode(budgets, forKey: .budgets)
+        try fields.encode(uploads, forKey: .uploads)
+        try fields.encode(connections, forKey: .connections)
     }
 
     func write(to path: String?) throws {
@@ -32,6 +37,16 @@ struct Report: Encodable {
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         try encoder.encode(self).write(to: URL(filePath: path))
     }
+}
+
+/// One file uploaded: where the host stored it, its size and digest, how long it took, and the echo
+/// of each key typed while it went, in milliseconds.
+struct UploadResult: Encodable {
+    var path: String
+    var bytes: Int
+    var sha256: String
+    var milliseconds: Double
+    var keyEchoes: [Double]
 }
 
 struct StepResult: Encodable {
