@@ -3142,9 +3142,9 @@ class WorkspacesTest {
           List.of("ssh-ed25519 AAAAana ana@laptop"));
 
   /** A shell that keeps what each push carried, by destination, before its staging file goes. */
-  private static final class Pushing implements ShellExec {
-    private final ScriptedShellExecutor shell;
-    private final Map<String, String> pushed = new LinkedHashMap<>();
+  static final class Pushing implements ShellExec {
+    final ScriptedShellExecutor shell;
+    final Map<String, String> pushed = new LinkedHashMap<>();
 
     Pushing(ScriptedShellExecutor shell) {
       this.shell = shell;
@@ -3454,7 +3454,7 @@ class WorkspacesTest {
             .anyMatch(
                 c ->
                     c.contains("sail-strip")
-                        || c.contains("rm -f /home/dev/.git-credentials")
+                        || c.endsWith("rm -f \"$1\" sh /home/dev/.git-credentials")
                         || c.contains("file delete")),
         "the token file is never removed");
     assertEquals(

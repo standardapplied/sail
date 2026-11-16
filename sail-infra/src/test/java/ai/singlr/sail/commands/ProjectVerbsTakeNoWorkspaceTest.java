@@ -174,7 +174,10 @@ class ProjectVerbsTakeNoWorkspaceTest {
     var incus = incus();
 
     var ran =
-        CommandRun.of(new ProjectApplyCommand(() -> box, dryRun -> incus), "acme-fix", "--yes");
+        CommandRun.of(
+            new ProjectApplyCommand(() -> box, dryRun -> incus, ProjectApplyCommandTest::noPerson),
+            "acme-fix",
+            "--yes");
 
     assertEquals(1, ran.exit(), ran.err());
     assertTrue(

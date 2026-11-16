@@ -44,6 +44,7 @@ import java.io.IOException;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.TimeoutException;
 import java.util.function.Function;
@@ -304,6 +305,14 @@ final class HostLanes {
     @Override
     public WorkspaceOwner workspaceOwner(String handle) {
       return WorkspaceOwner.onThisBox(new FdeStore(db), handle, boxConfig.get().handle());
+    }
+
+    @Override
+    public Optional<Map<String, String>> gitTokens() {
+      var fdes = new FdeStore(db);
+      return Optional.ofNullable(boxConfig.get().handle())
+          .flatMap(fdes::byHandle)
+          .map(fde -> fdes.logins().gitTokens(fde.id()));
     }
 
     @Override

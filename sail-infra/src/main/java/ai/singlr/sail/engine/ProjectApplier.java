@@ -136,20 +136,22 @@ public final class ProjectApplier {
   }
 
   /**
-   * Clones new repos. A repo whose target directory already exists is skipped when it is a checkout
-   * of the definition's repository, and refused otherwise ({@link RepoOrigin}).
+   * Gives the container {@code tokens} by the step a workspace's owner change takes ({@link
+   * WorkspaceCredentials#renew}): the store replaced whole, or removed with gh's login when nothing
+   * is to be written, so a token removed or no longer needed leaves it. Then clones new repos. A
+   * repo whose target directory already exists is skipped when it is a checkout of the definition's
+   * repository, and refused otherwise ({@link RepoOrigin}).
    */
   public ApplyResult applyRepos(
-      String name,
-      List<ProjectDefinition.Repo> repos,
-      String sshUser,
-      Map<String, String> gitTokens)
+      String name, List<ProjectDefinition.Repo> repos, String sshUser, CheckedTokens tokens)
       throws IOException, InterruptedException, TimeoutException {
+    var removed = WorkspaceCredentials.renew(shell, name, repos, tokens.byHostFor(repos));
+    if (removed != null) {
+      out.println("  [remove] " + removed);
+    }
     if (repos == null || repos.isEmpty()) {
       return ApplyResult.empty();
     }
-
-    ensureCredentialStore(shell, name, sshUser, gitTokens, repos);
 
     var added = 0;
     var skipped = 0;
@@ -460,51 +462,5 @@ public final class ProjectApplier {
 
   private static String normalizedSize(String value) {
     return value == null ? "" : value.strip().replaceAll("\\s+", "").toUpperCase(Locale.ROOT);
-  }
-
-  /**
-   * Refreshes the git credential store inside the container so that {@code git clone} can
-   * authenticate without embedding the token in the URL (which would leak to /proc/cmdline). Writes
-   * one credential entry per unique HTTPS host found in the repo URLs, and logs {@code gh} in for
-   * each GitHub host among them with the same token.
-   */
-  public static void ensureCredentialStore(
-      ShellExec shell,
-      String name,
-      String sshUser,
-      Map<String, String> gitTokens,
-      List<ProjectDefinition.Repo> repos)
-      throws IOException, InterruptedException, TimeoutException {
-    if (writeCredentialStore(shell, name, sshUser, gitTokens, repos)) {
-      ForgeCliLogin.loginGitHub(shell, name, sshUser, gitTokens, repos);
-    }
-  }
-
-  /**
-   * The store half of {@link #ensureCredentialStore}: the {@code .git-credentials} file and its
-   * helper, which a fetch needs before the network a {@code gh} login asks is up. Whether there was
-   * a token to write.
-   */
-  public static boolean writeCredentialStore(
-      ShellExec shell,
-      String name,
-      String sshUser,
-      Map<String, String> gitTokens,
-      List<ProjectDefinition.Repo> repos)
-      throws IOException, InterruptedException, TimeoutException {
-    var credContent = GitCredentials.buildCredentialStore(gitTokens, repos);
-    if (credContent.isEmpty()) {
-      return false;
-    }
-    var credPath = "/home/" + sshUser + "/.git-credentials";
-    ContainerFilePush.pushAsDev(shell, name, credPath, credContent, "0600");
-    var helperResult =
-        shell.exec(
-            ContainerExec.asDevUser(
-                name, List.of("git", "config", "--global", "credential.helper", "store")));
-    if (!helperResult.ok()) {
-      throw new IOException("Failed to configure git credential helper: " + helperResult.stderr());
-    }
-    return true;
   }
 }

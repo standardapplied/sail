@@ -1496,6 +1496,30 @@ class SailOperationsSeamTest {
     }
   }
 
+  /**
+   * Item 3: the host commands clone with the box person's stored git tokens, keyed by the host as
+   * {@code sail git login} keys it, port included; none on a box that names no person.
+   */
+  @Test
+  void theHostCommandsGitTokensAreTheBoxPersonsStoredOnes() {
+    try (var db = Sqlite.open(tempDir.resolve("tokens.db"))) {
+      new SchemaManager(db).migrate();
+      var fdes = new FdeStore(db);
+      var uday = Acting.system(() -> fdes.add("uday", null, null, "admin"));
+      fdes.logins().storeGit(uday.id(), "Git.Example:8443", "tok-stored-for-8443");
+
+      assertEquals(
+          Optional.of(Map.of("git.example:8443", "tok-stored-for-8443")),
+          new HostLanes.Identity(db, () -> new SyncConfig(null, null, "uday", null), null, null)
+              .gitTokens());
+      assertEquals(
+          Optional.empty(),
+          new HostLanes.Identity(db, () -> new SyncConfig(null, null, null, null), null, null)
+              .gitTokens(),
+          "a box that names no person");
+    }
+  }
+
   @Test
   void hostReadsAndCredentialsUseTheSameDatabaseAsTheApi() throws Exception {
     try (var box = new SyncBox("node");
@@ -1528,6 +1552,10 @@ class SailOperationsSeamTest {
       assertTrue(operations.identity().sshKeys().isEmpty());
       assertEquals(
           "owner", operations.identity().workspaceOwner("owner").handle(), "the box's person");
+      assertEquals(
+          Map.of(),
+          operations.identity().gitTokens().orElse(Map.of()),
+          "an in-memory box keeps none");
       assertTrue(operations.schema().version() > 0);
       assertEquals(
           "This box has no FDE identity. Set one with 'sail host config set sync-handle <handle>'"

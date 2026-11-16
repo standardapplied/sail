@@ -633,7 +633,6 @@ class LifecycleCommandTest {
     assertTrue(output.contains("Make a project's container match its definition"));
     assertTrue(output.contains("--dry-run"));
     assertTrue(output.contains("--json"));
-    assertTrue(output.contains("--git-token"));
   }
 
   @Test
