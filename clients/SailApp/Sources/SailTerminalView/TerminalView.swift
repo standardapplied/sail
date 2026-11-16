@@ -115,7 +115,6 @@ public final class TerminalView: NSView {
             + "\(pacer.isIdle ? "paused" : "running") after \(figures.refresh.count) refreshes; \(awaitingDrawable ? "" : "not ")awaiting a drawable"
     }
 
-    /// Starts the latency figures from nothing.
     public func resetLatency() {
         marks.reset()
     }

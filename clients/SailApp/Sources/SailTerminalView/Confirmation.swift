@@ -1,12 +1,9 @@
 import AppKit
 import SailLook
 
-/// A sheet on a window asking the person to confirm what an action will do: the question, what
-/// follows, the action in the accent (its label the appearance's `onAccent`, bold, as text on the
-/// accent always is) and Cancel. Neither answers Return: the action would run what the sheet warns
-/// of, and a Cancel answering it would be drawn as the default button, in the system accent.
-/// Escape cancels: the keys are given once the sheet is laid out, which gives the first button
-/// Return (taken away here), and Escape is watched for while the sheet is up.
+/// A sheet asking to confirm an action, the action in the accent. Neither button answers Return:
+/// the action would run what the sheet warns of, and a default Cancel is drawn in the system
+/// accent. Escape cancels, watched for while the sheet is up.
 @MainActor
 public enum Confirmation {
     private static var escapeWatch: Any?

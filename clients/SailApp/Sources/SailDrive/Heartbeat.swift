@@ -1,14 +1,14 @@
 import Foundation
+import QuartzCore
+import SailSurface
 import Synchronization
 
-/// The longest a clock's ticks, due every 10 ms, went apart since the last reset: how long the
-/// thread that ticks it was kept from running. Beside the view's figures it says whose an output's
-/// wait was: a wait the drive's own thread shares was the process's or the machine's; one only the
-/// main thread shares, the main thread's (inside a refresh when the longest refresh shares it too,
-/// such as a wait for a drawable); one neither shares, the view's.
+/// When a clock's ticks, due every 10 ms, went apart since the last reset, on the host clock: how
+/// long, and when, the thread that ticks it was kept from running. A wait the drive's own thread
+/// was held through too was the machine's; one only the main thread shares, the main thread's.
 final class Heartbeat: Sendable {
     static let interval = 0.01
-    private let gaps = Mutex((last: ContinuousClock.now, longest: Duration.zero))
+    private let gaps = Mutex((last: CACurrentMediaTime(), longest: 0.0, stalls: Stalls(tick: Heartbeat.interval)))
 
     /// Ticked by the main run loop in every mode.
     @MainActor static func onTheMainThread() -> Heartbeat {
@@ -32,16 +32,24 @@ final class Heartbeat: Sendable {
     }
 
     func tick() {
-        let now = ContinuousClock.now
-        gaps.withLock { $0 = (now, max($0.longest, now - $0.last)) }
+        let now = CACurrentMediaTime()
+        gaps.withLock { gaps in
+            gaps.stalls.record(Span(gaps.last, now))
+            gaps.longest = max(gaps.longest, now - gaps.last)
+            gaps.last = now
+        }
     }
 
     func reset() {
-        gaps.withLock { $0 = (ContinuousClock.now, .zero) }
+        gaps.withLock { $0 = (CACurrentMediaTime(), 0, Stalls(tick: Self.interval)) }
     }
 
     /// The longest gap in milliseconds.
     var longest: Double {
-        gaps.withLock { $0.longest } / .milliseconds(1)
+        gaps.withLock { $0.longest } * 1000
+    }
+
+    var stalls: Stalls {
+        gaps.withLock { $0.stalls }
     }
 }

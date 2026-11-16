@@ -66,7 +66,9 @@ struct Step: Decodable {
     var resetLatency: Bool?
     /// Kills the host the preview started, as a crash would.
     var killHost: Bool?
-    /// Waits until the session is attached.
+    /// Stops this Mac's host (true) so nothing it is sent is answered, or lets it go on (false).
+    var pauseHost: Bool?
+    /// Waits until the session is attached; false, until it is not.
     var attached: Bool?
     /// The view's font size must be this many points.
     var fontPoints: Double?
@@ -116,7 +118,7 @@ struct Step: Decodable {
     /// The tab at the first index dragged to the middle of the tab at the second.
     var dragTab: [Int]?
     /// The tab at this index double-clicked, `rename` typed into its field, then `renameWith`
-    /// pressed ("enter" by default, or "escape").
+    /// pressed ("enter" by default, "escape", or "none" to leave the field open).
     var renameTab: Int?
     var rename: String?
     var renameWith: String?

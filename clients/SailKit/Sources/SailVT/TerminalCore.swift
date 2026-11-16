@@ -270,9 +270,26 @@ final class TerminalCore {
         return ghostty_terminal_get(handle, GHOSTTY_TERMINAL_DATA_MOUSE_TRACKING, &tracking) == GHOSTTY_SUCCESS && tracking
     }
 
+    /// At a prompt now: the shell marks its commands, none it started is still running, and the
+    /// cursor's row is a primary prompt row, as the terminal itself says (a row reached after Enter
+    /// with no C is a continuation, and counts as a command).
     var cursorAtPrompt: Bool {
         var atPrompt = false
-        return sink.commandsMarked && ghostty_terminal_get(handle, GHOSTTY_TERMINAL_DATA_CURSOR_AT_PROMPT, &atPrompt) == GHOSTTY_SUCCESS && atPrompt
+        guard sink.commandsMarked, !sink.commandRunning,
+              ghostty_terminal_get(handle, GHOSTTY_TERMINAL_DATA_CURSOR_AT_PROMPT, &atPrompt) == GHOSTTY_SUCCESS, atPrompt
+        else { return false }
+        var row: UInt16 = 0
+        guard ghostty_terminal_get(handle, GHOSTTY_TERMINAL_DATA_CURSOR_Y, &row) == GHOSTTY_SUCCESS else { return false }
+        var place = GhosttyPoint()
+        place.tag = GHOSTTY_POINT_TAG_ACTIVE
+        place.value.coordinate = GhosttyPointCoordinate(x: 0, y: UInt32(row))
+        var ref = GhosttyGridRef()
+        var cells: GhosttyRow = 0
+        var semantic = GHOSTTY_ROW_SEMANTIC_NONE
+        guard ghostty_terminal_grid_ref(handle, place, &ref) == GHOSTTY_SUCCESS, ghostty_grid_ref_row(&ref, &cells) == GHOSTTY_SUCCESS,
+              ghostty_row_get(cells, GHOSTTY_ROW_DATA_SEMANTIC_PROMPT, &semantic) == GHOSTTY_SUCCESS
+        else { return false }
+        return semantic == GHOSTTY_ROW_SEMANTIC_PROMPT
     }
 
     private var onAlternateScreen: Bool {

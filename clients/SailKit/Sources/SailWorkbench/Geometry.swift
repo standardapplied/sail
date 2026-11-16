@@ -19,7 +19,6 @@ public struct Divider: Equatable, Sendable {
     public let path: [Side]
     public let axis: Axis
     public let line: CGRect
-    /// The split's whole room, both sides and the line.
     public let split: CGRect
 
     /// Where the pointer takes the divider: ``Layout/dividerHitWidth`` across, centred on the line.
@@ -84,11 +83,32 @@ extension Layout {
         axis == .sideBySide ? size.width : size.height
     }
 
-    /// Whether every pane of the layout is at least `minimum` in `size`, edges on `scale`'s pixels.
-    func fits(in size: CGSize, minimum: CGSize, scale: Double) -> Bool {
-        frames(in: CGRect(origin: .zero, size: size), scale: scale).panes.values.allSatisfy {
-            $0.width >= minimum.width - 1e-9 && $0.height >= minimum.height - 1e-9
+    /// Whether every pane of the layout is at least `minimum` in `size`, edges on `scale`'s pixels;
+    /// against `before`, a pane already under the minimum there need only be no smaller, so a move
+    /// toward fitting always fits.
+    func fits(in size: CGSize, minimum: CGSize, scale: Double, against before: Layout? = nil) -> Bool {
+        let rect = CGRect(origin: .zero, size: size)
+        let was = before?.frames(in: rect, scale: scale).panes ?? [:]
+        return frames(in: rect, scale: scale).panes.allSatisfy { pane, frame in
+            let floor = was[pane].map { CGSize(width: min(minimum.width, $0.width), height: min(minimum.height, $0.height)) } ?? minimum
+            return frame.width >= floor.width - 1e-9 && frame.height >= floor.height - 1e-9
         }
+    }
+
+    /// Every split's ratio clamped so each pane keeps at least `sliver` along its axis where the
+    /// room allows, else equal shares: no stored ratio lays a pane out at nothing.
+    func withSlivers(in rect: CGRect, sliver: Double) -> Layout {
+        guard case let .split(axis, ratio, first, second) = self else { return self }
+        let room = max(0, Self.extent(of: rect, along: axis) - Self.dividerWidth)
+        let (one, two) = (first.weight(along: axis), second.weight(along: axis))
+        let share = (one + two) * sliver <= room ? min(max(ratio, one * sliver / room), 1 - two * sliver / room) : one / (one + two)
+        let lead = room * share
+        let (near, far) = axis == .sideBySide
+            ? (CGRect(x: rect.minX, y: rect.minY, width: lead, height: rect.height),
+               CGRect(x: rect.minX + lead + Self.dividerWidth, y: rect.minY, width: room - lead, height: rect.height))
+            : (CGRect(x: rect.minX, y: rect.minY, width: rect.width, height: lead),
+               CGRect(x: rect.minX, y: rect.minY + lead + Self.dividerWidth, width: rect.width, height: room - lead))
+        return .split(axis, ratio: share, first.withSlivers(in: near, sliver: sliver), second.withSlivers(in: far, sliver: sliver))
     }
 
     /// The pane nearest past `from`'s edge toward `direction` that overlaps it on the other axis;
@@ -115,10 +135,8 @@ extension Layout {
     }
 }
 
-/// How a strip of `width` shares its room between tabs: each as wide as the others, from
-/// ``widest`` down to ``narrowest``, with `+` and an empty stretch to drag the window by always
-/// left at its end. When not all fit at ``narrowest``, the strip shows the run of tabs around the
-/// selected one; the rest are reached by the keys and the Window menu.
+/// How a strip of `width` shares its room: equal tabs from ``widest`` to ``narrowest``, `+` and a
+/// stretch to drag the window by always kept; past that, the run of tabs around the selected one.
 public struct TabRow: Equatable, Sendable {
     public static let narrowest = 120.0
     public static let widest = 240.0
@@ -137,7 +155,6 @@ public struct TabRow: Equatable, Sendable {
         first = min(max(0, (selected ?? 0) - (shown - 1) / 2), max(0, tabs - shown))
     }
 
-    /// Whether the tab at `index` is in the strip.
     public func shows(_ index: Int) -> Bool {
         (first ..< first + shown).contains(index)
     }

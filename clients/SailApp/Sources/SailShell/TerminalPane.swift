@@ -7,11 +7,8 @@ import SailTerminalWire
 import SailVT
 import SailWorkbench
 
-/// One pane of the workbench: one terminal view drawing one session, made once and attached once
-/// (W2), on this Mac's own host. It opens its session in a folder, or attaches one that lives. A
-/// banner says where the session stands; ⌥⌘L shows the latency of key to echo on glass. Unfocused
-/// beside another pane, it lies under the terminal background at 30%. The terminal keeps the
-/// palette of the appearance it opened in (a screen's palette is set when it is made).
+/// One pane: one terminal view drawing one session on this Mac's host, made and attached once (W2).
+/// The terminal keeps the palette it opened in (a screen's palette is set when it is made).
 @MainActor
 public final class TerminalPane: NSView {
     public enum Start: Equatable, Sendable {
@@ -99,20 +96,20 @@ public final class TerminalPane: NSView {
         next.start()
     }
 
-    /// Whether ⌘W can do what its sheet says: the session is attached (the host ends it) or over.
-    /// While it reconnects or waits, a close would leave its program running unseen.
-    var canEnd: Bool {
-        guard let phase = session?.state.phase else { return true }
-        switch phase {
-        case .attached, .ended: return true
-        default: return false
-        }
-    }
-
-    /// Ends the session at the host, then this client's part.
+    /// Ends the session at the host, then this client's part: on this pane's connection when it is
+    /// attached, else on one of its own once this pane's is closed. A host that cannot be reached
+    /// keeps the session, which the next launch opens as a last tab.
     func end() {
-        try? session?.kill()
+        guard let session else { return }
+        let phase = session.state.phase
+        if case .attached = phase { try? session.kill() }
         detach()
+        switch phase {
+        case .attached, .ended: return
+        default:
+            let (name, address) = (session.state.session, host.address)
+            Task.detached { try? await SessionListing.end(name, at: address) }
+        }
     }
 
     /// Ends this client's part only; the session lives on at the host.
@@ -122,11 +119,15 @@ public final class TerminalPane: NSView {
     }
 
     /// Whether ending the session may end a program the person is running: false only while the
-    /// cursor is on the shell's prompt, as the shell marked it (OSC 133), or the session is over.
+    /// attached cursor is on the shell's prompt, as the shell marked it (OSC 133), or the session is
+    /// over. A session not attached cannot say, so it may.
     var mayEndAProgram: Bool {
         guard let session else { return false }
-        if case .ended = session.state.phase { return false }
-        return !session.screen.cursorAtPrompt
+        switch session.state.phase {
+        case .ended: return false
+        case .attached: return !session.screen.cursorAtPrompt
+        default: return true
+        }
     }
 
     @objc public func toggleLatency(_: Any?) {

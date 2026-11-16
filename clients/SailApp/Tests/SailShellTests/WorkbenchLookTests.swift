@@ -44,6 +44,12 @@ import Testing
             #expect(button.focusRingType == .none, "\(name): \(button.toolTip ?? "") draws the system's focus ring")
             #expect(button.contentTintColor == NSColor(look.textSecondary), "\(name): \(button.toolTip ?? "") is not textSecondary")
             #expect(button.keyEquivalent.isEmpty)
+            #expect(button.layer?.borderWidth == 0, "\(name): \(button.toolTip ?? "") is ringed unfocused")
+            #expect(button.becomeFirstResponder())
+            #expect(button.layer?.borderWidth == 2, "\(name): \(button.toolTip ?? "") shows no keyboard focus")
+            #expect(button.layer?.borderColor == NSColor(look.accent).cgColor, "\(name): \(button.toolTip ?? "")'s focus is not the accent")
+            #expect(button.resignFirstResponder())
+            #expect(button.layer?.borderWidth == 0)
         }
         #expect(selected.layer.map { Double($0.cornerRadius) } == Look.contentRadius)
         #expect(selected.label.font == NSFont.systemFont(ofSize: 13))

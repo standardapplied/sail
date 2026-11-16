@@ -15,11 +15,7 @@ public struct Tab: Hashable, Sendable {
 }
 
 /// The terminals of a window as a value: tabs in order, the selected one, and every pane. Each
-/// command is an operation returning what it opened or closed; the app opens and ends those
-/// sessions and draws the value, nothing more. After every operation the value is whole: each
-/// split has a ratio strictly between 0 and 1, no tab is empty, each tab's focused and zoomed panes
-/// are in its tree, the selected tab exists or there is none, and pane ids and session names are
-/// unique.
+/// operation returns what it opened or closed and leaves the value whole (the spec's W1).
 public struct Workbench: Hashable, Sendable {
     /// What a tab is called when nobody named it and its program said nothing.
     public static let untitled = "This Mac"
@@ -190,7 +186,7 @@ public struct Workbench: Hashable, Sendable {
 
     /// Puts the divider of the split at `path` in the selected tab at `position` along its axis, in
     /// points from the tab's top left, or as near to it as leaves every pane of the tab at least
-    /// `minimum`; false when nothing moved. A tab already too small for its panes keeps its ratios.
+    /// `minimum`, or no smaller than it was when it was already under it; false when nothing moved.
     @discardableResult
     public mutating func drag(_ path: [Side], to position: Double, in size: CGSize, minimum: CGSize, scale: Double) -> Bool {
         guard let index = selectedIndex, case let .split(axis, ratio, _, _)? = tabs[index].layout.node(at: path),
@@ -199,9 +195,9 @@ public struct Workbench: Hashable, Sendable {
         let layout = tabs[index].layout
         let room = Layout.extent(of: divider.split, along: axis) - Layout.dividerWidth
         let start = axis == .sideBySide ? divider.split.minX : divider.split.minY
-        guard room > 0, layout.fits(in: size, minimum: minimum, scale: scale) else { return false }
+        guard room > 0 else { return false }
         func fits(_ candidate: Double) -> Bool {
-            layout.settingRatio(candidate, at: path).fits(in: size, minimum: minimum, scale: scale)
+            layout.settingRatio(candidate, at: path).fits(in: size, minimum: minimum, scale: scale, against: layout)
         }
         var (held, wanted) = (ratio, min(max((position - start) / room, Self.leastRatio), 1 - Self.leastRatio))
         if !fits(wanted) {
@@ -211,8 +207,10 @@ public struct Workbench: Hashable, Sendable {
             }
             wanted = held
         }
-        guard wanted != ratio else { return false }
-        tabs[index].layout = layout.settingRatio(wanted, at: path)
+        let moved = layout.settingRatio(wanted, at: path)
+        let rect = CGRect(origin: .zero, size: size)
+        guard moved.frames(in: rect, scale: scale).panes != layout.frames(in: rect, scale: scale).panes else { return false }
+        tabs[index].layout = moved
         return true
     }
 
@@ -225,11 +223,16 @@ public struct Workbench: Hashable, Sendable {
     }
 
     /// Each tab too small at `size` for every pane to have `minimum` takes equal shares when they
-    /// fit; else it keeps its ratios and its panes are clipped (a window made too small).
+    /// fit; else it keeps its ratios, each pane given at least a divider's grip of room (a window
+    /// made too small). Focus leaves a pane with no room.
     public mutating func fit(in size: CGSize, minimum: CGSize, scale: Double) {
         for index in tabs.indices where !tabs[index].layout.fits(in: size, minimum: minimum, scale: scale) {
             let equal = tabs[index].layout.equalized()
-            if equal.fits(in: size, minimum: minimum, scale: scale) { tabs[index].layout = equal }
+            tabs[index].layout = equal.fits(in: size, minimum: minimum, scale: scale)
+                ? equal : tabs[index].layout.withSlivers(in: CGRect(origin: .zero, size: size), sliver: Layout.dividerHitWidth)
+            let panes = tabs[index].layout.frames(in: CGRect(origin: .zero, size: size), scale: scale).panes
+            let area = { (pane: PaneID) in panes[pane].map { $0.width * $0.height } ?? 0 }
+            if area(tabs[index].focused) < 1, let roomiest = tabs[index].layout.leaves.max(by: { area($0) < area($1) }) { focus(roomiest, at: index) }
         }
     }
 
@@ -255,7 +258,6 @@ public struct Workbench: Hashable, Sendable {
         selected = tabs.last?.id ?? selected
     }
 
-    /// Selects the next tab or the previous, wrapping.
     public mutating func selectNeighbourTab(next: Bool) {
         guard let index = selectedIndex else { return }
         selected = tabs[(index + (next ? 1 : tabs.count - 1)) % tabs.count].id

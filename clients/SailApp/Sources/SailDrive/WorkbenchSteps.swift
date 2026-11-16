@@ -1,6 +1,8 @@
 import AppKit
 import Darwin
+import QuartzCore
 import SailShell
+import SailSurface
 import SailTerminal
 import SailTerminalView
 import SailWorkbench
@@ -275,6 +277,7 @@ extension Driver {
         guard workbench.strip.isRenaming else { return (false, "the double-click opened no field") }
         if let all = Keys.named("a", modifiers: ["command"]) { send(all) }
         for character in text { key(character) }
+        guard ending != "none" else { return (workbench.strip.isRenaming, "the field is \(workbench.strip.isRenaming ? "open" : "closed")") }
         guard let end = Keys.named(ending, modifiers: []) else { return (false, "no key named \(ending)") }
         send(end)
         return (!workbench.strip.isRenaming, "the field is \(workbench.strip.isRenaming ? "still open" : "closed"); \(arrangementSaid)")
@@ -336,10 +339,11 @@ extension Driver {
     /// Scenario 32, `panes4`: a tab of four panes in a 2x2 grid; three flood 20 MB each while the
     /// fourth echoes 200 keys at one per 50 ms. Budgets: the echo pane's key to echo p95 ≤ 50 ms
     /// (presented when the display reports it, else the view's estimate, said which) and output to
-    /// committed p95 ≤ 2 refreshes; each flooding pane shows its last bytes and no output waited
-    /// over 100 ms to be shown; the four views' refresh work p95, summed, ≤ 8 ms; ⌘D to the new
-    /// pane's first committed frame, ten times, p95 ≤ 100 ms. Reported only: memory at one pane and
-    /// at four, and the atlas bytes of each. The tabs it made are closed after.
+    /// committed p95 ≤ 2 refreshes; each flooding pane shows its last bytes, with no gap between its
+    /// committed frames over 100 ms from its flood's first lines to its last; the four views'
+    /// refresh work p95, summed, ≤ 8 ms; ⌘D to the new pane's first committed frame, ten times, p95
+    /// ≤ 100 ms. Each wait is net of the drive's own thread's stall during it. Reported only: memory
+    /// at one pane and at four. The tabs it made are closed after.
     private func fourPanes() async -> (Bool, String) {
         let before = Self.footprint
         let tabsBefore = workbench.model.tabs.count
@@ -370,7 +374,9 @@ extension Driver {
             typeText(flood)
         }
         focus(echo)
-        grid.forEach { $0.terminal.resetLatency() }
+        let begun = await waitUntil(10) { floods.allSatisfy { ((try? $0.session?.screen.text()) ?? "").contains("xxxxxxxxxx") } }
+        floods.forEach { $0.terminal.resetLatency() }
+        let framesBefore = floods.map { Self.committed($0.terminal) }
         let (ok, said) = await measure(200, interval: 50, name: "panes4-echo")
         panes4["main thread's longest stall while four ran ms"] = mainThread.longest
         panes4["a thread of the drive's own, longest stall while four ran ms"] = ownThread.longest
@@ -379,18 +385,28 @@ extension Driver {
         let presented = echoed.keyToEcho.count > 0
         let keyToEcho = presented ? echoed.keyToEcho.p95 : echoed.keyToEchoEstimated.p95
         let marker = "xxxxxxxxxxxxxxxxxxxxflood-2"
-        let shown = await waitUntil(180) { floods.allSatisfy { Self.shows($0, marker) } }
+        var ran = [LatencyFigures?](repeating: nil, count: floods.count), frames = [Int](repeating: 0, count: floods.count)
+        let shown = await waitUntil(180) {
+            for (index, view) in floods.enumerated() where ran[index] == nil && Self.shows(view, marker) {
+                ran[index] = view.terminal.latency
+                frames[index] = Self.committed(view.terminal) - framesBefore[index]
+            }
+            return !ran.contains(nil)
+        }
         var budgets = [
             "echo key to echo p95 <= 50 ms (\(presented ? "presented" : "estimated"))": keyToEcho <= 50,
             "echo output to committed p95 <= 2 refreshes": echoed.outputToCommitted.p95 <= 2 * refresh,
+            "every flood begun within 10 s": begun,
             "every flood shown to its last bytes": shown,
         ]
-        let floodOwnHeld = ownThread.longest
+        let own = ownThread.stalls
         for (index, view) in floods.enumerated() {
-            let figures = view.terminal.latency
-            let wait = Self.ours(figures.outputToShown.max, ownHeld: floodOwnHeld)
-            budgets["flood \(index + 1): no output waited over 100 ms to be shown (\(wait.said))"] = wait.ours <= 100
+            let figures = ran[index] ?? view.terminal.latency
+            let gap = figures.longestBetweenCommits.map { Self.ours($0, own: own) }
+            budgets["flood \(index + 1): no gap between committed frames over 100 ms in its \(frames[index]) frames (\(gap?.said ?? "no frame committed"))"] =
+                (gap?.ours ?? .infinity) <= 100
             measures.append(measurement("panes4-flood-\(index + 1)", keys: 0, figures: figures, budgets: [:]))
+            panes4["flood \(index + 1) longest gap between committed frames ms"] = (figures.longestBetweenCommits?.length ?? 0) * 1000
             panes4["flood \(index + 1) longest wait to be shown ms"] = figures.outputToShown.max
             panes4["flood \(index + 1) refresh p95 ms"] = figures.refresh.p95
         }
@@ -474,23 +490,24 @@ extension Driver {
             _ = await waitUntil(10) { Self.committed(self.pane?.terminal) > 0 }
             mainThread.reset()
             ownThread.reset()
-            let began = ContinuousClock.now
+            let began = CACurrentMediaTime()
             press("d", ["command"])
-            handled.append((ContinuousClock.now - began) / .milliseconds(1))
+            handled.append((CACurrentMediaTime() - began) * 1000)
             let made = pane
-            while Self.committed(made?.terminal) == 0, ContinuousClock.now - began < .seconds(5) {
+            while Self.committed(made?.terminal) == 0, CACurrentMediaTime() - began < 5 {
                 try? await Task.sleep(for: .milliseconds(1))
             }
-            totals.append((ContinuousClock.now - began) / .milliseconds(1))
+            let wait = Span(began, CACurrentMediaTime())
+            totals.append(wait.length * 1000)
             held.append(mainThread.longest)
-            ownHeld.append(ownThread.longest)
-            ours.append(Self.ours(totals.last ?? 0, ownHeld: ownThread.longest).ours)
-            samples.append(String(format: "handled %.1f, first frame %.1f, own thread %.1f, ours %.1f", handled.last ?? 0, totals.last ?? 0, ownThread.longest, ours.last ?? 0))
+            ownHeld.append(ownThread.stalls.shared(with: wait) * 1000)
+            ours.append(Self.ours(wait, own: ownThread.stalls).ours)
+            samples.append(String(format: "handled %.1f, first frame %.1f, own thread %.1f, ours %.1f", handled.last ?? 0, totals.last ?? 0, ownHeld.last ?? 0, ours.last ?? 0))
             _ = await waitUntil(5) { made?.session?.state.phase == .attached }
             press("w", ["command", "option"])
             _ = await sheet("Close", asking: nil, within: 5)
         }
-        panes4["a thread of the drive's own, longest stall within a split p95 ms"] = Self.p95(ownHeld)
+        panes4["a thread of the drive's own, held during a split p95 ms"] = Self.p95(ownHeld)
         let said = "p95 waited \(Self.ms(Self.p95(totals))) ms, the drive's own thread held \(Self.ms(Self.p95(ownHeld))) ms, ours "
             + "\(Self.ms(Self.p95(ours))) ms; each split in ms: " + samples.joined(separator: " | ")
         return (Self.p95(totals), Self.p95(ours), said, Self.p95(handled), Self.p95(held))

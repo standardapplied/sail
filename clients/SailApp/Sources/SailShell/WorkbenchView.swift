@@ -7,28 +7,21 @@ import SailTerminalWire
 import SailVT
 import SailWorkbench
 
-/// "This Mac": the window's terminals in tabs and splits. The arrangement is a `Workbench` value;
-/// each command changes it and `apply()` draws it, setting frames and `isHidden` only: a pane's
-/// view is made once, in its tab's view, and stays there until the pane closes (W2). Every change
-/// is kept in user defaults; at the first showing only the panes whose sessions the host lists live
-/// come back, and with none one new tab opens. Closing a pane ends its session, asked first unless
-/// the shell marked its prompt; detaching (quitting) ends none.
+/// "This Mac": the window's terminals in tabs and splits. Each command changes the `Workbench` value
+/// and `apply()` draws it, kept in user defaults; the first showing restores what lives.
 @MainActor
 public final class WorkbenchView: NSView {
     static let arrangementKey = "workbench.arrangement"
-    /// How far a key moves a divider, in points.
     static let dividerStep = 10.0
 
     public let host: LocalHost
     public let strip: TabStrip
     public private(set) var model = Workbench()
     public private(set) var panes: [PaneID: TerminalPane] = [:]
-    /// Told the selected tab's title each time it may have changed.
     var onTitle: @MainActor (String) -> Void = { _ in }
     /// Asked to show "This Mac", for a command given while it is not shown.
     var onShow: @MainActor () -> Void = {}
 
-    /// The terminals' palette, the launch appearance's.
     let palette: Palette
     var look: Look {
         didSet { paint() }
@@ -41,7 +34,6 @@ public final class WorkbenchView: NSView {
     private let newTerminal: AccentButton
     private var started = false
     private var pendingKeep: DispatchWorkItem?
-    /// The arrangement as last written.
     private var kept: Data?
     static let keepDelay = 0.3
     /// The arrangement is the person's from here on: restored, so worth keeping.
@@ -116,10 +108,9 @@ public final class WorkbenchView: NSView {
         panes.values.forEach { $0.detach() }
     }
 
-    /// Draws the model: each tab's view shown only when selected, each pane at its frame or
-    /// hidden, the dividers, the scrim, the strip, the window's title; the focused pane the first
-    /// responder; the arrangement kept soon after.
+    /// Draws the model, by frames and `isHidden` only (W2), and keeps it soon after.
     func apply() {
+        strip.tabs.filter { $0.field != nil && $0.id != model.selected }.forEach { $0.endRename() }
         for (id, view) in tabViews where !model.tabs.contains(where: { $0.id == id }) {
             view.removeFromSuperview()
             tabViews[id] = nil
@@ -137,7 +128,6 @@ public final class WorkbenchView: NSView {
         keepSoon()
     }
 
-    /// The strip's tabs and the window's title, as the model names them.
     private func showTitles() {
         strip.show(model.tabs.map { TabStrip.Item(id: $0.id, title: model.title(of: $0.id), zoomed: $0.zoomed != nil) }, selected: model.selected)
         onTitle(model.selectedTab.map { model.title(of: $0.id) } ?? ShellApp.title)
@@ -188,7 +178,6 @@ public final class WorkbenchView: NSView {
         DispatchQueue.main.asyncAfter(deadline: .now() + Self.keepDelay, execute: work)
     }
 
-    /// Writes the arrangement when it differs from what was last written.
     private func keep() {
         pendingKeep?.cancel()
         pendingKeep = nil
@@ -245,12 +234,16 @@ public final class WorkbenchView: NSView {
         }
     }
 
-    /// A pane became the first responder (a click): the model follows at once, and the drawing on
-    /// the next turn, after AppKit has recorded the new responder, so no first responder is set
-    /// from inside another's change.
+    /// A click made a pane the first responder: the model follows at once, the drawing next turn.
     private func focusClicked(_ id: PaneID) {
         guard model.focusedPane?.id != id else { return }
         model.focus(id)
+        applySoon()
+    }
+
+    /// Draws the model on the next turn, for a change told from inside AppKit's own first-responder
+    /// change, which drawing now would re-enter.
+    private func applySoon() {
         DispatchQueue.main.async { [weak self] in
             MainActor.assumeIsolated { self?.apply() }
         }
@@ -303,7 +296,6 @@ public final class WorkbenchView: NSView {
         focused?.terminal.fontPoints ?? FontLadder.standard
     }
 
-    /// A divider dragged: only its tab is laid out again while it moves.
     private func drag(_ path: [Side], to position: Double) {
         guard model.drag(path, to: position, in: room, minimum: minimum, scale: scale) else { return }
         layoutSelected()
@@ -348,10 +340,9 @@ public final class WorkbenchView: NSView {
         confirm(ending: views, question: "Close this tab?", detail: "Its \(views.count) terminals will end.")
     }
 
-    /// Ends `views`' sessions, asking first when one of them may end a running program; refused
-    /// with a beep while one is reconnecting, since its program would run on unseen.
+    /// Ends `views`' sessions, asking first when one of them may end a running program, as one not
+    /// attached may.
     private func confirm(ending views: [TerminalPane], question: String, detail: String) {
-        guard views.allSatisfy(\.canEnd) else { return NSSound.beep() }
         guard views.contains(where: \.mayEndAProgram), let window else { return end(views) }
         Confirmation.ask(question, detail: detail + " Quitting Sail instead leaves every terminal running.", action: "Close", on: window) { [weak self] close in
             if close { self?.end(views) }
@@ -475,7 +466,10 @@ public final class WorkbenchView: NSView {
             self?.closeTab(nil)
         }
         strip.onNew = { [weak self] in self?.newTab(nil) }
-        strip.onRename = { [weak self] id, name in self?.change { bench in name.map { bench.rename(id, to: $0) } } }
+        strip.onRename = { [weak self] id, name in
+            if let name { self?.model.rename(id, to: name) }
+            self?.applySoon()
+        }
         strip.onMove = { [weak self] id, index in self?.change { $0.moveTab(id, to: index) } }
         paint()
     }
@@ -505,7 +499,6 @@ extension WorkbenchView: NSMenuItemValidation {
     }
 }
 
-/// One tab's room: its panes, laid out by the workbench, and its dividers over them.
 final class TabView: NSView {
     var onDrag: @MainActor ([Side], Double) -> Void = { _, _ in }
     var onDragEnded: @MainActor () -> Void = {}
@@ -537,7 +530,6 @@ final class TabView: NSView {
     }
 }
 
-/// A divider: a 1 pt line of `separatorStrong` in a 7 pt area the pointer drags.
 final class DividerView: NSView {
     var onDrag: @MainActor ([Side], Double) -> Void = { _, _ in }
     var onDragEnded: @MainActor () -> Void = {}

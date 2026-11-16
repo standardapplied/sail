@@ -40,6 +40,8 @@ public struct LatencyMarks: Sendable {
     private var reported = 0
     private var unreported = 0
     private var presentedBeforeCommit = 0
+    private var longestToShown: Span?
+    private var longestBetweenCommits: Span?
 
     public init() {}
 
@@ -70,6 +72,7 @@ public struct LatencyMarks: Sendable {
             Self.keep(time - output.time, in: &outputToCommitted)
         }
         committed[frame] = (time, (committed[frame]?.outputs ?? []) + drawn)
+        if let lastFrame { Self.keepLongest(Span(lastFrame.committed, time), in: &longestBetweenCommits) }
         lastFrame = (frame, time)
         if let presented = presentedAt[frame] {
             presentedBeforeCommit += 1
@@ -118,7 +121,8 @@ public struct LatencyMarks: Sendable {
             keyToEchoEstimated: Self.percentiles(keyToEchoEstimated), refresh: Self.percentiles(refreshes),
             refreshWork: Self.percentiles(refreshWork), screenUpdates: screenUpdates,
             lateOutputs: late, reportedPresents: reported, unreportedPresents: unreported,
-            presentedBeforeCommit: presentedBeforeCommit
+            presentedBeforeCommit: presentedBeforeCommit, longestToShown: longestToShown,
+            longestBetweenCommits: longestBetweenCommits
         )
     }
 
@@ -134,7 +138,9 @@ public struct LatencyMarks: Sendable {
         guard let drawn = committed.removeValue(forKey: frame) else { return }
         let shown = presented.reported ? presented.time : targets[frame] ?? drawn.time
         for output in drawn.outputs {
-            Self.keep((presented.reported ? presented.time : drawn.time) - output.time, in: &outputToShown)
+            let toShown = Span(output.time, presented.reported ? presented.time : drawn.time)
+            Self.keep(toShown.end - toShown.start, in: &outputToShown)
+            Self.keepLongest(toShown, in: &longestToShown)
             let echoes = output.keys.map { shown - $0 }
             if presented.reported {
                 Self.keep(shown - output.time, in: &outputToPresented)
@@ -150,6 +156,10 @@ public struct LatencyMarks: Sendable {
         guard seconds.isFinite, seconds >= 0 else { return }
         samples.append(seconds)
         if samples.count > capacity { samples.removeFirst() }
+    }
+
+    private static func keepLongest(_ span: Span, in longest: inout Span?) {
+        if span.length > longest?.length ?? -1 { longest = span }
     }
 
     private static func percentiles(_ seconds: [Double]) -> Percentiles {
@@ -182,4 +192,8 @@ public struct LatencyFigures: Equatable, Sendable, Codable {
     public var unreportedPresents: Int
     /// Frames Metal told presented before their commit was marked.
     public var presentedBeforeCommit: Int
+    /// When the output that waited longest to be shown was told and shown, in seconds.
+    public var longestToShown: Span?
+    /// The longest time between two committed frames, in seconds.
+    public var longestBetweenCommits: Span?
 }

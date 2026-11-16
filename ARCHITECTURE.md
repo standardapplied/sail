@@ -4223,15 +4223,20 @@ goes under 10 columns by 3 rows and the padding.
   empty, each tab's focused and zoomed panes in its tree, the selected tab one of the tabs, pane ids
   and session names unique.
 - **W2. One view per session for life:** a pane's view is made once, attaches one session once, and
-  stays in its tab's view until the pane closes; "Open a New Session" makes a new pane in its place.
+  stays in its tab's view until the pane closes.
 - **W6. Persistence stores arrangement, never existence:** `workbench.arrangement` keeps tabs, trees,
   ratios, names, focused sessions and the selected tab; at launch only panes whose sessions the host
   lists live come back, and nothing stored opens a session.
-- **W7. A close that may end a running program asks,** unless the cursor is on a prompt the shell
-  marked (OSC 133), from a shell that has marked a command's start (C) at least once, or the session
-  is over.
-- **The minimum is the tree's:** no drag, key, equalize or restore leaves any pane under 10 columns by
-  3 rows at its tab's largest font; a window made smaller keeps the ratios and the panes clip.
+- **W7. A close that may end a running program asks,** unless the session is over, or it is attached
+  and its cursor is on a primary prompt row (OSC 133) of a shell that marks its commands (C), with no
+  command it started still running (no D since its C), all forgotten at a full reset. A pane not
+  attached asks, then is ended at the host on a connection of its own; if the host cannot be reached
+  the session lives on and the next launch opens it as a last tab.
+- **The minimum is the tree's:** no drag, key, equalize or split leaves any pane under 10 columns by
+  3 rows at its tab's largest font, nor a pane already under it smaller; a move toward fitting is
+  always taken. A window made smaller keeps the ratios and the panes clip; a restored layout that
+  cannot fit is clamped so every pane keeps a divider's grip (7 pt), and focus leaves a pane with no
+  area.
 
 The strip lies in the title bar's row after the zoom button, on `chrome`; a tab takes every click on
 it and never moves the window, and the strip's empty part is a plain view, so there the title bar's

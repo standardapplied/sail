@@ -3,13 +3,8 @@ import SailLook
 import SailTerminalView
 import SailWorkbench
 
-/// The tabs, in the title bar's row after the window's buttons, on `chrome` as the rail is: equal
-/// widths from 240 down to 120 pt, and past what fits at 120 the rest left out (``TabRow``), the
-/// selected one on `fillSelected` in `text`, the others in `textSecondary` and on
-/// `fillHover` under the pointer; a close button on the selected tab and the one under the pointer;
-/// `+` last. A tab is clicked to select, double-clicked to rename in place, dragged to reorder; it
-/// never moves the window. The strip's empty part is a plain view, as the rail's top is, so there
-/// the title bar's own dragging and double-click action (the person's system setting) stay.
+/// The tabs in the title bar's row, laid out by ``TabRow``. A tab never moves the window; the
+/// strip's empty part is a plain view, so there the title bar's dragging and double-click stay.
 @MainActor
 public final class TabStrip: NSView {
     public struct Item: Equatable, Sendable {
@@ -30,7 +25,7 @@ public final class TabStrip: NSView {
     }
 
     public private(set) var tabs: [TabButton] = []
-    public let add: NSButton
+    public let add: RingedButton
 
     public var isRenaming: Bool {
         tabs.contains { $0.field != nil }
@@ -38,14 +33,11 @@ public final class TabStrip: NSView {
 
     init(look: Look) {
         self.look = look
-        add = NSButton(image: TabButton.symbol("plus", accessibility: "New Tab"), target: nil, action: nil)
+        add = RingedButton(TabButton.symbol("plus", accessibility: "New Tab"), tip: "New Tab")
         super.init(frame: NSRect(x: 0, y: 0, width: 600, height: 28))
         wantsLayer = true
-        add.isBordered = false
-        add.focusRingType = .none
         add.target = self
         add.action = #selector(addTab)
-        add.toolTip = "New Tab"
         addSubview(add)
         setAccessibilityElement(true)
         setAccessibilityRole(.tabGroup)
@@ -121,7 +113,7 @@ public final class TabStrip: NSView {
 
     private func paint() {
         layer?.backgroundColor = NSColor(look.chrome).cgColor
-        add.contentTintColor = NSColor(look.textSecondary)
+        add.paint(look)
         tabs.forEach { $0.look = look }
     }
 }
@@ -130,9 +122,8 @@ public final class TabStrip: NSView {
 public final class TabButton: NSView, NSTextFieldDelegate {
     public let id: TabID
     public let label = NSTextField(labelWithString: "")
-    public let close: NSButton
+    public let close: RingedButton
     public private(set) var isSelected = false
-    /// The field a rename types into, while one is under way.
     public private(set) var field: NSTextField?
     var onSelect: @MainActor () -> Void = {}
     var onClose: @MainActor () -> Void = {}
@@ -146,22 +137,19 @@ public final class TabButton: NSView, NSTextFieldDelegate {
     private let zoomMark = NSImageView(image: TabButton.symbol("arrow.up.left.and.arrow.down.right", accessibility: "Zoomed"))
     private var hovering = false
     private var grabbedAt: (pointer: Double, origin: Double)?
-    private var renamed = false
+    private var cancelled = false
 
     init(id: TabID, look: Look) {
         self.id = id
         self.look = look
-        close = NSButton(image: Self.symbol("xmark", accessibility: "Close Tab"), target: nil, action: nil)
+        close = RingedButton(Self.symbol("xmark", accessibility: "Close Tab"), tip: "Close Tab")
         super.init(frame: .zero)
         wantsLayer = true
         layer?.cornerRadius = Look.contentRadius
         label.font = .systemFont(ofSize: Look.Step.callout.points)
         label.lineBreakMode = .byTruncatingTail
-        close.isBordered = false
-        close.focusRingType = .none
         close.target = self
         close.action = #selector(closeTab)
-        close.toolTip = "Close Tab"
         for view in [label, close, zoomMark] as [NSView] {
             view.translatesAutoresizingMaskIntoConstraints = false
             addSubview(view)
@@ -256,8 +244,8 @@ public final class TabButton: NSView, NSTextFieldDelegate {
         onClose()
     }
 
-    /// The title becomes a field: Return names the tab what it holds (nothing clears the name),
-    /// Escape leaves the name as it was.
+    /// The title becomes a field: Return, a click elsewhere or another tab selected names the tab
+    /// what it holds (nothing clears the name); Escape leaves the name as it was.
     public func rename() {
         guard field == nil else { return }
         let field = NSTextField(string: label.stringValue)
@@ -271,7 +259,7 @@ public final class TabButton: NSView, NSTextFieldDelegate {
         field.delegate = self
         field.frame = bounds.insetBy(dx: 4, dy: 2)
         self.field = field
-        renamed = false
+        cancelled = false
         paint()
         addSubview(field)
         window?.makeFirstResponder(field)
@@ -285,10 +273,10 @@ public final class TabButton: NSView, NSTextFieldDelegate {
     public func control(_: NSControl, textView _: NSTextView, doCommandBy command: Selector) -> Bool {
         switch command {
         case #selector(NSResponder.insertNewline(_:)):
-            renamed = true
             endRename()
             return true
         case #selector(NSResponder.cancelOperation(_:)):
+            cancelled = true
             endRename()
             return true
         default:
@@ -300,22 +288,60 @@ public final class TabButton: NSView, NSTextFieldDelegate {
         endRename()
     }
 
-    private func endRename() {
+    func endRename() {
         guard let field else { return }
         self.field = nil
         field.removeFromSuperview()
-        onRename(renamed ? field.stringValue : nil)
+        onRename(cancelled ? nil : field.stringValue)
     }
 
     private func paint() {
         let fill = isSelected ? NSColor(look.fillSelected) : hovering ? NSColor(look.fillHover) : .clear
         layer?.backgroundColor = fill.cgColor
         label.textColor = NSColor(isSelected ? look.text : look.textSecondary)
-        close.contentTintColor = NSColor(look.textSecondary)
+        close.paint(look)
         zoomMark.contentTintColor = NSColor(look.textSecondary)
         close.isHidden = !(isSelected || hovering)
         field?.textColor = NSColor(look.text)
         field?.backgroundColor = NSColor(look.surface)
         field?.layer?.borderColor = NSColor(look.accent).cgColor
+    }
+}
+
+/// A strip button with no bezel whose keyboard focus (Full Keyboard Access) is a 2 pt ring in the
+/// accent, never the system's ring.
+@MainActor
+public final class RingedButton: NSButton {
+    init(_ symbol: NSImage, tip: String) {
+        super.init(frame: .zero)
+        image = symbol
+        imagePosition = .imageOnly
+        isBordered = false
+        focusRingType = .none
+        toolTip = tip
+        wantsLayer = true
+        layer?.cornerRadius = Look.contentRadius / 2
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        nil
+    }
+
+    func paint(_ look: Look) {
+        contentTintColor = NSColor(look.textSecondary)
+        layer?.borderColor = NSColor(look.accent).cgColor
+    }
+
+    override public func becomeFirstResponder() -> Bool {
+        let became = super.becomeFirstResponder()
+        if became { layer?.borderWidth = 2 }
+        return became
+    }
+
+    override public func resignFirstResponder() -> Bool {
+        let resigned = super.resignFirstResponder()
+        if resigned { layer?.borderWidth = 0 }
+        return resigned
     }
 }

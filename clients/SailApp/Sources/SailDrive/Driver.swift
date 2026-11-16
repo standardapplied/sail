@@ -1,4 +1,5 @@
 import AppKit
+import Darwin
 import SailLook
 import SailRenderer
 import SailShell
@@ -274,7 +275,7 @@ final class Driver {
         }
         if let limit = step.shownWithin {
             let figures = terminal.latency
-            let wait = Self.ours(figures.outputToShown.max, ownHeld: ownThread.longest)
+            let wait = Self.ours(figures.longestToShown, own: ownThread.stalls)
             let ok = wait.ours <= limit
             let flood = measurement(name, keys: 0, figures: figures, budgets: ["every output shown within \(Self.ms(limit)) ms": ok])
             measures.append(flood)
@@ -305,9 +306,13 @@ final class Driver {
             shell.thisMac.host.crash()
             return (true, "")
         }
-        if step.attached == true {
-            let attached = await waitUntil(step.seconds ?? 20) { self.pane?.session?.state.phase == .attached }
-            return (attached, "the session is \(pane?.session.map { "\($0.state.phase)" } ?? "none")")
+        if let pause = step.pauseHost {
+            guard let pid = shell.thisMac.host.startedPID else { return (false, "the app started no host to pause") }
+            return (Darwin.kill(pid, pause ? SIGSTOP : SIGCONT) == 0, "")
+        }
+        if let wanted = step.attached {
+            let reached = await waitUntil(step.seconds ?? 20) { (self.pane?.session?.state.phase == .attached) == wanted }
+            return (reached, "the session is \(pane?.session.map { "\($0.state.phase)" } ?? "none")")
         }
         return (false, "the step names no action")
     }
@@ -359,12 +364,13 @@ final class Driver {
         ownThread.reset()
     }
 
-    /// A wait timed on a hosted runner, judged as the app's: less the longest the drive's own
-    /// heartbeat thread was kept from running over the same span, since a stall the machine shares is
-    /// the machine's (sail#417); what is left is ours, against the same budget as before.
-    static func ours(_ waited: Double, ownHeld: Double) -> (ours: Double, said: String) {
-        let ours = max(0, waited - ownHeld)
-        return (ours, "waited \(ms(waited)) ms, the drive's own thread held \(ms(ownHeld)) ms, ours \(ms(ours)) ms")
+    /// A wait timed on a hosted runner, judged as the app's, in ms: less what the drive's own
+    /// heartbeat thread was held during that same wait, since a stall the machine shares is the
+    /// machine's (sail#417); what is left is ours, against the same budget as before.
+    static func ours(_ wait: Span?, own: Stalls) -> (ours: Double, said: String) {
+        let wait = wait ?? Span(0, 0)
+        let shared = own.shared(with: wait) * 1000, ours = own.net(of: wait) * 1000
+        return (ours, "waited \(ms(wait.length * 1000)) ms, the drive's own thread held \(ms(shared)) ms of it, ours \(ms(ours)) ms")
     }
 
     static func ms(_ milliseconds: Double) -> String {
