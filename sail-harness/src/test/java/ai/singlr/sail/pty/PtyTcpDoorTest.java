@@ -313,7 +313,7 @@ class PtyTcpDoorTest {
   }
 
   /** A listener whose first {@code failures} accepts fail as a box out of descriptors does. */
-  private static final class FailingAccepts extends ServerSocketChannel {
+  static final class FailingAccepts extends ServerSocketChannel {
     private final ServerSocketChannel real;
     private int failures;
 
