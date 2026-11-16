@@ -97,6 +97,7 @@ class WorkspaceIT extends AbstractIncusIT {
   private static final String HELD = "held";
   private static final String BACKED = "backed";
   private static final String TREE = "tree";
+  private static final String NO_ADDRESS = "sail-it-noaddr";
   private static final Path CONTAINER_DIR = Path.of("/var/lib/sail/run");
 
   private static final String SEAL =
@@ -194,6 +195,10 @@ class WorkspaceIT extends AbstractIncusIT {
     deleteContainerQuietly(PROJECT + "-" + TREE);
     deleteContainerQuietly(TEMPLATE);
     deleteContainerQuietly(PROJECT);
+    try {
+      shell.exec(List.of("incus", "network", "delete", NO_ADDRESS));
+    } catch (Exception ignored) {
+    }
     try {
       shell.exec(List.of("incus", "storage", "delete", POOL));
     } catch (Exception ignored) {
@@ -777,6 +782,66 @@ class WorkspaceIT extends AbstractIncusIT {
         "ana@sail.invalid\nssh-ed25519 AAAAana ana@laptop\n1\n",
         held.stdout(),
         "only ana's credentials: " + held.stderr());
+  }
+
+  /**
+   * Round 2 of {@code sail-a-workspace-is-its-creators} on a real Incus: a workspace that gets no
+   * IPv4 address within its 30 s is not made. The create fails naming the wait and what to check,
+   * and nothing of the workspace is left. Staged by giving the template a network Incus serves no
+   * address on ({@code ipv4.address=none}) and making that its current snapshot, so its clone's
+   * {@code eth0} comes up with none.
+   */
+  @Test
+  void aWorkspaceThatGetsNoAddressIsNotMadeAndNothingOfItIsLeft() throws Exception {
+    var made =
+        shell.exec(
+            List.of(
+                "incus",
+                "network",
+                "create",
+                NO_ADDRESS,
+                "ipv4.address=none",
+                "ipv6.address=none"));
+    assertTrue(made.ok(), made.reason());
+    var moved =
+        shell.exec(
+            List.of(
+                "incus",
+                "config",
+                "device",
+                "override",
+                TEMPLATE,
+                "eth0",
+                "network=" + NO_ADDRESS));
+    if (!moved.ok()) {
+      moved =
+          shell.exec(
+              List.of(
+                  "incus", "config", "device", "set", TEMPLATE, "eth0", "network=" + NO_ADDRESS));
+    }
+    assertTrue(moved.ok(), moved.reason());
+    new SnapshotManager(shell).create(TEMPLATE, "v2");
+    var current =
+        shell.exec(List.of("incus", "config", "set", TEMPLATE, "user.sail.template.current=v2"));
+    assertTrue(current.ok(), current.reason());
+
+    var refused =
+        assertThrows(
+            IOException.class,
+            () -> workspaces.create(definition(), FIX, source(), null, "tmp", h -> leaving()));
+
+    assertTrue(
+        refused
+            .getMessage()
+            .startsWith(
+                "Workspace 'fix-login' could not be made its own: "
+                    + PROJECT
+                    + "-"
+                    + FIX
+                    + " got no address on eth0 within 30 s, so its repos cannot be fetched; check"
+                    + " that the network Incus gives it"),
+        refused.getMessage());
+    assertEquals(Optional.empty(), new BoxInstances(shell).named(PROJECT + "-" + FIX));
   }
 
   private static WorkspaceOwner udayWith(String token) {

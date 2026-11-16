@@ -1289,7 +1289,10 @@ own, about three (2.9 to 4.3 s over 32 creates, median 3.2 s).
     a new machine-id, the project's name as its hostname (which the in-container helpers read the
     project from), new SSH host keys made under that name, each repo fetched and on the branch
     named after the workspace, sshd restarted onto the new keys once systemd answers (it boots
-    while the repos are fetched), and the dev user's bus. Each fetch first waits, up to 10 s, until
+    while the repos are fetched), and the dev user's bus. Before any fetch it waits up to 30 s for
+    `eth0` to get an IPv4 address; a clone that gets none is not made: the script fails naming
+    the wait and what to check ("acme-try got no address on eth0 within 30 s, …"), and the create
+    removes it as any failed create does. Each fetch first waits, up to 10 s, until
     its remote's host resolves, asking the resolver itself (`getent hosts`, `Workspaces.FETCH`, a
     deadline on bash's `SECONDS`), never reading a failed fetch's words: a clone's address comes up
     a fraction of a second before its resolver, and more when several start at once. The script prints

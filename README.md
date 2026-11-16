@@ -348,7 +348,8 @@ current version. It gets:
 - SSH host keys of its own, made under that name;
 - every repo fetched and on the branch named after the workspace (the remote's, when it has one),
   asking again for up to 10 s while the repo's host does not resolve, as a fresh clone's
-  resolver can lag its address (`ready_steps.fetch_retries` counts how often);
+  resolver can lag its address (`ready_steps.fetch_retries` counts how often); a clone that gets
+  no IPv4 address on `eth0` within 30 s is not made, and the create says so;
 - none of the template's own keys.
 
 A workspace is its owner's: the person it was made for, or the one its spec's runs act for. Only

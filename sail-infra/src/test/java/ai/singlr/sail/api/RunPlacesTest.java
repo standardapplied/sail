@@ -206,6 +206,32 @@ class RunPlacesTest {
   }
 
   /**
+   * A spec's workspace that got no address within its 30 s is not made: the dispatch is refused
+   * naming the wait, as any create that failed is, and the half-made workspace is deleted.
+   */
+  @Test
+  void aWorkspaceThatGotNoAddressIsNotMadeAndTheDispatchSaysWhy() throws Exception {
+    var noAddress =
+        TestWorkspaces.incus(definitions(), "acme")
+            .onFail(
+                "sail-workspace acme auth",
+                "acme-auth got no address on eth0 within 30 s, so its repos cannot be fetched");
+    var places = places(noAddress, new ScriptedShellExecutor());
+    var check = places.checkSpec("acme", config(), "auth", Lane.BUILD, "eng");
+
+    var failed = assertThrows(ApiException.class, () -> places.enter(check, config()));
+
+    assertEquals(ErrorCode.COMMAND_FAILED, failed.failure().errorCode());
+    assertEquals(
+        "Workspace auth of acme could not be made ready: Workspace 'auth' could not be made its"
+            + " own: acme-auth got no address on eth0 within 30 s, so its repos cannot be fetched",
+        failed.getMessage());
+    assertEquals("Then dispatch again.", failed.failure().remedy().plain());
+    assertTrue(
+        noAddress.invocations().stream().anyMatch(c -> c.startsWith("incus delete acme-auth")));
+  }
+
+  /**
    * D8 reads the box's memory as its host says it, and a box whose memory cannot be read refuses.
    */
   @Test

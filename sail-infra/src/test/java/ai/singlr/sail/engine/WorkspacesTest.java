@@ -1398,6 +1398,10 @@ class WorkspacesTest {
             ip -4 -o addr show dev eth0 | grep -q inet && break
             sleep 0.1
           done
+          if ! ip -4 -o addr show dev eth0 | grep -q inet; then
+            echo "$project-$workspace got no address on eth0 within 30 s, so its repos cannot be fetched; check that the network Incus gives it (incus config device show $project-$workspace) serves addresses (incus network show <network>)" >&2
+            exit 1
+          fi
         fi
         step network
         while [ "$#" -ge 2 ]; do
