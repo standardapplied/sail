@@ -216,12 +216,15 @@ extension Driver {
     /// Scenario 28: the tab at `from` pressed, dragged to the middle of the tab at `to`, let go.
     private func dragTab(from: Int, to: Int) -> (Bool, String) {
         guard let start = tabMiddle(from), let end = tabMiddle(to) else { return (false, "no tab \(from) or \(to)") }
+        let tab = workbench.strip.tabs[from]
+        let before = tab.frame.minX
         mouse(.leftMouseDown, at: start, clicks: 1)
         for step in 1 ... 10 {
             mouse(.leftMouseDragged, at: NSPoint(x: start.x + (end.x - start.x) * Double(step) / 10, y: start.y), clicks: 1)
         }
+        let moved = tab.frame.minX
         mouse(.leftMouseUp, at: end, clicks: 1)
-        return (true, arrangementSaid)
+        return (true, "the dragged tab went from x \(Int(before)) to \(Int(moved)) before the release; " + arrangementSaid)
     }
 
     /// Scenario 29: a double-click on the tab, `text` typed into its field, then Return or Escape.
