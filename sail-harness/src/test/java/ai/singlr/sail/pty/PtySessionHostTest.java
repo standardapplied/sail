@@ -26,11 +26,13 @@ import java.net.StandardProtocolFamily;
 import java.net.StandardSocketOptions;
 import java.net.UnixDomainSocketAddress;
 import java.nio.ByteBuffer;
+import java.nio.channels.ServerSocketChannel;
 import java.nio.channels.SocketChannel;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
@@ -278,6 +280,25 @@ class PtySessionHostTest {
       var second = welcome();
       assertEquals(restarted.bootId(), second);
       assertNotEquals(first, second, "a restarted host is a new boot: the id changes");
+    }
+  }
+
+  @Test
+  void anAcceptThatFailsIsPassedOverAndTheSocketServesOn() throws Exception {
+    var other = UnixDomainSocketAddress.of(dir.resolve("other.sock"));
+    try (var started = startHost();
+        var real = ServerSocketChannel.open(StandardProtocolFamily.UNIX).bind(other);
+        var failing = new PtyTcpDoorTest.FailingAccepts(real, 1);
+        var waiting = SocketChannel.open(other)) {
+      var loop = Thread.ofVirtual().start(() -> started.acceptLoop(failing));
+
+      var reply =
+          assertTimeoutPreemptively(Duration.ofSeconds(10), () -> hello(waiting, "tok-uday"));
+
+      assertInstanceOf(PtyMessage.Welcome.class, reply, "served after a failed accept");
+      started.close();
+      failing.close();
+      loop.join();
     }
   }
 

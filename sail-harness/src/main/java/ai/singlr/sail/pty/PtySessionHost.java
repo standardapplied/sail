@@ -41,6 +41,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.locks.LockSupport;
 import java.util.function.Function;
 import java.util.function.LongSupplier;
 
@@ -382,7 +383,7 @@ public final class PtySessionHost implements AutoCloseable {
     server = ServerSocketChannel.open(StandardProtocolFamily.UNIX);
     server.bind(UnixDomainSocketAddress.of(socketPath));
     ownerOnly(socketPath);
-    Thread.ofVirtual().name("pty-host-accept").start(this::acceptLoop);
+    Thread.ofVirtual().name("pty-host-accept").start(() -> acceptLoop(server));
     tick(network.clock().getAsLong());
   }
 
@@ -596,16 +597,22 @@ public final class PtySessionHost implements AutoCloseable {
             PosixFilePermission.OWNER_EXECUTE));
   }
 
-  private void acceptLoop() {
+  /**
+   * Accepts until the host closes. An accept that fails (out of descriptors, say) is logged and
+   * passed over after {@link PtyTcpDoor#ACCEPT_PAUSE}: a host that stopped accepting would be alive
+   * and deaf, every terminal waiting on it for good.
+   */
+  void acceptLoop(ServerSocketChannel listener) {
     while (!closed) {
       try {
-        var channel = server.accept();
+        var channel = listener.accept();
         Thread.ofVirtual().name("pty-host-conn").start(() -> serveLocal(channel));
       } catch (IOException e) {
-        if (!closed) {
-          throw new IllegalStateException("pty host accept failed", e);
+        if (closed) {
+          return;
         }
-        return;
+        log("accept-failed", "?", "-", String.valueOf(e.getMessage()));
+        LockSupport.parkNanos(PtyTcpDoor.ACCEPT_PAUSE.toNanos());
       }
     }
   }
