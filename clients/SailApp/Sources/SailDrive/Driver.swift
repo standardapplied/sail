@@ -3,6 +3,7 @@ import Darwin
 import SailLook
 import SailRenderer
 import SailShell
+import SailMeasures
 import SailSurface
 import SailTerminal
 import SailTerminalView
@@ -276,7 +277,7 @@ final class Driver {
         }
         if let limit = step.shownWithin {
             let figures = terminal.latency
-            let wait = Self.ours(figures.longestToShown, own: ownThread.stalls), held = mainHeld()
+            let wait = ours(figures.longestToShown), held = mainHeld()
             if let gap = mainThread.stalls.longest() {
                 mainStacks.told(gap).forEach { print("main thread in its longest hold of the flood: \($0)") }
             }
@@ -304,6 +305,9 @@ final class Driver {
         }
         if let keys = step.measure {
             return await measure(keys, interval: step.interval ?? 50, name: name)
+        }
+        if step.floodFile == true {
+            return (FileManager.default.fileExists(atPath: Self.floodFile), Self.floodFile)
         }
         if step.killHost == true {
             guard shell.thisMac.host.startedPID != nil else { return (false, "the app started no host to kill") }
@@ -369,22 +373,51 @@ final class Driver {
         ownThread.reset()
     }
 
-    /// A wait timed on a hosted runner, judged as the app's, in ms: less what the drive's own
-    /// heartbeat thread was held during that same wait, since a stall the machine shares is the
-    /// machine's (sail#417); what is left is ours, against the same budget as before.
-    static func ours(_ wait: Span?, own: Stalls) -> (ours: Double, said: String) {
+    /// A wait timed on a hosted runner, judged as the app's, in ms: less the machine's share of
+    /// that same wait (sail#417), the larger of the drive's own thread's stall over it and the time
+    /// the main thread was runnable and got no CPU while the machine had none idle; what is left
+    /// is ours, against the same budget as before.
+    func ours(_ wait: Span?, less tick: Double = 0) -> (ours: Double, said: String) {
         let wait = wait ?? Span(0, 0)
-        let shared = own.shared(with: wait) * 1000, ours = own.net(of: wait) * 1000
-        return (ours, "waited \(ms(wait.length * 1000)) ms, the drive's own thread held \(ms(shared)) ms of it, ours \(ms(ours)) ms")
+        let own = ownThread.stalls, looks = mainStacks.looks
+        let ownHeld = own.shared(with: wait), starved = MachineShare.starved(in: wait, looks: looks)
+        let ours = max(0, wait.length - tick - MachineShare.of(wait, own: own, main: looks)) * 1000
+        return (ours, "waited \(Self.ms((wait.length - tick) * 1000)) ms, the drive's own thread held \(Self.ms(ownHeld * 1000)) ms of it, "
+            + "the main thread runnable without CPU on a machine with none idle \(Self.ms(starved * 1000)) ms of it, ours \(Self.ms(ours)) ms")
     }
 
     /// The main thread's longest hold, its heartbeat's longest gap (in `span` when given) less one
-    /// tick, judged as ``ours(_:own:)`` judges a wait.
+    /// tick, judged as ``ours(_:less:)`` judges a wait.
     func mainHeld(in span: Span? = nil) -> (ours: Double, said: String) {
-        let gap = mainThread.stalls.longest(in: span) ?? Span(0, 0)
-        let own = ownThread.stalls
-        let held = max(0, gap.length - Heartbeat.interval) * 1000, ours = max(0, own.net(of: gap) - Heartbeat.interval) * 1000
-        return (ours, "held \(Self.ms(held)) ms, the drive's own thread held \(Self.ms(own.shared(with: gap) * 1000)) ms of it, ours \(Self.ms(ours)) ms")
+        ours(mainThread.stalls.longest(in: span), less: Heartbeat.interval)
+    }
+
+    /// The bytes the spec's flood prints, made once so that one `cat` gives them: 20 MiB of `x`
+    /// folded at 150 columns (`head -c 20971520 /dev/zero | tr '\0' x | fold -w 150` printed nine
+    /// processes' worth of CPU beside the terminal it measured), its last 20 bytes unended.
+    static let floodFile: String = {
+        let path = "/tmp/sail-drive-flood"
+        let line = [UInt8](repeating: UInt8(ascii: "x"), count: 150) + [UInt8(ascii: "\n")]
+        let lines = 20_971_520 / 150
+        var bytes = [UInt8]()
+        bytes.reserveCapacity(lines * 151 + 20)
+        for _ in 0 ..< lines { bytes += line }
+        bytes += [UInt8](repeating: UInt8(ascii: "x"), count: 20_971_520 - lines * 150)
+        FileManager.default.createFile(atPath: path, contents: Data(bytes))
+        return path
+    }()
+
+    /// What the floods' processes and their neighbours cost the machine now, as `ps` says.
+    static func processes() -> [String] {
+        let ps = Process()
+        ps.executableURL = URL(filePath: "/bin/ps")
+        ps.arguments = ["-axo", "pid,pri,%cpu,comm", "-r"]
+        let pipe = Pipe()
+        ps.standardOutput = pipe
+        guard (try? ps.run()) != nil else { return ["ps did not run"] }
+        let listed = String(decoding: pipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+        ps.waitUntilExit()
+        return listed.split(separator: "\n").prefix(16).map(String.init)
     }
 
     static func ms(_ milliseconds: Double) -> String {

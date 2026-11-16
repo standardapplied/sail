@@ -1,5 +1,6 @@
 import Foundation
 import QuartzCore
+import SailMeasures
 import SailSurface
 import Synchronization
 
@@ -56,41 +57,5 @@ final class Heartbeat: Sendable {
 
     var stalls: Stalls {
         gaps.withLock { $0.stalls }
-    }
-}
-
-/// When a thread that only ticks, once every `tick` seconds, was kept from running: each gap
-/// between its ticks held it for the gap less one tick.
-struct Stalls: Sendable {
-    static let capacity = 100_000
-
-    let tick: Double
-    private(set) var gaps: [Span] = []
-
-    init(tick: Double) {
-        self.tick = tick
-    }
-
-    mutating func record(_ gap: Span) {
-        guard gap.length > tick else { return }
-        gaps.append(gap)
-        if gaps.count > Self.capacity { gaps.removeFirst() }
-    }
-
-    /// How much of `wait` this thread was held too, in seconds: the longest stall that overlaps
-    /// it, less one tick, never below zero and never more than the overlap. A stall the machine held
-    /// every thread through is the machine's; one at another moment says nothing of this wait, and
-    /// ticks merely late on a busy machine do not add up to one.
-    func shared(with wait: Span) -> Double {
-        gaps.reduce(0) { held, gap in max(held, min(gap.overlap(wait), max(0, gap.length - tick))) }
-    }
-
-    /// The longest gap, or the longest that overlaps `span`.
-    func longest(in span: Span? = nil) -> Span? {
-        gaps.filter { gap in span.map { gap.overlap($0) > 0 } ?? true }.max { $0.length < $1.length }
-    }
-
-    func net(of wait: Span) -> Double {
-        max(0, wait.length - shared(with: wait))
     }
 }

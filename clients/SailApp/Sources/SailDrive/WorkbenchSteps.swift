@@ -2,6 +2,7 @@ import AppKit
 import Darwin
 import QuartzCore
 import SailShell
+import SailMeasures
 import SailSurface
 import SailTerminal
 import SailTerminalView
@@ -348,6 +349,7 @@ extension Driver {
         let before = Self.footprint
         let tabsBefore = workbench.model.tabs.count
         _ = mainStacks
+        _ = Self.floodFile
         mainThread.reset()
         press("t", ["command"])
         guard await waitUntil(10, { self.workbench.model.tabs.count == tabsBefore + 1 && self.pane?.session?.state.phase == .attached }) else {
@@ -369,7 +371,7 @@ extension Driver {
         }
         focus(echo)
         typeText("cat\r")
-        let flood = "clear; head -c 20971520 /dev/zero | tr '\\0' x | fold -w 150; echo flood-$((1+1))\r"
+        let flood = "clear; cat \(Self.floodFile); echo flood-$((1+1))\r"
         for view in floods {
             focus(view)
             typeText(flood)
@@ -378,6 +380,7 @@ extension Driver {
         print(String(format: "panes4 phase floods typed %.3f", CACurrentMediaTime()))
         let begun = await waitUntil(10) { floods.allSatisfy { ((try? $0.session?.screen.text()) ?? "").contains("xxxxxxxxxx") } }
         print(String(format: "panes4 phase floods begun %.3f", CACurrentMediaTime()))
+        Self.processes().forEach { print("panes4 ps: \($0)") }
         floods.forEach { $0.terminal.resetLatency() }
         let framesBefore = floods.map { Self.committed($0.terminal) }
         let (ok, said) = await measure(200, interval: 50, name: "panes4-echo")
@@ -404,10 +407,9 @@ extension Driver {
             "every flood begun within 10 s": begun,
             "every flood shown to its last bytes": shown,
         ]
-        let own = ownThread.stalls
         for (index, view) in floods.enumerated() {
             let figures = ran[index] ?? view.terminal.latency
-            let gap = figures.longestBetweenCommits.map { Self.ours($0, own: own) }
+            let gap = figures.longestBetweenCommits.map { ours($0) }
             if let span = figures.longestBetweenCommits {
                 print(String(format: "panes4 flood %d longest gap %.3f–%.3f; refresh max %.1f ms", index + 1, span.start, span.end, figures.refresh.max))
                 mainStacks.told(span).forEach { print("panes4 flood \(index + 1) in its longest gap: \($0)") }
@@ -416,7 +418,7 @@ extension Driver {
                 (gap?.ours ?? .infinity) <= 100
             measures.append(measurement("panes4-flood-\(index + 1)", keys: 0, figures: figures, budgets: [:]))
             panes4["flood \(index + 1) longest gap between committed frames ms"] = (figures.longestBetweenCommits?.length ?? 0) * 1000
-            panes4["flood \(index + 1) longest gap between committed frames, less the drive's own thread's stall in it, ms"] = gap?.ours ?? -1
+            panes4["flood \(index + 1) longest gap between committed frames, less the machine's share of it, ms"] = gap?.ours ?? -1
             panes4["flood \(index + 1) longest wait to be shown ms"] = figures.outputToShown.max
             panes4["flood \(index + 1) refresh p95 ms"] = figures.refresh.p95
         }
@@ -516,7 +518,7 @@ extension Driver {
             totals.append(wait.length * 1000)
             held.append(mainThread.longest)
             ownHeld.append(ownThread.stalls.shared(with: wait) * 1000)
-            ours.append(Self.ours(wait, own: ownThread.stalls).ours)
+            ours.append(self.ours(wait).ours)
             samples.append(String(format: "handled %.1f, first frame %.1f, own thread %.1f, ours %.1f", handled.last ?? 0, totals.last ?? 0, ownHeld.last ?? 0, ours.last ?? 0))
             _ = await waitUntil(5) { made?.session?.state.phase == .attached }
             press("w", ["command", "option"])

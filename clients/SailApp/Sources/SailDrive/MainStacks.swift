@@ -1,6 +1,7 @@
 import Darwin
 import Foundation
 import QuartzCore
+import SailMeasures
 import SailSurface
 
 /// What the main thread is doing while its heartbeat is late: a thread of its own looks every
@@ -160,6 +161,19 @@ final class MainStacks: @unchecked Sendable {
         #else
         return 0
         #endif
+    }
+
+    /// Every sample as a look at the main thread, for ``MachineShare``.
+    var looks: [ThreadLook] {
+        lock.withLock {
+            samples.map { sample in
+                ThreadLook(
+                    time: sample.time, runnable: sample.runState == 1, cpu: sample.cpu,
+                    idleTicks: sample.ticks.count == 4 ? sample.ticks[2] : nil,
+                    busyTicks: sample.ticks.count == 4 ? sample.ticks[0] &+ sample.ticks[1] &+ sample.ticks[3] : nil
+                )
+            }
+        }
     }
 
     /// The samples taken in `span`, each as its run state, the main thread's CPU time since the

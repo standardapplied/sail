@@ -299,9 +299,7 @@ import Testing
             context: nil, characters: "\u{1b}", charactersIgnoringModifiers: "\u{1b}", isARepeat: false, keyCode: 0x35
         ))
         NSApp.sendEvent(escape)
-        await harness.drainMain()
-        #expect(harness.window.attachedSheet == nil)
-        #expect(answers.withLock { $0 } == [false])
+        #expect(await harness.until { harness.window.attachedSheet == nil && answers.withLock { $0 } == [false] }, "Escape did not cancel the sheet")
     }
 
     /// ⌘V while scrolled back returns the view to the bottom and draws it there, the screen's lock
