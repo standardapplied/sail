@@ -131,12 +131,20 @@ import Testing
         }
     }
 
-    @Test func everyOperationKeepsTheValueWholeAndWhatIsKeptComesBackAsItself() {
-        var random = Seeded(state: 0x5A11)
+    /// What the walk found: its first breach, every restore that differed, and how much it ran.
+    struct Walked: Sendable {
+        var issues: [String] = []
+        var sequences = 0
         var stepsRun = 0
         var restoredTabs = 0
         var restoredPanes = 0
+    }
+
+    static func walk() -> Walked {
+        var random = Seeded(state: 0x5A11)
+        var walked = Walked()
         for sequence in 0 ..< 10000 {
+            walked.sequences += 1
             var bench = Workbench()
             var made = 0
             let window = Self.windows[sequence % Self.windows.count]
@@ -144,22 +152,44 @@ import Testing
             var trail: [String] = ["new tab"]
             for _ in 0 ..< Int.random(in: 1 ... 30, using: &random) {
                 trail.append(Self.randomStep(&bench, &random, made: &made, window: window))
-                stepsRun += 1
+                walked.stepsRun += 1
                 let breaches = Self.breaches(bench) + Self.panesUnderTheMinimum(bench, window)
                 guard breaches.isEmpty else {
-                    Issue.record("sequence \(sequence) after \(trail.joined(separator: ", ")): \(breaches.joined(separator: "; "))")
-                    return
+                    walked.issues.append("sequence \(sequence) after \(trail.joined(separator: ", ")): \(breaches.joined(separator: "; "))")
+                    return walked
                 }
             }
             let live = bench.panes.values.map(\.session)
             let restored = Workbench.restore(bench.arrangement, live: live, home: "/home")
-            restoredTabs += restored.tabs.count
-            restoredPanes += restored.panes.count
-            #expect(Self.breaches(restored).isEmpty, "sequence \(sequence): restored \(Self.breaches(restored))")
-            #expect(restored.arrangement == bench.arrangement, "sequence \(sequence) after \(trail.joined(separator: ", "))")
-            #expect(restored.focusedPane?.session == bench.focusedPane?.session)
-            if restored.arrangement != bench.arrangement { return }
+            walked.restoredTabs += restored.tabs.count
+            walked.restoredPanes += restored.panes.count
+            if !Self.breaches(restored).isEmpty { walked.issues.append("sequence \(sequence): restored \(Self.breaches(restored))") }
+            if restored.focusedPane?.session != bench.focusedPane?.session { walked.issues.append("sequence \(sequence): the focus did not come back") }
+            if restored.arrangement != bench.arrangement {
+                walked.issues.append("sequence \(sequence) after \(trail.joined(separator: ", "))")
+                return walked
+            }
         }
-        #expect(stepsRun > 100_000 && restoredTabs > 10000 && restoredPanes > restoredTabs + 5000, "\(stepsRun) steps, \(restoredTabs) tabs and \(restoredPanes) panes restored")
+        return walked
+    }
+
+    /// The walk runs on a thread of its own, so it holds none of the threads every other test
+    /// shares while it computes.
+    @Test func everyOperationKeepsTheValueWholeAndWhatIsKeptComesBackAsItself() async {
+        let walked = await onOwnThread(Self.walk)
+        print("WholenessTests ran \(walked.sequences) sequences, \(walked.stepsRun) steps")
+        #expect(walked.issues.isEmpty, "\(walked.issues.prefix(5))")
+        #expect(walked.sequences == 10000)
+        #expect(
+            walked.stepsRun > 100_000 && walked.restoredTabs > 10000 && walked.restoredPanes > walked.restoredTabs + 5000,
+            "\(walked.stepsRun) steps, \(walked.restoredTabs) tabs and \(walked.restoredPanes) panes restored"
+        )
+    }
+}
+
+/// `work`, blocking, on a thread of its own, its result awaited.
+func onOwnThread<Value: Sendable>(_ work: @escaping @Sendable () -> Value) async -> Value {
+    await withCheckedContinuation { result in
+        Thread { result.resume(returning: work()) }.start()
     }
 }
