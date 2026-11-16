@@ -321,8 +321,7 @@ import Testing
         harness.pasteboard.setString("x", forType: .string)
         harness.view.paste(nil)
         harness.flush()
-        await harness.drainMain()
-        #expect(harness.view.visibleText.contains("line 200"))
+        #expect(await harness.until { harness.view.visibleText.contains("line 200") }, "the paste did not draw the bottom")
         #expect(harness.link.bytes.contains(UInt8(ascii: "x")))
     }
 
@@ -407,9 +406,8 @@ import Testing
         try #require(harness.clock.isPaused)
         let refreshes = harness.view.latency.refresh.count
         harness.key("e", code: 0x0E)
-        await harness.drainMain()
+        #expect(await harness.until { harness.view.latency.refresh.count == refreshes + 1 }, "the key's hop read the screen")
         await harness.drawn()
-        #expect(harness.view.latency.refresh.count == refreshes + 1, "the key's hop read the screen")
         try #require(harness.clock.isPaused, "the key itself asked for no frame")
         harness.link.output("e")
         await harness.clock.nextResume()

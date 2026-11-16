@@ -176,6 +176,18 @@ struct Harness {
         await drawn()
     }
 
+    /// Waits, at most `seconds`, until `condition` holds: what the view's hops to the main actor
+    /// lead to. Such a hop is a task, which may wait for a thread of the shared pool before it
+    /// reaches the main queue, so one turn of the main queue does not wait for it.
+    func until(_ seconds: Double = 5, _ condition: () -> Bool) async -> Bool {
+        let deadline = ContinuousClock.now + .seconds(seconds)
+        while !condition() {
+            guard ContinuousClock.now < deadline else { return false }
+            try? await Task.sleep(for: .milliseconds(1))
+        }
+        return true
+    }
+
     /// Waits until no drawable the view asked for is still on its way.
     func drawn() async {
         while view.drawingState.contains("; awaiting a drawable") {
