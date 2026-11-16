@@ -219,6 +219,34 @@ class SqliteTest {
     assertEquals(0L, count.getFirst());
   }
 
+  /**
+   * An {@link Error} thrown inside a transaction rolls it back as an exception does and comes out
+   * unchanged: its write is not there afterwards, not even after the connection's next transaction
+   * commits, which starts clean.
+   */
+  @Test
+  void anErrorThrownInsideATransactionRollsItBackAndIsRethrownUnchanged() {
+    db.execute("CREATE TABLE t (id INTEGER PRIMARY KEY)");
+    var thrown = new StackOverflowError("deep");
+
+    var caught =
+        assertThrows(
+            StackOverflowError.class,
+            () ->
+                db.transaction(
+                    () -> {
+                      db.execute("INSERT INTO t VALUES (?)", 1);
+                      throw thrown;
+                    }));
+    db.transaction(() -> db.execute("INSERT INTO t VALUES (?)", 2));
+
+    assertSame(thrown, caught);
+    assertEquals(List.of(2L), db.query("SELECT id FROM t ORDER BY id", row -> row.integer(0)));
+    try (var other = Sqlite.open(tempDir.resolve("test.db"))) {
+      assertEquals(List.of(2L), other.query("SELECT id FROM t ORDER BY id", row -> row.integer(0)));
+    }
+  }
+
   @Test
   void nestedTransactionJoinsTheOuterScope() {
     db.execute("CREATE TABLE t (id INTEGER PRIMARY KEY)");

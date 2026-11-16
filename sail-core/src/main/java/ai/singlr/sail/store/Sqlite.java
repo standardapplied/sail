@@ -298,7 +298,7 @@ public final class Sqlite implements AutoCloseable {
           afterCommit.forEach(Runnable::run);
         }
         return result;
-      } catch (Exception e) {
+      } catch (Throwable e) {
         try {
           execute("ROLLBACK");
         } catch (Exception rollbackEx) {
