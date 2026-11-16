@@ -40,7 +40,7 @@ final class Driver {
         return view
     }()
     let mainThread = Heartbeat.onTheMainThread()
-    private let ownThread = Heartbeat.onItsOwnThread()
+    let ownThread = Heartbeat.onItsOwnThread()
 
     struct Result: Encodable {
         let index: Int

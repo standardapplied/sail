@@ -180,6 +180,10 @@ extension Driver {
         mouse(.leftMouseDown, at: windowPoint(0), clicks: 1)
         var followed = 0
         var handled: [Double] = []
+        let views = tab.layout.leaves.compactMap { workbench.panes[$0] }
+        views.forEach { $0.terminal.resetLatency() }
+        mainThread.reset()
+        ownThread.reset()
         let began = ContinuousClock.now
         for move in 1 ... max(1, moves) {
             let wanted = distance * Double(move) / Double(max(1, moves))
@@ -194,7 +198,8 @@ extension Driver {
         mouse(.leftMouseUp, at: windowPoint(distance), clicks: 1)
         let spent = (ContinuousClock.now - began) / .milliseconds(1)
         let timing = String(format: "a move handled in p50 %.1f ms, at most %.1f ms; ", handled.sorted()[handled.count / 2], handled.max() ?? 0)
-            + "\(handled.count) moves in \(Int(spent)) ms"
+            + "\(handled.count) moves in \(Int(spent)) ms; the main thread held at most \(Int(mainThread.longest)) ms, a thread of the drive's own "
+            + "\(Int(ownThread.longest)) ms; the panes' longest refresh " + views.map { String(format: "%.1f ms", $0.terminal.latency.refresh.max) }.joined(separator: ", ")
         return (followed == max(1, moves), "the panes followed \(followed) of \(max(1, moves)) moves; \(timing); \(arrangementSaid)")
     }
 
