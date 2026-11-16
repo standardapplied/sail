@@ -347,6 +347,7 @@ extension Driver {
     private func fourPanes() async -> (Bool, String) {
         let before = Self.footprint
         let tabsBefore = workbench.model.tabs.count
+        _ = mainStacks
         mainThread.reset()
         press("t", ["command"])
         guard await waitUntil(10, { self.workbench.model.tabs.count == tabsBefore + 1 && self.pane?.session?.state.phase == .attached }) else {
@@ -374,10 +375,13 @@ extension Driver {
             typeText(flood)
         }
         focus(echo)
+        print(String(format: "panes4 phase floods typed %.3f", CACurrentMediaTime()))
         let begun = await waitUntil(10) { floods.allSatisfy { ((try? $0.session?.screen.text()) ?? "").contains("xxxxxxxxxx") } }
+        print(String(format: "panes4 phase floods begun %.3f", CACurrentMediaTime()))
         floods.forEach { $0.terminal.resetLatency() }
         let framesBefore = floods.map { Self.committed($0.terminal) }
         let (ok, said) = await measure(200, interval: 50, name: "panes4-echo")
+        print(String(format: "panes4 phase echo measured %.3f", CACurrentMediaTime()))
         panes4["main thread's longest stall while four ran ms"] = mainThread.longest
         panes4["a thread of the drive's own, longest stall while four ran ms"] = ownThread.longest
         let refresh = 1000 / Double(max(1, shell.window.screen?.maximumFramesPerSecond ?? 60))
@@ -388,6 +392,7 @@ extension Driver {
         var ran = [LatencyFigures?](repeating: nil, count: floods.count), frames = [Int](repeating: 0, count: floods.count)
         let shown = await waitUntil(180) {
             for (index, view) in floods.enumerated() where ran[index] == nil && Self.shows(view, marker) {
+                print(String(format: "panes4 phase flood %d shown to its end %.3f", index + 1, CACurrentMediaTime()))
                 ran[index] = view.terminal.latency
                 frames[index] = Self.committed(view.terminal) - framesBefore[index]
             }
@@ -403,6 +408,10 @@ extension Driver {
         for (index, view) in floods.enumerated() {
             let figures = ran[index] ?? view.terminal.latency
             let gap = figures.longestBetweenCommits.map { Self.ours($0, own: own) }
+            if let span = figures.longestBetweenCommits {
+                print(String(format: "panes4 flood %d longest gap %.3f–%.3f; refresh max %.1f ms", index + 1, span.start, span.end, figures.refresh.max))
+                mainStacks.described(in: span).forEach { print("panes4 flood \(index + 1) main thread in its longest gap: \($0)") }
+            }
             budgets["flood \(index + 1): no gap between committed frames over 100 ms in its \(frames[index]) frames (\(gap?.said ?? "no frame committed"))"] =
                 (gap?.ours ?? .infinity) <= 100
             measures.append(measurement("panes4-flood-\(index + 1)", keys: 0, figures: figures, budgets: [:]))
@@ -410,6 +419,10 @@ extension Driver {
             panes4["flood \(index + 1) longest gap between committed frames, less the drive's own thread's stall in it, ms"] = gap?.ours ?? -1
             panes4["flood \(index + 1) longest wait to be shown ms"] = figures.outputToShown.max
             panes4["flood \(index + 1) refresh p95 ms"] = figures.refresh.p95
+        }
+        for gap in mainThread.stalls.gaps where gap.length > 0.06 {
+            print(String(format: "panes4 main thread held %.3f–%.3f (%.1f ms), the drive's own thread %.1f ms of it", gap.start, gap.end, gap.length * 1000,
+                         ownThread.stalls.shared(with: gap) * 1000))
         }
         let work = grid.map { $0.terminal.latency.refreshWork.p95 }.reduce(0, +)
         budgets["the four views' refresh work p95 summed <= 8 ms (CPU time, the main thread's own clock)"] = work <= 8

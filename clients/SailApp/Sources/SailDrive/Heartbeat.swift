@@ -44,6 +44,11 @@ final class Heartbeat: Sendable {
         gaps.withLock { $0 = (CACurrentMediaTime(), 0, Stalls(tick: Self.interval)) }
     }
 
+    /// When it last ticked, on the host clock.
+    var lastTick: Double {
+        gaps.withLock { $0.last }
+    }
+
     /// The longest gap in milliseconds.
     var longest: Double {
         gaps.withLock { $0.longest } * 1000

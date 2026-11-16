@@ -46,6 +46,7 @@ final class Driver {
     }()
     let mainThread = Heartbeat.onTheMainThread()
     let ownThread = Heartbeat.onItsOwnThread()
+    lazy var mainStacks = MainStacks(watching: mainThread)
 
     struct Result: Encodable {
         let index: Int
@@ -276,6 +277,9 @@ final class Driver {
         if let limit = step.shownWithin {
             let figures = terminal.latency
             let wait = Self.ours(figures.longestToShown, own: ownThread.stalls), held = mainHeld()
+            if let gap = mainThread.stalls.longest() {
+                mainStacks.described(in: gap).forEach { print("main thread in its longest hold of the flood: \($0)") }
+            }
             let ok = max(wait.ours, held.ours) <= limit
             let flood = measurement(name, keys: 0, figures: figures, budgets: ["every output shown within \(Self.ms(limit)) ms": ok])
             measures.append(flood)
@@ -359,6 +363,7 @@ final class Driver {
     }
 
     func resetLatency() {
+        _ = mainStacks
         terminal.resetLatency()
         mainThread.reset()
         ownThread.reset()
