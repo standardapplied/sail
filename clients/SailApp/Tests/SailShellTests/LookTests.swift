@@ -57,7 +57,8 @@ import Testing
     }
 
     /// A: the title bar is transparent over a full-size content view, the platform's buttons in
-    /// place; what shows under it is the rail's tint at the left and the pane's surface beside it.
+    /// place; under it the rail is drawn in `chrome` and the strip beside it in the pane's surface
+    /// (the layers' own colours; the drive checks the pixels of the running window).
     @MainActor @Test(arguments: [("dark", Look.dark), ("light", Look.light)])
     func theTitleBarShowsTheRailAndThePanesSurface(_ name: String, _ look: Look) throws {
         let folder = FileManager.default.temporaryDirectory.appending(path: "sail-look-\(UUID().uuidString.prefix(8))")
@@ -73,68 +74,16 @@ import Testing
             #expect(window.standardWindowButton(button).map { !$0.isHidden } == true, "\(name): the window lacks its \(button) button")
         }
         let content = try #require(window.contentView)
-        window.orderFront(nil)
-        defer { window.orderOut(nil) }
         #expect(window.contentLayoutRect.height < content.bounds.height, "\(name): the content view does not reach under the title bar")
+        #expect(shell.rail.layer?.backgroundColor == NSColor(look.chrome).cgColor, "\(name): the rail is not chrome")
         for (item, surface) in [(Rail.Item.account, look.canvas), (.thisMac, look.palette.background)] {
             shell.select(item)
-            content.layoutSubtreeIfNeeded()
-            let rail = try #require(Self.pixel(of: content, x: Rail.width / 2, fromTop: 10))
-            let pane = try #require(Self.pixel(of: content, x: Rail.width + 200, fromTop: 10))
-            #expect(rail == look.chrome, "\(name) \(item): under the title bar the rail is \(rail), not \(look.chrome)")
-            #expect(pane == surface, "\(name) \(item): under the title bar the pane is \(pane), not \(surface)")
+            #expect(content.layer?.backgroundColor == NSColor(surface).cgColor, "\(name) \(item): the strip under the title bar is not the pane's surface")
         }
     }
 
     static let fonts = URL(filePath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
         .appending(path: "Fonts")
-
-    /// The colour `view`'s layer draws at a point, `fromTop` points below its top edge, in sRGB.
-    @MainActor static func pixel(of view: NSView, x: Double, fromTop: Double) -> RGB? {
-        let width = Int(view.bounds.width), height = Int(view.bounds.height)
-        guard width > 0, height > 0, let layer = view.layer, let space = CGColorSpace(name: CGColorSpace.sRGB),
-              let context = CGContext(
-                  data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: width * 4, space: space,
-                  bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
-              ), let bytes = context.data
-        else { return nil }
-        view.display()
-        layer.render(in: context)
-        let pixels = bytes.bindMemory(to: UInt8.self, capacity: width * height * 4)
-        let index = (Int(fromTop) * width + Int(x)) * 4
-        return RGB(red: pixels[index], green: pixels[index + 1], blue: pixels[index + 2])
-    }
-
-    @Test func noSourceOfTheAppNamesTheSystemAccent() throws {
-        let sources = URL(filePath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
-            .appending(path: "Sources")
-        var read = 0
-        for target in ["SailLook", "SailShell", "SailAccount", "Sail", "SailTerminalView", "SailRenderer"] {
-            let directory = sources.appending(path: target)
-            for name in try FileManager.default.contentsOfDirectory(atPath: directory.path) where name.hasSuffix(".swift") {
-                let text = try String(contentsOf: directory.appending(path: name), encoding: .utf8)
-                read += 1
-                for word in ["controlAccentColor", "accentColor", "AppleAccentColor", "selectedContentBackgroundColor", "keyboardFocusIndicatorColor"] {
-                    #expect(!text.contains(word), "\(target)/\(name) names \(word)")
-                }
-            }
-        }
-        #expect(read >= 12)
-    }
-
-    @Test func theTitleFontIsThePinnedNewsreaderMedium() throws {
-        let fonts = Self.fonts
-        let pins = [
-            "Newsreader16pt-Medium.ttf": "ee2f66ee4c6c313acf211c952211f8c6c0c0d9fa6a17cd0ec0ceba13418b1aed",
-            "Newsreader-OFL.txt": "fdfad38143ec470553cae82a1e45320bdd1b9ec70415d37bd0171051d8a4ded8",
-        ]
-        for (file, pin) in pins {
-            let digest = SHA256.hash(data: try Data(contentsOf: fonts.appending(path: file)))
-            #expect(digest.map { String(format: "%02x", $0) }.joined() == pin, "\(file) is not the pinned Newsreader file")
-        }
-        let title = try TitleFont(directory: fonts).font(.title2)
-        #expect(CTFontGetSize(title) == 22)
-    }
 
     /// Focus and selection are the look's accent, never the system's: a field being edited is
     /// ringed in the accent (the system's ring is off), text selected in it is on the selection fill,

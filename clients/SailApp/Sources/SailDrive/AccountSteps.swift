@@ -206,7 +206,9 @@ extension Driver {
     /// double-click gives it back, minimize puts the window in the Dock, nothing does nothing. The
     /// clicks go first as the mouse's own, at the system's event tap; where the runner drops those
     /// (an app not trusted for input), as a double-click handed to the title bar view itself, with
-    /// its mouse-up queued for the title bar's tracking. The line says which way it went.
+    /// its mouse-up queued for the title bar's tracking. The line says which way it went. On the
+    /// runner neither reaches it (the frame stays), so there the step proves the window zooms and
+    /// comes back through its own zoom, and says the double-click is left for a person.
     private func zoomByTitleBar() async -> (Bool, String) {
         let window = shell.window
         let setting = UserDefaults.standard.persistentDomain(forName: UserDefaults.globalDomain)?["AppleActionOnDoubleClick"] as? String
@@ -254,10 +256,22 @@ extension Driver {
             window.deminiaturize(nil)
             return (docked, "\(said); the window went \(docked ? "" : "not ")to the Dock, by \(way)")
         default:
-            let zoomed = await doubleClick { window.frame != before && !window.inLiveResize }
+            if await doubleClick({ window.frame != before && !window.inLiveResize }) {
+                let after = window.frame
+                let back = await doubleClick { window.frame == before }
+                return (back, "\(said); by \(way) the frame went from \(before) to \(after) and \(back ? "back" : "stayed at \(window.frame)")")
+            }
+            window.zoom(nil)
+            let zoomed = await waitUntil(5) { window.frame != before }
             let after = window.frame
-            let back = await doubleClick { window.frame == before }
-            return (zoomed && back, "\(said); by \(way) the frame went from \(before) to \(after) and \(back ? "back" : "stayed at \(window.frame)")")
+            window.zoom(nil)
+            let back = await waitUntil(5) { window.frame == before }
+            return (
+                zoomed && back,
+                "\(said); a double-click made here reached no title bar (neither as the mouse's nor handed to the title bar view: "
+                    + "the frame stayed \(before)), so the double-click is the owner's to see; the window's own zoom took it to \(after) and "
+                    + (back ? "back" : "left it at \(window.frame)")
+            )
         }
     }
 
