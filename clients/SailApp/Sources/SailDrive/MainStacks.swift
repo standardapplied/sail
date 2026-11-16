@@ -28,7 +28,7 @@ final class MainStacks: @unchecked Sendable {
     /// Made on the main thread, which it then watches through `beat`.
     @MainActor init(watching beat: Heartbeat) {
         thread = mach_thread_self()
-        let main = pthread_main_thread_np()
+        let main = pthread_self()
         high = UInt(bitPattern: pthread_get_stackaddr_np(main))
         low = high - UInt(pthread_get_stacksize_np(main))
         let watcher = Thread { [self] in
