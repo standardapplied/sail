@@ -40,6 +40,10 @@ final class EffectSink {
     var events: [ScreenEvent] = []
     var titleChanged = false
     var workingDirectoryChanged = false
+    /// The shell has marked a command's start (OSC 133 C) since the last full reset.
+    var commandsMarked = false
+    /// A command's start was marked and its end (D) has not come.
+    var commandRunning = false
     /// Between a replay's begin and end the stream is history: a replayed query is not answered
     /// again, nor a bell rung or a clipboard written for it.
     var replaying = false
@@ -136,7 +140,26 @@ final class EffectSink {
         try set(terminal, GHOSTTY_TERMINAL_OPT_CLIPBOARD_WRITE, unsafeBitCast(clipboardWrite, to: UnsafeRawPointer.self))
         try set(terminal, GHOSTTY_TERMINAL_OPT_CLIPBOARD_READ, unsafeBitCast(clipboardRead, to: UnsafeRawPointer.self))
         try set(terminal, GHOSTTY_TERMINAL_OPT_DESKTOP_NOTIFICATION, unsafeBitCast(notification, to: UnsafeRawPointer.self))
+        let prompt: GhosttyTerminalSemanticPromptFn = { _, userdata, event in
+            guard let event, let sink = EffectSink.from(userdata) else { return }
+            switch event.pointee.kind {
+            case GHOSTTY_SEMANTIC_PROMPT_OUTPUT_START:
+                sink.commandsMarked = true
+                sink.commandRunning = true
+            case GHOSTTY_SEMANTIC_PROMPT_COMMAND_END:
+                sink.commandRunning = false
+            default:
+                break
+            }
+        }
+        let reset: GhosttyTerminalResetFn = { _, userdata in
+            guard let sink = EffectSink.from(userdata) else { return }
+            sink.commandsMarked = false
+            sink.commandRunning = false
+        }
         try set(terminal, GHOSTTY_TERMINAL_OPT_RENDER_HOLD, unsafeBitCast(hold, to: UnsafeRawPointer.self))
+        try set(terminal, GHOSTTY_TERMINAL_OPT_SEMANTIC_PROMPT, unsafeBitCast(prompt, to: UnsafeRawPointer.self))
+        try set(terminal, GHOSTTY_TERMINAL_OPT_RESET, unsafeBitCast(reset, to: UnsafeRawPointer.self))
     }
 
     private static func from(_ userdata: UnsafeMutableRawPointer?) -> EffectSink? {

@@ -15,6 +15,7 @@ import SailVT
 public final class TerminalView: NSView {
     /// What the session tells, as it tells it: phases, the title, the bell, the working directory.
     public var onEvent: @MainActor (SessionEvent) -> Void = { _ in }
+    public var onFocus: @MainActor () -> Void = {}
     /// The pasteboard ⌘C writes and ⌘V reads: the general one, unless a test gives another.
     public var pasteboard = NSPasteboard.general
     /// Asks the person whether to paste text of `lines` lines into a program that did not ask for
@@ -51,8 +52,10 @@ public final class TerminalView: NSView {
     private var broughtDrawable: (any CAMetalDrawable)?
     /// The cell the pointer last moved into with no button held.
     var hovered: CellPoint?
-    /// Watches for Escape while the paste sheet is up.
-    var escapeWatch: Any?
+    /// The button went down on a view that was not focused: that click only focuses it.
+    var focusingClick = false
+    /// When the view last became its window's first responder, on the events' clock.
+    var focusedAt = 0.0
     var gatherer = ScrollGatherer()
     private(set) var focused = false
     private(set) var lastFrame: ScreenFrame?
@@ -104,13 +107,15 @@ public final class TerminalView: NSView {
         marks.figures
     }
 
-    /// Starts the latency figures from nothing.
     /// Where drawing stands, in words: frames presented and committed, the display link, its
     /// refreshes, and whether a drawable is awaited. For a step whose frames did not come.
     public var drawingState: String {
         let figures = latency
         return "frames presented \(figures.reportedPresents + figures.unreportedPresents), committed \(committedFrames); the display link "
-            + "\(pacer.isIdle ? "paused" : "running") after \(figures.refresh.count) refreshes; \(awaitingDrawable ? "" : "not ")awaiting a drawable"
+            + "\(pacer.isIdle ? "paused" : "running") after \(figures.refresh.count) refreshes; \(awaitingDrawable ? "" : "not ")awaiting a drawable; "
+            + "not yet told presented: \(figures.unpresented.isEmpty ? "none" : figures.unpresented.map(\.description).joined(separator: ", ")); "
+            + String(format: "commit to completed p50 %.1f max %.1f ms, to told presented p50 %.1f max %.1f ms", figures.commitToCompleted.p50,
+                     figures.commitToCompleted.max, figures.commitToPresentTold.p50, figures.commitToPresentTold.max)
     }
 
     public func resetLatency() {
@@ -222,10 +227,21 @@ public final class TerminalView: NSView {
         layoutGrid()
     }
 
+    /// A hidden view draws nothing and pauses its display link; shown, it draws its screen as it is.
+    override public func viewDidHide() {
+        super.viewDidHide()
+        pacer.pause()
+    }
+
+    override public func viewDidUnhide() {
+        super.viewDidUnhide()
+        needFrame()
+    }
+
     override public func setFrameSize(_ size: NSSize) {
         super.setFrameSize(size)
         configureLayer(scale: renderer.faces.scale)
-        layoutGrid()
+        layoutGrid(sizeChanging: true)
     }
 
     /// The font at `points` from the ladder's range: the cell, the grid and every glyph again.
@@ -257,26 +273,38 @@ public final class TerminalView: NSView {
         )
     }
 
+    /// The layer at the view's pixel size and `scale`, changed only where it differs: a drawable
+    /// size set again, even to the same value, costs the layer its drawables.
     private func configureLayer(scale: Double) {
         guard let metalLayer else { return }
-        metalLayer.device = renderer.device
-        metalLayer.pixelFormat = .bgra8Unorm
-        metalLayer.colorspace = CGColorSpace(name: CGColorSpace.sRGB)
-        metalLayer.framebufferOnly = true
+        if metalLayer.device == nil {
+            metalLayer.device = renderer.device
+            metalLayer.pixelFormat = .bgra8Unorm
+            metalLayer.colorspace = CGColorSpace(name: CGColorSpace.sRGB)
+            metalLayer.framebufferOnly = true
+        }
+        let size = CGSize(width: pixelSize.width, height: pixelSize.height)
+        guard metalLayer.contentsScale != CGFloat(scale) || metalLayer.drawableSize != size else { return }
         metalLayer.contentsScale = scale
-        metalLayer.drawableSize = CGSize(width: pixelSize.width, height: pixelSize.height)
+        metalLayer.drawableSize = size
         needFrame()
     }
 
     /// The grid that fits the view, given to the session at once when it changed: the screen
-    /// reflows now, and the session tells the host once the size has held.
-    func layoutGrid() {
+    /// reflows now, and the session tells the host once the size has held. While the view's size is
+    /// changing (`sizeChanging`, a drag or a window resize) the session is told even when the grid
+    /// is not, so its hold counts from the last change of the view, not of the grid (W5): a drag
+    /// that crosses a column only now and then still gives the program one size, at its end.
+    func layoutGrid(sizeChanging: Bool = false) {
         guard let link else { return }
         let fitted = metrics.grid(fitting: pixelSize)
         let size = GridSize(
             columns: min(fitted.columns, TerminalSession.largestGrid.columns), rows: min(fitted.rows, TerminalSession.largestGrid.rows)
         )
-        guard size != grid else { return }
+        guard size != grid else {
+            if sizeChanging { input.async { try? link.resize(size) } }
+            return
+        }
         grid = size
         input.async { [weak self] in
             try? link.resize(size)
@@ -291,6 +319,7 @@ public final class TerminalView: NSView {
     /// Something the view shows changed: draw at the next refresh.
     func needFrame() {
         needsDraw = true
+        guard !isHiddenOrHasHiddenAncestor else { return }
         pacer.resume()
     }
 
@@ -301,7 +330,7 @@ public final class TerminalView: NSView {
     /// display refresh rather than the one after. A view paused for want of a drawable is not
     /// idle: output does not ask for one again (an occluded window's ask can block for a second).
     func drawNowIfIdle() {
-        guard pacer.isIdle, !awaitingDrawable, refresh(target: CACurrentMediaTime() + refreshInterval) else { return }
+        guard pacer.isIdle, !awaitingDrawable, !isHiddenOrHasHiddenAncestor, refresh(target: CACurrentMediaTime() + refreshInterval) else { return }
         pacer.resume()
     }
 
@@ -365,8 +394,14 @@ public final class TerminalView: NSView {
             pacer.pause()
             return false
         }
+        guard !isHiddenOrHasHiddenAncestor else {
+            needsDraw = true
+            pacer.pause()
+            return false
+        }
         let read = CACurrentMediaTime()
-        defer { marks.refreshed(since: read) }
+        let work = Duration.threadCPU
+        defer { marks.refreshed(since: read, workSince: work) }
         guard let frame = try? link.screen.frame() else {
             pacer.pause()
             return false
@@ -383,7 +418,7 @@ public final class TerminalView: NSView {
             pacer.pause()
             return false
         }
-        switch renderer.draw(frame, overlay: overlay, from: { takeDrawable(metalLayer) }, presented: { [marks] in marks.presented(frame: $0, at: $1) }) {
+        switch renderer.draw(frame, overlay: overlay, from: { takeDrawable(metalLayer) }, presented: { [marks] in marks.presented(frame: $0, at: $1) }, completed: { [marks] in marks.completed(frame: $0, ok: $1) }) {
         case let .drawn(number):
             committedFrames += 1
             awaitingDrawable = false
@@ -423,7 +458,9 @@ public final class TerminalView: NSView {
     }
 
     override public func becomeFirstResponder() -> Bool {
+        focusedAt = ProcessInfo.processInfo.systemUptime
         updateFocus(responder: true)
+        onFocus()
         return true
     }
 
@@ -466,7 +503,6 @@ public final class TerminalView: NSView {
 
     isolated deinit {
         tasks.forEach { $0.cancel() }
-        if let escapeWatch { NSEvent.removeMonitor(escapeWatch) }
     }
 
     override public func isAccessibilityElement() -> Bool {

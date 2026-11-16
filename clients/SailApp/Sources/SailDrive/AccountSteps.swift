@@ -202,8 +202,8 @@ extension Driver {
         func at(_ x: Double) -> UInt32 {
             Self.pixel(pixels, (20 * context.width + Int(x * 2)) * 4)
         }
-        let surface = Self.hex(shell.rail.selected == .thisMac ? shell.look.palette.background : shell.look.canvas)
-        let rail = at(Rail.width / 2), pane = at(Rail.width + 200)
+        let surface = Self.hex(shell.rail.selected == .thisMac ? shell.look.chrome : shell.look.canvas)
+        let rail = at(Rail.width / 2), pane = at(Double(content.bounds.width) - 30)
         return (
             Self.near(rail, Self.hex(shell.look.chrome)) && Self.near(pane, surface),
             String(format: "under the title bar the rail is #%06X (wanted #%06X) and the pane #%06X (wanted #%06X)", rail, Self.hex(shell.look.chrome), pane, surface)
