@@ -177,8 +177,7 @@ public final class ProjectDemoCommand implements Runnable {
     var tracker = new ProvisionTracker<>(ProjectPhase.class, stateFile, false);
     tracker.reset();
 
-    var tokens = WorkspaceVerbs.boxTokens(config);
-    WorkspaceVerbs.requireTokens(config, tokens, shell::asksForCredentials, System.getenv());
+    var tokens = WorkspaceVerbs.cloneTokens(config, shell::asksForCredentials);
     var listener = json ? ProvisionListener.NOOP : ConsoleProvisionListener.INSTANCE;
     provisionTrusting(
         SailPaths.controlPlaneDb(),

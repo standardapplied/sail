@@ -1554,7 +1554,10 @@ Each row with the tests that prove it:
   a definition naming any host gets nobody's token for it. A spec's workspace takes its owner's
   (T2); the host commands that clone (`project apply`, `repo add`, `demo`, `template build`,
   `workspace create`) take the box person's (`HostIdentity.gitTokens`), written into the project's
-  container by the same writer and selection as the owner step. Nothing is read from a process's
+  container by the same writer and selection as the owner step, and only through one seam
+  (`WorkspaceVerbs.cloneTokens`) that refuses first, so no host command has a token past the
+  refusal. `repo add` writes the store an apply writes, for every host the project's repos name,
+  not the added repo's alone. Nothing is read from a process's
   environment: a repo whose host asks for credentials and has no stored token is refused before
   anything is written, naming `sail git login <host>`, and when `GITHUB_TOKEN`, `GITLAB_TOKEN` or
   `BITBUCKET_TOKEN` is set the refusal says Sail does not read it (only whether it is set is
@@ -1562,7 +1565,8 @@ Each row with the tests that prove it:
   *`GitCredentialsTest.aTokenStoredForOneHostIsNeverSentToAnother`,
   `GitCredentialsTest.aHostWithAPortIsKeyedAndRefusedWithItsPort`,
   `GitCredentialsTest.aTokenVariableSetIsNamedAsUnreadAndItsValueNeverSaid`,
-  `WorkspaceVerbsTest.aTemplateIsNotBuiltWhenARepoAsksForATokenNoOneStored`,
+  `WorkspaceVerbsTest.theTokensAHostCommandWritesComeOnlyPastTheRefusal`,
+  `ProjectAddRepoCommandTest.addingARepoOnAnotherHostKeepsTheEarlierHostsTokenAndAddsNoOther`,
   `RootRequiredTest.noCommandTakesAGitTokenOnItsCommandLine`.*
 - **Keys follow owners.** One walker (`BoxInstances.wholeWorkspaceOf`) finds a person's
   workspaces for keys and tokens alike. A pairing and `host config set ssh-public-key` both

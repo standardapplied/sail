@@ -16,9 +16,12 @@ import ai.singlr.sail.engine.NameValidator;
 import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.ProjectApplier;
 import ai.singlr.sail.engine.ShellExecutor;
+import java.io.IOException;
 import java.io.PrintStream;
 import java.util.LinkedHashMap;
-import java.util.List;
+import java.util.Map;
+import java.util.concurrent.TimeoutException;
+import java.util.function.Predicate;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
 import picocli.CommandLine.Option;
@@ -84,11 +87,14 @@ public final class ProjectAddRepoCommand implements Runnable {
     }
 
     var edited = ProjectMutations.checked(DefinitionEdits.addRepo(config, repo));
-    var tokens = WorkspaceVerbs.boxTokens(edited);
-    WorkspaceVerbs.requireTokens(
-        edited, tokens, new ShellExecutor(false)::asksForCredentials, System.getenv());
-    var applier = new ProjectApplier(shell, out);
-    var result = applier.applyRepos(name, List.of(repo), ProjectDefinition.USER, tokens);
+    var result =
+        cloned(
+            new ProjectApplier(shell, out),
+            name,
+            edited,
+            WorkspaceVerbs.storedTokens(),
+            new ShellExecutor(false)::asksForCredentials,
+            System.getenv());
     mutations.write(
         Section.REPOS,
         config,
@@ -117,6 +123,26 @@ public final class ProjectAddRepoCommand implements Runnable {
                 + "' added to "
                 + name
                 + " and its definition"));
+  }
+
+  /**
+   * Clones what {@code edited} adds into {@code name}'s container, with the store an apply writes:
+   * the person's {@code stored} tokens for every host {@code edited}'s repos name ({@link
+   * WorkspaceVerbs#cloneTokens}), not the added repo's host alone, so no earlier repo loses its.
+   */
+  static ProjectApplier.ApplyResult cloned(
+      ProjectApplier applier,
+      String name,
+      ProjectDefinition edited,
+      Map<String, String> stored,
+      Predicate<String> asks,
+      Map<String, String> env)
+      throws IOException, InterruptedException, TimeoutException {
+    return applier.applyRepos(
+        name,
+        edited.repos(),
+        ProjectDefinition.USER,
+        WorkspaceVerbs.cloneTokens(edited, stored, asks, env));
   }
 
   private ProjectDefinition.Repo collectRepoInteractively(PrintStream out, Ansi ansi) {

@@ -455,8 +455,7 @@ public final class ProjectApplyCommand implements Runnable {
       OperatorCommand operator)
       throws Exception {
     var project = config.name();
-    var tokens = WorkspaceVerbs.boxTokens(config);
-    WorkspaceVerbs.requireTokens(config, tokens, observer::asksForCredentials, System.getenv());
+    var tokens = WorkspaceVerbs.cloneTokens(config, observer::asksForCredentials);
     var observed = new ContainerManager(observer);
     var mgr = new ContainerManager(shell);
     var hostnameRealigned = !observed.hostnameMatches(project) && mgr.setHostname(project);
@@ -663,8 +662,7 @@ public final class ProjectApplyCommand implements Runnable {
       ConsoleHelper.proceed("Create project " + config.name() + "?", "Not provisioned", "--yes");
     }
 
-    var gitTokens = WorkspaceVerbs.boxTokens(config);
-    WorkspaceVerbs.requireTokens(config, gitTokens, shell::asksForCredentials, System.getenv());
+    var gitTokens = WorkspaceVerbs.cloneTokens(config, shell::asksForCredentials);
     var listener = json ? ProvisionListener.NOOP : ConsoleProvisionListener.INSTANCE;
     try (var operations = OperationsFactory.open()) {
       var provisioner =
