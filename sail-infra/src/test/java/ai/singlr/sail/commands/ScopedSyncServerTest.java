@@ -6,6 +6,7 @@
 package ai.singlr.sail.commands;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.config.SpecStatus;
@@ -19,6 +20,7 @@ import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
+import ai.singlr.sail.store.TestLogins;
 import ai.singlr.sail.store.TokenStore;
 import ai.singlr.sail.store.WebauthnCredentialStore;
 import ai.singlr.sail.sync.SyncDatabase;
@@ -207,6 +209,158 @@ class ScopedSyncServerTest {
         round.roster().stream().map(fde -> fde.get("email")).toList());
   }
 
+  /** One unscoped round as the box of {@code own}, applied to the node as the sync applies it. */
+  private FdeStore syncAs(String own) throws Exception {
+    var round = roundAs(tokenOf(own));
+    var node = new FdeStore(nodeDb);
+    assertEquals(List.of(), SyncOperations.applyFdes(node, round.roster(), round.scope(), own));
+    return node;
+  }
+
+  private String nodeId(String handle) {
+    return new FdeStore(nodeDb).byHandle(handle).orElseThrow().id();
+  }
+
+  /**
+   * Scenario 1 (N1): main removes tmp and gives the handle to a new hire within one round. The
+   * node's row is a new person's: none of the old tmp's logins, git tokens or API tokens, and a new
+   * id the pass disowns the old one's workspaces by.
+   */
+  @Test
+  void aHandleMainGivesToSomeoneNewInOneRoundCarriesNothingOfTheLastHolders() throws Exception {
+    fdes.add("tmp", "Tmp", "tmp@x.dev", "member");
+    syncAs("uma");
+    var old = TestLogins.store(nodeDb, "tmp");
+    new FdeStore(nodeDb).logins().storeGit(old, "github.com", "ghp_old_tmp_0123456789");
+    new TokenStore(nodeDb).create("mast-tmp", "member", old, null);
+    Acting.system(() -> fdes.remove(fdes.byHandle("tmp").orElseThrow().id()));
+    fdes.add("tmp", "New Hire", "newhire@x.dev", "member");
+
+    var node = syncAs("uma");
+
+    var hire = node.byHandle("tmp").orElseThrow();
+    assertNotEquals(old, hire.id());
+    assertEquals("newhire@x.dev", hire.email());
+    assertEquals(List.of(), node.logins().list(hire.id()));
+    assertEquals(List.of(), node.logins().list(old));
+    assertEquals(Map.of(), node.logins().gitTokens(old));
+    assertEquals(0L, count("SELECT count(*) FROM api_tokens WHERE name = 'mast-tmp'"));
+  }
+
+  /**
+   * Scenario 2 (N2): a box with people of its own joins a main that has the same handles. Each row
+   * takes main's id and keeps everything; a row main never described is only disabled, its logins
+   * kept. A row that took main's id goes, with its logins, once main removes that person.
+   */
+  @Test
+  void aBoxWithItsOwnPeopleJoiningAMainDeletesNobodysLogins() throws Exception {
+    var node = new FdeStore(nodeDb);
+    node.add("uma", "Uma", "uma@old.dev", "member");
+    node.add("ada", "Ada", "ada@old.dev", "member");
+    node.add("zed", "Zed", "zed@old.dev", "member");
+    node.add("sam", "Sam", "sam@old.dev", "member");
+    var ada = TestLogins.store(nodeDb, "ada");
+    var zed = TestLogins.store(nodeDb, "zed");
+    var sam = TestLogins.store(nodeDb, "sam");
+
+    syncAs("uma");
+    syncAs("uma");
+
+    assertEquals(ada, nodeId("ada"));
+    assertEquals(zed, nodeId("zed"));
+    assertEquals(sam, nodeId("sam"));
+    assertEquals(2, node.logins().list(ada).size());
+    assertEquals(2, node.logins().list(zed).size());
+    assertEquals("disabled", node.byHandle("zed").orElseThrow().status());
+    Acting.system(() -> fdes.remove(fdes.byHandle("sam").orElseThrow().id()));
+    syncAs("uma");
+    assertTrue(node.byHandle("sam").isEmpty());
+    assertEquals(List.of(), node.logins().list(sam));
+    assertEquals(2, node.logins().list(zed).size());
+  }
+
+  /** A roster from a main that sends no ids, as one before this change, removes no one by id. */
+  @Test
+  void aRosterWithoutMainsIdsRemovesNoOne() throws Exception {
+    syncAs("uma");
+    var yan = TestLogins.store(nodeDb, "yan");
+    var round = roundAs(tokenOf("uma"));
+    var withoutIds =
+        round.roster().stream()
+            .filter(fde -> !"yan".equals(fde.get("handle")))
+            .map(
+                fde ->
+                    fde.entrySet().stream()
+                        .filter(field -> !"id".equals(field.getKey()))
+                        .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue)))
+            .toList();
+
+    var node = new FdeStore(nodeDb);
+    SyncOperations.applyFdes(node, withoutIds, round.scope(), "uma");
+
+    assertEquals(yan, nodeId("yan"));
+    assertEquals(2, node.logins().list(yan).size());
+  }
+
+  /**
+   * Scenario 3: a main rebuilt by adding its people again mints new ids ({@code FdeStore.add}), so
+   * each is a new person to a node and stores their logins again; the box's own person takes the
+   * new id and keeps everything (N3).
+   */
+  @Test
+  void aRebuiltMainsNewIdsAreNewPeopleButTheBoxsOwnPersonKeepsEverything() throws Exception {
+    syncAs("uma");
+    var bob = TestLogins.store(nodeDb, "bob");
+    var uma = TestLogins.store(nodeDb, "uma");
+    Acting.system(
+        () -> {
+          for (var handle : List.of("bob", "uma")) {
+            fdes.remove(fdes.byHandle(handle).orElseThrow().id());
+            fdes.add(handle, handle, handle + "@x.dev", "member");
+          }
+        });
+
+    var node = syncAs("uma");
+
+    assertNotEquals(bob, nodeId("bob"));
+    assertEquals(List.of(), node.logins().list(bob));
+    assertEquals(uma, nodeId("uma"));
+    assertEquals(2, node.logins().list(uma).size());
+    assertTrue(node.byHandle("uma").orElseThrow().active());
+  }
+
+  /** Scenario 4: a person main removed while the node missed rounds goes at its next round. */
+  @Test
+  void aPersonMainRemovedWhileTheNodeWasAwayIsErasedAtItsNextRound() throws Exception {
+    syncAs("uma");
+    var yan = TestLogins.store(nodeDb, "yan");
+    Acting.system(() -> fdes.remove(fdes.byHandle("yan").orElseThrow().id()));
+    fdes.add("late", "Late", "late@x.dev", "member");
+
+    var node = syncAs("uma");
+
+    assertTrue(node.byHandle("yan").isEmpty());
+    assertEquals(List.of(), node.logins().list(yan));
+    assertTrue(node.byHandle("late").orElseThrow().active());
+  }
+
+  /** Scenario 5 (N3): a round that leaves out the box's own person changes nothing of theirs. */
+  @Test
+  void aRoundWithoutTheBoxsOwnPersonChangesNothingOfTheirs() throws Exception {
+    syncAs("uma");
+    var uma = TestLogins.store(nodeDb, "uma");
+    var round = roundAs(tokenOf("uma"));
+    var withoutItsOwn =
+        round.roster().stream().filter(fde -> !"uma".equals(fde.get("handle"))).toList();
+
+    var node = new FdeStore(nodeDb);
+    SyncOperations.applyFdes(node, withoutItsOwn, round.scope(), "uma");
+
+    assertEquals(uma, nodeId("uma"));
+    assertTrue(node.byHandle("uma").orElseThrow().active());
+    assertEquals(2, node.logins().list(uma).size());
+  }
+
   private record Round(ProjectScope scope, List<Map<String, Object>> roster) {}
 
   /** One round of every type over a session main authenticates with {@code token}. */
@@ -257,7 +411,7 @@ class ScopedSyncServerTest {
 
   private static Map<String, Object> withoutCreatedAt(Map<String, Object> fde) {
     return fde.entrySet().stream()
-        .filter(field -> !"created_at".equals(field.getKey()))
+        .filter(field -> !"created_at".equals(field.getKey()) && !"id".equals(field.getKey()))
         .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));
   }
 

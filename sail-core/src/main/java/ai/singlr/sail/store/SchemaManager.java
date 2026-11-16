@@ -264,7 +264,8 @@ public final class SchemaManager {
               status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'disabled')),
               created_at INTEGER NOT NULL,
               role TEXT NOT NULL DEFAULT 'member',
-              scope TEXT NOT NULL DEFAULT 'all' CHECK (scope IN ('all', 'granted'))
+              scope TEXT NOT NULL DEFAULT 'all' CHECK (scope IN ('all', 'granted')),
+              main_id TEXT
           )""",
           """
           CREATE TABLE api_tokens (
@@ -740,18 +741,21 @@ public final class SchemaManager {
    * made, adds only the feed's indexes it lacks ({@link #FEED_INDEXES}). Any other database is
    * refused naming what to do: an older one was made by a release before v1 and is replaced, as is
    * one holding tables but no version, or one stamped v1004 by a build before {@code
-   * runs.login_overridden}, and a newer one needs a newer binary.
+   * runs.login_overridden} or {@code fdes.main_id}, and a newer one needs a newer binary.
    */
   public void migrate() {
     db.execute(SCHEMA_VERSION_TABLE);
     if (currentVersion() == CURRENT_VERSION) {
-      if (lacksLoginOverridden()) {
-        throw Remedied.state(
-            "Database "
-                + db.path()
-                + " was made by a build of schema v1004 before runs.login_overridden, and none"
-                + " is converted: the box is reinstalled.",
-            freshStart());
+      for (var added : List.of("runs.login_overridden", "fdes.main_id")) {
+        if (lacks(added)) {
+          throw Remedied.state(
+              "Database "
+                  + db.path()
+                  + " was made by a build of schema v1004 before "
+                  + added
+                  + ", and none is converted: the box is reinstalled.",
+              freshStart());
+        }
       }
       FEED_INDEXES.forEach(db::execute);
       return;
@@ -778,10 +782,13 @@ public final class SchemaManager {
     stamp(CURRENT_VERSION);
   }
 
-  private boolean lacksLoginOverridden() {
+  private boolean lacks(String column) {
+    var named = column.split("\\.");
     return db.queryOne(
-                "SELECT COUNT(*) FROM pragma_table_info('runs') WHERE name = 'login_overridden'",
-                row -> row.integer(0))
+                "SELECT COUNT(*) FROM pragma_table_info(?) WHERE name = ?",
+                row -> row.integer(0),
+                named[0],
+                named[1])
             .orElse(0L)
         == 0;
   }

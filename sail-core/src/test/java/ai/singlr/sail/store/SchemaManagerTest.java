@@ -23,6 +23,8 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 
 class SchemaManagerTest {
 
@@ -184,21 +186,26 @@ class SchemaManagerTest {
   }
 
   /**
-   * A v1004 database a build made before {@code runs.login_overridden} is refused at the start,
-   * naming the reinstall, not at the first read of a run.
+   * A v1004 database a build made before {@code runs.login_overridden}, or before {@code
+   * fdes.main_id}, is refused at the start, naming the reinstall, not at the first read.
    */
-  @Test
-  void aV1004DatabaseWithoutTheLoginOverriddenColumnIsRefusedAtTheStart() {
+  @ParameterizedTest
+  @CsvSource({"runs,login_overridden", "fdes,main_id"})
+  void aV1004DatabaseWithoutAColumnThisReleaseAddedIsRefusedAtTheStart(
+      String table, String column) {
     new SchemaManager(db).migrate();
-    db.execute("ALTER TABLE runs DROP COLUMN login_overridden");
+    db.execute("ALTER TABLE " + table + " DROP COLUMN " + column);
 
     var refusal = assertThrows(Remedied.State.class, new SchemaManager(db)::migrate);
 
     assertEquals(
         "Database "
             + tempDir.resolve("test.db")
-            + " was made by a build of schema v1004 before runs.login_overridden, and none is"
-            + " converted: the box is reinstalled.",
+            + " was made by a build of schema v1004 before "
+            + table
+            + "."
+            + column
+            + ", and none is converted: the box is reinstalled.",
         refusal.reason());
     assertEquals(
         "Move " + tempDir.resolve("test.db") + " aside and run 'sail init' to make a fresh one.",

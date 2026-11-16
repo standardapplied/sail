@@ -138,7 +138,7 @@ Eighteen `*Store` classes plus the sync and journal machinery, all over `Sqlite`
 | `RunStore` | `runs`, every agent run with its lane, unit, principal and reservation | Yes, entity `run`, pushed only by the box that executes it |
 | `ReviewStore` | `reviews`, `review_stages`, and `review_findings` as the projection of each review's content | Yes, entity `review`, its findings as content |
 | `BlobStore` | `blobs` and their chunks, the content every synced content field names by hash | Content crosses by hash, fetched on demand |
-| `FdeStore` | `fdes`, the human principals and roles | One-way, main to node roster pull |
+| `FdeStore` | `fdes`, the human principals and roles | One-way, main to node roster pull, each row holding main's id |
 | `FdeSshKeyStore` | `fde_ssh_keys`, SSH fingerprint to FDE | Local |
 | `FdePairingStore` | `fde_pairings`, the public key and token name of each FDE's Mast pairing | Local |
 | `EventStore` | `events`, the audit stream persisted from the bus | Local |
@@ -1557,16 +1557,18 @@ Each row with the tests that prove it:
   workstation key) reaches every container and workspace; a stopped workspace takes its owner's
   keys as they are at its next start. A person removed (`fde rm`, or a scoped node's roster round)
   has every workspace they owned lose its token store, gh login and keys, and its owner, through
-  its files, running or stopped, and their stored logins and git tokens on the box erased. A
-  person `disabled` on a box (a node disables whom a roster round no longer lists, never its own
-  person) holds nothing usable there: their workspaces are stripped and made nobody's at once,
-  which their next entry undoes, and the give and the login doors refuse them, but their stored
-  logins stay, since a node cannot tell a person main removed from a round that did not list them;
-  they are erased once the person has been disabled for 24 hours of sail-api's monotonic time, so
-  neither a clock step nor a restart erases early. Until `sail-a-node-knows-a-person-by-mains-id`
-  lands, a handle main gives again within one sync round keeps the previous holder's stored logins
-  on a node. A stored git token is at least 16 characters, a sanity floor no forge's token is
-  under. sail-api's pass
+  its files, running or stopped, and their stored logins and git tokens on the box erased. A node
+  knows each person by main's id (`fdes.main_id`, sent in every roster entry): each round holds
+  main's whole roster for the node, so a person main described by id and lists no more, removed
+  or their handle given to someone new under a new id, is removed there with every credential of
+  theirs (`FdeStore.removeUndescribed`), which is the only way a node erases a person's stored
+  logins; a row made on the box before main described it takes main's id on first sight, and one
+  main never describes is only disabled. Main mints an id when a person is added and never
+  changes it, so a main rebuilt by adding its people again gives each a new id, and every node
+  takes them as new people who store their logins again; only a main whose database file is
+  restored keeps them. The box's own person is never removed or disabled by a round and takes a
+  new id in place. A stored git token is at least 16 characters, a sanity floor no forge's token
+  is under. sail-api's pass
   reads the roster each minute and lists Incus only on its first
   pass, when someone stopped being active or their handle went to someone else, or to retry a
   workspace it could not reach, said once. Nobody stores a login for another person: a store

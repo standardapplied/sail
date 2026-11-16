@@ -101,7 +101,13 @@ class FleetSyncTest {
   private void pullRoster() {
     for (var fde : main.fdes.list()) {
       node.fdes.replicate(
-          fde.handle(), fde.displayName(), fde.email(), fde.role(), fde.status(), fde.createdAt());
+          fde.handle(),
+          null,
+          fde.displayName(),
+          fde.email(),
+          fde.role(),
+          fde.status(),
+          fde.createdAt());
     }
   }
 

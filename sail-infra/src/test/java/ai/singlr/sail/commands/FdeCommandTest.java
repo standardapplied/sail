@@ -703,7 +703,8 @@ class FdeCommandTest {
     return inDb(
         db -> {
           new FdeStore(db)
-              .replicate(handle, null, null, role, "active", Instant.parse("2026-10-01T00:00:00Z"));
+              .replicate(
+                  handle, null, null, null, role, "active", Instant.parse("2026-10-01T00:00:00Z"));
           return new FdeStore(db).byHandle(handle).orElseThrow();
         });
   }
@@ -714,6 +715,7 @@ class FdeCommandTest {
           new FdeStore(db)
               .replicate(
                   handle,
+                  null,
                   "Client",
                   email,
                   "member",
@@ -2562,7 +2564,7 @@ class FdeCommandTest {
   void aDisabledFdeIsNotPaired() {
     inDb(
         db -> {
-          new FdeStore(db).replicate("ada", null, "ada@x.com", "member", "disabled", null);
+          new FdeStore(db).replicate("ada", null, null, "ada@x.com", "member", "disabled", null);
           return null;
         });
 

@@ -216,6 +216,7 @@ public final class SyncServerCommand implements Callable<Integer> {
 
   private static Map<String, Object> fdeToMap(FdeStore.Fde fde) {
     var map = new LinkedHashMap<String, Object>();
+    map.put("id", fde.id());
     map.put("handle", fde.handle());
     map.put("display_name", fde.displayName());
     map.put("email", fde.email());

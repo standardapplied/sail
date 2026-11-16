@@ -16,6 +16,8 @@ import ai.singlr.sail.ssh.SshPublicKey;
 import java.time.Instant;
 import java.util.Collection;
 import java.util.List;
+import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 
@@ -88,16 +90,18 @@ public final class FdeStore {
   }
 
   /**
-   * Mirrors an identity from the main devbox into this box's roster, keyed by the stable {@code
-   * handle}: a new handle is inserted, an existing one has its display name, email, role, and
-   * status updated while its local surrogate id — and the tokens, keys, and sessions that reference
-   * it — are preserved. This is the one-way, main-authoritative pull; nodes never push identities
-   * back. Revocation propagates as a {@code disabled} status (which the gateway already refuses),
-   * never as a destructive delete. Role and status are validated, so a malformed roster entry is
-   * rejected rather than written with a bad authorization.
+   * Mirrors an identity from the main devbox into this box's roster by {@code handle}, recording
+   * main's own id for it, {@code mainId}: a new handle is inserted, an existing one has its display
+   * name, email, role and status updated while its local surrogate id — and the tokens, keys, and
+   * sessions that reference it — are preserved, and a row made here before main described it takes
+   * main's id. A row main described under another id is gone by now ({@link #removeUndescribed}).
+   * This is the one-way, main-authoritative pull; nodes never push identities back. Role and status
+   * are validated, so a malformed roster entry is rejected rather than written with a bad
+   * authorization.
    */
   public void replicate(
       String handle,
+      String mainId,
       String displayName,
       String email,
       String role,
@@ -113,17 +117,19 @@ public final class FdeStore {
           "Invalid status: " + status + ". Must be one of " + STATUSES + ".");
     }
     db.execute(
-        "INSERT INTO fdes (id, handle, display_name, email, role, status, created_at)"
-            + " VALUES (?, ?, ?, ?, ?, ?, ?)"
+        "INSERT INTO fdes (id, handle, display_name, email, role, status, created_at, main_id)"
+            + " VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
             + " ON CONFLICT(handle) DO UPDATE SET display_name = excluded.display_name,"
-            + " email = excluded.email, role = excluded.role, status = excluded.status",
+            + " email = excluded.email, role = excluded.role, status = excluded.status,"
+            + " main_id = COALESCE(excluded.main_id, fdes.main_id)",
         generateId(),
         handle,
         displayName,
         email,
         role,
         status,
-        createdAt == null ? DateTimeUtils.now() : createdAt);
+        createdAt == null ? DateTimeUtils.now() : createdAt,
+        mainId);
   }
 
   public Optional<Fde> byHandle(String handle) {
@@ -369,22 +375,44 @@ public final class FdeStore {
   }
 
   /**
-   * Disables every active FDE this box holds that main's roster, naming {@code listed}, no longer
-   * does, but this box's own {@code own}: main removed it, so it is refused here as it is on main,
-   * never left acting with its last role. Its local row, and what references it, stays. Returns the
-   * handles it disabled.
+   * Removes, as {@link #remove} does, every person this box holds under a main id that main's whole
+   * roster, naming {@code mainIds}, no longer holds, but this box's own {@code own}: main removed
+   * them, or gave their handle to someone new under a new id. Main's statement by id is the only
+   * thing that erases a person's credentials on a node. Returns how many it removed.
+   */
+  public int removeUndescribed(Collection<String> mainIds, String own) {
+    return db.transaction(
+        () -> {
+          var gone =
+              db
+                  .query(
+                      "SELECT id, main_id FROM fdes WHERE main_id IS NOT NULL AND handle != ?",
+                      row -> Map.entry(row.text(0), row.text(1)),
+                      Objects.toString(own, ""))
+                  .stream()
+                  .filter(row -> !mainIds.contains(row.getValue()))
+                  .map(Map.Entry::getKey)
+                  .toList();
+          gone.forEach(id -> byId(id).ifPresent(this::delete));
+          return gone.size();
+        });
+  }
+
+  /**
+   * Disables every active person main never described to this box (made here before it joined) and
+   * its roster, naming {@code listed}, does not hold, but this box's own {@code own}: nothing main
+   * said names them, so they are refused here, never removed. Returns the handles it disabled.
    */
   public List<String> disableUnlisted(Collection<String> listed, String own) {
     return db.transaction(
         () -> {
           var unlisted =
-              list().stream()
-                  .filter(
-                      fde ->
-                          fde.active()
-                              && !listed.contains(fde.handle())
-                              && !fde.handle().equals(own))
-                  .map(Fde::handle)
+              db
+                  .query(
+                      "SELECT handle FROM fdes WHERE status = 'active' AND main_id IS NULL",
+                      row -> row.text(0))
+                  .stream()
+                  .filter(handle -> !listed.contains(handle) && !handle.equals(own))
                   .toList();
           unlisted.forEach(
               handle -> db.execute("UPDATE fdes SET status = 'disabled' WHERE handle = ?", handle));

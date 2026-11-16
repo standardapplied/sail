@@ -736,32 +736,38 @@ public final class SyncOperations {
 
   /**
    * Mirrors main's roster into the local FDE store, returning the handles of any entries rejected
-   * for a malformed role or status — dropped, never written with a bad authorization. An FDE main
-   * no longer lists is disabled here ({@link FdeStore#disableUnlisted}), unless main scoped this
-   * box to {@code scope}: then it is removed with its credentials, as is anyone main lists to this
-   * box no more, so the box keeps no name or email outside its projects. This box's own FDE, {@code
-   * own}, is never removed.
+   * for a malformed role or status — dropped, never written with a bad authorization. Each round
+   * holds main's whole roster for this box, so a person main described by id and lists no more is
+   * removed with their credentials ({@link FdeStore#removeUndescribed}): main removed them, or gave
+   * their handle to someone new. A person main never described is disabled ({@link
+   * FdeStore#disableUnlisted}), unless main scoped this box to {@code scope}: then everyone it does
+   * not list is removed, so the box keeps no name or email outside its projects. This box's own
+   * FDE, {@code own}, is never removed or disabled. A roster from a main that sends no ids removes
+   * no one by id.
    */
   public static List<String> applyFdes(
       FdeStore fdes, List<Map<String, Object>> roster, ProjectScope scope, String own) {
     var listed = roster.stream().map(entry -> str(entry, "handle")).toList();
+    var ids = roster.stream().map(entry -> str(entry, "id")).toList();
+    var removed = ids.contains(null) ? 0 : fdes.removeUndescribed(ids, own);
     if (scope.unrestricted()) {
       fdes.disableUnlisted(listed, own);
     } else {
-      var removed = fdes.removeUnlisted(listed, own);
-      if (removed > 0) {
-        System.err.println(
-            Ansi.AUTO.string(
-                "  @|faint roster: removed "
-                    + removed
-                    + " FDE(s) main no longer lists to this box|@"));
-      }
+      removed += fdes.removeUnlisted(listed, own);
+    }
+    if (removed > 0) {
+      System.err.println(
+          Ansi.AUTO.string(
+              "  @|faint roster: removed "
+                  + removed
+                  + " FDE(s) main no longer lists to this box|@"));
     }
     var rejected = new ArrayList<String>();
     for (var entry : roster) {
       try {
         fdes.replicate(
             str(entry, "handle"),
+            str(entry, "id"),
             str(entry, "display_name"),
             str(entry, "email"),
             str(entry, "role"),

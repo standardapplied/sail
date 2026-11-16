@@ -157,7 +157,7 @@ class WorkspaceOwnerTest {
   /** High 1 of the proof: a person a node marks disabled, as main's removal does, owns nothing. */
   @Test
   void aDisabledPersonIsNoOwner() {
-    fdes.replicate("ana", null, "ana@example.com", "member", "disabled", null);
+    fdes.replicate("ana", null, null, "ana@example.com", "member", "disabled", null);
 
     var refused =
         assertThrows(

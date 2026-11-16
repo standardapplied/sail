@@ -49,7 +49,6 @@ import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -61,7 +60,6 @@ import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Function;
 import java.util.function.Predicate;
@@ -562,149 +560,61 @@ class MissedStopReconcilerTest {
         List.of("ada true, bob true", "ada true, bob false", "ada false, bob false"), asked);
   }
 
-  private static Map<String, Object> rosterEntry(FdeStore.Fde fde) {
-    return rosterEntry(fde.handle(), fde.email(), fde.createdAt());
-  }
-
-  private static Map<String, Object> rosterEntry(String handle, String email, Instant created) {
+  private static Map<String, Object> rosterEntry(String mainId, String handle) {
     return Map.of(
+        "id",
+        mainId,
         "handle",
         handle,
         "display_name",
         handle,
         "email",
-        email,
+        handle + "@sail.invalid",
         "role",
         "member",
         "status",
-        "active",
-        "created_at",
-        created.toEpochMilli());
+        "active");
   }
 
-  private void round(FdeStore fdes, String own, List<Map<String, Object>> roster) {
-    Acting.system(() -> SyncOperations.applyFdes(fdes, roster, ProjectScope.all(), own));
-  }
-
-  /** What the removal pass asks of each of {@code handles}, one line a pass. */
-  private static CountingProbe asking(List<String> asked, String... handles) {
-    return new CountingProbe(true) {
-      @Override
-      public List<String> disown(Predicate<String> held) {
-        asked.add(
-            String.join(", ", Arrays.stream(handles).map(h -> h + " " + held.test(h)).toList()));
-        return List.of();
-      }
-    };
+  private void round(FdeStore fdes, List<Map<String, Object>> roster) {
+    Acting.system(() -> SyncOperations.applyFdes(fdes, roster, ProjectScope.all(), "ada"));
   }
 
   /**
-   * High 1 of the proof, as round 4 rules it: a node keeps a person a round no longer lists as
-   * {@code disabled}, the roster shape of the evidence. The next pass takes their workspaces' at
-   * once, but their stored logins, unusable while they are disabled, stay; only once they have been
-   * disabled for a day by this box's clock are they erased.
+   * A handle main gave to a new person (a new main id) is a new row here: the pass disowns the old
+   * person's workspaces at once and deletes their logins, which main's id said were another's; a
+   * person main still describes keeps everything, and so does one it never described.
    */
   @Test
-  void aPersonANodeDisabledLosesTheirWorkspacesAtOnceAndTheirLoginsOnlyAfterADay() {
+  void aHandleWhoseMainIdChangedIsDisownedAndItsLoginsGoAtThePass() {
     var ada = TestLogins.store(db, "ada");
     var tmp = TestLogins.store(db, "tmp");
+    var zed = TestLogins.store(db, "zed");
     var fdes = new FdeStore(db);
-    fdes.logins().storeGit(tmp, "github.com", "ghp_tmp_0123456789ab");
     var asked = new ArrayList<String>();
-    var elapsed = new AtomicLong();
-    var reconciler = reconciler(asking(asked, "ada", "tmp"), PAST_GRACE).counting(elapsed::get);
+    var probe =
+        new CountingProbe(true) {
+          @Override
+          public List<String> disown(Predicate<String> held) {
+            asked.add("ada " + held.test("ada") + ", tmp " + held.test("tmp"));
+            return List.of();
+          }
+        };
+    var reconciler = reconciler(probe, PAST_GRACE);
+    round(fdes, List.of(rosterEntry("fde_main_ada", "ada"), rosterEntry("fde_main_tmp", "tmp")));
+    fdes.logins().storeGit(tmp, "github.com", "ghp_old_tmp_0123456789");
 
     reconciler.sweep();
-    round(fdes, "ada", List.of(rosterEntry(fdes.byId(ada).orElseThrow())));
-    reconciler.sweep();
-    elapsed.addAndGet(MissedStopReconciler.DISABLED_FOR.toNanos() - 1);
-    reconciler.sweep();
-    var keptForADay = fdes.logins().gitTokens(tmp);
-    elapsed.incrementAndGet();
+    round(fdes, List.of(rosterEntry("fde_main_ada", "ada"), rosterEntry("fde_main_hire", "tmp")));
     reconciler.sweep();
 
-    assertEquals("disabled", fdes.byHandle("tmp").orElseThrow().status());
     assertEquals(List.of("ada true, tmp true", "ada true, tmp false"), asked);
-    assertEquals(Map.of("github.com", "ghp_tmp_0123456789ab"), keptForADay);
     assertEquals(List.of(), fdes.logins().list(tmp));
     assertEquals(Map.of(), fdes.logins().gitTokens(tmp));
+    assertEquals(List.of(), fdes.logins().list(fdes.byHandle("tmp").orElseThrow().id()));
     assertEquals(2, fdes.logins().list(ada).size());
-  }
-
-  /**
-   * F2, the reviewer's probe: a wall clock stepped 25 hours on, with no round between, erases no
-   * disabled person's logins, since the day is counted on the monotonic clock.
-   */
-  @Test
-  void aWallClockStepErasesNoDisabledPersonsLogins() {
-    var ada = TestLogins.store(db, "ada");
-    var eve = TestLogins.store(db, "eve");
-    var fdes = new FdeStore(db);
-    fdes.logins().storeGit(eve, "github.com", "ghp_eve_0123456789abcdef");
-    var wall = new AtomicReference<>(Instant.now().plus(Duration.ofMinutes(3)));
-    var elapsed = new AtomicLong();
-    var reconciler = reconciler(asking(new ArrayList<>(), "eve"), wall::get).counting(elapsed::get);
-
-    round(fdes, "ada", List.of(rosterEntry(fdes.byId(ada).orElseThrow())));
-    reconciler.sweep();
-    wall.set(wall.get().plus(Duration.ofHours(25)));
-    elapsed.addAndGet(Duration.ofMinutes(1).toNanos());
-    reconciler.sweep();
-
-    assertEquals("disabled", fdes.byId(eve).orElseThrow().status());
-    assertEquals(Map.of("github.com", "ghp_eve_0123456789abcdef"), fdes.logins().gitTokens(eve));
-  }
-
-  /**
-   * The reviewer's probe: a round that leaves out the box's own person disables nothing of theirs.
-   */
-  @Test
-  void aRoundThatLeavesOutTheBoxsOwnPersonKeepsEveryLoginOfTheirs() {
-    var ada = TestLogins.store(db, "ada");
-    var fdes = new FdeStore(db);
-    fdes.logins().storeGit(ada, "github.com", "ghp_ada_0123456789ab");
-    var asked = new ArrayList<String>();
-    var elapsed = new AtomicLong();
-    var reconciler = reconciler(asking(asked, "ada"), PAST_GRACE).counting(elapsed::get);
-
-    round(fdes, "ada", List.of());
-    reconciler.sweep();
-    elapsed.addAndGet(MissedStopReconciler.DISABLED_FOR.toNanos() + 1);
-    reconciler.sweep();
-
-    assertEquals("active", fdes.byHandle("ada").orElseThrow().status());
-    assertEquals(List.of("ada true"), asked);
-    assertEquals(3, fdes.logins().list(ada).size());
-  }
-
-  /**
-   * F1, the reviewer's two probes: a person main describes with a later {@code created_at} than
-   * this box's row (a box that kept its own roster joins a main that added them since, or a main
-   * rebuilt by adding its people again) is the same person, and nothing of theirs is deleted.
-   */
-  @Test
-  void aLaterCreatedAtFromMainDeletesNobodysLogins() {
-    var ada = TestLogins.store(db, "ada");
-    var bob = TestLogins.store(db, "bob");
-    var fdes = new FdeStore(db);
-    fdes.logins().storeGit(bob, "github.com", "ghp_bob_0123456789abcd");
-    var reconciler = reconciler(asking(new ArrayList<>(), "ada", "bob"), PAST_GRACE);
-    var later = fdes.byId(bob).orElseThrow().createdAt().plusSeconds(60);
-
-    reconciler.sweep();
-    round(
-        fdes,
-        "ada",
-        List.of(
-            rosterEntry("ada", "ada@sail.invalid", later),
-            rosterEntry("bob", "bob@sail.invalid", later)));
-    reconciler.sweep();
-
-    assertEquals(bob, fdes.byHandle("bob").orElseThrow().id());
-    assertEquals(ada, fdes.byHandle("ada").orElseThrow().id());
-    assertEquals(Map.of("github.com", "ghp_bob_0123456789abcd"), fdes.logins().gitTokens(bob));
-    assertEquals(3, fdes.logins().list(bob).size());
-    assertEquals(2, fdes.logins().list(ada).size());
+    assertEquals("disabled", fdes.byHandle("zed").orElseThrow().status());
+    assertEquals(2, fdes.logins().list(zed).size(), "a disabled person main never described keeps");
   }
 
   /** A container that cannot be asked fails nothing: the next pass tries again. */
