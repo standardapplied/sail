@@ -246,7 +246,7 @@ public final class TerminalView: NSView {
     override public func setFrameSize(_ size: NSSize) {
         super.setFrameSize(size)
         configureLayer(scale: renderer.faces.scale)
-        layoutGrid()
+        layoutGrid(sizeChanging: true)
     }
 
     /// The font at `points` from the ladder's range: the cell, the grid and every glyph again.
@@ -290,14 +290,20 @@ public final class TerminalView: NSView {
     }
 
     /// The grid that fits the view, given to the session at once when it changed: the screen
-    /// reflows now, and the session tells the host once the size has held.
-    func layoutGrid() {
+    /// reflows now, and the session tells the host once the size has held. While the view's size is
+    /// changing (`sizeChanging`, a drag or a window resize) the session is told even when the grid
+    /// is not, so its hold counts from the last change of the view, not of the grid (W5): a drag
+    /// that crosses a column only now and then still gives the program one size, at its end.
+    func layoutGrid(sizeChanging: Bool = false) {
         guard let link else { return }
         let fitted = metrics.grid(fitting: pixelSize)
         let size = GridSize(
             columns: min(fitted.columns, TerminalSession.largestGrid.columns), rows: min(fitted.rows, TerminalSession.largestGrid.rows)
         )
-        guard size != grid else { return }
+        guard size != grid else {
+            if sizeChanging { input.async { try? link.resize(size) } }
+            return
+        }
         grid = size
         input.async { [weak self] in
             try? link.resize(size)

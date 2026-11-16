@@ -144,6 +144,22 @@ import Testing
         #expect(move(6) == "\u{1b}[<35;7;2M", "the cell hovered before a drag, entered again after it")
     }
 
+    /// W5: a change of the view's size that keeps the grid still tells the session, so the
+    /// session's 60 ms hold counts from the view's last change, not the grid's.
+    @Test func aSizeChangeThatKeepsTheGridStillRestartsTheSessionsHold() throws {
+        let harness = try Harness()
+        harness.flush()
+        let grid = try #require(harness.view.grid)
+        let told = harness.link.resizes.count
+        var frame = harness.view.frame
+        frame.size.width += 1
+        harness.view.frame = frame
+        harness.flush()
+        #expect(harness.view.grid == grid, "a point more made another grid")
+        #expect(harness.link.resizes.count == told + 1)
+        #expect(harness.link.resizes.last == grid)
+    }
+
     /// Scenario 21: the first click on a view that is not focused only focuses it: a program that
     /// tracks the mouse gets no report of it, and nothing is selected; the next click is reported.
     @Test func theFirstClickOnAnUnfocusedViewOnlyFocusesIt() throws {
