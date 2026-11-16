@@ -28,6 +28,12 @@ public sealed interface LoginOutcome {
   record Refused() implements LoginOutcome {}
 
   /**
+   * The harness refused the credential it took from {@code source}, one of the sources it declares,
+   * not the login it was given, which it never used.
+   */
+  record RefusedOther(String source) implements LoginOutcome {}
+
+  /**
    * The login's account ran out of quota; {@code resets} is when, as Sail renders the time its
    * harness gave ({@link #resetTime}), or null when it gave none Sail could parse.
    */

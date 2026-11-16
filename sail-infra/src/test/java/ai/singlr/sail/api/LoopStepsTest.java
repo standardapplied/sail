@@ -71,7 +71,9 @@ class LoopStepsTest {
     lanes.set(loop.operations.reviewLanes());
     var narrator = new LoopNarrator(loop.specs, loop.bus, this::sync);
     narrator.useMessages(loop.messages);
-    reader = new LoopFactsReader(loop.specs, loop.reviews, loop.runs, () -> ReviewLoop.HANDLE);
+    reader =
+        new LoopFactsReader(
+            loop.specs, loop.reviews, loop.runs, () -> ReviewLoop.HANDLE, run -> false);
     steps =
         new LoopSteps(
             loop.specs,
@@ -95,6 +97,11 @@ class LoopStepsTest {
               @Override
               public RunReports reports() {
                 return new RunReports(run -> RunReport.NONE, RunLauncher.Room.NONE, event -> {});
+              }
+
+              @Override
+              public boolean loginReplaced(RunStore.RunRow run) {
+                return false;
               }
 
               @Override
@@ -150,6 +157,11 @@ class LoopStepsTest {
           @Override
           public RunReports reports() {
             return new RunReports(run -> RunReport.NONE, RunLauncher.Room.NONE, event -> {});
+          }
+
+          @Override
+          public boolean loginReplaced(RunStore.RunRow run) {
+            return false;
           }
 
           @Override
@@ -543,6 +555,11 @@ class LoopStepsTest {
           }
 
           @Override
+          public boolean loginReplaced(RunStore.RunRow run) {
+            return false;
+          }
+
+          @Override
           public List<Rescue> ensureCommitted(
               RunPlace place, List<String> repos, String branch, String commitMessage) {
             return List.of();
@@ -733,6 +750,11 @@ class LoopStepsTest {
           @Override
           public RunReports reports() {
             return new RunReports(run -> RunReport.NONE, RunLauncher.Room.NONE, event -> {});
+          }
+
+          @Override
+          public boolean loginReplaced(RunStore.RunRow run) {
+            return false;
           }
 
           @Override

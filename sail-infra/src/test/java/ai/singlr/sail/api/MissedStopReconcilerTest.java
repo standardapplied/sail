@@ -731,6 +731,118 @@ class MissedStopReconcilerTest {
     assertEquals(false, asked.contains(foreign), "another box's run is its own to read");
   }
 
+  /**
+   * Round 4, item 3: before its first replay a pass reads only the unread reports of runs serving a
+   * review, the newest {@link MissedStopReconciler#READ_FIRST} of them, and every other unread
+   * report after its replays: a container that never answers is asked once a pass.
+   */
+  @Test
+  void aPassReadsAFewReviewersReportsBeforeItsFirstReplayAndEveryOtherAfterIt() {
+    createInProgressSpec("auth");
+    var build = runningSession("auth");
+    var reviewers = new ArrayList<String>();
+    for (var i = 0; i < MissedStopReconciler.READ_FIRST + 2; i++) {
+      reviewers.add(session("docs", "node-a", "review"));
+    }
+    var builtBefore = session("docs", "node-a", "build");
+    finishedUnread(reviewers);
+    finishedUnread(List.of(builtBefore));
+    var order = new CopyOnWriteArrayList<String>();
+    Function<RunStore.RunRow, RunReport> unanswered =
+        run -> {
+          order.add(run.id());
+          return null;
+        };
+    MissedStopReconciler.UnitProbe probe =
+        (place, runId, unit) -> {
+          order.add("probe " + runId);
+          return false;
+        };
+
+    reconciler(probe, unanswered, PAST_GRACE).sweep();
+
+    var first = order.indexOf("probe " + build);
+    assertEquals(
+        reviewers.reversed().subList(0, MissedStopReconciler.READ_FIRST),
+        order.subList(0, first),
+        "the newest reviewers, before anything is probed or replayed");
+    var after = order.subList(first, order.size()).stream().filter(id -> !id.startsWith("probe"));
+    assertEquals(
+        List.of(reviewers.get(0), reviewers.get(1), builtBefore),
+        after.toList(),
+        "every other unread report after, and none asked twice");
+  }
+
+  /**
+   * Round 4, item 3: a pass starts no read before its first replay after {@link
+   * MissedStopReconciler#READ_FIRST_FOR}, so a hanging container delays it by one read at most.
+   */
+  @Test
+  void aPassStartsNoEarlyReadOnceItsTimeIsSpent() {
+    createInProgressSpec("auth");
+    var build = runningSession("auth");
+    var reviewers = List.of(session("docs", "node-a", "review"), session("docs", "node-a", "fix"));
+    finishedUnread(reviewers);
+    var clock = new ManualClock(PAST_GRACE.get(), Duration.ofMinutes(5));
+    var order = new CopyOnWriteArrayList<String>();
+    Function<RunStore.RunRow, RunReport> hanging =
+        run -> {
+          order.add(run.id());
+          clock.advance(MissedStopReconciler.READ_FIRST_FOR);
+          return null;
+        };
+    MissedStopReconciler.UnitProbe probe =
+        (place, runId, unit) -> {
+          order.add("probe " + runId);
+          return false;
+        };
+
+    reconciler(probe, hanging, clock::instant).sweep();
+
+    var first = order.indexOf("probe " + build);
+    assertEquals(List.of(reviewers.get(1)), order.subList(0, first));
+    assertEquals(
+        List.of(reviewers.get(0)),
+        order.subList(first, order.size()).stream().filter(id -> !id.startsWith("probe")).toList(),
+        "the other is read after the replays");
+  }
+
+  /**
+   * Round 4, item 3: a store that cannot list the unread reports costs the pass its replays not.
+   */
+  @Test
+  void aPassWhoseEarlyReadsCannotBeListedStillReplays() {
+    createInProgressSpec("auth");
+    var build = runningSession("auth");
+    var asked = new AtomicInteger();
+    var probed = new CopyOnWriteArrayList<String>();
+    MissedStopReconciler.UnitProbe probe =
+        (place, runId, unit) -> {
+          probed.add(runId);
+          return false;
+        };
+    Supplier<String> handle =
+        () -> {
+          if (asked.getAndIncrement() == 0) {
+            throw new IllegalStateException("the store is gone for a moment");
+          }
+          return "node-a";
+        };
+
+    reconciler(probe, handle, run -> null, PAST_GRACE).sweep();
+
+    assertTrue(probed.contains(build), "the replays still run");
+  }
+
+  private void finishedUnread(List<String> ids) {
+    Acting.system(
+        () -> {
+          for (var id : ids) {
+            assertTrue(sessionStore.claimStop(id, "stopped", () -> {}));
+          }
+        });
+  }
+
   @Test
   void aFinishedRunWhoseReportHoldsNoUsageIsRecordedNoneOnceAndNotReadAgain() {
     var silent = runningSession("auth");
@@ -1158,6 +1270,11 @@ class MissedStopReconcilerTest {
               @Override
               public RunReports reports() {
                 return new RunReports(run -> RunReport.NONE, RunLauncher.Room.NONE, event -> {});
+              }
+
+              @Override
+              public boolean loginReplaced(RunStore.RunRow run) {
+                return false;
               }
 
               @Override

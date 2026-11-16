@@ -101,6 +101,11 @@ public interface ReviewLanes {
   /** Where a finished run's report is read and said ({@link RunReports}). */
   RunReports reports();
 
+  /**
+   * Whether the login {@code run} was given has since been replaced ({@link RunLogins#replaced}).
+   */
+  boolean loginReplaced(RunStore.RunRow run);
+
   /** One rescued repo and the files the rescue commit swept up, for the guardrail event. */
   record Rescue(String repo, List<String> files) {}
 

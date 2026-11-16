@@ -98,7 +98,8 @@ public final class ReviewPipelineController implements EventSubscriber {
     Objects.requireNonNull(lanes, "lanes");
     this.lanes = lanes;
     this.pipelines = LoopFactsReader.pipelines(configResolver, reviewerResolver);
-    this.reader = new LoopFactsReader(specStore, reviewStore, runStore, localHandle);
+    this.reader =
+        new LoopFactsReader(specStore, reviewStore, runStore, localHandle, lanes::loginReplaced);
     this.narrator = new LoopNarrator(specStore, eventBus, syncTrigger);
     this.steps =
         new LoopSteps(specStore, reviewStore, lanes, reader, narrator, syncTrigger, localHandle);

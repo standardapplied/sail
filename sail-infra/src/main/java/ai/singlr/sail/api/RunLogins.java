@@ -131,7 +131,7 @@ final class RunLogins {
                   RunReports.event(
                       run,
                       new RunStore.RunLogin(stored.row().name(), stored.kind().kind()),
-                      "ending",
+                      RunReports.ENDING,
                       said));
               room.tell(run.specId(), said);
             });
@@ -147,6 +147,25 @@ final class RunLogins {
         ChronoUnit.DAYS.between(
             now.atOffset(ZoneOffset.UTC).toLocalDate(), end.atOffset(ZoneOffset.UTC).toLocalDate());
     return days == 0 ? "today" : days == 1 ? "tomorrow" : "in " + days + " days";
+  }
+
+  /**
+   * Whether the login {@code run} was given is no longer what its person's runs start with: their
+   * default login for its harness is another, or was stored after the run started. What mends a
+   * refusal is that state, whether or not the store's event was heard. {@code run} was given a
+   * stored login: only such a run's login is refused.
+   */
+  static boolean replaced(FdeStore fdes, RunStore.RunRow run) {
+    var harness = Harnesses.of(run.agent());
+    return Optional.ofNullable(run.owner())
+        .flatMap(fdes::byHandle)
+        .flatMap(person -> fdes.logins().defaultFor(person.id(), harness))
+        .map(LoginStore.Login::row)
+        .filter(
+            stored ->
+                !stored.name().equals(run.login().name())
+                    || stored.storedAt().isAfter(run.startedAt()))
+        .isPresent();
   }
 
   /** How a stored login is named where it is said: whose, its name and its kind. */

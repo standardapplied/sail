@@ -2700,7 +2700,7 @@ review and go on with the latest.
 | G9b | | (**P**) the stage the review is in is an agent stage | `LaunchReviewer` |
 | G10 | | (**P**) every configured stage has a row and it is `passed` | `Pass` |
 | R1 | `ReviewerEnded` | not awaited in `pending`, `running` | as `GoOn` |
-| R1b | | its harness ended it for its login (`stop_source` `login`): the review is owed its reviewer (due `Advance`), held until `LoginStored` | `Nothing` |
+| R1b | | its harness refused its login (`stop_source` `login`): the review is owed its reviewer (due `Advance`), held while that login is still its person's (`Rows.heldForLogin`) | `Nothing`; once replaced, what is due |
 | R2 | | (**P**) no running agent stage was started while this run was live | as `GoOn` |
 | R3 | | (**P**) `failure` present | `ReadVerdict` with the error `"reviewer " + failure` |
 | R4 | | (**P**) otherwise | `ReadVerdict` |
@@ -2709,7 +2709,7 @@ review and go on with the latest.
 | J2 | | `GateFailed` | `FailGate` |
 | J3 | | `Errored(why)` | `ErrorReview(stage, why)`, its stage already closed |
 | F1 | `FixEnded` | not awaited in `failed`, or the review failed by error | as `GoOn` |
-| F1b | | its harness ended it for its login: the review is owed its fix (due `Fix`), held until `LoginStored` | `Nothing` |
+| F1b | | its harness refused its login: the review is owed its fix (due `Fix`), held while that login is still its person's | `Nothing`; once replaced, what is due |
 | F2 | | `failure` present | `FailFix("fix agent " + failure)` |
 | F2b | | the run's newest question is one no one who steers it has answered | `AwaitAnswer(fix, question)` |
 | F2c | | that question was answered and the run was not told every answer: `ResumeFix(review)` (**P**) when the spec is `resumableHere`, else `CannotResume(fix)` | as said |
@@ -3917,17 +3917,25 @@ no pairing is removed through the gateway as before, and no key file is touched.
     changes. The sentence names the login by its person, name and kind and the command that
     replaces it under the same name and kind (`RunLogins.howToReplace`); a build's refusal then
     names the build's next step, the `--restart` dispatch as the CLI prints it for a spec not
-    pending (`RestartResolution.redispatch`); a limit says until when and the branch its work stays
-    on. The watcher's own `agent_session_stopped` cannot carry it:
-    the watcher is another process and publishes before the one read. A run on its container's own
-    login says nothing. Nothing is retried on another login. A refusal or a limit also marks the
-    run in the write that records its report, a late read's included (`stop_source` `login`,
-    `RunStore.STOPPED_FOR_LOGIN`), and a reviewer or fix agent so ended holds its review as a
-    launch refused for want of a login does (rows R1b, F1b; `LoopFacts.Rows.heldForLogin`): its
-    review is owed the reviewer, the fix or the errored iteration again, `GoOn` takes none of them,
-    the missed-stop reconciler neither replays nor rescues its stop (it logs the hold once; each
-    pass reads the reports left unread first, so a late read's mark lands before any replay), and
-    storing a login (`LoopTrigger.LoginStored`) takes the owed step. A build's login
+    pending (`RestartResolution.redispatch`); a limit says until when and, for a build or a fix,
+    the branch its work stays on. A refused credential of another source the harness declares
+    (`init` names it) is said as that credential's, the stored login named as never used, with no
+    command to replace it (`LoginOutcome.RefusedOther`, event outcome `refused_other`). The
+    watcher's own `agent_session_stopped` cannot carry it: the watcher is another process and publishes before the one read. A run on its container's own
+    login says nothing. Nothing is retried on another login. A refusal of the run's own login also
+    marks the run in the write that records its report, a late read's included (`stop_source`
+    `login`, `RunStore.STOPPED_FOR_LOGIN`), and a reviewer or fix agent so ended holds its review
+    (rows R1b, F1b; `LoopFacts.Rows.heldForLogin`) while that login is still what its person's runs
+    start with: no trigger takes the owed step, and the missed-stop reconciler never replays its
+    stop. The hold is state, not an event: once its person's default login for the harness is
+    another or was stored after the run started (`RunLogins.replaced`), any trigger takes the
+    owed step, and the reconciler's next pass rescues it as it rescues any review so owed
+    (`StrandedReviewRescue`), so a `login_stored` event lost to a restart, or heard before the
+    refusal was recorded, costs one pass at most. A limit holds nothing: it resets by itself, so
+    its run takes the ordinary errored path (retried, then escalated). Each pass reads the unread reports of at most three runs that
+    serve a review first, newest first and starting none after ten seconds
+    (`MissedStopReconciler.READ_FIRST`, `READ_FIRST_FOR`), so a late read's mark lands before a
+    replay, and every other unread report last. A build's login
     of a kind with a known lifetime (Claude Code's token: 365 days from the day it was stored,
     `LoginKind.lifetime`) is warned in its last 14 days at each build reservation, a resumed
     build's included (`RunLogins.ending`), its days counted by date in UTC: in the dispatch's own

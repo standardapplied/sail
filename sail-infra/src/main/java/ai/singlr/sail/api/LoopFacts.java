@@ -167,6 +167,10 @@ record LoopFacts(
    * @param serving the runs this box executed that serve the review, newest first
    * @param newestLoopRun the spec's newest build, reviewer or fix run, whichever box executed it
    * @param holderEnded whether the run the review recorded that it waits on holds nothing any more
+   * @param heldForLogin whether the newest run serving the review, a reviewer or a fix agent, had
+   *     its login refused, however late its report was read, and that login is still what its
+   *     person's runs start with ({@link RunLogins#replaced}): the review is held, and moves once a
+   *     login replaces it, whether or not the store's event was heard
    */
   record Rows(
       String node,
@@ -175,15 +179,12 @@ record LoopFacts(
       List<ReviewStore.StageRow> stages,
       List<RunStore.RunRow> serving,
       Optional<RunStore.RunRow> newestLoopRun,
-      boolean holderEnded) {
+      boolean holderEnded,
+      boolean heldForLogin) {
 
-    /**
-     * Whether the review is held for a login: the newest run serving it, a reviewer or a fix agent,
-     * its harness ended for its login, however late its report was read. Only a stored login moves
-     * it ({@code LoopTrigger.LoginStored}).
-     */
-    boolean heldForLogin() {
-      return serving.stream().findFirst().filter(RunStore.RunRow::stoppedForLogin).isPresent();
+    /** The newest run serving the review, when its login was refused, held or since replaced. */
+    Optional<RunStore.RunRow> refusedItsLogin() {
+      return serving.stream().findFirst().filter(RunStore.RunRow::stoppedForLogin);
     }
 
     /** Whether this box executed the newest run of the spec's loop, and so drives it. */

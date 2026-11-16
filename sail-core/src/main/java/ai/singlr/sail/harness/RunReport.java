@@ -27,14 +27,19 @@ public record RunReport(RunUsage usage, LoginOutcome login) {
   }
 
   /**
-   * Whether its harness ended the run for its login: refused it, or its account's quota ran out.
+   * Whether its harness refused the run's own login: what only a stored login mends. A limit resets
+   * by itself, and a refused credential of another source was never the login.
    */
-  public boolean endedForItsLogin() {
-    return login instanceof LoginOutcome.Refused || login instanceof LoginOutcome.Limited;
+  public boolean refusedItsLogin() {
+    return login instanceof LoginOutcome.Refused;
   }
 
   /** The credential source the harness used instead of the run's login, or null when it did not. */
   public String overriddenBy() {
-    return login instanceof LoginOutcome.Overridden overridden ? overridden.source() : null;
+    return switch (login) {
+      case LoginOutcome.Overridden overridden -> overridden.source();
+      case LoginOutcome.RefusedOther other -> other.source();
+      case null, default -> null;
+    };
   }
 }

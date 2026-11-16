@@ -191,6 +191,29 @@ class RunUsageStoreTest {
     assertTrue(store.findById(adopted).isEmpty());
   }
 
+  /**
+   * Round 4, item 7: a run records as its override only a source a harness declares, so a node's
+   * row naming any other text is refused at the door it enters by, and nothing is adopted.
+   */
+  @Test
+  void anOverrideOfASourceNoHarnessDeclaresIsRefusedAtTheDoorANodesRowEntersBy() {
+    var id = run(null);
+    var base = new LinkedHashMap<>(store.comparableSnapshot(id));
+    for (var declared : List.of("ANTHROPIC_API_KEY", "apiKeyHelper", "/login managed key")) {
+      var snapshot = new LinkedHashMap<>(base);
+      snapshot.put("login_overridden", declared);
+      var adopted = DateTimeUtils.newId().toString();
+      store.applyRevision(adopted, snapshot, "1-remote");
+      assertEquals(declared, store.findById(adopted).orElseThrow().loginOverridden());
+    }
+    var hostile = new LinkedHashMap<>(base);
+    hostile.put("login_overridden", "sk-ant-api03-AbCdEf0123456789xyz");
+    var refused = DateTimeUtils.newId().toString();
+
+    assertThrows(SqliteException.class, () -> store.applyRevision(refused, hostile, "1-remote"));
+    assertTrue(store.findById(refused).isEmpty());
+  }
+
   /** M1: the finish and its usage are one write, so main hears them as one revision. */
   @Test
   void aFinishRecordsWhatTheHarnessReportedInTheRevisionThatFinishesTheRow() {

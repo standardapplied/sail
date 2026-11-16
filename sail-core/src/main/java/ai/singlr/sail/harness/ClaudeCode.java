@@ -286,20 +286,26 @@ final class ClaudeCode implements Harness {
   }
 
   /**
-   * The last {@code result}, when it is an error, decides first: a 401 is a refusal, whatever the
-   * {@code init} line said; "Not logged in" is no login delivered at all (only a harness given no
-   * credential, or an empty one, prints it: 2.1.322, recorded); "You've hit your … limit" is a
-   * limit, with the time it resets. Otherwise the last {@code init} line naming a source that is
-   * another credential for the kind it was given ({@link #OTHER_SOURCES}) is an override.
+   * The last {@code result}, when it is an error, decides first: a 401 is a refusal, of the login
+   * or, when the last {@code init} line names another credential's source ({@link #OTHER_SOURCES}),
+   * of that credential, which the login never was; "Not logged in" is no login delivered at all
+   * (only a harness given no credential, or an empty one, prints it: 2.1.322, recorded); "You've
+   * hit your … limit" is a limit, with the time it resets. Otherwise the last {@code init} line
+   * naming a source that is another credential for the kind it was given ({@link #OTHER_SOURCES})
+   * is an override.
    */
   @Override
   public Optional<LoginOutcome> loginOutcome(String report, LoginKind given) {
+    var other = otherSource(report, given);
     var result = RunUsage.last(report, RESULT, line -> "result".equals(line.get("type"))).line();
     if (result != null && Boolean.TRUE.equals(result.get("is_error"))) {
       var said = result.get("result") instanceof String text ? text.strip() : "";
       var limit = LIMIT.matcher(said);
       if (Long.valueOf(401).equals(RunUsage.count(result, "api_error_status"))) {
-        return Optional.of(new LoginOutcome.Refused());
+        return Optional.of(
+            other
+                .<LoginOutcome>map(LoginOutcome.RefusedOther::new)
+                .orElseGet(LoginOutcome.Refused::new));
       }
       if (said.startsWith("Not logged in")) {
         return Optional.of(new LoginOutcome.Undelivered());
@@ -308,6 +314,13 @@ final class ClaudeCode implements Harness {
         return Optional.of(new LoginOutcome.Limited(LoginOutcome.resetTime(limit.group(1))));
       }
     }
+    return other.map(LoginOutcome.Overridden::new);
+  }
+
+  /**
+   * The source the last {@code init} line names, when it is another credential for {@code given}.
+   */
+  private static Optional<String> otherSource(String report, LoginKind given) {
     var init =
         RunUsage.last(
                 report,
@@ -317,7 +330,7 @@ final class ClaudeCode implements Harness {
     return init != null
             && init.get("apiKeySource") instanceof String source
             && OTHER_SOURCES.getOrDefault(given.kind(), Set.of()).contains(source)
-        ? Optional.of(new LoginOutcome.Overridden(source))
+        ? Optional.of(source)
         : Optional.empty();
   }
 

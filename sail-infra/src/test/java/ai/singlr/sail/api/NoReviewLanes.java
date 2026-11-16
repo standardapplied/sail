@@ -34,6 +34,11 @@ final class NoReviewLanes implements ReviewLanes {
   }
 
   @Override
+  public boolean loginReplaced(RunStore.RunRow run) {
+    return false;
+  }
+
+  @Override
   public List<Rescue> ensureCommitted(
       RunPlace place, List<String> repos, String branch, String commitMessage) {
     throw new AssertionError("this test rescues no work");

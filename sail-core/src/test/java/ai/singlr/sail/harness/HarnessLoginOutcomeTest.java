@@ -92,7 +92,13 @@ class HarnessLoginOutcomeTest {
           CLAUDE_CODE,
           TOKEN,
           CLAUDE_HELPER_INIT + afterInit(CLAUDE_TOKEN_REFUSED),
-          new LoginOutcome.Refused()
+          new LoginOutcome.RefusedOther("apiKeyHelper")
+        },
+        new Object[] {
+          CLAUDE_CODE,
+          TOKEN,
+          withSource(CLAUDE_TOKEN_REFUSED, "/login managed key"),
+          new LoginOutcome.RefusedOther("/login managed key")
         },
         new Object[] {
           CLAUDE_CODE,
@@ -147,6 +153,7 @@ class HarnessLoginOutcomeTest {
   static Stream<Object[]> ordinary() {
     return Stream.of(
         new Object[] {CLAUDE_CODE, TOKEN, CLAUDE_LOG},
+        new Object[] {CLAUDE_CODE, TOKEN, CLAUDE_TOKEN_REFUSED + CLAUDE_LOG},
         new Object[] {CLAUDE_CODE, TOKEN, null},
         new Object[] {CLAUDE_CODE, TOKEN, ""},
         new Object[] {

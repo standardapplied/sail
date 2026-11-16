@@ -212,10 +212,16 @@ public record Event(
     public static final String AGENT_FAILED = "agent_failed";
 
     /**
-     * What a finished run's harness report said of the stored login it was given: {@code
-     * data.outcome} {@code refused}, {@code limited} or {@code overridden}, {@code data.login} and
-     * {@code data.login_kind} naming it, and {@code data.detail} the sentence its spec's room was
-     * told. Published once, by the write that recorded the report ({@link RunReports}).
+     * What came of the stored login a run was given, in {@code data.outcome}, one of: {@code
+     * refused} (its harness refused the login), {@code refused_other} (its harness refused the
+     * credential of another source, which it ran on instead), {@code limited} (the login's account
+     * is out of quota), {@code overridden} (its harness ran on another source's credential) — each
+     * published once, by the write that recorded the run's report ({@link RunReports}) — or {@code
+     * ending} (a build's login ends within two weeks, said as it is dispatched: {@link
+     * RunLogins#ending}). {@code data.login} and {@code data.login_kind} name the login, and {@code
+     * data.detail} is the sentence its spec's room was told. The values are {@code
+     * RunReports.outcome} and {@code RunReports.ENDING}; a login its harness never saw is said to
+     * the operator only, never published.
      */
     public static final String AGENT_LOGIN_OUTCOME = "agent_login_outcome";
 

@@ -100,6 +100,12 @@ public final class MissedStopReconciler implements AutoCloseable {
    */
   static final Duration TIDY_LOOKBACK = Duration.ofMinutes(2);
 
+  /** How many unread reports of runs serving a review a pass reads before it replays a stop. */
+  static final int READ_FIRST = 3;
+
+  /** How long a pass starts reading those reports for. */
+  static final Duration READ_FIRST_FOR = Duration.ofSeconds(10);
+
   private static final SpecStore.SpecFilter IN_PROGRESS =
       new SpecStore.SpecFilter(null, "in_progress", null, null, null);
 
@@ -157,7 +163,6 @@ public final class MissedStopReconciler implements AutoCloseable {
   private final PeriodicPass pass;
   private volatile Instant tidiedSince = Instant.EPOCH;
   private final Set<String> untidied = ConcurrentHashMap.newKeySet();
-  private final Set<String> held = ConcurrentHashMap.newKeySet();
   private final StrandedReviewRescue strandedReviews;
 
   public MissedStopReconciler(
@@ -191,7 +196,7 @@ public final class MissedStopReconciler implements AutoCloseable {
             clock,
             LAUNCH_GRACE,
             this::gone,
-            this::heldForLogin,
+            run -> RunLogins.replaced(fdes, run),
             this::publishStop);
     this.pass = new PeriodicPass("reconcile", this::sweep);
   }
@@ -283,13 +288,15 @@ public final class MissedStopReconciler implements AutoCloseable {
   }
 
   /**
-   * One pass. The reports left unread are read first: a reviewer's late read can mark it ended for
-   * its login, and its stop must not be replayed, nor its review rescued, before the pass knows.
+   * One pass. The unread reports of the runs that serve a review are read first, newest first, a
+   * few and for a while ({@link #READ_FIRST}, {@link #READ_FIRST_FOR}): a reviewer's late read can
+   * hold its review for a refused login, and its stop must not be replayed, nor its review rescued,
+   * before the pass knows. Every other unread report is read last, as before.
    */
   private int reconcileAll() {
     var replayed = 0;
     try {
-      readUnreadUsage();
+      var readFirst = readServingFirst();
       var handledThisSweep = new HashSet<String>();
       for (var spec : specStore.list(IN_PROGRESS)) {
         try {
@@ -310,6 +317,7 @@ public final class MissedStopReconciler implements AutoCloseable {
       replayed += rescueStrandedReviews(handledThisSweep);
       replayed += finishDeadSessions(handledThisSweep);
       replayed += finalizeInterruptedStops();
+      read(unread().stream().filter(run -> !readFirst.contains(run.id())).toList());
       removeLeftovers();
     } catch (Exception e) {
       System.err.println("  [reconcile] missed-stop sweep aborted: " + e.getMessage());
@@ -354,26 +362,6 @@ public final class MissedStopReconciler implements AutoCloseable {
     if (swept > 0) {
       System.err.println("  [reconcile] removed the logins of " + swept + " people removed");
     }
-  }
-
-  /**
-   * Whether {@code run}, a reviewer or a fix agent, was ended for its login: its review is held
-   * until a login is stored, so its stop is acted on and is not replayed. Said on the server's log
-   * once a hold.
-   */
-  boolean heldForLogin(RunStore.RunRow run) {
-    if (!run.servesReview() || !run.stoppedForLogin()) {
-      return false;
-    }
-    if (held.add(run.id())) {
-      System.err.println(
-          "  [reconcile] the review of spec "
-              + run.specId()
-              + " is held: run "
-              + run.id()
-              + " was ended for its login, and a stored login launches it again");
-    }
-    return true;
   }
 
   /** The sweep's rescue of stranded reviews, skipping the specs it already handled. */
@@ -514,8 +502,39 @@ public final class MissedStopReconciler implements AutoCloseable {
    * how many were recorded.
    */
   int readUnreadUsage() {
+    return read(unread());
+  }
+
+  /**
+   * Reads, before any stop is replayed, the unread reports of at most {@link #READ_FIRST} runs that
+   * serve a review, newest first, starting none after {@link #READ_FIRST_FOR}: the pass's first
+   * replay waits at most that and one read ({@code RunReportReader.TIMEOUT}). A store that cannot
+   * list them costs the pass nothing but these reads. Returns the runs it read.
+   */
+  private Set<String> readServingFirst() {
+    var deadline = clock.get().plus(READ_FIRST_FOR);
+    var tried = new HashSet<String>();
+    try {
+      for (var run : unread().stream().filter(RunStore.RunRow::servesReview).toList().reversed()) {
+        if (tried.size() == READ_FIRST || !clock.get().isBefore(deadline)) {
+          break;
+        }
+        tried.add(run.id());
+        read(List.of(run));
+      }
+    } catch (RuntimeException e) {
+      System.err.println("  [reconcile] could not read reviewers' reports first: " + e);
+    }
+    return tried;
+  }
+
+  private List<RunStore.RunRow> unread() {
+    return sessionStore.unread(localHandle.get());
+  }
+
+  private int read(List<RunStore.RunRow> runs) {
     var recorded = 0;
-    for (var run : sessionStore.unread(localHandle.get())) {
+    for (var run : runs) {
       try {
         if (reports.finish(
             sessionStore,
@@ -586,7 +605,7 @@ public final class MissedStopReconciler implements AutoCloseable {
       return false;
     }
     var session = latest.get();
-    if (heldForLogin(session)) {
+    if (session.servesReview() && session.stoppedForLogin()) {
       return false;
     }
     var coverage = stopCoverage(spec.id(), session);

@@ -7,6 +7,7 @@ package ai.singlr.sail.store;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -245,6 +246,62 @@ class SqliteTest {
     try (var other = Sqlite.open(tempDir.resolve("test.db"))) {
       assertEquals(List.of(2L), other.query("SELECT id FROM t ORDER BY id", row -> row.integer(0)));
     }
+  }
+
+  /**
+   * Round 4, item 6: when the rollback itself fails, the error the work threw is the one rethrown
+   * and the rollback's is attached to it; a connection SQLite says holds no transaction then starts
+   * the next one clean.
+   */
+  @Test
+  void aRollbackThatFailsLeavesTheWorksErrorRethrownWithTheRollbacksSuppressed() {
+    db.execute("CREATE TABLE t (id INTEGER PRIMARY KEY)");
+    var thrown = new IllegalStateException("the work's own");
+
+    var caught =
+        assertThrows(
+            IllegalStateException.class,
+            () ->
+                db.transaction(
+                    () -> {
+                      db.execute("ROLLBACK");
+                      throw thrown;
+                    }));
+    db.transaction(() -> db.execute("INSERT INTO t VALUES (?)", 1));
+
+    assertSame(thrown, caught);
+    assertEquals(1, caught.getSuppressed().length);
+    assertInstanceOf(SqliteException.class, caught.getSuppressed()[0]);
+    assertEquals(List.of(1L), db.query("SELECT id FROM t", row -> row.integer(0)));
+  }
+
+  /**
+   * Round 4, item 6: a connection SQLite says still holds a transaction that no scope opened, as a
+   * rollback that failed leaves one, is handed no new scope, write or read, as if it were clean:
+   * each is refused with a sentence that says what to do.
+   */
+  @Test
+  void aConnectionLeftHoldingATransactionIsRefusedANewScopeWithASentence() {
+    db.execute("CREATE TABLE t (id INTEGER PRIMARY KEY)");
+    db.execute("BEGIN");
+    db.execute("INSERT INTO t VALUES (?)", 1);
+
+    var write =
+        assertThrows(
+            IllegalStateException.class,
+            () -> db.transaction(() -> db.execute("INSERT INTO t VALUES (?)", 2)));
+    var read = assertThrows(IllegalStateException.class, () -> db.read(() -> 0));
+
+    assertEquals(
+        "Database "
+            + tempDir.resolve("test.db")
+            + " holds a transaction that no scope opened, left by a rollback that failed, so it"
+            + " takes no new one: restart the process to reopen it.",
+        write.getMessage());
+    assertEquals(write.getMessage(), read.getMessage());
+    db.execute("ROLLBACK");
+    db.transaction(() -> db.execute("INSERT INTO t VALUES (?)", 3));
+    assertEquals(List.of(3L), db.query("SELECT id FROM t", row -> row.integer(0)));
   }
 
   @Test

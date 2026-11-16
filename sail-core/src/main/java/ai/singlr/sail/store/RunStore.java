@@ -111,7 +111,7 @@ public final class RunStore implements ConflictResolver, SyncedStore {
    * <p>{@code stopSource} is who ended the run when it did not end on its own: {@link
    * #STOPPED_BY_OPERATOR} from the moment an operator's stop claims it ({@link #claimStop}), kept
    * once that stop is finalized; {@link #STOPPED_FOR_LOGIN} when its harness ended it for its
-   * login, as the report its finish recorded says ({@link RunReport#endedForItsLogin}). Null on a
+   * login, as the report its finish recorded says ({@link RunReport#refusedItsLogin}). Null on a
    * run that ended itself or that the watcher ended.
    *
    * <p>{@code model} is the model the run was launched on, the harness default when null, and the
@@ -1619,7 +1619,7 @@ public final class RunStore implements ConflictResolver, SyncedStore {
               usageParameters(
                   attributed.own(),
                   report,
-                  report.endedForItsLogin() ? STOPPED_FOR_LOGIN : null,
+                  report.refusedItsLogin() ? STOPPED_FOR_LOGIN : null,
                   id));
           keep(run.get(), attributed.session());
           recordRevision(id, ChangeLog.Entry.LOCAL, false);
@@ -1913,7 +1913,7 @@ public final class RunStore implements ConflictResolver, SyncedStore {
                       : usageParameters(
                           own,
                           report,
-                          report.endedForItsLogin() ? STOPPED_FOR_LOGIN : null,
+                          report.refusedItsLogin() ? STOPPED_FOR_LOGIN : null,
                           id,
                           expected)));
           db.execute(

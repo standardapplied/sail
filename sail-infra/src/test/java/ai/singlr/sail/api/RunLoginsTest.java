@@ -6,6 +6,8 @@
 package ai.singlr.sail.api;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.harness.Harnesses;
@@ -63,6 +65,48 @@ class RunLoginsTest {
   @AfterEach
   void tearDown() {
     db.close();
+  }
+
+  /**
+   * Round 4, item 2: a refused login is replaced once its person's default login for the harness is
+   * another, or was stored after the run started, and not by anything stored before it, nor by a
+   * person with no default login.
+   */
+  @Test
+  void aRefusedLoginIsReplacedByAnotherDefaultOrOneStoredAfterTheRunStarted() throws Exception {
+    var refused = refusedRun("uday");
+    var stranger = refusedRun("nobody");
+    var uday = fdes.byHandle("uday").orElseThrow().id();
+    var claude = Harnesses.of("claude-code");
+
+    assertFalse(RunLogins.replaced(fdes, refused), "the one it was refused, stored before");
+    assertFalse(RunLogins.replaced(fdes, stranger), "no login to replace it");
+
+    fdes.logins().store(uday, claude, "work", "token", "sk-ant-oat01-work");
+    fdes.logins().use(uday, claude, "work");
+    assertTrue(RunLogins.replaced(fdes, refused), "another login is the default");
+
+    fdes.logins().use(uday, claude, "default");
+    assertFalse(RunLogins.replaced(fdes, refused));
+    fdes.logins().store(uday, claude, null, "token", "sk-ant-oat01-new");
+    Files.setLastModifiedTime(
+        tempDir.resolve("logins").resolve(uday).resolve("claude-code").resolve("default"),
+        FileTime.from(refused.startedAt().plusSeconds(1)));
+    assertTrue(RunLogins.replaced(fdes, refused), "stored again after the run started");
+  }
+
+  private RunStore.RunRow refusedRun(String owner) {
+    var id = DateTimeUtils.newId().toString();
+    Acting.system(
+        () -> {
+          runs.create(
+              id, "acme", "auth", owner, "review", "claude-code", "b", "t", null, null, "/l", "u");
+          runs.recordLaunch(
+              id,
+              new RunStore.Launched(
+                  null, null, null, new RunStore.RunLogin("default", "token"), null));
+        });
+    return runs.findById(id).orElseThrow();
   }
 
   private List<String> dispatched(Instant now, String agent, String role) {

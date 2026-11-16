@@ -289,25 +289,46 @@ class LoopDecisionTest {
     var anotherBoxs = run("build-1", "node-b", "build", null, "stopped", ENDED);
     return Stream.of(
         row(
-            "L1 a review whose reviewer its harness ended for its login launches it again",
-            facts().review(RUNNING, stages("running", "pending")).serving(REFUSED_REVIEWER),
+            "L1 a review whose reviewer's refused login was replaced launches it again",
+            facts()
+                .review(RUNNING, stages("running", "pending"))
+                .serving(REFUSED_REVIEWER)
+                .loginReplaced(),
             LOGIN_STORED,
             new LoopStep.Resume(RUNNING)),
         row(
-            "L1 a fix its harness ended for its login launches again",
-            owedAFix(GATE_FAILED).serving(REFUSED_FIXER),
+            "L1 a fix whose refused login was replaced launches again",
+            owedAFix(GATE_FAILED).serving(REFUSED_FIXER).loginReplaced(),
             LOGIN_STORED,
             new LoopStep.LaunchFix(GATE_FAILED, List.of(HIGH))),
         row(
-            "R1b a reviewer its harness ended for its login holds its review",
+            "L1 a login stored that is not the refused one's replacement leaves the review held",
+            facts().review(RUNNING, stages("running", "pending")).serving(REFUSED_REVIEWER),
+            LOGIN_STORED,
+            NOTHING),
+        row(
+            "R1b a reviewer whose login its harness refused holds its review",
             facts().review(RUNNING, stages("running", "pending")).serving(REFUSED_REVIEWER),
             reviewerEnded(REFUSED_REVIEWER),
             NOTHING),
         row(
-            "F1b a fix agent its harness ended for its login holds its review",
+            "R1b a reviewer whose refused login was already replaced is launched again",
+            facts()
+                .review(RUNNING, stages("running", "pending"))
+                .serving(REFUSED_REVIEWER)
+                .loginReplaced(),
+            reviewerEnded(REFUSED_REVIEWER),
+            new LoopStep.Resume(RUNNING)),
+        row(
+            "F1b a fix agent whose login its harness refused holds its review",
             owedAFix(GATE_FAILED).serving(REFUSED_FIXER),
             fixEnded(REFUSED_FIXER),
             NOTHING),
+        row(
+            "F1b a fix agent whose refused login was already replaced is launched again",
+            owedAFix(GATE_FAILED).serving(REFUSED_FIXER).loginReplaced(),
+            fixEnded(REFUSED_FIXER),
+            new LoopStep.LaunchFix(GATE_FAILED, List.of(HIGH))),
         row(
             "G1 a held review waits for the login, whatever else moves the loop",
             facts().review(RUNNING, stages("running", "pending")).serving(REFUSED_REVIEWER),
@@ -336,6 +357,16 @@ class LoopDecisionTest {
         row(
             "L2 an errored review keeps to the reconciler's pace",
             facts().newestLoopRun(BUILD).review(ERRORED, List.of()),
+            LOGIN_STORED,
+            NOTHING),
+        row(
+            "L2 an errored review whose reviewer's refused login, read late, was replaced runs again",
+            facts().review(ERRORED, List.of()).serving(REFUSED_REVIEWER).loginReplaced(),
+            LOGIN_STORED,
+            new LoopStep.StartReview(2)),
+        row(
+            "L2 an errored review whose reviewer's refused login still stands stays held",
+            facts().review(ERRORED, List.of()).serving(REFUSED_REVIEWER),
             LOGIN_STORED,
             NOTHING));
   }

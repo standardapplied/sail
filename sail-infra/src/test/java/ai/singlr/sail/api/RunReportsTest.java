@@ -56,22 +56,15 @@ class RunReportsTest {
   }
 
   private RunStore.RunRow run(String specId, String branch, RunStore.RunLogin login) {
+    return run(specId, branch, login, "build");
+  }
+
+  private RunStore.RunRow run(String specId, String branch, RunStore.RunLogin login, String role) {
     var id = DateTimeUtils.newId().toString();
     Acting.system(
         () -> {
           runs.create(
-              id,
-              "acme",
-              specId,
-              "eng",
-              "build",
-              "claude-code",
-              branch,
-              "t",
-              null,
-              null,
-              "/l",
-              "u");
+              id, "acme", specId, "eng", role, "claude-code", branch, "t", null, null, "/l", "u");
           if (login != null) {
             runs.recordLaunch(id, new RunStore.Launched(null, null, null, login, null));
           }
@@ -112,6 +105,80 @@ class RunReportsTest {
     assertEquals(
         List.of("refused", "limited"),
         published.stream().map(event -> event.data().get("outcome")).toList());
+  }
+
+  /**
+   * Round 4, item 1: a limit holds nothing, and its sentence is true for its lane: a build or a fix
+   * keeps what it committed on its branch, and a reviewer, which commits nothing, says no branch.
+   */
+  @Test
+  void aLimitSaysTheBranchOnlyForALaneThatCommitsAndHoldsNoLane() {
+    var token = new RunStore.RunLogin("default", "token");
+    var limited = reporting(new LoginOutcome.Limited("15:04"));
+    var runs =
+        List.of(
+            run("auth", "feat/auth", token, "build"),
+            run("auth", "feat/auth", token, "fix"),
+            run("auth", "feat/auth", token, "review"));
+
+    runs.forEach(run -> finished(limited, run));
+
+    var quota =
+        "auth: Claude Code says the account behind eng's login 'default' (long-lived token) is out"
+            + " of quota until 15:04, so its run stopped";
+    assertEquals(
+        List.of(
+            quota + "; what it committed stays on branch feat/auth.",
+            quota + "; what it committed stays on branch feat/auth.",
+            quota + "."),
+        told);
+    runs.forEach(
+        run ->
+            assertFalse(
+                this.runs.findById(run.id()).orElseThrow().stoppedForLogin(),
+                "a limit resets by itself: " + run.role()));
+  }
+
+  /**
+   * Round 4, item 8: a 401 on a credential its harness took from another source it declares names
+   * that credential, says the stored login was never used, gives no command to replace that login,
+   * and holds nothing, since storing a login would not mend it.
+   */
+  @Test
+  void aRefusedCredentialOfAnotherSourceIsNamedAndTheStoredLoginIsNotToldToBeReplaced() {
+    var run = run("auth", "feat/auth", new RunStore.RunLogin("default", "token"), "review");
+
+    assertTrue(finished(reporting(new LoginOutcome.RefusedOther("apiKeyHelper")), run));
+
+    assertEquals(
+        List.of(
+            "auth: Claude Code refused the credential from apiKeyHelper, so its run stopped; it"
+                + " never used eng's login 'default' (long-lived token), which its container's own"
+                + " settings outrank."),
+        told);
+    assertFalse(told.getFirst().contains("sail agent login"), "no replace command");
+    assertEquals(
+        List.of("refused_other"), published.stream().map(e -> e.data().get("outcome")).toList());
+    var recorded = runs.findById(run.id()).orElseThrow();
+    assertFalse(recorded.stoppedForLogin(), "not the stored login's refusal: nothing held");
+    assertEquals("apiKeyHelper", recorded.loginOverridden());
+  }
+
+  /**
+   * Round 4, item 4: the event names each outcome by a constant written out, never by its class;
+   * one its harness never saw has a name too, though it is never published.
+   */
+  @Test
+  void eachOutcomeHasTheNameItsEventCarries() {
+    assertEquals(
+        List.of("refused", "refused_other", "limited", "overridden", "undelivered", "ending"),
+        List.of(
+            RunReports.outcome(new LoginOutcome.Refused()),
+            RunReports.outcome(new LoginOutcome.RefusedOther("apiKeyHelper")),
+            RunReports.outcome(new LoginOutcome.Limited(null)),
+            RunReports.outcome(new LoginOutcome.Overridden("apiKeyHelper")),
+            RunReports.outcome(new LoginOutcome.Undelivered()),
+            RunReports.ENDING));
   }
 
   /** A run given no stored login, or a report of nothing, or none read, says nothing. */

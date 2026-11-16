@@ -38,6 +38,8 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -486,6 +488,124 @@ class ReviewLanesTest {
 
     assertEquals("fix", loop.onlyLive().role(), "the stored login launches the fix again");
   }
+
+  /**
+   * Round 4, item 1, the second review's probe: a reviewer out of its account's quota holds
+   * nothing. No run is marked for its login, each says the limit once with no branch (a reviewer
+   * commits nothing), and the review takes the ordinary errored path across passes five minutes, a
+   * day and a week later: retried, then escalated once its budget is spent.
+   */
+  @Test
+  void aReviewerOutOfQuotaTakesTheOrdinaryErroredPathAndIsNeverHeld() {
+    loop = ReviewLoop.staged(tempDir, "codex", "claude-code");
+    loop.built("auth");
+    var before = sailLines("auth").size();
+    var later = List.of(Duration.ofMinutes(5), Duration.ofDays(1), Duration.ofDays(7));
+    var reviewers = new ArrayList<String>();
+
+    for (var attempt = 0; attempt < LoopDecision.MAX_ERRORED_RETRIES; attempt++) {
+      var reviewer = loop.onlyLive();
+      reviewers.add(reviewer.id());
+      var transcript = "/home/dev/.codex/sessions/rollout-limit-" + attempt + ".jsonl";
+      Acting.system(
+          () -> loop.runs.recordSession(reviewer.id(), "thread-1", "startup", transcript));
+      loop.container.wroteFile(transcript, CODEX_OUT_OF_QUOTA);
+      loop.exit(reviewer.id(), "codex exec writes text, not its report\n", 1);
+      var offset = later.get(attempt);
+      loop.reconciler(() -> Instant.now().plus(offset)).sweep();
+      loop.settle();
+    }
+
+    assertTrue(loop.live().isEmpty(), "the budget is spent: no fourth reviewer launches");
+    assertEquals("escalated", loop.statusOf(loop.reviewOf("auth")));
+    for (var id : reviewers) {
+      assertNull(loop.runs.findById(id).orElseThrow().stopSource(), "a limit holds nothing");
+    }
+    var quota =
+        "Codex CLI says the account behind node-a's login 'default' (API key) is out of quota"
+            + " until 15:04, so its run stopped.";
+    var said = sailLines("auth").subList(before, sailLines("auth").size());
+    assertEquals(
+        Collections.nCopies(LoopDecision.MAX_ERRORED_RETRIES, quota),
+        said.stream().filter(line -> line.startsWith("Codex CLI")).toList(),
+        said.toString());
+  }
+
+  /**
+   * Round 4, item 2: the hold is the state of the login, not an event. A login stored while the
+   * reviewer still ran, its event heard before the refusal was recorded, replaces the refused one:
+   * the reviewer is launched again, once, however many passes follow.
+   */
+  @Test
+  void aLoginStoredBeforeTheRefusalIsRecordedLaunchesTheReviewerAgainOnce() {
+    loop = ReviewLoop.staged(tempDir, "codex", "claude-code");
+    loop.built("auth");
+    var reviewer = loop.onlyLive();
+    var transcript = "/home/dev/.codex/sessions/rollout-early.jsonl";
+    Acting.system(() -> loop.runs.recordSession(reviewer.id(), "thread-1", "startup", transcript));
+    loop.container.wroteFile(transcript, RunLoginOutcomeTest.fixture("codex-refused-key.jsonl"));
+    storeCodexKey();
+    loop.onEvent(loginStored());
+    loop.settle();
+
+    loop.exit(reviewer.id(), "codex exec writes text, not its report\n", 1);
+    var reconciler = loop.reconciler(() -> Instant.now().plus(Duration.ofMinutes(5)));
+    for (var pass = 0; pass <= LoopDecision.MAX_ERRORED_RETRIES; pass++) {
+      reconciler.sweep();
+      loop.settle();
+    }
+
+    assertTrue(loop.runs.findById(reviewer.id()).orElseThrow().stoppedForLogin());
+    assertEquals("review", loop.onlyLive().role(), "launched again on the login stored since");
+    assertEquals(2, loop.runsIn("auth", "review").size(), "once");
+    assertEquals("running", loop.statusOf(loop.reviewOf("auth")));
+  }
+
+  /**
+   * Round 4, item 2: a login stored whose event was lost to a sail-api restart releases the hold on
+   * the next pass of the reconciler the restart starts, once: the late event, or more passes,
+   * launch nothing more.
+   */
+  @Test
+  void aLoginStoredWhoseEventWasLostLaunchesTheReviewerAgainOnTheNextPassOnce() {
+    loop = ReviewLoop.staged(tempDir, "codex", "claude-code");
+    loop.built("auth");
+    var reviewer = loop.onlyLive();
+    var transcript = "/home/dev/.codex/sessions/rollout-lost.jsonl";
+    Acting.system(() -> loop.runs.recordSession(reviewer.id(), "thread-1", "startup", transcript));
+    loop.container.wroteFile(transcript, RunLoginOutcomeTest.fixture("codex-refused-key.jsonl"));
+    loop.exit(reviewer.id(), "codex exec writes text, not its report\n", 1);
+    var held = loop.reconciler(() -> Instant.now().plus(Duration.ofMinutes(5)));
+    held.sweep();
+    loop.settle();
+    assertTrue(loop.live().isEmpty(), "held while the refused login is the one stored");
+
+    storeCodexKey();
+    var restarted = loop.reconciler(() -> Instant.now().plus(Duration.ofMinutes(6)));
+    restarted.sweep();
+    loop.settle();
+
+    assertEquals("review", loop.onlyLive().role(), "the next pass launches it again");
+    for (var pass = 0; pass <= LoopDecision.MAX_ERRORED_RETRIES; pass++) {
+      restarted.sweep();
+    }
+    loop.onEvent(loginStored());
+    loop.settle();
+    assertEquals(1, loop.live().size());
+    assertEquals(2, loop.runsIn("auth", "review").size(), "once");
+  }
+
+  private void storeCodexKey() {
+    var fdes = new FdeStore(loop.db);
+    var person = fdes.byHandle(ReviewLoop.HANDLE).orElseThrow().id();
+    fdes.logins().store(person, Harnesses.of("codex"), null, null, "sk-new-key");
+  }
+
+  private static final String CODEX_OUT_OF_QUOTA =
+      "{\"type\":\"turn_context\",\"payload\":{\"turn_id\":\"t1\",\"model\":\"m\"}}\n"
+          + "{\"type\":\"event_msg\",\"payload\":{\"type\":\"task_complete\",\"turn_id\":\"t1\","
+          + "\"error\":{\"message\":\"You've hit your usage limit. Try again at 3:04 PM.\","
+          + "\"codex_error_info\":\"usage_limit_exceeded\"}}}\n";
 
   /** How many stops of run {@code runId} reached the bus: its own, and any replay of it. */
   private long stopsOf(String runId) {

@@ -175,6 +175,11 @@ final class ReviewLaneLauncher implements ReviewLanes {
     return reports;
   }
 
+  @Override
+  public boolean loginReplaced(RunStore.RunRow run) {
+    return runReservation.loginReplaced(run);
+  }
+
   /**
    * A repo is rescued only when it is still checked out on the spec's branch — a repo parked
    * anywhere else (another spec's branch, or main) is not this run's to commit, and auto-committing

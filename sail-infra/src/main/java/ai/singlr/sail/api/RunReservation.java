@@ -77,6 +77,7 @@ public final class RunReservation {
   private final SessionYield sessionYield;
   private final Displaceable displaceable;
   private final RunLogins logins;
+  private final FdeStore fdes;
 
   /**
    * {@code fdes} is the roster whose people's stored logins spec runs start with; {@code room} is
@@ -97,6 +98,14 @@ public final class RunReservation {
     this.sessionYield = Objects.requireNonNull(sessionYield, "sessionYield");
     this.displaceable = Objects.requireNonNull(displaceable, "displaceable");
     this.logins = new RunLogins(fdes, room, listener, events, DateTimeUtils::now);
+    this.fdes = fdes;
+  }
+
+  /**
+   * Whether the login {@code run} was given has since been replaced ({@link RunLogins#replaced}).
+   */
+  boolean loginReplaced(RunStore.RunRow run) {
+    return fdes != null && RunLogins.replaced(fdes, run);
   }
 
   /**

@@ -17,7 +17,6 @@ import ai.singlr.sail.harness.LoginOutcome;
 import ai.singlr.sail.harness.RunReport;
 import ai.singlr.sail.store.RunStore;
 import java.util.LinkedHashMap;
-import java.util.Locale;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicReference;
@@ -38,6 +37,9 @@ import java.util.function.Predicate;
  * not to the person. An override is said once a spec, until its source changes.
  */
 public final class RunReports {
+
+  /** The {@code outcome} of the warning that a login ends soon ({@link RunLogins#ending}). */
+  static final String ENDING = "ending";
 
   private final Function<RunStore.RunRow, RunReport> reader;
   private final RunLauncher.Room room;
@@ -124,12 +126,7 @@ public final class RunReports {
 
   private void published(RunStore.RunRow run, RunReport report, String said) {
     if (said != null) {
-      events.publish(
-          event(
-              run,
-              run.login(),
-              report.login().getClass().getSimpleName().toLowerCase(Locale.ROOT),
-              said));
+      events.publish(event(run, run.login(), outcome(report.login()), said));
     }
   }
 
@@ -142,7 +139,8 @@ public final class RunReports {
 
   /**
    * The one sentence an outcome of {@code run}'s login of {@code kind} is said in; {@code ended}
-   * when the run ended with it, so the sentence says the run stopped and where its work stays.
+   * when the run ended with it, so the sentence says the run stopped and, for a lane that commits,
+   * where its work stays.
    */
   static String sentence(RunStore.RunRow run, LoginKind kind, LoginOutcome outcome, boolean ended) {
     var harness = Harnesses.of(run.agent());
@@ -167,9 +165,17 @@ public final class RunReports {
               + " is out of quota"
               + (limited.resets() == null ? "" : " until " + limited.resets())
               + stopped
-              + (!ended || Strings.isBlank(run.branch())
-                  ? "."
-                  : "; what it committed stays on branch " + run.branch() + ".");
+              + (ended && commits(run) && Strings.isNotBlank(run.branch())
+                  ? "; what it committed stays on branch " + run.branch() + "."
+                  : ".");
+      case LoginOutcome.RefusedOther other ->
+          harness.displayName()
+              + " refused the credential from "
+              + other.source()
+              + stopped
+              + "; it never used "
+              + login
+              + ", which its container's own settings outrank.";
       case LoginOutcome.Overridden overridden ->
           harness.displayName()
               + " ran on a credential from "
@@ -183,6 +189,22 @@ public final class RunReports {
               + login
               + ": Sail's delivery of it failed, and the login itself was never tried.";
     };
+  }
+
+  /** {@code outcome} as the {@code agent_login_outcome} event names it. */
+  static String outcome(LoginOutcome outcome) {
+    return switch (outcome) {
+      case LoginOutcome.Refused refused -> "refused";
+      case LoginOutcome.RefusedOther other -> "refused_other";
+      case LoginOutcome.Limited limited -> "limited";
+      case LoginOutcome.Overridden overridden -> "overridden";
+      case LoginOutcome.Undelivered undelivered -> "undelivered";
+    };
+  }
+
+  /** Whether {@code run}'s lane commits its work to the spec's branch: a build or a fix. */
+  private static boolean commits(RunStore.RunRow run) {
+    return Lane.BUILD.matches(run.role()) || Lane.FIX.matches(run.role());
   }
 
   /**

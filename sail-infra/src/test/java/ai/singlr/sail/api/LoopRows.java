@@ -217,6 +217,7 @@ final class LoopRows {
     private List<LoopFacts.Aged> failedStage = List.of();
     private long erroredAttempts;
     private boolean holderEnded;
+    private boolean loginReplaced;
     private MessageStore.Asked asked;
 
     Facts spec(SpecStatus status) {
@@ -290,6 +291,12 @@ final class LoopRows {
       return this;
     }
 
+    /** A login has replaced the one a serving run had refused since that run started. */
+    Facts loginReplaced() {
+      this.loginReplaced = true;
+      return this;
+    }
+
     /**
      * The newest loop run's newest question: answered or not, and an answer the run heard, as one
      * that came while it ran is.
@@ -315,7 +322,12 @@ final class LoopRows {
               stages,
               serving,
               Optional.ofNullable(newest),
-              holderEnded);
+              holderEnded,
+              !loginReplaced
+                  && serving.stream()
+                      .findFirst()
+                      .filter(RunStore.RunRow::stoppedForLogin)
+                      .isPresent());
       return new LoopFacts(
           PROJECT,
           SPEC,
