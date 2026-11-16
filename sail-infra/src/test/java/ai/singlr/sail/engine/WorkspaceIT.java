@@ -461,8 +461,10 @@ class WorkspaceIT extends AbstractIncusIT {
       Files.deleteIfExists(cert);
     }
     plant(
-        "update-ca-certificates >/dev/null; runuser -u dev -- git -C /home/dev/workspace/app"
-            + " remote set-url origin "
+        "git config --system http."
+            + url.substring(0, url.indexOf("/app.git") + 1)
+            + ".sslCAInfo /usr/local/share/ca-certificates/sail-it.crt; runuser -u dev -- git -C"
+            + " /home/dev/workspace/app remote set-url origin "
             + url);
     rebuild();
     var config =
