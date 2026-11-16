@@ -46,6 +46,8 @@ public final class TerminalView: NSView {
     private var fetching = false
     /// The drawable just brought, for the frame drawn on its arrival only.
     private var fetched: (any CAMetalDrawable)?
+    /// A refresh wanted a frame and had no drawable: only then is one asked for.
+    private var owed = false
     /// The cell the pointer last moved into with no button held.
     var hovered: CellPoint?
     /// The button went down on a view that was not focused: that click only focuses it.
@@ -335,6 +337,7 @@ public final class TerminalView: NSView {
     private func fetchDrawable() {
         guard !fetching, let metalLayer, window.map(isOnScreen) ?? false else { return }
         fetching = true
+        marks.fetchStarted()
         let fetch = DrawableFetch(view: self, layer: metalLayer, next: nextDrawable)
         DispatchQueue.global(qos: .userInteractive).async {
             fetch.drawable = fetch.next(fetch.layer)
@@ -345,12 +348,18 @@ public final class TerminalView: NSView {
     }
 
     /// A drawable of the layer's size draws the owed frame now, reading the screen as it is (D2),
-    /// and is let go if that frame does not use it; none, the one-second wait over, asks again.
+    /// and is let go if that frame does not use it; none, the one-second wait over, asks again
+    /// while the frame is still owed and the view shown.
     private func arrived(_ drawable: (any CAMetalDrawable)?) {
         fetching = false
+        marks.fetchEnded()
         guard let drawable, let metalLayer,
               drawable.texture.width == Int(metalLayer.drawableSize.width), drawable.texture.height == Int(metalLayer.drawableSize.height)
-        else { return fetchDrawable() }
+        else {
+            if owed, !isHiddenOrHasHiddenAncestor { fetchDrawable() }
+            return
+        }
+        owed = false
         fetched = drawable
         defer { fetched = nil }
         if !isHiddenOrHasHiddenAncestor, refresh(target: CACurrentMediaTime() + refreshInterval) { pacer.resume() }
@@ -360,15 +369,16 @@ public final class TerminalView: NSView {
         1 / Double(max(1, window?.screen?.maximumFramesPerSecond ?? 60))
     }
 
-    /// The window was seen again: a frame it may owe asks for its drawable.
+    /// The window was seen again: a shown view that owes a frame asks for its drawable.
     @objc private func visibilityChanged() {
-        if pacer.isIdle { fetchDrawable() }
+        if owed, !isHiddenOrHasHiddenAncestor { fetchDrawable() }
     }
 
     /// One display refresh, for the frame meant to reach the display at `target`: with no drawable
     /// just brought, ask for one and draw on its arrival; else read the screen and draw when it or
     /// the view changed, or pause until something does. True when the link is wanted for the next
-    /// refresh: a frame was drawn, or every buffer was still in flight.
+    /// refresh: a frame was drawn, or every buffer was still in flight, or the frame could not be
+    /// encoded (tried again then).
     @discardableResult
     func refresh(target: Double) -> Bool {
         guard let link else {
@@ -381,6 +391,7 @@ public final class TerminalView: NSView {
             return false
         }
         guard fetched != nil else {
+            owed = true
             pacer.pause()
             fetchDrawable()
             return false
@@ -415,8 +426,7 @@ public final class TerminalView: NSView {
             marks.skipped(read: read)
             renderer.invalidate()
             needsDraw = true
-            pacer.pause()
-            return false
+            return true
         }
     }
 

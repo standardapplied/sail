@@ -40,7 +40,7 @@
   {"name": "pasted", "line": "pasted-3", "seconds": 10},
   {"name": "flood-bytes-made-once", "floodFile": true},
   {"name": "flood-latency-from-zero", "resetLatency": true},
-  {"name": "flood", "type": "clear; cat /tmp/sail-drive-flood; echo flood-$((1+1))\r"},
+  {"name": "flood", "type": "clear; cat /tmp/sail-drive-flood-lines /tmp/sail-drive-flood-tail; echo flood-$((1+1))\r"},
   {"name": "flood-done-its-last-20-bytes-then-the-marker", "line": "xxxxxxxxxxxxxxxxxxxxflood-2", "seconds": 180},
   {"name": "every-output-shown-within-100-ms", "shownWithin": 100},
   {"name": "kill-host", "killHost": true},

@@ -163,12 +163,15 @@ final class MainStacks: @unchecked Sendable {
         #endif
     }
 
-    /// Every sample as a look at the main thread, for ``MachineShare``.
+    /// Every sample as a look at the main thread, with this process's CPU (every thread of the app,
+    /// its session readers included), for ``MachineShare``. The terminal host and its session
+    /// shims are other processes; counting them as ours would need their CPU time
+    /// (`proc_pid_rusage` on each pid the host started), which the sampler does not read.
     var looks: [ThreadLook] {
         lock.withLock {
             samples.map { sample in
                 ThreadLook(
-                    time: sample.time, runnable: sample.runState == 1, cpu: sample.cpu,
+                    time: sample.time, runnable: sample.runState == 1, cpu: sample.cpu, processCPU: sample.threads.reduce(0) { $0 + $1.cpu },
                     idleTicks: sample.ticks.count == 4 ? sample.ticks[2] : nil,
                     busyTicks: sample.ticks.count == 4 ? sample.ticks[0] &+ sample.ticks[1] &+ sample.ticks[3] : nil
                 )

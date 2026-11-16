@@ -45,6 +45,9 @@ public struct LatencyMarks: Sendable {
     private var presentedBeforeCommit = 0
     private var longestToShown: Span?
     private var longestBetweenCommits: Span?
+    private var longestGapOutputs = 0
+    private var fetches: [Span] = []
+    private var fetchStarted: Double?
     private var inFlight: [UInt64: Flight] = [:]
     private var commitToCompleted: [Double] = []
     private var commitToPresentTold: [Double] = []
@@ -86,7 +89,10 @@ public struct LatencyMarks: Sendable {
             Self.keep(time - output.time, in: &outputToCommitted)
         }
         committed[frame] = (time, (committed[frame]?.outputs ?? []) + drawn)
-        if let lastFrame { Self.keepLongest(Span(lastFrame.committed, time), in: &longestBetweenCommits) }
+        if let lastFrame, time - lastFrame.committed > longestBetweenCommits?.length ?? -1 {
+            longestBetweenCommits = Span(lastFrame.committed, time)
+            longestGapOutputs = drawn.filter { $0.time > lastFrame.committed }.count
+        }
         lastFrame = (frame, time)
         if inFlight[frame]?.told == true {
             inFlight[frame] = nil
@@ -155,6 +161,19 @@ public struct LatencyMarks: Sendable {
         settle(frame, shown)
     }
 
+    /// A drawable was asked for at `time`, off the main thread.
+    public mutating func fetchStarted(at time: Double) {
+        fetchStarted = time
+    }
+
+    /// The drawable asked for came, or the ask gave up, at `time`.
+    public mutating func fetchEnded(at time: Double) {
+        guard let started = fetchStarted else { return }
+        fetchStarted = nil
+        fetches.append(Span(started, time))
+        if fetches.count > Self.capacity { fetches.removeFirst() }
+    }
+
     /// How long one refresh took, reading the screen to committing the frame or pausing: on the
     /// wall clock, and the work it did on its thread's CPU clock (what a stall of the machine does
     /// not add to).
@@ -172,7 +191,9 @@ public struct LatencyMarks: Sendable {
             refreshWork: Self.percentiles(refreshWork), screenUpdates: screenUpdates,
             lateOutputs: late, reportedPresents: reported, unreportedPresents: unreported,
             presentedBeforeCommit: presentedBeforeCommit, longestToShown: longestToShown,
-            longestBetweenCommits: longestBetweenCommits, commitToCompleted: Self.percentiles(commitToCompleted),
+            longestBetweenCommits: longestBetweenCommits, longestGapOutputs: longestGapOutputs,
+            longestGapFetching: longestBetweenCommits.map { gap in fetches.reduce(0) { $0 + $1.overlap(gap) } * 1000 } ?? 0,
+            commitToCompleted: Self.percentiles(commitToCompleted),
             commitToPresentTold: Self.percentiles(commitToPresentTold), unpresented: []
         )
     }
@@ -247,6 +268,10 @@ public struct LatencyFigures: Equatable, Sendable, Codable {
     public var longestToShown: Span?
     /// The longest time between two committed frames, in seconds.
     public var longestBetweenCommits: Span?
+    /// How many outputs reached the screen inside that gap, and for how many ms a drawable was being
+    /// asked for in it: a gap with no output was silence, not a stall.
+    public var longestGapOutputs: Int
+    public var longestGapFetching: Double
     /// A frame's commit to its commands completing on the GPU, and to Metal telling it presented.
     public var commitToCompleted: Percentiles
     public var commitToPresentTold: Percentiles

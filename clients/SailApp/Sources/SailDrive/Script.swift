@@ -66,7 +66,7 @@ struct Step: Decodable {
     var resetLatency: Bool?
     /// Kills the host the preview started, as a crash would.
     var killHost: Bool?
-    /// Makes the flood's bytes, once, at ``Driver/floodFile``.
+    /// Makes the flood's bytes, once, at ``Driver/floodFiles``.
     var floodFile: Bool?
     /// Stops this Mac's host (true) so nothing it is sent is answered, or lets it go on (false).
     var pauseHost: Bool?

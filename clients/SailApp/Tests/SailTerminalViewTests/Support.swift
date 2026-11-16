@@ -6,6 +6,7 @@ import SailTerminal
 @testable import SailTerminalView
 import SailVT
 import Synchronization
+import Testing
 
 /// A session stand-in that encodes through a real screen, so the bytes it records are
 /// libghostty-vt's, as a session would send them.
@@ -190,9 +191,8 @@ struct Harness {
 
     /// Waits until no drawable the view asked for is still on its way.
     func drawn() async {
-        while view.drawingState.contains("; awaiting a drawable") {
-            try? await Task.sleep(for: .milliseconds(1))
-        }
+        let came = await until { !view.drawingState.contains("; awaiting a drawable") }
+        if !came { Issue.record("a drawable the view asked for did not come within 5 s") }
     }
 
     func key(_ characters: String, code: UInt16, ignoring: String? = nil, flags: NSEvent.ModifierFlags = []) {

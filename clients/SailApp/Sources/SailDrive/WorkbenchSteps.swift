@@ -337,19 +337,21 @@ extension Driver {
         for character in text { key(character) }
     }
 
-    /// Scenario 32, `panes4`: a tab of four panes in a 2x2 grid; three flood 20 MB each while the
-    /// fourth echoes 200 keys at one per 50 ms. Budgets: the echo pane's key to echo p95 ≤ 50 ms
-    /// (presented when the display reports it, else the view's estimate, said which) and output to
-    /// committed p95 ≤ 2 refreshes; each flooding pane shows its last bytes, with no gap between its
-    /// committed frames over 100 ms from its flood's first lines to its last; the four views'
-    /// refresh work p95, summed, ≤ 8 ms; ⌘D to the new pane's first committed frame, ten times, p95
-    /// ≤ 100 ms. Each wait is net of the drive's own thread's stall during it. Reported only: memory
-    /// at one pane and at four. The tabs it made are closed after.
+    /// Scenario 32, `panes4`: a tab of four panes in a 2x2 grid. Three flood (20 MiB of `x` folded
+    /// at 150, again and again until the echo is measured, then the marker) while the fourth echoes
+    /// 200 keys at one per 50 ms. Budgets: the echo pane's key to echo p95 ≤ 50 ms and output to
+    /// committed p95 ≤ 2 refreshes; each flood shows its last bytes, and none of its output waited,
+    /// nor was the main thread held, over 100 ms (``Driver/flood(_:)``); the four views' refresh
+    /// work p95, summed, ≤ 8 ms; ⌘D to the new pane's first committed frame, ten times, p95
+    /// ≤ 100 ms. Each wait is net of the machine's share of it. Reported: each flood's frames and
+    /// longest commit gap with what reached the screen and what was asked for in it, and memory.
     private func fourPanes() async -> (Bool, String) {
         let before = Self.footprint
         let tabsBefore = workbench.model.tabs.count
         _ = mainStacks
-        _ = Self.floodFile
+        let files = Self.floodFiles
+        let stop = "/tmp/sail-drive-flood-stop"
+        try? FileManager.default.removeItem(atPath: stop)
         mainThread.reset()
         press("t", ["command"])
         guard await waitUntil(10, { self.workbench.model.tabs.count == tabsBefore + 1 && self.pane?.session?.state.phase == .attached }) else {
@@ -371,10 +373,10 @@ extension Driver {
         }
         focus(echo)
         typeText("cat\r")
-        let flood = "clear; cat \(Self.floodFile); echo flood-$((1+1))\r"
+        let command = "clear; while [ ! -e \(stop) ]; do cat \(files.lines); done; cat \(files.tail); echo flood-$((1+1))\r"
         for view in floods {
             focus(view)
-            typeText(flood)
+            typeText(command)
         }
         focus(echo)
         print(String(format: "panes4 phase floods typed %.3f", CACurrentMediaTime()))
@@ -385,6 +387,8 @@ extension Driver {
         let framesBefore = floods.map { Self.committed($0.terminal) }
         let (ok, said) = await measure(200, interval: 50, name: "panes4-echo")
         print(String(format: "panes4 phase echo measured %.3f", CACurrentMediaTime()))
+        Self.processes().forEach { print("panes4 ps at the echo's end: \($0)") }
+        FileManager.default.createFile(atPath: stop, contents: nil)
         panes4["main thread's longest stall while four ran ms"] = mainThread.longest
         panes4["a thread of the drive's own, longest stall while four ran ms"] = ownThread.longest
         let refresh = 1000 / Double(max(1, shell.window.screen?.maximumFramesPerSecond ?? 60))
@@ -409,16 +413,19 @@ extension Driver {
         ]
         for (index, view) in floods.enumerated() {
             let figures = ran[index] ?? view.terminal.latency
-            let gap = figures.longestBetweenCommits.map { ours($0) }
+            let judged = flood(figures)
             if let span = figures.longestBetweenCommits {
                 print(String(format: "panes4 flood %d longest gap %.3f–%.3f; refresh max %.1f ms", index + 1, span.start, span.end, figures.refresh.max))
                 mainStacks.told(span).forEach { print("panes4 flood \(index + 1) in its longest gap: \($0)") }
             }
-            budgets["flood \(index + 1): no gap between committed frames over 100 ms in its \(frames[index]) frames (\(gap?.said ?? "no frame committed"))"] =
-                (gap?.ours ?? .infinity) <= 100
+            budgets["flood \(index + 1): no output waited, nor the main thread held, over 100 ms in its \(frames[index]) frames (\(judged.said))"] =
+                frames[index] > 0 && judged.ours <= 100
             measures.append(measurement("panes4-flood-\(index + 1)", keys: 0, figures: figures, budgets: [:]))
             panes4["flood \(index + 1) longest gap between committed frames ms"] = (figures.longestBetweenCommits?.length ?? 0) * 1000
-            panes4["flood \(index + 1) longest gap between committed frames, less the machine's share of it, ms"] = gap?.ours ?? -1
+            panes4["flood \(index + 1), ours (the larger of its longest output wait and the main thread's longest hold, less the machine's share), ms"] = judged.ours
+            panes4["flood \(index + 1) frames committed"] = Double(frames[index])
+            panes4["flood \(index + 1) outputs that reached the screen in its longest commit gap"] = Double(figures.longestGapOutputs)
+            panes4["flood \(index + 1) ms a drawable was being asked for in its longest commit gap"] = figures.longestGapFetching
             panes4["flood \(index + 1) longest wait to be shown ms"] = figures.outputToShown.max
             panes4["flood \(index + 1) refresh p95 ms"] = figures.refresh.p95
         }

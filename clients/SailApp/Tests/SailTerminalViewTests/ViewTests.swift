@@ -471,6 +471,70 @@ import Testing
         #expect(asks.withLock { $0 } == 3, "two asks brought none and were asked again")
     }
 
+    /// m1: an idle view, or a hidden one, asks for no drawable when the window is seen again, and
+    /// an answer of none asks again only while a frame is owed by a view that is shown.
+    @Test func onlyAShownViewThatOwesAFrameAsksForADrawable() async throws {
+        let harness = try Harness()
+        await harness.drainMain()
+        await harness.tick()
+        await harness.tick()
+        try #require(harness.clock.isPaused)
+        let asks = Mutex(0)
+        let gate = DispatchSemaphore(value: 0)
+        harness.view.nextDrawable = { _ in
+            asks.withLock { $0 += 1 }
+            _ = gate.wait(timeout: .now() + 2)
+            return nil
+        }
+        NotificationCenter.default.post(name: NSWindow.didChangeOcclusionStateNotification, object: harness.window)
+        #expect(!harness.view.drawingState.contains("; awaiting a drawable"), "an idle view asked when the window was seen")
+        harness.view.isOnScreen = { _ in false }
+        harness.link.output("owed")
+        harness.view.drawNowIfIdle()
+        harness.view.isHidden = true
+        harness.view.isOnScreen = { _ in true }
+        NotificationCenter.default.post(name: NSWindow.didChangeOcclusionStateNotification, object: harness.window)
+        #expect(!harness.view.drawingState.contains("; awaiting a drawable"), "a hidden view asked when the window was seen")
+        harness.view.isHidden = false
+        NotificationCenter.default.post(name: NSWindow.didChangeOcclusionStateNotification, object: harness.window)
+        #expect(await harness.until { asks.withLock { $0 } == 1 }, "a shown view that owes a frame asked")
+        harness.view.isHidden = true
+        gate.signal()
+        #expect(await harness.until { !harness.view.drawingState.contains("; awaiting a drawable") })
+        #expect(asks.withLock { $0 } == 1, "an answer of none asked again for a hidden view")
+        harness.view.isHidden = false
+    }
+
+    /// m4: the layer resized on the main thread while an ask is under way (its drawables held, so
+    /// the ask may block in the layer): the main thread does not wait, and the frame owed is drawn
+    /// at the new size once a drawable of it comes. Whether the ask really blocked inside the layer
+    /// on this machine only a Mac with a starved window server can show.
+    @Test func aResizeWhileAnAskIsUnderWayDoesNotHoldTheMainThread() async throws {
+        let harness = try Harness()
+        await harness.drainMain()
+        await harness.tick()
+        await harness.tick()
+        try #require(harness.clock.isPaused)
+        let holding = Mutex(false)
+        harness.view.nextDrawable = { layer in
+            let held = (0 ..< layer.maximumDrawableCount).compactMap { _ in layer.nextDrawable() }
+            holding.withLock { $0 = true }
+            let next = layer.nextDrawable()
+            withExtendedLifetime(held) {}
+            return next
+        }
+        harness.link.output("resized")
+        harness.view.drawNowIfIdle()
+        #expect(await harness.until { holding.withLock { $0 } }, "the ask began")
+        let began = ContinuousClock.now
+        harness.window.setContentSize(NSSize(width: 640, height: 400))
+        harness.window.layoutIfNeeded()
+        #expect(ContinuousClock.now - began < .milliseconds(50), "the main thread waited on the layer while an ask was under way")
+        harness.view.nextDrawable = { $0.nextDrawable() }
+        await harness.drawn()
+        #expect(await harness.until { harness.view.visibleText.contains("resized") }, "the owed frame was drawn")
+    }
+
     static func committed(_ view: TerminalView) -> Int {
         guard let found = view.drawingState.range(of: "committed ") else { return -1 }
         return Int(view.drawingState[found.upperBound...].prefix { $0.isNumber }) ?? -1

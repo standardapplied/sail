@@ -277,16 +277,15 @@ final class Driver {
         }
         if let limit = step.shownWithin {
             let figures = terminal.latency
-            let wait = ours(figures.longestToShown), held = mainHeld()
+            let judged = flood(figures)
             if let gap = mainThread.stalls.longest() {
                 mainStacks.told(gap).forEach { print("main thread in its longest hold of the flood: \($0)") }
             }
-            let ok = max(wait.ours, held.ours) <= limit
-            let flood = measurement(name, keys: 0, figures: figures, budgets: ["every output shown within \(Self.ms(limit)) ms": ok])
-            measures.append(flood)
-            return (ok, "the longest any output waited to be shown: \(wait.said); the main thread's longest hold: \(held.said); the longest refresh took "
-                + "\(Self.ms(figures.refresh.max)) ms, \(figures.lateOutputs) outputs were late; the main thread was held at most "
-                + "\(Self.ms(flood.mainThreadHeld)) ms")
+            let ok = judged.ours <= limit
+            let measured = measurement(name, keys: 0, figures: figures, budgets: ["every output shown within \(Self.ms(limit)) ms": ok])
+            measures.append(measured)
+            return (ok, "\(judged.said); the longest refresh took \(Self.ms(figures.refresh.max)) ms, \(figures.lateOutputs) outputs were late; "
+                + "the main thread was held at most \(Self.ms(measured.mainThreadHeld)) ms")
         }
         if let text = step.text {
             let found = await waitUntil(step.seconds ?? 10) { self.screenText.contains(text) }
@@ -307,7 +306,7 @@ final class Driver {
             return await measure(keys, interval: step.interval ?? 50, name: name)
         }
         if step.floodFile == true {
-            return (FileManager.default.fileExists(atPath: Self.floodFile), Self.floodFile)
+            return (FileManager.default.fileExists(atPath: Self.floodFiles.lines), Self.floodFiles.lines)
         }
         if step.killHost == true {
             guard shell.thisMac.host.startedPID != nil else { return (false, "the app started no host to kill") }
@@ -345,7 +344,9 @@ final class Driver {
         if let clear = Keys.named("u", modifiers: ["control"]) { send(clear) }
         let refresh = 1000 / Double(max(1, shell.window.screen?.maximumFramesPerSecond ?? 60))
         let measured = figures.outputToPresented.count > 0
-        let budgets = [
+        let stale = figures.unpresented.filter { $0.ageMs > 6 * refresh }
+        var budgets = [
+            "every committed frame told presented within 6 refreshes (reported presents only)": figures.reportedPresents == 0 || stale.isEmpty,
             "key to bytes written p95 <= 2 ms": figures.keyToWritten.p95 <= 2,
             "output to committed p50 <= 1 refresh": figures.outputToCommitted.p50 <= refresh,
             "output to committed p95 <= 2 refreshes": figures.outputToCommitted.p95 <= 2 * refresh,
@@ -356,7 +357,20 @@ final class Driver {
         ]
         measures.append(measurement(name, keys: keys, figures: figures, budgets: budgets))
         let missed = budgets.filter { !$0.value }.keys.sorted()
-        return (missed.isEmpty, missed.isEmpty ? "within every budget" : "missed: \(missed.joined(separator: "; "))")
+        let presents = figures.reportedPresents > 0
+            ? "\(stale.count) committed frames not told presented within 6 refreshes" : "the display tells no presentation time, so a frame never presented is not caught here"
+        return (missed.isEmpty, (missed.isEmpty ? "within every budget" : "missed: \(missed.joined(separator: "; "))") + "; " + presents)
+    }
+
+    /// A flood judged as the app's, in ms (``FloodVerdict``): the larger of its longest output's
+    /// wait and the main thread's longest hold over it, each less the machine's share; with the
+    /// words that say what each waited for and whose it was.
+    func flood(_ figures: LatencyFigures) -> (ours: Double, said: String) {
+        let verdict = FloodVerdict.ours(figures, mainHold: mainThread.stalls.longest(), tick: Heartbeat.interval, own: ownThread.stalls, main: mainStacks.looks)
+        let gap = figures.longestBetweenCommits?.length ?? 0
+        return (max(verdict.shown, verdict.held) * 1000, "the longest any output waited to be shown: \(ours(figures.longestToShown).said); "
+            + "the main thread's longest hold: \(mainHeld().said); its longest gap between commits \(Self.ms(gap * 1000)) ms, "
+            + "\(figures.longestGapOutputs) outputs reached the screen in it, a drawable was being asked for \(Self.ms(figures.longestGapFetching)) ms of it")
     }
 
     func measurement(_ name: String, keys: Int, figures: LatencyFigures, budgets: [String: Bool]) -> Measure {
@@ -392,19 +406,19 @@ final class Driver {
         ours(mainThread.stalls.longest(in: span), less: Heartbeat.interval)
     }
 
-    /// The bytes the spec's flood prints, made once so that one `cat` gives them: 20 MiB of `x`
-    /// folded at 150 columns (`head -c 20971520 /dev/zero | tr '\0' x | fold -w 150` printed nine
-    /// processes' worth of CPU beside the terminal it measured), its last 20 bytes unended.
-    static let floodFile: String = {
-        let path = "/tmp/sail-drive-flood"
-        let line = [UInt8](repeating: UInt8(ascii: "x"), count: 150) + [UInt8(ascii: "\n")]
+    /// The bytes the spec's flood prints, made once so that one `cat` gives them (`head -c 20971520
+    /// /dev/zero | tr '\0' x | fold -w 150` printed nine processes' worth of CPU beside the
+    /// terminal it measured): 20 MiB of `x` folded at 150 columns in `lines`, its last 20 bytes
+    /// unended in `tail`. Printed again and again, `lines` keeps the same shape.
+    static let floodFiles: (lines: String, tail: String) = {
         let lines = 20_971_520 / 150
+        let line = [UInt8](repeating: UInt8(ascii: "x"), count: 150) + [UInt8(ascii: "\n")]
         var bytes = [UInt8]()
-        bytes.reserveCapacity(lines * 151 + 20)
+        bytes.reserveCapacity(lines * 151)
         for _ in 0 ..< lines { bytes += line }
-        bytes += [UInt8](repeating: UInt8(ascii: "x"), count: 20_971_520 - lines * 150)
-        FileManager.default.createFile(atPath: path, contents: Data(bytes))
-        return path
+        FileManager.default.createFile(atPath: "/tmp/sail-drive-flood-lines", contents: Data(bytes))
+        FileManager.default.createFile(atPath: "/tmp/sail-drive-flood-tail", contents: Data(repeating: UInt8(ascii: "x"), count: 20_971_520 - lines * 150))
+        return ("/tmp/sail-drive-flood-lines", "/tmp/sail-drive-flood-tail")
     }()
 
     /// What the floods' processes and their neighbours cost the machine now, as `ps` says.
@@ -469,7 +483,11 @@ final class Driver {
     /// its echo reaches the display): every line of the overlay shown, and a key count above zero.
     private func latencyOverlay(within seconds: Double) async -> (Bool, String) {
         let began = ContinuousClock.now
-        let counted = await waitUntil(seconds) { self.terminal.latency.keyToEcho.count + self.terminal.latency.keyToEchoEstimated.count > 0 }
+        let written = terminal.latency.keyToWritten.count
+        let counted = await waitUntil(seconds) {
+            let figures = self.terminal.latency
+            return written > 0 && (figures.keyToEcho.count + figures.keyToEchoEstimated.count) * 10 >= written * 9
+        }
         let waited = (ContinuousClock.now - began) / .milliseconds(1)
         guard let toggle = Keys.named("l", modifiers: ["command", "option"]) else { return (false, "no ⌥⌘L") }
         send(toggle)
@@ -478,7 +496,7 @@ final class Driver {
         let keys = shown.components(separatedBy: "(").dropFirst().compactMap { part in Int(part.prefix(while: \.isNumber)) }.reduce(0, +)
         let figures = terminal.latency
         let ok = counted && keys > 0 && lines.count <= TerminalPane.latencyLines && shown.contains("key → echo on glass")
-        let measured = "keys written \(figures.keyToWritten.count), echoes counted on glass \(figures.keyToEcho.count) and estimated "
+        let measured = "at least 90% of the keys written counted \(counted); keys written \(figures.keyToWritten.count), echoes counted on glass \(figures.keyToEcho.count) and estimated "
             + "\(figures.keyToEchoEstimated.count), presents reported \(figures.reportedPresents) and not \(figures.unreportedPresents), "
             + "told before their commit \(figures.presentedBeforeCommit), "
             + "waited \(String(format: "%.0f", waited)) ms"

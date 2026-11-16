@@ -33,6 +33,16 @@ final class ViewMarks: Sendable {
         }
     }
 
+    func fetchStarted() {
+        let now = CACurrentMediaTime()
+        marks.withLock { $0.fetchStarted(at: now) }
+    }
+
+    func fetchEnded() {
+        let now = CACurrentMediaTime()
+        marks.withLock { $0.fetchEnded(at: now) }
+    }
+
     func completed(frame: UInt64, ok: Bool) {
         let now = CACurrentMediaTime()
         marks.withLock { $0.completed(frame: frame, at: now, ok: ok) }
