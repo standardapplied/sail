@@ -231,6 +231,8 @@
   {"name": "s17-to-the-right", "clickPane": 1},
   {"name": "s17-end-the-right-reporter", "press": "c", "modifiers": ["control"]},
   {"name": "s17-back-left", "clickPane": 0},
+  {"name": "s27-output-to-come-back", "type": "clear; echo kept-$((4+4))\r"},
+  {"name": "s27-output-shown", "line": "kept-8", "seconds": 10},
   {"name": "s28-second-tab", "press": "t", "modifiers": ["command"]},
   {"name": "s28-third-tab", "press": "t", "modifiers": ["command"]},
   {"name": "s28-three-tabs", "arrangement": {"tabs": [2, 1, 1], "selected": 2}},
