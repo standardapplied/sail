@@ -149,8 +149,8 @@ private extension SessionInfo {
         ]
     }
 
-    /// Where it runs and who opened it, written after everything a host before workspaces wrote, so
-    /// a peer of that host reads the frame as before and a reader of one finds none.
+    /// Where it runs and who opened it, written after every other field of the frame, a page's after
+    /// its cursor: the macOS lanes run the app against a pinned released host, which writes none.
     var place: [Field] {
         [.string(workspace), .string(opener)]
     }
@@ -210,7 +210,7 @@ private struct Cursor {
         case 11:
             .issueTicket(
                 action: Open(rawValue: try string()), target: try string(), credential: try string(),
-                workspace: try trailing()
+                workspace: try string()
             )
         case 33: .ticket(try string())
         case 34: .ticketRefused(kind: Open(rawValue: try string()), remedy: try list { (cursor: inout Cursor) throws(TerminalWireError) in try cursor.part() })
@@ -233,14 +233,10 @@ private struct Cursor {
     private mutating func create() throws(TerminalWireError) -> SessionCreate {
         SessionCreate(
             session: try string(), command: try strings(), workingDirectory: try string(), project: try string(),
-            room: try string(), size: try size(), workspace: try trailing()
+            room: try string(), size: try size(), workspace: try string()
         )
     }
 
-    /// A string a frame ends with that a host before it did not send: empty when absent.
-    private mutating func trailing() throws(TerminalWireError) -> String {
-        remaining > 0 ? try string() : ""
-    }
 
     private mutating func session() throws(TerminalWireError) -> SessionInfo {
         SessionInfo(
@@ -249,7 +245,8 @@ private struct Cursor {
         )
     }
 
-    /// `info` with the place a frame ends with, when its host wrote one.
+    /// `info` with the place a frame ends with, when its host wrote one (a pinned released host
+    /// writes none).
     private mutating func placed(_ info: SessionInfo) throws(TerminalWireError) -> SessionInfo {
         guard remaining > 0 else { return info }
         var placed = info

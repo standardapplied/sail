@@ -237,8 +237,9 @@ public final class PtyWire {
   }
 
   /**
-   * Where a session runs and who opened it, written after everything a host before workspaces
-   * wrote, so a peer of that host reads its frames as before and a reader of one finds none.
+   * Where a session runs and who opened it, written after every other field of the frame, a page's
+   * after its cursor: the macOS lanes run the app against a pinned released host, which writes
+   * none, and the app reads a frame's fields up to the place.
    */
   private static Writer encodePlace(Writer out, PtyMessage.SessionInfo info) {
     return out.string(info.workspace()).string(info.opener());
@@ -257,7 +258,7 @@ public final class PtyWire {
               string(in),
               in.getInt(),
               in.getInt(),
-              trailing(in));
+              string(in));
       case 2 -> new PtyMessage.Attach(string(in), in.get() == 1);
       case 3 -> new PtyMessage.Input(in.getLong(), bytes(in));
       case 4 -> new PtyMessage.Resize(in.getInt(), in.getInt());
@@ -268,7 +269,7 @@ public final class PtyWire {
       case 10 -> new PtyMessage.Yield(string(in), string(in));
       case 11 ->
           new PtyMessage.IssueTicket(
-              PtyMessage.TicketAction.of(string(in)), string(in), string(in), trailing(in));
+              PtyMessage.TicketAction.of(string(in)), string(in), string(in), string(in));
       case 33 -> new PtyMessage.Ticket(string(in));
       case 34 -> new PtyMessage.TicketRefused(PtyMessage.TicketRefusal.of(string(in)), remedy(in));
       case 20 -> new PtyMessage.Output(in.getLong(), bytes(in));
@@ -279,10 +280,7 @@ public final class PtyWire {
       case 25 -> new PtyMessage.Paused();
       case 26 -> new PtyMessage.Continued();
       case 27 -> new PtyMessage.SessionEnded(string(in));
-      case 28 -> {
-        var info = decodeInfo(in);
-        yield in.hasRemaining() ? info.placed(string(in), string(in)) : info;
-      }
+      case 28 -> decodeInfo(in).placed(string(in), string(in));
       case 29 -> {
         var count = bounded(in);
         var sessions = new ArrayList<PtyMessage.SessionInfo>(count);
@@ -290,19 +288,13 @@ public final class PtyWire {
           sessions.add(decodeInfo(in));
         }
         var next = string(in);
-        if (in.hasRemaining()) {
-          var placed = in.getInt();
-          if (placed != count) {
-            throw new IOException(
-                "Corrupt pty frame: a page places "
-                    + placed
-                    + " sessions but holds "
-                    + count
-                    + ".");
-          }
-          for (var i = 0; i < count; i++) {
-            sessions.set(i, sessions.get(i).placed(string(in), string(in)));
-          }
+        var placed = in.getInt();
+        if (placed != count) {
+          throw new IOException(
+              "Corrupt pty frame: a page places " + placed + " sessions but holds " + count + ".");
+        }
+        for (var i = 0; i < count; i++) {
+          sessions.set(i, sessions.get(i).placed(string(in), string(in)));
         }
         yield new PtyMessage.Sessions(List.copyOf(sessions), next);
       }
@@ -316,11 +308,6 @@ public final class PtyWire {
   private static PtyMessage.SessionInfo decodeInfo(ByteBuffer in) throws IOException {
     return new PtyMessage.SessionInfo(
         string(in), string(in), in.get() == 1, in.getInt(), string(in), string(in), stringList(in));
-  }
-
-  /** A string a frame ends with that a peer before it did not send: blank when absent. */
-  private static String trailing(ByteBuffer in) throws IOException {
-    return in.hasRemaining() ? string(in) : "";
   }
 
   private static String string(ByteBuffer in) throws IOException {

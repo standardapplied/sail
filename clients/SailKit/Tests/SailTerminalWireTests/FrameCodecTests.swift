@@ -97,20 +97,8 @@ import Testing
         }
     }
 
-    @Test func aCreateOrATicketFromAHostBeforeWorkspacesIsForTheProjectsContainer() throws {
-        let create = Array(try golden("Create").dropFirst(4))
-        let ticket = Array(try golden("IssueTicket").dropFirst(4))
-
-        guard case let .create(bare) = try FrameCodec.decode(payload: create[..<withoutWorkspace("Create", create)]),
-              case let .issueTicket(_, _, _, workspace) = try FrameCodec.decode(
-                  payload: ticket[..<withoutWorkspace("IssueTicket", ticket)]
-              )
-        else {
-            Issue.record("a frame without its workspace decodes as another frame")
-            return
-        }
-        #expect(bare.workspace == "")
-        #expect(workspace == "")
+    /// The macOS lanes run the app against a pinned released host, whose sessions carry no place.
+    @Test func aSessionOrAPageWithoutItsPlacesIsInTheProjectsContainer() throws {
         let info = Array(try golden("SessionInfo").dropFirst(4))
         let page = Array(try golden("Sessions").dropFirst(4))
         #expect(try FrameCodec.decode(payload: info[..<withoutWorkspace("SessionInfo", info)])
@@ -237,13 +225,11 @@ func errWithoutRemedy(_ payload: [UInt8]) throws -> Int {
     1 + 4 + Int(try decodedLength(payload, at: 1))
 }
 
-/// Where `name`'s golden frame ends without what a host before workspaces never sent: the
-/// workspace `dock` of a create or ticket, `lounge`'s place in `dock` opened by `uday`, and a
-/// page's places of `lounge` and of `shell`, which is in none.
+/// Where `name`'s golden frame ends without its sessions' places: `lounge`'s in `dock` opened by
+/// `uday`, and `shell`'s in none.
 func withoutWorkspace(_ name: String, _ payload: [UInt8]) -> Int {
     let lounge = field("dock") + field("uday")
     return switch name {
-    case "Create", "IssueTicket": payload.count - field("dock")
     case "SessionInfo": payload.count - lounge
     case "Sessions": payload.count - 4 - lounge - field("") - field("")
     default: payload.count

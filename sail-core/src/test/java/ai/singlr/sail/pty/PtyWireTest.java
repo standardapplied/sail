@@ -385,12 +385,10 @@ class PtyWireTest {
     assertEquals(
         "", new PtyMessage.Create("s", List.of(), "/tmp", "acme", "", 80, 24, "main").workspace());
     assertEquals("", new PtyMessage.Create("s", List.of(), "/tmp", "acme", "", 80, 24).workspace());
-    var read = (PtyMessage.IssueTicket) readPayload(texts((byte) 11, "open", "acme", "tok"));
-    assertEquals("", read.workspace(), "a ticket request from before the field names none");
   }
 
-  /** A session as a host before workspaces writes it: no place after its command. */
-  private static ByteBuffer olderSession(ByteBuffer out, String name) {
+  /** A session as written before its place: no workspace or opener after its command. */
+  private static ByteBuffer unplacedSession(ByteBuffer out, String name) {
     put(out, name);
     put(out, "i");
     out.put((byte) 1).putInt(0);
@@ -404,37 +402,17 @@ class PtyWireTest {
     out.putInt(bytes.length).put(bytes);
   }
 
-  private static ByteBuffer texts(byte type, String... texts) {
-    var out = ByteBuffer.allocate(256).put(type);
-    for (var text : texts) {
-      put(out, text);
-    }
-    return out;
-  }
-
   /**
-   * A session and a page of them from a host before workspaces, which writes no place, read as in
-   * the project's container; a page placing other than its sessions is refused, never misread.
+   * A page's places follow its cursor, one for each of its sessions; a page placing other than its
+   * sessions is refused, never misread.
    */
   @Test
-  void aSessionFromAHostBeforeWorkspacesIsInTheContainerAndAPageMustPlaceEachOfItsSessions()
-      throws IOException {
-    var info =
-        (PtyMessage.SessionInfo)
-            readPayload(olderSession(ByteBuffer.allocate(256).put((byte) 28), "s"));
-    var page = ByteBuffer.allocate(256).put((byte) 29).putInt(2);
-    olderSession(olderSession(page, "a"), "b");
-    put(page, "");
-    var sessions = (PtyMessage.Sessions) readPayload(page);
+  void aPagePlacesEachOfItsSessionsAfterItsCursorAndNoOtherCount() throws IOException {
     var misplaced = ByteBuffer.allocate(256).put((byte) 29).putInt(1);
-    olderSession(misplaced, "a");
+    unplacedSession(misplaced, "a");
     put(misplaced, "");
     misplaced.putInt(2);
 
-    assertEquals(List.of("", ""), List.of(info.workspace(), info.opener()));
-    assertEquals(
-        List.of("", ""),
-        sessions.sessions().stream().map(PtyMessage.SessionInfo::workspace).toList());
     assertEquals(
         "Corrupt pty frame: a page places 2 sessions but holds 1.",
         assertThrows(IOException.class, () -> readPayload(misplaced)).getMessage());

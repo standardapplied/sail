@@ -85,7 +85,7 @@ public record SessionMeta(
               string(map, "project"),
               string(map, "room"),
               strings(map.get("command")),
-              map.get("workspace") instanceof String workspace ? workspace : "");
+              string(map, "workspace"));
       return new SessionMeta(
           origin,
           string(map, "cwd"),

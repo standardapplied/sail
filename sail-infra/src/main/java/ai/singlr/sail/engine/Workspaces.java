@@ -624,9 +624,10 @@ public final class Workspaces {
 
   /**
    * The person workspace {@code found} is, by handle: its labelled owner while the id its label
-   * stores (none on a label made before ids were) is the id of that handle's active person ({@code
-   * owners}); none for one made by hand, taken back, whose person is gone or disabled, or whose
-   * handle is now another person's. The one read of the label every door decides by.
+   * stores (none for an owner whose id this box does not know) is the id of that handle's active
+   * person ({@code owners}); none for one made by hand, taken back, whose person is gone or
+   * disabled, or whose handle is now another person's. The one read of the label every door decides
+   * by.
    */
   public static Optional<String> ownerOf(
       BoxInstances.Instance found, Function<String, WorkspaceOwner> owners) {
