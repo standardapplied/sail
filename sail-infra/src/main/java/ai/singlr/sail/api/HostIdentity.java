@@ -42,6 +42,9 @@ public interface HostIdentity {
 
   Optional<FdeStore.Fde> fde(String handle);
 
+  /** Whether {@code fdeId} is an active person's on this box. */
+  boolean activePerson(String fdeId);
+
   List<FdeSshKeyStore.SshKeyInfo> sshKeys();
 
   /**
@@ -57,4 +60,7 @@ public interface HostIdentity {
   Optional<Map<String, String>> gitTokens();
 
   SshGateway.Decision authorizeGateway(String command, String handle);
+
+  /** As {@link #authorizeGateway}, for the person a key is pinned to by this box's id for them. */
+  SshGateway.Decision authorizeGatewayById(String command, String fdeId);
 }

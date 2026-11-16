@@ -498,6 +498,24 @@ class HandleChangeTest {
     assertTrue(written.get());
   }
 
+  /**
+   * The re-proof's case 6: a node pointed at another main ('sail init --main <other>') forgets the
+   * old main's catalog, so its first round with the new main is not refused as a rebuilt database;
+   * pointed at the same main again, it keeps it, so a main rebuilt there still is.
+   */
+  @Test
+  void aNodePointedAtAnotherMainForgetsTheOldCatalogAndOnePointedAtTheSameKeepsIt()
+      throws Exception {
+    new DatabaseCatalog(db).recordMain("cat-a");
+
+    apply(node("ada"), node("ada"));
+    var same = new DatabaseCatalog(db).main();
+    apply(node("ada"), new SyncConfig(SyncConfig.ROLE_NODE, "sail@main2", "ada", "box"));
+
+    assertEquals(Optional.of("cat-a"), same);
+    assertEquals(Optional.empty(), new DatabaseCatalog(db).main());
+  }
+
   @Test
   void aNodeRenamedStaysANodeAndKeepsTheScopeAndTheCatalogMainNamedIt() throws Exception {
     var granted = ProjectScope.of(List.of("acme"));

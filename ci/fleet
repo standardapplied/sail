@@ -1471,8 +1471,7 @@ for f in /root/.ssh/authorized_keys /home/*/.ssh/authorized_keys; do
   grep -q "[^[:space:]]" "$f"; s=$?
   [ $s -le 1 ] || { echo "$f unreadable"; exit 2; }; [ $s -eq 1 ] || held="$held $f"
 done
-if said=$(runuser -u dev -- env HOME=/home/dev gh auth status 2>&1); then held="$held a-gh-login"
-else case $said in *"not logged in"*) ;; *) echo "gh unreadable"; exit 2 ;; esac; fi
+[ ! -e /home/dev/.config/gh/hosts.yml ] || held="$held a-gh-login"
 [ -z "$held" ] || { echo "the snapshot holds:$held"; exit 1; }'
 
 template_holds_nothing() {

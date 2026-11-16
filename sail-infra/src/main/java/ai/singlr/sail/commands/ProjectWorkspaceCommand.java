@@ -136,7 +136,12 @@ public final class ProjectWorkspaceCommand implements Runnable {
 
     private void execute() throws Exception {
       WorkspaceVerbs.readable(project, operator());
-      var listing = WorkspaceVerbs.workspaces(false).list(project);
+      Workspaces.Listing listing;
+      try (var operations = OperationsFactory.open()) {
+        listing =
+            WorkspaceVerbs.workspaces(false)
+                .list(project, id -> operations.identity().activePerson(id));
+      }
       if (json) {
         System.out.println(CliJson.stringify(listing));
         return;

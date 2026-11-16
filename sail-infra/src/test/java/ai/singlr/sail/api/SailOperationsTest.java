@@ -972,7 +972,11 @@ class SailOperationsTest {
                 """
                 [{"name": "acme-w", "status": "Stopped",
                   "config": {"user.sail.project": "acme", "user.sail.workspace": "w",
-                             "user.sail.template": "v1", "user.sail.ready": "1"}}]
+                             "user.sail.template": "v1", "user.sail.ready": "1"}},
+                 {"name": "acme-x", "status": "Stopped",
+                  "config": {"user.sail.project": "acme", "user.sail.workspace": "x",
+                             "user.sail.template": "v1", "user.sail.ready": "1",
+                             "user.sail.owner": "tmp", "user.sail.owner_id": "fde_gone"}}]
                 """);
     var dir =
         shell()
@@ -988,8 +992,11 @@ class SailOperationsTest {
     assertEquals(
         List.of(
             new Workspaces.Row("main", "acme", "not_created", null, null, null, null, null),
-            new Workspaces.Row("w", "acme-w", "stopped", "v1", null, null, null, null)),
-        listed.workspaces());
+            new Workspaces.Row("w", "acme-w", "stopped", "v1", null, null, null, null),
+            new Workspaces.Row(
+                "x", "acme-x", "stopped", "v1", null, null, null, Workspaces.REMOVED_OWNER)),
+        listed.workspaces(),
+        "a workspace whose stored owner id no active person holds is shown as removed");
     assertEquals(
         List.of(new Workspaces.Row("main", "acme", "not_created", null, null, null, null, null)),
         noZfs.orThrow().workspaces());

@@ -8,25 +8,40 @@ package ai.singlr.sail.commands;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.api.OperationsFactory;
+import ai.singlr.sail.api.SessionYield;
+import ai.singlr.sail.api.SyncRequest;
+import ai.singlr.sail.api.SyncScheduler;
+import ai.singlr.sail.api.SyncStatus;
+import ai.singlr.sail.api.SyncViews;
+import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.config.HostYaml;
 import ai.singlr.sail.config.ListenConfig;
+import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.DeviceFixtures;
 import ai.singlr.sail.engine.HostDetector;
 import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.ScriptedShellExecutor;
 import ai.singlr.sail.engine.ShellExec;
+import ai.singlr.sail.engine.SyncOperations;
 import ai.singlr.sail.engine.TimingOutShell;
+import ai.singlr.sail.store.SchemaManager;
+import ai.singlr.sail.store.Sqlite;
+import ai.singlr.sail.sync.SyncTransportException;
 import java.io.ByteArrayOutputStream;
 import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 class HostStatusCommandTest {
 
@@ -596,5 +611,65 @@ class HostStatusCommandTest {
     assertEquals(
         List.of(),
         HostStatusCommand.doors(ListenConfig.none(), setting -> Optional.empty(), address -> true));
+  }
+
+  /** The refusal a round carries when main no longer knows the box's person, as it says it. */
+  private static final String REMOVED_SAID =
+      "Main no longer knows this box's person, eng, or their key: main removed them. This box keeps"
+          + " running as them but syncs no more until an admin on main runs this line; then sync"
+          + " again:\n  sudo sail fde add eng --main-host-key SHA256:main";
+
+  /**
+   * The proof's Low 3 and the re-proof's N2, with the real schema and store: a round refused
+   * because main no longer knows the box's person is recorded as that, so host status says so with
+   * the line that brings them back, and sync status says it too, never "Syncing"; another failure
+   * gives host status nothing to say.
+   */
+  @Test
+  void aRoundRefusedBecauseMainRemovedTheBoxsPersonIsRecordedAndBothStatusesSayIt(@TempDir Path dir)
+      throws Exception {
+    try (var db = Sqlite.open(dir.resolve("sail.db"))) {
+      new SchemaManager(db).migrate();
+      var refusal =
+          new SyncTransportException(
+              SyncOperations.REMOVED,
+              "hello: Sync channel closed before main replied.",
+              Remedy.of(REMOVED_SAID),
+              null);
+      var operations =
+          OperationsFactory.create(
+                  db,
+                  new ScriptedShellExecutor(),
+                  null,
+                  SyncScheduler.disabled(),
+                  SessionYield.NONE)
+              .useControlPlane(
+                  db,
+                  dir,
+                  new SyncOperations(
+                      db,
+                      "eng-box",
+                      dir,
+                      () -> new SyncConfig("node", "sail@main", "eng", "box-1"),
+                      target -> {
+                        throw refusal;
+                      }));
+
+      assertThrows(SyncTransportException.class, () -> operations.sync(new SyncRequest(null)));
+
+      var status = operations.syncStatus();
+      assertEquals("stale", status.state());
+      assertEquals(SyncOperations.REMOVED, status.lastErrorKind());
+      assertEquals(
+          Optional.of("  hello: Sync channel closed before main replied. " + REMOVED_SAID),
+          HostStatusCommand.removedFromMain(status, OperatorCommand.PLAIN));
+      var said = SyncCommand.renderStatus(SyncViews.status(status), OperatorCommand.PLAIN);
+      assertTrue(said.startsWith("Stale since ") && said.contains(REMOVED_SAID), said);
+      var unreachable =
+          new SyncStatus(
+              "node", "sail@main", null, "stale", null, null, 1, "unreachable", null, null);
+      assertEquals(
+          Optional.empty(), HostStatusCommand.removedFromMain(unreachable, OperatorCommand.PLAIN));
+    }
   }
 }

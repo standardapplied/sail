@@ -5,7 +5,9 @@
 
 package ai.singlr.sail.commands;
 
+import ai.singlr.sail.api.OperationsFactory;
 import ai.singlr.sail.api.SailApiServer;
+import ai.singlr.sail.api.SyncStatus;
 import ai.singlr.sail.config.HostYaml;
 import ai.singlr.sail.config.ListenConfig;
 import ai.singlr.sail.config.YamlUtil;
@@ -23,6 +25,7 @@ import ai.singlr.sail.engine.PoolMembers;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.ShellExecutor;
+import ai.singlr.sail.engine.SyncOperations;
 import ai.singlr.sail.pty.PtySessionHost;
 import java.io.IOException;
 import java.io.PrintStream;
@@ -79,6 +82,22 @@ public final class HostStatusCommand implements Runnable {
         json,
         operator,
         System.out);
+    if (!json) {
+      try (var operations = OperationsFactory.open(operator::warn)) {
+        removedFromMain(operations.syncStatus(), operator).ifPresent(System.out::println);
+      }
+    }
+  }
+
+  /**
+   * What the last round said when it was refused because main no longer knows this box's person:
+   * that, and the line that brings them back, as the round recorded it.
+   */
+  static Optional<String> removedFromMain(SyncStatus status, OperatorCommand operator) {
+    if (!SyncOperations.REMOVED.equals(status.lastErrorKind()) || status.lastError() == null) {
+      return Optional.empty();
+    }
+    return Optional.of("  " + operator.render(status.lastError()));
   }
 
   static void report(

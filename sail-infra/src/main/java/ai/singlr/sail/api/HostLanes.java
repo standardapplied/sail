@@ -298,6 +298,11 @@ final class HostLanes {
     }
 
     @Override
+    public boolean activePerson(String fdeId) {
+      return new FdeStore(db).byId(fdeId).filter(FdeStore.Fde::active).isPresent();
+    }
+
+    @Override
     public List<FdeSshKeyStore.SshKeyInfo> sshKeys() {
       return new FdeSshKeyStore(db).list();
     }
@@ -319,6 +324,12 @@ final class HostLanes {
     public SshGateway.Decision authorizeGateway(String command, String handle) {
       return SshGateway.authorize(
           command, handle, new FdeStore(db), roles, new AuthSessionStore(db));
+    }
+
+    @Override
+    public SshGateway.Decision authorizeGatewayById(String command, String fdeId) {
+      return SshGateway.authorizeById(
+          command, fdeId, new FdeStore(db), roles, new AuthSessionStore(db));
     }
   }
 

@@ -94,6 +94,7 @@ public final class SailOperations implements HostOperations {
   private AttentionStore attention;
   private SyncOperations syncOperations;
   private Clock syncClock = Clock.systemUTC();
+  private volatile String lastUnrecorded;
   private Path projectsDir;
   private Runnable closeAction = () -> {};
   private HostCatalog catalog;
@@ -236,6 +237,7 @@ public final class SailOperations implements HostOperations {
         }
       } catch (RuntimeException recordingFailure) {
         e.addSuppressed(recordingFailure);
+        unrecorded(recordingFailure);
       }
       throw e;
     }
@@ -250,6 +252,20 @@ public final class SailOperations implements HostOperations {
       publishSyncTransition(target, true, null, null);
     }
     return round;
+  }
+
+  /**
+   * Says, once for each cause, that a round's failure could not be recorded: its sync health then
+   * still reads as syncing, so nothing that reads it would show the failure.
+   */
+  private void unrecorded(RuntimeException recordingFailure) {
+    var cause = Objects.toString(recordingFailure.getMessage(), recordingFailure.toString());
+    if (!cause.equals(lastUnrecorded)) {
+      lastUnrecorded = cause;
+      System.err.println(
+          "  sync: this round's failure could not be recorded, so sync status does not show it: "
+              + cause);
+    }
   }
 
   SailOperations useSyncClock(Clock clock) {
@@ -1396,7 +1412,14 @@ public final class SailOperations implements HostOperations {
           var readable = readable(project);
           try {
             return new WorkspaceListResponse(
-                readable, Workspaces.onThisBox(shell).list(readable).workspaces());
+                readable,
+                Workspaces.onThisBox(shell)
+                    .list(
+                        readable,
+                        id ->
+                            fdeStore != null
+                                && fdeStore.byId(id).filter(FdeStore.Fde::active).isPresent())
+                    .workspaces());
           } catch (Exception unread) {
             if (unread instanceof InterruptedException) {
               Thread.currentThread().interrupt();

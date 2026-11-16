@@ -14,7 +14,6 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.TimeoutException;
 
@@ -27,22 +26,43 @@ final class WorkspaceCredentials {
   static final String GH_HOSTS = ContainerExec.DEV_HOME + "/.config/gh/hosts.yml";
   static final String KEYS = ContainerExec.DEV_HOME + "/.ssh/authorized_keys";
 
-  /** Every give runs it whole, so nothing of a previous owner survives a re-own or a restart. */
+  /**
+   * Every file a give writes, and every leftover of one cut short: the strip takes exactly these,
+   * so the two cannot drift.
+   */
+  static final List<String> FILES =
+      List.of(STORE, STORE + NEW, GH_HOSTS, DEV + ForgeCliLogin.TOKEN_FILE);
+
+  /**
+   * Every give runs it whole, so nothing of a previous owner survives a re-own or a restart, and so
+   * does a disown. Each removal is idempotent and checked by what is left, never by what a failed
+   * command said.
+   */
   static final String STRIP =
       """
       set -eu
       as_dev() { runuser -u dev -- env HOME=/home/dev "$@"; }
-      rm -f /home/dev/.git-credentials /home/dev/.git-credentials.sail-new /home/dev/.config/gh/hosts.yml /home/dev/.sail/gh-token
+      rm -f %1$s
       for key in user.name user.email; do
         as_dev git config --global --unset-all "$key" || [ "$?" -eq 5 ]
       done
-      if [ -e /home/dev/.ssh/authorized_keys ]; then : > /home/dev/.ssh/authorized_keys; fi
+      if [ -e %2$s ]; then : > %2$s; fi
+      for file in %1$s; do
+        if [ -e "$file" ]; then echo "$file is still there" >&2; exit 1; fi
+      done
+      for key in user.name user.email; do
+        if as_dev git config --global --get "$key" >/dev/null; then
+          echo "the git $key is still set" >&2; exit 1
+        fi
+      done
+      if [ -s %2$s ]; then echo "%2$s still has a key" >&2; exit 1; fi
       if [ "$#" -eq 2 ]; then
         install -d -m 0700 -o dev -g dev /home/dev/.ssh
         as_dev git config --global user.name "$1"
         as_dev git config --global user.email "$2"
       fi
-      """;
+      """
+          .formatted(String.join(" ", FILES), KEYS);
 
   /**
    * Searches by content, not by a list of paths, because a token can hide where no list names it;
@@ -91,14 +111,7 @@ final class WorkspaceCredentials {
           *) echo "could not read $keys" >&2; exit 2 ;;
         esac
       done
-      if said=$(as_dev gh auth status 2>&1); then
-        add "a gh login"
-      else
-        case $said in
-          *"not logged in"*) ;;
-          *) printf 'gh could not say whether it is logged in: %s\n' "$said" >&2; exit 2 ;;
-        esac
-      fi
+      if [ -e /home/dev/.config/gh/hosts.yml ]; then add "a gh login"; fi
       if [ -n "$held" ]; then echo "$held" >&2; exit 1; fi
       """;
 
@@ -330,24 +343,6 @@ final class WorkspaceCredentials {
     }
   }
 
-  /** Through files alone, so a stopped workspace is reached without starting it. */
-  static void takeBack(ShellExec shell, String instance)
-      throws IOException, InterruptedException, TimeoutException {
-    for (var file : List.of(STORE, STORE + NEW, GH_HOSTS, DEV + ForgeCliLogin.TOKEN_FILE)) {
-      var deleted = shell.exec(List.of("incus", "file", "delete", instance + file));
-      if (!deleted.ok() && !absent(deleted.stderr())) {
-        throw new IOException(
-            "Could not delete " + file + " in " + instance + ": " + deleted.stderr().strip());
-      }
-    }
-    ContainerFilePush.push(
-        shell,
-        instance,
-        KEYS,
-        "",
-        List.of("--uid", ContainerExec.DEV_UID, "--gid", ContainerExec.DEV_GID, "--mode", "0600"));
-  }
-
   private static void run(ShellExec shell, String instance, List<String> args, String failure)
       throws IOException, InterruptedException, TimeoutException {
     var argv = new ArrayList<>(List.of("bash", "-c", STRIP, "sail-strip"));
@@ -356,10 +351,5 @@ final class WorkspaceCredentials {
     if (!stripped.ok()) {
       throw new IOException(failure + ": " + stripped.reason().strip());
     }
-  }
-
-  private static boolean absent(String stderr) {
-    var said = stderr.toLowerCase(Locale.ROOT);
-    return said.contains("not found") || said.contains("no such file");
   }
 }

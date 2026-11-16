@@ -177,6 +177,51 @@ class SailOperationsSeamTest {
     }
   }
 
+  /**
+   * N2: a round's failure that cannot be recorded is said, once for its cause, never dropped: the
+   * round still fails with its own error, and the recording failure rides on it.
+   */
+  @Test
+  void aFailureThatCannotBeRecordedIsSaidOnceAndRidesOnTheRoundsError() throws Exception {
+    try (var db = Sqlite.open(tempDir.resolve("unrecorded.db"))) {
+      new SchemaManager(db).migrate();
+      var operations =
+          OperationsFactory.create(db, shell, null, SyncScheduler.disabled(), SessionYield.NONE)
+              .useControlPlane(
+                  db,
+                  tempDir,
+                  new SyncOperations(
+                      db,
+                      "box",
+                      tempDir,
+                      () -> new SyncConfig("node", "sail@main", "eng", "box-1"),
+                      target -> {
+                        throw new IOException("connection refused");
+                      }));
+      db.execute("DROP TABLE sync_health");
+      var err = new ByteArrayOutputStream();
+      var before = System.err;
+      System.setErr(new PrintStream(err, true, StandardCharsets.UTF_8));
+      List<Exception> failed = new ArrayList<>();
+      try {
+        for (var round = 0; round < 2; round++) {
+          failed.add(assertThrows(Exception.class, () -> operations.sync(new SyncRequest(null))));
+        }
+      } finally {
+        System.setErr(before);
+      }
+
+      var said =
+          err.toString(StandardCharsets.UTF_8)
+              .lines()
+              .filter(line -> line.startsWith("  sync: this round's failure could not be recorded"))
+              .toList();
+      assertEquals(1, said.size(), err.toString(StandardCharsets.UTF_8));
+      assertTrue(said.getFirst().contains("sync_health"), said.getFirst());
+      assertEquals(1, failed.getFirst().getSuppressed().length);
+    }
+  }
+
   @Test
   void healthIsStoredAcrossOperationsInstancesAndVisibleWhileARoundRuns() throws Exception {
     try (var main = new SyncBox("main");
@@ -284,7 +329,7 @@ class SailOperationsSeamTest {
               advance::accept,
               clock::instant);
       operations.useSyncScheduler(scheduler);
-      knownToMain(main, "owner", "member");
+      knownToMain(main, node, "owner", "member");
       var token = credential(node.db, "owner", "member", "token");
       scheduler.freshenRead();
       assertEquals(1, attempts.get());
@@ -686,9 +731,9 @@ class SailOperationsSeamTest {
                 targets.add(target);
                 return channel(main);
               }));
-      knownToMain(main, "member", "member");
-      knownToMain(main, "node", "member");
-      knownToMain(main, "admin", "admin");
+      knownToMain(main, node, "member", "member");
+      knownToMain(main, node, "node", "member");
+      knownToMain(main, node, "admin", "admin");
       var member = credential(node.db, "member", "member", lane);
       for (var body : List.of("{}", "{\"main\":\"untrusted-peer\"}")) {
         var denied = send(server, "POST", "/v1/sync", member, body);
@@ -866,8 +911,10 @@ class SailOperationsSeamTest {
   }
 
   /** A node's roster mirrors main's, so an FDE a node acts as must be on main's roster too. */
-  private static void knownToMain(SyncBox main, String handle, String role) {
-    new FdeStore(main.db).add(handle, null, null, role);
+  private static void knownToMain(SyncBox main, SyncBox node, String handle, String role) {
+    var known = new FdeStore(main.db).add(handle, null, handle + "@sail.invalid", role);
+    new FdeStore(node.db)
+        .replicate(handle, known.id(), null, known.email(), role, "active", known.createdAt());
   }
 
   private static String credential(Sqlite db, String handle, String role, String lane) {
@@ -1587,6 +1634,10 @@ class SailOperationsSeamTest {
       assertTrue(
           operations.identity().authorizeGateway("not-allowed", "owner")
               instanceof SshGateway.Rejected);
+      assertEquals(
+          new SshGateway.Rejected(SshGateway.NO_LONGER_HERE),
+          operations.identity().authorizeGatewayById("sail spec list", "fde_nobody"));
+      assertFalse(operations.identity().activePerson("fde_nobody"));
       operations
           .pty()
           .recordEvent(

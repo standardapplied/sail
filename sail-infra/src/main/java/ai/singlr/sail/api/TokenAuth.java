@@ -82,6 +82,6 @@ public final class TokenAuth implements ApiAuth {
             ErrorCode.INVALID_BEARER_TOKEN,
             "Bearer token's FDE '" + fde + "' is disabled.",
             "Ask an admin to re-enable '" + fde + "'.")
-        : CliOperator.unplaced(roles.boxFde().orElse(null));
+        : CliOperator.refusal(roles);
   }
 }

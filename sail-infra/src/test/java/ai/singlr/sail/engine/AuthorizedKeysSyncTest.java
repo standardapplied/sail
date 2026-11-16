@@ -29,12 +29,14 @@ class AuthorizedKeysSyncTest {
   private Sqlite db;
   private ScriptedShellExecutor shell;
   private Path destination;
+  private String udayId;
 
   @BeforeEach
   void setUp() {
     db = Sqlite.open(tempDir.resolve("test.db"));
     new SchemaManager(db).migrate();
     var fde = new FdeStore(db).add("uday", null, null, "admin");
+    udayId = fde.id();
     new FdeSshKeyStore(db)
         .add(fde.id(), SshPublicKey.parse(TestSshKeys.ed25519("seed-1", "uday@mac")));
     shell = new ScriptedShellExecutor();
@@ -113,7 +115,7 @@ class AuthorizedKeysSyncTest {
   void rendersForcedCommandLinesWithoutWriting() {
     var content = sync(true).render(new FdeSshKeyStore(db).list());
     assertTrue(content.startsWith("# Managed by sail"));
-    assertTrue(content.contains("_gateway --fde uday\",restrict ssh-ed25519 "));
+    assertTrue(content.contains("_gateway --fde-id " + udayId + "\",restrict ssh-ed25519 "));
     assertTrue(shell.invocations().isEmpty());
   }
 
@@ -121,7 +123,9 @@ class AuthorizedKeysSyncTest {
   void everyForcedCommandRunsTheInstalledBinaryWhicheverBinaryRenders() {
     var content = sync(true).render(new FdeSshKeyStore(db).list());
 
-    assertTrue(content.contains("command=\"/usr/local/bin/sail _gateway --fde uday\""), content);
+    assertTrue(
+        content.contains("command=\"/usr/local/bin/sail _gateway --fde-id " + udayId + "\""),
+        content);
   }
 
   @Test

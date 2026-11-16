@@ -15,8 +15,9 @@ import java.util.function.Supplier;
 /**
  * Installs the {@code sail} user's {@code authorized_keys} from the SSH-key registry — the single
  * write path shared by {@code sail host keys sync}, the {@code sail fde} key mutations, and the
- * upgrade reconciler. The file is fully regenerated each time, so registry membership is the only
- * source of truth and removing a key revokes its SSH access on the next sync.
+ * upgrade reconciler and every sync round. The file is rendered whole each time and installed when
+ * it differs from the one in place, so registry membership is the only source of truth, removing a
+ * key revokes its SSH access on the next sync, and a round that changed no one writes nothing.
  *
  * <p>Syncing is environment-dependent, so callers receive an {@link Outcome} instead of an
  * exception: writing into the sail user's home requires root, and an unprovisioned host has nowhere
@@ -27,7 +28,7 @@ public final class AuthorizedKeysSync {
 
   public sealed interface Outcome permits Synced, NeedsRoot, NotProvisioned {}
 
-  /** The file was regenerated from the registry. */
+  /** The file matches the registry: installed now, or already in place. */
   public record Synced(int keyCount, Path destination) implements Outcome {
     /** The one human-facing phrase for a successful sync, shared by every caller that prints it. */
     public String describe() {
@@ -58,7 +59,8 @@ public final class AuthorizedKeysSync {
    * @param binary the sail every forced command runs — the installed one, asked for only once the
    *     file is about to be rendered
    */
-  AuthorizedKeysSync(Path destination, boolean root, ShellExec shell, Supplier<Path> binary) {
+  public AuthorizedKeysSync(
+      Path destination, boolean root, ShellExec shell, Supplier<Path> binary) {
     this.destination = destination;
     this.root = root;
     this.shell = shell;
@@ -85,7 +87,10 @@ public final class AuthorizedKeysSync {
       return new NotProvisioned();
     }
     var keys = registry.get();
-    install(render(keys));
+    var content = render(keys);
+    if (!Files.exists(destination) || !content.equals(Files.readString(destination))) {
+      install(content);
+    }
     return new Synced(keys.size(), destination);
   }
 

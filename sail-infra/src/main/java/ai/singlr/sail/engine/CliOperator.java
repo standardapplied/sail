@@ -30,9 +30,31 @@ public final class CliOperator {
   /** The operator this box's configuration and roster name; a null roster is none kept yet. */
   public static Actor of(SyncConfig config, FdeStore roster) {
     var roles = new RoleRule(() -> config, roster);
-    return roles
-        .principal(RoleRule.Credential.box())
-        .orElseThrow(() -> unplaced(roles.boxFde().orElse(null)));
+    return roles.principal(RoleRule.Credential.box()).orElseThrow(() -> refusal(roles));
+  }
+
+  /**
+   * Why whatever acts for this box's person is refused, by what is true of them: taken off every
+   * project the box holds ({@link #withdrawn}), or not placed ({@link #unplaced}). The one choice
+   * every door that acts for the box's person makes, the CLI's and the API's.
+   */
+  public static ApiException refusal(RoleRule roles) {
+    var handle = roles.boxFde().orElse(null);
+    return handle != null && roles.withdrawn(handle) ? withdrawn(handle) : unplaced(handle);
+  }
+
+  /**
+   * The refusal for this box's person, {@code handle}, whom main has taken off every project the
+   * box holds: a sync changes nothing until main grants them one again.
+   */
+  public static ApiException withdrawn(String handle) {
+    return new ApiException(
+        ErrorCode.CONFLICT,
+        handle
+            + " is no longer on any project this box holds, so this box gives them nothing until"
+            + " main grants them one again.",
+        Remedy.of(
+            "Ask an admin on main to run '", Remedy.sail("fde grant", handle, "<project>"), "'."));
   }
 
   /**

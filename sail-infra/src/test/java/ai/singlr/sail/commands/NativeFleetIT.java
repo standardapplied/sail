@@ -536,9 +536,9 @@ class NativeFleetIT {
       assertEquals(
           "0", nia.query("SELECT count(*) FROM blobs WHERE hash = '" + betaFile + "'").strip());
       assertEquals(
-          "nia|nia@example.dev\nole|\nuday|\numa|",
+          "nia|nia@example.dev\nole|ole@example.dev\nuday|uday@example.dev\numa|uma@example.dev",
           nia.query("SELECT handle, email FROM fdes ORDER BY handle").strip(),
-          "a scoped node mirrors who shares its projects, and no email but its own");
+          "a scoped node mirrors who shares its projects, each with the email they commit under");
       fleet.assertConverged(uma);
       fleet.assertHeadsAgree(uma);
       main.serving(
@@ -668,7 +668,7 @@ class NativeFleetIT {
       assertEquals("1", main.query("SELECT count(*) FROM specs WHERE id = 'nia-a-1'").strip());
       assertEquals("gone", nia.shOk(BETA_ON_DISK).strip());
       assertEquals(
-          "eng|\nnia|nia@example.dev\nuday|\numa|",
+          "eng|eng@example.dev\nnia|nia@example.dev\nuday|uday@example.dev\numa|uma@example.dev",
           nia.query("SELECT handle, email FROM fdes ORDER BY handle").strip(),
           "a scoped node holds the roster main lists to it, and nothing it no longer does");
       assertEquals("0", nia.query("SELECT count(*) FROM fdes WHERE status = 'disabled'").strip());

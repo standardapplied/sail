@@ -9,6 +9,7 @@ import ai.singlr.sail.api.Mappable;
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.common.Remedied;
 import ai.singlr.sail.common.Remedy;
+import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.ProjectDefinition;
 import ai.singlr.sail.store.RunStore;
 import java.io.IOException;
@@ -30,6 +31,7 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.TimeoutException;
+import java.util.function.BiPredicate;
 import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.function.LongSupplier;
@@ -96,29 +98,31 @@ public final class Workspaces {
       """;
 
   /**
-   * Fetches the repository at {@code $1} as the dev user, in the C locale so git's words are the
-   * ones matched, asking again until 10 s have passed while its host does not resolve: a clone's
-   * network answers before its resolver does, by a fraction of a second and by more when several
-   * clones start at once. Each ask again adds one to {@code retries}. Any other failure, or one
-   * still unresolved at the deadline, is said with git's own words.
+   * Fetches the repository at {@code $1} as the dev user once its remote's host resolves, asked of
+   * the resolver itself ({@code getent}) for up to 10 s, never read from a failed fetch's words: a
+   * clone's network answers before its resolver does, by a fraction of a second and by more when
+   * several clones start at once. Each ask again adds one to {@code retries}. A remote with no host
+   * (a path, {@code file://}) is fetched at once; a failed fetch is said in git's own words.
    */
   static final String FETCH =
       """
       retries=0
       fetch() {
-        local until=$((SECONDS + 10))
-        while ! failed=$(as_dev env LC_ALL=C git -C "$1" fetch --quiet origin 2>&1); do
-          case $failed in
-            *"Could not resolve host"*) ;;
-            *) printf '%s\\n' "$failed" >&2; return 1 ;;
-          esac
-          if [ "$SECONDS" -ge "$until" ]; then
-            printf '%s\\n' "$failed" >&2
-            return 1
-          fi
-          retries=$((retries + 1))
-          sleep 0.1
-        done
+        local url host until=$((SECONDS + 10))
+        url=$(as_dev git -C "$1" remote get-url origin)
+        host=
+        case $url in *://*) host=${url#*://}; host=${host#*@}; host=${host%%[:/]*} ;; esac
+        if [ -n "$host" ]; then
+          until getent hosts "$host" >/dev/null; do
+            if [ "$SECONDS" -ge "$until" ]; then
+              echo "$host did not resolve within 10 s, so its repo could not be fetched" >&2
+              return 1
+            fi
+            retries=$((retries + 1))
+            sleep 0.1
+          done
+        fi
+        as_dev git -C "$1" fetch --quiet origin
       }
       """;
 
@@ -597,10 +601,7 @@ public final class Workspaces {
                                   "--spec",
                                   place.specId(),
                                   "--restart"))));
-      var owner = found.key(BoxInstances.OWNER_KEY);
-      if (startIfStopped(found) && owner.isPresent()) {
-        giveAll(found.name(), config, owners.apply(owner.get()));
-      }
+      startGiving(found, config, owners);
     }
   }
 
@@ -611,6 +612,82 @@ public final class Workspaces {
     containers.start(found.name());
     awaitReady(found.name());
     return true;
+  }
+
+  /**
+   * Starts {@code found} when it is stopped, then {@link #giveOrStop}. Answers whether it started
+   * it. The caller holds the workspace's lock.
+   */
+  private boolean startGiving(
+      BoxInstances.Instance found,
+      ProjectDefinition config,
+      Function<String, WorkspaceOwner> owners)
+      throws Exception {
+    if (!startIfStopped(found)) {
+      return false;
+    }
+    giveOrStop(found, config, owners);
+    return true;
+  }
+
+  /**
+   * What every start of a workspace does once it runs, the one place each start passes through: its
+   * labelled owner's credentials given again (a token change while it was stopped did not reach
+   * it), after what a removal could not do while it was stopped. One whose labelled handle is now
+   * another person (its stored id is not theirs) is stripped and made nobody's; one whose labelled
+   * person is not active here is stripped and refused. Anything that fails stops it again before
+   * the failure leaves, so a running workspace with an owner always holds their credentials and its
+   * next start strips and gives from the beginning. The caller holds the workspace's lock.
+   */
+  private void giveOrStop(
+      BoxInstances.Instance found,
+      ProjectDefinition config,
+      Function<String, WorkspaceOwner> owners)
+      throws Exception {
+    var owner = found.key(BoxInstances.OWNER_KEY).filter(handle -> !handle.isBlank());
+    if (owner.isEmpty()) {
+      return;
+    }
+    try {
+      WorkspaceOwner holder;
+      try {
+        holder = owners.apply(owner.get());
+      } catch (IllegalStateException notActiveHere) {
+        WorkspaceCredentials.strip(shell, found.name());
+        throw notActiveHere;
+      }
+      if (labelledFor(found, holder)) {
+        giveAll(found.name(), config, holder);
+      } else {
+        WorkspaceCredentials.strip(shell, found.name());
+        label(found.name(), "");
+      }
+    } catch (IOException given) {
+      var stopped =
+          new IOException(
+              "Workspace "
+                  + found.name()
+                  + " could not be given its owner's credentials, so it is stopped again; its next"
+                  + " start strips it and gives them from the beginning: "
+                  + given.getMessage(),
+              given);
+      stopAgain(found.name(), stopped);
+      throw stopped;
+    } catch (RuntimeException | TimeoutException | InterruptedException refused) {
+      stopAgain(found.name(), refused);
+      throw refused;
+    }
+  }
+
+  private void stopAgain(String instance, Exception failure) {
+    try {
+      containers.stop(instance);
+    } catch (Exception stopping) {
+      if (stopping instanceof InterruptedException) {
+        Thread.currentThread().interrupt();
+      }
+      failure.addSuppressed(stopping);
+    }
   }
 
   /** Read afresh at each give: a token or key revoked since the check must not be written. */
@@ -628,22 +705,31 @@ public final class Workspaces {
    */
   private Reused reuse(BoxInstances.Instance found, ProjectDefinition config, Owning owning)
       throws Exception {
-    var started = startIfStopped(found);
     var labelled = found.key(BoxInstances.OWNER_KEY).orElse("");
-    var another = !owning.handle().equals(labelled);
-    if (another && !labelled.isBlank()) {
-      label(found.name(), "");
-    }
+    var labelledId = found.key(BoxInstances.OWNER_ID_KEY).filter(Strings::isNotBlank);
+    var another =
+        !owning.handle().equals(labelled)
+            || labelledId.isPresent()
+                && !labelledId.get().equals(owning.owners().apply(owning.handle()).id());
+    boolean started;
     if (another) {
+      started = startIfStopped(found);
+      if (!labelled.isBlank()) {
+        label(found.name(), "");
+      }
       try {
-        giveAll(found.name(), config, owning.now(this, config));
-        label(found.name(), owning.handle());
+        var owner = owning.now(this, config);
+        giveAll(found.name(), config, owner);
+        label(found.name(), owner.handle(), owner.id());
       } catch (Exception failure) {
         stripAfter(found.name(), failure);
+        if (started) {
+          stopAgain(found.name(), failure);
+        }
         throw failure;
       }
-    } else if (started) {
-      giveAll(found.name(), config, owning.owners().apply(owning.handle()));
+    } else {
+      started = startGiving(found, config, owning.owners());
     }
     if (found.key(BoxInstances.KEPT_KEY).isPresent()) {
       var cleared =
@@ -672,9 +758,18 @@ public final class Workspaces {
 
   private void label(String instance, String handle)
       throws IOException, InterruptedException, TimeoutException {
+    label(instance, handle, null);
+  }
+
+  private void label(String instance, String handle, String id)
+      throws IOException, InterruptedException, TimeoutException {
     var owned =
         new ContainerConfig(shell, locks)
-            .set(instance, List.of(BoxInstances.OWNER_KEY + "=" + handle));
+            .set(
+                instance,
+                List.of(
+                    BoxInstances.OWNER_KEY + "=" + handle,
+                    BoxInstances.OWNER_ID_KEY + "=" + Objects.requireNonNullElse(id, "")));
     if (!owned.ok()) {
       throw new IOException(
           "Workspace "
@@ -714,21 +809,36 @@ public final class Workspaces {
   }
 
   /**
-   * Clears the owner too, so a person later given the handle is re-given theirs at their next
-   * entry. Answers those not reached.
+   * A workspace whose owner {@code held} says is not a person here, by its stored owner id when it
+   * has one, else by handle, is stripped in the container (started for it when stopped, and stopped
+   * again) and made nobody's, when {@code due} says of its name that it is time to try. Clears the
+   * owner too, so a person later given the handle is re-given theirs at their next entry. Answers
+   * those not reached.
    */
-  public List<String> disown(Predicate<String> held)
+  public List<String> disown(BiPredicate<String, String> held, Predicate<String> due)
       throws IOException, InterruptedException, TimeoutException {
     var unreached = new ArrayList<String>();
     for (var instance : box.all()) {
       var owner = instance.key(BoxInstances.OWNER_KEY).orElse("");
+      var id = instance.key(BoxInstances.OWNER_ID_KEY).filter(Strings::isNotBlank).orElse(null);
       if (!(instance.kind() instanceof BoxInstances.Workspace)
           || owner.isBlank()
-          || held.test(owner)) {
+          || held.test(owner, id)
+          || !due.test(instance.name())) {
         continue;
       }
       try (var locked = nameLock(instance.name())) {
-        WorkspaceCredentials.takeBack(shell, instance.name());
+        var stopped = !(instance.state() instanceof ContainerState.Running);
+        if (stopped) {
+          containers.start(instance.name());
+        }
+        try {
+          WorkspaceCredentials.strip(shell, instance.name());
+        } finally {
+          if (stopped) {
+            containers.stop(instance.name());
+          }
+        }
         label(instance.name(), "");
       } catch (IOException | TimeoutException failure) {
         unreached.add(instance.name() + ": " + Remedied.reasonOf(failure).strip());
@@ -838,6 +948,9 @@ public final class Workspaces {
       var running = nanos.getAsLong();
       var owner = owning.now(this, config);
       WorkspaceCredentials.give(shell, instance, config, owner);
+      if (owner.id() != null) {
+        label(instance, owner.handle(), owner.id());
+      }
       var steps = prepare(config, name, branch, instance, files);
       WorkspaceCredentials.logForgeIn(shell, instance, config, owner);
       var ready = nanos.getAsLong();
@@ -858,11 +971,18 @@ public final class Workspaces {
     }
   }
 
+  /** Who a workspace whose label stores an owner id no active person holds is shown as. */
+  public static final String REMOVED_OWNER = "removed";
+
   /**
    * Project {@code project}'s workspaces: its default one, then every workspace, by name. A box
-   * with no ZFS pool has only the default one, which is answered as on any other box.
+   * with no ZFS pool has only the default one, which is answered as on any other box. A workspace's
+   * owner is shown by the id its label stores: one {@code activeId} does not hold is shown as
+   * {@link #REMOVED_OWNER}, never under the handle someone else may hold now; a label with a handle
+   * alone is shown by it.
    */
-  public Listing list(String project) throws IOException, InterruptedException, TimeoutException {
+  public Listing list(String project, Predicate<String> activeId)
+      throws IOException, InterruptedException, TimeoutException {
     NameValidator.requireValidProjectName(project);
     var instances = box.all();
     var rows = new ArrayList<Row>();
@@ -870,7 +990,7 @@ public final class Workspaces {
         instances.stream()
             .filter(i -> i.name().equals(project) && i.plain())
             .findFirst()
-            .map(i -> row(DEFAULT, i, word(i.state()), null, fromIncus(i.createdAt())))
+            .map(i -> row(DEFAULT, i, word(i.state()), null, fromIncus(i.createdAt()), activeId))
             .orElse(
                 new Row(
                     DEFAULT,
@@ -892,7 +1012,8 @@ public final class Workspaces {
                   i,
                   workspace.ready() ? word(i.state()) : "incomplete",
                   i.key(TEMPLATE_KEY).orElse(null),
-                  i.key(CREATED_KEY).map(Workspaces::fromMillis).orElse(null));
+                  i.key(CREATED_KEY).map(Workspaces::fromMillis).orElse(null),
+                  activeId);
             })
         .forEach(rows::add);
     return new Listing(project, List.copyOf(rows));
@@ -917,8 +1038,9 @@ public final class Workspaces {
   }
 
   /**
-   * Starts workspace {@code name}, stopped or frozen, and says what its resume took. It is given
-   * its owner's credentials again, since a token change while it was stopped did not reach it.
+   * Starts workspace {@code name}, stopped or frozen, and says what its resume took, its owner's
+   * credentials given as every start gives them ({@link #giveOrStop}): a start that cannot give
+   * them leaves it stopped.
    */
   public Changed start(
       ProjectDefinition config, String name, Function<String, WorkspaceOwner> owners)
@@ -932,21 +1054,8 @@ public final class Workspaces {
     containers.start(found.name());
     var running = nanos.getAsLong();
     awaitReady(found.name());
-    var owner = found.key(BoxInstances.OWNER_KEY).filter(handle -> !handle.isBlank());
-    if (owner.isPresent()) {
-      try (var held = nameLock(found.name())) {
-        giveAll(found.name(), config, owners.apply(owner.get()));
-      } catch (IOException given) {
-        throw new IOException(
-            "Workspace "
-                + name
-                + " of "
-                + project
-                + " is running, but its owner's credentials were not all given, and are given again"
-                + " at its next start: "
-                + given.getMessage(),
-            given);
-      }
+    try (var held = nameLock(found.name())) {
+      giveOrStop(found, config, owners);
     }
     var ready = nanos.getAsLong();
     return new Changed(
@@ -960,6 +1069,15 @@ public final class Workspaces {
             millis(ready - running),
             millis(ready - started),
             Map.of()));
+  }
+
+  /**
+   * Whether workspace {@code found} is still {@code holder}'s, the active person of its labelled
+   * handle: its label stores no id (made before ids were stored), or theirs.
+   */
+  private static boolean labelledFor(BoxInstances.Instance found, WorkspaceOwner holder) {
+    var id = found.key(BoxInstances.OWNER_ID_KEY).filter(Strings::isNotBlank);
+    return id.isEmpty() || id.get().equals(holder.id());
   }
 
   /**
@@ -1502,8 +1620,11 @@ public final class Workspaces {
       BoxInstances.Instance instance,
       String state,
       String template,
-      String createdAt) {
+      String createdAt,
+      Predicate<String> activeId) {
     var ipv4 = instance.state() instanceof ContainerState.Running running ? running.ipv4() : null;
+    var owner = instance.key(BoxInstances.OWNER_KEY).filter(Strings::isNotBlank).orElse(null);
+    var ownerId = instance.key(BoxInstances.OWNER_ID_KEY).filter(Strings::isNotBlank);
     return new Row(
         name,
         instance.name(),
@@ -1512,7 +1633,9 @@ public final class Workspaces {
         createdAt,
         ipv4,
         instance.key(BoxInstances.SPEC_KEY).orElse(null),
-        instance.key(BoxInstances.OWNER_KEY).orElse(null));
+        owner != null && ownerId.isPresent() && !activeId.test(ownerId.get())
+            ? REMOVED_OWNER
+            : owner);
   }
 
   private static String word(ContainerState state) {
