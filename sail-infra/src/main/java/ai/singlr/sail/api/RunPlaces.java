@@ -106,10 +106,7 @@ final class RunPlaces {
     return checkSpec(project, config, specId, lane, boxHandle);
   }
 
-  /**
-   * As {@link #check}, for a run that names spec {@code specId}: its workspace, refused too when it
-   * will be made or re-owned for a person it cannot be given to ({@link WorkspaceOwner#require}).
-   */
+  /** As {@link #check}, for a run that names spec {@code specId}: its workspace. */
   InWorkspace checkSpec(
       String project, ProjectDefinition config, String specId, Lane lane, String boxHandle) {
     try {
@@ -125,9 +122,8 @@ final class RunPlaces {
   }
 
   /**
-   * Refuses, as {@link ErrorCode#CONFLICT}, {@code handle} as the owner of {@code check}'s
-   * workspace when it will be made, or is another's, and could not be theirs: the early refusal,
-   * asked again when their credentials are given.
+   * The early refusal, before anything is reserved; the give asks again, since a token or email can
+   * go in between.
    */
   private void requireOwner(Workspaces.SpecCheck check, ProjectDefinition config, String handle) {
     var theirs =
@@ -144,13 +140,13 @@ final class RunPlaces {
   }
 
   /**
-   * Puts a reserved run into the place {@code checked} found, for its owner, the person it acts
-   * for: a spec's workspace is reused, started when stopped, or made, and is the owner's, holding
-   * their credentials alone, before anything of the run is staged; what it entered, none for the
-   * project's container. A workspace a dispatch made from a template older than the definition, or
-   * on a degraded mirror, says so once in the spec's room. A box still making another workspace
-   * past {@link Workspaces#CREATE_WAIT} is {@link ErrorCode#RUNNER_BUSY}; a create that fails
-   * answers its own reason, and the caller releases the run.
+   * Puts a reserved run into the place {@code checked} found, for the person it acts for: a spec's
+   * workspace is reused, started when stopped, or made, and is theirs before anything of the run is
+   * staged; what it entered, none for the project's container. A workspace a dispatch made from a
+   * template older than the definition, or on a degraded mirror, says so once in the spec's room. A
+   * box still making another workspace past {@link Workspaces#CREATE_WAIT} is {@link
+   * ErrorCode#RUNNER_BUSY}; a create that fails answers its own reason, and the caller releases the
+   * run.
    */
   DispatchOperations.WorkspaceUse enter(Checked checked, ProjectDefinition config) {
     if (!(checked instanceof InWorkspace(var check, var lane, var boxHandle))) {

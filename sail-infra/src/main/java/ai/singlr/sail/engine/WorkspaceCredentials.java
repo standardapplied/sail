@@ -14,23 +14,14 @@ import java.util.List;
 import java.util.Locale;
 import java.util.concurrent.TimeoutException;
 
-/**
- * What a template or a workspace holds of a person: the dev user's git token store, {@code gh}'s
- * login, git identity and {@code authorized_keys}. A template is built with its builder's tokens
- * and left holding none of the four (T1); a workspace is given its owner's alone, and a re-own
- * takes the previous owner's away first (T2, T3).
- */
+/** A template holds no one's credentials (T1); a workspace holds its owner's alone (T2, T3). */
 final class WorkspaceCredentials {
 
   static final String STORE = ContainerExec.DEV_HOME + "/.git-credentials";
   static final String GH_HOSTS = ContainerExec.DEV_HOME + "/.config/gh/hosts.yml";
   static final String KEYS = ContainerExec.DEV_HOME + "/.ssh/authorized_keys";
 
-  /**
-   * Run as root: removes the token store and {@code gh}'s login, unsets the dev user's git identity
-   * and empties its {@code authorized_keys}, then, given a name ({@code $1}) and an email ({@code
-   * $2}), sets them as its identity. Neither is ever part of the text.
-   */
+  /** Every give runs it whole, so nothing of a previous owner survives a re-own or a restart. */
   static final String STRIP =
       """
       set -eu
@@ -48,13 +39,8 @@ final class WorkspaceCredentials {
       """;
 
   /**
-   * Run as root on a quiet container, with the tokens its build was given on stdin, one per line:
-   * names what it still holds and exits 1, or exits 2 when it cannot tell, since an error is never
-   * "nothing found". It holds (a) a token, when the bytes of any appear in any file of its root
-   * filesystem (every top-level directory that is no mount point), grep reading the tokens as its
-   * fixed-string patterns from stdin, never as an argument; (b) a git identity, when git reports a
-   * user name or email at the system or the dev user's global level; (c) a key, when any {@code
-   * authorized_keys} under a home has a line; (d) a gh login, when gh reports one.
+   * Searches by content, not by a list of paths, because a token can hide where no list names it;
+   * exits 2, never 0, when a search cannot tell. The tokens arrive on stdin so no argv holds one.
    */
   static final String HELD =
       """
@@ -109,17 +95,11 @@ final class WorkspaceCredentials {
 
   private WorkspaceCredentials() {}
 
-  /** Removes from {@code instance}, running, every credential of anyone ({@link #STRIP}). */
   static void strip(ShellExec shell, String instance)
       throws IOException, InterruptedException, TimeoutException {
     run(shell, instance, List.of(), "Could not remove its builder's credentials from " + instance);
   }
 
-  /**
-   * Refuses {@code template} when it still holds a credential ({@link #HELD}), the build's {@code
-   * tokens} given to the check on stdin: what a build asks before it records or snapshots a version
-   * (T1).
-   */
   static void requireNone(ShellExec shell, String template, Collection<String> tokens)
       throws IOException, InterruptedException, TimeoutException {
     var held =
@@ -138,13 +118,7 @@ final class WorkspaceCredentials {
     }
   }
 
-  /**
-   * Gives {@code instance}, running, to {@code owner} before anything of theirs is fetched or
-   * staged: every credential it held is removed, their name and email become its git identity,
-   * their keys its {@code authorized_keys}, and their tokens for the hosts of {@code config}'s
-   * repos its token store. {@code gh} is logged in later ({@link #logForgeIn}), once the network a
-   * login asks is up.
-   */
+  /** gh is logged in separately ({@link #logForgeIn}): its login needs the network up. */
   static void give(ShellExec shell, String instance, ProjectDefinition config, WorkspaceOwner owner)
       throws IOException, InterruptedException, TimeoutException {
     run(
@@ -163,10 +137,7 @@ final class WorkspaceCredentials {
         shell, instance, ProjectDefinition.USER, owner.tokensFor(repos), repos);
   }
 
-  /**
-   * Run as root: waits until each host named after it resolves, for at most 30 s, so a {@code gh}
-   * login, which asks its forge, does not run before a container just started has a resolver.
-   */
+  /** A container just started has no resolver yet, and gh's login asks its forge. */
   static final String RESOLVES =
       """
       for host in "$@"; do
@@ -174,10 +145,6 @@ final class WorkspaceCredentials {
       done
       """;
 
-  /**
-   * Logs {@code gh} in for {@code owner}'s tokens of the GitHub hosts of {@code config}'s repos,
-   * once each resolves ({@link #RESOLVES}).
-   */
   static void logForgeIn(
       ShellExec shell, String instance, ProjectDefinition config, WorkspaceOwner owner)
       throws IOException, InterruptedException, TimeoutException {
@@ -193,10 +160,7 @@ final class WorkspaceCredentials {
         shell, instance, ProjectDefinition.USER, owner.tokensFor(repos), repos);
   }
 
-  /**
-   * Takes from {@code instance}, running or stopped, the token store, {@code gh}'s login and the
-   * keys of a person no longer on the roster, through its files alone.
-   */
+  /** Through files alone, so a stopped workspace is reached without starting it. */
   static void takeBack(ShellExec shell, String instance)
       throws IOException, InterruptedException, TimeoutException {
     for (var file : List.of(STORE, GH_HOSTS)) {

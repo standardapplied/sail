@@ -146,10 +146,7 @@ public final class MissedStopReconciler implements AutoCloseable {
       return false;
     }
 
-    /**
-     * Takes from every workspace whose owner {@code held} says the roster no longer holds their
-     * credentials ({@link Workspaces#disown}), answering those it could not; none, by default.
-     */
+    /** None, by default ({@link Workspaces#disown}). */
     default List<String> disown(Predicate<String> held) throws Exception {
       return List.of();
     }
@@ -386,12 +383,8 @@ public final class MissedStopReconciler implements AutoCloseable {
   }
 
   /**
-   * Takes the credentials of every person the roster no longer holds out of the workspaces they
-   * owned, however they were removed (a host {@code fde rm}, or a scoped node's roster round): on
-   * the first pass after a start, when a person left the roster or their handle was given to
-   * someone else since the last pass, and again while a workspace a pass could not reach is left.
-   * Each pass reads the roster alone; Incus is listed only then. A workspace not reached is said
-   * once, until it is.
+   * However a person was removed, sail-api up or not, this catches it; Incus is listed only at
+   * start, when the roster lost someone (or a handle changed hands), or to retry one not reached.
    */
   private void disownRemoved() {
     var roster = new HashMap<String, String>();

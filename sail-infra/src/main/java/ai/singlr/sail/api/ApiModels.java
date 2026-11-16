@@ -1579,37 +1579,6 @@ record LoginView(
   }
 }
 
-/**
- * A git token as any door shows it: whose, its host, when it was stored, its fingerprint, and what
- * is said of workspaces a store did not reach ({@code note}, null when there are none).
- */
-record GitLoginView(String fde, String host, Instant storedAt, String fingerprint, String note)
-    implements Mappable {
-  @Override
-  public Map<String, Object> toMap() {
-    var m = new LinkedHashMap<String, Object>();
-    m.put("fde", fde);
-    m.put("host", host);
-    m.put("stored_at", DateTimeUtils.format(storedAt));
-    m.put("fingerprint", fingerprint);
-    if (note != null) {
-      m.put("note", note);
-    }
-    return m;
-  }
-}
-
-/** A person's git tokens, by host, never a value. */
-record GitLoginList(String fde, List<GitLoginView> tokens) implements Mappable {
-  @Override
-  public Map<String, Object> toMap() {
-    var m = new LinkedHashMap<String, Object>();
-    m.put("fde", fde);
-    m.put("tokens", tokens.stream().map(GitLoginView::toMap).toList());
-    return m;
-  }
-}
-
 /** A person's stored logins. */
 record LoginList(String fde, List<LoginView> logins) implements Mappable {
   @Override

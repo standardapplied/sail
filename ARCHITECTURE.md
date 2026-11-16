@@ -1519,8 +1519,11 @@ Each row with the tests that prove it:
 - **T5. A git token is kept like a harness login.** `sail git login <host>` reads it from stdin;
   it is `/var/lib/sail/logins/<fde-id>/git/<host>`, `0600` under `0700` directories, written whole
   and renamed, one line under the login value rule, never in the database, a log, an argv or an
-  answer, and erased with the person's logins. `GET /v1/git-logins[?fde=]`, `PUT
-  /v1/git-logins/{host}` and `DELETE /v1/git-logins/{host}[?fde=]` are Keep logins doors. A token
+  answer, and erased with the person's logins. A git token is a login of `git` named by its host,
+  served by the login doors themselves: `GET /v1/logins[?fde=]` lists it beside the harness logins,
+  `PUT /v1/logins/git/{host}` stores it and `DELETE /v1/logins/git/{host}[?fde=]` removes it; it
+  has no default, so `POST /v1/logins/git/{host}:use` is refused. `sail git login` makes the same
+  client calls as `sail agent login`, and both lists print through one renderer. A token
   stored, replaced or removed reaches each running workspace of its person at once, by the owner
   step (`Workspaces.refresh`, over `BoxInstances.wholeWorkspacesOf`, the walker `fde key add`
   reaches a person's workspaces by); a stopped one takes it when it next starts, since every start
@@ -1549,9 +1552,14 @@ Each row with the tests that prove it:
 **Known limits.**
 - **Key lines added to `authorized_keys` by hand** are replaced by the owner step of a re-own, a
   start and a token change.
-- **A workspace's own snapshots keep what it held.** A guardrail's `snapshot-and-stop` snapshot of
-  a workspace holds its owner then, token store included; neither a re-own nor a removal touches
-  snapshots. Only root reaches them, and no door restores a workspace snapshot.
+- **A workspace's snapshot at rest keeps what the workspace held then.** A guardrail's
+  `snapshot-and-stop` snapshot holds its owner's token store, identity and keys at that moment,
+  readable by the host's root alone; deleting the workspace deletes its snapshots. No Sail door
+  restores one (`project snapshot restore` refuses a workspace), and one restored by hand brings
+  its old owner label back with it, so the current owner's next entry is a re-own: stripped whole,
+  then given theirs, then labelled theirs. Every give strips first.
+  *`WorkspacesTest.aWorkspaceRestoredByHandToAnotherOwnersSnapshotIsStrippedThenGivenAtItsOwnersNextEntry`,
+  `ProjectVerbsTakeNoWorkspaceTest`.*
 - **Hand copies are not Sail's.** A copy of a workspace made with `incus copy` carries the
   project's keys under another name: every verb refuses it, and it outlives its project, keeping
   the project's tree and the owner's credentials (and, through `deleted/`, the dataset of a

@@ -25,28 +25,23 @@ import java.util.function.Supplier;
 import java.util.stream.Stream;
 
 /**
- * The doors to a person's harness logins and git tokens (Keep logins): store or replace one, make a
- * login the default, list them, remove one. Storing, replacing and choosing the default act on the
- * caller's own only; listing or removing another person's is managing people, an admin's. No door
- * answers a value, to anyone: a login is shown by name, kind, date and fingerprint, a git token by
- * host, date and fingerprint. Each change is announced with the same facts, never the value.
+ * The doors to a person's harness logins (Keep logins): store or replace one, make one the default,
+ * list them, remove one. Storing, replacing and choosing the default act on the caller's own logins
+ * only; listing or removing another person's is managing people, an admin's. No door answers a
+ * value, to anyone: a login is shown by name, kind, date and fingerprint. Each change is announced
+ * with the same facts, never the value.
  */
 public final class LoginOperations {
 
   static final String STORED = "login_stored";
   static final String DEFAULT = "login_default";
   static final String REMOVED = "login_removed";
-  static final String GIT_STORED = "git_login_stored";
-  static final String GIT_REMOVED = "git_login_removed";
 
   private final FdeStore fdes;
   private final RunStore runs;
   private final Consumer<Event> events;
 
-  /**
-   * Gives a person's running workspaces their credentials as they are now, by handle, answering
-   * each it could not reach and why ({@link ai.singlr.sail.engine.Workspaces#refresh}).
-   */
+  /** Answers each workspace a token change did not reach ({@code Workspaces#refresh}). */
   @FunctionalInterface
   interface Reach {
     List<String> workspacesOf(String handle) throws Exception;
@@ -72,6 +67,11 @@ public final class LoginOperations {
   /** Stores {@code value} as the caller's login {@code name} of {@code harness}, or replaces it. */
   LoginResponse store(String harness, String name, String kind, String value) {
     var person = caller();
+    if (LoginStore.GIT.equals(harness)) {
+      var row = stored(() -> logins().storeGit(person.id(), name, value));
+      announce(STORED, person, row);
+      return new LoginResponse(view(person, row), unreached(person));
+    }
     var named = LoginStore.requireName(name);
     var known = Harnesses.of(harness);
     var still = liveOn(person, known, named);
@@ -83,6 +83,11 @@ public final class LoginOperations {
   /** Makes the caller's login {@code name} of {@code harness} the default for launches after it. */
   LoginResponse use(String harness, String name) {
     var person = caller();
+    if (LoginStore.GIT.equals(harness)) {
+      throw new ApiException(
+          ErrorCode.BAD_REQUEST,
+          "A git token is no default: each host has its own, and each is used.");
+    }
     var row = found(() -> logins().use(person.id(), Harnesses.of(harness), name));
     announce(DEFAULT, person, row);
     return new LoginResponse(view(person, row), null);
@@ -94,6 +99,9 @@ public final class LoginOperations {
    */
   LoginResponse remove(String harness, String name, String fde) {
     var person = whose(fde);
+    if (LoginStore.GIT.equals(harness)) {
+      return removeGit(person, name);
+    }
     var known = Harnesses.of(harness);
     var removed = logins().remove(person.id(), known, name);
     if (removed.isEmpty()) {
@@ -112,27 +120,6 @@ public final class LoginOperations {
     return new LoginResponse(view(person, row), liveOn(person, known, row.name()));
   }
 
-  /** The git tokens of {@code fde}, the caller when blank, by host. */
-  GitLoginList gitList(String fde) {
-    var person = whose(fde);
-    return new GitLoginList(
-        person.handle(),
-        logins().gitRows(person.id()).stream().map(row -> view(person, row)).toList());
-  }
-
-  /**
-   * Stores {@code value} as the caller's git token for {@code host}, or replaces it, and gives it
-   * to each running workspace of theirs; a stopped one takes it when it next starts.
-   */
-  GitLoginView gitStore(String host, String value) {
-    var person = caller();
-    var row = stored(() -> logins().storeGit(person.id(), host, value));
-    announce(GIT_STORED, person, row);
-    return new GitLoginView(
-        person.handle(), row.host(), row.storedAt(), row.fingerprint(), unreached(person));
-  }
-
-  /** What is said of {@code person}'s running workspaces a token change did not reach, or null. */
   private String unreached(FdeStore.Fde person) {
     try {
       var left = reach.workspacesOf(person.handle());
@@ -151,33 +138,19 @@ public final class LoginOperations {
     }
   }
 
-  /**
-   * Removes {@code fde}'s git token for {@code host}, the caller's when blank; one not stored is
-   * nothing to remove, said so.
-   */
-  LoginResponse gitRemove(String host, String fde) {
-    var person = whose(fde);
-    var named = LoginStore.requireHost(host);
-    var removed = logins().removeGit(person.id(), named);
+  private LoginResponse removeGit(FdeStore.Fde person, String host) {
+    var removed = logins().removeGit(person.id(), host);
     if (removed.isEmpty()) {
       return new LoginResponse(
           null,
           "No git token for "
-              + named
+              + LoginStore.requireHost(host)
               + " is stored for "
               + person.handle()
               + "; nothing was removed.");
     }
-    announce(GIT_REMOVED, person, removed.get());
-    var left = unreached(person);
-    return new LoginResponse(
-        null,
-        "Removed "
-            + person.handle()
-            + "'s git token for "
-            + named
-            + "."
-            + (left == null ? "" : " " + left));
+    announce(REMOVED, person, removed.get());
+    return new LoginResponse(view(person, removed.get()), unreached(person));
   }
 
   private FdeStore roster() {
@@ -292,18 +265,6 @@ public final class LoginOperations {
             Access.attendee(Actor.current()).orElse(Event.SAIL_AGENT),
             HostInfo.hostname(),
             data));
-  }
-
-  private void announce(String type, FdeStore.Fde person, LoginStore.GitRow row) {
-    var data = new LinkedHashMap<String, Object>();
-    data.put("person", person.handle());
-    data.put("host", row.host());
-    data.put("fingerprint", row.fingerprint());
-    publish(type, data);
-  }
-
-  private static GitLoginView view(FdeStore.Fde person, LoginStore.GitRow row) {
-    return new GitLoginView(person.handle(), row.host(), row.storedAt(), row.fingerprint(), null);
   }
 
   private static LoginView view(FdeStore.Fde person, LoginStore.Row row) {

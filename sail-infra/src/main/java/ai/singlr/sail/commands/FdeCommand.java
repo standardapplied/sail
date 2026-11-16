@@ -405,18 +405,13 @@ public final class FdeCommand implements Runnable {
     System.out.println(Ansi.AUTO.string(keysOutcome(new AuthorizedKeysSync().sync(db), operator)));
   }
 
-  /** A change of the containers' keys, said only for each one it did not reach and why. */
   @FunctionalInterface
   interface KeyChange {
     List<ContainerAuthorizedKeys.Unreached> apply()
         throws IOException, InterruptedException, TimeoutException;
   }
 
-  /**
-   * Makes {@code change} and says each container it did not reach, that it {@code still} (for
-   * instance "may still trust the removed key"), and why; or, when the containers cannot be listed,
-   * that the change reached none.
-   */
+  /** Says only what a key change did not reach, so a clean change prints nothing. */
   static void say(KeyChange change, String still) throws InterruptedException {
     try {
       for (var unreached : change.apply()) {
@@ -1044,6 +1039,11 @@ public final class FdeCommand implements Runnable {
               fdeStore.remove(fde.id());
               System.out.println(Ansi.AUTO.string("  @|green ✓|@ FDE removed: " + fde.handle()));
               System.out.println(
+                  "  Their workspaces on this box lose "
+                      + fde.handle()
+                      + "'s git tokens, gh login and keys at sail-api's next pass: within a"
+                      + " minute while it runs, or as it next starts.");
+              System.out.println(
                   Ansi.AUTO.string(
                       "  @|faint Owned tokens, SSH keys, sessions, passkeys, and enrollment"
                           + " tickets are revoked.|@"));
@@ -1190,11 +1190,7 @@ public final class FdeCommand implements Runnable {
       }
     }
 
-    /**
-     * Makes {@code key} the workstation key every container of this box and every workspace of its
-     * person trusts in place of {@code replaced}, as a pairing and {@code host config set
-     * ssh-public-key} both do, and names each that may still trust the old or not the new.
-     */
+    /** One path for a pairing and {@code host config set ssh-public-key} alike. */
     static List<String> trustWorkstationKey(
         Box box, Optional<SshPublicKey> replaced, SshPublicKey key, OperatorCommand operator)
         throws InterruptedException {

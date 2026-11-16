@@ -371,10 +371,6 @@ public final class Workspaces {
         shell::asksForCredentials);
   }
 
-  /**
-   * Refuses {@code owner} for a workspace of {@code config} that will be made or re-owned for them
-   * ({@link WorkspaceOwner#require}): what a lane asks before its run is reserved.
-   */
   public void requireOwner(WorkspaceOwner owner, ProjectDefinition config) {
     owner.require(config, asks);
   }
@@ -396,13 +392,12 @@ public final class Workspaces {
   }
 
   /**
-   * Creates workspace {@code name} of {@code config}'s project for {@code handle}, the person it
-   * belongs to, as {@code owners} answers them each time they are read, refused first when it could
-   * not be theirs ({@link #requireOwner}): a clone of its template's current version, built first
-   * when there is none or it is stale, then started, given its owner's credentials, made its own
-   * with every repo on a branch of its name, and marked whole. One create of a workspace runs at a
-   * time, under its lock: of two of one name, the second finds the first's workspace and is
-   * refused. An instance a create of it did not finish is deleted and made again.
+   * Creates workspace {@code name} of {@code config}'s project for {@code handle}: a clone of its
+   * template's current version, built first when there is none or it is stale, then started, given
+   * its owner's credentials, made its own with every repo on a branch of its name, and marked
+   * whole. One create of a workspace runs at a time, under its lock: of two of one name, the second
+   * finds the first's workspace and is refused. An instance a create of it did not finish is
+   * deleted and made again.
    */
   public Created create(
       ProjectDefinition config,
@@ -462,10 +457,9 @@ public final class Workspaces {
    * person the run acts for: a whole one is started when stopped and kept as it is, tree and all;
    * otherwise a clone of the checked template carrying the spec and the owner is made, with every
    * repo left detached at its fetched base, under the box's create lock. Either way the workspace
-   * is {@code handle}'s, and holds their credentials alone as {@code owners} answers them at the
-   * moment they are given, before anything of the run is staged (R12, T2, T3); refused then, as
-   * before the reservation, when it could not be theirs. A create that cannot have the create lock
-   * within {@link #CREATE_WAIT} is {@link Busy}.
+   * is {@code handle}'s, and holds their credentials alone, before anything of the run is staged
+   * (R12, T2, T3). A create that cannot have the create lock within {@link #CREATE_WAIT} is {@link
+   * Busy}.
    */
   public Entered enterSpec(
       SpecCheck check,
@@ -513,12 +507,8 @@ public final class Workspaces {
     return specs;
   }
 
-  /**
-   * The person a workspace is made or entered for, read afresh each time their credentials are
-   * given: what is written is what is true when it is written.
-   */
+  /** Read afresh at each give: a token or key revoked since the check must not be written. */
   private record Owning(String handle, Function<String, WorkspaceOwner> owners) {
-    /** The owner as the roster and the login store say now, refused when they could not own. */
     WorkspaceOwner now(Workspaces workspaces, ProjectDefinition config) {
       var owner = owners.apply(handle);
       workspaces.requireOwner(owner, config);
@@ -527,10 +517,8 @@ public final class Workspaces {
   }
 
   /**
-   * Starts {@code found} when stopped and, when it is another's or was stopped, gives it the
-   * owner's credentials as they are now. A workspace of another person loses its owner first, then
-   * is stripped and given the new owner's, and is recorded theirs last: one cut short between is
-   * nobody's, and the next entry, whoever's it is, strips and gives again.
+   * The label is cleared before the give and written after it: a re-own cut short is nobody's, so
+   * whoever enters next strips and gives again.
    */
   private Reused reuse(BoxInstances.Instance found, ProjectDefinition config, Owning owning)
       throws Exception {
@@ -571,12 +559,7 @@ public final class Workspaces {
     }
   }
 
-  /**
-   * Gives every running whole workspace of {@code owner} their credentials as they are now, a git
-   * token they stored, replaced or removed included, each with its project's definition ({@code
-   * definitions}); a stopped one takes them at its next start. Answers those it could not, each
-   * with why: one that cannot be reached stops none of the others.
-   */
+  /** Running ones only: a stopped one takes them at its next start. Answers those not reached. */
   public List<String> refresh(WorkspaceOwner owner, Function<String, ProjectDefinition> definitions)
       throws IOException, InterruptedException, TimeoutException {
     var unreached = new ArrayList<String>();
@@ -594,7 +577,6 @@ public final class Workspaces {
     return List.copyOf(unreached);
   }
 
-  /** {@code owner}'s credentials, gh's login among them, given to {@code instance}, running. */
   private void giveAll(String instance, ProjectDefinition config, WorkspaceOwner owner)
       throws IOException, InterruptedException, TimeoutException {
     WorkspaceCredentials.give(shell, instance, config, owner);
@@ -602,11 +584,8 @@ public final class Workspaces {
   }
 
   /**
-   * Takes from every workspace whose owner {@code held} says the roster no longer holds, a person
-   * removed, their token store, {@code gh} login and keys, and its owner with them, so a person
-   * later given the handle has their own written at its next entry. Answers those it could not,
-   * each with why: one that cannot be reached stops none of the others, and is taken again by the
-   * next call.
+   * Clears the owner too, so a person later given the handle is re-given theirs at their next
+   * entry. Answers those not reached.
    */
   public List<String> disown(Predicate<String> held)
       throws IOException, InterruptedException, TimeoutException {
@@ -760,9 +739,8 @@ public final class Workspaces {
   }
 
   /**
-   * Starts workspace {@code name} of {@code config}'s project, stopped or frozen, gives it its
-   * owner's credentials as they are now ({@code owners} answers a person by handle), since a token
-   * they replaced or removed while it was stopped reached it not, and says what its resume took.
+   * Starts workspace {@code name}, stopped or frozen, and says what its resume took. It is given
+   * its owner's credentials again, since a token change while it was stopped did not reach it.
    */
   public Changed start(
       ProjectDefinition config, String name, Function<String, WorkspaceOwner> owners)

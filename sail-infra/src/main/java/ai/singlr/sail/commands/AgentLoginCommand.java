@@ -17,6 +17,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.function.Predicate;
 import picocli.CommandLine;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
@@ -173,7 +174,7 @@ public final class AgentLoginCommand implements Runnable {
   }
 
   @SuppressWarnings("unchecked")
-  private static void printChange(String what, Map<String, Object> result) {
+  static void printChange(String what, Map<String, Object> result) {
     var login = (Map<String, Object>) result.get("login");
     if (login == null) {
       System.out.println("  " + result.get("note"));
@@ -198,7 +199,7 @@ public final class AgentLoginCommand implements Runnable {
     }
   }
 
-  private static String person(String fde) {
+  static String person(String fde) {
     if (fde == null) {
       return "";
     }
@@ -223,37 +224,54 @@ public final class AgentLoginCommand implements Runnable {
 
     @Override
     public void run() {
-      CliCommand.run(this::execute);
+      CliCommand.run(json, this::execute);
     }
 
-    @SuppressWarnings("unchecked")
     private void execute() throws Exception {
-      var config = connection.resolve();
-      try (var client = new SailApiClient(config.serverUrl(), config.token())) {
-        var result = client.get("/v1/logins" + person(fde));
-        if (json) {
-          System.out.println(YamlUtil.dumpJson(new LinkedHashMap<>(result)));
-          return;
-        }
-        var logins = (List<Map<String, Object>>) result.get("logins");
-        if (logins.isEmpty()) {
-          System.out.println(
-              Ansi.AUTO.string("  @|faint No logins stored for " + result.get("fde") + ".|@"));
-          return;
-        }
+      list(connection, fde, json, login -> !LoginStore.GIT.equals(login.get("harness")), "logins");
+    }
+  }
+
+  /**
+   * Lists the logins of {@code fde}, the caller when blank, that {@code shown} keeps: the one list
+   * {@code sail agent login list} and {@code sail git login list} both print, as JSON or as a table
+   * a person reads, saying "No {@code noun} stored" when there are none.
+   */
+  @SuppressWarnings("unchecked")
+  static void list(
+      ConnectionOptions connection,
+      String fde,
+      boolean json,
+      Predicate<Map<String, Object>> shown,
+      String noun)
+      throws Exception {
+    var config = connection.resolve();
+    try (var client = new SailApiClient(config.serverUrl(), config.token())) {
+      var result = new LinkedHashMap<>(client.get("/v1/logins" + person(fde)));
+      var logins =
+          ((List<Map<String, Object>>) result.get("logins")).stream().filter(shown).toList();
+      result.put("logins", logins);
+      if (json) {
+        System.out.println(YamlUtil.dumpJson(result));
+        return;
+      }
+      if (logins.isEmpty()) {
+        System.out.println(
+            Ansi.AUTO.string("  @|faint No " + noun + " stored for " + result.get("fde") + ".|@"));
+        return;
+      }
+      System.out.printf(
+          "  %-12s %-24s %-8s %-8s %-25s %s%n",
+          "HARNESS", "NAME", "KIND", "DEFAULT", "STORED", "FINGERPRINT");
+      for (var login : logins) {
         System.out.printf(
-            "  %-12s %-16s %-8s %-8s %-25s %s%n",
-            "HARNESS", "NAME", "KIND", "DEFAULT", "STORED", "FINGERPRINT");
-        for (var login : logins) {
-          System.out.printf(
-              "  %-12s %-16s %-8s %-8s %-25s %s%n",
-              login.get("harness"),
-              login.get("name"),
-              login.get("kind"),
-              Boolean.TRUE.equals(login.get("default")) ? "yes" : "",
-              Objects.toString(login.get("stored_at"), ""),
-              login.get("fingerprint"));
-        }
+            "  %-12s %-24s %-8s %-8s %-25s %s%n",
+            login.get("harness"),
+            login.get("name"),
+            login.get("kind"),
+            Boolean.TRUE.equals(login.get("default")) ? "yes" : "",
+            Objects.toString(login.get("stored_at"), ""),
+            login.get("fingerprint"));
       }
     }
   }

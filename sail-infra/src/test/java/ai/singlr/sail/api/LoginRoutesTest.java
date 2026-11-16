@@ -322,57 +322,64 @@ class LoginRoutesTest {
 
   @SuppressWarnings("unchecked")
   private static List<String> hosts(Answer listed) {
-    return ((List<Map<String, Object>>) listed.map().get("tokens"))
-        .stream().map(token -> token.get("host") + " " + token.get("fingerprint")).toList();
+    return ((List<Map<String, Object>>) listed.map().get("logins"))
+        .stream()
+            .filter(login -> "git".equals(login.get("harness")))
+            .map(login -> login.get("name") + " " + login.get("fingerprint"))
+            .toList();
+  }
+
+  private Answer storeToken(String token, String host, String value) throws Exception {
+    return ask(
+        token,
+        "PUT",
+        "/v1/logins/git/" + host,
+        YamlUtil.dumpJson(Map.of("kind", "token", "value", value)));
   }
 
   /**
-   * A git token is kept as a login is (T5): a person stores, lists and removes their own by host, a
-   * viewer too, and sees only its host and fingerprint; another person's is listed or removed only
-   * by an admin; a machine credential keeps none; each change is announced with no value.
+   * A git token is a login of {@code git} named by its host, behind the same doors and gate (T5): a
+   * person stores, lists and removes their own, a viewer too, seeing only its host and fingerprint;
+   * another person's is listed or removed only by an admin; a machine credential keeps none; it has
+   * no default to choose; each change is announced as a login's, with no value.
    */
+  @SuppressWarnings("unchecked")
   @Test
   void aPersonKeepsTheirOwnGitTokensByHostAndOnlyAnAdminReachesAnothersSeeingNoValue()
       throws Exception {
-    var stored =
-        ask(sam, "PUT", "/v1/git-logins/GitHub.com", YamlUtil.dumpJson(Map.of("value", TOKEN)));
+    var stored = storeToken(sam, "GitHub.com", TOKEN);
 
     assertEquals(200, stored.status(), stored.body());
-    assertEquals("sam", stored.map().get("fde"));
-    assertEquals("github.com", stored.map().get("host"));
-    var print = stored.map().get("fingerprint");
-    assertEquals(List.of("github.com " + print), hosts(ask(sam, "GET", "/v1/git-logins", null)));
+    var login = (Map<String, Object>) stored.map().get("login");
     assertEquals(
-        200,
-        ask(obs, "PUT", "/v1/git-logins/github.com", YamlUtil.dumpJson(Map.of("value", KEY)))
-            .status());
-    assertEquals(403, ask(sam, "GET", "/v1/git-logins?fde=obs", null).status());
-    assertEquals(403, ask(sam, "DELETE", "/v1/git-logins/github.com?fde=obs", null).status());
+        List.of("sam", "git", "github.com"),
+        List.of(login.get("fde"), login.get("harness"), login.get("name")));
+    var print = login.get("fingerprint");
+    assertEquals(List.of("github.com " + print), hosts(ask(sam, "GET", "/v1/logins", null)));
+    assertEquals(200, storeToken(obs, "github.com", KEY).status());
+    assertEquals(403, ask(sam, "GET", "/v1/logins?fde=obs", null).status());
+    assertEquals(403, ask(sam, "DELETE", "/v1/logins/git/github.com?fde=obs", null).status());
+    assertEquals(403, storeToken(machine, "github.com", KEY).status());
+    assertEquals(400, ask(sam, "POST", "/v1/logins/git/github.com:use", null).status());
     assertEquals(
-        403,
-        ask(machine, "PUT", "/v1/git-logins/github.com", YamlUtil.dumpJson(Map.of("value", KEY)))
-            .status());
-    assertEquals(
-        List.of("github.com " + print), hosts(ask(ada, "GET", "/v1/git-logins?fde=sam", null)));
+        List.of("github.com " + print), hosts(ask(ada, "GET", "/v1/logins?fde=sam", null)));
 
-    var removed = ask(ada, "DELETE", "/v1/git-logins/github.com?fde=sam", null);
-    var again = ask(sam, "DELETE", "/v1/git-logins/github.com", null);
+    var removed = ask(ada, "DELETE", "/v1/logins/git/github.com?fde=sam", null);
+    var again = ask(sam, "DELETE", "/v1/logins/git/github.com", null);
 
-    assertEquals("Removed sam's git token for github.com.", removed.map().get("note"));
+    assertEquals("github.com", ((Map<String, Object>) removed.map().get("login")).get("name"));
     assertEquals(
         "No git token for github.com is stored for sam; nothing was removed.",
         again.map().get("note"));
-    assertEquals(List.of(), hosts(ask(sam, "GET", "/v1/git-logins", null)));
+    assertEquals(List.of(), hosts(ask(sam, "GET", "/v1/logins", null)));
     var fdes = new FdeStore(db);
     assertEquals(
         Map.of("github.com", KEY),
         fdes.logins().gitTokens(fdes.byHandle("obs").orElseThrow().id()));
     assertEquals(
-        List.of("git_login_stored", "git_login_stored", "git_login_removed"),
+        List.of("login_stored", "login_stored", "login_removed"),
         events.stream().map(Event::type).toList());
-    assertEquals(
-        Map.of("person", "sam", "host", "github.com", "fingerprint", print),
-        events.getFirst().data());
+    assertEquals("git", events.getFirst().data().get("harness"));
     assertFalse(events.toString().contains(TOKEN));
     assertFalse(events.toString().contains(KEY));
   }
@@ -382,15 +389,13 @@ class LoginRoutesTest {
    */
   @Test
   void aGitTokenForABadHostOrWithABadValueIsRefusedNamingTheRule() throws Exception {
-    var spaced =
-        ask(sam, "PUT", "/v1/git-logins/github.com", YamlUtil.dumpJson(Map.of("value", "a b")));
-    var badHost =
-        ask(sam, "PUT", "/v1/git-logins/git_hub.com", YamlUtil.dumpJson(Map.of("value", TOKEN)));
+    var spaced = storeToken(sam, "github.com", "a b");
+    var badHost = storeToken(sam, "git_hub.com", TOKEN);
 
     assertEquals(422, spaced.status());
     assertTrue(spaced.body().contains("printable ASCII with no space"), spaced.body());
     assertEquals(422, badHost.status());
     assertTrue(badHost.body().contains("Invalid host: 'git_hub.com'"), badHost.body());
-    assertEquals(List.of(), hosts(ask(sam, "GET", "/v1/git-logins", null)));
+    assertEquals(List.of(), hosts(ask(sam, "GET", "/v1/logins", null)));
   }
 }

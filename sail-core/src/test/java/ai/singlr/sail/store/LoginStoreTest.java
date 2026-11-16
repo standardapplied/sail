@@ -385,15 +385,23 @@ class LoginStoreTest {
     store.storeGit(UDAY, "gitlab.example", "glpat-uday");
 
     assertEquals(
-        new LoginStore.GitRow("github.com", stored.storedAt(), LoginStore.fingerprint("ghp_uday")),
+        new LoginStore.Row(
+            "git",
+            "github.com",
+            "token",
+            false,
+            stored.storedAt(),
+            LoginStore.fingerprint("ghp_uday")),
         stored);
     assertEquals(
-        List.of("github.com", "gitlab.example"),
-        store.gitRows(UDAY).stream().map(LoginStore.GitRow::host).toList());
-    assertFalse(store.gitRows(UDAY).toString().contains("ghp_uday"));
-    assertEquals(
         Map.of("github.com", "ghp_uday", "gitlab.example", "glpat-uday"), store.gitTokens(UDAY));
-    assertEquals(List.of("claude-code/default token default"), described(store.list(UDAY)));
+    assertEquals(
+        List.of(
+            "claude-code/default token default",
+            "git/github.com token",
+            "git/gitlab.example token"),
+        described(store.list(UDAY)));
+    assertFalse(store.list(UDAY).toString().contains("ghp_uday"));
     var git = dir.resolve("logins").resolve(UDAY).resolve("git");
     assertEquals("rwx------", PosixFilePermissions.toString(Files.getPosixFilePermissions(git)));
     assertEquals(
@@ -414,7 +422,7 @@ class LoginStoreTest {
     assertEquals(Map.of("github.com", "ghp_new"), store.gitTokens(UDAY));
     assertTrue(store.removeGit(UDAY, "github.com").isPresent());
     assertEquals(Optional.empty(), store.removeGit(UDAY, "github.com"));
-    assertEquals(List.of(), store.gitRows(UDAY));
+    assertEquals(List.of(), store.list(UDAY));
     assertEquals(Map.of(), store.gitTokens(ANA));
   }
 
@@ -429,7 +437,7 @@ class LoginStoreTest {
     for (var host : List.of("../x", "-github.com", "git hub", "", "h:0", "h:65536", "h:x")) {
       assertThrows(IllegalArgumentException.class, () -> store.storeGit(UDAY, host, "ghp_x"));
     }
-    assertEquals(List.of(), store.gitRows(UDAY));
+    assertEquals(List.of(), store.list(UDAY));
   }
 
   @Test

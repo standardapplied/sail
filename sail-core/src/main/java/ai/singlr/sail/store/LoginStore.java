@@ -57,7 +57,11 @@ public final class LoginStore {
   static final int MAX_VALUE_BYTES = 16 * 1024;
 
   private static final String DEFAULT_FILE = ".default";
-  private static final String GIT = "git";
+
+  /** What a git token is a login of: its name is its host, and it has no default. */
+  public static final String GIT = "git";
+
+  private static final String TOKEN = "token";
   private static final String TEMP_PREFIX = ".tmp-";
   private static final Pattern NAME = Pattern.compile("[a-z0-9][a-z0-9-]{0,31}");
   private static final Pattern FDE_ID = Pattern.compile("[A-Za-z0-9][A-Za-z0-9_-]{0,63}");
@@ -90,9 +94,6 @@ public final class LoginStore {
       return "Login[" + row.harness() + "/" + row.name() + " " + row.fingerprint() + "]";
     }
   }
-
-  /** One git token as anyone may be shown it: its host, when it was stored, and its fingerprint. */
-  public record GitRow(String host, Instant storedAt, String fingerprint) {}
 
   private final Path root;
 
@@ -143,6 +144,8 @@ public final class LoginStore {
         known(harness).flatMap(known -> row(harness, known, name)).ifPresent(rows::add);
       }
     }
+    var git = person.resolve(GIT);
+    hosts(git).forEach(host -> gitRow(git, host).ifPresent(rows::add));
     rows.sort(Comparator.comparing(Row::harness).thenComparing(Row::name));
     return List.copyOf(rows);
   }
@@ -233,13 +236,7 @@ public final class LoginStore {
     }
   }
 
-  /**
-   * Stores {@code value} as {@code fdeId}'s git token for {@code host}, replacing one stored for
-   * it.
-   *
-   * @throws IllegalArgumentException naming the rule a host or value breaks, never the value
-   */
-  public GitRow storeGit(String fdeId, String host, String value) {
+  public Row storeGit(String fdeId, String host, String value) {
     var named = requireHost(host);
     requireValue(value);
     synchronized (WRITES) {
@@ -249,33 +246,17 @@ public final class LoginStore {
     }
   }
 
-  /** Every git token {@code fdeId} keeps, by host, never a value. */
-  public List<GitRow> gitRows(String fdeId) {
-    var dir = dirOf(fdeId, GIT);
-    if (dir == null) {
-      return List.of();
-    }
-    return hosts(dir).stream().flatMap(host -> gitRow(dir, host).stream()).toList();
-  }
-
-  /**
-   * Removes {@code fdeId}'s git token for {@code host}. Empty when none was stored, so removing
-   * twice removes once.
-   */
-  public Optional<GitRow> removeGit(String fdeId, String host) {
+  public Optional<Row> removeGit(String fdeId, String host) {
     var named = requireHost(host);
     synchronized (WRITES) {
       var dir = dirOf(fdeId, GIT);
-      var removed = dir == null ? Optional.<GitRow>empty() : gitRow(dir, named);
+      var removed = dir == null ? Optional.<Row>empty() : gitRow(dir, named);
       removed.ifPresent(row -> delete(dir.resolve(named)));
       return removed;
     }
   }
 
-  /**
-   * The git tokens {@code fdeId} keeps, value and all, by host: what a workspace of theirs is given
-   * and nothing else ever reads.
-   */
+  /** Values and all: only a workspace's owner step reads them. */
   public Map<String, String> gitTokens(String fdeId) {
     var dir = dirOf(fdeId, GIT);
     var tokens = new LinkedHashMap<String, String>();
@@ -287,13 +268,7 @@ public final class LoginStore {
     return tokens;
   }
 
-  /**
-   * {@code host}, lowercased, once it is a host a git token may be kept for: {@link
-   * NameValidator#requireValidHost}'s rule, with a port of 1 to 65535 after a colon when it has
-   * one, as a repo's https URL names it.
-   *
-   * @throws IllegalArgumentException naming the rule
-   */
+  /** A port is allowed because a repo's https URL may name one, and the refusal prints it. */
   public static String requireHost(String host) {
     var port = host == null ? null : PORT.matcher(host);
     if (port != null && port.matches() && Integer.parseInt(port.group(2)) <= 65535) {
@@ -304,9 +279,10 @@ public final class LoginStore {
     return host.toLowerCase(Locale.ROOT);
   }
 
-  private Optional<GitRow> gitRow(Path dir, String host) {
+  private Optional<Row> gitRow(Path dir, String host) {
     var file = dir.resolve(host);
-    return readToken(file).map(value -> new GitRow(host, modified(file), fingerprint(value)));
+    return readToken(file)
+        .map(value -> new Row(GIT, host, TOKEN, false, modified(file), fingerprint(value)));
   }
 
   private static Optional<String> readToken(Path file) {

@@ -21,13 +21,7 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.function.Predicate;
 
-/**
- * Everything a workspace is given of the person it belongs to, and nothing of anyone else's (T2):
- * the git tokens they keep on this runner, their name and email as its git identity, and their SSH
- * keys, with the box's workstation key only when they are the box's own person. Read on the host
- * before a run is reserved or a workspace copied, and written into the workspace by {@link
- * Workspaces} alone; its {@link #toString} never shows a token.
- */
+/** The workstation key goes only to the box's own person: it is their laptop's (T2). */
 public record WorkspaceOwner(
     String handle, String name, String email, Map<String, String> tokens, List<String> keys) {
 
@@ -37,7 +31,7 @@ public record WorkspaceOwner(
     keys = List.copyOf(keys);
   }
 
-  /** A person refused as a workspace's owner, saying why and what to do. */
+  /** Its own type so a refusal at the give is told apart from a create that failed. */
   public static final class Refused extends IllegalStateException implements Remedied {
     private final String reason;
     private final transient Remedy remedy;
@@ -59,11 +53,7 @@ public record WorkspaceOwner(
     }
   }
 
-  /**
-   * Person {@code handle} of this box's roster {@code fdes} as a workspace's owner, with this box's
-   * registered workstation key when they are the box's person, {@code boxHandle}: the one lookup
-   * every door makes.
-   */
+  /** The one lookup every door makes, so none adds the workstation key by its own rule. */
   public static WorkspaceOwner onThisBox(FdeStore fdes, String handle, String boxHandle) {
     if (fdes == null) {
       throw new IllegalStateException("This box keeps no roster, so no workspace has an owner.");
@@ -71,13 +61,7 @@ public record WorkspaceOwner(
     return of(fdes, handle, boxHandle, WorkstationIdentity.registered());
   }
 
-  /**
-   * The person {@code handle} of {@code fdes}' roster as a workspace's owner: their display name
-   * (else their handle), email, git tokens and keys, and {@code workstation} too when {@code
-   * handle} is {@code boxHandle}, the box's own person.
-   *
-   * @throws IllegalStateException when the box names no person, or the roster does not hold them
-   */
+  /** A display name may be blank, and a commit still needs a name: the handle is it then. */
   public static WorkspaceOwner of(
       FdeStore fdes, String handle, String boxHandle, Optional<SshPublicKey> workstation) {
     if (Strings.isBlank(handle)) {
@@ -107,11 +91,7 @@ public record WorkspaceOwner(
         keys);
   }
 
-  /**
-   * Refuses this owner for a workspace of {@code config} before anything is reserved or copied: one
-   * with no email, since a workspace commits as its owner, or one who keeps no token for a repo's
-   * host that {@code asks} says asks for credentials ({@link ShellExec#asksForCredentials}).
-   */
+  /** A workspace commits as its owner, and fetches as them: without either it cannot work. */
   public void require(ProjectDefinition config, Predicate<String> asks) {
     if (Strings.isBlank(email)) {
       throw new Refused(
@@ -135,10 +115,7 @@ public record WorkspaceOwner(
     }
   }
 
-  /**
-   * The repos of {@code repos} whose host this owner keeps a token for: all a workspace's token
-   * store is written for, so a host without one never reaches a token from the environment.
-   */
+  /** Only these, so a host without a token never falls back to one from the environment. */
   List<ProjectDefinition.Repo> tokenRepos(List<ProjectDefinition.Repo> repos) {
     return (repos == null ? List.<ProjectDefinition.Repo>of() : repos)
         .stream()
@@ -149,7 +126,7 @@ public record WorkspaceOwner(
             .toList();
   }
 
-  /** This owner's tokens keyed as the hosts of a project's repos are spelled. */
+  /** Keyed as the repo URL spells the host, which is the key the credential store matches. */
   Map<String, String> tokensFor(List<ProjectDefinition.Repo> repos) {
     var spelled = new LinkedHashMap<String, String>();
     for (var host : GitCredentials.extractHttpsHosts(repos)) {

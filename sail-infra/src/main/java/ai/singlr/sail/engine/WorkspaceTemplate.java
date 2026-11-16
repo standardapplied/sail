@@ -279,11 +279,10 @@ public final class WorkspaceTemplate {
   }
 
   /**
-   * Provisions {@code template}, takes every credential of its builder out of it and checks that
-   * none is left (T1), then stops it. One this call starts, by launching it or starting it stopped,
-   * is stopped again when the build fails, so a failed build leaves no template running, and no
-   * version is recorded or snapshotted: the one before stays current. A failed build is stripped
-   * too, as far as it can be, so no builder's token waits in it for the next build.
+   * Provisions {@code template} and stops it. One this call starts, by launching it or starting it
+   * stopped, is stopped again when the build fails, so a failed build leaves no template running.
+   * The check runs before the stop, not after the record, so a failed check leaves the version
+   * before current (W7); a failed build is stripped too, so no builder's token waits in it.
    */
   private void build(
       Source source,

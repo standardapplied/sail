@@ -210,10 +210,6 @@ public final class ApiRouter implements HttpHandler, RouteTable {
         route(PUT, "/v1/logins/{harness}/{name}", keepLogins, this::storeLogin),
         route(DELETE, "/v1/logins/{harness}/{name}", keepLogins, this::removeLogin),
         route(Route.ANY, "/v1/logins/{rest...}", unserved, ApiRouter::absent),
-        route(GET, "/v1/git-logins", keepLogins, this::gitLogins),
-        route(PUT, "/v1/git-logins/{host}", keepLogins, this::storeGitLogin),
-        route(DELETE, "/v1/git-logins/{host}", keepLogins, this::removeGitLogin),
-        route(Route.ANY, "/v1/git-logins/{rest...}", unserved, ApiRouter::absent),
         route(POST, "/v1/attention", Gate.ATTENDS, this::attend),
         route(Route.ANY, "/v1/attention", unserved, ApiRouter::absent),
         route(GET, "/v1/reviews/{review}", reads, this::reviewDetail),
@@ -783,24 +779,6 @@ public final class ApiRouter implements HttpHandler, RouteTable {
         operations
             .logins()
             .remove(call.param("harness"), call.param("name"), call.query().get("fde")));
-  }
-
-  private ApiResponse gitLogins(Call call) {
-    return ApiResponse.ok(operations.logins().gitList(call.query().get("fde")));
-  }
-
-  /** Stores the caller's git token for the host from the body's {@code value}, and only that. */
-  private ApiResponse storeGitLogin(Call call) throws IOException {
-    var value = call.body().get("value");
-    return ApiResponse.ok(
-        operations
-            .logins()
-            .gitStore(call.param("host"), value instanceof String given ? given : null));
-  }
-
-  private ApiResponse removeGitLogin(Call call) {
-    return ApiResponse.ok(
-        operations.logins().gitRemove(call.param("host"), call.query().get("fde")));
   }
 
   /**

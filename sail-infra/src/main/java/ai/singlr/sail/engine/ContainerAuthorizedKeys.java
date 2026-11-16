@@ -22,14 +22,13 @@ import java.util.stream.Stream;
 /**
  * The {@code authorized_keys} of the accounts in each of this box's containers, which provisioning
  * fills from the project's {@code ssh.authorized_keys}. A removal reaches every container, an
- * addition each container sail made for the projects it is given and each workspace of the person
- * the key is of, running or not alike, since {@code incus file pull} and {@code push} reach a
- * stopped container's filesystem. The accounts are read from the container's own {@code
- * /etc/passwd}, never from the catalog, which may name another user than the one a container was
- * provisioned with. A removal edits the file of every account whose home is under {@code /home},
- * where provisioning creates the SSH user; an addition only the SSH user's, the account at uid 1000
- * provisioning requires. Only the lines whose key is the exact key are matched, so the other keys
- * an engineer put there stay.
+ * addition each container sail made for the projects it is given, running or not alike, since
+ * {@code incus file pull} and {@code push} reach a stopped container's filesystem. The accounts are
+ * read from the container's own {@code /etc/passwd}, never from the catalog, which may name another
+ * user than the one a container was provisioned with. A removal edits the file of every account
+ * whose home is under {@code /home}, where provisioning creates the SSH user; an addition only the
+ * SSH user's, the account at uid 1000 provisioning requires. Only the lines whose key is the exact
+ * key are matched, so the other keys an engineer put there stay.
  */
 public final class ContainerAuthorizedKeys {
 
@@ -79,13 +78,9 @@ public final class ContainerAuthorizedKeys {
   }
 
   /**
-   * Adds {@code key}, the box's workstation key, to the SSH user's file in each container of {@code
-   * projects} this box runs and in each whole workspace whose owner is {@code boxHandle}, the box's
-   * person ({@link BoxInstances#wholeWorkspaceOf}), that does not hold it yet, and returns those it
-   * could not, each with why: one that cannot be written stops none of the others. A workspace of
-   * anyone else never takes it (T2). A container bearing a project's name that carries no
-   * sail-api-sock device is not written but returned, as {@code project apply --all} names it: sail
-   * did not make it, or did not finish.
+   * The workstation key goes to the box person's workspaces alone (T2). A container bearing a
+   * project's name that carries no sail-api-sock device is returned, not written: sail did not make
+   * it, or did not finish.
    */
   public List<Unreached> add(SshPublicKey key, Collection<String> projects, String boxHandle)
       throws IOException, InterruptedException, TimeoutException {
@@ -101,10 +96,7 @@ public final class ContainerAuthorizedKeys {
                 .toList());
   }
 
-  /**
-   * Adds {@code key}, a key person {@code handle} registered, to each whole workspace of theirs
-   * this box holds, and returns those it could not, each with why.
-   */
+  /** A person's own key goes to their own workspaces alone. */
   public List<Unreached> addToWorkspacesOf(SshPublicKey key, String handle)
       throws IOException, InterruptedException, TimeoutException {
     return addTo(key, new BoxInstances(shell).wholeWorkspacesOf(handle));

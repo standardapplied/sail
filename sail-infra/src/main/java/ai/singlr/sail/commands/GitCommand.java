@@ -7,20 +7,20 @@ package ai.singlr.sail.commands;
 
 import ai.singlr.sail.api.SailApiClient;
 import ai.singlr.sail.config.YamlUtil;
-import ai.singlr.sail.engine.NameValidator;
 import ai.singlr.sail.store.LoginStore;
 import java.util.LinkedHashMap;
-import java.util.List;
 import java.util.Map;
-import java.util.Objects;
 import picocli.CommandLine;
 import picocli.CommandLine.Command;
-import picocli.CommandLine.Help.Ansi;
 import picocli.CommandLine.Mixin;
 import picocli.CommandLine.Option;
 import picocli.CommandLine.Parameters;
 
-/** {@code sail git}: what a person keeps on this runner for their workspaces' git. */
+/**
+ * {@code sail git login}: a git token is a login of {@value LoginStore#GIT} named by its host, kept
+ * and served by the login doors; these verbs are {@code sail agent login}'s calls under the name a
+ * person looks for.
+ */
 @Command(
     name = "git",
     description = "Keep the git tokens your workspaces fetch, push and open pull requests with.",
@@ -33,12 +33,7 @@ public final class GitCommand implements Runnable {
     CommandLine.usage(this, System.out);
   }
 
-  /**
-   * {@code sail git login <host>}: stores a git token for one forge host, read from stdin, never
-   * from the command line, and echoed nowhere. Every workspace made or re-owned for you after it
-   * fetches, pushes and logs {@code gh} in with it. On the host it is root's and acts as the box's
-   * person; anyone else reaches the same door through the gateway. No answer ever holds a value.
-   */
+  /** {@code sail git login <host>}: stores a token, read from stdin and echoed nowhere. */
   @Command(
       name = "login",
       description = "Store a git token for a forge host, read from stdin; list or remove tokens.",
@@ -66,36 +61,32 @@ public final class GitCommand implements Runnable {
     private void execute() throws Exception {
       var named = LoginStore.requireHost(host);
       var value = AgentLoginCommand.read(named + " token", null);
+      change(
+          connection,
+          json,
+          "Stored",
+          client ->
+              client.put(
+                  "/v1/logins/" + LoginStore.GIT + "/" + named,
+                  Map.of("kind", "token", "value", value)));
+    }
+
+    @FunctionalInterface
+    private interface Call {
+      Map<String, Object> on(SailApiClient client) throws Exception;
+    }
+
+    private static void change(ConnectionOptions connection, boolean json, String what, Call call)
+        throws Exception {
       var config = connection.resolve();
       try (var client = new SailApiClient(config.serverUrl(), config.token())) {
-        var result = client.put("/v1/git-logins/" + named, Map.of("value", value));
+        var result = call.on(client);
         if (json) {
           System.out.println(YamlUtil.dumpJson(new LinkedHashMap<>(result)));
           return;
         }
-        System.out.println(
-            Ansi.AUTO.string(
-                "  @|green ✓|@ Stored "
-                    + result.get("fde")
-                    + "'s git token for "
-                    + result.get("host")
-                    + ", fingerprint "
-                    + result.get("fingerprint")
-                    + ". Every workspace of "
-                    + result.get("fde")
-                    + "'s takes it: a running one now, a stopped one when it next starts."));
-        if (result.get("note") != null) {
-          System.out.println("  " + result.get("note"));
-        }
+        AgentLoginCommand.printChange(what, result);
       }
-    }
-
-    private static String person(String fde) {
-      if (fde == null) {
-        return "";
-      }
-      NameValidator.requireValidFdeHandle(fde);
-      return "?fde=" + fde;
     }
 
     /** {@code sail git login list}: your git tokens, or {@code --fde}'s, never a value. */
@@ -115,34 +106,15 @@ public final class GitCommand implements Runnable {
 
       @Override
       public void run() {
-        CliCommand.run(json, this::execute);
-      }
-
-      @SuppressWarnings("unchecked")
-      private void execute() throws Exception {
-        var config = connection.resolve();
-        try (var client = new SailApiClient(config.serverUrl(), config.token())) {
-          var result = client.get("/v1/git-logins" + person(fde));
-          if (json) {
-            System.out.println(YamlUtil.dumpJson(new LinkedHashMap<>(result)));
-            return;
-          }
-          var tokens = (List<Map<String, Object>>) result.get("tokens");
-          if (tokens.isEmpty()) {
-            System.out.println(
-                Ansi.AUTO.string(
-                    "  @|faint No git tokens stored for " + result.get("fde") + ".|@"));
-            return;
-          }
-          System.out.printf("  %-32s %-25s %s%n", "HOST", "STORED", "FINGERPRINT");
-          for (var token : tokens) {
-            System.out.printf(
-                "  %-32s %-25s %s%n",
-                token.get("host"),
-                Objects.toString(token.get("stored_at"), ""),
-                token.get("fingerprint"));
-          }
-        }
+        CliCommand.run(
+            json,
+            () ->
+                AgentLoginCommand.list(
+                    connection,
+                    fde,
+                    json,
+                    login -> LoginStore.GIT.equals(login.get("harness")),
+                    "git tokens"));
       }
     }
 
@@ -166,20 +138,20 @@ public final class GitCommand implements Runnable {
 
       @Override
       public void run() {
-        CliCommand.run(json, this::execute);
-      }
-
-      private void execute() throws Exception {
-        var path = "/v1/git-logins/" + LoginStore.requireHost(host) + person(fde);
-        var config = connection.resolve();
-        try (var client = new SailApiClient(config.serverUrl(), config.token())) {
-          var result = client.delete(path);
-          if (json) {
-            System.out.println(YamlUtil.dumpJson(new LinkedHashMap<>(result)));
-            return;
-          }
-          System.out.println("  " + result.get("note"));
-        }
+        CliCommand.run(
+            json,
+            () ->
+                change(
+                    connection,
+                    json,
+                    "Removed",
+                    client ->
+                        client.delete(
+                            "/v1/logins/"
+                                + LoginStore.GIT
+                                + "/"
+                                + LoginStore.requireHost(host)
+                                + AgentLoginCommand.person(fde))));
       }
     }
   }

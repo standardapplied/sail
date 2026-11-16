@@ -3082,6 +3082,58 @@ class WorkspacesTest {
   }
 
   /**
+   * Round 2, item 4: no Sail door restores a workspace's snapshot, so one is restored only by hand,
+   * and Incus brings the snapshot's owner label back with it. The current owner's next entry is
+   * then a re-own: stripped whole first, then given theirs, then labelled theirs, so none of the
+   * snapshot owner's token, identity or keys is left in use.
+   */
+  @Test
+  void aWorkspaceRestoredByHandToAnotherOwnersSnapshotIsStrippedThenGivenAtItsOwnersNextEntry()
+      throws Exception {
+    var box = new Box();
+    box.put("acme--tmpl", "Stopped", template("v1", INPUTS), "v1");
+    box.put("acme-fix-login", "Running", specWorkspace("Running", "fix-login", "uday"));
+    var ran = new ArrayList<String>();
+    var shell =
+        new ShellExec() {
+          @Override
+          public Result exec(List<String> command) {
+            ran.add(String.join(" ", command));
+            return box.exec(command);
+          }
+
+          @Override
+          public Result exec(List<String> command, Path workDir, Duration timeout) {
+            return exec(command);
+          }
+
+          @Override
+          public boolean isDryRun() {
+            return false;
+          }
+        };
+    var workspaces = new Workspaces(shell, shell, ticks(0, 1), locks(), () -> 65536, url -> false);
+
+    workspaces.enterSpec(
+        workspaces.checkSpec(FIX, INPUTS, name -> false),
+        acme(),
+        "ana",
+        handle -> ANA,
+        tempDir.resolve("no-files"),
+        whole -> {});
+
+    var stripped =
+        ran.indexOf(String.join(" ", strip("acme-fix-login", "Ana", "ana@sail.invalid")));
+    var keys = indexOfFirst(ran, c -> c.endsWith("acme-fix-login/home/dev/.ssh/authorized_keys"));
+    var store = indexOfFirst(ran, c -> c.endsWith("acme-fix-login/home/dev/.git-credentials"));
+    var labelled = ran.indexOf("incus config set acme-fix-login user.sail.owner=ana");
+    assertTrue(
+        0 <= stripped && stripped < keys && keys < store && store < labelled,
+        String.join("\n", ran));
+    assertEquals("ana", box.key("acme-fix-login", BoxInstances.OWNER_KEY));
+  }
+
+  /**
    * Scenario 11: a removed person's workspaces, running or stopped, lose their token store, gh
    * login and keys, and their owner, through their files; another's workspace is left as it is.
    */

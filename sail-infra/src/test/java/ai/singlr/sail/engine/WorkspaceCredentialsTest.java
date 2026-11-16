@@ -63,7 +63,12 @@ class WorkspaceCredentialsTest {
   private void git(String... args) throws Exception {
     var command = new ArrayList<>(List.of("git"));
     command.addAll(List.of(args));
-    var process = environment(new ProcessBuilder(command)).start();
+    var process =
+        environment(new ProcessBuilder(command))
+            .redirectOutput(ProcessBuilder.Redirect.DISCARD)
+            .redirectError(ProcessBuilder.Redirect.DISCARD)
+            .start();
+    process.getOutputStream().close();
     assertTrue(process.waitFor(30, TimeUnit.SECONDS));
     assertEquals(0, process.exitValue(), String.join(" ", command));
   }
@@ -90,17 +95,17 @@ class WorkspaceCredentialsTest {
             .replace("-o dev -g dev ", "");
     var command = new ArrayList<>(List.of("bash", "-c", rooted, "sail-test"));
     command.addAll(List.of(args));
+    var err = Files.createTempFile(bin, "err", ".txt");
     var process =
         environment(new ProcessBuilder(command))
             .redirectOutput(ProcessBuilder.Redirect.DISCARD)
+            .redirectError(err.toFile())
             .start();
     try (var in = process.getOutputStream()) {
       in.write(stdin.getBytes(StandardCharsets.UTF_8));
     }
     assertTrue(process.waitFor(60, TimeUnit.SECONDS), "the script ends");
-    return new Ran(
-        process.exitValue(),
-        new String(process.getErrorStream().readAllBytes(), StandardCharsets.UTF_8));
+    return new Ran(process.exitValue(), Files.readString(err));
   }
 
   private void builderLeftEverything() throws Exception {

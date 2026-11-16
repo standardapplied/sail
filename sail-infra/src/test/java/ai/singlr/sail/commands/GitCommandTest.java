@@ -102,23 +102,20 @@ class GitCommandTest {
     assertEquals("  Reading the github.com token from stdin.\n", stored.err());
     var uday = new FdeStore(db).byHandle("uday").orElseThrow().id();
     assertEquals(Map.of("github.com", KEY), new FdeStore(db).logins().gitTokens(uday));
-    var print = new FdeStore(db).logins().gitRows(uday).getFirst().fingerprint();
+    var print = new FdeStore(db).logins().list(uday).getFirst().fingerprint();
     assertEquals(
-        "  ✓ Stored uday's git token for github.com, fingerprint "
-            + print
-            + ". Every workspace of uday's takes it: a running one now, a stopped one when it next"
-            + " starts.\n",
-        stored.out());
+        "  ✓ Stored git login 'github.com' (token), fingerprint " + print + ".\n", stored.out());
 
     var listed = sail("", "login", "list", "--json");
-    var tokens = (List<Map<String, Object>>) YamlUtil.parseMap(listed.out()).get("tokens");
-    assertEquals(List.of("github.com"), tokens.stream().map(t -> t.get("host")).toList());
+    var tokens = (List<Map<String, Object>>) YamlUtil.parseMap(listed.out()).get("logins");
+    assertEquals(List.of("github.com"), tokens.stream().map(t -> t.get("name")).toList());
     assertTrue(sail("", "login", "list").out().contains("github.com"));
 
     var removed = sail("", "login", "remove", "github.com");
     var again = sail("", "login", "remove", "github.com");
 
-    assertEquals("  Removed uday's git token for github.com.\n", removed.out());
+    assertEquals(
+        "  ✓ Removed git login 'github.com' (token), fingerprint " + print + ".\n", removed.out());
     assertEquals(
         "  No git token for github.com is stored for uday; nothing was removed.\n", again.out());
     assertTrue(

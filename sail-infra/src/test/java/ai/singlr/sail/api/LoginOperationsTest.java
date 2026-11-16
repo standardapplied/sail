@@ -108,9 +108,9 @@ class LoginOperationsTest {
                 throw new IOException("incus list failed: denied");
               });
 
-      var stored = Actor.call(UDAY, () -> doors.gitStore("github.com", "ghp_one"));
-      var removed = Actor.call(UDAY, () -> doors.gitRemove("github.com", null));
-      var blind = Actor.call(UDAY, () -> unreadable.gitStore("github.com", "ghp_two"));
+      var stored = Actor.call(UDAY, () -> doors.store("git", "github.com", "token", "ghp_one"));
+      var removed = Actor.call(UDAY, () -> doors.remove("git", "github.com", null));
+      var blind = Actor.call(UDAY, () -> unreadable.store("git", "github.com", "token", "ghp_two"));
       var interrupting =
           new LoginOperations(
               new FdeStore(db),
@@ -119,7 +119,7 @@ class LoginOperationsTest {
               handle -> {
                 throw new InterruptedException("stopped");
               });
-      Actor.call(UDAY, () -> interrupting.gitStore("github.com", "ghp_three"));
+      Actor.call(UDAY, () -> interrupting.store("git", "github.com", "token", "ghp_three"));
       assertTrue(Thread.interrupted(), "the interrupt is kept");
 
       assertEquals(List.of("uday", "uday"), reached);
@@ -129,8 +129,8 @@ class LoginOperationsTest {
           stored.note());
       assertEquals(stored.note(), stored.toMap().get("note"));
       assertEquals(
-          "Removed uday's git token for github.com. These workspaces keep the token they had until"
-              + " they next start: acme-a: Error: not running.",
+          "These workspaces keep the token they had until they next start: acme-a: Error: not"
+              + " running.",
           removed.note());
       assertEquals(
           "This box's workspaces could not be read, so each keeps the token it had until it next"
