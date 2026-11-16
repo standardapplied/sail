@@ -26,7 +26,10 @@ import ai.singlr.sail.identity.RoleRule;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.Sqlite;
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.io.PrintStream;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -616,5 +619,97 @@ class WorkspaceDoorsTest {
           "Workspace 'try' has no owner, so only an admin may enter it.", mainRefuses.getMessage());
       assertEquals(Optional.of("client"), node.nodeFde());
     }
+  }
+
+  /**
+   * Ruling 6 at the CLI: a shell enters its own workspace through the same locked entry, starting a
+   * stopped one, and answers where it opens; another member's is refused.
+   */
+  @Test
+  void aShellStartsItsOwnersStoppedWorkspaceAndAnswersItsInstance() throws Exception {
+    var box = box(trying("Stopped", "ada"));
+    var doors = doors(box);
+
+    var refused = refused(Actors.OTHER_API, () -> doors.startExisting(ACME, "try"));
+    var instance = Actor.call(Actors.OWNER_API, () -> doors.startExisting(ACME, "try"));
+
+    assertEquals(ErrorCode.FORBIDDEN_NOT_ASSIGNEE, refused.failure().errorCode());
+    assertEquals("acme-try", instance);
+    assertEquals(List.of("start"), changes(box));
+  }
+
+  /**
+   * A stop whose terminal host cannot be told still stops: its terminals end with the workspace,
+   * and that is said on the server's log.
+   */
+  @Test
+  void aStopWhoseTerminalHostCannotBeToldStillStopsSayingSo() throws Exception {
+    var box = box(trying("Running", "ada"));
+    var untold =
+        new SessionYield() {
+          @Override
+          public Hold lock(String project) {
+            return NO_HOLD;
+          }
+
+          @Override
+          public void end(List<String> names, String reason) {}
+
+          @Override
+          public void endIn(String project, String workspace, String reason) throws IOException {
+            throw new IOException("the session host did not answer");
+          }
+        };
+    var err = new ByteArrayOutputStream();
+    var before = System.err;
+    System.setErr(new PrintStream(err, true, StandardCharsets.UTF_8));
+    try {
+      Actor.call(
+          Actors.OWNER_API,
+          () ->
+              new WorkspaceDoors(over(box), box, TestOwners::of, untold, null)
+                  .stop("acme", "try", spec -> false));
+    } finally {
+      System.setErr(before);
+    }
+
+    assertEquals(List.of("stop"), changes(box));
+    assertEquals(
+        "[workspaces] the terminals of workspace try of acme end without being told why: the"
+            + " session host did not answer",
+        err.toString(StandardCharsets.UTF_8).strip());
+  }
+
+  /**
+   * Review 1's B2: the delete reads the workspace again, under its lock, immediately before it
+   * deletes: a run of its spec that became live after the first look refuses it.
+   */
+  @Test
+  void aRunThatBecameLiveAfterTheFirstLookRefusesTheDeleteAtTheLast() {
+    var box =
+        box(
+            trying("Running", "ada")
+                .replace("\"user.sail.owner\"", "\"user.sail.spec\": \"a\", \"user.sail.owner\""));
+    var asks = new AtomicInteger();
+
+    var refused =
+        assertThrows(
+            IllegalStateException.class,
+            () ->
+                Actor.call(
+                    Actors.OWNER_API,
+                    () ->
+                        doors(box)
+                            .delete(
+                                ACME,
+                                "try",
+                                spec -> asks.incrementAndGet() > 1,
+                                true,
+                                FORCED,
+                                i -> {})));
+
+    assertTrue(refused.getMessage().contains("holds a live run of spec a"), refused.getMessage());
+    assertEquals(2, asks.get());
+    assertEquals(List.of(), changes(box));
   }
 }

@@ -198,6 +198,46 @@ class HostPtyTest {
     assertTrue(box.invocations().stream().anyMatch(c -> c.contains("sail-strip")), "given ada's");
   }
 
+  /**
+   * A terminal opened by an admin in a workspace whose labelled person is no longer active here is
+   * refused saying so, and nothing is started: the next pass makes it nobody's.
+   */
+  @Test
+  void aWorkspaceWhosePersonIsGoneIsNotStartedForATerminalSayingSo() {
+    var stopped =
+        """
+        {"name": "acme-try", "status": "Stopped", "type": "container",
+         "config": {"user.sail.project": "acme", "user.sail.workspace": "try",
+                    "user.sail.ready": "1762941601000", "user.sail.owner": "zed",
+                    "user.sail.owner_id": "fde_zed"},
+         "expanded_devices": {"root": {"path": "/", "pool": "tank", "type": "disk"}}}""";
+    var box =
+        new ScriptedShellExecutor()
+            .onOk("incus storage list --format json", TestWorkspaces.POOL)
+            .onOk("incus list --format json", "[" + stopped + "]");
+    var lane =
+        new HostLanes.Pty(
+            db,
+            TestAuth.roles(db, new SyncConfig("main", null, "root", "box")),
+            null,
+            new BoxInstances(box),
+            TestWorkspaces.over(box),
+            project -> Optional.of(TestDefinitions.named(project)),
+            handle -> {
+              throw new IllegalStateException(handle + " is not on this box's roster.");
+            });
+    var root = new PtyIdentity.Person(new Actor("root", Role.ADMIN, Actor.Lane.API));
+
+    var refused = assertThrows(IOException.class, () -> lane.enterWorkspace("acme", "try", root));
+
+    assertEquals(
+        "Workspace 'try' of acme is zed's, who is no longer active here, so it is not started: the"
+            + " next pass makes it nobody's. Delete it meanwhile with: sail project workspace"
+            + " delete acme try --force.",
+        refused.getMessage());
+    assertTrue(box.invocations().stream().noneMatch(c -> c.startsWith("incus start")));
+  }
+
   /** A workspace Incus does not answer for, or whose start fails, opens nothing, saying why. */
   @Test
   void aWorkspaceIncusCannotAnswerForOrStartOpensNothingSayingWhy() throws IOException {
