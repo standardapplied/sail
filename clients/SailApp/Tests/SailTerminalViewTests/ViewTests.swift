@@ -428,7 +428,7 @@ import Testing
         let onMain = Mutex<[Bool]>([])
         harness.view.nextDrawable = { layer in
             onMain.withLock { $0.append(Thread.isMainThread) }
-            gate.wait()
+            _ = gate.wait(timeout: .now() + 2)
             return layer.nextDrawable()
         }
         let committed = Self.committed(harness.view)
