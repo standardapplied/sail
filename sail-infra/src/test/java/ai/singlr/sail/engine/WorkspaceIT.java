@@ -675,9 +675,9 @@ class WorkspaceIT extends AbstractIncusIT {
     assertEquals(List.of(), workspaces.disown((handle, id) -> !"fde_old_tmp".equals(id)));
 
     for (var made : List.of(running, stopped)) {
-      assertEquals(
-          Optional.of(""),
-          instances.named(made.instance()).orElseThrow().key(BoxInstances.OWNER_KEY));
+      var found = instances.named(made.instance()).orElseThrow();
+      assertEquals(Optional.empty(), found.key(BoxInstances.OWNER_KEY), "nobody's");
+      assertEquals(Optional.empty(), found.key(BoxInstances.OWNER_ID_KEY), "no owner id left");
     }
     assertFalse(
         instances.named(stopped.instance()).orElseThrow().state() instanceof ContainerState.Running,

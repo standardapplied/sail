@@ -2482,7 +2482,15 @@ class WorkspacesTest {
     assertEquals(new Workspaces.Reused("acme-fix-login", true), reused);
     var start = indexOf(shell, List.of("incus", "start", "acme-fix-login"));
     var owned =
-        indexOf(shell, List.of("incus", "config", "set", "acme-fix-login", "user.sail.owner=uday"));
+        indexOf(
+            shell,
+            List.of(
+                "incus",
+                "config",
+                "set",
+                "acme-fix-login",
+                "user.sail.owner=uday",
+                "user.sail.owner_id="));
     assertTrue(0 <= start && start < owned, String.join("\n", shell.invocations()));
     assertFalse(shell.invocations().stream().anyMatch(c -> c.startsWith("incus copy")));
   }
@@ -2791,7 +2799,7 @@ class WorkspacesTest {
     assertTrue(shell.invocations().stream().anyMatch(c -> c.contains("sail-strip")), "given");
     assertEquals(
         List.of(
-            "incus config set acme-fix-login user.sail.owner=ana",
+            "incus config set acme-fix-login user.sail.owner=ana user.sail.owner_id=",
             "incus config set acme-fix-login user.sail.kept="),
         shell.invocations().stream().filter(c -> c.startsWith("incus config set")).toList());
   }
@@ -3252,7 +3260,14 @@ class WorkspacesTest {
     var gh = indexWhere(scripted, c -> c.contains("gh auth login --hostname"));
     var owned =
         indexOf(
-            scripted, List.of("incus", "config", "set", "acme-fix-login", "user.sail.owner=ana"));
+            scripted,
+            List.of(
+                "incus",
+                "config",
+                "set",
+                "acme-fix-login",
+                "user.sail.owner=ana",
+                "user.sail.owner_id="));
     assertTrue(
         0 <= stripped && stripped < gh && gh < owned, String.join("\n", scripted.invocations()));
     assertEquals(
@@ -3428,7 +3443,9 @@ class WorkspacesTest {
             .invocations()
             .contains(String.join(" ", strip("acme-fix-login", "Ana", "ana@sail.invalid"))));
     assertFalse(
-        shell.invocations().contains("incus config set acme-fix-login user.sail.owner=ana"),
+        shell
+            .invocations()
+            .contains("incus config set acme-fix-login user.sail.owner=ana user.sail.owner_id="),
         "already hers: no owner is written");
   }
 
@@ -3550,7 +3567,8 @@ class WorkspacesTest {
         ran.indexOf(String.join(" ", strip("acme-fix-login", "Ana", "ana@sail.invalid")));
     var keys = indexOfFirst(ran, c -> c.endsWith("acme-fix-login/home/dev/.ssh/authorized_keys"));
     var store = indexOfFirst(ran, c -> c.endsWith("acme-fix-login/home/dev/.git-credentials"));
-    var labelled = ran.indexOf("incus config set acme-fix-login user.sail.owner=ana");
+    var labelled =
+        ran.indexOf("incus config set acme-fix-login user.sail.owner=ana user.sail.owner_id=");
     assertTrue(
         0 <= stripped && stripped < keys && keys < store && store < labelled,
         String.join("\n", ran));
@@ -3615,9 +3633,9 @@ class WorkspacesTest {
             "incus start acme-b",
             String.join(" ", strip("acme-b")),
             "incus stop acme-b",
-            "incus config set acme-b user.sail.owner=",
+            "incus config set acme-b user.sail.owner= user.sail.owner_id=",
             String.join(" ", strip("acme-c")),
-            "incus config set acme-c user.sail.owner="),
+            "incus config set acme-c user.sail.owner= user.sail.owner_id="),
         scripted.invocations().stream()
             .filter(c -> c.contains("acme-") && !c.startsWith("incus list"))
             .map(c -> c.startsWith("incus stop acme-b") ? "incus stop acme-b" : c)
@@ -3654,7 +3672,10 @@ class WorkspacesTest {
         unreached.getFirst().startsWith("acme-a: ")
             && unreached.getFirst().endsWith("/home/dev/.ssh/authorized_keys still has a key"),
         unreached.getFirst());
-    assertTrue(shell.invocations().contains("incus config set acme-b user.sail.owner="));
+    assertTrue(
+        shell
+            .invocations()
+            .contains("incus config set acme-b user.sail.owner= user.sail.owner_id="));
   }
 
   /**

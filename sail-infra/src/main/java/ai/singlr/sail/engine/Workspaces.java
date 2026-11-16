@@ -686,11 +686,13 @@ public final class Workspaces {
 
   private void label(String instance, String handle, String id)
       throws IOException, InterruptedException, TimeoutException {
-    var keys = new ArrayList<>(List.of(BoxInstances.OWNER_KEY + "=" + handle));
-    if (id != null) {
-      keys.add(BoxInstances.OWNER_ID_KEY + "=" + id);
-    }
-    var owned = new ContainerConfig(shell, locks).set(instance, keys);
+    var owned =
+        new ContainerConfig(shell, locks)
+            .set(
+                instance,
+                List.of(
+                    BoxInstances.OWNER_KEY + "=" + handle,
+                    BoxInstances.OWNER_ID_KEY + "=" + Objects.requireNonNullElse(id, "")));
     if (!owned.ok()) {
       throw new IOException(
           "Workspace "
