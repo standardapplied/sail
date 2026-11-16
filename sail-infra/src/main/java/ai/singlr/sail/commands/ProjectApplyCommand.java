@@ -184,7 +184,7 @@ public final class ProjectApplyCommand implements Runnable {
             operator);
     requireReadyBox(operator);
     var observer = shells.apply(false);
-    var tokens = keeper.get().check(config, observer::asksForCredentials, System.getenv());
+    var tokens = keeper.get().check(config);
     var shell = shells.apply(dryRun);
     var observed = new ContainerManager(observer);
     var mgr = new ContainerManager(shell);
@@ -311,10 +311,7 @@ public final class ProjectApplyCommand implements Runnable {
           ProjectMutations.requireResources(definition.get(), operator);
         }
         var targetPlan = planTarget(target.state(), definition.orElse(null));
-        var tokens =
-            targetPlan.config() == null
-                ? null
-                : person.check(targetPlan.config(), observer::asksForCredentials, System.getenv());
+        var tokens = targetPlan.config() == null ? null : person.check(targetPlan.config());
         var action = targetPlan.action();
         if (action == Action.STARTED) {
           mgr.start(project);
@@ -356,10 +353,7 @@ public final class ProjectApplyCommand implements Runnable {
       } catch (Exception e) {
         failed++;
         if (json) {
-          var row = new LinkedHashMap<String, Object>();
-          row.put("name", project);
-          row.put("error", CliCommand.describe(e));
-          rows.add(row);
+          rows.add(failedRow(project, e));
         } else {
           System.err.println(
               Banner.errorLine(
@@ -378,6 +372,16 @@ public final class ProjectApplyCommand implements Runnable {
       System.out.println(Ansi.AUTO.string(allSummaryLine(applied, failed)));
     }
     requireAllApplied(failed);
+  }
+
+  /**
+   * A project {@code --all --json} could not apply: its name and the API's refusal, code and all.
+   */
+  static LinkedHashMap<String, Object> failedRow(String project, Exception failure) {
+    var row = new LinkedHashMap<String, Object>();
+    row.put("name", project);
+    row.put("error", CliCommand.refusalOf(failure).toMap());
+    return row;
   }
 
   /**

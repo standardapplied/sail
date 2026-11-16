@@ -15,8 +15,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.Sail;
 import ai.singlr.sail.api.ApiException;
+import ai.singlr.sail.api.ErrorCode;
 import ai.singlr.sail.api.HomeRoom;
 import ai.singlr.sail.api.SailOperations;
+import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.config.ProjectDefinition;
 import ai.singlr.sail.config.TestDefinitions;
 import ai.singlr.sail.config.YamlUtil;
@@ -310,7 +312,7 @@ class ProjectApplyCommandTest {
 
   /** A box whose person keeps no git token: what a test's apply clones with. */
   static WorkspaceVerbs.Keeper noPerson() {
-    return new WorkspaceVerbs.Keeper(Optional.empty(), Map.of());
+    return new WorkspaceVerbs.Keeper(Optional.empty(), Map.of(), url -> false, Map.of());
   }
 
   /**
@@ -345,13 +347,8 @@ class ProjectApplyCommandTest {
           public boolean isDryRun() {
             return false;
           }
-
-          @Override
-          public boolean asksForCredentials(String url) {
-            return true;
-          }
         };
-    var eng = new WorkspaceVerbs.Keeper(Optional.of("eng"), Map.of());
+    var eng = new WorkspaceVerbs.Keeper(Optional.of("eng"), Map.of(), url -> true, Map.of());
 
     var refused =
         SailCli.run(new ProjectApplyCommand(() -> box, dryRun -> shell, () -> eng), "acme");
@@ -370,6 +367,24 @@ class ProjectApplyCommandTest {
         "login_not_stored",
         ((Map<?, ?>) YamlUtil.parseMap(json.out()).get("error")).get("code"),
         json.out());
+  }
+
+  /** Round 2, item 4: a project {@code --all --json} could not apply carries the API's code. */
+  @Test
+  void aProjectAnApplyOfAllCouldNotApplyCarriesTheRefusalsCode() {
+    var row =
+        ProjectApplyCommand.failedRow(
+            "acme",
+            new ApiException(
+                ErrorCode.LOGIN_NOT_STORED,
+                "github.com asks for credentials to fetch acme's repo private.",
+                Remedy.of("Store one with ", Remedy.sail("git login", "github.com"), ".")));
+
+    assertEquals("acme", row.get("name"));
+    var error = (Map<?, ?>) row.get("error");
+    assertEquals("login_not_stored", error.get("code"));
+    assertEquals(
+        "github.com asks for credentials to fetch acme's repo private.", error.get("message"));
   }
 
   /** Records {@code yaml}'s definition in the catalog at {@code database}. */

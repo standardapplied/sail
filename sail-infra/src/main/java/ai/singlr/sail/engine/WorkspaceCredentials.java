@@ -204,36 +204,66 @@ final class WorkspaceCredentials {
    * A token change for the owner a workspace already has ({@link #renew(ShellExec, String, List,
    * Map)}).
    */
-  static void renew(
+  static String renew(
       ShellExec shell, String instance, ProjectDefinition config, WorkspaceOwner owner)
       throws IOException, InterruptedException, TimeoutException {
-    renew(shell, instance, config.repos(), owner.tokensFor(config.repos()));
+    return renew(shell, instance, config.repos(), owner.tokensFor(config.repos()));
   }
 
   /**
    * Gives {@code instance} exactly {@code tokens} for {@code repos}: the store replaced whole by a
-   * rename, or removed when there is nothing to write, and gh logged in again or out, never
-   * stripped first, so a live run's fetch or push never finds the container without credentials.
-   * The one step a workspace's token change and a project container's apply both take, so a token
-   * removed or no longer needed leaves either.
+   * rename, never stripped first, so a live run's fetch or push never finds the container without
+   * one, or removed when there is nothing to write; and gh logged in anew for exactly the GitHub
+   * hosts with a token, any other host's login gone. The one step a workspace's token change and a
+   * project container's apply both take, so a token removed or no longer needed leaves either.
+   * Answers what it removed with nothing written in its place, which may have been made by hand and
+   * is said, or null.
    */
-  static void renew(
+  static String renew(
       ShellExec shell,
       String instance,
       List<ProjectDefinition.Repo> repos,
       Map<String, String> tokens)
       throws IOException, InterruptedException, TimeoutException {
+    var removed = new ArrayList<String>();
     var store = GitCredentials.buildCredentialStore(tokens, repos);
     if (store.isEmpty()) {
-      asDev(shell, instance, "rm", "-f", STORE);
+      if (remove(shell, instance, STORE)) {
+        removed.add("git credentials");
+      }
     } else {
       writeStore(shell, instance, store);
     }
-    if (forgeHosts(repos, tokens).isEmpty()) {
-      asDev(shell, instance, "rm", "-f", GH_HOSTS);
-    } else {
+    var loggedIn = remove(shell, instance, GH_HOSTS);
+    if (!forgeHosts(repos, tokens).isEmpty()) {
       logForgeIn(shell, instance, repos, tokens);
+    } else if (loggedIn) {
+      removed.add("gh login");
     }
+    return removed.isEmpty()
+        ? null
+        : instance
+            + "'s "
+            + String.join(" and ", removed)
+            + " removed: no token is stored for its repos' hosts, and Sail keeps only the tokens its"
+            + " git login stores.";
+  }
+
+  /** Exits 3 when there is no {@code $1}, so the step knows whether it removed one. */
+  private static final String REMOVE = "[ -e \"$1\" ] || exit 3; rm -f \"$1\"";
+
+  private static boolean remove(ShellExec shell, String instance, String file)
+      throws IOException, InterruptedException, TimeoutException {
+    var ran =
+        shell.exec(ContainerExec.asDevUser(instance, List.of("sh", "-c", REMOVE, "sh", file)));
+    if (ran.exitCode() == 3) {
+      return false;
+    }
+    if (!ran.ok()) {
+      throw new IOException(
+          "Could not remove " + file + " in " + instance + ": " + ran.reason().strip());
+    }
+    return true;
   }
 
   /** The store written beside the old one and renamed over it, with git told to read it. */

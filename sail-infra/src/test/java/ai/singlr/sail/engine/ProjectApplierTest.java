@@ -27,12 +27,18 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.function.Predicate;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 class ProjectApplierTest {
 
   private static final String CONTAINER = "acme-health";
+
+  /**
+   * How the credential step removes a file, as a test's scripted shell sees it, before its path.
+   */
+  private static final String REMOVE = "rm -f \"$1\" sh ";
 
   @TempDir Path tempDir;
 
@@ -254,7 +260,7 @@ class ProjectApplierTest {
 
     var repos =
         List.of(new ProjectDefinition.Repo("https://github.com/org/backend.git", "backend", null));
-    var result = applier.applyRepos(CONTAINER, repos, "dev", tokens(Map.of()));
+    var result = applier.applyRepos(CONTAINER, repos, "dev", tokens(repos, Map.of()));
 
     assertEquals(1, result.added());
     assertTrue(shell.invocations().stream().anyMatch(c -> c.contains("git clone")));
@@ -273,7 +279,7 @@ class ProjectApplierTest {
 
     var repos =
         List.of(new ProjectDefinition.Repo("https://github.com/org/backend.git", "backend", null));
-    var result = applier.applyRepos(CONTAINER, repos, "dev", tokens(Map.of()));
+    var result = applier.applyRepos(CONTAINER, repos, "dev", tokens(repos, Map.of()));
 
     assertEquals(0, result.added());
     assertEquals(1, result.skipped());
@@ -295,7 +301,7 @@ class ProjectApplierTest {
     var refused =
         assertThrows(
             IllegalStateException.class,
-            () -> applier(shell).applyRepos(CONTAINER, repos, "dev", tokens(Map.of())));
+            () -> applier(shell).applyRepos(CONTAINER, repos, "dev", tokens(repos, Map.of())));
 
     assertEquals(
         "Repo 'backend' is a clone of https://github.com/org/old.git, but the definition says"
@@ -322,7 +328,7 @@ class ProjectApplierTest {
     var refused =
         assertThrows(
             IllegalStateException.class,
-            () -> applier(shell).applyRepos(CONTAINER, repos, "dev", tokens(Map.of())));
+            () -> applier(shell).applyRepos(CONTAINER, repos, "dev", tokens(repos, Map.of())));
 
     assertEquals(
         "Repo 'backend' is not a git checkout, but the definition says"
@@ -339,7 +345,7 @@ class ProjectApplierTest {
     var refused =
         assertThrows(
             IllegalStateException.class,
-            () -> applier(shell).applyRepos(CONTAINER, repos, "dev", tokens(Map.of())));
+            () -> applier(shell).applyRepos(CONTAINER, repos, "dev", tokens(repos, Map.of())));
 
     assertEquals(
         "Repo 'backend' is a clone with no origin, but the definition says"
@@ -358,7 +364,7 @@ class ProjectApplierTest {
     var refused =
         assertThrows(
             IllegalStateException.class,
-            () -> applier(shell).applyRepos(CONTAINER, repos, "dev", tokens(Map.of())));
+            () -> applier(shell).applyRepos(CONTAINER, repos, "dev", tokens(repos, Map.of())));
 
     assertEquals(
         "Repo 'backend' is a clone of https://github.com/org/old, but the definition says"
@@ -372,7 +378,7 @@ class ProjectApplierTest {
     var repos =
         List.of(new ProjectDefinition.Repo("git@github.com:org/backend.git", "backend", null));
 
-    var result = applier(shell).applyRepos(CONTAINER, repos, "dev", tokens(Map.of()));
+    var result = applier(shell).applyRepos(CONTAINER, repos, "dev", tokens(repos, Map.of()));
 
     assertEquals(1, result.skipped());
   }
@@ -392,7 +398,8 @@ class ProjectApplierTest {
 
     var repos =
         List.of(new ProjectDefinition.Repo("https://github.com/org/private.git", "private", null));
-    applier.applyRepos(CONTAINER, repos, "dev", tokens(Map.of("github.com", "ghp_secret123")));
+    applier.applyRepos(
+        CONTAINER, repos, "dev", tokens(repos, Map.of("github.com", "ghp_secret123")));
 
     var cloneCmd = shell.invocations().stream().filter(c -> c.contains("git clone")).findFirst();
     assertTrue(cloneCmd.isPresent());
@@ -443,14 +450,16 @@ class ProjectApplierTest {
         new ScriptedShellExecutor(new ShellExec.Result(0, "", "")).onFail("test -d", "not found");
     var applier = applier(shell);
 
-    applier.applyRepos(
-        CONTAINER,
+    var repos =
         List.of(
             new ProjectDefinition.Repo(
                 "https://git.example.com/org/api.git", "api", null, "github"),
-            new ProjectDefinition.Repo("https://gitlab.com/org/web.git", "web", null)),
+            new ProjectDefinition.Repo("https://gitlab.com/org/web.git", "web", null));
+    applier.applyRepos(
+        CONTAINER,
+        repos,
         "dev",
-        tokens(Map.of("git.example.com", "tok_wild", "gitlab.com", "tok_wild")));
+        tokens(repos, Map.of("git.example.com", "tok_wild", "gitlab.com", "tok_wild")));
 
     assertGhLoggedIn(shell, "git.example.com", "tok_wild");
     assertEquals(
@@ -465,11 +474,8 @@ class ProjectApplierTest {
         new ScriptedShellExecutor(new ShellExec.Result(0, "", "")).onFail("test -d", "not found");
     var applier = applier(shell);
 
-    applier.applyRepos(
-        CONTAINER,
-        List.of(new ProjectDefinition.Repo("https://gitlab.com/org/web.git", "web", null)),
-        "dev",
-        tokens(Map.of("gitlab.com", "glpat_x")));
+    var repos = List.of(new ProjectDefinition.Repo("https://gitlab.com/org/web.git", "web", null));
+    applier.applyRepos(CONTAINER, repos, "dev", tokens(repos, Map.of("gitlab.com", "glpat_x")));
 
     assertTrue(shell.invocations().stream().noneMatch(c -> c.contains("gh auth login")));
     assertTrue(shell.invocations().stream().noneMatch(c -> c.contains("gh-token")));
@@ -481,17 +487,14 @@ class ProjectApplierTest {
         new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
             .onFail("gh auth login", "The token in GH_TOKEN is invalid.");
     var applier = applier(shell);
+    var repos = List.of(new ProjectDefinition.Repo("https://github.com/org/api.git", "api", null));
 
     var failed =
         assertThrows(
             java.io.IOException.class,
             () ->
                 applier.applyRepos(
-                    CONTAINER,
-                    List.of(
-                        new ProjectDefinition.Repo("https://github.com/org/api.git", "api", null)),
-                    "dev",
-                    tokens(Map.of("github.com", "ghp_bad"))));
+                    CONTAINER, repos, "dev", tokens(repos, Map.of("github.com", "ghp_bad"))));
 
     assertEquals(
         "Failed to log gh in for github.com in acme-health: The token in GH_TOKEN is invalid.",
@@ -505,7 +508,7 @@ class ProjectApplierTest {
 
     var repos =
         List.of(new ProjectDefinition.Repo("https://github.com/org/repo.git", "repo", "develop"));
-    applier.applyRepos(CONTAINER, repos, "dev", tokens(Map.of()));
+    applier.applyRepos(CONTAINER, repos, "dev", tokens(repos, Map.of()));
 
     var cloneCmd = shell.invocations().stream().filter(c -> c.contains("git clone")).findFirst();
     assertTrue(cloneCmd.isPresent());
@@ -517,7 +520,7 @@ class ProjectApplierTest {
     var shell = scripted();
     var applier = applier(shell);
 
-    var result = applier.applyRepos(CONTAINER, null, "dev", tokens(Map.of()));
+    var result = applier.applyRepos(CONTAINER, null, "dev", tokens(null, Map.of()));
 
     assertEquals(0, result.added());
   }
@@ -866,7 +869,8 @@ class ProjectApplierTest {
         List.of(new ProjectDefinition.Repo("https://github.com/org/backend.git", "backend", null));
     var ex =
         assertThrows(
-            Exception.class, () -> applier.applyRepos(CONTAINER, repos, "dev", tokens(Map.of())));
+            Exception.class,
+            () -> applier.applyRepos(CONTAINER, repos, "dev", tokens(repos, Map.of())));
 
     assertTrue(ex.getMessage().contains("Failed to clone"));
   }
@@ -876,7 +880,7 @@ class ProjectApplierTest {
     var shell = scripted();
     var applier = applier(shell);
 
-    var result = applier.applyRepos(CONTAINER, List.of(), "dev", tokens(Map.of()));
+    var result = applier.applyRepos(CONTAINER, List.of(), "dev", tokens(List.of(), Map.of()));
 
     assertEquals(0, result.added());
   }
@@ -894,7 +898,7 @@ class ProjectApplierTest {
 
     var repos =
         List.of(new ProjectDefinition.Repo("https://gitlab.com/org/repo.git", "repo", null));
-    applier.applyRepos(CONTAINER, repos, "dev", tokens(Map.of("gitlab.com", "ghp_token")));
+    applier.applyRepos(CONTAINER, repos, "dev", tokens(repos, Map.of("gitlab.com", "ghp_token")));
 
     var cloneCmd = shell.invocations().stream().filter(c -> c.contains("git clone")).findFirst();
     assertTrue(cloneCmd.isPresent());
@@ -1389,14 +1393,14 @@ class ProjectApplierTest {
       var shell =
           new ScriptedShellExecutor(new ShellExec.Result(0, "", "")).onFail("test -d", "no");
 
-      applier(shell).applyRepos(CONTAINER, repos, "dev", tokens(Map.of()));
+      applier(shell).applyRepos(CONTAINER, repos, "dev", tokens(repos, Map.of()));
 
       var ran = shell.invocations();
       assertTrue(
-          ran.stream().anyMatch(c -> c.endsWith("rm -f /home/dev/.git-credentials")),
+          ran.stream().anyMatch(c -> c.endsWith(REMOVE + "/home/dev/.git-credentials")),
           ran.toString());
       assertTrue(
-          ran.stream().anyMatch(c -> c.endsWith("rm -f /home/dev/.config/gh/hosts.yml")),
+          ran.stream().anyMatch(c -> c.endsWith(REMOVE + "/home/dev/.config/gh/hosts.yml")),
           ran.toString());
       assertTrue(ran.stream().noneMatch(c -> c.contains("incus file push")), ran.toString());
     }
@@ -1438,19 +1442,89 @@ class ProjectApplierTest {
                         "mv -f /home/dev/.git-credentials.sail-new /home/dev/.git-credentials")),
         ran.toString());
     assertTrue(
-        ran.stream().anyMatch(c -> c.endsWith("rm -f /home/dev/.config/gh/hosts.yml")),
+        ran.stream().anyMatch(c -> c.endsWith(REMOVE + "/home/dev/.config/gh/hosts.yml")),
         ran.toString());
   }
 
   /**
-   * {@code stored} as the checked tokens of a project with a repo on each of their hosts, none of
-   * which asks: what an apply hands the applier for them.
+   * Round 2, item 1: gh is logged in to exactly the GitHub hosts with a token now. With two GitHub
+   * hosts and one token removed, gh's login file goes and the host that keeps its token is logged
+   * in anew; the other is not.
    */
-  static CheckedTokens tokens(Map<String, String> stored) {
+  @Test
+  void ghIsLeftLoggedInToExactlyTheGithubHostsWithATokenNow() throws Exception {
     var repos =
-        stored.keySet().stream()
-            .map(host -> new ProjectDefinition.Repo("https://" + host + "/o/r.git", "r", null))
-            .toList();
+        List.of(
+            new ProjectDefinition.Repo("https://github.com/acme/api.git", "api", null),
+            new ProjectDefinition.Repo("https://ghe.example/acme/web.git", "web", null, "github"));
+    var shell = new ScriptedShellExecutor(new ShellExec.Result(0, "", "")).onFail("test -d", "no");
+
+    applier(shell)
+        .applyRepos(
+            CONTAINER, repos, "dev", tokens(repos, Map.of("github.com", "ghp_github_still_here")));
+
+    var ran = shell.invocations();
+    var removed = indexOf(ran, c -> c.endsWith(REMOVE + "/home/dev/.config/gh/hosts.yml"));
+    var logins = ran.stream().filter(c -> c.contains("gh auth login")).toList();
+    assertEquals(1, logins.size(), ran.toString());
+    assertTrue(logins.getFirst().contains(" sh github.com "), logins.toString());
+    assertTrue(removed >= 0 && removed < ran.indexOf(logins.getFirst()), ran.toString());
+  }
+
+  /**
+   * Round 2, item 2: what an apply removes with nothing written in its place, which may have been
+   * made by hand, is said in one line; nothing is said when there was nothing to remove.
+   */
+  @Test
+  void whatAnApplyRemovesWithNothingInItsPlaceIsSaid() throws Exception {
+    var repos = List.of(new ProjectDefinition.Repo("https://github.com/acme/pub.git", "pub", null));
+    var said = new ByteArrayOutputStream();
+    var none = new ByteArrayOutputStream();
+
+    new ProjectApplier(
+            new ScriptedShellExecutor(new ShellExec.Result(0, "", "")).onFail("test -d", "no"),
+            new PrintStream(said, true, StandardCharsets.UTF_8))
+        .applyRepos(CONTAINER, repos, "dev", tokens(repos, Map.of()));
+    new ProjectApplier(
+            new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
+                .onFail("test -d", "no")
+                .on(REMOVE, new ShellExec.Result(3, "", "")),
+            new PrintStream(none, true, StandardCharsets.UTF_8))
+        .applyRepos(CONTAINER, repos, "dev", tokens(repos, Map.of()));
+
+    assertTrue(
+        said.toString(StandardCharsets.UTF_8)
+            .contains(
+                "  [remove] acme-health's git credentials and gh login removed: no token is stored"
+                    + " for its repos' hosts, and Sail keeps only the tokens its git login stores.\n"),
+        said.toString(StandardCharsets.UTF_8));
+    assertFalse(none.toString(StandardCharsets.UTF_8).contains("[remove]"));
+  }
+
+  /**
+   * Round 2, item 3: tokens checked for one definition's repos are refused for another's, before
+   * anything is written.
+   */
+  @Test
+  void tokensCheckedForOtherReposAreNeverWritten() {
+    var checkedFor =
+        List.of(new ProjectDefinition.Repo("https://github.com/acme/a.git", "a", null));
+    var written = List.of(new ProjectDefinition.Repo("https://github.com/acme/b.git", "b", null));
+    var shell = new ScriptedShellExecutor(new ShellExec.Result(0, "", ""));
+
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            applier(shell)
+                .applyRepos(
+                    CONTAINER, written, "dev", tokens(checkedFor, Map.of("github.com", "ghp_x"))));
+    assertEquals(List.of(), shell.invocations());
+  }
+
+  /**
+   * {@code stored} as the checked tokens of a project whose repos are {@code repos}, none asking.
+   */
+  static CheckedTokens tokens(List<ProjectDefinition.Repo> repos, Map<String, String> stored) {
     return CheckedTokens.of(
         new ProjectDefinition("acme", null, null, null, null, null, repos, null, null, null, null),
         Optional.of("eng"),
@@ -1459,11 +1533,20 @@ class ProjectApplierTest {
         Map.of());
   }
 
+  private static int indexOf(List<String> ran, Predicate<String> which) {
+    for (var i = 0; i < ran.size(); i++) {
+      if (which.test(ran.get(i))) {
+        return i;
+      }
+    }
+    return -1;
+  }
+
   /** A shell that answers no command but those a test scripts, and the credential step's own. */
   private static ScriptedShellExecutor scripted() {
     return new ScriptedShellExecutor()
-        .onOk("rm -f /home/dev/.git-credentials")
-        .onOk("rm -f /home/dev/.config/gh/hosts.yml")
+        .onOk(REMOVE + "/home/dev/.git-credentials")
+        .onOk(REMOVE + "/home/dev/.config/gh/hosts.yml")
         .onOk("mv -f /home/dev/.git-credentials.sail-new");
   }
 

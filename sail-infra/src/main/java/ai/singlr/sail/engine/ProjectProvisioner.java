@@ -933,7 +933,9 @@ public final class ProjectProvisioner {
     var user = ProjectDefinition.USER;
     var cloned = 0;
 
-    WorkspaceCredentials.renew(shell, name, config.repos(), gitTokens.byHost());
+    var removed =
+        WorkspaceCredentials.renew(
+            shell, name, config.repos(), gitTokens.byHostFor(config.repos()));
 
     execAsDevUser(name, List.of("mkdir", "-p", "/home/" + user + "/workspace"));
 
@@ -961,7 +963,14 @@ public final class ProjectProvisioner {
     }
 
     tracker.advance(currentPhase);
-    stepDone(13, "Cloned " + cloned + "/" + config.repos().size() + " repositories");
+    stepDone(
+        13,
+        "Cloned "
+            + cloned
+            + "/"
+            + config.repos().size()
+            + " repositories"
+            + (removed == null ? "" : "; " + removed));
   }
 
   private void pushWorkspaceFiles(String name, Path filesDir) throws Exception {

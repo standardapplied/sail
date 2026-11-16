@@ -100,16 +100,12 @@ class ProjectDemoCommandTest {
             null,
             null,
             null);
-    var noPerson = new WorkspaceVerbs.Keeper(Optional.empty(), Map.of());
+    var noPerson = new WorkspaceVerbs.Keeper(Optional.empty(), Map.of(), url -> true, Map.of());
 
-    var ran =
-        SailCli.run(
-            new ProjectDemoCommand(() -> definition, () -> noPerson, url -> true), "--dry-run");
+    var ran = SailCli.run(new ProjectDemoCommand(() -> definition, () -> noPerson), "--dry-run");
     var json =
         SailCli.run(
-            new ProjectDemoCommand(() -> definition, () -> noPerson, url -> true),
-            "--dry-run",
-            "--json");
+            new ProjectDemoCommand(() -> definition, () -> noPerson), "--dry-run", "--json");
 
     assertEquals(1, ran.exit());
     assertTrue(ran.err().contains("this box names no person to keep a token for it."), ran.err());

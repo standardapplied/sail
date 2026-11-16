@@ -64,10 +64,11 @@ class GitCredentialsTest {
             "github.com:8443",
             "www.github.com",
             "gitlab.attacker.example")) {
-      assertEquals(Map.of(), checked(host, stored).byHost(), host);
+      assertEquals(Map.of(), checked(host, stored).byHostFor(project(host).repos()), host);
     }
     assertEquals(
-        Map.of("GitHub.com", "ghp_stored_for_github"), checked("GitHub.com", stored).byHost());
+        Map.of("GitHub.com", "ghp_stored_for_github"),
+        checked("GitHub.com", stored).byHostFor(project("GitHub.com").repos()));
   }
 
   /**

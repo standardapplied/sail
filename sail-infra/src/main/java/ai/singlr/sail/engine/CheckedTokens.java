@@ -10,6 +10,7 @@ import ai.singlr.sail.api.ErrorCode;
 import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.config.ProjectDefinition;
 import java.util.Collection;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.function.Predicate;
@@ -23,9 +24,11 @@ import java.util.function.Predicate;
  */
 public final class CheckedTokens {
 
+  private final List<ProjectDefinition.Repo> repos;
   private final Map<String, String> byHost;
 
-  private CheckedTokens(Map<String, String> byHost) {
+  private CheckedTokens(List<ProjectDefinition.Repo> repos, Map<String, String> byHost) {
+    this.repos = listed(repos);
     this.byHost = Map.copyOf(byHost);
   }
 
@@ -44,7 +47,7 @@ public final class CheckedTokens {
     var tokens = GitCredentials.forRepos(stored, config.repos());
     var missing = GitCredentials.missing(config.repos(), tokens, asks);
     if (missing.isEmpty()) {
-      return new CheckedTokens(tokens);
+      return new CheckedTokens(config.repos(), tokens);
     }
     var host = missing.get().host();
     if (person.isEmpty()) {
@@ -69,9 +72,21 @@ public final class CheckedTokens {
         missing.get().remedy(env));
   }
 
-  /** The tokens, keyed as each repo URL spells its host: what is written. */
-  Map<String, String> byHost() {
+  /**
+   * The tokens, keyed as each repo URL spells its host, for writing alongside {@code repos}: the
+   * repos they were checked for, or a refusal, so tokens checked for one definition are never
+   * written for another.
+   */
+  Map<String, String> byHostFor(List<ProjectDefinition.Repo> repos) {
+    if (!this.repos.equals(listed(repos))) {
+      throw new IllegalArgumentException(
+          "These git tokens were checked for other repos than the ones being written.");
+    }
     return byHost;
+  }
+
+  private static List<ProjectDefinition.Repo> listed(List<ProjectDefinition.Repo> repos) {
+    return repos == null ? List.of() : List.copyOf(repos);
   }
 
   /** The tokens' values: what a built template is searched for, the ones already in it. */

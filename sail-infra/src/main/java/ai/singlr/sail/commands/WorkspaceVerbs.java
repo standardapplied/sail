@@ -145,9 +145,20 @@ final class WorkspaceVerbs {
 
   /**
    * This box's person, by handle, and the git tokens they stored: whose a host command clones with
-   * ({@code HostIdentity.gitTokens}). No person when the box names none on its roster.
+   * ({@code HostIdentity.gitTokens}). No person when the box names none on its roster. It asks a
+   * repo's host whether it wants credentials through {@code asks}, in {@code env}: a command hands
+   * it a definition, never a probe of its own.
    */
-  record Keeper(Optional<String> person, Map<String, String> tokens) {
+  record Keeper(
+      Optional<String> person,
+      Map<String, String> tokens,
+      Predicate<String> asks,
+      Map<String, String> env) {
+
+    /** With the real probe ({@link ShellExecutor#asksForCredentials}) and this process's env. */
+    Keeper(Optional<String> person, Map<String, String> tokens) {
+      this(person, tokens, new ShellExecutor(false)::asksForCredentials, System.getenv());
+    }
 
     static Keeper here() {
       try (var operations = OperationsFactory.open()) {
@@ -163,7 +174,7 @@ final class WorkspaceVerbs {
      * The tokens a host command may write for {@code config}'s repos, or the refusal ({@link
      * CheckedTokens#of}): the one way one has them.
      */
-    CheckedTokens check(ProjectDefinition config, Predicate<String> asks, Map<String, String> env) {
+    CheckedTokens check(ProjectDefinition config) {
       return CheckedTokens.of(config, person, tokens, asks, env);
     }
   }

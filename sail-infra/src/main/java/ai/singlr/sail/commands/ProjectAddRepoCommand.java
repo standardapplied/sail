@@ -19,9 +19,7 @@ import ai.singlr.sail.engine.ShellExecutor;
 import java.io.IOException;
 import java.io.PrintStream;
 import java.util.LinkedHashMap;
-import java.util.Map;
 import java.util.concurrent.TimeoutException;
-import java.util.function.Predicate;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
 import picocli.CommandLine.Option;
@@ -87,14 +85,7 @@ public final class ProjectAddRepoCommand implements Runnable {
     }
 
     var edited = ProjectMutations.checked(DefinitionEdits.addRepo(config, repo));
-    var result =
-        cloned(
-            new ProjectApplier(shell, out),
-            name,
-            edited,
-            WorkspaceVerbs.Keeper.here(),
-            new ShellExecutor(false)::asksForCredentials,
-            System.getenv());
+    var result = cloned(new ProjectApplier(shell, out), name, edited, WorkspaceVerbs.Keeper.here());
     mutations.write(
         Section.REPOS,
         config,
@@ -131,15 +122,9 @@ public final class ProjectAddRepoCommand implements Runnable {
    * WorkspaceVerbs.Keeper#check}), not the added repo's host alone, so no earlier repo loses its.
    */
   static ProjectApplier.ApplyResult cloned(
-      ProjectApplier applier,
-      String name,
-      ProjectDefinition edited,
-      WorkspaceVerbs.Keeper keeper,
-      Predicate<String> asks,
-      Map<String, String> env)
+      ProjectApplier applier, String name, ProjectDefinition edited, WorkspaceVerbs.Keeper keeper)
       throws IOException, InterruptedException, TimeoutException {
-    return applier.applyRepos(
-        name, edited.repos(), ProjectDefinition.USER, keeper.check(edited, asks, env));
+    return applier.applyRepos(name, edited.repos(), ProjectDefinition.USER, keeper.check(edited));
   }
 
   private ProjectDefinition.Repo collectRepoInteractively(PrintStream out, Ansi ansi) {

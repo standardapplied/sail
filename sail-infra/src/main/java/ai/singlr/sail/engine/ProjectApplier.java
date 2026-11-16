@@ -145,7 +145,10 @@ public final class ProjectApplier {
   public ApplyResult applyRepos(
       String name, List<ProjectDefinition.Repo> repos, String sshUser, CheckedTokens tokens)
       throws IOException, InterruptedException, TimeoutException {
-    WorkspaceCredentials.renew(shell, name, repos, tokens.byHost());
+    var removed = WorkspaceCredentials.renew(shell, name, repos, tokens.byHostFor(repos));
+    if (removed != null) {
+      out.println("  [remove] " + removed);
+    }
     if (repos == null || repos.isEmpty()) {
       return ApplyResult.empty();
     }

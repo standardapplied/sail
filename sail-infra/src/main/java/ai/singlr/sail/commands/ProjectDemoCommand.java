@@ -35,7 +35,6 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.LinkedHashMap;
 import java.util.Optional;
-import java.util.function.Predicate;
 import java.util.function.Supplier;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
@@ -61,27 +60,19 @@ public final class ProjectDemoCommand implements Runnable {
 
   private final Supplier<ProjectDefinition> definition;
   private final Supplier<WorkspaceVerbs.Keeper> keeper;
-  private final Predicate<String> asks;
 
   public ProjectDemoCommand() {
-    this(
-        ProjectDemoCommand::demoDefinition,
-        WorkspaceVerbs.Keeper::here,
-        new ShellExecutor(false)::asksForCredentials);
+    this(ProjectDemoCommand::demoDefinition, WorkspaceVerbs.Keeper::here);
   }
 
   /**
    * @param definition the demo's definition, as the catalog holds it
    * @param keeper whose stored tokens the demo clones with
-   * @param asks whether a repo's refs ask for credentials
    */
   ProjectDemoCommand(
-      Supplier<ProjectDefinition> definition,
-      Supplier<WorkspaceVerbs.Keeper> keeper,
-      Predicate<String> asks) {
+      Supplier<ProjectDefinition> definition, Supplier<WorkspaceVerbs.Keeper> keeper) {
     this.definition = definition;
     this.keeper = keeper;
-    this.asks = asks;
   }
 
   /** A provisioning that installs {@code workstationKey} in the container it creates. */
@@ -160,7 +151,7 @@ public final class ProjectDemoCommand implements Runnable {
     }
 
     var config = definition.get();
-    var tokens = keeper.get().check(config, asks, System.getenv());
+    var tokens = keeper.get().check(config);
     if (!json) {
       out.println(ansi.string("  @|green \u2713|@ demo project loaded from the catalog"));
     }

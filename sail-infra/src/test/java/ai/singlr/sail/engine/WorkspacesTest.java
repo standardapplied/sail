@@ -2961,7 +2961,7 @@ class WorkspacesTest {
             .anyMatch(
                 c ->
                     c.contains("sail-strip")
-                        || c.contains("rm -f /home/dev/.git-credentials")
+                        || c.endsWith("rm -f \"$1\" sh /home/dev/.git-credentials")
                         || c.contains("file delete")),
         "the token file is never removed");
     assertEquals(

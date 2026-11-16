@@ -52,16 +52,16 @@ class ProjectAddRepoCommandTest {
             Map.of(
                 "github.com", "ghp_token_for_github",
                 "git.example.com", "tok_for_git_example",
-                "gitlab.com", "glpat_token_for_gitlab"));
+                "gitlab.com", "glpat_token_for_gitlab"),
+            url -> true,
+            Map.of());
 
     var result =
         ProjectAddRepoCommand.cloned(
             new ProjectApplier(shell, new PrintStream(OutputStream.nullOutputStream())),
             "acme",
             acme(),
-            stored,
-            url -> true,
-            Map.of());
+            stored);
 
     assertEquals(
         "https://oauth2:ghp_token_for_github@github.com\n"
@@ -90,9 +90,10 @@ class ProjectAddRepoCommandTest {
                     "acme",
                     acme(),
                     new WorkspaceVerbs.Keeper(
-                        Optional.of("eng"), Map.of("github.com", "ghp_token_for_github")),
-                    url -> true,
-                    Map.of()));
+                        Optional.of("eng"),
+                        Map.of("github.com", "ghp_token_for_github"),
+                        url -> true,
+                        Map.of())));
 
     assertEquals(
         "git.example.com asks for credentials to fetch acme's repo web, and eng keeps no token for"

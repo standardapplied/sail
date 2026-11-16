@@ -26,6 +26,8 @@ import ai.singlr.sail.store.ProjectStore;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.Sqlite;
+import com.sun.net.httpserver.HttpServer;
+import java.net.InetSocketAddress;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
@@ -146,16 +148,45 @@ class WorkspaceVerbsTest {
         new WorkspaceVerbs.Keeper(
                 Optional.of("eng"),
                 Map.of(
-                    "github.com", "ghp_stored_for_github", "gitlab.com", "glpat_stored_for_gitlab"))
-            .check(acme(), url -> true, Map.of());
+                    "github.com", "ghp_stored_for_github", "gitlab.com", "glpat_stored_for_gitlab"),
+                url -> true,
+                Map.of())
+            .check(acme());
 
     var source = WorkspaceVerbs.source(host, acme(), given, name -> false, (into, fresh) -> {});
 
     assertEquals(List.of("ghp_stored_for_github"), List.copyOf(source.tokens()));
   }
 
+  /**
+   * Round 2, item 3: a host command hands the keeper a definition, never a probe; the keeper asks
+   * with the real one, which says a host answering 401 to its refs wants credentials and one
+   * answering 200 does not.
+   */
+  @Test
+  void theKeeperAsksAReposHostWithTheRealProbe() throws Exception {
+    var server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+    server.createContext(
+        "/",
+        exchange -> {
+          exchange.sendResponseHeaders(
+              exchange.getRequestURI().getPath().startsWith("/private") ? 401 : 200, -1);
+          exchange.close();
+        });
+    server.start();
+    try {
+      var base = "http://127.0.0.1:" + server.getAddress().getPort();
+      var asks = new WorkspaceVerbs.Keeper(Optional.of("eng"), Map.of()).asks();
+
+      assertTrue(asks.test(base + "/private/info/refs?service=git-upload-pack"));
+      assertFalse(asks.test(base + "/public/info/refs?service=git-upload-pack"));
+    } finally {
+      server.stop(0);
+    }
+  }
+
   private static CheckedTokens none() {
-    return new WorkspaceVerbs.Keeper(Optional.empty(), Map.of())
-        .check(acme(), url -> false, Map.of());
+    return new WorkspaceVerbs.Keeper(Optional.empty(), Map.of(), url -> false, Map.of())
+        .check(acme());
   }
 }
