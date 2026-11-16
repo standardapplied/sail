@@ -265,8 +265,8 @@ class ScopedSyncServerTest {
     assertEquals(2, node.logins().list(lee).size());
     assertEquals(
         List.of(
-            "roster: kim on this box (kim@home.example) is not main's kim (kim@x.dev): main gave"
-                + " the handle to someone else. It is kept as "
+            "roster: kim on this box is not main's kim: their emails differ, so main gave the"
+                + " handle to someone else. It is kept as "
                 + aside.handle()
                 + ", disabled, with what it stored, and main's kim takes the handle. Remove it with"
                 + " 'sail fde rm "

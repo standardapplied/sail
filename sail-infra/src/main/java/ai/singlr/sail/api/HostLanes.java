@@ -298,6 +298,11 @@ final class HostLanes {
     }
 
     @Override
+    public boolean activePerson(String fdeId) {
+      return new FdeStore(db).byId(fdeId).filter(FdeStore.Fde::active).isPresent();
+    }
+
+    @Override
     public List<FdeSshKeyStore.SshKeyInfo> sshKeys() {
       return new FdeSshKeyStore(db).list();
     }

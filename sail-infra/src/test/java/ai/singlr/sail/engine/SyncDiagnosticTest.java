@@ -7,6 +7,7 @@ package ai.singlr.sail.engine;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.api.SyncRequest;
 import ai.singlr.sail.config.SyncConfig;
@@ -122,14 +123,15 @@ class SyncDiagnosticTest {
   }
 
   /**
-   * m3: a box that synced before, whose key main now refuses, is told main removed its person (or
-   * their key), that it syncs no more, and the line that brings it back.
+   * m3: a box that synced with this main before, whose key it now refuses, is told main removed its
+   * person (or their key), that it syncs no more, and the line that brings it back.
    */
   @Test
   void aKeyMainRefusesAfterABoxSyncedSaysMainRemovedItsPerson() throws Exception {
     try (var db = Sqlite.open(home.resolve("sail.db"))) {
       new SchemaManager(db).migrate();
       new FdeStore(db).replicate("mady", "main-mady", null, null, "member", "active", null);
+      syncedOnceWith(db, "sail@main");
 
       var refused =
           failure(
@@ -147,6 +149,40 @@ class SyncDiagnosticTest {
               + "\n  ssh said: sail@10.128.0.25: Permission denied (publickey).",
           OperatorCommand.PLAIN.render(refused));
     }
+  }
+
+  /**
+   * N5: a box pointed at a main it never synced with, holding people another main described, is
+   * told this main has not authorised it yet, never that it removed anyone.
+   */
+  @Test
+  void aKeyRefusedByAMainThisBoxNeverSyncedWithSaysItIsNotAuthorisedYet() throws Exception {
+    try (var db = Sqlite.open(home.resolve("sail.db"))) {
+      new SchemaManager(db).migrate();
+      new FdeStore(db).replicate("mady", "old-main-mady", null, null, "member", "active", null);
+      syncedOnceWith(db, "sail@old-main");
+
+      var refused =
+          failure(
+              db,
+              closed(
+                  "sail@10.128.0.31: Permission denied (publickey).",
+                  handle -> Optional.of(AUTHORISE.replace("mady", handle))));
+
+      assertEquals("unreachable", refused.kind());
+      assertTrue(
+          OperatorCommand.PLAIN
+              .render(refused)
+              .contains("Main has not authorised this box's key yet."),
+          OperatorCommand.PLAIN.render(refused));
+    }
+  }
+
+  private static void syncedOnceWith(Sqlite db, String peer) {
+    db.execute(
+        "INSERT INTO sync_health (peer, last_attempt_at, last_success_at, state)"
+            + " VALUES (?, 1, 1, 'in_sync')",
+        peer);
   }
 
   @Test

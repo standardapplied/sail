@@ -84,27 +84,20 @@ public final class HostStatusCommand implements Runnable {
         System.out);
     if (!json) {
       try (var operations = OperationsFactory.open(operator::warn)) {
-        removedFromMain(operations.syncStatus(), hostYaml.sync().handle(), operator)
-            .ifPresent(System.out::println);
+        removedFromMain(operations.syncStatus(), operator).ifPresent(System.out::println);
       }
     }
   }
 
   /**
-   * The line that says main no longer knows this box's person, {@code handle}, when its last round
-   * was refused for that.
+   * What the last round said when it was refused because main no longer knows this box's person:
+   * that, and the line that brings them back, as the round recorded it.
    */
-  static Optional<String> removedFromMain(
-      SyncStatus status, String handle, OperatorCommand operator) {
-    if (!SyncOperations.REMOVED.equals(status.lastErrorKind())) {
+  static Optional<String> removedFromMain(SyncStatus status, OperatorCommand operator) {
+    if (!SyncOperations.REMOVED.equals(status.lastErrorKind()) || status.lastError() == null) {
       return Optional.empty();
     }
-    return Optional.of(
-        "  Main no longer knows this box's person, "
-            + handle
-            + ": the box syncs no more until an admin on main adds them again. '"
-            + operator.sail("sync")
-            + "' prints the line to send them.");
+    return Optional.of("  " + operator.render(status.lastError()));
   }
 
   static void report(

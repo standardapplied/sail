@@ -7,6 +7,7 @@ package ai.singlr.sail.sync;
 
 import ai.singlr.sail.common.Remedied;
 import ai.singlr.sail.common.Remedy;
+import java.util.List;
 
 /**
  * A sync session failed at the transport layer — main refused a request (e.g. a read-only push) or
@@ -18,6 +19,14 @@ public final class SyncTransportException extends RuntimeException implements Re
   private final String kind;
   private final String reason;
   private final transient Remedy remedy;
+
+  /**
+   * Every kind a sync failure is recorded as: the one list both this class and {@code
+   * sync_health}'s check on {@code last_error_kind} take, so a kind added here is one the store
+   * accepts.
+   */
+  public static final List<String> KINDS =
+      List.of("unreachable", "refused", "removed", "protocol", "store");
 
   public SyncTransportException(String message) {
     this("protocol", message, null);
@@ -32,11 +41,7 @@ public final class SyncTransportException extends RuntimeException implements Re
     super(Remedied.message(reason, remedy), cause);
     this.reason = reason;
     this.remedy = remedy;
-    this.kind =
-        switch (kind) {
-          case "unreachable", "refused", "removed", "protocol", "store" -> kind;
-          case null, default -> "protocol";
-        };
+    this.kind = kind != null && KINDS.contains(kind) ? kind : "protocol";
   }
 
   public String kind() {

@@ -91,7 +91,8 @@ pushed yet (work main took after the copy is lost with it); a main set up empty 
 its nodes refuse it. A main restored in place from an older copy keeps its box id, so its log sits
 below the node's checkpoint: the node then walks every head again from the copy instead of reading
 nothing and saying it is in sync. A box that stops being a node forgets main's catalog as it forgets
-its scope. A copy taken before the release that mints catalog ids is minted a new one when restored,
+its scope, and so does a node pointed at another main (`sail init --main <other>`): it is
+joining that main, not meeting a rebuilt one. Pointed at the same main again, it keeps it. A copy taken before the release that mints catalog ids is minted a new one when restored,
 so take a fresh copy after upgrading. Main is never rebuilt from its nodes.
 
 ## Module layout
@@ -1757,10 +1758,13 @@ Each row with the tests that prove it:
   before main described it takes main's id on first sight only when it is the box's own person or
   has the same, non-blank email; otherwise it is someone else. At the box's first round with a main
   (it holds no one that main's ids describe) that is refused before anything changes, naming both
-  emails and the commands that fix it, or only the removal where the box cannot see both emails (a
-  node may correct or remove a person main never described). In a later round main's person takes
+  emails and the commands that fix it, or only the removal where the box cannot see both emails. A
+  person main never described exists on this box alone, so correcting or removing them is the
+  box's own matter: its own person may do it there whatever their role on main (`sudo sail fde rm`,
+  `sudo sail fde update --email`), and anyone else only if they may manage people; people main
+  described are main's, and a node adds no one. In a later round main's person takes
   the handle and the local row is moved aside, renamed `<handle>.local-<4 hex>` and disabled with
-  everything it stored, said once with the command that removes it: a round never deletes a person
+  everything it stored, said once with the command that removes it, naming handles only: a round never deletes a person
   main never described, and only an id main no longer holds at all erases anyone. Main mints an id when a person is added and never
   changes it, so a main rebuilt by adding its people again gives each a new id, and every node
   takes them as new people who store their logins again; only a main whose database file is
@@ -1942,7 +1946,9 @@ the one whose name and keys match.
 - **The workspace is the rollback.** Dispatch takes no snapshot (`--snapshot` and
   `agent.auto_snapshot` are gone; a definition naming the key is refused like any key `agent` does
   not have): the project's container is never touched by a spec's run, and the spec's tree is its
-  workspace's. `sail project workspace list` shows each workspace's spec and owner; `stop` and
+  workspace's. `sail project workspace list` shows each workspace's spec and owner, the owner by the id its
+  label stores: one no active person holds is shown as `removed`, never under the handle someone
+  else now holds (a label with a handle alone is shown by it); `stop` and
   `delete` refuse a workspace a live run of its spec is in, and `project destroy` takes the run
   workspaces with the rest (W11). A spec's workspace stops by itself 10 minutes after its last
   run, and goes once its spec is done and nothing its runs made would be lost (W13).
@@ -4694,7 +4700,17 @@ detection. The node and main server use the same registry and reports reduce in 
 status`), HTTP (`GET /v1/sync`), and Mast read the same persisted attempt, success, failure,
 and report. `last_attempt_at` is stamped when a round starts and again when it finishes, so
 retry delays start after a failed connection finishes timing out. `state` makes in-flight rounds visible; `stale_since` preserves the first failure
-when a node has never reached main. Health is local and is not another replicated entity.
+when a node has never reached main. Health is local and is not another replicated entity. The
+kinds a failure is recorded as (`unreachable`, `refused`, `removed`, `protocol`, `store`) are one
+list, `SyncTransportException.KINDS`, from which the table's check is built, so a kind the code
+gives is one the store accepts. A failure that cannot be recorded is said once for its cause and
+rides on the round's error, never dropped. A round refused because main no longer knows the box's
+person is `removed`: `sail sync status` and `sail host status` both say so with the line that
+brings them back. It is `removed` only when this box has had a round with that main (a
+`sync_health` success for it); a main the box never synced with, one it was just pointed at, is
+told to authorise the box, never that it removed anyone. Every door that acts for the box's
+person refuses one main took off every project the box holds with the one sentence
+`CliOperator.refusal` gives, the API's login doors included.
 
 `SyncScheduler` combines debounced writes with periodic/read freshness and the pure `Backoff`
 policy: 15/30/60/120 seconds with ±20% jitter, then an open circuit at five failures. Reads

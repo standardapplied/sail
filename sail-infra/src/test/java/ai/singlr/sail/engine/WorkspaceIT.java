@@ -772,7 +772,7 @@ class WorkspaceIT extends AbstractIncusIT {
 
     assertEquals(
         List.of("main running", FIX + " running", SECOND + " running"),
-        workspaces.list(PROJECT).workspaces().stream()
+        workspaces.list(PROJECT, id -> true).workspaces().stream()
             .map(row -> row.name() + " " + row.state())
             .toList());
 
@@ -829,7 +829,7 @@ class WorkspaceIT extends AbstractIncusIT {
           "each workspace listens on 3000 in its own network");
     }
     var addresses =
-        workspaces.list(PROJECT).workspaces().stream()
+        workspaces.list(PROJECT, id -> true).workspaces().stream()
             .filter(row -> !row.name().equals(Workspaces.DEFAULT))
             .map(Workspaces.Row::ipv4)
             .toList();
@@ -908,7 +908,7 @@ class WorkspaceIT extends AbstractIncusIT {
     assertTrue(shell.exec(List.of("incus", "pause", fix.instance())).ok());
     assertEquals(
         List.of("main running", FIX + " frozen"),
-        workspaces.list(PROJECT).workspaces().stream()
+        workspaces.list(PROJECT, id -> true).workspaces().stream()
             .map(row -> row.name() + " " + row.state())
             .toList());
     assertEquals(

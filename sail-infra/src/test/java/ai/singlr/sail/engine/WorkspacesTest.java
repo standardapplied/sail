@@ -564,7 +564,7 @@ class WorkspacesTest {
   void aBoxWithNoZfsPoolListsItsDefaultWorkspaceAlone() throws Exception {
     var shell = incus(DIR_ONLY, list(instance("acme", "Stopped", "devpool", "")), "[]");
 
-    var listing = workspaces(shell, ticks()).list("acme");
+    var listing = workspaces(shell, ticks()).list("acme", id -> true);
 
     assertEquals(
         List.of(
@@ -590,7 +590,7 @@ class WorkspacesTest {
                 instance("acme-x", "Running", "devpool", "")),
             "[]");
 
-    var listing = workspaces(shell, ticks()).list("acme");
+    var listing = workspaces(shell, ticks()).list("acme", id -> true);
 
     var created = "2025-11-12T10:00:00.000Z";
     assertEquals(
@@ -639,7 +639,7 @@ class WorkspacesTest {
                     "\"user.sail.project\": \"ac\", \"user.sail.workspace\": \"me\"")),
             "[]");
 
-    var listing = workspaces(shell, ticks()).list("acme");
+    var listing = workspaces(shell, ticks()).list("acme", id -> true);
 
     assertEquals(
         List.of(new Workspaces.Row("main", "acme", "not_created", null, null, null, null, null)),
@@ -1332,7 +1332,7 @@ class WorkspacesTest {
         List.of(
             new Workspaces.Row("main", "acme", "not_created", null, null, null, null, null),
             new Workspaces.Row("odd", "acme-odd", "error", null, null, null, null, null)),
-        workspaces.list("acme").workspaces());
+        workspaces.list("acme", id -> true).workspaces());
     assertEquals(
         "Workspace 'odd' of acme is not running: Incus lists it as"
             + " Error[message=Unexpected container status: Error].",
@@ -1378,7 +1378,7 @@ class WorkspacesTest {
 
     workspaces(fresh, ticks(0, 1, 2, 3, 4, 5, 6, 7))
         .create(acme(), "fix-login", source(), tempDir, "eng", TestOwners::of);
-    workspaces(fresh, ticks()).list("acme");
+    workspaces(fresh, ticks()).list("acme", id -> true);
     workspaces(stale, ticks(0, 1, 2, 3, 4, 5, 6, 7))
         .create(acme(), "fix-login", source(), tempDir, "eng", TestOwners::of);
     workspaces(stopped, ticks(0, 1, 2)).start(acme(), "w", TestOwners::of);
@@ -1655,7 +1655,7 @@ class WorkspacesTest {
 
     assertEquals(
         "incomplete",
-        workspaces.list("acme").workspaces().stream()
+        workspaces.list("acme", id -> true).workspaces().stream()
             .filter(row -> row.name().equals("fix-login"))
             .findFirst()
             .orElseThrow()
@@ -1768,7 +1768,9 @@ class WorkspacesTest {
             .getMessage());
     assertEquals(
         List.of("main", "fix"),
-        workspaces.list("acme").workspaces().stream().map(Workspaces.Row::name).toList());
+        workspaces.list("acme", id -> true).workspaces().stream()
+            .map(Workspaces.Row::name)
+            .toList());
     assertFalse(shell.invocations().stream().anyMatch(c -> c.startsWith("incus delete")));
   }
 
@@ -3119,11 +3121,35 @@ class WorkspacesTest {
                 specWorkspace("Stopped", "fix-login", "uday")),
             "[]");
 
-    var rows = workspaces(shell, ticks()).list("acme").workspaces();
+    var rows = workspaces(shell, ticks()).list("acme", id -> true).workspaces();
 
     assertEquals(
         List.of("main:null:null", "fix-login:fix-login:uday"),
         rows.stream().map(row -> row.name() + ":" + row.spec() + ":" + row.owner()).toList());
+  }
+
+  /**
+   * N4: a listing shows a workspace's owner by the id its label stores. One whose id is no active
+   * person's (the handle given to someone new) is shown as removed, never under the handle the new
+   * holder now has; one whose id is active is shown by its handle; a label with a handle alone is
+   * shown by it, as before ids were stored.
+   */
+  @Test
+  void aListingShowsAWorkspaceWhoseOwnerIdIsNoActivePersonsAsRemoved() throws Exception {
+    var shell =
+        incus(
+            DIR_AND_ZFS,
+            list(
+                owned("acme-a", "Running", "tmp\", \"user.sail.owner_id\": \"fde_old_tmp"),
+                owned("acme-b", "Running", "tmp\", \"user.sail.owner_id\": \"fde_new_tmp"),
+                owned("acme-c", "Running", "uday")),
+            "[]");
+
+    var rows = workspaces(shell, ticks()).list("acme", id -> id.equals("fde_new_tmp")).workspaces();
+
+    assertEquals(
+        List.of("main:null", "a:" + Workspaces.REMOVED_OWNER, "b:tmp", "c:uday"),
+        rows.stream().map(row -> row.name() + ":" + row.owner()).toList());
   }
 
   private static final WorkspaceOwner UDAY =

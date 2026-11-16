@@ -30,15 +30,17 @@ public final class CliOperator {
   /** The operator this box's configuration and roster name; a null roster is none kept yet. */
   public static Actor of(SyncConfig config, FdeStore roster) {
     var roles = new RoleRule(() -> config, roster);
-    return roles
-        .principal(RoleRule.Credential.box())
-        .orElseThrow(
-            () -> {
-              var handle = roles.boxFde().orElse(null);
-              return handle != null && roster != null && roster.withdrawn(handle)
-                  ? withdrawn(handle)
-                  : unplaced(handle);
-            });
+    return roles.principal(RoleRule.Credential.box()).orElseThrow(() -> refusal(roles));
+  }
+
+  /**
+   * Why whatever acts for this box's person is refused, by what is true of them: taken off every
+   * project the box holds ({@link #withdrawn}), or not placed ({@link #unplaced}). The one choice
+   * every door that acts for the box's person makes, the CLI's and the API's.
+   */
+  public static ApiException refusal(RoleRule roles) {
+    var handle = roles.boxFde().orElse(null);
+    return handle != null && roles.withdrawn(handle) ? withdrawn(handle) : unplaced(handle);
   }
 
   /**

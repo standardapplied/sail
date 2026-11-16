@@ -352,13 +352,20 @@ public final class FdeCommand implements Runnable {
     }
   }
 
-  /** A node edits only a person made here that main never described: main's roster is not its. */
+  /**
+   * A node edits only a person made here that main never described: they exist on this box alone,
+   * so correcting or removing them is this box's own matter, which its own person may do whatever
+   * their role on main (the remedies a round prints send them here); anyone else must be one who
+   * may manage people. People main described are main's.
+   */
   private static void requireRosterEdit(Box box, String action, String handle) {
     if (box.node()) {
       try (var db = Sqlite.open(box.database())) {
         if (new FdeStore(db).undescribed(handle)) {
-          Refusals.enforce(
-              Access.atAll(Actor.reader(), Action.MANAGE_PEOPLE, Resource.Kind.PEOPLE));
+          if (!Objects.equals(Actor.reader().handle(), box.handle())) {
+            Refusals.enforce(
+                Access.atAll(Actor.reader(), Action.MANAGE_PEOPLE, Resource.Kind.PEOPLE));
+          }
           return;
         }
       }

@@ -273,6 +273,11 @@ public final class RoleRule {
     return box.get().isNode() ? Optional.empty() : Optional.of(cap);
   }
 
+  /** Whether {@code handle} is a person main took off every project this box holds. */
+  public boolean withdrawn(String handle) {
+    return roster != null && roster.withdrawn(handle);
+  }
+
   /** The FDE this box is, named by its sync handle; empty on a box with no sync handle. */
   public Optional<String> boxFde() {
     var handle = box.get().handle();

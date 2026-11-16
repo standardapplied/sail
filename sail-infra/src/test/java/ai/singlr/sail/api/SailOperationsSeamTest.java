@@ -177,6 +177,51 @@ class SailOperationsSeamTest {
     }
   }
 
+  /**
+   * N2: a round's failure that cannot be recorded is said, once for its cause, never dropped: the
+   * round still fails with its own error, and the recording failure rides on it.
+   */
+  @Test
+  void aFailureThatCannotBeRecordedIsSaidOnceAndRidesOnTheRoundsError() throws Exception {
+    try (var db = Sqlite.open(tempDir.resolve("unrecorded.db"))) {
+      new SchemaManager(db).migrate();
+      var operations =
+          OperationsFactory.create(db, shell, null, SyncScheduler.disabled(), SessionYield.NONE)
+              .useControlPlane(
+                  db,
+                  tempDir,
+                  new SyncOperations(
+                      db,
+                      "box",
+                      tempDir,
+                      () -> new SyncConfig("node", "sail@main", "eng", "box-1"),
+                      target -> {
+                        throw new IOException("connection refused");
+                      }));
+      db.execute("DROP TABLE sync_health");
+      var err = new ByteArrayOutputStream();
+      var before = System.err;
+      System.setErr(new PrintStream(err, true, StandardCharsets.UTF_8));
+      List<Exception> failed = new ArrayList<>();
+      try {
+        for (var round = 0; round < 2; round++) {
+          failed.add(assertThrows(Exception.class, () -> operations.sync(new SyncRequest(null))));
+        }
+      } finally {
+        System.setErr(before);
+      }
+
+      var said =
+          err.toString(StandardCharsets.UTF_8)
+              .lines()
+              .filter(line -> line.startsWith("  sync: this round's failure could not be recorded"))
+              .toList();
+      assertEquals(1, said.size(), err.toString(StandardCharsets.UTF_8));
+      assertTrue(said.getFirst().contains("sync_health"), said.getFirst());
+      assertEquals(1, failed.getFirst().getSuppressed().length);
+    }
+  }
+
   @Test
   void healthIsStoredAcrossOperationsInstancesAndVisibleWhileARoundRuns() throws Exception {
     try (var main = new SyncBox("main");
@@ -1592,6 +1637,7 @@ class SailOperationsSeamTest {
       assertEquals(
           new SshGateway.Rejected(SshGateway.NO_LONGER_HERE),
           operations.identity().authorizeGatewayById("sail spec list", "fde_nobody"));
+      assertFalse(operations.identity().activePerson("fde_nobody"));
       operations
           .pty()
           .recordEvent(

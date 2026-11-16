@@ -32,7 +32,9 @@ import ai.singlr.sail.engine.PairingTrust;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.identity.Acting;
+import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.ProjectScope;
+import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.ssh.SshPublicKey;
 import ai.singlr.sail.ssh.TestSshKeys;
 import ai.singlr.sail.store.AuthSessionStore;
@@ -1880,13 +1882,14 @@ class FdeCommandTest {
   }
 
   /**
-   * M1's ways out, as pasted on a node: a person made here that main never described is this box's
-   * own to correct or remove; one main described is not.
+   * M1's ways out, as pasted on a node, and the re-proof's N1: a person made here that main never
+   * described is this box's own to correct or remove, and its own person may do it whatever their
+   * role on main (here a member, as a node's person usually is); one main described is not.
    */
   @Test
   void aNodeCorrectsOrRemovesAPersonMadeHereThatMainNeverDescribed() {
     main = "sail@main";
-    replicatedAs("ada", "admin");
+    replicatedAs("ada", "member");
     inDb(
         db ->
             Acting.system(() -> new FdeStore(db).add("kim", "Kim", "kim@home.example", "member")));
@@ -1895,6 +1898,34 @@ class FdeCommandTest {
     assertEquals("kim@x.dev", inDb(db -> new FdeStore(db).byHandle("kim").orElseThrow().email()));
     assertEquals(0, fde("rm", "kim", "--force"), () -> refusal);
     assertEquals(Optional.empty(), inDb(db -> new FdeStore(db).byHandle("kim")));
+  }
+
+  private static final String MEMBER_MAY_NOT = "Only an admin may manage people.";
+
+  /**
+   * N1: the box's own person's leave over people made here is theirs alone; another member acting
+   * on this box (a gateway session) may not remove them, and a member may still not add anyone.
+   */
+  @Test
+  void anotherMemberMayNotRemoveAPersonMadeHereAndNoMemberAddsOne() {
+    main = "sail@main";
+    replicatedAs("ada", "member");
+    replicatedAs("bob", "member");
+    inDb(
+        db ->
+            Acting.system(() -> new FdeStore(db).add("kim", "Kim", "kim@home.example", "member")));
+
+    var removed =
+        Actor.call(
+            new Actor("bob", Role.MEMBER, Actor.Lane.API), () -> fde("rm", "kim", "--force"));
+    var refusedRemoval = refusal;
+    var added = fde("add", "kit", "--email", "kit@x.dev");
+
+    assertEquals(1, removed);
+    assertEquals(MEMBER_MAY_NOT, refusedRemoval);
+    assertTrue(inDb(db -> new FdeStore(db).byHandle("kim")).isPresent());
+    assertEquals(1, added);
+    assertEquals(MEMBER_MAY_NOT, refusal);
   }
 
   @Test

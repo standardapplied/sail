@@ -28,6 +28,7 @@ import ai.singlr.sail.store.ProjectStore;
 import ai.singlr.sail.store.Snapshots;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
+import ai.singlr.sail.store.SyncHealth;
 import ai.singlr.sail.store.SyncScope;
 import ai.singlr.sail.sync.NodeRound;
 import ai.singlr.sail.sync.Settlement;
@@ -370,7 +371,7 @@ public final class SyncOperations {
       if (Strings.isBlank(said)) {
         throw e;
       }
-      throw closed(e, said, channel, config.handle(), target, new FdeStore(db).anyDescribed());
+      throw closed(e, said, channel, config.handle(), target, syncedWith(db, target));
     }
   }
 
@@ -407,6 +408,15 @@ public final class SyncOperations {
                 + "\n  ssh said: "
                 + said),
         e);
+  }
+
+  /**
+   * Whether this box has had a round with the main at {@code target}: only a main it synced with
+   * can have removed its person. A box pointed at a main that never knew it is told that main has
+   * not authorised it yet, whoever another main described here.
+   */
+  private static boolean syncedWith(Sqlite db, String target) {
+    return new SyncHealth(db).find(target).map(SyncHealth.Health::lastSuccessAt).isPresent();
   }
 
   /** The remedy for a channel ssh closed saying {@code said}, when it names one. */
@@ -838,8 +848,11 @@ public final class SyncOperations {
         notice.accept(
             Remedy.of(
                 "roster: "
-                    + stranger.said()
-                    + " It is kept as "
+                    + stranger.handle()
+                    + " on this box is not main's "
+                    + stranger.handle()
+                    + ": their emails differ, so main gave the handle to someone else. It is kept"
+                    + " as "
                     + moved
                     + ", disabled,"
                     + " with what it stored, and main's "

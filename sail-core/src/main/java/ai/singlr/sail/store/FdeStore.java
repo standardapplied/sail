@@ -457,13 +457,6 @@ public final class FdeStore {
         > 0;
   }
 
-  /** Whether main has described anyone to this box yet: none before its first roster round. */
-  public boolean anyDescribed() {
-    return db.queryOne("SELECT COUNT(*) FROM fdes WHERE main_id IS NOT NULL", row -> row.integer(0))
-            .orElse(0L)
-        > 0;
-  }
-
   /**
    * Whether this box holds anyone the main whose ids are {@code mainIds} described: none at the
    * first round with that main, though another main may have described some.

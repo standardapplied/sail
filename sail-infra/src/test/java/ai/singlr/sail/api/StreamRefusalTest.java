@@ -12,6 +12,7 @@ import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.CliOperator;
 import ai.singlr.sail.engine.OperatorCommand;
+import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.Sqlite;
 import ai.singlr.sail.store.TokenStore;
@@ -61,6 +62,52 @@ class StreamRefusalTest {
   void tearDown() {
     server.close();
     db.close();
+  }
+
+  /**
+   * N3: every login door, list and store, for git and for an agent, tells a person main took off
+   * every project this box holds what is true, in the one sentence every door uses, never to sync.
+   */
+  @Test
+  void everyLoginDoorTellsAWithdrawnPersonTheyAreOffTheBoxsProjects() throws Exception {
+    new FdeStore(db).replicate("ada", "main-ada", "Ada", "ada@x.dev", "member", "active", null);
+    db.execute("UPDATE fdes SET status = 'disabled', display_name = NULL, email = NULL");
+    var doors =
+        Map.of(
+            "git login list", HttpRequest.newBuilder(uri("/v1/logins?harness=git")).GET(),
+            "agent login list", HttpRequest.newBuilder(uri("/v1/logins")).GET(),
+            "git login",
+                HttpRequest.newBuilder(uri("/v1/logins/git/github.com"))
+                    .PUT(
+                        HttpRequest.BodyPublishers.ofString(
+                            "{\"value\": \"ghp_0123456789abcdef\"}")),
+            "agent login",
+                HttpRequest.newBuilder(uri("/v1/logins/claude-code/api-key"))
+                    .PUT(
+                        HttpRequest.BodyPublishers.ofString("{\"value\": \"sk-ant-api03-0123\"}")));
+
+    for (var door : doors.entrySet()) {
+      var response =
+          HttpClient.newHttpClient()
+              .send(
+                  door.getValue().header("Authorization", "Bearer " + token).build(),
+                  HttpResponse.BodyHandlers.ofString());
+
+      var error = (Map<?, ?>) YamlUtil.parseMap(response.body()).get("error");
+      assertEquals(409, response.statusCode(), door.getKey());
+      assertEquals(
+          List.of(
+              "conflict",
+              "ada is no longer on any project this box holds, so this box gives them nothing"
+                  + " until main grants them one again.",
+              "Ask an admin on main to run 'fde grant ada <project>'."),
+          List.of(error.get("code"), error.get("message"), error.get("action")),
+          door.getKey() + ": " + response.body());
+    }
+  }
+
+  private URI uri(String path) {
+    return URI.create("http://127.0.0.1:" + server.port() + path);
   }
 
   @Test

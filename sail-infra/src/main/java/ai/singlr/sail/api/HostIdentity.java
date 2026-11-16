@@ -42,6 +42,9 @@ public interface HostIdentity {
 
   Optional<FdeStore.Fde> fde(String handle);
 
+  /** Whether {@code fdeId} is an active person's on this box. */
+  boolean activePerson(String fdeId);
+
   List<FdeSshKeyStore.SshKeyInfo> sshKeys();
 
   /**

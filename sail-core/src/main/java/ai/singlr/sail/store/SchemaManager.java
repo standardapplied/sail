@@ -8,8 +8,10 @@ package ai.singlr.sail.store;
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.common.Remedied;
 import ai.singlr.sail.common.Remedy;
+import ai.singlr.sail.sync.SyncTransportException;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 /**
  * Creates the one schema this release opens. A fresh database gets it in one shot, stamped {@value
@@ -586,13 +588,16 @@ public final class SchemaManager {
               last_attempt_at INTEGER,
               last_success_at INTEGER,
               consecutive_failures INTEGER NOT NULL DEFAULT 0 CHECK (consecutive_failures >= 0),
-              last_error_kind TEXT
-                  CHECK (last_error_kind IN ('unreachable', 'refused', 'protocol', 'store')),
+              last_error_kind TEXT CHECK (last_error_kind IN (%s)),
               last_error TEXT,
               last_report TEXT,
               state TEXT NOT NULL CHECK (state IN ('in_sync', 'syncing', 'stale')),
               stale_since INTEGER
-          )""",
+          )"""
+              .formatted(
+                  SyncTransportException.KINDS.stream()
+                      .map(kind -> "'" + kind + "'")
+                      .collect(Collectors.joining(", "))),
           """
           CREATE TABLE change_heads (
               entity_type TEXT NOT NULL,

@@ -894,11 +894,18 @@ public final class Workspaces {
     }
   }
 
+  /** Who a workspace whose label stores an owner id no active person holds is shown as. */
+  public static final String REMOVED_OWNER = "removed";
+
   /**
    * Project {@code project}'s workspaces: its default one, then every workspace, by name. A box
-   * with no ZFS pool has only the default one, which is answered as on any other box.
+   * with no ZFS pool has only the default one, which is answered as on any other box. A workspace's
+   * owner is shown by the id its label stores: one {@code activeId} does not hold is shown as
+   * {@link #REMOVED_OWNER}, never under the handle someone else may hold now; a label with a handle
+   * alone is shown by it.
    */
-  public Listing list(String project) throws IOException, InterruptedException, TimeoutException {
+  public Listing list(String project, Predicate<String> activeId)
+      throws IOException, InterruptedException, TimeoutException {
     NameValidator.requireValidProjectName(project);
     var instances = box.all();
     var rows = new ArrayList<Row>();
@@ -906,7 +913,7 @@ public final class Workspaces {
         instances.stream()
             .filter(i -> i.name().equals(project) && i.plain())
             .findFirst()
-            .map(i -> row(DEFAULT, i, word(i.state()), null, fromIncus(i.createdAt())))
+            .map(i -> row(DEFAULT, i, word(i.state()), null, fromIncus(i.createdAt()), activeId))
             .orElse(
                 new Row(
                     DEFAULT,
@@ -928,7 +935,8 @@ public final class Workspaces {
                   i,
                   workspace.ready() ? word(i.state()) : "incomplete",
                   i.key(TEMPLATE_KEY).orElse(null),
-                  i.key(CREATED_KEY).map(Workspaces::fromMillis).orElse(null));
+                  i.key(CREATED_KEY).map(Workspaces::fromMillis).orElse(null),
+                  activeId);
             })
         .forEach(rows::add);
     return new Listing(project, List.copyOf(rows));
@@ -1562,8 +1570,11 @@ public final class Workspaces {
       BoxInstances.Instance instance,
       String state,
       String template,
-      String createdAt) {
+      String createdAt,
+      Predicate<String> activeId) {
     var ipv4 = instance.state() instanceof ContainerState.Running running ? running.ipv4() : null;
+    var owner = instance.key(BoxInstances.OWNER_KEY).filter(Strings::isNotBlank).orElse(null);
+    var ownerId = instance.key(BoxInstances.OWNER_ID_KEY).filter(Strings::isNotBlank);
     return new Row(
         name,
         instance.name(),
@@ -1572,7 +1583,9 @@ public final class Workspaces {
         createdAt,
         ipv4,
         instance.key(BoxInstances.SPEC_KEY).orElse(null),
-        instance.key(BoxInstances.OWNER_KEY).orElse(null));
+        owner != null && ownerId.isPresent() && !activeId.test(ownerId.get())
+            ? REMOVED_OWNER
+            : owner);
   }
 
   private static String word(ContainerState state) {
