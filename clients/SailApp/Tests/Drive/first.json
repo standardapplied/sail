@@ -169,7 +169,7 @@
   {"name": "s25-keeps-its-banner", "banner": "exited(3)", "seconds": 10},
   {"name": "s25-kept", "arrangement": {"tabs": [1, 3]}},
   {"name": "s31-output-on-the-way", "clickPane": 0},
-  {"name": "s31-sleep-then-echo", "type": "sleep 1; echo hidden-$((5+5))\r"},
+  {"name": "s31-sleep-then-echo", "type": "clear; sleep 1; echo hidden-$((5+5))\r"},
   {"name": "s31-to-the-other-tab", "press": "[", "modifiers": ["command", "shift"]},
   {"name": "s31-hidden-meanwhile", "wait": 2.5},
   {"name": "s31-back", "press": "]", "modifiers": ["command", "shift"]},
