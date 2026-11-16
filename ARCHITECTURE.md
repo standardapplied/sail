@@ -1436,23 +1436,35 @@ Each row with the tests that prove it:
   said to be one. The read route declares `Gate.READS_IN_SCOPE` and reads through
   `ProjectGate.readable`. Entering a workspace, a terminal in it or making, starting, stopping or
   deleting one, is then **Enter a workspace** on its owner (R10): one decision,
-  `WorkspaceDoors.refusal` over `Resources.workspace` (`user.sail.owner`, judged by the id its
-  label stores, `user.sail.owner_id`, and read in one place, `Workspaces.ownerOf`: a label whose
-  id is not its handle's active person's, or whose person is gone, is no one's), for the host CLI verbs, the API routes and the terminal alike. Its owner
-  or an admin enters; a viewer and every agent never; one with no owner, made by hand or taken
-  back when its owner left the box, an admin alone; one being made is its caller's. The routes
-  are `POST /v1/projects/{p}/workspaces` (`{"name"}`, from the current template, which the server
-  never builds: none is refused naming its build, a stale one is cloned and the answer says so),
-  `POST …/workspaces/{w}/start` and `…/stop`, and `DELETE …/workspaces/{w}[?force=true]`, each
-  declaring `Gate.decides(ENTER_WORKSPACE)`. A delete, at the CLI (`--force`) and the API alike,
-  first reads what the workspace holds with the idle sweep's reads (`WorkspaceGit`, a stopped one
-  started for it and stopped again when refused) and is refused (`workspace_holds_work`, 409)
-  naming what it holds, and its owner when the caller is not, or naming why it could not be read,
-  unless forced; a live run of its spec refuses it whatever is passed. Every door that makes,
-  starts, stops or deletes a workspace goes through `WorkspaceDoors`; today those are the API and
-  the host CLI, as the SSH gateway serves no `project workspace` command
-  (`SshGateway.API_COMMANDS`). A gateway verb for workspaces is added only through
-  `WorkspaceDoors`, so its delete reads what the workspace holds as the other doors do.
+  `WorkspaceDoors.refusal` over `Resources.workspace`, for the host CLI verbs, the API routes and
+  the terminal alike, taken on the instance the workspace's locked entry found
+  (`Workspaces.Entry`). Its owner is the person whose id its label stores (`user.sail.owner_id`,
+  read in one place, `Workspaces.ownerOf`); a label with no id, an id that is not its handle's
+  active person's, or a person gone makes it no one's. Its owner or an admin enters; a viewer and
+  every agent never; one no one owns, an admin alone; one being made is its caller's, and a
+  credential that names no person makes none. On a node every person but the node's own acts as a
+  viewer (the role rule's cap), so there they are refused naming main, where other people's
+  workspaces live; and the node's own person keeps what no one owns on it (a workspace disowned,
+  or labelled for someone no longer active), deciding it as an admin decides it on main. The
+  routes are `POST /v1/projects/{p}/workspaces` (`{"name"}`, from the current template, which the
+  server never builds: none is refused naming its build, a stale one is cloned and the answer says
+  so), `POST …/workspaces/{w}/start` and `…/stop`, and `DELETE …/workspaces/{w}[?force=true]`,
+  each declaring `Gate.decides(ENTER_WORKSPACE)`. A start, a stop, a delete and a terminal's open
+  hold the workspace's lock from their decision to their act, waiting for it no longer than 60 s
+  (the sweep stopping or deleting it holds it), then `runner_busy`. A start of a workspace whose
+  labelled person is no longer active here is refused saying so, and that the next pass makes it
+  no one's. A delete, at the CLI (`--force`) and the API alike, first reads under that lock what
+  the workspace holds, with the idle sweep's reads (`WorkspaceHoldings`: `WorkspaceGit`, a
+  stopped one started for it and stopped again when refused), and who is in it (Incus's running
+  operations: a terminal, an attach, an exec), and is refused (`workspace_holds_work`, 409)
+  naming it, its owner when the caller is not, or why it could not be read, unless forced; it is
+  read again for a live run immediately before the delete, and a live run of its spec refuses it
+  whatever is passed. A stop, and a delete with force, first end the workspace's terminals, each
+  told who stopped or deleted it. Every door that makes, starts, stops or deletes a workspace goes
+  through `WorkspaceDoors`; today those are the API and the host CLI, its dry runs included, as
+  the SSH gateway serves no `project workspace` command (`SshGateway.API_COMMANDS`). A gateway verb
+  for workspaces is added only through `WorkspaceDoors`, so its delete reads what the workspace
+  holds as the other doors do.
   *`RouteGateSweepTest`, `ScopedReadsTest`, `OneDecisionSweepTest`, `AccessDoorsBaselineTest`,
   `WorkspaceDoorsTest`, `WorkspaceRoutesTest`, `AccessTest.aWorkspaceIsEnteredByItsOwnerOrAnAdminAlone`.*
 - **W10. Every instance on a box is exactly one kind, told from its keys.** No command takes a
@@ -1522,8 +1534,9 @@ Each row with the tests that prove it:
   nothing persisted). Nothing in it means no run of its spec is live on this box (a room's live
   member is one), and no operation Incus is running names the instance. That second check is one
   `incus operation list` per running workspace per pass, `BoxInstances.inUse`: an exec held open
-  by `workspace shell`, `agent attach`, a live process or a person by hand keeps the workspace for
-  as long as it runs and ten minutes after the pass that last saw it. An Incus that does not
+  by `workspace shell`, `agent attach`, a terminal the pty host opened in it (live or detached), a
+  live process or a person by hand keeps the workspace for as long as it runs and ten minutes after
+  the pass that last saw it. An Incus that does not
   answer counts as one that says something is in it. One held so with nothing run or started in
   it for 12 hours is logged once, naming `sudo incus operation list`. The process start holds a
   restart's first passes off, so the loop that replays a missed stop has the workspace first. The

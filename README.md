@@ -353,8 +353,12 @@ current version. It gets:
 
 A workspace is its owner's: the person it was made for, or the one its spec's runs act for. Only
 its owner or an admin opens a terminal in it, or starts, stops or deletes it; a viewer makes
-none. `delete` first reads what the workspace holds (uncommitted changes, untracked files, a
-stash, commits origin lacks) and is refused naming it; `--force` deletes it anyway. The same
+none. Other people's workspaces live on main: on a node, every person but the node's own is
+refused one there, and the node's own person keeps any workspace on it that no one owns.
+`delete` first reads what the workspace holds (uncommitted changes, untracked files, a stash,
+commits origin lacks) and whether anything runs in it (a terminal, an attach, an exec), and is
+refused naming it; `--force` deletes it anyway, ending its terminals with a line saying who
+deleted it, as `stop` does. The same
 doors are on the API (`POST /v1/projects/{p}/workspaces`, `…/{w}/start`, `…/{w}/stop`, `DELETE
 …/{w}`), and a terminal ticket names its workspace (`"workspace": "fix-login"`).
 
