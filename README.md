@@ -449,7 +449,10 @@ sudo sail agent login remove claude-code default
 
 On the host it is `sudo`, as you; from a thin client run the same `sail agent login` without
 `sudo`. A spec run whose person stored no login for its harness is refused before anything
-starts, saying how to make one. An admin lists or removes another person's logins with `--fde
+starts, saying how to make one. A run whose harness refused your login (expired, revoked,
+wrong), ran out of its account's quota, or used another credential is said so in the spec's
+room, with the command that replaces it; a token in its last 14 days is warned at dispatch.
+An admin lists or removes another person's logins with `--fde
 <handle>`; nobody, an admin included, can read a value back. A login made by hand in a terminal
 (`claude` then `/login`) still works in that terminal, and an ad-hoc `sail agent run` uses it.
 

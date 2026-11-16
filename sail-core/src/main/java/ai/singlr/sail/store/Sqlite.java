@@ -285,6 +285,7 @@ public final class Sqlite implements AutoCloseable {
           transactionDepth--;
         }
       }
+      requireNoTransactionOpen();
       execute(begin);
       transactionDepth = 1;
       writeLocked = begin.equals("BEGIN IMMEDIATE");
@@ -298,10 +299,10 @@ public final class Sqlite implements AutoCloseable {
           afterCommit.forEach(Runnable::run);
         }
         return result;
-      } catch (Exception e) {
+      } catch (Throwable e) {
         try {
           execute("ROLLBACK");
-        } catch (Exception rollbackEx) {
+        } catch (Throwable rollbackEx) {
           e.addSuppressed(rollbackEx);
         }
         throw e;
@@ -446,6 +447,26 @@ public final class Sqlite implements AutoCloseable {
     if (closed) throw new IllegalStateException("Database is closed");
   }
 
+  /**
+   * Refuses a scope on a connection that SQLite says holds a transaction no scope opened: what a
+   * rollback that failed leaves, whose writes a new scope would otherwise join as if it were clean.
+   */
+  private void requireNoTransactionOpen() {
+    int autocommit;
+    try {
+      autocommit = (int) lib.autocommit.invokeExact(db);
+    } catch (Throwable t) {
+      throw new SqliteException("Failed to read the transaction state", t);
+    }
+    if (autocommit == 0) {
+      throw new IllegalStateException(
+          "Database "
+              + (path == null ? ":memory:" : path)
+              + " holds a transaction that no scope opened, left by a rollback that failed, so it"
+              + " takes no new one: restart the process to reopen it.");
+    }
+  }
+
   @FunctionalInterface
   public interface RowMapper<T> {
     T map(Row row);
@@ -566,7 +587,8 @@ public final class Sqlite implements AutoCloseable {
       MethodHandle columnBytes,
       MethodHandle columnCount,
       MethodHandle errmsg,
-      MethodHandle changes) {
+      MethodHandle changes,
+      MethodHandle autocommit) {
 
     static SqliteLib load(Arena arena) {
       var libName =
@@ -671,6 +693,9 @@ public final class Sqlite implements AutoCloseable {
               FunctionDescriptor.of(ValueLayout.ADDRESS, ValueLayout.ADDRESS)),
           linker.downcallHandle(
               lookup.find("sqlite3_changes").orElseThrow(),
+              FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.ADDRESS)),
+          linker.downcallHandle(
+              lookup.find("sqlite3_get_autocommit").orElseThrow(),
               FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.ADDRESS)));
     }
   }

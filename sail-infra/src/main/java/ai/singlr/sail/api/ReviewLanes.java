@@ -7,8 +7,6 @@ package ai.singlr.sail.api;
 
 import ai.singlr.sail.config.Lane;
 import ai.singlr.sail.engine.RunPlace;
-import ai.singlr.sail.engine.RunUsageReader;
-import ai.singlr.sail.harness.RunUsage;
 import ai.singlr.sail.store.DispatchGate;
 import ai.singlr.sail.store.RunStore;
 import java.util.List;
@@ -100,12 +98,13 @@ public interface ReviewLanes {
    */
   String output(RunStore.RunRow run) throws Exception;
 
+  /** Where a finished run's report is read and said ({@link RunReports}). */
+  RunReports reports();
+
   /**
-   * What run {@code run}'s harness reported it cost, read from the run's own log and transcript as
-   * it finishes ({@link RunUsageReader}): none when they say nothing, null when they could not be
-   * read.
+   * Whether the login {@code run} was given has since been replaced ({@link RunLogins#replaced}).
    */
-  RunUsage usage(RunStore.RunRow run);
+  boolean loginReplaced(RunStore.RunRow run);
 
   /** One rescued repo and the files the rescue commit swept up, for the guardrail event. */
   record Rescue(String repo, List<String> files) {}

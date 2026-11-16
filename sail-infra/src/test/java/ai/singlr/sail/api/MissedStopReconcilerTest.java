@@ -18,10 +18,13 @@ import ai.singlr.sail.config.TestDefinitions;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.HostInfo;
 import ai.singlr.sail.engine.RunPlace;
+import ai.singlr.sail.engine.RunReportReader;
 import ai.singlr.sail.engine.ScriptedShellExecutor;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.SyncOperations;
 import ai.singlr.sail.harness.Harnesses;
+import ai.singlr.sail.harness.LoginOutcome;
+import ai.singlr.sail.harness.RunReport;
 import ai.singlr.sail.harness.RunUsage;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.ProjectScope;
@@ -58,6 +61,7 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Function;
 import java.util.function.Predicate;
 import java.util.function.Supplier;
 import org.junit.jupiter.api.AfterEach;
@@ -115,11 +119,26 @@ class MissedStopReconcilerTest {
 
   private MissedStopReconciler reconciler(
       MissedStopReconciler.UnitProbe probe, Supplier<Instant> clock) {
-    return reconciler(probe, () -> "node-a", clock);
+    return reconciler(probe, run -> null, clock);
+  }
+
+  private MissedStopReconciler reconciler(
+      MissedStopReconciler.UnitProbe probe,
+      Function<RunStore.RunRow, RunReport> reads,
+      Supplier<Instant> clock) {
+    return reconciler(probe, () -> "node-a", reads, clock);
   }
 
   private MissedStopReconciler reconciler(
       MissedStopReconciler.UnitProbe probe, Supplier<String> localHandle, Supplier<Instant> clock) {
+    return reconciler(probe, localHandle, run -> null, clock);
+  }
+
+  private MissedStopReconciler reconciler(
+      MissedStopReconciler.UnitProbe probe,
+      Supplier<String> localHandle,
+      Function<RunStore.RunRow, RunReport> reads,
+      Supplier<Instant> clock) {
     return new MissedStopReconciler(
         specStore,
         sessionStore,
@@ -130,7 +149,8 @@ class MissedStopReconcilerTest {
         new WatcherCoverage(watched::contains, pid -> false),
         localHandle,
         clock,
-        new FdeStore(db));
+        new FdeStore(db),
+        new RunReports(reads, (spec, body) -> roomLines.add(spec + ": " + body), bus::publish));
   }
 
   private void createInProgressSpec(String id) {
@@ -808,20 +828,14 @@ class MissedStopReconcilerTest {
         });
     var answers = new AtomicReference<RunUsage>(null);
     var asked = new CopyOnWriteArrayList<String>();
-    MissedStopReconciler.UnitProbe probe =
-        new MissedStopReconciler.UnitProbe() {
-          @Override
-          public boolean active(RunPlace place, String runId, String unit) {
-            return false;
-          }
-
-          @Override
-          public RunUsage usage(RunStore.RunRow run) {
-            asked.add(run.id());
-            return run.id().equals(gone) && answers.get() != null ? RunUsage.NONE : answers.get();
-          }
+    Function<RunStore.RunRow, RunReport> reads =
+        run -> {
+          asked.add(run.id());
+          var usage =
+              run.id().equals(gone) && answers.get() != null ? RunUsage.NONE : answers.get();
+          return usage == null ? null : new RunReport(usage, null);
         };
-    var reconciler = reconciler(probe, Instant::now);
+    var reconciler = reconciler((place, runId, unit) -> false, reads, Instant::now);
 
     reconciler.sweep();
     assertNull(sessionStore.findById(stopped).orElseThrow().usage(), "unanswered: still unread");
@@ -836,25 +850,129 @@ class MissedStopReconcilerTest {
     assertEquals(false, asked.contains(foreign), "another box's run is its own to read");
   }
 
+  /**
+   * Round 4, item 3: before its first replay a pass reads only the unread reports of runs serving a
+   * review, the newest {@link MissedStopReconciler#READ_FIRST} of them, and every other unread
+   * report after its replays: a container that never answers is asked once a pass.
+   */
+  @Test
+  void aPassReadsAFewReviewersReportsBeforeItsFirstReplayAndEveryOtherAfterIt() {
+    createInProgressSpec("auth");
+    var build = runningSession("auth");
+    var reviewers = new ArrayList<String>();
+    for (var i = 0; i < MissedStopReconciler.READ_FIRST + 2; i++) {
+      reviewers.add(session("docs", "node-a", "review"));
+    }
+    var builtBefore = session("docs", "node-a", "build");
+    finishedUnread(reviewers);
+    finishedUnread(List.of(builtBefore));
+    var order = new CopyOnWriteArrayList<String>();
+    Function<RunStore.RunRow, RunReport> unanswered =
+        run -> {
+          order.add(run.id());
+          return null;
+        };
+    MissedStopReconciler.UnitProbe probe =
+        (place, runId, unit) -> {
+          order.add("probe " + runId);
+          return false;
+        };
+
+    reconciler(probe, unanswered, PAST_GRACE).sweep();
+
+    var first = order.indexOf("probe " + build);
+    assertEquals(
+        reviewers.reversed().subList(0, MissedStopReconciler.READ_FIRST),
+        order.subList(0, first),
+        "the newest reviewers, before anything is probed or replayed");
+    var after = order.subList(first, order.size()).stream().filter(id -> !id.startsWith("probe"));
+    assertEquals(
+        List.of(reviewers.get(0), reviewers.get(1), builtBefore),
+        after.toList(),
+        "every other unread report after, and none asked twice");
+  }
+
+  /**
+   * Round 4, item 3: a pass starts no read before its first replay after {@link
+   * MissedStopReconciler#READ_FIRST_FOR}, so a hanging container delays it by one read at most.
+   */
+  @Test
+  void aPassStartsNoEarlyReadOnceItsTimeIsSpent() {
+    createInProgressSpec("auth");
+    var build = runningSession("auth");
+    var reviewers = List.of(session("docs", "node-a", "review"), session("docs", "node-a", "fix"));
+    finishedUnread(reviewers);
+    var clock = new ManualClock(PAST_GRACE.get(), Duration.ofMinutes(5));
+    var order = new CopyOnWriteArrayList<String>();
+    Function<RunStore.RunRow, RunReport> hanging =
+        run -> {
+          order.add(run.id());
+          clock.advance(MissedStopReconciler.READ_FIRST_FOR);
+          return null;
+        };
+    MissedStopReconciler.UnitProbe probe =
+        (place, runId, unit) -> {
+          order.add("probe " + runId);
+          return false;
+        };
+
+    reconciler(probe, hanging, clock::instant).sweep();
+
+    var first = order.indexOf("probe " + build);
+    assertEquals(List.of(reviewers.get(1)), order.subList(0, first));
+    assertEquals(
+        List.of(reviewers.get(0)),
+        order.subList(first, order.size()).stream().filter(id -> !id.startsWith("probe")).toList(),
+        "the other is read after the replays");
+  }
+
+  /**
+   * Round 4, item 3: a store that cannot list the unread reports costs the pass its replays not.
+   */
+  @Test
+  void aPassWhoseEarlyReadsCannotBeListedStillReplays() {
+    createInProgressSpec("auth");
+    var build = runningSession("auth");
+    var asked = new AtomicInteger();
+    var probed = new CopyOnWriteArrayList<String>();
+    MissedStopReconciler.UnitProbe probe =
+        (place, runId, unit) -> {
+          probed.add(runId);
+          return false;
+        };
+    Supplier<String> handle =
+        () -> {
+          if (asked.getAndIncrement() == 0) {
+            throw new IllegalStateException("the store is gone for a moment");
+          }
+          return "node-a";
+        };
+
+    reconciler(probe, handle, run -> null, PAST_GRACE).sweep();
+
+    assertTrue(probed.contains(build), "the replays still run");
+  }
+
+  private void finishedUnread(List<String> ids) {
+    Acting.system(
+        () -> {
+          for (var id : ids) {
+            assertTrue(sessionStore.claimStop(id, "stopped", () -> {}));
+          }
+        });
+  }
+
   @Test
   void aFinishedRunWhoseReportHoldsNoUsageIsRecordedNoneOnceAndNotReadAgain() {
     var silent = runningSession("auth");
     Acting.system(() -> assertTrue(sessionStore.claimStop(silent, "stopped", () -> {})));
     var asked = new CopyOnWriteArrayList<String>();
-    MissedStopReconciler.UnitProbe probe =
-        new MissedStopReconciler.UnitProbe() {
-          @Override
-          public boolean active(RunPlace place, String runId, String unit) {
-            return false;
-          }
-
-          @Override
-          public RunUsage usage(RunStore.RunRow run) {
-            asked.add(run.id());
-            return RunUsage.NONE;
-          }
+    Function<RunStore.RunRow, RunReport> reads =
+        run -> {
+          asked.add(run.id());
+          return RunReport.NONE;
         };
-    var reconciler = reconciler(probe, Instant::now);
+    var reconciler = reconciler((place, runId, unit) -> false, reads, Instant::now);
 
     assertEquals(1, (int) Acting.system(() -> reconciler.readUnreadUsage()));
     assertEquals(0, (int) Acting.system(() -> reconciler.readUnreadUsage()));
@@ -913,7 +1031,11 @@ class MissedStopReconcilerTest {
             return false;
           }
         };
-    var reconciler = reconciler(MissedStopReconciler.systemdUnitProbe(container), Instant::now);
+    var reconciler =
+        reconciler(
+            MissedStopReconciler.systemdUnitProbe(container),
+            new RunReportReader(container)::read,
+            Instant::now);
 
     assertEquals(3, (int) Acting.system(() -> reconciler.readUnreadUsage()));
     assertEquals(0, (int) Acting.system(() -> reconciler.readUnreadUsage()));
@@ -932,22 +1054,14 @@ class MissedStopReconcilerTest {
     Acting.system(() -> assertTrue(sessionStore.claimStop(broken, "stopped", () -> {})));
     Acting.system(() -> assertTrue(sessionStore.claimStop(whole, "stopped", () -> {})));
     var failing = new AtomicBoolean(true);
-    MissedStopReconciler.UnitProbe probe =
-        new MissedStopReconciler.UnitProbe() {
-          @Override
-          public boolean active(RunPlace place, String runId, String unit) {
-            return false;
+    Function<RunStore.RunRow, RunReport> reads =
+        run -> {
+          if (run.id().equals(broken) && failing.get()) {
+            throw new IllegalStateException("the report could not be parsed");
           }
-
-          @Override
-          public RunUsage usage(RunStore.RunRow run) {
-            if (run.id().equals(broken) && failing.get()) {
-              throw new IllegalStateException("the report could not be parsed");
-            }
-            return RunUsage.NONE;
-          }
+          return RunReport.NONE;
         };
-    var reconciler = reconciler(probe, Instant::now);
+    var reconciler = reconciler((place, runId, unit) -> false, reads, Instant::now);
 
     assertEquals(1, (int) Acting.system(() -> reconciler.readUnreadUsage()));
     assertNull(
@@ -1000,6 +1114,36 @@ class MissedStopReconcilerTest {
 
     assertEquals("stopped", sessionStore.findById(newest).orElseThrow().status());
     assertEquals(0, bus.publishedCount(), "finished, not replayed as a stop");
+  }
+
+  /**
+   * RL4 at the reconciler's own finish of a dead run: what its report says of its login is said by
+   * that finish, once, however many passes follow.
+   */
+  @Test
+  void aDeadRunTheReconcilerFinishesSaysWhatItsReportSaysOfItsLoginOnce() {
+    createSpec("auth", SpecStatus.REVIEW);
+    var newest = runningSession("auth");
+    Acting.system(
+        () ->
+            sessionStore.recordLaunch(
+                newest,
+                new RunStore.Launched(
+                    null, null, null, new RunStore.RunLogin("default", "token"), null)));
+    var refused = new RunReport(RunUsage.NONE, new LoginOutcome.Refused());
+    var reconciler = reconciler(new CountingProbe(false), run -> refused, PAST_GRACE);
+
+    reconciler.sweep();
+    reconciler.sweep();
+
+    assertEquals("stopped", sessionStore.findById(newest).orElseThrow().status());
+    assertEquals(
+        List.of(
+            "auth: Claude Code refused node-a's login 'default' (long-lived token), so its run"
+                + " stopped. Run claude setup-token on a machine where Claude Code is signed in,"
+                + " then sail agent login claude-code. Then build it again: sail spec dispatch -p"
+                + " test-project --spec auth --restart."),
+        roomLines);
   }
 
   @Test
@@ -1243,9 +1387,13 @@ class MissedStopReconcilerTest {
               }
 
               @Override
-              public RunUsage usage(RunStore.RunRow run) {
+              public RunReports reports() {
+                return new RunReports(run -> RunReport.NONE, RunLauncher.Room.NONE, event -> {});
+              }
 
-                return RunUsage.NONE;
+              @Override
+              public boolean loginReplaced(RunStore.RunRow run) {
+                return false;
               }
 
               @Override
@@ -1262,6 +1410,7 @@ class MissedStopReconcilerTest {
 
   private final List<ReviewLanes.Invocation> reviewersLaunched = new CopyOnWriteArrayList<>();
   private final Set<String> watched = ConcurrentHashMap.newKeySet();
+  private final List<String> roomLines = new CopyOnWriteArrayList<>();
 
   @Test
   void replaysACleanMissedStopAndStartsTheSpecsReview() throws Exception {
@@ -1970,7 +2119,10 @@ class MissedStopReconcilerTest {
             Event.WellKnownData.EXIT_CODE,
             1);
     new RunTracker(
-            sessionStore, finished -> RunUsage.NONE, SyncScheduler.disabled(), () -> "node-a")
+            sessionStore,
+            new RunReports(finished -> RunReport.NONE, RunLauncher.Room.NONE, event -> {}),
+            SyncScheduler.disabled(),
+            () -> "node-a")
         .onEvent(
             Event.of(
                 "test-project",

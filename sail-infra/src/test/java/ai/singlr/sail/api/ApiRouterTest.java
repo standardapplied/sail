@@ -2324,7 +2324,8 @@ class ApiRouterTest {
                 null,
                 null,
                 new RunStore.RunLogin("work", "api-key"),
-                "ana")
+                "ana",
+                null)
             .toMap();
     assertEquals("work", stored.get("login"));
     assertEquals("api-key", stored.get("login_kind"));
@@ -2352,6 +2353,7 @@ class ApiRouterTest {
                 null,
                 null,
                 RunStore.RunLogin.CONTAINER,
+                null,
                 null)
             .toMap();
     assertEquals("container", container.get("login"));
@@ -2854,6 +2856,7 @@ class ApiRouterTest {
                   null,
                   "running",
                   "t0",
+                  null,
                   null,
                   null,
                   null,

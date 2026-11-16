@@ -17,6 +17,7 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.Predicate;
 import java.util.function.Supplier;
 import java.util.stream.Stream;
 
@@ -53,10 +54,12 @@ final class StrandedReviewRescue {
       Supplier<Instant> clock,
       Duration launchGrace,
       Gone gone,
+      Predicate<RunStore.RunRow> loginReplaced,
       StopPublisher publishStop) {
     this.specStore = specStore;
     this.sessionStore = sessionStore;
-    this.loop = new LoopFactsReader(specStore, reviewStore, sessionStore, localHandle);
+    this.loop =
+        new LoopFactsReader(specStore, reviewStore, sessionStore, localHandle, loginReplaced);
     this.localHandle = localHandle;
     this.clock = clock;
     this.launchGrace = launchGrace;
@@ -134,9 +137,10 @@ final class StrandedReviewRescue {
    * has ended with no stop on the bus to wake the review — finished in place, a foreground session
    * completing, a launch that failed after reserving. <em>Unheard stop</em>: the reviewer of a
    * review's running stage, or the fix agent answering its gate failure, ended and nothing came of
-   * it — that run's stop was never acted on. Replaying the stop of the spec's newest loop run,
-   * whichever lane it ran in, lets the pipeline kick off, retry, go on from the stage rows, launch
-   * the fix, or judge the run's work.
+   * it — that run's stop was never acted on. A review held for a refused login is left alone until
+   * a login replaces it, whether or not its event was heard, and is then rescued in the shape it is
+   * owed. Replaying the stop of the spec's newest loop run, whichever lane it ran in, lets the
+   * pipeline kick off, retry, go on from the stage rows, launch the fix, or judge the run's work.
    *
    * <p>Every rescue is one-shot: keyed by the spec for a dropped kickoff, and by the review row and
    * its shape otherwise — a running review per stage, a waiting one per run it waits on — so a
@@ -181,6 +185,9 @@ final class StrandedReviewRescue {
           new Rescue(
               spec.id(),
               "stranded in review with no review started; replaying the stop to kick it off"));
+    }
+    if (rows.heldForLogin()) {
+      return Optional.empty();
     }
     return switch (rows.owed()) {
       case LoopFacts.Owed.Retry retry ->

@@ -12,10 +12,8 @@ import ai.singlr.sail.engine.AgentUnit;
 import ai.singlr.sail.engine.ContainerExec;
 import ai.singlr.sail.engine.LaunchEnv;
 import ai.singlr.sail.engine.RunPlace;
-import ai.singlr.sail.engine.RunUsageReader;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.StreamJsonResult;
-import ai.singlr.sail.harness.RunUsage;
 import ai.singlr.sail.store.RunStore;
 import java.util.ArrayList;
 import java.util.List;
@@ -42,6 +40,7 @@ final class ReviewLaneLauncher implements ReviewLanes {
   private final ShellExec shell;
   private final WorkBranch workBranch;
   private final Builds builds;
+  private final RunReports reports;
 
   /** The dispatch machinery's resume of a build, which this lane hands its builds to. */
   interface Builds {
@@ -56,7 +55,8 @@ final class ReviewLaneLauncher implements ReviewLanes {
       RunLauncher runLauncher,
       ShellExec shell,
       WorkBranch workBranch,
-      Builds builds) {
+      Builds builds,
+      RunReports reports) {
     this.projects = projects;
     this.places = places;
     this.workBranch = workBranch;
@@ -65,6 +65,7 @@ final class ReviewLaneLauncher implements ReviewLanes {
     this.runLauncher = runLauncher;
     this.shell = shell;
     this.builds = builds;
+    this.reports = reports;
   }
 
   @Override
@@ -170,8 +171,13 @@ final class ReviewLaneLauncher implements ReviewLanes {
   }
 
   @Override
-  public RunUsage usage(RunStore.RunRow run) {
-    return new RunUsageReader(shell).read(run);
+  public RunReports reports() {
+    return reports;
+  }
+
+  @Override
+  public boolean loginReplaced(RunStore.RunRow run) {
+    return runReservation.loginReplaced(run);
   }
 
   /**

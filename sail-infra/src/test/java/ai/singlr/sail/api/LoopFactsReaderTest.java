@@ -40,7 +40,9 @@ class LoopFactsReaderTest {
   void setUp() {
     loop = ReviewLoop.of(tempDir, AN_AGENT_THEN_A_PERSON);
     loop.spec(SPEC, "api");
-    reader = new LoopFactsReader(loop.specs, loop.reviews, loop.runs, () -> ReviewLoop.HANDLE);
+    reader =
+        new LoopFactsReader(
+            loop.specs, loop.reviews, loop.runs, () -> ReviewLoop.HANDLE, run -> false);
   }
 
   @AfterEach
