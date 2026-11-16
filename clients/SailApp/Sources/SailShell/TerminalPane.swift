@@ -29,7 +29,6 @@ public final class TerminalPane: NSView {
     public let host: LocalHost
     public let opened = ContinuousClock.now
     public private(set) var session: TerminalSession?
-    /// Told what the session tells: its phases, the title, the folder.
     var onEvent: @MainActor (TerminalPane, SessionEvent) -> Void = { _, _ in }
     /// Told when the person asks for a new session in place of one that ended.
     var onReopen: @MainActor (TerminalPane) -> Void = { _ in }
@@ -39,14 +38,8 @@ public final class TerminalPane: NSView {
         didSet { paint() }
     }
 
-    /// Whether the scrim lies over the terminal.
     public internal(set) var isDimmed = false {
         didSet { scrim.isHidden = !isDimmed }
-    }
-
-    /// The scrim's colour: the terminal background at ``dimming``.
-    public var scrimColor: CGColor? {
-        scrim.layer?.backgroundColor
     }
 
     private let start: Start
@@ -148,7 +141,6 @@ public final class TerminalPane: NSView {
         banner.shown
     }
 
-    /// Presses the banner's button, as a click on it does.
     public func pressBanner() {
         banner.press()
     }

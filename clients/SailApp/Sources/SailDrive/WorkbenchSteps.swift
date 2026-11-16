@@ -1,10 +1,8 @@
 import AppKit
 import Darwin
-import SailLook
 import SailShell
 import SailTerminal
 import SailTerminalView
-import SailVT
 import SailWorkbench
 
 /// The drive's steps on the workbench. Shortcuts are `press` steps, key events through the app's
@@ -356,9 +354,11 @@ extension Driver {
             "echo output to committed p95 <= 2 refreshes": echoed.outputToCommitted.p95 <= 2 * refresh,
             "every flood shown to its last bytes": shown,
         ]
+        let floodOwnHeld = ownThread.longest
         for (index, view) in floods.enumerated() {
             let figures = view.terminal.latency
-            budgets["flood \(index + 1): no output waited over 100 ms to be shown"] = figures.outputToShown.max <= 100
+            let wait = Self.ours(figures.outputToShown.max, ownHeld: floodOwnHeld)
+            budgets["flood \(index + 1): no output waited over 100 ms to be shown (\(wait.said))"] = wait.ours <= 100
             measures.append(measurement("panes4-flood-\(index + 1)", keys: 0, figures: figures, budgets: [:]))
             panes4["flood \(index + 1) longest wait to be shown ms"] = figures.outputToShown.max
             panes4["flood \(index + 1) refresh p95 ms"] = figures.refresh.p95
@@ -375,10 +375,10 @@ extension Driver {
         }
         press("w", ["command", "option"])
         _ = await sheet("Close", asking: "Its 4 terminals will end.", within: 5)
-        panes4.merge(partsOfAPane()) { $1 }
         let splits = await timeSplits(10)
-        budgets["⌘D to the new pane's first committed frame p95 <= 100 ms"] = splits.total <= 100
+        budgets["⌘D to the new pane's first committed frame p95 <= 100 ms (\(splits.said))"] = splits.ours <= 100
         panes4["⌘D to first committed frame p95 ms"] = splits.total
+        panes4["⌘D to first committed frame, less the drive's own thread's hold, p95 ms"] = splits.ours
         panes4["of which ⌘D handled (pane, view, session made) p95 ms"] = splits.handled
         panes4["main thread's longest stall within a split p95 ms"] = splits.held
 
@@ -411,8 +411,8 @@ extension Driver {
     /// in ms, the p95; beside it, of the same splits, the p95 of the key's own handling (the pane
     /// and its view made, its session opened) and of the main thread's longest stall. Each tab is
     /// closed after.
-    private func timeSplits(_ count: Int) async -> (total: Double, handled: Double, held: Double) {
-        var totals: [Double] = [], handled: [Double] = [], held: [Double] = [], ownHeld: [Double] = []
+    private func timeSplits(_ count: Int) async -> (total: Double, ours: Double, said: String, handled: Double, held: Double) {
+        var totals: [Double] = [], ours: [Double] = [], handled: [Double] = [], held: [Double] = [], ownHeld: [Double] = []
         for _ in 0 ..< count {
             press("t", ["command"])
             _ = await waitUntil(10) { self.pane?.terminal.framesCommitted ?? 0 > 0 }
@@ -428,37 +428,14 @@ extension Driver {
             totals.append((ContinuousClock.now - began) / .milliseconds(1))
             held.append(mainThread.longest)
             ownHeld.append(ownThread.longest)
+            ours.append(Self.ours(totals.last ?? 0, ownHeld: ownThread.longest).ours)
             press("w", ["command", "option"])
             _ = await sheet("Close", asking: nil, within: 5)
         }
         panes4["a thread of the drive's own, longest stall within a split p95 ms"] = Self.p95(ownHeld)
-        return (Self.p95(totals), Self.p95(handled), Self.p95(held))
-    }
-
-    /// What making a pane's parts costs, each made five times, the median in ms: its terminal view
-    /// (the renderer: queue, faces, atlases), that view put into the window (its display link and
-    /// layer set up), and its screen (10 MB of scrollback).
-    func partsOfAPane() -> [String: Double] {
-        guard let fonts = Bundle.main.resourceURL.flatMap({ try? TerminalFonts(directory: $0.appending(path: "Fonts")) }) else { return [:] }
-        func median(_ make: () -> Void) -> Double {
-            let times = (0 ..< 5).map { _ in
-                let began = ContinuousClock.now
-                make()
-                return (ContinuousClock.now - began) / .milliseconds(1)
-            }
-            return times.sorted()[2]
-        }
-        return [
-            "of a pane, a terminal view made median ms": median { _ = try? TerminalView(fonts: fonts) },
-            "of a pane, a terminal view put into the window median ms": median {
-                guard let view = try? TerminalView(fonts: fonts), let room = workbench.superview else { return }
-                room.addSubview(view)
-                view.removeFromSuperview()
-            },
-            "of a pane, a screen with 10 MB of scrollback made median ms": median {
-                _ = try? Screen(size: GridSize(columns: 100, rows: 40), scrollbackBytes: 10 << 20, palette: .dark)
-            },
-        ]
+        let said = "p95 waited \(Self.ms(Self.p95(totals))) ms, the drive's own thread held \(Self.ms(Self.p95(ownHeld))) ms, ours "
+            + "\(Self.ms(Self.p95(ours))) ms"
+        return (Self.p95(totals), Self.p95(ours), said, Self.p95(handled), Self.p95(held))
     }
 
     static func p95(_ values: [Double]) -> Double {

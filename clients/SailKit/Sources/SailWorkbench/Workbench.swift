@@ -83,14 +83,12 @@ public struct Workbench: Hashable, Sendable {
         }
     }
 
-    /// A last tab holding `layout`, `focused` its focused pane, not selected.
     mutating func adoptTab(_ layout: Layout, focused: PaneID) -> TabID {
         let id = TabID(mint())
         tabs.append(Tab(id: id, layout: layout, name: nil, focused: focused, history: layout.leaves.filter { $0 != focused } + [focused], zoomed: nil))
         return id
     }
 
-    /// A last tab of one pane on `session`, selected.
     @discardableResult
     public mutating func newTab(session: String, place: Place) -> PaneID {
         let pane = makePane(session: session, place: place)
@@ -132,7 +130,6 @@ public struct Workbench: Hashable, Sendable {
         return closed
     }
 
-    /// Closes the tab and every pane in it, as ``close(_:)`` closes its last.
     @discardableResult
     public mutating func closeTab(_ tab: TabID) -> [Pane] {
         guard let index = tabs.firstIndex(where: { $0.id == tab }) else { return [] }
@@ -240,7 +237,6 @@ public struct Workbench: Hashable, Sendable {
         selected = tab
     }
 
-    /// Selects the tab at `index` from 0, when there is one.
     public mutating func selectTab(at index: Int) {
         guard tabs.indices.contains(index) else { return }
         selected = tabs[index].id

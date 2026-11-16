@@ -272,12 +272,13 @@ final class Driver {
         }
         if let limit = step.shownWithin {
             let figures = terminal.latency
-            let ok = figures.outputToShown.max <= limit
+            let wait = Self.ours(figures.outputToShown.max, ownHeld: ownThread.longest)
+            let ok = wait.ours <= limit
             let flood = measurement(name, keys: 0, figures: figures, budgets: ["every output shown within \(Self.ms(limit)) ms": ok])
             measures.append(flood)
-            return (ok, "the longest any output waited to be shown was \(Self.ms(figures.outputToShown.max)) ms; the longest refresh took "
+            return (ok, "the longest any output waited to be shown: \(wait.said); the longest refresh took "
                 + "\(Self.ms(figures.refresh.max)) ms, \(figures.lateOutputs) outputs were late; the main thread was held at most "
-                + "\(Self.ms(flood.mainThreadHeld)) ms, a thread of the drive's own \(Self.ms(flood.ownThreadHeld)) ms")
+                + "\(Self.ms(flood.mainThreadHeld)) ms")
         }
         if let text = step.text {
             let found = await waitUntil(step.seconds ?? 10) { self.screenText.contains(text) }
@@ -361,7 +362,15 @@ final class Driver {
         ownThread.reset()
     }
 
-    private static func ms(_ milliseconds: Double) -> String {
+    /// A wait timed on a hosted runner, judged as the app's: less the longest the drive's own
+    /// heartbeat thread was kept from running over the same span, since a stall the machine shares is
+    /// the machine's (sail#417); what is left is ours, against the same budget as before.
+    static func ours(_ waited: Double, ownHeld: Double) -> (ours: Double, said: String) {
+        let ours = max(0, waited - ownHeld)
+        return (ours, "waited \(ms(waited)) ms, the drive's own thread held \(ms(ownHeld)) ms, ours \(ms(ours)) ms")
+    }
+
+    static func ms(_ milliseconds: Double) -> String {
         String(format: "%.1f", milliseconds)
     }
 

@@ -15,12 +15,9 @@ public struct Frames: Equatable, Sendable {
     }
 }
 
-/// The line between a split's sides.
 public struct Divider: Equatable, Sendable {
-    /// Its split's place in the tree.
     public let path: [Side]
     public let axis: Axis
-    /// The line, ``Layout/dividerWidth`` across.
     public let line: CGRect
     /// The split's whole room, both sides and the line.
     public let split: CGRect
@@ -119,5 +116,18 @@ extension Layout {
             history.lastIndex(of: id) ?? -1
         }
         return past.filter { $0.gap < nearest + 0.5 }.map(\.id).max { (recency($0), $1.value) < (recency($1), $0.value) }
+    }
+}
+
+/// How a strip shares its room between tabs: each as wide as the others, from `widest` down to
+/// `narrowest`; tabs past what fits at `narrowest` are left out of the strip (keys and the Window
+/// menu still reach them).
+public struct TabRow: Equatable, Sendable {
+    public let width: Double
+    public let shown: Int
+
+    public init(tabs: Int, room: Double, narrowest: Double, widest: Double, gap: Double) {
+        shown = min(tabs, max(1, Int((room + gap) / (narrowest + gap))))
+        width = shown == 0 ? widest : min(widest, max(narrowest, (room - gap * Double(shown - 1)) / Double(shown)))
     }
 }

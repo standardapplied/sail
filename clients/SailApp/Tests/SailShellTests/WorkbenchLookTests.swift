@@ -83,10 +83,10 @@ import Testing
             try #require(bench.panes[id]), start: .attach, host: shell.thisMac.host, fonts: TerminalFonts(directory: LookTests.fonts), points: 15,
             look: .dark, palette: Look.dark.palette
         )
-        #expect(pane.scrimColor == NSColor(Look.dark.palette.background).withAlphaComponent(0.3).cgColor)
-        #expect(!pane.isDimmed)
-        pane.isDimmed = true
         let scrim = try #require(pane.subviews.first { $0 is Scrim })
+        #expect(scrim.layer?.backgroundColor == NSColor(Look.dark.palette.background).withAlphaComponent(0.3).cgColor)
+        #expect(!pane.isDimmed && scrim.isHidden)
+        pane.isDimmed = true
         #expect(!scrim.isHidden)
         #expect(scrim.hitTest(NSPoint(x: 10, y: 10)) == nil)
     }
@@ -124,6 +124,35 @@ import Testing
         }
         #expect(!all.contains { $0.title.hasSuffix("…") || $0.title.hasSuffix("...") }, "a menu item ends in an ellipsis")
         #expect(!all.contains { $0.title == "Close" && $0.keyEquivalent == "w" && $0.action == #selector(NSWindow.performClose(_:)) }, "⌘W still closes the window")
+    }
+
+    /// The workbench takes its own keys before the menu bar: each finds its menu item, shifted
+    /// keys by what the keyboard sends (`charactersIgnoringModifiers` "D", "{"), arrows by their
+    /// function-key characters; a key of no workbench item finds none.
+    @Test func eachShortcutFindsItsMenuItem() throws {
+        let shell = try Self.shell(.dark)
+        let menu = shell.menu()
+        func key(_ characters: String, _ flags: NSEvent.ModifierFlags) throws -> NSEvent {
+            try #require(NSEvent.keyEvent(
+                with: .keyDown, location: .zero, modifierFlags: flags, timestamp: 0, windowNumber: 0, context: nil, characters: characters,
+                charactersIgnoringModifiers: characters, isARepeat: false, keyCode: 0
+            ))
+        }
+        let left = String(Character(try #require(UnicodeScalar(UInt16(NSLeftArrowFunctionKey)))))
+        let cases: [(NSEvent, Selector?)] = [
+            (try key("d", .command), #selector(WorkbenchView.splitRight(_:))),
+            (try key("D", [.command, .shift]), #selector(WorkbenchView.splitDown(_:))),
+            (try key(left, [.command, .option, .function, .numericPad]), #selector(WorkbenchView.selectSplit(_:))),
+            (try key("\r", [.command, .shift]), #selector(WorkbenchView.zoomSplit(_:))),
+            (try key("{", [.command, .shift]), #selector(WorkbenchView.showPreviousTab(_:))),
+            (try key("9", .command), #selector(WorkbenchView.selectTab(_:))),
+            (try key("c", .command), nil),
+            (try key("d", [.command, .option]), nil),
+        ]
+        for (event, action) in cases {
+            let found = WorkbenchView.shortcut(for: event, in: menu, target: shell.thisMac)
+            #expect(found?.action == action, "\(event.charactersIgnoringModifiers ?? "") found \(found?.title ?? "nothing")")
+        }
     }
 
     /// W2 and scenario 33: the workbench adds a pane's view in one place, `TabView.addPane`,

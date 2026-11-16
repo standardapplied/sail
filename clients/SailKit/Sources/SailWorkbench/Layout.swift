@@ -34,14 +34,12 @@ public enum Place: Hashable, Codable, Sendable {
     /// the app's still, and comes back as a tab.
     public static let thisMacSessions = "mac-"
 
-    /// The folder the pane's session opened in.
     public var folder: String {
         switch self {
         case let .thisMac(folder): folder
         }
     }
 
-    /// A new session's name for this place, unlike any other.
     public var newSessionName: String {
         Self.thisMacSessions + UUID().uuidString.prefix(8).lowercased()
     }
@@ -85,7 +83,6 @@ public indirect enum Layout: Hashable, Sendable {
         path(to: pane) != nil
     }
 
-    /// The sides taken from the root to `pane`.
     func path(to pane: PaneID) -> [Side]? {
         switch self {
         case let .pane(id): id == pane ? [] : nil

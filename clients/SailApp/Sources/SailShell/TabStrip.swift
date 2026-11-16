@@ -3,8 +3,9 @@ import SailLook
 import SailTerminalView
 import SailWorkbench
 
-/// The tabs, in the title bar's row after the window's buttons, on `chrome` as the rail is: each
-/// 120 to 240 pt, the selected one on `fillSelected` in `text`, the others in `textSecondary` and on
+/// The tabs, in the title bar's row after the window's buttons, on `chrome` as the rail is: equal
+/// widths from 240 down to 120 pt, and past what fits at 120 the rest left out (``TabRow``), the
+/// selected one on `fillSelected` in `text`, the others in `textSecondary` and on
 /// `fillHover` under the pointer; a close button on the selected tab and the one under the pointer;
 /// `+` last. A tab is clicked to select, double-clicked to rename in place, dragged to reorder; it
 /// never moves the window. The strip's empty part is a plain view, as the rail's top is, so there
@@ -36,7 +37,6 @@ public final class TabStrip: NSView {
     public private(set) var tabs: [TabButton] = []
     public let add: NSButton
 
-    /// A tab's name is being typed.
     public var isRenaming: Bool {
         tabs.contains { $0.field != nil }
     }
@@ -66,7 +66,6 @@ public final class TabStrip: NSView {
         true
     }
 
-    /// The tabs as `items` say, in their order, `selected` marked.
     func show(_ items: [Item], selected: TabID?) {
         let held = Dictionary(uniqueKeysWithValues: tabs.map { ($0.id, $0) })
         tabs = items.map { item in
@@ -81,18 +80,19 @@ public final class TabStrip: NSView {
         needsLayout = true
     }
 
-    private var tabWidth: Double {
-        let room = Double(bounds.width) - Self.addSide - Self.gap
-        let count = Double(max(1, tabs.count))
-        return min(Self.widest, max(Self.narrowest, (room - Self.gap * (count - 1)) / count))
+    private var row: TabRow {
+        TabRow(tabs: tabs.count, room: Double(bounds.width) - Self.addSide - Self.gap, narrowest: Self.narrowest, widest: Self.widest, gap: Self.gap)
     }
 
     override public func layout() {
         super.layout()
+        let row = self.row
         var x = 0.0
-        for tab in tabs {
-            if !tab.dragging { tab.frame = CGRect(x: x, y: 4, width: tabWidth, height: max(0, Double(bounds.height) - 8)) }
-            x += tabWidth + Self.gap
+        for (index, tab) in tabs.enumerated() {
+            tab.isHidden = index >= row.shown
+            guard !tab.isHidden else { continue }
+            if !tab.dragging { tab.frame = CGRect(x: x, y: 4, width: row.width, height: max(0, Double(bounds.height) - 8)) }
+            x += row.width + Self.gap
         }
         add.frame = CGRect(x: x, y: (Double(bounds.height) - Self.addSide) / 2, width: Self.addSide, height: Self.addSide)
     }
@@ -109,9 +109,10 @@ public final class TabStrip: NSView {
 
     /// A dragged tab let go: its place is where its middle is.
     private func drop(_ tab: TabButton) {
-        let index = Int((Double(tab.frame.midX) / (tabWidth + Self.gap)).rounded(.down))
+        let row = self.row
+        let index = Int((Double(tab.frame.midX) / (row.width + Self.gap)).rounded(.down))
         tab.dragging = false
-        onMove(tab.id, min(max(0, index), tabs.count - 1))
+        onMove(tab.id, min(max(0, index), row.shown - 1))
         needsLayout = true
     }
 
@@ -126,7 +127,6 @@ public final class TabStrip: NSView {
     }
 }
 
-/// One tab of the strip, an accessibility tab button.
 @MainActor
 public final class TabButton: NSView, NSTextFieldDelegate {
     public let id: TabID

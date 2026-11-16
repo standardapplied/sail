@@ -72,12 +72,10 @@ public final class WorkbenchView: NSView {
         true
     }
 
-    /// "No terminal is open" shows, with New Terminal.
     public var saysNoTerminal: Bool {
         !emptyLabel.isHidden
     }
 
-    /// The selected tab's focused pane.
     public var focused: TerminalPane? {
         model.focusedPane.flatMap { panes[$0.id] }
     }
@@ -112,7 +110,6 @@ public final class WorkbenchView: NSView {
         if model.tabs.isEmpty { openTab() } else { apply() }
     }
 
-    /// Detaches every pane: each session lives on at the host.
     func detachAll() {
         panes.values.forEach { $0.detach() }
     }
@@ -385,13 +382,33 @@ public final class WorkbenchView: NSView {
         }
     }
 
-    /// The selected tab's title becomes a field to type its name into.
     @objc public func renameTab(_: Any?) {
         strip.tabs.first(where: \.isSelected)?.rename()
     }
 
     @objc public func toggleLatency(_ sender: Any?) {
         focused?.toggleLatency(sender)
+    }
+
+    /// The workbench's own shortcuts are taken here, before the menu bar, as Ghostty's surface takes
+    /// its bindings: the menu bar answers a key equivalent only after highlighting its menu's title,
+    /// which held ⌘D 80 to 180 ms on the runner. The menu items stay the one list of commands and
+    /// keys (W8); this sends the matching item's action, validated as the menu would.
+    override public func performKeyEquivalent(with event: NSEvent) -> Bool {
+        guard !isHidden, let item = Self.shortcut(for: event, in: NSApp.mainMenu, target: self), validateMenuItem(item), let action = item.action else {
+            return super.performKeyEquivalent(with: event)
+        }
+        return NSApp.sendAction(action, to: self, from: item)
+    }
+
+    static func shortcut(for event: NSEvent, in menu: NSMenu?, target: AnyObject) -> NSMenuItem? {
+        let modifiers = event.modifierFlags.intersection([.command, .option, .control, .shift])
+        for item in menu?.items ?? [] {
+            if let found = shortcut(for: event, in: item.submenu, target: target) { return found }
+            guard item.target === target, !item.keyEquivalent.isEmpty, item.keyEquivalentModifierMask == modifiers else { continue }
+            if item.keyEquivalent == event.charactersIgnoringModifiers { return item }
+        }
+        return nil
     }
 
     private func change(_ command: (inout Workbench) -> Void) {
