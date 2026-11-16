@@ -526,16 +526,17 @@ public final class Workspaces {
                               + place.specId()
                               + " has no workspace of "
                               + place.project()
-                              + " on this runner, and an attach makes none: a run of the spec"
-                              + " makes it.",
+                              + " on this runner (a done spec's is deleted), and an attach makes"
+                              + " none: a run of the spec makes it.",
                           Remedy.of(
-                              "Dispatch one with: ",
+                              "Dispatch one, which reopens a done spec, with: ",
                               Remedy.sail(
                                   "spec dispatch",
                                   "-p",
                                   place.project(),
                                   "--spec",
-                                  place.specId()))));
+                                  place.specId(),
+                                  "--restart"))));
       startIfStopped(found);
     }
   }

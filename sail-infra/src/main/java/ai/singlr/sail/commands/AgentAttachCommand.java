@@ -413,11 +413,7 @@ public final class AgentAttachCommand implements Runnable {
     } else {
       announceResume(run, harness, sessionId, place.instance());
     }
-    if (place instanceof RunPlace.SpecWorkspace workspace) {
-      Workspaces.onThisBox(new ShellExecutor(false)).startExisting(workspace);
-    } else {
-      requireRunning(place);
-    }
+    reach(place, Workspaces.onThisBox(new ShellExecutor(false)));
 
     if (member) {
       endMember(run, operator);
@@ -580,6 +576,18 @@ public final class AgentAttachCommand implements Runnable {
   private static void requireRunning(RunPlace place) throws Exception {
     var state = new AgentPresence(new ShellExecutor(false)).state(place);
     ContainerStateGuard.requireRunning(state, place);
+  }
+
+  /**
+   * Puts {@code place} within an attach's reach: a spec's workspace through its own door ({@link
+   * Workspaces#startExisting}), started when stopped; any other place must be running.
+   */
+  static void reach(RunPlace place, Workspaces workspaces) throws Exception {
+    if (place instanceof RunPlace.SpecWorkspace workspace) {
+      workspaces.startExisting(workspace);
+      return;
+    }
+    requireRunning(place);
   }
 
   /**

@@ -1980,11 +1980,16 @@ workspace_stops_then_goes() {
   echo "$verdict" > "$dir/goes.verdict"
 }
 
-# What background job $1 said in $2.poll, once it has ended, and its verdict.
+# What the background check whose files start $1 said, once its verdict is written, waiting no
+# longer than $2 seconds for it: past that the check fails.
 polled() {
-  wait "$1" 2> /dev/null || true
-  cat "$2.poll"
-  return "$(cat "$2.verdict" 2> /dev/null || echo 1)"
+  local deadline=$((SECONDS + $2))
+  until [[ -s $1.verdict ]]; do
+    ((SECONDS < deadline)) || { echo "no verdict within $2 s"; return 1; }
+    sleep 5
+  done
+  cat "$1.poll"
+  return "$(cat "$1.verdict")"
 }
 
 loop_config() {
@@ -1995,7 +2000,7 @@ loop_config() {
 }
 
 loop() {
-  local run=${1:-} spec beside polls watcher
+  local run=${1:-} spec beside polls
   [[ -n $run ]] || usage
   spec="loop-$(date -u +%H%M%S)"
   beside="beside-${spec#loop-}"
@@ -2025,8 +2030,8 @@ loop() {
   check "$run" "the two builds ran at once, each in its own workspace of acme" each_ran_in_its_own_workspace "$run" eng "$spec" "$beside"
   polls="$(log_dir "$run")/beside-workspace"
   mkdir -p "$polls"
+  rm -f "$polls"/*.verdict
   workspace_stops_then_goes "$run" eng "$beside" "$polls" &
-  watcher=$!
   check "$run" "eng answers in the room" on "$run" eng "sudo sail spec comment $spec --body 'Call it Building.'"
   check "$run" "the answer resumes the build, and the review takes it to awaiting_merge" reaches_status "$run" eng "$spec" awaiting_merge 45
   check "$run" "the agent opened a pull request on $LOOP_REPO" opened_a_pull_request "$spec"
@@ -2042,9 +2047,9 @@ loop() {
   check "$run" "the fleet closes its pull request and deletes the branch" closes_the_pull_request "$spec" "$run"
   check "$run" "the fleet closes the second spec's pull request and deletes its branch" closes_the_pull_request "$beside" "$run"
   check "$run" "the second spec's workspace, left awaiting merge, was running until its idle period ended and stopped after it" \
-    polled "$watcher" "$polls/stops"
+    polled "$polls/stops" 1200
   check "$run" "marked done once stopped, the second spec's workspace and its dataset went within the sweep's next passes" \
-    polled "$watcher" "$polls/goes"
+    polled "$polls/goes" 300
   check "$run" "still no secret appears in the run's logs" no_secret_in_logs "$run"
 }
 

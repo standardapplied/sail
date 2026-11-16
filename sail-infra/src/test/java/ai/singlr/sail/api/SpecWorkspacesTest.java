@@ -689,9 +689,8 @@ class SpecWorkspacesTest {
     assertEquals("Stopped", box.state(instance("c")));
     assertTrue(
         logged.contains(
-            "  [workspaces] acme-c: left as it is, and tried again once idle: its repos could not"
-                + " be read: the push of agent/c in app did not reach origin: fatal: unable to"
-                + " access\n"),
+            "  [workspaces] acme-c: left as it is, and tried again once idle: could not reach"
+                + " origin to push agent/c from app: fatal: unable to access\n"),
         logged);
   }
 
@@ -726,13 +725,13 @@ class SpecWorkspacesTest {
     assertEquals(List.of(), said);
     for (var cause :
         List.of(
-            "acme-f: left as it is, and tried again once idle: its repos could not be read: fatal:"
-                + " bad object",
-            "acme-n: left as it is, and tried again once idle: its repos could not be read:"
+            "acme-f: left as it is, and tried again once idle: fatal: bad object",
+            "acme-n: left as it is, and tried again once idle: git said what Sail cannot read:"
                 + " warning: ambiguous",
             "acme-s: left as it is, and tried again once idle: Failed to start container"
                 + " 'acme-s': Error: Failed to start device \"eth0\": no free address",
-            "acme-t: left as it is, and tried again once idle: Command timed out after 180s")) {
+            "acme-t: left as it is, and tried again once idle: Incus did not answer: Command timed"
+                + " out after 180s")) {
       assertTrue(first.contains("  [workspaces] " + cause + "\n"), first);
     }
     assertEquals("", meanwhile);
@@ -745,6 +744,32 @@ class SpecWorkspacesTest {
     assertFalse(box.holds(instance("t")));
     assertEquals(List.of("start", "stop", "start", "stop"), changesOf(instance("f")));
     assertFalse(again.contains("acme-f: left"), "the same cause is logged once");
+  }
+
+  /**
+   * Major F-M1 of the final look, its probe made the test: a cause that cannot change (a push that
+   * never reaches origin) is tried three times, one idle period apart, and the third keeps the
+   * workspace, stopped, said once in the room in plain words; it is never started again.
+   */
+  @Test
+  void aCauseThatFailsThreeTimesKeepsTheWorkspaceSaidOnceAndItIsNeverStartedAgain() {
+    spec("c", SpecStatus.DONE);
+    box.workspace("c", "Stopped").repo("app").repo("web/site").ahead("app", 1).pushUnreached = true;
+    ended("c");
+    later(IDLE);
+    var sweeper = sweeper();
+
+    for (var pass = 0; pass < 66; pass++) {
+      sweeper.sweep();
+      later(Duration.ofMinutes(1));
+    }
+
+    var why = "could not reach origin to push agent/c from app, 3 times";
+    assertEquals(
+        List.of("start", "stop", "start", "stop", "start", "stop"), changesOf(instance("c")));
+    assertEquals(3, box.pushes.size());
+    assertEquals(why, box.key(instance("c"), KEPT));
+    assertEquals(List.of("c: " + notice("c", "done", why)), said);
   }
 
   /**
@@ -782,9 +807,8 @@ class SpecWorkspacesTest {
 
     assertTrue(
         logged.contains(
-            "acme-a: left as it is, and tried again once idle: the usage of run "
-                + unread
-                + " could not be read"),
+            "acme-a: left as it is, and tried again once idle: could not read the usage of run "
+                + unread),
         logged);
     assertNull(runs.findById(unread).orElseThrow().usage());
     assertTrue(askedOf(instance("a")).stream().noneMatch(step -> step.startsWith("left")));
@@ -792,8 +816,8 @@ class SpecWorkspacesTest {
         thrown.contains("acme-b: left as it is, and tried again once idle: unreadable"), thrown);
     assertTrue(
         empty.contains(
-            "acme-c: left as it is, and tried again once idle: the definition of project acme is"
-                + " not readable here, so neither are its repos"),
+            "acme-c: left as it is, and tried again once idle: could not read the definition of"
+                + " project acme"),
         empty);
     for (var id : List.of("a", "b", "c")) {
       assertNull(box.key(instance(id), KEPT), id);
@@ -1392,12 +1416,11 @@ class SpecWorkspacesTest {
             return new Result(
                 3,
                 "",
-                "the push of "
+                "fatal: unable to access\ncould not reach origin to push "
                     + branch
-                    + " in "
+                    + " from "
                     + path
-                    + " did not reach origin: fatal: unable to"
-                    + " access\n");
+                    + "\n");
           }
           if (held.pushRefused) {
             lines.append("refused ").append(path).append('\n');

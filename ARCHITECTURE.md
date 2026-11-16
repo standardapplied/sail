@@ -1475,8 +1475,9 @@ Each row with the tests that prove it:
   the refusal names `sudo incus info <instance>` for one that stays so. `agent attach` creates
   nothing and needs nothing a dispatch needs: `Workspaces.startExisting` takes the same lock, as
   bounded, finds the spec's workspace and starts it when stopped, with no pool or template read
-  and the kept mark left as it is; one that is not there is refused naming `sail spec dispatch -p
-  <p> --spec <id>`, whose run makes it. An entry that finds stopped a workspace its check saw
+  and the kept mark left as it is; one that is not there (a done spec's is deleted) is refused
+  naming `sail spec dispatch -p <p> --spec <id> --restart`, whose run makes it and which reopens
+  a done spec. An entry that finds stopped a workspace its check saw
   running, the sweep having stopped it between, starts it only within the box's cap, counted over
   the other whole spec workspaces. A stopped or frozen workspace any other door meets names `sail
   project workspace start <p> <w>`.
@@ -1512,8 +1513,8 @@ Each row with the tests that prove it:
     --untracked-files=all` (uncommitted changes and untracked files said apart), `git stash
     list`, and one read of commits over every ref, whatever its namespace: `git rev-list
     --exclude=refs/stash --all --not --remotes=origin` (branches, tags, every worktree's
-    checked-out commit, another remote's refs). Only `origin`, the remote the place clones from,
-    counts as a copy. Covered is everything git tracks or could track in the spec's repos: every
+    checked-out commit, another remote's refs). In a configured repo only `origin`, the remote the
+    project clones from, counts as a copy; in a submodule, any of the submodule's own remotes. Covered is everything git tracks or could track in the spec's repos: every
     ref, every worktree, every stash, every submodule. Not covered are commits only the reflog
     holds (counting them would keep nearly every workspace, since every amend leaves one), files
     git ignores, and files outside the repos. Nothing is fetched, so a branch the forge deleted
@@ -1527,7 +1528,14 @@ Each row with the tests that prove it:
     read, or a push that does not reach `origin`. The workspace is left as it is, stopped again
     when the sweep started it, logged once per workspace per cause, and tried again once idle,
     the failure counting as the sweep's own time in it; no mark is written and nothing is said in
-    the room. The read waits at most 3 minutes (a push 1 of them), so one slow repo can hold its
+    the room. A cause that fails three times (`SpecWorkspaces.TRIES`) keeps the workspace on the
+    third, said once in the room in Sail's plain words ("could not reach origin to push <branch>
+    from <repo>, 3 times"; "could not read the definition of project <p>"; "Incus did not
+    answer"; "git could not read <place>"), so a cause that cannot change costs three starts, not
+    one every idle period for ever. The count is per workspace and cause and held in memory: a
+    sail-api restart starts it again. A run's report the sweep reads late is said as for a done
+    spec: reopen it with `sail spec dispatch -p <p> --spec <id> --restart`, never "build it
+    again". The read waits at most 3 minutes (a push 1 of them), so one slow repo can hold its
     pass that long, never the missed-stop pass.
   - **Kept is final for the sweep.** A kept workspace is stopped and carries
     `user.sail.kept=<what each repo holds>`. The spec's room is told once, as Sail, through the
@@ -1560,13 +1568,17 @@ Each row with the tests that prove it:
   the reviewer's order; an exec running on it and a shell just closed, on the injected clock; a
   start by hand; the latest end of any run; a spec reopened and a run started during the reads;
   a timeout, a failure, nonsense, a failed start, an unanswered usage, an unreadable definition
-  and an unreached push each deciding nothing, logged once and tried again once idle; a status written
+  and an unreached push each deciding nothing, logged once and tried again once idle; a cause
+  failing three times keeping the workspace, said once, in 66 passes; a status written
   straight to the store and one arriving by a `SyncBox` round; an erasure adopted from main; the
   name lock; the notice's commands parsed as printed), `WorkspaceGitTest` (the read against real
   repositories: a nested path, a branch not checked out, a stash, an untracked file, a tag-only
   and a detached commit, a missing repo, the push, a merged and deleted branch, a refused push and
   an unreachable remote, a linked worktree under an ignored directory and one outside the repo, a
-  submodule's unpushed commits, a worktree git cannot read), `PeriodicPassTest`, `RoomWakeLaunchTest` and `LiveMemberTest` (a session a deleted
+  submodule's unpushed commits and one pushed to a remote not named `origin`, a worktree git
+  cannot read), `RunReportsTest.aDoneSpecsLateReportSaysToReopenItNotToBuildItAgain`,
+  `AgentAttachCommandTest.anAttachStartsItsSpecsIdleStoppedWorkspaceAndRefusesAMissingOne`,
+  `PeriodicPassTest`, `RoomWakeLaunchTest` and `LiveMemberTest` (a session a deleted
   workspace took is not resumed), `WorkspaceIT.aDoneSpecsWorkspaceIsPushedThenDeletedAndItsDatasetGoes`,
   `WorkspaceIT.aDoneSpecsWorkspaceHoldingWhatNoRemoteHasIsKeptStoppedWithItsDataset`,
   `WorkspaceIT.anExecHeldOpenKeepsTheWorkspaceRunningAcrossAPassAndItStopsOnceTheExecEnds`,

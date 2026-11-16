@@ -179,7 +179,8 @@ class WorkspaceGitTest {
 
     assertTrue(read.exit() != 0, read.output());
     assertTrue(
-        read.output().contains("the push of agent/a in app did not reach origin: fatal:"),
+        read.output().contains("fatal:")
+            && read.output().strip().endsWith("could not reach origin to push agent/a from app"),
         read.output());
   }
 
@@ -291,9 +292,53 @@ class WorkspaceGitTest {
     git(app, "worktree", "add", "--quiet", "-b", "wt", tempDir.resolve("tree").toString());
     Files.writeString(tempDir.resolve("tree/.git"), "gitdir: " + tempDir.resolve("nowhere") + "\n");
 
-    var read = bash(List.of(BRANCH, "app"));
+    var read = exec(command(List.of(BRANCH, "app")), true);
 
     assertTrue(read.exit() != 0, read.output());
+    assertTrue(
+        read.output()
+            .strip()
+            .endsWith("git could not read " + tempDir.resolve("tree").toRealPath()),
+        read.output());
+  }
+
+  /**
+   * Minor F-m3: inside a submodule, pushed means on any of its own remotes, whatever its name; the
+   * repo's own commits still count only on {@code origin}.
+   */
+  @Test
+  void aSubmoduleWhoseRemoteIsNotOriginIsPushedOnIt() throws Exception {
+    var lib = tempDir.resolve("lib.git");
+    run(List.of("git", "init", "--quiet", "--bare", "-b", "main", lib.toString()));
+    var seed = tempDir.resolve("lib-seed");
+    run(List.of("git", "clone", "--quiet", lib.toString(), seed.toString()));
+    git(seed, "commit", "--quiet", "--allow-empty", "-m", "lib");
+    git(seed, "push", "--quiet", "origin", "main");
+    git(
+        app,
+        "-c",
+        "protocol.file.allow=always",
+        "submodule",
+        "add",
+        "--quiet",
+        lib.toString(),
+        "lib");
+    git(app, "commit", "--quiet", "-m", "lib");
+    git(app, "push", "--quiet", "origin", "main");
+    var sub = app.resolve("lib");
+    git(sub, "remote", "rename", "origin", "upstream");
+    git(sub, "commit", "--quiet", "--allow-empty", "-m", "pushed upstream");
+    git(sub, "push", "--quiet", "upstream", "HEAD:main");
+    git(app, "add", "lib");
+    git(app, "commit", "--quiet", "-m", "bump");
+    git(app, "push", "--quiet", "origin", "main");
+    assertEquals("", left(BRANCH, REPOS));
+
+    git(sub, "commit", "--quiet", "--allow-empty", "-m", "nowhere");
+    git(app, "add", "lib");
+    git(app, "commit", "--quiet", "-m", "bump again");
+    git(app, "push", "--quiet", "origin", "main");
+    assertEquals("commits app/lib\n", left(BRANCH, REPOS));
   }
 
   /**

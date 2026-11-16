@@ -2704,13 +2704,13 @@ class WorkspacesTest {
     }
     assertTrue(running.invocations().stream().noneMatch(c -> c.startsWith("incus start")));
     assertEquals(
-        "Spec fix-login has no workspace of acme on this runner, and an attach makes none: a run"
-            + " of the spec makes it. Dispatch one with: sail spec dispatch -p acme --spec"
-            + " fix-login",
+        "Spec fix-login has no workspace of acme on this runner (a done spec's is deleted), and an"
+            + " attach makes none: a run of the spec makes it. Dispatch one, which reopens a done"
+            + " spec, with: sail spec dispatch -p acme --spec fix-login --restart",
         refused.getMessage());
     var leaf =
         SailCommandLine.of(new Sail())
-            .parseArgs("spec", "dispatch", "-p", "acme", "--spec", "fix-login");
+            .parseArgs("spec", "dispatch", "-p", "acme", "--spec", "fix-login", "--restart");
     while (leaf.hasSubcommand()) {
       leaf = leaf.subcommand();
     }

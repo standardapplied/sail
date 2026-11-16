@@ -51,6 +51,9 @@ public final class SpecWorkspaces implements AutoCloseable {
   /** How often a pass starts. */
   static final Duration INTERVAL = Duration.ofSeconds(60);
 
+  /** How many times one cause may fail a done spec's decision before it keeps the workspace. */
+  static final int TRIES = 3;
+
   /** How long a workspace is held with nothing started or ended in it before that is said. */
   static final Duration HELD = Duration.ofHours(12);
 
@@ -71,6 +74,7 @@ public final class SpecWorkspaces implements AutoCloseable {
   private final PeriodicPass pass;
   private final Set<String> said = ConcurrentHashMap.newKeySet();
   private final Map<String, Instant> lastHeld = new ConcurrentHashMap<>();
+  private final Map<String, Integer> failures = new ConcurrentHashMap<>();
 
   /**
    * @param workspaces the box's workspaces, whose doors start, stop and delete one
@@ -221,7 +225,12 @@ public final class SpecWorkspaces implements AutoCloseable {
       if (stopped) {
         workspaces.stop(project, workspace.workspace(), id -> false);
       }
-      throw failed;
+      var cause = Strings.oneLine(Objects.toString(failed.getMessage(), "")).split(": ", 2)[0];
+      if (failures.merge(found.name() + "\n" + cause, 1, Integer::sum) < TRIES) {
+        throw failed;
+      }
+      keep(found, workspace, spec, cause + ", " + TRIES + " times");
+      return;
     }
     var now = specs.findById(spec.id()).filter(row -> row.project().equals(project));
     if (now.isEmpty() || !done(now.get()) || occupied(found.name(), true, project, spec.id())) {
@@ -251,9 +260,9 @@ public final class SpecWorkspaces implements AutoCloseable {
       throws IOException, TimeoutException, InterruptedException {
     var theirs = theirs(spec.project(), spec.id());
     for (var run : theirs.stream().filter(SpecWorkspaces::unread).toList()) {
-      reports.finish(runs, run, report -> report != null && runs.recordRead(run.id(), report));
+      reports.finishDone(runs, run, report -> report != null && runs.recordRead(run.id(), report));
       if (runs.findById(run.id()).filter(SpecWorkspaces::unread).isPresent()) {
-        throw new IOException("the usage of run " + run.id() + " could not be read");
+        throw new IOException("could not read the usage of run " + run.id());
       }
     }
     var definition =
@@ -261,10 +270,7 @@ public final class SpecWorkspaces implements AutoCloseable {
             .read(spec.project())
             .orElseThrow(
                 () ->
-                    new IOException(
-                        "the definition of project "
-                            + spec.project()
-                            + " is not readable here, so neither are its repos"));
+                    new IOException("could not read the definition of project " + spec.project()));
     var repos =
         Objects.requireNonNullElse(definition.repos(), List.<ProjectDefinition.Repo>of()).stream()
             .map(ProjectDefinition.Repo::path)

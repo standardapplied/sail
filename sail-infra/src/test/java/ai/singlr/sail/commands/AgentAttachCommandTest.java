@@ -14,12 +14,15 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.api.OperationsFactory;
+import ai.singlr.sail.api.TestWorkspaces;
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.TestDefinitions;
 import ai.singlr.sail.engine.AgentUnit;
 import ai.singlr.sail.engine.FileMutexTest;
 import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.RunPlace;
+import ai.singlr.sail.engine.ScriptedShellExecutor;
+import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.harness.Harnesses;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.Actor;
@@ -665,5 +668,34 @@ class AgentAttachCommandTest {
       Acting.system(() -> new ProjectStore(db).upsert(TestDefinitions.yaml(definition)));
     }
     return dbPath;
+  }
+
+  /**
+   * Major F-M2 of the final look: an attach reaches a spec's workspace through its own door, so one
+   * the idle sweep stopped is started and the attach goes on, and one that is gone is refused
+   * naming the dispatch that makes it.
+   */
+  @Test
+  void anAttachStartsItsSpecsIdleStoppedWorkspaceAndRefusesAMissingOne() throws Exception {
+    var place = RunPlace.of("acme", "u2");
+    var stopped =
+        new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
+            .onOk(
+                "incus list --format json",
+                "[" + TestWorkspaces.specWorkspace("acme", "u2", "Stopped", "uday") + "]");
+    var gone =
+        new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
+            .onOk("incus list --format json", "[]");
+
+    AgentAttachCommand.reach(place, TestWorkspaces.over(stopped));
+    var refused =
+        assertThrows(
+            IllegalStateException.class,
+            () -> AgentAttachCommand.reach(place, TestWorkspaces.over(gone)));
+
+    assertTrue(
+        stopped.invocations().contains("incus start acme-u2"), stopped.invocations().toString());
+    assertTrue(refused.getMessage().endsWith("sail spec dispatch -p acme --spec u2 --restart"));
+    assertTrue(gone.invocations().stream().noneMatch(c -> c.startsWith("incus start")));
   }
 }
