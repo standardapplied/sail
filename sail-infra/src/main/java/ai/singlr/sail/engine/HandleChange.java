@@ -114,11 +114,14 @@ public final class HandleChange {
    * offer a run main would then hold under the old handle, and two overlapping writes cannot leave
    * the credential naming a handle other than the one written last: the write that waits is refused
    * when the identity it read is no longer the box's ({@link Write#requireCurrent}), so it cannot
-   * put the old one back. A box that stops being a node forgets the scope main last named it
-   * ({@link SyncScope}): as main or standalone it holds every project, and a change that died
-   * before forgetting it is repaired at the next {@code sail migrate} or start ({@link
-   * BoxDatabase}). A box with no database yet has no sail-api to read a credential: its first start
-   * issues it ({@code sail server start}). Returns the runs stamped for the new identity.
+   * put the old one back. A node pointed at another main forgets the old main's catalog, so the new
+   * one, a database it never synced with, is taken as its main rather than refused as a rebuilt one
+   * (pointed at the same main again, it keeps it). A box that stops being a node forgets the scope
+   * main last named it ({@link SyncScope}): as main or standalone it holds every project, and a
+   * change that died before forgetting it is repaired at the next {@code sail migrate} or start
+   * ({@link BoxDatabase}). A box with no database yet has no sail-api to read a credential: its
+   * first start issues it ({@code sail server start}). Returns the runs stamped for the new
+   * identity.
    */
   public static List<String> apply(
       Path dbPath,
@@ -160,8 +163,13 @@ public final class HandleChange {
     var renamed = !Objects.equals(before.handle(), after.handle());
     var promoted = after.isMain() && !before.isMain();
     var leftNode = before.isNode() && !after.isNode();
+    var repointed =
+        before.isNode() && after.isNode() && !Objects.equals(before.main(), after.main());
     if (!(renamed || promoted || leftNode)) {
       write.run();
+      if (repointed) {
+        new DatabaseCatalog(db).forgetMain();
+      }
       return List.of();
     }
     var runs = new RunStore(db);
@@ -176,6 +184,8 @@ public final class HandleChange {
     write.run();
     if (leftNode) {
       new SyncScope(db).record(ProjectScope.all());
+    }
+    if (leftNode || repointed) {
       new DatabaseCatalog(db).forgetMain();
     }
     return after.isMain()

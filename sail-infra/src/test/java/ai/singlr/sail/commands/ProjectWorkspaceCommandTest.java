@@ -113,7 +113,7 @@ class ProjectWorkspaceCommandTest {
     var ran = SailCli.run("project", "workspace", "create", "acme", "w", "--json", "--dry-run");
 
     assertEquals(1, ran.exit());
-    assertTrue(ran.err().contains("--json and --dry-run cannot be combined"), ran.err());
+    assertTrue(ran.out().contains("--json and --dry-run cannot be combined"), ran.out());
   }
 
   @Test

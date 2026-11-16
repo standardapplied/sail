@@ -59,7 +59,7 @@ to do it. Every feature is judged by whether it helps coordinate agents.
    │   project) + Podman + agents│             │  + Podman + agents                         │
    └────────────────────────────┘             └──────────────────────────────────────────┘
          ▲                                                ▲
-         │ SSH (gateway: sail@box, _gateway --fde)        │
+         │ SSH (gateway: sail@box, _gateway --fde-id)     │
    ┌─────┴───────────┐                              GUI client / browser, HTTP via a TLS reverse
    │ Mac thin client │                              proxy with passkeys, to sail-api
    │ sail (darwin)   │
@@ -91,7 +91,12 @@ pushed yet (work main took after the copy is lost with it); a main set up empty 
 its nodes refuse it. A main restored in place from an older copy keeps its box id, so its log sits
 below the node's checkpoint: the node then walks every head again from the copy instead of reading
 nothing and saying it is in sync. A box that stops being a node forgets main's catalog as it forgets
-its scope. A copy taken before the release that mints catalog ids is minted a new one when restored,
+its scope, and so does a node pointed at another main (`sail init --main <other>`): it is
+joining that main, not meeting a rebuilt one. Pointed at the same main again, it keeps it. Before
+anything changes, `init --main <other>` says what following the other does (everyone the old main
+described but the box's own person removed at the first sync with their logins, counted; the
+edits not yet pushed, counted, offered to the new main; the old main's rows kept) and asks, or
+takes `--yes`; where nobody can answer it is refused with that text. A copy taken before the release that mints catalog ids is minted a new one when restored,
 so take a fresh copy after upgrading. Main is never rebuilt from its nodes.
 
 ## Module layout
@@ -138,7 +143,7 @@ Eighteen `*Store` classes plus the sync and journal machinery, all over `Sqlite`
 | `RunStore` | `runs`, every agent run with its lane, unit, principal and reservation | Yes, entity `run`, pushed only by the box that executes it |
 | `ReviewStore` | `reviews`, `review_stages`, and `review_findings` as the projection of each review's content | Yes, entity `review`, its findings as content |
 | `BlobStore` | `blobs` and their chunks, the content every synced content field names by hash | Content crosses by hash, fetched on demand |
-| `FdeStore` | `fdes`, the human principals and roles | One-way, main to node roster pull |
+| `FdeStore` | `fdes`, the human principals and roles | One-way, main to node roster pull, each row holding main's id |
 | `FdeSshKeyStore` | `fde_ssh_keys`, SSH fingerprint to FDE | Local |
 | `FdePairingStore` | `fde_pairings`, the public key and token name of each FDE's Mast pairing | Local |
 | `EventStore` | `events`, the audit stream persisted from the bus | Local |
@@ -210,7 +215,7 @@ and the spec that closes it.
 | C5 | A box takes a spec or room only into a project its catalog holds within the scope main grants it: a birth, a move or a restore into any other is refused before anything is written, for every write a box decides as its own (main's word and the box's own machinery are not asked); main denies such a pushed row as gone and the node keeps it, offering it again — unless the project lies outside the pusher's scope, which the scope rule answers naming nothing of main's catalog; a row staying in its project is never refused, and one in a project the node made waits for main to take the project. Only a node is scoped: on main or a standalone box that scope is every project, whatever it last heard as a node, decided from a whole `host.yaml`, never from one absent or half written. | `UnheldProjectTest` (the refusal, its list and a scoped node's grant line; a project held beyond the scope; a move; a restore; a legacy row; a room; main's and the machinery's lanes), `UnheldProjectSyncTest` (a forged row denied every round and kept; a scoped pusher hears only the scope rule; a restore over main's tombstone; a project the node made; an edit of a row main holds), `ScopedSyncTest` (a project row main holds but the pusher is not granted), `SailOperationsSyncTest` (the door's code and message), `HandleChangeTest` (a box leaving the node role forgets its scope; a renamed node keeps it), `SyncCliTest` (main's and a standalone box's migrate, and the migration every start runs, forget a scope a role change left behind, a node's keeps it, one that starts while a node rewrites its identity, or finds `host.yaml` gone or empty, leaves the scope), `HostProvisionerTest` (a re-run `host init` keeps the sync identity, and an identity change that finished while it ran), `HostYamlTest` (any other rewrite of `host.yaml` waits out an identity write and keeps it) |
 | C6 | Sync's notices are true and each prints once per round: a node never seeds the demo, and lets go of one it seeded before it joined, so a fresh node drops nothing; parked conflicts are a warning, and the round exits 0. | `DemoSeederTest` (the seed, and the node's first round through `SyncOperations` announcing nothing), `SyncCliTest` (a node's migrate and demo route seed nothing), `SyncCommandTest` (a round's summary repeats no notice; the conflict line), `ScopedSyncTest` |
 | E1 | An erased id is never written again on any box; what belongs to it goes with it; a node removes only what main never acknowledged. | `ErasureTest`, `ErasureSyncTest`; a prune racing a born-in spec, on an admin and a member node: `ErasureAuditTest` |
-| S1 | A scoped node holds exactly the rows of its granted projects: no row, erasure, blob or roster email of another project reaches it over any wire. | `ScopedSyncTest` (every type from an empty node; a blob fetched by hash and a chunk no served manifest lists are refused; an erasure reaches the nodes that held the row and no other; a version main took in a project since revoked is neither handed back nor its content served; an offer names only content its session sent or was served, and a scoped session is asked for every blob and chunk it announces, held on main or not), `ScopedSyncServerTest` (the roster of those who share a project, no email but the node's own, no assignee disabled; a scoped node removes whom main no longer lists, with their credentials, and never its own FDE), `NativeFleetIT` (real processes: rows, heads, blobs and roster) |
+| S1 | A scoped node holds exactly the rows of its granted projects: no row, erasure, blob or roster email of another project reaches it over any wire. | `ScopedSyncTest` (every type from an empty node; a blob fetched by hash and a chunk no served manifest lists are refused; an erasure reaches the nodes that held the row and no other; a version main took in a project since revoked is neither handed back nor its content served; an offer names only content its session sent or was served, and a scoped session is asked for every blob and chunk it announces, held on main or not), `ScopedSyncServerTest` (the roster of those who share a project, each with the email they commit under, and the bare ids of everyone else; no assignee disabled; a scoped node withdraws whom main no longer shows it and removes, with their credentials, only whom main no longer holds, never its own FDE), `NativeFleetIT` (real processes: rows, heads, blobs and roster) |
 | S2 | A scoped actor reads and writes inside its scope on every box; a write outside it is refused in the journal, on every lane, before the type's own rule. | `ScopeRuleTest` (a create into a hidden project is a project not found; a write over a hidden row says only that the id is taken; specs, posts, files and catalog rows on this box's lanes; a write over a review is decided by where the review is filed, wherever its spec is now; a prune), `MessageStoreTest` (a conversation is read message by message by the project each was filed under, the page as long as its limit of what its reader sees; a reply answers only a message its writer may read), `ScopedSyncTest` (a forged push, a project row, an erase request, and one for a spec moved into the scope whose earlier review is not; a row is born naming only what its pusher may see: a spec into or over a conversation outside the scope, a room over one, a run of a spec or room outside it, none told whose it is), `EraseAuthorityTest` (a scoped owner erases a spec only when all that belongs to it is inside the scope), `ScopedReadsTest` (every read route under `/v1` answers a scoped caller byte for byte the same whether or not another project exists, held complete against `Operations`; a write into a hidden project is a project not found and one addressed to a hidden row meets what a missing row answers; the terminal door; a run sees its owner's scope; a spec is born neither into nor over a hidden room; a spec moved into the scope shows nothing of the room and run it left behind, nor any review written before the move, its findings, their count or a follow-up drafted from them, and is not its owner's to prune, rehearsed or real, while anything belonging to it is filed outside the scope; a room's refusal names only the specs its reader sees; every write route that addresses a row answers one of a hidden project as one nobody holds, held complete against `Operations`; a moved spec is neither seated in nor restored to what it left behind, and shows no question asked in the room it left, nor is a message of that room announced under the spec's project; a run never names the owner of a spec that left the scope; a spec moved into the scope brings none of the talk held in the project it left, through its room, its page cursors, its open question or a run's inbox; a run is delivered nothing of a project its FDE no longer holds; a scoped owner's write on its spec rewrites no review filed outside its scope), `BuildDispatchCoverageTest` (a scoped caller dispatches no spec whose earlier review is filed outside its scope, and its prompt carries no talk filed outside it), `ReadFilterTest` (the read filter; an unrestricted read never asks a row's project), `SseHandlerTest` and `AgentLogStreamerTest` (the event and run-log streams; a scope changed while a run-log stream is open), `OpenStreamRecheckTest` (an open event stream follows a grant and a revoke from the next event a second later, asks once per second, and ends when its FDE is removed or disabled), `ConflictOperationsTest`, `ScopedRosterApiTest` (a session and a token of a scoped FDE both resolve to a scoped caller), `NativeFleetIT` (the gateway's `spec list` with a scoped node's key) |
 | S3 | Main decides scope alone, from its grants and the project each change head carries, and remembers nothing of what it sent. | `ScopedHeadsTest` (every type's head carries its project from its first write, through a deletion, a withdrawal, an erasure and a purge; a review and a message stay filed where they were first written when their spec moves and they are written again; the backfill), `MessageStoreTest` (a reply is filed with the message it answers), `ScopedSyncTest` (a thousand foreign heads are paged past by their heads alone, no row loaded, and the checkpoint reaches main's tip), `ProjectScopeTest` |
 | S4 | A grant shows after the next round; a revocation removes the project in the same round with its container and directory, unpushed work included, announced once and counting the unpushed rows only when there are any; a narrowing revokes every project it does not grant, and a widening grants every project. | `ScopedSyncTest` (a grant resets the checkpoints and what was held re-adopts unwritten; a revocation with nothing unpushed says so; a revocation drops rows, history, heads, offers, requests and content at the round's start; a project with a run under way here is kept until the run ends; what was erased or deleted before the node first synced leaves with its project; with a spec moved each way between two projects, a revocation takes what main files under the project and leaves what it files under the other, and the node equals main within its scope; a thread begun before its room moved arrives and leaves whole), `SyncScopeTest`, `ScopeChangeRoundTest` (a narrowing and a widening through a whole round; a container Sail provisioned deleted and one it did not kept; an unreachable Incus leaves the container to the next round; a run under way keeps both; an out-of-scope project's leftovers taken by the first round; an unchanged round's one `incus list`, and none unscoped), `ProjectTeardownTest`, `ScopeTeardownIT` (a real Incus daemon), `NativeFleetIT` (an FDE that joined unscoped narrowed in place, keeping its key) |
@@ -294,8 +299,12 @@ its erasure must reach the nodes that held it and never one that did not.
   written into a row main then serves. A scoped node therefore sends again the content of a
   row it changes when main already holds it; an unscoped session is asked only for what main
   lacks, as before;
-- the roster is `FdeStore.visibleTo`: everyone whose own scope admits one of the principal's
-  projects, without their emails, and the principal's own row whole;
+- the roster is everyone `FdeStore.visibleTo` shows (whose own scope admits one of the
+  principal's projects, and the principal), each row whole: handle, name, role, status and the
+  email they commit under, since one of them may own a workspace there; and every other person
+  main holds as their main id alone (`{"id": …}`), nothing else, so the node can tell a person
+  main removed from one it no longer shows. A person withdrawn there has their name and email
+  cleared again;
 - a push is decided for scope first (`ScopeRule.pushed`), before the erasure and staleness
   checks that would otherwise answer about a row the pusher may not see, and its denial
   carries no version; an erase request for an id outside the scope is answered as one main
@@ -764,7 +773,7 @@ word), and the sync repeats it (`SshSyncChannel.authorisation`) while it still n
 handle, key, main and pin, telling the node to send it to main's operator and sync again, before
 ssh's words. On main, that key sits on the locked `sail`
 user's `authorized_keys` as a forced command,
-`command="…/sail _gateway --fde <handle>",restrict …`. The gateway resolves the FDE and
+`command="…/sail _gateway --fde-id <id>",restrict …`. The gateway resolves the FDE by that id and
 admits the `_sync` session. The write gate lives next to the write: every commit of a `_sync`
 session is denied to a read-only viewer role, which may still pull.
 
@@ -913,8 +922,8 @@ clone a project's source repos into its container at provision time, not to move
   - FDE-gateway commands (`spec`, `events`, `fde`, and `agent stream|sessions|review`) target
     `sail@host`; the other `agent` verbs read the control plane directly as the box's own
     person, so the gateway refuses them and the client sends them to the plain host. The
-    engineer's SSH key hits the forced command `sail _gateway --fde <handle>`, which
-    resolves their FDE, mints a short-lived session token, and re-executes the command, so
+    engineer's SSH key hits the forced command `sail _gateway --fde-id <id>`, which
+    resolves their FDE by this box's id for them, mints a short-lived session token, and re-executes the command, so
     the loopback API sees who is acting and asks `Access` for each thing they do.
   - Everything else (project lifecycle, interactive `shell` and `exec`) is forwarded as the
     plain SSH host, because it needs host privileges the `sail` user must never have.
@@ -1277,10 +1286,10 @@ own, about three (2.9 to 4.3 s over 32 creates, median 3.2 s).
     a new machine-id, the project's name as its hostname (which the in-container helpers read the
     project from), new SSH host keys made under that name, each repo fetched and on the branch
     named after the workspace, sshd restarted onto the new keys once systemd answers (it boots
-    while the repos are fetched), and the dev user's bus. A fetch whose host does not resolve yet
-    is asked again until 10 s have passed (`Workspaces.FETCH`, a deadline on bash's `SECONDS`, git
-    run with `LC_ALL=C` so its words are the ones matched): a clone's address comes up a fraction
-    of a second before its resolver, and more when several start at once. The script prints
+    while the repos are fetched), and the dev user's bus. Each fetch first waits, up to 10 s, until
+    its remote's host resolves, asking the resolver itself (`getent hosts`, `Workspaces.FETCH`, a
+    deadline on bash's `SECONDS`), never reading a failed fetch's words: a clone's address comes up
+    a fraction of a second before its resolver, and more when several start at once. The script prints
     `sail-step <step> <epoch ms>` as each step ends, and `sail-count fetch_retries <n>`, how many
     times its fetches asked again.
   - Then come the shared files and the machinery, as `project start` reconciles them, and last one
@@ -1574,7 +1583,8 @@ Each row with the tests that prove it:
     and what it holds (uncommitted changes, untracked files, a stash, commits origin lacks, a push
     origin refused) and the commands `sail project workspace start`, `shell` and `delete`. The
     sweep never starts, reads or deletes a kept workspace again; it stops it when idle, as any
-    other. Its person deletes it, or a run of the spec enters it (`Workspaces.enterSpec`), which
+    other. A removal outranks that promise: a removed person's kept workspace is started for the
+    strip that takes their credentials out, stopped again, and its kept mark left as it was. Its person deletes it, or a run of the spec enters it (`Workspaces.enterSpec`), which
     clears the mark, so a spec done again is decided again; an attach is not a run and leaves the
     mark.
   - **A deleted workspace takes its sessions.** The next run of the spec's conversation, a room's
@@ -1620,9 +1630,8 @@ Each row with the tests that prove it:
   `BoxInstancesTest.anInstanceARunningOperationNamesIsInUse`,
   `WorkspacesTest.aRunEnteringItsSpecsKeptWorkspaceClearsTheMark`.*
 
-- **T1. A template holds no one's credentials.** A build provisions with its caller's tokens
-  (`--git-token`, or `GITHUB_TOKEN` and its kin) for its own clone and fetches, with no git
-  identity and no trusted key. After the provisioner and before the stop, one root step
+- **T1. A template holds no one's credentials.** A build provisions with the box person's stored
+  tokens (T6) for its own clone and fetches, with no git identity and no trusted key. After the provisioner and before the stop, one root step
   (`WorkspaceCredentials.STRIP`) removes `/home/dev/.git-credentials`, gh's `hosts.yml`, the dev
   user's `user.name` and `user.email`, and every line of its `authorized_keys`. A check
   (`WorkspaceCredentials.HELD`) then proves the template holds nothing by content, not by a list
@@ -1631,7 +1640,7 @@ Each row with the tests that prove it:
   never on a command line (an empty pattern, which would match every file, fails the check);
   (b) git reports
   no user name or email at system or global level; (c) no `authorized_keys` under any home has a
-  line; (d) gh reports no login. A search or a git or gh command that errors fails the build, as
+  line; (d) gh holds no login file (`hosts.yml`), read by existence, never by what gh prints. A search or a git or gh command that errors fails the build, as
   does anything found: nothing is recorded or snapshotted and the version before stays current. A
   failed build is stripped too; what the strip does not remove is named, never its value, at most
   three files and how many more, with the remedy to remove what wrote it, a step of the
@@ -1703,6 +1712,43 @@ Each row with the tests that prove it:
   `WorkspacesTest.aStoppedWorkspaceTakesItsOwnersCredentialsAsTheyAreNowWhenItStarts`,
   `LoginOperationsTest.aGitTokenChangeReachesThePersonsWorkspacesAndSaysEachItDidNot`,
   `WorkspaceIT.aReplacedTokenReachesARunningWorkspaceAtOnceAndAStoppedOneWhenItStarts`.*
+- **T6. A git token goes only to the host it was stored for.** The one source of a token is a
+  person's `sail git login <host>`, keyed by the host as the command takes it, port included
+  (`GitCredentials.forRepos`, `resolveTokenForHost`): no substring, prefix, suffix, provider guess
+  or wildcard, so a definition naming any host gets nobody's token for it, and a URL that carries
+  a credential is refused naming its host alone. A spec's workspace takes its owner's (T2); the
+  host commands that clone (`project apply`, `repo add`, `demo`, `template build`, `workspace
+  create`) take the box person's (`HostIdentity.gitTokens`, `WorkspaceVerbs.Keeper`) as
+  `CheckedTokens`, which only `CheckedTokens.of` makes, past the refusal, bound to the repos it
+  was checked for, and which the applier, the provisioner and a template's source take instead of
+  a map: a host command cannot write a token without the check, nor for other repos than those
+  checked. A command hands the keeper a definition; the keeper asks each repo's host with the real
+  probe. Each command checks first, before it creates, starts, writes or asks
+  anything. The project's container is given them by the workspace's own renew step
+  (`WorkspaceCredentials.renew`): the store replaced whole, or removed when nothing is to be
+  written, and gh left logged in to exactly the GitHub hosts with a token, in place: a host with
+  none logged out by its own name, a kept host logged in again only when its token changed and
+  never logged out on the way, so a live run's `gh` never meets a gap. A token removed, or for a
+  host no repo names any more, thus leaves it at the next apply; what an apply removes with
+  nothing in its place, which may have been made by hand, is said in its output; `repo add` writes
+  the store an apply writes. Nothing is read from a process's
+  environment: a repo whose host asks for credentials with no stored token is refused
+  (`login_not_stored`, under `--json` too), naming `sail git login <host>`, or on a box that names
+  no person the setup that makes one first, and when `GITHUB_TOKEN`, `GITLAB_TOKEN` or
+  `BITBUCKET_TOKEN` is set the refusal says Sail does not read it (only whether it is set is read).
+  A template is searched for the tokens its build was given alone. No command takes a token on
+  its command line. A host the probe cannot reach asks for nothing, so its clone fails with git's
+  own words.
+  *`GitCredentialsTest.aTokenGoesToItsOwnHostAloneAndToNoHostThatMerelyContainsIt`,
+  `GitCredentialsTest.aBoxWithNoPersonIsToldToNameOneBeforeStoringALogin`,
+  `GitCredentialsTest.aRepoUrlThatCarriesACredentialIsRefusedWithoutEchoingIt`,
+  `ProjectApplierTest.anApplyWithNoTokenToGiveTakesTheStoreAndGhsLoginOut`,
+  `ProjectApplierTest.aTokenForAHostNoRepoNamesAnyMoreIsGoneAfterTheApply`,
+  `ProjectApplyCommandTest.anApplyWhoseRepoAsksForATokenNoneIsStoredForIsRefusedBeforeItTouchesAnything`,
+  `ProjectDemoCommandTest.aDemoWhoseRepoAsksForATokenNoneIsStoredForIsRefusedBeforeItWritesAnything`,
+  `WorkspaceVerbsTest.aTemplateIsSearchedForTheTokensItsBuildWasGivenAndNoOther`,
+  `ProjectAddRepoCommandTest.addingARepoOnAnotherHostKeepsTheEarlierHostsTokenAndAddsNoOther`,
+  `RootRequiredTest.noCommandTakesAGitTokenOnItsCommandLine`.*
 - **Keys follow owners.** One walker (`BoxInstances.wholeWorkspaceOf`) finds a person's
   workspaces for keys and tokens alike. A pairing and `host config set ssh-public-key` both
   (`ContainerAuthorizedKeys.rekeyWorkstation`) take the old workstation key out of every container and
@@ -1710,17 +1756,47 @@ Each row with the tests that prove it:
   reaches that person's whole workspaces; a key removal (`fde key rm`, a replaced or unpaired
   workstation key) reaches every container and workspace; a stopped workspace takes its owner's
   keys as they are at its next start. A person removed (`fde rm`, or a scoped node's roster round)
-  has every workspace they owned lose its token store, gh login and keys, and its owner, through
-  its files, running or stopped, and their stored logins and git tokens on the box erased. A
-  person `disabled` on a box (a node disables whom a roster round no longer lists, never its own
-  person) holds nothing usable there: their workspaces are stripped and made nobody's at once,
-  which their next entry undoes, and the give and the login doors refuse them, but their stored
-  logins stay, since a node cannot tell a person main removed from a round that did not list them;
-  they are erased once the person has been disabled for 24 hours of sail-api's monotonic time, so
-  neither a clock step nor a restart erases early. Until `sail-a-node-knows-a-person-by-mains-id`
-  lands, a handle main gives again within one sync round keeps the previous holder's stored logins
-  on a node. A stored git token is at least 16 characters, a sanity floor no forge's token is
-  under. sail-api's pass
+  has every workspace they owned lose its token store, gh login, identity and keys, and its owner:
+  the give's own strip (`WorkspaceCredentials.STRIP`, one list of what a give writes,
+  `WorkspaceCredentials.FILES`) runs in the container, a stopped workspace started for it and
+  stopped again, each removal idempotent and checked by what is left, never by what a failed
+  command said; and their stored logins and git tokens on the box are erased. A workspace's label
+  holds its owner's id on this box beside the handle (`user.sail.owner_id`), so the pass judges it
+  by that stored id, at every pass and after a restart, and a handle main gave to someone new
+  never makes the old holder's workspace theirs. A workspace the pass cannot strip (it will not
+  start, or its strip fails) is tried three times an idle period apart, then left as it is and
+  said once with its cause; its next start, by anyone, strips it first, then makes it nobody's
+  when its handle is now another person's (never giving it to them), or refuses as before when
+  its person is not active here. Every start passes through one place (`Workspaces.giveOrStop`:
+  `project workspace start`, an attach, a run's entry), and one that cannot give the owner's
+  credentials stops the workspace again before the failure leaves, so a running workspace with an
+  owner always holds what their last successful start, create or re-own gave, and a run entering
+  one it finds running needs to give nothing. A node
+  knows each person by main's id (`fdes.main_id`): each roster round lists the people main shows
+  the node and, by id alone, everyone else main still holds. A person main described whose id main
+  no longer holds at all, removed or their handle given to someone new under a new id, is removed
+  there with every credential of theirs (`FdeStore.removeUndescribed`); one main still holds but no
+  longer shows the node, who left its projects, is withdrawn (`FdeStore.withdraw`): disabled, their
+  name and email forgotten, what they stored kept, and enabled again when listed again. Nothing
+  is removed or withdrawn by a round that does not name the box's own person. The people a scoped node
+  is shown come with the emails they commit under there; the bare ids tell it how many others
+  main holds and their opaque ids, nothing else. A row made on the box
+  before main described it takes main's id on first sight only when it is the box's own person or
+  has the same, non-blank email; otherwise it is someone else. At the box's first round with a main
+  (it holds no one that main's ids describe) that is refused before anything changes, naming both
+  emails and the commands that fix it, or only the removal where the box cannot see both emails. A
+  person main never described exists on this box alone, so correcting or removing them is the
+  box's own matter: its own person may do it there whatever their role on main (`sudo sail fde rm`,
+  `sudo sail fde update --email`), and anyone else only if they may manage people; people main
+  described are main's, and a node adds no one. In a later round main's person takes
+  the handle and the local row is moved aside, renamed `<handle>.local-<4 hex>` and disabled with
+  everything it stored, said once with the command that removes it, naming handles only: a round never deletes a person
+  main never described, and only an id main no longer holds at all erases anyone. Main mints an id when a person is added and never
+  changes it, so a main rebuilt by adding its people again gives each a new id, and every node
+  takes them as new people who store their logins again; only a main whose database file is
+  restored keeps them. The box's own person is never removed or disabled by a round and takes a
+  new id in place. A stored git token is at least 16 characters, a sanity floor no forge's token
+  is under. sail-api's pass
   reads the roster each minute and lists Incus only on its first
   pass, when someone stopped being active or their handle went to someone else, or to retry a
   workspace it could not reach, said once. Nobody stores a login for another person: a store
@@ -1746,7 +1822,7 @@ Each row with the tests that prove it:
   template version it was cloned from). Its owner deletes it.
 - **The resolver wait is exercised by the fleet alone.** A test body reaches no network, so the
   wait for a repo's host to resolve (`Workspaces.FETCH`) is pinned and run against a stand-in git
-  in `WorkspacesTest`. The fleet's storage row runs it against a real resolver: it gives acme the
+  and resolver in `WorkspacesTest`. The fleet's storage row runs it against a real resolver: it gives acme the
   public `octocat/Hello-World` for the row, makes ten workspaces at once, checks each is whole
   with the repo on its own branch, and writes each one's ready steps and fetch retries into the
   report. Until that row has run green on this release, the wait is not proven against one.
@@ -1896,7 +1972,9 @@ the one whose name and keys match.
 - **The workspace is the rollback.** Dispatch takes no snapshot (`--snapshot` and
   `agent.auto_snapshot` are gone; a definition naming the key is refused like any key `agent` does
   not have): the project's container is never touched by a spec's run, and the spec's tree is its
-  workspace's. `sail project workspace list` shows each workspace's spec and owner; `stop` and
+  workspace's. `sail project workspace list` shows each workspace's spec and owner, the owner by the id its
+  label stores: one no active person holds is shown as `removed`, never under the handle someone
+  else now holds (a label with a handle alone is shown by it); `stop` and
   `delete` refuse a workspace a live run of its spec is in, and `project destroy` takes the run
   workspaces with the rest (W11). A spec's workspace stops by itself 10 minutes after its last
   run, and goes once its spec is done and nothing its runs made would be lost (W13).
@@ -3626,8 +3704,17 @@ default. There are exactly two identity doors, and both land on the same `fdes` 
 principal `RoleRule` resolves for it, and `Access`:
 
 1. **Terminal: SSH key to FDE.** Each registered key is pinned in the `sail` user's
-   `authorized_keys` to `command="…/sail _gateway --fde <handle>",restrict`, with no shell
-   and no forwarding. Command classification is default-deny: only `spec`, `agent`, and
+   `authorized_keys` to `command="…/sail _gateway --fde-id <id>",restrict`, with no shell
+   and no forwarding. The pin is the key's person by this box's id for them, never a handle:
+   a sync round can move a handle aside or main can give it to someone new, and a line written
+   before must then fail, not open the door for whoever holds the name. A line whose id is no
+   active person's is refused with one sentence (`SshGateway.authorizeById`). The file holds a
+   line for active people's keys only (`FdeSshKeyStore.list`), and every sync round brings it into
+   line with the roster it leaves, rewriting it only when it differs (`AuthorizedKeysSync`); a
+   round that cannot write it fails and the next round tries again. A line written before keys
+   were pinned by id (`--fde <handle>`) is still read by handle, in `GatewayCommand`, so an
+   upgraded box works until `migrate` regenerates the file, which the upgrade runs; no release
+   writes one any more. Command classification is default-deny: only `spec`, `agent`, and
    `events` reach the loopback API, `fde` is admin-gated at the gateway (with two
    self-service carve-outs: any active FDE may `fde passkey list|rm` and `fde enroll` its
    own pinned handle, which is what lets `sail enroll` self-mint an enrollment ticket),
@@ -4288,9 +4375,9 @@ no pairing is removed through the gateway as before, and no key file is touched.
 - Dispatch gives a coding agent broad power inside its container by design. Dispatch is an
   explicit act of an FDE, the container is the isolation boundary, and the agent's output is
   untrusted.
-- A few flags take secrets as process arguments (`--git-token`, `--token`) as explicit
-  escape hatches; the environment, a token file or a prompt with echo off are the documented
-  ways.
+- One flag takes a secret as a process argument (`--token`, the API bearer) as an explicit escape
+  hatch; the environment, a token file or a prompt with echo off are the documented ways. A git
+  token is never an argument: `sail git login` reads it from stdin (T5).
 
 ## Native clients
 
@@ -4649,7 +4736,17 @@ detection. The node and main server use the same registry and reports reduce in 
 status`), HTTP (`GET /v1/sync`), and Mast read the same persisted attempt, success, failure,
 and report. `last_attempt_at` is stamped when a round starts and again when it finishes, so
 retry delays start after a failed connection finishes timing out. `state` makes in-flight rounds visible; `stale_since` preserves the first failure
-when a node has never reached main. Health is local and is not another replicated entity.
+when a node has never reached main. Health is local and is not another replicated entity. The
+kinds a failure is recorded as (`unreachable`, `refused`, `removed`, `protocol`, `store`) are one
+list, `SyncTransportException.KINDS`, from which the table's check is built, so a kind the code
+gives is one the store accepts. A failure that cannot be recorded is said once for its cause and
+rides on the round's error, never dropped. A round refused because main no longer knows the box's
+person is `removed`: `sail sync status` and `sail host status` both say so with the line that
+brings them back. It is `removed` only when this box has had a round with that main (a
+`sync_health` success for it); a main the box never synced with, one it was just pointed at, is
+told to authorise the box, never that it removed anyone. Every door that acts for the box's
+person refuses one main took off every project the box holds with the one sentence
+`CliOperator.refusal` gives, the API's login doors included.
 
 `SyncScheduler` combines debounced writes with periodic/read freshness and the pure `Backoff`
 policy: 15/30/60/120 seconds with ±20% jitter, then an open circuit at five failures. Reads

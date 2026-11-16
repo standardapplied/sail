@@ -16,12 +16,12 @@ import ai.singlr.sail.config.ProjectDefinition;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.Banner;
 import ai.singlr.sail.engine.BoxInstances;
+import ai.singlr.sail.engine.CheckedTokens;
 import ai.singlr.sail.engine.ContainerExec;
 import ai.singlr.sail.engine.ContainerManager;
 import ai.singlr.sail.engine.ContainerManager.ContainerInfo;
 import ai.singlr.sail.engine.ContainerSailSetup;
 import ai.singlr.sail.engine.ContainerState;
-import ai.singlr.sail.engine.GitCredentials;
 import ai.singlr.sail.engine.HostInfo;
 import ai.singlr.sail.engine.IncusDeviceManager;
 import ai.singlr.sail.engine.LocalIdentity;
@@ -50,7 +50,6 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
-import java.util.Map;
 import java.util.Optional;
 import java.util.function.Function;
 import java.util.function.Supplier;
@@ -97,26 +96,25 @@ public final class ProjectApplyCommand implements Runnable {
   @Option(names = "--yes", description = "Skip confirmation prompts (for non-interactive use).")
   private boolean yes;
 
-  @Option(
-      names = "--git-token",
-      description = "Access token for cloning private repos over HTTPS.",
-      defaultValue = "${GITHUB_TOKEN}")
-  private String gitToken;
-
   private final Supplier<Box> box;
   private final Function<Boolean, ShellExec> shells;
+  private final Supplier<WorkspaceVerbs.Keeper> keeper;
 
   public ProjectApplyCommand() {
-    this(Box::here, ShellExecutor::new);
+    this(Box::here, ShellExecutor::new, WorkspaceVerbs.Keeper::here);
   }
 
   /**
    * @param box the box apply provisions on
    * @param shells the host shell, by whether this is a dry run
    */
-  ProjectApplyCommand(Supplier<Box> box, Function<Boolean, ShellExec> shells) {
+  ProjectApplyCommand(
+      Supplier<Box> box,
+      Function<Boolean, ShellExec> shells,
+      Supplier<WorkspaceVerbs.Keeper> keeper) {
     this.box = box;
     this.shells = shells;
+    this.keeper = keeper;
   }
 
   /** The box apply provisions on: its database, its host.yaml and sail-api's socket directory. */
@@ -149,7 +147,7 @@ public final class ProjectApplyCommand implements Runnable {
 
   @Override
   public void run() {
-    CliCommand.run(this::execute);
+    CliCommand.run(json, this::execute);
   }
 
   private void execute() throws Exception {
@@ -186,6 +184,7 @@ public final class ProjectApplyCommand implements Runnable {
             operator);
     requireReadyBox(operator);
     var observer = shells.apply(false);
+    var tokens = keeper.get().check(config);
     var shell = shells.apply(dryRun);
     var observed = new ContainerManager(observer);
     var mgr = new ContainerManager(shell);
@@ -210,6 +209,7 @@ public final class ProjectApplyCommand implements Runnable {
     if (!ProjectProvisioner.provisionedFrom(recorded, config, workstationKey)) {
       provision(
           config,
+          tokens,
           git,
           shell,
           action == Action.CREATED,
@@ -224,7 +224,7 @@ public final class ProjectApplyCommand implements Runnable {
       System.out.println();
     }
 
-    var outcome = converge(observer, shell, config, git, operator);
+    var outcome = converge(observer, shell, config, tokens, git, operator);
 
     if (json) {
       System.out.println(YamlUtil.dumpJson(jsonSummary(config.name(), action, outcome)));
@@ -284,6 +284,7 @@ public final class ProjectApplyCommand implements Runnable {
 
     var workstationKey = WorkstationIdentity.registered();
     var git = LocalIdentity.detect().git();
+    var person = keeper.get();
     var rows = new ArrayList<LinkedHashMap<String, Object>>();
     var applied = 0;
     var failed = 0;
@@ -310,6 +311,7 @@ public final class ProjectApplyCommand implements Runnable {
           ProjectMutations.requireResources(definition.get(), operator);
         }
         var targetPlan = planTarget(target.state(), definition.orElse(null));
+        var tokens = targetPlan.config() == null ? null : person.check(targetPlan.config());
         var action = targetPlan.action();
         if (action == Action.STARTED) {
           mgr.start(project);
@@ -321,6 +323,7 @@ public final class ProjectApplyCommand implements Runnable {
           if (!ProjectProvisioner.provisionedFrom(recorded, targetPlan.config(), workstationKey)) {
             provision(
                 targetPlan.config(),
+                tokens,
                 git,
                 shell,
                 false,
@@ -329,7 +332,7 @@ public final class ProjectApplyCommand implements Runnable {
                 operator);
             action = Action.CREATED;
           }
-          outcome = converge(observer, shell, targetPlan.config(), git, operator);
+          outcome = converge(observer, shell, targetPlan.config(), tokens, git, operator);
         } else {
           outcome = convergeMachineryOnly(observer, shell, project);
         }
@@ -350,10 +353,7 @@ public final class ProjectApplyCommand implements Runnable {
       } catch (Exception e) {
         failed++;
         if (json) {
-          var row = new LinkedHashMap<String, Object>();
-          row.put("name", project);
-          row.put("error", CliCommand.describe(e));
-          rows.add(row);
+          rows.add(failedRow(project, e));
         } else {
           System.err.println(
               Banner.errorLine(
@@ -372,6 +372,16 @@ public final class ProjectApplyCommand implements Runnable {
       System.out.println(Ansi.AUTO.string(allSummaryLine(applied, failed)));
     }
     requireAllApplied(failed);
+  }
+
+  /**
+   * A project {@code --all --json} could not apply: its name and the API's refusal, code and all.
+   */
+  static LinkedHashMap<String, Object> failedRow(String project, Exception failure) {
+    var row = new LinkedHashMap<String, Object>();
+    row.put("name", project);
+    row.put("error", CliCommand.refusalOf(failure).toMap());
+    return row;
   }
 
   /**
@@ -459,6 +469,7 @@ public final class ProjectApplyCommand implements Runnable {
       ShellExec observer,
       ShellExec shell,
       ProjectDefinition config,
+      CheckedTokens tokens,
       LocalIdentity.GitIdentity git,
       OperatorCommand operator)
       throws Exception {
@@ -473,14 +484,12 @@ public final class ProjectApplyCommand implements Runnable {
     var warnings =
         new ArrayList<>(applier.checkUnsupportedChanges(config, info.limits(), operator));
     var sshUser = ProjectDefinition.USER;
-    var token = Strings.isNotBlank(gitToken) ? gitToken : null;
 
     var results = new ArrayList<ProjectApplier.ApplyResult>();
     results.add(applier.applyPackages(project, config.packages()));
     results.add(applier.applyServices(project, config.services()));
     results.add(applier.reconcileServices(project, config.services()));
-    results.add(
-        applier.applyRepos(project, config.repos(), sshUser, GitCredentials.singleTokenMap(token)));
+    results.add(applier.applyRepos(project, config.repos(), sshUser, tokens));
     results.add(applier.applyWorkspaceFiles(project, SailPaths.projectFilesDir(project), sshUser));
     var agentInstall = config.agent() != null ? config.agent().installs() : null;
     results.add(applier.applyAgentTools(project, agentInstall));
@@ -624,6 +633,7 @@ public final class ProjectApplyCommand implements Runnable {
    */
   private void provision(
       ProjectDefinition config,
+      CheckedTokens tokens,
       LocalIdentity.GitIdentity git,
       ShellExec shell,
       boolean fresh,
@@ -671,7 +681,6 @@ public final class ProjectApplyCommand implements Runnable {
       ConsoleHelper.proceed("Create project " + config.name() + "?", "Not provisioned", "--yes");
     }
 
-    var gitTokens = resolveGitTokens(config, operator);
     var listener = json ? ProvisionListener.NOOP : ConsoleProvisionListener.INSTANCE;
     try (var operations = OperationsFactory.open()) {
       var provisioner =
@@ -683,7 +692,7 @@ public final class ProjectApplyCommand implements Runnable {
               workstationKey,
               operator);
       provisioner.provision(
-          config, hostYaml, gitTokens, git, SailPaths.projectFilesDir(config.name()));
+          config, hostYaml, tokens, git, SailPaths.projectFilesDir(config.name()));
     }
 
     if (!json) {
@@ -729,38 +738,5 @@ public final class ProjectApplyCommand implements Runnable {
         + "\n    Then: "
         + operator.sail("project connect " + project)
         + " for SSH config snippet.";
-  }
-
-  private Map<String, String> resolveGitTokens(ProjectDefinition config, OperatorCommand operator) {
-    var known = GitCredentials.known(config.repos(), gitToken);
-    if (Strings.isNotBlank(gitToken)) {
-      return known;
-    }
-    var tokens = new LinkedHashMap<>(known);
-    var missingHosts =
-        GitCredentials.extractHttpsHosts(config.repos()).stream()
-            .filter(h -> !tokens.containsKey(h))
-            .toList();
-    if (missingHosts.isEmpty() || yes || json || dryRun) {
-      return Map.copyOf(tokens);
-    }
-    for (var host : missingHosts) {
-      try {
-        var prompted =
-            ConsoleHelper.readPassword("  Git access token for " + host + " (blank to skip): ");
-        if (Strings.isNotBlank(prompted)) {
-          tokens.put(host, prompted);
-        }
-      } catch (EchoDisabledUnavailableException e) {
-        throw new IllegalArgumentException(
-            "Unable to read git access token interactively in this terminal.\n\n"
-                + "Provide the token via one of:\n"
-                + "  --git-token <token>\n"
-                + "  GITHUB_TOKEN environment variable\n\n"
-                + "Then re-run: "
-                + operator.sail("project apply " + config.name()));
-      }
-    }
-    return Map.copyOf(tokens);
   }
 }

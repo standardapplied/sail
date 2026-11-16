@@ -145,7 +145,7 @@ public final class WorkspaceDoors {
             .find(project, name)
             .orElseThrow(
                 () -> ApiException.of(ErrorCode.NOT_FOUND, Workspaces.absent(project, name)));
-    refusal(Actor.current(), project, name, Workspaces.ownerOf(found).orElse(null))
+    refusal(Actor.current(), project, name, Workspaces.ownerOf(found, owners).orElse(null))
         .ifPresent(WorkspaceDoors::refuse);
     return found;
   }
@@ -187,8 +187,8 @@ public final class WorkspaceDoors {
   }
 
   /** "workspace try of acme", and the owner's name beside it when the caller is not the owner. */
-  private static String whose(String project, String name, BoxInstances.Instance found) {
-    var owner = Workspaces.ownerOf(found);
+  private String whose(String project, String name, BoxInstances.Instance found) {
+    var owner = Workspaces.ownerOf(found, owners);
     var theirs =
         owner.isPresent() && !owner.get().equals(Actor.current().handle())
             ? ", " + owner.get() + "'s,"

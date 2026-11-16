@@ -106,4 +106,28 @@ class CliOperatorTest {
     new SchemaManager(db).migrate();
     return db;
   }
+
+  /**
+   * The proof's Low 4: a person main took off every project this box holds is told that, and what
+   * an admin on main does, not to run a sync that changes nothing.
+   */
+  @Test
+  void aPersonOffEveryProjectOfTheBoxIsToldSoAndNotToSync() {
+    try (var db = roster()) {
+      var fdes = new FdeStore(db);
+      fdes.replicate("mady", "main-mady", null, "mady@x.dev", "member", "active", null);
+      fdes.withdraw(List.of(), "nobody");
+
+      var refused = assertThrows(ApiException.class, () -> CliOperator.of(NODE, fdes));
+
+      assertEquals(ErrorCode.CONFLICT, refused.failure().errorCode());
+      assertEquals(
+          "mady is no longer on any project this box holds, so this box gives them nothing until"
+              + " main grants them one again.",
+          refused.getMessage());
+      assertEquals(
+          "Ask an admin on main to run 'sail fde grant mady <project>'.",
+          refused.failure().remedy().plain());
+    }
+  }
 }

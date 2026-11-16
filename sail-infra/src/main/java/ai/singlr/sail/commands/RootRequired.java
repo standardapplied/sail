@@ -23,7 +23,7 @@ import picocli.CommandLine.Model.CommandSpec;
  */
 public final class RootRequired {
 
-  private static final Set<String> SECRETS = Set.of("--token", "--git-token");
+  private static final Set<String> SECRETS = Set.of("--token");
   private static final String TOKEN_PLACEHOLDER = "<token>";
 
   private RootRequired() {}
@@ -41,9 +41,8 @@ public final class RootRequired {
 
   /**
    * {@code spec}'s command as its caller typed it: every word after {@code sail}, shell-quoted, for
-   * the door that prints it to render for its reader. A token's value ({@code --token}, {@code
-   * --git-token}) is never echoed: a printed failure reaches logs and pasted reports the command
-   * line never did.
+   * the door that prints it to render for its reader. A token's value ({@code --token}) is never
+   * echoed: a printed failure reaches logs and pasted reports the command line never did.
    */
   static Remedy.Command typed(CommandSpec spec) {
     var words = new ArrayList<String>();

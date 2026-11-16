@@ -224,7 +224,7 @@ class RosterChangeTest {
     onMain("UPDATE fdes SET status = 'disabled' WHERE handle = 'nia'");
 
     for (var command : List.of("sail _sync", "sail spec list")) {
-      assertEquals(new SshGateway.Rejected("Unknown or disabled FDE."), gateway(command, "nia"));
+      assertEquals(new SshGateway.Rejected(SshGateway.NO_LONGER_HERE), gateway(command, "nia"));
     }
     var out = new ByteArrayOutputStream();
     var err = new ByteArrayOutputStream();

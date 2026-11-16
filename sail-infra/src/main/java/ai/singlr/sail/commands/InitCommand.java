@@ -18,6 +18,7 @@ import ai.singlr.sail.engine.SystemdServiceInstaller;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.List;
 import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.function.Supplier;
@@ -80,6 +81,11 @@ public final class InitCommand implements Runnable {
           "Your email: this box's git user.email when it has none, and your roster email"
               + " (else prompted).")
   private String email;
+
+  @Option(
+      names = "--yes",
+      description = "Follow another main without asking, on a box that already follows one.")
+  private boolean yes;
 
   private final Supplier<Box> box;
 
@@ -282,7 +288,7 @@ public final class InitCommand implements Runnable {
       case INSTALL_API_SYSTEM -> steps.run(new HostServiceInstallCommand());
       case SSH_IDENTITY -> steps.run(new HostSshIdentityCommand());
       case SYNC_AS_MAIN -> steps.run(new HostSyncCommand(), withFde("--as-main", fde, name, mail));
-      case JOIN_MAIN -> steps.run(new JoinCommand(), withFde(main, fde, name, mail));
+      case JOIN_MAIN -> steps.run(new JoinCommand(), joinArgs(withFde(main, fde, name, mail)));
     };
   }
 
@@ -321,6 +327,15 @@ public final class InitCommand implements Runnable {
               + sudoUser
               + ".");
     }
+  }
+
+  private String[] joinArgs(String[] args) {
+    if (!yes) {
+      return args;
+    }
+    var withYes = new ArrayList<>(List.of(args));
+    withYes.add("--yes");
+    return withYes.toArray(String[]::new);
   }
 
   private static String[] withFde(String first, String fde, String name, String mail) {

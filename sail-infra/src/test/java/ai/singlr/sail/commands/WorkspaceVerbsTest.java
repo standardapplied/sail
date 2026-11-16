@@ -8,7 +8,6 @@ package ai.singlr.sail.commands;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
-import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.api.OperationsFactory;
@@ -16,6 +15,7 @@ import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.HostYaml;
 import ai.singlr.sail.config.ProjectDefinition;
 import ai.singlr.sail.config.TestDefinitions;
+import ai.singlr.sail.engine.CheckedTokens;
 import ai.singlr.sail.engine.ProjectPhase;
 import ai.singlr.sail.engine.ProjectProvisioner;
 import ai.singlr.sail.engine.ProvisionTracker;
@@ -26,8 +26,9 @@ import ai.singlr.sail.store.ProjectStore;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.Sqlite;
+import com.sun.net.httpserver.HttpServer;
+import java.net.InetSocketAddress;
 import java.nio.file.Path;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -115,45 +116,6 @@ class WorkspaceVerbsTest {
   }
 
   @Test
-  void aTemplateIsNotBuiltWhenARepoAsksForATokenNoOneGave() {
-    var failure =
-        assertThrows(
-            IllegalArgumentException.class,
-            () -> WorkspaceVerbs.requireTokens(acme(), Map.of(), url -> true));
-
-    assertEquals(
-        "The template cannot clone https://github.com/acme/app.git: it asks for credentials and no"
-            + " token was given for its host. Pass one with --git-token <token>, or keep"
-            + " GITHUB_TOKEN through sudo with sudo --preserve-env=GITHUB_TOKEN.",
-        failure.getMessage());
-    WorkspaceVerbs.requireTokens(acme(), Map.of("*", "tok"), url -> true);
-    WorkspaceVerbs.requireTokens(acme(), Map.of(), url -> false);
-  }
-
-  @Test
-  void aBuildAsksAboutTokensBeforeItProvisionsAndARefusedOneNeverProvisions() throws Exception {
-    var seen = new ArrayList<String>();
-    var build =
-        WorkspaceVerbs.checked(
-            acme(),
-            Map.of(),
-            url -> {
-              seen.add("probe");
-              return false;
-            },
-            (into, fresh) -> seen.add("provision"));
-    var refused =
-        WorkspaceVerbs.checked(
-            acme(), Map.of(), url -> true, (into, fresh) -> seen.add("provisioned anyway"));
-    var template = new ProjectProvisioner.Instance("acme--tmpl", Optional.of("tank"), Map.of());
-
-    build.into(template, true);
-    assertThrows(IllegalArgumentException.class, () -> refused.into(template, true));
-
-    assertEquals(List.of("probe", "provision"), seen);
-  }
-
-  @Test
   void aTemplateIsBuiltFromTheBaseProfilesPoolAndItsDigestIsTheDefinitionsAlone() throws Exception {
     var named =
         new HostYaml(
@@ -162,14 +124,69 @@ class WorkspaceVerbsTest {
         new HostYaml(
             "dir", null, null, "incusbr0", "singlr-base", "ubuntu/24.04", "6.0", null, null);
 
-    var source =
-        WorkspaceVerbs.source(named, acme(), List.of(), name -> false, (into, fresh) -> {});
+    var source = WorkspaceVerbs.source(named, acme(), none(), name -> false, (into, fresh) -> {});
 
     assertEquals("devpool", source.basePool());
     assertEquals(ProjectProvisioner.inputs(acme(), Optional.empty()), source.inputs());
     assertEquals(
         HostYaml.DEFAULT_POOL,
-        WorkspaceVerbs.source(unnamed, acme(), List.of(), name -> false, (into, fresh) -> {})
+        WorkspaceVerbs.source(unnamed, acme(), none(), name -> false, (into, fresh) -> {})
             .basePool());
+  }
+
+  /**
+   * sail#421 N1: the built template is searched for the tokens this build was given, the ones
+   * already in it, and no other: a stored token for a host the project does not name never enters
+   * the template, not even as a search pattern.
+   */
+  @Test
+  void aTemplateIsSearchedForTheTokensItsBuildWasGivenAndNoOther() {
+    var host =
+        new HostYaml(
+            "dir", "devpool", null, "incusbr0", "singlr-base", "ubuntu/24.04", "6.0", null, null);
+    var given =
+        new WorkspaceVerbs.Keeper(
+                Optional.of("eng"),
+                Map.of(
+                    "github.com", "ghp_stored_for_github", "gitlab.com", "glpat_stored_for_gitlab"),
+                url -> true,
+                Map.of())
+            .check(acme());
+
+    var source = WorkspaceVerbs.source(host, acme(), given, name -> false, (into, fresh) -> {});
+
+    assertEquals(List.of("ghp_stored_for_github"), List.copyOf(source.tokens()));
+  }
+
+  /**
+   * Round 2, item 3: a host command hands the keeper a definition, never a probe; the keeper asks
+   * with the real one, which says a host answering 401 to its refs wants credentials and one
+   * answering 200 does not.
+   */
+  @Test
+  void theKeeperAsksAReposHostWithTheRealProbe() throws Exception {
+    var server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+    server.createContext(
+        "/",
+        exchange -> {
+          exchange.sendResponseHeaders(
+              exchange.getRequestURI().getPath().startsWith("/private") ? 401 : 200, -1);
+          exchange.close();
+        });
+    server.start();
+    try {
+      var base = "http://127.0.0.1:" + server.getAddress().getPort();
+      var asks = new WorkspaceVerbs.Keeper(Optional.of("eng"), Map.of()).asks();
+
+      assertTrue(asks.test(base + "/private/info/refs?service=git-upload-pack"));
+      assertFalse(asks.test(base + "/public/info/refs?service=git-upload-pack"));
+    } finally {
+      server.stop(0);
+    }
+  }
+
+  private static CheckedTokens none() {
+    return new WorkspaceVerbs.Keeper(Optional.empty(), Map.of(), url -> false, Map.of())
+        .check(acme());
   }
 }

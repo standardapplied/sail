@@ -32,8 +32,10 @@ import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.ssh.SshPublicKey;
 import ai.singlr.sail.ssh.TestSshKeys;
 import ai.singlr.sail.store.BoxCredentialStore;
+import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SchemaManager;
+import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
 import ai.singlr.sail.sync.SyncBox;
 import java.io.ByteArrayOutputStream;
@@ -44,8 +46,10 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermissions;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.function.Predicate;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -303,6 +307,65 @@ class JoinCommandTest {
       assertEquals("mady", new RunStore(db).findById(run).orElseThrow().node());
       assertEquals("mady", new RunStore(db).findById(run).orElseThrow().owner());
     }
+  }
+
+  /**
+   * The closing look's n6: 'sail init --main <other>' on a box that follows a main says what
+   * following the other does before anything changes, with the counts, and goes on only when told
+   * yes; where nobody can answer it is refused with that text. Pointed at the main it follows, or
+   * on a box that follows none, it says and asks nothing.
+   */
+  @Test
+  void aBoxThatFollowsAnotherMainIsToldWhatFollowingThisOneDoesAndAskedFirst() throws Exception {
+    var hostConfig = dir.resolve("host.yaml");
+    YamlUtil.dumpToFile(
+        BASE.withSync(new SyncConfig(SyncConfig.ROLE_NODE, "sail@main", "rnode", "box")).toMap(),
+        hostConfig);
+    var database = dir.resolve("sail.db");
+    try (var db = Sqlite.open(database)) {
+      new SchemaManager(db).migrate();
+      var fdes = new FdeStore(db);
+      for (var handle : List.of("rnode", "ada", "bob")) {
+        fdes.replicate(handle, "main-" + handle, null, null, "member", "active", null);
+      }
+      Acting.system(() -> fdes.add("kim", "Kim", "kim@home.example", "member"));
+      Acting.system(() -> new SpecStore(db).create(SyncBox.spec("s1", "made here", "pending")));
+    }
+
+    var said = JoinCommand.repointing(hostConfig, database, "sail@main2").orElseThrow();
+
+    assertEquals(
+        "This box will stop following sail@main and follow sail@main2. At its first sync with"
+            + " sail@main2, everyone sail@main described here (2 people), all but this box's own"
+            + " person (rnode), is removed here with the logins they stored; edits made here and"
+            + " not yet pushed (1) are offered to sail@main2; the rows synced from sail@main stay"
+            + " on this box.",
+        said);
+    assertEquals(Optional.empty(), JoinCommand.repointing(hostConfig, database, "sail@main"));
+    assertEquals(
+        Optional.empty(),
+        JoinCommand.repointing(writeHostConfig(), database, "sail@main2"),
+        "a box that follows no main is asked nothing");
+    var asked = new ArrayList<String>();
+    Predicate<String> never =
+        prompt -> {
+          throw new AssertionError("nobody can answer: " + prompt);
+        };
+    for (var json : List.of(false, true)) {
+      var refused =
+          assertThrows(
+              CliCommand.Refused.class,
+              () -> JoinCommand.confirmRepoint(said, false, json, json, never));
+      assertEquals(said + " Re-run with --yes to go on.", refused.getMessage());
+    }
+    JoinCommand.confirmRepoint(said, true, true, false, never);
+    JoinCommand.confirmRepoint(said, false, false, true, prompt -> asked.add(prompt));
+    var declined =
+        assertThrows(
+            CliCommand.Refused.class,
+            () -> JoinCommand.confirmRepoint(said, false, false, true, prompt -> false));
+    assertEquals(List.of(said + " Go on?"), asked);
+    assertEquals("Aborted: this box still follows its main.", declined.getMessage());
   }
 
   @Test
