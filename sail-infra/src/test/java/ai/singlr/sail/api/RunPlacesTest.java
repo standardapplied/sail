@@ -694,7 +694,8 @@ class RunPlacesTest {
     assertEquals(
         "github.com asks for credentials to fetch acme's repo app, and ana keeps no token for it.",
         refused.getMessage());
-    assertEquals(2, reads.get(), "read at the check and again at the give");
+    assertEquals(
+        3, reads.get(), "read at the check, for the clone's owner id, and again at the give");
     assertFalse(incus.invocations().stream().anyMatch(c -> c.contains("sail-strip")));
     assertFalse(incus.invocations().stream().anyMatch(c -> c.startsWith("incus file push")));
     assertTrue(

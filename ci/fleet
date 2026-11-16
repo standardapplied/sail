@@ -798,6 +798,7 @@ inside() {
 
 readonly LISTEN_PRIVATELY='set -eu
 ip=$1 handle=${2:-client}
+[ -e /var/lib/sail/host.yaml.before-direct ] || sudo cp -p /var/lib/sail/host.yaml /var/lib/sail/host.yaml.before-direct
 sudo sail host config set api-listen "$ip:7071" > /dev/null
 sudo sail host config set terminal-listen "$ip:7072" > /dev/null
 sudo systemctl restart sail-api sail-pty-host
@@ -861,13 +862,22 @@ if kind != 31 or b"presented already" not in payload:
 print("the same ticket, presented again, is refused")'
 
 readonly CLOSE_PRIVATELY='handle=${1:-client}
-sudo sail host config set api-listen none > /dev/null
-sudo sail host config set terminal-listen none > /dev/null
+if [ -e /var/lib/sail/host.yaml.before-direct ]; then
+  sudo mv /var/lib/sail/host.yaml.before-direct /var/lib/sail/host.yaml
+else
+  sudo sail host config set api-listen none > /dev/null
+  sudo sail host config set terminal-listen none > /dev/null
+fi
 sudo systemctl restart sail-api sail-pty-host
 sudo sail server token revoke "direct-$handle" > /dev/null 2>&1 || true'
 
 # From box FROM, over box HOST's private address: a ticket HANDLE asks HOST's API for, to open a
 # terminal in acme's container, or in its WORKSPACE, opens a session over TCP that echoes a line.
+# HOST's listeners are set for it and put back as they were after it (its host.yaml, kept aside
+# first), whether it passed or not, and HOST's sail-api and pty host restart for each. That is safe
+# only where nothing else uses HOST meanwhile: each group runs on a fleet of its own and its
+# scenarios one after another, so inside (client) and storage (main) each have their box to
+# themselves when they call this, in a group and in the serial gate alike.
 direct_terminal() {
   local run=$1 host=$2 from=$3 handle=$4 workspace=${5:-} ip token status=0
   ip=$(internal_ip "$run" "$host")

@@ -1448,7 +1448,9 @@ Each row with the tests that prove it:
   credential that names no person makes none. On a node every person but the node's own acts as a
   viewer (the role rule's cap), so there they are refused naming main, where other people's
   workspaces live; and the node's own person keeps what no one owns on it (a workspace disowned,
-  or labelled for someone no longer active), deciding it as an admin decides it on main. The
+  or labelled for someone no longer active, until the pass takes it back), deciding it as an admin
+  decides it on main: they may stop or delete a gone person's workspace, and, as an admin, are
+  refused a start or terminal in it, so its person's credentials stay unread. The
   routes are `POST /v1/projects/{p}/workspaces` (`{"name"}`, from the current template, which the
   server never builds: none is refused naming its build, a stale one is cloned and the answer says
   so), `POST …/workspaces/{w}/start` and `…/stop`, and `DELETE …/workspaces/{w}[?force=true]`,
@@ -1462,8 +1464,10 @@ Each row with the tests that prove it:
   operations: a terminal, an attach, an exec), and is refused (`workspace_holds_work`, 409)
   naming it, its owner when the caller is not, or why it could not be read, unless forced; it is
   read again for a live run immediately before the delete, and a live run of its spec refuses it
-  whatever is passed. A stop, and a delete with force, first end the workspace's terminals, each
-  told who stopped or deleted it. Every door that makes, starts, stops or deletes a workspace goes
+  whatever is passed. A stop, and a delete with force, end the workspace's terminals once every
+  check that could refuse them has passed, just before they act, each told "Workspace try of acme
+  is being stopped by ada, which ends this terminal." (or deleted), which stays true if Incus then
+  fails the act; the act's failure goes to whoever asked. Every door that makes, starts, stops or deletes a workspace goes
   through `WorkspaceDoors`; today those are the API and the host CLI, its dry runs included, as
   the SSH gateway serves no `project workspace` command (`SshGateway.API_COMMANDS`). A gateway verb
   for workspaces is added only through `WorkspaceDoors`, so its delete reads what the workspace
@@ -1699,7 +1703,11 @@ Each row with the tests that prove it:
   labelled one person's while it holds another's: its owner is cleared first, then it is
   stripped and given the new owner's (gh too), and only then is `user.sail.owner` written. A
   re-own cut short between is stripped again and left nobody's, so it holds nothing of anyone's,
-  and the next entry, whoever's, strips and gives again.
+  and the next entry, whoever's, strips and gives again. A workspace being made carries its
+  owner's id beside the handle from its clone on (`incus copy -c user.sail.owner_id=…`), so no
+  label is ever a handle alone. Every act that decided from a listing and then waited for a
+  workspace's lock (the removal pass's strip and disown, a token change's renewal) reads it again
+  under the lock and leaves it alone when its owner is now one it must not touch.
   *`WorkspacesTest.aReOwnCutShortLeavesTheWorkspaceNobodysSoThePreviousOwnersNextEntryGivesTheirsAgain`,
   `WorkspacesTest.aWorkspaceOfAnotherIsStrippedAndGivenItsNewOwnersBeforeItIsRecordedTheirs`,
   `RunPlacesTest.aWorkspaceOfAnotherIsReOwnedOnlyForAPersonWithAnEmail`.*

@@ -37,6 +37,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.TreeMap;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.FutureTask;
 import java.util.concurrent.TimeUnit;
@@ -147,6 +148,7 @@ class WorkspacesTest {
     return new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
         .onOk("incus storage list --format json", pools)
         .onOk("incus list --format json", instances)
+        .onOk("incus list ^", instances)
         .onOk("incus snapshot list acme--tmpl --format json", snapshots);
   }
 
@@ -237,7 +239,9 @@ class WorkspacesTest {
         "-c",
         "user.sail.creating=1",
         "-c",
-        "user.sail.owner=eng");
+        "user.sail.owner=eng",
+        "-c",
+        "user.sail.owner_id=fde_eng");
   }
 
   private static int indexOf(ScriptedShellExecutor shell, List<String> argv) {
@@ -2371,7 +2375,9 @@ class WorkspacesTest {
                     "-c",
                     "user.sail.spec=fix-login",
                     "-c",
-                    "user.sail.owner=uday"))
+                    "user.sail.owner=uday",
+                    "-c",
+                    "user.sail.owner_id=fde_uday"))
             >= 0,
         String.join("\n", shell.invocations()));
     assertTrue(
@@ -3229,7 +3235,12 @@ class WorkspacesTest {
         shell.pushed.get("acme-fix-login/home/dev/.git-credentials"));
     assertTrue(
         scripted.invocations().stream()
-            .anyMatch(c -> c.startsWith("incus copy ") && c.contains("user.sail.owner=uday")));
+            .anyMatch(
+                c ->
+                    c.startsWith("incus copy ")
+                        && c.contains("user.sail.owner=uday")
+                        && c.contains("user.sail.owner_id=fde_uday")),
+        "the clone carries its owner's id beside the handle, so no label is ever handle-only");
     assertFalse(
         scripted.invocations().stream().anyMatch(c -> c.contains("ghp_uday")),
         "a token is never on a command line");
@@ -3920,5 +3931,118 @@ class WorkspacesTest {
           failing);
       assertTrue(shell.invocations().contains("incus stop acme--tmpl"), failing);
     }
+  }
+
+  /**
+   * Review 1's final F-M1: a removal pass that listed a workspace while it was being made, and then
+   * waited for its lock, reads it again under the lock and leaves it to its owner, whose id the
+   * make wrote before letting go; nothing is stripped, nothing relabelled.
+   */
+  @Test
+  void aRemovalPassThatListedAWorkspaceBeingMadeLeavesItToItsOwnerOnceTheMakeLetsGo()
+      throws Exception {
+    var idWritten = new AtomicBoolean(false);
+    var listedBeforeTheId = new CountDownLatch(1);
+    var commands = new CopyOnWriteArrayList<String>();
+    ShellExec incus =
+        new ShellExec() {
+          @Override
+          public Result exec(List<String> command) {
+            return exec(command, null, Duration.ZERO);
+          }
+
+          @Override
+          public Result exec(List<String> command, Path workDir, Duration timeout) {
+            var joined = String.join(" ", command);
+            commands.add(joined);
+            if (joined.startsWith("incus list")) {
+              var listed = being(idWritten.get());
+              if (joined.equals("incus list --format json")) {
+                listedBeforeTheId.countDown();
+              }
+              return new Result(0, listed, "");
+            }
+            return new Result(0, "", "");
+          }
+
+          @Override
+          public boolean isDryRun() {
+            return false;
+          }
+        };
+    var workspaces = new Workspaces(incus, incus, ticks(), locks(), () -> 65536, url -> false);
+    var making = new CountDownLatch(1);
+    var letGo = new CountDownLatch(1);
+    var make =
+        Thread.ofVirtual()
+            .start(
+                () -> {
+                  try (var lock = workspaces.holdIfFree("acme-try").orElseThrow()) {
+                    making.countDown();
+                    letGo.await();
+                    idWritten.set(true);
+                  } catch (Exception e) {
+                    throw new IllegalStateException(e);
+                  }
+                });
+    assertTrue(making.await(30, TimeUnit.SECONDS));
+    var unreached = new AtomicReference<List<String>>();
+    var pass =
+        Thread.ofVirtual()
+            .start(
+                () -> {
+                  try {
+                    unreached.set(
+                        workspaces.disown((handle, id) -> "fde_ada".equals(id), name -> true));
+                  } catch (Exception e) {
+                    throw new IllegalStateException(e);
+                  }
+                });
+    assertTrue(listedBeforeTheId.await(30, TimeUnit.SECONDS), "the pass listed it mid-make");
+    letGo.countDown();
+    make.join();
+    pass.join();
+
+    assertEquals(List.of(), unreached.get());
+    assertEquals(
+        List.of(),
+        commands.stream()
+            .filter(c -> c.contains("sail-strip") || c.startsWith("incus config set"))
+            .toList());
+  }
+
+  /**
+   * Workspace {@code try} of acme being made for ada: its id in the label once {@code idWritten}.
+   */
+  private static String being(boolean idWritten) {
+    return list(
+        instance(
+            "acme-try",
+            "Running",
+            "tank",
+            "\"user.sail.project\": \"acme\", \"user.sail.workspace\": \"try\","
+                + " \"user.sail.creating\": \"1\", \"user.sail.owner\": \"ada\""
+                + (idWritten ? ", \"user.sail.owner_id\": \"fde_ada\"" : "")));
+  }
+
+  /**
+   * A token change listed a workspace as its owner's, and found it someone else's once it held the
+   * workspace's lock: it renews nothing there.
+   */
+  @Test
+  void aTokenChangeRenewsNothingInAWorkspaceThatWasReOwnedBeforeItHeldTheLock() throws Exception {
+    var scripted =
+        new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
+            .onOk("incus list ^acme-a$", list(owned("acme-a", "Running", "bob")))
+            .onOk("incus list --format json", list(owned("acme-a", "Running", "ana")));
+    var shell = new Pushing(scripted);
+
+    var unreached =
+        new Workspaces(shell, shell, ticks(), locks(), () -> 65536, url -> false)
+            .refresh(TestOwners.of("ana"), project -> acme());
+
+    assertEquals(List.of(), unreached);
+    assertEquals(Map.of(), shell.pushed);
+    assertTrue(scripted.invocations().stream().noneMatch(c -> c.startsWith("incus exec acme-a")));
   }
 }

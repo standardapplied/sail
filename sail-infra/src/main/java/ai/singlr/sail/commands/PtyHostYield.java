@@ -79,17 +79,23 @@ final class PtyHostYield implements SessionYield {
     }
     List<String> in;
     try (var client = SessionClient.connect(socket, dispatchCredential(socket))) {
-      in =
-          client.list().stream()
-              .filter(
-                  info ->
-                      info.live()
-                          && info.project().equals(project)
-                          && info.workspace().equals(workspace))
-              .map(PtyMessage.SessionInfo::name)
-              .toList();
+      in = liveIn(client.list(), project, workspace);
     }
     end(in, reason);
+  }
+
+  /**
+   * The live sessions of {@code sessions} that run in workspace {@code workspace} of {@code
+   * project}: none in the project's own container, another workspace or another project.
+   */
+  static List<String> liveIn(
+      List<PtyMessage.SessionInfo> sessions, String project, String workspace) {
+    return sessions.stream()
+        .filter(
+            info ->
+                info.live() && info.project().equals(project) && info.workspace().equals(workspace))
+        .map(PtyMessage.SessionInfo::name)
+        .toList();
   }
 
   @Override

@@ -880,23 +880,36 @@ public final class Workspaces {
 
   /**
    * Running ones only, each under its workspace's lock and renewed in place, never stripped: a
-   * stopped one takes them at its next start. Answers those not reached.
+   * stopped one takes them at its next start. Each is read again under its lock, and one that is no
+   * longer {@code owner}'s, or no longer running, is left as it is. Answers those not reached.
    */
   public List<String> refresh(WorkspaceOwner owner, Function<String, ProjectDefinition> definitions)
       throws IOException, InterruptedException, TimeoutException {
     var unreached = new ArrayList<String>();
-    for (var instance : box.wholeWorkspacesOf(owner.id())) {
-      if (!(instance.state() instanceof ContainerState.Running)) {
+    for (var listed : box.wholeWorkspacesOf(owner.id())) {
+      if (!(listed.state() instanceof ContainerState.Running)) {
         continue;
       }
-      try (var held = nameLock(instance.name())) {
-        var project = ((BoxInstances.Workspace) instance.kind()).project();
-        WorkspaceCredentials.renew(shell, instance.name(), definitions.apply(project), owner);
+      try (var held = nameLock(listed.name())) {
+        var now = again(listed);
+        if (now.isEmpty()
+            || !(now.get().state() instanceof ContainerState.Running)
+            || !labelledFor(now.get(), owner)) {
+          continue;
+        }
+        var project = ((BoxInstances.Workspace) listed.kind()).project();
+        WorkspaceCredentials.renew(shell, listed.name(), definitions.apply(project), owner);
       } catch (IOException | TimeoutException | RuntimeException failure) {
-        unreached.add(instance.name() + ": " + Remedied.reasonOf(failure).strip());
+        unreached.add(listed.name() + ": " + Remedied.reasonOf(failure).strip());
       }
     }
     return List.copyOf(unreached);
+  }
+
+  /** {@code listed} as Incus has it now: what an act that waited for its lock decides on. */
+  private Optional<BoxInstances.Instance> again(BoxInstances.Instance listed)
+      throws IOException, InterruptedException, TimeoutException {
+    return box.lookup(listed.name(), Duration.ofSeconds(BoxInstances.LOOKUP_SECONDS));
   }
 
   private void giveAll(String instance, ProjectDefinition config, WorkspaceOwner owner)
@@ -906,25 +919,28 @@ public final class Workspaces {
   }
 
   /**
-   * A workspace whose owner {@code held} says is not a person here, by its stored owner id when it
-   * has one, else by handle, is stripped in the container (started for it when stopped, and stopped
-   * again) and made nobody's, when {@code due} says of its name that it is time to try. Clears the
+   * A workspace whose owner {@code held} says is not a person here, by the owner id its label
+   * stores, is stripped in the container (started for it when stopped, and stopped again) and made
+   * nobody's, when {@code due} says of its name that it is time to try. It is read again under its
+   * lock first, and left as it is when it now has an owner {@code held} holds, or none. Clears the
    * owner too, so a person later given the handle is re-given theirs at their next entry. Answers
    * those not reached.
    */
   public List<String> disown(BiPredicate<String, String> held, Predicate<String> due)
       throws IOException, InterruptedException, TimeoutException {
     var unreached = new ArrayList<String>();
-    for (var instance : box.all()) {
-      var owner = instance.key(BoxInstances.OWNER_KEY).orElse("");
-      var id = instance.key(BoxInstances.OWNER_ID_KEY).filter(Strings::isNotBlank).orElse(null);
-      if (!(instance.kind() instanceof BoxInstances.Workspace)
-          || owner.isBlank()
-          || held.test(owner, id)
-          || !due.test(instance.name())) {
+    for (var listed : box.all()) {
+      if (!(listed.kind() instanceof BoxInstances.Workspace)
+          || heldOrNobodys(listed, held)
+          || !due.test(listed.name())) {
         continue;
       }
-      try (var locked = nameLock(instance.name())) {
+      try (var locked = nameLock(listed.name())) {
+        var now = again(listed);
+        if (now.isEmpty() || heldOrNobodys(now.get(), held)) {
+          continue;
+        }
+        var instance = now.get();
         var stopped = !(instance.state() instanceof ContainerState.Running);
         if (stopped) {
           containers.start(instance.name());
@@ -938,10 +954,18 @@ public final class Workspaces {
         }
         label(instance.name(), "");
       } catch (IOException | TimeoutException failure) {
-        unreached.add(instance.name() + ": " + Remedied.reasonOf(failure).strip());
+        unreached.add(listed.name() + ": " + Remedied.reasonOf(failure).strip());
       }
     }
     return List.copyOf(unreached);
+  }
+
+  /** Whether {@code instance}'s labelled owner is one {@code held} holds, or it has none. */
+  private static boolean heldOrNobodys(
+      BoxInstances.Instance instance, BiPredicate<String, String> held) {
+    var owner = instance.key(BoxInstances.OWNER_KEY).orElse("");
+    var id = instance.key(BoxInstances.OWNER_ID_KEY).filter(Strings::isNotBlank).orElse(null);
+    return owner.isBlank() || held.test(owner, id);
   }
 
   /**
@@ -1039,6 +1063,7 @@ public final class Workspaces {
     var project = config.name();
     var copyKeys = new ArrayList<>(keys);
     copyKeys.add(BoxInstances.OWNER_KEY + "=" + owning.handle());
+    copyKeys.add(BoxInstances.OWNER_ID_KEY + "=" + owning.owners().apply(owning.handle()).id());
     clone(project, name, instance, built, copyKeys);
     try {
       var cloned = nanos.getAsLong();
@@ -1046,9 +1071,7 @@ public final class Workspaces {
       var running = nanos.getAsLong();
       var owner = owning.now(this, config);
       WorkspaceCredentials.give(shell, instance, config, owner);
-      if (owner.id() != null) {
-        label(instance, owner.handle(), owner.id());
-      }
+      label(instance, owner.handle(), owner.id());
       var steps = prepare(config, name, branch, instance, files);
       WorkspaceCredentials.logForgeIn(shell, instance, config, owner);
       var ready = nanos.getAsLong();

@@ -216,7 +216,10 @@ class WorkspaceDoorsTest {
     assertEquals(ErrorCode.READ_ONLY_CREDENTIAL, viewer.failure().errorCode());
     assertEquals(ErrorCode.AGENT_LANE_FORBIDDEN, agent.failure().errorCode());
     assertEquals(List.of("stop"), changes(box));
-    assertEquals(List.of("acme/try: Workspace try of acme was stopped by ada."), ended);
+    assertEquals(
+        List.of(
+            "acme/try: Workspace try of acme is being stopped by ada, which ends this terminal."),
+        ended);
   }
 
   /** A workspace the project does not have is not found, never refused. */
@@ -310,7 +313,10 @@ class WorkspaceDoorsTest {
         refused.failure().remedy().plain());
     assertEquals(Workspaces.Change.DELETED, deleted.change());
     assertEquals(List.of("read", "delete"), changes(box));
-    assertEquals(List.of("acme/try: Workspace try of acme was deleted by ada."), ended);
+    assertEquals(
+        List.of(
+            "acme/try: Workspace try of acme is being deleted by ada, which ends this terminal."),
+        ended);
   }
 
   /** Force deletes what it holds unread; a live run refuses the delete whatever is passed. */
@@ -711,5 +717,41 @@ class WorkspaceDoorsTest {
     assertTrue(refused.getMessage().contains("holds a live run of spec a"), refused.getMessage());
     assertEquals(2, asks.get());
     assertEquals(List.of(), changes(box));
+  }
+
+  /**
+   * Review 1's final minor 1: a stop ends the terminals only once every check that could refuse it
+   * has passed, and a stop Incus then fails has told them it was being stopped (true either way),
+   * and says why to whoever asked; a stop the checks refuse tells no terminal.
+   */
+  @Test
+  void aStopTellsTerminalsOnlyOnceItWillProceedAndAFailedStopIsSaidToItsCaller() {
+    var failing =
+        box(
+            trying("Running", "ada"),
+            first -> first.on("stop acme-try", new ShellExec.Result(1, "", "Error: busy")));
+    var live =
+        box(
+            trying("Running", "ada")
+                .replace("\"user.sail.owner\"", "\"user.sail.spec\": \"a\", \"user.sail.owner\""));
+
+    var failed =
+        assertThrows(
+            Exception.class,
+            () ->
+                Actor.call(
+                    Actors.OWNER_API, () -> doors(failing).stop("acme", "try", spec -> false)));
+    var told = List.copyOf(ended);
+    ended.clear();
+    assertThrows(
+        IllegalStateException.class,
+        () -> Actor.call(Actors.OWNER_API, () -> doors(live).stop("acme", "try", spec -> true)));
+
+    assertTrue(failed.getMessage().contains("Error: busy"), failed.getMessage());
+    assertEquals(
+        List.of(
+            "acme/try: Workspace try of acme is being stopped by ada, which ends this terminal."),
+        told);
+    assertEquals(List.of(), ended, "a stop refused for its live run tells no terminal");
   }
 }

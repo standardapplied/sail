@@ -243,9 +243,11 @@ public final class WorkspaceDoors {
   }
 
   /**
-   * Ends the open terminals of workspace {@code name}, each told the workspace was {@code done} and
-   * by whom. A host that cannot be told leaves them to end with the workspace, and that is said on
-   * the server's log.
+   * Ends the open terminals of workspace {@code name}, each told the workspace is being {@code
+   * done} and by whom: run under the workspace's lock once every check that could refuse the act
+   * has passed, just before it, so the line is true whether the act then succeeds or Incus fails it
+   * (the act's failure goes to whoever asked for it). A host that cannot be told leaves them to end
+   * with the workspace, and that is said on the server's log.
    */
   private void endTerminals(String project, String name, String done) {
     var who = Objects.requireNonNullElse(Actor.current().handle(), "an admin");
@@ -253,7 +255,15 @@ public final class WorkspaceDoors {
       sessions.endIn(
           project,
           name,
-          "Workspace " + name + " of " + project + " was " + done + " by " + who + ".");
+          "Workspace "
+              + name
+              + " of "
+              + project
+              + " is being "
+              + done
+              + " by "
+              + who
+              + ", which ends this terminal.");
     } catch (IOException untold) {
       System.err.println(
           "  [workspaces] the terminals of workspace "
