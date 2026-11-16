@@ -55,6 +55,8 @@ public final class TerminalView: NSView {
     var hovered: CellPoint?
     /// The button went down on a view that was not focused: that click only focuses it.
     var focusingClick = false
+    /// When the view last became its window's first responder, on the events' clock.
+    var focusedAt = 0.0
     var gatherer = ScrollGatherer()
     private(set) var focused = false
     private(set) var lastFrame: ScreenFrame?
@@ -442,16 +444,10 @@ public final class TerminalView: NSView {
     }
 
     override public func becomeFirstResponder() -> Bool {
-        focusingClick = isPressedHere(NSApp.currentEvent)
+        focusedAt = ProcessInfo.processInfo.systemUptime
         updateFocus(responder: true)
         onFocus()
         return true
-    }
-
-    /// Whether `event` is the left button going down inside this view.
-    private func isPressedHere(_ event: NSEvent?) -> Bool {
-        guard let event, event.type == .leftMouseDown, event.window === window else { return false }
-        return bounds.contains(convert(event.locationInWindow, from: nil))
     }
 
     override public func resignFirstResponder() -> Bool {

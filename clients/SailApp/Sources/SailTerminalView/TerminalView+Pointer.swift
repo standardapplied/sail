@@ -7,13 +7,10 @@ import SailVT
 extension TerminalView {
     /// A click on a view that is not the focused one only focuses it: the program gets no report and
     /// nothing is selected, until the button goes up. The window makes the clicked view its first
-    /// responder before it hands it the press, so the view also marks the click when it becomes
-    /// first responder under the pointer's press (``becomeFirstResponder()``).
+    /// responder before it hands it the press, so a press older than the view's focus is that click.
     override public func mouseDown(with event: NSEvent) {
-        if window?.firstResponder !== self {
-            window?.makeFirstResponder(self)
-            focusingClick = true
-        }
+        if window?.firstResponder !== self { window?.makeFirstResponder(self) }
+        focusingClick = event.timestamp <= focusedAt
         guard !focusingClick else { return }
         guard let link, let place = place(of: event) else { return }
         let action = pointer.down(

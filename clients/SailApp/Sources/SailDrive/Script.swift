@@ -136,8 +136,9 @@ struct Step: Decodable {
     var panes4: Bool?
     /// Waits this many seconds.
     var wait: Double?
-    /// Each pane of the selected tab shows exactly one line `winch-<columns>` (its shell's
-    /// TRAPWINCH), the columns its view's grid has, within `seconds`: one size reached each program.
+    /// Each pane of the selected tab shows exactly one line `winch-<columns>` (a program printing
+    /// one at each SIGWINCH), the columns its view's grid has, within `seconds`: one size reached
+    /// each program.
     var onceResized: Bool?
     /// The focused pane's screen must not hold this text.
     var absent: String?
