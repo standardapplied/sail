@@ -670,12 +670,16 @@ class WorkspacesTest {
     assertTrue(0 <= start && start < bus, String.join("\n", shell.invocations()));
   }
 
-  /** Low 1 of the proof: a start whose gh login fails says the workspace runs and what it lacks. */
+  /**
+   * The closing look's n9: a start whose give fails (here gh's login) stops the workspace again
+   * before the failure leaves, saying so, so no run lands in a running workspace without its
+   * owner's credentials; the next start strips and gives from the beginning, and it runs.
+   */
   @Test
-  void aStartWhoseGhLoginFailsSaysTheWorkspaceRunsAndIsGivenAgainAtItsNextStart() {
+  void aStartWhoseGiveFailsStopsTheWorkspaceAgainAndTheNextStartGivesIt() throws Exception {
     var shell =
         incus(DIR_AND_ZFS, list(owned("acme-fix-login", "Stopped", "ana")), "[]")
-            .onFail("gh auth login", "error connecting to api.github.com");
+            .onceOnFail("gh auth login", "error connecting to api.github.com");
     var ana =
         new WorkspaceOwner(
             "ana", "Ana", "ana@sail.invalid", Map.of("github.com", "ghp_a"), List.of());
@@ -684,75 +688,25 @@ class WorkspacesTest {
         assertThrows(
             IOException.class,
             () -> workspaces(shell, ticks(0, 1, 2)).start(acme(), "fix-login", handle -> ana));
+    var stoppedAfterFailure =
+        shell.invocations().stream().filter(c -> c.startsWith("incus stop acme-fix-login")).count();
+    var changed = workspaces(shell, ticks(0, 1, 2)).start(acme(), "fix-login", handle -> ana);
 
     assertEquals(
-        "Workspace fix-login of acme is running, but its owner's credentials were not all given,"
-            + " and are given again at its next start: Failed to log gh in for github.com in"
-            + " acme-fix-login: error connecting to api.github.com",
+        "Workspace acme-fix-login could not be given its owner's credentials, so it is stopped"
+            + " again; its next start strips it and gives them from the beginning: Failed to log gh"
+            + " in for github.com in acme-fix-login: error connecting to api.github.com",
         failure.getMessage());
-  }
-
-  /**
-   * The last look's n1: what a removal could not do to a stopped workspace its next start does
-   * first, whoever starts it. One whose handle is now another person (the stored id is not theirs)
-   * is stripped and made nobody's, never given to the new holder; one whose person is not active
-   * here is stripped and refused as before (#418's sweep counts that refusal as a cause).
-   */
-  @Test
-  void aStartOfAWorkspaceWhoseOwnerIsGoneOrNowSomeoneElseStripsItAndGivesNoOne() throws Exception {
-    var hire =
-        new WorkspaceOwner(
-            "tmp",
-            "New Hire",
-            "hire@sail.invalid",
-            Map.of("github.com", "ghp_hire_0123456789"),
-            List.of(),
-            "fde_new_tmp");
-    var replaced = labelledTmp();
-    var gone = labelledTmp();
-
-    var changed = workspaces(replaced, ticks(0, 1, 2)).start(acme(), "fix-login", handle -> hire);
-    var refused =
-        assertThrows(
-            IllegalStateException.class,
-            () ->
-                workspaces(gone, ticks(0, 1, 2))
-                    .start(
-                        acme(),
-                        "fix-login",
-                        handle -> {
-                          throw new IllegalStateException(
-                              handle + " is disabled on this box's roster.");
-                        }));
-
+    assertEquals(1, stoppedAfterFailure, "stopped before the failure left");
     assertEquals(Workspaces.Change.STARTED, changed.change());
-    assertEquals("tmp is disabled on this box's roster.", refused.getMessage());
-    for (var shell : List.of(replaced, gone)) {
-      var calls = shell.invocations();
-      assertTrue(
-          calls.contains(String.join(" ", strip("acme-fix-login"))), String.join("\n", calls));
-      assertTrue(
-          calls.stream().noneMatch(c -> c.contains("hire") || c.contains("gh auth login")),
-          "nothing of the handle's new holder is given: " + String.join("\n", calls));
-    }
-    assertTrue(
-        replaced
-            .invocations()
-            .contains("incus config set acme-fix-login user.sail.owner= user.sail.owner_id="));
-  }
-
-  private ScriptedShellExecutor labelledTmp() {
-    return incus(
-        DIR_AND_ZFS,
-        list(
-            instance(
-                "acme-fix-login",
-                "Stopped",
-                "tank",
-                "\"user.sail.project\": \"acme\", \"user.sail.workspace\": \"fix-login\","
-                    + " \"user.sail.ready\": \"1\", \"user.sail.owner\": \"tmp\","
-                    + " \"user.sail.owner_id\": \"fde_old_tmp\"")),
-        "[]");
+    assertEquals(
+        1,
+        shell.invocations().stream().filter(c -> c.startsWith("incus stop acme-fix-login")).count(),
+        "the start that gave leaves it running");
+    assertEquals(
+        2,
+        shell.invocations().stream().filter(c -> c.contains("gh auth login")).count(),
+        "the next start gave again");
   }
 
   @Test

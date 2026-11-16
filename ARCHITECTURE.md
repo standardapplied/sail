@@ -92,7 +92,11 @@ its nodes refuse it. A main restored in place from an older copy keeps its box i
 below the node's checkpoint: the node then walks every head again from the copy instead of reading
 nothing and saying it is in sync. A box that stops being a node forgets main's catalog as it forgets
 its scope, and so does a node pointed at another main (`sail init --main <other>`): it is
-joining that main, not meeting a rebuilt one. Pointed at the same main again, it keeps it. A copy taken before the release that mints catalog ids is minted a new one when restored,
+joining that main, not meeting a rebuilt one. Pointed at the same main again, it keeps it. Before
+anything changes, `init --main <other>` says what following the other does (everyone the old main
+described but the box's own person removed at the first sync with their logins, counted; the
+edits not yet pushed, counted, offered to the new main; the old main's rows kept) and asks, or
+takes `--yes`; where nobody can answer it is refused with that text. A copy taken before the release that mints catalog ids is minted a new one when restored,
 so take a fresh copy after upgrading. Main is never rebuilt from its nodes.
 
 ## Module layout
@@ -1745,7 +1749,11 @@ Each row with the tests that prove it:
   start, or its strip fails) is tried three times an idle period apart, then left as it is and
   said once with its cause; its next start, by anyone, strips it first, then makes it nobody's
   when its handle is now another person's (never giving it to them), or refuses as before when
-  its person is not active here (`Workspaces.start`). A node
+  its person is not active here. Every start passes through one place (`Workspaces.giveOrStop`:
+  `project workspace start`, an attach, a run's entry), and one that cannot give the owner's
+  credentials stops the workspace again before the failure leaves, so a running workspace with an
+  owner always holds what their last successful start, create or re-own gave, and a run entering
+  one it finds running needs to give nothing. A node
   knows each person by main's id (`fdes.main_id`): each roster round lists the people main shows
   the node and, by id alone, everyone else main still holds. A person main described whose id main
   no longer holds at all, removed or their handle given to someone new under a new id, is removed

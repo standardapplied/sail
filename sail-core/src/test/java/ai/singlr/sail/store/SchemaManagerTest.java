@@ -212,6 +212,28 @@ class SchemaManagerTest {
         refusal.remedy().plain());
   }
 
+  /**
+   * The closing look's n8: a v1004 database a build made before sync_health's check took the kind
+   * {@code removed} is refused at the start, naming the reinstall, not at the first refused round.
+   */
+  @Test
+  void aV1004DatabaseWhoseSyncHealthCheckLacksAKindIsRefusedAtTheStart() {
+    new SchemaManager(db).migrate();
+    db.execute("DROP TABLE sync_health");
+    db.execute(
+        "CREATE TABLE sync_health (peer TEXT PRIMARY KEY, last_error_kind TEXT CHECK"
+            + " (last_error_kind IN ('unreachable', 'refused', 'protocol', 'store')))");
+
+    var refusal = assertThrows(Remedied.State.class, new SchemaManager(db)::migrate);
+
+    assertEquals(
+        "Database "
+            + tempDir.resolve("test.db")
+            + " was made by a build of schema v1004 before sync_health.last_error_kind took"
+            + " removed, and none is converted: the box is reinstalled.",
+        refusal.reason());
+  }
+
   @Test
   void migrateRefusesADatabaseNewerThanThisBinary() {
     var newer = SchemaManager.CURRENT_VERSION + 1;

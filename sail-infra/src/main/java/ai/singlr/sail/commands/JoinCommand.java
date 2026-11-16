@@ -19,12 +19,15 @@ import ai.singlr.sail.engine.SyncIdentity;
 import ai.singlr.sail.engine.SyncOperations;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.Sqlite;
+import ai.singlr.sail.sync.SyncedEntities;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Objects;
 import java.util.Optional;
+import java.util.function.Predicate;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
 import picocli.CommandLine.Model.CommandSpec;
@@ -80,6 +83,11 @@ public final class JoinCommand implements Runnable {
   @Option(names = "--json", description = "Output in JSON format.")
   private boolean json;
 
+  @Option(
+      names = "--yes",
+      description = "Follow another main without asking, on a box that already follows one.")
+  private boolean yes;
+
   @Override
   public void run() {
     CliCommand.run(this::execute);
@@ -89,6 +97,11 @@ public final class JoinCommand implements Runnable {
     var operator = OperatorCommand.here();
     requireWritable(SailPaths.hostConfigPath());
     var normalized = normalizeTarget(target);
+    var repointing = repointing(SailPaths.hostConfigPath(), SailPaths.controlPlaneDb(), normalized);
+    if (repointing.isPresent()) {
+      confirmRepoint(
+          repointing.get(), yes, json, ConsoleHelper.hasConsole(), ConsoleHelper::confirmNo);
+    }
     nonSailUserWarning(target)
         .ifPresent(warning -> System.err.println(Banner.errorLine(warning, Ansi.AUTO)));
     var resolvedHandle = resolveHandle();
@@ -108,6 +121,78 @@ public final class JoinCommand implements Runnable {
             MainHostKey.here(),
             operator);
     System.out.println(render(plan, json, operator));
+  }
+
+  /**
+   * What following {@code target} instead does to a box, configured at {@code hostConfig} with its
+   * database at {@code db}, that already follows another main: said before anything changes. Empty
+   * for a box that follows no main, or follows {@code target} already.
+   */
+  static Optional<String> repointing(Path hostConfig, Path db, String target) throws Exception {
+    if (!Files.exists(hostConfig)) {
+      return Optional.empty();
+    }
+    var sync = HostYaml.fromMap(YamlUtil.parseFile(hostConfig)).sync();
+    if (!sync.isNode() || Strings.isBlank(sync.main()) || sync.main().equals(target)) {
+      return Optional.empty();
+    }
+    var own = Objects.toString(sync.handle(), "");
+    long described = 0;
+    long unpushed = 0;
+    if (Files.exists(db)) {
+      try (var opened = Sqlite.open(db)) {
+        described =
+            opened
+                .queryOne(
+                    "SELECT COUNT(*) FROM fdes WHERE main_id IS NOT NULL AND handle != ?",
+                    row -> row.integer(0),
+                    own)
+                .orElse(0L);
+        unpushed =
+            SyncedEntities.replicas(opened, sync.boxId(), own).values().stream()
+                .mapToLong(replica -> replica.dirtyIds().size())
+                .sum();
+      }
+    }
+    return Optional.of(
+        "This box will stop following "
+            + sync.main()
+            + " and follow "
+            + target
+            + ". At its first sync with "
+            + target
+            + ", everyone "
+            + sync.main()
+            + " described here ("
+            + described
+            + (described == 1 ? " person" : " people")
+            + "), all but this box's own person ("
+            + own
+            + "), is removed here with the logins they stored; edits made here and not yet pushed ("
+            + unpushed
+            + ") are offered to "
+            + target
+            + "; the rows synced from "
+            + sync.main()
+            + " stay on this box.");
+  }
+
+  /**
+   * Goes on with a re-point the operator said yes to, by {@code --yes} or when {@code ask}ed at the
+   * terminal; refused with what it would do where nobody can answer.
+   */
+  static void confirmRepoint(
+      String said, boolean yes, boolean json, boolean console, Predicate<String> ask) {
+    if (yes) {
+      System.err.println("  " + said);
+      return;
+    }
+    if (json || !console) {
+      throw new CliCommand.Refused(said + " Re-run with --yes to go on.");
+    }
+    if (!ask.test(said + " Go on?")) {
+      throw new CliCommand.Refused("Aborted: this box still follows its main.");
+    }
   }
 
   /**

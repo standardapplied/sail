@@ -746,7 +746,8 @@ public final class SchemaManager {
    * made, adds only the feed's indexes it lacks ({@link #FEED_INDEXES}). Any other database is
    * refused naming what to do: an older one was made by a release before v1 and is replaced, as is
    * one holding tables but no version, or one stamped v1004 by a build before {@code
-   * runs.login_overridden} or {@code fdes.main_id}, and a newer one needs a newer binary.
+   * runs.login_overridden} or {@code fdes.main_id}, or before {@code sync_health.last_error_kind}
+   * took every kind a failure is recorded as, and a newer one needs a newer binary.
    */
   public void migrate() {
     db.execute(SCHEMA_VERSION_TABLE);
@@ -761,6 +762,19 @@ public final class SchemaManager {
                   + ", and none is converted: the box is reinstalled.",
               freshStart());
         }
+      }
+      var refused =
+          SyncTransportException.KINDS.stream()
+              .filter(kind -> !syncHealthDefinition().contains("'" + kind + "'"))
+              .toList();
+      if (!refused.isEmpty()) {
+        throw Remedied.state(
+            "Database "
+                + db.path()
+                + " was made by a build of schema v1004 before sync_health.last_error_kind took "
+                + String.join(", ", refused)
+                + ", and none is converted: the box is reinstalled.",
+            freshStart());
       }
       FEED_INDEXES.forEach(db::execute);
       return;
@@ -785,6 +799,13 @@ public final class SchemaManager {
     BASELINE.forEach(db::execute);
     FEED_INDEXES.forEach(db::execute);
     stamp(CURRENT_VERSION);
+  }
+
+  private String syncHealthDefinition() {
+    return db.queryOne(
+            "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'sync_health'",
+            row -> row.text(0))
+        .orElse("");
   }
 
   private boolean lacks(String column) {

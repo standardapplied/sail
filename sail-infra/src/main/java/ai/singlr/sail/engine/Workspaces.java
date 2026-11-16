@@ -601,10 +601,7 @@ public final class Workspaces {
                                   "--spec",
                                   place.specId(),
                                   "--restart"))));
-      var owner = found.key(BoxInstances.OWNER_KEY);
-      if (startIfStopped(found) && owner.isPresent()) {
-        giveAll(found.name(), config, owners.apply(owner.get()));
-      }
+      startGiving(found, config, owners);
     }
   }
 
@@ -615,6 +612,82 @@ public final class Workspaces {
     containers.start(found.name());
     awaitReady(found.name());
     return true;
+  }
+
+  /**
+   * Starts {@code found} when it is stopped, then {@link #giveOrStop}. Answers whether it started
+   * it. The caller holds the workspace's lock.
+   */
+  private boolean startGiving(
+      BoxInstances.Instance found,
+      ProjectDefinition config,
+      Function<String, WorkspaceOwner> owners)
+      throws Exception {
+    if (!startIfStopped(found)) {
+      return false;
+    }
+    giveOrStop(found, config, owners);
+    return true;
+  }
+
+  /**
+   * What every start of a workspace does once it runs, the one place each start passes through: its
+   * labelled owner's credentials given again (a token change while it was stopped did not reach
+   * it), after what a removal could not do while it was stopped. One whose labelled handle is now
+   * another person (its stored id is not theirs) is stripped and made nobody's; one whose labelled
+   * person is not active here is stripped and refused. Anything that fails stops it again before
+   * the failure leaves, so a running workspace with an owner always holds their credentials and its
+   * next start strips and gives from the beginning. The caller holds the workspace's lock.
+   */
+  private void giveOrStop(
+      BoxInstances.Instance found,
+      ProjectDefinition config,
+      Function<String, WorkspaceOwner> owners)
+      throws Exception {
+    var owner = found.key(BoxInstances.OWNER_KEY).filter(handle -> !handle.isBlank());
+    if (owner.isEmpty()) {
+      return;
+    }
+    try {
+      WorkspaceOwner holder;
+      try {
+        holder = owners.apply(owner.get());
+      } catch (IllegalStateException notActiveHere) {
+        WorkspaceCredentials.strip(shell, found.name());
+        throw notActiveHere;
+      }
+      if (labelledFor(found, holder)) {
+        giveAll(found.name(), config, holder);
+      } else {
+        WorkspaceCredentials.strip(shell, found.name());
+        label(found.name(), "");
+      }
+    } catch (IOException given) {
+      var stopped =
+          new IOException(
+              "Workspace "
+                  + found.name()
+                  + " could not be given its owner's credentials, so it is stopped again; its next"
+                  + " start strips it and gives them from the beginning: "
+                  + given.getMessage(),
+              given);
+      stopAgain(found.name(), stopped);
+      throw stopped;
+    } catch (RuntimeException | TimeoutException | InterruptedException refused) {
+      stopAgain(found.name(), refused);
+      throw refused;
+    }
+  }
+
+  private void stopAgain(String instance, Exception failure) {
+    try {
+      containers.stop(instance);
+    } catch (Exception stopping) {
+      if (stopping instanceof InterruptedException) {
+        Thread.currentThread().interrupt();
+      }
+      failure.addSuppressed(stopping);
+    }
   }
 
   /** Read afresh at each give: a token or key revoked since the check must not be written. */
@@ -632,27 +705,31 @@ public final class Workspaces {
    */
   private Reused reuse(BoxInstances.Instance found, ProjectDefinition config, Owning owning)
       throws Exception {
-    var started = startIfStopped(found);
     var labelled = found.key(BoxInstances.OWNER_KEY).orElse("");
     var labelledId = found.key(BoxInstances.OWNER_ID_KEY).filter(Strings::isNotBlank);
     var another =
         !owning.handle().equals(labelled)
             || labelledId.isPresent()
                 && !labelledId.get().equals(owning.owners().apply(owning.handle()).id());
-    if (another && !labelled.isBlank()) {
-      label(found.name(), "");
-    }
+    boolean started;
     if (another) {
+      started = startIfStopped(found);
+      if (!labelled.isBlank()) {
+        label(found.name(), "");
+      }
       try {
         var owner = owning.now(this, config);
         giveAll(found.name(), config, owner);
         label(found.name(), owner.handle(), owner.id());
       } catch (Exception failure) {
         stripAfter(found.name(), failure);
+        if (started) {
+          stopAgain(found.name(), failure);
+        }
         throw failure;
       }
-    } else if (started) {
-      giveAll(found.name(), config, owning.owners().apply(owning.handle()));
+    } else {
+      started = startGiving(found, config, owning.owners());
     }
     if (found.key(BoxInstances.KEPT_KEY).isPresent()) {
       var cleared =
@@ -961,11 +1038,9 @@ public final class Workspaces {
   }
 
   /**
-   * Starts workspace {@code name}, stopped or frozen, and says what its resume took. It is given
-   * its owner's credentials again, since a token change while it was stopped did not reach it. What
-   * a removal could not do while it was stopped is done first: one whose labelled handle is now
-   * another person (its stored id is not theirs) is stripped and made nobody's; one whose labelled
-   * person is not active here is stripped and refused as before, holding nothing.
+   * Starts workspace {@code name}, stopped or frozen, and says what its resume took, its owner's
+   * credentials given as every start gives them ({@link #giveOrStop}): a start that cannot give
+   * them leaves it stopped.
    */
   public Changed start(
       ProjectDefinition config, String name, Function<String, WorkspaceOwner> owners)
@@ -979,33 +1054,8 @@ public final class Workspaces {
     containers.start(found.name());
     var running = nanos.getAsLong();
     awaitReady(found.name());
-    var owner = found.key(BoxInstances.OWNER_KEY).filter(handle -> !handle.isBlank());
-    if (owner.isPresent()) {
-      try (var held = nameLock(found.name())) {
-        WorkspaceOwner holder;
-        try {
-          holder = owners.apply(owner.get());
-        } catch (IllegalStateException notActiveHere) {
-          WorkspaceCredentials.strip(shell, found.name());
-          throw notActiveHere;
-        }
-        if (labelledFor(found, holder)) {
-          giveAll(found.name(), config, holder);
-        } else {
-          WorkspaceCredentials.strip(shell, found.name());
-          label(found.name(), "");
-        }
-      } catch (IOException given) {
-        throw new IOException(
-            "Workspace "
-                + name
-                + " of "
-                + project
-                + " is running, but its owner's credentials were not all given, and are given again"
-                + " at its next start: "
-                + given.getMessage(),
-            given);
-      }
+    try (var held = nameLock(found.name())) {
+      giveOrStop(found, config, owners);
     }
     var ready = nanos.getAsLong();
     return new Changed(
