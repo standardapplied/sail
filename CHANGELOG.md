@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.69.1
+
+- **A main at a new address is the same main.** 0.69.0 took `sudo sail init --main <address>` on a box that already follows a main as following a different one: it warned, needed `--yes`, and forgot which database the box follows, so re-pinning a node to its main restored on a new box was refused without a terminal, and with `--yes` a node pointed at an empty rebuilt main no longer refused it as another org. The re-pin is again what it was before 0.69.0: no question, nothing forgotten, and the next round admits the new address only if it serves the database the box synced with, refusing anything else. Following a different main is now said explicitly, `sudo sail init --main <address> --another-main`, the only path that prints what that does (with its counts), asks or takes `--yes`, and forgets the old main; the first round's refusal of a handle the new main gives someone else, and its remedies, hang off it as before. The refusal of another database names both ways: restore main's database from a copy, or follow a different main on purpose with `--another-main`.
+
 ## 0.69.0
 
 - **Reinstall every box to take this release: its database schema changed (v1004) and no database before it is converted.** A box on 0.68.0 refuses to start on 0.69.0 with "Database schema v1003 was made by an earlier Sail release; this release opens only v1004 and converts none: the box is reinstalled." and the remedy to move the database aside and run `sail init`. The sync wire is protocol 9: a 0.69.0 main refuses a 0.68.0 node at the hello and tells it to reinstall, so no run crosses through a box that drops the login it started with. After reinstalling, each person stores their harness login again (below), or their spec runs are refused.
