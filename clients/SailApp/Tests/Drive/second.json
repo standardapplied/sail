@@ -3,6 +3,7 @@
   {"name": "still-signed-in", "signed": true, "pane": "Uday\n@uday\nadmin\nhttp://127.0.0.1:7979\nSigned in until ", "seconds": 20},
   {"name": "no-ceremony", "asked": 0},
   {"name": "this-mac", "select": "thisMac"},
+  {"name": "s27-the-window-as-it-was", "resize": [920, 720]},
   {"name": "s27-the-same-tabs-names-ratios-and-focus", "arrangement": {"tabs": [1, 2, 1], "selected": 1, "focus": 0, "titles": ["This Mac", "api", "This Mac"], "frames": [[0, 0, 0.5, 1, 0, 0, 200, 0], [0.5, 0, 0.5, 1, 200, 0, -200, 0]]}, "seconds": 30},
   {"name": "s27-reattached-earlier-output", "line": "kept-8", "seconds": 30},
   {"name": "s28-the-order-survived", "press": "1", "modifiers": ["command"]},

@@ -136,8 +136,17 @@ struct Step: Decodable {
     var panes4: Bool?
     /// Waits this many seconds.
     var wait: Double?
+    /// Each pane of the selected tab shows exactly one line `winch-<columns>` (its shell's
+    /// TRAPWINCH), the columns its view's grid has, within `seconds`: one size reached each program.
+    var onceResized: Bool?
     /// The focused pane's screen must not hold this text.
     var absent: String?
+    /// The focused pane's screen holds `occurs` exactly `times` times, within `seconds`.
+    var occurs: String?
+    var times: Int?
+    /// Keeps the focused pane's top line; `sameTop` finds it there still.
+    var markTop: Bool?
+    var sameTop: Bool?
 
     /// The workbench: panes in each tab, the selected tab and focused pane (from 0, reading order),
     /// the selected tab's pane frames as fractions of its room `[x, y, width, height]`, and points

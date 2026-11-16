@@ -50,7 +50,7 @@ import Testing
         #expect(!selected.mouseDownCanMoveWindow && strip.mouseDownCanMoveWindow, "\(name): a tab moves the window, or the strip's empty part does not")
         #expect(strip.accessibilityRole() == .tabGroup)
         #expect(selected.accessibilityRole() == .radioButton)
-        #expect(selected.accessibilitySubrole() == .tabButton)
+        #expect(selected.accessibilitySubrole() == TabButton.tabButton)
     }
 
     /// The rename field: no system focus ring, ringed in the accent, its selection `fillSelected`

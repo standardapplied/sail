@@ -58,6 +58,25 @@ extension Driver {
         if step.panes4 == true {
             return await fourPanes()
         }
+        if step.onceResized == true {
+            let resized = await waitUntil(step.seconds ?? 5) { self.orderedPanes.allSatisfy(Self.resizedOnce) }
+            let said = orderedPanes.map { view in
+                "\(Self.winches(view)) for a grid of \(view.terminal.grid.map { "\($0.columns)" } ?? "none") columns"
+            }
+            return (resized, said.joined(separator: "; "))
+        }
+        if let text = step.occurs {
+            let times = step.times ?? 1
+            let found = await waitUntil(step.seconds ?? 5) { self.screenText.components(separatedBy: text).count - 1 == times }
+            return (found, "the screen holds it \(screenText.components(separatedBy: text).count - 1) times")
+        }
+        if step.markTop == true {
+            markedTop = lines.first
+            return (markedTop != nil, "the top line is '\(markedTop ?? "")'")
+        }
+        if step.sameTop == true {
+            return (lines.first == markedTop, "the top line is '\(lines.first ?? "")', it was '\(markedTop ?? "")'")
+        }
         if let seconds = step.wait {
             try? await Task.sleep(for: .seconds(seconds))
             return (true, "")
@@ -331,6 +350,18 @@ extension Driver {
         let missed = budgets.filter { !$0.value }.keys.sorted()
         let numbers = panes4.sorted { $0.key < $1.key }.map { "\($0.key) \(String(format: "%.1f", $0.value))" }.joined(separator: ", ")
         return (ok && missed.isEmpty, (missed.isEmpty ? "within every budget" : "missed: \(missed.joined(separator: "; "))") + "; echo: \(said); \(numbers)")
+    }
+
+    /// The lines `view`'s shell printed at each size change, `winch-<columns>`.
+    static func winches(_ view: TerminalPane) -> [String] {
+        let text = (try? view.session?.screen.text()) ?? ""
+        return text.split(separator: "\n").map { $0.trimmingCharacters(in: .whitespaces) }.filter { $0.hasPrefix("winch-") }
+    }
+
+    /// One size change reached `view`'s program, and it was the view's grid.
+    static func resizedOnce(_ view: TerminalPane) -> Bool {
+        guard let columns = view.terminal.grid?.columns else { return false }
+        return winches(view) == ["winch-\(columns)"]
     }
 
     /// Whether a line of `view`'s screen, trimmed, is `line`.

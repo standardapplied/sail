@@ -31,6 +31,8 @@ final class Driver {
     var panes4: [String: Double] = [:]
     /// The session `remember` kept.
     var remembered: String?
+    /// The top line `markTop` kept.
+    var markedTop: String?
     lazy var standIn: TerminalView = {
         guard let fonts = Bundle.main.resourceURL.flatMap({ try? TerminalFonts(directory: $0.appending(path: "Fonts")) }),
               let view = try? TerminalView(fonts: fonts)

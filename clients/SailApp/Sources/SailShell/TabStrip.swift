@@ -175,13 +175,16 @@ public final class TabButton: NSView, NSTextFieldDelegate {
         label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         setAccessibilityElement(true)
         setAccessibilityRole(.radioButton)
-        setAccessibilitySubrole(.tabButton)
+        setAccessibilitySubrole(Self.tabButton)
     }
 
     @available(*, unavailable)
     required init?(coder: NSCoder) {
         nil
     }
+
+    /// AppKit's subrole for a tab (`NSAccessibilityTabButtonSubrole`, `AXTabButton`).
+    public static let tabButton = NSAccessibility.Subrole(rawValue: "AXTabButton")
 
     static func symbol(_ name: String, accessibility: String) -> NSImage {
         let image = NSImage(systemSymbolName: name, accessibilityDescription: accessibility) ?? NSImage()
