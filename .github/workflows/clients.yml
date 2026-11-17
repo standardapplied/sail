@@ -248,6 +248,7 @@ jobs:
           ci/bundle SailDrive "$RUNNER_TEMP/drive/Sail.app" "$SAIL_BINARY"
 
       - name: Sign the drive build as the shipped app is signed
+        id: sign-drive
         if: ${{ !cancelled() }}
         env:
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
@@ -259,8 +260,10 @@ jobs:
           APPLE_PROVISIONING_PROFILE_BASE64: ${{ secrets.APPLE_PROVISIONING_PROFILE_BASE64 }}
         run: ci/sign "$RUNNER_TEMP/drive/Sail.app"
 
+      # Nothing runs a drive build that failed to sign: its Keychain would refuse it and the drive
+      # would report that hundreds of steps later as if it were the app's.
       - name: The bundled sail runs under the hardened runtime from inside the bundle
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && steps.sign-drive.outcome == 'success' }}
         run: |
           selftest=$("$RUNNER_TEMP/drive/Sail.app/Contents/Helpers/sail" _pty-selftest)
           echo "$selftest"
@@ -268,7 +271,7 @@ jobs:
 
       # The system accent graphite first, so a view that took the system's accent would show it.
       - name: Drive the app against this Mac's own host and two control planes
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && steps.sign-drive.outcome == 'success' }}
         env:
           SAIL_SIGNING: ${{ env.SIGNING }}
         run: |

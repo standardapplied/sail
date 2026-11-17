@@ -328,7 +328,8 @@ import Testing
         var bench = Workbench()
         _ = bench.newTab(session: "mac-left", place: .thisMac(folder: "/"))
         let size = CGSize(width: 800, height: 600)
-        _ = try #require(bench.split(.sideBySide, session: "mac-right", place: .thisMac(folder: "/"), in: size, minimum: CGSize(width: 100, height: 100), scale: 2))
+        let right = bench.split(.sideBySide, session: "mac-right", place: .thisMac(folder: "/"), in: size, minimum: CGSize(width: 100, height: 100), scale: 2)
+        try #require(right != nil, "the tab did not split")
         let dividers = bench.frames(in: size, scale: 2).dividers
         try #require(dividers.count == 1)
         let room = TabView(frame: NSRect(origin: .zero, size: size))
