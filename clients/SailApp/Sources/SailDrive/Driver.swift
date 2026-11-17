@@ -59,6 +59,8 @@ final class Driver {
         madeStacks = made
         return made
     }
+    /// Each flood judged so far this run, said in brief, so a later one is read beside them.
+    private var floodsSaid: [String] = []
     /// Every stretch of a judged wait excused as the machine's, with its evidence, once each.
     private var excused: [String] = []
 
@@ -308,8 +310,11 @@ final class Driver {
             let ok = judged.ours <= limit
             let measured = measurement(name, keys: 0, figures: figures, budgets: ["every output shown within \(Self.ms(limit)) ms": ok])
             measures.append(measured)
+            let earlier = floodsSaid.isEmpty ? "" : "; the floods before it this run: " + floodsSaid.joined(separator: "; ")
+            floodsSaid.append("\(name): ours \(Self.ms(judged.ours)) ms, its longest wake taken \(Self.ms((figures.longestToTold?.length ?? 0) * 1000)) ms after the screen took it"
+                + Self.posting(figures))
             return (ok, "\(judged.said); the longest refresh took \(Self.ms(figures.refresh.max)) ms, \(figures.lateOutputs) outputs were late; "
-                + "the main thread was held at most \(Self.ms(measured.mainThreadHeld)) ms")
+                + "the main thread was held at most \(Self.ms(measured.mainThreadHeld)) ms" + earlier)
         }
         if let text = step.text {
             let found = await waitUntil(step.seconds ?? 10) { self.screenText.contains(text) }
@@ -399,7 +404,8 @@ final class Driver {
             + "the main thread's longest hold: \(mainHeld().said); its longest gap between commits \(Self.ms(gap * 1000)) ms, "
             + "\(figures.longestGapOutputs) outputs reached the screen in it, a drawable was being asked for \(Self.ms(figures.longestGapFetching)) ms of it; "
             + "the main thread took the wake for an output at most \(Self.ms((figures.longestToTold?.length ?? 0) * 1000)) ms after the screen took it"
-            + Self.posting(figures) + ", "
+            + Self.posting(figures) + (figures.longestToTold.map { "; across that wake's wait, " + mainStacks.readers(across: $0) } ?? "")
+            + "; the reader runs at quality of service " + Self.quality(pane?.session?.readerQuality) + ", "
             + "\(figures.wakes) wakes for \(figures.changes) screen changes")
     }
 
@@ -408,6 +414,19 @@ final class Driver {
     static func posting(_ figures: LatencyFigures) -> String {
         guard let hop = figures.longestToTold, let posted = figures.longestToToldPosted else { return "" }
         return " (posted \(ms((posted - hop.start) * 1000)) ms after the screen took it, taken \(ms((hop.end - posted) * 1000)) ms after it was posted)"
+    }
+
+    /// A quality of service as the flood's line names it.
+    static func quality(_ quality: QualityOfService?) -> String {
+        guard let quality else { return "unknown (no reader yet)" }
+        switch quality {
+        case .userInteractive: return "user-interactive"
+        case .userInitiated: return "user-initiated"
+        case .utility: return "utility"
+        case .background: return "background"
+        case .default: return "default"
+        @unknown default: return "unknown"
+        }
     }
 
     func measurement(_ name: String, keys: Int, figures: LatencyFigures, budgets: [String: Bool]) -> Measure {
