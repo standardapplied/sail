@@ -3,6 +3,7 @@ import SailAPI
 import SailTerminal
 import SailTerminalWire
 import SailVT
+import SailWorkbench
 
 /// A terminal client with no window: it opens a session on this machine's host or on a runner,
 /// runs a script of steps against it, prints the screen, and leaves a JSON report.
@@ -69,9 +70,13 @@ struct Probe {
             guard let token = ProcessInfo.processInfo.environment[variable], !token.isEmpty else {
                 throw ProbeError("the environment variable \(variable) holds no token")
             }
-            create.project = project
-            create.workspace = workspace
-            create.workingDirectory = "/tmp"
+            if workspace.isEmpty {
+                create.project = project
+                create.workingDirectory = "/tmp"
+            } else {
+                create = Place.workspace(project: project, name: workspace).sessionCreate(session: create.session, size: create.size)
+                create.command = script.command
+            }
             door = .runner(SailClient(transport: URLSessionTransport(base: api), token: token))
             echoBudget = echoBudgets.runner
         }

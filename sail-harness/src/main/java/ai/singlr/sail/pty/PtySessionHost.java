@@ -1158,7 +1158,7 @@ public final class PtySessionHost implements AutoCloseable {
     }
     PtyAdmission.Folder folder;
     try {
-      folder = admission.folder(cwd, who);
+      folder = folderOf(m.project(), cwd, who);
     } catch (IOException refused) {
       log("refused", who.fde(), m.session(), "folder");
       return new PtyMessage.Err(
@@ -1201,10 +1201,36 @@ public final class PtySessionHost implements AutoCloseable {
       return new PtyMessage.Ok();
     } catch (IOException e) {
       deleteFiles(files, who.fde(), m.session());
-      return new PtyMessage.Err(
-          "Could not start session '" + m.session() + "': " + Remedied.reasonOf(e),
-          Remedied.remedyOf(e));
+      return notStarted(m.session(), e, who);
     }
+  }
+
+  /**
+   * Where a session of {@code project} opens, for {@code who}, asked for in {@code cwd}: in a
+   * container or a workspace, always where its instance starts it ({@link
+   * PtyAdmission.Folder#INSTANCE}); on this box itself, where the admission says, which refuses a
+   * folder that is not one here.
+   */
+  PtyAdmission.Folder folderOf(String project, Path cwd, PtyIdentity.Person who)
+      throws IOException {
+    return Strings.isBlank(project) ? admission.folder(cwd, who) : PtyAdmission.Folder.INSTANCE;
+  }
+
+  /**
+   * What a person reads when session {@code session} did not start: the failure's own words when
+   * they were written for a person ({@link Remedied}), else that it could not start here, and what
+   * the process launcher said goes to this host's log, never to the person.
+   */
+  private static PtyMessage.Err notStarted(
+      String session, IOException failure, PtyIdentity.Person who) {
+    if (failure instanceof Remedied) {
+      return new PtyMessage.Err(
+          "Could not start session '" + session + "': " + Remedied.reasonOf(failure),
+          Remedied.remedyOf(failure));
+    }
+    log("start-failed", who.fde(), session, failure.toString());
+    return new PtyMessage.Err(
+        "Could not start session '" + session + "' on this box.", PtyAdmission.Unavailable.REMEDY);
   }
 
   /**

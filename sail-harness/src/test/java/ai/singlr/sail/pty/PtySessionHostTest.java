@@ -33,6 +33,7 @@ import java.nio.channels.SocketChannel;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.attribute.PosixFilePermissions;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -523,6 +524,71 @@ class PtySessionHostTest {
     PtyWire.write(channel, new PtyMessage.Attach(session, true));
     assertInstanceOf(PtyMessage.Ok.class, PtyWire.read(channel));
     assertAttachPrologue(channel);
+  }
+
+  /**
+   * The app's Create for a runner tab names no folder: on this box itself the session opens at the
+   * host's home, and a folder that is not one here is refused naming the folder and nothing else.
+   */
+  @Test
+  void aSessionNamingNoFolderOpensAtHomeAndOneNamingNoneHereIsRefusedInWords() throws Exception {
+    try (var ignored = startHost();
+        var channel = connect()) {
+      PtyWire.write(
+          channel,
+          new PtyMessage.Create("home", List.of("sh", "-c", "pwd; read a"), "", "", "", 80, 24));
+      assertInstanceOf(PtyMessage.Ok.class, PtyWire.read(channel));
+      PtyWire.write(channel, new PtyMessage.Attach("home", true));
+      assertInstanceOf(PtyMessage.Ok.class, PtyWire.read(channel));
+      var shown = new StringBuilder();
+      while (!shown.toString().contains(System.getProperty("user.home"))) {
+        if (PtyWire.read(channel) instanceof PtyMessage.Output output) {
+          shown.append(new String(output.bytes(), StandardCharsets.UTF_8));
+        }
+      }
+
+      var missing = dir.resolve("no-such-dir").toString();
+      PtyWire.write(
+          channel, new PtyMessage.Create("nowhere", List.of("sh"), missing, "", "", 80, 24));
+      var refused = assertInstanceOf(PtyMessage.Err.class, readReply(channel));
+      assertEquals(
+          "Refusing folder for session 'nowhere': There is no folder '"
+              + missing
+              + "' on this box to open the terminal in.",
+          refused.reason());
+      assertFalse(refused.message().contains("Exception"), refused.message());
+    }
+  }
+
+  /**
+   * A session in a container or a workspace is started from {@code /} on this box, its shell where
+   * its instance starts it, whatever folder its Create names, none included.
+   */
+  @Test
+  void aContainerOrWorkspaceSessionStartsFromTheRootWhateverFolderItsCreateNames()
+      throws Exception {
+    try (var host = startHost()) {
+      var who = new PtyIdentity.Person(new Actor("uday", Role.MEMBER, Actor.Lane.API));
+      for (var named : List.of("", "/no/such/folder", "/tmp")) {
+        assertEquals(
+            Path.of("/"), host.folderOf("harbor", Path.of(named), who).path(), "named: " + named);
+      }
+      assertEquals(
+          Path.of(System.getProperty("user.home")), host.folderOf("", Path.of(""), who).path());
+    }
+  }
+
+  private static PtyMessage readReply(SocketChannel channel) throws IOException {
+    while (true) {
+      var message = PtyWire.read(channel);
+      if (!(message instanceof PtyMessage.Output)
+          && !(message instanceof PtyMessage.ReplayBegin)
+          && !(message instanceof PtyMessage.ReplayEnd)
+          && !(message instanceof PtyMessage.Resized)
+          && !(message instanceof PtyMessage.WriterChanged)) {
+        return message;
+      }
+    }
   }
 
   private void create(SocketChannel channel, String session, String room) throws IOException {
@@ -1273,23 +1339,22 @@ class PtySessionHostTest {
     }
   }
 
+  /**
+   * A session whose process cannot start says so in a sentence for a person; what the process
+   * launcher said (a program's path, an errno) goes to the log, and no ring is left behind.
+   */
   @Test
   void aCreateThatFailsToSpawnLeavesNoRingBehind() throws Exception {
+    var shut = Files.createDirectory(dir.resolve("shut"));
+    Files.setPosixFilePermissions(shut, PosixFilePermissions.fromString("---------"));
     try (var ignored = startHost(new PtySessionHost.Limits(1, 16, 256, 64));
         var channel = connect()) {
       for (var i = 0; i < 5; i++) {
         PtyWire.write(
             channel,
-            new PtyMessage.Create(
-                "doomed" + i,
-                List.of("sh"),
-                dir.resolve("no-such-dir").toString(),
-                "",
-                "",
-                80,
-                24));
+            new PtyMessage.Create("doomed" + i, List.of("sh"), shut.toString(), "", "", 80, 24));
         var refused = assertInstanceOf(PtyMessage.Err.class, PtyWire.read(channel));
-        assertTrue(refused.message().contains("Could not start session"), refused.message());
+        assertEquals("Could not start session 'doomed" + i + "' on this box.", refused.reason());
       }
       try (var rings = Files.list(dir.resolve("sessions"))) {
         assertEquals(
