@@ -6,7 +6,7 @@ import Testing
 @Suite struct FrameCodecTests {
     @Test func everyFrameTheHostWritesDecodesAsItsTypeAndEncodesToTheSameBytes() throws {
         let frames = try Goldens.frames()
-        #expect(frames.count == 33)
+        #expect(frames.count == 34)
         for (name, wire) in frames {
             let frame = try FrameCodec.decode(payload: wire.dropFirst(4))
             #expect(messageName(of: frame) == name)
