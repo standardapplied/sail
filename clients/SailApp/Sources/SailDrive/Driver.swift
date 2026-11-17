@@ -398,8 +398,16 @@ final class Driver {
         return (max(verdict.shown, verdict.held) * 1000, "the longest any output waited to be shown: \(ours(figures.longestToShown).said); "
             + "the main thread's longest hold: \(mainHeld().said); its longest gap between commits \(Self.ms(gap * 1000)) ms, "
             + "\(figures.longestGapOutputs) outputs reached the screen in it, a drawable was being asked for \(Self.ms(figures.longestGapFetching)) ms of it; "
-            + "the main thread took the wake for an output at most \(Self.ms((figures.longestToTold?.length ?? 0) * 1000)) ms after the screen took it, "
+            + "the main thread took the wake for an output at most \(Self.ms((figures.longestToTold?.length ?? 0) * 1000)) ms after the screen took it"
+            + Self.posting(figures) + ", "
             + "\(figures.wakes) wakes for \(figures.changes) screen changes")
+    }
+
+    /// Where the longest wake's wait went: the session's thread posting it after the screen took the
+    /// output, and the main thread taking it after it was posted.
+    static func posting(_ figures: LatencyFigures) -> String {
+        guard let hop = figures.longestToTold, let posted = figures.longestToToldPosted else { return "" }
+        return " (posted \(ms((posted - hop.start) * 1000)) ms after the screen took it, taken \(ms((hop.end - posted) * 1000)) ms after it was posted)"
     }
 
     func measurement(_ name: String, keys: Int, figures: LatencyFigures, budgets: [String: Bool]) -> Measure {
@@ -429,9 +437,9 @@ final class Driver {
         let ours = max(0, wait.length - tick - MachineShare.of(wait, own: own, main: looks)) * 1000
         let seen = looks.filter { $0.time >= wait.start && $0.time <= wait.end }.count
         proven.map(\.told).filter { !excused.contains($0) }.forEach { excused.append($0) }
-        let evidence = proven.isEmpty
+        let evidence = (proven.isEmpty
             ? "no run of \(MachineShare.fewestLooks) looks proved it starved (\(seen) looks in the wait)"
-            : proven.map(\.told).joined(separator: "; ")
+            : proven.map(\.told).joined(separator: "; ")) + "; the main run loop in " + MachineShare.modes(in: wait, looks: looks)
         return (ours, "waited \(Self.ms((wait.length - tick) * 1000)) ms, the drive's own thread held \(Self.ms(ownHeld * 1000)) ms of it, "
             + "the main thread runnable without CPU on a machine with none idle \(Self.ms(starved * 1000)) ms of it (\(evidence)), ours \(Self.ms(ours)) ms")
     }

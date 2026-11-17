@@ -72,10 +72,11 @@ final class ViewMarks: Sendable {
         marks.withLock { $0.output(at: time) }
     }
 
-    /// The main thread took the view's wake for `changes` changes, the oldest at `since`, now.
-    func told(since: Double, changes: Int) {
+    /// The main thread took the view's wake for `changes` changes, the oldest at `since`, now; the
+    /// session's thread posted it at `posted`.
+    func told(since: Double, posted: Double, changes: Int) {
         let now = CACurrentMediaTime()
-        marks.withLock { $0.told(at: now, since: since, changes: changes) }
+        marks.withLock { $0.told(at: now, since: since, posted: posted, changes: changes) }
     }
 
     func committed(frame: UInt64, read: Double, target: Double) {

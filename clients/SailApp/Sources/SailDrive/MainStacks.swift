@@ -100,7 +100,8 @@ final class MainStacks: @unchecked Sendable {
             time: time, runnable: info.run_state == TH_STATE_RUNNING,
             cpu: Double(info.user_time.seconds + info.system_time.seconds) + Double(info.user_time.microseconds + info.system_time.microseconds) / 1e6,
             processCPU: process, idleTicks: ticks.count == 4 ? ticks[2] : nil,
-            busyTicks: ticks.count == 4 ? ticks[0] &+ ticks[1] &+ ticks[3] : nil
+            busyTicks: ticks.count == 4 ? ticks[0] &+ ticks[1] &+ ticks[3] : nil,
+            mode: CFRunLoopCopyCurrentMode(CFRunLoopGetMain()).map { $0.rawValue as String }
         )
         let cost = CACurrentMediaTime() - time
         lock.withLock {

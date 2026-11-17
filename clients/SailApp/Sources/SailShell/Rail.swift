@@ -91,11 +91,16 @@ public final class Rail: NSView {
         nil
     }
 
+    /// The bar beside `item`'s button, which marks it chosen.
+    func bar(_ item: Item) -> NSView? {
+        bars[item]
+    }
+
     func show(_ item: Item?) {
         selected = item
         layer?.backgroundColor = NSColor.clear.cgColor
         for (each, button) in buttons {
-            bars[each]?.layer?.backgroundColor = NSColor(look.accent).cgColor
+            bars[each]?.layer?.backgroundColor = NSColor(look.accentText).cgColor
             let chosen = each == item
             button.layer?.backgroundColor = chosen ? NSColor(look.fillSelected).cgColor : NSColor.clear.cgColor
             button.contentTintColor = chosen ? NSColor(look.accentText) : NSColor(look.textSecondary)

@@ -37,16 +37,16 @@ import Testing
         #expect(other.label.font == NSFont.systemFont(ofSize: Look.Step.callout.points, weight: .regular))
         strip.frame = NSRect(x: 0, y: 0, width: 600, height: ShellApp.bandHeight)
         strip.layoutSubtreeIfNeeded()
-        let accentText = [Int(look.accentText.red), Int(look.accentText.green), Int(look.accentText.blue)]
-        for (tab, marked) in [(selected, true), (other, false)] {
-            tab.layoutSubtreeIfNeeded()
-            let context = try #require(Self.drawn(tab))
-            let pixels = try #require(context.data).bindMemory(to: UInt8.self, capacity: context.width * context.height * 4)
-            let at = (Int((Double(tab.bounds.height) - 1) * 2) * context.width + Int(Double(tab.bounds.midX) * 2)) * 4
-            let found = [Int(pixels[at]), Int(pixels[at + 1]), Int(pixels[at + 2])]
-            let isBar = zip(found, accentText).allSatisfy { abs($0 - $1) <= 2 }
-            #expect(isBar == marked, "\(name): the bottom edge's middle is \(found), the bar \(accentText), \(marked ? "wanted" : "not wanted") there")
-        }
+        selected.layoutSubtreeIfNeeded()
+        #expect(strip.isFlipped && !selected.isFlipped, "\(name): the tab's own y no longer runs up from its bottom edge")
+        let bar = selected.bar.frame, width = Double(selected.bounds.width)
+        #expect(width > 2 * Look.contentRadius, "\(name): the tab was not laid out (\(width) pt wide)")
+        #expect(abs(Double(bar.minY)) <= 0.5 && abs(Double(bar.height) - TabButton.barHeight) <= 0.5,
+                "\(name): the bar is at y \(bar.minY), \(bar.height) pt high, not along the tab's bottom edge")
+        #expect(abs(Double(bar.minX) - Look.contentRadius) <= 0.5 && abs(Double(bar.maxX) - (width - Look.contentRadius)) <= 0.5,
+                "\(name): the bar runs \(bar.minX)–\(bar.maxX) in a tab \(width) pt wide")
+        #expect(selected.bar.layer?.backgroundColor == NSColor(look.accentText).cgColor, "\(name): the bar is not accentText")
+        #expect(!selected.bar.isHidden && other.bar.isHidden, "\(name): the bar marks the wrong tab")
         #expect(other.layer?.backgroundColor == NSColor.clear.cgColor)
         #expect(other.label.textColor == NSColor(look.textSecondary))
         #expect(selected.close.isHidden && other.close.isHidden, "\(name): a close button shows without the pointer on its tab")
@@ -68,7 +68,7 @@ import Testing
             #expect(button.layer?.borderWidth == 0)
         }
         #expect(selected.layer.map { Double($0.cornerRadius) } == Look.contentRadius)
-        #expect(selected.label.font == NSFont.systemFont(ofSize: 13))
+        #expect(selected.label.font == NSFont.systemFont(ofSize: 13, weight: .medium))
         #expect(selected.toolTip == "api")
         #expect(!selected.mouseDownCanMoveWindow && strip.mouseDownCanMoveWindow, "\(name): a tab moves the window, or the strip's empty part does not")
         #expect(strip.accessibilityRole() == .tabGroup)
@@ -217,11 +217,12 @@ import Testing
         strip.show(Self.items(), selected: TabID(1))
         strip.layoutSubtreeIfNeeded()
         let tab = try #require(strip.tabs.first)
-        let title = try #require(Self.ink(tab), "the title drew no ink")
+        #expect(!tab.bar.isHidden, "the selected tab shows no bar")
+        let title = try #require(Self.ink(tab, except: Look.light.accentText), "the title drew no ink")
         tab.rename()
         let editor = try #require(tab.field?.currentEditor() as? NSTextView)
         editor.setSelectedRange(NSRange(location: editor.string.utf16.count, length: 0))
-        let text = try #require(Self.ink(tab), "the field drew no ink")
+        let text = try #require(Self.ink(tab, except: Look.light.accentText), "the field drew no ink")
         let middle = Double(tab.bounds.midX)
         #expect(abs(text.minY - title.minY) <= 0.5 && abs(text.maxY - title.maxY) <= 0.5, "the text is at \(text), the title was at \(title)")
         #expect(abs(title.midX - middle) <= 1 && abs(text.midX - middle) <= 1, "the tab's middle is \(middle); the title's \(title.midX), the text's \(text.midX)")
@@ -287,8 +288,9 @@ import Testing
 
     /// The rectangle, in points from the top left, of `view`'s mostly opaque pixels darker than
     /// `limit` (red, green and blue summed, of 765): the text, in the light look. Drawn at 2x as
-    /// AppKit draws views (`cacheDisplay`): a layer's render left out the title's text.
-    static func ink(_ view: NSView, darkerThan limit: Double = 300) -> CGRect? {
+    /// AppKit draws views (`cacheDisplay`): a layer's render left out the title's text. The pixels
+    /// of `except` are left out: a glyph's ink, not a mark of that colour beside it.
+    static func ink(_ view: NSView, darkerThan limit: Double = 300, except: RGB? = nil) -> CGRect? {
         view.layoutSubtreeIfNeeded()
         guard view.bounds.width > 0, view.bounds.height > 0, let image = NSBitmapImageRep(
             bitmapDataPlanes: nil, pixelsWide: Int(view.bounds.width * 2), pixelsHigh: Int(view.bounds.height * 2), bitsPerSample: 8,
@@ -301,7 +303,8 @@ import Testing
         for y in 0 ..< image.pixelsHigh {
             for x in 0 ..< image.pixelsWide {
                 guard let colour = image.colorAt(x: x, y: y)?.usingColorSpace(.sRGB), colour.alphaComponent > 0.5,
-                      Double(colour.redComponent + colour.greenComponent + colour.blueComponent) * 255 < limit
+                      Double(colour.redComponent + colour.greenComponent + colour.blueComponent) * 255 < limit,
+                      !Self.matches(colour, except)
                 else { continue }
                 found = found.map { (minX: min($0.minX, x), minY: min($0.minY, y), maxX: max($0.maxX, x), maxY: max($0.maxY, y)) } ?? (minX: x, minY: y, maxX: x, maxY: y)
             }
@@ -309,6 +312,14 @@ import Testing
         return found.map {
             CGRect(x: Double($0.minX) / scale, y: Double($0.minY) / scale, width: Double($0.maxX - $0.minX + 1) / scale, height: Double($0.maxY - $0.minY + 1) / scale)
         }
+    }
+
+    /// Whether `colour` is `rgb`, within 12 levels a channel: room for the bitmap's colour space,
+    /// while a title's antialiased ink comes no nearer than 74 levels to the bar's.
+    static func matches(_ colour: NSColor, _ rgb: RGB?) -> Bool {
+        guard let rgb else { return false }
+        let found = [colour.redComponent, colour.greenComponent, colour.blueComponent].map { Int((Double($0) * 255).rounded()) }
+        return zip(found, [Int(rgb.red), Int(rgb.green), Int(rgb.blue)]).allSatisfy { abs($0 - $1) <= 12 }
     }
 
     @Test func theScrimIsTheTerminalBackgroundAt30PercentAndTakesNoClick() throws {

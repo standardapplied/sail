@@ -634,6 +634,8 @@ final class ScreenWake: Sendable {
         var oldest: Double
         var newest: Double
         var changes: Int
+        /// When the session's thread posted the wake.
+        var posted: Double
     }
 
     private let queue: DispatchQueue
@@ -656,7 +658,7 @@ final class ScreenWake: Sendable {
                 outstanding?.newest = time
                 return false
             }
-            outstanding = Outstanding(oldest: time, newest: time, changes: 1)
+            outstanding = Outstanding(oldest: time, newest: time, changes: 1, posted: CACurrentMediaTime())
             return true
         }
         guard post else { return }
@@ -671,7 +673,7 @@ final class ScreenWake: Sendable {
         }) else { return }
         marks.output(at: taken.oldest)
         if taken.changes > 1 { marks.output(at: taken.newest) }
-        marks.told(since: taken.oldest, changes: taken.changes)
+        marks.told(since: taken.oldest, posted: taken.posted, changes: taken.changes)
         draw()
     }
 }

@@ -131,6 +131,9 @@ import Testing
         let content = try #require(window.contentView)
         #expect(window.contentLayoutRect.height < content.bounds.height, "\(name): the content view does not reach under the title bar")
         #expect(shell.rail.layer?.backgroundColor == NSColor.clear.cgColor, "\(name): the rail hides the chrome")
+        shell.select(.thisMac)
+        let chosen = try #require(shell.rail.bar(.thisMac))
+        #expect(!chosen.isHidden && chosen.layer?.backgroundColor == NSColor(look.accentText).cgColor, "\(name): the rail's chosen item has no accentText bar, as a tab's")
         let root = try #require(content as? ChromeView)
         #expect(root.colours == [NSColor(look.chromeEnd).cgColor, NSColor(look.chrome).cgColor], "\(name): the chrome is not Mast's gradient")
         for item in [Rail.Item.account, .thisMac] {
