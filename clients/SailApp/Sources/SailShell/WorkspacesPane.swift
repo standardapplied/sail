@@ -54,6 +54,7 @@ public final class WorkspacesPane: NSView, NSTableViewDataSource, NSTableViewDel
     private let projectGroup = NSStackView()
     private let newGroup = NSStackView()
     private let emptyGroup = NSStackView()
+    private lazy var nameFrame = FieldFrame(name, look: look)
     private var lines: [String] = []
 
     init(look: Look, title: TitleFont, mono: TerminalFonts) {
@@ -249,7 +250,7 @@ public final class WorkspacesPane: NSView, NSTableViewDataSource, NSTableViewDel
         }
         list.backgroundColor = NSColor(look.canvas)
         open.look = look
-        name.layer?.borderColor = NSColor(look.accent).cgColor
+        nameFrame.look = look
         say(lines)
         show(body)
         let kept = list.selectedRowIndexes
@@ -259,8 +260,11 @@ public final class WorkspacesPane: NSView, NSTableViewDataSource, NSTableViewDel
 
     private func compose(mono: TerminalFonts) {
         wantsLayer = true
-        let making = NSStackView(views: [name, make])
+        let making = NSStackView(views: [nameFrame, make])
         making.spacing = Look.Space.s
+        make.controlSize = .large
+        nameFrame.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        make.setContentHuggingPriority(.required, for: .horizontal)
         let groups: [(NSStackView, [NSView])] = [
             (projectGroup, [eyebrow("Project", mono: mono), projects]), (newGroup, [eyebrow("New workspace", mono: mono), making]),
             (emptyGroup, [empty, tryAgain]),
@@ -291,8 +295,6 @@ public final class WorkspacesPane: NSView, NSTableViewDataSource, NSTableViewDel
         scroll.borderType = .noBorder
         open.target = self
         name.placeholderString = "name of a new workspace"
-        name.focusRingType = .none
-        name.wantsLayer = true
         name.target = self
         name.action = #selector(makeWorkspace(_:))
         make.target = self
@@ -324,7 +326,7 @@ public final class WorkspacesPane: NSView, NSTableViewDataSource, NSTableViewDel
             stack.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Look.Space.x3l),
             stack.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -Look.Space.x3l),
             scroll.widthAnchor.constraint(equalToConstant: Self.width), listHeight,
-            projects.widthAnchor.constraint(equalToConstant: Self.width), name.widthAnchor.constraint(equalToConstant: 300),
+            projects.widthAnchor.constraint(equalToConstant: Self.width), making.widthAnchor.constraint(equalToConstant: Self.width),
             empty.widthAnchor.constraint(equalToConstant: Self.width), said.widthAnchor.constraint(lessThanOrEqualToConstant: 560),
         ])
         show(.listed)
@@ -341,6 +343,11 @@ final class WorkspaceRowView: NSTableRowView {
     static let inset = (Rail.width - Rail.item) / 2
 
     var look: Look {
+        didSet { needsDisplay = true }
+    }
+
+    /// Whether the pointer is over it: an unchosen row then takes the look's hover fill.
+    var hovered = false {
         didSet { needsDisplay = true }
     }
 
@@ -361,6 +368,23 @@ final class WorkspaceRowView: NSTableRowView {
     override func drawBackground(in dirtyRect: NSRect) {
         NSColor(look.canvas).setFill()
         dirtyRect.fill()
+        guard hovered, !isSelected else { return }
+        NSColor(look.fillHover).setFill()
+        NSBezierPath(roundedRect: Self.fill(in: bounds), xRadius: Look.contentRadius, yRadius: Look.contentRadius).fill()
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        trackingAreas.forEach(removeTrackingArea)
+        addTrackingArea(NSTrackingArea(rect: .zero, options: [.mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect], owner: self))
+    }
+
+    override func mouseEntered(with _: NSEvent) {
+        hovered = true
+    }
+
+    override func mouseExited(with _: NSEvent) {
+        hovered = false
     }
 
     override func drawSelection(in _: NSRect) {
@@ -380,12 +404,10 @@ final class WorkspaceRowView: NSTableRowView {
     }
 }
 
-/// A workspace's name in the body text; under it its state, a dot (filled in the accent while it
-/// runs, a ring otherwise) and a word in secondary text; and its owner at the trailing edge when
-/// it is another person's.
+/// A workspace's name in the body text; under it its state, a dot (the accent while it runs, the
+/// secondary text colour otherwise) and a word in secondary text; and, when it is another person's,
+/// their handle with a person symbol in secondary text at the trailing edge.
 final class WorkspaceCell: NSView {
-    static let dot = 6.0
-
     init(_ row: WorkspaceRow, for handle: String, look: Look) {
         super.init(frame: .zero)
         let name = NSTextField(labelWithString: row.name)
@@ -394,16 +416,19 @@ final class WorkspaceCell: NSView {
         let state = NSTextField(labelWithString: row.said)
         state.font = .systemFont(ofSize: Look.Step.micro.points)
         state.textColor = NSColor(look.textSecondary)
-        let dot = NSView()
-        dot.wantsLayer = true
-        dot.layer?.cornerRadius = Self.dot / 2
-        dot.layer?.backgroundColor = row.isUp ? NSColor(look.accent).cgColor : NSColor.clear.cgColor
-        dot.layer?.borderWidth = row.isUp ? 0 : 1
-        dot.layer?.borderColor = NSColor(look.textSecondary).cgColor
-        let owner = NSTextField(labelWithString: row.owner(apartFrom: handle).map { "\($0)'s" } ?? "")
-        owner.font = .systemFont(ofSize: Look.Step.callout.points)
-        owner.textColor = NSColor(look.textSecondary)
-        owner.alignment = .right
+        let dot = StateDot(colour: row.isUp ? NSColor(look.accent) : NSColor(look.textSecondary))
+        let owner = NSStackView()
+        owner.spacing = 4
+        owner.isHidden = row.owner(apartFrom: handle) == nil
+        if let who = row.owner(apartFrom: handle) {
+            let symbol = NSImageView(image: NSImage(systemSymbolName: "person.fill", accessibilityDescription: "owner") ?? NSImage())
+            symbol.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: Look.Step.micro.points, weight: .regular)
+            symbol.contentTintColor = NSColor(look.textSecondary)
+            let label = NSTextField(labelWithString: who)
+            label.font = .systemFont(ofSize: Look.Step.callout.points)
+            label.textColor = NSColor(look.textSecondary)
+            [symbol, label].forEach { owner.addArrangedSubview($0) }
+        }
         for view in [name, state, dot, owner] {
             view.translatesAutoresizingMaskIntoConstraints = false
             addSubview(view)
@@ -412,9 +437,9 @@ final class WorkspaceCell: NSView {
         NSLayoutConstraint.activate([
             name.leadingAnchor.constraint(equalTo: leadingAnchor, constant: leading),
             name.bottomAnchor.constraint(equalTo: centerYAnchor, constant: 1),
-            dot.leadingAnchor.constraint(equalTo: name.leadingAnchor), dot.widthAnchor.constraint(equalToConstant: Self.dot),
-            dot.heightAnchor.constraint(equalToConstant: Self.dot), dot.centerYAnchor.constraint(equalTo: state.centerYAnchor),
-            state.leadingAnchor.constraint(equalTo: dot.trailingAnchor, constant: Self.dot),
+            dot.leadingAnchor.constraint(equalTo: name.leadingAnchor), dot.widthAnchor.constraint(equalToConstant: StateDot.size),
+            dot.heightAnchor.constraint(equalToConstant: StateDot.size), dot.centerYAnchor.constraint(equalTo: state.centerYAnchor),
+            state.leadingAnchor.constraint(equalTo: dot.trailingAnchor, constant: StateDot.size),
             state.topAnchor.constraint(equalTo: centerYAnchor, constant: 1),
             owner.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Look.Space.m),
             owner.centerYAnchor.constraint(equalTo: centerYAnchor),
@@ -426,6 +451,28 @@ final class WorkspaceCell: NSView {
     @available(*, unavailable)
     required init?(coder: NSCoder) {
         nil
+    }
+}
+
+/// A workspace's state as a filled dot, drawn, so it shows wherever its row is drawn.
+final class StateDot: NSView {
+    static let size = 6.0
+
+    let colour: NSColor
+
+    init(colour: NSColor) {
+        self.colour = colour
+        super.init(frame: .zero)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        nil
+    }
+
+    override func draw(_: NSRect) {
+        colour.setFill()
+        NSBezierPath(ovalIn: bounds).fill()
     }
 }
 

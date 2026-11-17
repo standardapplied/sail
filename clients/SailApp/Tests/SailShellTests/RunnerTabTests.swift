@@ -443,7 +443,7 @@ final class DoorTickets: TicketSource {
         let pane = try await Self.listed([try Exchange("projects"), try Exchange("workspaces")])
         let scroll = try #require(pane.list.enclosingScrollView)
         let project = try #require(Self.label("PROJECT", in: pane)), new = try #require(Self.label("NEW WORKSPACE", in: pane))
-        let making = try #require(pane.name.superview)
+        let making = try #require(pane.name.superview?.superview)
         let rect = { (view: NSView) in pane.convert(view.alignmentRect(forFrame: view.frame), from: view.superview) }
         let gaps = [
             rect(project).minY - rect(pane.projects).maxY, rect(pane.projects).minY - rect(scroll).maxY, rect(scroll).minY - rect(pane.open).maxY,
@@ -451,6 +451,65 @@ final class DoorTickets: TicketSource {
         ]
         #expect(gaps.map { $0.rounded() } == [8, 24, 12, 24, 8], "gaps \(gaps)")
         #expect(rect(scroll).height.rounded() == Rail.item, "one row, one row's height")
+        #expect(rect(making).width.rounded() == WorkspacesPane.width && rect(pane.make).maxX.rounded() == rect(scroll).maxX.rounded(),
+                "the name and Make span the list's width: \(rect(making)), \(rect(pane.make)), \(rect(scroll))")
+    }
+
+    /// Look, the shared field: content corners (the canvas shows at the corner), the surface inside,
+    /// a 1 pt ring in the strong separator, in both looks.
+    @Test(arguments: [("light", Look.light), ("dark", Look.dark)])
+    func aFieldIsRoundedOnTheSurfaceWithItsRing(_ name: String, _ look: Look) {
+        let frame = FieldFrame(NSTextField(), look: look)
+        frame.frame = NSRect(x: 0, y: 0, width: 200, height: FieldFrame.height)
+        let backdrop = Backdrop(NSColor(look.canvas), holding: frame)
+        let ring = Self.colour(of: Swatch(NSColor(look.separatorStrong), over: NSColor(look.surface)), at: NSPoint(x: 5, y: 5))
+        #expect(Self.colour(of: backdrop, at: NSPoint(x: 1, y: 1)).near(Self.channels(look.canvas)), "\(name): the corner is not rounded")
+        #expect(Self.colour(of: backdrop, at: NSPoint(x: 150, y: 14)).near(Self.channels(look.surface)), "\(name): the inside is not the surface")
+        #expect(Self.colour(of: backdrop, at: NSPoint(x: 150, y: 0.25)).near(ring), "\(name): the ring is \(Self.colour(of: backdrop, at: NSPoint(x: 150, y: 0.25))), not \(ring)")
+        #expect(frame.ring.width == 1 && frame.ring.colour == NSColor(look.separatorStrong))
+    }
+
+    /// Look, the prominent button: enabled, the accent with its label `onAccent` in bold; disabled,
+    /// a grey (the strong separator over the canvas), its label secondary, never the accent dimmed.
+    @Test(arguments: [("light", Look.light), ("dark", Look.dark)])
+    func aDisabledProminentButtonIsGrey(_ name: String, _ look: Look) {
+        let button = AccentButton("Open", look: look, target: nil, action: #selector(NSApplication.terminate(_:)))
+        button.frame = NSRect(x: 0, y: 0, width: 120, height: 34)
+        let backdrop = Backdrop(NSColor(look.canvas), holding: button)
+        #expect(Self.colour(of: backdrop, at: NSPoint(x: 4, y: 17)).near(Self.channels(look.accent)), "\(name): enabled is the accent")
+        #expect(button.attributedTitle.attribute(.foregroundColor, at: 0, effectiveRange: nil) as? NSColor == NSColor(look.onAccent))
+        button.isEnabled = false
+        let grey = Self.colour(of: Swatch(NSColor(look.separatorStrong), over: NSColor(look.canvas)), at: NSPoint(x: 5, y: 5))
+        let drawn = Self.colour(of: backdrop, at: NSPoint(x: 4, y: 17))
+        #expect(drawn.near(grey), "\(name): disabled is \(drawn), not \(grey)")
+        #expect(drawn.count == 3 && (drawn.max() ?? 0) - (drawn.min() ?? 0) <= 16, "\(name): disabled is not a grey: \(drawn)")
+        #expect(button.attributedTitle.attribute(.foregroundColor, at: 0, effectiveRange: nil) as? NSColor == NSColor(look.textSecondary))
+    }
+
+    /// Look, a row's state: a running workspace's dot is the accent, a stopped one's the secondary
+    /// text colour, filled, legible at its size in both looks; an unchosen row under the pointer
+    /// takes the hover fill.
+    @Test(arguments: [("light", Look.light), ("dark", Look.dark)])
+    func theStateDotIsFilledAndARowUnderThePointerTakesTheHoverFill(_ name: String, _ look: Look) throws {
+        for (state, colour) in [(WorkspaceState.running, NSColor(look.accent)), (.stopped, NSColor(look.textSecondary))] {
+            let cell = WorkspaceCell(WorkspaceRow(name: "pier", instance: "harbor-pier", state: .known(state), owner: "uday"), for: "uday", look: look)
+            cell.frame = NSRect(x: 0, y: 0, width: 380, height: Rail.item)
+            let backdrop = Backdrop(NSColor(look.canvas), holding: cell)
+            backdrop.layoutSubtreeIfNeeded()
+            let dot = try #require(cell.subviews.first { $0 is StateDot })
+            let centre = backdrop.convert(NSPoint(x: dot.bounds.midX, y: dot.bounds.midY), from: dot)
+            let expected = Self.colour(of: Swatch(colour, over: NSColor(look.canvas)), at: NSPoint(x: 5, y: 5))
+            #expect(Self.colour(of: backdrop, at: centre).near(expected), "\(name) \(state): the dot is \(Self.colour(of: backdrop, at: centre)), not \(expected)")
+        }
+        let row = WorkspaceRowView(look: look)
+        row.frame = NSRect(x: 0, y: 0, width: 380, height: Rail.item)
+        row.hovered = true
+        let hover = Self.colour(of: Swatch(NSColor(look.fillHover), over: NSColor(look.canvas)), at: NSPoint(x: 5, y: 5))
+        #expect(Self.colour(of: row, at: NSPoint(x: 200, y: 21)).near(hover), "\(name): the hover fill")
+        row.isSelected = true
+        row.isEmphasized = true
+        let chosen = Self.colour(of: Swatch(NSColor(look.fillSelected), over: NSColor(look.canvas)), at: NSPoint(x: 5, y: 5))
+        #expect(Self.colour(of: row, at: NSPoint(x: 200, y: 21)).near(chosen), "\(name): a chosen row keeps its fill under the pointer")
     }
 
     /// The text field reading `text`, wherever it is in `view`.
@@ -497,6 +556,28 @@ final class Swatch: NSView {
         bounds.fill()
         colour.setFill()
         NSBezierPath(rect: bounds).fill()
+    }
+}
+
+/// `view` drawn over `base`, as it is drawn in its pane: what a translucent part of it shows.
+final class Backdrop: NSView {
+    private let base: NSColor
+
+    init(_ base: NSColor, holding view: NSView) {
+        self.base = base
+        super.init(frame: NSRect(origin: .zero, size: view.frame.size))
+        view.setFrameOrigin(.zero)
+        addSubview(view)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        nil
+    }
+
+    override func draw(_: NSRect) {
+        base.setFill()
+        bounds.fill()
     }
 }
 

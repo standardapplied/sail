@@ -3,8 +3,10 @@ import SailLook
 import SailTerminalView
 
 /// The one prominent action: terracotta filled, its label `onAccent` in bold, content corners at
-/// 6 pt. It draws its own fill, so the system accent never reaches it. The label is bold because
-/// white on terracotta is 3.43:1, which only large text may be (bold at any size, HIG Accessibility).
+/// 6 pt; disabled, the fill is the strong separator, a grey, and the label secondary, as macOS dims
+/// a prominent button. It draws its own fill, so the system accent never reaches it. The label is
+/// bold because white on terracotta is 3.43:1, which only large text may be (bold at any size, HIG
+/// Accessibility).
 @MainActor
 public final class AccentButton: NSButton {
     /// The look it is drawn in; a new one repaints it.
@@ -18,8 +20,6 @@ public final class AccentButton: NSButton {
         self.target = target
         self.action = action
         isBordered = false
-        wantsLayer = true
-        layer?.cornerRadius = Look.contentRadius
         setTitle(title)
     }
 
@@ -28,12 +28,24 @@ public final class AccentButton: NSButton {
         nil
     }
 
+    /// What it is filled with now.
+    var fill: NSColor {
+        isEnabled ? NSColor(look.accent) : NSColor(look.separatorStrong)
+    }
+
     public func setTitle(_ title: String) {
-        layer?.backgroundColor = NSColor(look.accent).cgColor
+        let ink = isEnabled ? NSColor(look.onAccent) : NSColor(look.textSecondary)
         attributedTitle = NSAttributedString(
-            string: title, attributes: [.foregroundColor: NSColor(look.onAccent), .font: NSFont.systemFont(ofSize: Look.Step.body.points, weight: .bold)]
+            string: title, attributes: [.foregroundColor: ink, .font: NSFont.systemFont(ofSize: Look.Step.body.points, weight: .bold)]
         )
         invalidateIntrinsicContentSize()
+        needsDisplay = true
+    }
+
+    override public func draw(_ dirtyRect: NSRect) {
+        fill.setFill()
+        NSBezierPath(roundedRect: bounds, xRadius: Look.contentRadius, yRadius: Look.contentRadius).fill()
+        super.draw(dirtyRect)
     }
 
     override public var intrinsicContentSize: NSSize {
@@ -42,7 +54,7 @@ public final class AccentButton: NSButton {
     }
 
     override public var isEnabled: Bool {
-        didSet { alphaValue = isEnabled ? 1 : 0.5 }
+        didSet { setTitle(title) }
     }
 }
 

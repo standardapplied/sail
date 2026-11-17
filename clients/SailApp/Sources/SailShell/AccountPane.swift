@@ -38,7 +38,8 @@ public final class AccountPane: NSView, NSMenuItemValidation {
     private let mono: TerminalFonts
     private var lines: [String] = []
     private var labels: [NSTextField] = []
-    private var focusWatch: NSKeyValueObservation?
+    private lazy var addressFrame = FieldFrame(address, look: look)
+    private lazy var ticketFrame = FieldFrame(ticket, look: look)
     private let heading = NSTextField(labelWithString: "Sign in to Sail")
     private let who = NSTextField(wrappingLabelWithString: "")
     private let signedOutRows = NSStackView()
@@ -168,34 +169,15 @@ public final class AccountPane: NSView, NSMenuItemValidation {
         ].filter { !$0.isEmpty }.joined(separator: "\n")
     }
 
-    override public func viewDidMoveToWindow() {
-        super.viewDidMoveToWindow()
-        focusWatch = window?.observe(\.firstResponder) { [weak self] _, _ in
-            MainActor.assumeIsolated { self?.focus() }
-        }
-        focus()
-    }
-
-    /// The field being edited ringed in the accent, its editor's selection and caret the look's.
-    private func focus() {
-        if let editor = window?.firstResponder as? NSTextView, editor.isFieldEditor {
-            editor.selectedTextAttributes = [.backgroundColor: NSColor(look.fillSelected), .foregroundColor: NSColor(look.text)]
-            editor.insertionPointColor = NSColor(look.accent)
-        }
-        for field in [address, ticket] {
-            field.layer?.borderWidth = field.currentEditor() == nil ? 0 : 2
-            field.layer?.borderColor = NSColor(look.accent).cgColor
-        }
-    }
-
     private func paint() {
         layer?.backgroundColor = NSColor(look.canvas).cgColor
         heading.textColor = NSColor(look.text)
         who.textColor = NSColor(look.textSecondary)
         labels.forEach { $0.textColor = NSColor(look.textSecondary) }
         signIn.look = look
+        addressFrame.look = look
+        ticketFrame.look = look
         say(lines)
-        focus()
     }
 
     private func say(_ lines: [String]) {
@@ -229,8 +211,6 @@ public final class AccountPane: NSView, NSMenuItemValidation {
         address.font = monospaced(.callout)
         ticket.placeholderString = "enr_… or the link sail fde enroll printed"
         for field in [address, ticket] {
-            field.focusRingType = .none
-            field.wantsLayer = true
             field.target = self
         }
         address.action = #selector(signInWithPasskey(_:))
@@ -241,7 +221,7 @@ public final class AccountPane: NSView, NSMenuItemValidation {
         signOut.action = #selector(signOutHere(_:))
         said.isSelectable = true
         said.isHidden = true
-        for row in [label("Control plane"), address, signIn, label("Enrollment ticket"), ticket, enroll] {
+        for row in [label("Control plane"), addressFrame, signIn, label("Enrollment ticket"), ticketFrame, enroll] {
             signedOutRows.addArrangedSubview(row)
         }
         signedOutRows.setCustomSpacing(Look.Space.xxl, after: signIn)
@@ -263,7 +243,7 @@ public final class AccountPane: NSView, NSMenuItemValidation {
             column.topAnchor.constraint(equalTo: topAnchor, constant: Look.Space.x3l + Look.Space.l),
             column.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Look.Space.x3l),
             column.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -Look.Space.x3l),
-            address.widthAnchor.constraint(equalToConstant: 380), ticket.widthAnchor.constraint(equalToConstant: 380),
+            addressFrame.widthAnchor.constraint(equalToConstant: 380), ticketFrame.widthAnchor.constraint(equalToConstant: 380),
             said.widthAnchor.constraint(lessThanOrEqualToConstant: 560),
         ])
         paint()
