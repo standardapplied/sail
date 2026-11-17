@@ -53,6 +53,11 @@ enum Step: Decodable, Equatable, CustomStringConvertible {
     case attach
     /// Kills the local host the probe owns, as a crash would, and starts another.
     case killHost
+    /// Tries at once, as Reconnect Now does.
+    case reconnectNow
+    /// Closes the session as a tab is closed: this client's part let go, then the session ended at
+    /// its host on a connection of its own, through the door it came through.
+    case close
     /// Waits for the session to reach a phase: attached, detached, parked or ended, optionally
     /// ended for a reason containing the text after `ended:`.
     case phase(String, within: Int)
@@ -78,6 +83,8 @@ enum Step: Decodable, Equatable, CustomStringConvertible {
         case .detach: self = .detach
         case .attach: self = .attach
         case .killHost: self = .killHost
+        case .reconnectNow: self = .reconnectNow
+        case .close: self = .close
         case .phase: self = .phase(try fields.decode(String.self, forKey: key), within: within)
         case .measure: self = .measure(try fields.decode(Int.self, forKey: key))
         case .within: throw DecodingError.dataCorruptedError(forKey: key, in: fields, debugDescription: "within goes with a step")
@@ -95,12 +102,14 @@ enum Step: Decodable, Equatable, CustomStringConvertible {
         case .detach: "detach"
         case .attach: "attach"
         case .killHost: "kill the host as a crash would and start another"
+        case .reconnectNow: "reconnect now"
+        case .close: "close, ending the session at its host"
         case let .phase(phase, within): "phase \(phase) within \(within) s"
         case let .measure(keys): "measure \(keys) echoed keys"
         }
     }
 
     private enum Keys: String, CodingKey {
-        case type, wait, within, resize, snapshot, same, drop, detach, attach, killHost, phase, measure
+        case type, wait, within, resize, snapshot, same, drop, detach, attach, killHost, reconnectNow, close, phase, measure
     }
 }

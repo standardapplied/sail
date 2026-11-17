@@ -5,6 +5,7 @@ import SailVT
 /// Runs a script's steps against one session in order, stopping at the first that fails.
 struct Runner {
     let session: TerminalSession
+    let door: Door
     let follower: Follower
     let host: LocalHostProcess?
     let echoBudget: Double
@@ -12,8 +13,9 @@ struct Runner {
     let progress: @Sendable (StepResult) -> Void
     private let clock = ContinuousClock()
 
-    init(session: TerminalSession, host: LocalHostProcess?, echoBudget: Double, progress: @escaping @Sendable (StepResult) -> Void) {
+    init(session: TerminalSession, door: Door, host: LocalHostProcess?, echoBudget: Double, progress: @escaping @Sendable (StepResult) -> Void) {
         self.session = session
+        self.door = door
         self.host = host
         self.echoBudget = echoBudget
         self.progress = progress
@@ -89,6 +91,11 @@ struct Runner {
             guard let host else { throw ProbeError("killHost needs --host-binary, so the probe owns the host") }
             host.crash()
             try await host.start()
+        case .reconnectNow:
+            session.reconnectNow()
+        case .close:
+            session.close()
+            try await SessionListing.end(session.state.session, through: door)
         case let .phase(name, within):
             try await follower.until(within: within, "reached \(name)") { Self.matches(session.state.phase, name) }
         case .measure:

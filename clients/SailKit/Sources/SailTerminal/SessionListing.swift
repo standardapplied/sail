@@ -23,12 +23,17 @@ public enum SessionListing {
         try await end(session, through: .local(address), timeout: timeout)
     }
 
-    /// Ends `session` at the host `door` reaches, on a connection of its own: for a runner, through
-    /// an attach ticket for that session.
+    /// Ends `session` at the host `door` reaches, on a connection of its own. A runner's door admits
+    /// Kill only from a connection attached to the session that holds its write token, so there it
+    /// is an attach ticket for the session, attached as the writer, then Kill; when someone else
+    /// holds the token the door refuses in its own words, which are thrown.
     public static func end(_ session: String, through door: Door, timeout: Int = 10) async throws(TerminalError) {
         guard timeout >= 1 else { throw .unsupported("ending a session waits 1 s or more for the answer, not \(timeout) s") }
         let entry = try await door.entry(for: .attach(session: session))
-        try await offThread { () throws(TerminalError) in try kill(session, at: entry.address, token: entry.token, timeout: timeout) }
+        let asWriter = if case .runner = door { true } else { false }
+        try await offThread { () throws(TerminalError) in
+            try kill(session, at: entry.address, token: entry.token, asWriter: asWriter, timeout: timeout)
+        }
     }
 
     private static func offThread<T: Sendable>(_ work: @escaping @Sendable () throws(TerminalError) -> T) async throws(TerminalError) -> T {
@@ -38,16 +43,31 @@ public enum SessionListing {
         return try result.get()
     }
 
-    private static func kill(_ session: String, at address: HostAddress, token: String, timeout: Int) throws(TerminalError) {
+    private static func kill(_ session: String, at address: HostAddress, token: String, asWriter: Bool, timeout: Int) throws(TerminalError) {
         let connection = try Connection.connect(to: address, timeout: timeout)
         defer { connection.close() }
         _ = try connection.admit(token: token)
+        if asWriter {
+            try connection.send(.attach(session: session, write: true))
+            try answer(to: "the attach to '\(session)'", on: connection, within: timeout)
+        }
         try connection.send(.kill(session: session))
-        switch try connection.next() {
-        case .accepted?: return
-        case let .refused(refusal)?: throw .refused(refusal)
-        case nil: throw .closed
-        case let other?: throw .protocolViolation("it answered Kill with \(other.name)")
+        try answer(to: "the Kill of '\(session)'", on: connection, within: timeout)
+    }
+
+    /// Waits at most `timeout` seconds for the host's answer to `what`, past the frames an
+    /// attachment streams meanwhile.
+    private static func answer(to what: String, on connection: Connection, within timeout: Int) throws(TerminalError) {
+        let deadline = ContinuousClock.now + .seconds(timeout)
+        while true {
+            switch try connection.next() {
+            case .accepted?: return
+            case let .refused(refusal)?: throw .refused(refusal)
+            case nil: throw .closed
+            case .output?, .replayBegin?, .replayEnd?, .writerChanged?, .resized?, .paused?, .continued?, .sessionEnded?:
+                guard ContinuousClock.now < deadline else { throw .timedOut(what) }
+            case let other?: throw .protocolViolation("it answered \(what) with \(other.name)")
+            }
         }
     }
 

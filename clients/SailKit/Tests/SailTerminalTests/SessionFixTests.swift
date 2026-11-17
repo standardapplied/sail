@@ -41,13 +41,15 @@ import Testing
         session.close()
     }
 
-    @Test func aRunnerThatAttachesAndClosesIsAskedSixTicketsThenParks() async throws {
+    /// A runner's door goes on at the 8 s cap until a minute of waits is spent: the open, then 11
+    /// reconnects.
+    @Test func aRunnerThatAttachesAndClosesIsAskedTwelveTicketsThenParks() async throws {
         let host = try FakeHost(tcp: ())
         let desk = TicketDesk(address: host.address)
         let session = TerminalSession(open: create, door: .runner(desk), screen: try screen(), timeout: 5, sleep: Naps().sleep)
         let watch = Watch(session)
         session.start()
-        for _ in 1 ... 6 {
+        for _ in 1 ... 12 {
             let peer = try await host.accept()
             try await peer.welcome()
             _ = try await peer.acceptAttach()
@@ -57,7 +59,7 @@ import Testing
             if case .parked = session.state.phase { return true }
             return false
         }
-        #expect(desk.requests.count == 6)
+        #expect(desk.requests.count == 12)
         session.close()
     }
 
@@ -470,18 +472,71 @@ import Testing
         await #expect(throws: TerminalError.refused(refusal)) { try await refused.value }
     }
 
-    /// A runner's session is ended the same way through its door: an attach ticket for it, presented
-    /// once, then Kill.
-    @Test func aRunnersSessionIsEndedThroughItsDoor() async throws {
+    /// A runner's door admits Kill only from a connection that attached to the session and holds
+    /// its write token, so a runner's session is ended through an attach ticket of its own,
+    /// presented once: attached as the writer, past what the attachment streams, then Kill.
+    @Test func aRunnersSessionIsEndedThroughItsDoorAsItsWriter() async throws {
         let host = try FakeHost(tcp: ())
         let desk = TicketDesk(address: host.address)
         async let ended: Void = SessionListing.end("app-a", through: .runner(desk), timeout: 5)
         let peer = try await host.accept()
         #expect(try await peer.welcome() == "ticket-1")
+        #expect(try await peer.read() == .attach(session: "app-a", write: true))
+        try peer.send([.accepted, .replayBegin(safe: true), output("$ "), .replayEnd, .writerChanged(fde: "uday")])
         #expect(try await peer.read() == .kill(session: "app-a"))
-        try peer.send(.accepted)
+        try peer.send([.sessionEnded(reason: "ended"), .accepted])
         try await ended
         #expect(desk.requests == [.attach(session: "app-a")])
+    }
+
+    /// When someone else holds the write token the attachment only observes, and the door refuses
+    /// the Kill in its own words, which is what the person is told.
+    @Test func aRunnersSessionAnotherHoldsIsNotEndedAndTheDoorsWordsAreSaid() async throws {
+        let host = try FakeHost(tcp: ())
+        let desk = TicketDesk(address: host.address)
+        let ended = Task { try await SessionListing.end("app-a", through: .runner(desk), timeout: 5) }
+        let peer = try await host.accept()
+        try await peer.welcome()
+        #expect(try await peer.read() == .attach(session: "app-a", write: true))
+        try peer.send([.accepted, .writerChanged(fde: "ana")])
+        #expect(try await peer.read() == .kill(session: "app-a"))
+        let refusal = HostRefusal(
+            message: "This connection's ticket is to attach to session 'app-a', and it admits nothing else; ask the API for a ticket for that.",
+            remedy: nil)
+        try peer.send(.refused(refusal))
+        await #expect(throws: TerminalError.refused(refusal)) { try await ended.value }
+    }
+
+    /// A session that is gone by the time it is attached is refused at the attach, and no Kill is
+    /// sent.
+    @Test func aRunnersSessionGoneBeforeTheAttachIsRefusedThere() async throws {
+        let host = try FakeHost(tcp: ())
+        let desk = TicketDesk(address: host.address)
+        let ended = Task { try await SessionListing.end("app-a", through: .runner(desk), timeout: 5) }
+        let peer = try await host.accept()
+        try await peer.welcome()
+        _ = try await peer.read()
+        let refusal = HostRefusal(message: "There is no session 'app-a' on this box that you may attach.", remedy: nil)
+        try peer.send(.refused(refusal))
+        await #expect(throws: TerminalError.refused(refusal)) { try await ended.value }
+    }
+
+    /// A host that streams the session forever and never answers the Kill is given up on at the
+    /// timeout, not read for ever.
+    @Test func aRunnerThatNeverAnswersTheKillIsGivenUpOn() async throws {
+        let host = try FakeHost(tcp: ())
+        let desk = TicketDesk(address: host.address)
+        let ended = Task { try await SessionListing.end("app-a", through: .runner(desk), timeout: 1) }
+        let peer = try await host.accept()
+        try await peer.welcome()
+        _ = try await peer.read()
+        try peer.send(.accepted)
+        _ = try await peer.read()
+        let streaming = Task.detached {
+            while !Task.isCancelled { try peer.send(output("x")) }
+        }
+        await #expect(throws: TerminalError.timedOut("the Kill of 'app-a'")) { try await ended.value }
+        streaming.cancel()
     }
 
     @Test func everyPageIsReadInOrder() async throws {

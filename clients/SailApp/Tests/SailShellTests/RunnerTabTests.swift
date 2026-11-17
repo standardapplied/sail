@@ -73,6 +73,17 @@ final class RecordingTickets: TicketSource {
         #expect(tickets.requests == [.open(project: "acme", workspace: "try"), .open(project: "acme", workspace: "try")])
     }
 
+    /// Q2: while a runner tab's session keeps trying, the banner names where it is going back to and
+    /// still offers Reconnect Now, which asks a ticket at once.
+    @Test func aRunnerTabSaysWhereItIsReconnectingAndOffersReconnectNow() async throws {
+        let tickets = RecordingTickets(answering: .unreachable("the runner does not answer"))
+        let pane = try Self.pane(.workspace(project: "harbor", name: "dock"), runner: tickets)
+        pane.begin()
+        #expect(await Self.until { pane.status == "Reconnecting to harbor · dock…" }, "the banner says \(pane.status ?? "nothing")")
+        #expect(pane.statusButton == "Reconnect Now")
+        pane.detach()
+    }
+
     /// A tab in a workspace is made only for a person signed in: its tickets are theirs.
     @Test func aWorkspaceTabNeedsSomeoneSignedIn() throws {
         #expect(throws: ShellError.host("Sign in to open a terminal in a workspace.")) {

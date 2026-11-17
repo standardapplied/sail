@@ -96,4 +96,25 @@ import Testing
         #expect(rows.map { $0.opens(for: "ana", admin: false) } == [true, true, true, false, false])
         #expect(rows.allSatisfy { $0.opens(for: "uday", admin: true) })
     }
+
+    /// A call that ended in anything but an answer is said in words, never as the enum's name:
+    /// a runner tab that cannot ask its ticket parks saying this.
+    @Test func everyFailureOfACallIsSaidInWords() {
+        let said = [
+            SailError.refused(Self.refusal("Workspace 'try' exists already.")),
+            .undecodable(Undecodable(route: "GET /v1/projects", field: "projects", reason: "not a list")),
+            .unexpected(route: "GET /v1/projects", status: 502),
+            .notAnEventStream(route: "GET /v1/events", contentType: nil),
+            .unsendable("a body that does not encode"),
+            .unreachable("The network connection was lost."),
+        ].map(\.description)
+        #expect(said == [
+            "Workspace 'try' exists already.",
+            "GET /v1/projects answered projects that this client cannot read: not a list",
+            "GET /v1/projects answered 502",
+            "GET /v1/events answered no content type",
+            "a body that does not encode",
+            "The network connection was lost.",
+        ])
+    }
 }

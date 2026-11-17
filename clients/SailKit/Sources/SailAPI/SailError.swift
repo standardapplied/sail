@@ -122,3 +122,16 @@ public struct Undecodable: Equatable, Sendable, CustomStringConvertible {
         "\(route) answered \(field) that this client cannot read: \(reason)"
     }
 }
+
+extension SailError: CustomStringConvertible {
+    /// What went wrong, in words: the server's sentence for a refusal.
+    public var description: String {
+        switch self {
+        case let .refused(refusal): refusal.message
+        case let .undecodable(undecodable): undecodable.description
+        case let .unexpected(route, status): "\(route) answered \(status)"
+        case let .notAnEventStream(route, type): "\(route) answered \(type ?? "no content type")"
+        case let .unsendable(reason), let .unreachable(reason): reason
+        }
+    }
+}

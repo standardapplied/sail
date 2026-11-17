@@ -63,6 +63,39 @@ import Testing
         #expect(steps.map(\.ok) == [true, true, true, true, true, true])
     }
 
+    /// The GCP proof's close and Reconnect Now: close lets the client's part go, then ends the
+    /// session through its door as its writer, as a runner tab's close does.
+    @Test func closeEndsTheSessionThroughItsDoorAndReconnectNowTriesAtOnce() async throws {
+        let script = try JSONDecoder().decode(Script.self, from: Data(#"{"size": [20, 3], "steps": [{"reconnectNow": true}, {"close": true}]}"#.utf8))
+        #expect(script.steps == [.reconnectNow, .close])
+        #expect(script.steps.map(\.description) == ["reconnect now", "close, ending the session at its host"])
+        let host = try FakeHost(tcp: ())
+        let desk = TicketDesk(address: host.address)
+        let create = SessionCreate(
+            session: "work", command: [], workingDirectory: "/tmp", project: "acme", room: "", size: TerminalSize(columns: 20, rows: 3),
+            workspace: "try"
+        )
+        let session = TerminalSession(
+            open: create, door: .runner(desk), screen: try screen(columns: 20, rows: 3), timeout: FakeHost.deadline, sleep: Naps().sleep
+        )
+        let runner = Runner(session: session, door: .runner(desk), host: nil, echoBudget: 10) { _ in }
+        session.start()
+        let first = try await host.accept()
+        try await first.welcome()
+        _ = try await first.acceptAttach(columns: 20, rows: 3)
+        let report = Task { await runner.run(script) }
+        #expect(try await first.read() == .resize(TerminalSize(columns: 20, rows: 3)), "reconnect now")
+        let ending = try await host.accept()
+        #expect(try await ending.welcome() == "ticket-2")
+        #expect(try await ending.read() == .attach(session: "work", write: true))
+        try ending.send(.accepted)
+        #expect(try await ending.read() == .kill(session: "work"))
+        try ending.send(.accepted)
+        #expect(await report.value.steps.map(\.ok) == [true, true, true])
+        #expect(desk.requests == [.open(project: "acme", workspace: "try"), .attach(session: "work")])
+        _ = first
+    }
+
     /// Runs snapshot, drop, attached, same against a fake host whose reattach `answer` gives. The
     /// session's answer timeout and the script's waits are the fake host's own bound: the host's
     /// side is a task on the cooperative pool, which the suite's CPU-heavy tests can hold past 5 s
@@ -76,7 +109,7 @@ import Testing
             open: create, door: .local(host.address), screen: try screen(columns: 20, rows: 3), timeout: FakeHost.deadline, stableAfter: .zero,
             sleep: Naps().sleep
         )
-        let runner = Runner(session: session, host: nil, echoBudget: 10) { _ in }
+        let runner = Runner(session: session, door: .local(host.address), host: nil, echoBudget: 10) { _ in }
         let script = try JSONDecoder().decode(Script.self, from: Data("""
             {"size": [20, 3], "steps": [{"wait": "kept", "within": \(FakeHost.deadline)}, {"snapshot": "before"}, {"drop": true},
               {"phase": "attached", "within": \(FakeHost.deadline)}, {"same": "before"}]}

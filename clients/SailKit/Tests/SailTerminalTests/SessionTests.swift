@@ -186,6 +186,49 @@ import Testing
         session.close()
     }
 
+    /// A runner's door keeps trying for a minute before it parks: past the five waits its waits go
+    /// on at their 8 s cap until 60 s or more of them are spent, so a cut of 20 s is ridden out and
+    /// one of 70 s parks, after which Reconnect Now asks a ticket at once.
+    @Test func aRunnerKeepsTryingForAMinuteAtTheCapThenParksUntilReconnectNow() async throws {
+        let host = try FakeHost(tcp: ())
+        let desk = TicketDesk(address: host.address)
+        let naps = Naps()
+        let session = TerminalSession(open: create, door: .runner(desk), screen: try screen(), timeout: 5, sleep: naps.sleep)
+        let watch = Watch(session)
+        session.start()
+        let peer = try await host.accept()
+        try await peer.welcome()
+        _ = try await peer.acceptAttach()
+        try await watch.attached()
+        host.stop()
+        peer.close()
+        try await watch.until("parked") {
+            if case .parked = session.state.phase { return true }
+            return false
+        }
+        let waits = TerminalSession.retryWaits + Array(repeating: Duration.seconds(8), count: 6)
+        #expect(naps.durations == waits)
+        #expect(naps.durations.dropLast().reduce(.zero, +) < TerminalSession.runnerPatience)
+        #expect(naps.durations.reduce(.zero, +) >= TerminalSession.runnerPatience)
+        #expect(watch.seen.contains(.phase(.reconnecting(attempt: 11))))
+        #expect(desk.requests.count == 1 + waits.count)
+        session.reconnectNow()
+        try await watch.until("asked a ticket again") { desk.requests.count > 1 + waits.count }
+        session.close()
+    }
+
+    /// A runner whose control plane cannot be reached says so in words, which a parked tab shows.
+    @Test func aTicketThatCannotBeAskedIsSaidInWords() async throws {
+        struct Lost: TicketSource {
+            func ticket(for _: TicketRequest) async throws(SailError) -> TerminalTicket {
+                throw .unreachable("The network connection was lost.")
+            }
+        }
+        await #expect(throws: TerminalError.unreachable("the ticket could not be asked: The network connection was lost.")) {
+            _ = try await Door.runner(Lost()).entry(for: .attach(session: "work"))
+        }
+    }
+
     /// Scenario 10 and T7: keys typed while reconnecting are dropped and counted, never sent later.
     @Test func keysTypedWhileReconnectingAreDroppedAndCounted() async throws {
         let timeline = Timeline()

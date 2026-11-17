@@ -72,6 +72,11 @@ final class StatusBanner: NSView {
         isHidden ? nil : message.stringValue
     }
 
+    /// The button the banner offers now, nil when it offers none.
+    var offered: String? {
+        isHidden || action.isHidden ? nil : action.title
+    }
+
     @objc private func act() {
         handler()
     }

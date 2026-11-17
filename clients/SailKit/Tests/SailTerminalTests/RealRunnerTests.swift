@@ -83,6 +83,38 @@ struct RealRunnerTests {
         }
         session.close()
     }
+
+    /// Closing a runner tab ends its session at the host, through an attach ticket of its own
+    /// attached as the writer; an observer's Kill is refused in the door's words first, and the
+    /// ended session is not attached again.
+    @Test func aClosedTabEndsItsSessionAtTheHostAndAnObserverEndsNone() async throws {
+        let runner = try RealRunner()
+        let (session, _) = try await runner.ours()
+        let name = session.state.session
+        let observed = try await runner.client.ticket(for: .attach(session: name))
+        let observerRefused = try await onThread { () throws -> HostRefusal? in
+            let connection = try Connection.connect(to: try HostAddress(ticketAddress: observed.address), timeout: 10)
+            defer { connection.close() }
+            _ = try connection.admit(token: observed.ticket)
+            try connection.send(.attach(session: name, write: false))
+            try connection.send(.kill(session: name))
+            while let frame = try connection.next() {
+                if case let .refused(refusal) = frame { return refusal }
+            }
+            return nil
+        }
+        #expect(
+            observerRefused?.message
+                == "This connection's ticket is to attach to session '\(name)', and it admits nothing else; ask the API for a ticket for that.")
+        session.close()
+        try await SessionListing.end(name, through: .runner(runner.client))
+        do {
+            _ = try await runner.client.ticket(for: .attach(session: name))
+            Issue.record("a ticket was issued to attach to the ended session")
+        } catch let .refused(refusal) {
+            #expect(refusal.message == "There is no session '\(name)' on this box that you may attach.")
+        }
+    }
 }
 
 /// Presents `ticket` on a connection of its own, and closes it once welcomed.

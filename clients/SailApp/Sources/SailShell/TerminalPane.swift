@@ -108,16 +108,18 @@ public final class TerminalPane: NSView {
             TerminalSession(attach: name, write: true, door: door, screen: screen)
         }
         session = next
-        banner.show(workspace.isEmpty ? "Connecting to this Mac's terminal host" : "Connecting to \(workspace) on the runner")
+        banner.show(place.label.map { "Connecting to \($0) on the runner" } ?? "Connecting to this Mac's terminal host")
         terminal.onEvent = { [weak self] event in self?.handle(event) }
         terminal.attach(next)
         next.start()
     }
 
     /// Ends the session at its host, then this client's part: on this pane's connection when it is
-    /// attached, else on one of its own through the pane's door once this pane's is closed; the
-    /// task that does that answers what stopped it. A local host that cannot be reached keeps the
-    /// session, which the next launch opens as a last tab.
+    /// attached to this Mac's host, else on one of its own through the pane's door once this pane's
+    /// is closed, which a runner's always is (its door ends a session only for a connection that
+    /// holds the write token, and says when it will not); the task that does that answers what
+    /// stopped it. A local host that cannot be reached keeps the session, which the next launch
+    /// opens as a last tab.
     @discardableResult
     func end() -> Task<TerminalError?, Never>? {
         guard let session else { return nil }
@@ -184,6 +186,11 @@ public final class TerminalPane: NSView {
         banner.shown
     }
 
+    /// The button the banner offers now, nil when it offers none.
+    var statusButton: String? {
+        banner.offered
+    }
+
     /// The latency overlay's lines, every one shown.
     public static let latencyLines = 4
 
@@ -210,22 +217,24 @@ public final class TerminalPane: NSView {
     }
 
     private func handle(_ event: SessionEvent) {
-        switch (event, place) {
+        switch (event, place.label) {
         case (.phase(.attached), _):
             banner.hide()
-        case (.phase(.reconnecting), .thisMac):
+        case (.phase(.reconnecting), nil):
             banner.show("Reconnecting to this Mac's terminal host")
-        case let (.phase(.reconnecting(attempt)), .workspace):
-            banner.show("Reconnecting (attempt \(attempt))")
-        case let (.phase(.parked(reason)), .thisMac):
+        case let (.phase(.reconnecting), runner?):
+            banner.show("Reconnecting to \(runner)…", button: "Reconnect Now") { [weak self] in
+                MainActor.assumeIsolated { self?.session?.reconnectNow() }
+            }
+        case let (.phase(.parked(reason)), nil):
             banner.show(host.endedBy ?? Self.sentence("this Mac's terminal host does not answer: \(reason)"), button: "Try Again") { [weak self] in
                 Task { await self?.tryAgain() }
             }
-        case let (.phase(.parked(reason)), .workspace):
+        case let (.phase(.parked(reason)), _?):
             banner.show(Self.sentence(reason), button: "Reconnect Now") { [weak self] in MainActor.assumeIsolated { self?.session?.reconnectNow() } }
-        case let (.phase(.ended(end)), .thisMac):
+        case let (.phase(.ended(end)), nil):
             banner.show(Self.sentence(end.description))
-        case let (.phase(.ended(end)), .workspace):
+        case let (.phase(.ended(end)), _?):
             showEnded(end)
         default:
             break

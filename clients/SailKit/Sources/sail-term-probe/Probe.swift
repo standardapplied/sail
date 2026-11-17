@@ -47,13 +47,13 @@ struct Probe {
         let script = try Script.read(run.script)
         let size = GridSize(columns: script.size[0], rows: script.size[1])
         let screen = try Screen(size: size, scrollbackBytes: 10 << 20, palette: .dark)
-        let create = SessionCreate(
+        var create = SessionCreate(
             session: "probe-" + UUID().uuidString.prefix(8).lowercased(), command: script.command, workingDirectory: "",
             project: "", room: "", size: TerminalSize(columns: Int32(size.columns), rows: Int32(size.rows))
         )
         var host: LocalHostProcess?
         defer { host?.stop() }
-        let session: TerminalSession
+        let door: Door
         let echoBudget: Double
         switch run.host {
         case let .local(socket, binary, folder):
@@ -61,29 +61,26 @@ struct Probe {
                 host = LocalHostProcess(binary: binary)
                 try await host?.start()
             }
-            var local = create
-            local.workingDirectory = folder
-            let address = try socket.map { HostAddress.unix(path: $0) } ?? HostAddress.local()
-            session = TerminalSession(open: local, door: .local(address), screen: screen)
+            create.workingDirectory = folder
+            door = .local(try socket.map { HostAddress.unix(path: $0) } ?? HostAddress.local())
             echoBudget = echoBudgets.local
         case let .runner(api, variable, project, workspace):
             guard let token = ProcessInfo.processInfo.environment[variable], !token.isEmpty else {
                 throw ProbeError("the environment variable \(variable) holds no token")
             }
-            var remote = create
-            remote.project = project
-            remote.workspace = workspace
-            remote.workingDirectory = "/tmp"
-            let client = SailClient(transport: URLSessionTransport(base: api), token: token)
-            session = TerminalSession(open: remote, door: .runner(client), screen: screen)
+            create.project = project
+            create.workspace = workspace
+            create.workingDirectory = "/tmp"
+            door = .runner(SailClient(transport: URLSessionTransport(base: api), token: token))
             echoBudget = echoBudgets.runner
         }
+        let session = TerminalSession(open: create, door: door, screen: screen)
         let capture = try run.capture.map(Capture.init(path:))
         if let capture {
             session.tapOutput { capture.append($0) }
         }
         session.start()
-        let report = await Runner(session: session, host: host, echoBudget: echoBudget) { result in
+        let report = await Runner(session: session, door: door, host: host, echoBudget: echoBudget) { result in
             say("\(result.ok ? "ok" : "FAILED") \(result.step) (\(String(format: "%.1f", result.milliseconds)) ms)\(result.detail.map { ": \($0)" } ?? "")")
         }.run(script)
         session.close()

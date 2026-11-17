@@ -17,8 +17,13 @@ import Synchronization
 /// input against a stuck peer, blocks its caller, so an app sends from a thread that may wait, not
 /// its main thread.
 public final class TerminalSession: Sendable {
-    /// The waits before each reconnect after a drop; one more failure in a row and the session parks.
+    /// The waits before each reconnect after a drop; one more failure in a row and a local door's
+    /// session parks.
     public static let retryWaits: [Duration] = [.milliseconds(500), .seconds(1), .seconds(2), .seconds(4), .seconds(8)]
+    /// How long a runner's door waits in all before it parks: past ``retryWaits`` it goes on at their
+    /// cap, so a network that is gone for well under a minute, as on a train or a moved laptop, is
+    /// ridden out.
+    public static let runnerPatience = Duration.seconds(60)
     /// How long a connection must stay attached to count as a success: one lost sooner is a failed
     /// attempt, so a host that attaches and then drops parks the session like one that never answers.
     public static let stableAttachment = Duration.seconds(5)
@@ -337,12 +342,13 @@ public final class TerminalSession: Sendable {
         send(.takeWrite, on: connection)
     }
 
-    /// Asks this machine's own host to end the session, on the attached connection. A runner's door
-    /// is refused before anything is sent (its ticket admits a session's input, size and write token,
-    /// and closes on anything else), and so is a session not attached now.
+    /// Asks this machine's own host to end the session, on the attached connection, and is refused
+    /// for a session not attached now. A runner's door is refused before anything is sent: it admits
+    /// Kill only from the write token's holder and hangs up on a Kill it refuses, so a runner's
+    /// session is ended by ``SessionListing/end(_:through:timeout:)``, which waits for the answer.
     public func kill() throws(TerminalError) {
         if case .runner = door {
-            throw .unsupported("a runner's terminal door ends no session: its ticket admits only this session's input, size and write token")
+            throw .unsupported("a runner's session is ended through its door, on a connection that waits for the answer")
         }
         guard let connection = core.withLock({ $0.connection }) else {
             throw .unsupported("the session is not attached, so there is no connection to ask the host to end it on")
@@ -351,19 +357,24 @@ public final class TerminalSession: Sendable {
     }
 
     private func supervise(_ generation: Int) async {
+        let patience: Duration = if case .runner = door { Self.runnerPatience } else { .zero }
         var failures = 0
+        var waited = Duration.zero
         var first = true
         var retrying = false
         var reason = ""
         while !Task.isCancelled {
             if !first {
-                if failures >= Self.retryWaits.count {
+                if failures >= Self.retryWaits.count, waited >= patience {
                     setPhase(.parked(reason: reason))
                     await alarm.wait(nil)
                     failures = 0
+                    waited = .zero
                 } else {
+                    let wait = Self.retryWaits[min(failures, Self.retryWaits.count - 1)]
                     setPhase(.reconnecting(attempt: failures + 1))
-                    await alarm.wait(Self.retryWaits[failures])
+                    await alarm.wait(wait)
+                    waited += wait
                 }
                 guard !Task.isCancelled else { return }
             }
@@ -377,6 +388,7 @@ public final class TerminalSession: Sendable {
                 reason = error.description
             case let .dropped(error, attachedFor):
                 failures = attachedFor >= stableAfter || !retrying ? 0 : failures + 1
+                if failures == 0 { waited = .zero }
                 reason = error.description
             case .detached:
                 core.withLock { $0.supervisor = nil }
