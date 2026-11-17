@@ -23,12 +23,37 @@ defaults:
     shell: bash
 
 jobs:
+  # Which lanes here this change can affect, as ci/changes decides it for this workflow and
+  # Clients: a pull request that touches only what no lane reads (the app, the changelog, the
+  # architecture, the Clients workflow) skips every lane; one that adds SailKit outside its goldens
+  # runs only the native build and the terminal lane; CI passed says which it skipped. A push, a
+  # dispatch and a change it cannot compute run every lane.
+  changes:
+    name: What the change touches
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      ci: ${{ steps.diff.outputs.ci }}
+      terminal: ${{ steps.diff.outputs.terminal }}
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          fetch-depth: 0
+
+      - id: diff
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: ci/changes "$EVENT" "$BASE" >> "$GITHUB_OUTPUT"
+
   # The unit verdict, one module per job so the slowest module bounds it, not their sum. `ci/check
   # unit` runs the module's wildcard-import check, its tests and spotless, with its coverage gates
   # on Linux. macOS runs the same tests, since a release ships a macOS binary and only its own
   # tests see Apple's libraries. No other job runs a unit test.
   unit:
     name: Unit tests (${{ matrix.module }}, ${{ matrix.os }})
+    needs: changes
+    if: needs.changes.outputs.ci == 'true'
     strategy:
       fail-fast: false
       matrix:
@@ -73,6 +98,8 @@ jobs:
   # A job of its own, so an NVD refresh that retries for minutes never holds the unit verdict.
   dependency-scan:
     name: Dependency scan
+    needs: changes
+    if: needs.changes.outputs.ci == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
@@ -139,6 +166,8 @@ jobs:
   # .github/released-tag pins. A release builds its own optimized binaries.
   native:
     name: Native binaries
+    needs: changes
+    if: needs.changes.outputs.terminal == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
@@ -309,7 +338,8 @@ jobs:
   # Each fleet test opens a fleet of its own, so the suite splits by test into three parts.
   native-fleet:
     name: Native fleet sync tests (part ${{ matrix.part }} of 3)
-    needs: native
+    needs: [changes, native]
+    if: needs.changes.outputs.ci == 'true'
     strategy:
       fail-fast: false
       matrix:
@@ -365,6 +395,8 @@ jobs:
 
   fleet-integration:
     name: Multi-node control-plane integration tests
+    needs: changes
+    if: needs.changes.outputs.ci == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 25
     steps:
@@ -405,6 +437,8 @@ jobs:
   # binaries run in their own jobs, so no shard waits for the native build.
   incus-integration:
     name: Incus-backed integration tests (shard ${{ matrix.shard }} of 4)
+    needs: changes
+    if: needs.changes.outputs.ci == 'true'
     strategy:
       fail-fast: false
       matrix:
@@ -451,7 +485,8 @@ jobs:
   # commit's native binary.
   native-upgrade:
     name: Native upgrade tests
-    needs: native
+    needs: [changes, native]
+    if: needs.changes.outputs.ci == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
@@ -502,23 +537,43 @@ jobs:
           job-status: ${{ job.status }}
 
   # The one check a branch rule requires. A job that needs another reads as skipped when that one
-  # fails, and a skipped check reads as passing, so this fails unless every job succeeded.
+  # fails, and a skipped check reads as passing, so this fails unless every job succeeded, or was
+  # skipped because ci/changes found nothing its lanes read.
   ci-passed:
     name: CI passed
     if: always()
     needs:
-      [unit, dependency-scan, native, native-fleet, native-upgrade, fleet-integration, incus-integration, terminal-e2e]
+      [changes, unit, dependency-scan, native, native-fleet, native-upgrade, fleet-integration, incus-integration, terminal-e2e]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
       - name: Every job succeeded
         env:
-          RESULTS: ${{ join(needs.*.result, ' ') }}
+          CHANGES: ${{ needs.changes.result }}
+          CI_LANES: ${{ needs.changes.outputs.ci }}
+          CI_RESULTS: >-
+            ${{ needs.unit.result }} ${{ needs.dependency-scan.result }} ${{ needs.native-fleet.result }}
+            ${{ needs.native-upgrade.result }} ${{ needs.fleet-integration.result }} ${{ needs.incus-integration.result }}
+          TERMINAL_LANES: ${{ needs.changes.outputs.terminal }}
+          TERMINAL_RESULTS: ${{ needs.native.result }} ${{ needs.terminal-e2e.result }}
         run: |
-          echo "Job results: $RESULTS"
-          for result in $RESULTS; do
-            if [ "$result" != success ]; then
-              echo "::error::A job ended $result, so this commit is not proven."
-              exit 1
+          echo "What the change touches: $CHANGES (ci=$CI_LANES, terminal=$TERMINAL_LANES)"
+          echo "Job results: $CI_RESULTS $TERMINAL_RESULTS"
+          if [[ $CHANGES != success ]]; then
+            echo "::error::What the change touches ended $CHANGES, so this commit is not proven."
+            exit 1
+          fi
+          proven() {
+            local lanes=$1 what=$2 results=$3 result
+            if [[ $lanes == false ]]; then
+              echo "Nothing the $what lanes test changed (ci/changes), so they were skipped."
             fi
-          done
+            for result in $results; do
+              if [[ $result != success && ! ($lanes == false && $result == skipped) ]]; then
+                echo "::error::A job ended $result, so this commit is not proven."
+                exit 1
+              fi
+            done
+          }
+          proven "$CI_LANES" "unit, scan, integration and fleet" "$CI_RESULTS"
+          proven "$TERMINAL_LANES" "native build and terminal" "$TERMINAL_RESULTS"

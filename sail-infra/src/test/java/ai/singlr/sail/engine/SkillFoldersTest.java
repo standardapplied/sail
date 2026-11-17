@@ -38,6 +38,7 @@ class SkillFoldersTest {
     for (var file : files.entrySet()) {
       Files.createDirectories(folder.resolve(file.getKey()).getParent());
       Files.writeString(folder.resolve(file.getKey()), file.getValue());
+      WorkspaceFiles.mode(folder.resolve(file.getKey()), 0644);
     }
     return folder;
   }
@@ -62,6 +63,7 @@ class SkillFoldersTest {
     WorkspaceFiles.mode(folder.resolve("scripts/run.sh"), 0755);
     Files.createDirectories(folder.resolve("empty"));
     Files.write(folder.resolve("bin.dat"), new byte[] {0, (byte) 0xff, 10});
+    WorkspaceFiles.mode(folder.resolve("bin.dat"), 0644);
 
     var entries = reader.read(folder, "java");
 
