@@ -804,11 +804,16 @@ public final class LiveMembers implements RoomWakeReactor.Live, AutoCloseable {
   }
 
   /**
-   * How long stopping may take, ends and readers together: inside the unit's stop timeout, with
-   * room for what sail closes after it.
+   * What the unit's stop timeout keeps for what sail closes after its live members: the room wake
+   * reactor, the sync scheduler and the database.
    */
-  static final Duration STOPPING =
-      SystemdServiceInstaller.STOP_TIMEOUT.minus(Duration.ofSeconds(20));
+  static final Duration AFTER_STOPPING = Duration.ofSeconds(20);
+
+  /**
+   * How long stopping may take, ends and readers together: the unit's stop timeout less what closes
+   * after it ({@link #AFTER_STOPPING}).
+   */
+  static final Duration STOPPING = SystemdServiceInstaller.STOP_TIMEOUT.minus(AFTER_STOPPING);
 
   /** Ends every member: sail is stopping, and nothing would read them after it. */
   @Override
@@ -930,9 +935,6 @@ public final class LiveMembers implements RoomWakeReactor.Live, AutoCloseable {
     private final Instant startedAt;
     private final Object pipe = new Object();
     private final String localHandle;
-    private final List<MessageStore.MessageRow> waiting = new ArrayList<>();
-    private final List<MessageStore.MessageRow> turnTook = new ArrayList<>();
-    private boolean turnStarted;
     private List<MessageStore.MessageRow> handedBack = List.of();
     private final CompletableFuture<Void> readerDone = new CompletableFuture<>();
     private boolean owesTheNext;
@@ -1004,10 +1006,12 @@ public final class LiveMembers implements RoomWakeReactor.Live, AutoCloseable {
           prompted = true;
           lastLine = timing.clock().get();
         }
-        if (written(text)) {
-          markDelivered(runId, messages);
-          took(messages);
-          return true;
+        var ids = messages.stream().map(MessageStore.MessageRow::id).toList();
+        if (runStore.hand(runId, ids)) {
+          if (written(text)) {
+            return true;
+          }
+          runStore.unhand(runId, ids);
         }
         synchronized (this) {
           prompted = owed && prompted;
@@ -1104,11 +1108,6 @@ public final class LiveMembers implements RoomWakeReactor.Live, AutoCloseable {
           seated ? waiting(handedBack) : unseated(handedBack, seat.spec(), run.agent()));
     }
 
-    /** The process was handed {@code messages}: they wait for the next turn to take them. */
-    private synchronized void took(List<MessageStore.MessageRow> messages) {
-      waiting.addAll(messages);
-    }
-
     /** Runs {@code work} as sail; a failure is this line's, never the reader's. */
     private void attempt(Runnable work) {
       try {
@@ -1196,22 +1195,20 @@ public final class LiveMembers implements RoomWakeReactor.Live, AutoCloseable {
      * a message written after it waits for the turn after (recorded in {@code LiveStreamTest}).
      */
     private void startTurn() {
-      turnTook.addAll(waiting);
-      waiting.clear();
-      turnStarted = true;
+      runStore.takeIntoTurn(runId);
     }
 
     /**
-     * The turn answers: what it took is its own. A turn with no {@code init} of its own took what
-     * was waiting when it began answering.
+     * The turn answers: what its {@code init} took is done with. A turn that told no {@code init}
+     * took nothing Sail can name, so what its process was handed stays owed, given back at its end.
      */
     private void begin() {
-      if (turnStarted) {
-        turnTook.clear();
-      } else {
-        waiting.clear();
-      }
-      turnStarted = false;
+      runStore.answerTurn(runId);
+      openTurn();
+    }
+
+    /** Opens the turn the process's lines belong to. */
+    private void openTurn() {
       turnOpen = true;
       prompted = false;
       turn++;
@@ -1403,12 +1400,8 @@ public final class LiveMembers implements RoomWakeReactor.Live, AutoCloseable {
       leaving = true;
       try {
         flush();
-        var unread = new ArrayList<>(turnTook);
-        unread.addAll(waiting);
-        var inTurn = turnTook.stream().map(MessageStore.MessageRow::id).toList();
-        var queued = waiting.stream().map(MessageStore.MessageRow::id).toList();
         if (prompted && !turnOpen) {
-          begin();
+          openTurn();
         }
         var exit = exitCode();
         var died = (turnOpen || !admitted) && !ending;
@@ -1419,18 +1412,12 @@ public final class LiveMembers implements RoomWakeReactor.Live, AutoCloseable {
         disarm();
         var status = died ? "failed" : "stopped";
         var code = exit.isPresent() ? exit.getAsInt() : null;
-        var finishedHere =
-            runStore.atomically(
-                () -> {
-                  var done = runStore.finishAsTurnsRecorded(runId, status, code);
-                  runStore.giveBack(runId, queued, inTurn);
-                  return done;
-                });
-        if (finishedHere) {
-          tellStopped(run, code, why);
-        }
-        handedBack = List.copyOf(unread);
-        owesTheNext = !unread.isEmpty() && !ending && !finishedHere;
+        var finishedHere = finish(run, status, code, why);
+        handedBack =
+            runStore.givenBack(runId).stream()
+                .flatMap(id -> messages.get().findById(id).stream())
+                .toList();
+        owesTheNext = !handedBack.isEmpty() && !ending && !finishedHere;
       } finally {
         members.remove(seat.roomId(), this);
         over = true;

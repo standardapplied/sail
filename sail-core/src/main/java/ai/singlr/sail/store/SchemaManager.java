@@ -579,7 +579,7 @@ public final class SchemaManager {
           CREATE TABLE run_delivered_messages (
               run_id TEXT NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
               message_id TEXT NOT NULL REFERENCES room_messages(id) ON DELETE CASCADE,
-              unanswered INTEGER NOT NULL DEFAULT 0,
+              state TEXT NOT NULL DEFAULT 'done',
               PRIMARY KEY (run_id, message_id)
           )""",
           "CREATE INDEX idx_run_delivered_message ON run_delivered_messages(message_id)",
@@ -747,15 +747,15 @@ public final class SchemaManager {
    * made, adds only the feed's indexes it lacks ({@link #FEED_INDEXES}). Any other database is
    * refused naming what to do: an older one was made by a release before v1 and is replaced, as is
    * one holding tables but no version, or one stamped v1004 by a build before {@code
-   * runs.login_overridden}, {@code fdes.main_id} or {@code run_delivered_messages.unanswered}, or
-   * before {@code sync_health.last_error_kind} took every kind a failure is recorded as, and a
-   * newer one needs a newer binary.
+   * runs.login_overridden}, {@code fdes.main_id} or {@code run_delivered_messages.state}, or before
+   * {@code sync_health.last_error_kind} took every kind a failure is recorded as, and a newer one
+   * needs a newer binary.
    */
   public void migrate() {
     db.execute(SCHEMA_VERSION_TABLE);
     if (currentVersion() == CURRENT_VERSION) {
       for (var added :
-          List.of("runs.login_overridden", "fdes.main_id", "run_delivered_messages.unanswered")) {
+          List.of("runs.login_overridden", "fdes.main_id", "run_delivered_messages.state")) {
         if (lacks(added)) {
           throw Remedied.state(
               "Database "

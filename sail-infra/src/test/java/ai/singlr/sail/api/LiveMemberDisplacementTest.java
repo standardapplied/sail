@@ -19,6 +19,7 @@ import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.Lane;
 import ai.singlr.sail.engine.AgentProcess;
 import ai.singlr.sail.engine.AgentUnit;
+import ai.singlr.sail.engine.SystemdServiceInstaller;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.ActingAs;
 import ai.singlr.sail.store.MessageStore;
@@ -34,6 +35,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.AfterEach;
@@ -762,9 +764,6 @@ class LiveMemberDisplacementTest {
   @Test
   void aMessageMeetingAnEndedProcessWaitsForItsMemberToFinishAndStartsTheNext() throws Exception {
     var process = idleMember();
-    assertTrue(
-        room.elsewhere().dispatching().endLiveMember(process.runId, AgentAttachWhy.TERMINAL));
-    room.settle();
     process.holdsItsEnd();
     process.exits(143);
     process.awaitHeldEnd();
@@ -775,20 +774,57 @@ class LiveMemberDisplacementTest {
     process.releasesItsEnd();
     said.join();
 
+    assertEquals(
+        List.of(), room.runs.givenBack(process.runId), "a write that failed handed nothing");
     assertEquals(2, room.processes.starts.size(), "and starts the next one");
     assertTrue(room.processes.latest().written.stream().anyMatch(line -> line.contains("back?")));
   }
 
   /**
-   * A message the client of an ended process took, before the member's reader saw the end, was
-   * never read: it is the next member's to answer, not lost with the old one.
+   * A run another process finished is handed nothing, even while its member's process still reads:
+   * a message meeting it is not written to that process and stays owed, so the room's next message
+   * hands it to the next member.
    */
   @Test
-  void aMessageTheClientOfAnEndedProcessTookIsGivenToTheNextMember() {
+  void aRunFinishedElsewhereIsHandedNothing() {
     var process = idleMember();
     assertTrue(
         room.elsewhere().dispatching().endLiveMember(process.runId, AgentAttachWhy.TERMINAL));
     room.settle();
+    room.grace(
+        new LiveMembers.Grace(
+            Duration.ofMillis(1),
+            Duration.ofMillis(1),
+            Duration.ofMillis(1),
+            Duration.ofMillis(1)));
+
+    var back = room.says(SPEC, "back?");
+
+    assertTrue(process.written.stream().noneMatch(line -> line.contains("back?")));
+    assertFalse(room.runs.deliveredMessageIds(process.runId).contains(back));
+    process.exits(143);
+    process.settle();
+    room.settle();
+    room.says(SPEC, "again");
+    assertEquals(2, room.processes.starts.size());
+    assertTrue(room.processes.latest().written.stream().anyMatch(line -> line.contains("back?")));
+  }
+
+  /**
+   * A message the client of an ended process took, before the member's reader saw the end, was
+   * never read: it is the next member's to answer, not lost with the old one. Here the run is
+   * finished elsewhere while the message is being written, after it was handed: that finish gives
+   * it back, so the next member starts at once for it.
+   */
+  @Test
+  void aMessageTheClientOfAnEndedProcessTookIsGivenToTheNextMember() {
+    var process = idleMember();
+    process.onWrite(
+        line ->
+            assertTrue(
+                room.elsewhere()
+                    .dispatching()
+                    .endLiveMember(process.runId, AgentAttachWhy.TERMINAL)));
     process.outlivedByItsClient().holdsItsEnd();
     process.exits(143);
     process.awaitHeldEnd();
@@ -864,6 +900,42 @@ class LiveMemberDisplacementTest {
   }
 
   /**
+   * Claude Code reads a message and prints its turn's {@code init} at once, so Sail's reader can
+   * see that {@code init} before the write that handed the message returns: the message is recorded
+   * handed before it is written, so that turn takes it, and its answer answers it. The member's
+   * idle end then gives nothing back, says nothing, and the next member is not handed it again.
+   */
+  @Test
+  void aTurnsInitReadBeforeItsWriteReturnsTakesTheMessageItAnswers() {
+    var process = room.prompted(SPEC, "full", "first");
+    room.says(process, Lines.init("sess-1"), Lines.delta("One"), Lines.result("One"));
+    var once = new AtomicBoolean();
+    process.onWrite(
+        line -> {
+          if (once.compareAndSet(false, true)) {
+            process.says(Lines.init("sess-1"));
+            process.settle();
+          }
+        });
+    var second = room.says(SPEC, "second");
+    room.says(process, Lines.delta("Two"), Lines.result("Two"));
+
+    process.exits(0);
+    process.settle();
+    room.settle();
+    var answered = room.conversation(SPEC);
+    room.says(SPEC, "third");
+
+    assertTrue(room.runs.deliveredMessageIds(process.runId).contains(second));
+    assertEquals(List.of(), room.runs.givenBack(process.runId));
+    assertFalse(answered.stream().anyMatch(line -> line.startsWith(MessageStore.SAIL_AUTHOR)));
+    assertEquals(2, room.processes.starts.size());
+    assertFalse(
+        room.processes.latest().written.stream().anyMatch(line -> line.contains("second")),
+        "'Two' answered it");
+  }
+
+  /**
    * A message a turn took at its {@code init}, by a member that ended before answering it, may be
    * in the session the next member resumes: it is handed again with a line saying so, even after
    * sail restarts in between, since the give-back records it on the run.
@@ -917,6 +989,18 @@ class LiveMemberDisplacementTest {
     assertFalse(room.conversation(SPEC).contains(waitingLine(SPEC, second)));
     room.says(SPEC, "anyone?");
     assertEquals(1, room.processes.starts.size(), "no agent is seated");
+  }
+
+  /**
+   * Stopping fits inside the unit's stop timeout and leaves what closes after it a share of its
+   * own, so systemd never kills sail before its database is closed.
+   */
+  @Test
+  void stoppingLeavesWhatClosesAfterItsShareOfTheUnitsStopTimeout() {
+    assertEquals(
+        SystemdServiceInstaller.STOP_TIMEOUT,
+        LiveMembers.STOPPING.plus(LiveMembers.AFTER_STOPPING));
+    assertTrue(LiveMembers.AFTER_STOPPING.isPositive());
   }
 
   /**
@@ -1018,8 +1102,8 @@ class LiveMemberDisplacementTest {
     var process = idleMember(LOUNGE);
     var second = room.says(LOUNGE, "second");
     room.db.execute(
-        "CREATE TRIGGER no_give_back BEFORE DELETE ON run_delivered_messages"
-            + " BEGIN SELECT RAISE(ABORT, 'refused'); END");
+        "CREATE TRIGGER no_give_back BEFORE UPDATE OF state ON run_delivered_messages"
+            + " WHEN NEW.state = 'given' BEGIN SELECT RAISE(ABORT, 'refused'); END");
 
     process.exits(1);
     process.settle();

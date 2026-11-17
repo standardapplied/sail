@@ -187,11 +187,11 @@ class SchemaManagerTest {
 
   /**
    * A v1004 database a build made before {@code runs.login_overridden}, {@code fdes.main_id} or
-   * {@code run_delivered_messages.unanswered} is refused at the start, naming the reinstall, not at
-   * the first read.
+   * {@code run_delivered_messages.state} is refused at the start, naming the reinstall, not at the
+   * first read.
    */
   @ParameterizedTest
-  @CsvSource({"runs,login_overridden", "fdes,main_id", "run_delivered_messages,unanswered"})
+  @CsvSource({"runs,login_overridden", "fdes,main_id", "run_delivered_messages,state"})
   void aV1004DatabaseWithoutAColumnThisReleaseAddedIsRefusedAtTheStart(
       String table, String column) {
     new SchemaManager(db).migrate();

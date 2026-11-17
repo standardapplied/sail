@@ -1223,31 +1223,88 @@ public final class RunStore implements ConflictResolver, SyncedStore {
   }
 
   /**
-   * Gives back what the run's process was handed and ended without answering, which is owed to
-   * whoever answers next: {@code queued} (written while no turn had taken it) leaves the ledger;
-   * {@code inTurn} (taken into a turn that never answered, so its session may already hold it)
-   * stays, marked unanswered, so the next process resuming that session is told it is handed again.
-   * One transaction.
+   * Records that a live member's process is being handed {@code messageIds}, before they are
+   * written to it, and answers whether they were: only a {@code running} run is handed anything, so
+   * whatever a run holds handed, its finish gives back ({@link #giveBack}).
    */
-  public void giveBack(String id, Collection<String> queued, Collection<String> inTurn) {
-    queued.forEach(Ids::requireUuid);
-    inTurn.forEach(Ids::requireUuid);
-    db.transaction(
+  public boolean hand(String id, Collection<String> messageIds) {
+    messageIds.forEach(Ids::requireUuid);
+    return db.transaction(
         () -> {
-          for (var messageId : queued) {
+          if (db.queryOne("SELECT 1 FROM runs WHERE id = ? AND status = 'running'", row -> 1, id)
+              .isEmpty()) {
+            return false;
+          }
+          for (var messageId : messageIds) {
             db.execute(
-                "DELETE FROM run_delivered_messages WHERE run_id = ? AND message_id = ?",
+                "INSERT OR IGNORE INTO run_delivered_messages (run_id, message_id, state)"
+                    + " VALUES (?, ?, 'handed')",
                 id,
                 messageId);
           }
-          for (var messageId : inTurn) {
+          return true;
+        });
+  }
+
+  /**
+   * Takes back what {@link #hand} recorded for a write that then failed: the process never read it.
+   */
+  public void unhand(String id, Collection<String> messageIds) {
+    messageIds.forEach(Ids::requireUuid);
+    db.transaction(
+        () -> {
+          for (var messageId : messageIds) {
             db.execute(
-                "UPDATE run_delivered_messages SET unanswered = 1 WHERE run_id = ? AND message_id = ?",
+                "DELETE FROM run_delivered_messages"
+                    + " WHERE run_id = ? AND message_id = ? AND state IN ('handed', 'taken')",
                 id,
                 messageId);
           }
           return null;
         });
+  }
+
+  /**
+   * A live member's turn started ({@code init}): it takes every message its run was handed and no
+   * turn took yet.
+   */
+  public void takeIntoTurn(String id) {
+    db.execute(
+        "UPDATE run_delivered_messages SET state = 'taken' WHERE run_id = ? AND state = 'handed'",
+        id);
+  }
+
+  /** A live member's turn answered: what it took is done with. */
+  public void answerTurn(String id) {
+    db.execute(
+        "UPDATE run_delivered_messages SET state = 'done' WHERE run_id = ? AND state = 'taken'",
+        id);
+  }
+
+  /**
+   * Gives back, in the transaction that finishes the run, whatever it was handed and did not
+   * answer, owed to whoever answers next: one no turn took is marked {@code given}; one a turn took
+   * and never answered {@code unanswered}, since the session the next process resumes may hold it
+   * ({@link #unansweredMessageIds}). Neither counts as delivered. A message the process read but
+   * whose turn's {@code init} it never told is given back as never taken: at worst it is answered
+   * twice, never lost.
+   */
+  private void giveBack(String id) {
+    db.execute(
+        "UPDATE run_delivered_messages SET state = 'given' WHERE run_id = ? AND state = 'handed'",
+        id);
+    db.execute(
+        "UPDATE run_delivered_messages SET state = 'unanswered' WHERE run_id = ? AND state = 'taken'",
+        id);
+  }
+
+  /** What the run's finish gave back ({@link #giveBack}), whoever finished it. */
+  public List<String> givenBack(String id) {
+    return db.query(
+        "SELECT message_id FROM run_delivered_messages"
+            + " WHERE run_id = ? AND state IN ('given', 'unanswered') ORDER BY message_id",
+        row -> row.text(0),
+        id);
   }
 
   /**
@@ -1257,7 +1314,7 @@ public final class RunStore implements ConflictResolver, SyncedStore {
   public Set<String> unansweredMessageIds(String id) {
     return new LinkedHashSet<>(
         db.query(
-            "SELECT message_id FROM run_delivered_messages WHERE run_id = ? AND unanswered = 1"
+            "SELECT message_id FROM run_delivered_messages WHERE run_id = ? AND state = 'unanswered'"
                 + " ORDER BY message_id",
             row -> row.text(0),
             id));
@@ -1267,7 +1324,8 @@ public final class RunStore implements ConflictResolver, SyncedStore {
   public Set<String> deliveredMessageIds(String id) {
     return new LinkedHashSet<>(
         db.query(
-            "SELECT message_id FROM run_delivered_messages WHERE run_id = ? AND unanswered = 0"
+            "SELECT message_id FROM run_delivered_messages"
+                + " WHERE run_id = ? AND state IN ('handed', 'taken', 'done')"
                 + " ORDER BY message_id",
             row -> row.text(0),
             id));
@@ -1371,6 +1429,15 @@ public final class RunStore implements ConflictResolver, SyncedStore {
         now,
         expiresAt);
     return credential;
+  }
+
+  /**
+   * What every finish of a run does in its transaction: its credential is revoked, and what it was
+   * handed and never answered is given back.
+   */
+  private void ended(String id) {
+    revokeCredential(id);
+    giveBack(id);
   }
 
   private void revokeCredential(String id) {
@@ -1610,7 +1677,7 @@ public final class RunStore implements ConflictResolver, SyncedStore {
           if (db.changes() == 0) {
             return false;
           }
-          revokeCredential(id);
+          ended(id);
           recordRevision(id, ChangeLog.Entry.LOCAL, false);
           return true;
         });
@@ -1970,7 +2037,7 @@ public final class RunStore implements ConflictResolver, SyncedStore {
             return false;
           }
           if (RunStatus.isTerminal(status)) {
-            revokeCredential(id);
+            ended(id);
           }
           if (attributed.isPresent()) {
             keep(run.get(), attributed.get().session());
