@@ -345,6 +345,8 @@ final class DoorTickets: TicketSource {
         await pane.refresh()
         #expect(pane.rows.map(\.name) == ["dock"], "the project's own container is not shown")
         #expect(pane.list.selectedRow == 0 && pane.open.isEnabled, "the first row is chosen, so Return or Open opens it")
+        pane.look = .dark
+        #expect(pane.list.selectedRow == 0 && pane.open.isEnabled, "a change of look keeps the chosen row")
         #expect(pane.text.contains("dock · running"), "\(pane.text)")
         pane.name.stringValue = "new"
         let before = pane.ended

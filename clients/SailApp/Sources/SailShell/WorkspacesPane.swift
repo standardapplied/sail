@@ -52,6 +52,7 @@ public final class WorkspacesPane: NSView, NSTableViewDataSource, NSTableViewDel
 
     /// The pane is shown: its projects, then the chosen one's workspaces, asked again.
     func shown() {
+        busy = true
         Task { await refresh() }
     }
 
@@ -168,7 +169,7 @@ public final class WorkspacesPane: NSView, NSTableViewDataSource, NSTableViewDel
         open.look = look
         name.layer?.borderColor = NSColor(look.accent).cgColor
         say(lines)
-        list.reloadData()
+        list.enumerateAvailableRowViews { row, _ in (row.view(atColumn: 0) as? NSTextField)?.textColor = NSColor(look.text) }
     }
 
     private func compose() {
