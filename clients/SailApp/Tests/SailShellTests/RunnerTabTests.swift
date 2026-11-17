@@ -110,13 +110,13 @@ final class RecordingTickets: TicketSource {
         pane.client = SailClient(transport: RecordedServer([try Exchange("projects"), try Exchange("workspaces"), try Exchange("workspace-create")]), token: "tok")
         await pane.refresh()
         #expect(pane.rows.map(\.name) == ["dock"], "the project's own container is not shown")
-        #expect(pane.text.contains("dock · running"), pane.text)
+        #expect(pane.text.contains("dock · running"), "\(pane.text)")
         pane.name.stringValue = "new"
         let before = pane.ended
         pane.makeWorkspace(nil)
         #expect(pane.text.contains("Making new (about 3 s)"))
         #expect(await Self.until { pane.ended > before })
-        #expect(!pane.text.contains("Making"), pane.text)
+        #expect(!pane.text.contains("Making"), "\(pane.text)")
         let viewer = WorkspacesPane(look: .light, title: try TitleFont(directory: LookTests.fonts))
         viewer.client = SailClient(
             transport: RecordedServer([try Exchange("projects"), try Exchange("workspaces"), try Exchange("refusal-read-only-credential-workspace")]),
@@ -127,6 +127,6 @@ final class RecordingTickets: TicketSource {
         let asked = viewer.ended
         viewer.makeWorkspace(nil)
         #expect(await Self.until { viewer.ended > asked })
-        #expect(viewer.text.hasSuffix("Your credential is read-only and cannot enter workspaces.\nAsk an admin for a member or admin credential."), viewer.text)
+        #expect(viewer.text.hasSuffix("Your credential is read-only and cannot enter workspaces.\nAsk an admin for a member or admin credential."), "\(viewer.text)")
     }
 }

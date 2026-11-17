@@ -141,7 +141,8 @@ struct Step: Decodable {
     /// A ticket was asked with these fields (`{"action": "open", "workspace": "dock"}`), within
     /// `seconds` (15 by default).
     var ticketAsked: [String: String]?
-    /// The app is asked to quit, as Quit Sail does.
+    /// The app is asked to quit, as Quit Sail does, on the next turn of the main queue: AppKit waits
+    /// in the quit until a sheet it asks on is answered, which a later step does.
     var quit: Bool?
     /// The whole screen in both looks, a sheet over the window included, saved as `window/<this>`.
     var shotScreen: String?

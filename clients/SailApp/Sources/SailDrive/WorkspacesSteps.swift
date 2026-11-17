@@ -73,7 +73,7 @@ extension Driver {
             return (found, "tickets asked: \(asked)")
         }
         if step.quit == true {
-            NSApp.terminate(nil)
+            DispatchQueue.main.async { NSApp.terminate(nil) }
             return (true, "")
         }
         if let name = step.shotScreen {
