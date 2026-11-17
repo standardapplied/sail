@@ -30,6 +30,9 @@ public final class TerminalView: NSView {
     let pacer = FramePacer()
     let marks = ViewMarks()
     let input = DispatchQueue(label: "sh.standardapplied.sail.terminal.input", qos: .userInteractive)
+    /// Where the drawable is asked for: a thread of the view's own, so handing it the ask never
+    /// waits on the main thread for the system to make a worker thread (``WorkThread``).
+    private let fetcher = WorkThread(name: "sh.standardapplied.sail.terminal.drawable")
     var makeClock: @MainActor (TerminalView) -> any FrameClock = { view in
         DisplayLinkClock(view: view) { [weak view] target in _ = view?.refresh(target: target) }
     }
@@ -353,7 +356,7 @@ public final class TerminalView: NSView {
         pacer.resume()
     }
 
-    /// Asks for the layer's next drawable on a background queue, at the moment a frame needs one
+    /// Asks for the layer's next drawable on the view's own thread, at the moment a frame needs one
     /// (Apple: acquire it as late as possible), unless an ask is under way or the window is off
     /// screen, where the occlusion notification asks again.
     private func fetchDrawable() {
@@ -361,7 +364,7 @@ public final class TerminalView: NSView {
         fetching = true
         marks.fetchStarted()
         let fetch = DrawableFetch(view: self, layer: metalLayer, next: nextDrawable)
-        DispatchQueue.global(qos: .userInteractive).async {
+        fetcher.run {
             fetch.drawable = fetch.next(fetch.layer)
             DispatchQueue.main.async {
                 MainActor.assumeIsolated { fetch.view?.arrived(fetch.drawable) }
@@ -595,11 +598,11 @@ public final class TerminalView: NSView {
     }
 }
 
-/// One ask for a drawable, carried to a background queue and its answer back to the main thread.
+/// One ask for a drawable, carried to the view's own thread and its answer back to the main thread.
 /// Apple's pages say `nextDrawable()` may block until a drawable is free, and that with
 /// `allowsNextDrawableTimeout` (on by default) it returns nil after one second; so it is not
 /// called on the main thread. Unchecked: the ask is touched by one thread at a time, the main
-/// thread, the queue, then the main thread.
+/// thread, that thread, then the main thread.
 private final class DrawableFetch: @unchecked Sendable {
     weak var view: TerminalView?
     let layer: CAMetalLayer

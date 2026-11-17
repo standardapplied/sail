@@ -143,7 +143,7 @@ import Testing
                     #expect(tabStart >= ShellApp.buttonsInset - 0.5 && tabStart <= ShellApp.buttonsInset + Look.Space.s, "\(name): the first tab starts at \(tabStart), not past the buttons' 96 pt inset")
                 }
                 let card = try #require(shell.thisMac.superview)
-                #expect(card.layer?.cornerRadius == Look.contentRadius && card.layer?.masksToBounds == true, "\(name): the pane is not a card with 6 pt corners")
+                #expect(card.layer.map { Double($0.cornerRadius) } == Look.contentRadius && card.layer?.masksToBounds == true, "\(name): the pane is not a card with 6 pt corners")
                 #expect(abs(Double(card.frame.minX - shell.rail.frame.maxX) - ShellApp.cardMargin) < 0.5 && abs(Double(root.bounds.maxX - card.frame.maxX) - ShellApp.cardMargin) < 0.5
                     && abs(Double(card.frame.minY) - ShellApp.cardMargin) < 0.5, "\(name): the card's chrome margin is not 2 pt: \(card.frame)")
                 let row = strip.convert(strip.bounds, to: nil)

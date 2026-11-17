@@ -68,9 +68,14 @@ import Testing
     /// `/bin/sh -c script`, a child of this test, reaped the moment it exits by a thread that waits.
     static func spawn(_ script: String) throws -> Int32 {
         var pid: pid_t = 0
-        let words = ["/bin/sh", "-c", script].map { strdup($0) } + [nil]
+        let arguments: [String] = ["/bin/sh", "-c", script]
+        let words: [UnsafeMutablePointer<CChar>?] = arguments.map { strdup($0) } + [nil]
         defer { words.forEach { free($0) } }
+        #if canImport(Darwin)
+        var attributes: posix_spawnattr_t?
+        #else
         var attributes = posix_spawnattr_t()
+        #endif
         posix_spawnattr_init(&attributes)
         defer { posix_spawnattr_destroy(&attributes) }
         var none = sigset_t(), all = sigset_t()
