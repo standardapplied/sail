@@ -2466,6 +2466,7 @@ class SailOperationsTest {
         operations(
             guardrailsYaml(),
             shell()
+                .on("sail-watch-", new ShellExec.Result(1, "", "no systemd scope here"))
                 .on("incus list ^acme$", RUNNING_JSON)
                 .on("cat /home/dev/.sail/agent.pid", new ShellExec.Result(1, "", "missing"))
                 .on("mkdir -p /home/dev/workspace/specs", "")
@@ -2490,6 +2491,7 @@ class SailOperationsTest {
         operations(
             guardrailsYaml(),
             shell()
+                .on("sail-watch-", new ShellExec.Result(1, "", "no systemd scope here"))
                 .on("incus list ^acme$", RUNNING_JSON)
                 .on("cat /home/dev/.sail/agent.pid", new ShellExec.Result(1, "", "missing"))
                 .on("mkdir -p /home/dev/workspace/specs", "")
@@ -2516,6 +2518,7 @@ class SailOperationsTest {
     seedAuthBillingSetup(store);
     var shell =
         shell()
+            .on("sail-watch-", new ShellExec.Result(1, "", "no systemd scope here"))
             .on("incus list ^acme$", RUNNING_JSON)
             .on("cat /home/dev/.sail/agent.pid", new ShellExec.Result(1, "", "missing"))
             .on("agent.pid", "123")
