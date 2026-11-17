@@ -30,6 +30,9 @@ final class Driver {
     var results: [Result] = []
     var measures: [Measure] = []
     private var bench: [String: Double] = [:]
+    /// A `resetLatency` step opened a measured window that a `shownWithin` step has not yet judged:
+    /// what the drive saves after each step inside it neither draws nor writes on the main thread.
+    private var measuring = false
     private var started = false
     var panes4: [String: Double] = [:]
     /// The session `remember` kept.
@@ -255,6 +258,7 @@ final class Driver {
         }
         if step.resetLatency == true {
             resetLatency()
+            measuring = true
             return (true, "")
         }
         if let wanted = step.line {
@@ -277,6 +281,7 @@ final class Driver {
             return (found, "the grid is \(columns) columns")
         }
         if let limit = step.shownWithin {
+            measuring = false
             let figures = terminal.latency
             let judged = flood(figures)
             if let gap = mainThread.stalls.longest() {
@@ -461,17 +466,17 @@ final class Driver {
     }()
 
     /// What the floods' processes and their neighbours cost the machine now, as `ps` says.
-    static func processes() -> [String] {
-        ps(["-axo", "pid,pri,%cpu,comm", "-r"]).split(separator: "\n").prefix(16).map(String.init)
+    static func processes() async -> [String] {
+        await ps(["-axo", "pid,pri,%cpu,comm", "-r"]).split(separator: "\n").prefix(16).map(String.init)
     }
 
     /// The share of a CPU, in %, the terminal host and the app each used over the next `seconds`,
     /// from their CPU times; nil for one `ps` did not list. The host is the bundled one, which may
     /// have been started by an earlier launch, so it is found by its path, not by a pid kept.
     static func cpuShares(over seconds: Double) async -> (host: Double?, app: Double?) {
-        let before = cpuTimes(), started = CACurrentMediaTime()
+        let before = await cpuTimes(), started = CACurrentMediaTime()
         try? await Task.sleep(for: .seconds(seconds))
-        let after = cpuTimes(), elapsed = CACurrentMediaTime() - started
+        let after = await cpuTimes(), elapsed = CACurrentMediaTime() - started
         func share(_ was: Double?, _ now: Double?) -> Double? {
             guard let was, let now else { return nil }
             return (now - was) / elapsed * 100
@@ -480,10 +485,10 @@ final class Driver {
     }
 
     /// The terminal host's and the app's CPU time so far in seconds, from `ps`'s `[[hh:]mm:]ss.ss`.
-    static func cpuTimes() -> (host: Double?, app: Double?) {
+    static func cpuTimes() async -> (host: Double?, app: Double?) {
         let helper = Bundle.main.bundleURL.appending(path: "Contents/Helpers/sail").path, app = getpid()
         var times: (host: Double?, app: Double?) = (nil, nil)
-        for line in ps(["-axo", "pid=,time=,comm="]).split(separator: "\n") {
+        for line in await ps(["-axo", "pid=,time=,comm="]).split(separator: "\n") {
             let fields = line.split(separator: " ", maxSplits: 2)
             guard fields.count == 3, let pid = pid_t(fields[0]) else { continue }
             let time = fields[1].split(separator: ":").compactMap { Double($0) }.reduce(0) { $0 * 60 + $1 }
@@ -493,7 +498,17 @@ final class Driver {
         return times
     }
 
-    private static func ps(_ arguments: [String]) -> String {
+    /// `ps`'s answer, run off the main thread: a wait for it never holds the frames a step judges.
+    private static func ps(_ arguments: [String]) async -> String {
+        await Task.detached { psNow(arguments) }.value
+    }
+
+    /// Makes the file at `path`, off the main thread: a signal a step sends never holds its frames.
+    static func touch(_ path: String) async {
+        await Task.detached { _ = FileManager.default.createFile(atPath: path, contents: nil) }.value
+    }
+
+    nonisolated private static func psNow(_ arguments: [String]) -> String {
         let ps = Process()
         ps.executableURL = URL(filePath: "/bin/ps")
         ps.arguments = arguments
@@ -636,9 +651,14 @@ final class Driver {
             try? windowImage()?.write(to: out.appending(path: stem + ".png"))
             return
         }
+        let text = screenText, file = out.appending(path: stem + ".txt")
+        guard !measuring else {
+            Task.detached { try? text.write(to: file, atomically: true, encoding: .utf8) }
+            return
+        }
         if let image = try? terminal.snapshot(), let png = image.png() {
             try? png.write(to: out.appending(path: stem + ".png"))
         }
-        try? screenText.write(to: out.appending(path: stem + ".txt"), atomically: true, encoding: .utf8)
+        try? text.write(to: file, atomically: true, encoding: .utf8)
     }
 }

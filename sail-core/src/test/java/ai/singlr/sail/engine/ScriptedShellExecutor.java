@@ -79,22 +79,28 @@ public final class ScriptedShellExecutor implements ShellExec {
    * registered after it.
    */
   public ScriptedShellExecutor onceOnOk(String pattern, String stdout) {
-    consumable.add(pattern);
-    return on(pattern, new Result(0, stdout, ""));
+    return onceOn(pattern, new Result(0, stdout, ""));
   }
 
   /** Shorthand: command containing pattern fails once, then falls through to default on reuse. */
   public ScriptedShellExecutor onceOnFail(String pattern, String stderr) {
-    consumable.add(pattern);
-    return on(pattern, new Result(1, "", stderr));
+    return onceOn(pattern, new Result(1, "", stderr));
   }
 
   /**
    * Shorthand: command containing pattern succeeds once, then falls through to default on reuse.
    */
   public ScriptedShellExecutor onceOnOk(String pattern) {
+    return onceOn(pattern, new Result(0, "", ""));
+  }
+
+  /**
+   * Command containing pattern answers {@code result} once, then falls through to the patterns
+   * registered after it.
+   */
+  public ScriptedShellExecutor onceOn(String pattern, Result result) {
     consumable.add(pattern);
-    return on(pattern, new Result(0, "", ""));
+    return on(pattern, result);
   }
 
   /**
