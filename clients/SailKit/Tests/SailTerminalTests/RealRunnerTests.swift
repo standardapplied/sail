@@ -77,7 +77,10 @@ struct RealRunnerTests {
         let theirs = TerminalSession(attach: name, write: true, door: .runner(runner.other), screen: try screen())
         let watch = Watch(theirs)
         theirs.start()
-        try await watch.phase(.ended(.refused("There is no session '\(name)' on this box that you may attach.")), within: 30)
+        let words = "There is no session '\(name)' on this box that you may attach."
+        try await watch.until(within: 30, "the API's refusal of the ticket, in the host's sentence") {
+            if case let .ended(.ticketRefused(refusal)) = theirs.state.phase { refusal.message == words } else { false }
+        }
         session.close()
     }
 }
