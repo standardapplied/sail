@@ -31,8 +31,10 @@ import Testing
         strip.show(Self.items(), selected: TabID(1))
         let selected = try #require(strip.tabs.first), other = try #require(strip.tabs.last)
         #expect(strip.layer?.backgroundColor == NSColor(look.chrome).cgColor, "\(name): the strip is not chrome")
-        #expect(selected.layer?.backgroundColor == NSColor(look.fillSelected).cgColor, "\(name): the selected tab is not fillSelected")
-        #expect(selected.label.textColor == NSColor(look.text))
+        #expect(selected.layer?.backgroundColor == NSColor(look.accent).cgColor, "\(name): the selected tab is not the accent")
+        #expect(selected.label.textColor == NSColor(look.onAccent))
+        #expect(selected.label.font == NSFont.boldSystemFont(ofSize: Look.Step.callout.points), "\(name): the title on the accent is not bold")
+        #expect(other.label.font == NSFont.systemFont(ofSize: Look.Step.callout.points))
         #expect(other.layer?.backgroundColor == NSColor.clear.cgColor)
         #expect(other.label.textColor == NSColor(look.textSecondary))
         #expect(selected.close.isHidden && other.close.isHidden, "\(name): a close button shows without the pointer on its tab")
@@ -109,15 +111,16 @@ import Testing
                 let band = full ? ShellApp.bandHeight : Double(root.bounds.height - window.contentLayoutRect.maxY)
                 let context = try #require(Self.drawn(root))
                 let pixels = try #require(context.data).bindMemory(to: UInt8.self, capacity: context.width * context.height * 4)
-                func isChrome(_ x: Double, _ y: Double) -> Bool {
+                func isChrome(_ x: Double, _ y: Double, _ chrome: RGB) -> Bool {
                     let at = (Int(y * 2) * context.width + Int(x * 2)) * 4
-                    let found = [pixels[at], pixels[at + 1], pixels[at + 2]], wanted = [look.chrome.red, look.chrome.green, look.chrome.blue]
+                    let found = [pixels[at], pixels[at + 1], pixels[at + 2]], wanted = [chrome.red, chrome.green, chrome.blue]
                     return zip(found, wanted).allSatisfy { abs(Int($0) - Int($1)) <= 2 }
                 }
                 for x in [40.0, Double(root.bounds.width) / 2, Double(root.bounds.width) - 6] {
-                    #expect(isChrome(x, band / 2), "\(name) \(pane) full \(full): the band at x \(x) is not the chrome")
+                    #expect(isChrome(x, band / 2, look.chrome), "\(name) \(pane) full \(full): the band at x \(x) is not the chrome")
                 }
-                #expect(isChrome(Rail.width / 2, band + 4), "\(name) \(pane) full \(full): the rail under the band is not the chrome")
+                #expect(isChrome(Rail.width / 2, band + 4, look.chrome), "\(name) \(pane) full \(full): the rail under the band is not the chrome")
+                #expect(isChrome(4, Double(root.bounds.height) - 4, look.chromeEnd), "\(name) \(pane) full \(full): the chrome at the bottom is not its end")
                 let railTop = Double(root.bounds.height - shell.rail.frame.maxY)
                 #expect(abs(railTop - band) < 0.5, "\(name) \(pane) full \(full): the rail starts at \(railTop), the band ends at \(band)")
                 #expect(band >= 44, "\(name): the band is \(band) pt")

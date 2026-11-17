@@ -51,7 +51,14 @@ final class Driver {
     }()
     let mainThread = Heartbeat.onTheMainThread { CACurrentMediaTime() }
     let ownThread = Heartbeat.onItsOwnThread { CACurrentMediaTime() }
-    lazy var mainStacks = MainStacks(watching: mainThread)
+    private var madeStacks: MainStacks?
+    /// The main thread's sampler, begun the first time a measure asks for it, and kept.
+    var mainStacks: MainStacks {
+        if let madeStacks { return madeStacks }
+        let made = MainStacks(watching: mainThread)
+        madeStacks = made
+        return made
+    }
     /// Every stretch of a judged wait excused as the machine's, with its evidence, once each.
     private var excused: [String] = []
 
@@ -156,9 +163,10 @@ final class Driver {
             Self.say("drive \(index) \(name): \(skipped ? "skipped" : ok ? "ok" : "FAILED") in \(String(format: "%.2f", seconds)) s \(detail)")
             if !ok { break }
         }
-        let withinClaim = mainStacks.watcherShare <= MainStacks.claim
+        let withinClaim = madeStacks.map { $0.watcherShare <= MainStacks.claim } ?? true
         Self.say("drive: \(excused.count) stretch\(excused.count == 1 ? "" : "es") of a judged wait excused as the machine's"
-            + (excused.isEmpty ? "" : ": " + excused.joined(separator: "; ")) + "; the main thread's sampler took \(mainStacks.cost)"
+            + (excused.isEmpty ? "" : ": " + excused.joined(separator: "; "))
+            + (madeStacks.map { "; the main thread's sampler took \($0.cost)" } ?? "; the main thread's sampler never ran: no step measured a wait")
             + (withinClaim ? "" : "; FAILED: the watcher took more of a CPU than its claim"))
         let passed = results.count == steps.count && results.allSatisfy(\.ok) && withinClaim
         let report = Report(

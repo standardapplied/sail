@@ -14,12 +14,16 @@ public struct Tint: Hashable, Sendable {
 /// The Sail look's tokens, dark and light (`design-language.md` 2.1.1). The accent is terracotta
 /// always, never the system's. Text on it is `onAccent`: dark ink in the dark appearance, white in
 /// the light (the owner's choice), which is 3.43:1 on terracotta, so text on an accent fill is
-/// always large text (bold) and counts against 3:1.
+/// always large text (bold) and counts against 3:1. The chrome runs from `chrome` at the window's
+/// top to `chromeEnd` at its bottom, Mast's `--chrome-bg`: terracotta mixed into its ink, 9 % at the
+/// top and 4 % at the bottom (6 % and 2 % into its paper), so around the content it nears the
+/// terminal's own family.
 public struct Look: Equatable, Sendable {
     public let palette: Palette
     public let canvas: RGB
     public let surface: RGB
     public let chrome: RGB
+    public let chromeEnd: RGB
     public let text: Tint
     public let textSecondary: Tint
     public let separator: Tint
@@ -31,13 +35,13 @@ public struct Look: Equatable, Sendable {
     public let fillHover: Tint
 
     public static let dark = Look(
-        palette: .dark, canvas: RGB(0x0A0E11), surface: RGB(0x12171B), chrome: RGB(0x251717), text: Tint(0xF6F1E9),
+        palette: .dark, canvas: RGB(0x0A0E11), surface: RGB(0x12171B), chrome: RGB(0x251717), chromeEnd: RGB(0x171215), text: Tint(0xF6F1E9),
         textSecondary: Tint(0xF6F1E9, alpha: 0.78), separator: Tint(0xF6F1E9, alpha: 0.14), separatorStrong: Tint(0xF6F1E9, alpha: 0.24), accent: RGB(0xFC4926),
         accentText: RGB(0xFC4926), onAccent: RGB(0x0A0E11), fillSelected: Tint(0xFC4926, alpha: 0.16), fillHover: Tint(0xF6F1E9, alpha: 0.06)
     )
 
     public static let light = Look(
-        palette: .light, canvas: RGB(0xF8FAFC), surface: RGB(0xFDFFFF), chrome: RGB(0xF7EAE2), text: Tint(0x0E1217),
+        palette: .light, canvas: RGB(0xF8FAFC), surface: RGB(0xFDFFFF), chrome: RGB(0xF7EAE2), chromeEnd: RGB(0xF2ECE4), text: Tint(0x0E1217),
         textSecondary: Tint(0x383E43), separator: Tint(0x0E1217, alpha: 0.12), separatorStrong: Tint(0x0E1217, alpha: 0.22),
         accent: RGB(0xFC4926), accentText: RGB(0xC8321F), onAccent: RGB(0xFFFFFF), fillSelected: Tint(0xFC4926, alpha: 0.16),
         fillHover: Tint(0x0E1217, alpha: 0.05)

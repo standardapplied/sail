@@ -110,9 +110,10 @@ import Testing
     }
 
     /// A: the title bar is transparent over a full-size content view, the platform's buttons in
-    /// place; under it the rail is drawn in `chrome`, and the row beside it in the account's surface,
-    /// or for "This Mac" in the tabs' `chrome` (the layers' own colours; the drive checks the pixels
-    /// of the running window).
+    /// place; under it the rail is clear over the chrome, Mast's gradient from `chrome` at the top to
+    /// `chromeEnd` at the bottom, and the row beside it in the account's surface, or for "This Mac"
+    /// in the tabs' `chrome` (the layers' own colours; the drive checks the pixels of the running
+    /// window).
     @MainActor @Test(arguments: [("dark", Look.dark), ("light", Look.light)])
     func theTitleBarShowsTheRailAndThePanesSurface(_ name: String, _ look: Look) throws {
         let folder = FileManager.default.temporaryDirectory.appending(path: "sail-look-\(UUID().uuidString.prefix(8))")
@@ -129,7 +130,9 @@ import Testing
         }
         let content = try #require(window.contentView)
         #expect(window.contentLayoutRect.height < content.bounds.height, "\(name): the content view does not reach under the title bar")
-        #expect(shell.rail.layer?.backgroundColor == NSColor(look.chrome).cgColor, "\(name): the rail is not chrome")
+        #expect(shell.rail.layer?.backgroundColor == NSColor.clear.cgColor, "\(name): the rail hides the chrome")
+        let root = try #require(content as? ChromeView)
+        #expect(root.colours == [NSColor(look.chromeEnd).cgColor, NSColor(look.chrome).cgColor], "\(name): the chrome is not Mast's gradient")
         for item in [Rail.Item.account, .thisMac] {
             shell.select(item)
             #expect(content.layer?.backgroundColor == NSColor(look.chrome).cgColor, "\(name) \(item): the band under the title bar is not the chrome")

@@ -93,7 +93,7 @@ public final class Rail: NSView {
 
     func show(_ item: Item?) {
         selected = item
-        layer?.backgroundColor = NSColor(look.chrome).cgColor
+        layer?.backgroundColor = NSColor.clear.cgColor
         for (each, button) in buttons {
             bars[each]?.layer?.backgroundColor = NSColor(look.accent).cgColor
             let chosen = each == item

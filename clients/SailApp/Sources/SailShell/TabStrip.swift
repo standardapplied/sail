@@ -364,13 +364,15 @@ public final class TabButton: NSView, NSTextFieldDelegate {
 
     private func paint() {
         let renaming = field != nil
-        let fill = renaming ? NSColor(look.surface) : isSelected ? NSColor(look.fillSelected) : hovering ? NSColor(look.fillHover) : .clear
+        let fill = renaming ? NSColor(look.surface) : isSelected ? NSColor(look.accent) : hovering ? NSColor(look.fillHover) : .clear
         layer?.backgroundColor = fill.cgColor
         layer?.borderWidth = renaming ? 2 : 0
         layer?.borderColor = NSColor(look.accent).cgColor
-        label.textColor = NSColor(isSelected ? look.text : look.textSecondary)
+        label.textColor = NSColor(isSelected ? look.onAccent : look.textSecondary)
+        label.font = isSelected ? .boldSystemFont(ofSize: Look.Step.callout.points) : .systemFont(ofSize: Look.Step.callout.points)
         close.paint(look)
-        zoomMark.contentTintColor = NSColor(look.textSecondary)
+        if isSelected { close.contentTintColor = NSColor(look.onAccent) }
+        zoomMark.contentTintColor = NSColor(isSelected ? look.onAccent : look.textSecondary)
         close.isHidden = !hovering || renaming
         field?.textColor = NSColor(look.text)
     }
