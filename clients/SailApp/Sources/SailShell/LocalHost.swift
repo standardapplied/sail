@@ -25,11 +25,11 @@ public final class LocalHost: Sendable {
     public static let startedElsewhere = "Another program started this Mac's terminal host while Sail was starting its own. Close it, then try again."
     public static let stoppedSentence = "This Mac's terminal host was stopped, and with it these terminals."
 
-    /// What holds another copy's host: the host tells which of its terminals have a client, not
-    /// whose client it is (another copy of Sail, or a `sail session attach`).
-    public static func inUse(by sessions: [String]) -> String {
-        let named = sessions.map { "“\($0)”" }.joined(separator: ", ")
-        return "This Mac's terminal host is in use by another program, attached to its \(sessions.count == 1 ? "terminal" : "terminals") \(named). Close it, then try again."
+    /// What holds another copy's host: how many of its terminals have a client. The host does not
+    /// tell whose client it is (another copy of Sail, or a `sail session attach`), and its session
+    /// names are its own, never shown to the person.
+    public static func inUse(attached: Int) -> String {
+        "This Mac's terminal host is in use by another program, attached to \(attached == 1 ? "one of its terminals" : "\(attached) of its terminals"). Close it, then try again."
     }
 
     public let address: HostAddress
@@ -114,13 +114,13 @@ public final class LocalHost: Sendable {
 
     /// Ends the host serving now when the rule allows it, saying first that its terminals are
     /// closing when it has any; true when it did. With a client on any of its sessions, nothing is
-    /// ended, and what holds it is thrown (``inUse(by:)``).
+    /// ended, and what holds it is thrown (``inUse(attached:)``).
     private func endAnother(keeping copy: String, before say: @Sendable (String) async -> Void) async throws(ShellError) -> Bool {
         guard let serving = servingProcess() else { return false }
         let sessions = try? await SessionListing.sessions(at: address, timeout: 1)
         switch HostTakeover.decide(serving: serving.executable, copy: copy, copies: copies.path, sessions: sessions) {
         case .keep: return false
-        case .refuse: throw .host(Self.inUse(by: (sessions ?? []).filter { $0.attached > 0 }.map(\.name)))
+        case .refuse: throw .host(Self.inUse(attached: (sessions ?? []).filter { $0.attached > 0 }.count))
         case .end: break
         }
         if sessions?.isEmpty == false { await say(Self.closingAnother) }

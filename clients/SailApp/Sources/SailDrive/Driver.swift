@@ -148,9 +148,10 @@ final class Driver {
                 Self.captureTheScreen(to: out.appending(path: String(format: "%02d-", index) + name + "-screen.png"))
             }
             let seconds = (ContinuousClock.now - began) / .seconds(1)
-            results.append(Result(index: index, name: name, ok: ok, skipped: false, seconds: seconds, detail: detail))
+            let skipped = ok && detail.hasPrefix("skipped: ")
+            results.append(Result(index: index, name: name, ok: ok, skipped: skipped, seconds: seconds, detail: detail))
             save(index: index, name: name)
-            Self.say("drive \(index) \(name): \(ok ? "ok" : "FAILED") in \(String(format: "%.2f", seconds)) s \(detail)")
+            Self.say("drive \(index) \(name): \(skipped ? "skipped" : ok ? "ok" : "FAILED") in \(String(format: "%.2f", seconds)) s \(detail)")
             if !ok { break }
         }
         let passed = results.count == steps.count && results.allSatisfy(\.ok)

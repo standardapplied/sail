@@ -79,7 +79,8 @@ public final class TerminalView: NSView {
     /// How many display refreshes reached the view, and how each ended: what an idle view's
     /// wakeups are made of, for the drive to report.
     public private(set) var refreshes = 0
-    public private(set) var refreshesBy: [String: Int] = [:]
+    /// How many refreshes ended each way, indexed by ``RefreshOutcome``'s raw value: plain integers.
+    public private(set) var refreshOutcomes = [Int](repeating: 0, count: RefreshOutcome.allCases.count)
     /// How many of those the display link asked for; the rest came from a drawable's arrival or
     /// from output or a key drawn at once.
     public internal(set) var linkFires = 0
@@ -418,32 +419,32 @@ public final class TerminalView: NSView {
         refreshes += 1
         guard let link else {
             pacer.pause()
-            return refreshed("no session", false)
+            return refreshed(.noSession, false)
         }
         guard !isHiddenOrHasHiddenAncestor else {
             needsDraw = true
             pacer.pause()
-            return refreshed("hidden", false)
+            return refreshed(.hidden, false)
         }
         guard fetched != nil else {
             owed = true
             pacer.pause()
             fetchDrawable()
-            return refreshed("asked for a drawable", false)
+            return refreshed(.askedForDrawable, false)
         }
         let read = CACurrentMediaTime()
         let work = Duration.threadCPU
         defer { marks.refreshed(since: read, workSince: work) }
         guard let frame = try? link.screen.frame() else {
             pacer.pause()
-            return refreshed("no frame", false)
+            return refreshed(.noFrame, false)
         }
         let screenChanged = frame.changed != .nothing || frame.cursor != lastFrame?.cursor || frame.colors != lastFrame?.colors
             || frame.size != lastFrame?.size
         guard needsDraw || screenChanged, let metalLayer else {
             marks.unchanged(read: read)
             pacer.pause()
-            return refreshed("nothing changed", false)
+            return refreshed(.nothingChanged, false)
         }
         switch renderer.draw(frame, overlay: overlay, from: { defer { self.fetched = nil }; return self.fetched }, presented: { [marks] in marks.presented(frame: $0, at: $1) }, completed: { [marks] in marks.completed(frame: $0, ok: $1) }) {
         case let .drawn(number):
@@ -452,17 +453,17 @@ public final class TerminalView: NSView {
             lastFrame = frame
             needsDraw = renderer.lastFrameWantsAnother
             updateBlink()
-            return refreshed("drew", screenChanged || needsDraw)
+            return refreshed(.drew, screenChanged || needsDraw)
         case .busy:
             marks.skipped(read: read)
             renderer.invalidate()
             needsDraw = true
-            return refreshed("every buffer in flight", true)
+            return refreshed(.buffersInFlight, true)
         case .unavailable:
             marks.skipped(read: read)
             renderer.invalidate()
             needsDraw = true
-            return refreshed("could not encode", true)
+            return refreshed(.couldNotEncode, true)
         }
     }
 
@@ -506,8 +507,8 @@ public final class TerminalView: NSView {
         updateBlink()
     }
 
-    private func refreshed(_ outcome: String, _ wanted: Bool) -> Bool {
-        refreshesBy[outcome, default: 0] += 1
+    private func refreshed(_ outcome: RefreshOutcome, _ wanted: Bool) -> Bool {
+        refreshOutcomes[outcome.rawValue] += 1
         return wanted
     }
 
@@ -630,4 +631,9 @@ private final class DrawableFetch: @unchecked Sendable {
         self.layer = layer
         self.next = next
     }
+}
+
+/// How a display refresh ended: what an idle view's wakeups are made of.
+public enum RefreshOutcome: Int, CaseIterable, Sendable {
+    case noSession, hidden, askedForDrawable, noFrame, nothingChanged, drew, buffersInFlight, couldNotEncode
 }

@@ -147,6 +147,13 @@ import Testing
         }
     }
 
+    /// The in-use sentence says how many of the host's terminals a client holds, never a session's
+    /// own name, so it stays true for one, several, or a CLI's `sail session attach`.
+    @Test func theInUseSentenceSaysHowManyTerminalsAreHeld() {
+        #expect(LocalHost.inUse(attached: 1) == "This Mac's terminal host is in use by another program, attached to one of its terminals. Close it, then try again.")
+        #expect(LocalHost.inUse(attached: 3) == "This Mac's terminal host is in use by another program, attached to 3 of its terminals. Close it, then try again.")
+    }
+
     /// Waits, at most 10 s, until `condition` holds.
     static func until(_ condition: () -> Bool) async -> Bool {
         let deadline = ContinuousClock.now + .seconds(10)

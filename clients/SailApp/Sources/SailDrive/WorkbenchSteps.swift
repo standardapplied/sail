@@ -628,12 +628,12 @@ extension Driver {
         let views = orderedPanes.map(\.terminal)
         let counts = { views.map { ($0.blinkWakeups, $0.refreshes, Self.committed($0)) } }
         let focused = terminal
-        let outcomes = { (focused.refreshesBy, focused.linkFires) }
+        let outcomes = { (focused.refreshOutcomes, focused.linkFires) }
         let before = counts(), outcomesBefore = outcomes()
         try? await Task.sleep(for: .seconds(seconds))
         let after = counts(), outcomesAfter = outcomes()
-        let by = outcomesAfter.0.keys.sorted().map { key in
-            key + String(format: " %.1f", Double(outcomesAfter.0[key, default: 0] - outcomesBefore.0[key, default: 0]) / seconds)
+        let by = RefreshOutcome.allCases.map { outcome in
+            "\(outcome)" + String(format: " %.1f", Double(outcomesAfter.0[outcome.rawValue] - outcomesBefore.0[outcome.rawValue]) / seconds)
         }.joined(separator: ", ")
         let per = zip(before, after).map { (Double($1.0 - $0.0) / seconds, Double($1.1 - $0.1) / seconds, Double($1.2 - $0.2) / seconds) }
         let total = per.reduce((0.0, 0.0, 0.0)) { ($0.0 + $1.0, $0.1 + $1.1, $0.2 + $1.2) }
@@ -654,8 +654,7 @@ extension Driver {
         for (look, appearance) in [("light", NSAppearance.Name.aqua), ("dark", .darkAqua)] {
             NSApp.appearance = NSAppearance(named: appearance)
             _ = await waitUntil(5) { (self.shell.look == .dark) == (look == "dark") }
-            shell.window.displayIfNeeded()
-            try? await Task.sleep(for: .milliseconds(300))
+            await drawnAndCommitted()
             await onTheCursorsVisiblePhase()
             let file = folder.appending(path: "\(name)-\(look).png")
             await take(file)
@@ -664,8 +663,19 @@ extension Driver {
         }
         NSApp.appearance = nil
         _ = await waitUntil(5) { self.shell.look == given }
-        try? await Task.sleep(for: .milliseconds(300))
+        await drawnAndCommitted()
         return (taken.allSatisfy { !$0.hasSuffix(" 0 bytes") }, taken.joined(separator: ", "))
+    }
+
+    /// Returns once the window has drawn what it owes and that drawing is committed to the window
+    /// server (the transaction's completion), at most 2 s: the fact a shot of the screen waits on.
+    private func drawnAndCommitted() async {
+        shell.window.displayIfNeeded()
+        let committed = Mutex(false)
+        CATransaction.begin()
+        CATransaction.setCompletionBlock { committed.withLock { $0 = true } }
+        CATransaction.commit()
+        _ = await waitUntil(2) { committed.withLock { $0 } }
     }
 
     /// Returns just after the focused pane's cursor was drawn shown, at the start of its visible
@@ -713,17 +723,21 @@ extension Driver {
         process.waitUntilExit()
     }
 
-    /// The window in full screen, the whole screen taken in both looks, then out of it again, to the
-    /// frame it had before, inside its screen; each frame seen on the way back is said. The shot is asked for only if the runner can: a window that does not enter full
-    /// screen is said, with no shot, and fails nothing.
+    /// The window in full screen, filling its screen, the whole screen taken in both looks, then out
+    /// of it again, to the frame it had before, inside its screen; each frame seen on the way back is
+    /// said. A window that does not enter full screen fails the step; one that cannot (on no screen,
+    /// or not allowing full screen) is skipped, saying why.
     private func fullScreen(_ name: String) async -> (Bool, String) {
         let window = shell.window
         let before = window.frame
-        window.toggleFullScreen(nil)
-        guard await waitUntil(10, { window.styleMask.contains(.fullScreen) }) else {
-            return (true, "this runner did not put the window in full screen within 10 s, so there is no full-screen shot")
+        guard let screen = window.screen else { return (true, "skipped: the window is on no screen, so this runner cannot show it in full screen") }
+        guard window.styleMask.contains(.resizable), !window.collectionBehavior.contains(.fullScreenNone) else {
+            return (true, "skipped: the window does not allow full screen")
         }
-        try? await Task.sleep(for: .seconds(1))
+        window.toggleFullScreen(nil)
+        guard await waitUntil(10, { window.styleMask.contains(.fullScreen) && window.frame == screen.frame }) else {
+            return (false, "the window did not fill its screen in full screen within 10 s: its frame \(NSStringFromRect(window.frame)), the screen's \(NSStringFromRect(screen.frame))")
+        }
         let (taken, said) = await inBothLooks(name) { file in await self.capture([], to: file) }
         var passed: [String] = []
         func sample() {
@@ -733,18 +747,14 @@ extension Driver {
         window.toggleFullScreen(nil)
         let back = await waitUntil(10) {
             sample()
-            return !window.styleMask.contains(.fullScreen)
-        }
-        _ = await waitUntil(1) {
-            sample()
-            return false
+            return !window.styleMask.contains(.fullScreen) && window.frame == before
         }
         let after = window.frame, visible = window.screen?.visibleFrame ?? .zero
         let same = abs(after.width - before.width) < 1 && abs(after.height - before.height) < 1
         let inside = after.width <= visible.width + 1 && after.height <= visible.height + 1
         let frames = "before \(NSStringFromRect(before)), after \(NSStringFromRect(after)), the screen's visible frame \(NSStringFromRect(visible)); "
             + "on the way back: \(passed.joined(separator: " → "))"
-        return (taken && back && same && inside, said + (back ? "; " : "; the window did not leave full screen; ") + frames)
+        return (taken && back && same && inside, said + (back ? "; " : "; the window did not come back to its frame within 10 s; ") + frames)
     }
 
     /// P4 and the design note's rule, against another copy's host with a client on it
@@ -769,7 +779,7 @@ extension Driver {
         }
         let reached: Bool
         switch state {
-        case "kept": reached = await waitUntil(20) { says("This Mac's terminal host is in use by another program, attached to its terminal “held”") && other() }
+        case "kept": reached = await waitUntil(20) { says(LocalHost.inUse(attached: 1)) && other() }
         case "replaced": reached = await waitUntil(30) { says(LocalHost.closingAnother) && ours() }
         default: return (false, "no other-host state \(state)")
         }
