@@ -3,6 +3,7 @@ import SailAPI
 @testable import SailTerminal
 import SailTerminalWire
 import SailVT
+import SailWorkbench
 @testable import sail_term_probe
 import Synchronization
 import Testing
@@ -12,7 +13,8 @@ import Testing
 /// The session under test opens in `SAIL_PROJECT`'s container through an open ticket; where no
 /// project can run (no Incus), `SAIL_BOX_SOCKET` names the box's unix socket instead, and the
 /// session opens there as the box's own person, in a folder, to be attached through tickets.
-/// Skipped without `SAIL_API`; CI's `terminal-e2e` sets it.
+/// `SAIL_WORKSPACE` names a workspace of the project, made by the token's person, for the app's own
+/// Create. Skipped without `SAIL_API`; CI's `terminal-e2e` sets it.
 @Suite(.serialized, .timeLimit(.minutes(3)), .enabled(if: RealRunner.api != nil))
 struct RealRunnerTests {
     /// Scenario 2.
@@ -22,6 +24,26 @@ struct RealRunnerTests {
         let (session, watch) = try await runner.ours()
         "echo hi-$((6*7))\r".forEach { session.send(.typing($0)) }
         try await watch.until(within: 30, "echoed") { try session.screen.text().contains("\nhi-42") }
+        session.close()
+    }
+
+    /// The field failure of 0.71.0: the Create the app sends for a workspace tab, made by the one
+    /// function the app calls (it names no folder), opens in the workspace's own directory and
+    /// echoes a line, as a person pressing Open meets it.
+    @Test(.enabled(if: RealRunner.project != nil && RealRunner.workspace != nil))
+    func theAppsOwnCreateForAWorkspaceTabOpensInTheWorkspaceAndEchoes() async throws {
+        let runner = try RealRunner()
+        let place = Place.workspace(project: try #require(RealRunner.project), name: try #require(RealRunner.workspace))
+        let create = place.sessionCreate(session: place.newSessionName, size: TerminalSize(columns: 100, rows: 30))
+        #expect(create.workingDirectory == "", "the app names no folder for a workspace tab")
+        let session = TerminalSession(open: create, door: .runner(runner.counter), screen: try screen(columns: 100, rows: 30))
+        let watch = Watch(session)
+        session.start()
+        try await watch.attached(within: 120)
+        "echo app-$((6*7)) $PWD\r".forEach { session.send(.typing($0)) }
+        try await watch.until(within: 30, "echoed in the workspace") {
+            try session.screen.text().contains("\napp-42 /home/dev/workspace")
+        }
         session.close()
     }
 
@@ -133,6 +155,7 @@ struct RealRunner {
     static let environment = ProcessInfo.processInfo.environment
     static let api = environment["SAIL_API"].flatMap(URL.init(string:))
     static let project = environment["SAIL_PROJECT"]
+    static let workspace = environment["SAIL_WORKSPACE"]
 
     let client: SailClient
     let other: SailClient

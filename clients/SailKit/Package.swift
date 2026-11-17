@@ -45,11 +45,11 @@ let package = Package(
             swiftSettings: strict
         ),
         .target(name: "SailSurface", dependencies: ["SailVT", "SailTerminal"], swiftSettings: strict),
-        .target(name: "SailWorkbench", swiftSettings: strict),
+        .target(name: "SailWorkbench", dependencies: ["SailTerminalWire"], swiftSettings: strict),
         .target(name: "SailMeasures", dependencies: ["SailSurface"], swiftSettings: strict),
         .executableTarget(
             name: "sail-term-probe",
-            dependencies: ["SailAPI", "SailMeasures", "SailSurface", "SailTerminal", "SailVT"],
+            dependencies: ["SailAPI", "SailMeasures", "SailSurface", "SailTerminal", "SailVT", "SailWorkbench"],
             swiftSettings: strict
         ),
         .target(
@@ -84,12 +84,12 @@ let package = Package(
         ),
         .testTarget(
             name: "SailTerminalTests",
-            dependencies: ["SailMeasures", "SailSurface", "SailTerminal", "SailTerminalWire", "SailVT", "sail-term-probe", "SailKitTestSupport"],
+            dependencies: ["SailMeasures", "SailSurface", "SailTerminal", "SailTerminalWire", "SailVT", "SailWorkbench", "sail-term-probe", "SailKitTestSupport"],
             swiftSettings: strict
         ),
         .testTarget(
             name: "SailWorkbenchTests",
-            dependencies: ["SailWorkbench"],
+            dependencies: ["SailWorkbench", "SailTerminalWire"],
             swiftSettings: strict
         ),
         .testTarget(name: "SailMeasuresTests", dependencies: ["SailMeasures", "SailSurface"], swiftSettings: strict),

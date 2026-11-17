@@ -220,7 +220,7 @@ public final class WorkbenchView: NSView {
     }
 
     private func open(_ id: PaneID, points: Double) {
-        if let pane = model.panes[id], makeView(pane, start: .open(folder: pane.place.folder), points: points) == nil {
+        if let pane = model.panes[id], makeView(pane, start: .open, points: points) == nil {
             model.close(id)
         }
         apply()

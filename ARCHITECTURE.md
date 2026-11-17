@@ -3874,6 +3874,17 @@ socket) or for a machine token. `sail _pty-selftest`, the release smoke test, op
 door, issues a ticket, presents it and hears one echo (`tcp-selftest: ok`), so the native binary
 runs the door and its keepalive options.
 
+**Where a session opens (`PtySessionHost.folderOf`).** One rule. A session in a container or a
+workspace starts its `incus exec` in `/` on the box and its shell in the instance's own
+`/home/dev/workspace`, as `sail project workspace shell` does; the folder a `Create` names is not
+used for it, and the app names none (`Place.sessionCreate`, the one place a tab's `Create` is
+built). A session on the box itself opens in the folder named by its absolute path, or in the
+host's own home when none is named; one that is no folder here is refused naming the folder
+(`PtyAdmission.Folder.onThisBox`). A session whose process does not start says so in a sentence
+("Could not start session '<name>' on this box."), and what the process launcher said goes to the
+host's log, never to the person. `RealRunnerTests.theAppsOwnCreateForAWorkspaceTabOpensInTheWorkspaceAndEchoes`
+opens a workspace on a real host with the app's own `Create`.
+
 **The terminal host on a person's own machine.** `sail _pty-host --local` (`LocalPtyHost`) is the
 same host wired for the account it runs as, with no server: the native app's launchd agent runs
 it, and a client speaks the same frames to it as to a box. `LocalPtyHostTest` holds each rule

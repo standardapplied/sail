@@ -130,7 +130,7 @@ actor Proxied: Transport {
         var bench = Workbench()
         let id = bench.newTab(session: place.newSessionName, place: place)
         return try TerminalPane(
-            try #require(bench.panes[id]), start: .open(folder: place.folder), host: shell.thisMac.host, runner: runner,
+            try #require(bench.panes[id]), start: .open, host: shell.thisMac.host, runner: runner,
             fonts: TerminalFonts(directory: LookTests.fonts), points: 15, look: .light, palette: Look.light.palette
         )
     }

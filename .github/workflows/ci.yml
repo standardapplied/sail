@@ -299,6 +299,8 @@ jobs:
           swift test --filter RealRunnerTests/aTicketOlderThanThirtySecondsIsRefused > "$RUNNER_TEMP/expiry.log" 2>&1 &
           expiry=$!
           sudo -H sail project apply term --yes
+          sudo -H sail project workspace create term try
+          export SAIL_WORKSPACE=try
           sudo -H sail host status
           expired=0
           wait "$expiry" || expired=$?
