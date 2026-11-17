@@ -57,6 +57,13 @@ actor GoldenDesk: Transport {
 
 /// The drive's steps on the Workspaces pane and the runner's tabs, against ``GoldenDesk``.
 extension Driver {
+    /// Types `name` into the pane's name field as a person does: the field changes and says so,
+    /// which is what enables Make.
+    private func typeName(_ name: String, into pane: WorkspacesPane) {
+        pane.name.stringValue = name
+        pane.controlTextDidChange(Notification(name: NSControl.textDidChangeNotification, object: pane.name))
+    }
+
     func performWorkspaces(_ step: Step) async -> (Bool, String)? {
         let pane = shell.workspaces
         if let pair = step.golden {
@@ -109,13 +116,13 @@ extension Driver {
             return (pane.list.selectedRow == index, "the button says \(pane.open.title), \(pane.open.isEnabled ? "enabled" : "disabled")")
         }
         if let wanted = step.makeStarts {
-            pane.name.stringValue = wanted
+            typeName(wanted, into: pane)
             pane.make.performClick(nil)
             return (pane.busy && !pane.make.isEnabled, "while making: Make says \(pane.make.title); \(pane.text.replacingOccurrences(of: "\n", with: " | "))")
         }
         if let wanted = step.make {
             let before = pane.ended
-            pane.name.stringValue = wanted
+            typeName(wanted, into: pane)
             pane.make.performClick(nil)
             let said = pane.text
             let done = await waitUntil(step.seconds ?? 10) { pane.ended > before }
