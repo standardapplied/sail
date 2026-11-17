@@ -191,10 +191,10 @@ public final class ContainerAuthorizedKeys {
             || BoxInstances.wholeWorkspaceOf(boxHandle).test(instance);
   }
 
-  /** A person's own key goes to their own workspaces alone. */
-  public List<Unreached> addToWorkspacesOf(SshPublicKey key, String handle)
+  /** A person's own key goes to their own workspaces alone, found by their id. */
+  public List<Unreached> addToWorkspacesOf(SshPublicKey key, String fdeId)
       throws IOException, InterruptedException, TimeoutException {
-    return addTo(key, new BoxInstances(shell).wholeWorkspacesOf(handle));
+    return addTo(key, new BoxInstances(shell).wholeWorkspacesOf(fdeId));
   }
 
   private List<Unreached> addTo(SshPublicKey key, List<BoxInstances.Instance> reached)

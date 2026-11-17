@@ -21,6 +21,7 @@ import ai.singlr.sail.engine.BoxInstances;
 import ai.singlr.sail.engine.HostAccess;
 import ai.singlr.sail.engine.HostToken;
 import ai.singlr.sail.engine.ScriptedShellExecutor;
+import ai.singlr.sail.engine.WorkspaceOwner;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.Role;
@@ -122,7 +123,7 @@ class AccessDoorsBaselineTest {
             TestControlPlane.on(
                 OperationsFactory.create(
                     world.db,
-                    new ScriptedShellExecutor()
+                    workspacesOfAcme(world, new ScriptedShellExecutor())
                         .onOk("incus list", "[]")
                         .onOk("incus storage list", "[{\"name\": \"tank\", \"driver\": \"zfs\"}]"),
                     bus,
@@ -159,6 +160,77 @@ class AccessDoorsBaselineTest {
     }
   }
 
+  /**
+   * Acme's workspaces on the box, as Incus lists them: {@code try}, the owner's; {@code spare}, the
+   * other member's; {@code loose}, made by hand and no one's. Each running, holding nothing, and
+   * stopped or deleted when asked.
+   */
+  private static ScriptedShellExecutor workspacesOfAcme(World world, ScriptedShellExecutor incus) {
+    var fdes = new FdeStore(world.db);
+    var all = new ArrayList<String>();
+    all.add(TestWorkspaces.currentTemplate(ProjectReader.ofCatalog(world.projects), "acme"));
+    for (var workspace : WORKSPACES.entrySet()) {
+      var owner = workspace.getValue();
+      var listed =
+          workspace(
+              workspace.getKey(),
+              owner.isBlank() ? "" : owner,
+              owner.isBlank() ? "" : fdes.byHandle(owner).orElseThrow().id());
+      all.add(listed);
+      incus.onOk("incus list ^acme-" + workspace.getKey() + "$", "[" + listed + "]");
+    }
+    return incus
+        .onOk("incus list ^acme-", "[]")
+        .onOk("incus snapshot list acme--tmpl --format json", TestWorkspaces.V1)
+        .onOk("incus operation list --format json", "[]")
+        .onOk("incus copy acme--tmpl", "")
+        .onOk("incus start acme-", "")
+        .onOk("incus config set acme-", "")
+        .onOk("incus config device add acme-", "")
+        .onOk("incus file push", "")
+        .onOk("incus exec acme-", "")
+        .onOk("incus stop acme-", "")
+        .onOk("incus delete acme-", "")
+        .onOk("incus list --format json", "[" + String.join(",", all) + "]");
+  }
+
+  /** Acme's workspaces by name, each to its owner's handle: blank for no one's. */
+  private static final Map<String, String> WORKSPACES =
+      Map.of("try", Cast.OWNER, "spare", Cast.OTHER, "loose", "");
+
+  /**
+   * Workspace {@code name} of acme, running, owned by {@code owner} by id {@code id}: none for no
+   * one's.
+   */
+  private static String workspace(String name, String owner, String id) {
+    return """
+        {"name": "acme-%s", "status": "Running", "type": "container",
+         "config": {"user.sail.project": "acme", "user.sail.workspace": "%s",
+                    "user.sail.ready": "1762941601000"%s},
+         "expanded_devices": {"root": {"path": "/", "pool": "tank", "type": "disk"}}}"""
+        .formatted(
+            name,
+            name,
+            owner.isBlank()
+                ? ""
+                : ", \"user.sail.owner\": \"%s\", \"user.sail.owner_id\": \"%s\""
+                    .formatted(owner, id));
+  }
+
+  /**
+   * The four workspace doors on acme's: make one's own, and start, stop and delete each of the
+   * owner's, the other member's and no one's, and one that is not there.
+   */
+  private static void workspaceDoors(List<Door> doors) {
+    doors.add(new Door("make a workspace of acme", ops -> ops.createWorkspace("acme", "new")));
+    for (var name : List.of("try", "spare", "loose", "ghost")) {
+      var which = "workspace " + name + " of acme";
+      doors.add(new Door("start " + which, ops -> ops.startWorkspace("acme", name)));
+      doors.add(new Door("stop " + which, ops -> ops.stopWorkspace("acme", name)));
+      doors.add(new Door("delete " + which, ops -> ops.deleteWorkspace("acme", name, false)));
+    }
+  }
+
   private static List<Door> doors(World world) {
     var doors = new ArrayList<Door>();
     reads(world, doors);
@@ -166,6 +238,7 @@ class AccessDoorsBaselineTest {
     specs(world, doors);
     rooms(world, doors);
     projects(doors);
+    workspaceDoors(doors);
     events(world, doors);
     logins(doors);
     return doors;
@@ -212,7 +285,12 @@ class AccessDoorsBaselineTest {
             world.db,
             roles,
             new EventStore(world.db),
-            new BoxInstances(new ScriptedShellExecutor()));
+            new BoxInstances(new ScriptedShellExecutor()),
+            TestWorkspaces.over(workspacesOfAcme(world, new ScriptedShellExecutor())),
+            project -> java.util.Optional.empty(),
+            handle ->
+                WorkspaceOwner.of(
+                    new FdeStore(world.db), handle, Cast.OWNER, java.util.Optional.empty()));
     var socket = tempDir.resolve("pty.sock");
     try (var host =
         new PtySessionHost(
@@ -236,6 +314,12 @@ class AccessDoorsBaselineTest {
                   throws IOException {
                 pty.admitRoom(room, project, who);
               }
+
+              @Override
+              public void workspace(String project, String workspace, PtyIdentity.Person who)
+                  throws IOException {
+                pty.admitWorkspace(project, workspace, who);
+              }
             },
             PtyEvents.NONE,
             "0.0.0-test",
@@ -257,8 +341,8 @@ class AccessDoorsBaselineTest {
       }
       var door =
           new TerminalTickets(
-              (credential, action, target) ->
-                  SessionClient.ticket(socket, credential, action, target),
+              (credential, action, target, workspace) ->
+                  SessionClient.ticket(socket, credential, action, target, workspace),
               host.tcpAddress().orElseThrow());
       var askers = new LinkedHashMap<String, String>();
       for (var fde :
@@ -279,6 +363,23 @@ class AccessDoorsBaselineTest {
                       ops ->
                           door.issue(
                               asker.getValue(), Map.of("action", "open", "project", project))),
+                  null));
+        }
+        for (var workspace : List.of("try", "spare", "loose", "ghost")) {
+          var label =
+              asker.getKey()
+                  + " asks a ticket to open a terminal in workspace "
+                  + workspace
+                  + " of acme";
+          corpus.put(
+              label,
+              answer(
+                  new Door(
+                      label,
+                      ops ->
+                          door.issue(
+                              asker.getValue(),
+                              Map.of("action", "open", "project", "acme", "workspace", workspace))),
                   null));
         }
         for (var session : List.of("lounge", "ghost")) {

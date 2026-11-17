@@ -45,6 +45,7 @@ import java.io.OutputStream;
 import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
@@ -578,16 +579,18 @@ public final class SyncOperations {
 
   /**
    * Takes off this box each project the scope main named does not admit and the box holds nothing
-   * of: its {@code ~/.sail/projects/<name>} directory, its container when Sail provisioned it
-   * ({@link IncusDeviceManager#sailManaged}), and its workspaces and template, told by their keys
-   * ({@link BoxInstances}), as {@code project destroy} without {@code --purge} would. A copy
-   * carrying a leaving project's keys under another name is not Sail's and stays, said once, in the
-   * round that drops the project. A workspace or template of a project in scope is never touched,
-   * nor taken for a project of its own name. It is decided from what the box holds, not from what
-   * this round {@code dropped}, so a directory or container an earlier release, a failed round or
-   * an unreachable Incus left behind goes in the first round that can take it. A project kept for a
-   * run still under way here is still held, and keeps both. An unscoped box is never asked, nor is
-   * Incus of a project in scope.
+   * of: its {@code ~/.sail/projects/<name>} directory, and its container, workspaces and template,
+   * each told positively by the keys Sail wrote on it ({@link BoxInstances}), as {@code project
+   * destroy} without {@code --purge} would. An instance is deleted only under its lock, read again
+   * immediately before, and only while it is still that ({@link #takeOffWhileStill}). One that
+   * carries no key of a leaving project, as Incus lists an instance it cannot render, is never
+   * deleted: a container Sail did not launch for a dropped project stays, said once, and so does a
+   * copy carrying a leaving project's keys under another name. A workspace or template of a project
+   * in scope is never touched, nor taken for a project of its own name. It is decided from what the
+   * box holds, not from what this round {@code dropped}, so a directory or container a failed round
+   * or an unreachable Incus left behind goes in the first round that can take it. A project kept
+   * for a run still under way here is still held, and keeps both. An unscoped box is never asked,
+   * nor is Incus of a project in scope.
    */
   private void tearDownOutOfScope(Set<String> dropped) {
     var scope = new SyncScope(db).held();
@@ -605,9 +608,10 @@ public final class SyncOperations {
           takeOff(teardown, name, List.of());
         }
       }
+      var box = new BoxInstances(shell);
       List<BoxInstances.Instance> instances;
       try {
-        instances = new BoxInstances(shell).all();
+        instances = box.all();
       } catch (IOException | TimeoutException unreachable) {
         dropped.forEach(
             project ->
@@ -621,66 +625,38 @@ public final class SyncOperations {
                         "')")));
         return;
       }
-      var devices = new IncusDeviceManager(shell);
-      for (var instance : instances) {
-        var name = instance.name();
-        switch (instance.kind()) {
-          case BoxInstances.Plain _ when leaving.test(name) -> {
-            if (devices.sailManaged(name)) {
-              if (takeOff(teardown, name, List.of(name))) {
-                notice.accept(
-                    Remedy.of(
-                        "project "
-                            + name
-                            + ": its container deleted, workspace and uncommitted work included —"
-                            + " main no longer grants this box the project"));
-              }
-            } else if (dropped.contains(name)) {
-              notice.accept(
-                  Remedy.of(
-                      "project "
-                          + name
-                          + ": container '"
-                          + name
-                          + "' kept — Sail did not provision it; remove it yourself if it holds the"
-                          + " project's work"));
-            }
-          }
-          case BoxInstances.Workspace workspace when leaving.test(workspace.project()) -> {
-            if (takeOff(teardown, workspace.project(), List.of(name))) {
-              notice.accept(
-                  Remedy.of(
-                      "project "
-                          + workspace.project()
-                          + ": its workspace "
-                          + workspace.workspace()
-                          + " deleted, uncommitted work included — main no longer grants this box"
-                          + " the project"));
-            }
-          }
-          case BoxInstances.Template template when leaving.test(template.project()) -> {
-            if (takeOff(teardown, template.project(), List.of(name))) {
-              notice.accept(
-                  Remedy.of(
-                      "project "
-                          + template.project()
-                          + ": its template deleted — main no longer grants this box the project"));
-            }
-          }
-          case BoxInstances.Stray stray when dropped.contains(stray.project()) ->
-              notice.accept(
-                  Remedy.of(
-                      "project "
-                          + stray.project()
-                          + ": instance '"
-                          + name
-                          + "' kept — a copy carrying the project's keys under another name is not"
-                          + " Sail's; delete it yourself if it is not wanted, as it holds the"
-                          + " project's work"));
-          default -> {}
+      var workspaces = Workspaces.onThisBox(shell);
+      for (var listed : instances) {
+        if (listed.state() instanceof ContainerState.Error) {
+          continue;
+        }
+        var project = leavingPart(listed, leaving);
+        if (project.isPresent()) {
+          takeOffWhileStill(teardown, box, workspaces, listed, project.get(), leaving)
+              .ifPresent(gone -> notice.accept(Remedy.of(deleted(gone, project.get()))));
+        } else if (listed.kind() instanceof BoxInstances.Stray stray
+            && dropped.contains(stray.project())) {
+          notice.accept(
+              Remedy.of(
+                  "project "
+                      + stray.project()
+                      + ": instance '"
+                      + listed.name()
+                      + "' kept — a copy carrying the project's keys under another name is not"
+                      + " Sail's; delete it yourself if it is not wanted, as it holds the"
+                      + " project's work"));
+        } else if (listed.plain() && dropped.contains(listed.name())) {
+          notice.accept(
+              Remedy.of(
+                  "project "
+                      + listed.name()
+                      + ": container '"
+                      + listed.name()
+                      + "' kept — Sail did not provision it; remove it yourself if it holds the"
+                      + " project's work"));
         }
       }
-    } catch (IOException | TimeoutException e) {
+    } catch (IOException e) {
       System.err.println(
           Banner.errorLine(
               "Could not list what this box holds of projects main no longer grants it: "
@@ -689,6 +665,76 @@ public final class SyncOperations {
     } catch (InterruptedException e) {
       Thread.currentThread().interrupt();
     }
+  }
+
+  /**
+   * The leaving project {@code instance} is Sail's part of, told positively by its keys: a
+   * workspace's or template's project, or the project a plain instance is the own container of.
+   * Empty for anything else, and for a project {@code leaving} does not name.
+   */
+  private static Optional<String> leavingPart(
+      BoxInstances.Instance instance, Predicate<String> leaving) {
+    var project =
+        switch (instance.kind()) {
+          case BoxInstances.Workspace workspace -> workspace.project();
+          case BoxInstances.Template template -> template.project();
+          case BoxInstances.Plain _ when instance.projectsOwn() -> instance.name();
+          default -> null;
+        };
+    return Optional.ofNullable(project).filter(leaving);
+  }
+
+  /**
+   * Deletes {@code listed}, Sail's part of leaving {@code project}, under the lock every make,
+   * entry, stop and delete of a workspace of its name holds, when no such change holds it now: it
+   * is read again under the lock and deleted only while it is still {@code project}'s part. Answers
+   * the instance deleted, as read then; empty when it was left, for this round's notices or the
+   * next round's try.
+   */
+  private Optional<BoxInstances.Instance> takeOffWhileStill(
+      ProjectTeardown teardown,
+      BoxInstances box,
+      Workspaces workspaces,
+      BoxInstances.Instance listed,
+      String project,
+      Predicate<String> leaving)
+      throws InterruptedException {
+    try {
+      var lock = workspaces.holdIfFree(listed.name());
+      if (lock.isEmpty()) {
+        return Optional.empty();
+      }
+      try (var held = lock.get()) {
+        var now =
+            box.lookup(listed.name(), Duration.ofSeconds(BoxInstances.LOOKUP_SECONDS))
+                .filter(instance -> leavingPart(instance, leaving).equals(Optional.of(project)));
+        if (now.isPresent()) {
+          teardown.tearDown(project, List.of(listed.name()));
+        }
+        return now;
+      }
+    } catch (IOException | UncheckedIOException | TimeoutException e) {
+      System.err.println(
+          Banner.errorLine(
+              "Could not take project "
+                  + project
+                  + " off this box (the next sync tries again): "
+                  + e.getMessage(),
+              Ansi.AUTO));
+      return Optional.empty();
+    }
+  }
+
+  private static String deleted(BoxInstances.Instance gone, String project) {
+    return "project "
+        + project
+        + switch (gone.kind()) {
+          case BoxInstances.Workspace workspace ->
+              ": its workspace " + workspace.workspace() + " deleted, uncommitted work included";
+          case BoxInstances.Template _ -> ": its template deleted";
+          default -> ": its container deleted, workspace and uncommitted work included";
+        }
+        + " — main no longer grants this box the project";
   }
 
   /**

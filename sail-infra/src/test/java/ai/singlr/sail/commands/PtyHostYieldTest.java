@@ -155,4 +155,30 @@ class PtyHostYieldTest {
       assertEquals(1, host.sessionCount(), "the session it could not end is reported, not hidden");
     }
   }
+
+  /**
+   * Review 1's final F-M2: what a stop or a forced delete of workspace {@code try} of acme ends is
+   * the live sessions in that workspace alone: not one in acme's own container, in acme's other
+   * workspace, in another project's workspace of the same name, or one already ended.
+   */
+  @Test
+  void aWorkspacesTerminalsAreTheLiveSessionsInThatWorkspaceAlone() {
+    var sessions =
+        List.of(
+            session("in-try", true, "acme", "try"),
+            session("ended-in-try", false, "acme", "try"),
+            session("in-container", true, "acme", ""),
+            session("in-spare", true, "acme", "spare"),
+            session("beta-try", true, "beta", "try"),
+            session("no-project", true, "", ""));
+
+    assertEquals(List.of("in-try"), PtyHostYield.liveIn(sessions, "acme", "try"));
+    assertEquals(List.of("in-spare"), PtyHostYield.liveIn(sessions, "acme", "spare"));
+  }
+
+  private static PtyMessage.SessionInfo session(
+      String name, boolean live, String project, String workspace) {
+    return new PtyMessage.SessionInfo(
+        name, "i-" + name, live, 0, "", "", List.of(), project, workspace, "ada");
+  }
 }

@@ -141,6 +141,24 @@ class PtySessionHostTest {
         }
 
         @Override
+        public void workspace(String project, String workspace, PtyIdentity.Person who)
+            throws IOException {
+          if (workspace.equals("gone")) {
+            throw new PtyAdmission.Absent("Project '" + project + "' has no workspace 'gone'.");
+          }
+          if (!who.actor().isAdmin() && !who.fde().equals("mady")) {
+            throw new IOException("Workspace '" + workspace + "' belongs to 'mady', not you.");
+          }
+        }
+
+        @Override
+        public void enter(String project, String workspace, PtyIdentity.Person who)
+            throws IOException {
+          workspace(project, workspace, who);
+          throw new IOException("entered " + project + "-" + workspace + " for " + who.fde());
+        }
+
+        @Override
         public void room(String room, String project, PtyIdentity.Person who) throws IOException {
           if (!room.equals("design-talk")) {
             throw new IOException("Room '" + room + "' was not found.");
@@ -1928,5 +1946,40 @@ class PtySessionHostTest {
     PtyWire.write(channel, new PtyMessage.ListSessions("", PtyMessage.PAGE_LIMIT));
     var listed = (PtyMessage.Sessions) PtyWire.read(channel);
     return listed.sessions().stream().filter(s -> s.name().equals(name)).findFirst().orElseThrow();
+  }
+
+  /**
+   * R10 at the pty host: a session in a workspace is decided as entering it, not as operating the
+   * box, so its owner opens one on a box that is not theirs; another member is refused naming the
+   * owner; one the project does not have is said not found; and its process runs in the workspace's
+   * own instance.
+   */
+  @Test
+  void aWorkspaceSessionIsDecidedByItsOwnerNotByTheBoxAndRunsInItsInstance() throws IOException {
+    boxless.add("mady");
+    startHost();
+
+    var answers = new ArrayList<String>();
+    for (var token : List.of("tok-mady", "tok-uday", "tok-mady")) {
+      try (var channel = connect(token)) {
+        var workspace = answers.size() == 2 ? "gone" : "try";
+        PtyWire.write(
+            channel,
+            new PtyMessage.Create("w", List.of("sh"), "/tmp", "acme", "", 80, 24, workspace));
+        answers.add(((PtyMessage.Err) PtyWire.read(channel)).message());
+      }
+    }
+
+    assertEquals(
+        List.of(
+            "entered acme-try for mady",
+            "Workspace 'try' belongs to 'mady', not you.",
+            "Project 'acme' has no workspace 'gone'."),
+        answers);
+    assertEquals(
+        List.of("incus", "exec", "acme-try"),
+        PtySessionHost.childCommand(
+                new PtySession.Origin("w", "i", "mady", "acme", "", List.of("sh"), "try"), Map.of())
+            .subList(0, 3));
   }
 }

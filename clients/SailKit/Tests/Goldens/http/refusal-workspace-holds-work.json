@@ -1,0 +1,18 @@
+{
+  "request": {
+    "method": "DELETE",
+    "path": "/v1/projects/harbor/workspaces/dock"
+  },
+  "response": {
+    "body": {
+      "error": {
+        "action": "Take what it holds first, or delete it anyway: DELETE /v1/projects/harbor/workspaces/dock?force=true",
+        "code": "workspace_holds_work",
+        "field_errors": [],
+        "message": "Workspace dock of harbor, uday's, holds work: app holds uncommitted changes."
+      },
+      "schema_version": 1
+    },
+    "status": 409
+  }
+}

@@ -21,8 +21,10 @@ import ai.singlr.sail.engine.ProjectCatalogRename;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.SyncOperations;
 import ai.singlr.sail.engine.WorkspaceOwner;
+import ai.singlr.sail.engine.Workspaces;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.RoleRule;
+import ai.singlr.sail.pty.PtyAdmission;
 import ai.singlr.sail.pty.PtyIdentity;
 import ai.singlr.sail.ssh.SshGateway;
 import ai.singlr.sail.store.AttentionStore;
@@ -304,7 +306,7 @@ final class HostLanes {
 
     @Override
     public List<FdeSshKeyStore.SshKeyInfo> sshKeys() {
-      return new FdeSshKeyStore(db).list();
+      return new FdeSshKeyStore(db).admitted();
     }
 
     @Override
@@ -333,7 +335,15 @@ final class HostLanes {
     }
   }
 
-  record Pty(Sqlite db, RoleRule roles, EventStore events, BoxInstances box) implements HostPty {
+  record Pty(
+      Sqlite db,
+      RoleRule roles,
+      EventStore events,
+      BoxInstances box,
+      Workspaces workspaces,
+      ProjectReader definitions,
+      Function<String, WorkspaceOwner> owners)
+      implements HostPty {
     @Override
     public PtyIdentity.Person identity(String token) throws IOException {
       return new HostAccess(db, roles).identity(token);
@@ -382,6 +392,66 @@ final class HostLanes {
       var taken = BoxInstances.taken(project, instance);
       if (taken.isPresent()) {
         throw Remedied.io(taken.get().reason(), taken.get().remedy());
+      }
+    }
+
+    @Override
+    public void admitWorkspace(String project, String workspace, PtyIdentity.Person who)
+        throws IOException {
+      Optional<BoxInstances.Instance> found;
+      try {
+        found = workspaces.find(project, workspace);
+      } catch (TimeoutException slow) {
+        throw unanswered(project + "-" + workspace);
+      } catch (InterruptedException interrupted) {
+        Thread.currentThread().interrupt();
+        throw unanswered(project + "-" + workspace);
+      }
+      if (found.isEmpty()) {
+        throw new PtyAdmission.Absent(Workspaces.absent(project, workspace).getMessage());
+      }
+      decide(project, workspace, found.get(), who);
+    }
+
+    @Override
+    public void enterWorkspace(String project, String workspace, PtyIdentity.Person who)
+        throws IOException {
+      try {
+        workspaces.startExisting(
+            definitions.require(project),
+            workspace,
+            owners,
+            found -> {
+              decide(project, workspace, found, who);
+              Workspaces.goneOwner(found, owners)
+                  .ifPresent(
+                      gone -> {
+                        throw WorkspaceDoors.goneOwner(project, workspace, gone);
+                      });
+            });
+      } catch (Exception failed) {
+        if (failed instanceof InterruptedException) {
+          Thread.currentThread().interrupt();
+        }
+        throw Remedied.io(Remedied.reasonOf(failed), Remedied.remedyOf(failed));
+      }
+    }
+
+    /**
+     * Refuses {@code who} workspace {@code found} unless they may enter it, as every workspace door
+     * decides, the node's own person keeping what nobody owns on a node.
+     */
+    private void decide(
+        String project, String workspace, BoxInstances.Instance found, PtyIdentity.Person who)
+        throws IOException {
+      var owner = Workspaces.ownerOf(found, owners).orElse(null);
+      var keeper = roles.nodeFde().orElse(null);
+      var refused =
+          Actor.call(
+              who.actor(),
+              () -> WorkspaceDoors.refusal(Actor.current(), project, workspace, owner, keeper));
+      if (refused.isPresent()) {
+        throw Remedied.io(refused.get().message(), refused.get().fix());
       }
     }
 

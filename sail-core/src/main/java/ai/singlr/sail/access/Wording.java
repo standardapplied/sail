@@ -329,7 +329,12 @@ final class Wording {
    * what the action does to it: operating a box, and changing a room, its roster included.
    */
   private static Refusal notTheOwner(Action action, Resource resource) {
-    var doing = action == Action.OPERATE_BOX ? "operate it" : "change it";
+    var doing =
+        switch (action) {
+          case OPERATE_BOX -> "operate it";
+          case ENTER_WORKSPACE -> "enter it";
+          default -> "change it";
+        };
     var owners = resource.owners();
     if (owners.isEmpty()) {
       return new Refusal(

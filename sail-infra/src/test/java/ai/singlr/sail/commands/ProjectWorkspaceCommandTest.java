@@ -137,6 +137,24 @@ class ProjectWorkspaceCommandTest {
   }
 
   @Test
+  void aDeleteRefusedForWhatItHoldsNamesACommandThatForcesItAsPrinted() {
+    var printed = ProjectWorkspaceCommand.forcedDelete("acme", "fix-login").plain();
+    var words = List.of(printed.split(" "));
+
+    var parsed =
+        new CommandLine(new Sail())
+            .parseArgs(words.subList(1, words.size()).toArray(String[]::new));
+    var delete = parsed.subcommand().subcommand().subcommand();
+
+    assertEquals("sail project workspace delete acme fix-login --force", printed);
+    assertEquals("delete", delete.commandSpec().name());
+    assertEquals(
+        List.of("acme", "fix-login"),
+        delete.matchedPositionals().stream().map(p -> p.getValue().toString()).toList());
+    assertTrue(delete.hasMatchedOption("--force"));
+  }
+
+  @Test
   void aDeleteThroughJsonNeedsYes() {
     var named = new ProjectWorkspaceCommand.Target();
     named.project = "acme";

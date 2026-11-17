@@ -109,22 +109,25 @@ private extension Frame {
             [
                 .string(create.session), .strings(create.command), .string(create.workingDirectory),
                 .string(create.project), .string(create.room),
-            ] + create.size.fields
+            ] + create.size.fields + [.string(create.workspace)]
         case let .attach(session, write): [.string(session), .bool(write)]
         case let .input(sequence, bytes): [.int64(sequence), .blob(bytes)]
         case let .resize(size), let .resized(size): size.fields
         case let .listSessions(after, limit): [.string(after), .int32(limit)]
         case let .kill(session): [.string(session)]
         case let .yield(session, reason): [.string(session), .string(reason)]
-        case let .issueTicket(action, target, credential): [.string(action.rawValue), .string(target), .string(credential)]
+        case let .issueTicket(action, target, credential, workspace):
+            [.string(action.rawValue), .string(target), .string(credential), .string(workspace)]
         case let .ticket(ticket): [.string(ticket)]
         case let .ticketRefused(kind, remedy): [.string(kind.rawValue), .count(remedy.count)] + remedy.flatMap(\.fields)
         case let .output(lastInputSequence, bytes): [.int64(lastInputSequence), .blob(bytes)]
         case let .replayBegin(safe): [.bool(safe)]
         case let .writerChanged(fde): [.string(fde)]
         case let .sessionEnded(reason): [.string(reason)]
-        case let .sessionInfo(info): info.fields
-        case let .sessions(page): [.count(page.sessions.count)] + page.sessions.flatMap(\.fields) + [.string(page.next)]
+        case let .sessionInfo(info): info.fields + info.place
+        case let .sessions(page):
+            [.count(page.sessions.count)] + page.sessions.flatMap(\.fields) + [.string(page.next)]
+                + [.count(page.sessions.count)] + page.sessions.flatMap(\.place)
         case let .refused(refusal):
             [.string(refusal.message)] + (refusal.remedy.map { [.count($0.count)] + $0.flatMap(\.fields) } ?? [])
         case .takeWrite, .detach, .replayEnd, .paused, .continued, .accepted: []
@@ -144,6 +147,12 @@ private extension SessionInfo {
             .string(name), .string(instanceID), .bool(live), .int32(attached), .string(writerFDE), .string(room),
             .strings(command),
         ]
+    }
+
+    /// Where it runs and who opened it, written after every other field of the frame, a page's after
+    /// its cursor: the macOS lanes run the app against a pinned released host, which writes none.
+    var place: [Field] {
+        [.string(project), .string(workspace), .string(opener)]
     }
 }
 
@@ -198,7 +207,11 @@ private struct Cursor {
         case 7: .listSessions(after: try string(), limit: try int32())
         case 8: .kill(session: try string())
         case 10: .yield(session: try string(), reason: try string())
-        case 11: .issueTicket(action: Open(rawValue: try string()), target: try string(), credential: try string())
+        case 11:
+            .issueTicket(
+                action: Open(rawValue: try string()), target: try string(), credential: try string(),
+                workspace: try string()
+            )
         case 33: .ticket(try string())
         case 34: .ticketRefused(kind: Open(rawValue: try string()), remedy: try list { (cursor: inout Cursor) throws(TerminalWireError) in try cursor.part() })
         case 20: .output(lastInputSequence: try int64(), bytes: try blob())
@@ -209,8 +222,8 @@ private struct Cursor {
         case 25: .paused
         case 26: .continued
         case 27: .sessionEnded(reason: try string())
-        case 28: .sessionInfo(try session())
-        case 29: .sessions(SessionPage(sessions: try list { (cursor: inout Cursor) throws(TerminalWireError) in try cursor.session() }, next: try string()))
+        case 28: .sessionInfo(try placed(try session()))
+        case 29: .sessions(try page())
         case 30: .accepted
         case 31: .refused(try refusal())
         case let other: throw .unknownType(other)
@@ -220,15 +233,45 @@ private struct Cursor {
     private mutating func create() throws(TerminalWireError) -> SessionCreate {
         SessionCreate(
             session: try string(), command: try strings(), workingDirectory: try string(), project: try string(),
-            room: try string(), size: try size()
+            room: try string(), size: try size(), workspace: try string()
         )
     }
+
 
     private mutating func session() throws(TerminalWireError) -> SessionInfo {
         SessionInfo(
             name: try string(), instanceID: try string(), live: try bool(), attached: try int32(),
             writerFDE: try string(), room: try string(), command: try strings()
         )
+    }
+
+    /// `info` with the place a frame ends with, when its host wrote one (a pinned released host
+    /// writes none).
+    private mutating func placed(_ info: SessionInfo) throws(TerminalWireError) -> SessionInfo {
+        guard remaining > 0 else { return info }
+        var placed = info
+        placed.project = try string()
+        placed.workspace = try string()
+        placed.opener = try string()
+        return placed
+    }
+
+    /// A page of sessions, each given the place the page ends with, when its host wrote them.
+    private mutating func page() throws(TerminalWireError) -> SessionPage {
+        var sessions = try list { (cursor: inout Cursor) throws(TerminalWireError) in try cursor.session() }
+        let next = try string()
+        if remaining > 0 {
+            let placed = try int32()
+            guard placed == sessions.count else {
+                throw .malformed("a page places \(placed) sessions but holds \(sessions.count)")
+            }
+            for index in sessions.indices {
+                sessions[index].project = try string()
+                sessions[index].workspace = try string()
+                sessions[index].opener = try string()
+            }
+        }
+        return SessionPage(sessions: sessions, next: next)
     }
 
     private mutating func refusal() throws(TerminalWireError) -> HostRefusal {

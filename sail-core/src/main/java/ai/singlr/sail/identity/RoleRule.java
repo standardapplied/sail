@@ -284,6 +284,11 @@ public final class RoleRule {
     return Strings.isBlank(handle) ? Optional.empty() : Optional.of(handle);
   }
 
+  /** The person this box is when it is a node, its own; empty on main or a standalone box. */
+  public Optional<String> nodeFde() {
+    return box.get().isNode() ? boxFde() : Optional.empty();
+  }
+
   private boolean isOperator(String handle) {
     var config = box.get();
     return !config.isNode() && handle.equals(config.handle());

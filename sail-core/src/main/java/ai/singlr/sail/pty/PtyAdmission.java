@@ -38,6 +38,35 @@ public interface PtyAdmission {
   default void instance(String project) throws IOException {}
 
   /**
+   * Throws, with the reason, when {@code who} may not enter workspace {@code workspace} of {@code
+   * project}: {@link Absent} when the project has none of that name here; any other refusal when it
+   * is not theirs and they are no admin. Asked of a ticket and of an open alike, after the project.
+   * A host with no workspaces refuses every one.
+   */
+  default void workspace(String project, String workspace, PtyIdentity.Person who)
+      throws IOException {
+    throw new IOException(
+        "This terminal host has no workspaces: a workspace lives on a runner. Open the project's"
+            + " own terminal here, or ask the runner for a ticket to the workspace.");
+  }
+
+  /**
+   * Readies workspace {@code workspace} of {@code project} for a session of {@code who}: its own
+   * instance, found by name and keys, started when stopped and given its owner's credentials, as an
+   * attach does. Throws, with the reason, when it cannot.
+   */
+  default void enter(String project, String workspace, PtyIdentity.Person who) throws IOException {
+    workspace(project, workspace, who);
+  }
+
+  /** A workspace the project does not have here: not found, never refused. */
+  final class Absent extends IOException {
+    public Absent(String said) {
+      super(said);
+    }
+  }
+
+  /**
    * Throws, with the reason, when {@code who} may not pin a session in {@code project} to {@code
    * room}.
    */

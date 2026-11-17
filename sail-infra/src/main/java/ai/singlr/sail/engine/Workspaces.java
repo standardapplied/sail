@@ -179,6 +179,10 @@ public final class Workspaces {
               ip -4 -o addr show dev eth0 | grep -q inet && break
               sleep 0.1
             done
+            if ! ip -4 -o addr show dev eth0 | grep -q inet; then
+              echo "$project-$workspace got no address on eth0 within 30 s, so its repos cannot be fetched; check that the network Incus gives it (incus config device show $project-$workspace) serves addresses (incus network show <network>)" >&2
+              exit 1
+            fi
           fi
           step network
           while [ "$#" -ge 2 ]; do
@@ -339,12 +343,12 @@ public final class Workspaces {
       return new Busy("This runner is making another workspace, which takes about a minute.");
     }
 
-    static Busy changing(RunPlace.SpecWorkspace place) {
+    static Busy changing(String project, String name) {
       return new Busy(
           "Workspace "
-              + place.workspace()
+              + name
               + " of "
-              + place.project()
+              + project
               + " is being stopped or deleted on this runner, and nothing enters it until that is"
               + " done.");
     }
@@ -414,8 +418,13 @@ public final class Workspaces {
    * under the box's lock directory: what every door of the box uses.
    */
   public static Workspaces onThisBox(ShellExec shell) {
+    return onThisBox(shell.observer(), shell);
+  }
+
+  /** As {@link #onThisBox(ShellExec)}, reading Incus through {@code observer}. */
+  public static Workspaces onThisBox(ShellExec observer, ShellExec shell) {
     return new Workspaces(
-        shell.observer(),
+        observer,
         shell,
         System::nanoTime,
         SailPaths.locksDir(),
@@ -499,7 +508,7 @@ public final class Workspaces {
             .orElseThrow(() -> noTemplate(place.project()));
     var degraded = WorkspaceTemplate.usable(observer, template.pool());
     Optional<BoxInstances.Instance> found;
-    try (var entry = entryLock(place)) {
+    try (var entry = entryLock(place.project(), place.workspace())) {
       found = requireTheSpecs(place, held, box.all());
     }
     var space = new IncusStorage(observer).find(template.pool()).flatMap(IncusStorage.Pool::space);
@@ -527,7 +536,7 @@ public final class Workspaces {
       Consumer<Set<String>> room)
       throws Exception {
     var place = check.place();
-    try (var held = entryLock(place)) {
+    try (var held = entryLock(place.project(), place.workspace())) {
       var found = requireTheSpecs(place, name -> false, box.all());
       if (found.map(i -> ((BoxInstances.Workspace) i.kind()).ready()).orElse(false)) {
         if (!(found.get().state() instanceof ContainerState.Running)) {
@@ -579,7 +588,7 @@ public final class Workspaces {
       ProjectDefinition config,
       Function<String, WorkspaceOwner> owners)
       throws Exception {
-    try (var held = entryLock(place)) {
+    try (var held = entryLock(place.project(), place.workspace())) {
       var found =
           requireTheSpecs(place, name -> false, box.all())
               .filter(i -> ((BoxInstances.Workspace) i.kind()).ready())
@@ -603,6 +612,104 @@ public final class Workspaces {
                                   "--restart"))));
       startGiving(found, config, owners);
     }
+  }
+
+  /**
+   * What a door decides of the workspace it is entering, the instance the entry found under the
+   * workspace's lock: it refuses by throwing, and the entry then does nothing.
+   */
+  @FunctionalInterface
+  public interface Entry {
+    Entry ANY = found -> {};
+
+    void decide(BoxInstances.Instance found) throws Exception;
+  }
+
+  /**
+   * A terminal's door to workspace {@code name} of {@code config}'s project: its own instance,
+   * found by name and keys under the entry's lock, decided by {@code enter}, started when stopped
+   * and given its recorded owner's credentials, as an attach is; one the project does not have, or
+   * that is not whole, is refused as {@link #start} refuses it. Nothing is made. Answers its
+   * instance.
+   */
+  public String startExisting(
+      ProjectDefinition config, String name, Function<String, WorkspaceOwner> owners, Entry enter)
+      throws Exception {
+    return started(config, name, owners, enter, "project shell", false).instance();
+  }
+
+  /**
+   * The person workspace {@code found} is, by handle: its labelled owner while the id its label
+   * stores is the id of that handle's active person ({@code owners}); none for one made by hand,
+   * taken back, labelled with no id, whose person is gone or disabled, or whose handle is now
+   * another person's. The one read of the label every door decides by.
+   */
+  public static Optional<String> ownerOf(
+      BoxInstances.Instance found, Function<String, WorkspaceOwner> owners) {
+    return found
+        .key(BoxInstances.OWNER_KEY)
+        .filter(Strings::isNotBlank)
+        .filter(handle -> isTheirs(found, owners, handle));
+  }
+
+  private static boolean isTheirs(
+      BoxInstances.Instance found, Function<String, WorkspaceOwner> owners, String handle) {
+    try {
+      return labelledFor(found, owners.apply(handle));
+    } catch (IllegalStateException notActiveHere) {
+      return false;
+    }
+  }
+
+  /**
+   * Makes workspace {@code name} of {@code config}'s project for {@code handle}, as {@link #create}
+   * does but from the project's current template as it is: none is refused naming its build, and
+   * one older than the definition is cloned as a dispatch clones it. What an API door makes, which
+   * builds nothing. {@code held} names the projects whose containers no workspace may take.
+   */
+  public Created createFromCurrent(
+      ProjectDefinition config,
+      String name,
+      Path files,
+      String handle,
+      Function<String, WorkspaceOwner> owners,
+      Predicate<String> held)
+      throws Exception {
+    var project = config.name();
+    var instance = requireNewName(project, name);
+    requireOwner(owners.apply(handle), config);
+    var zfs = WorkspaceTemplate.requireZfs(observer);
+    var template =
+        new WorkspaceTemplate(observer, shell, locks)
+            .current(project, zfs, nanos)
+            .orElseThrow(() -> noTemplate(project));
+    try (var lock = nameLock(instance)) {
+      var unfinished = requireUnclaimed(project, name, instance, held, box.all());
+      return make(
+          config,
+          name,
+          instance,
+          template,
+          List.of(),
+          new Owning(handle, owners),
+          name,
+          unfinished,
+          files,
+          whole -> {});
+    }
+  }
+
+  /**
+   * What the instance of workspace {@code name} of {@code project} is, and whose, when it is one.
+   */
+  public Optional<BoxInstances.Instance> find(String project, String name)
+      throws IOException, InterruptedException, TimeoutException {
+    return box.lookup(project + "-" + name, Duration.ofSeconds(BoxInstances.LOOKUP_SECONDS))
+        .filter(
+            instance ->
+                instance.kind() instanceof BoxInstances.Workspace(var p, var w, var ready)
+                    && p.equals(project)
+                    && w.equals(name));
   }
 
   private boolean startIfStopped(BoxInstances.Instance found) throws Exception {
@@ -709,8 +816,7 @@ public final class Workspaces {
     var labelledId = found.key(BoxInstances.OWNER_ID_KEY).filter(Strings::isNotBlank);
     var another =
         !owning.handle().equals(labelled)
-            || labelledId.isPresent()
-                && !labelledId.get().equals(owning.owners().apply(owning.handle()).id());
+            || !labelledId.equals(Optional.ofNullable(owning.owners().apply(owning.handle()).id()));
     boolean started;
     if (another) {
       started = startIfStopped(found);
@@ -783,23 +889,36 @@ public final class Workspaces {
 
   /**
    * Running ones only, each under its workspace's lock and renewed in place, never stripped: a
-   * stopped one takes them at its next start. Answers those not reached.
+   * stopped one takes them at its next start. Each is read again under its lock, and one that is no
+   * longer {@code owner}'s, or no longer running, is left as it is. Answers those not reached.
    */
   public List<String> refresh(WorkspaceOwner owner, Function<String, ProjectDefinition> definitions)
       throws IOException, InterruptedException, TimeoutException {
     var unreached = new ArrayList<String>();
-    for (var instance : box.wholeWorkspacesOf(owner.handle())) {
-      if (!(instance.state() instanceof ContainerState.Running)) {
+    for (var listed : box.wholeWorkspacesOf(owner.id())) {
+      if (!(listed.state() instanceof ContainerState.Running)) {
         continue;
       }
-      try (var held = nameLock(instance.name())) {
-        var project = ((BoxInstances.Workspace) instance.kind()).project();
-        WorkspaceCredentials.renew(shell, instance.name(), definitions.apply(project), owner);
+      try (var held = nameLock(listed.name())) {
+        var now = again(listed);
+        if (now.isEmpty()
+            || !(now.get().state() instanceof ContainerState.Running)
+            || !labelledFor(now.get(), owner)) {
+          continue;
+        }
+        var project = ((BoxInstances.Workspace) listed.kind()).project();
+        WorkspaceCredentials.renew(shell, listed.name(), definitions.apply(project), owner);
       } catch (IOException | TimeoutException | RuntimeException failure) {
-        unreached.add(instance.name() + ": " + Remedied.reasonOf(failure).strip());
+        unreached.add(listed.name() + ": " + Remedied.reasonOf(failure).strip());
       }
     }
     return List.copyOf(unreached);
+  }
+
+  /** {@code listed} as Incus has it now: what an act that waited for its lock decides on. */
+  private Optional<BoxInstances.Instance> again(BoxInstances.Instance listed)
+      throws IOException, InterruptedException, TimeoutException {
+    return box.lookup(listed.name(), Duration.ofSeconds(BoxInstances.LOOKUP_SECONDS));
   }
 
   private void giveAll(String instance, ProjectDefinition config, WorkspaceOwner owner)
@@ -809,25 +928,28 @@ public final class Workspaces {
   }
 
   /**
-   * A workspace whose owner {@code held} says is not a person here, by its stored owner id when it
-   * has one, else by handle, is stripped in the container (started for it when stopped, and stopped
-   * again) and made nobody's, when {@code due} says of its name that it is time to try. Clears the
+   * A workspace whose owner {@code held} says is not a person here, by the owner id its label
+   * stores, is stripped in the container (started for it when stopped, and stopped again) and made
+   * nobody's, when {@code due} says of its name that it is time to try. It is read again under its
+   * lock first, and left as it is when it now has an owner {@code held} holds, or none. Clears the
    * owner too, so a person later given the handle is re-given theirs at their next entry. Answers
    * those not reached.
    */
   public List<String> disown(BiPredicate<String, String> held, Predicate<String> due)
       throws IOException, InterruptedException, TimeoutException {
     var unreached = new ArrayList<String>();
-    for (var instance : box.all()) {
-      var owner = instance.key(BoxInstances.OWNER_KEY).orElse("");
-      var id = instance.key(BoxInstances.OWNER_ID_KEY).filter(Strings::isNotBlank).orElse(null);
-      if (!(instance.kind() instanceof BoxInstances.Workspace)
-          || owner.isBlank()
-          || held.test(owner, id)
-          || !due.test(instance.name())) {
+    for (var listed : box.all()) {
+      if (!(listed.kind() instanceof BoxInstances.Workspace)
+          || heldOrNobodys(listed, held)
+          || !due.test(listed.name())) {
         continue;
       }
-      try (var locked = nameLock(instance.name())) {
+      try (var locked = nameLock(listed.name())) {
+        var now = again(listed);
+        if (now.isEmpty() || heldOrNobodys(now.get(), held)) {
+          continue;
+        }
+        var instance = now.get();
         var stopped = !(instance.state() instanceof ContainerState.Running);
         if (stopped) {
           containers.start(instance.name());
@@ -841,10 +963,18 @@ public final class Workspaces {
         }
         label(instance.name(), "");
       } catch (IOException | TimeoutException failure) {
-        unreached.add(instance.name() + ": " + Remedied.reasonOf(failure).strip());
+        unreached.add(listed.name() + ": " + Remedied.reasonOf(failure).strip());
       }
     }
     return List.copyOf(unreached);
+  }
+
+  /** Whether {@code instance}'s labelled owner is one {@code held} holds, or it has none. */
+  private static boolean heldOrNobodys(
+      BoxInstances.Instance instance, BiPredicate<String, String> held) {
+    var owner = instance.key(BoxInstances.OWNER_KEY).orElse("");
+    var id = instance.key(BoxInstances.OWNER_ID_KEY).filter(Strings::isNotBlank).orElse(null);
+    return owner.isBlank() || held.test(owner, id);
   }
 
   /**
@@ -869,18 +999,19 @@ public final class Workspaces {
    * it, the sweep's stop or delete, holds it, no longer than {@link #CREATE_WAIT} on the create
    * lock's clock: past that the box is {@link Busy}, never a stranger's. None in a dry run.
    */
-  private FileMutex entryLock(RunPlace.SpecWorkspace place)
+  private FileMutex entryLock(String project, String name)
       throws IOException, InterruptedException {
+    var instance = project + "-" + name;
     if (shell.isDryRun()) {
       return null;
     }
-    var free = holdIfFree(place.instance());
+    var free = holdIfFree(instance);
     if (free.isPresent()) {
       return free.get();
     }
     return FileMutex.acquireUntil(
-            nameLockFile(place.instance()), nanos.getAsLong() + CREATE_WAIT.toNanos(), nanos)
-        .orElseThrow(() -> Busy.changing(place));
+            nameLockFile(instance), nanos.getAsLong() + CREATE_WAIT.toNanos(), nanos)
+        .orElseThrow(() -> Busy.changing(project, name));
   }
 
   private Path nameLockFile(String instance) {
@@ -941,6 +1072,7 @@ public final class Workspaces {
     var project = config.name();
     var copyKeys = new ArrayList<>(keys);
     copyKeys.add(BoxInstances.OWNER_KEY + "=" + owning.handle());
+    copyKeys.add(BoxInstances.OWNER_ID_KEY + "=" + owning.owners().apply(owning.handle()).id());
     clone(project, name, instance, built, copyKeys);
     try {
       var cloned = nanos.getAsLong();
@@ -948,9 +1080,7 @@ public final class Workspaces {
       var running = nanos.getAsLong();
       var owner = owning.now(this, config);
       WorkspaceCredentials.give(shell, instance, config, owner);
-      if (owner.id() != null) {
-        label(instance, owner.handle(), owner.id());
-      }
+      label(instance, owner.handle(), owner.id());
       var steps = prepare(config, name, branch, instance, files);
       WorkspaceCredentials.logForgeIn(shell, instance, config, owner);
       var ready = nanos.getAsLong();
@@ -1045,39 +1175,65 @@ public final class Workspaces {
   public Changed start(
       ProjectDefinition config, String name, Function<String, WorkspaceOwner> owners)
       throws Exception {
+    return start(config, name, owners, Entry.ANY);
+  }
+
+  /**
+   * As {@link #start(ProjectDefinition, String, Function)}, under the workspace's lock, waited for
+   * no longer than {@link #CREATE_WAIT} (the sweep stopping or deleting it holds it), its instance
+   * decided by {@code enter} first.
+   */
+  public Changed start(
+      ProjectDefinition config, String name, Function<String, WorkspaceOwner> owners, Entry enter)
+      throws Exception {
+    return started(config, name, owners, enter, "project start", true);
+  }
+
+  private Changed started(
+      ProjectDefinition config,
+      String name,
+      Function<String, WorkspaceOwner> owners,
+      Entry enter,
+      String projectVerb,
+      boolean changes)
+      throws Exception {
     var project = config.name();
-    var found = whole(project, name, "project start", true);
-    if (found.state() instanceof ContainerState.Running) {
-      return new Changed(project, name, found.name(), Change.ALREADY_RUNNING, null);
-    }
-    var started = nanos.getAsLong();
-    containers.start(found.name());
-    var running = nanos.getAsLong();
-    awaitReady(found.name());
-    try (var held = nameLock(found.name())) {
+    try (var held = entryLock(project, name)) {
+      var found = whole(project, name, projectVerb, changes);
+      enter.decide(found);
+      if (found.state() instanceof ContainerState.Running) {
+        return new Changed(project, name, found.name(), Change.ALREADY_RUNNING, null);
+      }
+      var started = nanos.getAsLong();
+      containers.start(found.name());
+      var running = nanos.getAsLong();
+      awaitReady(found.name());
       giveOrStop(found, config, owners);
+      var ready = nanos.getAsLong();
+      return new Changed(
+          project,
+          name,
+          found.name(),
+          Change.STARTED,
+          new Timings(
+              null,
+              millis(running - started),
+              millis(ready - running),
+              millis(ready - started),
+              Map.of()));
     }
-    var ready = nanos.getAsLong();
-    return new Changed(
-        project,
-        name,
-        found.name(),
-        Change.STARTED,
-        new Timings(
-            null,
-            millis(running - started),
-            millis(ready - running),
-            millis(ready - started),
-            Map.of()));
   }
 
   /**
    * Whether workspace {@code found} is still {@code holder}'s, the active person of its labelled
-   * handle: its label stores no id (made before ids were stored), or theirs.
+   * handle: its label stores their id. A label with no id is nobody's.
    */
   private static boolean labelledFor(BoxInstances.Instance found, WorkspaceOwner holder) {
-    var id = found.key(BoxInstances.OWNER_ID_KEY).filter(Strings::isNotBlank);
-    return id.isEmpty() || id.get().equals(holder.id());
+    return found
+        .key(BoxInstances.OWNER_ID_KEY)
+        .filter(Strings::isNotBlank)
+        .filter(id -> id.equals(holder.id()))
+        .isPresent();
   }
 
   /**
@@ -1085,13 +1241,27 @@ public final class Workspaces {
    * ({@code live} says of a spec), which is refused naming the stop that ends the run.
    */
   public Changed stop(String project, String name, Predicate<String> live) throws Exception {
-    var found = existing(project, name, "project stop", true);
-    requireNoLiveRun(project, name, found, live);
-    if (!found.state().live()) {
-      return new Changed(project, name, found.name(), Change.ALREADY_STOPPED, null);
+    return stop(project, name, live, Entry.ANY, Entry.ANY);
+  }
+
+  /**
+   * As {@link #stop(String, String, Predicate)}, under the workspace's lock, its instance decided
+   * by {@code enter} first, and {@code before} run on it just before it stops.
+   */
+  public Changed stop(
+      String project, String name, Predicate<String> live, Entry enter, Entry before)
+      throws Exception {
+    try (var held = entryLock(project, name)) {
+      var found = existing(project, name, "project stop", true);
+      enter.decide(found);
+      requireNoLiveRun(project, name, found, live);
+      if (!found.state().live()) {
+        return new Changed(project, name, found.name(), Change.ALREADY_STOPPED, null);
+      }
+      before.decide(found);
+      containers.stop(found.name());
+      return new Changed(project, name, found.name(), Change.STOPPED, null);
     }
-    containers.stop(found.name());
-    return new Changed(project, name, found.name(), Change.STOPPED, null);
   }
 
   /**
@@ -1103,30 +1273,149 @@ public final class Workspaces {
   public Changed delete(
       String project, String name, Predicate<String> live, Consumer<String> confirm)
       throws Exception {
-    var found = existing(project, name, "project destroy", true);
-    requireNoLiveRun(project, name, found, live);
-    confirm.accept(found.name());
-    containers.forceDelete(found.name());
-    return new Changed(project, name, found.name(), Change.DELETED, null);
+    return delete(project, name, live, Entry.ANY, found -> confirm.accept(found.name()));
   }
 
-  /** The instance of workspace {@code name}, when it runs: where a shell opens. */
-  public String running(String project, String name) throws Exception {
-    var found = whole(project, name, "project shell", false);
-    return switch (found.state()) {
-      case ContainerState.Running ignored -> found.name();
-      case ContainerState.Stopped ignored -> throw notRunning(project, name, "stopped");
-      case ContainerState.Frozen ignored -> throw notRunning(project, name, "frozen");
-      case ContainerState.NotCreated _, ContainerState.Error _ ->
-          throw new IllegalStateException(
-              "Workspace '"
-                  + name
-                  + "' of "
-                  + project
-                  + " is not running: Incus lists it as "
-                  + found.state()
-                  + ".");
-    };
+  /**
+   * As {@link #delete(String, String, Predicate, Consumer)}, under the workspace's lock from its
+   * decision to its delete: its instance decided by {@code enter}, then {@code before} run on it,
+   * then read again (still there, still holding no live run) immediately before the delete.
+   */
+  public Changed delete(
+      String project, String name, Predicate<String> live, Entry enter, Entry before)
+      throws Exception {
+    try (var held = entryLock(project, name)) {
+      var found = existing(project, name, "project destroy", true);
+      enter.decide(found);
+      requireNoLiveRun(project, name, found, live);
+      before.decide(found);
+      var now = existing(project, name, "project destroy", true);
+      requireNoLiveRun(project, name, now, live);
+      containers.forceDelete(now.name());
+      return new Changed(project, name, now.name(), Change.DELETED, null);
+    }
+  }
+
+  /**
+   * What a destroy deletes, handed the project's workspaces and template as read under its locks.
+   */
+  @FunctionalInterface
+  public interface Destroy {
+    void delete(List<String> instances) throws Exception;
+  }
+
+  /**
+   * Runs {@code destroy} on project {@code project}'s workspaces and template once nothing else can
+   * change them: under each one's lock (a workspace's entry lock, the template's build lock), then
+   * the box's create lock, each waited for no longer than {@link #CREATE_WAIT}, so a create, start,
+   * stop, delete or build in flight finishes first, and one still going after that refuses the
+   * destroy, saying what holds it. They are read again under those locks, and one made since {@code
+   * confirmed} was read refuses it too, naming it: a destroy deletes only what it showed, and never
+   * leaves a workspace of a project that is gone. A create that had not reached its clone finds no
+   * template, and fails.
+   */
+  public void whileDestroying(String project, List<String> confirmed, Destroy destroy)
+      throws Exception {
+    var held = new ArrayList<FileMutex>();
+    try {
+      try {
+        for (var part : partsOf(project)) {
+          held.add(
+              part.kind() instanceof BoxInstances.Workspace workspace
+                  ? entryLock(project, workspace.workspace())
+                  : templateLock(project));
+        }
+        held.add(createLock(nanos.getAsLong()));
+      } catch (Busy busy) {
+        throw Remedied.state(
+            "Project " + project + " is not destroyed: " + busy.getMessage(),
+            Remedy.of(
+                "Destroy it again once that is done: ",
+                Remedy.sail("project destroy", project),
+                "."));
+      }
+      var now = partsOf(project).stream().map(BoxInstances.Instance::name).toList();
+      var made = now.stream().filter(name -> !confirmed.contains(name)).toList();
+      if (!made.isEmpty()) {
+        throw Remedied.state(
+            "Project "
+                + project
+                + " is not destroyed: "
+                + String.join(", ", made)
+                + " was made after the destroy read what it would delete.",
+            Remedy.of(
+                "Destroy it again to see it: ", Remedy.sail("project destroy", project), "."));
+      }
+      destroy.delete(now);
+    } finally {
+      for (var lock : held.reversed()) {
+        if (lock != null) {
+          lock.close();
+        }
+      }
+    }
+  }
+
+  /** Project {@code project}'s workspaces, then its template, as Incus has them now. */
+  private List<BoxInstances.Instance> partsOf(String project)
+      throws IOException, InterruptedException, TimeoutException {
+    var all = box.all();
+    var parts = new ArrayList<BoxInstances.Instance>();
+    all.stream()
+        .filter(i -> i.kind() instanceof BoxInstances.Workspace w && w.project().equals(project))
+        .forEach(parts::add);
+    all.stream()
+        .filter(i -> i.kind() instanceof BoxInstances.Template t && t.project().equals(project))
+        .forEach(parts::add);
+    return parts;
+  }
+
+  /** The lock a build of {@code project}'s template holds, waited for as a create waits. */
+  private FileMutex templateLock(String project) throws IOException, InterruptedException {
+    if (shell.isDryRun()) {
+      return null;
+    }
+    return FileMutex.acquireUntil(
+            ContainerConfig.lockOf(locks, WorkspaceTemplate.nameOf(project)),
+            nanos.getAsLong() + CREATE_WAIT.toNanos(),
+            nanos)
+        .orElseThrow(() -> Busy.building(project));
+  }
+
+  /**
+   * Runs {@code body} on workspace {@code found} running: started for it when stopped, and stopped
+   * again when {@code body} throws. Its caller holds the workspace's lock.
+   */
+  public void whileRunning(BoxInstances.Instance found, Entry body) throws Exception {
+    var started = startIfStopped(found);
+    try {
+      body.decide(found);
+    } catch (Exception refused) {
+      if (started) {
+        stopAgain(found.name(), refused);
+      }
+      throw refused;
+    }
+  }
+
+  /**
+   * The person workspace {@code found} is labelled for when that person is no longer active here
+   * ({@code owners} refuses them): one a start cannot give to, until the pass makes it nobody's.
+   */
+  public static Optional<String> goneOwner(
+      BoxInstances.Instance found, Function<String, WorkspaceOwner> owners) {
+    return found
+        .key(BoxInstances.OWNER_KEY)
+        .filter(Strings::isNotBlank)
+        .filter(
+            handle -> {
+              try {
+                owners.apply(handle);
+                return false;
+              } catch (IllegalStateException notActiveHere) {
+                return true;
+              }
+            });
   }
 
   /**
@@ -1580,12 +1869,7 @@ public final class Workspaces {
   }
 
   private static void requireWorkspaceName(String name) {
-    if (!NameValidator.isValidProjectName(name)) {
-      throw new IllegalArgumentException(
-          "Invalid workspace name: '"
-              + name
-              + "'. Must match [a-z0-9][a-z0-9-]*, as a project name does.");
-    }
+    NameValidator.requireValidWorkspaceName(name);
   }
 
   /** A workspace whose create finished and whose ready mark was taken off since, by hand. */
@@ -1603,16 +1887,37 @@ public final class Workspaces {
             "."));
   }
 
-  private static IllegalStateException absent(String project, String name) {
-    return Remedied.state(
-        "Project '" + project + "' has no workspace '" + name + "' on this box.",
-        Remedy.of("List them with: ", Remedy.sail("project workspace list", project), "."));
+  /** Project {@code project} has no workspace {@code name} here. */
+  public static Absent absent(String project, String name) {
+    return new Absent(project, name);
   }
 
-  private static IllegalStateException notRunning(String project, String name, String state) {
-    return Remedied.state(
-        "Workspace '" + name + "' of " + project + " is " + state + ".",
-        Remedy.of("Start it with: ", Remedy.sail("project workspace start", project, name), "."));
+  /** A workspace the project does not have on this box: what a door answers as not found. */
+  public static final class Absent extends IllegalStateException implements Remedied {
+    private final String reason;
+    private final transient Remedy remedy;
+
+    private Absent(String project, String name) {
+      this(
+          "Project '" + project + "' has no workspace '" + name + "' on this box.",
+          Remedy.of("List them with: ", Remedy.sail("project workspace list", project), "."));
+    }
+
+    private Absent(String reason, Remedy remedy) {
+      super(Remedied.message(reason, remedy));
+      this.reason = reason;
+      this.remedy = remedy;
+    }
+
+    @Override
+    public String reason() {
+      return reason;
+    }
+
+    @Override
+    public Remedy remedy() {
+      return remedy;
+    }
   }
 
   private static Row row(
@@ -1633,9 +1938,9 @@ public final class Workspaces {
         createdAt,
         ipv4,
         instance.key(BoxInstances.SPEC_KEY).orElse(null),
-        owner != null && ownerId.isPresent() && !activeId.test(ownerId.get())
-            ? REMOVED_OWNER
-            : owner);
+        owner == null || ownerId.isEmpty()
+            ? null
+            : activeId.test(ownerId.get()) ? owner : REMOVED_OWNER);
   }
 
   private static String word(ContainerState state) {

@@ -1,0 +1,16 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/v1/projects/harbor/workspaces/dock/stop"
+  },
+  "response": {
+    "body": {
+      "change": "stopped",
+      "instance": "harbor-dock",
+      "project": "harbor",
+      "schema_version": 1,
+      "workspace": "dock"
+    },
+    "status": 200
+  }
+}

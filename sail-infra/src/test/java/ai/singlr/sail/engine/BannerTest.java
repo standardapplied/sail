@@ -86,21 +86,23 @@ class BannerTest {
   }
 
   @Test
-  void fdeKeyTableShowsHandleCommentAndFingerprint() {
+  void fdeKeyTableShowsHandleStateCommentAndFingerprint() {
     var out = new ByteArrayOutputStream();
     var keys =
         List.of(
             new FdeSshKeyStore.SshKeyInfo(
-                "SHA256:abc", "id1", "uday", "ssh-ed25519 AAAA", "laptop", Instant.EPOCH),
+                "SHA256:abc", "id1", "uday", "ssh-ed25519 AAAA", "laptop", Instant.EPOCH, "active"),
             new FdeSshKeyStore.SshKeyInfo(
-                "SHA256:xyz", "id2", "mady", "ssh-ed25519 BBBB", null, Instant.EPOCH));
+                "SHA256:xyz", "id2", "mady", "ssh-ed25519 BBBB", null, Instant.EPOCH, "disabled"));
 
     Banner.printFdeKeyTable(keys, new PrintStream(out, true, StandardCharsets.UTF_8), Ansi.OFF);
     var text = out.toString(StandardCharsets.UTF_8);
 
     assertTrue(text.contains("HANDLE"));
+    assertTrue(text.contains("STATE"));
     assertTrue(text.contains("FINGERPRINT"));
     assertTrue(text.contains("uday"));
+    assertTrue(text.contains("disabled"), "a disabled person's key is listed with its state");
     assertTrue(text.contains("laptop"));
     assertTrue(text.contains("SHA256:abc"));
     assertTrue(text.contains("-"), "a missing comment renders as a dash");
