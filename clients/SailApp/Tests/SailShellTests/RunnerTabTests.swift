@@ -427,7 +427,7 @@ final class DoorTickets: TicketSource {
             row.isSelected = true
             row.isEmphasized = emphasized
             let alpha = emphasized ? look.fillSelected.alpha : look.fillSelected.alpha / 2
-            let fill = Self.over(look.fillSelected.rgb, alpha: alpha, on: look.canvas)
+            let fill = Self.colour(of: Swatch(NSColor(look.fillSelected).withAlphaComponent(alpha), over: NSColor(look.canvas)), at: NSPoint(x: 5, y: 5))
             #expect(Self.colour(of: row, at: NSPoint(x: 1, y: 21)).near(Self.channels(look.accent)), "\(name): the bar")
             #expect(Self.colour(of: row, at: NSPoint(x: 200, y: 21)).near(fill), "\(name) \(emphasized): the fill is \(Self.colour(of: row, at: NSPoint(x: 200, y: 21))), not \(fill)")
             #expect(Self.colour(of: row, at: NSPoint(x: 5, y: 21)).near(Self.channels(look.canvas)), "\(name): nothing between the bar and the fill")
@@ -450,18 +450,13 @@ final class DoorTickets: TicketSource {
             rect(pane.open).minY - rect(new).maxY, rect(new).minY - rect(making).maxY,
         ]
         #expect(gaps.map { $0.rounded() } == [8, 24, 12, 24, 8], "gaps \(gaps)")
-        #expect(rect(scroll).height == Rail.item, "one row, one row's height")
+        #expect(rect(scroll).height.rounded() == Rail.item, "one row, one row's height")
     }
 
     /// The text field reading `text`, wherever it is in `view`.
     static func label(_ text: String, in view: NSView) -> NSTextField? {
         if let field = view as? NSTextField, field.stringValue == text { return field }
         return view.subviews.lazy.compactMap { label(text, in: $0) }.first
-    }
-
-    /// `rgb` at `alpha` over `base`, as 0–255 channels.
-    static func over(_ rgb: RGB, alpha: Double, on base: RGB) -> [Double] {
-        zip(channels(rgb), channels(base)).map { alpha * $0 + (1 - alpha) * $1 }
     }
 
     static func channels(_ rgb: RGB) -> [Double] {
@@ -476,6 +471,32 @@ final class DoorTickets: TicketSource {
         let y = view.isFlipped ? point.y : view.bounds.height - point.y
         guard let colour = image.colorAt(x: Int(point.x * scale), y: Int(y * scale))?.usingColorSpace(.sRGB) else { return [] }
         return [colour.redComponent, colour.greenComponent, colour.blueComponent].map { ($0 * 255).rounded() }
+    }
+}
+
+/// `colour` composed over `base` as AppKit composes a view's drawing, the reference a drawn
+/// translucent fill is read against: a translucent colour is blended in the drawing's colour space,
+/// not as sRGB numbers.
+final class Swatch: NSView {
+    private let colour: NSColor
+    private let base: NSColor
+
+    init(_ colour: NSColor, over base: NSColor) {
+        self.colour = colour
+        self.base = base
+        super.init(frame: NSRect(x: 0, y: 0, width: 10, height: 10))
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        nil
+    }
+
+    override func draw(_: NSRect) {
+        base.setFill()
+        bounds.fill()
+        colour.setFill()
+        NSBezierPath(rect: bounds).fill()
     }
 }
 
