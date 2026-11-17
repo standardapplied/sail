@@ -755,6 +755,18 @@ extension Driver {
         let ours = { serving().contains("/Application Support/Sail/Host/") }
         let other = { serving().contains("/other-build/") }
         let says = { (text: String) in self.workbench.bannerSays?.contains(text) == true }
+        if state == "free" {
+            let deadline = ContinuousClock.now + .seconds(10)
+            var said = "nothing (no answer)"
+            while ContinuousClock.now < deadline {
+                if let listed = try? await SessionListing.sessions(at: host.address, timeout: 1) {
+                    if listed.allSatisfy({ $0.attached == 0 }) { return (true, "the host lists \(listed.count) sessions, none with a client") }
+                    said = listed.map { "\($0.name) attached \($0.attached)" }.joined(separator: ", ")
+                }
+                try? await Task.sleep(for: .milliseconds(100))
+            }
+            return (false, "after 10 s the host lists: \(said)")
+        }
         let reached: Bool
         switch state {
         case "kept": reached = await waitUntil(20) { says("This Mac's terminal host is in use by another program, attached to its terminal “held”") && other() }

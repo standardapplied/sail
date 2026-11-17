@@ -2,6 +2,7 @@
   {"name": "p6-this-mac", "select": "thisMac"},
   {"name": "p6-another-copy-with-a-client-is-not-ended-and-what-holds-it-is-said", "otherHost": "kept"},
   {"name": "p6-the-other-copys-client-quits", "kill": "session attach held"},
+  {"name": "p6-its-host-has-seen-the-client-leave", "otherHost": "free"},
   {"name": "p6-try-again", "press": "enter"},
   {"name": "p6-its-terminals-said-closing-it-ended-and-this-builds-host-alone-serves", "otherHost": "replaced"},
   {"name": "p6-a-new-tab", "press": "t", "modifiers": ["command"]},

@@ -145,8 +145,9 @@ struct Step: Decodable {
     /// wakeups a second are reported.
     var blink: Bool?
     /// Another copy of Sail's host and this app (third run): "kept" (it has a client, so the app
-    /// ended nothing and said what holds it), "replaced" (no client: the app said its terminals
-    /// are closing, ended it, and its own host serves, the only one).
+    /// ended nothing and said what holds it), "free" (the host serving lists no session with a
+    /// client: a client that quit has been seen to leave), "replaced" (no client: the app said its
+    /// terminals are closing, ended it, and its own host serves, the only one).
     var otherHost: String?
     /// The app's window as the screen shows it (`screencapture -l`, so what AppKit draws in the
     /// title bar and the Metal layers are in it), in the light look and the dark, saved as
