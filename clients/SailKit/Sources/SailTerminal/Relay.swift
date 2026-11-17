@@ -17,7 +17,8 @@ public final class Relay<Argument: Sendable>: Sendable {
 
     public init() {}
 
-    /// Calls `call` from now on, in place of any function before; nil calls nothing.
+    /// Calls `call` from now on, in place of any function before; nil calls nothing from now on,
+    /// though a call already begun, which read the function before, may still finish.
     public func set(_ call: (@Sendable (Argument) -> Void)?) {
         let next = call.map(Held.init)
         held.withLock { $0 = next }

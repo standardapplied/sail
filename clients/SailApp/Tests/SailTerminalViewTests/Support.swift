@@ -237,34 +237,53 @@ struct Harness {
     }
 }
 
-/// Swift's shared pool held at every priority: at each, as many tasks as the machine has cores wait,
-/// as a task stuck in a blocking call does, until the test lets them go, never on a timer. What
-/// needs one of the pool's threads waits until then.
+/// Swift's shared pool held at every priority: at each, twice as many tasks as the machine has
+/// cores wait, as a task stuck in a blocking call does, until the test lets them go, never on a
+/// timer. The pool runs only some of them; those left waiting at every priority are what shows each
+/// priority's share of the pool is full, so a task at any priority waits for a thread.
 final class PoolHold: Sendable {
     static let priorities: [TaskPriority] = [.background, .utility, .medium, .userInitiated, .high]
 
     private let gate: DispatchSemaphore
     private let count: Int
     private let released = Mutex(false)
-    /// How many holders ran within 5 s of being asked, by priority (its raw value).
+    /// How many holders were set going at each priority, by its raw value.
+    let asked: [UInt8: Int]
+    /// How many of them run, by priority's raw value, once the starts stopped coming.
     let running: [UInt8: Int]
 
     init() {
         let gate = DispatchSemaphore(value: 0), started = DispatchSemaphore(value: 0)
-        let cores = ProcessInfo.processInfo.activeProcessorCount
+        let each = ProcessInfo.processInfo.activeProcessorCount * 2
         let ran = Tally()
+        var asked: [UInt8: Int] = [:]
         for priority in Self.priorities {
-            for _ in 0 ..< cores {
+            asked[priority.rawValue, default: 0] += each
+            for _ in 0 ..< each {
                 Task.detached(priority: priority) {
                     ran.add(priority)
                     Self.hold(gate, started: started)
                 }
             }
         }
-        Self.count(started, upTo: cores * Self.priorities.count)
+        Self.awaitStartsToStop(started, upTo: each * Self.priorities.count)
         self.gate = gate
-        count = cores * Self.priorities.count
+        count = each * Self.priorities.count
+        self.asked = asked
         running = ran.counts
+    }
+
+    /// Whether at every priority some holders never started: the pool runs no more at any of them.
+    var holdsEveryPriority: Bool {
+        asked.allSatisfy { priority, asked in running[priority, default: 0] < asked }
+    }
+
+    func release() {
+        let first = released.withLock { released in
+            defer { released = true }
+            return !released
+        }
+        if first { for _ in 0 ..< count { gate.signal() } }
     }
 
     /// How many holders ran, by priority, counted from the holders' own threads.
@@ -280,30 +299,16 @@ final class PoolHold: Sendable {
         }
     }
 
-    /// Whether every priority has a holder running, and the pool at least as many as it has cores.
-    var holdsEveryPriority: Bool {
-        Self.priorities.allSatisfy { running[$0.rawValue, default: 0] > 0 }
-            && running.values.reduce(0, +) >= ProcessInfo.processInfo.activeProcessorCount
-    }
-
-    func release() {
-        let first = released.withLock { released in
-            defer { released = true }
-            return !released
-        }
-        if first { for _ in 0 ..< count { gate.signal() } }
-    }
-
     private static func hold(_ gate: DispatchSemaphore, started: DispatchSemaphore) {
         started.signal()
         gate.wait()
     }
 
-    /// Counts up to `limit` starts, giving up at the first that does not come within 5 s of the ask.
-    private static func count(_ started: DispatchSemaphore, upTo limit: Int) {
-        let deadline = DispatchTime.now() + 5
-        var counted = 0
-        while counted < limit, started.wait(timeout: deadline) == .success {
+    /// Waits for the first start, at most 5 s, then for the starts to stop: no new one in 50 ms.
+    private static func awaitStartsToStop(_ started: DispatchSemaphore, upTo limit: Int) {
+        guard started.wait(timeout: .now() + 5) == .success else { return }
+        var counted = 1
+        while counted < limit, started.wait(timeout: .now() + .milliseconds(50)) == .success {
             counted += 1
         }
     }

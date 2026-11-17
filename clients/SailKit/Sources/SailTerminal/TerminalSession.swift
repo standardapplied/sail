@@ -49,6 +49,7 @@ public final class TerminalSession: Sendable {
     private let tap = Relay<[UInt8]>()
     private let alarm: Alarm
     private let sleep: @Sendable (Duration) async throws -> Void
+    private let after: HoldTick.After
     private let timeout: Int
     private let stableAfter: Duration
     private let eventSink: AsyncStream<SessionEvent>.Continuation
@@ -71,7 +72,7 @@ public final class TerminalSession: Sendable {
         /// pty has exactly this size, unless the client is a reader that thinks it writes, and a
         /// reader's `Resize` changes nothing.
         var ptySize: TerminalSize?
-        var holdTimer: Task<Void, Never>?
+        var holdTimer: (any Scheduled)?
         var focused = true
         var detaching = false
         var closed = false
@@ -116,12 +117,16 @@ public final class TerminalSession: Sendable {
     }
 
     /// As the public ones, waiting with `sleep`, giving each connect and answer `timeout` seconds,
-    /// and counting a connection a success once attached for `stableAfter`.
+    /// counting a connection a success once attached for `stableAfter`, and timing a render hold's
+    /// end with `after`.
     package convenience init(
         open create: SessionCreate, door: Door, screen: Screen, timeout: Int,
-        stableAfter: Duration = TerminalSession.stableAttachment, sleep: @escaping @Sendable (Duration) async throws -> Void
+        stableAfter: Duration = TerminalSession.stableAttachment, sleep: @escaping @Sendable (Duration) async throws -> Void,
+        after: @escaping HoldTick.After = HoldTick.dispatch
     ) {
-        self.init(intent: .open(create), door: door, screen: screen, timeout: timeout, stableAfter: stableAfter, sleep: sleep)
+        self.init(
+            intent: .open(create), door: door, screen: screen, timeout: timeout, stableAfter: stableAfter, sleep: sleep, after: after
+        )
     }
 
     package convenience init(
@@ -136,13 +141,15 @@ public final class TerminalSession: Sendable {
 
     private init(
         intent: Intent, door: Door, screen: Screen, timeout: Int = 10, stableAfter: Duration = TerminalSession.stableAttachment,
-        sleep: @escaping @Sendable (Duration) async throws -> Void = { try await Task.sleep(for: $0) }
+        sleep: @escaping @Sendable (Duration) async throws -> Void = { try await Task.sleep(for: $0) },
+        after: @escaping HoldTick.After = HoldTick.dispatch
     ) {
         self.door = door
         self.screen = screen
         self.timeout = timeout
         self.stableAfter = stableAfter
         self.sleep = sleep
+        self.after = after
         alarm = Alarm(sleep: sleep)
         var initial = Core(state: SessionState(phase: .connecting, session: intent.session), intent: intent)
         if case let .open(create) = intent {
@@ -154,8 +161,9 @@ public final class TerminalSession: Sendable {
     }
 
     /// Tells `listener`, in place of any before it and on the thread that changed the screen, each
-    /// time the screen changed, with when it took the output; nil stops telling. Nothing stands
-    /// between the change and the call, so it must return at once: what draws hands the change on.
+    /// time the screen changed, with when it took the output; nil stops new calls, while a call
+    /// already begun may still finish. Nothing stands between the change and the call, so it must
+    /// return at once: what draws hands the change on.
     public func onScreenChange(_ listener: (@Sendable (ContinuousClock.Instant) -> Void)?) {
         screenListener.set(listener)
     }
@@ -238,10 +246,11 @@ public final class TerminalSession: Sendable {
                 core.connection = nil
                 core.inFlight = nil
             }
-            return ([core.connection, core.inFlight].compactMap(\.self), core.supervisor, [core.resizeTimer, core.holdTimer])
+            return ([core.connection, core.inFlight].compactMap(\.self), core.supervisor, (core.resizeTimer, core.holdTimer))
         }
         supervisor?.cancel()
-        timers.forEach { $0?.cancel() }
+        timers.0?.cancel()
+        timers.1?.cancel()
         connections.forEach { $0.close() }
         finish(.closed)
     }
@@ -692,21 +701,17 @@ public final class TerminalSession: Sendable {
         send(.resize(size), on: connection)
     }
 
-    /// When output left the program's render hold open, a screen tick at the hold's limit: the
-    /// frame then goes on without the program, and a renderer that draws only on a tick draws it.
+    /// When output left the program's render hold open, a screen tick at the hold's limit, on a
+    /// timer of its own: the frame then goes on without the program, and a renderer that draws only
+    /// on a tick draws it.
     private func armHoldTick() {
         guard let remaining = screen.holdRemaining else { return }
+        let next = after(remaining) { [weak self] in
+            guard let self else { return }
+            screenChanged(at: clock.now)
+        }
         let previous = core.withLock { core in
-            defer {
-                core.holdTimer = Task {
-                    do {
-                        try await self.sleep(remaining)
-                    } catch {
-                        return
-                    }
-                    self.screenChanged(at: self.clock.now)
-                }
-            }
+            defer { core.holdTimer = next }
             return core.holdTimer
         }
         previous?.cancel()

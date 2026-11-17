@@ -66,8 +66,11 @@ for run in first second third shots; do
   perl -e 'alarm shift; exec @ARGV' 600 "$drive" --drive "Tests/Drive/$run.json" --out "$out/$run" 2>&1 | tee "$out/$run-output.txt" || {
     status=$?
     reports=$HOME/Library/Logs/DiagnosticReports
-    # ReportCrash writes the report some seconds after the process died.
-    perl -e 'alarm shift; exec @ARGV' 90 bash -c 'until compgen -G "$1/SailDrive*.ips" > /dev/null; do :; done' _ "$reports" || true
+    # A signal killed the drive (138 is SIGBUS, 139 SIGSEGV): ReportCrash writes its report some
+    # seconds later. Any other failure is a step's, with no report to wait for.
+    if (( status > 128 )); then
+      perl -e 'alarm shift; exec @ARGV' 90 bash -c 'until compgen -G "$1/SailDrive*.ips" > /dev/null; do sleep 1; done' _ "$reports" || true
+    fi
     if compgen -G "$reports/SailDrive*.ips" > /dev/null; then
       cp "$reports"/SailDrive*.ips "$out/"
       for report in "$reports"/SailDrive*.ips; do
@@ -86,7 +89,7 @@ for index, thread in enumerate(body.get("threads", [])):
         print("  ", image, frame.get("symbol", hex(frame.get("imageOffset", 0))), frame.get("symbolLocation", ""))
 PY
       done
-    else
+    elif (( status > 128 )); then
       echo "ci/drive: the drive left no crash report in $reports within 90 s" >&2
     fi
     exit "$status"

@@ -7,7 +7,7 @@ import SailVT
 public protocol TerminalLink: AnyObject, Sendable {
     var screen: Screen { get }
     /// Tells `listener`, on the thread that changed the screen, each time it changed, with when it
-    /// took the output; nil stops telling.
+    /// took the output; nil stops new calls, while a call already begun may still finish.
     func onScreenChange(_ listener: (@Sendable (ContinuousClock.Instant) -> Void)?)
     var events: AsyncStream<SessionEvent> { get }
     func send(_ key: KeyInput)

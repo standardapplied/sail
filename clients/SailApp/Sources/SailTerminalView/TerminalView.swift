@@ -617,13 +617,15 @@ public final class TerminalView: NSView {
 
 /// A view's wake for its screen's changes, told on the session's own thread: a change that finds no
 /// wake outstanding posts one block to the main queue, which takes the wake, marks the oldest change
-/// it carries (so output to shown is the longest any of them waited) and draws the screen as it is
-/// then. The session's thread only takes a lock and, at most once per wake, posts; nothing between a
+/// it carries (so output to shown is the longest any of them waited) and, when it carries more than
+/// one, the newest (so a key whose echo came in a later change is put to it), and draws the screen as
+/// it is then. The session's thread only takes a lock and, at most once per wake, posts; nothing between a
 /// change and the main queue runs on a shared pool, and however fast a session's screen changes, one
 /// wake per view waits on the main queue at a time.
 final class ScreenWake: Sendable {
     private struct Outstanding {
         var oldest: Double
+        var newest: Double
         var changes: Int
     }
 
@@ -644,9 +646,10 @@ final class ScreenWake: Sendable {
         let post = outstanding.withLock { outstanding in
             guard outstanding == nil else {
                 outstanding?.changes += 1
+                outstanding?.newest = time
                 return false
             }
-            outstanding = Outstanding(oldest: time, changes: 1)
+            outstanding = Outstanding(oldest: time, newest: time, changes: 1)
             return true
         }
         guard post else { return }
@@ -660,6 +663,7 @@ final class ScreenWake: Sendable {
             return outstanding
         }) else { return }
         marks.output(at: taken.oldest)
+        if taken.changes > 1 { marks.output(at: taken.newest) }
         marks.told(since: taken.oldest, changes: taken.changes)
         draw()
     }

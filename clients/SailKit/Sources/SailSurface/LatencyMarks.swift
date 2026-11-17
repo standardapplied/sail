@@ -84,8 +84,10 @@ public struct LatencyMarks: Sendable {
         }
     }
 
-    /// The session's screen took output at `time`: the oldest of the changes one wake of the view
-    /// carried, so a frame that shows it is measured from the change that waited longest.
+    /// The session's screen took output at `time`: a wake of the view marks the oldest change it
+    /// carried, so a frame that shows it is measured from the change that waited longest, and the
+    /// newest too when it carried more than one, so a key whose echo came in a later change of the
+    /// same wake is put to it, not held for an unrelated later output.
     public mutating func output(at time: Double) {
         screenUpdates += 1
         let echoed = awaitingEcho.filter { $0.sent <= time }.map(\.event)
@@ -94,8 +96,6 @@ public struct LatencyMarks: Sendable {
         if pending.count > Self.capacity { pending.removeFirst() }
     }
 
-    /// A refresh that read the screen at `read` drew `frame`, committed at `time`, for the display
-    /// refresh at `target`.
     /// The main thread took the view's wake at `time`, for `changes` changes of the screen, the
     /// oldest at `since`: the hop a frame request waits on, from the session's thread to the main one.
     public mutating func told(at time: Double, since: Double, changes: Int) {
@@ -104,6 +104,8 @@ public struct LatencyMarks: Sendable {
         Self.keepLongest(Span(since, max(since, time)), in: &longestToTold)
     }
 
+    /// A refresh that read the screen at `read` drew `frame`, committed at `time`, for the display
+    /// refresh at `target`.
     public mutating func committed(frame: UInt64, at time: Double, read: Double, target: Double) {
         targets[frame] = target
         targets = targets.filter { $0.key + 64 > frame }
