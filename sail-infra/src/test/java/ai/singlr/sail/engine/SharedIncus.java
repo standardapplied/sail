@@ -117,12 +117,10 @@ final class SharedIncus implements ShellExec {
     return new Result(0, "", "");
   }
 
-  /** Whether {@code thread} waits on a lock, blocked on it or polling it, or has finished. */
+  /** Whether {@code thread} waits on a lock, or has finished. */
   static Predicate<Thread> parkedOrDone() {
     return thread ->
-        thread.getState() == Thread.State.WAITING
-            || thread.getState() == Thread.State.TIMED_WAITING
-            || thread.getState() == Thread.State.TERMINATED;
+        thread.getState() == Thread.State.WAITING || thread.getState() == Thread.State.TERMINATED;
   }
 
   /** Spins until {@code condition} holds, failing once ten seconds have passed. */

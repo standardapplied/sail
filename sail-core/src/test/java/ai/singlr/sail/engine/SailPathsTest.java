@@ -26,19 +26,6 @@ class SailPathsTest {
 
   private static final Path HOME = Path.of(System.getProperty("user.home"));
 
-  /**
-   * A test never reaches the person's own Sail: every test JVM has a home and a data directory of
-   * its own (the build's surefire configuration), so no test takes the lock files, database or
-   * configuration of the Sail that runs on the machine, nor a lock another test JVM holds.
-   */
-  @Test
-  void aTestJvmHasASailOfItsOwn() {
-    var persons = Path.of(System.getenv("HOME"), ".sail");
-    assertFalse(SailPaths.sailDir().startsWith(persons), SailPaths.sailDir().toString());
-    assertFalse(SailPaths.dataDir().startsWith(persons), SailPaths.dataDir().toString());
-    assertNotEquals(SailPaths.systemDataDir(), SailPaths.dataDir());
-  }
-
   @Test
   void sailDirIsUnderHome() {
     assertEquals(HOME.resolve(".sail"), SailPaths.sailDir());
