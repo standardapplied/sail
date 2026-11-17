@@ -12,6 +12,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.TimeoutException;
+import java.util.function.LongSupplier;
 
 /**
  * The one door through which sail writes a project container's Incus config and devices. The incus
@@ -37,9 +38,38 @@ public final class ContainerConfig {
     this.locks = Objects.requireNonNull(locks, "locks");
   }
 
+  /** How long an automated step waits for another to let go of a container's config. */
+  public static final Duration HOLD_WAIT = Duration.ofSeconds(60);
+
+  /** Another sail process held a container's config past {@link #HOLD_WAIT}. */
+  public static final class Held extends IOException {
+    Held(String container) {
+      super(
+          "Another sail process held the configuration of container "
+              + container
+              + " for over "
+              + HOLD_WAIT.toSeconds()
+              + " s (a config write, a snapshot restore or another launch's setup), so it was not"
+              + " set up; try again once that is done.");
+    }
+  }
+
   /** Takes {@code container}'s lock under {@code locks}, waiting while another holds it. */
   public static FileMutex hold(Path locks, String container) throws IOException {
     return FileMutex.acquire(lockOf(locks, container));
+  }
+
+  /**
+   * Takes {@code container}'s lock under {@code locks} for an automated step, waiting at most
+   * {@link #HOLD_WAIT} on {@code nanos} while another holds it; past it, {@link Held}. It polls
+   * rather than blocks, so it never waits unseen behind another process, nor is refused as a
+   * deadlock its process did not make.
+   */
+  public static FileMutex holdWithin(Path locks, String container, LongSupplier nanos)
+      throws IOException, InterruptedException {
+    return FileMutex.acquireUntil(
+            lockOf(locks, container), nanos.getAsLong() + HOLD_WAIT.toNanos(), nanos)
+        .orElseThrow(() -> new Held(container));
   }
 
   /** The lock file {@link #hold} takes for {@code container}. */

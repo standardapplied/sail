@@ -9,12 +9,14 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.harness.Harnesses;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -22,7 +24,9 @@ import java.util.Set;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.FutureTask;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.LongSupplier;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -34,6 +38,55 @@ class ContainerSailSetupTest {
   private static final String CONTAINER = "light-grid";
   private static final String PROBE = "cmp -s --";
   private static final ShellExec.Result OK = new ShellExec.Result(0, "", "");
+
+  /**
+   * A launch sets up its container under the container's lock and waits for whoever holds it, a
+   * write of its config, a restore or another launch, for at most {@link
+   * ContainerConfig#HOLD_WAIT}; past it, it is refused saying what held it rather than waiting
+   * forever unseen.
+   */
+  @Test
+  void aSetupWaitsForTheContainerAtMostItsHoldWaitAndSaysWhatHeldIt() throws Exception {
+    var shell = new ScriptedShellExecutor(OK);
+    var now = new AtomicLong();
+    LongSupplier leaping = () -> now.addAndGet(ContainerConfig.HOLD_WAIT.toNanos());
+    var held = new CountDownLatch(1);
+    var done = new CountDownLatch(1);
+    var holder =
+        Thread.ofVirtual()
+            .start(
+                () -> {
+                  try (var lock = ContainerConfig.hold(locks, CONTAINER)) {
+                    held.countDown();
+                    done.await();
+                  } catch (Exception e) {
+                    throw new IllegalStateException(e);
+                  }
+                });
+    held.await();
+    try {
+      var refused =
+          assertTimeoutPreemptively(
+              Duration.ofSeconds(10),
+              () ->
+                  assertThrows(
+                      ContainerConfig.Held.class,
+                      () ->
+                          ContainerSailSetup.ensureInstalled(
+                              shell, shell, CONTAINER, locks, leaping)));
+      assertEquals(
+          "Another sail process held the configuration of container "
+              + CONTAINER
+              + " for over 60 s (a config write, a snapshot restore or another launch's setup),"
+              + " so it was not set up; try again once that is done.",
+          refused.getMessage());
+      assertEquals(
+          List.of(), shell.invocations(), "nothing is written to a container it does not hold");
+    } finally {
+      done.countDown();
+      holder.join();
+    }
+  }
 
   @Test
   void aVerifiedContainerIsAlreadyPresentAndRunsNoInstaller() throws Exception {

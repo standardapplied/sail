@@ -377,7 +377,7 @@ class ReviewLoopEveryStateTest {
 
     stop(STATE);
 
-    assertEquals(walk(state).end(), endInTheStores(state), step);
+    assertEquals(walk(state).end(), endInTheStores(state), () -> step + stored());
     assertEquals(List.of(), loop.details("review_pipeline_error"), "and no step failed");
   }
 
@@ -407,7 +407,7 @@ class ReviewLoopEveryStateTest {
       var walked = walk(state).end();
       var stored = endInTheStores(state);
       if (!walked.equals(stored)) {
-        apart.add(state + ": walked to " + walked + ", stored " + stored);
+        apart.add(state + ": walked to " + walked + ", stored " + stored + stored());
       }
     }
 
@@ -541,6 +541,23 @@ class ReviewLoopEveryStateTest {
                 stage -> "human".equals(stage.stageType()) && "running".equals(stage.status()))
         ? Optional.of(End.A_PERSONS)
         : Optional.empty();
+  }
+
+  /**
+   * What the stores hold of the spec's latest review, said beside a mismatch so that it names its
+   * own cause: the review's status and the error it recorded (a launch that could not start says
+   * why there), and the runs that serve it.
+   */
+  private String stored() {
+    var review = loop.reviews.latestReviewForSpec(STATE).orElseThrow();
+    return " (review "
+        + review.status()
+        + (review.error() == null ? "" : ": " + review.error())
+        + "; its runs "
+        + loop.runs.forReview(review.id()).stream()
+            .map(run -> run.role() + " " + run.status())
+            .toList()
+        + ")";
   }
 
   private boolean waitsOnALiveRun(ReviewStore.ReviewRow review) {

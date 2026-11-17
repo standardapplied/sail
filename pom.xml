@@ -85,6 +85,8 @@
                         -Djdk.httpserver.attributes=context
                         --add-opens java.base/java.util=ALL-UNNAMED
                         --add-opens java.base/java.lang=ALL-UNNAMED
+                        <!-- a Sail of each fork's own: never the person's, never another fork's lock files -->
+                        -Duser.home=${project.build.directory}/test-home-${surefire.forkNumber}
                     </argLine>
                 </configuration>
             </plugin>

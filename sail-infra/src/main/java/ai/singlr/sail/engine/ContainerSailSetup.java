@@ -20,6 +20,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.SequencedMap;
 import java.util.concurrent.TimeoutException;
+import java.util.function.LongSupplier;
 
 /**
  * Self-healing entry point for sail's in-container machinery. Reconciles two invariants on every
@@ -99,18 +100,28 @@ public final class ContainerSailSetup {
   /**
    * The same reconciliation, serialised on its container's file under {@code locks}, the box's lock
    * directory: the device check is a read, a remove and an add, and an interleaved write to the
-   * same container fails it, so the API server's boot sweep and every CLI that reconciles or writes
-   * the container's config wait for each other there. A dry run changes nothing, so it takes no
-   * lock.
+   * same container fails it, so the API server's boot sweep, a launch and every CLI that reconciles
+   * or writes the container's config wait for each other there, a setup for at most {@link
+   * ContainerConfig#HOLD_WAIT}. A dry run changes nothing, so it takes no lock.
    */
   public static Result ensureInstalled(
       ShellExec probe, ShellExec shell, String container, Path locks)
+      throws IOException, InterruptedException, TimeoutException {
+    return ensureInstalled(probe, shell, container, locks, System::nanoTime);
+  }
+
+  /**
+   * The same, waiting for another holder of the container's lock at most {@link
+   * ContainerConfig#HOLD_WAIT} on {@code nanos} ({@link ContainerConfig#holdWithin}).
+   */
+  public static Result ensureInstalled(
+      ShellExec probe, ShellExec shell, String container, Path locks, LongSupplier nanos)
       throws IOException, InterruptedException, TimeoutException {
     NameValidator.requireValidProjectName(container);
     if (shell.isDryRun()) {
       return reconcile(probe, shell, container, locks);
     }
-    try (var held = ContainerConfig.hold(locks, container)) {
+    try (var held = ContainerConfig.holdWithin(locks, container, nanos)) {
       return reconcile(probe, shell, container, locks);
     }
   }
