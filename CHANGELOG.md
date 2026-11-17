@@ -2,6 +2,7 @@
 
 ## 0.70.0
 
+- **The drive no longer blocks the main thread it measures.** Inside a measured window the four-pane step listed processes with a synchronous `ps` on the main thread, while the floods still wrote; on a busy runner that held every pane's frames for 170 to 290 ms and failed the flood gate as the app's (sail#434's and sail#439's runs). `ps`, the CPU shares it feeds and the floods' stop file now run off the main thread, and a step inside a `resetLatency`…`shownWithin` window saves its screen's text off the main thread and takes no snapshot. The gates are unchanged.
 - **The Sail app's terminal never waits for the window server on its main thread.** A frame asks for its drawable on a background queue at the moment it needs one and is drawn when it arrives, so typing, menus and window dragging stay live while every drawable is in use (before, the ask waited on the main thread up to a second, then retried every 0.25 s); nothing about what is drawn changes. Where the display gives no presentation time, an echo or output counts as shown when its frame's command buffer completed, and View > Show Latency says which measure it used.
 
 ## 0.69.1
