@@ -1590,7 +1590,8 @@ storage() {
   check "$run" "acme runs after the reboot, on devpool" until_true 120 3 running_on_pool "$run" client acme devpool
   check "$run" "host status names every pool" status_pools "$run" client "devpool:dir tank:zfs twin:zfs"
   check "$run" "the mirror is ONLINE after the reboot" healthy_on "$run" client twin
-  gone=$(on "$run" client "realpath $scratch2")
+  gone=$(on "$run" client "want=\$(realpath $scratch2); sudo zpool status -P twin | awk '\$1 ~ /^\\//{print \$1}' | while read -r member; do case \$(realpath \"\$member\") in \"\$want\"*) echo \"\$member\" ;; esac; done")
+  check "$run" "the mirror names one member on client's second scratch disk" test -n "$gone" -a "$gone" = "${gone%%$'\n'*}"
   check "$run" "client's second scratch disk, $gone, is detached" \
     gc compute instances detach-disk "$(vm "$run" client)" --zone "$ZONE" --device-name scratch2
   check "$run" "host status says the mirror is DEGRADED and names the device that went" \
