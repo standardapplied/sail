@@ -6,6 +6,7 @@
 package ai.singlr.sail.api;
 
 import ai.singlr.sail.common.DateTimeUtils;
+import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.Engagement;
 import ai.singlr.sail.config.Guardrails;
@@ -25,6 +26,7 @@ import ai.singlr.sail.engine.LiveStream;
 import ai.singlr.sail.engine.PromptConversation;
 import ai.singlr.sail.engine.RunPlace;
 import ai.singlr.sail.engine.ShellExec;
+import ai.singlr.sail.engine.SystemdServiceInstaller;
 import ai.singlr.sail.harness.Harness;
 import ai.singlr.sail.harness.Harnesses;
 import ai.singlr.sail.harness.RunReport;
@@ -164,7 +166,6 @@ public final class LiveMembers implements RoomWakeReactor.Live, AutoCloseable {
   private final SessionYield terminals;
   private final Map<String, Member> members = new ConcurrentHashMap<>();
   private final Map<String, Object> roomLocks = new ConcurrentHashMap<>();
-  private final Map<String, Set<String>> handedAgain = new ConcurrentHashMap<>();
   private final Set<Member> reading = ConcurrentHashMap.newKeySet();
   private final RunLauncher.Room notices;
   private final ExecutorService timers = Executors.newVirtualThreadPerTaskExecutor();
@@ -459,10 +460,12 @@ public final class LiveMembers implements RoomWakeReactor.Live, AutoCloseable {
     if (resumed.isPresent() && (unread.isEmpty() || terminalHolds(resumed.get()))) {
       return;
     }
-    var again = handedAgain.remove(seat.roomId());
     var pages =
         resumed.isPresent()
-            ? handedAgain(LiveMemberPrompt.messages(unread), unread, again)
+            ? handedAgain(
+                LiveMemberPrompt.messages(unread),
+                unread,
+                runStore.unansweredMessageIds(resumed.get().id()))
             : fresh(seat, tail, full);
     var prompt = pages.getFirst().text();
     var command =
@@ -800,18 +803,77 @@ public final class LiveMembers implements RoomWakeReactor.Live, AutoCloseable {
     List.copyOf(members.values()).forEach(member -> member.holdToLimits(now));
   }
 
+  /**
+   * How long stopping may take, ends and readers together: inside the unit's stop timeout, with
+   * room for what sail closes after it.
+   */
+  static final Duration STOPPING =
+      SystemdServiceInstaller.STOP_TIMEOUT.minus(Duration.ofSeconds(20));
+
   /** Ends every member: sail is stopping, and nothing would read them after it. */
   @Override
   public void close() {
     sweepPass.close();
+    var deadline = timing.clock().get().plus(STOPPING);
     try (var ending = Executors.newVirtualThreadPerTaskExecutor()) {
       members
           .values()
           .forEach(
               member -> ending.execute(() -> member.end("sail stopping", timing.grace().result())));
     }
-    List.copyOf(reading).forEach(Member::awaitReader);
+    awaitReaders(deadline);
     timers.shutdownNow();
+  }
+
+  /**
+   * Waits, until {@code deadline}, for every reader still running to be done with its ended
+   * process, so what each says of the messages it gives back is said before sail lets go of the
+   * room; names in the log each one that was not.
+   */
+  private void awaitReaders(Instant deadline) {
+    var readers = List.copyOf(reading);
+    var left = Math.max(0, Duration.between(timing.clock().get(), deadline).toMillis());
+    CompletableFuture.allOf(
+            readers.stream().map(member -> member.readerDone).toArray(CompletableFuture[]::new))
+        .completeOnTimeout(null, left, TimeUnit.MILLISECONDS)
+        .join();
+    readers.stream()
+        .filter(member -> !member.readerDone.isDone())
+        .forEach(
+            member ->
+                System.err.println(
+                    "  [live] sail stopped before run "
+                        + member.runId
+                        + " of "
+                        + member.seat.conversation()
+                        + " was done: what it was handed and never answered is not said in its"
+                        + " room"));
+  }
+
+  /**
+   * The room's line for messages given back when no agent is seated: they are unanswered, and how
+   * to seat one.
+   */
+  static String unseated(
+      List<MessageStore.MessageRow> messages, SpecStore.SpecRow spec, String agent) {
+    return names(messages)
+        + (messages.size() == 1 ? "'s message is" : "'s messages are")
+        + " unanswered: the room's agent was removed before it answered, and no agent is in the room"
+        + " now. "
+        + (spec != null
+            ? Remedy.of(
+                    "Add one with '",
+                    Remedy.client("spec engage", spec.id(), "--agent", agent),
+                    "'.")
+                .plain()
+            : "Add an agent to the room to answer.");
+  }
+
+  private static String names(List<MessageStore.MessageRow> messages) {
+    var authors = messages.stream().map(MessageStore.MessageRow::author).distinct().toList();
+    return authors.size() == 1
+        ? authors.getFirst()
+        : String.join(", ", authors.subList(0, authors.size() - 1)) + " and " + authors.getLast();
   }
 
   /**
@@ -819,15 +881,8 @@ public final class LiveMembers implements RoomWakeReactor.Live, AutoCloseable {
    * starts the next member at once: whose they are, and what answers them.
    */
   static String waiting(List<MessageStore.MessageRow> messages) {
-    var authors = messages.stream().map(MessageStore.MessageRow::author).distinct().toList();
-    var names =
-        authors.size() == 1
-            ? authors.getFirst()
-            : String.join(", ", authors.subList(0, authors.size() - 1))
-                + " and "
-                + authors.getLast();
     return "The room's agent ended before it answered "
-        + names
+        + names(messages)
         + (messages.size() == 1 ? "'s message" : "'s messages")
         + "; the room's next message starts it again, and it answers "
         + (messages.size() == 1 ? "that one" : "them")
@@ -842,8 +897,7 @@ public final class LiveMembers implements RoomWakeReactor.Live, AutoCloseable {
       List<PromptConversation.Rendered<MessageStore.MessageRow>> pages,
       List<MessageStore.MessageRow> unread,
       Set<String> again) {
-    var repeated =
-        unread.stream().filter(message -> again != null && again.contains(message.id())).toList();
+    var repeated = unread.stream().filter(message -> again.contains(message.id())).toList();
     if (repeated.isEmpty()) {
       return pages;
     }
@@ -876,7 +930,9 @@ public final class LiveMembers implements RoomWakeReactor.Live, AutoCloseable {
     private final Instant startedAt;
     private final Object pipe = new Object();
     private final String localHandle;
-    private final List<MessageStore.MessageRow> taken = new ArrayList<>();
+    private final List<MessageStore.MessageRow> waiting = new ArrayList<>();
+    private final List<MessageStore.MessageRow> turnTook = new ArrayList<>();
+    private boolean turnStarted;
     private List<MessageStore.MessageRow> handedBack = List.of();
     private final CompletableFuture<Void> readerDone = new CompletableFuture<>();
     private boolean owesTheNext;
@@ -1027,34 +1083,30 @@ public final class LiveMembers implements RoomWakeReactor.Live, AutoCloseable {
       if (handedBack.isEmpty()) {
         return;
       }
-      handedAgain
-          .computeIfAbsent(seat.roomId(), room -> ConcurrentHashMap.newKeySet())
-          .addAll(handedBack.stream().map(MessageStore.MessageRow::id).toList());
       if (owesTheNext) {
         attempt(() -> deliver(seat.conversation(), localHandle));
       }
       if (members.get(seat.roomId()) == null) {
-        attempt(
-            () ->
-                notices.tell(
-                    seat.spec() != null ? seat.spec().id() : seat.roomId(), waiting(handedBack)));
+        attempt(this::tellWaiting);
       }
     }
 
     /**
-     * Waits for the reader to be done with an ended process: what it says of the messages it gives
-     * back is said before sail lets go of the room.
+     * Says in the room what is true of the messages given back when no member answers them now: the
+     * room's next message starts the member again, or, with no agent seated (dismissed), that they
+     * are unanswered and how to seat one. A dismissal says nothing in the room itself.
      */
-    private void awaitReader() {
-      readerDone
-          .copy()
-          .completeOnTimeout(null, timing.grace().whole().toMillis(), TimeUnit.MILLISECONDS)
-          .join();
+    private void tellWaiting() {
+      var conversation = seat.spec() != null ? seat.spec().id() : seat.roomId();
+      var seated = seat(seat.conversation()).map(Seat::member).isPresent();
+      notices.tell(
+          conversation,
+          seated ? waiting(handedBack) : unseated(handedBack, seat.spec(), run.agent()));
     }
 
-    /** The process was handed {@code messages}: they are its to answer once it begins a turn. */
+    /** The process was handed {@code messages}: they wait for the next turn to take them. */
     private synchronized void took(List<MessageStore.MessageRow> messages) {
-      taken.addAll(messages);
+      waiting.addAll(messages);
     }
 
     /** Runs {@code work} as sail; a failure is this line's, never the reader's. */
@@ -1076,6 +1128,7 @@ public final class LiveMembers implements RoomWakeReactor.Live, AutoCloseable {
         case LiveStream.Step.Init init -> {
           initLine = line;
           session(init.sessionId());
+          startTurn();
         }
         case LiveStream.Step.TextStarted started -> {
           open();
@@ -1138,8 +1191,27 @@ public final class LiveMembers implements RoomWakeReactor.Live, AutoCloseable {
       }
     }
 
+    /**
+     * A turn starts at its {@code init}: Claude Code takes into it every message waiting then, and
+     * a message written after it waits for the turn after (recorded in {@code LiveStreamTest}).
+     */
+    private void startTurn() {
+      turnTook.addAll(waiting);
+      waiting.clear();
+      turnStarted = true;
+    }
+
+    /**
+     * The turn answers: what it took is its own. A turn with no {@code init} of its own took what
+     * was waiting when it began answering.
+     */
     private void begin() {
-      taken.clear();
+      if (turnStarted) {
+        turnTook.clear();
+      } else {
+        waiting.clear();
+      }
+      turnStarted = false;
       turnOpen = true;
       prompted = false;
       turn++;
@@ -1331,7 +1403,10 @@ public final class LiveMembers implements RoomWakeReactor.Live, AutoCloseable {
       leaving = true;
       try {
         flush();
-        var unread = List.copyOf(taken);
+        var unread = new ArrayList<>(turnTook);
+        unread.addAll(waiting);
+        var inTurn = turnTook.stream().map(MessageStore.MessageRow::id).toList();
+        var queued = waiting.stream().map(MessageStore.MessageRow::id).toList();
         if (prompted && !turnOpen) {
           begin();
         }
@@ -1344,18 +1419,17 @@ public final class LiveMembers implements RoomWakeReactor.Live, AutoCloseable {
         disarm();
         var status = died ? "failed" : "stopped";
         var code = exit.isPresent() ? exit.getAsInt() : null;
-        var ids = unread.stream().map(MessageStore.MessageRow::id).toList();
         var finishedHere =
             runStore.atomically(
                 () -> {
                   var done = runStore.finishAsTurnsRecorded(runId, status, code);
-                  runStore.forgetDelivered(runId, ids);
+                  runStore.giveBack(runId, queued, inTurn);
                   return done;
                 });
         if (finishedHere) {
           tellStopped(run, code, why);
         }
-        handedBack = unread;
+        handedBack = List.copyOf(unread);
         owesTheNext = !unread.isEmpty() && !ending && !finishedHere;
       } finally {
         members.remove(seat.roomId(), this);

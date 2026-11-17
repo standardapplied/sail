@@ -1223,16 +1223,26 @@ public final class RunStore implements ConflictResolver, SyncedStore {
   }
 
   /**
-   * Takes {@code messageIds} back out of the run's ledger: messages its process was handed and
-   * ended without reading, which are owed to whoever answers next.
+   * Gives back what the run's process was handed and ended without answering, which is owed to
+   * whoever answers next: {@code queued} (written while no turn had taken it) leaves the ledger;
+   * {@code inTurn} (taken into a turn that never answered, so its session may already hold it)
+   * stays, marked unanswered, so the next process resuming that session is told it is handed again.
+   * One transaction.
    */
-  public void forgetDelivered(String id, Collection<String> messageIds) {
-    messageIds.forEach(Ids::requireUuid);
+  public void giveBack(String id, Collection<String> queued, Collection<String> inTurn) {
+    queued.forEach(Ids::requireUuid);
+    inTurn.forEach(Ids::requireUuid);
     db.transaction(
         () -> {
-          for (var messageId : messageIds) {
+          for (var messageId : queued) {
             db.execute(
                 "DELETE FROM run_delivered_messages WHERE run_id = ? AND message_id = ?",
+                id,
+                messageId);
+          }
+          for (var messageId : inTurn) {
+            db.execute(
+                "UPDATE run_delivered_messages SET unanswered = 1 WHERE run_id = ? AND message_id = ?",
                 id,
                 messageId);
           }
@@ -1240,11 +1250,25 @@ public final class RunStore implements ConflictResolver, SyncedStore {
         });
   }
 
+  /**
+   * What {@link #giveBack} marked unanswered on the run: handed again to a session that may hold
+   * it.
+   */
+  public Set<String> unansweredMessageIds(String id) {
+    return new LinkedHashSet<>(
+        db.query(
+            "SELECT message_id FROM run_delivered_messages WHERE run_id = ? AND unanswered = 1"
+                + " ORDER BY message_id",
+            row -> row.text(0),
+            id));
+  }
+
   /** The run's delivery ledger — see {@link #markDelivered}. */
   public Set<String> deliveredMessageIds(String id) {
     return new LinkedHashSet<>(
         db.query(
-            "SELECT message_id FROM run_delivered_messages WHERE run_id = ? ORDER BY message_id",
+            "SELECT message_id FROM run_delivered_messages WHERE run_id = ? AND unanswered = 0"
+                + " ORDER BY message_id",
             row -> row.text(0),
             id));
   }

@@ -2303,19 +2303,23 @@ class RunStoreTest {
   }
 
   @Test
-  void aMessageForgottenIsOwedAgainAndTheRestStayDelivered() {
+  void aMessageGivenBackIsOwedAgainAndOneATurnTookIsMarkedUnanswered() {
     var id = newRun("backend", "auth");
     var messages = new MessageStore(db);
     var read = messages.append("auth", "ada", "read", null).id();
-    var unread = messages.append("auth", "ada", "never read", null).id();
-    store.markDelivered(id, List.of(read, unread));
+    var queued = messages.append("auth", "ada", "never taken", null).id();
+    var inTurn = messages.append("auth", "ada", "taken, never answered", null).id();
+    store.markDelivered(id, List.of(read, queued, inTurn));
 
-    store.forgetDelivered(id, List.of(unread));
-    store.forgetDelivered(id, List.of(unread));
+    store.giveBack(id, List.of(queued), List.of(inTurn));
+    store.giveBack(id, List.of(queued), List.of(inTurn));
 
     assertEquals(Set.of(read), store.deliveredMessageIds(id));
+    assertEquals(Set.of(inTurn), store.unansweredMessageIds(id));
     assertThrows(
-        IllegalArgumentException.class, () -> store.forgetDelivered(id, List.of("not-a-uuid")));
+        IllegalArgumentException.class, () -> store.giveBack(id, List.of("not-a-uuid"), List.of()));
+    assertThrows(
+        IllegalArgumentException.class, () -> store.giveBack(id, List.of(), List.of("not-a-uuid")));
   }
 
   @Test
