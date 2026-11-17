@@ -134,6 +134,7 @@ public final class PtyWire {
       }
       case PtyMessage.PutEnd m -> out.type(14).i32(m.id()).bytes(m.sha256());
       case PtyMessage.PutCancel m -> out.type(15).i32(m.id());
+      case PtyMessage.PutQuery m -> out.type(16).i32(m.id());
       case PtyMessage.PutAck m -> out.type(35).i32(m.id()).i64(m.received());
       case PtyMessage.PutStored m -> out.type(36).i32(m.id()).string(m.path());
       case PtyMessage.PutRefused m ->
@@ -250,11 +251,7 @@ public final class PtyWire {
     return out.string(info.writerFde()).string(info.room()).stringList(info.command());
   }
 
-  /**
-   * Where a session runs and who opened it, written after every other field of the frame, a page's
-   * after its cursor: the macOS lanes run the app against a pinned released host, which writes
-   * none, and the app reads a frame's fields up to the place.
-   */
+  /** Where a session runs and who opened it: its project, its workspace and its opener. */
   private static Writer encodePlace(Writer out, PtyMessage.SessionInfo info) {
     return out.string(info.project()).string(info.workspace()).string(info.opener());
   }
@@ -288,6 +285,7 @@ public final class PtyWire {
       case 13 -> new PtyMessage.PutChunk(in.getInt(), in.getLong(), bytes(in));
       case 14 -> new PtyMessage.PutEnd(in.getInt(), bytes(in));
       case 15 -> new PtyMessage.PutCancel(in.getInt());
+      case 16 -> new PtyMessage.PutQuery(in.getInt());
       case 35 -> new PtyMessage.PutAck(in.getInt(), in.getLong());
       case 36 -> new PtyMessage.PutStored(in.getInt(), string(in));
       case 37 ->

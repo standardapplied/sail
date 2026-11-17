@@ -6,8 +6,6 @@ import SailAPI
 public enum FrameCodec {
     /// The largest payload either side accepts; anything larger is a protocol violation.
     public static let maxPayload = 1 << 20
-    /// The most bytes one `PutChunk` carries; the host refuses an upload that sends more.
-    public static let maxPutChunk = 64 * 1024
 
     /// `frame` as it travels: its length, then its payload.
     public static func encode(_ frame: Frame) throws(TerminalWireError) -> [UInt8] {
@@ -88,6 +86,7 @@ private extension Frame {
         case .putChunk: 13
         case .putEnd: 14
         case .putCancel: 15
+        case .putQuery: 16
         case .output: 20
         case .replayBegin: 21
         case .replayEnd: 22
@@ -134,6 +133,7 @@ private extension Frame {
         case let .putChunk(id, offset, bytes): [.int32(id), .int64(offset), .blob(bytes)]
         case let .putEnd(id, sha256): [.int32(id), .blob(sha256)]
         case let .putCancel(id): [.int32(id)]
+        case let .putQuery(id): [.int32(id)]
         case let .putAck(id, received): [.int32(id), .int64(received)]
         case let .putStored(id, path): [.int32(id), .string(path)]
         case let .putRefused(id, kind, limit): [.int32(id), .string(kind.rawValue), .int64(limit)]
@@ -233,6 +233,7 @@ private struct Cursor {
         case 13: .putChunk(id: try int32(), offset: try int64(), bytes: try blob())
         case 14: .putEnd(id: try int32(), sha256: try blob())
         case 15: .putCancel(id: try int32())
+        case 16: .putQuery(id: try int32())
         case 35: .putAck(id: try int32(), received: try int64())
         case 36: .putStored(id: try int32(), path: try string())
         case 37: .putRefused(id: try int32(), kind: Open(rawValue: try string()), limit: try int64())

@@ -32,7 +32,8 @@ struct UploadSourceShrank: Error {}
 /// of them sent and not yet acknowledged, so the bytes queued ahead of a key in the socket and the
 /// network stay that few.
 public enum UploadPacing {
-    /// The most bytes one `PutChunk` carries: the host's bound.
+    /// The bytes one `PutChunk` carries: half the host's bound of 64 KiB, so a key typed behind a
+    /// chunk waits for 32 KiB at most.
     public static let chunk = 32 * 1024
     public static let window = 2
     /// The largest file uploaded: the host's bound, checked here first so it is refused before a
@@ -43,36 +44,65 @@ public enum UploadPacing {
 /// The upload a session has in flight, at most one, and the order the next ones wait in.
 final class Uploads: Sendable {
     private struct Gate {
-        var busy = false
-        var waiting: [CheckedContinuation<Void, Never>] = []
+        var holder: Int?
+        var issued = 0
+        var waiting: [(ticket: Int, turn: CheckedContinuation<Void, Never>)] = []
     }
 
     private let gate = Mutex(Gate())
     private let current = Mutex<UploadFlight?>(nil)
-    private let nextID = Mutex<Int32>(0)
+    /// Ids start at random, so two clients of one session, whose uploads the host keeps answers
+    /// for by id, do not share them.
+    private let nextID = Mutex(Int32.random(in: 0 ... Int32.max / 2))
 
     /// Waits for the uploads begun before to finish: one connection carries one upload at a time.
-    func enter() async {
-        await withCheckedContinuation { (turn: CheckedContinuation<Void, Never>) in
-            let now = gate.withLock { gate in
-                guard gate.busy else {
-                    gate.busy = true
-                    return true
-                }
-                gate.waiting.append(turn)
-                return false
-            }
-            if now { turn.resume() }
+    /// A task cancelled while it waits stops waiting and throws `CancellationError`.
+    func enter() async throws {
+        let ticket = gate.withLock { gate in
+            defer { gate.issued += 1 }
+            return gate.issued
         }
+        await withTaskCancellationHandler {
+            await withCheckedContinuation { (turn: CheckedContinuation<Void, Never>) in
+                let now = gate.withLock { gate in
+                    guard gate.holder != nil else {
+                        gate.holder = ticket
+                        return true
+                    }
+                    if Task.isCancelled { return true }
+                    gate.waiting.append((ticket, turn))
+                    return false
+                }
+                if now { turn.resume() }
+            }
+        } onCancel: {
+            let turn = gate.withLock { gate -> CheckedContinuation<Void, Never>? in
+                guard let index = gate.waiting.firstIndex(where: { $0.ticket == ticket }) else { return nil }
+                return gate.waiting.remove(at: index).turn
+            }
+            turn?.resume()
+        }
+        guard gate.withLock({ $0.holder == ticket }) else { throw CancellationError() }
+        if Task.isCancelled {
+            leave()
+            throw CancellationError()
+        }
+    }
+
+    /// How many uploads wait their turn.
+    var waiting: Int {
+        gate.withLock { $0.waiting.count }
     }
 
     func leave() {
         let next = gate.withLock { gate -> CheckedContinuation<Void, Never>? in
             guard !gate.waiting.isEmpty else {
-                gate.busy = false
+                gate.holder = nil
                 return nil
             }
-            return gate.waiting.removeFirst()
+            let next = gate.waiting.removeFirst()
+            gate.holder = next.ticket
+            return next.turn
         }
         next?.resume()
     }
@@ -80,7 +110,7 @@ final class Uploads: Sendable {
     /// A flight for an upload on `connection`, numbered apart from every other on the session.
     func begin(on connection: Connection) -> UploadFlight {
         let id = nextID.withLock { id in
-            defer { id &+= 1 }
+            defer { id = id == .max ? 0 : id + 1 }
             return id
         }
         let flight = UploadFlight(id: id, connection: connection)
@@ -108,10 +138,21 @@ final class Uploads: Sendable {
         }
     }
 
-    /// `connection` is gone: an upload on it ended with it.
-    func ended(_ connection: Connection) {
-        let flight = current.withLock { $0 }
-        if flight?.connection === connection { flight?.settle(.ended) }
+    /// `connection` dropped: an upload on it whose end was not sent is lost with it; one whose end
+    /// was sent waits for the next connection to ask the host what became of it.
+    func dropped(_ connection: Connection) {
+        current.withLock { $0 }?.dropped(connection)
+    }
+
+    /// `connection` attached the session again: an upload waiting to ask after itself asks on it.
+    func attached(_ connection: Connection) {
+        current.withLock { $0 }?.attached(connection)
+    }
+
+    /// The session will not attach again for now: an upload in flight ends as ``UploadFlight/Outcome/ended``
+    /// when `ended` says the session itself ended, else as lost.
+    func over(sessionEnded: Bool) {
+        current.withLock { $0 }?.over(sessionEnded: sessionEnded)
     }
 }
 
@@ -121,7 +162,6 @@ final class UploadFlight: Sendable {
         case acked(Int64)
         case stored(String)
         case refused(Open<UploadRefusal.Kind>, Int64)
-        case ended
     }
 
     enum Outcome: Equatable {
@@ -135,15 +175,18 @@ final class UploadFlight: Sendable {
         var acked: Int64 = -1
         var outcome: Outcome?
         var waiter: (need: Int64, turn: CheckedContinuation<Void, Never>)?
+        /// The connection the upload's frames go on; nil while one whose end was sent is gone.
+        var connection: Connection?
+        var endSent = false
+        var cancelAsked = false
     }
 
     let id: Int32
-    let connection: Connection
-    private let state = Mutex(State())
+    private let state: Mutex<State>
 
     init(id: Int32, connection: Connection) {
         self.id = id
-        self.connection = connection
+        state = Mutex(State(connection: connection))
     }
 
     /// The bytes the host has said it holds.
@@ -157,13 +200,65 @@ final class UploadFlight: Sendable {
             case let .acked(received): state.acked = max(state.acked, received)
             case let .stored(path): state.outcome = state.outcome ?? .stored(path)
             case let .refused(kind, limit): state.outcome = state.outcome ?? .refused(kind, limit)
-            case .ended: state.outcome = state.outcome ?? .ended
             }
-            guard let waiter = state.waiter, state.outcome != nil || state.acked >= waiter.need else { return nil }
-            state.waiter = nil
-            return waiter.turn
+            return Self.woken(&state)
         }
         woken?.resume()
+    }
+
+    private func end(_ outcome: Outcome) {
+        let woken = state.withLock { state -> CheckedContinuation<Void, Never>? in
+            state.outcome = state.outcome ?? outcome
+            return Self.woken(&state)
+        }
+        woken?.resume()
+    }
+
+    private static func woken(_ state: inout State) -> CheckedContinuation<Void, Never>? {
+        guard let waiter = state.waiter, state.outcome != nil || state.acked >= waiter.need else { return nil }
+        state.waiter = nil
+        return waiter.turn
+    }
+
+    private static func lost(_ endSent: Bool) -> Outcome {
+        .refused(.known(endSent ? .notKnown : .connectionLost), 0)
+    }
+
+    /// Sends `frame` of this upload, before its end, on its connection.
+    func send(_ frame: Frame) throws(TerminalError) {
+        let connection = state.withLock { state in
+            if case .putEnd = frame { state.endSent = true }
+            return state.connection
+        }
+        try connection?.send(frame)
+    }
+
+    /// See ``Uploads/dropped(_:)``.
+    func dropped(_ connection: Connection) {
+        let ended = state.withLock { state -> Bool in
+            guard state.connection === connection else { return false }
+            state.connection = nil
+            return !state.endSent
+        }
+        if ended { end(Self.lost(false)) }
+    }
+
+    /// See ``Uploads/attached(_:)``.
+    func attached(_ connection: Connection) {
+        let asking = state.withLock { state -> (cancel: Bool, ask: Bool) in
+            guard state.connection == nil, state.endSent, state.outcome == nil else { return (false, false) }
+            state.connection = connection
+            return (state.cancelAsked, true)
+        }
+        guard asking.ask else { return }
+        if asking.cancel { try? connection.send(.putCancel(id: id)) }
+        try? connection.send(.putQuery(id: id))
+    }
+
+    /// See ``Uploads/over(sessionEnded:)``.
+    func over(sessionEnded: Bool) {
+        let endSent = state.withLock { $0.endSent }
+        end(sessionEnded ? .ended : Self.lost(endSent))
     }
 
     /// Waits until the host holds `need` bytes or the upload has an outcome: the outcome, nil while
@@ -180,18 +275,31 @@ final class UploadFlight: Sendable {
                 if now { turn.resume() }
             }
         } onCancel: {
-            let woken = state.withLock { state -> CheckedContinuation<Void, Never>? in
-                state.outcome = state.outcome ?? .cancelled
-                defer { state.waiter = nil }
-                return state.waiter?.turn
-            }
-            woken?.resume()
+            end(.cancelled)
         }
         return state.withLock { $0.outcome }
     }
 
-    /// Waits for the outcome.
+    /// Waits for the outcome of an upload whose end was sent. Cancelling the waiting task asks the
+    /// host to keep nothing, and the outcome is still the host's: stored, when the file took its
+    /// name first.
     func outcome() async -> Outcome {
-        await wait(until: .max) ?? .ended
+        await withTaskCancellationHandler {
+            await withCheckedContinuation { (turn: CheckedContinuation<Void, Never>) in
+                let now = state.withLock { state in
+                    guard state.outcome == nil else { return true }
+                    state.waiter = (.max, turn)
+                    return false
+                }
+                if now { turn.resume() }
+            }
+        } onCancel: {
+            let connection = state.withLock { state in
+                state.cancelAsked = true
+                return state.connection
+            }
+            try? connection?.send(.putCancel(id: id))
+        }
+        return state.withLock { $0.outcome } ?? .ended
     }
 }

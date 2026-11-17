@@ -223,8 +223,17 @@ public sealed interface PtyMessage {
   /** Upload {@code id} is whole: its SHA-256, which the host checks before it stores it. */
   record PutEnd(int id, byte[] sha256) implements PtyMessage {}
 
-  /** Upload {@code id} is abandoned: the host discards what it holds of it. */
+  /**
+   * Upload {@code id} is abandoned: the host discards what it holds of it, or, once its end came,
+   * keeps nothing unless it already answered that the file is stored.
+   */
   record PutCancel(int id) implements PtyMessage {}
+
+  /**
+   * What became of upload {@code id} of the attached session, asked by a client whose connection
+   * dropped after it sent the end: answered as the upload was, or {@link PutRefusal#UNKNOWN}.
+   */
+  record PutQuery(int id) implements PtyMessage {}
 
   /** The host holds {@code received} bytes of upload {@code id}: the client may send more. */
   record PutAck(int id, long received) implements PtyMessage {}
@@ -248,7 +257,9 @@ public sealed interface PtyMessage {
     SHARED_CONTAINER,
     SESSION_ENDED,
     NO_SPACE,
-    FAILED;
+    FAILED,
+    CANCELLED,
+    UNKNOWN;
 
     /** The kind as the wire names it. */
     public String wire() {

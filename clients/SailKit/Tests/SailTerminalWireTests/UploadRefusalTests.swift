@@ -21,13 +21,18 @@ import Testing
         #expect(said(.known(.sessionEnded)) == "The session ended before screenshot.png was uploaded; nothing was saved.")
         #expect(said(.known(.noSpace)) == "box-3 has no room for screenshot.png; nothing was saved.")
         #expect(said(.known(.failed)) == "screenshot.png could not be saved on box-3; nothing was pasted. Paste it again.")
+        #expect(said(.known(.cancelled)) == "screenshot.png was cancelled; nothing was saved.")
+        #expect(said(.known(.notKnown))
+            == "The connection to box-3 dropped after screenshot.png was sent, and whether it was saved is not known; paste it again if it is not in your workspace.")
+        #expect(said(.known(.connectionLost))
+            == "The connection to box-3 dropped while screenshot.png was uploading, before it was sent whole, so nothing was saved; paste it again.")
         #expect(said(.unknown("quota")) == said(.known(.failed)), "a kind from a newer host reads as a failure")
     }
 
     @Test func theKindsAreTheHostsWords() {
         #expect(UploadRefusal.Kind.allCases.map(\.rawValue) == [
             "too_large", "too_many", "session_full", "not_writer", "no_container", "shared_container",
-            "session_ended", "no_space", "failed",
+            "session_ended", "no_space", "failed", "cancelled", "not_known", "connection_lost",
         ])
     }
 }

@@ -172,6 +172,7 @@ extension Frame {
         case .putChunk: "PutChunk"
         case .putEnd: "PutEnd"
         case .putCancel: "PutCancel"
+        case .putQuery: "PutQuery"
         case .putAck: "PutAck"
         case .putStored: "PutStored"
         case .putRefused: "PutRefused"

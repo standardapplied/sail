@@ -33,11 +33,11 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 /**
- * Scenarios 9 to 11 of pasting into a remote session, against a real Incus container standing as a
- * workspace's own instance: a file uploaded on the session's own connection lands whole in the
- * session's directory, the dev user's alone; it goes when the session ends; and a new session in
- * the instance sweeps what a session no longer live left. Self-cleaning: the instance is always
- * removed.
+ * Pasting into a remote session against a real Incus container standing as a workspace's own
+ * instance: scenarios 9 to 11 (a file lands whole in the session's directory, the dev user's alone;
+ * it goes when the session ends; a new session sweeps what a session no longer live left), and the
+ * ways an upload fails there, each leaving nothing: a full disk, a killed copy, links the dev user
+ * plants, and a project's shared container. Self-cleaning: every instance is removed.
  */
 class PtyUploadIT extends AbstractIncusIT {
 
@@ -80,10 +80,14 @@ class PtyUploadIT extends AbstractIncusIT {
   }
 
   private void prepare() throws Exception {
-    launch(INSTANCE);
+    prepare(INSTANCE);
+  }
+
+  private void prepare(String container) throws Exception {
+    launch(container);
     var prepared =
         exec(
-            INSTANCE,
+            container,
             List.of("bash", "-c", "mkdir -p /home/dev/workspace && chown -R 1000:1000 /home/dev"));
     assertTrue(prepared.ok(), "could not prepare the dev workspace: " + prepared.stderr());
   }
@@ -99,11 +103,16 @@ class PtyUploadIT extends AbstractIncusIT {
 
   /** A connection writing in a new session of the workspace that waits for a line. */
   private SocketChannel session(String name) throws IOException {
+    return session(name, WORKSPACE);
+  }
+
+  /** As {@link #session(String)}, in {@code workspace} of the project, or its shared container. */
+  private SocketChannel session(String name, String workspace) throws IOException {
     var channel = connect();
     PtyWire.write(
         channel,
         new PtyMessage.Create(
-            name, List.of("sh", "-c", "read a"), "/tmp", PROJECT, "", 80, 24, WORKSPACE));
+            name, List.of("sh", "-c", "read a"), "/tmp", PROJECT, "", 80, 24, workspace));
     assertInstanceOf(PtyMessage.Ok.class, PtyWire.read(channel));
     PtyWire.write(channel, new PtyMessage.Attach(name, true));
     assertInstanceOf(PtyMessage.Ok.class, PtyWire.read(channel));
@@ -124,22 +133,66 @@ class PtyUploadIT extends AbstractIncusIT {
 
   private static PtyMessage.PutStored upload(SocketChannel channel, String name, byte[] bytes)
       throws Exception {
-    PtyWire.write(channel, new PtyMessage.PutBegin(1, name, bytes.length));
-    assertEquals(new PtyMessage.PutAck(1, 0), answer(channel));
+    return assertInstanceOf(
+        PtyMessage.PutStored.class, tryUpload(channel, 1, name, bytes, () -> {}));
+  }
+
+  /**
+   * Uploads {@code bytes} as upload {@code id}, running {@code midway} once half its chunks are
+   * acknowledged: the host's answer, the first that is not an acknowledgement.
+   */
+  private static PtyMessage tryUpload(
+      SocketChannel channel, int id, String name, byte[] bytes, Midway midway) throws Exception {
+    PtyWire.write(channel, new PtyMessage.PutBegin(id, name, bytes.length));
+    var begun = answer(channel);
+    if (!(begun instanceof PtyMessage.PutAck)) {
+      return begun;
+    }
+    var half = bytes.length / 2;
     for (var offset = 0; offset < bytes.length; offset += 32 << 10) {
+      if (offset >= half && offset - (32 << 10) < half) {
+        midway.run();
+      }
       var chunk = Arrays.copyOfRange(bytes, offset, Math.min(bytes.length, offset + (32 << 10)));
-      PtyWire.write(channel, new PtyMessage.PutChunk(1, offset, chunk));
-      assertEquals(new PtyMessage.PutAck(1, offset + chunk.length), answer(channel));
+      PtyWire.write(channel, new PtyMessage.PutChunk(id, offset, chunk));
+      var acked = answer(channel);
+      if (!(acked instanceof PtyMessage.PutAck)) {
+        return acked;
+      }
     }
     PtyWire.write(
-        channel, new PtyMessage.PutEnd(1, MessageDigest.getInstance("SHA-256").digest(bytes)));
-    return assertInstanceOf(PtyMessage.PutStored.class, answer(channel));
+        channel, new PtyMessage.PutEnd(id, MessageDigest.getInstance("SHA-256").digest(bytes)));
+    return answer(channel);
+  }
+
+  @FunctionalInterface
+  private interface Midway {
+    void run() throws Exception;
   }
 
   private String inInstance(String script) throws Exception {
     var ran = exec(INSTANCE, List.of("sh", "-c", script));
     assertTrue(ran.ok(), script + " failed: " + ran.stderr());
     return ran.stdout().strip();
+  }
+
+  /** Runs {@code script} in the instance as the dev user: whether it succeeded. */
+  private boolean asDev(String script) throws Exception {
+    return shell
+        .exec(
+            List.of(
+                "incus", "exec", INSTANCE, "--user", "1000", "--group", "1000", "--cwd", "/", "--",
+                "sh", "-c", script))
+        .ok();
+  }
+
+  private static String directoryOf(String path) {
+    return path.substring(0, path.lastIndexOf('/'));
+  }
+
+  /** What the session directory holds, temporaries included, by name. */
+  private String held(String directory) throws Exception {
+    return inInstance("ls -A " + directory + " | tr '\\n' ' '");
   }
 
   /** Waits, by asking the instance, until `script` prints `expected`. */
@@ -155,7 +208,10 @@ class PtyUploadIT extends AbstractIncusIT {
     throw new AssertionError(script + " printed '" + last + "', never '" + expected + "'");
   }
 
-  /** Scenarios 9 and 10: a 5 MB file stored whole, the dev user's alone, then gone with a kill. */
+  /**
+   * Scenarios 9 and 10: a 5 MB file stored whole, the dev user's alone, in a directory of its own
+   * under a root the dev user cannot write, then gone with a kill.
+   */
   @Test
   void aFileLandsWholeInTheWorkspaceAndGoesWhenTheSessionIsKilled() throws Exception {
     ensureIncusOrSkip();
@@ -167,20 +223,23 @@ class PtyUploadIT extends AbstractIncusIT {
           var channel = session("p9")) {
         var stored = upload(channel, "shot.png", bytes);
         assertTrue(
-            stored.path().matches("/tmp/sail-paste/[0-9a-f-]{36}/1-shot\\.png"), stored.path());
+            stored.path().matches("/var/lib/sail-paste/[0-9a-f-]{36}/1-shot\\.png"), stored.path());
         assertEquals(
             "600 1000 1000 " + (5 << 20), inInstance("stat -c '%a %u %g %s' " + stored.path()));
-        assertEquals("700 1000", inInstance("stat -c '%a %u' $(dirname " + stored.path() + ")"));
+        assertEquals("700 1000", inInstance("stat -c '%a %u' " + directoryOf(stored.path())));
+        assertEquals("755 0", inInstance("stat -c '%a %u' /var/lib/sail-paste"));
+        assertEquals("1-shot.png ", held(directoryOf(stored.path())));
         assertEquals(
             HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(bytes)),
             inInstance("sha256sum " + stored.path() + " | cut -d' ' -f1"));
+        assertFalse(asDev("mkdir /var/lib/sail-paste/mine"), "the dev user wrote into the root");
 
         try (var killer = connect()) {
           PtyWire.write(killer, new PtyMessage.Kill("p9"));
           assertInstanceOf(PtyMessage.Ok.class, PtyWire.read(killer));
         }
-        var directory = stored.path().substring(0, stored.path().lastIndexOf('/'));
-        awaitInInstance("test -e " + directory + " && echo kept || echo gone", "gone");
+        awaitInInstance(
+            "test -e " + directoryOf(stored.path()) + " && echo kept || echo gone", "gone");
       }
     } finally {
       deleteContainerQuietly(INSTANCE);
@@ -202,33 +261,142 @@ class PtyUploadIT extends AbstractIncusIT {
         var gone = upload(leaving, "a.txt", "leaving".getBytes());
         var kept = upload(staying, "b.txt", "staying".getBytes());
         PtyWire.write(leaving, new PtyMessage.Input(1, "\n".getBytes()));
-        var goneDirectory = gone.path().substring(0, gone.path().lastIndexOf('/'));
-        awaitInInstance("test -e " + goneDirectory + " && echo kept || echo gone", "gone");
+        awaitInInstance(
+            "test -e " + directoryOf(gone.path()) + " && echo kept || echo gone", "gone");
 
-        var left =
-            shell.exec(
-                List.of(
-                    "incus",
-                    "exec",
-                    INSTANCE,
-                    "--user",
-                    "1000",
-                    "--group",
-                    "1000",
-                    "--",
-                    "sh",
-                    "-c",
-                    "mkdir -p -m 0700 /tmp/sail-paste/0f0e0d0c-left && echo left >"
-                        + " /tmp/sail-paste/0f0e0d0c-left/1-left.txt"));
-        assertTrue(left.ok(), "the dev user could not leave a session's uploads: " + left.stderr());
+        inInstance(
+            "mkdir -p -m 0700 /var/lib/sail-paste/0f0e0d0c-0000-7000-8000-000000000000"
+                + " && echo left > /var/lib/sail-paste/0f0e0d0c-0000-7000-8000-000000000000/1-a");
         try (var newcomer = session("p12")) {
-          assertFalse(inInstance("ls -A /tmp/sail-paste").contains("0f0e0d0c-left"));
+          awaitInInstance(
+              "test -e /var/lib/sail-paste/0f0e0d0c-0000-7000-8000-000000000000"
+                  + " && echo kept || echo gone",
+              "gone");
           assertEquals("staying", inInstance("cat " + kept.path()));
           assertTrue(newcomer.isOpen());
         }
       }
     } finally {
       deleteContainerQuietly(INSTANCE);
+    }
+  }
+
+  /**
+   * Major 1 and Minor 10: a workspace whose disk fills, before an upload or while it is written,
+   * refuses it as {@code no_space} and keeps nothing of it; so does an upload whose copy into the
+   * workspace is killed midway. The uploads root is a 1 MiB filesystem of its own here.
+   */
+  @Test
+  void aFullDiskOrAKilledCopyLeavesNothingBehind() throws Exception {
+    ensureIncusOrSkip();
+    try {
+      prepare();
+      inInstance(
+          "mkdir -p /var/lib/sail-paste && mount -t tmpfs -o size=1m,mode=0755 tmpfs"
+              + " /var/lib/sail-paste");
+      try (var host = startHost();
+          var channel = session("p13")) {
+        var small = upload(channel, "first.txt", "first".getBytes());
+        var directory = directoryOf(small.path());
+
+        assertEquals(
+            new PtyMessage.PutRefused(2, PtyMessage.PutRefusal.NO_SPACE, 0),
+            tryUpload(channel, 2, "big.bin", new byte[2 << 20], () -> {}));
+        assertEquals("1-first.txt ", held(directory));
+
+        var filling = new byte[600 << 10];
+        new Random(13).nextBytes(filling);
+        var filled =
+            tryUpload(
+                channel,
+                3,
+                "filling.bin",
+                filling,
+                () -> inInstance("head -c 700000 /dev/zero > /var/lib/sail-paste/filler || true"));
+        assertEquals(new PtyMessage.PutRefused(3, PtyMessage.PutRefusal.NO_SPACE, 0), filled);
+        awaitInInstance("ls -A " + directory + " | tr '\\n' ' '", "1-first.txt ");
+        inInstance("rm /var/lib/sail-paste/filler");
+
+        var killed =
+            tryUpload(
+                channel,
+                4,
+                "killed.bin",
+                filling,
+                () ->
+                    ProcessHandle.current()
+                        .descendants()
+                        .filter(
+                            process ->
+                                process.info().arguments().stream()
+                                    .flatMap(Arrays::stream)
+                                    .anyMatch("sail-open"::equals))
+                        .forEach(ProcessHandle::destroyForcibly));
+        assertEquals(new PtyMessage.PutRefused(4, PtyMessage.PutRefusal.FAILED, 0), killed);
+        awaitInInstance("ls -A " + directory + " | tr '\\n' ' '", "1-first.txt ");
+      }
+    } finally {
+      deleteContainerQuietly(INSTANCE);
+    }
+  }
+
+  /**
+   * Major 5: links the dev user plants in its session's directory are never written through and
+   * never followed when the directory goes.
+   */
+  @Test
+  void linksInASessionsDirectoryAreNeitherWrittenThroughNorFollowed() throws Exception {
+    ensureIncusOrSkip();
+    try {
+      prepare();
+      try (var host = startHost();
+          var channel = session("p14")) {
+        var first = upload(channel, "a.png", "one".getBytes());
+        var directory = directoryOf(first.path());
+        assertTrue(
+            asDev(
+                "echo mine > /home/dev/workspace/keep"
+                    + " && ln -s /home/dev/workspace "
+                    + directory
+                    + "/2-a.png"
+                    + " && ln -s /home/dev/workspace/new "
+                    + directory
+                    + "/.3-a.png.part"),
+            "the dev user could not plant its links");
+
+        var next = upload(channel, "a.png", "two".getBytes());
+        assertEquals(directory + "/4-a.png", next.path());
+        assertEquals("two", inInstance("cat " + next.path()));
+        assertEquals("keep", inInstance("ls -A /home/dev/workspace"));
+
+        try (var killer = connect()) {
+          PtyWire.write(killer, new PtyMessage.Kill("p14"));
+          assertInstanceOf(PtyMessage.Ok.class, PtyWire.read(killer));
+        }
+        awaitInInstance("test -e " + directory + " && echo kept || echo gone", "gone");
+        assertEquals("mine", inInstance("cat /home/dev/workspace/keep"));
+      }
+    } finally {
+      deleteContainerQuietly(INSTANCE);
+    }
+  }
+
+  /** Minor 10: a session in a project's shared container takes no file, and nothing is made. */
+  @Test
+  void aSessionInASharedContainerTakesNoFile() throws Exception {
+    ensureIncusOrSkip();
+    try {
+      prepare(PROJECT);
+      try (var host = startHost();
+          var channel = session("p15", "")) {
+        assertEquals(
+            new PtyMessage.PutRefused(1, PtyMessage.PutRefusal.SHARED_CONTAINER, 0),
+            tryUpload(channel, 1, "a.png", new byte[] {1}, () -> {}));
+        var looked = exec(PROJECT, List.of("sh", "-c", "test -e /var/lib/sail-paste && echo made"));
+        assertEquals("", looked.stdout().strip());
+      }
+    } finally {
+      deleteContainerQuietly(PROJECT);
     }
   }
 }

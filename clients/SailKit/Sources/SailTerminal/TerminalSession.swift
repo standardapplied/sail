@@ -55,7 +55,7 @@ public final class TerminalSession: Sendable {
     private let sequence = Mutex<Int64>(0)
     private let latency = Mutex(LatencyRecorder())
     private let tap = Relay<[UInt8]>()
-    private let uploads = Uploads()
+    let uploads = Uploads()
     private let alarm: Alarm
     private let sleep: @Sendable (Duration) async throws -> Void
     private let after: HoldTick.After
@@ -391,9 +391,12 @@ public final class TerminalSession: Sendable {
     /// waits its turn. Refused with an ``UploadRefusal`` before a byte is sent when this machine's
     /// own host serves the session (it has no workspace), the file is larger than
     /// ``UploadPacing/largest``, or this client is known to be watching, not writing; refused by the
-    /// host for its own reasons; and ended as ``UploadRefusal/Kind/sessionEnded`` when the session
-    /// or its connection ends first. Cancelling the task cancels the upload, and the host keeps
-    /// nothing of it. `progress` hears the bytes the host holds as they grow.
+    /// host for its own reasons. A connection that drops before the end is sent loses the upload
+    /// (``UploadRefusal/Kind/connectionLost``); after it, the next connection asks the host what
+    /// became of it, and its answer is the outcome. Cancelling the task before the end is sent
+    /// cancels the upload, and the host keeps nothing; after it, the host keeps nothing unless it
+    /// already stored the file, and then its path is returned. A read of `source` that fails throws
+    /// its own error. `progress` hears the bytes the host holds as they grow.
     public func upload(
         name: String, source: UploadSource, progress: @escaping @Sendable (Int64) -> Void = { _ in }
     ) async throws -> String {
@@ -402,11 +405,10 @@ public final class TerminalSession: Sendable {
         }
         if case .local = door { throw refusal(.noContainer, 0) }
         guard source.size <= UploadPacing.largest else { throw refusal(.tooLarge, UploadPacing.largest) }
-        await uploads.enter()
+        try await uploads.enter()
         defer { uploads.leave() }
-        try Task.checkCancellation()
         let (connection, writing) = core.withLock { ($0.connection, $0.writing) }
-        guard let connection else { throw refusal(.sessionEnded, 0) }
+        guard let connection else { throw refusal(.connectionLost, 0) }
         guard writing else { throw refusal(.notWriter, 0) }
         let flight = uploads.begin(on: connection)
         defer { uploads.finish(flight) }
@@ -415,19 +417,22 @@ public final class TerminalSession: Sendable {
             outcome = try await send(source, as: name, on: flight, progress: progress)
         } catch is TerminalError {
             connection.close()
-            throw refusal(.sessionEnded, 0)
+            flight.dropped(connection)
+            if let now = core.withLock({ $0.connection }), now !== connection { flight.attached(now) }
+            outcome = await flight.outcome()
         } catch {
-            try? connection.send(.putCancel(id: flight.id))
-            throw refusal(.failed, 0)
+            try? flight.send(.putCancel(id: flight.id))
+            throw error
         }
         switch outcome {
         case let .stored(path):
             progress(source.size)
             return path
+        case .refused(.known(.cancelled), _): throw CancellationError()
         case let .refused(kind, limit): throw UploadRefusal(kind: kind, limit: limit, file: name, size: source.size)
         case .ended: throw refusal(.sessionEnded, 0)
         case .cancelled:
-            try? connection.send(.putCancel(id: flight.id))
+            try? flight.send(.putCancel(id: flight.id))
             throw CancellationError()
         }
     }
@@ -437,8 +442,7 @@ public final class TerminalSession: Sendable {
     private func send(
         _ source: UploadSource, as name: String, on flight: UploadFlight, progress: @Sendable (Int64) -> Void
     ) async throws -> UploadFlight.Outcome {
-        let connection = flight.connection
-        try connection.send(.putBegin(id: flight.id, name: name, size: source.size))
+        try flight.send(.putBegin(id: flight.id, name: name, size: source.size))
         if let early = await flight.wait(until: 0) { return early }
         var digest = SHA256()
         var offset: Int64 = 0
@@ -446,12 +450,12 @@ public final class TerminalSession: Sendable {
             let bytes = try source.read(Int(min(Int64(UploadPacing.chunk), source.size - offset)))
             guard !bytes.isEmpty else { throw UploadSourceShrank() }
             digest.update(bytes)
-            try connection.send(.putChunk(id: flight.id, offset: offset, bytes: bytes))
+            try flight.send(.putChunk(id: flight.id, offset: offset, bytes: bytes))
             offset += Int64(bytes.count)
             if let early = await flight.wait(until: offset - Int64(UploadPacing.window * UploadPacing.chunk)) { return early }
             progress(flight.acked)
         }
-        try connection.send(.putEnd(id: flight.id, sha256: digest.finalize()))
+        try flight.send(.putEnd(id: flight.id, sha256: digest.finalize()))
         return await flight.outcome()
     }
 
@@ -649,11 +653,13 @@ public final class TerminalSession: Sendable {
             return standDown
         }
         alarm.clear()
+        uploads.attached(connection)
         setPhase(.attached)
         let attached = clock.now
         var outcome = read(connection, since: attached)
         connection.close()
-        uploads.ended(connection)
+        if case .finished(.ended) = outcome { uploads.over(sessionEnded: true) }
+        uploads.dropped(connection)
         core.withLock { core in
             if core.connection === connection { core.connection = nil }
             if case .dropped = outcome, core.detaching { outcome = .detached }
@@ -909,7 +915,13 @@ public final class TerminalSession: Sendable {
             core.state.phase = phase
             return true
         }
-        if changed { emit(.phase(phase)) }
+        guard changed else { return }
+        switch phase {
+        case .ended(.ended), .ended(.hostRestarted): uploads.over(sessionEnded: true)
+        case .ended, .parked, .detached: uploads.over(sessionEnded: false)
+        case .connecting, .attached, .reconnecting: break
+        }
+        emit(.phase(phase))
     }
 
     private func finish(_ end: SessionEnd) {

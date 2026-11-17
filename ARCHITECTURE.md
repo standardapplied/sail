@@ -3875,35 +3875,52 @@ door, issues a ticket, presents it and hears one echo (`tcp-selftest: ok`), so t
 runs the door and its keepalive options.
 
 **Files pasted into a session (`PtyUploads`).** A client uploads a file on the terminal connection
-it already holds, in frames 12-15 (`PutBegin`, `PutChunk`, `PutEnd`, `PutCancel`) answered by 35-37
-(`PutAck`, `PutStored`, `PutRefused`, a kind and the bound it met, never a sentence: SailKit's
-`UploadRefusal.sentence` words each kind once). `PtyUploadsTest` drives each rule through a real host.
+it already holds, in frames 12-16 (`PutBegin`, `PutChunk`, `PutEnd`, `PutCancel`, `PutQuery`)
+answered by 35-37 (`PutAck`, `PutStored`, `PutRefused`, a kind and the bound it met, never a
+sentence: SailKit's `UploadRefusal.sentence` words each kind once). Nothing of a file is kept on
+the host: its bytes stream from the connection into the workspace. `PtyUploadsTest` drives each rule
+through a real host against a directory standing as the container; `PtyUploadIT` drives them against
+real Incus.
 - **U1. Only into the session's own workspace.** `PtyUploads.targetOf` alone names where a
   session's files go: a session in a workspace into that workspace's own instance
   (`<project>-<workspace>`, one person's); a session on the box itself has no container
   (`no_container`), and one in a project's container shares it with every member's sessions
   (`shared_container`), so nothing is stored there. The bytes never leave the connection to that host; the control plane never sees one.
-- **U3. Only the writer,** asked of the session (`PtySession.isWriter`) at `PutBegin`; a ticket admits
-  the four client frames as it admits input.
-- **U4. The host names every path:** `/tmp/sail-paste/<instanceId>/<n>-<name>`, the name reduced to
-  `[A-Za-z0-9._-]`, at most 96 bytes, `file` for nothing, `.` or `..` (`PtyUploads.named`, mirrored by
-  SailKit's `UploadName`); `<n>` is the first number from the session's count that no file of that
-  name holds, so nothing is overwritten, a host's successor's uploads included. The directory is
-  `0700`, the file `0600`, both the dev user's.
+- **U3. Only the writer,** asked of the session (`PtySession.isWriter`) at `PutBegin`, at every chunk
+  and at `PutEnd`; a ticket admits the five client frames as it admits input.
+- **U4. The host names every path:** `/var/lib/sail-paste/<instanceId>/<n>-<name>`, the name reduced
+  to `[A-Za-z0-9._-]`, at most 96 bytes, `file` for nothing, `.` or `..` (`PtyUploads.named`, mirrored
+  by SailKit's `UploadName`). `/var/lib/sail-paste` is root's (`0755`), made and checked by the host
+  before every write and every delete; each session's directory is the dev user's alone (`0700`),
+  its files `0600`. `<n>` is the first number no file, link or temporary of that name takes.
 - **U5. Bounded on the host:** 64 MiB a file (`ITEM`), 64 KiB a chunk (`CHUNK`), 256 files and 1 GiB a
-  session (`FILES`, `SESSION`), counted across the session's connections when an upload begins and
-  checked again against what its directory holds before each push.
-- **U6. Whole or nothing.** Chunks are appended in order to a private file in `SailPaths.stagingDir`
-  on the connection's own thread; one out of order, past the declared size, or a digest that is not
-  the bytes' SHA-256 is `failed` and nothing is pushed. The push runs on a thread of its own, so input
-  keeps flowing; a full disk is `no_space`. A refusal, a cancel, a detach or a dropped connection
-  deletes the staged file.
+  session (`FILES`, `SESSION`), taken from the session's allowance across its connections when an
+  upload begins and handed back by any upload that is not stored; the container checks the same
+  bounds against what the directory holds, and its disk's free space, before it opens the file. A
+  refusal is decided by a script's exit status, never by words: 11 `too_many`, 12 `session_full`,
+  28 `no_space` (no room before the file opens, or under 64 KiB free once a write failed).
+- **U6. Whole or nothing.** One `incus exec` per upload (`OPEN`) runs as root to make the
+  directories, then as the dev user (`setpriv`) creates `.<n>-<name>.part` with `O_EXCL` (a link at
+  the name is refused, never written through) and copies its input into it; each chunk, in order and
+  within the declared size, is written to that input and acknowledged once written. At `PutEnd`, from
+  the writer, with every byte there and the bytes' SHA-256 the client's, `COMMIT` gives the
+  temporary its name by a hard link, which never overwrites, once it is a regular file of the
+  declared size. Anything else (a refusal, a cancel, a detach, a dropped connection, a failed copy)
+  removes the temporary (`ABORT`). A cancel after `PutEnd` keeps nothing unless the file took its
+  name first, and the answer says which. A client whose connection dropped after `PutEnd` asks on its
+  next connection (`PutQuery`): the session's last 64 answers are kept by id, else `not_known`.
 - **U7. Typing first.** SailKit sends 32 KiB chunks, each frame written on its own, and no more than
-  two unacknowledged, so a key waits behind at most three chunks: measured at 77 ms worst through a
-  10 Mbit/s link (`UploadTests.typingStaysFirstThroughASlowLink`).
-- **U8. Gone with the session.** When a session ends its directory is removed as the dev user, under
-  the lock its pushes take, so a push lands before the removal or is refused `session_ended`; the
-  next session made in a container removes every upload directory there whose session is not live.
+  two unacknowledged, so a key waits behind at most 96 KiB
+  (`UploadTests.aKeyTypedDuringAnUploadGoesOutAheadOfEveryChunkTheHostHasNotTaken`).
+- **U8. Gone with the session.** When a session ends no upload begins in it, and its directory is
+  removed as root on a thread of its own (`REMOVE`), never under the host's lock: a commit and the
+  removal take the session's lock in turn, so a file is stored before the removal or the upload is
+  answered `session_ended`. The next session made in a container removes, under that container's
+  lock, every directory there named as an instance id whose session is not live (`SWEEP`); a
+  session's first upload takes the same lock, so the sweep never removes what a live session is
+  making. No delete follows a link: each checks the root is a directory, not a link, and root's,
+  and `rm -r` removes a link as itself, walking by descriptor, so nothing in the container can turn a
+  delete outside the uploads; the dev user cannot write the root or swap its own directory.
 
 **The terminal host on a person's own machine.** `sail _pty-host --local` (`LocalPtyHost`) is the
 same host wired for the account it runs as, with no server: the native app's launchd agent runs
@@ -4661,8 +4678,12 @@ every build. With all seven signing secrets (`ci/signing`
 decides, and fails on some but not all) it is signed with Developer ID, its profile embedded and
 its entitlements claimed, notarized, stapled and assessed by Gatekeeper; without them it is uploaded as an unsigned build and the signed-only check
 is skipped. Goldens are recorded only by the workflow's `record-goldens`
-input, never by a pull request's run. This job and the SailKit jobs run only when `clients/` or
-the workflow changed (a job skipped by `if:` reports success, so no required check waits on it).
+input, never by a pull request's run. This job and the SailKit jobs run only when `clients/`, the
+workflow, or what the darwin `sail` is built from (the build files and the Java modules' main
+sources) changed (`ci/changes`; a job skipped by `if:` reports success, so no required check waits
+on it). A release calls the workflow for this job alone: its app bundles the `sail-darwin-arm64`
+the release built and signed in the same run, its cosign signature verified against the release
+workflow at that tag first, so the app and the release ship one binary, built and attested once.
 
 ### The Sail app signs in with a passkey
 

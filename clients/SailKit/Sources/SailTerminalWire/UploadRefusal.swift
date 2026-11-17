@@ -14,6 +14,12 @@ public struct UploadRefusal: Error, Equatable, Sendable {
         case sessionEnded = "session_ended"
         case noSpace = "no_space"
         case failed
+        case cancelled
+        /// The host has no record of the upload asked after: it cannot say whether it stored it.
+        case notKnown = "not_known"
+        /// Said by this client alone: the connection dropped before the upload's end was sent, so
+        /// the host, which stores a file only once its end arrives, kept nothing.
+        case connectionLost = "connection_lost"
     }
 
     public var kind: Open<Kind>
@@ -49,6 +55,12 @@ public struct UploadRefusal: Error, Equatable, Sendable {
             "The session ended before \(file) was uploaded; nothing was saved."
         case .known(.noSpace):
             "\(box) has no room for \(file); nothing was saved."
+        case .known(.cancelled):
+            "\(file) was cancelled; nothing was saved."
+        case .known(.notKnown):
+            "The connection to \(box) dropped after \(file) was sent, and whether it was saved is not known; paste it again if it is not in your workspace."
+        case .known(.connectionLost):
+            "The connection to \(box) dropped while \(file) was uploading, before it was sent whole, so nothing was saved; paste it again."
         case .known(.failed), .unknown:
             "\(file) could not be saved on \(box); nothing was pasted. Paste it again."
         }

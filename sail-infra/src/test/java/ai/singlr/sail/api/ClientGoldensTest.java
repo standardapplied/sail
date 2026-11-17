@@ -582,8 +582,9 @@ class ClientGoldensTest {
         new PtyMessage.PutChunk(7, Long.MAX_VALUE, chunk()),
         new PtyMessage.PutEnd(7, sha256(chunk())),
         new PtyMessage.PutCancel(Integer.MAX_VALUE),
+        new PtyMessage.PutQuery(7),
         new PtyMessage.PutAck(7, 65536),
-        new PtyMessage.PutStored(7, "/tmp/sail-paste/inst-1/1-shot.png"),
+        new PtyMessage.PutStored(7, "/var/lib/sail-paste/inst-1/1-shot.png"),
         new PtyMessage.PutRefused(-1, PtyMessage.PutRefusal.TOO_LARGE, 64L << 20),
         new PtyMessage.TicketRefused(
             PtyMessage.TicketRefusal.NOT_FOUND,

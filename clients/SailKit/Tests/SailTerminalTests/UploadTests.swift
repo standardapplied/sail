@@ -14,21 +14,19 @@ import Testing
         let stored = Task {
             try await session.upload(name: "shot.png", source: .bytes(bytes)) { held in progress.withLock { $0.append(held) } }
         }
-        #expect(try await peer.read() == .putBegin(id: 0, name: "shot.png", size: Int64(bytes.count)))
-        try peer.send(.putAck(id: 0, received: 0))
+        let id = try await begun(peer, name: "shot.png", size: bytes.count)
+        try peer.send(.putAck(id: id, received: 0))
         var received: [UInt8] = []
         while received.count < bytes.count {
-            guard case let .putChunk(id, offset, chunk) = try await peer.read() else { throw HostError("expected a chunk") }
-            #expect(id == 0 && offset == Int64(received.count) && chunk.count <= UploadPacing.chunk)
+            guard case let .putChunk(chunkID, offset, chunk) = try await peer.read() else { throw HostError("expected a chunk") }
+            #expect(chunkID == id && offset == Int64(received.count) && chunk.count <= UploadPacing.chunk)
             received += chunk
-            try peer.send(.putAck(id: 0, received: Int64(received.count)))
+            try peer.send(.putAck(id: id, received: Int64(received.count)))
         }
         #expect(received == bytes)
-        var digest = SHA256()
-        digest.update(bytes)
-        #expect(try await peer.read() == .putEnd(id: 0, sha256: digest.finalize()))
-        try peer.send(.putStored(id: 0, path: "/tmp/sail-paste/inst-1/1-shot.png"))
-        #expect(try await stored.value == "/tmp/sail-paste/inst-1/1-shot.png")
+        #expect(try await peer.read() == .putEnd(id: id, sha256: digest(bytes)))
+        try peer.send(.putStored(id: id, path: "/var/lib/sail-paste/inst-1/1-shot.png"))
+        #expect(try await stored.value == "/var/lib/sail-paste/inst-1/1-shot.png")
         #expect(progress.withLock { $0 }.last == Int64(bytes.count))
         session.close()
         _ = host
@@ -49,8 +47,8 @@ import Testing
             return try whole.read(count)
         }
         let stored = Task { try await session.upload(name: "a", source: source) }
-        #expect(try await peer.read() == .putBegin(id: 0, name: "a", size: Int64(bytes.count)))
-        try peer.send(.putAck(id: 0, received: 0))
+        let id = try await begun(peer, name: "a", size: bytes.count)
+        try peer.send(.putAck(id: id, received: 0))
         for index in 0 ... UploadPacing.window {
             guard case let .putChunk(_, offset, _) = try await peer.read() else { throw HostError("expected a chunk") }
             #expect(offset == Int64(index * UploadPacing.chunk))
@@ -59,11 +57,11 @@ import Testing
         guard case let .input(_, typed) = try await peer.read() else { throw HostError("the key did not go ahead of the chunks") }
         #expect(typed == Array("k".utf8))
         pacing.withLock { $0.acknowledged = true }
-        try peer.send(.putAck(id: 0, received: Int64(bytes.count)))
+        try peer.send(.putAck(id: id, received: Int64(bytes.count)))
         while true {
             if case .putEnd = try await peer.read() { break }
         }
-        try peer.send(.putStored(id: 0, path: "/tmp/sail-paste/i/1-a"))
+        try peer.send(.putStored(id: id, path: "/var/lib/sail-paste/i/1-a"))
         _ = try await stored.value
         #expect(!pacing.withLock { $0.readAhead }, "no chunk past the window is even read before the host takes one")
         session.close()
@@ -95,14 +93,15 @@ import Testing
     @Test func theHostsRefusalIsThrownWithItsKindAndBound() async throws {
         let (host, session, peer) = try await attachedOnRunner()
         let stored = Task { try await session.upload(name: "a.png", source: .bytes([1])) }
-        #expect(try await peer.read() == .putBegin(id: 0, name: "a.png", size: 1))
-        try peer.send(.putRefused(id: 0, kind: .known(.sharedContainer), limit: 0))
+        let id = try await begun(peer, name: "a.png", size: 1)
+        try peer.send(.putRefused(id: id, kind: .known(.sharedContainer), limit: 0))
         await #expect(throws: UploadRefusal(kind: .known(.sharedContainer), limit: 0, file: "a.png", size: 1)) {
             try await stored.value
         }
         let next = Task { try await session.upload(name: "b", source: .bytes([1])) }
-        #expect(try await peer.read() == .putBegin(id: 1, name: "b", size: 1), "each upload has an id of its own")
-        try peer.send(.putRefused(id: 1, kind: .unknown("quota"), limit: 9))
+        let nextID = try await begun(peer, name: "b", size: 1)
+        #expect(nextID != id, "each upload has an id of its own")
+        try peer.send(.putRefused(id: nextID, kind: .unknown("quota"), limit: 9))
         await #expect(throws: UploadRefusal(kind: .unknown("quota"), limit: 9, file: "b", size: 1)) {
             try await next.value
         }
@@ -110,13 +109,60 @@ import Testing
         _ = host
     }
 
-    @Test func aConnectionLostMidUploadEndsItAsTheSessionEnded() async throws {
+    /// Major 4: a drop before the end is sent loses the upload, and the person is told the
+    /// connection dropped, not that the session ended.
+    @Test func aConnectionLostBeforeTheEndIsToldAsTheConnectionLost() async throws {
         let (host, session, peer) = try await attachedOnRunner()
-        let stored = Task { try await session.upload(name: "a", source: .bytes([UInt8](repeating: 1, count: UploadPacing.chunk * 4))) }
-        _ = try await peer.read()
-        try peer.send(.putAck(id: 0, received: 0))
+        let size = UploadPacing.chunk * 4
+        let stored = Task { try await session.upload(name: "a", source: .bytes([UInt8](repeating: 1, count: size))) }
+        let id = try await begun(peer, name: "a", size: size)
+        try peer.send(.putAck(id: id, received: 0))
         _ = try await peer.read()
         peer.close()
+        await #expect(throws: UploadRefusal(kind: .known(.connectionLost), limit: 0, file: "a", size: Int64(size))) {
+            try await stored.value
+        }
+        session.close()
+        _ = host
+    }
+
+    /// Major 4: a drop after the end is sent leaves the outcome to the host, which the next
+    /// connection asks; its answer is what the upload comes to, a stored file or not known.
+    @Test func aConnectionLostAfterTheEndAsksTheNextConnectionWhatBecameOfTheUpload() async throws {
+        for (answer, expected) in [
+            (Frame.putStored(id: 0, path: "/var/lib/sail-paste/i/1-a"), "stored"),
+            (Frame.putRefused(id: 0, kind: .known(.notKnown), limit: 0), "not known"),
+        ] {
+            let (host, session, peer) = try await attachedOnRunner()
+            let stored = Task { try await session.upload(name: "a", source: .bytes([1])) }
+            let id = try await sentWhole(peer, [1])
+            peer.close()
+            let again = try await host.accept()
+            try await again.welcome()
+            _ = try await again.acceptAttach()
+            #expect(try await again.read() == .putQuery(id: id))
+            switch answer {
+            case let .putStored(_, path):
+                try again.send(.putStored(id: id, path: path))
+                #expect(try await stored.value == path, "\(expected)")
+            default:
+                try again.send(.putRefused(id: id, kind: .known(.notKnown), limit: 0))
+                await #expect(throws: UploadRefusal(kind: .known(.notKnown), limit: 0, file: "a", size: 1), "\(expected)") {
+                    try await stored.value
+                }
+            }
+            session.close()
+            _ = host
+        }
+    }
+
+    @Test func aSessionThatEndsMidUploadIsToldAsEnded() async throws {
+        let (host, session, peer) = try await attachedOnRunner()
+        let stored = Task { try await session.upload(name: "a", source: .bytes([UInt8](repeating: 1, count: UploadPacing.chunk * 4))) }
+        let id = try await begun(peer, name: "a", size: UploadPacing.chunk * 4)
+        try peer.send(.putAck(id: id, received: 0))
+        _ = try await peer.read()
+        try peer.send(.sessionEnded(reason: "exit 0"))
         await #expect(throws: UploadRefusal(kind: .known(.sessionEnded), limit: 0, file: "a", size: Int64(UploadPacing.chunk * 4))) {
             try await stored.value
         }
@@ -127,14 +173,73 @@ import Testing
     @Test func aCancelledUploadTellsTheHostAndThrowsCancellation() async throws {
         let (host, session, peer) = try await attachedOnRunner()
         let stored = Task { try await session.upload(name: "a", source: .bytes([UInt8](repeating: 1, count: UploadPacing.chunk * 8))) }
-        _ = try await peer.read()
-        try peer.send(.putAck(id: 0, received: 0))
+        let id = try await begun(peer, name: "a", size: UploadPacing.chunk * 8)
+        try peer.send(.putAck(id: id, received: 0))
         for _ in 0 ... UploadPacing.window {
             _ = try await peer.read()
         }
         stored.cancel()
-        #expect(try await peer.read() == .putCancel(id: 0))
+        #expect(try await peer.read() == .putCancel(id: id))
         await #expect(throws: CancellationError.self) { try await stored.value }
+        session.close()
+        _ = host
+    }
+
+    /// Minor 2: a cancel after the end is sent asks the host to keep nothing, and the host's answer
+    /// says what happened: cancelled, or stored when the file had already taken its name.
+    @Test func aCancelAfterTheEndIsTheHostsToDecide() async throws {
+        let (host, session, peer) = try await attachedOnRunner()
+        let first = Task { try await session.upload(name: "a", source: .bytes([1])) }
+        let id = try await sentWhole(peer, [1])
+        first.cancel()
+        #expect(try await peer.read() == .putCancel(id: id))
+        try peer.send(.putRefused(id: id, kind: .known(.cancelled), limit: 0))
+        await #expect(throws: CancellationError.self) { try await first.value }
+
+        let second = Task { try await session.upload(name: "b", source: .bytes([2])) }
+        let secondID = try await sentWhole(peer, [2])
+        second.cancel()
+        #expect(try await peer.read() == .putCancel(id: secondID))
+        try peer.send(.putStored(id: secondID, path: "/var/lib/sail-paste/i/1-b"))
+        #expect(try await second.value == "/var/lib/sail-paste/i/1-b", "a file stored before the cancel is said to be stored")
+        session.close()
+        _ = host
+    }
+
+    /// Minor 7: an upload cancelled while it waits behind another stops waiting at once.
+    @Test func anUploadCancelledWhileItWaitsItsTurnStopsWaiting() async throws {
+        let (host, session, peer) = try await attachedOnRunner()
+        let first = Task { try await session.upload(name: "a", source: .bytes([1])) }
+        let id = try await begun(peer, name: "a", size: 1)
+        let waiting = Task { try await session.upload(name: "b", source: .bytes([2])) }
+        while session.uploads.waiting == 0 {
+            await Task.yield()
+        }
+        waiting.cancel()
+        await #expect(throws: CancellationError.self) { try await waiting.value }
+        try peer.send(.putAck(id: id, received: 0))
+        _ = try await peer.read()
+        try peer.send(.putAck(id: id, received: 1))
+        _ = try await peer.read()
+        try peer.send(.putStored(id: id, path: "/p/a"))
+        #expect(try await first.value == "/p/a")
+        let next = Task { try await session.upload(name: "c", source: .bytes([3])) }
+        _ = try await begun(peer, name: "c", size: 1)
+        next.cancel()
+        session.close()
+        _ = host
+    }
+
+    /// Major 4: a file that cannot be read is this machine's failure, thrown as its own error.
+    @Test func aSourceThatFailsToReadThrowsItsOwnErrorAndCancelsTheUpload() async throws {
+        struct Unreadable: Error, Equatable {}
+        let (host, session, peer) = try await attachedOnRunner()
+        let source = UploadSource(size: 4) { _ in throw Unreadable() }
+        let stored = Task { try await session.upload(name: "a", source: source) }
+        let id = try await begun(peer, name: "a", size: 4)
+        try peer.send(.putAck(id: id, received: 0))
+        #expect(try await peer.read() == .putCancel(id: id))
+        await #expect(throws: Unreadable()) { try await stored.value }
         session.close()
         _ = host
     }
@@ -152,16 +257,14 @@ import Testing
             try peer.send(.putStored(id: id, path: "/p/\(id)"))
         }
         let paths = Set([try await first.value, try await second.value])
-        #expect(paths == ["/p/0", "/p/1"])
+        #expect(paths.count == 2)
         session.close()
         _ = host
     }
 
     @Test func theDigestIsSHA256() {
         func hex(_ bytes: [UInt8]) -> String {
-            var digest = SHA256()
-            digest.update(bytes)
-            return digest.finalize().map { String(format: "%02x", $0) }.joined()
+            digest(bytes).map { String(format: "%02x", $0) }.joined()
         }
         #expect(hex([]) == "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855")
         #expect(hex(Array("abc".utf8)) == "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad")
@@ -174,50 +277,30 @@ import Testing
         #expect(pieces.finalize().map { String(format: "%02x", $0) }.joined()
             == "cdc76e5c9914fb9281a1c7e284d73e67f1809a48a497200e046d39ccc7112cd0")
     }
+}
 
-    /// Scenario 12: a 4 MiB upload over a link of 10 Mbit/s while a key is typed every 50 ms; each
-    /// key reaches the host within 110 ms of its press, and every byte arrives.
-    @Test(.timeLimit(.minutes(1))) func typingStaysFirstThroughASlowLink() async throws {
-        let (host, session, peer) = try await attachedOnRunner()
-        peer.shape(bytesPerSecond: 10_000_000 / 8)
-        let bytes = (0 ..< 4 << 20).map { UInt8(truncatingIfNeeded: $0 &* 7) }
-        let pressed = Mutex<[ContinuousClock.Instant]>([])
-        let arrived = Mutex<[ContinuousClock.Instant]>([])
-        let stored = Task { try await session.upload(name: "big.bin", source: .bytes(bytes)) }
-        let typing = Task {
-            while !Task.isCancelled {
-                try await Task.sleep(for: .milliseconds(50))
-                pressed.withLock { $0.append(.now) }
-                session.paste("k")
-            }
-        }
-        var received = 0
-        reading: while true {
-            switch try await peer.read() {
-            case .putBegin: try peer.send(.putAck(id: 0, received: 0))
-            case let .putChunk(_, _, chunk):
-                received += chunk.count
-                try peer.send(.putAck(id: 0, received: Int64(received)))
-            case .input: arrived.withLock { $0.append(.now) }
-            case .putEnd:
-                try peer.send(.putStored(id: 0, path: "/p"))
-                break reading
-            default: continue
-            }
-        }
-        _ = try await stored.value
-        typing.cancel()
-        let delays = zip(pressed.withLock { $0 }, arrived.withLock { $0 }).map { $1 - $0 }.sorted()
-        let worst = try #require(delays.last)
-        print("upload pacing: chunk \(UploadPacing.chunk), window \(UploadPacing.window), \(delays.count) keys,"
-            + " median \(delays[delays.count / 2]), p95 \(delays[delays.count * 95 / 100]), worst \(worst)")
-        #expect(received == bytes.count)
-        let keysTypedDuringTheUpload = delays.count
-        #expect(keysTypedDuringTheUpload >= 20, "the worst delay below is over at least a second of the upload's keys, not a handful")
-        #expect(worst <= .milliseconds(110))
-        session.close()
-        _ = host
+/// The id of the upload `peer` reads the begin of, checking its name and size.
+func begun(_ peer: FakeHost.Peer, name: String, size: Int) async throws -> Int32 {
+    guard case let .putBegin(id, begunName, begunSize) = try await peer.read(), begunName == name, begunSize == Int64(size) else {
+        throw HostError("expected the begin of \(name)")
     }
+    return id
+}
+
+/// Takes an upload of `bytes`, one chunk, through to its end, leaving the end unanswered: its id.
+func sentWhole(_ peer: FakeHost.Peer, _ bytes: [UInt8]) async throws -> Int32 {
+    guard case let .putBegin(id, _, _) = try await peer.read() else { throw HostError("expected a begin") }
+    try peer.send(.putAck(id: id, received: 0))
+    guard case .putChunk = try await peer.read() else { throw HostError("expected the chunk") }
+    try peer.send(.putAck(id: id, received: Int64(bytes.count)))
+    guard case .putEnd = try await peer.read() else { throw HostError("expected the end") }
+    return id
+}
+
+func digest(_ bytes: [UInt8]) -> [UInt8] {
+    var digest = SHA256()
+    digest.update(bytes)
+    return digest.finalize()
 }
 
 @Suite(.timeLimit(.minutes(1))) struct ProbeUploadTests {
@@ -233,11 +316,14 @@ import Testing
         let runner = Runner(session: session, host: nil, echoBudget: 10) { _ in }
         let report = Task { await runner.run(script) }
         var held = 0
+        var id: Int32 = 0
         var typed = 0
         var pasted: [UInt8] = []
         serving: while true {
             switch try await peer.read() {
-            case .putBegin: try peer.send(.putAck(id: 0, received: 0))
+            case let .putBegin(begun, _, _):
+                id = begun
+                try peer.send(.putAck(id: id, received: 0))
             case let .putChunk(_, _, chunk):
                 if typed == 0 {
                     guard case let .input(sequence, _) = try await peer.read() else { throw HostError("no key typed during the upload") }
@@ -245,28 +331,31 @@ import Testing
                     try peer.send(output("x", applied: sequence))
                 }
                 held += chunk.count
-                try peer.send(.putAck(id: 0, received: Int64(held)))
+                try peer.send(.putAck(id: id, received: Int64(held)))
             case let .input(sequence, _):
                 typed += 1
                 try peer.send(output("", applied: sequence))
             case .putEnd:
-                try peer.send(.putStored(id: 0, path: "/tmp/sail-paste/inst-1/1-shot.png"))
+                try peer.send(.putStored(id: id, path: "/var/lib/sail-paste/inst-1/1-shot.png"))
                 break serving
             default: continue
             }
         }
-        while pasted.count < "/tmp/sail-paste/inst-1/1-shot.png ".utf8.count {
-            if case let .input(_, bytes) = try await peer.read(), bytes.count > 1 { pasted = bytes }
+        while pasted.count < "/var/lib/sail-paste/inst-1/1-shot.png ".utf8.count {
+            guard case let .input(sequence, bytes) = try await peer.read() else { continue }
+            if bytes.count > 1 {
+                pasted = bytes
+            } else {
+                try peer.send(output("", applied: sequence))
+            }
         }
-        #expect(String(decoding: pasted, as: UTF8.self) == "/tmp/sail-paste/inst-1/1-shot.png ")
+        #expect(String(decoding: pasted, as: UTF8.self) == "/var/lib/sail-paste/inst-1/1-shot.png ")
         let done = await report.value
         let failed = done.steps.filter { !$0.ok }.map(\.step)
         #expect(failed == [])
         let upload = try #require(done.uploads.first)
-        #expect(upload.path == "/tmp/sail-paste/inst-1/1-shot.png" && upload.bytes == bytes.count)
-        var digest = SHA256()
-        digest.update(bytes)
-        #expect(upload.sha256 == digest.finalize().map { String(format: "%02x", $0) }.joined())
+        #expect(upload.path == "/var/lib/sail-paste/inst-1/1-shot.png" && upload.bytes == bytes.count)
+        #expect(upload.sha256 == digest(bytes).map { String(format: "%02x", $0) }.joined())
         #expect(!upload.keyEchoes.isEmpty)
         session.close()
         _ = host

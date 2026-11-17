@@ -33,7 +33,7 @@ public final class ContainerFilePush {
    * The directory content is staged in on its way into a container ({@link SailPaths#stagingDir}),
    * this account's alone ({@link PrivateDirectory}).
    */
-  public static Path staging() throws IOException {
+  static Path staging() throws IOException {
     return staging(SailPaths.stagingDir());
   }
 
