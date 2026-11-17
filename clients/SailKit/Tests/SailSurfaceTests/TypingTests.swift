@@ -201,7 +201,7 @@ import Testing
 @Suite struct LatencyMarksTests {
     @Test func aKeysEchoIsTheFirstOutputAfterItsBytesAndShowsWhenItsFrameIsPresented() {
         var marks = LatencyMarks()
-        marks.keyWritten(event: 1.000, written: 1.001)
+        marks.keyWritten(event: 1.000, sent: 1.0005, written: 1.001)
         marks.output(at: 1.004)
         marks.committed(frame: 1, at: 1.010, read: 1.008, target: 1.0267)
         marks.presented(frame: 1, at: 1.025, told: 1.025)
@@ -217,7 +217,7 @@ import Testing
     /// time, the key's echo counts at that completion once the commit is.
     @Test func aFrameCompletedBeforeItsCommitStillCountsItsEcho() {
         var marks = LatencyMarks()
-        marks.keyWritten(event: 1.000, written: 1.001)
+        marks.keyWritten(event: 1.000, sent: 1.0005, written: 1.001)
         marks.output(at: 1.004)
         marks.completed(frame: 1, at: 1.012, ok: true)
         marks.committed(frame: 1, at: 1.010, read: 1.008, target: 1.0267)
@@ -227,6 +227,49 @@ import Testing
         #expect(abs(figures.outputToPresentedEstimated.p50 - 8) < 1e-6)
         #expect(figures.keyToEcho.count == 0, "nothing was measured on the display")
         #expect(figures.presentedBeforeCommit == 1)
+    }
+
+    /// An echo can reach the screen after the key's bytes began to go but before the write call
+    /// returned: it is that key's echo, not the next output's.
+    @Test func anOutputBetweenTheSendAndTheWrittenStampIsTheKeysEcho() {
+        var marks = LatencyMarks()
+        marks.keyWritten(event: 1.000, sent: 1.001, written: 1.003)
+        marks.output(at: 1.002)
+        marks.committed(frame: 1, at: 1.010, read: 1.008, target: 1.0267)
+        marks.presented(frame: 1, at: 1.025, told: 1.025)
+        #expect(marks.figures.keyToEcho.count == 1)
+        #expect(abs(marks.figures.keyToEcho.p50 - 25) < 1e-6)
+    }
+
+    /// The screen-change consumer can tell the echo, and a frame draw it, before the input queue
+    /// tells the key written: the key is put to that output.
+    @Test func anOutputToldAndDrawnBeforeTheKeyIsToldWrittenIsTheKeysEcho() {
+        var marks = LatencyMarks()
+        marks.output(at: 1.002)
+        marks.committed(frame: 1, at: 1.010, read: 1.008, target: 1.0267)
+        marks.keyWritten(event: 1.000, sent: 1.001, written: 1.003)
+        marks.presented(frame: 1, at: 1.025, told: 1.025)
+        #expect(marks.figures.keyToEcho.count == 1)
+        var undrawn = LatencyMarks()
+        undrawn.output(at: 1.002)
+        undrawn.keyWritten(event: 1.000, sent: 1.001, written: 1.003)
+        undrawn.committed(frame: 1, at: 1.010, read: 1.008, target: 1.0267)
+        undrawn.presented(frame: 1, at: 1.025, told: 1.025)
+        #expect(undrawn.figures.keyToEcho.count == 1)
+    }
+
+    /// A key's echo is counted once: a key told after its echo is not put to a later output as
+    /// well, and an output before the key's send is not its echo.
+    @Test func eachKeysEchoIsCountedOnce() {
+        var marks = LatencyMarks()
+        marks.output(at: 0.999)
+        marks.output(at: 1.002)
+        marks.keyWritten(event: 1.000, sent: 1.001, written: 1.003)
+        marks.output(at: 1.005)
+        marks.committed(frame: 1, at: 1.010, read: 1.008, target: 1.0267)
+        marks.presented(frame: 1, at: 1.025, told: 1.025)
+        #expect(marks.figures.keyToEcho.count == 1)
+        #expect(abs(marks.figures.keyToEcho.p50 - 25) < 1e-6)
     }
 
     @Test func outputSeenAfterTheReadWaitsForTheNextFrameOrIsPutToTheOneThatShowedIt() {
@@ -257,7 +300,7 @@ import Testing
     /// right); once and only once, never for a failed buffer, and not once the display tells times.
     @Test func aCompletedFrameIsShownWhereTheDisplayTellsNoTime() {
         var marks = LatencyMarks()
-        marks.keyWritten(event: 1.000, written: 1.001)
+        marks.keyWritten(event: 1.000, sent: 1.0005, written: 1.001)
         marks.output(at: 1.004)
         marks.committed(frame: 1, at: 1.010, read: 1.008, target: 1.0267)
         marks.completed(frame: 1, at: 1.0113, ok: true)
