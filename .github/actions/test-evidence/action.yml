@@ -2,7 +2,8 @@ name: Test evidence
 description: >
   Leaves what a test job's maven run proved where it can be read without scrolling the log: the
   totals and every failed test in the job summary and as the log's last lines, and, unless the
-  job passed, the surefire and failsafe reports as an artifact. Run it last, with `if: always()`,
+  job passed, the surefire and failsafe reports as an artifact, with the evidence an Incus test kept
+  of a workspace that got no address (`target/incus-evidence`). Run it last, with `if: always()`,
   after a maven step that teed its output to $RUNNER_TEMP/maven.log.
 
 inputs:
@@ -45,3 +46,4 @@ runs:
         path: |
           **/target/surefire-reports
           **/target/failsafe-reports
+          **/target/incus-evidence

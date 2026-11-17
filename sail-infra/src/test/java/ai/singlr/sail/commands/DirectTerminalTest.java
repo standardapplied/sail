@@ -1019,8 +1019,8 @@ class DirectTerminalTest {
                 .map(
                     address ->
                         new TerminalTickets(
-                            (credential, action, target) ->
-                                SessionClient.ticket(socket, credential, action, target),
+                            (credential, action, target, workspace) ->
+                                SessionClient.ticket(socket, credential, action, target, workspace),
                             address))));
   }
 

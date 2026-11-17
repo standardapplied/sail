@@ -653,9 +653,10 @@ public final class Banner {
   /** Prints a bordered table of an FDE's registered SSH keys. */
   public static void printFdeKeyTable(
       List<FdeSshKeyStore.SshKeyInfo> keys, PrintStream out, Ansi ansi) {
-    var table = new TableFormatter(" SSH Keys ", List.of("HANDLE", "COMMENT", "FINGERPRINT"));
+    var table =
+        new TableFormatter(" SSH Keys ", List.of("HANDLE", "STATE", "COMMENT", "FINGERPRINT"));
     for (var key : keys) {
-      table.addRow(key.fdeHandle(), orDash(key.comment()), key.fingerprint());
+      table.addRow(key.fdeHandle(), key.state(), orDash(key.comment()), key.fingerprint());
     }
     table.render(out, ansi);
   }

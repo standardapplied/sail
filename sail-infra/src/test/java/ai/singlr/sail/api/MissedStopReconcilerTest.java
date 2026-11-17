@@ -498,7 +498,7 @@ class MissedStopReconcilerTest {
    */
   @Test
   void aWorkspaceARemovalCannotReachIsTriedThreeTimesAnIdlePeriodApartThenLeftAndSaidOnce() {
-    TestLogins.store(db, "ada");
+    var ada = TestLogins.store(db, "ada");
     var asked = new ArrayList<String>();
     var probe =
         new CountingProbe(true) {
@@ -506,9 +506,9 @@ class MissedStopReconcilerTest {
           public List<String> disown(BiPredicate<String, String> held, Predicate<String> due) {
             asked.add(
                 "ada "
-                    + held.test("ada", null)
+                    + held.test("ada", ada)
                     + ", gone "
-                    + held.test("gone", null)
+                    + held.test("gone", "fde_gone")
                     + ", due "
                     + due.test("acme-b"));
             return List.of("acme-b: Error: permission denied");
@@ -546,14 +546,14 @@ class MissedStopReconcilerTest {
    */
   @Test
   void theRemovalSweepAsksIncusOnlyAtStartAndWhenTheRosterLosesSomeone() {
-    TestLogins.store(db, "ada");
-    TestLogins.store(db, "bob");
+    var ada = TestLogins.store(db, "ada");
+    var bob = TestLogins.store(db, "bob");
     var asked = new ArrayList<String>();
     var probe =
         new CountingProbe(true) {
           @Override
           public List<String> disown(BiPredicate<String, String> held, Predicate<String> due) {
-            asked.add("ada " + held.test("ada", null) + ", bob " + held.test("bob", null));
+            asked.add("ada " + held.test("ada", ada) + ", bob " + held.test("bob", bob));
             return List.of();
           }
         };
@@ -609,7 +609,11 @@ class MissedStopReconcilerTest {
         new CountingProbe(true) {
           @Override
           public List<String> disown(BiPredicate<String, String> held, Predicate<String> due) {
-            asked.add("ada " + held.test("ada", null) + ", tmp " + held.test("tmp", null));
+            asked.add(
+                "ada "
+                    + held.test("ada", fdes.byHandle("ada").orElseThrow().id())
+                    + ", tmp "
+                    + held.test("tmp", tmp));
             return List.of();
           }
         };
@@ -634,7 +638,7 @@ class MissedStopReconcilerTest {
    * The proof's Medium 1: the pass decides from what each workspace's label stores, not from what
    * it remembers. A sail-api started after main gave tmp's handle to someone new (a new id here)
    * still takes the old tmp's workspace, labelled with the old id, at its first pass; one labelled
-   * with the new id is the new tmp's, and one labelled by handle alone is read by handle.
+   * with the new id is the new tmp's, and one labelled by handle alone is nobody's.
    */
   @Test
   void theFirstPassAfterAStartTakesAWorkspaceWhoseOwnerIdIsNoActivePersons() {
@@ -658,7 +662,7 @@ class MissedStopReconcilerTest {
 
     reconciler(probe, PAST_GRACE).sweep();
 
-    assertEquals(List.of("old false, new true, by handle true"), asked);
+    assertEquals(List.of("old false, new true, by handle false"), asked);
   }
 
   /** A container that cannot be asked fails nothing: the next pass tries again. */

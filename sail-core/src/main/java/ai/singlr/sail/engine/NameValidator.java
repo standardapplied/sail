@@ -84,6 +84,16 @@ public final class NameValidator {
    * ../foo} could otherwise escape the directory or delete another session's history. Dots are
    * allowed (room sessions are named {@code room-<id>.2} upward); {@code ..} is not.
    */
+  /** A workspace's name is spelled as a project's is. */
+  public static void requireValidWorkspaceName(String name) {
+    if (!isValidProjectName(name)) {
+      throw new IllegalArgumentException(
+          "Invalid workspace name: '"
+              + name
+              + "'. Must match [a-z0-9][a-z0-9-]*, as a project name does.");
+    }
+  }
+
   public static void requireValidSessionName(String name) {
     if (name == null
         || name.isEmpty()

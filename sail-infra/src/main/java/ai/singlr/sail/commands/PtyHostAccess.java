@@ -81,6 +81,21 @@ final class PtyHostAccess implements PtyIdentity.Resolver, PtyIdentity.Holders, 
   }
 
   @Override
+  public void workspace(String project, String workspace, PtyIdentity.Person who)
+      throws IOException {
+    try (var opened = operations.get()) {
+      opened.pty().admitWorkspace(project, workspace, who);
+    }
+  }
+
+  @Override
+  public void enter(String project, String workspace, PtyIdentity.Person who) throws IOException {
+    try (var opened = operations.get()) {
+      opened.pty().enterWorkspace(project, workspace, who);
+    }
+  }
+
+  @Override
   public void room(String roomId, String project, PtyIdentity.Person who) throws IOException {
     try (var opened = operations.get()) {
       opened.pty().admitRoom(roomId, project, who);

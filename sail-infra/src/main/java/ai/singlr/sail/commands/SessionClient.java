@@ -118,8 +118,20 @@ public final class SessionClient implements AutoCloseable {
   public static PtyMessage ticket(
       Path socket, String credential, PtyMessage.TicketAction action, String target)
       throws IOException {
+    return ticket(socket, credential, action, target, "");
+  }
+
+  /** As {@link #ticket(Path, String, PtyMessage.TicketAction, String)}, in {@code workspace}. */
+  public static PtyMessage ticket(
+      Path socket,
+      String credential,
+      PtyMessage.TicketAction action,
+      String target,
+      String workspace)
+      throws IOException {
     try (var client = connect(socket, "")) {
-      PtyWire.write(client.channel, new PtyMessage.IssueTicket(action, target, credential));
+      PtyWire.write(
+          client.channel, new PtyMessage.IssueTicket(action, target, credential, workspace));
       var reply = PtyWire.read(client.channel);
       if (!(reply instanceof PtyMessage.Ticket) && !(reply instanceof PtyMessage.TicketRefused)) {
         throw new IOException("Unexpected host reply to a ticket request: " + reply.getClass());

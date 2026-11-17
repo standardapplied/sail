@@ -19,12 +19,14 @@ import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.config.Engagement;
 import ai.singlr.sail.config.EngagementMode;
+import ai.singlr.sail.config.ProjectDefinition;
 import ai.singlr.sail.config.Roster;
 import ai.singlr.sail.config.RunStatus;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.HostInfo;
+import ai.singlr.sail.engine.ProjectProvisioner;
 import ai.singlr.sail.engine.ScriptedShellExecutor;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.SyncOperations;
@@ -47,6 +49,7 @@ import ai.singlr.sail.store.HeldProjects;
 import ai.singlr.sail.store.LoginStore;
 import ai.singlr.sail.store.MessageStore;
 import ai.singlr.sail.store.PendingChallengeStore;
+import ai.singlr.sail.store.ProjectStore;
 import ai.singlr.sail.store.ReviewStore;
 import ai.singlr.sail.store.RoomStore;
 import ai.singlr.sail.store.RunStore;
@@ -156,6 +159,35 @@ class ClientGoldensTest {
   private static final String ID = "id: ";
   private static final int STREAMS = 2;
   private static final SyncConfig OWNER = new SyncConfig(null, null, "uday");
+  private static final ProjectDefinition HARBOR =
+      new ProjectDefinition(
+          PROJECT,
+          "",
+          null,
+          null,
+          null,
+          null,
+          List.of(new ProjectDefinition.Repo("https://github.com/harbor/app.git", "app", null)),
+          null,
+          null,
+          null,
+          null);
+
+  /** Harbor's template, current at v1, as Incus lists it. */
+  private static final String TEMPLATE =
+      TestWorkspaces.template(PROJECT, ProjectProvisioner.inputs(HARBOR, Optional.empty()));
+
+  /** Workspace {@code dock} of harbor, running, uday's by {@code udayId}. */
+  private static String dock(String udayId) {
+    return """
+        {"name": "harbor-dock", "status": "Running", "type": "container",
+         "config": {"user.sail.project": "harbor", "user.sail.workspace": "dock",
+                    "user.sail.ready": "1762941601000", "user.sail.owner": "uday",
+                    "user.sail.owner_id": "%s"},
+         "expanded_devices": {"root": {"path": "/", "pool": "tank", "type": "disk"}}}"""
+        .formatted(udayId);
+  }
+
   private static final String RP_ID = "sail.standardapplied.com";
   private static final String ORIGIN = "https://" + RP_ID;
   private static final String PASSKEYS = "/v1/auth";
@@ -196,6 +228,7 @@ class ClientGoldensTest {
         var bus = new EventBus();
         var box = new Box(db, bus, tempDir)) {
       var uday = box.session("uday", "Uday", "uday@example.com", Role.ADMIN);
+      box.holdsDockOf("uday");
       var vik = box.token("vik", Role.VIEWER);
       var sam = box.scopedToken("sam");
       var http = new TreeMap<String, String>();
@@ -237,6 +270,13 @@ class ClientGoldensTest {
           "/v1/terminal/tickets",
           uday,
           Map.of("action", "open", "project", PROJECT));
+      box.record(
+          http,
+          "terminal-ticket-workspace",
+          "POST",
+          "/v1/terminal/tickets",
+          uday,
+          Map.of("action", "open", "project", PROJECT, "workspace", "dock"));
 
       box.record(http, "refusal-read-only-credential", "POST", messages(), vik, plain("hello"));
       box.record(http, "refusal-room-not-found", "GET", "/v1/rooms/nowhere", uday, null);
@@ -271,6 +311,20 @@ class ClientGoldensTest {
       events.put("room-stream.sse", Scrub.stream(Scrub.busEvents(roomStream.join()), box::renamed));
       events.put("resumed-stream.sse", Scrub.stream(resumed, box::renamed));
       events.put("resync-stream.sse", Scrub.stream(resync, box::renamed));
+      Acting.system(() -> new ProjectStore(db).upsert(HARBOR));
+      var dana = box.session("dana", "Dana", "dana@example.com", Role.ADMIN);
+      var dock = "/v1/projects/" + PROJECT + "/workspaces/dock";
+      box.record(
+          http,
+          "workspace-create",
+          "POST",
+          "/v1/projects/" + PROJECT + "/workspaces",
+          dana,
+          Map.of("name", "new"));
+      box.record(http, "workspace-start", "POST", dock + "/start", dana, null);
+      box.record(http, "workspace-stop", "POST", dock + "/stop", dana, null);
+      box.record(http, "refusal-workspace-holds-work", "DELETE", dock, dana, null);
+      box.record(http, "workspace-delete", "DELETE", dock + "?force=true", dana, null);
 
       assertAll(
           () -> GoldenFiles.check(GOLDENS.resolve("http"), http),
@@ -463,12 +517,22 @@ class ClientGoldensTest {
   private static List<PtyMessage> everyPtyMessage() {
     var lounge =
         new PtyMessage.SessionInfo(
-            "lounge", "inst-1", true, 2, "uday", ROOM, List.of("claude", "--resume"));
+            "lounge",
+            "inst-1",
+            true,
+            2,
+            "uday",
+            ROOM,
+            List.of("claude", "--resume"),
+            PROJECT,
+            "dock",
+            "uday");
     var shell = new PtyMessage.SessionInfo("shell", "inst-2", false, 0, "", "", List.of("bash"));
     return List.of(
         new PtyMessage.Hello("tok-uday"),
         new PtyMessage.Welcome("boot-7"),
-        new PtyMessage.Create("lounge", List.of("bash", "-l"), "/home/dev", PROJECT, ROOM, 132, 43),
+        new PtyMessage.Create(
+            "lounge", List.of("bash", "-l"), "/home/dev", PROJECT, ROOM, 132, 43, "dock"),
         new PtyMessage.Attach("lounge", true),
         new PtyMessage.Input(42, "ls -la\r".getBytes(StandardCharsets.UTF_8)),
         new PtyMessage.Resize(100, 30),
@@ -477,7 +541,7 @@ class ClientGoldensTest {
         new PtyMessage.ListSessions("", PtyMessage.PAGE_LIMIT),
         new PtyMessage.Kill("lounge"),
         new PtyMessage.Yield("lounge", "a dispatch took the repos"),
-        new PtyMessage.IssueTicket(PtyMessage.TicketAction.OPEN, PROJECT, "sail_uday"),
+        new PtyMessage.IssueTicket(PtyMessage.TicketAction.OPEN, PROJECT, "sail_uday", "dock"),
         new PtyMessage.Ticket("tkt_harbor"),
         new PtyMessage.TicketRefused(
             PtyMessage.TicketRefusal.NOT_FOUND,
@@ -553,6 +617,7 @@ class ClientGoldensTest {
     private final Sqlite db;
     private final EventBus bus;
     private final SailOperations operations;
+    private final ScriptedShellExecutor incus;
     private final HttpServer server;
     private final ManualClock streamClock;
     private final SessionAwareAuth auth;
@@ -567,14 +632,14 @@ class ClientGoldensTest {
       this.db = db;
       this.bus = bus;
       this.streamClock = new ManualClock(AT, Duration.ofMinutes(1));
+      this.incus =
+          new ScriptedShellExecutor(new ShellExec.Result(0, "[]", ""))
+              .onOk("incus storage list", "[{\"name\": \"tank\", \"driver\": \"zfs\"}]")
+              .onOk("incus snapshot list harbor--tmpl --format json", TestWorkspaces.V1)
+              .onOk("incus list --format json", "[" + TEMPLATE + "]")
+              .onOk("sail-left", "changes app\n");
       this.operations =
-          OperationsFactory.create(
-                  db,
-                  new ScriptedShellExecutor(new ShellExec.Result(0, "[]", ""))
-                      .onOk("incus storage list", "[{\"name\": \"tank\", \"driver\": \"zfs\"}]"),
-                  bus,
-                  SyncScheduler.disabled(),
-                  SessionYield.NONE)
+          OperationsFactory.create(db, incus, bus, SyncScheduler.disabled(), SessionYield.NONE)
               .useControlPlane(
                   db,
                   dir,
@@ -599,7 +664,8 @@ class ClientGoldensTest {
               new AgentLogStreamer(auth),
               Optional.of(
                   new TerminalTickets(
-                      (credential, action, target) -> new PtyMessage.Ticket("tkt_" + target),
+                      (credential, action, target, workspace) ->
+                          new PtyMessage.Ticket("tkt_" + target),
                       new InetSocketAddress(InetAddress.ofLiteral("100.64.0.7"), 7072)))));
       server.createContext(
           "/v1/events/stream",
@@ -992,10 +1058,40 @@ class ClientGoldensTest {
           .headers()
           .firstValue(ChangeFeed.SEQ_HEADER)
           .ifPresent(seq -> answer.put("headers", Map.of("seq", seq)));
-      answer.put("body", parsed);
+      answer.put("body", untimed(parsed));
       var exchange = Map.of("request", request, "response", answer);
       goldens.put(name + ".json", json(Scrub.canonical(exchange, this::renamed)));
       return parsed;
+    }
+
+    /** {@code body} with every time a workspace door measured, its {@code timings}, as 0. */
+    private static Map<String, Object> untimed(Map<String, Object> body) {
+      if (!(body.get("timings") instanceof Map<?, ?> timings)) {
+        return body;
+      }
+      var steady = new LinkedHashMap<>(body);
+      steady.put("timings", zeroed(timings));
+      return steady;
+    }
+
+    private static Object zeroed(Object measured) {
+      return switch (measured) {
+        case Number taken -> 0;
+        case Map<?, ?> steps -> {
+          var zeroed = new LinkedHashMap<Object, Object>();
+          steps.forEach((step, taken) -> zeroed.put(step, zeroed(taken)));
+          yield zeroed;
+        }
+        case null, default -> measured;
+      };
+    }
+
+    /** Makes Incus list workspace {@code dock} of harbor, {@code handle}'s by their id. */
+    void holdsDockOf(String handle) {
+      var dock = dock(new FdeStore(db).byHandle(handle).orElseThrow().id());
+      incus
+          .onOk("incus list ^harbor-dock$", "[" + dock + "]")
+          .onOk("incus list --format json", "[" + TEMPLATE + "," + dock + "]");
     }
 
     /** Sends what a golden needs written first, which must succeed. */

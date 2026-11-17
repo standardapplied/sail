@@ -230,12 +230,33 @@ public final class PtySession implements AutoCloseable {
       String ownerFde,
       String project,
       String room,
-      List<String> command) {
+      List<String> command,
+      String workspace) {
     public Origin {
       if (instanceId == null || instanceId.isBlank()) {
         throw new IllegalArgumentException("A session incarnation needs a non-blank instance id.");
       }
       command = List.copyOf(command);
+      workspace = Objects.toString(workspace, "");
+    }
+
+    /** A session in the project's own container, or on the host when it names no project. */
+    public Origin(
+        String name,
+        String instanceId,
+        String ownerFde,
+        String project,
+        String room,
+        List<String> command) {
+      this(name, instanceId, ownerFde, project, room, command, "");
+    }
+
+    /**
+     * The instance the session runs in: the project's container, or for a workspace its own
+     * instance, {@code <project>-<workspace>}, which the host admitted by name and keys first.
+     */
+    public String instance() {
+      return workspace.isBlank() ? project : project + "-" + workspace;
     }
 
     public boolean roomBound() {

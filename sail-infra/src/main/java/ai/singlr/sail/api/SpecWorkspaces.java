@@ -241,7 +241,7 @@ public final class SpecWorkspaces implements AutoCloseable {
               .replaceFirst("\\.$", "");
       var ownerless =
           failed instanceof WorkspaceGit.Unpushed
-              && found.key(BoxInstances.OWNER_KEY).orElse("").isBlank();
+              && found.key(BoxInstances.OWNER_ID_KEY).orElse("").isBlank();
       if (!ownerless && failures.merge(found.name() + "\n" + cause, 1, Integer::sum) < TRIES) {
         throw failed;
       }

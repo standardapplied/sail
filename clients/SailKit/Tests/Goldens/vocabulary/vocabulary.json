@@ -178,6 +178,10 @@
       "status": 503
     },
     {
+      "code": "workspace_holds_work",
+      "status": 409
+    },
+    {
       "code": "agent_not_configured",
       "status": 409
     },

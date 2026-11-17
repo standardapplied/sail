@@ -6,6 +6,7 @@
 package ai.singlr.sail.commands;
 
 import ai.singlr.sail.api.OperationsFactory;
+import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.engine.Banner;
 import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.SailPaths;
@@ -86,6 +87,9 @@ public final class ProjectWorkspaceCommand implements Runnable {
       WorkspaceVerbs.requireRoot(dryRun, spec);
       CliCommand.requireJsonOrDryRun(json, dryRun);
       var config = WorkspaceVerbs.buildable(project, operator);
+      if (!dryRun) {
+        WorkspaceVerbs.requireMaking(project, name);
+      }
       var tokens = WorkspaceVerbs.Keeper.here().check(config);
       if (!json) {
         Banner.printBranding(System.out, Ansi.AUTO);
@@ -171,8 +175,8 @@ public final class ProjectWorkspaceCommand implements Runnable {
     }
 
     private void execute() throws Exception {
-      WorkspaceVerbs.readable(project, operator());
-      ShellCommand.open(WorkspaceVerbs.workspaces(false).running(project, name));
+      var config = WorkspaceVerbs.readable(project, operator());
+      ShellCommand.open(WorkspaceVerbs.entering(false, doors -> doors.startExisting(config, name)));
     }
   }
 
@@ -189,11 +193,10 @@ public final class ProjectWorkspaceCommand implements Runnable {
     public void run() {
       target.change(
           null,
-          (workspaces, named) ->
-              workspaces.start(
-                  WorkspaceVerbs.readable(named.project, operator()),
-                  named.name,
-                  WorkspaceVerbs::ownerOf));
+          (workspaces, named) -> {
+            var config = WorkspaceVerbs.readable(named.project, operator());
+            return WorkspaceVerbs.entering(named.dryRun, doors -> doors.start(config, named.name));
+          });
     }
   }
 
@@ -207,12 +210,12 @@ public final class ProjectWorkspaceCommand implements Runnable {
     public void run() {
       target.change(
           null,
-          (workspaces, named) ->
-              workspaces.stop(
-                  named.project,
-                  named.name,
-                  WorkspaceVerbs.liveRun(
-                      named.project, OperationsFactory::open, HostSync.handle())));
+          (workspaces, named) -> {
+            var live =
+                WorkspaceVerbs.liveRun(named.project, OperationsFactory::open, HostSync.handle());
+            return WorkspaceVerbs.entering(
+                named.dryRun, doors -> doors.stop(named.project, named.name, live));
+          });
     }
   }
 
@@ -232,16 +235,32 @@ public final class ProjectWorkspaceCommand implements Runnable {
     @Option(names = "--yes", description = "Skip the confirmation prompt.")
     private boolean yes;
 
+    @Option(
+        names = "--force",
+        description =
+            "Delete it even when it holds work, or cannot be read: uncommitted changes, untracked"
+                + " files, a stash or commits origin lacks.")
+    private boolean force;
+
     @Override
     public void run() {
       target.change(
           spec,
-          (workspaces, named) ->
-              workspaces.delete(
-                  named.project,
-                  named.name,
-                  WorkspaceVerbs.liveRun(named.project, OperationsFactory::open, HostSync.handle()),
-                  instance -> confirm(yes, named)));
+          (workspaces, named) -> {
+            var live =
+                WorkspaceVerbs.liveRun(named.project, OperationsFactory::open, HostSync.handle());
+            var config = WorkspaceVerbs.readable(named.project, operator());
+            return WorkspaceVerbs.entering(
+                named.dryRun,
+                doors ->
+                    doors.delete(
+                        config,
+                        named.name,
+                        live,
+                        force || named.dryRun,
+                        forcedDelete(named.project, named.name),
+                        instance -> confirm(yes, named)));
+          });
     }
   }
 
@@ -258,6 +277,11 @@ public final class ProjectWorkspaceCommand implements Runnable {
     }
     ConsoleHelper.confirmDestructive(
         deletePrompt(named.project, named.name), "Not deleted", "--yes");
+  }
+
+  /** The command a delete refused for what the workspace holds names: the same one, forced. */
+  static Remedy forcedDelete(String project, String name) {
+    return Remedy.of(Remedy.sail("project workspace delete", project, name, "--force"));
   }
 
   /** What a delete asks. */
@@ -304,6 +328,10 @@ public final class ProjectWorkspaceCommand implements Runnable {
               WorkspaceVerbs.requireRoot(dryRun, rootOnly);
             }
             CliCommand.requireJsonOrDryRun(json, dryRun);
+          });
+      CliCommand.run(
+          json,
+          () -> {
             WorkspaceVerbs.readable(project, operator());
             var changed = verb.apply(WorkspaceVerbs.workspaces(dryRun), this);
             if (json) {
