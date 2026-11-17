@@ -1,3 +1,4 @@
+import Foundation
 @testable import SailTerminal
 import Testing
 
@@ -19,6 +20,15 @@ import Testing
     ])
     func anAddressThatNamesNoHostAndPortIsRefused(_ address: String) {
         #expect(throws: TerminalError.self) { try HostAddress(ticketAddress: address) }
+    }
+
+    /// The process listening at a unix socket is told by its pid: here, this test's own; none for a
+    /// socket nobody listens at, or for TCP.
+    @Test func theListenersPidIsTheProcessThatListens() throws {
+        let host = try FakeHost()
+        #expect(host.address.listenerPID() == getpid())
+        #expect(HostAddress.unix(path: "/tmp/sail-none-\(getpid()).sock").listenerPID() == nil)
+        #expect(HostAddress.tcp(host: "127.0.0.1", port: 1).listenerPID() == nil)
     }
 
     @Test func theLocalHostListensUnderTheAccountsHome() throws {

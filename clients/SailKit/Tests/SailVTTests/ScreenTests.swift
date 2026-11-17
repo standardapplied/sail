@@ -94,12 +94,41 @@ import Testing
         #expect(try screen.text() == "again")
     }
 
-    @Test func aClipboardWriteIsReportedUnlessThePolicyDeniesIt() throws {
+    /// A clipboard write of text is reported; one that is not valid UTF-8 is refused, never
+    /// turned into U+FFFD on the person's clipboard.
+    @Test func aClipboardWriteOfTextIsReportedAndOneNotTextIsRefused() throws {
         let screen = try screen(columns: 20, rows: 1)
-        let osc52 = Array("\u{1b}]52;c;aGVsbG8=\u{07}".utf8)
-        #expect(screen.feed(osc52).events == [.clipboardWrite("hello")])
-        screen.setClipboardWrites(.deny)
-        #expect(screen.feed(osc52).events.isEmpty)
+        #expect(screen.feed(Array("\u{1b}]52;c;aGVsbG8=\u{07}".utf8)).events == [.clipboardWrite("hello")])
+        #expect(screen.feed(Array("\u{1b}]52;c;/w==\u{07}".utf8)).events.isEmpty, "0xFF is no text")
+    }
+
+    /// A clipboard write over ``ClipboardWrite/largestText`` is refused and reported nowhere.
+    @Test func aClipboardWriteOverTheBoundIsRefused() throws {
+        let screen = try screen(columns: 20, rows: 1)
+        let largest = String(repeating: "x", count: ClipboardWrite.largestText)
+        let write = { (text: String) in Array("\u{1b}]52;c;\(Data(text.utf8).base64EncodedString())\u{07}".utf8) }
+        #expect(screen.feed(write(largest)).events == [.clipboardWrite(largest)])
+        #expect(screen.feed(write(largest + "x")).events.isEmpty)
+    }
+
+    /// Kitty graphics are off until the app draws images: a query (`a=q`) gets no answer, which the
+    /// protocol's documentation says is how a terminal without support behaves ("query … followed
+    /// by a request for the primary device attributes; if you get back an answer for the device
+    /// attributes without also getting back an answer for the query the terminal does not support
+    /// the kitty graphics protocol", sw.kovidgoyal.net/kitty/graphics-protocol, "Querying support").
+    @Test func aKittyGraphicsQueryGetsNoAnswerOnlyTheDeviceAttributes() throws {
+        let screen = try screen(columns: 20, rows: 1)
+        let reply = String(decoding: screen.feed(Array("\u{1b}_Gi=31,s=1,v=1,a=q,t=d,f=24;AAAA\u{1b}\\\u{1b}[c".utf8)).reply, as: UTF8.self)
+        #expect(!reply.contains("\u{1b}_G"), "\(reply.debugDescription)")
+        #expect(reply.hasPrefix("\u{1b}[?"), "the device attributes are answered: \(reply.debugDescription)")
+    }
+
+    /// XTVERSION names Sail, not "libghostty": a program that picks an image protocol by the
+    /// terminal's name (yazi matches "ghostty") would otherwise send Kitty graphics, never drawn.
+    @Test func xtversionNamesSail() throws {
+        let screen = try screen(columns: 20, rows: 1)
+        let reply = String(decoding: screen.feed(Array("\u{1b}[>q".utf8)).reply, as: UTF8.self)
+        #expect(reply == "\u{1b}P>|Sail\u{1b}\\", "\(reply.debugDescription)")
     }
 
     @Test func aClipboardReadIsAnsweredEmpty() throws {
@@ -143,11 +172,31 @@ import Testing
         #expect(screen.feed(Array("\u{1b}[14t".utf8)).reply == Array("\u{1b}[4;72;270t".utf8))
     }
 
+    /// Ghostty's default: a cursor blinks unless the program asks for a steady one (DECSCUSR 2, 4
+    /// or 6, or mode 12 reset); its default style (`CSI 0 q`) and a full reset blink again.
+    @Test func theCursorBlinksUnlessTheProgramAsksForASteadyOne() throws {
+        let screen = try screen(columns: 20, rows: 3)
+        #expect(try screen.frame().cursor.blinking, "a new terminal's cursor blinks")
+        for (sequence, blinking) in [("\u{1b}[2 q", false), ("\u{1b}[0 q", true), ("\u{1b}[6 q", false), ("\u{1b}[5 q", true), ("\u{1b}[?12l", false), ("\u{1b}c", true)] {
+            _ = screen.feed(Array(sequence.utf8))
+            #expect(try screen.frame().cursor.blinking == blinking, "after \(sequence.debugDescription)")
+        }
+    }
+
+    @Test func selectAllTakesEveryLineTheScrollbackIncluded() throws {
+        let screen = try screen(columns: 20, rows: 3)
+        _ = screen.feed(Array("first\r\nsecond\r\nthird\r\nfourth".utf8))
+        #expect(screen.select(.all))
+        #expect(screen.selectedText()?.hasPrefix("first\nsecond\nthird\nfourth") == true, "\(screen.selectedText() ?? "nil")")
+    }
+
     @Test func aWordALineAndARangeAreSelected() throws {
         let screen = try screen(columns: 20, rows: 3)
         _ = screen.feed(Array("hello brave world\r\nsecond line".utf8))
         #expect(screen.selectedText() == nil)
+        #expect(!screen.hasSelection)
         #expect(screen.select(.word(at: CellPoint(x: 7, y: 0))))
+        #expect(screen.hasSelection)
         #expect(screen.selectedText() == "brave")
         #expect(try screen.frame().rows[0].cells[6 ... 10].allSatisfy(\.selected))
         #expect(screen.select(.line(at: CellPoint(x: 2, y: 1))))

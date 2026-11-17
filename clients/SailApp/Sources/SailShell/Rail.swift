@@ -2,11 +2,14 @@ import AppKit
 import SailLook
 import SailTerminalView
 
-/// The icon rail, 60 pt wide on the window's chrome: "This Mac" on top, the account at the bottom.
-/// The selected item takes the accent fill and a bar at its leading edge.
+/// The icon rail, 60 pt wide on the window's chrome under the band: "This Mac" on top, the account
+/// at the bottom, as Mast's `.rail` (10 pt in at the top, 12 at the bottom, 42 pt items). The
+/// selected item takes the accent fill and a 2 pt bar at its leading edge.
 @MainActor
 public final class Rail: NSView {
     public static let width = 60.0
+    /// Mast's `.rail` measures: 10 pt in at the top, 12 at the bottom, 42 pt items, a 2 pt bar.
+    static let top = 10.0, bottom = 12.0, item = 42.0, bar = 2.0, barHeight = 24.0
 
     public enum Item: String, CaseIterable, Sendable {
         case thisMac, account
@@ -58,13 +61,13 @@ public final class Rail: NSView {
             buttons[item] = button
             bars[item] = bar
             NSLayoutConstraint.activate([
-                button.centerXAnchor.constraint(equalTo: centerXAnchor), button.widthAnchor.constraint(equalToConstant: 44),
-                button.heightAnchor.constraint(equalToConstant: 44), bar.leadingAnchor.constraint(equalTo: leadingAnchor),
-                bar.widthAnchor.constraint(equalToConstant: 3), bar.centerYAnchor.constraint(equalTo: button.centerYAnchor),
-                bar.heightAnchor.constraint(equalToConstant: 24),
+                button.centerXAnchor.constraint(equalTo: centerXAnchor), button.widthAnchor.constraint(equalToConstant: Self.item),
+                button.heightAnchor.constraint(equalToConstant: Self.item), bar.leadingAnchor.constraint(equalTo: leadingAnchor),
+                bar.widthAnchor.constraint(equalToConstant: Self.bar), bar.centerYAnchor.constraint(equalTo: button.centerYAnchor),
+                bar.heightAnchor.constraint(equalToConstant: Self.barHeight),
                 item == .thisMac
-                    ? button.topAnchor.constraint(equalTo: topAnchor, constant: Look.Space.x3l + Look.Space.s)
-                    : button.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -Look.Space.m),
+                    ? button.topAnchor.constraint(equalTo: topAnchor, constant: Self.top)
+                    : button.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -Self.bottom),
             ])
         }
         widthAnchor.constraint(equalToConstant: Self.width).isActive = true
