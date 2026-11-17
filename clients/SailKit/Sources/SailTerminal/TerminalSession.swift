@@ -46,13 +46,13 @@ public final class TerminalSession: Sendable {
     private let core: Mutex<Core>
     private let sequence = Mutex<Int64>(0)
     private let latency = Mutex(LatencyRecorder())
-    private let tap = Mutex<(@Sendable ([UInt8]) -> Void)?>(nil)
+    private let tap = Relay<[UInt8]>()
     private let alarm: Alarm
     private let sleep: @Sendable (Duration) async throws -> Void
     private let timeout: Int
     private let stableAfter: Duration
     private let eventSink: AsyncStream<SessionEvent>.Continuation
-    private let screenListener = Mutex<(@Sendable (ContinuousClock.Instant) -> Void)?>(nil)
+    private let screenListener = Relay<ContinuousClock.Instant>()
     private let clock = ContinuousClock()
 
     private struct Core {
@@ -157,11 +157,11 @@ public final class TerminalSession: Sendable {
     /// time the screen changed, with when it took the output; nil stops telling. Nothing stands
     /// between the change and the call, so it must return at once: what draws hands the change on.
     public func onScreenChange(_ listener: (@Sendable (ContinuousClock.Instant) -> Void)?) {
-        screenListener.withLock { $0 = listener }
+        screenListener.set(listener)
     }
 
     private func screenChanged(at time: ContinuousClock.Instant) {
-        screenListener.withLock { $0 }?(time)
+        screenListener(time)
     }
 
     public var state: SessionState {
@@ -329,7 +329,7 @@ public final class TerminalSession: Sendable {
     /// Hands every byte of output to `tap` as it reaches the screen. For the probe's capture of a
     /// fixture, the one place terminal bytes leave the session.
     package func tapOutput(_ tap: @escaping @Sendable ([UInt8]) -> Void) {
-        self.tap.withLock { $0 = tap }
+        self.tap.set(tap)
     }
 
     /// Asks the host for the write token, which it grants to any attached client; once granted, the
@@ -541,7 +541,7 @@ public final class TerminalSession: Sendable {
                 return .finished(.protocolViolation("it named input \(applied) applied, outside -1 through \(Self.largestApplied)"))
             }
             account(applied)
-            tap.withLock { $0 }?(bytes)
+            tap(bytes)
             let effects = Signposts.outputToScreen { screen.feed(bytes) }
             let updated = clock.now
             latency.withLock { $0.screenUpdated(at: updated) }

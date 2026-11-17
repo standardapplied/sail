@@ -14,7 +14,7 @@ final class FakeLink: TerminalLink {
     let screen: Screen
     let events: AsyncStream<SessionEvent>
     let eventsSink: AsyncStream<SessionEvent>.Continuation
-    private let listener = Mutex<(@Sendable (ContinuousClock.Instant) -> Void)?>(nil)
+    private let listener = Relay<ContinuousClock.Instant>()
     private let sent = Mutex<[UInt8]>([])
     private let sizes = Mutex<[GridSize]>([])
     private let focus = Mutex(true)
@@ -38,18 +38,18 @@ final class FakeLink: TerminalLink {
 
     /// Whether a view listens for the screen's changes.
     var listened: Bool {
-        listener.withLock { $0 != nil }
+        listener.isSet
     }
 
     func onScreenChange(_ listener: (@Sendable (ContinuousClock.Instant) -> Void)?) {
-        self.listener.withLock { $0 = listener }
+        self.listener.set(listener)
     }
 
     /// Output from the program: fed to the screen, what it asks of the app told as a writer's
     /// session tells it, and the change told on this thread, as a session's reader thread tells it.
     func output(_ text: String) {
         screen.feed(Array(text.utf8)).events.forEach { eventsSink.yield(.screen($0)) }
-        listener.withLock { $0 }?(.now)
+        listener(.now)
     }
 
     func send(_ key: KeyInput) {

@@ -395,30 +395,22 @@ import Testing
         #expect(harness.view.visibleText.contains("hello"), "drawn as it arrived, before the next refresh")
     }
 
-    /// A change of the screen, told on the session's thread, reaches the main thread and asks for
-    /// its frame while Swift's shared pool is held at every priority: nothing between the change and
-    /// the main queue needs one of its threads. Waiting here is one turn of the main queue, which
-    /// runs in order, since any wait of the pool's (a task's sleep) would itself wait for it.
-    @Test func aScreenChangeReachesTheMainThreadWhileTheSharedPoolIsHeld() async throws {
-        let harness = try Harness()
-        await harness.drainMain()
-        await harness.tick()
-        await harness.tick()
-        try #require(harness.clock.isPaused)
-        let committed = Self.committed(harness.view)
+    /// A change of the screen, told on the session's thread, reaches the queue that draws while
+    /// Swift's shared pool is held at every priority: nothing between the change and that queue
+    /// needs one of its threads. The wake's queue is a private one here, and the test waits for it
+    /// on a semaphore, since any wait of Swift concurrency's would need the pool too.
+    @Test func aScreenChangeReachesItsQueueWhileTheSharedPoolIsHeld() throws {
+        let marks = ViewMarks()
+        let drew = DispatchSemaphore(value: 0)
+        let wake = ScreenWake(on: DispatchQueue(label: "sh.standardapplied.sail.tests.wake"), marks: marks) { drew.signal() }
         let pool = PoolHold()
         defer { pool.release() }
         try #require(pool.holdsEveryPriority, "the pool is not held at every priority: holders ran \(pool.running)")
-        let link = harness.link
-        onItsOwnThread { link.output("through") }
-        await harness.drainMain()
-        let reached = harness.view.latency.longestToTold
-        let asked = harness.view.drawingState.contains("; awaiting a drawable") || Self.committed(harness.view) > committed
+        onItsOwnThread { wake.changed(at: CACurrentMediaTime()) }
+        let reached = drew.wait(timeout: .now() + 2) == .success
         pool.release()
-        #expect(reached != nil, "the change did not reach the main thread while the shared pool was held")
-        #expect(asked, "no frame was asked for while the shared pool was held: \(harness.view.drawingState)")
-        await harness.drawn()
-        #expect(harness.view.visibleText.contains("through"))
+        #expect(reached, "the change did not reach its queue while the shared pool was held")
+        #expect(marks.figures.wakes == 1)
     }
 
     /// Changes the main thread has not yet taken make one wake, which carries the oldest of them:

@@ -173,7 +173,9 @@ public final class TerminalView: NSView {
         input.async { try? link.setCellPixels(width: cell.width, height: cell.height) }
         grid = nil
         layoutGrid()
-        let wake = ScreenWake(marks: marks) { [weak self] in self?.drawNowIfIdle() }
+        let wake = ScreenWake(marks: marks) { [weak self] in
+            MainActor.assumeIsolated { self?.drawNowIfIdle() }
+        }
         link.onScreenChange { updated in wake.changed(at: CACurrentMediaTime() - (ContinuousClock.now - updated) / .seconds(1)) }
         let events = link.events
         tasks.append(Task { [weak self] in
@@ -625,12 +627,15 @@ final class ScreenWake: Sendable {
         var changes: Int
     }
 
+    private let queue: DispatchQueue
     private let marks: ViewMarks
-    private let draw: @MainActor @Sendable () -> Void
-    /// The changes since the main thread last took the wake; nil while none is outstanding.
+    private let draw: @Sendable () -> Void
+    /// The changes since the queue last took the wake; nil while none is outstanding.
     private let outstanding = Mutex<Outstanding?>(nil)
 
-    init(marks: ViewMarks, draw: @escaping @MainActor @Sendable () -> Void) {
+    /// A wake that `queue`, the main queue unless a test gives another, takes to call `draw`.
+    init(on queue: DispatchQueue = .main, marks: ViewMarks, draw: @escaping @Sendable () -> Void) {
+        self.queue = queue
         self.marks = marks
         self.draw = draw
     }
@@ -645,13 +650,11 @@ final class ScreenWake: Sendable {
             return true
         }
         guard post else { return }
-        DispatchQueue.main.async {
-            MainActor.assumeIsolated { self.taken() }
-        }
+        queue.async { self.taken() }
     }
 
     /// The wake is cleared before the screen is read, so a change after the read posts another.
-    @MainActor private func taken() {
+    private func taken() {
         guard let taken = outstanding.withLock({ outstanding in
             defer { outstanding = nil }
             return outstanding
