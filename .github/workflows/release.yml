@@ -109,6 +109,16 @@ jobs:
             sail-infra/target/${{ matrix.binary-name }}.sha256
             sail-infra/target/${{ matrix.binary-name }}.cosign.bundle
 
+  # The app of this release, its zip this run's artifact: clients.yml's app job, bundling the
+  # sail-darwin-arm64 the build above made and signed, checked against its published sha256 and its
+  # signature first, so the app and the release ship one binary.
+  app:
+    needs: [ci-passed, build]
+    uses: ./.github/workflows/clients.yml
+    with:
+      release: true
+    secrets: inherit
+
   release:
     needs: [ci-passed, build]
     runs-on: ubuntu-24.04

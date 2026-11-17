@@ -4632,6 +4632,10 @@ its entitlements claimed, notarized, stapled and assessed by Gatekeeper; without
 is skipped. Goldens are recorded only by the workflow's `record-goldens`
 input, never by a pull request's run. This job and the SailKit jobs run only when `clients/` or
 the workflow changed (a job skipped by `if:` reports success, so no required check waits on it).
+A release calls the workflow for this job alone (`release.yml`'s `app`): its app bundles the
+`sail-darwin-arm64` the release built and signed in the same run, used only once its sha256 is the
+published one and its cosign signature is `release.yml`'s at that tag, so the app and the release
+ship one binary, built and attested once; the app's zip is that run's artifact.
 
 ### The Sail app signs in with a passkey
 

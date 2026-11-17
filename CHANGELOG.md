@@ -2,6 +2,7 @@
 
 ## 0.72.0
 
+- **A release's app bundles that release's own `sail`.** The release workflow now builds the app too, by the Clients workflow's app job alone, and the app bundles the `sail-darwin-arm64` the same run built and signed, used only once its sha256 is the one the release publishes and its cosign signature is the release workflow's at that tag: one binary, built and attested once, in the release and in the app. Until now an app was built only on main and bundled a pinned earlier release. The app's zip is the release run's artifact.
 - **The app's drive excuses a starved main thread only on evidence it prints, and counts every excuse.** Its sampler now looks at the main thread every 5 ms throughout, not only once it is late, from a real-time thread of the drive's own (period 5 ms, computation 0.25 ms; it may take at most 5% of one CPU, and the drive fails if it takes more), so it keeps looking while every core is busy, recording the thread's run state and CPU time, this process's CPU time and the machine's CPU ticks. A judged wait is the machine's for a stretch only when at least 4 looks in a row, none more than 15 ms apart, find the main thread runnable, its CPU time flat (under a tenth of the time) and no CPU idle. Missing looks, a blocked thread or one that used CPU excuse nothing. Each flood's line names the looks that excused each stretch, and the drive's last line counts every stretch it excused and says what the sampler cost.
 
 ## 0.71.0

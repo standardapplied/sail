@@ -1,6 +1,13 @@
 name: Clients
 
 on:
+  # A release calls this for its app alone (release.yml's app job): the app then bundles the
+  # darwin sail the release built and signed in the same run, and no SailKit lane runs again.
+  workflow_call:
+    inputs:
+      release:
+        type: boolean
+        default: false
   pull_request:
   push:
     branches:
@@ -27,7 +34,7 @@ jobs:
   sailkit:
     name: SailKit on ${{ matrix.name }}
     needs: changes
-    if: needs.changes.outputs.clients == 'true'
+    if: needs.changes.outputs.clients == 'true' && !inputs.release
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 20
     strategy:
@@ -215,7 +222,35 @@ jobs:
       - name: Install cosign
         uses: sigstore/cosign-installer@398d4b0eeef1380460a10c8013a76f728fb906ac # v3
 
+      # A release's app bundles the darwin sail the release built and signed in this same run, the
+      # one it publishes: one binary, built once, attested once. It is used only once its sha256 is
+      # the one the release publishes and its signature is the release workflow's at this tag; the
+      # step prints both sums and the binary's version, for whoever cuts the release to compare.
+      - name: The release's own darwin sail
+        if: inputs.release
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: sail-darwin-arm64
+          path: ${{ runner.temp }}/sail
+
+      - name: The release's darwin sail, checked by its checksum and its signature
+        if: inputs.release
+        run: |
+          binary="$RUNNER_TEMP/sail/sail-darwin-arm64"
+          published=$(< "$binary.sha256")
+          actual=$(shasum -a 256 "$binary" | cut -d' ' -f1)
+          echo "bundled sail-darwin-arm64 sha256: $actual"
+          echo "the release's sail-darwin-arm64.sha256: $published"
+          [[ $actual == "$published" ]] || { echo "the binary is not the one the release publishes" >&2; exit 1; }
+          cosign verify-blob --bundle "$binary.cosign.bundle" \
+            --certificate-identity "https://github.com/$GITHUB_REPOSITORY/.github/workflows/release.yml@$GITHUB_REF" \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com "$binary"
+          chmod +x "$binary"
+          "$binary" -V | tail -1
+          echo "SAIL_BINARY=$binary" >> "$GITHUB_ENV"
+
       - name: The pinned darwin sail, checked by its checksum and its signature
+        if: ${{ !inputs.release }}
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
