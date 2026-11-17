@@ -256,6 +256,12 @@ final class TerminalCore {
         return GhosttySelection(start: start, end: end, rectangle: false)
     }
 
+    /// Whether something is selected, without making its text.
+    var hasSelection: Bool {
+        var selection = GhosttySelection()
+        return ghostty_terminal_get(handle, GHOSTTY_TERMINAL_DATA_SELECTION, &selection) == GHOSTTY_SUCCESS
+    }
+
     func selectedText() -> String? {
         var selection = GhosttySelection()
         guard ghostty_terminal_get(handle, GHOSTTY_TERMINAL_DATA_SELECTION, &selection) == GHOSTTY_SUCCESS,

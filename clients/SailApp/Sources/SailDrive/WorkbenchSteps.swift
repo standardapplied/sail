@@ -65,8 +65,16 @@ extension Driver {
         if step.blink == true {
             return await blinks()
         }
-        if step.anotherBuildsHost == true {
-            return await anotherBuildsHost()
+        if let state = step.otherHost {
+            return await otherHost(state)
+        }
+        if let pattern = step.kill {
+            let pkill = Process()
+            pkill.executableURL = URL(filePath: "/usr/bin/pkill")
+            pkill.arguments = ["-f", pattern]
+            try? pkill.run()
+            pkill.waitUntilExit()
+            return (pkill.terminationStatus == 0, "pkill -f \(pattern) exited \(pkill.terminationStatus)")
         }
         if step.panes4 == true {
             return await fourPanes()
@@ -497,9 +505,7 @@ extension Driver {
 
     /// The terminal host's and the app's CPU shares, in %, over the next second.
     private func cpuShares() async -> (host: Double, app: Double, said: String) {
-        var host: pid_t?
-        if case let .unix(path) = workbench.host.address { host = LocalHost.serving(at: path)?.pid }
-        let shares = await Self.cpuShares(host: host, over: 1)
+        let shares = await Self.cpuShares(host: workbench.host.servingProcess()?.pid, over: 1)
         guard let host = shares.host, let app = shares.app else {
             return (-1, -1, "not measured: ps listed \(shares.host == nil ? "no terminal host" : "the host") and \(shares.app == nil ? "not the app" : "the app")")
         }
@@ -558,7 +564,7 @@ extension Driver {
     }
 
     /// P2: the focused pane's cursor in two frames a blink apart: they differ only inside the
-    /// cursor's cell. Unfocused, no frame is committed and the blink never wakes over two periods.
+    /// cursor's cell. Unfocused, its display link goes idle, no blink is due, and the cursor shows.
     /// The blink's wakeups and the frames committed a second, idle, over 5 s, are reported.
     private func blinks() async -> (Bool, String) {
         let view = terminal
@@ -578,38 +584,51 @@ extension Driver {
         }
         let rate = await wakeups(for: 5)
         shell.window.makeFirstResponder(nil)
-        _ = await waitUntil(2) { view.drawingState.contains("display link paused") && view.drawingState.contains("not awaiting a drawable") }
-        let frames = Self.committed(view), woken = view.blinkWakeups
-        try? await Task.sleep(for: .seconds(2 * (TerminalView.blinkPeriods.on + TerminalView.blinkPeriods.off)))
-        let still = Self.committed(view) == frames && view.blinkWakeups == woken && view.cursorOn
+        let idle = await waitUntil(2) { view.drawingState.contains("display link paused") && view.drawingState.contains("not awaiting a drawable") }
+        let still = idle && !view.isBlinking && view.cursorOn
         shell.window.makeFirstResponder(view)
         print("blink: \(rate) with \(workbench.panes.count) panes")
         return (
             inside > 0 && outside == 0 && still,
             "a blink apart, \(inside) pixels differ inside the cursor's cell and \(outside) outside it; unfocused, "
-                + (still ? "nothing drawn or woken" : "frames \(frames) -> \(Self.committed(view)), wakeups \(woken) -> \(view.blinkWakeups)") + "; \(rate)"
+                + (still ? "its link idle, no blink due, the cursor shown" : "idle \(idle), a blink due \(view.isBlinking), the cursor shown \(view.cursorOn)") + "; \(rate)"
         )
     }
 
-    /// The blink's wakeups and the frames committed a second, across every pane, idle for `seconds`.
+    /// The idle cost a second over `seconds`, across every pane: the blink's timer wakeups, the
+    /// display refreshes (each blink resumes the link for at least two) and the frames committed;
+    /// then each pane's frames, the focused one marked, so a pane drawing for another reason shows.
     func wakeups(for seconds: Double) async -> String {
-        let views = workbench.panes.values.map(\.terminal)
-        let before = (views.map(\.blinkWakeups).reduce(0, +), views.map { Self.committed($0) }.reduce(0, +))
+        let views = orderedPanes.map(\.terminal)
+        let counts = { views.map { ($0.blinkWakeups, $0.refreshes, Self.committed($0)) } }
+        let before = counts()
         try? await Task.sleep(for: .seconds(seconds))
-        let after = (views.map(\.blinkWakeups).reduce(0, +), views.map { Self.committed($0) }.reduce(0, +))
-        return String(format: "%.1f blink wakeups and %.1f frames a second", Double(after.0 - before.0) / seconds, Double(after.1 - before.1) / seconds)
+        let after = counts()
+        let per = zip(before, after).map { (Double($1.0 - $0.0) / seconds, Double($1.1 - $0.1) / seconds, Double($1.2 - $0.2) / seconds) }
+        let total = per.reduce((0.0, 0.0, 0.0)) { ($0.0 + $1.0, $0.1 + $1.1, $0.2 + $1.2) }
+        let panes = zip(views, per).map { view, rate in (view === terminal ? "*" : "") + String(format: "%.1f", rate.2) }.joined(separator: " ")
+        return String(format: "%.1f blink wakeups, %.1f display refreshes and %.1f frames a second; frames a second by pane (* focused): ", total.0, total.1, total.2) + panes
     }
 
-    /// P4: the app found another build's host serving, said so once, ended it and started its own,
-    /// from this build's copy under Application Support; one host serves.
-    private func anotherBuildsHost() async -> (Bool, String) {
-        let said = await waitUntil(15) { self.workbench.told.contains(LocalHost.endingAnother) }
-        guard case let .unix(path) = workbench.host.address else { return (false, "the host listens on no socket") }
-        let serving = await waitUntil(15) { LocalHost.serving(at: path)?.executable.contains("/Application Support/Sail/Host/") == true }
+    /// P4 and the design note's rule, against another copy's host with a client and a parent that
+    /// restarts it (`ci/drive`'s third run).
+    private func otherHost(_ state: String) async -> (Bool, String) {
+        let host = workbench.host
+        func serving() -> String { host.servingProcess()?.executable ?? "none" }
+        let ours = { serving().contains("/Application Support/Sail/Host/") }
+        let other = { serving().contains("/other-build/") }
+        let usedByAnother = { self.workbench.bannerSays?.contains("Another copy of Sail is using this Mac's terminal host") == true }
+        let reached: Bool
+        switch state {
+        case "kept": reached = await waitUntil(20) { usedByAnother() && other() }
+        case "replaced": reached = await waitUntil(30) { host.told.contains(LocalHost.closingAnother) && (ours() || usedByAnother() && other()) }
+        case "ours": reached = await waitUntil(30) { ours() }
+        default: return (false, "no other-host state \(state)")
+        }
         let hosts = await Self.processes(matching: "_pty-host --local")
         return (
-            said && serving && hosts.count == 1 && workbench.told.filter { $0 == LocalHost.endingAnother }.count == 1,
-            "said: \(workbench.told); serving: \(LocalHost.serving(at: path)?.executable ?? "none"); hosts: \(hosts)"
+            reached && hosts.count == 1,
+            "serving: \(serving()); the banner says: \(workbench.bannerSays ?? "nothing"); told: \(host.told); hosts: \(hosts)"
         )
     }
 

@@ -15,6 +15,12 @@ public enum HostAddress: Hashable, Sendable, CustomStringConvertible {
 
     /// This account's own host: `~/.sail/local/pty.sock` in the home the account database names,
     /// where `sail _pty-host --local` serves, never `$HOME`.
+    /// The pid of the process listening at this unix socket, nil for TCP or when none listens.
+    public func listenerPID(timeout: Int = 1) -> Int32? {
+        guard case .unix = self else { return nil }
+        return (try? Socket.connect(to: self, timeout: timeout))?.peerPID
+    }
+
     public static func local() throws(TerminalError) -> HostAddress {
         try local(home: try accountHome())
     }

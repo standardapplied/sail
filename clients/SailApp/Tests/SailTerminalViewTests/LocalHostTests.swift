@@ -58,6 +58,11 @@ import Testing
         try "#!/bin/sh\nexit 4\n".write(to: binary, atomically: true, encoding: .utf8)
         let newer = try LocalHost.installed(binary.path, under: copies)
         #expect(newer != copy && FileManager.default.fileExists(atPath: copy))
+        try "half".write(toFile: newer + ".1.staged", atomically: true, encoding: .utf8)
+        LocalHost.prune(copies, keeping: newer)
+        #expect(!FileManager.default.fileExists(atPath: copy), "an older build's copy is removed")
+        #expect(FileManager.default.fileExists(atPath: newer))
+        #expect(try FileManager.default.contentsOfDirectory(atPath: URL(filePath: newer).deletingLastPathComponent().path) == ["sail"], "a staged file is removed")
     }
 
     /// The process serving at a socket is found by its pid and its executable: here, this test's own.
@@ -73,11 +78,12 @@ import Testing
         withUnsafeMutableBytes(of: &address.sun_path) { $0.copyBytes(from: path.utf8) }
         let bound = withUnsafePointer(to: &address) { $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { bind(listener, $0, socklen_t(MemoryLayout<sockaddr_un>.size)) } }
         try #require(bound == 0 && listen(listener, 1) == 0)
-        let serving = try #require(LocalHost.serving(at: path))
+        let host = LocalHost(binary: nil, address: .unix(path: path), log: path + ".log", copies: URL(filePath: path + ".copies"))
+        let serving = try #require(host.servingProcess())
         #expect(serving.pid == getpid())
         var own = [CChar](repeating: 0, count: 4 * Int(MAXPATHLEN))
         #expect(proc_pidpath(getpid(), &own, UInt32(own.count)) > 0)
         #expect(serving.executable == String(cString: own))
-        #expect(LocalHost.serving(at: path + ".none") == nil)
+        #expect(LocalHost(binary: nil, address: .unix(path: path + ".none"), log: path + ".log", copies: URL(filePath: path)).servingProcess() == nil)
     }
 }

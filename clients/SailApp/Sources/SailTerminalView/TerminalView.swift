@@ -70,6 +70,14 @@ public final class TerminalView: NSView {
     private var blink: Timer?
     /// How many times the blink's timer woke the main thread: what the drive counts.
     public private(set) var blinkWakeups = 0
+    /// How many display refreshes reached the view: each blink resumes the link for at least two
+    /// (one that draws, one that finds nothing and pauses), so these count as wakeups too.
+    public private(set) var refreshes = 0
+
+    /// Whether a blink is due: the only thing that would wake this view while nothing changes.
+    public var isBlinking: Bool {
+        blink != nil
+    }
 
     public init(fonts: TerminalFonts, points: Double = FontLadder.standard) throws(RenderError) {
         let scale = NSScreen.main.map { Double($0.backingScaleFactor) } ?? 2
@@ -396,6 +404,7 @@ public final class TerminalView: NSView {
     /// encoded (tried again then).
     @discardableResult
     func refresh(target: Double) -> Bool {
+        refreshes += 1
         guard let link else {
             pacer.pause()
             return false
@@ -528,9 +537,12 @@ public final class TerminalView: NSView {
 
     private func scheduleBlink(after seconds: Double) {
         blink?.invalidate()
-        blink = Timer.scheduledTimer(withTimeInterval: seconds, repeats: false) { [weak self] _ in
+        let timer = Timer(timeInterval: seconds, repeats: false) { [weak self] _ in
             MainActor.assumeIsolated { self?.blinked() }
         }
+        timer.tolerance = seconds / 10
+        RunLoop.main.add(timer, forMode: .common)
+        blink = timer
     }
 
     /// Half a blink: the cursor shown or hidden, one frame drawn (P2: no row laid out again).

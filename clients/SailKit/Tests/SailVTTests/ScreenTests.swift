@@ -94,18 +94,18 @@ import Testing
         #expect(try screen.text() == "again")
     }
 
-    @Test func aClipboardWriteIsReportedUnlessThePolicyDeniesIt() throws {
+    /// A clipboard write of text is reported; one that is not valid UTF-8 is refused, never
+    /// turned into U+FFFD on the person's clipboard.
+    @Test func aClipboardWriteOfTextIsReportedAndOneNotTextIsRefused() throws {
         let screen = try screen(columns: 20, rows: 1)
-        let osc52 = Array("\u{1b}]52;c;aGVsbG8=\u{07}".utf8)
-        #expect(screen.feed(osc52).events == [.clipboardWrite("hello")])
-        screen.setClipboardWrites(.deny)
-        #expect(screen.feed(osc52).events.isEmpty)
+        #expect(screen.feed(Array("\u{1b}]52;c;aGVsbG8=\u{07}".utf8)).events == [.clipboardWrite("hello")])
+        #expect(screen.feed(Array("\u{1b}]52;c;/w==\u{07}".utf8)).events.isEmpty, "0xFF is no text")
     }
 
-    /// A clipboard write over ``ClipboardWritePolicy/largestText`` is refused and reported nowhere.
+    /// A clipboard write over ``ClipboardWrite/largestText`` is refused and reported nowhere.
     @Test func aClipboardWriteOverTheBoundIsRefused() throws {
         let screen = try screen(columns: 20, rows: 1)
-        let largest = String(repeating: "x", count: ClipboardWritePolicy.largestText)
+        let largest = String(repeating: "x", count: ClipboardWrite.largestText)
         let write = { (text: String) in Array("\u{1b}]52;c;\(Data(text.utf8).base64EncodedString())\u{07}".utf8) }
         #expect(screen.feed(write(largest)).events == [.clipboardWrite(largest)])
         #expect(screen.feed(write(largest + "x")).events.isEmpty)
@@ -121,6 +121,14 @@ import Testing
         let reply = String(decoding: screen.feed(Array("\u{1b}_Gi=31,s=1,v=1,a=q,t=d,f=24;AAAA\u{1b}\\\u{1b}[c".utf8)).reply, as: UTF8.self)
         #expect(!reply.contains("\u{1b}_G"), "\(reply.debugDescription)")
         #expect(reply.hasPrefix("\u{1b}[?"), "the device attributes are answered: \(reply.debugDescription)")
+    }
+
+    /// XTVERSION names Sail, not "libghostty": a program that picks an image protocol by the
+    /// terminal's name (yazi matches "ghostty") would otherwise send Kitty graphics, never drawn.
+    @Test func xtversionNamesSail() throws {
+        let screen = try screen(columns: 20, rows: 1)
+        let reply = String(decoding: screen.feed(Array("\u{1b}[>q".utf8)).reply, as: UTF8.self)
+        #expect(reply == "\u{1b}P>|Sail\u{1b}\\", "\(reply.debugDescription)")
     }
 
     @Test func aClipboardReadIsAnsweredEmpty() throws {
@@ -186,7 +194,9 @@ import Testing
         let screen = try screen(columns: 20, rows: 3)
         _ = screen.feed(Array("hello brave world\r\nsecond line".utf8))
         #expect(screen.selectedText() == nil)
+        #expect(!screen.hasSelection)
         #expect(screen.select(.word(at: CellPoint(x: 7, y: 0))))
+        #expect(screen.hasSelection)
         #expect(screen.selectedText() == "brave")
         #expect(try screen.frame().rows[0].cells[6 ... 10].allSatisfy(\.selected))
         #expect(screen.select(.line(at: CellPoint(x: 2, y: 1))))

@@ -21,8 +21,8 @@ public final class TabStrip: NSView {
     /// A rename ended: the name typed, or nil when it was cancelled.
     var onRename: @MainActor (TabID, String?) -> Void = { _, _ in }
     var onMove: @MainActor (TabID, Int) -> Void = { _, _ in }
-    /// A tab's context menu, asked once the tab is selected.
-    var onMenu: @MainActor () -> NSMenu? = { nil }
+    /// A tab's context menu, for the tab it names.
+    var onMenu: @MainActor (TabID) -> NSMenu? = { _ in nil }
 
     var look: Look {
         didSet { paint() }
@@ -33,8 +33,7 @@ public final class TabStrip: NSView {
 
     var showsTabs = true {
         didSet {
-            subviews.forEach { $0.isHidden = !showsTabs }
-            if showsTabs { needsLayout = true }
+            needsLayout = true
             paint()
         }
     }
@@ -117,7 +116,7 @@ public final class TabStrip: NSView {
         tab.onClose = { [weak self] in self?.onClose(id) }
         tab.onRename = { [weak self] name in self?.onRename(id, name) }
         tab.onDrop = { [weak self] tab in self?.drop(tab) }
-        tab.onMenu = { [weak self] in self?.onMenu() }
+        tab.onMenu = { [weak self] in self?.onMenu(id) }
         addSubview(tab)
         return tab
     }
@@ -193,6 +192,10 @@ public final class TabButton: NSView, NSTextFieldDelegate {
         setAccessibilityElement(true)
         setAccessibilityRole(.radioButton)
         setAccessibilitySubrole(Self.tabButton)
+        setAccessibilityCustomActions([
+            NSAccessibilityCustomAction(name: "Close Tab") { [weak self] in MainActor.assumeIsolated { self?.onClose() } != nil },
+            NSAccessibilityCustomAction(name: "Rename") { [weak self] in MainActor.assumeIsolated { self?.rename() } != nil },
+        ])
     }
 
     @available(*, unavailable)
@@ -278,10 +281,10 @@ public final class TabButton: NSView, NSTextFieldDelegate {
         onClose()
     }
 
-    /// A right-click or a control-click selects the tab, then offers its menu; none while renaming.
+    /// A right-click or a control-click offers the tab's menu, the tab left as it is (selected or
+    /// not); none while renaming.
     override public func menu(for event: NSEvent) -> NSMenu? {
         guard field == nil, event.type == .rightMouseDown || event.modifierFlags.contains(.control) else { return nil }
-        onSelect()
         return onMenu()
     }
 

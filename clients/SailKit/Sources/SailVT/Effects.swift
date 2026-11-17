@@ -32,12 +32,10 @@ public enum ScreenEvent: Equatable, Sendable {
     }
 }
 
-/// Whether a program may write the person's clipboard; never more than ``largestText`` bytes of
-/// UTF-8 at once, so a runaway program cannot fill it with megabytes.
-public enum ClipboardWritePolicy: Equatable, Sendable {
-    case allow
-    case deny
-
+/// What a program may write to the person's clipboard: text, at most ``largestText`` bytes of valid
+/// UTF-8 at once, so a runaway program cannot fill it with megabytes, nor with bytes that are not
+/// text. Whether the write reaches the clipboard at all is the session's (its write token).
+public enum ClipboardWrite {
     public static let largestText = 1 << 20
 }
 
@@ -55,7 +53,6 @@ final class EffectSink {
     /// Between a replay's begin and end the stream is history: a replayed query is not answered
     /// again, nor a bell rung or a clipboard written for it.
     var replaying = false
-    var clipboardPolicy = ClipboardWritePolicy.allow
     var size = GhosttySizeReportSize()
     let isDark: Bool
     /// The render state a hold's start is captured into, set once the screen has one.
@@ -111,8 +108,7 @@ final class EffectSink {
             guard let write else { return }
             let sink = EffectSink.from(userdata)
             let text = EffectSink.text(of: write.pointee)
-            let allowed = sink.map { !$0.replaying && $0.clipboardPolicy == .allow } ?? false
-                && (text?.utf8.count ?? 0) <= ClipboardWritePolicy.largestText
+            let allowed = sink.map { !$0.replaying } ?? false && text != nil
             var reply = GhosttyClipboardWriteReply()
             reply.size = MemoryLayout<GhosttyClipboardWriteReply>.size
             reply.result = allowed ? GHOSTTY_CLIPBOARD_WRITE_RESULT_SUCCESS : GHOSTTY_CLIPBOARD_WRITE_RESULT_DENIED
@@ -170,18 +166,30 @@ final class EffectSink {
         try set(terminal, GHOSTTY_TERMINAL_OPT_RENDER_HOLD, unsafeBitCast(hold, to: UnsafeRawPointer.self))
         try set(terminal, GHOSTTY_TERMINAL_OPT_SEMANTIC_PROMPT, unsafeBitCast(prompt, to: UnsafeRawPointer.self))
         try set(terminal, GHOSTTY_TERMINAL_OPT_RESET, unsafeBitCast(reset, to: UnsafeRawPointer.self))
+        let version: GhosttyTerminalXtversionFn = { _, _ in
+            GhosttyString(ptr: EffectSink.terminalName.utf8Start, len: EffectSink.terminalName.utf8CodeUnitCount)
+        }
+        try set(terminal, GHOSTTY_TERMINAL_OPT_XTVERSION, unsafeBitCast(version, to: UnsafeRawPointer.self))
     }
+
+    /// What XTVERSION (`CSI > q`) answers: this terminal's own name. libghostty-vt's default,
+    /// "libghostty", made programs that match on "ghostty" (yazi's `Brand::Ghostty`) send Kitty
+    /// graphics without asking, which this app does not draw.
+    static let terminalName: StaticString = "Sail"
 
     private static func from(_ userdata: UnsafeMutableRawPointer?) -> EffectSink? {
         userdata.map { Unmanaged<EffectSink>.fromOpaque($0).takeUnretainedValue() }
     }
 
-    /// The text a clipboard write carries: its first `text/…` representation.
+    /// The text a clipboard write carries: its first `text/…` representation, nil when it is over
+    /// ``ClipboardWrite/largestText`` bytes (measured before any text is made) or not valid UTF-8.
     private static func text(of write: GhosttyClipboardWrite) -> String? {
-        guard let contents = write.contents else { return nil }
-        return UnsafeBufferPointer(start: contents, count: write.contents_len)
-            .first { string($0.mime).hasPrefix("text/") }
-            .map { string($0.data) }
+        guard let contents = write.contents,
+              let part = UnsafeBufferPointer(start: contents, count: write.contents_len).first(where: { string($0.mime).hasPrefix("text/") }),
+              part.data.len <= ClipboardWrite.largestText
+        else { return nil }
+        guard let bytes = part.data.ptr else { return "" }
+        return String(validating: UnsafeBufferPointer(start: bytes, count: part.data.len), as: UTF8.self)
     }
 }
 

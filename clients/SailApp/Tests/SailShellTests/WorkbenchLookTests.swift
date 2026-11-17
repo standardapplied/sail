@@ -135,11 +135,20 @@ import Testing
                     }
                 }
                 let strip = shell.thisMac.strip
+                strip.show(Self.items(), selected: TabID(1))
+                strip.layoutSubtreeIfNeeded()
+                if pane == .thisMac {
+                    let firstTab = try #require(strip.tabs.first)
+                    let tabStart = Double(firstTab.convert(firstTab.bounds, to: nil).minX)
+                    #expect(tabStart >= ShellApp.buttonsInset - 0.5 && tabStart <= ShellApp.buttonsInset + Look.Space.s, "\(name): the first tab starts at \(tabStart), not past the buttons' 96 pt inset")
+                }
+                let card = try #require(shell.thisMac.superview)
+                #expect(card.layer?.cornerRadius == Look.contentRadius && card.layer?.masksToBounds == true, "\(name): the pane is not a card with 6 pt corners")
+                #expect(abs(Double(card.frame.minX - shell.rail.frame.maxX) - ShellApp.cardMargin) < 0.5 && abs(Double(root.bounds.maxX - card.frame.maxX) - ShellApp.cardMargin) < 0.5
+                    && abs(Double(card.frame.minY) - ShellApp.cardMargin) < 0.5, "\(name): the card's chrome margin is not 2 pt: \(card.frame)")
                 let row = strip.convert(strip.bounds, to: nil)
                 #expect(abs(Double(row.height) - band) < 1 && abs(Double(row.maxX) - Double(root.bounds.width)) < 1,
                         "\(name): the strip \(row) does not fill the band after the buttons (\(band) pt)")
-                #expect(abs(Double(strip.convert(NSPoint.zero, to: nil).x) + strip.leading - ShellApp.buttonsInset) < 0.5 || strip.leading == Look.Space.s,
-                        "\(name): the tabs do not start at the buttons' 96 pt inset")
             }
         }
     }
@@ -250,7 +259,7 @@ import Testing
         }
         let pane = workbench.paneMenu().items.map { $0.isSeparatorItem ? "-" : $0.title }
         #expect(pane == ["Copy", "Paste", "Select All"], "with no terminal, only the edit commands, dimmed by the responder chain: \(pane)")
-        #expect(workbench.tabMenu().items.map(\.title) == ["New Tab"])
+        #expect(workbench.tabMenu(for: TabID(1)).items.map(\.title) == ["New Tab"])
     }
 
     /// The workbench takes its own keys before the menu bar: each finds its menu item, shifted

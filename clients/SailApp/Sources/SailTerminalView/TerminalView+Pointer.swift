@@ -225,11 +225,12 @@ extension NSColor {
 
 extension TerminalView: NSMenuItemValidation {
     /// Copy with a selection, Paste with text to paste, Select All with a session; the rest as the
-    /// responder chain says.
+    /// responder chain says. Asked each time a menu opens, so neither the selection's text nor the
+    /// clipboard's is read: only whether there is some.
     public func validateMenuItem(_ item: NSMenuItem) -> Bool {
         switch item.action {
-        case #selector(copy(_:)): link?.screen.selectedText()?.isEmpty == false
-        case #selector(paste(_:)): link != nil && pasteboard.string(forType: .string)?.isEmpty == false
+        case #selector(copy(_:)): link?.screen.hasSelection == true
+        case #selector(paste(_:)): link != nil && pasteboard.availableType(from: [.string]) != nil
         case #selector(selectAll(_:)): link != nil
         default: responds(to: item.action)
         }

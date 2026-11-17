@@ -637,12 +637,10 @@ import Testing
         #expect(!harness.view.overlay.cursorOn)
         harness.key("a", code: 0)
         #expect(harness.view.cursorOn, "a key typed shows the cursor")
+        #expect(harness.view.isBlinking)
         harness.window.makeFirstResponder(nil)
         #expect(harness.view.cursorOn)
-        let woken = harness.view.blinkWakeups
-        try await Task.sleep(for: .seconds(1.2))
-        #expect(harness.view.blinkWakeups == woken, "an unfocused view woke to blink")
-        #expect(harness.view.cursorOn)
+        #expect(!harness.view.isBlinking, "an unfocused view would still wake to blink")
     }
 
     /// A program that asks for a steady cursor (DECSCUSR 2) gets one: no blink wakes the view.
@@ -652,14 +650,55 @@ import Testing
         await harness.drainMain()
         await harness.tick()
         await harness.tick()
-        let woken = harness.view.blinkWakeups
-        try await Task.sleep(for: .seconds(1.2))
-        #expect(harness.view.blinkWakeups == woken)
+        #expect(!harness.view.isBlinking, "a steady cursor would wake the view")
         #expect(harness.view.cursorOn)
     }
 
     /// A program's clipboard write (OSC 52) from a session this client writes to reaches the
     /// pasteboard.
+    /// Copy is offered only with a selection, Paste only with text to paste, Select All with a
+    /// session; and Select All then selects what Copy writes.
+    @Test func theEditCommandsAreValidatedByWhatTheyWouldDo() async throws {
+        let harness = try Harness()
+        harness.link.output("first\r\nsecond")
+        await harness.drainMain()
+        func valid(_ action: Selector) -> Bool {
+            harness.view.validateMenuItem(NSMenuItem(title: "", action: action, keyEquivalent: ""))
+        }
+        harness.pasteboard.clearContents()
+        #expect(!valid(#selector(TerminalView.copy(_:))), "Copy with nothing selected")
+        #expect(!valid(#selector(TerminalView.paste(_:))), "Paste with nothing to paste")
+        #expect(valid(#selector(TerminalView.selectAll(_:))))
+        harness.view.selectAll(nil)
+        #expect(valid(#selector(TerminalView.copy(_:))))
+        harness.view.copy(nil)
+        #expect(harness.pasteboard.string(forType: .string)?.hasPrefix("first\nsecond") == true)
+        #expect(valid(#selector(TerminalView.paste(_:))))
+    }
+
+    /// The right button goes to a program that tracks the mouse in a focused view, and no menu
+    /// opens; with Shift, or in a program that does not track it, the menu opens instead.
+    @Test func theRightButtonGoesToAProgramThatTracksTheMouseShiftGivesTheMenu() async throws {
+        let harness = try Harness()
+        let menu = NSMenu()
+        harness.view.contextMenu = { menu }
+        func right(_ flags: NSEvent.ModifierFlags) -> NSEvent? {
+            NSEvent.mouseEvent(
+                with: .rightMouseDown, location: harness.view.convert(NSPoint(x: 20, y: 20), to: nil), modifierFlags: flags,
+                timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: harness.window.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 1
+            )
+        }
+        #expect(harness.view.menu(for: try #require(right([]))) === menu, "no program tracks the mouse: the menu")
+        harness.link.output("\u{1b}[?1000h")
+        await harness.drainMain()
+        #expect(harness.view.menu(for: try #require(right([]))) == nil, "a program tracking the mouse takes the right button")
+        #expect(harness.view.menu(for: try #require(right(.shift))) === menu, "Shift gives the menu")
+        harness.link.forget()
+        harness.view.rightMouseDown(with: try #require(right([])))
+        harness.flush()
+        #expect(!harness.link.bytes.isEmpty, "the right button's press reached the program")
+    }
+
     @Test func aProgramsClipboardWriteReachesThePasteboard() async throws {
         let harness = try Harness()
         harness.pasteboard.clearContents()

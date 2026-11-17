@@ -58,7 +58,7 @@ public final class ShellApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         fonts: URL, helper: String?, look: Look, passkeys: (@escaping @MainActor @Sendable () -> NSWindow?) -> any PasskeyAuthenticator
     ) throws(ShellError) {
         self.look = look
-        let window = NSWindow(
+        let window = ShellWindow(
             contentRect: NSRect(x: 0, y: 0, width: 1180, height: 800),
             styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView], backing: .buffered, defer: false
         )
@@ -111,7 +111,7 @@ public final class ShellApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         thisMac.strip.showsTabs = !thisMac.isHidden
         account.isHidden = !thisMac.isHidden
         rail.show(item)
-        paintStrip()
+        paintChrome()
         UserDefaults.standard.set(item.rawValue, forKey: Self.paneKey)
         if item == .thisMac {
             thisMac.shown()
@@ -129,7 +129,7 @@ public final class ShellApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         rail.look = look
         account.look = look
         thisMac.look = look
-        paintStrip()
+        paintChrome()
     }
 
     public func windowDidEnterFullScreen(_: Notification) {
@@ -192,7 +192,7 @@ public final class ShellApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     /// The band, the rail and the card's margin are one chrome surface, as Mast's `--chrome-bg`.
-    private func paintStrip() {
+    private func paintChrome() {
         root.layer?.backgroundColor = NSColor(look.chrome).cgColor
     }
 
@@ -228,6 +228,8 @@ public final class ShellApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         apply(look)
         window.titlebarAppearsTransparent = true
         window.titleVisibility = .hidden
+        band.allowsUserCustomization = false
+        band.allowsDisplayModeCustomization = false
         window.toolbar = band
         window.toolbarStyle = .unified
         window.titlebarSeparatorStyle = .none
@@ -235,7 +237,7 @@ public final class ShellApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         content.layer?.cornerRadius = Look.contentRadius
         content.layer?.masksToBounds = true
         root.wantsLayer = true
-        paintStrip()
+        paintChrome()
         titleBarRow.layoutAttribute = .left
         for view in [rail, content] as [NSView] {
             view.translatesAutoresizingMaskIntoConstraints = false
@@ -367,5 +369,15 @@ public enum ShellError: Error, Equatable, CustomStringConvertible {
         switch self {
         case let .host(what), let .resources(what): what
         }
+    }
+}
+
+/// The window, whose toolbar is the band and nothing else: it cannot be hidden (that would leave a
+/// 28 pt title bar over a card laid out for the band), and offers no display modes.
+final class ShellWindow: NSWindow {
+    override func toggleToolbarShown(_: Any?) {}
+
+    override func validateMenuItem(_ item: NSMenuItem) -> Bool {
+        item.action == #selector(toggleToolbarShown(_:)) ? false : super.validateMenuItem(item)
     }
 }

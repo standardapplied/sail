@@ -1,5 +1,6 @@
 import AppKit
 import SailTerminalView
+import SailWorkbench
 
 /// A command of the menu bar that a context menu offers too, defined once (P1): both places make
 /// their item from it, with the same action and target, so both are validated alike. A context
@@ -44,15 +45,14 @@ extension WorkbenchView {
         ])
     }
 
-    /// A tab's context menu, the tab selected first so each item acts on it as the menu bar's does.
-    func tabMenu() -> NSMenu {
+    /// A tab's context menu: each item the menu bar's command, acting on that tab without
+    /// selecting it (its id rides on the item), as Safari's and Finder's tab menus do.
+    func tabMenu(for tab: TabID) -> NSMenu {
         let rename = Command.renameTab.item(target: self, keyed: false)
         rename.title = "Rename"
-        return menu([
-            [rename],
-            [Command.closeTab, Command.closeOtherTabs].map { $0.item(target: self, keyed: false) },
-            [Command.newTab.item(target: self, keyed: false)],
-        ])
+        let items = [[rename], [Command.closeTab, Command.closeOtherTabs].map { $0.item(target: self, keyed: false) }]
+        items.joined().forEach { $0.representedObject = tab }
+        return menu(items + [[Command.newTab.item(target: self, keyed: false)]])
     }
 
     private func menu(_ groups: [[NSMenuItem]]) -> NSMenu {
