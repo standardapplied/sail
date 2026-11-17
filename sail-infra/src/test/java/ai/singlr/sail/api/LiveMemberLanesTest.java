@@ -320,6 +320,31 @@ class LiveMemberLanesTest {
     assertEquals(List.of(room.promptOf(SPEC, next)), room.processes.latest().written);
   }
 
+  /**
+   * A restart finds a run its member left running, holding a message its last turn took and never
+   * answered: reclaim finishes it through the same finish as every other end, which gives the
+   * message back in its transaction, and the room's next message hands it to the next member.
+   */
+  @Test
+  void aRunReclaimedAtStartGivesBackWhatItWasHandedAndNeverAnswered() {
+    var process = room.prompted(SPEC, "full", "first");
+    room.says(process, Lines.init("sess-1"), Lines.delta("One"), Lines.result("One"));
+    var second = room.says(SPEC, "second");
+    room.says(process, Lines.init("sess-1"));
+
+    room.restart();
+    assertEquals(new LiveMembers.Reclaimed(1, List.of()), room.live.reclaim(HANDLE));
+    room.settle();
+    room.says(SPEC, "third");
+
+    assertEquals(List.of(second), room.runs.givenBack(process.runId));
+    assertEquals(2, room.processes.starts.size());
+    var prompt = String.join("\n", room.processes.latest().written);
+    assertTrue(prompt.contains("second"), prompt);
+    assertTrue(prompt.contains("third"), prompt);
+    assertTrue(prompt.contains("Your last process ended before it answered"), prompt);
+  }
+
   @Test
   void aRestartKeepsTheRunOfAMemberItCannotProveGone() {
     var process = room.prompted(SPEC, "full", "first");

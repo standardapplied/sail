@@ -307,7 +307,8 @@ public final class DispatchOperations {
             shell,
             this.events,
             sessionYield,
-            reports);
+            reports,
+            this::tellRoom);
     this.buildDispatch =
         new BuildDispatch(
             projects,
