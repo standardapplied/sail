@@ -6,7 +6,9 @@
 # Then another copy of Sail's host runs from another bundle's path, with a client attached to one
 # of its sessions, and the app is opened once more for Tests/Drive/third.json; then, with no host
 # and no saved arrangement, once more for Tests/Drive/shots.json: the window as the screen shows it;
-# then once more for Tests/Drive/workspaces.json, every control-plane call answered from the goldens.
+# then once more for Tests/Drive/workspaces.json, every control-plane call answered from the goldens;
+# then, with keyboard navigation on, for Tests/Drive/kit.json, the controls' gallery, left to right
+# and once more right to left (kit-rtl).
 # Each run's texts, images and report land in OUT; what it prints, and the servers' logs, beside
 # them. The ticket is handed to the drive in its environment and printed nowhere.
 set -euo pipefail
@@ -43,7 +45,7 @@ SAIL_DRIVE_TICKET=$("$sail" fde enroll uday --json | plutil -extract ticket raw 
 export SAIL_DRIVE_TICKET SAIL_DRIVE_PASSKEY=$out/software-passkey.json
 rm -f "$SAIL_DRIVE_PASSKEY"
 
-for run in first second third shots workspaces; do
+for run in first second third shots workspaces kit kit-rtl; do
   if [[ $run == third ]]; then
     echo "ci/drive: another copy's host, and a client on it"
     pkill -f '_pty-host --local' || true
@@ -66,7 +68,13 @@ for run in first second third shots workspaces; do
   echo "ci/drive: $run"
   goldens=off
   [[ $run == workspaces ]] && goldens=on
-  SAIL_DRIVE_GOLDENS=$goldens perl -e 'alarm shift; exec @ARGV' 600 "$drive" --drive "Tests/Drive/$run.json" --out "$out/$run" 2>&1 | tee "$out/$run-output.txt" || {
+  script=$run directions=()
+  if [[ $run == kit* ]]; then
+    script=kit
+    defaults write -g AppleKeyboardUIMode -int 2
+  fi
+  [[ $run == kit-rtl ]] && directions=(-AppleTextDirection YES -NSForceRightToLeftWritingDirection YES)
+  SAIL_DRIVE_GOLDENS=$goldens perl -e 'alarm shift; exec @ARGV' 600 "$drive" --drive "Tests/Drive/$script.json" --out "$out/$run" ${directions[@]+"${directions[@]}"} 2>&1 | tee "$out/$run-output.txt" || {
     status=$?
     reports=$HOME/Library/Logs/DiagnosticReports
     # A signal killed the drive (138 is SIGBUS, 139 SIGSEGV): ReportCrash writes its report some
