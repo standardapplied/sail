@@ -66,6 +66,8 @@ import Testing
     /// The GCP proof's close and Reconnect Now: close lets the client's part go, then ends the
     /// session through its door as its writer, as a runner tab's close does.
     @Test func closeEndsTheSessionThroughItsDoorAndReconnectNowTriesAtOnce() async throws {
+        let held = try JSONDecoder().decode(Script.self, from: Data(#"{"size": [20, 3], "steps": [{"hold": 12}]}"#.utf8))
+        #expect(held.steps == [.hold(12)] && held.steps.map(\.description) == ["hold 12 s"])
         let script = try JSONDecoder().decode(Script.self, from: Data(#"{"size": [20, 3], "steps": [{"reconnectNow": true}, {"close": true}]}"#.utf8))
         #expect(script.steps == [.reconnectNow, .close])
         #expect(script.steps.map(\.description) == ["reconnect now", "close, ending the session at its host"])

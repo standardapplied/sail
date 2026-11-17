@@ -93,6 +93,8 @@ struct Runner {
             try await host.start()
         case .reconnectNow:
             session.reconnectNow()
+        case let .hold(seconds):
+            try await Task.sleep(for: .seconds(seconds))
         case .close:
             session.close()
             try await SessionListing.end(session.state.session, through: door)

@@ -55,6 +55,9 @@ enum Step: Decodable, Equatable, CustomStringConvertible {
     case killHost
     /// Tries at once, as Reconnect Now does.
     case reconnectNow
+    /// Does nothing for this many seconds, as a person away from the keyboard: the GCP proof's
+    /// network comes back while a parked session waits.
+    case hold(Int)
     /// Closes the session as a tab is closed: this client's part let go, then the session ended at
     /// its host on a connection of its own, through the door it came through.
     case close
@@ -84,6 +87,7 @@ enum Step: Decodable, Equatable, CustomStringConvertible {
         case .attach: self = .attach
         case .killHost: self = .killHost
         case .reconnectNow: self = .reconnectNow
+        case .hold: self = .hold(try fields.decode(Int.self, forKey: key))
         case .close: self = .close
         case .phase: self = .phase(try fields.decode(String.self, forKey: key), within: within)
         case .measure: self = .measure(try fields.decode(Int.self, forKey: key))
@@ -103,6 +107,7 @@ enum Step: Decodable, Equatable, CustomStringConvertible {
         case .attach: "attach"
         case .killHost: "kill the host as a crash would and start another"
         case .reconnectNow: "reconnect now"
+        case let .hold(seconds): "hold \(seconds) s"
         case .close: "close, ending the session at its host"
         case let .phase(phase, within): "phase \(phase) within \(within) s"
         case let .measure(keys): "measure \(keys) echoed keys"
@@ -110,6 +115,6 @@ enum Step: Decodable, Equatable, CustomStringConvertible {
     }
 
     private enum Keys: String, CodingKey {
-        case type, wait, within, resize, snapshot, same, drop, detach, attach, killHost, reconnectNow, close, phase, measure
+        case type, wait, within, resize, snapshot, same, drop, detach, attach, killHost, reconnectNow, hold, close, phase, measure
     }
 }
