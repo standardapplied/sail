@@ -412,7 +412,7 @@ holds() {
 holds_no_trace_of() {
   local run=$1 box=$2 counts
   shift 2
-  counts=$(on "$run" "$box" "sudo apt-get install -y -qq sqlite3 > /dev/null 2>&1; for w in $*; do printf '%s=%s ' \$w \$(sudo sqlite3 -readonly /root/.sail/sail.db .dump | grep -ci \"\\b\$w\\b\"); done")
+  counts=$(on "$run" "$box" "$(installed sqlite3); for w in $*; do printf '%s=%s ' \$w \$(sudo sqlite3 -readonly /root/.sail/sail.db .dump | grep -ci \"\\b\$w\\b\"); done")
   echo "$box: $counts"
   ! grep -qE '=[1-9]' <<< "$counts"
 }
@@ -924,7 +924,7 @@ while_cut_off() {
   main_ip=$(internal_ip "$run" main)
   [[ -n $main_ip ]] || { echo "main has no address"; return 1; }
   rule="OUTPUT -d $main_ip -j REJECT"
-  on "$run" "$box" "command -v iptables > /dev/null || sudo apt-get install -y -qq iptables > /dev/null 2>&1; sudo iptables -I $rule" || return 1
+  on "$run" "$box" "command -v iptables > /dev/null || $(installed iptables); sudo iptables -I $rule" || return 1
   trap "on $(printf %q "$run") $(printf %q "$box") $(printf %q "sudo iptables -D $rule")" EXIT INT TERM
   echo "$box cannot reach main at $main_ip"
   { on "$run" main "$on_main" && on "$run" "$box" "$on_box"; } || status=1
@@ -1324,7 +1324,7 @@ audited() {
   local run=$1 box=$2 key=$3 rule said
   shift 3
   rule="always,exit -F arch=b64 -S execve -F auid=\$(id -u) -k $key"
-  on "$run" "$box" "sudo apt-get install -y -q auditd > /dev/null && sudo auditctl -a $rule > /dev/null" || return 1
+  on "$run" "$box" "$(installed auditd); sudo auditctl -a $rule > /dev/null" || return 1
   said=0
   on "$run" "$box" "$*" || said=$?
   on "$run" "$box" "sudo auditctl -d $rule > /dev/null" || return 1
@@ -1410,6 +1410,12 @@ mirrored_on() {
   gap=$(awk -v p="$first" -v c="$create" 'BEGIN { split(p, a, ":"); split(c, b, ":"); printf "%.3f", (b[1] * 3600 + b[2] * 60 + b[3]) - (a[1] * 3600 + a[2] * 60 + a[3]) }')
   echo "first device's last probe at $first, incus storage create at $create: $gap s"
   awk -v g="$gap" 'BEGIN { exit !(g >= 0 && g < 1) }'
+}
+
+# The regional Ubuntu mirror answers 404 for a few files of an install, different ones each try, and
+# apt keeps what it fetched: the fleet's own tools are installed as Sail installs (up to four tries).
+installed() {
+  echo "for try in 1 2 3 4; do sudo apt-get install -y -q $1 > /dev/null 2>&1 && break; done"
 }
 
 pool_health() {
@@ -1640,7 +1646,7 @@ storage() {
 
 copies_main() {
   local run=$1 copy=$2
-  on "$run" main "sudo apt-get install -y -qq sqlite3 > /dev/null 2>&1 && sudo sqlite3 /var/lib/sail/sail.db '.backup /root/sail.db.copy' && sudo install -m 600 -o \$(id -un) /root/sail.db.copy /tmp/sail.db.copy" || return 1
+  on "$run" main "$(installed sqlite3); sudo sqlite3 /var/lib/sail/sail.db '.backup /root/sail.db.copy' && sudo install -m 600 -o \$(id -un) /root/sail.db.copy /tmp/sail.db.copy" || return 1
   (umask 077 && gc compute scp "$(vm "$run" main):/tmp/sail.db.copy" "$copy" --zone "$ZONE") || return 1
   ls -l "$copy"
 }
