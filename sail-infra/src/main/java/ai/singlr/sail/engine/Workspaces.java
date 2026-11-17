@@ -418,8 +418,13 @@ public final class Workspaces {
    * under the box's lock directory: what every door of the box uses.
    */
   public static Workspaces onThisBox(ShellExec shell) {
+    return onThisBox(shell.observer(), shell);
+  }
+
+  /** As {@link #onThisBox(ShellExec)}, reading Incus through {@code observer}. */
+  public static Workspaces onThisBox(ShellExec observer, ShellExec shell) {
     return new Workspaces(
-        shell.observer(),
+        observer,
         shell,
         System::nanoTime,
         SailPaths.locksDir(),
@@ -1289,6 +1294,92 @@ public final class Workspaces {
       containers.forceDelete(now.name());
       return new Changed(project, name, now.name(), Change.DELETED, null);
     }
+  }
+
+  /**
+   * What a destroy deletes, handed the project's workspaces and template as read under its locks.
+   */
+  @FunctionalInterface
+  public interface Destroy {
+    void delete(List<String> instances) throws Exception;
+  }
+
+  /**
+   * Runs {@code destroy} on project {@code project}'s workspaces and template once nothing else can
+   * change them: under each one's lock (a workspace's entry lock, the template's build lock), then
+   * the box's create lock, each waited for no longer than {@link #CREATE_WAIT}, so a create, start,
+   * stop, delete or build in flight finishes first, and one still going after that refuses the
+   * destroy, saying what holds it. They are read again under those locks, and one made since {@code
+   * confirmed} was read refuses it too, naming it: a destroy deletes only what it showed, and never
+   * leaves a workspace of a project that is gone. A create that had not reached its clone finds no
+   * template, and fails.
+   */
+  public void whileDestroying(String project, List<String> confirmed, Destroy destroy)
+      throws Exception {
+    var held = new ArrayList<FileMutex>();
+    try {
+      try {
+        for (var part : partsOf(project)) {
+          held.add(
+              part.kind() instanceof BoxInstances.Workspace workspace
+                  ? entryLock(project, workspace.workspace())
+                  : templateLock(project));
+        }
+        held.add(createLock(nanos.getAsLong()));
+      } catch (Busy busy) {
+        throw Remedied.state(
+            "Project " + project + " is not destroyed: " + busy.getMessage(),
+            Remedy.of(
+                "Destroy it again once that is done: ",
+                Remedy.sail("project destroy", project),
+                "."));
+      }
+      var now = partsOf(project).stream().map(BoxInstances.Instance::name).toList();
+      var made = now.stream().filter(name -> !confirmed.contains(name)).toList();
+      if (!made.isEmpty()) {
+        throw Remedied.state(
+            "Project "
+                + project
+                + " is not destroyed: "
+                + String.join(", ", made)
+                + " was made after the destroy read what it would delete.",
+            Remedy.of(
+                "Destroy it again to see it: ", Remedy.sail("project destroy", project), "."));
+      }
+      destroy.delete(now);
+    } finally {
+      for (var lock : held.reversed()) {
+        if (lock != null) {
+          lock.close();
+        }
+      }
+    }
+  }
+
+  /** Project {@code project}'s workspaces, then its template, as Incus has them now. */
+  private List<BoxInstances.Instance> partsOf(String project)
+      throws IOException, InterruptedException, TimeoutException {
+    var all = box.all();
+    var parts = new ArrayList<BoxInstances.Instance>();
+    all.stream()
+        .filter(i -> i.kind() instanceof BoxInstances.Workspace w && w.project().equals(project))
+        .forEach(parts::add);
+    all.stream()
+        .filter(i -> i.kind() instanceof BoxInstances.Template t && t.project().equals(project))
+        .forEach(parts::add);
+    return parts;
+  }
+
+  /** The lock a build of {@code project}'s template holds, waited for as a create waits. */
+  private FileMutex templateLock(String project) throws IOException, InterruptedException {
+    if (shell.isDryRun()) {
+      return null;
+    }
+    return FileMutex.acquireUntil(
+            ContainerConfig.lockOf(locks, WorkspaceTemplate.nameOf(project)),
+            nanos.getAsLong() + CREATE_WAIT.toNanos(),
+            nanos)
+        .orElseThrow(() -> Busy.building(project));
   }
 
   /**

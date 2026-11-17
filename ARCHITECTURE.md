@@ -1502,12 +1502,18 @@ Each row with the tests that prove it:
   `ContainerSetupSweepTest`, `ContainerAuthorizedKeysTest`.*
 - **W11. A project's instances go with it.** `project destroy <p>` removes the project's
   workspaces, its specs' run workspaces among them, and its template with its container, naming each
-  in its confirmation; a run live in one ends as any killed run does. When a project
+  in its confirmation; a run live in one ends as any killed run does. It deletes them under each
+  workspace's lock, the template's build lock and the box's create lock (`Workspaces.whileDestroying`,
+  each waited for at most 60 s, then refused saying what holds it), read again there: one made
+  after it read them refuses it, naming it, and a create that had not cloned yet finds no
+  template, so no workspace outlives its project. When a project
   leaves a box's scope, the sync round removes them the same way, and only then. A copy carrying
   the project's keys under another name is not Sail's: it stays, said once, in the round that
   drops the project.
   *`ProjectDestroyCommandTest.destroyTakesTheProjectsWorkspacesAndTemplateAndNothingElse`,
-  `ProjectTeardownTest`, `ScopeChangeRoundTest.aProjectThatLeavesTheBoxTakesItsWorkspacesAndTemplateWithIt`.*
+  `WorkspacesTest.aDestroy…` (read again under its locks; a workspace made meanwhile; a create or a
+  change that outlasts the wait), `ProjectTeardownTest`,
+  `ScopeChangeRoundTest.aProjectThatLeavesTheBoxTakesItsWorkspacesAndTemplateWithIt`.*
 - **W12. A workspace is whole or it is not one.** `user.sail.ready` is written last, in the write
   that clears the copy's `user.sail.creating`. A workspace without it:
   - is listed as `incomplete`;

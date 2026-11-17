@@ -4049,4 +4049,133 @@ class WorkspacesTest {
     assertEquals(Map.of(), shell.pushed);
     assertTrue(scripted.invocations().stream().noneMatch(c -> c.startsWith("incus exec acme-a")));
   }
+
+  private static final String ACME_PARTS =
+      """
+      [{"name": "acme", "status": "Running"},
+       {"name": "acme--tmpl", "status": "Stopped", "config": {"user.sail.template.of": "acme"}},
+       {"name": "acme-fix", "status": "Stopped",
+        "config": {"user.sail.project": "acme", "user.sail.workspace": "fix",
+                   "user.sail.ready": "1"}}]
+      """;
+
+  private static final String ACME_PARTS_AND_NEW =
+      ACME_PARTS
+          .strip()
+          .replaceFirst(
+              "]$",
+              """
+          ,{"name": "acme-new", "status": "Running",
+            "config": {"user.sail.project": "acme", "user.sail.workspace": "new",
+                       "user.sail.ready": "1"}}]""");
+
+  /** A destroy deletes the project's workspaces and template as it reads them under its locks. */
+  @Test
+  void aDestroyDeletesTheWorkspacesAndTemplateItReadsUnderItsLocks() throws Exception {
+    var shell = new ScriptedShellExecutor().onOk("incus list --format json", ACME_PARTS);
+    var deleted = new ArrayList<List<String>>();
+
+    workspaces(shell, System::nanoTime)
+        .whileDestroying("acme", List.of("acme-fix", "acme--tmpl"), deleted::add);
+
+    assertEquals(List.of(List.of("acme-fix", "acme--tmpl")), deleted);
+  }
+
+  /**
+   * A workspace a create in flight made by the time the destroy holds the box's create lock is read
+   * again there, and refuses the destroy, naming it: nothing is deleted, so no workspace is left of
+   * a project that is gone, and nothing is deleted that the destroy did not show.
+   */
+  @Test
+  void aDestroyReadsAgainUnderTheCreateLockAndRefusesNamingAWorkspaceMadeMeanwhile()
+      throws Exception {
+    var shell =
+        new ScriptedShellExecutor()
+            .onceOnOk("incus list --format", ACME_PARTS)
+            .onOk("incus list --format json", ACME_PARTS_AND_NEW);
+    var deleted = new ArrayList<List<String>>();
+
+    var refused =
+        assertThrows(
+            IllegalStateException.class,
+            () ->
+                workspaces(shell, System::nanoTime)
+                    .whileDestroying("acme", List.of("acme-fix", "acme--tmpl"), deleted::add));
+
+    assertTrue(
+        refused
+            .getMessage()
+            .contains(
+                "Project acme is not destroyed: acme-new was made after the destroy read what it"
+                    + " would delete."),
+        refused.getMessage());
+    assertTrue(refused.getMessage().contains("sail project destroy acme"), refused.getMessage());
+    assertEquals(List.of(), deleted);
+  }
+
+  /**
+   * A create holding the box's create lock past {@link Workspaces#CREATE_WAIT} refuses the destroy,
+   * saying what holds it and how to try again; nothing is deleted.
+   */
+  @Test
+  void aDestroyThatACreateOutlastsIsRefusedSayingWhatHoldsItAndNothingGoes() throws Exception {
+    var shell = new ScriptedShellExecutor().onOk("incus list --format json", ACME_PARTS);
+    var deleted = new ArrayList<List<String>>();
+    var refused = new AtomicReference<Exception>();
+
+    HeldLocks.whileHeld(
+        locks().resolve(Workspaces.CREATE_LOCK),
+        () -> {
+          refused.set(
+              assertThrows(
+                  IllegalStateException.class,
+                  () ->
+                      workspaces(shell, HeldLocks.pastEveryWait())
+                          .whileDestroying(
+                              "acme", List.of("acme-fix", "acme--tmpl"), deleted::add)));
+          return null;
+        });
+
+    assertTrue(
+        refused
+            .get()
+            .getMessage()
+            .contains(
+                "Project acme is not destroyed: This runner is making another workspace, which"
+                    + " takes about a minute."),
+        refused.get().getMessage());
+    assertTrue(
+        refused.get().getMessage().contains("sail project destroy acme"),
+        refused.get().getMessage());
+    assertEquals(List.of(), deleted);
+  }
+
+  /** A workspace another change holds past the wait refuses the destroy the same way. */
+  @Test
+  void aDestroyOfAWorkspaceAnotherChangeHoldsIsRefusedAndNothingGoes() throws Exception {
+    var shell = new ScriptedShellExecutor().onOk("incus list --format json", ACME_PARTS);
+    var deleted = new ArrayList<List<String>>();
+    var refused = new AtomicReference<Exception>();
+
+    HeldLocks.whileHeld(
+        locks().resolve("acme-fix.workspace.lock"),
+        () -> {
+          refused.set(
+              assertThrows(
+                  IllegalStateException.class,
+                  () ->
+                      workspaces(shell, HeldLocks.pastEveryWait())
+                          .whileDestroying(
+                              "acme", List.of("acme-fix", "acme--tmpl"), deleted::add)));
+          return null;
+        });
+
+    assertTrue(
+        refused
+            .get()
+            .getMessage()
+            .contains("Project acme is not destroyed: Workspace fix of acme is being stopped"),
+        refused.get().getMessage());
+    assertEquals(List.of(), deleted);
+  }
 }

@@ -60,6 +60,7 @@ import java.nio.file.attribute.PosixFilePermissions;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -850,6 +851,24 @@ class WorkspaceIT extends AbstractIncusIT {
                     + " that the network Incus gives it"),
         refused.getMessage());
     assertEquals(Optional.empty(), new BoxInstances(shell).named(PROJECT + "-" + FIX));
+    var kept = keptEvidenceOf(PROJECT + "-" + FIX);
+    assertTrue(
+        kept.contains("== incus info " + PROJECT + "-" + FIX + "\nexit 0\n"),
+        "the evidence was kept while the half-made workspace still existed: " + kept);
+    assertTrue(kept.contains("== incus network list-leases "), kept);
+    assertTrue(kept.contains("== /proc/loadavg\n"), kept);
+  }
+
+  /** The newest evidence {@link NoAddressEvidence} kept of {@code instance}. */
+  private static String keptEvidenceOf(String instance) throws IOException {
+    try (var files = Files.list(Path.of("target", "incus-evidence"))) {
+      var newest =
+          files
+              .filter(file -> file.getFileName().toString().startsWith(instance + "-"))
+              .max(Comparator.comparing(Path::toString))
+              .orElseThrow(() -> new AssertionError("no evidence kept of " + instance));
+      return Files.readString(newest);
+    }
   }
 
   private static WorkspaceOwner udayWith(String token) {
@@ -1097,6 +1116,66 @@ class WorkspaceIT extends AbstractIncusIT {
     assertEquals(new BoxInstances.Workspace(PROJECT, FIX, true), found.kind());
     assertEquals(Optional.of("eng"), found.key(BoxInstances.OWNER_KEY));
     assertEquals(Optional.of(TestOwners.of("eng").id()), found.key(BoxInstances.OWNER_ID_KEY));
+  }
+
+  /**
+   * A destroy on a real Incus deletes a project's workspaces and template only under their locks
+   * and the box's create lock, read again there: a create that holds the create lock past the wait
+   * refuses it and nothing goes; a workspace made after it read what it would delete refuses it,
+   * naming it; read again as it is, it deletes every workspace and the template, and no other
+   * instance.
+   */
+  @Test
+  void aDestroyActsOnlyUnderTheLocksAndOnWhatItReadsThereSoNoWorkspaceOutlivesItsProject(
+      @TempDir Path dir) throws Exception {
+    var before = bystander();
+    var fix = workspaces.create(definition(), FIX, source(), null, "eng", TestOwners::of);
+    var teardown = new ProjectTeardown(shell, dir);
+    Workspaces.Destroy destroy = parts -> teardown.tearDown(PROJECT, parts);
+    var outwaited =
+        new Workspaces(
+            shell,
+            shell,
+            HeldLocks.pastEveryWait(),
+            SailPaths.locksDir(),
+            Workspaces.memoryOf(new HostDetector()),
+            url -> false);
+    var busy = new AtomicReference<Exception>();
+
+    HeldLocks.whileHeld(
+        SailPaths.locksDir().resolve(Workspaces.CREATE_LOCK),
+        () -> {
+          busy.set(
+              assertThrows(
+                  IllegalStateException.class,
+                  () ->
+                      outwaited.whileDestroying(
+                          PROJECT, List.of(fix.instance(), TEMPLATE), destroy)));
+          return null;
+        });
+    assertTrue(
+        busy.get().getMessage().contains("Project " + PROJECT + " is not destroyed: This runner"),
+        busy.get().getMessage());
+    assertTrue(new BoxInstances(shell).named(fix.instance()).isPresent());
+    assertTrue(new BoxInstances(shell).named(TEMPLATE).isPresent());
+
+    var second = workspaces.create(definition(), SECOND, source(), null, "eng", TestOwners::of);
+    var unseen =
+        assertThrows(
+            IllegalStateException.class,
+            () -> workspaces.whileDestroying(PROJECT, List.of(fix.instance(), TEMPLATE), destroy));
+    assertTrue(
+        unseen.getMessage().contains(second.instance() + " was made after"), unseen.getMessage());
+    assertTrue(new BoxInstances(shell).named(second.instance()).isPresent());
+
+    workspaces.whileDestroying(
+        PROJECT, List.of(fix.instance(), second.instance(), TEMPLATE), destroy);
+
+    var left = new BoxInstances(shell).all().stream().map(BoxInstances.Instance::name).toList();
+    assertFalse(left.contains(fix.instance()), String.valueOf(left));
+    assertFalse(left.contains(second.instance()), String.valueOf(left));
+    assertFalse(left.contains(TEMPLATE), String.valueOf(left));
+    assertEquals(before, bystander(), "the project's own container is untouched");
   }
 
   /**

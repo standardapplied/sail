@@ -35,7 +35,10 @@ public abstract class AbstractIncusIT {
 
   protected static final String IMAGE = "images:ubuntu/24.04";
 
-  protected final ShellExec shell = new ShellExecutor(false);
+  /**
+   * This host's Incus, keeping evidence of a make that gets no address ({@link NoAddressEvidence}).
+   */
+  protected final ShellExec shell = new NoAddressEvidence(new ShellExecutor(false));
 
   /**
    * Skips the test where no incus daemon answers, and otherwise makes this machine a box whose
