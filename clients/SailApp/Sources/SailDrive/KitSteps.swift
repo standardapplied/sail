@@ -110,7 +110,7 @@ extension Driver {
         await capture(["-o", "-l", "\(window.windowNumber)"], to: file)
         defer { if whole == nil { try? FileManager.default.removeItem(at: file) } }
         guard let source = CGImageSourceCreateWithURL(file as CFURL, nil) else { return nil }
-        return CGImageSourceCreateImageAtIndex(source, 0, nil)
+        return CGImageSourceCreateImageAtIndex(source, 0, [kCGImageSourceShouldCacheImmediately: true] as CFDictionary)
     }
 
     /// The specimen's cell cut from `image`, saved as `name`.png.

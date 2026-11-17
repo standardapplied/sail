@@ -63,6 +63,7 @@ public final class SailButton: NSButton {
         clipsToBounds = false
         layer?.addSublayer(spinner.layer)
         spinner.place(at: .zero, hidden: true)
+        setAccessibilityRole(.button)
         setAccessibilityLabel(title)
         NotificationCenter.default.addObserver(self, selector: #selector(motionChanged), name: Motion.changed, object: nil)
         repaint()
@@ -91,6 +92,10 @@ public final class SailButton: NSButton {
         needsLayout = true
         needsDisplay = true
     }
+
+    /// SF Symbols at these sizes draw a glyph as big as the design's 14 pt leading icon and its 15 pt
+    /// icon-only ones, which sit in a 24-unit box with room around the stroke.
+    static let symbolPoints = 11.0, iconPoints = 12.0
 
     var drawnState: ButtonState {
         ButtonState(enabled: isEnabled, hovered: hovered, pressed: isHighlighted, focused: focused, busy: busyWord != nil)
@@ -123,7 +128,7 @@ public final class SailButton: NSButton {
     }
 
     private var symbol: NSImage? {
-        symbolName.flatMap { Draw.symbol($0, points: iconOnly ? ($0 == "ellipsis" ? 16 : 15) : ButtonSize.symbol, ink: paint.label) }
+        symbolName.flatMap { Draw.symbol($0, points: iconOnly ? Self.iconPoints : Self.symbolPoints, ink: paint.label) }
     }
 
     override public var intrinsicContentSize: NSSize {
