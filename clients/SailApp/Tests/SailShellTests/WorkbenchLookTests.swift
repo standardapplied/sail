@@ -1,6 +1,7 @@
 import AppKit
 import Foundation
 import SailLook
+import SailVT
 @testable import SailShell
 import SailTerminalView
 import SailTestPasskey
@@ -26,6 +27,7 @@ import Testing
     func theStripsTabsAreTheLooks(_ name: String, _ look: Look) throws {
         let shell = try Self.shell(look)
         let strip = shell.thisMac.strip
+        strip.showsTabs = true
         strip.show(Self.items(), selected: TabID(1))
         let selected = try #require(strip.tabs.first), other = try #require(strip.tabs.last)
         #expect(strip.layer?.backgroundColor == NSColor(look.chrome).cgColor, "\(name): the strip is not chrome")
@@ -33,7 +35,7 @@ import Testing
         #expect(selected.label.textColor == NSColor(look.text))
         #expect(other.layer?.backgroundColor == NSColor.clear.cgColor)
         #expect(other.label.textColor == NSColor(look.textSecondary))
-        #expect(!selected.close.isHidden && other.close.isHidden, "\(name): the close button shows on the selected tab only")
+        #expect(selected.close.isHidden && other.close.isHidden, "\(name): a close button shows without the pointer on its tab")
         other.mouseEntered(with: try #require(NSEvent.otherEvent(
             with: .applicationDefined, location: .zero, modifierFlags: [], timestamp: 0, windowNumber: 0, context: nil, subtype: 0, data1: 0, data2: 0
         )))
@@ -64,8 +66,108 @@ import Testing
         #expect(pressed == TabID(2), "VoiceOver's press selects no tab")
     }
 
-    /// The rename field: no system focus ring, ringed in the accent, its selection `fillSelected`
-    /// and its caret the accent.
+    /// A tab's title is centred in the tab, to the point, at three widths, with the close button
+    /// shown (the pointer on the tab) and hidden; a title too long for the tab is cut in the middle,
+    /// still centred, clear of the close button and the zoom mark.
+    @Test(arguments: [100.0, 180.0, 240.0])
+    func aTabsTitleIsCentredInTheTab(_ width: Double) throws {
+        let hover = try #require(NSEvent.otherEvent(
+            with: .applicationDefined, location: .zero, modifierFlags: [], timestamp: 0, windowNumber: 0, context: nil, subtype: 0, data1: 0, data2: 0
+        ))
+        for title in ["api", "linuxuser@lightgrid: ~/a/rather/long/working/directory"] {
+            let tab = TabButton(id: TabID(1), look: .dark)
+            tab.frame = NSRect(x: 0, y: 0, width: width, height: 20)
+            tab.show(TabStrip.Item(id: TabID(1), title: title, zoomed: true), selected: true, look: .dark)
+            for hovered in [false, true] {
+                if hovered { tab.mouseEntered(with: hover) }
+                tab.layoutSubtreeIfNeeded()
+                let label = tab.label.alignmentRect(forFrame: tab.label.frame)
+                #expect(tab.close.isHidden == !hovered)
+                #expect(abs(label.midX - tab.bounds.midX) <= 0.5, "\(title) at \(width) pt, hovered \(hovered): the title's middle is \(label.midX), the tab's \(tab.bounds.midX)")
+                #expect(label.minX >= tab.close.frame.maxX - 1 && label.maxX <= tab.bounds.maxX - TabButton.titleInset + 1, "\(title) at \(width) pt overlaps the close button or the zoom mark: \(label)")
+            }
+            #expect(tab.label.lineBreakMode == .byTruncatingMiddle)
+        }
+    }
+
+    /// Mast's shell: one band across the window's top in the chrome (sampled under the buttons'
+    /// inset, in the middle and at the end), the rail's top edge at the band's bottom, the pane's
+    /// card beside it, and no view over a window button; in full screen the band is the window's
+    /// own top row, the tabs 8 pt in, the rail under it. Both panes, both looks.
+    @Test(arguments: [("dark", Look.dark), ("light", Look.light)])
+    func theBandRunsAcrossTheTopAndTheRailStartsUnderIt(_ name: String, _ look: Look) throws {
+        let shell = try Self.shell(look)
+        let window = shell.window
+        window.orderFront(nil)
+        defer { window.orderOut(nil) }
+        for pane in [Rail.Item.thisMac, .account] {
+            shell.select(pane)
+            for full in [false, true] {
+                shell.placeTheStrip(fullScreen: full)
+                window.layoutIfNeeded()
+                let root = try #require(window.contentView)
+                let band = full ? ShellApp.bandHeight : Double(root.bounds.height - window.contentLayoutRect.maxY)
+                let context = try #require(Self.drawn(root))
+                let pixels = try #require(context.data).bindMemory(to: UInt8.self, capacity: context.width * context.height * 4)
+                func isChrome(_ x: Double, _ y: Double) -> Bool {
+                    let at = (Int(y * 2) * context.width + Int(x * 2)) * 4
+                    let found = [pixels[at], pixels[at + 1], pixels[at + 2]], wanted = [look.chrome.red, look.chrome.green, look.chrome.blue]
+                    return zip(found, wanted).allSatisfy { abs(Int($0) - Int($1)) <= 2 }
+                }
+                for x in [40.0, Double(root.bounds.width) / 2, Double(root.bounds.width) - 6] {
+                    #expect(isChrome(x, band / 2), "\(name) \(pane) full \(full): the band at x \(x) is not the chrome")
+                }
+                #expect(isChrome(Rail.width / 2, band + 4), "\(name) \(pane) full \(full): the rail under the band is not the chrome")
+                let railTop = Double(root.bounds.height - shell.rail.frame.maxY)
+                #expect(abs(railTop - band) < 0.5, "\(name) \(pane) full \(full): the rail starts at \(railTop), the band ends at \(band)")
+                #expect(band >= 44, "\(name): the band is \(band) pt")
+                guard !full else {
+                    #expect(shell.thisMac.strip.leading == ShellApp.fullScreenInset)
+                    continue
+                }
+                let views: [NSView] = [shell.rail, shell.thisMac, shell.account, shell.thisMac.strip]
+                for kind in [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton] {
+                    let button = try #require(window.standardWindowButton(kind))
+                    let frame = button.convert(button.bounds, to: nil)
+                    #expect(abs(Double(frame.midY) - (Double(root.bounds.height) - band / 2)) < 1.5, "\(name): \(kind) is not centred in the band")
+                    for view in views where view.window != nil && !view.isHiddenOrHasHiddenAncestor {
+                        #expect(!view.convert(view.bounds, to: nil).intersects(frame), "\(name) \(pane): \(type(of: view)) lies over \(kind)")
+                    }
+                }
+                let strip = shell.thisMac.strip
+                strip.show(Self.items(), selected: TabID(1))
+                strip.layoutSubtreeIfNeeded()
+                if pane == .thisMac {
+                    let firstTab = try #require(strip.tabs.first)
+                    let tabStart = Double(firstTab.convert(firstTab.bounds, to: nil).minX)
+                    #expect(tabStart >= ShellApp.buttonsInset - 0.5 && tabStart <= ShellApp.buttonsInset + Look.Space.s, "\(name): the first tab starts at \(tabStart), not past the buttons' 96 pt inset")
+                }
+                let card = try #require(shell.thisMac.superview)
+                #expect(card.layer.map { Double($0.cornerRadius) } == Look.contentRadius && card.layer?.masksToBounds == true, "\(name): the pane is not a card with 6 pt corners")
+                #expect(abs(Double(card.frame.minX - shell.rail.frame.maxX) - ShellApp.cardMargin) < 0.5 && abs(Double(root.bounds.maxX - card.frame.maxX) - ShellApp.cardMargin) < 0.5
+                    && abs(Double(card.frame.minY) - ShellApp.cardMargin) < 0.5, "\(name): the card's chrome margin is not 2 pt: \(card.frame)")
+                let row = strip.convert(strip.bounds, to: nil)
+                #expect(abs(Double(row.height) - band) < 1 && abs(Double(row.maxX) - Double(root.bounds.width)) < 1,
+                        "\(name): the strip \(row) does not fill the band after the buttons (\(band) pt)")
+            }
+        }
+    }
+
+    static func drawn(_ view: NSView) -> CGContext? {
+        view.display()
+        let width = Int(view.bounds.width) * 2, height = Int(view.bounds.height) * 2
+        guard width > 0, height > 0, let layer = view.layer, let space = CGColorSpace(name: CGColorSpace.sRGB),
+              let context = CGContext(data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: width * 4, space: space,
+                                      bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
+        else { return nil }
+        context.scaleBy(x: 2, y: 2)
+        layer.render(in: context)
+        return context
+    }
+
+    /// The rename field: no system focus ring and no box of its own; the tab's pill is the surface,
+    /// ringed in the accent; the field's font and centring are the title's; its selection
+    /// `fillSelected` and its caret the accent.
     @Test(arguments: [("dark", Look.dark), ("light", Look.light)])
     func theRenameFieldIsTheLooks(_ name: String, _ look: Look) throws {
         let shell = try Self.shell(look)
@@ -80,10 +182,118 @@ import Testing
         let field = try #require(tab.field)
         let editor = try #require(field.currentEditor() as? NSTextView)
         #expect(field.focusRingType == .none)
-        #expect(field.layer?.borderWidth == 2, "\(name): the field is not ringed")
-        #expect(field.layer?.borderColor == NSColor(look.accent).cgColor, "\(name): the ring is not the accent")
+        #expect(!field.isBezeled && !field.isBordered && !field.drawsBackground, "\(name): the field draws a box of its own")
+        #expect(field.font == tab.label.font && field.alignment == .center, "\(name): the field's text is not set as the title's")
+        #expect(tab.layer?.borderWidth == 2, "\(name): the tab is not ringed")
+        #expect(tab.layer?.borderColor == NSColor(look.accent).cgColor, "\(name): the ring is not the accent")
+        #expect(tab.layer?.backgroundColor == NSColor(look.surface).cgColor, "\(name): the pill is not the surface")
         #expect(editor.selectedTextAttributes[.backgroundColor] as? NSColor == NSColor(look.fillSelected))
         #expect(editor.insertionPointColor == NSColor(look.accent))
+    }
+
+    /// The name does not jump when the field opens: its text's ink is the title's, within half a
+    /// point in y, and both are centred in the tab.
+    @Test func theRenameFieldsTextIsWhereTheTitleWas() throws {
+        let shell = try Self.shell(.light)
+        shell.select(.thisMac)
+        shell.window.orderFront(nil)
+        defer { shell.window.orderOut(nil) }
+        let strip = shell.thisMac.strip
+        strip.show(Self.items(), selected: TabID(1))
+        strip.layoutSubtreeIfNeeded()
+        let tab = try #require(strip.tabs.first)
+        let title = try #require(Self.ink(tab), "the title drew no ink")
+        tab.rename()
+        let editor = try #require(tab.field?.currentEditor() as? NSTextView)
+        editor.setSelectedRange(NSRange(location: editor.string.utf16.count, length: 0))
+        let text = try #require(Self.ink(tab), "the field drew no ink")
+        let middle = Double(tab.bounds.midX)
+        #expect(abs(text.minY - title.minY) <= 0.5 && abs(text.maxY - title.maxY) <= 0.5, "the text is at \(text), the title was at \(title)")
+        #expect(abs(title.midX - middle) <= 1 && abs(text.midX - middle) <= 1, "the tab's middle is \(middle); the title's \(title.midX), the text's \(text.midX)")
+    }
+
+    /// A rename goes on when the field loses the keys to nothing (the window itself first responder,
+    /// as when the title bar is laid out again) and through a change of appearance, and Escape then
+    /// restores the name; the keys taken by another view, the name typed is kept.
+    @Test func aRenameOutlivesLosingTheKeysToNothingAndEscapeRestoresTheName() async throws {
+        let shell = try Self.shell(.light)
+        shell.select(.thisMac)
+        shell.window.orderFront(nil)
+        defer { shell.window.orderOut(nil) }
+        let strip = shell.thisMac.strip
+        strip.show(Self.items(), selected: TabID(1))
+        strip.layoutSubtreeIfNeeded()
+        var renamed: [String?] = []
+        strip.onRename = { _, name in renamed.append(name) }
+        let tab = try #require(strip.tabs.first)
+        func type(_ text: String) throws {
+            let editor = try #require(tab.field?.currentEditor() as? NSTextView)
+            editor.selectAll(nil)
+            editor.insertText(text, replacementRange: editor.selectedRange())
+        }
+        tab.rename()
+        try type("build")
+        shell.window.makeFirstResponder(nil)
+        await Self.mainQueueTurns()
+        #expect(strip.isRenaming, "the rename ended when the field lost the keys to nothing")
+        shell.window.appearance = NSAppearance(named: .darkAqua)
+        shell.apply(.dark)
+        shell.window.displayIfNeeded()
+        await Self.mainQueueTurns()
+        #expect(strip.isRenaming, "a change of appearance ended the rename")
+        let editor = try #require(tab.field?.currentEditor() as? NSTextView)
+        #expect(editor.string == "build")
+        editor.doCommand(by: #selector(NSResponder.cancelOperation(_:)))
+        #expect(!strip.isRenaming && renamed == [nil], "Escape did not restore the name: \(renamed)")
+        #expect(tab.label.stringValue == "api" && !tab.label.isHidden)
+        tab.rename()
+        try type("deploy")
+        let other = NSTextField()
+        shell.window.contentView?.addSubview(other)
+        shell.window.makeFirstResponder(other)
+        await Self.mainQueueTurns()
+        #expect(!strip.isRenaming && renamed.last == "deploy", "the keys taken by another view, the name typed was not kept: \(renamed)")
+    }
+
+    /// The window's first frame fits its screen: the designed 1180 × 800 on a 1024 × 743 visible
+    /// frame is 1024 × 743, and a frame that fits is kept.
+    @Test func theWindowsFirstFrameFitsItsScreen() {
+        let visible = NSRect(x: 0, y: 25, width: 1024, height: 743)
+        #expect(ShellApp.fitted(NSRect(x: 10, y: 20, width: 1180, height: 800), in: visible) == NSRect(x: 10, y: 20, width: 1024, height: 743))
+        #expect(ShellApp.fitted(NSRect(x: 10, y: 20, width: 900, height: 600), in: visible) == NSRect(x: 10, y: 20, width: 900, height: 600))
+    }
+
+    /// Turns of the main queue, each after whatever was queued before it.
+    static func mainQueueTurns(_ count: Int = 3) async {
+        for _ in 0 ..< count {
+            await withCheckedContinuation { (done: CheckedContinuation<Void, Never>) in DispatchQueue.main.async { done.resume() } }
+        }
+    }
+
+    /// The rectangle, in points from the top left, of `view`'s mostly opaque pixels darker than
+    /// `limit` (red, green and blue summed, of 765): the text, in the light look. Drawn at 2x as
+    /// AppKit draws views (`cacheDisplay`): a layer's render left out the title's text.
+    static func ink(_ view: NSView, darkerThan limit: Double = 300) -> CGRect? {
+        view.layoutSubtreeIfNeeded()
+        guard view.bounds.width > 0, view.bounds.height > 0, let image = NSBitmapImageRep(
+            bitmapDataPlanes: nil, pixelsWide: Int(view.bounds.width * 2), pixelsHigh: Int(view.bounds.height * 2), bitsPerSample: 8,
+            samplesPerPixel: 4, hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0
+        ) else { return nil }
+        image.size = view.bounds.size
+        view.cacheDisplay(in: view.bounds, to: image)
+        let scale = Double(image.pixelsWide) / Double(view.bounds.width)
+        var found: (minX: Int, minY: Int, maxX: Int, maxY: Int)?
+        for y in 0 ..< image.pixelsHigh {
+            for x in 0 ..< image.pixelsWide {
+                guard let colour = image.colorAt(x: x, y: y)?.usingColorSpace(.sRGB), colour.alphaComponent > 0.5,
+                      Double(colour.redComponent + colour.greenComponent + colour.blueComponent) * 255 < limit
+                else { continue }
+                found = found.map { (minX: min($0.minX, x), minY: min($0.minY, y), maxX: max($0.maxX, x), maxY: max($0.maxY, y)) } ?? (minX: x, minY: y, maxX: x, maxY: y)
+            }
+        }
+        return found.map {
+            CGRect(x: Double($0.minX) / scale, y: Double($0.minY) / scale, width: Double($0.maxX - $0.minX + 1) / scale, height: Double($0.maxY - $0.minY + 1) / scale)
+        }
     }
 
     @Test func theScrimIsTheTerminalBackgroundAt30PercentAndTakesNoClick() throws {
@@ -135,6 +345,30 @@ import Testing
         }
         #expect(!all.contains { $0.title.hasSuffix("…") || $0.title.hasSuffix("...") }, "a menu item ends in an ellipsis")
         #expect(!all.contains { $0.title == "Close" && $0.keyEquivalent == "w" && $0.action == #selector(NSWindow.performClose(_:)) }, "⌘W still closes the window")
+    }
+
+    /// P1: each command a context menu offers is a menu bar item with the same action and target,
+    /// so both are one action validated alike; a context menu's item shows no key (Apple's
+    /// guidelines), and with nothing to act on the workbench's commands are left out, not dimmed.
+    @Test func everyContextMenuCommandIsTheMenuBarsOwn() throws {
+        let shell = try Self.shell(.dark)
+        func items(_ menu: NSMenu) -> [NSMenuItem] {
+            menu.items.flatMap { [$0] + ($0.submenu.map(items) ?? []) }
+        }
+        let bar = items(shell.menu())
+        let workbench = shell.thisMac
+        let offered: [(Command, AnyObject?)] = [
+            (.copy, nil), (.paste, nil), (.selectAll, nil), (.splitRight, workbench), (.splitDown, workbench), (.zoomSplit, workbench),
+            (.close, workbench), (.renameTab, workbench), (.closeTab, workbench), (.closeOtherTabs, workbench), (.newTab, workbench),
+        ]
+        for (command, target) in offered {
+            let context = command.item(target: target, keyed: false)
+            #expect(context.keyEquivalent.isEmpty, "\(command.title) shows a key in a context menu")
+            #expect(bar.contains { $0.action == context.action && $0.target === context.target && $0.title == command.title }, "\(command.title) is not the menu bar's own")
+        }
+        let pane = workbench.paneMenu().items.map { $0.isSeparatorItem ? "-" : $0.title }
+        #expect(pane == ["Copy", "Paste", "Select All"], "with no terminal, only the edit commands, dimmed by the responder chain: \(pane)")
+        #expect(workbench.tabMenu(for: TabID(1)).items.map(\.title) == ["New Tab"])
     }
 
     /// The workbench takes its own keys before the menu bar: each finds its menu item, shifted

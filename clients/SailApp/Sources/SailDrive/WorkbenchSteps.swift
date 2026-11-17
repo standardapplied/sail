@@ -59,6 +59,42 @@ extension Driver {
         if step.stripHits == true {
             return stripHits()
         }
+        if let kind = step.contextMenu {
+            return contextMenu(kind, at: step.at ?? 0, items: step.items, choose: step.choose)
+        }
+        if step.blink == true {
+            return await blinks()
+        }
+        if let renaming = step.renaming {
+            let window = shell.window
+            let field = { self.workbench.strip.tabs.compactMap(\.field).first }
+            let reached = await waitUntil(2) {
+                guard renaming else { return field() == nil }
+                return field().map { $0.currentEditor() != nil && window.firstResponder === $0.currentEditor() } ?? false
+            }
+            let holder = window.firstResponder.map { String(describing: type(of: $0)) } ?? "nothing"
+            return (reached, "the field is \(field() == nil ? "closed" : "open"); the keys are with \(holder)")
+        }
+        if let name = step.shot {
+            return await inBothLooks(name) { file in await self.capture(["-o", "-l", "\(self.shell.window.windowNumber)"], to: file) }
+        }
+        if let name = step.shotMenu {
+            return await inBothLooks(name) { file in self.captureWithTheMenuOpen(to: file) }
+        }
+        if let name = step.fullScreen {
+            return await fullScreen(name)
+        }
+        if let state = step.otherHost {
+            return await otherHost(state)
+        }
+        if let pattern = step.kill {
+            let pkill = Process()
+            pkill.executableURL = URL(filePath: "/usr/bin/pkill")
+            pkill.arguments = ["-f", pattern]
+            try? pkill.run()
+            pkill.waitUntilExit()
+            return (pkill.terminationStatus <= 1, "pkill -f \(pattern) exited \(pkill.terminationStatus)" + (pkill.terminationStatus == 1 ? " (none was running)" : ""))
+        }
         if step.panes4 == true {
             return await fourPanes()
         }
@@ -302,25 +338,32 @@ extension Driver {
         return ((view as? NSTextField).map { [$0.stringValue] } ?? []) + view.subviews.flatMap(texts)
     }
 
-    /// The window's own hit testing at a tab's middle reaches the tab, and at the strip's empty end
-    /// it reaches no tab (the title bar's, or the strip's own plain view).
+    /// The window's own hit testing: a tab's middle reaches the tab, which never moves the window;
+    /// the strip's empty end and the row just after the window's buttons reach no tab, and a view
+    /// inside the title bar's own view (`NSTitlebarView`), which takes the drag and performs the
+    /// double-click System Settings names. The double-click itself cannot be made in process (a
+    /// made event handed to the title bar's view crashes the app; see the spec's report).
     private func stripHits() -> (Bool, String) {
-        guard let frame = shell.window.contentView?.superview, let tab = workbench.strip.tabs.first, let middle = tabMiddle(0) else {
-            return (false, "no tab to hit")
-        }
-        let hit = frame.hitTest(middle)
+        let window = shell.window
+        guard let frame = window.contentView?.superview, let tab = workbench.strip.tabs.first, let middle = tabMiddle(0),
+              let zoom = window.standardWindowButton(.zoomButton)
+        else { return (false, "no tab to hit") }
         let strip = workbench.strip
-        let end = strip.convert(NSPoint(x: strip.bounds.maxX - 4, y: strip.bounds.midY), to: nil)
-        let empty = frame.hitTest(end)
-        let onTab = hit === tab || hit?.isDescendant(of: tab) == true
-        let emptyOnTab = empty.map { view in strip.tabs.contains { view === $0 || view.isDescendant(of: $0) } } ?? false
-        let emptyMoves = empty?.mouseDownCanMoveWindow == true
-        let tabStays = onTab && !tab.mouseDownCanMoveWindow
-        return (
-            tabStays && !emptyOnTab && emptyMoves,
-            "a tab's middle hits \(hit.map { "\(type(of: $0))" } ?? "nothing"), the strip's empty end \(empty.map { "\(type(of: $0))" } ?? "nothing")"
-                + " (it moves the window: \(empty?.mouseDownCanMoveWindow == true))"
-        )
+        let hit = frame.hitTest(middle)
+        let buttons = zoom.convert(zoom.bounds, to: nil)
+        let places = [
+            ("the strip's empty end", strip.convert(NSPoint(x: strip.bounds.maxX - 4, y: strip.bounds.midY), to: nil)),
+            ("just after the window's buttons", NSPoint(x: buttons.maxX + 2, y: buttons.midY)),
+        ]
+        let said = places.map { name, point -> (Bool, String) in
+            let empty = frame.hitTest(point)
+            let chain = empty.map { sequence(first: $0, next: \.superview).map { "\(type(of: $0))" } } ?? []
+            let onTab = empty.map { view in strip.tabs.contains { view === $0 || view.isDescendant(of: $0) } } ?? false
+            let titleBars = !onTab && chain.contains("NSTitlebarView") && empty?.mouseDownCanMoveWindow == true
+            return (titleBars, "\(name) hits \(chain.joined(separator: " < "))")
+        }
+        let onTab = (hit === tab || hit?.isDescendant(of: tab) == true) && !tab.mouseDownCanMoveWindow
+        return (onTab && said.allSatisfy(\.0), "a tab's middle hits \(hit.map { "\(type(of: $0))" } ?? "nothing"); " + said.map(\.1).joined(separator: "; "))
     }
 
     /// The most memory the process has held resident so far, in MB.
@@ -377,6 +420,7 @@ extension Driver {
             return (false, "the grid did not attach four panes: \(arrangementSaid)")
         }
         let four = Self.footprint
+        print("panes4 idle, the echo pane focused: \(await wakeups(for: 5).said)")
         panes4["main thread's longest stall making the grid ms"] = mainThread.longest
         let echo = grid[1], floods = [grid[0], grid[2], grid[3]]
         func focus(_ view: TerminalPane) {
@@ -480,7 +524,7 @@ extension Driver {
 
     /// The terminal host's and the app's CPU shares, in %, over the next second.
     private func cpuShares() async -> (host: Double, app: Double, said: String) {
-        let shares = await Self.cpuShares(over: 1)
+        let shares = await Self.cpuShares(host: workbench.host.servingProcess()?.pid, over: 1)
         guard let host = shares.host, let app = shares.app else {
             return (-1, -1, "not measured: ps listed \(shares.host == nil ? "no terminal host" : "the host") and \(shares.app == nil ? "not the app" : "the app")")
         }
@@ -510,6 +554,252 @@ extension Driver {
             print("panes4 unlimited flood \(index + 1) (reported, not gated): \(judged.said)")
             panes4["unlimited flood \(index + 1), ours, ms"] = judged.ours
         }
+    }
+
+    /// A right-click's menu, asked of the view as AppKit asks it before it would show it.
+    private func contextMenu(_ kind: String, at index: Int, items: [String]?, choose: String?) -> (Bool, String) {
+        shell.window.layoutIfNeeded()
+        let target: NSView?
+        switch kind {
+        case "pane": target = paneView(at: index)?.terminal
+        case "tab": target = workbench.strip.tabs.indices.contains(index) ? workbench.strip.tabs[index] : nil
+        default: target = nil
+        }
+        guard let target, let event = NSEvent.mouseEvent(
+            with: .rightMouseDown, location: target.convert(NSPoint(x: target.bounds.midX, y: target.bounds.midY), to: nil), modifierFlags: [],
+            timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: shell.window.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 1
+        ) else { return (false, "no \(kind) \(index)") }
+        guard let menu = target.menu(for: event) else { return (false, "the \(kind) offered no menu") }
+        let titles = menu.items.map { $0.isSeparatorItem ? "-" : $0.title }
+        let focused = kind != "pane" || shell.window.firstResponder === target
+        var said = "the menu holds \(titles)" + (kind == "pane" ? "; the pane \(focused ? "was" : "was not") focused first" : "")
+        guard items.map({ $0 == titles }) ?? true, focused else { return (false, said) }
+        if let choose {
+            guard let item = menu.items.firstIndex(where: { $0.title == choose }) else { return (false, said + "; no \(choose)") }
+            menu.performActionForItem(at: item)
+            said += "; chose \(choose)" + (workbench.strip.isRenaming ? ", a rename field is open" : "")
+        }
+        return (true, said)
+    }
+
+    /// P2: the focused pane's cursor in two frames a blink apart: they differ only inside the
+    /// cursor's cell. Unfocused, its display link goes idle, no blink is due, and the cursor shows.
+    /// The blink's wakeups and the frames committed a second, idle, over 5 s, are reported.
+    private func blinks() async -> (Bool, String) {
+        let view = terminal
+        guard await waitUntil(3, { view.cursorOn }), let shown = try? view.snapshot(),
+              await waitUntil(3, { !view.cursorOn }), let hidden = try? view.snapshot(),
+              let cursor = view.lastFrame?.cursor.position
+        else { return (false, "the cursor did not blink: \(view.drawingState)") }
+        let metrics = view.metrics, origin = metrics.origin(of: cursor)
+        let cell = (minX: origin.x, minY: origin.y, maxX: origin.x + 2 * metrics.width, maxY: origin.y + metrics.height)
+        var outside = 0, inside = 0
+        for y in 0 ..< min(shown.height, hidden.height) {
+            for x in 0 ..< min(shown.width, hidden.width) {
+                let at = (y * shown.width + x) * 4
+                guard shown.bgra[at ..< at + 4] != hidden.bgra[at ..< at + 4] else { continue }
+                if (cell.minX ..< cell.maxX).contains(x), (cell.minY ..< cell.maxY).contains(y) { inside += 1 } else { outside += 1 }
+            }
+        }
+        let rate = await wakeups(for: 5)
+        shell.window.makeFirstResponder(nil)
+        let idle = await waitUntil(2) { view.drawingState.contains("display link paused") && view.drawingState.contains("not awaiting a drawable") }
+        let still = idle && !view.isBlinking && view.cursorOn
+        shell.window.makeFirstResponder(view)
+        print("blink: \(rate.said) with \(workbench.panes.count) panes")
+        let linkSlept = rate.linkFires < Self.idleLinkFires
+        return (
+            inside > 0 && outside == 0 && still && linkSlept,
+            "a blink apart, \(inside) pixels differ inside the cursor's cell and \(outside) outside it; unfocused, "
+                + (still ? "its link idle, no blink due, the cursor shown" : "idle \(idle), a blink due \(view.isBlinking), the cursor shown \(view.cursorOn)")
+                + (linkSlept ? "; blinking, its display link slept" : "; blinking, its display link fired \(rate.linkFires) a second") + "; \(rate.said)"
+        )
+    }
+
+    /// A blinking idle pane draws each half-blink on a drawable it asks for at once, so its display
+    /// link does not fire; the old way fired it twice a half-blink, 4 a second.
+    static let idleLinkFires = 0.5
+
+    /// The idle cost a second over `seconds`, across every pane: the blink's timer wakeups, the
+    /// display refreshes and the frames committed; then each pane's frames, the focused one marked,
+    /// so a pane drawing for another reason shows; then how the focused pane's refreshes ended, and
+    /// how many a second its display link fired (`linkFires`).
+    func wakeups(for seconds: Double) async -> (said: String, linkFires: Double) {
+        let views = orderedPanes.map(\.terminal)
+        let counts = { views.map { ($0.blinkWakeups, $0.refreshes, Self.committed($0)) } }
+        let focused = terminal
+        let outcomes = { (focused.refreshOutcomes, focused.linkFires) }
+        let before = counts(), outcomesBefore = outcomes()
+        try? await Task.sleep(for: .seconds(seconds))
+        let after = counts(), outcomesAfter = outcomes()
+        let by = RefreshOutcome.allCases.map { outcome in
+            "\(outcome)" + String(format: " %.1f", Double(outcomesAfter.0[outcome.rawValue] - outcomesBefore.0[outcome.rawValue]) / seconds)
+        }.joined(separator: ", ")
+        let per = zip(before, after).map { (Double($1.0 - $0.0) / seconds, Double($1.1 - $0.1) / seconds, Double($1.2 - $0.2) / seconds) }
+        let total = per.reduce((0.0, 0.0, 0.0)) { ($0.0 + $1.0, $0.1 + $1.1, $0.2 + $1.2) }
+        let panes = zip(views, per).map { view, rate in (view === terminal ? "*" : "") + String(format: "%.1f", rate.2) }.joined(separator: " ")
+        let fires = Double(outcomesAfter.1 - outcomesBefore.1) / seconds
+        let said = String(format: "%.1f blink wakeups, %.1f display refreshes and %.1f frames a second; frames a second by pane (* focused): ", total.0, total.1, total.2) + panes
+            + String(format: "; the focused pane's refreshes a second, %.1f asked for by the display link, ending: ", fires) + by
+        return (said, fires)
+    }
+
+    /// `take` in the light look, then the dark, each once the window has been drawn in it; the
+    /// look the system gives comes back after. Fails when a file is missing or empty.
+    private func inBothLooks(_ name: String, _ take: (URL) async -> Void) async -> (Bool, String) {
+        let given = shell.look
+        let folder = out.deletingLastPathComponent().appending(path: "window")
+        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        var taken: [String] = []
+        for (look, appearance) in [("light", NSAppearance.Name.aqua), ("dark", .darkAqua)] {
+            NSApp.appearance = NSAppearance(named: appearance)
+            _ = await waitUntil(5) { (self.shell.look == .dark) == (look == "dark") }
+            await drawnAndCommitted()
+            await onTheCursorsVisiblePhase()
+            let file = folder.appending(path: "\(name)-\(look).png")
+            await take(file)
+            let size = (try? FileManager.default.attributesOfItem(atPath: file.path)[.size] as? Int) ?? 0
+            taken.append("\(file.lastPathComponent) \(size) bytes")
+        }
+        NSApp.appearance = nil
+        _ = await waitUntil(5) { self.shell.look == given }
+        await drawnAndCommitted()
+        return (taken.allSatisfy { !$0.hasSuffix(" 0 bytes") }, taken.joined(separator: ", "))
+    }
+
+    /// Returns once the window has drawn what it owes and that drawing is committed to the window
+    /// server (the transaction's completion), at most 2 s: the fact a shot of the screen waits on.
+    private func drawnAndCommitted() async {
+        shell.window.displayIfNeeded()
+        let committed = Mutex(false)
+        CATransaction.begin()
+        CATransaction.setCompletionBlock { committed.withLock { $0 = true } }
+        CATransaction.commit()
+        _ = await waitUntil(2) { committed.withLock { $0 } }
+    }
+
+    /// Returns just after the focused pane's cursor was drawn shown, at the start of its visible
+    /// phase, so a shot shows what a person mostly sees; at once when no terminal shows or its
+    /// cursor does not blink.
+    private func onTheCursorsVisiblePhase() async {
+        guard !workbench.isHiddenOrHasHiddenAncestor, let view = workbench.focused?.terminal, view.isBlinking else { return }
+        _ = await waitUntil(2) { !view.cursorOn }
+        let hidden = Self.committed(view)
+        _ = await waitUntil(2) { view.cursorOn && Self.committed(view) > hidden }
+    }
+
+    /// `screencapture -x` with `arguments`, into `file`; its own error, if any, is printed.
+    private func capture(_ arguments: [String], to file: URL) async {
+        let process = Process()
+        let errors = Pipe()
+        process.executableURL = URL(filePath: "/usr/sbin/screencapture")
+        process.arguments = ["-x"] + arguments + [file.path]
+        process.standardError = errors
+        await withCheckedContinuation { (done: CheckedContinuation<Void, Never>) in
+            process.terminationHandler = { _ in done.resume() }
+            guard (try? process.run()) == nil else { return }
+            process.terminationHandler = nil
+            print("screencapture did not run")
+            done.resume()
+        }
+        let said = String(decoding: errors.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+        if !said.isEmpty { print("screencapture: \(said)") }
+    }
+
+    /// The focused pane's context menu, popped up as a right-click shows it, the whole screen taken
+    /// a second later (the menu is a window of its own), then the menu closed.
+    private func captureWithTheMenuOpen(to file: URL) {
+        let view = terminal
+        guard let event = NSEvent.mouseEvent(
+            with: .rightMouseDown, location: view.convert(NSPoint(x: 80, y: 60), to: nil), modifierFlags: [],
+            timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: shell.window.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 1
+        ), let menu = view.menu(for: event) else { return print("the pane offered no menu") }
+        let process = Process()
+        process.executableURL = URL(filePath: "/usr/sbin/screencapture")
+        process.arguments = ["-x", "-T", "1", file.path]
+        guard (try? process.run()) != nil else { return print("screencapture did not run") }
+        menu.perform(#selector(NSMenu.cancelTracking), with: nil, afterDelay: 2.5, inModes: [.common])
+        menu.popUp(positioning: nil, at: NSPoint(x: 80, y: 60), in: view)
+        process.waitUntilExit()
+    }
+
+    /// The window in full screen once AppKit says the transition ended, filling its screen, the whole
+    /// screen taken in both looks, then out of it again once AppKit says so, to the frame it had
+    /// before, inside its screen; each frame seen on the way back is said. A window that does not enter full screen fails the step; one that cannot (on no screen,
+    /// or not allowing full screen) is skipped, saying why.
+    private func fullScreen(_ name: String) async -> (Bool, String) {
+        let window = shell.window
+        let before = window.frame
+        guard let screen = window.screen else { return (true, "skipped: the window is on no screen, so this runner cannot show it in full screen") }
+        guard window.styleMask.contains(.resizable), !window.collectionBehavior.contains(.fullScreenNone) else {
+            return (true, "skipped: the window does not allow full screen")
+        }
+        let entered = Mutex(false), exited = Mutex(false)
+        let center = NotificationCenter.default
+        let watches = [
+            center.addObserver(forName: NSWindow.didEnterFullScreenNotification, object: window, queue: nil) { _ in entered.withLock { $0 = true } },
+            center.addObserver(forName: NSWindow.didExitFullScreenNotification, object: window, queue: nil) { _ in exited.withLock { $0 = true } },
+        ]
+        defer { watches.forEach { center.removeObserver($0) } }
+        window.toggleFullScreen(nil)
+        guard await waitUntil(10, { entered.withLock { $0 } && window.frame == screen.frame }) else {
+            return (false, "the window did not finish entering full screen within 10 s: its frame \(NSStringFromRect(window.frame)), the screen's \(NSStringFromRect(screen.frame))")
+        }
+        let (taken, said) = await inBothLooks(name) { file in await self.capture([], to: file) }
+        var passed: [String] = []
+        func sample() {
+            let frame = NSStringFromRect(window.frame)
+            if passed.last != frame { passed.append(frame) }
+        }
+        window.toggleFullScreen(nil)
+        let back = await waitUntil(10) {
+            sample()
+            return exited.withLock { $0 } && window.frame == before
+        }
+        let after = window.frame, visible = window.screen?.visibleFrame ?? .zero
+        let same = abs(after.width - before.width) < 1 && abs(after.height - before.height) < 1
+        let inside = after.width <= visible.width + 1 && after.height <= visible.height + 1
+        let frames = "before \(NSStringFromRect(before)), after \(NSStringFromRect(after)), the screen's visible frame \(NSStringFromRect(visible)); "
+            + "on the way back: \(passed.joined(separator: " → "))"
+        return (taken && back && same && inside, said + (back ? "; " : "; the window did not come back to its frame within 10 s; ") + frames)
+    }
+
+    /// P4 and the design note's rule, against another copy's host with a client on it
+    /// (`ci/drive`'s third run).
+    private func otherHost(_ state: String) async -> (Bool, String) {
+        let host = workbench.host
+        func serving() -> String { host.servingProcess()?.executable ?? "none" }
+        let ours = { serving().contains("/Application Support/Sail/Host/") }
+        let other = { serving().contains("/other-build/") }
+        let says = { (text: String) in self.workbench.bannerSays?.contains(text) == true }
+        if state == "free" {
+            let deadline = ContinuousClock.now + .seconds(10)
+            var said = "nothing (no answer)"
+            while ContinuousClock.now < deadline {
+                if let listed = try? await SessionListing.sessions(at: host.address, timeout: 1) {
+                    if listed.allSatisfy({ $0.attached == 0 }) { return (true, "the host lists \(listed.count) sessions, none with a client") }
+                    said = listed.map { "\($0.name) attached \($0.attached)" }.joined(separator: ", ")
+                }
+                try? await Task.sleep(for: .milliseconds(100))
+            }
+            return (false, "after 10 s the host lists: \(said)")
+        }
+        let reached: Bool
+        switch state {
+        case "kept": reached = await waitUntil(20) { says(LocalHost.inUse(attached: 1)) && other() }
+        case "replaced": reached = await waitUntil(30) { says(LocalHost.closingAnother) && ours() }
+        default: return (false, "no other-host state \(state)")
+        }
+        var hosts = await Self.processes(matching: "_pty-host --local")
+        let settled = ContinuousClock.now + .seconds(10)
+        while hosts.count != 1, ContinuousClock.now < settled {
+            try? await Task.sleep(for: .milliseconds(200))
+            hosts = await Self.processes(matching: "_pty-host --local")
+        }
+        return (
+            reached && hosts.count == 1,
+            "serving: \(serving()); the banner says: \(workbench.bannerSays ?? "nothing"); hosts: \(hosts)"
+        )
     }
 
     /// The lines `view`'s shell printed at each size change, `winch-<columns>`.

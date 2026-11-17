@@ -51,7 +51,7 @@ let package = Package(
         ),
         .testTarget(
             name: "SailTerminalViewTests",
-            dependencies: ["SailTerminalView", "SailShell", "SailRenderer", "SailLook", kit("SailSurface"), kit("SailTerminal"), kit("SailVT")],
+            dependencies: ["SailTerminalView", "SailShell", "SailRenderer", "SailLook", kit("SailSurface"), kit("SailTerminal"), kit("SailTerminalWire"), kit("SailVT")],
             swiftSettings: strict
         ),
         .testTarget(

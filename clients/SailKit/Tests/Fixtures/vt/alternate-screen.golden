@@ -1,5 +1,5 @@
 size 30x5
-cursor 4,2 block visible steady
+cursor 4,2 block visible blinking
 colors fg #f6f1e9 bg #0a0e11 cursor #fc4926
 row 0 |primary one|
 row 1 |primary two|

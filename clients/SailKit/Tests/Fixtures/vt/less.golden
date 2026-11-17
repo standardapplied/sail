@@ -1,5 +1,5 @@
 size 80x24
-cursor 1,23 block visible steady
+cursor 1,23 block visible blinking
 colors fg #f6f1e9 bg #0a0e11 cursor #fc4926
 row 0 |line 24|
 row 1 |line 25|
