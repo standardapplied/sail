@@ -15,10 +15,10 @@ public final class Pill: NSView {
     }
 
     public let size: PillSize
-    private let mono: TerminalFonts
+    private let mono: LabelFont
     let dot = PillDot()
 
-    public init(_ state: PillState, size: PillSize = .regular, look: Look, mono: TerminalFonts) {
+    public init(_ state: PillState, size: PillSize = .regular, look: Look, mono: LabelFont) {
         self.state = state
         self.size = size
         self.look = look
@@ -46,7 +46,7 @@ public final class Pill: NSView {
     }
 
     private var label: NSAttributedString {
-        Draw.text(state.label, mono.medium(size.text) as NSFont, paint.text, tracking: size.tracking, upper: true)
+        Draw.text(state.label, mono.font(size.text) as NSFont, paint.text, tracking: size.tracking, upper: true)
     }
 
     override public var intrinsicContentSize: NSSize {
@@ -121,9 +121,9 @@ public final class Keycap: NSView {
     }
 
     private let key: String
-    private let mono: TerminalFonts
+    private let mono: LabelFont
 
-    public init(_ key: String, look: Look, mono: TerminalFonts) {
+    public init(_ key: String, look: Look, mono: LabelFont) {
         self.key = key
         self.look = look
         self.mono = mono
@@ -143,7 +143,7 @@ public final class Keycap: NSView {
     }
 
     private var label: NSAttributedString {
-        Draw.text(key, mono.medium(Look.Step.caption.points) as NSFont, look.textSecondary)
+        Draw.text(key, mono.font(Look.Step.caption.points) as NSFont, look.textSecondary)
     }
 
     /// Mast's kbd: 3 by 5 pt padding around a 10 pt line, a 1 pt edge and a 2 pt foot.

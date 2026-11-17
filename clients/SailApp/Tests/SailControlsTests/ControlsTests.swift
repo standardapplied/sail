@@ -11,8 +11,22 @@ import Testing
     static let fonts = URL(filePath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
         .appending(path: "Fonts")
 
-    static func mono() throws -> TerminalFonts {
-        try TerminalFonts(directory: fonts)
+    static func mono() throws -> LabelFont {
+        try LabelFont(directory: fonts)
+    }
+
+    /// The controls' Medium face is apart from the terminal's: without it a terminal's fonts still
+    /// load, and only the labels' face is missing.
+    @Test func aMissingMediumNeverStopsATerminal() throws {
+        let folder = FileManager.default.temporaryDirectory.appending(path: "sail-fonts-\(UUID().uuidString.prefix(8))")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        for file in TerminalFonts.files.values {
+            try FileManager.default.copyItem(at: Self.fonts.appending(path: file), to: folder.appending(path: file))
+        }
+        #expect((try? TerminalFonts(directory: folder)) != nil, "the terminal's fonts need the controls' Medium")
+        #expect((try? LabelFont(directory: folder)) == nil, "the labels' faces were read without their Medium")
+        #expect((try? LabelFont(directory: Self.fonts)) != nil)
     }
 
     static func entered() throws -> NSEvent {
@@ -235,9 +249,44 @@ import Testing
                     "\(name) at \(scale)x: the edge is \(edge)")
             #expect(Self.tells(fill, Self.swatch(canvas, [surface], scale: scale), from: Self.swatch(canvas, [surface, NSColor(look.focusHalo)], scale: scale)), "\(name) at \(scale)x: the fill is \(fill)")
         }
+        window.key = false
+        let away = backdrop.colour(at: NSPoint(x: box.minX - 1.5, y: box.midY), scale: 2)
+        #expect(field.paint.halo == nil && field.paint.edge == look.separatorStrong, "\(name): the field shows the keys in a window that is not key")
+        #expect(Self.tells(away, Self.swatch(canvas, [], scale: 2), from: Self.swatch(canvas, [NSColor(look.focusHalo)], scale: 2)), "\(name): the halo is drawn while the window is not key")
+        window.key = true
         let left = window.makeFirstResponder(nil)
         #expect(left)
         #expect(field.paint.halo == nil && field.paint.edge == look.separatorStrong)
+    }
+
+    /// A control moved to another window watches that window's key changes and no longer the old
+    /// one's.
+    @Test func aControlWatchesOnlyTheWindowItIsIn() throws {
+        let button = Self.sized(SailButton("Open", kind: .primary, look: .light, target: nil, action: nil))
+        let field = try Self.field(.light)
+        for view in [button, field] as [NSView] {
+            let (first, _) = Self.window(holding: view, on: .white)
+            let (second, backdrop) = Self.window(holding: NSView(frame: view.frame), on: .white)
+            defer {
+                first.orderOut(nil)
+                second.orderOut(nil)
+            }
+            backdrop.addSubview(view)
+            view.display()
+            NotificationCenter.default.post(name: NSWindow.didBecomeKeyNotification, object: first)
+            #expect(!view.needsDisplay, "\(type(of: view)) still watches the window it left")
+            NotificationCenter.default.post(name: NSWindow.didBecomeKeyNotification, object: second)
+            #expect(view.needsDisplay, "\(type(of: view)) does not watch the window it is in")
+        }
+    }
+
+    /// The ⋯'s three dots are evenly spaced wherever the button's middle falls.
+    @Test(arguments: [NSPoint(x: 16, y: 16), NSPoint(x: 16.3, y: 16.6), NSPoint(x: 13.5, y: 13.5)])
+    func theEllipsisDotsAreEvenlySpaced(_ middle: NSPoint) {
+        let dots = SailButton.dots(around: middle)
+        let first = Double(dots[1].minX - dots[0].minX), second = Double(dots[2].minX - dots[1].minX)
+        #expect(dots.count == 3 && abs(first - ButtonSize.dotPitch) < 1e-9 && abs(second - ButtonSize.dotPitch) < 1e-9, "the gaps are \(first) and \(second)")
+        #expect(Double(dots[1].midX) == Double(dots[1].midX).rounded() && Double(dots[1].width) == ButtonSize.dot)
     }
 
     @Test(arguments: [("light", Look.light), ("dark", Look.dark)])

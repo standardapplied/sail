@@ -249,12 +249,26 @@ public struct PillPaint: Equatable, Sendable {
     }
 }
 
-/// A key as a person reads it after a label: the modifiers in the platform's order (⌃⌥⇧⌘), then the
-/// key, a letter capitalised, Return as ⏎, Escape as esc, Delete as ⌫.
+/// A key equivalent as a person reads it after a label: the modifiers in the platform's order
+/// (⌃⌥⇧⌘), then the key. A letter is capitalised, and an upper-case one also says ⇧, since AppKit
+/// presses it with Shift; Return, Enter, Escape, Delete, Tab, Space, the arrows, Home, End, the page
+/// keys and the function keys are said by their glyph or name.
 public enum Shortcut {
-    public static func said(_ key: String, control: Bool = false, option: Bool = false, shift: Bool = false, command: Bool = false) -> String {
-        let named = ["\r": "⏎", "\u{1b}": "esc", "\u{7f}": "⌫", "\u{8}": "⌫", "\t": "⇥", " ": "Space"]
-        let modifiers = (control ? "⌃" : "") + (option ? "⌥" : "") + (shift ? "⇧" : "") + (command ? "⌘" : "")
-        return modifiers + (named[key] ?? key.uppercased())
+    static let named: [Unicode.Scalar: String] = [
+        "\r": "⏎", "\u{3}": "⌤", "\u{1b}": "esc", "\u{7f}": "⌫", "\u{8}": "⌫", "\t": "⇥", "\u{19}": "⇥", " ": "Space",
+        "\u{F700}": "↑", "\u{F701}": "↓", "\u{F702}": "←", "\u{F703}": "→", "\u{F728}": "⌦", "\u{F729}": "↖", "\u{F72B}": "↘",
+        "\u{F72C}": "⇞", "\u{F72D}": "⇟",
+    ]
+
+    /// Nil for a key it cannot name (an empty key, more than one character, another control or
+    /// private-use character), so no hint says something untrue.
+    public static func said(_ key: String, control: Bool = false, option: Bool = false, shift: Bool = false, command: Bool = false) -> String? {
+        guard key.unicodeScalars.count == 1, let scalar = key.unicodeScalars.first else { return nil }
+        let upper = key != key.lowercased()
+        let modifiers = (control ? "⌃" : "") + (option ? "⌥" : "") + (shift || upper ? "⇧" : "") + (command ? "⌘" : "")
+        if let name = named[scalar] { return modifiers + name }
+        if (0xF704 ... 0xF726).contains(scalar.value) { return modifiers + "F\(scalar.value - 0xF703)" }
+        guard !(0xE000 ... 0xF8FF).contains(scalar.value), scalar.properties.generalCategory != .control else { return nil }
+        return modifiers + key.uppercased()
     }
 }

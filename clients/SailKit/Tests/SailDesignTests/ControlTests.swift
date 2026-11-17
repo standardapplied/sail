@@ -155,8 +155,23 @@ import Testing
         }
     }
 
-    @Test func aShortcutReadsInThePlatformsOrder() {
-        #expect(Shortcut.said("\r") == "⏎" && Shortcut.said("n", command: true) == "⌘N" && Shortcut.said("r", command: true) == "⌘R")
-        #expect(Shortcut.said("k", control: true, option: true, shift: true, command: true) == "⌃⌥⇧⌘K" && Shortcut.said("\u{1b}") == "esc")
+    /// Each key as the hint says it: the platform's order, ⇧ for an upper-case letter as AppKit
+    /// presses it, the named keys by glyph or name, and nothing for a key it cannot name.
+    @Test(arguments: [
+        ("\r", false, "⏎"), ("\u{3}", false, "⌤"), ("n", true, "⌘N"), ("N", true, "⇧⌘N"), ("D", false, "⇧D"), ("\u{1b}", false, "esc"),
+        ("\u{7f}", true, "⌘⌫"), ("\u{8}", false, "⌫"), ("\t", false, "⇥"), (" ", false, "Space"), ("\u{F700}", false, "↑"), ("\u{F701}", true, "⌘↓"),
+        ("\u{F702}", false, "←"), ("\u{F703}", false, "→"), ("\u{F728}", false, "⌦"), ("\u{F729}", false, "↖"), ("\u{F72B}", false, "↘"),
+        ("\u{F72C}", false, "⇞"), ("\u{F72D}", false, "⇟"), ("\u{F704}", false, "F1"), ("\u{F70F}", false, "F12"), ("[", true, "⌘["), ("1", true, "⌘1"),
+    ])
+    func eachKeyIsSaidAsThePlatformSaysIt(_ key: String, _ command: Bool, _ said: String) {
+        #expect(Shortcut.said(key, command: command) == said, "\(key.unicodeScalars.map { String($0.value, radix: 16) }) is said \(Shortcut.said(key, command: command) ?? "nothing")")
+    }
+
+    @Test func modifiersComeInThePlatformsOrderAndAnUnnamedKeyIsNotSaid() {
+        #expect(Shortcut.said("k", control: true, option: true, shift: true, command: true) == "⌃⌥⇧⌘K")
+        #expect(Shortcut.said("K", shift: true, command: true) == "⇧⌘K")
+        for unnamed in ["", "ab", "\u{F750}", "\u{E000}", "\u{0}", "\u{1}"] {
+            #expect(Shortcut.said(unnamed, command: true) == nil, "\(unnamed.unicodeScalars.map { String($0.value, radix: 16) }) is said")
+        }
     }
 }

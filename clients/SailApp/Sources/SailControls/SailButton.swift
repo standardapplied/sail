@@ -20,7 +20,7 @@ public final class SailButton: NSButton {
     private let symbolName: String?
     private let iconOnly: Bool
     private var showsShortcut = false
-    private var mono: TerminalFonts?
+    private var mono: LabelFont?
     private(set) var hovered = false
     private(set) var focused = false
     private var heldWidth = 0.0
@@ -72,7 +72,7 @@ public final class SailButton: NSButton {
 
     /// The key that presses it, made its key equivalent and shown after the label in mono (Create ⏎,
     /// New Workspace ⌘N): what it says is read from the key equivalent, so the two always agree.
-    public func shortcut(_ key: String, modifiers: NSEvent.ModifierFlags = [], mono: TerminalFonts) {
+    public func shortcut(_ key: String, modifiers: NSEvent.ModifierFlags = [], mono: LabelFont) {
         keyEquivalent = key
         keyEquivalentModifierMask = modifiers
         showsShortcut = true
@@ -141,7 +141,7 @@ public final class SailButton: NSButton {
 
     private var hintText: NSAttributedString? {
         guard busyWord == nil, !iconOnly, let words = shortcutWords, let mono else { return nil }
-        return Draw.text(words, mono.medium(Look.Step.caption.points) as NSFont, Tint(paint.label.rgb, alpha: paint.label.alpha * ButtonSize.hintOpacity))
+        return Draw.text(words, mono.font(Look.Step.caption.points) as NSFont, Tint(paint.label.rgb, alpha: paint.label.alpha * ButtonSize.hintOpacity))
     }
 
     private var symbol: NSImage? {
@@ -189,9 +189,8 @@ public final class SailButton: NSButton {
         Draw.box(box, radius: size.radius, fill: paint.fill, edge: paint.edge)
         if busyWord == nil, symbolName == Self.ellipsis, let mark {
             NSColor(paint.label).setFill()
-            for step in -1 ... 1 {
-                let centre = NSPoint(x: Double(mark.midX) + Double(step) * ButtonSize.dotPitch, y: Double(mark.midY))
-                NSBezierPath(ovalIn: Draw.centred(NSSize(width: ButtonSize.dot, height: ButtonSize.dot), on: centre)).fill()
+            for dot in Self.dots(around: NSPoint(x: mark.midX, y: mark.midY)) {
+                NSBezierPath(ovalIn: dot).fill()
             }
         } else if busyWord == nil, let mark, let symbol {
             symbol.draw(in: Draw.centred(symbol.size, on: NSPoint(x: mark.midX, y: mark.midY)), from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)
@@ -210,12 +209,18 @@ public final class SailButton: NSButton {
     /// The ⋯ of a row's menu, drawn as the design draws it: three small dots, lighter than the symbol.
     static let ellipsis = "ellipsis"
 
-    override public func viewDidMoveToWindow() {
-        super.viewDidMoveToWindow()
-        guard let window else { return }
-        for name in [NSWindow.didBecomeKeyNotification, NSWindow.didResignKeyNotification] {
-            NotificationCenter.default.addObserver(self, selector: #selector(keyChanged), name: name, object: window)
+    /// The three dots, the group placed once on a whole point and each dot at the exact pitch from
+    /// its middle, so the two gaps are always equal.
+    static func dots(around point: NSPoint) -> [NSRect] {
+        let middle = NSPoint(x: Double(point.x).rounded(), y: Double(point.y).rounded())
+        return (-1 ... 1).map { step in
+            NSRect(x: Double(middle.x) + Double(step) * ButtonSize.dotPitch - ButtonSize.dot / 2, y: Double(middle.y) - ButtonSize.dot / 2, width: ButtonSize.dot, height: ButtonSize.dot)
         }
+    }
+
+    override public func viewWillMove(toWindow newWindow: NSWindow?) {
+        super.viewWillMove(toWindow: newWindow)
+        KeyWatch.move(self, from: window, to: newWindow, calling: #selector(keyChanged))
     }
 
     @objc private func keyChanged() {

@@ -19,7 +19,7 @@ extension Driver {
         guard NSApplication.shared.isFullKeyboardAccessEnabled else {
             return (false, "keyboard navigation is off, so no button takes the keys: ci/drive turns it on for the kit run")
         }
-        guard let mono = Bundle.main.resourceURL.flatMap({ try? TerminalFonts(directory: $0.appending(path: "Fonts")) }) else {
+        guard let fonts = Bundle.main.resourceURL?.appending(path: "Fonts"), let mono = try? LabelFont(directory: fonts) else {
             return (false, "the drive's bundle has no fonts")
         }
         let motion = Motion.shared, was = motion.reduced
@@ -173,12 +173,12 @@ final class KitPresses: NSObject {
 final class Kit {
     let sheet: String
     let look: Look
-    let mono: TerminalFonts
+    let mono: LabelFont
     let presses = KitPresses()
     private(set) var specimens: [Specimen] = []
     private var rows: [NSView] = []
 
-    init(_ sheet: String, look: Look, mono: TerminalFonts) {
+    init(_ sheet: String, look: Look, mono: LabelFont) {
         self.sheet = sheet
         self.look = look
         self.mono = mono
@@ -285,7 +285,7 @@ final class Kit {
     /// A caption in mono capitals, and the specimens in a row under it.
     private func row(_ caption: String, _ added: [Specimen]) {
         let label = NSTextField(labelWithAttributedString: NSAttributedString(string: caption.uppercased(), attributes: [
-            .font: mono.regular(Look.Step.caption.points) as NSFont, .foregroundColor: NSColor(look.textTertiary), .kern: 0.6,
+            .font: mono.font(Look.Step.caption.points, .regular) as NSFont, .foregroundColor: NSColor(look.textTertiary), .kern: 0.6,
         ]))
         let line = NSStackView(views: added.map { $0.cell })
         line.spacing = 2

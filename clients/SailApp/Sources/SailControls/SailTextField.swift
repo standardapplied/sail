@@ -43,11 +43,11 @@ public final class SailTextField: NSView {
 
     private let label: String?
     private let placeholder: String
-    private let mono: TerminalFonts
+    private let mono: LabelFont
     private(set) var hovered = false
     private var focusWatch: NSKeyValueObservation?
 
-    public init(label: String?, placeholder: String, help: String? = nil, size: FieldSize = .regular, secure: Bool = false, look: Look, mono: TerminalFonts) {
+    public init(label: String?, placeholder: String, help: String? = nil, size: FieldSize = .regular, secure: Bool = false, look: Look, mono: LabelFont) {
         field = secure ? NSSecureTextField() : NSTextField()
         self.label = label
         self.placeholder = placeholder
@@ -101,7 +101,7 @@ public final class SailTextField: NSView {
     static let textPadding = 2.0
 
     private var eyebrow: NSAttributedString? {
-        label.map { Draw.text($0, mono.medium(Look.Step.caption.points) as NSFont, paint.eyebrow, tracking: Look.Tracking.eyebrow, upper: true) }
+        label.map { Draw.text($0, mono.font(Look.Step.caption.points) as NSFont, paint.eyebrow, tracking: Look.Tracking.eyebrow, upper: true) }
     }
 
     private var lineText: NSAttributedString? {
@@ -183,9 +183,10 @@ public final class SailTextField: NSView {
     private func repaint() {
         field.textColor = NSColor(look.text)
         field.alphaValue = paint.boxOpacity
-        field.alignment = rightToLeft ? .right : .left
+        field.alignment = .natural
         let style = NSMutableParagraphStyle()
-        style.alignment = field.alignment
+        style.alignment = rightToLeft ? .right : .left
+        style.baseWritingDirection = rightToLeft ? .rightToLeft : .leftToRight
         field.placeholderAttributedString = NSAttributedString(string: placeholder, attributes: [
             .font: NSFont.systemFont(ofSize: size.text), .foregroundColor: NSColor(look.textTertiary), .paragraphStyle: style,
         ])
@@ -201,10 +202,11 @@ public final class SailTextField: NSView {
         focusWatch = window?.observe(\.firstResponder) { [weak self] _, _ in
             MainActor.assumeIsolated { self?.repaint() }
         }
-        guard let window else { return }
-        for name in [NSWindow.didBecomeKeyNotification, NSWindow.didResignKeyNotification] {
-            NotificationCenter.default.addObserver(self, selector: #selector(keyChanged), name: name, object: window)
-        }
+    }
+
+    override public func viewWillMove(toWindow newWindow: NSWindow?) {
+        super.viewWillMove(toWindow: newWindow)
+        KeyWatch.move(self, from: window, to: newWindow, calling: #selector(keyChanged))
     }
 
     @objc private func keyChanged() {

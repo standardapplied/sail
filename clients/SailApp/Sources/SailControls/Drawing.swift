@@ -1,6 +1,20 @@
 import AppKit
 import SailLook
 
+/// A control's watch on its window becoming and ceasing to be key, moved with the control from window
+/// to window so it never watches one it has left.
+@MainActor
+enum KeyWatch {
+    static let names = [NSWindow.didBecomeKeyNotification, NSWindow.didResignKeyNotification]
+
+    static func move(_ view: NSView, from old: NSWindow?, to new: NSWindow?, calling selector: Selector) {
+        for name in names {
+            if let old { NotificationCenter.default.removeObserver(view, name: name, object: old) }
+            if let new { NotificationCenter.default.addObserver(view, selector: selector, name: name, object: new) }
+        }
+    }
+}
+
 /// What every control draws the same way: a box in its corners, filled, with a 1 pt edge laid on
 /// pixel boundaries, and the focus halo around it.
 enum Draw {
