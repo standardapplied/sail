@@ -105,7 +105,8 @@ struct RealRunnerTests {
         }
         #expect(
             observerRefused?.message
-                == "This connection's ticket is to attach to session '\(name)', and it admits nothing else; ask the API for a ticket for that.")
+                == "This connection does not hold the terminal's keyboard, so it was not ended; someone else may hold it.",
+            "an observer's Kill of its own session is refused, the door saying why")
         session.close()
         #expect(await Door.runner(runner.client).end(name) == .ended)
         do {

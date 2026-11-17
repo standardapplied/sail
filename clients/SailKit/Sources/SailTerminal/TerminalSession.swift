@@ -265,6 +265,11 @@ public final class TerminalSession: Sendable {
         }
     }
 
+    /// Whether a `Create` is out and not yet answered: the host may be making the session now.
+    package var creating: Bool {
+        core.withLock { $0.creating }
+    }
+
     /// Ends this session at its host on a connection of its own, within `limit` in all. An open
     /// whose `Create` is still unanswered is waited for first, inside the same limit, so a session
     /// the host is still making is ended, never left behind unseen; a session never made is gone

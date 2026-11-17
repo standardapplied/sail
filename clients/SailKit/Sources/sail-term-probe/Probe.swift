@@ -97,19 +97,21 @@ struct Probe {
         return report.passed
     }
 
-    /// Ends `session` once its `Create` went out and while the runner may still be answering it,
-    /// as closing a tab on a workspace that is starting does: true when the runner ended what it
-    /// made, or made nothing.
+    /// Ends `session` while its `Create` is out and unanswered, as closing a tab on a workspace
+    /// that is starting does: true when the end began with the `Create` still unanswered and the
+    /// runner ended what it made. The `Create` sends no event, so this looks every 10 ms.
     private static func endWhileOpening(_ session: TerminalSession) async -> Bool {
-        do {
-            try await Follower(session).until(within: 60, "its Create went out") { session.mayBeAtHost }
-        } catch {
-            say("FAILED the Create never went out: \(error)")
-            return false
+        let deadline = ContinuousClock.now + .seconds(60)
+        while !session.creating {
+            guard ContinuousClock.now < deadline, !session.mayBeAtHost else {
+                say("FAILED the Create was never seen unanswered: \(session.state.phase)")
+                return false
+            }
+            try? await Task.sleep(for: .milliseconds(10))
         }
         let began = ContinuousClock.now
         let outcome = await session.end()
-        say("ended while opening: \(outcome) in \(began.duration(to: .now))")
+        say("ended while opening: the Create unanswered when the end began; \(outcome) in \(began.duration(to: .now))")
         session.close()
         return outcome.closesTab
     }
