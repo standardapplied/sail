@@ -27,7 +27,7 @@ import Testing
         let watch = Watch(session)
         session.start()
         try await watch.until("the runner is making it") { door.createsReceived == 1 }
-        #expect(session.mayBeAtHost, "a session coming counts")
+        #expect(session.atHost == .coming, "a session coming counts")
         let ending = Task { await session.end(within: .seconds(10)) }
         door.releaseCreates()
         #expect(await ending.value == .ended)
@@ -64,10 +64,31 @@ import Testing
         let watch = Watch(session)
         session.start()
         try await watch.until("its ticket is asked") { desk.asked }
-        #expect(!session.mayBeAtHost)
+        #expect(session.atHost == .none)
         #expect(await session.end(within: .seconds(2)) == .gone)
         desk.release()
         #expect(door.createsReceived == 0 && door.sessions.isEmpty)
+    }
+
+    /// r4: a `Create` whose answer was lost (the connection dropped while the runner made it) is not
+    /// taken for never made: the end asks the runner, which ends what it made.
+    @Test func aCreateWhoseAnswerWasLostIsEndedNotTakenForNeverMade() async throws {
+        let door = try FakeRunnerDoor()
+        defer { door.stop() }
+        door.loseCreateAnswers()
+        let timeline = Timeline()
+        let create = SessionCreate(
+            session: "app-lost", command: [], workingDirectory: "/tmp", project: "acme", room: "", size: TerminalSize(columns: 80, rows: 24), workspace: "try"
+        )
+        let session = TerminalSession(
+            open: create, door: .runner(FakeRunnerDoorTests.Tickets(door)), screen: try screen(), timeout: 5, sleep: timeline.sleep
+        )
+        let watch = Watch(session)
+        session.start()
+        try await watch.until("the runner made it, its answer lost") { door.sessions == ["app-lost"] && session.atHost == .maybe }
+        #expect(await session.end(within: .seconds(5)) == .ended)
+        #expect(door.sessions.isEmpty, "the host's list: nothing left behind")
+        timeline.passAll()
     }
 
     /// N1: what may still run is said as what is true of it: it runs, and keeps its workspace

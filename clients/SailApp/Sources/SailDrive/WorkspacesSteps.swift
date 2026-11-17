@@ -115,7 +115,7 @@ extension Driver {
         }
         if let title = step.pressStatus {
             guard let focused = workbench.focused else { return (false, "no focused terminal") }
-            return (focused.banner.press(title), "the banner said \(focused.banner.shown ?? "nothing")")
+            return (focused.press(title), "the banner said \(focused.status.says ?? "nothing")")
         }
         if step.signOutNow == true {
             shell.account.signOutHere(nil)

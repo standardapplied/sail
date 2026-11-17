@@ -2090,7 +2090,7 @@ class PtySessionHostTest {
           channel, new PtyMessage.Create("w", List.of("sh"), "/tmp", "acme", "", 80, 24, "broken"));
       var refused = (PtyMessage.Err) PtyWire.read(channel);
 
-      assertEquals(PtyAdmission.Unavailable.REASON, refused.reason());
+      assertEquals(PtyAdmission.Unavailable.UNREAD, refused.reason());
       assertEquals(PtyAdmission.Unavailable.REMEDY, refused.remedy());
       assertFalse(refused.message().contains("incus"), refused.message());
       assertFalse(refused.message().contains("sail host"), refused.message());

@@ -306,12 +306,62 @@ class HostPtyTest {
         assertThrows(
             PtyAdmission.Unavailable.class, () -> pty.admitWorkspace("acme", "interrupted", ada));
     assertTrue(Thread.interrupted(), "the interrupt is kept");
-    var unstarted = assertThrows(IOException.class, () -> lane.enterWorkspace("acme", "try", ada));
+    var unstarted =
+        assertThrows(PtyAdmission.Unavailable.class, () -> lane.enterWorkspace("acme", "try", ada));
     assertTrue(Thread.interrupted(), "the interrupt is kept");
 
-    assertEquals(PtyAdmission.Unavailable.REASON, slow.reason());
-    assertEquals(PtyAdmission.Unavailable.REASON, cut.reason());
-    assertTrue(unstarted.getMessage().contains("shutting down"), unstarted.getMessage());
+    assertEquals(PtyAdmission.Unavailable.UNREAD, slow.reason());
+    assertEquals(PtyAdmission.Unavailable.UNREAD, cut.reason());
+    assertEquals(PtyAdmission.Unavailable.UNFINISHED, unstarted.reason());
+    assertEquals(
+        "shutting down", unstarted.getCause().getMessage(), "kept as the cause, for the log");
+  }
+
+  /**
+   * R1: a stopped workspace whose start fails, as "Start and Open" asks it, tells the person the
+   * runner could not finish that and who looks, never Incus's own words, a command line among them;
+   * what Incus said is the cause, for the log.
+   */
+  @Test
+  void aWorkspaceWhoseStartFailsTellsThePersonNotTheToolsWords() throws IOException {
+    var ada = new PtyIdentity.Person(new Actor("ada", Role.MEMBER, Actor.Lane.API));
+    var stopped =
+        """
+        {"name": "acme-try", "status": "Stopped", "type": "container",
+         "config": {"user.sail.project": "acme", "user.sail.workspace": "try",
+                    "user.sail.ready": "1762941601000", "user.sail.owner": "ada",
+                    "user.sail.owner_id": "fde_ada"},
+         "expanded_devices": {"root": {"path": "/", "pool": "tank", "type": "disk"}}}""";
+    var incus = "Error: Failed to start device. Try `incus info --show-log acme-try` for more info";
+    var box =
+        new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
+            .onOk("incus storage list --format json", TestWorkspaces.POOL)
+            .onOk("incus list ^acme-try$", "[" + stopped + "]")
+            .onOk("incus list --format json", "[" + stopped + "]")
+            .onFail("incus start acme-try", incus);
+    var lane =
+        new HostLanes.Pty(
+            db,
+            TestAuth.roles(db, new SyncConfig("main", null, "root", "box")),
+            null,
+            new BoxInstances(box),
+            TestWorkspaces.over(box),
+            project -> Optional.of(TestDefinitions.named(project)),
+            TestOwners::of);
+
+    var bob = new PtyIdentity.Person(new Actor("bob", Role.MEMBER, Actor.Lane.API));
+    var unstarted =
+        assertThrows(PtyAdmission.Unavailable.class, () -> lane.enterWorkspace("acme", "try", ada));
+    var refused = assertThrows(IOException.class, () -> lane.enterWorkspace("acme", "try", bob));
+
+    assertEquals(
+        "Workspace 'try' belongs to 'ada', not you. Ask ada to enter it, or have an admin do it.",
+        refused.getMessage(),
+        "words written for a person are told as they are");
+    assertEquals("The runner could not finish that.", unstarted.reason());
+    assertEquals("An admin looks at the runner.", unstarted.remedy().plain());
+    assertFalse(unstarted.getMessage().contains("incus"), unstarted.getMessage());
+    assertTrue(unstarted.getCause().getMessage().contains(incus), "what Incus said, for the log");
   }
 
   private static final class Incus implements ShellExec {

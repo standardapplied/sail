@@ -6,7 +6,7 @@ import SailTerminalView
 /// at most one other: the Sail look's surface and hairline, content corners at 6 pt, the action in
 /// the accent, the other a plain button. The action answers Return while it shows.
 @MainActor
-public final class StatusBanner: NSView {
+final class StatusBanner: NSView {
     private let message = NSTextField(wrappingLabelWithString: "")
     private let action: AccentButton
     private let other = NSButton(title: "", target: nil, action: nil)
@@ -85,18 +85,18 @@ public final class StatusBanner: NSView {
     }
 
     /// What the banner says now, nil when hidden.
-    public var shown: String? {
+    var shown: String? {
         isHidden ? nil : message.stringValue
     }
 
     /// The buttons it offers now, the action first; none while hidden.
-    public var offers: [String] {
+    var offers: [String] {
         isHidden ? [] : ([action, other] as [NSButton]).filter { !$0.isHidden }.map(\.title)
     }
 
     /// Presses the button titled `title` it offers, as a click does; false when it offers none so
     /// titled.
-    public func press(_ title: String) -> Bool {
+    func press(_ title: String) -> Bool {
         guard offers.contains(title) else { return false }
         if action.title == title { handler() } else { otherHandler() }
         return true

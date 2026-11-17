@@ -4521,7 +4521,8 @@ against them before it is used. Both expose one module, `GhosttyVt`. The termina
   door, throws: a session is ended by `TerminalSession.end(within:)`, within 10 s in all. A `Create`
   sent and not yet answered (a workspace starting) is waited for first, inside the same limit,
   since the host makes the session before it answers and a closed connection does not undo it;
-  a session never made is gone already (`mayBeAtHost`, which also decides what a quit counts).
+  a session never made is gone already (`atHost`, which also decides what a quit counts; a `Create`
+  whose answer was lost may be at the host, so the door decides).
   Then `Door.end(_:within:)` ends it on a connection of its own (through a runner's door an attach
   ticket, attached as the writer, then `Kill`), the ticket included in the limit, its outcome
   `EndOutcome`: ended, gone already (a ticket to attach refused as not found, by code), or

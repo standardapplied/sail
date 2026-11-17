@@ -34,8 +34,8 @@ import Testing
         let panes = try names.map { try RunnerTabTests.pane(.workspace(project: "harbor", name: $0), runner: tickets) }
         panes.forEach { $0.begin() }
         #expect(
-            await RunnerTabTests.until(10) { panes.allSatisfy { $0.attachedOnce && $0.banner.shown == nil } },
-            "attached: \(panes.map { $0.banner.shown ?? "nothing said" })"
+            await RunnerTabTests.until(10) { panes.allSatisfy { $0.attachedOnce && $0.status.says == nil } },
+            "attached: \(panes.map { $0.status.says ?? "nothing said" })"
         )
         return panes
     }
@@ -72,7 +72,7 @@ import Testing
         #expect(Self.said(shell.window).contains("Quit and End 1 Runner Terminal"))
         shell.window.endSheet(try #require(shell.window.attachedSheet), returnCode: .alertSecondButtonReturn)
         #expect(await RunnerTabTests.until { replies.given == [false] })
-        #expect(door.kills.isEmpty && door.sessions == panes.map(\.name) && panes.allSatisfy { $0.banner.shown == nil })
+        #expect(door.kills.isEmpty && door.sessions == panes.map(\.name) && panes.allSatisfy { $0.status.says == nil })
     }
 
     /// M5: what may still run is named by its tab's title and said as possibly running; a session
@@ -187,8 +187,8 @@ import Testing
         #expect(pane.unended && pane.holdsRunnerSession, "it may still be running, and a quit still counts it")
         var again = 0
         pane.showUnended([FakeRunnerDoor.notTheWriter], endAgain: { again += 1 }, closeAnyway: {})
-        #expect(pane.banner.shown == EndOutcome.mayStillRun("This terminal", [FakeRunnerDoor.notTheWriter]) + " Close Anyway leaves it there.")
-        #expect(pane.banner.offers == ["End Again", "Close Anyway"])
+        #expect(pane.status.says == EndOutcome.mayStillRun("This terminal", [FakeRunnerDoor.notTheWriter]) + " Close Anyway leaves it there.")
+        #expect(pane.status.offers == ["End Again", "Close Anyway"])
         door.release(pane.name)
         let ended = try #require(pane.end(), "End Again ends it again")
         #expect(await ended.value == .ended && door.sessions.isEmpty)
@@ -214,6 +214,30 @@ import Testing
         door.releaseCreates()
         #expect(await RunnerTabTests.until(15) { replies.given == [true] })
         #expect(door.sessions.isEmpty, "the host's list: nothing left behind")
+    }
+
+    /// r3: the panes of a split share their tab's title, and each end is still its own pane's: one
+    /// ended after another was not confirmed leaves that one said as its own end came.
+    @Test func twoPanesOfOneTitleAreEachSaidAsTheirOwnEndCame() async throws {
+        let door = try FakeRunnerDoor()
+        defer { door.stop() }
+        let shell = try WorkbenchLookTests.shell(.light)
+        let slow = DoorTickets(door)
+        let first = try await Self.attached(["dock"], slow)[0]
+        let second = try await Self.attached(["dock"], DoorTickets(door))[0]
+        door.holdWrite(second.name)
+        slow.silence()
+        let replies = Replies()
+        _ = RunnerEnds.ask([first, second], titled: Self.titled, on: shell.window) { replies.given.append($0) }
+        shell.window.endSheet(try #require(shell.window.attachedSheet), returnCode: .alertFirstButtonReturn)
+        #expect(await RunnerTabTests.until(10) { second.unended }, "the second pane's end came first")
+        slow.answerAgain()
+        #expect(await RunnerTabTests.until(15) { Self.said(shell.window).contains("Some terminals on the runner may still be running") })
+        let said = Self.said(shell.window).joined(separator: "\n")
+        #expect(said.contains(EndOutcome.mayStillRun("harbor · dock", [FakeRunnerDoor.notTheWriter])), "\(said)")
+        #expect(!said.contains("Sail went on"), "the ended pane's end is not taken for the other's: \(said)")
+        shell.window.endSheet(try #require(shell.window.attachedSheet), returnCode: .alertFirstButtonReturn)
+        #expect(await RunnerTabTests.until { replies.given == [true] })
     }
 
     /// n10: going on before the ends answer says which terminals may still run, by title, before

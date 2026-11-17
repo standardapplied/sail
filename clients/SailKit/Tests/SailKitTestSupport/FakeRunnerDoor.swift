@@ -37,6 +37,7 @@ public final class FakeRunnerDoor: Sendable {
     /// The `Create`s the door holds before it makes their sessions.
     private struct Creates {
         var holding = false
+        var losing = false
         var received = 0
         var held: [DispatchSemaphore] = []
     }
@@ -77,6 +78,12 @@ public final class FakeRunnerDoor: Sendable {
             return ticket
         }
         return TerminalTicket(ticket: ticket, address: address, expiresAt: Date().addingTimeInterval(30))
+    }
+
+    /// From now on a `Create` is made and its answer lost: the door hangs up before it answers, as a
+    /// connection that drops while the runner starts a workspace.
+    public func loseCreateAnswers() {
+        creates.withLock { $0.losing = true }
     }
 
     /// From now on a `Create` waits, unanswered and its session not yet made, until ``releaseCreates()``:
@@ -208,6 +215,7 @@ public final class FakeRunnerDoor: Sendable {
             switch frame {
             case let .create(create):
                 made(create.session)
+                if creates.withLock({ $0.losing }) { return }
                 opened = create.session
                 answer(.accepted, on: connection)
             case let .attach(session, write):

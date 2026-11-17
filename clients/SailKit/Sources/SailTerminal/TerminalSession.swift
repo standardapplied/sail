@@ -104,8 +104,10 @@ public final class TerminalSession: Sendable {
         /// The inputs left unconfirmed by a lost connection are accounted for by the next replay.
         var accounting = false
         var numbered = false
-        /// A `Create` was sent and its answer is still to come: the host may be making the session.
-        var creating = false
+        /// Whether the host holds, or may hold, this session.
+        var atHost: AtHost = .none
+        /// What ``atHost`` was before the `Create` now out: a refused `Create` leaves it so.
+        var beforeCreate: AtHost = .none
         /// Who waits for that answer.
         var createWaiters: [CheckedContinuation<Void, Never>] = []
         /// The last ticket asked of a runner's door while it has not been presented.
@@ -171,6 +173,7 @@ public final class TerminalSession: Sendable {
         self.after = after
         alarm = Alarm(sleep: sleep)
         var initial = Core(state: SessionState(phase: .connecting, session: intent.session), intent: intent)
+        if case .attach = intent { initial.atHost = .maybe }
         if case let .open(create) = intent {
             initial.viewSize = create.size
             initial.ptySize = create.size
@@ -255,19 +258,9 @@ public final class TerminalSession: Sendable {
         }
     }
 
-    /// Whether the host may hold this session: it was made, or its `Create` is still unanswered.
-    /// A session never made, or whose `Create` was refused, is at no host.
-    public var mayBeAtHost: Bool {
-        core.withLock { core in
-            if core.creating { return true }
-            if case .attach = core.intent { return true }
-            return false
-        }
-    }
-
-    /// Whether a `Create` is out and not yet answered: the host may be making the session now.
-    package var creating: Bool {
-        core.withLock { $0.creating }
+    /// Whether the host holds, or may hold, this session: what an end and a quit's count go by.
+    public var atHost: AtHost {
+        core.withLock { $0.atHost }
     }
 
     /// Ends this session at its host on a connection of its own, within `limit` in all. An open
@@ -276,14 +269,14 @@ public final class TerminalSession: Sendable {
     /// already. This client detaches either way.
     public func end(within limit: Duration = Door.endLimit) async -> EndOutcome {
         let began = clock.now
-        let creating = core.withLock { core -> Bool in
+        let coming = core.withLock { core -> Bool in
             core.detaching = true
-            return core.creating
+            return core.atHost == .coming
         }
-        if creating { _ = await Door.within(limit) { await self.createAnswered() } }
-        let made = mayBeAtHost
+        if coming { _ = await Door.within(limit) { await self.createAnswered() } }
+        let held = self.atHost
         detach()
-        guard made else { return .gone }
+        guard held != .none else { return .gone }
         return await door.end(state.session, within: limit - (clock.now - began), of: limit)
     }
 
@@ -546,9 +539,16 @@ public final class TerminalSession: Sendable {
                     connection.close()
                     return standDown
                 }
-                defer { answeredCreate() }
-                try connection.request(.create(create))
+                do throws(TerminalError) {
+                    try connection.request(.create(create))
+                } catch {
+                    var refused = false
+                    if case .refused = error { refused = true }
+                    answeredCreate(refused: refused)
+                    throw error
+                }
                 core.withLock { $0.intent = .attach(session: create.session, write: true) }
+                answeredCreate(refused: false)
             }
             guard case let .attach(session, wantsWrite) = core.withLock({ $0.intent }) else { return .failed(.closed) }
             write = wantsWrite
@@ -599,7 +599,10 @@ public final class TerminalSession: Sendable {
             guard !core.closed else { return .finished(.closed) }
             guard !core.detaching, core.generation == generation else { return .detached }
             if let connection { core.inFlight = connection }
-            if creating { core.creating = true }
+            if creating {
+                core.beforeCreate = core.atHost
+                core.atHost = .coming
+            }
             return nil
         }
     }
@@ -608,7 +611,7 @@ public final class TerminalSession: Sendable {
     private func createAnswered() async {
         await withCheckedContinuation { (answered: CheckedContinuation<Void, Never>) in
             let now = core.withLock { core -> Bool in
-                guard core.creating else { return true }
+                guard core.atHost == .coming else { return true }
                 core.createWaiters.append(answered)
                 return false
             }
@@ -616,10 +619,11 @@ public final class TerminalSession: Sendable {
         }
     }
 
-    /// The `Create` was answered, or its connection lost: whoever waits for it goes on.
-    private func answeredCreate() {
+    /// The `Create` was answered, or its connection lost: whoever waits for it goes on. Refused, the
+    /// host made nothing of it; made, or its answer lost, only the host can say whether it holds it.
+    private func answeredCreate(refused: Bool) {
         let waiters = core.withLock { core in
-            core.creating = false
+            core.atHost = refused ? core.beforeCreate : .maybe
             defer { core.createWaiters = [] }
             return core.createWaiters
         }

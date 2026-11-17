@@ -2165,7 +2165,7 @@ class ApiRouterTest {
 
       assertEquals(404, response.statusCode());
       assertTrue(response.body().contains("Room invites are retired"));
-      assertTrue(response.body().contains("Add the agent to the room as a member"));
+      assertTrue(response.body().contains("POST /v1/rooms/{id}/members"));
     }
   }
 

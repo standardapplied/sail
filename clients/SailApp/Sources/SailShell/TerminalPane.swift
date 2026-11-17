@@ -50,8 +50,7 @@ public final class TerminalPane: NSView {
 
     private let start: Start
     private let door: Door
-    /// The card saying where the session stands: what a test or the drive reads and presses.
-    public let banner: StatusBanner
+    private let banner: StatusBanner
     private let scrim = Scrim()
     private let latency = NSTextField(labelWithString: "")
     private var latencyTimer: Timer?
@@ -159,7 +158,7 @@ public final class TerminalPane: NSView {
         guard place.onRunner, let session else { return false }
         if ending != nil || unended { return true }
         if case .ended = session.state.phase { return false }
-        return session.mayBeAtHost
+        return session.atHost != .none
     }
 
     /// The tab stays while its runner session is ended, saying so.
@@ -214,6 +213,17 @@ public final class TerminalPane: NSView {
             latencyTimer = nil
             latency.isHidden = true
         }
+    }
+
+    /// What the banner says now (nil when hidden) and the buttons it offers: what a test or the
+    /// drive reads.
+    public var status: (says: String?, offers: [String]) {
+        (banner.shown, banner.offers)
+    }
+
+    /// Presses the banner's button titled `title`, as a click does; false when none is so titled.
+    public func press(_ title: String) -> Bool {
+        banner.press(title)
     }
 
     /// The latency overlay's lines, every one shown.

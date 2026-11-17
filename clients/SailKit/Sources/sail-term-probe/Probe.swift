@@ -102,8 +102,8 @@ struct Probe {
     /// runner ended what it made. The `Create` sends no event, so this looks every 10 ms.
     private static func endWhileOpening(_ session: TerminalSession) async -> Bool {
         let deadline = ContinuousClock.now + .seconds(60)
-        while !session.creating {
-            guard ContinuousClock.now < deadline, !session.mayBeAtHost else {
+        while session.atHost != .coming {
+            guard ContinuousClock.now < deadline, session.atHost == .none else {
                 say("FAILED the Create was never seen unanswered: \(session.state.phase)")
                 return false
             }

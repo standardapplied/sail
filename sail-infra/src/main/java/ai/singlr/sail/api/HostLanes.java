@@ -435,8 +435,19 @@ final class HostLanes {
         if (failed instanceof InterruptedException) {
           Thread.currentThread().interrupt();
         }
-        throw Remedied.io(Remedied.reasonOf(failed), Remedied.remedyOf(failed));
+        throw told(failed);
       }
+    }
+
+    /**
+     * What a person is told of a workspace start's {@code failure}: words written for one, its
+     * reason and remedy as they are; anything else, a tool's output say, {@link
+     * PtyAdmission.Unavailable} with what it said as its cause, for the log.
+     */
+    private static IOException told(Exception failure) {
+      return failure instanceof Remedied
+          ? Remedied.io(Remedied.reasonOf(failure), Remedied.remedyOf(failure))
+          : new PtyAdmission.Unavailable(PtyAdmission.Unavailable.UNFINISHED, failure);
     }
 
     /**

@@ -19,6 +19,7 @@ import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.WorkspaceOwner;
 import ai.singlr.sail.engine.Workspaces;
 import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.pty.PtyAdmission;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.util.Objects;
@@ -110,7 +111,7 @@ public final class WorkspaceDoors {
    * {@code door}'s answer, its refusals as the API says them: a busy runner, a refusal of what the
    * workspace or the request is, and Incus failing, each with its own code. Only words written for
    * a person ({@link Remedied}) reach one: any other failure, a tool's output say, goes to the log,
-   * and the person reads {@link #UNFINISHED}.
+   * and the person reads {@link PtyAdmission.Unavailable#UNFINISHED}.
    */
   static <T> T answered(Callable<T> door) {
     try {
@@ -133,14 +134,13 @@ public final class WorkspaceDoors {
             failed);
       }
       ApiLog.unexpected("a workspace door", failed);
-      throw new ApiException(ErrorCode.CONTAINER_ERROR, UNFINISHED, UNFINISHED_REMEDY, failed);
+      throw new ApiException(
+          ErrorCode.CONTAINER_ERROR,
+          PtyAdmission.Unavailable.UNFINISHED,
+          PtyAdmission.Unavailable.REMEDY,
+          failed);
     }
   }
-
-  /** What a person reads of a workspace door's failure that was not written for one. */
-  static final String UNFINISHED = "The runner could not finish that.";
-
-  static final Remedy UNFINISHED_REMEDY = Remedy.of("An admin looks at the runner.");
 
   /**
    * Makes workspace {@code name} of {@code config}'s project, the bound actor's own: a credential

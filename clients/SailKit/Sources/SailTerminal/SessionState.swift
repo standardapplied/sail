@@ -129,3 +129,13 @@ enum Intent: Equatable, Sendable {
         }
     }
 }
+
+/// Whether a host holds a session, as its client can know it.
+public enum AtHost: Equatable, Sendable {
+    /// Never made: no `Create` went out, or the host refused it.
+    case none
+    /// A `Create` is out and its answer still to come: the host may be making it now.
+    case coming
+    /// Made, or a `Create` whose answer was lost: only the host can say.
+    case maybe
+}

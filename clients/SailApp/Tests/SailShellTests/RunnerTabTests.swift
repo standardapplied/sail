@@ -141,10 +141,10 @@ actor Proxied: Transport {
     @Test func aRunnerTabsTicketNamesItsWorkspaceAtEveryOpen() async throws {
         let tickets = RecordingTickets(answering: .refused(Self.notYours))
         let pane = try Self.pane(.workspace(project: "acme", name: "try"), runner: tickets)
-        #expect(pane.banner.shown == nil)
+        #expect(pane.status.says == nil)
         pane.begin()
-        #expect(await Self.until { pane.banner.shown == "Workspace 'dock' belongs to 'uday', not you. Ask uday to enter it, or have an admin do it." },
-                "the banner says \(pane.banner.shown ?? "nothing")")
+        #expect(await Self.until { pane.status.says == "Workspace 'dock' belongs to 'uday', not you. Ask uday to enter it, or have an admin do it." },
+                "the banner says \(pane.status.says ?? "nothing")")
         pane.openAgain()
         #expect(await Self.until { tickets.requests.count == 2 })
         #expect(tickets.requests == [.open(project: "acme", workspace: "try"), .open(project: "acme", workspace: "try")])
@@ -156,8 +156,8 @@ actor Proxied: Transport {
         let tickets = RecordingTickets(answering: .unreachable("the runner does not answer"))
         let pane = try Self.pane(.workspace(project: "harbor", name: "dock"), runner: tickets)
         pane.begin()
-        #expect(await Self.until { pane.banner.shown == "Reconnecting to harbor · dock…" }, "the banner says \(pane.banner.shown ?? "nothing")")
-        #expect(pane.banner.offers == ["Reconnect Now"])
+        #expect(await Self.until { pane.status.says == "Reconnecting to harbor · dock…" }, "the banner says \(pane.status.says ?? "nothing")")
+        #expect(pane.status.offers == ["Reconnect Now"])
         pane.detach()
     }
 

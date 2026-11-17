@@ -302,8 +302,8 @@ final class Driver {
             return (found, found ? "" : "the screen never showed '\(text)'")
         }
         if let banner = step.banner {
-            let found = await waitUntil(step.seconds ?? 15) { self.pane?.banner.shown?.contains(banner) == true }
-            return (found, "the banner says '\(pane?.banner.shown ?? "nothing")'")
+            let found = await waitUntil(step.seconds ?? 15) { self.pane?.status.says?.contains(banner) == true }
+            return (found, "the banner says '\(pane?.status.says ?? "nothing")'")
         }
         if step.still == true {
             let before = screenText

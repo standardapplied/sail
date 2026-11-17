@@ -89,22 +89,37 @@ public interface PtyAdmission {
   }
 
   /**
-   * The box could not say what a workspace or an instance is (its tool failed, or did not answer in
-   * time): unavailable, never refused. Its words are a person's; what the tool said is its cause,
-   * for the host's log only.
+   * The runner could not do what was asked (its tool failed, or did not answer in time):
+   * unavailable, never refused. Its words are a person's, one of two sentences, with who looks;
+   * what the tool said is its cause, for the log only.
    */
   final class Unavailable extends IOException implements Remedied {
-    public static final String REASON =
+    /** The runner could not say what a workspace or an instance is. */
+    public static final String UNREAD =
         "The runner could not read its workspaces, so no terminal was opened.";
+
+    /** The runner could not finish what was asked of a workspace: its start, say. */
+    public static final String UNFINISHED = "The runner could not finish that.";
+
+    /** Who looks, said with either. */
     public static final Remedy REMEDY = Remedy.of("An admin looks at the runner.");
 
+    private final String reason;
+
+    /** The runner could not read its workspaces, for {@code cause}. */
     public Unavailable(Throwable cause) {
-      super(Remedied.message(REASON, REMEDY), cause);
+      this(UNREAD, cause);
+    }
+
+    /** The runner could not do what {@code reason} says, for {@code cause}. */
+    public Unavailable(String reason, Throwable cause) {
+      super(Remedied.message(reason, REMEDY), cause);
+      this.reason = reason;
     }
 
     @Override
     public String reason() {
-      return REASON;
+      return reason;
     }
 
     @Override

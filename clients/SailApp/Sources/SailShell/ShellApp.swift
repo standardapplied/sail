@@ -526,19 +526,19 @@ enum RunnerEnds {
         }
     }
 
-    /// The runner terminals not yet confirmed ended, by their tab's title: why, or nil while the
-    /// end is still under way.
+    /// The runner terminals not yet confirmed ended, each by its pane (the panes of a split share a
+    /// title) and said by its tab's title: why, or nil while the end is still under way.
     @MainActor
     final class Left {
-        private var waiting: [(title: String, why: [String]?)]
+        private var waiting: [(pane: PaneID, title: String, why: [String]?)]
 
-        init(_ titles: [String]) {
-            waiting = titles.map { (title: $0, why: nil) }
+        init(_ panes: [(pane: PaneID, title: String)]) {
+            waiting = panes.map { (pane: $0.pane, title: $0.title, why: nil) }
         }
 
-        /// What `title`'s end came to: gone from the list once ended, kept with why otherwise.
-        func settle(_ title: String, _ outcome: EndOutcome) {
-            guard let index = waiting.firstIndex(where: { $0.title == title }) else { return }
+        /// What `pane`'s end came to: gone from the list once ended, kept with why otherwise.
+        func settle(_ pane: PaneID, _ outcome: EndOutcome) {
+            guard let index = waiting.firstIndex(where: { $0.pane == pane }) else { return }
             if case let .unconfirmed(why) = outcome { waiting[index].why = why } else { waiting.remove(at: index) }
         }
 
@@ -557,10 +557,10 @@ enum RunnerEnds {
     ) -> Bool {
         let live = panes.filter(\.holdsRunnerSession)
         guard !live.isEmpty else { return false }
-        let left = Left(live.map(titled))
+        let left = Left(live.map { (pane: $0.id, title: titled($0)) })
         if systemQuitting {
             Task { @MainActor in
-                await end(live, titled: titled, within: limit, into: left)
+                await end(live, within: limit, into: left)
                 reply(true)
             }
             return true
@@ -581,7 +581,7 @@ enum RunnerEnds {
                 }
             }
             Task { @MainActor in
-                await end(live, titled: titled, within: limit, into: left)
+                await end(live, within: limit, into: left)
                 guard answered.first() else { return }
                 window.endSheet(progress.window)
                 say(left.said, on: window, then: reply)
@@ -592,21 +592,21 @@ enum RunnerEnds {
 
     /// Ends every pane's session at the runner, all at once, each within `limit`, an end already
     /// under way joined rather than started again, each outcome settled in `left` as it comes.
-    static func end(_ panes: [TerminalPane], titled: @MainActor (TerminalPane) -> String, within limit: Duration, into left: Left) async {
-        var endings: [(title: String, ending: Task<EndOutcome, Never>)] = []
+    static func end(_ panes: [TerminalPane], within limit: Duration, into left: Left) async {
+        var endings: [(pane: PaneID, ending: Task<EndOutcome, Never>)] = []
         for pane in panes {
             guard let ending = pane.end(within: limit) else {
-                left.settle(titled(pane), .gone)
+                left.settle(pane.id, .gone)
                 continue
             }
-            endings.append((titled(pane), ending))
+            endings.append((pane.id, ending))
         }
-        await withTaskGroup(of: (String, EndOutcome).self) { group in
-            for (title, ending) in endings {
-                group.addTask { (title, await ending.value) }
+        await withTaskGroup(of: (PaneID, EndOutcome).self) { group in
+            for (pane, ending) in endings {
+                group.addTask { (pane, await ending.value) }
             }
-            for await (title, outcome) in group {
-                left.settle(title, outcome)
+            for await (pane, outcome) in group {
+                left.settle(pane, outcome)
             }
         }
     }
