@@ -163,7 +163,7 @@ final class WorkspaceCredentials {
         shell,
         instance,
         List.of(owner.name(), owner.email()),
-        "Could not make " + instance + " " + owner.handle() + "'s");
+        "Could not give " + instance + " to " + owner.handle());
     ContainerFilePush.push(
         shell,
         instance,

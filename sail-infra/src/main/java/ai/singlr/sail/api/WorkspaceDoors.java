@@ -103,8 +103,8 @@ public final class WorkspaceDoors {
             + keeper
             + "'s node, where only "
             + keeper
-            + " makes or enters a workspace; another person's workspaces live on main.",
-        "Workspaces are made on main: make yours there.");
+            + " creates or enters a workspace; another person's workspaces live on main.",
+        "Workspaces are created on main: create yours there.");
   }
 
   /**
@@ -152,7 +152,7 @@ public final class WorkspaceDoors {
     if (Strings.isBlank(actor.handle())) {
       throw new ApiException(
           ErrorCode.FORBIDDEN,
-          "This credential names no person, and a workspace is made for the person who asks.");
+          "This credential names no person, and a workspace is created for the person who asks.");
     }
     requireEnter(actor, config.name(), name, actor.handle(), keeper);
     return workspaces.createFromCurrent(config, name, files, actor.handle(), owners, held);
@@ -247,7 +247,7 @@ public final class WorkspaceDoors {
             + project
             + " is "
             + gone
-            + "'s, who is no longer active here, so it is not started: the next pass makes it"
+            + "'s, who is no longer active here, so it is not started: the next pass leaves it"
             + " nobody's.",
         Remedy.of(
             "Delete it meanwhile with: ",

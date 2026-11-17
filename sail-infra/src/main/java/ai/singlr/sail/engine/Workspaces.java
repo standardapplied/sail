@@ -344,7 +344,7 @@ public final class Workspaces {
     }
 
     static Busy creating() {
-      return new Busy("This runner is making another workspace, which takes about a minute.");
+      return new Busy("This runner is creating another workspace, which takes about a minute.");
     }
 
     static Busy changing(String project, String name) {
@@ -603,8 +603,8 @@ public final class Workspaces {
                               + place.specId()
                               + " has no workspace of "
                               + place.project()
-                              + " on this runner (a done spec's is deleted), and an attach makes"
-                              + " none: a run of the spec makes it.",
+                              + " on this runner (a done spec's is deleted), and an attach creates"
+                              + " none: a run of the spec creates it.",
                           Remedy.of(
                               "Dispatch one, which reopens a done spec, with: ",
                               Remedy.sail(
@@ -884,8 +884,9 @@ public final class Workspaces {
       throw new IOException(
           "Workspace "
               + instance
-              + " could not be made "
-              + (handle.isBlank() ? "nobody's" : handle + "'s")
+              + (handle.isBlank()
+                  ? " could not be left nobody's"
+                  : " could not be given to " + handle)
               + ", so no run goes in it: "
               + owned.reason());
     }
@@ -1346,7 +1347,7 @@ public final class Workspaces {
                 + project
                 + " is not destroyed: "
                 + String.join(", ", made)
-                + " was made after the destroy read what it would delete.",
+                + " was created after the destroy read what it would delete.",
             Remedy.of(
                 "Destroy it again to see it: ", Remedy.sail("project destroy", project), "."));
       }
@@ -1512,8 +1513,7 @@ public final class Workspaces {
     }
     var prepared = shell.exec(ContainerExec.asRoot(instance, argv), null, READY_TIMEOUT);
     if (!prepared.ok()) {
-      throw new IOException(
-          "Workspace '" + name + "' could not be made its own: " + prepared.reason());
+      throw new IOException("Workspace '" + name + "' could not be finished: " + prepared.reason());
     }
     var steps = steps(prepared.stdout());
     var at = nanos.getAsLong();
@@ -1806,7 +1806,7 @@ public final class Workspaces {
               + name
               + "' of "
               + project
-              + " was never made whole: a create of it did not finish.",
+              + " was never finished: its create did not complete.",
           Remedy.of(
               "Create it again, which replaces it: ",
               Remedy.sail("project workspace create", project, name),

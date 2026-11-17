@@ -106,7 +106,7 @@ public final class WorkspaceTemplate {
   public record Stale(String project) implements Remedied {
     @Override
     public String reason() {
-      return "This spec's workspace was made from "
+      return "This spec's workspace was created from "
           + project
           + "'s template as it was last built, which is older than the project's definition.";
     }

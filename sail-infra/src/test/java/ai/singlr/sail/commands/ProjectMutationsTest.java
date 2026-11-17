@@ -152,7 +152,7 @@ class ProjectMutationsTest {
     var sized = TestDefinitions.yaml("name: acme\nresources: {cpu: 2, memory: 8GB, disk: 50GB}\n");
 
     assertEquals(
-        "Project 'acme' sets no resources, so its container cannot be made. Set them with: sail"
+        "Project 'acme' sets no resources, so its container cannot be created. Set them with: sail"
             + " project config set acme resources '{\"cpu\": 2, \"memory\": \"8GB\", \"disk\":"
             + " \"50GB\"}'",
         assertThrows(

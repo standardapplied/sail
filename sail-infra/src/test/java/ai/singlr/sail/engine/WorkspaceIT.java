@@ -901,7 +901,7 @@ class WorkspaceIT extends AbstractIncusIT {
         refused
             .getMessage()
             .startsWith(
-                "Workspace 'fix-login' could not be made its own: "
+                "Workspace 'fix-login' could not be finished: "
                     + PROJECT
                     + "-"
                     + FIX

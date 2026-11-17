@@ -438,7 +438,7 @@ class WorkspaceDoorsTest {
     assertEquals(ErrorCode.READ_ONLY_CREDENTIAL, viewer.failure().errorCode());
     assertEquals(ErrorCode.FORBIDDEN, noOne.failure().errorCode());
     assertEquals(
-        "This credential names no person, and a workspace is made for the person who asks.",
+        "This credential names no person, and a workspace is created for the person who asks.",
         noOne.getMessage());
     assertEquals("acme-try", created.instance());
     assertTrue(
@@ -518,7 +518,8 @@ class WorkspaceDoorsTest {
 
     assertEquals(ErrorCode.RUNNER_BUSY, busy.failure().errorCode());
     assertEquals(
-        "This runner is making another workspace, which takes about a minute.", busy.getMessage());
+        "This runner is creating another workspace, which takes about a minute.",
+        busy.getMessage());
     assertEquals(ErrorCode.CONFLICT, conflict.failure().errorCode());
     assertEquals("Workspace 'try' of acme exists already.", conflict.getMessage());
     for (var unsaid : List.of(unwritten, incus)) {
@@ -586,7 +587,7 @@ class WorkspaceDoorsTest {
     }
     assertEquals(
         "Workspace 'try' of acme is ada's, who is no longer active here, so it is not started: the"
-            + " next pass makes it nobody's. Delete it meanwhile with: sail project workspace"
+            + " next pass leaves it nobody's. Delete it meanwhile with: sail project workspace"
             + " delete acme try --force.",
         told.getMessage());
     assertEquals(List.of(), changes(removed));
@@ -623,11 +624,11 @@ class WorkspaceDoorsTest {
       assertEquals(Role.VIEWER, eng.role());
       assertEquals(ErrorCode.READ_ONLY_CREDENTIAL, capped.failure().errorCode());
       assertEquals(
-          "This box is client's node, where only client makes or enters a workspace; another"
+          "This box is client's node, where only client creates or enters a workspace; another"
               + " person's workspaces live on main.",
           capped.getMessage());
       assertEquals(
-          "Workspaces are made on main: make yours there.", capped.failure().remedy().plain());
+          "Workspaces are created on main: create yours there.", capped.failure().remedy().plain());
       assertEquals(List.of("start"), changes(onNode));
       assertEquals(
           "Workspace 'try' has no owner, so only an admin may enter it.", mainRefuses.getMessage());

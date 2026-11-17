@@ -214,7 +214,7 @@ class HostPtyTest {
 
   /**
    * A terminal opened by an admin in a workspace whose labelled person is no longer active here is
-   * refused saying so, and nothing is started: the next pass makes it nobody's.
+   * refused saying so, and nothing is started: the next pass leaves it nobody's.
    */
   @Test
   void aWorkspaceWhosePersonIsGoneIsNotStartedForATerminalSayingSo() {
@@ -246,7 +246,7 @@ class HostPtyTest {
 
     assertEquals(
         "Workspace 'try' of acme is zed's, who is no longer active here, so it is not started: the"
-            + " next pass makes it nobody's. Delete it meanwhile with: sail project workspace"
+            + " next pass leaves it nobody's. Delete it meanwhile with: sail project workspace"
             + " delete acme try --force.",
         refused.getMessage());
     assertTrue(box.invocations().stream().noneMatch(c -> c.startsWith("incus start")));

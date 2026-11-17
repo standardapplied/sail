@@ -46,8 +46,8 @@ import Testing
     @Test func anUntypedFixIsShownAsWrittenAndNoneIsTheMessageAlone() {
         #expect(Self.refusal("Your credential is read-only and cannot enter workspaces.", action: "Ask an admin for a member or admin credential.").lines
             == ["Your credential is read-only and cannot enter workspaces.", "Ask an admin for a member or admin credential."])
-        #expect(Self.refusal("This runner is making another workspace, which takes about a minute.").lines
-            == ["This runner is making another workspace, which takes about a minute."])
+        #expect(Self.refusal("This runner is creating another workspace, which takes about a minute.").lines
+            == ["This runner is creating another workspace, which takes about a minute."])
     }
 
     /// The server's own refusals, as it writes them (`Workspaces.java:1447`, `WorkspaceDoors.java:93-106`,
@@ -56,14 +56,14 @@ import Testing
         let untemplated = Refusal(code: .known(.conflict), message: "acme has no template yet:", action: "project template build acme.",
                                   remedy: [Self.sail("project template build", "acme"), .words(".")])
         #expect(untemplated.lines == ["acme has no template yet:", "An admin builds acme's template on the runner first."])
-        let busy = Refusal(code: .known(.runnerBusy), message: "This runner is making another workspace, which takes about a minute.")
-        #expect(busy.lines == ["This runner is making another workspace, which takes about a minute."])
+        let busy = Refusal(code: .known(.runnerBusy), message: "This runner is creating another workspace, which takes about a minute.")
+        #expect(busy.lines == ["This runner is creating another workspace, which takes about a minute."])
         let node = Refusal(
             code: .known(.readOnlyCredential),
-            message: "This box is client's node, where only client makes or enters a workspace; another person's workspaces live on main.",
-            action: "Workspaces are made on main: make yours there."
+            message: "This box is client's node, where only client creates or enters a workspace; another person's workspaces live on main.",
+            action: "Workspaces are created on main: create yours there."
         )
-        #expect(node.lines.last == "Workspaces are made on main: make yours there.")
+        #expect(node.lines.last == "Workspaces are created on main: create yours there.")
         let offered = Refusal(code: .known(.terminalNotOffered), message: "This runner offers no terminal over the network; ask an admin.")
         #expect(offered.lines == ["This runner offers no terminal over the network; ask an admin."])
     }
