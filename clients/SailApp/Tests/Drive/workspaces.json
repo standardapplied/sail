@@ -20,7 +20,7 @@
   {"name": "w-three-listed", "golden": ["GET /v1/projects/harbor/workspaces", "workspaces-three"]},
   {"name": "w-three-asked-again", "select": "workspaces"},
   {"name": "w-three", "workspaces": "ana's quay · running"},
-  {"name": "w-three-the-stopped-one", "choose": "pier"},
+  {"name": "w-three-the-stopped-one", "chooseRow": "pier"},
   {"name": "w-three-rows", "shot": "13-three-rows"},
   {"name": "w-none-listed", "golden": ["GET /v1/projects/harbor/workspaces", "workspaces-none"]},
   {"name": "w-none-asked-again", "select": "workspaces"},

@@ -140,7 +140,7 @@ struct Step: Decodable {
     /// The Workspaces row of this name selected and Open pressed: a tab on the runner.
     var open: String?
     /// The Workspaces row of this name selected, what its button then says told.
-    var choose: String?
+    var chooseRow: String?
     /// This name typed into the Workspaces pane's field and Make pressed; the call not waited for.
     var makeStarts: String?
     /// A ticket was asked with these fields (`{"action": "open", "workspace": "dock"}`), within

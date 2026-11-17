@@ -62,7 +62,7 @@ extension Driver {
             return (found, "the pane says: " + pane.text.replacingOccurrences(of: "\n", with: " | ")
                 + "; selected \(chosen)\(focused ? ", the list focused" : ""), Open \(pane.open.isEnabled ? "enabled" : "disabled")")
         }
-        if let wanted = step.choose {
+        if let wanted = step.chooseRow {
             guard let index = pane.rows.firstIndex(where: { $0.name == wanted }) else { return (false, "no row \(wanted)") }
             pane.list.selectRowIndexes([index], byExtendingSelection: false)
             return (pane.list.selectedRow == index, "the button says \(pane.open.title), \(pane.open.isEnabled ? "enabled" : "disabled")")
