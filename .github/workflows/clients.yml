@@ -73,7 +73,7 @@ jobs:
   sailkit-linux:
     name: SailKit on Linux
     needs: changes
-    if: needs.changes.outputs.clients == 'true'
+    if: needs.changes.outputs.clients == 'true' && !inputs.release
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     defaults:
