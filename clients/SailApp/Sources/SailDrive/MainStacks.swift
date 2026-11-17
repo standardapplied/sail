@@ -3,6 +3,7 @@ import Foundation
 import QuartzCore
 import SailMeasures
 import SailSurface
+import SailTerminal
 
 /// What the main thread is doing: a thread of its own looks at it every ``interval``, always, and
 /// keeps its run state, its CPU time so far, this process's CPU time and the machine's CPU ticks
@@ -33,6 +34,17 @@ final class MainStacks: @unchecked Sendable {
         let state: Int32
     }
 
+    /// A look at a session's reader thread (``TerminalSession/readerName``): its run state
+    /// (`TH_STATE_RUNNING`, running or waiting for a CPU; `TH_STATE_WAITING`), its CPU time so far
+    /// and its priority.
+    struct ReaderLook: Sendable {
+        let time: Double
+        let id: UInt64
+        let state: Int32
+        let cpu: Double
+        let priority: Int32
+    }
+
     private static let host = mach_host_self()
     /// How often the watcher looks at the main thread.
     static let interval = 0.005
@@ -57,6 +69,10 @@ final class MainStacks: @unchecked Sendable {
     private let lock = NSLock()
     private var samples: [Sample] = []
     private var dense: [ThreadLook] = []
+    private var readerLooks: [ReaderLook] = []
+    /// The reader threads found, looked for again each second; only the watcher's thread uses them.
+    private var readerPorts: [(port: thread_act_t, id: UInt64)] = []
+    private var readersFound = -Double.infinity
     private var spent: (looks: Int, total: Double, longest: Double) = (0, 0, 0)
     /// Whether the kernel took the watcher's real-time policy, when it began, and its own CPU time.
     private var watcher: (realTime: Bool, since: Double, cpu: Double) = (false, 0, 0)
@@ -75,6 +91,7 @@ final class MainStacks: @unchecked Sendable {
                 Thread.sleep(forTimeInterval: MainStacks.interval)
                 let now = CACurrentMediaTime()
                 look(at: now)
+                lookAtReaders(at: now)
                 if now - beat.lastTick > 0.03 { sample(at: now) }
                 if let used = MainStacks.cpu(of: me) { lock.withLock { self.watcher.cpu = used } }
             }
@@ -100,7 +117,8 @@ final class MainStacks: @unchecked Sendable {
             time: time, runnable: info.run_state == TH_STATE_RUNNING,
             cpu: Double(info.user_time.seconds + info.system_time.seconds) + Double(info.user_time.microseconds + info.system_time.microseconds) / 1e6,
             processCPU: process, idleTicks: ticks.count == 4 ? ticks[2] : nil,
-            busyTicks: ticks.count == 4 ? ticks[0] &+ ticks[1] &+ ticks[3] : nil
+            busyTicks: ticks.count == 4 ? ticks[0] &+ ticks[1] &+ ticks[3] : nil,
+            mode: CFRunLoopCopyCurrentMode(CFRunLoopGetMain()).map { $0.rawValue as String }
         )
         let cost = CACurrentMediaTime() - time
         lock.withLock {
@@ -194,24 +212,80 @@ final class MainStacks: @unchecked Sendable {
         for index in 0 ..< Int(count) {
             let thread = list[index]
             defer { mach_port_deallocate(mach_task_self_, thread) }
-            var info = thread_extended_info()
-            var infoCount = mach_msg_type_number_t(MemoryLayout<thread_extended_info>.size / MemoryLayout<integer_t>.size)
-            var ident = thread_identifier_info()
-            var identCount = mach_msg_type_number_t(MemoryLayout<thread_identifier_info>.size / MemoryLayout<integer_t>.size)
-            let gotInfo = withUnsafeMutablePointer(to: &info) {
-                $0.withMemoryRebound(to: integer_t.self, capacity: Int(infoCount)) { thread_info(thread, thread_flavor_t(THREAD_EXTENDED_INFO), $0, &infoCount) }
-            }
-            let gotIdent = withUnsafeMutablePointer(to: &ident) {
-                $0.withMemoryRebound(to: integer_t.self, capacity: Int(identCount)) { thread_info(thread, thread_flavor_t(THREAD_IDENTIFIER_INFO), $0, &identCount) }
-            }
-            guard gotInfo == KERN_SUCCESS, gotIdent == KERN_SUCCESS else { continue }
-            let name = withUnsafeBytes(of: info.pth_name) { bytes in String(decoding: bytes.prefix { $0 != 0 }, as: UTF8.self) }
-            found.append(ThreadSample(
-                id: ident.thread_id, name: name, cpu: Double(info.pth_user_time + info.pth_system_time) / 1e9, priority: info.pth_curpri,
-                state: info.pth_run_state
-            ))
+            if let sample = Self.sample(of: thread) { found.append(sample) }
         }
         return found
+    }
+
+    /// One thread's name, id, CPU time so far, current priority and run state; nil when the thread
+    /// cannot be read (it ended).
+    private static func sample(of thread: thread_act_t) -> ThreadSample? {
+        var info = thread_extended_info()
+        var infoCount = mach_msg_type_number_t(MemoryLayout<thread_extended_info>.size / MemoryLayout<integer_t>.size)
+        var ident = thread_identifier_info()
+        var identCount = mach_msg_type_number_t(MemoryLayout<thread_identifier_info>.size / MemoryLayout<integer_t>.size)
+        let gotInfo = withUnsafeMutablePointer(to: &info) {
+            $0.withMemoryRebound(to: integer_t.self, capacity: Int(infoCount)) { thread_info(thread, thread_flavor_t(THREAD_EXTENDED_INFO), $0, &infoCount) }
+        }
+        let gotIdent = withUnsafeMutablePointer(to: &ident) {
+            $0.withMemoryRebound(to: integer_t.self, capacity: Int(identCount)) { thread_info(thread, thread_flavor_t(THREAD_IDENTIFIER_INFO), $0, &identCount) }
+        }
+        guard gotInfo == KERN_SUCCESS, gotIdent == KERN_SUCCESS else { return nil }
+        let name = withUnsafeBytes(of: info.pth_name) { bytes in String(decoding: bytes.prefix { $0 != 0 }, as: UTF8.self) }
+        return ThreadSample(
+            id: ident.thread_id, name: name, cpu: Double(info.pth_user_time + info.pth_system_time) / 1e9, priority: info.pth_curpri,
+            state: info.pth_run_state
+        )
+    }
+
+    /// Each look, the session readers' state, CPU time and priority; the readers themselves are
+    /// found again each second, as sessions come and go.
+    private func lookAtReaders(at time: Double) {
+        if time - readersFound >= 1 {
+            findReaders()
+            readersFound = time
+        }
+        let looks = readerPorts.compactMap { reader in
+            Self.sample(of: reader.port).map { ReaderLook(time: time, id: reader.id, state: $0.state, cpu: $0.cpu, priority: $0.priority) }
+        }
+        guard !looks.isEmpty else { return }
+        lock.withLock {
+            readerLooks += looks
+            if readerLooks.count > Self.kept { readerLooks.removeFirst(Self.kept / 2) }
+        }
+    }
+
+    /// The process's threads named ``TerminalSession/readerName``, their ports kept until the next
+    /// search.
+    private func findReaders() {
+        readerPorts.forEach { mach_port_deallocate(mach_task_self_, $0.port) }
+        readerPorts = []
+        var list: thread_act_array_t?
+        var count = mach_msg_type_number_t(0)
+        guard task_threads(mach_task_self_, &list, &count) == KERN_SUCCESS, let list else { return }
+        defer { vm_deallocate(mach_task_self_, vm_address_t(UInt(bitPattern: list)), vm_size_t(Int(count) * MemoryLayout<thread_act_t>.stride)) }
+        for index in 0 ..< Int(count) {
+            let thread = list[index]
+            if let found = Self.sample(of: thread), found.name == TerminalSession.readerName {
+                readerPorts.append((port: thread, id: found.id))
+            } else {
+                mach_port_deallocate(mach_task_self_, thread)
+            }
+        }
+    }
+
+    /// The reader threads across `span`: for each, its priority, at how many looks it was runnable
+    /// (running or waiting for a CPU) and at how many waiting, and the CPU it used: a reader
+    /// runnable across a wait and given little CPU was kept from it.
+    func readers(across span: Span) -> String {
+        let looks = lock.withLock { readerLooks.filter { $0.time >= span.start && $0.time <= span.end } }
+        guard !looks.isEmpty else { return "no look at a reader thread in it" }
+        return Dictionary(grouping: looks) { $0.id }.sorted { $0.key < $1.key }.map { id, seen in
+            let runnable = seen.filter { $0.state == TH_STATE_RUNNING }.count, waiting = seen.filter { $0.state == TH_STATE_WAITING }.count
+            let cpu = ((seen.last?.cpu ?? 0) - (seen.first?.cpu ?? 0)) * 1000
+            return String(format: "reader #%llu (pri %d): runnable at %ld of %ld looks, waiting at %ld, %.1f ms of CPU across them",
+                          id, seen.last?.priority ?? 0, runnable, seen.count, waiting, cpu)
+        }.joined(separator: "; ")
     }
 
     /// Over `span`: how idle the machine's CPUs were, which of the process's threads used the CPU

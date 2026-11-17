@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.72.0
+
+- **The drive's flood line says on which side a late wake waited.** A view's wake records when the session's thread handed it to the main queue, stamped once the hand-off returned, so the line splits the longest wake's wait into the screen taking the output to the hand-off (the reader's side) and the hand-off to the main thread taking it (the main queue's side). A session's reader thread is named (`sh.standardapplied.sail.terminal.reader`) and the session tells its quality of service; the drive's watcher looks at each reader every 5 ms, and the line says, across that wake's wait, at how many looks the reader was runnable or waiting and how much CPU it got. Every look at the main thread records the run loop's mode, and each judged wait names the modes it saw.
+
 ## 0.71.1
 
 - **Open on a workspace from the app starts its terminal.** In 0.71.0 a workspace tab said "Could not start session …: Cannot run program "/usr/local/bin/sail" (in directory "")": the app names no folder for a workspace tab, and the runner passed that empty folder to the process it starts. A session in a container or a workspace now always starts from `/` on the box, its shell in the workspace's own `/home/dev/workspace`, whatever folder its request names; a session on the box itself opens at the host's home when no folder is named, and a folder that is not one there is refused naming the folder. A session whose process cannot start says so in a sentence, and what the system said goes to the runner's log, not to the person. The terminal end-to-end lane now opens a workspace with the app's own request, built by the one function the app calls (`Place.sessionCreate`).

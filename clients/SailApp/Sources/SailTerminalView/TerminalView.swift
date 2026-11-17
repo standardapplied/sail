@@ -627,6 +627,12 @@ final class ScreenWake: Sendable {
         var oldest: Double
         var newest: Double
         var changes: Int
+        /// Which wake this is, so its post time is written into it and no later one.
+        var wake: UInt64
+        /// When the session's thread had handed the wake to the queue: stamped once `async`
+        /// returned, so a thread kept from the CPU before it handed it shows as a late post, not a
+        /// late take. Nil when the queue took it first.
+        var posted: Double?
     }
 
     private let queue: DispatchQueue
@@ -634,6 +640,7 @@ final class ScreenWake: Sendable {
     private let draw: @Sendable () -> Void
     /// The changes since the queue last took the wake; nil while none is outstanding.
     private let outstanding = Mutex<Outstanding?>(nil)
+    private let wakes = Mutex<UInt64>(0)
 
     /// A wake that `queue`, the main queue unless a test gives another, takes to call `draw`.
     init(on queue: DispatchQueue = .main, marks: ViewMarks, draw: @escaping @Sendable () -> Void) {
@@ -643,17 +650,25 @@ final class ScreenWake: Sendable {
     }
 
     func changed(at time: Double) {
+        let wake = wakes.withLock { wakes in
+            wakes &+= 1
+            return wakes
+        }
         let post = outstanding.withLock { outstanding in
             guard outstanding == nil else {
                 outstanding?.changes += 1
                 outstanding?.newest = time
                 return false
             }
-            outstanding = Outstanding(oldest: time, newest: time, changes: 1)
+            outstanding = Outstanding(oldest: time, newest: time, changes: 1, wake: wake, posted: nil)
             return true
         }
         guard post else { return }
         queue.async { self.taken() }
+        let handed = CACurrentMediaTime()
+        outstanding.withLock { outstanding in
+            if outstanding?.wake == wake { outstanding?.posted = handed }
+        }
     }
 
     /// The wake is cleared before the screen is read, so a change after the read posts another.
@@ -664,7 +679,7 @@ final class ScreenWake: Sendable {
         }) else { return }
         marks.output(at: taken.oldest)
         if taken.changes > 1 { marks.output(at: taken.newest) }
-        marks.told(since: taken.oldest, changes: taken.changes)
+        marks.told(since: taken.oldest, posted: taken.posted, changes: taken.changes)
         draw()
     }
 }

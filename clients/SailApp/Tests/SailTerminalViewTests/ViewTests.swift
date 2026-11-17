@@ -418,6 +418,26 @@ import Testing
         #expect(figures.keyToEchoEstimated.count == 1, "the key's echo was not put to the wake's newest change")
     }
 
+    /// A wake records when the session's thread posted it, apart from when the screen took the
+    /// output and when the main thread took the wake: a late post and a late take are told apart.
+    @Test func aWakeRecordsWhenItWasPosted() throws {
+        let marks = ViewMarks()
+        let queue = DispatchQueue(label: "sh.standardapplied.sail.tests.posted")
+        let drew = DispatchSemaphore(value: 0)
+        let wake = ScreenWake(on: queue, marks: marks) { drew.signal() }
+        queue.suspend()
+        let before = CACurrentMediaTime()
+        wake.changed(at: before - 0.05)
+        let after = CACurrentMediaTime()
+        queue.resume()
+        try #require(drew.wait(timeout: .now() + 2) == .success)
+        let figures = marks.figures
+        let posted = try #require(figures.longestToToldPosted)
+        #expect(posted >= before && posted <= after, "posted at \(posted), while the change was told from \(before) to \(after)")
+        let hop = try #require(figures.longestToTold)
+        #expect(hop.start == before - 0.05)
+    }
+
     /// Changes the main thread has not yet taken make one wake, which carries the oldest of them:
     /// output to shown is measured from the change that waited longest, never the newest.
     @Test func oneWakeCarriesTheOldestChangeItWasPostedFor() async throws {

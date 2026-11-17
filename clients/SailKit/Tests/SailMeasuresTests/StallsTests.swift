@@ -194,6 +194,19 @@ import Testing
         #expect(abs(MachineShare.starved(in: Self.wait, looks: Self.looks(processPerLook: 0.015)) - 0.1) < 1e-9, "half the busy CPU was ours")
         #expect(MachineShare.starved(in: Self.wait, looks: Self.looks(processPerLook: 0.05)) == 0, "all of it was")
     }
+
+    /// The main run loop's mode at each look in a wait, counted: whether the loop was in a mode that
+    /// runs the main queue's blocks while a wake waited. A look outside the wait does not count.
+    @Test func theMainRunLoopsModesInAWaitAreCounted() {
+        func look(_ time: Double, _ mode: String?) -> ThreadLook {
+            ThreadLook(time: time, runnable: false, cpu: 0, processCPU: 0, idleTicks: nil, busyTicks: nil, mode: mode)
+        }
+        let looks = [look(0.9, "kCFRunLoopDefaultMode"), look(1.0, "kCFRunLoopDefaultMode"), look(1.005, "NSEventTrackingRunLoopMode"),
+                     look(1.010, "kCFRunLoopDefaultMode"), look(1.015, nil), look(1.2, "kCFRunLoopDefaultMode")]
+        #expect(MachineShare.modes(in: Span(1.0, 1.1), looks: looks) == "kCFRunLoopDefaultMode at 2, NSEventTrackingRunLoopMode at 1, not running at 1")
+        #expect(MachineShare.modes(in: Span(2.0, 2.1), looks: looks) == "no look")
+    }
+
 }
 
 /// A flood is judged on its output's wait and the main thread's hold, never on a gap between
@@ -245,5 +258,4 @@ import Testing
         #expect(beat.stalls.gaps.isEmpty)
         #expect(beat.longest == 0)
         #expect(beat.lastTick == 200)
-    }
-}
+    }}
