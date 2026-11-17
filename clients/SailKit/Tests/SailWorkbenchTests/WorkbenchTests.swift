@@ -259,6 +259,19 @@ import Testing
     /// A tab in a workspace says where it is, "acme · try", whatever its program titles itself;
     /// the person's name for it wins. Its sessions are named apart from this Mac's, a new tab from
     /// it opens on this Mac at home, and a relaunch, which lists this Mac's live sessions only,
+    /// m10: two unnamed tabs in one workspace are told apart; `onRunner` is the one runner-or-local
+    /// decision.
+    @Test func twoTabsInOneWorkspaceAreToldApart() {
+        var bench = Workbench()
+        let place = Place.workspace(project: "acme", name: "try")
+        _ = bench.newTab(session: "app-1", place: place)
+        _ = bench.newTab(session: "app-2", place: place)
+        _ = bench.newTab(session: "mac-1", place: .thisMac(folder: "/"))
+        _ = bench.newTab(session: "app-3", place: place)
+        #expect(bench.tabs.map { bench.title(of: $0.id) } == ["acme · try", "acme · try 2", Workbench.untitled, "acme · try 3"])
+        #expect(place.onRunner && !Place.thisMac(folder: "/").onRunner)
+    }
+
     /// brings back none of its panes.
     @Test func aWorkspaceTabSaysWhereItIsAndStaysOutOfThisMacs() throws {
         var bench = Self.bench()

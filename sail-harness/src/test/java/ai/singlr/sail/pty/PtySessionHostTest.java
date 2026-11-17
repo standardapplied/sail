@@ -14,6 +14,8 @@ import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.common.DateTimeUtils;
+import ai.singlr.sail.common.Remedied;
+import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.common.Secrets;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.ProjectScope;
@@ -144,7 +146,8 @@ class PtySessionHostTest {
         public void workspace(String project, String workspace, PtyIdentity.Person who)
             throws IOException {
           if (workspace.equals("gone")) {
-            throw new PtyAdmission.Absent("Project '" + project + "' has no workspace 'gone'.");
+            throw new PtyAdmission.Absent(
+                "Project '" + project + "' has no workspace 'gone'.", Remedy.NONE);
           }
           if (!who.actor().isAdmin() && !who.fde().equals("mady")) {
             throw new IOException("Workspace '" + workspace + "' belongs to 'mady', not you.");
@@ -2017,7 +2020,7 @@ class PtySessionHostTest {
   /** A ticket refusal as its kind and words. */
   private static String said(PtyMessage answer) {
     var refused = (PtyMessage.TicketRefused) answer;
-    return refused.kind().wire() + " " + refused.detail().plain();
+    return refused.kind().wire() + " " + Remedied.message(refused.reason(), refused.remedy());
   }
 
   private static SocketChannel presentTcp(PtySessionHost host, String ticket) throws IOException {

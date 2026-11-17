@@ -24,6 +24,9 @@ public final class TerminalSession: Sendable {
     /// cap, so a network that is gone for well under a minute, as on a train or a moved laptop, is
     /// ridden out.
     public static let runnerPatience = Duration.seconds(60)
+    /// How long a ticket never presented is asked again for the next attempt instead of a new one:
+    /// well inside its life (``PtyMessage``'s 30 s), so it is still good when presented.
+    public static let unpresentedReuse = Duration.seconds(20)
     /// How long a connection must stay attached to count as a success: one lost sooner is a failed
     /// attempt, so a host that attaches and then drops parks the session like one that never answers.
     public static let stableAttachment = Duration.seconds(5)
@@ -103,6 +106,8 @@ public final class TerminalSession: Sendable {
         /// The inputs left unconfirmed by a lost connection are accounted for by the next replay.
         var accounting = false
         var numbered = false
+        /// The last ticket asked of a runner's door while it has not been presented.
+        var unpresented: (request: TicketRequest, entry: (address: HostAddress, token: String), asked: ContinuousClock.Instant)?
     }
 
     private enum Outcome: Sendable {
@@ -380,8 +385,10 @@ public final class TerminalSession: Sendable {
             }
             retrying = !first
             first = false
+            let began = clock.now
             let outcome = await attempt(generation)
             guard core.withLock({ $0.generation == generation }) else { return }
+            if retrying { waited += clock.now - began }
             switch outcome {
             case let .failed(error):
                 failures += 1
@@ -404,11 +411,13 @@ public final class TerminalSession: Sendable {
     private func attempt(_ generation: Int) async -> Outcome {
         let intent = core.withLock { $0.intent }
         if case let .open(create) = intent, !Self.fits(GridSize(columns: Int(create.size.columns), rows: Int(create.size.rows))) {
-            return .finished(.refused("a terminal of \(create.size.columns)x\(create.size.rows) cells is larger than \(Self.largestGrid)"))
+            return .finished(.refused(HostRefusal(
+                message: "a terminal of \(create.size.columns)x\(create.size.rows) cells is larger than \(Self.largestGrid)", remedy: nil
+            )))
         }
         let entry: (address: HostAddress, token: String)
         do throws(TerminalError) {
-            entry = try await door.entry(for: intent.ticket)
+            entry = try await ticket(for: intent.ticket)
         } catch let .ticketRefused(refusal) where !Self.passes(refusal) {
             return .finished(.ticketRefused(refusal))
         } catch {
@@ -419,6 +428,24 @@ public final class TerminalSession: Sendable {
                 result.resume(returning: self.connect(to: entry.address, token: entry.token, generation: generation))
             }.start()
         }
+    }
+
+    /// The entry for `request`: a ticket asked of the door, or the last one asked for it when that
+    /// was never presented (its connect failed before the `Hello`) and is under
+    /// ``unpresentedReuse`` old, so attempts against a door that cannot be reached do not spend the
+    /// person's tickets, which the host bounds.
+    private func ticket(for request: TicketRequest) async throws(TerminalError) -> (address: HostAddress, token: String) {
+        let kept = core.withLock { core -> (address: HostAddress, token: String)? in
+            guard let held = core.unpresented, held.request == request, clock.now - held.asked < Self.unpresentedReuse else { return nil }
+            return held.entry
+        }
+        if let kept { return kept }
+        let entry = try await door.entry(for: request)
+        if case .runner = door {
+            let asked = clock.now
+            core.withLock { $0.unpresented = (request, entry, asked) }
+        }
+        return entry
     }
 
     /// One connection, from its connect to its end, on its own thread. Before each step that
@@ -435,6 +462,7 @@ public final class TerminalSession: Sendable {
             connection.close()
             return standDown
         }
+        core.withLock { $0.unpresented = nil }
         defer { core.withLock { if $0.inFlight === connection { $0.inFlight = nil } } }
         let bootID: String
         do throws(TerminalError) {
@@ -519,8 +547,8 @@ public final class TerminalSession: Sendable {
     /// protocol end the session; anything else is a failed attempt, to try again.
     private static func outcome(of error: TerminalError) -> Outcome {
         switch error {
-        case let .refused(refusal): .finished(.refused(refusal.message))
-        case .skew: .finished(.refused(error.description))
+        case let .refused(refusal): .finished(.refused(refusal))
+        case .skew: .finished(.refused(HostRefusal(message: error.description, remedy: nil)))
         case let .protocolViolation(what): .finished(.protocolViolation(what))
         default: .failed(error)
         }

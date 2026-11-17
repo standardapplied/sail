@@ -97,7 +97,9 @@ struct Runner {
             try await Task.sleep(for: .seconds(seconds))
         case .close:
             session.close()
-            try await SessionListing.end(session.state.session, through: door)
+            if case let .unconfirmed(said) = await door.end(session.state.session) {
+                throw ProbeError("not ended: " + said.joined(separator: " "))
+            }
         case let .phase(name, within):
             try await follower.until(within: within, "reached \(name)") { Self.matches(session.state.phase, name) }
         case .measure:

@@ -141,6 +141,22 @@ struct Step: Decodable {
     var open: String?
     /// The Workspaces row of this name selected, what its button then says told.
     var chooseRow: String?
+    /// The Workspaces row chosen is the one of this name, within `seconds` (10 by default).
+    var listChosen: String?
+    /// A proxy answers this route ("GET /v1/projects/harbor/workspaces") with a 502 from now on;
+    /// empty, no route.
+    var proxyFails: String?
+    /// The drive's runner door holds this many sessions, within `seconds` (15 by default): the
+    /// host's session list.
+    var doorLists: Int?
+    /// Someone else holds the focused terminal's write token at the runner's door from now on.
+    var doorHoldsWrite: Bool?
+    /// Someone else lets go of it.
+    var doorReleasesWrite: Bool?
+    /// The focused terminal's banner button of this title pressed.
+    var pressStatus: String?
+    /// Sign Out pressed on the account, answered no further: what follows it asks.
+    var signOutNow: Bool?
     /// This name typed into the Workspaces pane's field and Make pressed; the call not waited for.
     var makeStarts: String?
     /// A ticket was asked with these fields (`{"action": "open", "workspace": "dock"}`), within

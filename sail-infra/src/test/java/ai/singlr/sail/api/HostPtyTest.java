@@ -10,6 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.common.Remedied;
+import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.config.TestDefinitions;
 import ai.singlr.sail.engine.BoxInstances;
@@ -191,9 +192,11 @@ class HostPtyTest {
     assertEquals(
         "Workspace 'try' belongs to 'ada', not you. Ask ada to enter it, or have an admin do it.",
         refused.getMessage());
-    assertTrue(
-        absent.getMessage().startsWith("Project 'acme' has no workspace 'gone' on this box."),
-        absent.getMessage());
+    assertEquals("Project 'acme' has no workspace 'gone' on this box.", absent.reason());
+    assertEquals(
+        List.of(new Remedy.Command(Remedy.Runs.SAIL, "project workspace list", List.of("acme"))),
+        absent.remedy().commands(),
+        "the door answers the remedy typed, never flattened into the reason");
     assertTrue(box.invocations().contains("incus start acme-try"), box.invocations().toString());
     assertTrue(box.invocations().stream().anyMatch(c -> c.contains("sail-strip")), "given ada's");
   }

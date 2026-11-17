@@ -33,6 +33,7 @@ let calls: [String: @Sendable (SailClient) async throws -> Void] = [
     "workspaces": { _ = try await $0.send(.workspaces(project: "harbor")) },
     "workspaces-three": { _ = try await $0.send(.workspaces(project: "harbor")) },
     "workspaces-none": { _ = try await $0.send(.workspaces(project: "harbor")) },
+    "workspaces-made": { _ = try await $0.send(.workspaces(project: "harbor")) },
     "refusal-read-only-credential-workspace": { _ = try await $0.send(.createWorkspace("new", project: "harbor")) },
     "refusal-conflict-workspace-exists": { _ = try await $0.send(.createWorkspace("dock", project: "harbor")) },
     "refusal-forbidden-not-assignee": { _ = try await $0.send(.startWorkspace("dock", project: "harbor")) },
@@ -125,7 +126,7 @@ func answer<Response>(
     /// its own lists only its container.
     @Test func threeWorkspacesAndNoneAreReadAsListed() throws {
         let three = try Endpoint.workspaces(project: "harbor").decode(response(try Exchange("workspaces-three")))
-        #expect(three.rows(for: "uday").map { "\($0.title(for: "uday")) · \($0.said)" } == ["dock · running", "pier · stopped", "ana's quay · running"])
+        #expect(three.rows(for: "uday").map { $0.reading(for: "uday") } == ["dock · running", "pier · stopped", "quay · running · ana"])
         let none = try Endpoint.workspaces(project: "harbor").decode(response(try Exchange("workspaces-none")))
         #expect(none.workspaces.map(\.name) == ["main"] && none.rows(for: "uday").isEmpty)
     }

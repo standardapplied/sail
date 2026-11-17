@@ -21,6 +21,7 @@ import ai.singlr.sail.api.SyncScheduler;
 import ai.singlr.sail.api.TerminalTickets;
 import ai.singlr.sail.api.TestAuth;
 import ai.singlr.sail.common.DateTimeUtils;
+import ai.singlr.sail.common.Remedied;
 import ai.singlr.sail.config.Lane;
 import ai.singlr.sail.config.ListenConfig;
 import ai.singlr.sail.config.SyncConfig;
@@ -324,12 +325,17 @@ class DirectTerminalTest {
                   IOException.class,
                   () -> unix.create("bobs", List.of(), "/tmp", "acme", "", 80, 24))
               .getMessage();
-      assertEquals(unixSays, error(post(bob, OPEN_ACME)).get("message"));
+      var apiSays = error(post(bob, OPEN_ACME));
+      assertEquals("Box 'ada' belongs to 'ada', not you.", apiSays.get("message"));
+      assertEquals(unixSays, apiSays.get("message") + " " + apiSays.get("action"));
     }
     assertEquals(0, host.sessionCount());
   }
 
-  /** Scenario 6: a project the caller does not hold is not found, in the terminal host's words. */
+  /**
+   * Scenario 6: a project the caller does not hold is not found, in the terminal host's words: the
+   * API answers its reason, naming no command, and its remedy typed, never one flattened line.
+   */
   @Test
   void aProjectTheCallerDoesNotHoldIsNotFoundInTheTerminalHostsWords() throws Exception {
     var answer = post(ada, "{\"action\":\"open\",\"project\":\"beta\"}");
@@ -343,7 +349,15 @@ class DirectTerminalTest {
           "Project 'beta' is not in the catalog. Create it with 'sail project create beta', or"
               + " sync it from main with 'sail sync'.",
           hostSays);
-      assertEquals("404 not_found " + hostSays, statusAndError(answer));
+      assertEquals("404 not_found Project 'beta' is not in the catalog.", statusAndError(answer));
+      assertEquals(
+          List.of(
+              Map.of("text", "Create it with '"),
+              Map.of("run", "sail", "verb", "project create", "args", List.of("beta")),
+              Map.of("text", "', or sync it from main with '"),
+              Map.of("run", "sail", "verb", "sync", "args", List.of()),
+              Map.of("text", "'.")),
+          error(answer).get("remedy"));
     }
   }
 
@@ -1099,8 +1113,8 @@ class DirectTerminalTest {
 
   /** {@code answer}, a refusal's words read as plain words, so it compares by what it says. */
   private static PtyMessage plain(PtyMessage answer) {
-    return answer instanceof PtyMessage.TicketRefused(var kind, var detail)
-        ? new PtyMessage.TicketRefused(kind, detail.plain())
+    return answer instanceof PtyMessage.TicketRefused(var kind, var reason, var remedy)
+        ? new PtyMessage.TicketRefused(kind, Remedied.message(reason, remedy))
         : answer;
   }
 

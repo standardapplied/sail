@@ -14,7 +14,10 @@ import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.pty.PtyAdmission;
 import ai.singlr.sail.pty.PtyEvents;
 import ai.singlr.sail.pty.PtyIdentity;
+import java.io.IOException;
+import java.nio.file.Files;
 import java.nio.file.Path;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledOnOs;
 import org.junit.jupiter.api.condition.OS;
@@ -42,6 +45,15 @@ class SessionVerbsTest {
       };
 
   @TempDir Path dir;
+
+  /**
+   * {@code session new} starts in the person's home, which always exists; a fork's test home exists
+   * only once a test makes it.
+   */
+  @BeforeEach
+  void aHomeToStartIn() throws IOException {
+    Files.createDirectories(Path.of(System.getProperty("user.home")));
+  }
 
   private int run(String... args) {
     return new CommandLine(new SessionCommand()).execute(args);

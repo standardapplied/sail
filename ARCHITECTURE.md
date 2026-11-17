@@ -4503,8 +4503,10 @@ against them before it is used. Both expose one module, `GhosttyVt`. The termina
   `Int64.max - 2^32`, which leaves every client room to number its input without overflow); no
   integer from a frame is added to, multiplied or used as a size, count or index before it is
   bounded. After 5 failed reconnects in a row (0.5, 1, 2, 4 and 8 s apart) it parks, saying why,
-  until the app calls `reconnectNow()`; a runner's door goes on every 8 s until its waits add up to
-  60 s or more (`runnerPatience`), so a network gone for well under a minute is ridden out. A connection lost within 5 s of attaching is a failed
+  until the app calls `reconnectNow()`; a runner's door goes on every 8 s until its waits and the
+  time its attempts took add up to 60 s or more (`runnerPatience`), so a network gone for well under
+  a minute is ridden out, and an attempt whose ticket was never presented uses it again for 20 s
+  (`unpresentedReuse`). A connection lost within 5 s of attaching is a failed
   attempt, so a host that attaches and drops parks the session too; the first drop after a stable
   attachment still gets all five waits. A dead TCP peer with anything unacknowledged in flight is
   found within 10 s (`TCP_USER_TIMEOUT` / `TCP_RXT_CONNDROPTIME`); a quiet one within 45 s, by
@@ -4516,9 +4518,13 @@ against them before it is used. Both expose one module, `GhosttyVt`. The termina
   that died during sleep is found at once without resizing anything; the protocol has no no-op
   frame, and an empty `Input` would count as typing. A connect attempt a detach or a close overtook stands down
   before it sends anything for the session, and `kill()` while not attached, or through a runner's
-  door, throws: a runner's session is ended by `SessionListing.end(_:through:)`, an attach ticket of
-  its own attached as the writer and then `Kill`, each answer awaited within its timeout past what
-  the attachment streams, and the door's refusal, when someone else holds the token, thrown.
+  door, throws: a session is ended by `Door.end(_:within:)`, on a connection of its own (through a
+  runner's door an attach ticket, attached as the writer, then `Kill`), within 10 s in all, the
+  ticket included, its outcome `EndOutcome`: ended, gone already (a ticket to attach refused as
+  not found, by code), or unconfirmed with why in words. A refusal is kept whole on every path
+  (`SessionEnd.refused(HostRefusal)`, `.ticketRefused(Refusal)`), the host's reason apart from its
+  typed remedy, and said by `Said`: the sentence and, for a command the app knows, who acts; a
+  call that fails is said by its kind, never its route (`SailError.description`).
 - **T7. No keystroke reaches a screen the person cannot see.** Input while not attached is
   dropped and counted exactly (`droppedInputs`), never queued; input written into a connection
   that then died is estimated lost (`possiblyLostInputs`) when the next attach shows the host's

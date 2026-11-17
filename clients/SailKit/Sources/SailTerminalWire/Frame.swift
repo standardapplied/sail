@@ -26,8 +26,9 @@ public enum Frame: Equatable, Sendable {
     case issueTicket(action: Open<TicketAction>, target: String, credential: String, workspace: String = "")
     /// A ticket, presented as the `hello` token of one TCP connection to the host.
     case ticket(String)
-    /// A ticket request refused: what kind of refusal, and its remedy as words and commands.
-    case ticketRefused(kind: Open<TicketRefusal>, remedy: [RemedyPart])
+    /// A ticket request refused: what kind of refusal, what happened, and its remedy as words and
+    /// commands, kept apart.
+    case ticketRefused(kind: Open<TicketRefusal>, reason: String, remedy: [RemedyPart])
     case output(lastInputSequence: Int64, bytes: [UInt8])
     /// What follows until ``replayEnd`` is the session's journal replayed; `safe` says whether it
     /// starts on a clean terminal boundary.
@@ -142,9 +143,9 @@ public struct SessionPage: Equatable, Sendable {
     }
 }
 
-/// The host's refusal: its message, and the remedy behind it as words and commands, the same parts
-/// an API refusal carries. `remedy` is nil when the host sent the message alone, as a host from
-/// before remedies does.
+/// The host's refusal: what happened, naming no command, and the remedy behind it as words and
+/// commands, the same parts an API refusal carries, kept apart. `remedy` is nil when the host sent
+/// the reason alone.
 public struct HostRefusal: Equatable, Sendable {
     public var message: String
     public var remedy: [RemedyPart]?
@@ -152,6 +153,13 @@ public struct HostRefusal: Equatable, Sendable {
     public init(message: String, remedy: [RemedyPart]?) {
         self.message = message
         self.remedy = remedy
+    }
+
+    /// What a person reads of it: the host's sentence, then what they can do, in words
+    /// (``Said/fix(_:otherwise:)``).
+    public var lines: [String] {
+        let words = (remedy ?? []).compactMap { part -> String? in if case let .words(text) = part { text } else { nil } }.joined()
+        return [message] + (Said.fix(remedy ?? [], otherwise: words.isEmpty ? nil : words).map { [$0] } ?? [])
     }
 }
 

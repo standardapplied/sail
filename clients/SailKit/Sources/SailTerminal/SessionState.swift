@@ -57,8 +57,8 @@ public enum SessionPhase: Equatable, Sendable {
 public enum SessionEnd: Equatable, Sendable, CustomStringConvertible {
     /// The host's run that held the session ended: a new boot id welcomed the reconnect.
     case hostRestarted
-    /// The host, or the API for it, refused the session, in these words.
-    case refused(String)
+    /// The host refused the session: its reason and its remedy, whole.
+    case refused(HostRefusal)
     /// The API refused the session's ticket: the refusal whole, its fix included.
     case ticketRefused(Refusal)
     /// The host ended the session, for this reason.
@@ -71,11 +71,21 @@ public enum SessionEnd: Equatable, Sendable, CustomStringConvertible {
     public var description: String {
         switch self {
         case .hostRestarted: "the host restarted, which ends every session it held"
-        case let .refused(words): words
+        case let .refused(refusal): refusal.message
         case let .ticketRefused(refusal): refusal.message
         case let .ended(reason): "the session ended: \(reason)"
         case let .protocolViolation(what): "the terminal host broke the protocol: \(what)"
         case .closed: "closed"
+        }
+    }
+
+    /// What a person reads of this end, a line each: for a refusal its sentence and what they can
+    /// do in words, never a command; else the end itself as a sentence.
+    public var said: [String] {
+        switch self {
+        case let .refused(refusal): refusal.lines
+        case let .ticketRefused(refusal): refusal.lines
+        default: [Said.sentence(description)]
         }
     }
 }

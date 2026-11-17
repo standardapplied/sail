@@ -5,6 +5,8 @@
 
 package ai.singlr.sail.pty;
 
+import ai.singlr.sail.common.Remedied;
+import ai.singlr.sail.common.Remedy;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.util.List;
@@ -59,10 +61,28 @@ public interface PtyAdmission {
     workspace(project, workspace, who);
   }
 
-  /** A workspace the project does not have here: not found, never refused. */
-  final class Absent extends IOException {
-    public Absent(String said) {
-      super(said);
+  /**
+   * A workspace the project does not have here: not found, never refused; its reason and remedy
+   * kept apart, so a door answers the remedy typed.
+   */
+  final class Absent extends IOException implements Remedied {
+    private final String reason;
+    private final transient Remedy remedy;
+
+    public Absent(String reason, Remedy remedy) {
+      super(Remedied.message(reason, remedy));
+      this.reason = reason;
+      this.remedy = remedy;
+    }
+
+    @Override
+    public String reason() {
+      return reason;
+    }
+
+    @Override
+    public Remedy remedy() {
+      return remedy;
     }
   }
 

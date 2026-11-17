@@ -354,6 +354,10 @@ class ClientGoldensTest {
       box.record(http, "workspaces-three", "GET", workspaces, dana, null);
       box.lists();
       box.record(http, "workspaces-none", "GET", workspaces, dana, null);
+      box.lists(
+          workspace("dock", "Running", "uday", box.idOf("uday")),
+          workspace("new", "Running", "uday", box.idOf("uday")));
+      box.record(http, "workspaces-made", "GET", workspaces, dana, null);
 
       assertAll(
           () -> GoldenFiles.check(GOLDENS.resolve("http"), http),
@@ -574,7 +578,8 @@ class ClientGoldensTest {
         new PtyMessage.Ticket("tkt_harbor"),
         new PtyMessage.TicketRefused(
             PtyMessage.TicketRefusal.NOT_FOUND,
-            Remedy.of("Project 'harbor' is not in the catalog. Run '", Remedy.sail("sync"), "'.")),
+            "Project 'harbor' is not in the catalog.",
+            Remedy.of("Run '", Remedy.sail("sync"), "'.")),
         new PtyMessage.Output(42, "héllo ✅\u001b[0m\r\n".getBytes(StandardCharsets.UTF_8)),
         new PtyMessage.ReplayBegin(true),
         new PtyMessage.ReplayEnd(),
@@ -587,9 +592,10 @@ class ClientGoldensTest {
         new PtyMessage.Sessions(List.of(lounge, shell), "shell"),
         new PtyMessage.Ok(),
         new PtyMessage.Err(
+            "You do not hold the write token.",
             new Remedy(
                 List.of(
-                    new Remedy.Words("You do not hold the write token. Run "),
+                    new Remedy.Words("Run "),
                     new Remedy.Command(Remedy.Runs.SAIL, "session", List.of("take", "lounge")),
                     new Remedy.Words(" to take it.")))));
   }

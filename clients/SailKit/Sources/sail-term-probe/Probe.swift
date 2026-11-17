@@ -80,9 +80,13 @@ struct Probe {
             session.tapOutput { capture.append($0) }
         }
         session.start()
+        say("session \(create.session)")
         let report = await Runner(session: session, door: door, host: host, echoBudget: echoBudget) { result in
             say("\(result.ok ? "ok" : "FAILED") \(result.step) (\(String(format: "%.1f", result.milliseconds)) ms)\(result.detail.map { ": \($0)" } ?? "")")
         }.run(script)
+        if case let .ended(end) = session.state.phase {
+            say("a person reads: " + end.said.joined(separator: " | "))
+        }
         session.close()
         try capture?.close()
         print(try screen.text())

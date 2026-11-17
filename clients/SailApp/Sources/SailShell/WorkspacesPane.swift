@@ -3,15 +3,17 @@ import SailAPI
 import SailLook
 
 /// The person's workspaces on the runner, laid out as the account pane is: the title; PROJECT and
-/// its chooser; the project's workspaces as a list that hugs its rows (up to ``shownRows``, then it
-/// scrolls), theirs first, each its name, its state as a dot and a word and, when it is another
-/// person's, its owner at the trailing edge; Open directly under it, "Start and Open" for a stopped
-/// workspace, which opening starts; then NEW WORKSPACE, a name and Make. Where there is no list the
-/// body says why in a sentence, with Try Again when asking again can help. What the server refuses
-/// of a make is said under it in its words. The list is asked again when the pane shows and after
-/// each change it makes.
+/// its chooser, with Refresh (⌘R) beside it; the project's workspaces as a list that hugs its rows
+/// (up to ``shownRows``, then it scrolls), theirs first, each its name, its state as a dot and a word
+/// and, when it is another person's, its owner at the trailing edge; Open directly under it, "Start
+/// and Open" for a stopped workspace, which opening starts, and why when it is not offered; then
+/// NEW WORKSPACE, a name and Make. Where there is no list the body says why in a sentence: the
+/// sign-in not yet known, signed out (with Sign In), no project, no workspace, or the list not read
+/// (with Try Again). What the server refuses of a make is said under it in its words. The latest
+/// request wins (``WorkspaceListing``), and Open and Make act on the project the rows were listed
+/// for, never on what the chooser says since.
 @MainActor
-public final class WorkspacesPane: NSView, NSTableViewDataSource, NSTableViewDelegate {
+public final class WorkspacesPane: NSView, NSTableViewDataSource, NSTableViewDelegate, NSTextFieldDelegate {
     /// The rows the list shows before it scrolls.
     static let shownRows = 6
     static let width = 380.0
@@ -19,23 +21,35 @@ public final class WorkspacesPane: NSView, NSTableViewDataSource, NSTableViewDel
     /// What the pane's body shows where the list goes.
     enum Body: Equatable {
         case listed
+        case askingWhoIsSignedIn
+        case signedOut
+        case signInUnknown([String])
         case noProjects
         case noWorkspaces(project: String)
         case unreadable([String])
     }
 
     public let projects = NSPopUpButton()
+    public let refreshButton = NSButton()
     public let list = OpeningTable()
     public let open: AccentButton
+    /// Why Open is not offered on the chosen row, under it.
+    public let whyNot = NSTextField(wrappingLabelWithString: "")
     public let name = NSTextField()
     public let make = NSButton(title: "Make", target: nil, action: nil)
     public let said = NSTextField(wrappingLabelWithString: "")
     /// Why there is no list, where the list would be.
     public let empty = NSTextField(wrappingLabelWithString: "")
     public let tryAgain = NSButton(title: "Try Again", target: nil, action: nil)
-    public private(set) var rows: [WorkspaceRow] = []
+    public var rows: [WorkspaceRow] {
+        listing.rows
+    }
+
     /// Whether a call is under way, and how many have ended: what the drive waits on.
-    public private(set) var busy = false
+    public var busy: Bool {
+        calls > 0
+    }
+
     public private(set) var ended = 0
     private(set) var body = Body.listed
 
@@ -44,6 +58,10 @@ public final class WorkspacesPane: NSView, NSTableViewDataSource, NSTableViewDel
     var person = (handle: "", admin: false)
     /// Asked to open a terminal in workspace `name` of `project`.
     var onOpen: @MainActor (_ project: String, _ name: String) -> Void = { _, _ in }
+    /// Asked to show the account, where the person signs in.
+    var onSignIn: @MainActor () -> Void = {}
+    /// Asked to learn again who is signed in, when the control plane could not be asked.
+    var onAskWhoIsSignedIn: @MainActor () -> Void = {}
     var look: Look {
         didSet { paint() }
     }
@@ -54,8 +72,12 @@ public final class WorkspacesPane: NSView, NSTableViewDataSource, NSTableViewDel
     private let projectGroup = NSStackView()
     private let newGroup = NSStackView()
     private let emptyGroup = NSStackView()
+    private let openGroup = NSStackView()
     private lazy var nameFrame = FieldFrame(name, look: look)
     private var lines: [String] = []
+    private var listing = WorkspaceListing()
+    private var calls = 0
+    private var refreshes = 0
 
     init(look: Look, title: TitleFont, mono: TerminalFonts) {
         self.look = look
@@ -70,24 +92,51 @@ public final class WorkspacesPane: NSView, NSTableViewDataSource, NSTableViewDel
         nil
     }
 
-    /// Everything the pane says now, a line each, as the drive reads it.
+    /// Everything the pane says now, a line each, as the drive reads it: the rows as a person reads
+    /// them ("quay · running · ana").
     public var text: String {
-        let shown = [projectGroup.isHidden ? "" : projects.titleOfSelectedItem ?? ""] + rows.map(line)
-            + (emptyGroup.isHidden ? [] : [empty.stringValue]) + (said.isHidden ? [] : [said.stringValue])
+        let shown = [projectGroup.isHidden ? "" : projects.titleOfSelectedItem ?? ""] + (scroll.isHidden ? [] : rows.map { $0.reading(for: person.handle) })
+            + (whyNot.isHidden ? [] : [whyNot.stringValue]) + (emptyGroup.isHidden ? [] : [empty.stringValue])
+            + (said.isHidden ? [] : [said.stringValue])
         return ([heading.stringValue] + shown).filter { !$0.isEmpty }.joined(separator: "\n")
     }
 
-    /// The pane is shown: its projects, then the chosen one's workspaces, asked again.
+    /// The pane is shown: its projects, then the chosen one's workspaces, asked again; nothing is
+    /// asked while no one is signed in.
     func shown() {
-        busy = true
-        Task { await refresh() }
+        guard client != nil else { return }
+        calls += 1
+        Task {
+            await refresh()
+            calls -= 1
+        }
+    }
+
+    /// Until the sign-in is known, at a launch onto this pane: nothing misleading is shown.
+    func waitForSignIn() {
+        show(.askingWhoIsSignedIn)
+    }
+
+    /// No one is signed in: said, with Sign In.
+    func signedOut() {
+        forgetProjects()
+        show(.signedOut)
+    }
+
+    /// Who is signed in could not be asked, in these words: said, with Try Again.
+    func signInUnknown(_ lines: [String]) {
+        forgetProjects()
+        show(.signInUnknown(lines))
     }
 
     func refresh() async {
+        refreshes += 1
+        let mine = refreshes
         await run(failing: { self.show(.unreadable($0)) }) { () async throws(SailError) in
             guard let client = self.client else { return }
-            let chosen = self.projects.titleOfSelectedItem
             let names = try await client.send(.projects).projects.map(\.name)
+            guard mine == self.refreshes else { return }
+            let chosen = self.projects.titleOfSelectedItem
             self.projects.removeAllItems()
             self.projects.addItems(withTitles: names)
             if let chosen, names.contains(chosen) { self.projects.selectItem(withTitle: chosen) }
@@ -99,11 +148,15 @@ public final class WorkspacesPane: NSView, NSTableViewDataSource, NSTableViewDel
         Task { await run(failing: { self.show(.unreadable($0)) }) { () async throws(SailError) in try await self.listWorkspaces() } }
     }
 
+    @objc public func refreshList(_: Any?) {
+        shown()
+    }
+
     @objc public func makeWorkspace(_: Any?) {
         let wanted = name.stringValue.trimmingCharacters(in: .whitespaces)
-        guard !busy, let project = projects.titleOfSelectedItem, let client, !wanted.isEmpty else { return }
+        guard !busy, let project = listing.listed ?? projects.titleOfSelectedItem, let client, !wanted.isEmpty else { return }
         say(["Making \(wanted) (about 3 s)"])
-        busy = true
+        calls += 1
         make.title = "Making…"
         [make, open].forEach { $0.isEnabled = false }
         Task {
@@ -113,13 +166,15 @@ public final class WorkspacesPane: NSView, NSTableViewDataSource, NSTableViewDel
                 try await self.listWorkspaces(selecting: made.workspace)
                 self.say(made.stale ? ["\(made.workspace) was made from an older template."] : [])
             }
+            calls -= 1
+            enable()
         }
     }
 
-    /// Opens the chosen workspace in a tab, its button saying so meanwhile; pressed again, or
-    /// during a call, it does nothing.
+    /// Opens the chosen workspace in a tab, in the project it was listed for, its button saying so
+    /// meanwhile; pressed again, or during a call, it does nothing.
     @objc public func openSelected(_: Any?) {
-        guard !busy, open.isEnabled, let project = projects.titleOfSelectedItem, let row = chosen,
+        guard !busy, open.isEnabled, let project = listing.listed, let row = chosen,
               row.opens(for: person.handle, admin: person.admin) else { return }
         open.setTitle(row.startsWhenOpened ? "Starting…" : "Opening…")
         open.isEnabled = false
@@ -127,7 +182,15 @@ public final class WorkspacesPane: NSView, NSTableViewDataSource, NSTableViewDel
     }
 
     @objc func askAgain(_: Any?) {
-        shown()
+        switch body {
+        case .signedOut: onSignIn()
+        case .signInUnknown: onAskWhoIsSignedIn()
+        default: shown()
+        }
+    }
+
+    public func controlTextDidChange(_: Notification) {
+        enable()
     }
 
     public func numberOfRows(in _: NSTableView) -> Int {
@@ -143,25 +206,36 @@ public final class WorkspacesPane: NSView, NSTableViewDataSource, NSTableViewDel
     }
 
     public func tableViewSelectionDidChange(_: Notification) {
-        enableOpen()
+        enable()
     }
 
     private var chosen: WorkspaceRow? {
         rows.indices.contains(list.selectedRow) ? rows[list.selectedRow] : nil
     }
 
-    private func line(_ row: WorkspaceRow) -> String {
-        "\(row.title(for: person.handle)) · \(row.said)"
+    private func forgetProjects() {
+        projects.removeAllItems()
+        listing.clear()
+        list.reloadData()
     }
 
+    /// Lists the chosen project's workspaces; an answer overtaken by a later request, or for a
+    /// project no longer chosen, is dropped, and so is its failure.
     private func listWorkspaces(selecting wanted: String? = nil) async throws(SailError) {
         guard let client, let project = projects.titleOfSelectedItem else {
-            rows = []
-            list.reloadData()
+            forgetProjects()
             return show(.noProjects)
         }
+        let number = listing.ask(project)
         let kept = wanted ?? chosen?.name
-        rows = try await client.send(.workspaces(project: project)).rows(for: person.handle)
+        let listed: [WorkspaceRow]
+        do throws(SailError) {
+            listed = try await client.send(.workspaces(project: project)).rows(for: person.handle)
+        } catch {
+            guard listing.isLatest(number) else { return }
+            throw error
+        }
+        guard listing.take(listed, for: project, request: number) else { return }
         list.reloadData()
         listHeight.constant = Rail.item * Double(min(rows.count, Self.shownRows))
         show(rows.isEmpty ? .noWorkspaces(project: project) : .listed)
@@ -170,7 +244,7 @@ public final class WorkspacesPane: NSView, NSTableViewDataSource, NSTableViewDel
             list.scrollRowToVisible(index)
             if !isHiddenOrHasHiddenAncestor { window?.makeFirstResponder(list) }
         }
-        enableOpen()
+        enable()
     }
 
     /// Shows `body` where the list goes, and the groups that make sense beside it.
@@ -181,42 +255,62 @@ public final class WorkspacesPane: NSView, NSTableViewDataSource, NSTableViewDel
         newGroup.isHidden = !hasProjects
         scroll.isHidden = body != .listed
         open.isHidden = body != .listed
+        openGroup.isHidden = body != .listed
         emptyGroup.isHidden = body == .listed
         tryAgain.isHidden = true
         switch body {
         case .listed:
             paintEmpty([])
+        case .askingWhoIsSignedIn:
+            paintEmpty(["Asking the control plane who is signed in…"])
+        case .signedOut:
+            offer("Sign In")
+            paintEmpty(["You are signed out of the control plane.", "Sign in to see your workspaces on the runner."])
+        case let .signInUnknown(lines):
+            offer("Try Again")
+            paintEmpty(lines)
         case .noProjects:
             paintEmpty(["No project on this control plane is open to you yet.", "An admin adds you to one."])
         case let .noWorkspaces(project):
             paintEmpty(["No workspaces in \(project) yet.", "Name one below to make it."])
         case let .unreadable(lines):
-            tryAgain.isHidden = false
+            offer("Try Again")
             paintEmpty(lines)
         }
+        enable()
     }
 
-    private func enableOpen() {
+    private func offer(_ title: String) {
+        tryAgain.title = title
+        tryAgain.isHidden = false
+    }
+
+    /// Open, its words and why not; Make, while a name is typed; neither during a call.
+    private func enable() {
         open.setTitle(chosen?.startsWhenOpened == true ? "Start and Open" : "Open")
         open.isEnabled = !busy && chosen?.opens(for: person.handle, admin: person.admin) == true
+        let why = body == .listed ? chosen?.notOpened(for: person.handle, admin: person.admin) : nil
+        whyNot.stringValue = why ?? ""
+        whyNot.isHidden = why == nil
+        if !busy { make.title = "Make" }
+        make.isEnabled = !busy && !name.stringValue.trimmingCharacters(in: .whitespaces).isEmpty
+        refreshButton.isEnabled = client != nil
     }
 
     private func run(failing: @MainActor ([String]) -> Void, _ act: @MainActor () async throws(SailError) -> Void) async {
-        busy = true
+        calls += 1
         [make, open].forEach { $0.isEnabled = false }
         defer {
-            busy = false
+            calls -= 1
             ended += 1
-            make.title = "Make"
-            make.isEnabled = true
-            enableOpen()
+            enable()
         }
         do {
             try await act()
         } catch let .refused(refusal) {
             failing(refusal.lines)
         } catch {
-            failing([TerminalPane.sentence("\(error)")])
+            failing([Said.sentence(error.description)])
         }
     }
 
@@ -249,6 +343,8 @@ public final class WorkspacesPane: NSView, NSTableViewDataSource, NSTableViewDel
             (group.arrangedSubviews.first as? NSTextField)?.textColor = NSColor(look.textSecondary)
         }
         list.backgroundColor = NSColor(look.canvas)
+        whyNot.textColor = NSColor(look.textSecondary)
+        refreshButton.contentTintColor = NSColor(look.textSecondary)
         open.look = look
         nameFrame.look = look
         say(lines)
@@ -265,9 +361,21 @@ public final class WorkspacesPane: NSView, NSTableViewDataSource, NSTableViewDel
         make.controlSize = .large
         nameFrame.setContentHuggingPriority(.defaultLow, for: .horizontal)
         make.setContentHuggingPriority(.required, for: .horizontal)
+        let chooser = NSStackView(views: [projects, refreshButton])
+        chooser.spacing = Look.Space.s
+        refreshButton.image = NSImage(systemSymbolName: "arrow.clockwise", accessibilityDescription: "List again")
+        refreshButton.isBordered = false
+        refreshButton.toolTip = "List again (⌘R)"
+        refreshButton.keyEquivalent = "r"
+        refreshButton.keyEquivalentModifierMask = .command
+        refreshButton.target = self
+        refreshButton.action = #selector(refreshList(_:))
+        whyNot.font = .systemFont(ofSize: Look.Step.callout.points)
+        whyNot.isHidden = true
+        name.delegate = self
         let groups: [(NSStackView, [NSView])] = [
-            (projectGroup, [eyebrow("Project", mono: mono), projects]), (newGroup, [eyebrow("New workspace", mono: mono), making]),
-            (emptyGroup, [empty, tryAgain]),
+            (projectGroup, [eyebrow("Project", mono: mono), chooser]), (newGroup, [eyebrow("New workspace", mono: mono), making]),
+            (emptyGroup, [empty, tryAgain]), (openGroup, [open, whyNot]),
         ]
         for (group, views) in groups {
             views.forEach { group.addArrangedSubview($0) }
@@ -304,14 +412,14 @@ public final class WorkspacesPane: NSView, NSTableViewDataSource, NSTableViewDel
         said.isSelectable = true
         said.isHidden = true
         empty.isSelectable = true
-        for group in [projectGroup, newGroup, emptyGroup] {
+        for group in [projectGroup, newGroup, emptyGroup, openGroup] {
             group.orientation = .vertical
             group.alignment = .leading
             group.spacing = Look.Space.s
             group.detachesHiddenViews = true
         }
         emptyGroup.spacing = Look.Space.m
-        let stack = NSStackView(views: [heading, projectGroup, scroll, emptyGroup, open, newGroup, said])
+        let stack = NSStackView(views: [heading, projectGroup, scroll, emptyGroup, openGroup, newGroup, said])
         stack.orientation = .vertical
         stack.alignment = .leading
         stack.spacing = Look.Space.xxl
@@ -328,9 +436,9 @@ public final class WorkspacesPane: NSView, NSTableViewDataSource, NSTableViewDel
             scroll.widthAnchor.constraint(equalToConstant: Self.width), listHeight,
             projects.widthAnchor.constraint(equalToConstant: Self.width), making.widthAnchor.constraint(equalToConstant: Self.width),
             empty.widthAnchor.constraint(equalToConstant: Self.width), said.widthAnchor.constraint(lessThanOrEqualToConstant: 560),
+            whyNot.widthAnchor.constraint(lessThanOrEqualToConstant: Self.width),
         ])
         show(.listed)
-        enableOpen()
         paint()
     }
 }

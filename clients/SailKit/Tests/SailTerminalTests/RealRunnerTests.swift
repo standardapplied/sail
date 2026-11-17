@@ -107,7 +107,7 @@ struct RealRunnerTests {
             observerRefused?.message
                 == "This connection's ticket is to attach to session '\(name)', and it admits nothing else; ask the API for a ticket for that.")
         session.close()
-        try await SessionListing.end(name, through: .runner(runner.client))
+        #expect(await Door.runner(runner.client).end(name) == .ended)
         do {
             _ = try await runner.client.ticket(for: .attach(session: name))
             Issue.record("a ticket was issued to attach to the ended session")

@@ -2,6 +2,7 @@ import AppKit
 import SailAccount
 import SailAPI
 import SailLook
+import SailTerminal
 import SailTerminalView
 import SailWorkbench
 
@@ -96,22 +97,50 @@ public final class ShellApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         window.center()
         window.makeKeyAndOrderFront(nil)
         placeTheStrip()
-        select(UserDefaults.standard.string(forKey: Self.paneKey).flatMap { Rail.Item(rawValue: $0) } ?? .account)
+        let remembered = UserDefaults.standard.string(forKey: Self.paneKey).flatMap { Rail.Item(rawValue: $0) } ?? .account
+        if remembered == .workspaces { workspaces.waitForSignIn() }
+        select(remembered)
         if Bundle.main.bundlePath.contains("/AppTranslocation/") { thisMac.tell(Self.translocated) }
         NSApp.activate(ignoringOtherApps: true)
     }
 
     public func applicationDidBecomeActive(_: Notification) {
-        Task { await account.refresh() }
+        askWhoIsSignedIn()
     }
 
+    /// Asks the control plane who is signed in, then tells the Workspaces pane what it learnt when
+    /// no one is: signed out, or the control plane could not be asked, in its words.
+    private func askWhoIsSignedIn() {
+        Task {
+            await account.refresh()
+            guard account.standing == nil else { return }
+            let lines = account.saying
+            if lines.isEmpty { workspaces.signedOut() } else { workspaces.signInUnknown(lines) }
+        }
+    }
+
+    /// Closing the window keeps the app and every tab, this Mac's and the runner's, as a Mac app
+    /// that holds terminals does; the Dock icon brings the window back.
     public func applicationShouldTerminateAfterLastWindowClosed(_: NSApplication) -> Bool {
-        true
+        false
     }
 
-    /// Quitting with terminals on the runner asks once, then ends them there (``RunnerQuit``).
+    public func windowShouldClose(_: NSWindow) -> Bool {
+        window.orderOut(nil)
+        return false
+    }
+
+    public func applicationShouldHandleReopen(_: NSApplication, hasVisibleWindows visible: Bool) -> Bool {
+        if !visible { window.makeKeyAndOrderFront(nil) }
+        return true
+    }
+
+    /// Quitting with terminals on the runner asks once, then ends them there (``RunnerQuit``); a
+    /// quit the system asks for asks nothing.
     public func applicationShouldTerminate(_: NSApplication) -> NSApplication.TerminateReply {
-        RunnerQuit.ask(thisMac.runnerPanes, on: window) { NSApp.reply(toApplicationShouldTerminate: $0) }
+        RunnerQuit.ask(
+            thisMac.runnerPanes, titled: { [thisMac] in thisMac.title(of: $0) }, on: window, systemQuitting: RunnerQuit.systemIsQuitting()
+        ) { NSApp.reply(toApplicationShouldTerminate: $0) }
     }
 
     /// Quitting detaches this Mac's terminals and asks nothing: each session lives on at the host.
@@ -121,6 +150,7 @@ public final class ShellApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     /// Shows `item`'s pane and remembers it for the next launch.
     public func select(_ item: Rail.Item) {
+        rail.offer(.workspaces, account.standing != nil || item == .workspaces)
         thisMac.isHidden = item != .thisMac
         thisMac.strip.showsTabs = !thisMac.isHidden
         workspaces.isHidden = item != .workspaces
@@ -145,12 +175,30 @@ public final class ShellApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
     /// are theirs, and go with them.
     private func standing(_ signedIn: SignedIn?) {
         let whoami = signedIn.flatMap { try? $0.whoami.get() }
-        let client = account.client()
-        workspaces.client = client
+        workspaces.client = account.client()
         workspaces.person = (whoami?.fde ?? signedIn?.fde ?? "", whoami?.role == .known(.admin))
-        thisMac.runner = client
-        rail.offer(.workspaces, signedIn != nil)
-        if signedIn == nil, rail.selected == .workspaces { select(.account) }
+        rail.offer(.workspaces, signedIn != nil || rail.selected == .workspaces)
+        guard rail.selected == .workspaces else { return }
+        if signedIn == nil { workspaces.signedOut() } else { workspaces.shown() }
+    }
+
+    /// Who is signed in now and the API as them, which every runner tab asks at each ticket.
+    private func signedIn() -> (handle: String, tickets: any TicketSource)? {
+        guard let standing = account.standing, let client = account.client() else { return nil }
+        return ((try? standing.whoami.get())?.fde ?? standing.fde, client)
+    }
+
+    /// Signing out with runner terminals open asks as a quit does, then ends them, and no tab
+    /// keeps the runner after the sign-in goes.
+    private func askBeforeSigningOut(_ proceed: @escaping @MainActor (Bool) -> Void) {
+        let goOn: @MainActor (Bool) -> Void = { [thisMac] go in
+            if go { thisMac.removeRunnerPanes() }
+            proceed(go)
+        }
+        let now = RunnerQuit.ask(
+            thisMac.runnerPanes, titled: { [thisMac] in thisMac.title(of: $0) }, on: window, asking: RunnerQuit.Question.signOut, reply: goOn
+        )
+        if now == .terminateNow { goOn(true) }
     }
 
     /// Draws the window in `look`: the chrome, the rail and the panes.
@@ -251,7 +299,7 @@ public final class ShellApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         } catch {
             let alert = NSAlert()
             alert.messageText = "\(title) cannot start"
-            alert.informativeText = TerminalPane.sentence(error.description)
+            alert.informativeText = Said.sentence(error.description)
             alert.runModal()
             exit(1)
         }
@@ -306,6 +354,14 @@ public final class ShellApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         placeTheStrip()
         rail.onSelect = { [weak self] item in self?.select(item) }
         account.onStanding = { [weak self] signedIn in self?.standing(signedIn) }
+        account.askBeforeSigningOut = { [weak self] proceed in
+            guard let self else { return proceed(true) }
+            askBeforeSigningOut(proceed)
+        }
+        thisMac.signedIn = { [weak self] in self?.signedIn() }
+        thisMac.onSignIn = { [weak self] in self?.select(.account) }
+        workspaces.onSignIn = { [weak self] in self?.select(.account) }
+        workspaces.onAskWhoIsSignedIn = { [weak self] in self?.askWhoIsSignedIn() }
         workspaces.onOpen = { [weak self] project, name in
             self?.select(.thisMac)
             self?.thisMac.openWorkspace(project: project, name: name)
@@ -428,22 +484,76 @@ final class ShellWindow: NSWindow {
     }
 }
 
-/// A quit with terminals on the runner open: asked once, since the app cannot attach to them again
-/// after a relaunch; then each is ended at the runner through its door and the app told to quit,
-/// those that could not be ended named first. Cancel leaves everything as it was.
+/// What ends the app's runner terminals with it, asked once: a quit, or a sign-out, since a
+/// runner terminal outlives neither (the app cannot attach to it again after a relaunch, and it
+/// was opened under the sign-in). Only tabs that hold a live session count. Asked on a window that
+/// shows: one ordered out is brought back first, since a sheet on a window off screen is not shown.
+/// "Quit and End N Runner Terminals" ends them all at once under one deadline (``Door/endLimit``,
+/// the tickets included), the sheet saying so meanwhile; at the deadline what was not confirmed is
+/// named by its tab's title, said as possibly still running, and the app goes on. Cancel leaves
+/// everything as it was. A quit the system asks for (log out, restart, shut down) asks nothing:
+/// the terminals are ended within the deadline and the system proceeds.
 @MainActor
 enum RunnerQuit {
-    /// What AppKit is answered now; `reply` is told later whether to quit, when the answer is later.
-    static func ask(_ panes: [TerminalPane], on window: NSWindow, reply: @escaping @MainActor (Bool) -> Void) -> NSApplication.TerminateReply {
-        guard !panes.isEmpty else { return .terminateNow }
-        let terminals = panes.count == 1 ? "1 Runner Terminal" : "\(panes.count) Runner Terminals"
-        Confirmation.ask(
-            "Quit Sail?", detail: "A terminal on the runner ends when Sail quits; this Mac's own keep running.",
-            action: "Quit and End \(terminals)", on: window
-        ) { quit in
-            guard quit else { return reply(false) }
+    /// What is asked, and what the action does.
+    struct Question {
+        let question: String
+        let detail: String
+        let action: String
+
+        static func quit(_ count: Int) -> Question {
+            Question(
+                question: "Quit Sail?", detail: "A terminal on the runner ends when Sail quits; this Mac's own keep running.",
+                action: "Quit and End \(terminals(count))"
+            )
+        }
+
+        static func signOut(_ count: Int) -> Question {
+            Question(
+                question: "Sign Out?", detail: "A terminal on the runner is yours under this sign-in, so it ends when you sign out.",
+                action: "Sign Out and End \(terminals(count))"
+            )
+        }
+
+        private static func terminals(_ count: Int) -> String {
+            count == 1 ? "1 Runner Terminal" : "\(count) Runner Terminals"
+        }
+    }
+
+    /// What AppKit is answered now; `reply` is told later whether to go on, when the answer is
+    /// later. `asked` makes the question for the count of live runner terminals.
+    static func ask(
+        _ panes: [TerminalPane], titled: @escaping @MainActor (TerminalPane) -> String, on window: NSWindow,
+        asking asked: (Int) -> Question = Question.quit, systemQuitting: Bool = false, within limit: Duration = Door.endLimit,
+        reply: @escaping @MainActor (Bool) -> Void
+    ) -> NSApplication.TerminateReply {
+        let live = panes.filter(\.holdsRunnerSession)
+        guard !live.isEmpty else { return .terminateNow }
+        if systemQuitting {
             Task { @MainActor in
-                let unended = await end(panes)
+                _ = await end(live, titled: titled, within: limit)
+                reply(true)
+            }
+            return .terminateLater
+        }
+        if !window.isVisible { window.makeKeyAndOrderFront(nil) }
+        let question = asked(live.count)
+        Confirmation.ask(question.question, detail: question.detail, action: question.action, on: window) { go in
+            guard go else { return reply(false) }
+            let progress = NSAlert()
+            progress.messageText = "Ending \(live.count == 1 ? "1 terminal" : "\(live.count) terminals") on the runner…"
+            progress.informativeText = "Sail goes on once the runner says they ended, within \(Int(limit.components.seconds)) s."
+            progress.addButton(withTitle: "Go On Now")
+            let answered = Once()
+            progress.beginSheetModal(for: window) { response in
+                MainActor.assumeIsolated {
+                    if response == .alertFirstButtonReturn, answered.first() { reply(true) }
+                }
+            }
+            Task { @MainActor in
+                let unended = await end(live, titled: titled, within: limit)
+                guard answered.first() else { return }
+                window.endSheet(progress.window)
                 guard !unended.isEmpty else { return reply(true) }
                 say(unended, on: window, then: reply)
             }
@@ -451,24 +561,55 @@ enum RunnerQuit {
         return .terminateLater
     }
 
-    /// Ends every pane's session at the runner and waits for each: the tab and what stopped it, for
-    /// each that could not be ended.
-    static func end(_ panes: [TerminalPane]) async -> [String] {
-        var unended: [String] = []
-        for pane in panes {
-            let label = pane.place.label ?? pane.name
-            if let ending = pane.end(), let error = await ending.value { unended.append("\(label): \(TerminalPane.sentence(error.description))") }
+    /// Ends every pane's session at the runner, all at once, each within `limit`, an end already
+    /// under way joined rather than started again: for each not confirmed, its tab's title and why.
+    static func end(_ panes: [TerminalPane], titled: @MainActor (TerminalPane) -> String, within limit: Duration) async -> [String] {
+        let endings = panes.compactMap { pane in pane.end(within: limit).map { (titled(pane), $0) } }
+        return await withTaskGroup(of: String?.self) { group in
+            for (title, ending) in endings {
+                group.addTask {
+                    guard case let .unconfirmed(why) = await ending.value else { return nil }
+                    return "\(title): \(why.joined(separator: " "))"
+                }
+            }
+            var unended: [String] = []
+            for await line in group {
+                if let line { unended.append(line) }
+            }
+            return unended.sorted()
         }
-        return unended
     }
 
-    /// The runner terminals a quit could not end, each with what stopped it, then the quit: they run
-    /// on until the runner ends them.
+    /// The runner terminals whose end was not confirmed, each by its tab's title and why, then on:
+    /// they may run on until the runner ends them.
     private static func say(_ unended: [String], on window: NSWindow, then reply: @escaping @MainActor (Bool) -> Void) {
         let alert = NSAlert()
-        alert.messageText = "Some terminals on the runner could not be ended"
-        alert.informativeText = (unended + ["They keep running on the runner."]).joined(separator: "\n")
-        alert.addButton(withTitle: "Quit")
+        alert.messageText = "Some terminals on the runner may still be running"
+        alert.informativeText = (unended + ["Sail could not confirm they ended; the runner ends them in time."]).joined(separator: "\n")
+        alert.addButton(withTitle: "OK")
         alert.beginSheetModal(for: window) { _ in MainActor.assumeIsolated { reply(true) } }
+    }
+
+    /// Whether this quit is the system's: a log out, a restart or a shut down (its Apple event's
+    /// quit reason).
+    static func systemIsQuitting() -> Bool {
+        guard let event = NSAppleEventManager.shared().currentAppleEvent,
+              let reason = event.attributeDescriptor(forKeyword: code("why?"))?.enumCodeValue else { return false }
+        return ["logo", "rlgo", "rrst", "rest", "rsdn", "shut"].map(code).contains(reason)
+    }
+
+    private static func code(_ four: String) -> FourCharCode {
+        four.utf8.reduce(0) { $0 << 8 | FourCharCode($1) }
+    }
+}
+
+/// Lets one of several answers through: the first to ask.
+@MainActor
+final class Once {
+    private var done = false
+
+    func first() -> Bool {
+        defer { done = true }
+        return !done
     }
 }

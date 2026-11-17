@@ -124,14 +124,25 @@ public struct Undecodable: Equatable, Sendable, CustomStringConvertible {
 }
 
 extension SailError: CustomStringConvertible {
-    /// What went wrong, in words: the server's sentence for a refusal.
+    /// What went wrong, in words a person reads, by its kind: the server's sentence for a refusal;
+    /// never a route, which goes to a log only (``route``).
     public var description: String {
         switch self {
         case let .refused(refusal): refusal.message
-        case let .undecodable(undecodable): undecodable.description
-        case let .unexpected(route, status): "\(route) answered \(status)"
-        case let .notAnEventStream(route, type): "\(route) answered \(type ?? "no content type")"
-        case let .unsendable(reason), let .unreachable(reason): reason
+        case .undecodable: "The control plane sent an answer this app cannot read."
+        case let .unexpected(_, status): "The control plane's proxy answered an error (\(status))."
+        case .notAnEventStream: "The control plane's proxy answered in place of its event stream."
+        case let .unsendable(reason): reason
+        case let .unreachable(reason): "Sail could not reach the control plane: \(reason)"
+        }
+    }
+
+    /// The route the failure came from, for a log; nil for one that names none.
+    public var route: String? {
+        switch self {
+        case let .undecodable(undecodable): undecodable.route
+        case let .unexpected(route, _), let .notAnEventStream(route, _): route
+        case .refused, .unsendable, .unreachable: nil
         }
     }
 }

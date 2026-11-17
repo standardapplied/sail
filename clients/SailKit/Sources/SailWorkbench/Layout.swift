@@ -46,13 +46,18 @@ public enum Place: Hashable, Codable, Sendable {
         }
     }
 
+    /// Whether a session here is on a runner, which every runner-or-local decision asks.
+    public var onRunner: Bool {
+        if case .workspace = self { true } else { false }
+    }
+
     public var newSessionName: String {
-        let prefix = if case .thisMac = self { Self.thisMacSessions } else { Self.runnerSessions }
+        let prefix = onRunner ? Self.runnerSessions : Self.thisMacSessions
         return prefix + UUID().uuidString.prefix(8).lowercased()
     }
 
-    /// What a tab here is called until the person names it: nil on this Mac, where its program's
-    /// title names it; in a workspace, where it is ("acme · try").
+    /// What a tab here is called until the person names it, words only: nil on this Mac, where its
+    /// program's title names it; in a workspace, where it is ("acme · try").
     public var label: String? {
         switch self {
         case .thisMac: nil

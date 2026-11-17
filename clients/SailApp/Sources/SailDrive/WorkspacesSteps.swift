@@ -6,11 +6,15 @@ import SailShell
 
 /// The control plane of the drive's workspaces run: every route answered as the server answered
 /// it in the goldens its `ClientGoldensTest` writes, a step choosing which golden answers a route
-/// from then on. No answer is written here.
+/// from then on; a ticket answered so carries a ticket of the drive's ``FakeRunnerDoor`` and its
+/// address, so a runner tab attaches to a door that refuses what the real door refuses. A step can
+/// put a proxy's 502 in front of one route. No answer is written here.
 actor GoldenDesk: Transport {
     static let shared = GoldenDesk()
+    static let door = try? FakeRunnerDoor()
     private var answers: [String: HTTPResponse] = [:]
     private var held: [String: Duration] = [:]
+    private var failing: String?
     private(set) var asked: [HTTPRequest] = []
 
     init() {
@@ -28,11 +32,22 @@ actor GoldenDesk: Transport {
         held[route] = after
     }
 
+    /// From now on a proxy answers `route` with a 502 of its own; nil, nothing.
+    func fail(_ route: String?) {
+        failing = route
+    }
+
     func send(_ request: HTTPRequest) async throws(SailError) -> HTTPResponse {
         asked.append(request)
         if let after = held[request.route], after > .zero { try? await Task.sleep(for: after) }
+        guard request.route != failing else { throw .unexpected(route: request.route, status: 502) }
         guard let answer = answers[request.route] else { throw .unreachable("no golden answers \(request.route)") }
-        return answer
+        guard request.route == "POST /v1/terminal/tickets", answer.status == 201, let door = Self.door,
+              var body = (try? JSONSerialization.jsonObject(with: answer.body)) as? [String: Any] else { return answer }
+        let ticket = door.issue()
+        body["ticket"] = ticket.ticket
+        body["address"] = ticket.address
+        return HTTPResponse(status: answer.status, headers: answer.headers, body: (try? JSONSerialization.data(withJSONObject: body)) ?? answer.body)
     }
 
     func open(_ request: HTTPRequest) throws(SailError) -> HTTPStream {
@@ -61,6 +76,32 @@ extension Driver {
             let focused = pane.window?.firstResponder === pane.list
             return (found, "the pane says: " + pane.text.replacingOccurrences(of: "\n", with: " | ")
                 + "; selected \(chosen)\(focused ? ", the list focused" : ""), Open \(pane.open.isEnabled ? "enabled" : "disabled")")
+        }
+        if let wanted = step.listChosen {
+            let found = await waitUntil(step.seconds ?? 10) { !pane.busy && pane.rows.indices.contains(pane.list.selectedRow) && pane.rows[pane.list.selectedRow].name == wanted }
+            return (found, "the pane says: " + pane.text.replacingOccurrences(of: "\n", with: " | "))
+        }
+        if let route = step.proxyFails {
+            await GoldenDesk.shared.fail(route.isEmpty ? nil : route)
+            return (true, "")
+        }
+        if let count = step.doorLists {
+            guard let door = GoldenDesk.door else { return (false, "the drive's runner door did not listen") }
+            let found = await waitUntil(step.seconds ?? 15) { door.sessions.count == count }
+            return (found, "the runner's sessions: \(door.sessions)")
+        }
+        if step.doorHoldsWrite == true || step.doorReleasesWrite == true {
+            guard let door = GoldenDesk.door, let focused = workbench.focused else { return (false, "no door or no focused terminal") }
+            if step.doorHoldsWrite == true { door.holdWrite(focused.name) } else { door.release(focused.name) }
+            return (true, "")
+        }
+        if let title = step.pressStatus {
+            guard let focused = workbench.focused else { return (false, "no focused terminal") }
+            return (focused.pressStatus(title), "the banner said \(focused.status ?? "nothing")")
+        }
+        if step.signOutNow == true {
+            shell.account.signOutHere(nil)
+            return (true, "")
         }
         if let wanted = step.chooseRow {
             guard let index = pane.rows.firstIndex(where: { $0.name == wanted }) else { return (false, "no row \(wanted)") }

@@ -145,9 +145,34 @@ import Testing
         let peer = try await host.accept()
         try await peer.welcome()
         #expect(try await peer.read() == .attach(session: "theirs", write: true))
-        let words = "There is no session 'theirs' on this box that you may attach."
-        try peer.send(.refused(HostRefusal(message: words, remedy: nil)))
-        try await watch.phase(.ended(.refused(words)))
+        let refusal = HostRefusal(message: "There is no session 'theirs' on this box that you may attach.", remedy: nil)
+        try peer.send(.refused(refusal))
+        try await watch.phase(.ended(.refused(refusal)))
+    }
+
+    /// M1: a refused open keeps the host's refusal whole, its typed remedy included, and a person
+    /// reads its sentence and, for a fix the app knows, what they can do: never a command.
+    @Test func aRefusedOpenIsKeptWholeAndSaidWithoutACommand() async throws {
+        let host = try FakeHost()
+        let session = TerminalSession(open: create, door: .local(host.address), screen: try screen())
+        let watch = Watch(session)
+        session.start()
+        let peer = try await host.accept()
+        try await peer.welcome()
+        _ = try await peer.read()
+        let absent = HostRefusal(message: "Project 'acme' has no workspace 'try' on this box.", remedy: [
+            .words("List them with: "), .command(run: .known(.sail), verb: "project workspace list", args: ["acme"]), .words("."),
+        ])
+        try peer.send(.refused(absent))
+        try await watch.phase(.ended(.refused(absent)))
+        #expect(SessionEnd.refused(absent).said == ["Project 'acme' has no workspace 'try' on this box."])
+        let token = HostRefusal(
+            message: "Workspace 'try' fetches acme's repo app, and uday keeps no token for it.",
+            remedy: [.words("Store one with "), .command(run: .known(.sail), verb: "git login", args: ["github.com"]), .words(".")]
+        )
+        #expect(SessionEnd.refused(token).said == [
+            "Workspace 'try' fetches acme's repo app, and uday keeps no token for it.", "An admin stores it on the runner for now.",
+        ])
     }
 
     /// Scenario 8, the client's half: the API's refusal of the attach ticket is the end, in its words.
@@ -188,7 +213,9 @@ import Testing
 
     /// A runner's door keeps trying for a minute before it parks: past the five waits its waits go
     /// on at their 8 s cap until 60 s or more of them are spent, so a cut of 20 s is ridden out and
-    /// one of 70 s parks, after which Reconnect Now asks a ticket at once.
+    /// one of 70 s parks, after which Reconnect Now tries at once. A ticket asked while the door
+    /// cannot be reached is never presented, so the next attempts use it again (m8): the person's
+    /// tickets, which the host bounds, are not spent on a dead door.
     @Test func aRunnerKeepsTryingForAMinuteAtTheCapThenParksUntilReconnectNow() async throws {
         let host = try FakeHost(tcp: ())
         let desk = TicketDesk(address: host.address)
@@ -211,9 +238,11 @@ import Testing
         #expect(naps.durations.dropLast().reduce(.zero, +) < TerminalSession.runnerPatience)
         #expect(naps.durations.reduce(.zero, +) >= TerminalSession.runnerPatience)
         #expect(watch.seen.contains(.phase(.reconnecting(attempt: 11))))
-        #expect(desk.requests.count == 1 + waits.count)
+        #expect(desk.requests.first == .open(project: "", workspace: ""))
+        #expect(desk.requests.count <= 3, "\(desk.requests.count) tickets for \(waits.count) attempts: one never presented serves the next")
+        let attempts = naps.durations.count
         session.reconnectNow()
-        try await watch.until("asked a ticket again") { desk.requests.count > 1 + waits.count }
+        try await watch.until("tried again at once") { naps.durations.count > attempts }
         session.close()
     }
 
@@ -224,9 +253,11 @@ import Testing
                 throw .unreachable("The network connection was lost.")
             }
         }
-        await #expect(throws: TerminalError.unreachable("the ticket could not be asked: The network connection was lost.")) {
+        await #expect(throws: TerminalError.controlPlane(.unreachable("The network connection was lost."))) {
             _ = try await Door.runner(Lost()).entry(for: .attach(session: "work"))
         }
+        #expect(TerminalError.controlPlane(.unreachable("The network connection was lost.")).description
+            == "Sail could not reach the control plane: The network connection was lost.")
     }
 
     /// Scenario 10 and T7: keys typed while reconnecting are dropped and counted, never sent later.
@@ -430,7 +461,7 @@ import Testing
         session.start()
         let peer = try await host.accept()
         try peer.send(raw: Array("SAILPTY2".utf8))
-        try await watch.phase(.ended(.refused("the terminal host is older than this app: upgrade sail on it")))
+        try await watch.phase(.ended(.refused(HostRefusal(message: "the terminal host is older than this app: upgrade sail on it", remedy: nil))))
     }
 
     @Test func aHostThatRefusesTheHelloEndsTheSessionInItsWords() async throws {
@@ -441,6 +472,6 @@ import Testing
         let peer = try await host.accept()
         _ = try await peer.hello()
         try peer.send(.refused(HostRefusal(message: "That token is not this machine's person.", remedy: nil)))
-        try await watch.phase(.ended(.refused("That token is not this machine's person.")))
+        try await watch.phase(.ended(.refused(HostRefusal(message: "That token is not this machine's person.", remedy: nil))))
     }
 }

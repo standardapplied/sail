@@ -408,7 +408,8 @@ final class HostLanes {
         throw unanswered(project + "-" + workspace);
       }
       if (found.isEmpty()) {
-        throw new PtyAdmission.Absent(Workspaces.absent(project, workspace).getMessage());
+        var absent = Workspaces.absent(project, workspace);
+        throw new PtyAdmission.Absent(absent.reason(), absent.remedy());
       }
       decide(project, workspace, found.get(), who);
     }

@@ -28,8 +28,8 @@ import Testing
     @Test func aTypedFixIsSaidAsWhoActsNeverAsTheCommand() {
         let cases: [(RemedyPart, String?)] = [
             (Self.sail("project template build", "acme"), "An admin builds acme's template on the runner first."),
-            (Self.sail("git login", "github.com"), "Ask an admin to store it."),
-            (Self.sail("fde update", "ada", "--email", "<email>"), "Ask an admin to set your email."),
+            (Self.sail("git login", "github.com"), "An admin stores it on the runner for now."),
+            (Self.sail("fde update", "ada", "--email", "<email>"), "An admin sets it on main for now."),
             (Self.sail("project workspace list", "acme"), nil),
             (Self.sail("project workspace delete", "acme", "try", "--force"), "Ask an admin to delete it."),
             (Self.sail("agent stop", "acme/fix"), nil),
@@ -91,7 +91,13 @@ import Testing
         ])
         let rows = list.rows(for: "ana")
         #expect(rows.map(\.name) == ["try", "fix", "half", "dock", "old"])
-        #expect(rows.map { $0.title(for: "ana") } == ["try", "fix", "half", "uday's dock", "old"])
+        #expect(rows.map { $0.reading(for: "ana") } == [
+            "try · running", "fix · stopped", "half · not whole, make it again", "dock · running · uday", "old · paused",
+        ])
+        #expect(rows.map { $0.notOpened(for: "ana", admin: false) } == [
+            nil, nil, nil, "dock is uday's: only uday or an admin can open it.", "No one owns old: only an admin can open it.",
+        ])
+        #expect(rows.allSatisfy { $0.notOpened(for: "ana", admin: true) == nil })
         #expect(rows.map(\.said) == ["running", "stopped", "not whole, make it again", "running", "paused"])
         #expect(rows.map { $0.opens(for: "ana", admin: false) } == [true, true, true, false, false])
         #expect(rows.allSatisfy { $0.opens(for: "uday", admin: true) })
@@ -100,8 +106,8 @@ import Testing
         #expect(rows.map(\.isUp) == [true, false, false, true, false])
     }
 
-    /// A call that ended in anything but an answer is said in words, never as the enum's name:
-    /// a runner tab that cannot ask its ticket parks saying this.
+    /// A call that ended in anything but an answer is said in words by its kind, never as the enum's
+    /// name nor its route: a runner tab that cannot ask its ticket parks saying this.
     @Test func everyFailureOfACallIsSaidInWords() {
         let said = [
             SailError.refused(Self.refusal("Workspace 'try' exists already.")),
@@ -113,11 +119,35 @@ import Testing
         ].map(\.description)
         #expect(said == [
             "Workspace 'try' exists already.",
-            "GET /v1/projects answered projects that this client cannot read: not a list",
-            "GET /v1/projects answered 502",
-            "GET /v1/events answered no content type",
+            "The control plane sent an answer this app cannot read.",
+            "The control plane's proxy answered an error (502).",
+            "The control plane's proxy answered in place of its event stream.",
             "a body that does not encode",
-            "The network connection was lost.",
+            "Sail could not reach the control plane: The network connection was lost.",
         ])
+        #expect(!said.joined().contains("/v1/"))
+    }
+
+    /// M9: the latest request wins: an answer for a project no longer chosen, or overtaken by a later
+    /// request, is dropped; the rows stay paired with the project they were listed for.
+    @Test func theLatestListingWinsAndKeepsItsProject() {
+        let dock = WorkspaceRow(name: "dock", instance: "acme-dock", state: .known(.running), owner: "uday")
+        let pier = WorkspaceRow(name: "pier", instance: "beta-pier", state: .known(.stopped), owner: "uday")
+        var listing = WorkspaceListing()
+        let first = listing.ask("acme")
+        let second = listing.ask("beta")
+        let late = listing.take([dock], for: "acme", request: first)
+        #expect(!late, "acme's answer, arriving after beta was chosen")
+        #expect(listing.rows.isEmpty && listing.listed == nil)
+        let taken = listing.take([pier], for: "beta", request: second)
+        #expect(taken)
+        #expect(listing.rows == [pier] && listing.listed == "beta")
+        let third = listing.ask("beta")
+        let overtaken = listing.take([dock], for: "beta", request: second)
+        #expect(!overtaken, "overtaken by a later request for the same project")
+        #expect(listing.isLatest(third) && !listing.isLatest(second))
+        #expect(listing.rows == [pier] && listing.listed == "beta", "the rows shown keep the project they were listed for")
+        listing.clear()
+        #expect(listing.rows.isEmpty && listing.listed == nil && !listing.isLatest(third))
     }
 }
