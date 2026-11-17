@@ -16,18 +16,29 @@ import Testing
         lines.filter { $0.contains(/(^|[\s'`(:"])sail (?!system\b)[a-z][a-z-]*/) || $0.contains("/v1/") }
     }
 
+    /// The refusal `exchange` answers, as the client decodes it. A `catch` with a pattern here
+    /// crashes Swift 6.2.4's SILGen on macOS, so the error is matched after it is caught.
+    static func refusal(in exchange: Exchange) -> Refusal? {
+        let response = HTTPResponse(status: exchange.status, headers: exchange.headers, body: exchange.body)
+        let error: SailError
+        do {
+            _ = try Endpoint.whoami.decode(response)
+            return nil
+        } catch let caught {
+            error = caught
+        }
+        guard case let .refused(refusal) = error else { return nil }
+        return refusal
+    }
+
     @Test func noRecordedRefusalReadsAsACommandOrARoute() throws {
         var read = 0
         var spelled: [String] = []
         for name in try Goldens.names(in: "http") {
             let exchange = try Exchange(name)
-            guard exchange.status >= 400 else { continue }
-            do {
-                _ = try Endpoint.whoami.decode(HTTPResponse(status: exchange.status, headers: exchange.headers, body: exchange.body))
-            } catch let SailError.refused(refusal) {
-                read += 1
-                spelled += Self.spelled(refusal.lines).map { "\(name): \($0)" }
-            }
+            guard exchange.status >= 400, let refusal = Self.refusal(in: exchange) else { continue }
+            read += 1
+            spelled += Self.spelled(refusal.lines).map { "\(name): \($0)" }
         }
         for (name, wire) in try Goldens.frames() {
             switch try FrameCodec.decode(payload: wire.dropFirst(4)) {
@@ -144,7 +155,8 @@ import Testing
                 do {
                     _ = try connection.admit(token: ticket.ticket)
                     said.append("welcomed")
-                } catch let TerminalError.refused(refusal) {
+                } catch {
+                    guard case let TerminalError.refused(refusal) = error else { throw error }
                     said.append(refusal.message)
                 }
             }

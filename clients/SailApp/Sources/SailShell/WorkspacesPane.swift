@@ -95,10 +95,11 @@ public final class WorkspacesPane: NSView, NSTableViewDataSource, NSTableViewDel
     /// Everything the pane says now, a line each, as the drive reads it: the rows as a person reads
     /// them ("quay · running · ana").
     public var text: String {
-        let shown = [projectGroup.isHidden ? "" : projects.titleOfSelectedItem ?? ""] + (scroll.isHidden ? [] : rows.map { $0.reading(for: person.handle) })
-            + (whyNot.isHidden ? [] : [whyNot.stringValue]) + (emptyGroup.isHidden ? [] : [empty.stringValue])
-            + (said.isHidden ? [] : [said.stringValue])
-        return ([heading.stringValue] + shown).filter { !$0.isEmpty }.joined(separator: "\n")
+        let project = projectGroup.isHidden ? "" : projects.titleOfSelectedItem ?? ""
+        let listed: [String] = scroll.isHidden ? [] : rows.map { $0.reading(for: person.handle) }
+        let words: [(NSView, String)] = [(whyNot, whyNot.stringValue), (emptyGroup, empty.stringValue), (said, said.stringValue)]
+        let shown: [String] = [heading.stringValue, project] + listed + words.filter { !$0.0.isHidden }.map(\.1)
+        return shown.filter { !$0.isEmpty }.joined(separator: "\n")
     }
 
     /// The pane is shown: its projects, then the chosen one's workspaces, asked again; nothing is

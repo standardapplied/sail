@@ -31,10 +31,6 @@ final class RecordingTickets: TicketSource {
     }
 }
 
-/// A runner's terminal door played by a test, on a loopback port: it welcomes any ticket, opens and
-/// attaches what it is asked to, and ends a session when asked, unless told to refuse it, which it
-/// does in the real door's words and hangs up, as the real door does for a connection that does not
-/// hold the write token. Every Kill it was sent is kept.
 /// Tickets as the API hands them out for a runner's door: one the door issues for each request,
 /// every request kept; an attach ticket for a session the door no longer holds is refused as not
 /// found, in the API's words, as the API refuses it.
@@ -166,7 +162,7 @@ actor Proxied: Transport {
         runner.begin()
         #expect(await Self.until { !tickets.requests.isEmpty })
         let ending = try #require(runner.end(within: .seconds(2)), "a session not attached is ended on a connection of its own")
-        #expect(await ending.value == .unconfirmed(["Sail could not reach the control plane: the runner does not answer"]))
+        #expect(await ending.value == .unconfirmed(["Sail could not reach the control plane: the runner does not answer."]))
         #expect(tickets.requests.contains(.attach(session: runner.name)), "\(tickets.requests)")
     }
 

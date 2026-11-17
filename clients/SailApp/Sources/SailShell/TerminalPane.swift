@@ -285,7 +285,7 @@ public final class TerminalPane: NSView {
     /// only where a new ticket can succeed (it ended, the runner restarted, or it ended while Sail
     /// was away from the runner), Sign In where the sign-in lapsed, and nothing else.
     private func showEnded(_ end: SessionEnd) {
-        let again = { [weak self] in MainActor.assumeIsolated { self?.openAgain() } }
+        let again: () -> Void = { [weak self] in MainActor.assumeIsolated { self?.openAgain() } }
         switch end {
         case .closed:
             return
