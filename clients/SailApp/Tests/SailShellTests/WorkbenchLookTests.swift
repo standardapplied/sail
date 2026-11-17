@@ -31,10 +31,22 @@ import Testing
         strip.show(Self.items(), selected: TabID(1))
         let selected = try #require(strip.tabs.first), other = try #require(strip.tabs.last)
         #expect(strip.layer?.backgroundColor == NSColor(look.chrome).cgColor, "\(name): the strip is not chrome")
-        #expect(selected.layer?.backgroundColor == NSColor(look.accent).cgColor, "\(name): the selected tab is not the accent")
-        #expect(selected.label.textColor == NSColor(look.onAccent))
-        #expect(selected.label.font == NSFont.boldSystemFont(ofSize: Look.Step.callout.points), "\(name): the title on the accent is not bold")
-        #expect(other.label.font == NSFont.systemFont(ofSize: Look.Step.callout.points))
+        #expect(selected.layer?.backgroundColor == NSColor(look.fillSelected).cgColor, "\(name): the selected tab is not fillSelected")
+        #expect(selected.label.textColor == NSColor(look.text))
+        #expect(selected.label.font == NSFont.systemFont(ofSize: Look.Step.callout.points, weight: .medium), "\(name): the selected title is not medium")
+        #expect(other.label.font == NSFont.systemFont(ofSize: Look.Step.callout.points, weight: .regular))
+        strip.frame = NSRect(x: 0, y: 0, width: 600, height: ShellApp.bandHeight)
+        strip.layoutSubtreeIfNeeded()
+        let accentText = [Int(look.accentText.red), Int(look.accentText.green), Int(look.accentText.blue)]
+        for (tab, marked) in [(selected, true), (other, false)] {
+            tab.layoutSubtreeIfNeeded()
+            let context = try #require(Self.drawn(tab))
+            let pixels = try #require(context.data).bindMemory(to: UInt8.self, capacity: context.width * context.height * 4)
+            let at = (Int((Double(tab.bounds.height) - 1) * 2) * context.width + Int(Double(tab.bounds.midX) * 2)) * 4
+            let found = [Int(pixels[at]), Int(pixels[at + 1]), Int(pixels[at + 2])]
+            let isBar = zip(found, accentText).allSatisfy { abs($0 - $1) <= 2 }
+            #expect(isBar == marked, "\(name): the bottom edge's middle is \(found), the bar \(accentText), \(marked ? "wanted" : "not wanted") there")
+        }
         #expect(other.layer?.backgroundColor == NSColor.clear.cgColor)
         #expect(other.label.textColor == NSColor(look.textSecondary))
         #expect(selected.close.isHidden && other.close.isHidden, "\(name): a close button shows without the pointer on its tab")

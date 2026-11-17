@@ -159,6 +159,9 @@ public final class TabButton: NSView, NSTextFieldDelegate {
     }
 
     private let zoomMark = NSImageView(image: TabButton.symbol("arrow.up.left.and.arrow.down.right", accessibility: "Zoomed"))
+    /// The selected tab's mark: a 2 pt bar along its bottom edge in `accentText`, as the rail's
+    /// bar marks its chosen item and Mast underlines its active tab.
+    let bar = NSView()
     private var hovering = false
     private var grabbedAt: (pointer: Double, origin: Double)?
     private var cancelled = false
@@ -175,11 +178,15 @@ public final class TabButton: NSView, NSTextFieldDelegate {
         label.alignment = .center
         close.target = self
         close.action = #selector(closeTab)
-        for view in [label, close, zoomMark] as [NSView] {
+        bar.wantsLayer = true
+        for view in [label, close, zoomMark, bar] as [NSView] {
             view.translatesAutoresizingMaskIntoConstraints = false
             addSubview(view)
         }
         NSLayoutConstraint.activate([
+            bar.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Look.contentRadius),
+            bar.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Look.contentRadius),
+            bar.bottomAnchor.constraint(equalTo: bottomAnchor), bar.heightAnchor.constraint(equalToConstant: Self.barHeight),
             close.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 4), close.centerYAnchor.constraint(equalTo: centerYAnchor),
             close.widthAnchor.constraint(equalToConstant: 16),
             zoomMark.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -4), zoomMark.centerYAnchor.constraint(equalTo: centerYAnchor),
@@ -207,6 +214,8 @@ public final class TabButton: NSView, NSTextFieldDelegate {
     /// mark on the trailing one, so the title stays centred in the tab whichever shows: the model
     /// of macOS's own window tabs, which Ghostty uses and Safari draws.
     public static let titleInset = 24.0
+    /// The selected tab's bar, as thick as the rail's.
+    static let barHeight = 2.0
 
     /// AppKit's subrole for a tab (`NSAccessibilityTabButtonSubrole`, `AXTabButton`).
     public static let tabButton = NSAccessibility.Subrole(rawValue: "AXTabButton")
@@ -364,15 +373,16 @@ public final class TabButton: NSView, NSTextFieldDelegate {
 
     private func paint() {
         let renaming = field != nil
-        let fill = renaming ? NSColor(look.surface) : isSelected ? NSColor(look.accent) : hovering ? NSColor(look.fillHover) : .clear
+        let fill = renaming ? NSColor(look.surface) : isSelected ? NSColor(look.fillSelected) : hovering ? NSColor(look.fillHover) : .clear
         layer?.backgroundColor = fill.cgColor
         layer?.borderWidth = renaming ? 2 : 0
         layer?.borderColor = NSColor(look.accent).cgColor
-        label.textColor = NSColor(isSelected ? look.onAccent : look.textSecondary)
-        label.font = isSelected ? .boldSystemFont(ofSize: Look.Step.callout.points) : .systemFont(ofSize: Look.Step.callout.points)
+        bar.layer?.backgroundColor = NSColor(look.accentText).cgColor
+        bar.isHidden = !isSelected || renaming
+        label.textColor = NSColor(isSelected ? look.text : look.textSecondary)
+        label.font = .systemFont(ofSize: Look.Step.callout.points, weight: isSelected ? .medium : .regular)
         close.paint(look)
-        if isSelected { close.contentTintColor = NSColor(look.onAccent) }
-        zoomMark.contentTintColor = NSColor(isSelected ? look.onAccent : look.textSecondary)
+        zoomMark.contentTintColor = NSColor(look.textSecondary)
         close.isHidden = !hovering || renaming
         field?.textColor = NSColor(look.text)
     }
