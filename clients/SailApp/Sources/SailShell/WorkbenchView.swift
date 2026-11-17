@@ -84,7 +84,7 @@ public final class WorkbenchView: NSView {
         banner.show("Connecting to this Mac's terminal host")
         let listed: [SessionInfo]
         do {
-            try await host.ensureServing()
+            try await host.ensureServing { [weak self] sentence in await self?.tell(sentence) }
             listed = try await SessionListing.sessions(at: host.address)
         } catch {
             banner.show(TerminalPane.sentence("\(error)"), button: "Try Again") { [weak self] in
@@ -92,7 +92,7 @@ public final class WorkbenchView: NSView {
             }
             return
         }
-        banner.hide()
+        if banner.shown != told { banner.hide() }
         let kept = UserDefaults.standard.data(forKey: Self.arrangementKey).flatMap { try? JSONDecoder().decode(Arrangement.self, from: $0) }
         model = Workbench.restore(kept, live: listed.filter(\.live).map(\.name), home: NSHomeDirectory())
         restored = true
@@ -199,6 +199,7 @@ public final class WorkbenchView: NSView {
             return nil
         }
         view.onEvent = { [weak self] view, event in self?.handle(event, from: view) }
+        view.terminal.contextMenu = { [weak self] in self?.paneMenu() }
         view.terminal.onFocus = { [weak self, id = pane.id] in self?.focusClicked(id) }
         panes[pane.id] = view
         tabView(tab.id).addPane(view)
@@ -301,6 +302,24 @@ public final class WorkbenchView: NSView {
         layoutSelected()
     }
 
+    /// What the workbench's banner says now: for the drive.
+    public var bannerSays: String? {
+        banner.shown
+    }
+
+    /// The last sentence ``tell(_:)`` said, which the end of a restore leaves in the banner.
+    private var told: String?
+
+    /// Says `sentence` in the banner for 10 s, unless something else is said meanwhile.
+    func tell(_ sentence: String) {
+        told = sentence
+        banner.show(sentence)
+        Task { [weak self] in
+            try? await Task.sleep(for: .seconds(10))
+            if self?.banner.shown == sentence { self?.banner.hide() }
+        }
+    }
+
     private func openTab() {
         let place = newPlace()
         open(model.newTab(session: place.newSessionName, place: place), points: points)
@@ -333,11 +352,28 @@ public final class WorkbenchView: NSView {
         confirm(ending: [pane], question: "Close this terminal?", detail: "The program running in it will end.")
     }
 
-    @objc public func closeTab(_: Any?) {
-        guard let tab = model.selectedTab else { return }
+    /// The tab a command acts on: the one whose menu it came from (a tab's menu acts on that tab,
+    /// selected or not), else the selected one.
+    private func tab(for sender: Any?) -> Tab? {
+        let id = (sender as? NSMenuItem)?.representedObject as? TabID
+        return id.flatMap { id in model.tabs.first { $0.id == id } } ?? model.selectedTab
+    }
+
+    @objc public func closeTab(_ sender: Any?) {
+        guard let tab = self.tab(for: sender) else { return }
         let views = tab.layout.leaves.compactMap { panes[$0] }
-        guard views.count > 1 else { return closePane(nil) }
+        guard views.count > 1 else {
+            return confirm(ending: views, question: "Close this terminal?", detail: "The program running in it will end.")
+        }
         confirm(ending: views, question: "Close this tab?", detail: "Its \(views.count) terminals will end.")
+    }
+
+    /// Closes every tab but this one, asking first as Close Tab does.
+    @objc public func closeOtherTabs(_ sender: Any?) {
+        guard let kept = tab(for: sender)?.id else { return }
+        let views = model.tabs.filter { $0.id != kept }.flatMap(\.layout.leaves).compactMap { panes[$0] }
+        guard !views.isEmpty else { return }
+        confirm(ending: views, question: "Close the other tabs?", detail: "Their \(views.count == 1 ? "terminal" : "\(views.count) terminals") will end.")
     }
 
     /// Ends `views`' sessions, asking first when one of them may end a running program, as one not
@@ -405,8 +441,9 @@ public final class WorkbenchView: NSView {
         }
     }
 
-    @objc public func renameTab(_: Any?) {
-        strip.tabs.first(where: \.isSelected)?.rename()
+    @objc public func renameTab(_ sender: Any?) {
+        guard let id = tab(for: sender)?.id else { return }
+        strip.tabs.first { $0.id == id }?.rename()
     }
 
     @objc public func toggleLatency(_ sender: Any?) {
@@ -459,6 +496,7 @@ public final class WorkbenchView: NSView {
         emptyLabel.isHidden = true
         newTerminal.isHidden = true
         strip.onSelect = { [weak self] id in self?.change { $0.select(id) } }
+        strip.onMenu = { [weak self] id in self?.tabMenu(for: id) }
         strip.onClose = { [weak self] id in
             self?.change { $0.select(id) }
             self?.closeTab(nil)
@@ -490,6 +528,7 @@ extension WorkbenchView: NSMenuItemValidation {
         let panes = model.selectedTab?.layout.leaves.count ?? 0
         switch item.action {
         case #selector(newTab(_:)): return true
+        case #selector(closeOtherTabs(_:)): return !isHidden && model.tabs.count > 1
         case #selector(zoomSplit(_:)), #selector(equalizeSplits(_:)), #selector(selectNextSplit(_:)), #selector(selectPreviousSplit(_:)):
             return !isHidden && panes > 1
         default: return !isHidden && panes > 0

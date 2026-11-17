@@ -114,8 +114,10 @@ public final class ContainerManager {
   }
 
   /**
-   * Renames the container from {@code old} to {@code renamed} (snapshots travel with it). Incus
-   * requires the instance to be stopped first. Throws on failure.
+   * Renames project {@code old}'s container to {@code renamed} (snapshots travel with it), and the
+   * project key it carries ({@link BoxInstances#PROJECT_KEY}) with it, so it is still told as its
+   * project's own. Incus requires the instance to be stopped first. Throws on failure, having put
+   * the name back when the key could not follow it.
    */
   public void rename(String old, String renamed)
       throws IOException, InterruptedException, TimeoutException {
@@ -123,6 +125,19 @@ public final class ContainerManager {
     if (!result.ok()) {
       throw new IOException(
           "Failed to rename container '" + old + "' to '" + renamed + "': " + result.stderr());
+    }
+    var keyed = config.set(renamed, List.of(BoxInstances.PROJECT_KEY + "=" + renamed));
+    if (!keyed.ok()) {
+      shell.exec(List.of("incus", "rename", renamed, old));
+      throw new IOException(
+          "Failed to record container '"
+              + renamed
+              + "' as project "
+              + renamed
+              + "'s, so it keeps the name '"
+              + old
+              + "': "
+              + keyed.reason());
     }
   }
 

@@ -12,6 +12,7 @@ import ai.singlr.sail.pty.PtyMessage;
 import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.util.Map;
+import java.util.Objects;
 
 /**
  * The ticket door: a caller asks for a ticket to open a terminal session in a project or to attach
@@ -29,10 +30,12 @@ public final class TerminalTickets {
 
     /**
      * The host's answer to a ticket for the holder of {@code credential} to take {@code action} on
-     * {@code target}: a {@link PtyMessage.Ticket} or a {@link PtyMessage.TicketRefused}; throws
-     * when the host cannot be asked.
+     * {@code target}, in {@code workspace} of it for an open (blank for the project's own
+     * container): a {@link PtyMessage.Ticket} or a {@link PtyMessage.TicketRefused}; throws when
+     * the host cannot be asked.
      */
-    PtyMessage ticket(String credential, PtyMessage.TicketAction action, String target)
+    PtyMessage ticket(
+        String credential, PtyMessage.TicketAction action, String target, String workspace)
         throws IOException;
   }
 
@@ -46,8 +49,9 @@ public final class TerminalTickets {
   }
 
   /**
-   * The ticket {@code request} asks for, {@code {"action": "open", "project": ...}} or {@code
-   * {"action": "attach", "session": ...}}, issued to the holder of {@code credential}, the
+   * The ticket {@code request} asks for, {@code {"action": "open", "project": ..., "workspace":
+   * ...}} ({@code workspace} absent, blank or {@code main} for the project's own container) or
+   * {@code {"action": "attach", "session": ...}}, issued to the holder of {@code credential}, the
    * credential this request was authenticated by.
    */
   TicketResponse issue(String credential, Map<String, Object> request) {
@@ -65,9 +69,13 @@ public final class TerminalTickets {
             yield session;
           }
         };
+    var workspace = action == PtyMessage.TicketAction.OPEN ? text(request, "workspace") : null;
+    if (workspace != null && !workspace.isBlank() && !workspace.equals("main")) {
+      NameValidator.requireValidWorkspaceName(workspace);
+    }
     PtyMessage answer;
     try {
-      answer = host.ticket(credential, action, target);
+      answer = host.ticket(credential, action, target, Objects.toString(workspace, ""));
     } catch (IOException unreachable) {
       throw ApiException.of(ErrorCode.TERMINAL_UNAVAILABLE, unreachable);
     }

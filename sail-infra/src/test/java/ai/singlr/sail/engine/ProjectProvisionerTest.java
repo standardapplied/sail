@@ -1034,6 +1034,25 @@ class ProjectProvisionerTest {
         "Should use project image ubuntu-22.04, not host default");
   }
 
+  /**
+   * A project's own container is launched carrying its project's key, which tells it as its own.
+   */
+  @Test
+  void aProjectsOwnContainerIsLaunchedCarryingItsProjectKey() throws Exception {
+    var shell = minimalSuccessShell();
+    var provisioner =
+        new ProjectProvisioner(shell, tracker(), null, Optional.empty(), OperatorCommand.PLAIN);
+
+    provisioner.provision(minimalConfig(), hostYaml(), none(minimalConfig()), GIT, null);
+
+    assertTrue(
+        shell
+            .invocations()
+            .contains(
+                "incus launch ubuntu-24.04 simple --profile singlr-base -c user.sail.project=simple"),
+        String.join("\n", shell.invocations()));
+  }
+
   @Test
   void nullProjectImageFallsBackToHostImage() throws Exception {
     var shell = minimalSuccessShell();

@@ -1,5 +1,5 @@
 size 20x4
-cursor 8,2 block visible steady
+cursor 8,2 block visible blinking
 colors fg #f6f1e9 bg #0a0e11 cursor #fc4926
 row 0 |┌──┐ █▓▒░|
 row 1 |│ab│ ▀▄▌▐|

@@ -8,6 +8,7 @@ package ai.singlr.sail.api;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
@@ -18,17 +19,23 @@ import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.Lane;
 import ai.singlr.sail.engine.AgentProcess;
 import ai.singlr.sail.engine.AgentUnit;
+import ai.singlr.sail.engine.SystemdServiceInstaller;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.ActingAs;
+import ai.singlr.sail.store.MessageStore;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.TestRuns;
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.io.PrintStream;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.AfterEach;
@@ -621,29 +628,37 @@ class LiveMemberDisplacementTest {
     var asks = new AtomicInteger();
     var freed = new AtomicReference<Boolean>();
     var aliveOnceFreed = new AtomicReference<Boolean>();
+    var displaced = new AtomicReference<FakeAgentProcess.Fake>();
     room.processes.slowToName(true);
     room.processes.onStart(
-        starting ->
-            starting
-                .onPidAsked(
-                    () -> {
-                      if (asks.incrementAndGet() == 1) {
-                        room.windowElapses();
-                      } else {
-                        named(starting);
-                      }
-                    })
-                .onWrite(
-                    line -> {
-                      freed.set(cli.endLiveMember(starting.runId, "displaced by a build"));
+        starting -> {
+          if (!displaced.compareAndSet(null, starting)) {
+            starting.onPidAsked(() -> named(starting));
+            return;
+          }
+          starting
+              .onPidAsked(
+                  () -> {
+                    if (asks.incrementAndGet() == 1) {
+                      room.windowElapses();
+                    } else {
                       named(starting);
-                      aliveOnceFreed.set(room.container.alive(starting.runId));
-                      starting.exits(143);
-                    }));
+                    }
+                  })
+              .onWrite(
+                  line -> {
+                    freed.set(cli.endLiveMember(starting.runId, "displaced by a build"));
+                    named(starting);
+                    aliveOnceFreed.set(room.container.alive(starting.runId));
+                    starting.exits(143);
+                  });
+        });
 
     var first = room.says(SPEC, "first");
 
-    var process = room.processes.latest();
+    var process = displaced.get();
+    process.settle();
+    room.settle();
     assertEquals(Boolean.TRUE, freed.get());
     assertEquals(
         Boolean.FALSE,
@@ -651,7 +666,11 @@ class LiveMemberDisplacementTest {
         "a prompted run records its process, so it is ended through its pid file before it is"
             + " freed: a wrapper slow to write its pid is waited for, never read as gone");
     assertEquals(1, process.written.size(), "it was prompted while its run still held its repos");
-    assertEquals(Set.of(first), room.runs.deliveredMessageIds(process.runId));
+    assertEquals(
+        Set.of(),
+        room.runs.deliveredMessageIds(process.runId),
+        "it ended before it began to answer, so the message is not its");
+    assertEquals(Set.of(first), room.runs.deliveredMessageIds(room.processes.latest().runId));
     assertEquals("stopped", room.run(process.runId).status());
     assertEquals(
         Integer.valueOf(room.container.pidOf(process.runId)), room.run(process.runId).pid());
@@ -736,6 +755,406 @@ class LiveMemberDisplacementTest {
 
     room.says(SPEC, "back?");
     assertEquals(2, room.processes.starts.size(), "and the room's next message resumes it");
+  }
+
+  /**
+   * A message meeting a member whose process has ended, before its reader has seen the end, finds
+   * the pipe gone: the message waits for the member to finish and starts the next one.
+   */
+  @Test
+  void aMessageMeetingAnEndedProcessWaitsForItsMemberToFinishAndStartsTheNext() throws Exception {
+    var process = idleMember();
+    process.holdsItsEnd();
+    process.exits(143);
+    process.awaitHeldEnd();
+
+    var said = Thread.ofVirtual().start(() -> room.says(SPEC, "back?"));
+    process.awaitRefusedWrite();
+    assertEquals(1, room.processes.starts.size(), "it waits for the member to finish");
+    process.releasesItsEnd();
+    said.join();
+
+    assertEquals(
+        List.of(), room.runs.givenBack(process.runId), "a write that failed handed nothing");
+    assertEquals(2, room.processes.starts.size(), "and starts the next one");
+    assertTrue(room.processes.latest().written.stream().anyMatch(line -> line.contains("back?")));
+  }
+
+  /**
+   * A turn that answers what it was handed with no {@code init} of its own means the harness's
+   * stream no longer marks its turns, so every message it answers would be handed again: the log
+   * says so once per run, at the first such turn, and a turn that is marked says nothing.
+   */
+  @Test
+  void aTurnAnsweredWithNoInitIsSaidOncePerRunInTheLog() {
+    var process = room.prompted(SPEC, "full", "first");
+    var err = System.err;
+    var said = new ByteArrayOutputStream();
+    System.setErr(new PrintStream(said, true, StandardCharsets.UTF_8));
+    String marked;
+    try {
+      room.says(process, Lines.init("sess-1"), Lines.delta("One"), Lines.result("One"));
+      marked = said.toString(StandardCharsets.UTF_8);
+      room.says(SPEC, "second");
+      room.says(process, Lines.delta("Two"), Lines.result("Two"));
+      room.says(SPEC, "third");
+      room.says(process, Lines.delta("Three"), Lines.result("Three"));
+    } finally {
+      System.setErr(err);
+    }
+
+    var line =
+        "run "
+            + process.runId
+            + " answered a turn its stream never marked with an init: the harness's stream no"
+            + " longer marks its turns, so the messages it answers will be handed again.";
+    assertFalse(marked.contains("never marked with an init"), marked);
+    var log = said.toString(StandardCharsets.UTF_8);
+    assertEquals(1, log.lines().filter(logged -> logged.contains(line)).count(), log);
+  }
+
+  /**
+   * A run another process finished is handed nothing, even while its member's process still reads:
+   * a message meeting it is not written to that process and stays owed, so the room's next message
+   * hands it to the next member.
+   */
+  @Test
+  void aRunFinishedElsewhereIsHandedNothing() {
+    var process = idleMember();
+    assertTrue(
+        room.elsewhere().dispatching().endLiveMember(process.runId, AgentAttachWhy.TERMINAL));
+    room.settle();
+    room.grace(
+        new LiveMembers.Grace(
+            Duration.ofMillis(1),
+            Duration.ofMillis(1),
+            Duration.ofMillis(1),
+            Duration.ofMillis(1)));
+
+    var back = room.says(SPEC, "back?");
+
+    assertTrue(process.written.stream().noneMatch(line -> line.contains("back?")));
+    assertFalse(room.runs.deliveredMessageIds(process.runId).contains(back));
+    process.exits(143);
+    process.settle();
+    room.settle();
+    room.says(SPEC, "again");
+    assertEquals(2, room.processes.starts.size());
+    assertTrue(room.processes.latest().written.stream().anyMatch(line -> line.contains("back?")));
+  }
+
+  /**
+   * A message the client of an ended process took, before the member's reader saw the end, was
+   * never read: it is the next member's to answer, not lost with the old one. Here the run is
+   * finished elsewhere while the message is being written, after it was handed: that finish gives
+   * it back, so the next member starts at once for it.
+   */
+  @Test
+  void aMessageTheClientOfAnEndedProcessTookIsGivenToTheNextMember() {
+    var process = idleMember();
+    process.onWrite(
+        line ->
+            assertTrue(
+                room.elsewhere()
+                    .dispatching()
+                    .endLiveMember(process.runId, AgentAttachWhy.TERMINAL)));
+    process.outlivedByItsClient().holdsItsEnd();
+    process.exits(143);
+    process.awaitHeldEnd();
+
+    room.says(SPEC, "back?");
+    assertTrue(
+        process.written.stream().anyMatch(line -> line.contains("back?")), "the client took it");
+    process.releasesItsEnd();
+    process.settle();
+    room.settle();
+
+    assertEquals(2, room.processes.starts.size(), "the next member is started for it");
+    assertTrue(room.processes.latest().written.stream().anyMatch(line -> line.contains("back?")));
+    assertTrue(
+        room.conversation(SPEC).stream()
+            .noneMatch(line -> line.startsWith(MessageStore.SAIL_AUTHOR + ": ")),
+        "nothing is said when the next member starts at once");
+  }
+
+  /**
+   * Claude Code answers a message written while it is answering in its next turn, never in the
+   * running one (LiveStreamTest's recording). A member that dies before that turn begins never
+   * answered it: it is given back, the room says it waits, and the next member is handed it.
+   */
+  @Test
+  void aFollowUpHandedWhileTheMemberAnswersIsGivenBackWhenItDiesBeforeAnsweringIt() {
+    var process = room.prompted(LOUNGE, "full", "first");
+    room.says(process, Lines.init("sess-1"), Lines.delta("Working on it"));
+    var followUp = room.says(LOUNGE, "and the tests please");
+    assertTrue(process.written.stream().anyMatch(line -> line.contains("and the tests please")));
+
+    process.exits(1);
+    process.settle();
+    room.settle();
+
+    assertFalse(room.runs.deliveredMessageIds(process.runId).contains(followUp));
+    assertEquals(1, room.processes.starts.size(), "a crash starts nothing at once");
+    assertTrue(
+        room.conversation(LOUNGE).contains(waitingLine(LOUNGE, followUp)),
+        "the room says it waits");
+
+    room.says(LOUNGE, "anyone?");
+
+    assertEquals(2, room.processes.starts.size());
+    var prompt = String.join("\n", room.processes.latest().written);
+    assertTrue(prompt.contains("and the tests please"), "the next member is handed the follow-up");
+    assertFalse(
+        prompt.contains("Your last process ended"),
+        "no turn took it, so the session does not hold it");
+  }
+
+  /**
+   * A message written after a turn's {@code init} but before its first answer waits for the next
+   * turn (the turn took what was waiting at its {@code init}): its answering does not make it
+   * answered, and a member that ends before the next turn gives it back.
+   */
+  @Test
+  void aMessageWrittenBetweenATurnsInitAndItsFirstAnswerIsTheNextTurns() {
+    var process = room.prompted(LOUNGE, "full", "first");
+    room.says(process, Lines.init("sess-1"));
+    var late = room.says(LOUNGE, "one more thing");
+    room.says(process, Lines.delta("answering first"));
+
+    process.exits(1);
+    process.settle();
+    room.settle();
+
+    assertFalse(room.runs.deliveredMessageIds(process.runId).contains(late));
+    room.says(LOUNGE, "anyone?");
+    var prompt = String.join("\n", room.processes.latest().written);
+    assertTrue(prompt.contains("one more thing"), "the next member is handed it");
+    assertFalse(prompt.contains("Your last process ended"), "no turn took it");
+  }
+
+  /**
+   * Claude Code reads a message and prints its turn's {@code init} at once, so Sail's reader can
+   * see that {@code init} before the write that handed the message returns: the message is recorded
+   * handed before it is written, so that turn takes it, and its answer answers it. The member's
+   * idle end then gives nothing back, says nothing, and the next member is not handed it again.
+   */
+  @Test
+  void aTurnsInitReadBeforeItsWriteReturnsTakesTheMessageItAnswers() {
+    var process = room.prompted(SPEC, "full", "first");
+    room.says(process, Lines.init("sess-1"), Lines.delta("One"), Lines.result("One"));
+    var once = new AtomicBoolean();
+    process.onWrite(
+        line -> {
+          if (once.compareAndSet(false, true)) {
+            process.says(Lines.init("sess-1"));
+            process.settle();
+          }
+        });
+    var second = room.says(SPEC, "second");
+    room.says(process, Lines.delta("Two"), Lines.result("Two"));
+
+    process.exits(0);
+    process.settle();
+    room.settle();
+    var answered = room.conversation(SPEC);
+    room.says(SPEC, "third");
+
+    assertTrue(room.runs.deliveredMessageIds(process.runId).contains(second));
+    assertEquals(List.of(), room.runs.givenBack(process.runId));
+    assertFalse(answered.stream().anyMatch(line -> line.startsWith(MessageStore.SAIL_AUTHOR)));
+    assertEquals(2, room.processes.starts.size());
+    assertFalse(
+        room.processes.latest().written.stream().anyMatch(line -> line.contains("second")),
+        "'Two' answered it");
+  }
+
+  /**
+   * A message a turn took at its {@code init}, by a member that ended before answering it, may be
+   * in the session the next member resumes: it is handed again with a line saying so, even after
+   * sail restarts in between, since the give-back records it on the run.
+   */
+  @Test
+  void aMessageATurnTookAndNeverAnsweredIsHandedAgainWithItsLineAcrossARestart() {
+    var process = idleMember(LOUNGE);
+    var second = room.says(LOUNGE, "second");
+    room.says(process, Lines.init("sess-1"));
+
+    process.exits(1);
+    process.settle();
+    room.settle();
+    room.restart();
+    room.says(LOUNGE, "anyone?");
+
+    assertEquals(Set.of(second), room.runs.unansweredMessageIds(process.runId));
+    var prompt = String.join("\n", room.processes.latest().written);
+    assertTrue(
+        prompt.contains(
+            "Your last process ended before it answered the message below from node-a; your"
+                + " session may already show it, so answer each once."),
+        prompt);
+    assertTrue(prompt.contains("second"));
+  }
+
+  /**
+   * A member dismissed while it holds a message it never answered: nothing starts it again, so the
+   * room is told the message is unanswered and how to seat an agent, not that the next message
+   * answers it (a dismissal itself says nothing in the room).
+   */
+  @Test
+  void aMessageHandedToAMemberThatIsDismissedIsSaidUnanswered() {
+    var process = idleMember(SPEC);
+    var second = room.says(SPEC, "second");
+    process.onClose(() -> process.exits(0));
+
+    room.dismiss(SPEC);
+    process.settle();
+    room.settle();
+
+    var rows = rows(SPEC, second);
+    assertTrue(
+        room.conversation(SPEC)
+            .contains(
+                MessageStore.SAIL_AUTHOR
+                    + ": "
+                    + LiveMembers.unseated(
+                        rows, room.specs.findById(SPEC).orElseThrow(), "claude-code")),
+        room.conversation(SPEC).toString());
+    assertFalse(room.conversation(SPEC).contains(waitingLine(SPEC, second)));
+    room.says(SPEC, "anyone?");
+    assertEquals(1, room.processes.starts.size(), "no agent is seated");
+  }
+
+  /**
+   * Stopping fits inside the unit's stop timeout and leaves what closes after it a share of its
+   * own, so systemd never kills sail before its database is closed.
+   */
+  @Test
+  void stoppingLeavesWhatClosesAfterItsShareOfTheUnitsStopTimeout() {
+    assertEquals(
+        SystemdServiceInstaller.STOP_TIMEOUT,
+        LiveMembers.STOPPING.plus(LiveMembers.AFTER_STOPPING));
+    assertTrue(LiveMembers.AFTER_STOPPING.isPositive());
+  }
+
+  /**
+   * Stopping waits for every reader still running under one deadline, not one after another, and
+   * names in the log each that was not done by it.
+   */
+  @Test
+  void stoppingWaitsForEveryReaderUnderOneDeadlineAndNamesTheOnesNotDone() {
+    room.impatient();
+    room.room("second-room");
+    var first = idleMember(LOUNGE);
+    var second = room.prompted("second-room", "read-only", "hello");
+    assertNotEquals(first.runId, second.runId, "two members, each with a reader");
+    for (var process : List.of(first, second)) {
+      process.holdsItsEnd();
+      process.onSignal(signal -> process.exitsIfRunning());
+    }
+    first.onSignal(
+        signal -> {
+          room.later(LiveMembers.STOPPING);
+          first.exitsIfRunning();
+        });
+    var err = System.err;
+    var said = new ByteArrayOutputStream();
+    System.setErr(new PrintStream(said, true, StandardCharsets.UTF_8));
+    try {
+      assertTimeoutPreemptively(
+          Duration.ofSeconds(10),
+          room.live::close,
+          "the deadline is the injected clock's, not real time");
+    } finally {
+      System.setErr(err);
+      first.releasesItsEnd();
+      second.releasesItsEnd();
+    }
+
+    var log = said.toString(StandardCharsets.UTF_8);
+    assertTrue(log.contains("sail stopped before run " + first.runId + " of " + LOUNGE), log);
+    assertTrue(log.contains("sail stopped before run " + second.runId + " of second-room"), log);
+  }
+
+  /**
+   * An end this box made (an operator's, a terminal's, a claim's) is not undone by starting the
+   * member again at once, even when another process finished its run first: what it was handed and
+   * never answered waits for the room's next message.
+   */
+  @Test
+  void aMessageHandedAsThisBoxEndsTheMemberWaitsForTheNextMessage() {
+    var process = idleMember(LOUNGE);
+    var second = room.says(LOUNGE, "second");
+    assertTrue(process.written.stream().anyMatch(line -> line.contains("second")));
+    process.onClose(() -> process.exits(0));
+    assertTrue(
+        room.elsewhere().dispatching().endLiveMember(process.runId, "stopped by an operator"));
+    room.settle();
+
+    room.sail.dispatching().endLiveMember(process.runId, "displaced by a terminal");
+    process.settle();
+    room.settle();
+
+    assertFalse(room.runs.deliveredMessageIds(process.runId).contains(second));
+    assertEquals(1, room.processes.starts.size(), "an end this box made starts nothing at once");
+    assertTrue(room.conversation(LOUNGE).contains(waitingLine(LOUNGE, second)));
+
+    room.says(LOUNGE, "anyone?");
+
+    assertEquals(2, room.processes.starts.size());
+    assertTrue(room.processes.latest().written.stream().anyMatch(line -> line.contains("second")));
+  }
+
+  /** A next member that cannot start at once (its repos held, its host refusing) is said. */
+  @Test
+  void aMessageWhoseNextMemberCannotStartAtOnceWaitsAndTheRoomSaysSo() {
+    var process = idleMember(LOUNGE);
+    var second = room.says(LOUNGE, "second");
+    assertTrue(
+        room.elsewhere().dispatching().endLiveMember(process.runId, AgentAttachWhy.TERMINAL));
+    room.settle();
+    room.processes.refusing(new IOException("no incus"));
+
+    process.exits(143);
+    process.settle();
+    room.settle();
+
+    assertEquals(1, room.processes.starts.size());
+    assertFalse(room.runs.deliveredMessageIds(process.runId).contains(second));
+    assertEquals(
+        1,
+        room.conversation(LOUNGE).stream().filter(waitingLine(LOUNGE, second)::equals).count(),
+        "said once");
+  }
+
+  /**
+   * The finish and the give-back are one transaction: a give-back that fails leaves the run
+   * unfinished, never finished with its message still marked delivered.
+   */
+  @Test
+  void aGiveBackThatFailsLeavesTheRunUnfinished() {
+    var process = idleMember(LOUNGE);
+    var second = room.says(LOUNGE, "second");
+    room.db.execute(
+        "CREATE TRIGGER no_give_back BEFORE UPDATE OF state ON run_delivered_messages"
+            + " WHEN NEW.state = 'given' BEGIN SELECT RAISE(ABORT, 'refused'); END");
+
+    process.exits(1);
+    process.settle();
+    room.settle();
+
+    assertEquals("running", room.run(process.runId).status(), "the finish rolled back with it");
+    assertTrue(room.runs.deliveredMessageIds(process.runId).contains(second));
+  }
+
+  private String waitingLine(String roomId, String... messageIds) {
+    return MessageStore.SAIL_AUTHOR + ": " + LiveMembers.waiting(rows(roomId, messageIds));
+  }
+
+  private List<MessageStore.MessageRow> rows(String roomId, String... messageIds) {
+    var ids = List.of(messageIds);
+    return room.messages.list(roomId, null, 100).stream()
+        .filter(message -> ids.contains(message.id()))
+        .toList();
   }
 
   @Test

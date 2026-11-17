@@ -713,7 +713,11 @@ class BuildDispatchCoverageTest {
             .anyMatch(
                 command ->
                     command.startsWith("incus copy acme--tmpl/v1 acme-auth")
-                        && command.endsWith("-c user.sail.spec=auth -c user.sail.owner=" + HANDLE)),
+                        && command.endsWith(
+                            "-c user.sail.spec=auth -c user.sail.owner="
+                                + HANDLE
+                                + " -c user.sail.owner_id="
+                                + new FdeStore(db).byHandle(HANDLE).orElseThrow().id())),
         String.join("\n", box.invocations()));
     assertEquals(
         List.of("acme-auth"),

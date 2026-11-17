@@ -500,3 +500,12 @@ jobs:
           path: |
             ${{ runner.temp }}/frames
             ${{ runner.temp }}/drive-out
+
+      - name: Leave the window as the screen showed it, in both looks
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: sailapp-screenshots-${{ github.sha }}
+          if-no-files-found: ignore
+          retention-days: 14
+          path: ${{ runner.temp }}/drive-out/window

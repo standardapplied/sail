@@ -221,7 +221,7 @@ and the spec that closes it.
 | S1 | A scoped node holds exactly the rows of its granted projects: no row, erasure, blob or roster email of another project reaches it over any wire. | `ScopedSyncTest` (every type from an empty node; a blob fetched by hash and a chunk no served manifest lists are refused; an erasure reaches the nodes that held the row and no other; a version main took in a project since revoked is neither handed back nor its content served; an offer names only content its session sent or was served, and a scoped session is asked for every blob and chunk it announces, held on main or not), `ScopedSyncServerTest` (the roster of those who share a project, each with the email they commit under, and the bare ids of everyone else; no assignee disabled; a scoped node withdraws whom main no longer shows it and removes, with their credentials, only whom main no longer holds, never its own FDE), `NativeFleetIT` (real processes: rows, heads, blobs and roster) |
 | S2 | A scoped actor reads and writes inside its scope on every box; a write outside it is refused in the journal, on every lane, before the type's own rule. | `ScopeRuleTest` (a create into a hidden project is a project not found; a write over a hidden row says only that the id is taken; specs, posts, files and catalog rows on this box's lanes; a write over a review is decided by where the review is filed, wherever its spec is now; a prune), `MessageStoreTest` (a conversation is read message by message by the project each was filed under, the page as long as its limit of what its reader sees; a reply answers only a message its writer may read), `ScopedSyncTest` (a forged push, a project row, an erase request, and one for a spec moved into the scope whose earlier review is not; a row is born naming only what its pusher may see: a spec into or over a conversation outside the scope, a room over one, a run of a spec or room outside it, none told whose it is), `EraseAuthorityTest` (a scoped owner erases a spec only when all that belongs to it is inside the scope), `ScopedReadsTest` (every read route under `/v1` answers a scoped caller byte for byte the same whether or not another project exists, held complete against `Operations`; a write into a hidden project is a project not found and one addressed to a hidden row meets what a missing row answers; the terminal door; a run sees its owner's scope; a spec is born neither into nor over a hidden room; a spec moved into the scope shows nothing of the room and run it left behind, nor any review written before the move, its findings, their count or a follow-up drafted from them, and is not its owner's to prune, rehearsed or real, while anything belonging to it is filed outside the scope; a room's refusal names only the specs its reader sees; every write route that addresses a row answers one of a hidden project as one nobody holds, held complete against `Operations`; a moved spec is neither seated in nor restored to what it left behind, and shows no question asked in the room it left, nor is a message of that room announced under the spec's project; a run never names the owner of a spec that left the scope; a spec moved into the scope brings none of the talk held in the project it left, through its room, its page cursors, its open question or a run's inbox; a run is delivered nothing of a project its FDE no longer holds; a scoped owner's write on its spec rewrites no review filed outside its scope), `BuildDispatchCoverageTest` (a scoped caller dispatches no spec whose earlier review is filed outside its scope, and its prompt carries no talk filed outside it), `ReadFilterTest` (the read filter; an unrestricted read never asks a row's project), `SseHandlerTest` and `AgentLogStreamerTest` (the event and run-log streams; a scope changed while a run-log stream is open), `OpenStreamRecheckTest` (an open event stream follows a grant and a revoke from the next event a second later, asks once per second, and ends when its FDE is removed or disabled), `ConflictOperationsTest`, `ScopedRosterApiTest` (a session and a token of a scoped FDE both resolve to a scoped caller), `NativeFleetIT` (the gateway's `spec list` with a scoped node's key) |
 | S3 | Main decides scope alone, from its grants and the project each change head carries, and remembers nothing of what it sent. | `ScopedHeadsTest` (every type's head carries its project from its first write, through a deletion, a withdrawal, an erasure and a purge; a review and a message stay filed where they were first written when their spec moves and they are written again; the backfill), `MessageStoreTest` (a reply is filed with the message it answers), `ScopedSyncTest` (a thousand foreign heads are paged past by their heads alone, no row loaded, and the checkpoint reaches main's tip), `ProjectScopeTest` |
-| S4 | A grant shows after the next round; a revocation removes the project in the same round with its container and directory, unpushed work included, announced once and counting the unpushed rows only when there are any; a narrowing revokes every project it does not grant, and a widening grants every project. | `ScopedSyncTest` (a grant resets the checkpoints and what was held re-adopts unwritten; a revocation with nothing unpushed says so; a revocation drops rows, history, heads, offers, requests and content at the round's start; a project with a run under way here is kept until the run ends; what was erased or deleted before the node first synced leaves with its project; with a spec moved each way between two projects, a revocation takes what main files under the project and leaves what it files under the other, and the node equals main within its scope; a thread begun before its room moved arrives and leaves whole), `SyncScopeTest`, `ScopeChangeRoundTest` (a narrowing and a widening through a whole round; a container Sail provisioned deleted and one it did not kept; an unreachable Incus leaves the container to the next round; a run under way keeps both; an out-of-scope project's leftovers taken by the first round; an unchanged round's one `incus list`, and none unscoped), `ProjectTeardownTest`, `ScopeTeardownIT` (a real Incus daemon), `NativeFleetIT` (an FDE that joined unscoped narrowed in place, keeping its key) |
+| S4 | A grant shows after the next round; a revocation removes the project in the same round with its container and directory, unpushed work included, announced once and counting the unpushed rows only when there are any; a narrowing revokes every project it does not grant, and a widening grants every project. | `ScopedSyncTest` (a grant resets the checkpoints and what was held re-adopts unwritten; a revocation with nothing unpushed says so; a revocation drops rows, history, heads, offers, requests and content at the round's start; a project with a run under way here is kept until the run ends; what was erased or deleted before the node first synced leaves with its project; with a spec moved each way between two projects, a revocation takes what main files under the project and leaves what it files under the other, and the node equals main within its scope; a thread begun before its room moved arrives and leaves whole), `SyncScopeTest`, `ScopeChangeRoundTest` (a narrowing and a widening through a whole round; a container Sail launched deleted and one it did not kept; a workspace Incus lists without its keys while it stops never taken for a project; an instance named after a leaving project carrying a workspace's keys kept; one no longer the project's own when re-read under its lock kept; one whose lock another change holds left to the next round; an unreachable Incus leaves the container to the next round; a run under way keeps both; an out-of-scope project's leftovers taken by the first round; an unchanged round's one `incus list`, and none unscoped), `ProjectTeardownTest`, `ScopeTeardownIT` (a real Incus daemon), `WorkspaceIT.aWorkspaceMadeAndStoppedOnANodeWhileItsRoundsRunIsStillThereWithItsKeys`, `NativeFleetIT` (an FDE that joined unscoped narrowed in place, keeping its key) |
 | S5 | An unscoped FDE is untouched: a fleet with no scoped FDE behaves as it did. | every sync test, unchanged; `ScopedSyncTest` and `NativeFleetIT` (an unscoped node beside a scoped one equals main), `ScopedSyncServerTest` (the whole roster, with emails) |
 | S6 | A welcome that names no scope is an unscoped FDE's: the node holds every project. | `SyncWireTest` (a welcome naming no scope; a key this build does not know), `ScopedSyncTest` (a welcome naming none after one naming an empty scope pages everything), `NativeFleetIT` (two scoped nodes are each sent only their scope and drop the project main revokes) |
 | S7 | Scope fails closed: an FDE added or narrowed scoped sees nothing until granted, a session naming no FDE receives nothing, a head of unknown project reaches unscoped nodes only, and a request whose auth stamped no scope reads none. | `ScopedSyncServerTest` (no grant; no token, a blank one and one never issued), `ScopedSyncTest`, `ScopedHeadsTest` (a head pruned before heads carried a project stays unknown), `SyncWireTest` (a scope key that names nothing readable grants nothing), `ProjectScopeTest` (an admin is never scoped; a widening forgets the grants), `FdeCommandTest` (a narrowing keeps the FDE's id and every credential, commits with its grants or not at all, and is refused for this box's own FDE and an admin) |
@@ -353,19 +353,27 @@ grant of every project; the node needs to know neither which command changed its
 when.
 
 **What else a scoped node holds** follows the same scope, decided from what the box holds and
-never from what a round dropped, so a box an earlier release, a failed round or an
-unreachable Incus left behind is brought in line by its next round, with no migration. Its
+never from what a round dropped, so what a failed round or an unreachable Incus left
+behind is brought in line by the next round, with no migration. Its
 roster is exactly the one main lists to it: an FDE main stops listing is removed with its
 box-local credentials (`FdeStore.removeUnlisted`), so the box keeps neither its name nor its
 email; the box's own FDE is never removed, and one main lists again arrives as a new row with
 no credentials. The round's last step (`SyncOperations.tearDownOutOfScope`) takes off the box
 each project the scope does not admit and the box holds no head of: its
-`~/.sail/projects/<name>` directory, and its container when Sail provisioned it
-(`IncusDeviceManager.sailManaged`, the one trust gate, which `project apply --all` asks too),
-through `ProjectTeardown`, the seam `sail project destroy` without `--purge` tears down
-through. A container Sail did not provision is never touched, and is named once, in the round
-that drops its project. One `incus list` serves the round, a device query is asked only of a
-container outside the scope, and an unscoped box asks Incus nothing. When `incus list` fails
+`~/.sail/projects/<name>` directory, and its container, workspaces and template, through
+`ProjectTeardown`, the seam `sail project destroy` without `--purge` tears down through. Each
+instance is told positively by the keys Sail wrote on it: a project's own container carries
+`user.sail.project` of its own name from its launch (`BoxInstances.Instance.projectsOwn`, kept
+through a rename). An instance with a workspace's keys is only ever its project's workspace;
+one with no project key is never deleted, whatever device it carries; and one whose project the
+box holds is never touched. Each is deleted under its lock, the one a workspace's make, entry,
+stop and delete hold, read again immediately before: one whose lock is held is left to the next
+round, and one that no longer reads as part of the leaving project stays. An instance Incus
+lists without its config, as it lists one it cannot render (for a moment while it stops), is
+left as it is and nothing is said of it. A container Sail did not launch is never touched, and
+is named once, in the round that drops its project. One `incus list` serves the round, one
+`incus list ^<name>$` is asked of each instance to delete, and an unscoped box asks Incus
+nothing. When `incus list` fails
 (an unprivileged `sail sync`), nothing is deleted and the round that dropped a project says
 the next round that can reach Incus deletes its container. A project kept for a run under way
 here is still held, so it keeps both until the round after the run ends.
@@ -1289,7 +1297,10 @@ own, about three (2.9 to 4.3 s over 32 creates, median 3.2 s).
     a new machine-id, the project's name as its hostname (which the in-container helpers read the
     project from), new SSH host keys made under that name, each repo fetched and on the branch
     named after the workspace, sshd restarted onto the new keys once systemd answers (it boots
-    while the repos are fetched), and the dev user's bus. Each fetch first waits, up to 10 s, until
+    while the repos are fetched), and the dev user's bus. Before any fetch it waits up to 30 s for
+    `eth0` to get an IPv4 address; a clone that gets none is not made: the script fails naming
+    the wait and what to check ("acme-try got no address on eth0 within 30 s, …"), and the create
+    removes it as any failed create does. Each fetch first waits, up to 10 s, until
     its remote's host resolves, asking the resolver itself (`getent hosts`, `Workspaces.FETCH`, a
     deadline on bash's `SECONDS`), never reading a failed fetch's words: a clone's address comes up
     a fraction of a second before its resolver, and more when several start at once. The script prints
@@ -1315,15 +1326,17 @@ own, about three (2.9 to 4.3 s over 32 creates, median 3.2 s).
     `user.sail.workspace=<w>`;
   - a **template**: the one named `<p>--tmpl` that carries `user.sail.template.of=<p>`;
   - a **stray**: either set of keys under another name, as a hand copy carries them;
-  - **plain**: no key. This is the container of the project it is named after when the box holds
-    that project, and otherwise not Sail's.
+  - **plain**: no workspace or template key. This is the container of the project it is named
+    after when the box holds that project, and otherwise not Sail's. Sail launches a project's own
+    container carrying `user.sail.project=<p>`, which tells it positively (`projectsOwn`), the
+    only way a deleting rule may take it.
 
   Every command that walks the box's instances goes through the seam, and each takes the kinds
   below:
 
   | Command | Takes |
   |---|---|
-  | the sync round's teardown | plain containers of leaving projects; their workspaces and template |
+  | the sync round's teardown | the own containers of leaving projects (`projectsOwn`); their workspaces and template |
   | `project apply --all` | plain only |
   | `project list`, `GET /v1/projects` | plain only |
   | `agent status` | plain only |
@@ -1437,8 +1450,43 @@ Each row with the tests that prove it:
 - **W9. One decision.** Every verb first reads the project from the catalog as the box's person,
   through `ReadFilter`, which is what `project apply` asks. A catalog this account cannot read is
   said to be one. The read route declares `Gate.READS_IN_SCOPE` and reads through
-  `ProjectGate.readable`. No rule was added.
-  *`RouteGateSweepTest`, `ScopedReadsTest`, `OneDecisionSweepTest`, `AccessDoorsBaselineTest`.*
+  `ProjectGate.readable`. Entering a workspace, a terminal in it or making, starting, stopping or
+  deleting one, is then **Enter a workspace** on its owner (R10): one decision,
+  `WorkspaceDoors.refusal` over `Resources.workspace`, for the host CLI verbs, the API routes and
+  the terminal alike, taken on the instance the workspace's locked entry found
+  (`Workspaces.Entry`). Its owner is the person whose id its label stores (`user.sail.owner_id`,
+  read in one place, `Workspaces.ownerOf`); a label with no id, an id that is not its handle's
+  active person's, or a person gone makes it no one's. Its owner or an admin enters; a viewer and
+  every agent never; one no one owns, an admin alone; one being made is its caller's, and a
+  credential that names no person makes none. On a node every person but the node's own acts as a
+  viewer (the role rule's cap), so there they are refused naming main, where other people's
+  workspaces live; and the node's own person keeps what no one owns on it (a workspace disowned,
+  or labelled for someone no longer active, until the pass takes it back), deciding it as an admin
+  decides it on main: they may stop or delete a gone person's workspace, and, as an admin, are
+  refused a start or terminal in it, so its person's credentials stay unread. The
+  routes are `POST /v1/projects/{p}/workspaces` (`{"name"}`, from the current template, which the
+  server never builds: none is refused naming its build, a stale one is cloned and the answer says
+  so), `POST …/workspaces/{w}/start` and `…/stop`, and `DELETE …/workspaces/{w}[?force=true]`,
+  each declaring `Gate.decides(ENTER_WORKSPACE)`. A start, a stop, a delete and a terminal's open
+  hold the workspace's lock from their decision to their act, waiting for it no longer than 60 s
+  (the sweep stopping or deleting it holds it), then `runner_busy`. A start of a workspace whose
+  labelled person is no longer active here is refused saying so, and that the next pass makes it
+  no one's. A delete, at the CLI (`--force`) and the API alike, first reads under that lock what
+  the workspace holds, with the idle sweep's reads (`WorkspaceHoldings`: `WorkspaceGit`, a
+  stopped one started for it and stopped again when refused), and who is in it (Incus's running
+  operations: a terminal, an attach, an exec), and is refused (`workspace_holds_work`, 409)
+  naming it, its owner when the caller is not, or why it could not be read, unless forced; it is
+  read again for a live run immediately before the delete, and a live run of its spec refuses it
+  whatever is passed. A stop, and a delete with force, end the workspace's terminals once every
+  check that could refuse them has passed, just before they act, each told "Workspace try of acme
+  is being stopped by ada, which ends this terminal." (or deleted), which stays true if Incus then
+  fails the act; the act's failure goes to whoever asked. Every door that makes, starts, stops or deletes a workspace goes
+  through `WorkspaceDoors`; today those are the API and the host CLI, its dry runs included, as
+  the SSH gateway serves no `project workspace` command (`SshGateway.API_COMMANDS`). A gateway verb
+  for workspaces is added only through `WorkspaceDoors`, so its delete reads what the workspace
+  holds as the other doors do.
+  *`RouteGateSweepTest`, `ScopedReadsTest`, `OneDecisionSweepTest`, `AccessDoorsBaselineTest`,
+  `WorkspaceDoorsTest`, `WorkspaceRoutesTest`, `AccessTest.aWorkspaceIsEnteredByItsOwnerOrAnAdminAlone`.*
 - **W10. Every instance on a box is exactly one kind, told from its keys.** No command takes a
   workspace, a template or a stray for a project: each one that walks the box's instances asks
   `BoxInstances`, the only class that lists them.
@@ -1454,12 +1502,18 @@ Each row with the tests that prove it:
   `ContainerSetupSweepTest`, `ContainerAuthorizedKeysTest`.*
 - **W11. A project's instances go with it.** `project destroy <p>` removes the project's
   workspaces, its specs' run workspaces among them, and its template with its container, naming each
-  in its confirmation; a run live in one ends as any killed run does. When a project
+  in its confirmation; a run live in one ends as any killed run does. It deletes them under each
+  workspace's lock, the template's build lock and the box's create lock (`Workspaces.whileDestroying`,
+  each waited for at most 60 s, then refused saying what holds it), read again there: one made
+  after it read them refuses it, naming it, and a create that had not cloned yet finds no
+  template, so no workspace outlives its project. When a project
   leaves a box's scope, the sync round removes them the same way, and only then. A copy carrying
   the project's keys under another name is not Sail's: it stays, said once, in the round that
   drops the project.
   *`ProjectDestroyCommandTest.destroyTakesTheProjectsWorkspacesAndTemplateAndNothingElse`,
-  `ProjectTeardownTest`, `ScopeChangeRoundTest.aProjectThatLeavesTheBoxTakesItsWorkspacesAndTemplateWithIt`.*
+  `WorkspacesTest.aDestroy…` (read again under its locks; a workspace made meanwhile; a create or a
+  change that outlasts the wait), `ProjectTeardownTest`,
+  `ScopeChangeRoundTest.aProjectThatLeavesTheBoxTakesItsWorkspacesAndTemplateWithIt`.*
 - **W12. A workspace is whole or it is not one.** `user.sail.ready` is written last, in the write
   that clears the copy's `user.sail.creating`. A workspace without it:
   - is listed as `incomplete`;
@@ -1506,8 +1560,9 @@ Each row with the tests that prove it:
   nothing persisted). Nothing in it means no run of its spec is live on this box (a room's live
   member is one), and no operation Incus is running names the instance. That second check is one
   `incus operation list` per running workspace per pass, `BoxInstances.inUse`: an exec held open
-  by `workspace shell`, `agent attach`, a live process or a person by hand keeps the workspace for
-  as long as it runs and ten minutes after the pass that last saw it. An Incus that does not
+  by `workspace shell`, `agent attach`, a terminal the pty host opened in it (live or detached), a
+  live process or a person by hand keeps the workspace for as long as it runs and ten minutes after
+  the pass that last saw it. An Incus that does not
   answer counts as one that says something is in it. One held so with nothing run or started in
   it for 12 hours is logged once, naming `sudo incus operation list`. The process start holds a
   restart's first passes off, so the loop that replays a missed stop has the workspace first. The
@@ -1667,7 +1722,11 @@ Each row with the tests that prove it:
   labelled one person's while it holds another's: its owner is cleared first, then it is
   stripped and given the new owner's (gh too), and only then is `user.sail.owner` written. A
   re-own cut short between is stripped again and left nobody's, so it holds nothing of anyone's,
-  and the next entry, whoever's, strips and gives again.
+  and the next entry, whoever's, strips and gives again. A workspace being made carries its
+  owner's id beside the handle from its clone on (`incus copy -c user.sail.owner_id=…`), so no
+  label is ever a handle alone. Every act that decided from a listing and then waited for a
+  workspace's lock (the removal pass's strip and disown, a token change's renewal) reads it again
+  under the lock and leaves it alone when its owner is now one it must not touch.
   *`WorkspacesTest.aReOwnCutShortLeavesTheWorkspaceNobodysSoThePreviousOwnersNextEntryGivesTheirsAgain`,
   `WorkspacesTest.aWorkspaceOfAnotherIsStrippedAndGivenItsNewOwnersBeforeItIsRecordedTheirs`,
   `RunPlacesTest.aWorkspaceOfAnotherIsReOwnedOnlyForAPersonWithAnEmail`.*
@@ -2355,10 +2414,34 @@ class is `LiveMemberTest`'s):
   `PromptConversation.MAX_CODE_POINTS` holds and none cut or left out: what does not fit is
   the next prompt, written straight after, and a message longer than a prompt is written
   across several, each part saying that more follows (`LiveMemberPrompt.messages`). A message
-  is recorded as delivered to the run only once the prompt that ends it was written, so one a
-  process took part of, or never took, is handed whole to the next; a fresh session's room
-  follows its opening the same way.
+  is recorded on the run's ledger (`run_delivered_messages.state`) as *handed* before the
+  prompt that ends it is written, and taken back if that write fails, so one a process took
+  part of, or never took, is handed whole to the next; a run that is not `running` is handed
+  nothing; a fresh session's room follows its opening the same way. Recording before the write
+  is what orders it before the turn: Claude Code prints a turn's `init` only after it read the
+  message, so Sail's reader always finds the message handed when it sees that `init`. The
+  `init` *takes* every message handed and not yet taken (Claude Code takes everything waiting
+  into one turn, `LiveStreamTest`), and the turn's first answer marks what it took *done*. A
+  turn that answers what it was handed with no `init` of its own takes nothing, so what it
+  answered is handed again; the log says so once per run, at the first such turn, naming the
+  run, so a harness whose stream stops marking its turns is loud at once
+  (`LiveMemberDisplacementTest.aTurnAnsweredWithNoInitIsSaidOncePerRunInTheLog`).
+  Every finish of the run, whoever makes it (its member's end, a restart's reclaim, the
+  missed-stop sweep, a stop), gives back in its own transaction what is handed or taken and not
+  done (`RunStore.giveBack`): one no turn took is owed again; one a turn took is owed again
+  marked *unanswered*, and the member that resumes that session is told in one line that its
+  session may already show it. A message the process read but whose turn's `init` Sail never
+  saw before the process ended is given back as never taken, without that line: the next
+  member may answer it a second time but never not at all, since only the session transcript
+  could say whether the session holds it, and a repeated reply costs the room less than an
+  unanswered message.
   *`aHumanMessageStartsOneLiveProcessAndIsItsFirstPrompt`,
+  `LiveMemberDisplacementTest.aTurnsInitReadBeforeItsWriteReturnsTakesTheMessageItAnswers`,
+  `LiveMemberDisplacementTest.aRunFinishedElsewhereIsHandedNothing`,
+  `LiveMemberDisplacementTest.aMessageATurnTookAndNeverAnsweredIsHandedAgainWithItsLineAcrossARestart`,
+  `LiveMemberLanesTest.aRunReclaimedAtStartGivesBackWhatItWasHandedAndNeverAnswered`,
+  `RunStoreTest.aFinishGivesBackWhatTheRunsTurnsDidNotAnswer`,
+  `RunStoreTest.aFinishBySweepGivesBackToo`,
   `aMessageDuringATurnIsWrittenAtOnceAndStartsTheNextTurn`,
   `aMessageAfterATurnGoesToTheSameProcess`,
   `LiveMemberEdgesTest.aMessageLongerThanAPromptIsWrittenAcrossPromptsAndIsDeliveredOnceAllOfItIs`,
@@ -2435,7 +2518,7 @@ class is `LiveMemberTest`'s):
   turn cut short is posted as far as it got and told with `is_error` and the reason. Every end
   is `running` to `stopped` (or `failed`, for a process that died unasked while it owed an
   answer or before its run recorded its pid, with the end of its log as the reason) as one
-  compare-and-set that revokes the credential, then the `agent_session_stopped` its watcher
+  compare-and-set that revokes the credential and gives back what the run did not answer (L1), then the `agent_session_stopped` its watcher
   would have published, `source` `live`. The next message starts a process that resumes the
   newest session a live run of the same member and lane recorded. A process is prompted only
   for a run that still holds what it reserved and a seat that is still its member's: once it
@@ -3468,6 +3551,7 @@ a birth, as on main. A door's placement comes after `Access` too. The table is
 | Dispatch | dispatch or resume a spec; seat or remove a room agent | no | owner | yes | no | no | no |
 | Operate a run | stop it; attach to it; read its log | no | owner | yes | no | no | no |
 | Narrate | a run's reports about itself: events, session, inbox acks | no | owner | yes | its own | its own | no |
+| Enter a workspace | open a terminal in a workspace; make, start, stop or delete one | no | owner | yes | no | no | no |
 | Share | add, change or remove project files and skills | no | yes | yes | no | no | no |
 | Serve | start and stop the project's processes | no | yes | yes | own work | no | yes |
 | Restore | restore or delete a snapshot | no | yes | yes | no | no | no |
@@ -3509,11 +3593,20 @@ grant on its own work alone is refused there, since no work is in hand.
 
 - A spec runs only on its assignee's box, and a room's agents only on its owner's box: placement
   (`DispatchPolicy`, `LaunchAdmission`), asked after `Access`.
-- Opening a terminal needs the project on your own box: its person operates this box (Operate the
-  box on it, the question attaching asks of a session's opener's box: the box's own person, or an
-  admin) and holds the project, whatever their role (`HostLanes.Pty.admitBox`, then
-  `admitProject`, through `ProjectGate.readable`), asked in one place (`PtySessionHost.openRefusal`)
-  at the unix socket and for a ticket alike. A viewer on their own box opens one too.
+- Opening a terminal in a project's own container needs the project on your own box: its person
+  operates this box (Operate the box on it, the question attaching asks of a session's opener's
+  box: the box's own person, or an admin) and holds the project, whatever their role
+  (`HostLanes.Pty.admitBox`, then `admitProject`, through `ProjectGate.readable`), asked in one
+  place (`PtySessionHost.openRefusal`) at the unix socket and for a ticket alike. A viewer on their
+  own box opens one too.
+- Opening one in a workspace (`workspace` on the create, the ticket and `POST
+  /v1/terminal/tickets`; blank or `main` is the project's container) is entering it, a permission:
+  the project's audience, then Enter a workspace on its owner (`HostLanes.Pty.admitWorkspace`),
+  never operating the box, so a member opens one in their own workspace on another person's
+  runner. Its own instance is found by name and keys, started when stopped and given its owner's
+  credentials (`Workspaces.startExisting`, the attach's door), and the session runs there (R15).
+  A ticket opens only the project and workspace it was issued for (R16). A personal runner's host
+  has no workspaces and refuses one.
 - Admins are never scoped.
 
 **Whose a resource is.** `Resources` builds each resource from the row in hand, with the project
@@ -3778,9 +3871,10 @@ it already holds, in frames 12-15 (`PutBegin`, `PutChunk`, `PutEnd`, `PutCancel`
 (`PutAck`, `PutStored`, `PutRefused`, a kind and the bound it met, never a sentence: SailKit's
 `UploadRefusal.sentence` words each kind once). `PtyUploadsTest` drives each rule through a real host.
 - **U1. Only into the session's own workspace.** `PtyUploads.targetOf` alone names where a
-  session's files go: a session on the box itself has no container (`no_container`), and one in a
-  project's container shares it with every member's sessions (`shared_container`), so nothing is
-  stored there. The bytes never leave the connection to that host; the control plane never sees one.
+  session's files go: a session in a workspace into that workspace's own instance
+  (`<project>-<workspace>`, one person's); a session on the box itself has no container
+  (`no_container`), and one in a project's container shares it with every member's sessions
+  (`shared_container`), so nothing is stored there. The bytes never leave the connection to that host; the control plane never sees one.
 - **U3. Only the writer,** asked of the session (`PtySession.isWriter`) at `PutBegin`; a ticket admits
   the four client frames as it admits input.
 - **U4. The host names every path:** `/tmp/sail-paste/<instanceId>/<n>-<name>`, the name reduced to

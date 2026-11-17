@@ -18,7 +18,7 @@ import Testing
         let frames = try Dictionary(uniqueKeysWithValues: Goldens.frames().map { ($0.name, try decoded($0.wire)) })
         #expect(frames["Create"] == .create(SessionCreate(
             session: "lounge", command: ["bash", "-l"], workingDirectory: "/home/dev", project: "harbor",
-            room: "harbor-design", size: TerminalSize(columns: 132, rows: 43)
+            room: "harbor-design", size: TerminalSize(columns: 132, rows: 43), workspace: "dock"
         )))
         #expect(frames["Attach"] == .attach(session: "lounge", write: true))
         #expect(frames["Input"] == .input(sequence: 42, bytes: Array("ls -la\r".utf8)))
@@ -28,7 +28,9 @@ import Testing
         #expect(frames["ListSessions"] == .listSessions(after: "", limit: 16))
         #expect(frames["Sessions"] == .sessions(SessionPage(sessions: [lounge, shell], next: "shell")))
         #expect(frames["SessionInfo"] == .sessionInfo(lounge))
-        #expect(frames["IssueTicket"] == .issueTicket(action: .known(.open), target: "harbor", credential: "sail_uday"))
+        #expect(frames["IssueTicket"] == .issueTicket(
+            action: .known(.open), target: "harbor", credential: "sail_uday", workspace: "dock"
+        ))
         #expect(frames["Ticket"] == .ticket("tkt_harbor"))
         let chunk = (0 ..< FrameCodec.maxPutChunk).map { UInt8(truncatingIfNeeded: $0) }
         #expect(frames["PutBegin"] == .putBegin(id: 7, name: "", size: 64 << 20))
@@ -104,6 +106,15 @@ import Testing
         }
     }
 
+    @Test func aPagePlacingOtherThanItsSessionsIsMalformed() throws {
+        var page = Array(try golden("Sessions").dropFirst(4))
+        let placed = page.count - 4 - (field("harbor") + field("dock") + field("uday")) - 3 * field("")
+        page.replaceSubrange(placed ..< placed + 4, with: [0, 0, 0, 3])
+        #expect(throws: TerminalWireError.malformed("a page places 3 sessions but holds 2")) {
+            try FrameCodec.decode(payload: page)
+        }
+    }
+
     @Test func aFieldClaimingMoreBytesThanTheFrameHoldsIsTruncated() throws {
         var hello = try golden("Hello")
         hello.replaceSubrange(5 ..< 9, with: bigEndian(Int32.max))
@@ -172,7 +183,8 @@ import Testing
 
 let lounge = SessionInfo(
     name: "lounge", instanceID: "inst-1", live: true, attached: 2, writerFDE: "uday",
-    room: "harbor-design", command: ["claude", "--resume"]
+    room: "harbor-design", command: ["claude", "--resume"], project: "harbor", workspace: "dock",
+    opener: "uday"
 )
 let shell = SessionInfo(
     name: "shell", instanceID: "inst-2", live: false, attached: 0, writerFDE: "", room: "", command: ["bash"]
@@ -238,4 +250,9 @@ func messageName(of frame: Frame) -> String {
     case .accepted: "Ok"
     case .refused: "Err"
     }
+}
+
+/// The bytes a string field takes: its length and its UTF-8.
+func field(_ text: String) -> Int {
+    4 + text.utf8.count
 }

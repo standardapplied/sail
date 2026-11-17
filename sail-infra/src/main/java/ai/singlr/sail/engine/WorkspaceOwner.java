@@ -35,14 +35,9 @@ public record WorkspaceOwner(
 
   public WorkspaceOwner {
     Objects.requireNonNull(handle, "handle");
+    Objects.requireNonNull(id, "id");
     tokens = Map.copyOf(tokens);
     keys = List.copyOf(keys);
-  }
-
-  /** An owner whose id on this box is not known: its workspaces are labelled by handle alone. */
-  public WorkspaceOwner(
-      String handle, String name, String email, Map<String, String> tokens, List<String> keys) {
-    this(handle, name, email, tokens, keys, null);
   }
 
   /** Its own type so a refusal at the give is told apart from a create that failed. */

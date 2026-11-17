@@ -307,7 +307,7 @@ class PtyUploadsTest {
   }
 
   @Test
-  void aSessionOnTheBoxItselfOrInASharedContainerTakesNoFile() throws Exception {
+  void aFileGoesOnlyIntoAWorkspaceNeverTheBoxNorAProjectsSharedContainer() throws Exception {
     try (var ignored = startHost(PtyUploads::targetOf);
         var channel = writer("lounge")) {
       PtyWire.write(channel, new PtyMessage.PutBegin(1, "shot.png", 5));
@@ -315,9 +315,12 @@ class PtyUploadsTest {
       assertEquals(new PtyMessage.PutRefused(1, PutRefusal.NO_CONTAINER, 0), answer(channel));
       assertEquals(List.of(), staged());
     }
-    var shared = new PtySession.Origin("lounge", "inst-1", "uday", "acme", "", List.of("bash"));
+    var shared = new PtySession.Origin("lounge", "inst-1", "uday", "acme", "", List.of("bash"), "");
     assertEquals(PtyUploads.Target.SHARED, PtyUploads.targetOf(shared));
     assertEquals(PutRefusal.SHARED_CONTAINER, PtyUploads.targetOf(shared).refused());
+    var own =
+        new PtySession.Origin("lounge", "inst-1", "uday", "acme", "", List.of("bash"), "dock");
+    assertEquals(PtyUploads.Target.own("acme-dock"), PtyUploads.targetOf(own));
   }
 
   @Test

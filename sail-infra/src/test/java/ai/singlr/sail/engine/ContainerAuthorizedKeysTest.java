@@ -22,21 +22,25 @@ class ContainerAuthorizedKeysTest {
       [{"name": "acme", "status": "Running", "type": "container"},
        {"name": "acme-w", "status": "Running", "type": "container",
         "config": {"user.sail.project": "acme", "user.sail.workspace": "w",
-                   "user.sail.ready": "1", "user.sail.owner": "uday"}},
+                   "user.sail.ready": "1", "user.sail.owner": "uday",
+                   "user.sail.owner_id": "fde_uday"}},
        {"name": "acme-b", "status": "Stopped", "type": "container",
         "config": {"user.sail.project": "acme", "user.sail.workspace": "b",
-                   "user.sail.ready": "1", "user.sail.owner": "ana"}},
+                   "user.sail.ready": "1", "user.sail.owner": "ana",
+                   "user.sail.owner_id": "fde_ana"}},
        {"name": "acme-half", "status": "Running", "type": "container",
         "config": {"user.sail.project": "acme", "user.sail.workspace": "half",
-                   "user.sail.owner": "uday"}},
+                   "user.sail.owner": "uday", "user.sail.owner_id": "fde_uday"}},
        {"name": "acme--tmpl", "status": "Stopped", "type": "container",
         "config": {"user.sail.template.of": "acme"}},
        {"name": "bravo-w", "status": "Running", "type": "container",
         "config": {"user.sail.project": "bravo", "user.sail.workspace": "w",
-                   "user.sail.ready": "1", "user.sail.owner": "uday"}},
+                   "user.sail.ready": "1", "user.sail.owner": "uday",
+                   "user.sail.owner_id": "fde_uday"}},
        {"name": "bravo-a", "status": "Running", "type": "container",
         "config": {"user.sail.project": "bravo", "user.sail.workspace": "a",
-                   "user.sail.ready": "1", "user.sail.owner": "ana"}}]
+                   "user.sail.ready": "1", "user.sail.owner": "ana",
+                   "user.sail.owner_id": "fde_ana"}}]
       """;
 
   private static ScriptedShellExecutor box() {
@@ -76,7 +80,7 @@ class ContainerAuthorizedKeysTest {
   void aPersonsKeyReachesTheirWholeWorkspacesAloneAndNoContainer() throws Exception {
     var shell = box();
 
-    new ContainerAuthorizedKeys(shell).addToWorkspacesOf(LAPTOP, "ana");
+    new ContainerAuthorizedKeys(shell).addToWorkspacesOf(LAPTOP, "fde_ana");
 
     assertEquals(List.of("acme-b", "bravo-a"), reached(shell));
   }

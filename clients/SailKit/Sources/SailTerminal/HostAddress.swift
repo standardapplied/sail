@@ -13,6 +13,12 @@ public enum HostAddress: Hashable, Sendable, CustomStringConvertible {
     /// The longest socket path the local host binds (macOS's `sun_path` less what the JDK keeps).
     public static let longestSocketPath = 102
 
+    /// The pid of the process listening at this unix socket, nil for TCP or when none listens.
+    public func listenerPID(timeout: Int = 1) -> Int32? {
+        guard case .unix = self else { return nil }
+        return (try? Socket.connect(to: self, timeout: timeout))?.peerPID
+    }
+
     /// This account's own host: `~/.sail/local/pty.sock` in the home the account database names,
     /// where `sail _pty-host --local` serves, never `$HOME`.
     public static func local() throws(TerminalError) -> HostAddress {

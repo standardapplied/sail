@@ -1,5 +1,5 @@
 size 20x5
-cursor 4,4 block visible steady
+cursor 4,4 block visible blinking
 colors fg #f6f1e9 bg #0a0e11 cursor #fc4926
 row 0 |uvwxyz0123456789|
 row 1 |second line|

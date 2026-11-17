@@ -24,6 +24,16 @@ public interface HostPty {
 
   void admitInstance(String project) throws IOException;
 
+  /**
+   * Refuses {@code who} entering workspace {@code workspace} of {@code project} unless it is theirs
+   * or they are an admin ({@link Action#ENTER_WORKSPACE}); {@link PtyAdmission.Absent} when the
+   * project has no such workspace here.
+   */
+  void admitWorkspace(String project, String workspace, PtyIdentity.Person who) throws IOException;
+
+  /** As {@link #admitWorkspace}, then readies it: started when stopped, given its owner's. */
+  void enterWorkspace(String project, String workspace, PtyIdentity.Person who) throws IOException;
+
   void admitRoom(String room, String project, PtyIdentity.Person who) throws IOException;
 
   void recordEvent(EventStore.EventRow event);

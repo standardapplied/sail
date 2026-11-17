@@ -181,8 +181,9 @@ class GitCommandTest {
             null,
             null,
             null);
-    var noEmail = new WorkspaceOwner("ana", "Ana", "", Map.of(), List.of());
-    var noToken = new WorkspaceOwner("ana", "Ana", "ana@sail.invalid", Map.of(), List.of());
+    var noEmail = new WorkspaceOwner("ana", "Ana", "", Map.of(), List.of(), "fde_ana");
+    var noToken =
+        new WorkspaceOwner("ana", "Ana", "ana@sail.invalid", Map.of(), List.of(), "fde_ana");
     var commands = new ArrayList<Remedy.Command>();
     for (var owner : List.of(noEmail, noToken)) {
       var refused =
@@ -223,7 +224,8 @@ class GitCommandTest {
             null,
             null,
             null);
-    var owner = new WorkspaceOwner("uday", "Uday", "uday@example.com", Map.of(), List.of());
+    var owner =
+        new WorkspaceOwner("uday", "Uday", "uday@example.com", Map.of(), List.of(), "fde_uday");
     var refused =
         assertThrows(IllegalStateException.class, () -> owner.require(config, url -> true));
     var printed = Remedied.remedyOf(refused).commands().getFirst();

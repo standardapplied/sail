@@ -113,7 +113,7 @@ class AuthorizedKeysSyncTest {
 
   @Test
   void rendersForcedCommandLinesWithoutWriting() {
-    var content = sync(true).render(new FdeSshKeyStore(db).list());
+    var content = sync(true).render(new FdeSshKeyStore(db).admitted());
     assertTrue(content.startsWith("# Managed by sail"));
     assertTrue(content.contains("_gateway --fde-id " + udayId + "\",restrict ssh-ed25519 "));
     assertTrue(shell.invocations().isEmpty());
@@ -121,7 +121,7 @@ class AuthorizedKeysSyncTest {
 
   @Test
   void everyForcedCommandRunsTheInstalledBinaryWhicheverBinaryRenders() {
-    var content = sync(true).render(new FdeSshKeyStore(db).list());
+    var content = sync(true).render(new FdeSshKeyStore(db).admitted());
 
     assertTrue(
         content.contains("command=\"/usr/local/bin/sail _gateway --fde-id " + udayId + "\""),
@@ -130,7 +130,7 @@ class AuthorizedKeysSyncTest {
 
   @Test
   void theDefaultSyncNamesTheInstalledSailNeverTheProcessThatRendersIt() {
-    var keys = new FdeSshKeyStore(db).list();
+    var keys = new FdeSshKeyStore(db).admitted();
     var sync = new AuthorizedKeysSync();
 
     SailPaths.findInstalledBinary()

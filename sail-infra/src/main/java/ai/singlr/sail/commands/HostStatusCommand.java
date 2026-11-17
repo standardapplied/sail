@@ -152,7 +152,7 @@ public final class HostStatusCommand implements Runnable {
       Predicate<InetSocketAddress> answers) {
     var doors = new ArrayList<Door>();
     for (var setting : List.of(ListenConfig.API, ListenConfig.TERMINAL)) {
-      var set = ListenConfig.API.equals(setting) ? listen.api() : listen.terminal();
+      var set = setTo(listen, setting);
       var serving = bound.apply(setting).filter(at -> listening(setting, at, answers));
       if (serving.isPresent()) {
         var pending =
@@ -167,6 +167,11 @@ public final class HostStatusCommand implements Runnable {
       }
     }
     return List.copyOf(doors);
+  }
+
+  /** What {@code setting} is set to, null when it is not set. */
+  private static String setTo(ListenConfig listen, String setting) {
+    return ListenConfig.API.equals(setting) ? listen.api() : listen.terminal();
   }
 
   /** Whether {@code set} names the address {@code bound} is, however it is written. */
@@ -267,7 +272,16 @@ public final class HostStatusCommand implements Runnable {
       map.put(
           "listen",
           doors.stream()
-              .map(door -> Map.of("setting", door.setting(), "state", door.state()))
+              .map(
+                  door ->
+                      Map.of(
+                          "setting",
+                          door.setting(),
+                          "state",
+                          door.state(),
+                          "set",
+                          Objects.requireNonNullElse(
+                              setTo(hostYaml.listen(), door.setting()), ListenConfig.NONE)))
               .toList());
     }
     out.println(YamlUtil.dumpJson(map));

@@ -45,6 +45,7 @@ public record SessionMeta(
     map.put("owner_fde", origin.ownerFde());
     map.put("project", Objects.toString(origin.project(), ""));
     map.put("room", Objects.toString(origin.room(), ""));
+    map.put("workspace", origin.workspace());
     map.put("command", origin.command());
     map.put("cwd", cwd);
     map.put("cols", cols);
@@ -83,7 +84,8 @@ public record SessionMeta(
               string(map, "owner_fde"),
               string(map, "project"),
               string(map, "room"),
-              strings(map.get("command")));
+              strings(map.get("command")),
+              string(map, "workspace"));
       return new SessionMeta(
           origin,
           string(map, "cwd"),

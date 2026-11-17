@@ -157,6 +157,23 @@ public final class TerminalPane: NSView {
         latency.isHidden ? nil : latency.stringValue
     }
 
+    /// Try Again on a parked pane: the host made to serve, saying what that did (another copy's
+    /// terminals closing), then the session reconnected; what stops it is said with Try Again again.
+    private func tryAgain() async {
+        do {
+            try await host.ensureServing { [weak self] sentence in await self?.say(sentence) }
+        } catch {
+            return banner.show(Self.sentence("\(error)"), button: "Try Again") { [weak self] in
+                Task { await self?.tryAgain() }
+            }
+        }
+        session?.reconnectNow()
+    }
+
+    private func say(_ sentence: String) {
+        banner.show(sentence)
+    }
+
     private func handle(_ event: SessionEvent) {
         switch event {
         case .phase(.attached):
@@ -164,11 +181,8 @@ public final class TerminalPane: NSView {
         case .phase(.reconnecting):
             banner.show("Reconnecting to this Mac's terminal host")
         case let .phase(.parked(reason)):
-            banner.show(Self.sentence("this Mac's terminal host does not answer: \(reason)"), button: "Try Again") { [weak self] in
-                Task {
-                    try? await self?.host.ensureServing()
-                    self?.session?.reconnectNow()
-                }
+            banner.show(host.endedBy ?? Self.sentence("this Mac's terminal host does not answer: \(reason)"), button: "Try Again") { [weak self] in
+                Task { await self?.tryAgain() }
             }
         case let .phase(.ended(end)):
             banner.show(Self.sentence(end.description))

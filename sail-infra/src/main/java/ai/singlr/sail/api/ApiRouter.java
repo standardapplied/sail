@@ -135,6 +135,7 @@ public final class ApiRouter implements HttpHandler, RouteTable {
     var unserved = Gate.UNSERVED;
     var box = Gate.box(operations::boxFde);
     var keepLogins = Gate.decides(Action.KEEP_LOGINS);
+    var enterWorkspace = Gate.decides(Action.ENTER_WORKSPACE);
     return List.of(
         route(GET, "/v1/health", Gate.unauthenticated("the liveness probe"), this::health),
         route(Route.ANY, "/v1/health", unserved, ApiRouter::absent),
@@ -257,6 +258,31 @@ public final class ApiRouter implements HttpHandler, RouteTable {
             PROJECT + "/workspaces",
             reads,
             call -> ApiResponse.from(operations.workspaces(call.project()))),
+        route(POST, PROJECT + "/workspaces", enterWorkspace, this::createWorkspace),
+        route(
+            POST,
+            PROJECT + "/workspaces/{workspace}/start",
+            enterWorkspace,
+            call ->
+                ApiResponse.from(
+                    operations.startWorkspace(call.project(), call.param("workspace")))),
+        route(
+            POST,
+            PROJECT + "/workspaces/{workspace}/stop",
+            enterWorkspace,
+            call ->
+                ApiResponse.from(
+                    operations.stopWorkspace(call.project(), call.param("workspace")))),
+        route(
+            DELETE,
+            PROJECT + "/workspaces/{workspace}",
+            enterWorkspace,
+            call ->
+                ApiResponse.from(
+                    operations.deleteWorkspace(
+                        call.project(),
+                        call.param("workspace"),
+                        "true".equals(call.query().get("force"))))),
         route(
             DELETE,
             PROJECT + "/snapshots/{label}",
@@ -678,6 +704,14 @@ public final class ApiRouter implements HttpHandler, RouteTable {
    * A terminal ticket for the caller, issued for the credential it presented here; as a path no
    * route serves on a box that offers no terminal over the network.
    */
+  /** {@code POST /v1/projects/{p}/workspaces} with {@code {"name": ...}}: the caller's own. */
+  private ApiResponse createWorkspace(Call call) throws IOException {
+    if (!(call.body().get("name") instanceof String name)) {
+      throw new IllegalArgumentException("The body names the workspace as {\"name\": ...}.");
+    }
+    return ApiResponse.fromCreated(operations.createWorkspace(call.project(), name));
+  }
+
   private ApiResponse terminalTicket(Call call) throws IOException {
     var tickets = terminal.orElseThrow(ApiRouter::notFound);
     return ApiResponse.created(tickets.issue(ApiAuth.credentialOf(call.exchange()), call.body()));

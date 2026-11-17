@@ -130,9 +130,9 @@ import Testing
         let content = try #require(window.contentView)
         #expect(window.contentLayoutRect.height < content.bounds.height, "\(name): the content view does not reach under the title bar")
         #expect(shell.rail.layer?.backgroundColor == NSColor(look.chrome).cgColor, "\(name): the rail is not chrome")
-        for (item, surface) in [(Rail.Item.account, look.canvas), (.thisMac, look.chrome)] {
+        for item in [Rail.Item.account, .thisMac] {
             shell.select(item)
-            #expect(content.layer?.backgroundColor == NSColor(surface).cgColor, "\(name) \(item): the strip under the title bar is not the pane's surface")
+            #expect(content.layer?.backgroundColor == NSColor(look.chrome).cgColor, "\(name) \(item): the band under the title bar is not the chrome")
         }
     }
 

@@ -30,8 +30,14 @@ public final class TerminalView: NSView {
     let pacer = FramePacer()
     let marks = ViewMarks()
     let input = DispatchQueue(label: "sh.standardapplied.sail.terminal.input", qos: .userInteractive)
+    /// Where the drawable is asked for: a thread of the view's own, so handing it the ask is a
+    /// semaphore signal, with no request for a worker thread made from the main thread (``WorkThread``).
+    private let fetcher = WorkThread(name: "sh.standardapplied.sail.terminal.drawable")
     var makeClock: @MainActor (TerminalView) -> any FrameClock = { view in
-        DisplayLinkClock(view: view) { [weak view] target in _ = view?.refresh(target: target) }
+        DisplayLinkClock(view: view) { [weak view] target in
+            view?.linkFires += 1
+            _ = view?.refresh(target: target)
+        }
     }
     var composition = Composition()
     var committedDuringKey: [String]?
@@ -52,13 +58,37 @@ public final class TerminalView: NSView {
     var hovered: CellPoint?
     /// The button went down on a view that was not focused: that click only focuses it.
     var focusingClick = false
+    /// The right button's press went to the program, so its release does too.
+    var rightReported = false
+    /// The menu a right-click or a control-click offers; none unless the app gives one.
+    public var contextMenu: @MainActor () -> NSMenu? = { nil }
     /// When the view last became its window's first responder, on the events' clock.
     var focusedAt = 0.0
     var gatherer = ScrollGatherer()
     private(set) var focused = false
-    private(set) var lastFrame: ScreenFrame?
+    public private(set) var lastFrame: ScreenFrame?
     private var needsDraw = true
     private var tasks: [Task<Void, Never>] = []
+    /// A blinking cursor is in its shown half.
+    public private(set) var cursorOn = true
+    /// Whether the cursor may blink at all; a test whose frames are counted turns it off.
+    var cursorBlinks = true
+    private var blink: Timer?
+    /// How many times the blink's timer woke the main thread: what the drive counts.
+    public private(set) var blinkWakeups = 0
+    /// How many display refreshes reached the view, and how each ended: what an idle view's
+    /// wakeups are made of, for the drive to report.
+    public private(set) var refreshes = 0
+    /// How many refreshes ended each way, indexed by ``RefreshOutcome``'s raw value: plain integers.
+    public private(set) var refreshOutcomes = [Int](repeating: 0, count: RefreshOutcome.allCases.count)
+    /// How many of those the display link asked for; the rest came from a drawable's arrival or
+    /// from output or a key drawn at once.
+    public internal(set) var linkFires = 0
+
+    /// Whether a blink is due: the only thing that would wake this view while nothing changes.
+    public var isBlinking: Bool {
+        blink != nil
+    }
 
     public init(fonts: TerminalFonts, points: Double = FontLadder.standard) throws(RenderError) {
         let scale = NSScreen.main.map { Double($0.backingScaleFactor) } ?? 2
@@ -125,9 +155,10 @@ public final class TerminalView: NSView {
     }
 
     /// Draws `link`'s screen and types into it, in place of any link before. A link is drawn by one
-    /// view for its life, since its streams have one reader: move the view, not the session.
-    /// Programs may not write the clipboard (it changes only on the person's action) and Option
-    /// types characters.
+    /// view for its life, since its streams have one reader: move the view, not the session. A
+    /// program's clipboard write (OSC 52) reaches the pasteboard: the session tells it only while
+    /// this client holds the write token, and the screen refuses one over 1 MiB; reads stay refused.
+    /// Option types characters.
     public func attach(_ link: any TerminalLink) {
         precondition(
             Self.canAttach(link),
@@ -136,7 +167,6 @@ public final class TerminalView: NSView {
         Self.attached.add(link)
         detach()
         self.link = link
-        link.screen.setClipboardWrites(.deny)
         link.screen.setOptionAsAlt(.none)
         let cell = (width: metrics.width, height: metrics.height)
         input.async { try? link.setCellPixels(width: cell.width, height: cell.height) }
@@ -172,6 +202,8 @@ public final class TerminalView: NSView {
     /// Stops drawing the session and typing into it, for good: the session itself is the caller's,
     /// and no view can attach it again.
     public func detach() {
+        blink?.invalidate()
+        blink = nil
         tasks.forEach { $0.cancel() }
         tasks = []
         link = nil
@@ -229,6 +261,7 @@ public final class TerminalView: NSView {
     override public func viewDidHide() {
         super.viewDidHide()
         pacer.pause()
+        updateBlink()
     }
 
     override public func viewDidUnhide() {
@@ -311,7 +344,7 @@ public final class TerminalView: NSView {
     }
 
     var overlay: Overlay {
-        Overlay(focused: focused, marked: composition.marked)
+        Overlay(focused: focused, cursorOn: cursorOn, marked: composition.marked)
     }
 
     /// Something the view shows changed: draw at the next refresh.
@@ -331,7 +364,7 @@ public final class TerminalView: NSView {
         pacer.resume()
     }
 
-    /// Asks for the layer's next drawable on a background queue, at the moment a frame needs one
+    /// Asks for the layer's next drawable on the view's own thread, at the moment a frame needs one
     /// (Apple: acquire it as late as possible), unless an ask is under way or the window is off
     /// screen, where the occlusion notification asks again.
     private func fetchDrawable() {
@@ -339,7 +372,7 @@ public final class TerminalView: NSView {
         fetching = true
         marks.fetchStarted()
         let fetch = DrawableFetch(view: self, layer: metalLayer, next: nextDrawable)
-        DispatchQueue.global(qos: .userInteractive).async {
+        fetcher.run {
             fetch.drawable = fetch.next(fetch.layer)
             DispatchQueue.main.async {
                 MainActor.assumeIsolated { fetch.view?.arrived(fetch.drawable) }
@@ -372,43 +405,46 @@ public final class TerminalView: NSView {
     /// The window was seen again: a shown view that owes a frame asks for its drawable.
     @objc private func visibilityChanged() {
         if owed, !isHiddenOrHasHiddenAncestor { fetchDrawable() }
+        updateBlink()
     }
 
     /// One display refresh, for the frame meant to reach the display at `target`: with no drawable
     /// just brought, ask for one and draw on its arrival; else read the screen and draw when it or
     /// the view changed, or pause until something does. True when the link is wanted for the next
     /// refresh: a frame was drawn, or every buffer was still in flight, or the frame could not be
-    /// encoded (tried again then).
+    /// encoded (tried again then). A frame drawn only for the view (a blink, focus, a selection)
+    /// leaves the link paused: the screen did not change, so no output is under way.
     @discardableResult
     func refresh(target: Double) -> Bool {
+        refreshes += 1
         guard let link else {
             pacer.pause()
-            return false
+            return refreshed(.noSession, false)
         }
         guard !isHiddenOrHasHiddenAncestor else {
             needsDraw = true
             pacer.pause()
-            return false
+            return refreshed(.hidden, false)
         }
         guard fetched != nil else {
             owed = true
             pacer.pause()
             fetchDrawable()
-            return false
+            return refreshed(.askedForDrawable, false)
         }
         let read = CACurrentMediaTime()
         let work = Duration.threadCPU
         defer { marks.refreshed(since: read, workSince: work) }
         guard let frame = try? link.screen.frame() else {
             pacer.pause()
-            return false
+            return refreshed(.noFrame, false)
         }
-        let changed = needsDraw || frame.changed != .nothing || frame.cursor != lastFrame?.cursor || frame.colors != lastFrame?.colors
+        let screenChanged = frame.changed != .nothing || frame.cursor != lastFrame?.cursor || frame.colors != lastFrame?.colors
             || frame.size != lastFrame?.size
-        guard changed, let metalLayer else {
+        guard needsDraw || screenChanged, let metalLayer else {
             marks.unchanged(read: read)
             pacer.pause()
-            return false
+            return refreshed(.nothingChanged, false)
         }
         switch renderer.draw(frame, overlay: overlay, from: { defer { self.fetched = nil }; return self.fetched }, presented: { [marks] in marks.presented(frame: $0, at: $1) }, completed: { [marks] in marks.completed(frame: $0, ok: $1) }) {
         case let .drawn(number):
@@ -416,23 +452,28 @@ public final class TerminalView: NSView {
             marks.committed(frame: number, read: read, target: target)
             lastFrame = frame
             needsDraw = renderer.lastFrameWantsAnother
-            return true
+            updateBlink()
+            return refreshed(.drew, screenChanged || needsDraw)
         case .busy:
             marks.skipped(read: read)
             renderer.invalidate()
             needsDraw = true
-            return true
+            return refreshed(.buffersInFlight, true)
         case .unavailable:
             marks.skipped(read: read)
             renderer.invalidate()
             needsDraw = true
-            return true
+            return refreshed(.couldNotEncode, true)
         }
     }
 
     private func handle(_ event: SessionEvent) {
         if case .screen(.bell) = event, !NSApp.isActive {
             NSApp.requestUserAttention(.informationalRequest)
+        }
+        if case let .screen(.clipboardWrite(text)) = event {
+            pasteboard.clearContents()
+            pasteboard.setString(text, forType: .string)
         }
         onEvent(event)
     }
@@ -463,6 +504,76 @@ public final class TerminalView: NSView {
             input.async { link.setFocused(now) }
         }
         needFrame()
+        updateBlink()
+    }
+
+    private func refreshed(_ outcome: RefreshOutcome, _ wanted: Bool) -> Bool {
+        refreshOutcomes[outcome.rawValue] += 1
+        return wanted
+    }
+
+    /// The system's insertion-point blink: `NSTextInsertionPointBlinkPeriodOn` and `…Off`, in ms,
+    /// the keys AppKit's text view reads (Chromium's `ui/base/cocoa/defaults_utils.mm` reads them
+    /// for the same reason); 500 ms each when unset.
+    public static var blinkPeriods: (on: Double, off: Double) {
+        func period(_ key: String) -> Double {
+            let milliseconds = UserDefaults.standard.integer(forKey: key)
+            return milliseconds > 0 ? Double(milliseconds) / 1000 : 0.5
+        }
+        return (period("NSTextInsertionPointBlinkPeriodOn"), period("NSTextInsertionPointBlinkPeriodOff"))
+    }
+
+    /// The cursor blinks while the screen says it does (DECSCUSR, mode 12) and the view shows it
+    /// focused: never in a hidden, unfocused or unseen view (P2), nor while text is composed.
+    private var shouldBlink: Bool {
+        guard cursorBlinks, focused, !isHiddenOrHasHiddenAncestor, let window, isOnScreen(window), composition.marked.isEmpty,
+              let cursor = lastFrame?.cursor, cursor.blinking, cursor.visible, cursor.position != nil
+        else { return false }
+        return true
+    }
+
+    /// Starts or stops the blink as ``shouldBlink`` says; stopped, the cursor shows. `restart`
+    /// shows it for a whole period, as a key typed does, so it never blinks while keys come.
+    func updateBlink(restart: Bool = false) {
+        guard shouldBlink else {
+            blink?.invalidate()
+            blink = nil
+            showCursor()
+            return
+        }
+        guard restart || blink == nil else { return }
+        showCursor()
+        scheduleBlink(after: Self.blinkPeriods.on)
+    }
+
+    private func showCursor() {
+        guard !cursorOn else { return }
+        cursorOn = true
+        needFrame()
+    }
+
+    private func scheduleBlink(after seconds: Double) {
+        blink?.invalidate()
+        let timer = Timer(timeInterval: seconds, repeats: false) { [weak self] _ in
+            MainActor.assumeIsolated { self?.blinked() }
+        }
+        timer.tolerance = seconds / 10
+        RunLoop.main.add(timer, forMode: .common)
+        blink = timer
+    }
+
+    /// Half a blink: the cursor shown or hidden, one frame drawn (P2: no row laid out again). An
+    /// idle view asks for its drawable at once, as typing's echo does, so the display link is not
+    /// woken for it.
+    private func blinked() {
+        blinkWakeups += 1
+        blink = nil
+        guard shouldBlink else { return updateBlink() }
+        cursorOn.toggle()
+        needsDraw = true
+        drawNowIfIdle()
+        let periods = Self.blinkPeriods
+        scheduleBlink(after: cursorOn ? periods.on : periods.off)
     }
 
     /// Sends what `key` encodes to, on the input queue, so the main thread never takes the
@@ -475,6 +586,7 @@ public final class TerminalView: NSView {
             input.async { link.send(key) }
             return
         }
+        updateBlink(restart: true)
         let marks = marks
         let interval = marks.keyBegan()
         input.async { [weak self] in
@@ -486,6 +598,7 @@ public final class TerminalView: NSView {
     }
 
     isolated deinit {
+        blink?.invalidate()
         tasks.forEach { $0.cancel() }
     }
 
@@ -502,11 +615,11 @@ public final class TerminalView: NSView {
     }
 }
 
-/// One ask for a drawable, carried to a background queue and its answer back to the main thread.
+/// One ask for a drawable, carried to the view's own thread and its answer back to the main thread.
 /// Apple's pages say `nextDrawable()` may block until a drawable is free, and that with
 /// `allowsNextDrawableTimeout` (on by default) it returns nil after one second; so it is not
 /// called on the main thread. Unchecked: the ask is touched by one thread at a time, the main
-/// thread, the queue, then the main thread.
+/// thread, that thread, then the main thread.
 private final class DrawableFetch: @unchecked Sendable {
     weak var view: TerminalView?
     let layer: CAMetalLayer
@@ -518,4 +631,9 @@ private final class DrawableFetch: @unchecked Sendable {
         self.layer = layer
         self.next = next
     }
+}
+
+/// How a display refresh ended: what an idle view's wakeups are made of.
+public enum RefreshOutcome: Int, CaseIterable, Sendable {
+    case noSession, hidden, askedForDrawable, noFrame, nothingChanged, drew, buffersInFlight, couldNotEncode
 }

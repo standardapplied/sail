@@ -7,12 +7,14 @@ package ai.singlr.sail.api;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.pty.PtyMessage;
 import java.io.IOException;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
 
@@ -34,7 +36,8 @@ class TerminalTicketsTest {
     for (var kind : PtyMessage.TicketRefusal.values()) {
       var door =
           new TerminalTickets(
-              (credential, action, target) -> new PtyMessage.TicketRefused(kind, "the host says"),
+              (credential, action, target, workspace) ->
+                  new PtyMessage.TicketRefused(kind, "the host says"),
               TERMINAL);
       answered.put(
           kind.wire(),
@@ -55,11 +58,13 @@ class TerminalTicketsTest {
   void aHostThatCannotBeAskedOrAnswersNoTicketIsTheTerminalsOutage() {
     var unreachable =
         new TerminalTickets(
-            (credential, action, target) -> {
+            (credential, action, target, workspace) -> {
               throw new IOException("No session host at /run/pty.sock.");
             },
             TERMINAL);
-    var astray = new TerminalTickets((credential, action, target) -> new PtyMessage.Ok(), TERMINAL);
+    var astray =
+        new TerminalTickets(
+            (credential, action, target, workspace) -> new PtyMessage.Ok(), TERMINAL);
 
     assertEquals(
         "503 terminal_unavailable No session host at /run/pty.sock.",
@@ -71,5 +76,34 @@ class TerminalTicketsTest {
 
   private static String said(ApiException refused) {
     return refused.status() + " " + refused.error().code() + " " + refused.error().message();
+  }
+
+  /**
+   * R16 at the API: an open names its workspace, passed to the host as asked ({@code main} the
+   * project's own container); an invalid one is refused before the host is asked.
+   */
+  @Test
+  void anOpenNamesItsWorkspaceAndAnInvalidOneIsRefusedFirst() {
+    var asked = new java.util.ArrayList<String>();
+    var door =
+        new TerminalTickets(
+            (credential, action, target, workspace) -> {
+              asked.add(target + "/" + workspace);
+              return new PtyMessage.Ticket("tkt");
+            },
+            TERMINAL);
+
+    door.issue("cred", Map.of("action", "open", "project", "acme", "workspace", "try"));
+    door.issue("cred", Map.of("action", "open", "project", "acme", "workspace", "main"));
+    door.issue("cred", Map.of("action", "open", "project", "acme"));
+    var refused =
+        assertThrows(
+            IllegalArgumentException.class,
+            () ->
+                door.issue(
+                    "cred", Map.of("action", "open", "project", "acme", "workspace", "Bad Name")));
+
+    assertEquals(List.of("acme/try", "acme/main", "acme/"), asked);
+    assertTrue(refused.getMessage().startsWith("Invalid workspace name: 'Bad Name'."));
   }
 }

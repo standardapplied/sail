@@ -24,6 +24,12 @@ let calls: [String: @Sendable (SailClient) async throws -> Void] = [
     "refusal-bad-request": { _ = try await $0.send(.post(MessagePost(body: ""), room: "harbor-design")) },
     "refusal-not-found": { _ = try await $0.send(Endpoint<Whoami>(.get, ["v1", "nowhere"])) },
     "terminal-ticket": { _ = try await $0.send(.terminalTicket(open: "harbor")) },
+    "terminal-ticket-workspace": { _ = try await $0.send(.terminalTicket(open: "harbor", workspace: "dock")) },
+    "workspace-create": { _ = try await $0.send(.createWorkspace("new", project: "harbor")) },
+    "workspace-start": { _ = try await $0.send(.startWorkspace("dock", project: "harbor")) },
+    "workspace-stop": { _ = try await $0.send(.stopWorkspace("dock", project: "harbor")) },
+    "workspace-delete": { _ = try await $0.send(.deleteWorkspace("dock", project: "harbor", force: true)) },
+    "refusal-workspace-holds-work": { _ = try await $0.send(.deleteWorkspace("dock", project: "harbor")) },
     "attention": { _ = try await $0.send(.attention(conversation: "harbor-docks")) },
     "changes": { _ = try await $0.send(.changes(since: "golden.0.0")) },
     "board-specs": { _ = try await $0.send(.specs(SpecFilter(project: "harbor"))) },
@@ -89,6 +95,34 @@ func answer<Response>(
         #expect(ticket.ticket == "tkt_harbor")
         #expect(ticket.address == "100.64.0.7:7072")
         #expect(ticket.expiresAt.milliseconds == Goldens.pinnedMilliseconds + 30_000)
+    }
+
+    @Test func aWorkspaceTicketNamesItsWorkspace() throws {
+        let ticket = try Endpoint.terminalTicket(open: "harbor", workspace: "dock")
+            .decode(response(try Exchange("terminal-ticket-workspace")))
+        #expect(ticket.ticket == "tkt_harbor")
+    }
+
+    @Test func aWorkspaceDoorReadsWhatItMadeOrChanged() throws {
+        let made = try Endpoint.createWorkspace("new", project: "harbor")
+            .decode(response(try Exchange("workspace-create")))
+        #expect(made == WorkspaceCreated(
+            project: "harbor", workspace: "new", instance: "harbor-new", owner: "dana", template: "v1", stale: false,
+            timings: WorkspaceTimings(
+                cloneMs: 0, startMs: 0, readyMs: 0, totalMs: 0, readySteps: ["files": 0, "machinery": 0, "mark": 0]
+            )
+        ))
+        let started = try Endpoint.startWorkspace("dock", project: "harbor")
+            .decode(response(try Exchange("workspace-start")))
+        #expect(started == WorkspaceChanged(
+            project: "harbor", workspace: "dock", instance: "harbor-dock", change: .known(.alreadyRunning), timings: nil
+        ))
+        let stopped = try Endpoint.stopWorkspace("dock", project: "harbor")
+            .decode(response(try Exchange("workspace-stop")))
+        #expect(stopped.change == .known(.stopped))
+        let deleted = try Endpoint.deleteWorkspace("dock", project: "harbor", force: true)
+            .decode(response(try Exchange("workspace-delete")))
+        #expect(deleted.change == .known(.deleted))
     }
 
     @Test func aHeartbeatReadsTheConversationTheServersMinuteAndWhetherItWasNew() throws {

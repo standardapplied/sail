@@ -168,9 +168,9 @@ public final class TestWorkspaces {
         {"name": "%s", "status": "%s", "type": "container",
          "config": {"user.sail.project": "%s", "user.sail.workspace": "%s",
                     "user.sail.ready": "1762941601000", "user.sail.spec": "%s",
-                    "user.sail.owner": "%s"},
+                    "user.sail.owner": "%s", "user.sail.owner_id": "fde_%s"},
          "expanded_devices": {"root": {"path": "/", "pool": "tank", "type": "disk"}}}"""
-        .formatted(place.instance(), status, project, place.workspace(), spec, owner);
+        .formatted(place.instance(), status, project, place.workspace(), spec, owner, owner);
   }
 
   /**

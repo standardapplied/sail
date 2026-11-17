@@ -127,12 +127,16 @@ final class PtyUploads {
   }
 
   /**
-   * Where a file pasted into {@code origin}'s session goes, decided here alone: a session on the
-   * box itself has no container, and one in a project's container shares it with every member's
+   * Where a file pasted into {@code origin}'s session goes, decided here alone: a session in a
+   * workspace puts it in that workspace's own instance, which is one person's; a session on the box
+   * itself has no container, and one in a project's container shares it with every member's
    * sessions, so no one person's file goes there (U1).
    */
   static Target targetOf(PtySession.Origin origin) {
-    return Strings.isBlank(origin.project()) ? Target.NONE : Target.SHARED;
+    if (Strings.isBlank(origin.project())) {
+      return Target.NONE;
+    }
+    return Strings.isBlank(origin.workspace()) ? Target.SHARED : Target.own(origin.instance());
   }
 
   /** The upload one connection has in progress. Used on that connection's thread alone. */

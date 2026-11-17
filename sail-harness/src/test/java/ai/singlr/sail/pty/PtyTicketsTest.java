@@ -7,6 +7,7 @@ package ai.singlr.sail.pty;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
@@ -209,5 +210,23 @@ class PtyTicketsTest {
             new PtyMessage.Hello("tok-uday"))) {
       assertEquals(refusal, ATTACH_LOUNGE.refusal(other, null));
     }
+  }
+
+  /** R16: a ticket opens only the project and the workspace it was issued for. */
+  @Test
+  void aTicketOpensOnlyTheWorkspaceItWasIssuedFor() {
+    var trying = new PtyTickets.Ticket(PtyMessage.TicketAction.OPEN, "acme", "tok-ana", "try");
+    var there = new PtyMessage.Create("s", List.of(), "/tmp", "acme", "", 80, 24, "try");
+    var elsewhere = new PtyMessage.Create("s", List.of(), "/tmp", "acme", "", 80, 24, "b");
+    var container = new PtyMessage.Create("s", List.of(), "/tmp", "acme", "", 80, 24);
+
+    assertNull(trying.refusal(there, null));
+    assertEquals(
+        "This connection's ticket is to open a session in workspace 'try' of project 'acme', and"
+            + " it admits nothing else; ask the API for a ticket for that.",
+        trying.refusal(elsewhere, null).message());
+    assertNotNull(trying.refusal(container, null));
+    assertNotNull(OPEN_ACME.refusal(there, null), "a ticket to the container opens no workspace");
+    assertNull(OPEN_ACME.refusal(container, null));
   }
 }

@@ -63,6 +63,12 @@ public interface SessionYield {
   void end(List<String> sessions, String reason) throws IOException;
 
   /**
+   * Ends every live session in workspace {@code workspace} of {@code project} with {@code reason},
+   * the line its terminal shows last. A seam with no host ends nothing.
+   */
+  default void endIn(String project, String workspace, String reason) throws IOException {}
+
+  /**
    * Whether the host runs a session named {@code session} now. A live member asks before it starts
    * over a recorded conversation: a terminal resumed on that conversation holds it, and two
    * processes on one conversation would corrupt it. A seam with no host runs no session; a host

@@ -95,6 +95,7 @@ public final class PtyWire {
             .string(m.project())
             .string(m.room());
         out.i32(m.cols()).i32(m.rows());
+        out.string(m.workspace());
       }
       case PtyMessage.Attach m -> {
         out.type(2).string(m.session());
@@ -118,7 +119,11 @@ public final class PtyWire {
       case PtyMessage.Kill m -> out.type(8).string(m.session());
       case PtyMessage.Yield m -> out.type(10).string(m.session()).string(m.reason());
       case PtyMessage.IssueTicket m ->
-          out.type(11).string(m.action().wire()).string(m.target()).string(m.credential());
+          out.type(11)
+              .string(m.action().wire())
+              .string(m.target())
+              .string(m.credential())
+              .string(m.workspace());
       case PtyMessage.PutBegin m -> {
         out.type(12).i32(m.id()).string(m.name());
         out.i64(m.size());
@@ -154,7 +159,7 @@ public final class PtyWire {
       case PtyMessage.Paused m -> out.type(25);
       case PtyMessage.Continued m -> out.type(26);
       case PtyMessage.SessionEnded m -> out.type(27).string(m.reason());
-      case PtyMessage.SessionInfo m -> encodeInfo(out.type(28), m);
+      case PtyMessage.SessionInfo m -> encodePlace(encodeInfo(out.type(28), m), m);
       case PtyMessage.Sessions m -> {
         out.type(29);
         out.i32(m.sessions().size());
@@ -162,6 +167,10 @@ public final class PtyWire {
           encodeInfo(out, info);
         }
         out.string(m.next());
+        out.i32(m.sessions().size());
+        for (var info : m.sessions()) {
+          encodePlace(out, info);
+        }
       }
       case PtyMessage.Ok m -> out.type(30);
       case PtyMessage.Err m -> encodeRemedy(out.type(31).string(m.message()), m.detail());
@@ -242,6 +251,15 @@ public final class PtyWire {
     return out.string(info.writerFde()).string(info.room()).stringList(info.command());
   }
 
+  /**
+   * Where a session runs and who opened it, written after every other field of the frame, a page's
+   * after its cursor: the macOS lanes run the app against a pinned released host, which writes
+   * none, and the app reads a frame's fields up to the place.
+   */
+  private static Writer encodePlace(Writer out, PtyMessage.SessionInfo info) {
+    return out.string(info.project()).string(info.workspace()).string(info.opener());
+  }
+
   private static PtyMessage decode(ByteBuffer in) throws IOException {
     var type = in.get();
     return switch (type) {
@@ -254,7 +272,8 @@ public final class PtyWire {
               string(in),
               string(in),
               in.getInt(),
-              in.getInt());
+              in.getInt(),
+              string(in));
       case 2 -> new PtyMessage.Attach(string(in), in.get() == 1);
       case 3 -> new PtyMessage.Input(in.getLong(), bytes(in));
       case 4 -> new PtyMessage.Resize(in.getInt(), in.getInt());
@@ -265,7 +284,7 @@ public final class PtyWire {
       case 10 -> new PtyMessage.Yield(string(in), string(in));
       case 11 ->
           new PtyMessage.IssueTicket(
-              PtyMessage.TicketAction.of(string(in)), string(in), string(in));
+              PtyMessage.TicketAction.of(string(in)), string(in), string(in), string(in));
       case 12 -> new PtyMessage.PutBegin(in.getInt(), string(in), in.getLong());
       case 13 -> new PtyMessage.PutChunk(in.getInt(), in.getLong(), bytes(in));
       case 14 -> new PtyMessage.PutEnd(in.getInt(), bytes(in));
@@ -285,14 +304,23 @@ public final class PtyWire {
       case 25 -> new PtyMessage.Paused();
       case 26 -> new PtyMessage.Continued();
       case 27 -> new PtyMessage.SessionEnded(string(in));
-      case 28 -> decodeInfo(in);
+      case 28 -> decodeInfo(in).placed(string(in), string(in), string(in));
       case 29 -> {
         var count = bounded(in);
         var sessions = new ArrayList<PtyMessage.SessionInfo>(count);
         for (var i = 0; i < count; i++) {
           sessions.add(decodeInfo(in));
         }
-        yield new PtyMessage.Sessions(List.copyOf(sessions), string(in));
+        var next = string(in);
+        var placed = in.getInt();
+        if (placed != count) {
+          throw new IOException(
+              "Corrupt pty frame: a page places " + placed + " sessions but holds " + count + ".");
+        }
+        for (var i = 0; i < count; i++) {
+          sessions.set(i, sessions.get(i).placed(string(in), string(in), string(in)));
+        }
+        yield new PtyMessage.Sessions(List.copyOf(sessions), next);
       }
       case 30 -> new PtyMessage.Ok();
       case 31 -> decodeErr(in);

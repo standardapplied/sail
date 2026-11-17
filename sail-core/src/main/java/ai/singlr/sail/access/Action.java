@@ -79,6 +79,15 @@ public enum Action {
    * inbox. Whether the run executed on this box stays the event rule's own fact.
    */
   NARRATE("Narrate", "a run's reports about itself: events, session, inbox acks", "narrate"),
+  /**
+   * Entering a workspace: opening a terminal in it, or making, starting, stopping or deleting it. A
+   * workspace is its owner's, the person it was made for or the one its spec's runs act for.
+   */
+  ENTER_WORKSPACE(
+      "Enter a workspace",
+      "open a terminal in a workspace; make, start, stop or delete one",
+      "enter",
+      "workspaces"),
   /** Adding, changing or removing a project's shared files and skills. */
   SHARE(
       "Share",

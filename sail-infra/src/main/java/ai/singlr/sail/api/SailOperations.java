@@ -36,6 +36,7 @@ import ai.singlr.sail.engine.ContainerManager;
 import ai.singlr.sail.engine.ContainerState;
 import ai.singlr.sail.engine.HostInfo;
 import ai.singlr.sail.engine.NameValidator;
+import ai.singlr.sail.engine.ProjectProvisioner;
 import ai.singlr.sail.engine.RunPlace;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.SharedProjectFiles;
@@ -85,6 +86,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.TreeMap;
 import java.util.function.Function;
+import java.util.function.Predicate;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
@@ -116,7 +118,15 @@ public final class SailOperations implements HostOperations {
         new HostLanes.Catalog(
             db, projectStore, specStore, roomStore, schema, pruner, this::cliOperator);
     this.identity = new HostLanes.Identity(db, this::box, roles(), this::cliOperator);
-    this.pty = new HostLanes.Pty(db, roles(), eventStore, new BoxInstances(shell));
+    this.pty =
+        new HostLanes.Pty(
+            db,
+            roles(),
+            eventStore,
+            new BoxInstances(shell),
+            Workspaces.onThisBox(shell),
+            ProjectReader.ofCatalog(projectStore),
+            identity::workspaceOwner);
     projectSkills = new ProjectSkills(this::projectFiles);
     dispatchOps.useProjectSkills(projectSkills);
     return this;
@@ -417,6 +427,7 @@ public final class SailOperations implements HostOperations {
   }
 
   private final ShellExec shell;
+  private final SessionYield sessionYield;
   private final WatcherSpawner watcherSpawner;
   private final EventBus eventBus;
   private final SpecStore specStore;
@@ -702,6 +713,7 @@ public final class SailOperations implements HostOperations {
       SessionYield sessionYield,
       OperationHooks hooks) {
     this.shell = shell;
+    this.sessionYield = sessionYield;
     this.watcherSpawner = hooks.watcher();
     this.eventBus = eventBus;
     this.specStore = specStore;
@@ -1427,6 +1439,86 @@ public final class SailOperations implements HostOperations {
             throw ApiException.of(ErrorCode.CONTAINER_ERROR, unread);
           }
         });
+  }
+
+  @Override
+  public Result<WorkspaceCreateResponse> createWorkspace(String project, String name) {
+    return safe(
+        () ->
+            WorkspaceDoors.answered(
+                () -> {
+                  var config = projects.definition(readable(project));
+                  var created =
+                      workspaceDoors()
+                          .create(
+                              config,
+                              name,
+                              SailPaths.projectFilesDir(project),
+                              held -> projectCatalog().findByName(held).isPresent());
+                  return new WorkspaceCreateResponse(
+                      created,
+                      Actor.current().handle(),
+                      !ProjectProvisioner.inputs(config, Optional.empty())
+                          .equals(created.template().inputs()));
+                }));
+  }
+
+  @Override
+  public Result<WorkspaceChangeResponse> startWorkspace(String project, String name) {
+    return safe(
+        () ->
+            WorkspaceDoors.answered(
+                () ->
+                    new WorkspaceChangeResponse(
+                        workspaceDoors().start(projects.definition(readable(project)), name))));
+  }
+
+  @Override
+  public Result<WorkspaceChangeResponse> stopWorkspace(String project, String name) {
+    return safe(
+        () ->
+            WorkspaceDoors.answered(
+                () ->
+                    new WorkspaceChangeResponse(
+                        workspaceDoors().stop(readable(project), name, liveIn(project)))));
+  }
+
+  @Override
+  public Result<WorkspaceChangeResponse> deleteWorkspace(
+      String project, String name, boolean force) {
+    return safe(
+        () ->
+            WorkspaceDoors.answered(
+                () ->
+                    new WorkspaceChangeResponse(
+                        workspaceDoors()
+                            .delete(
+                                projects.definition(readable(project)),
+                                name,
+                                liveIn(project),
+                                force,
+                                Remedy.of(
+                                    "DELETE /v1/projects/"
+                                        + project
+                                        + "/workspaces/"
+                                        + name
+                                        + "?force=true"),
+                                instance -> {}))));
+  }
+
+  private WorkspaceDoors workspaceDoors() {
+    var box = box();
+    return new WorkspaceDoors(
+        Workspaces.onThisBox(shell),
+        shell,
+        identity()::workspaceOwner,
+        sessionYield,
+        box.isNode() ? box.handle() : null);
+  }
+
+  /** Whether a run of spec {@code spec} of {@code project} is live on this box. */
+  private Predicate<String> liveIn(String project) {
+    return spec -> runStore.liveSpecs(box().handle()).contains(project + "/" + spec);
   }
 
   @Override

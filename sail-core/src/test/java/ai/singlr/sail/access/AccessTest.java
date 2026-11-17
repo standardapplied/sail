@@ -1059,6 +1059,44 @@ class AccessTest {
         Access.decide(unplaced, Action.MANAGE_PEOPLE, PEOPLE));
   }
 
+  /**
+   * R10: a workspace is entered (a terminal opened in it; made, started, stopped or deleted) by its
+   * owner or an admin; a viewer and every agent never; one with no owner by an admin alone.
+   */
+  @Test
+  void aWorkspaceIsEnteredByItsOwnerOrAnAdminAlone() {
+    var adas = Resources.workspace("try", "acme", "ada");
+    var nobodys = Resources.workspace("try", "acme", " ");
+
+    assertEquals(
+        new Decision.Allowed(), Access.decide(Actors.OWNER_API, Action.ENTER_WORKSPACE, adas));
+    assertEquals(new Decision.Allowed(), Access.decide(Actors.ADMIN, Action.ENTER_WORKSPACE, adas));
+    assertEquals(
+        refused(
+            Refusal.Kind.NOT_OWNER,
+            "Workspace 'try' belongs to 'ada', not you.",
+            "Ask ada to enter it, or have an admin do it."),
+        Access.decide(Actors.OTHER_API, Action.ENTER_WORKSPACE, adas));
+    assertEquals(
+        Refusal.Kind.READ_ONLY,
+        ((Decision.Refused) Access.decide(Actors.VIEWER, Action.ENTER_WORKSPACE, adas))
+            .refusal()
+            .kind());
+    for (var agent : List.of(Actors.AGENT, Actors.ROOM, Actors.OWNER_IN_CONTAINER)) {
+      assertTrue(
+          Access.decide(agent, Action.ENTER_WORKSPACE, adas) instanceof Decision.Refused,
+          agent.toString());
+    }
+    assertEquals(
+        new Decision.Allowed(), Access.decide(Actors.ADMIN, Action.ENTER_WORKSPACE, nobodys));
+    assertEquals(
+        refused(
+            Refusal.Kind.NOT_OWNER,
+            "Workspace 'try' has no owner, so only an admin may enter it.",
+            "Have an admin enter it."),
+        Access.decide(Actors.OWNER_API, Action.ENTER_WORKSPACE, nobodys));
+  }
+
   @Test
   void aBoxNamingNoFdeIsNoOnesSoAnAdminsAlone() {
     var unnamed = Resources.box(" ");

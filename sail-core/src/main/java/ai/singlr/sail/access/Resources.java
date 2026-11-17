@@ -143,6 +143,15 @@ public final class Resources {
         null);
   }
 
+  /**
+   * Workspace {@code name} of {@code project}: its owner's ({@code user.sail.owner}). One with no
+   * owner, made by hand or taken back when its owner left the box, is no one's, so an admin's
+   * alone. A workspace being made is its caller's.
+   */
+  public static Resource workspace(String name, String project, String owner) {
+    return new Resource(Resource.Kind.WORKSPACE, name, project, one(owner), null, null, null, null);
+  }
+
   /** Project {@code name}, filed under itself: its creator's ({@code projects.created_by}). */
   public static Resource project(String name, String createdBy) {
     return new Resource(Resource.Kind.PROJECT, name, name, one(createdBy), null, null, null, null);

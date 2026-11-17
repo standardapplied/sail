@@ -9,6 +9,8 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import ai.singlr.sail.engine.LiveStream.Step;
 import ai.singlr.sail.engine.LiveStream.ToolCall;
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -185,5 +187,32 @@ class LiveStreamTest {
     assertEquals(
         new Step.Result(true, null, ""),
         LiveStream.read("{\"type\":\"result\",\"subtype\":\" \",\"is_error\":true}"));
+  }
+
+  /**
+   * Recorded from Claude Code 2.1.322 in the live member's streaming mode: one prompt, then two
+   * more written while it was answering the first (after its first text delta). It finished the
+   * first turn as asked, then began one more turn (a second {@code init}) and answered there; its
+   * transcript shows both later messages dequeued together into that turn's one user message. So a
+   * message written mid-turn is never folded into the turn in progress: it waits for the next turn,
+   * and every message waiting then is taken into it.
+   */
+  @Test
+  void followUpsWrittenMidTurnAreAnsweredInOneLaterTurn() throws IOException {
+    String recorded;
+    try (var in =
+        LiveStreamTest.class.getResourceAsStream("claude-code-live-follow-ups-queued.jsonl")) {
+      recorded = new String(in.readAllBytes(), StandardCharsets.UTF_8);
+    }
+    var steps = recorded.lines().map(LiveStream::read).toList();
+
+    var turns = steps.stream().filter(step -> step instanceof Step.Init).count();
+    var results =
+        steps.stream().filter(Step.Result.class::isInstance).map(Step.Result.class::cast).toList();
+    assertEquals(2, turns, "the first turn, then one more for both follow-ups");
+    assertEquals(2, results.size());
+    assertEquals(
+        true, results.getFirst().text().endsWith("ALPHA-DONE"), "the first is answered whole");
+    assertEquals("BRAVO", results.getLast().text());
   }
 }

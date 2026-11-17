@@ -11,11 +11,15 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.common.Remedied;
 import ai.singlr.sail.config.SyncConfig;
+import ai.singlr.sail.config.TestDefinitions;
 import ai.singlr.sail.engine.BoxInstances;
+import ai.singlr.sail.engine.ScriptedShellExecutor;
 import ai.singlr.sail.engine.ShellExec;
+import ai.singlr.sail.engine.TestOwners;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.ProjectScope;
 import ai.singlr.sail.identity.Role;
+import ai.singlr.sail.pty.PtyAdmission;
 import ai.singlr.sail.pty.PtyIdentity;
 import ai.singlr.sail.store.HeldProjects;
 import ai.singlr.sail.store.SchemaManager;
@@ -25,6 +29,7 @@ import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 import java.util.concurrent.TimeoutException;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -47,7 +52,10 @@ class HostPtyTest {
             db,
             TestAuth.roles(db, new SyncConfig("main", null, "root", "box")),
             null,
-            new BoxInstances(incus));
+            new BoxInstances(incus),
+            TestWorkspaces.over(incus),
+            project -> Optional.of(TestDefinitions.named(project)),
+            TestOwners::of);
   }
 
   @AfterEach
@@ -139,6 +147,159 @@ class HostPtyTest {
    * of acme, {@code slow} never answering, {@code interrupted} interrupting the asker, {@code
    * denied} refusing; each ask recorded with its bound.
    */
+  /**
+   * R10 and R15 at the terminal: workspace {@code try} is entered by its owner or an admin, found
+   * by its own instance's name and keys; another member is refused naming the owner; one the
+   * project does not have is not found; entering a stopped one starts it and gives its owner
+   * theirs.
+   */
+  @Test
+  void aWorkspaceIsEnteredByItsOwnerOrAnAdminAndAStoppedOneIsStartedForIt() throws IOException {
+    var stopped =
+        """
+        {"name": "acme-try", "status": "Stopped", "type": "container",
+         "config": {"user.sail.project": "acme", "user.sail.workspace": "try",
+                    "user.sail.ready": "1762941601000", "user.sail.owner": "ada",
+                    "user.sail.owner_id": "fde_ada"},
+         "expanded_devices": {"root": {"path": "/", "pool": "tank", "type": "disk"}}}""";
+    var box =
+        new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
+            .onOk("incus storage list --format json", TestWorkspaces.POOL)
+            .onOk("incus list ^acme-try$", "[" + stopped + "]")
+            .onOk("incus list ^acme-gone$", "[]")
+            .onOk("incus list --format json", "[" + stopped + "]");
+    var lane =
+        new HostLanes.Pty(
+            db,
+            TestAuth.roles(db, new SyncConfig("main", null, "root", "box")),
+            null,
+            new BoxInstances(box),
+            TestWorkspaces.over(box),
+            project -> Optional.of(TestDefinitions.named(project)),
+            TestOwners::of);
+    var ada = new PtyIdentity.Person(new Actor("ada", Role.MEMBER, Actor.Lane.API));
+    var bob = new PtyIdentity.Person(new Actor("bob", Role.MEMBER, Actor.Lane.API));
+    var root = new PtyIdentity.Person(new Actor("root", Role.ADMIN, Actor.Lane.API));
+
+    lane.admitWorkspace("acme", "try", ada);
+    lane.admitWorkspace("acme", "try", root);
+    var refused = assertThrows(Remedied.Io.class, () -> lane.admitWorkspace("acme", "try", bob));
+    var absent =
+        assertThrows(PtyAdmission.Absent.class, () -> lane.admitWorkspace("acme", "gone", ada));
+    lane.enterWorkspace("acme", "try", ada);
+
+    assertEquals(
+        "Workspace 'try' belongs to 'ada', not you. Ask ada to enter it, or have an admin do it.",
+        refused.getMessage());
+    assertTrue(
+        absent.getMessage().startsWith("Project 'acme' has no workspace 'gone' on this box."),
+        absent.getMessage());
+    assertTrue(box.invocations().contains("incus start acme-try"), box.invocations().toString());
+    assertTrue(box.invocations().stream().anyMatch(c -> c.contains("sail-strip")), "given ada's");
+  }
+
+  /**
+   * A terminal opened by an admin in a workspace whose labelled person is no longer active here is
+   * refused saying so, and nothing is started: the next pass makes it nobody's.
+   */
+  @Test
+  void aWorkspaceWhosePersonIsGoneIsNotStartedForATerminalSayingSo() {
+    var stopped =
+        """
+        {"name": "acme-try", "status": "Stopped", "type": "container",
+         "config": {"user.sail.project": "acme", "user.sail.workspace": "try",
+                    "user.sail.ready": "1762941601000", "user.sail.owner": "zed",
+                    "user.sail.owner_id": "fde_zed"},
+         "expanded_devices": {"root": {"path": "/", "pool": "tank", "type": "disk"}}}""";
+    var box =
+        new ScriptedShellExecutor()
+            .onOk("incus storage list --format json", TestWorkspaces.POOL)
+            .onOk("incus list --format json", "[" + stopped + "]");
+    var lane =
+        new HostLanes.Pty(
+            db,
+            TestAuth.roles(db, new SyncConfig("main", null, "root", "box")),
+            null,
+            new BoxInstances(box),
+            TestWorkspaces.over(box),
+            project -> Optional.of(TestDefinitions.named(project)),
+            handle -> {
+              throw new IllegalStateException(handle + " is not on this box's roster.");
+            });
+    var root = new PtyIdentity.Person(new Actor("root", Role.ADMIN, Actor.Lane.API));
+
+    var refused = assertThrows(IOException.class, () -> lane.enterWorkspace("acme", "try", root));
+
+    assertEquals(
+        "Workspace 'try' of acme is zed's, who is no longer active here, so it is not started: the"
+            + " next pass makes it nobody's. Delete it meanwhile with: sail project workspace"
+            + " delete acme try --force.",
+        refused.getMessage());
+    assertTrue(box.invocations().stream().noneMatch(c -> c.startsWith("incus start")));
+  }
+
+  /** A workspace Incus does not answer for, or whose start fails, opens nothing, saying why. */
+  @Test
+  void aWorkspaceIncusCannotAnswerForOrStartOpensNothingSayingWhy() throws IOException {
+    var ada = new PtyIdentity.Person(new Actor("ada", Role.MEMBER, Actor.Lane.API));
+    var stopped =
+        """
+        {"name": "acme-try", "status": "Stopped", "type": "container",
+         "config": {"user.sail.project": "acme", "user.sail.workspace": "try",
+                    "user.sail.ready": "1762941601000", "user.sail.owner": "ada",
+                    "user.sail.owner_id": "fde_ada"},
+         "expanded_devices": {"root": {"path": "/", "pool": "tank", "type": "disk"}}}""";
+    var interrupting =
+        new ShellExec() {
+          final ScriptedShellExecutor box =
+              new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
+                  .onOk("incus storage list --format json", TestWorkspaces.POOL)
+                  .onOk("incus list ^acme-try$", "[" + stopped + "]")
+                  .onOk("incus list --format json", "[" + stopped + "]");
+
+          @Override
+          public Result exec(List<String> command) throws IOException, InterruptedException {
+            return exec(command, null, Duration.ZERO);
+          }
+
+          @Override
+          public Result exec(List<String> command, Path workDir, Duration timeout)
+              throws IOException, InterruptedException {
+            if (String.join(" ", command).startsWith("incus start")) {
+              throw new InterruptedException("shutting down");
+            }
+            return box.exec(command, workDir, timeout);
+          }
+
+          @Override
+          public boolean isDryRun() {
+            return false;
+          }
+        };
+    var lane =
+        new HostLanes.Pty(
+            db,
+            TestAuth.roles(db, new SyncConfig("main", null, "root", "box")),
+            null,
+            new BoxInstances(interrupting),
+            TestWorkspaces.over(interrupting),
+            project -> Optional.of(TestDefinitions.named(project)),
+            TestOwners::of);
+
+    var slow = assertThrows(IOException.class, () -> pty.admitWorkspace("acme", "slow", ada));
+    var cut = assertThrows(IOException.class, () -> pty.admitWorkspace("acme", "interrupted", ada));
+    assertTrue(Thread.interrupted(), "the interrupt is kept");
+    var unstarted = assertThrows(IOException.class, () -> lane.enterWorkspace("acme", "try", ada));
+    assertTrue(Thread.interrupted(), "the interrupt is kept");
+
+    assertEquals(
+        "Incus did not say within 3 s what instance 'acme-slow' is, so no terminal was opened in"
+            + " it. Try again once Incus answers.",
+        slow.getMessage());
+    assertTrue(cut.getMessage().contains("'acme-interrupted'"), cut.getMessage());
+    assertTrue(unstarted.getMessage().contains("shutting down"), unstarted.getMessage());
+  }
+
   private static final class Incus implements ShellExec {
     final List<String> asked = new ArrayList<>();
 
@@ -159,8 +320,8 @@ class HostPtyTest {
                 "[{\"name\": \"acme-fix\", \"config\": {\"user.sail.project\": \"acme\","
                     + " \"user.sail.workspace\": \"fix\"}}]",
                 "");
-        case "^slow$" -> throw new TimeoutException("timed out");
-        case "^interrupted$" -> throw new InterruptedException();
+        case "^slow$", "^acme-slow$" -> throw new TimeoutException("timed out");
+        case "^interrupted$", "^acme-interrupted$" -> throw new InterruptedException();
         default -> new Result(1, "", "Error: not authorized");
       };
     }

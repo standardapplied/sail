@@ -172,6 +172,11 @@ final class FakeAgentProcess implements AgentProcess {
     private volatile boolean stdinBroken;
     private volatile boolean deaf;
     private volatile boolean waitInterrupted;
+    private volatile boolean outlivedByItsClient;
+    private boolean endHeld;
+    private boolean heldReader;
+    private boolean writeRefused;
+    private Thread reader;
     private volatile Runnable onPidAsked = () -> {};
     private volatile Runnable onClose = () -> {};
     private volatile Consumer<Signal> onSignal = signal -> {};
@@ -327,11 +332,74 @@ final class FakeAgentProcess implements AgentProcess {
       return stdinClosed;
     }
 
-    /** Blocks until the reader has taken everything said so far, or seen the process end. */
+    /**
+     * Blocks until the reader has taken everything said so far and waits for more, or, once the
+     * process ended, until its reader is done with it: what follows the end (the run finished, the
+     * member gone from its room) has happened on return.
+     */
     void settle() {
       await(
-          () -> lines.isEmpty() && (waiting || endSeen),
+          () -> lines.isEmpty() && (ended || broken != null ? endSeen : waiting),
           "nothing read the fake process of run " + runId);
+      Thread finishing;
+      lock.lock();
+      try {
+        finishing = endSeen ? reader : null;
+      } finally {
+        lock.unlock();
+      }
+      if (finishing != null && finishing != Thread.currentThread()) {
+        try {
+          if (!finishing.join(Duration.ofSeconds(PATIENCE_SECONDS))) {
+            throw new AssertionError(
+                "the reader of the fake process of run " + runId + " never finished");
+          }
+        } catch (InterruptedException e) {
+          Thread.currentThread().interrupt();
+          throw new AssertionError("interrupted while the reader of run " + runId + " finished", e);
+        }
+      }
+    }
+
+    /**
+     * What wraps the process outlives it: a line written after the process ended is taken, as the
+     * client of a container exec takes it until it notices its process gone, and never read.
+     */
+    Fake outlivedByItsClient() {
+      outlivedByItsClient = true;
+      return this;
+    }
+
+    /** Once the process ends, its reader is not told so until {@link #releasesItsEnd}. */
+    Fake holdsItsEnd() {
+      lock.lock();
+      try {
+        endHeld = true;
+      } finally {
+        lock.unlock();
+      }
+      return this;
+    }
+
+    /** The reader held at the end of the process is told it ended. */
+    void releasesItsEnd() {
+      lock.lock();
+      try {
+        endHeld = false;
+        moved.signalAll();
+      } finally {
+        lock.unlock();
+      }
+    }
+
+    /** Blocks until a write was refused because the process had ended. */
+    void awaitRefusedWrite() {
+      await(() -> writeRefused, "nothing was written to the ended fake process of run " + runId);
+    }
+
+    /** Blocks until the reader has been held at the end of the process. */
+    void awaitHeldEnd() {
+      await(() -> heldReader, "nothing read the end of the fake process of run " + runId);
     }
 
     @Override
@@ -346,6 +414,9 @@ final class FakeAgentProcess implements AgentProcess {
 
     @Override
     public void write(String line) throws IOException {
+      if (endedUnwrapped()) {
+        throw new IOException("Broken pipe");
+      }
       if (stdinBroken) {
         exits(1);
         throw new IOException("Broken pipe");
@@ -356,6 +427,17 @@ final class FakeAgentProcess implements AgentProcess {
       }
       written.add(line);
       onWrite.accept(line);
+    }
+
+    private boolean endedUnwrapped() {
+      lock.lock();
+      try {
+        writeRefused = ended && !outlivedByItsClient;
+        moved.signalAll();
+        return writeRefused;
+      } finally {
+        lock.unlock();
+      }
     }
 
     private void blockUntilEnded() {
@@ -397,11 +479,19 @@ final class FakeAgentProcess implements AgentProcess {
       try {
         while (lines.isEmpty()) {
           if (broken != null) {
+            reader = Thread.currentThread();
             endSeen = true;
             moved.signalAll();
             throw broken;
           }
           if (ended) {
+            reader = Thread.currentThread();
+            heldReader = endHeld;
+            moved.signalAll();
+            while (endHeld) {
+              moved.awaitUninterruptibly();
+            }
+            heldReader = false;
             endSeen = true;
             moved.signalAll();
             return null;
