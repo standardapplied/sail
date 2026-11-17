@@ -30,6 +30,13 @@ let calls: [String: @Sendable (SailClient) async throws -> Void] = [
     "workspace-stop": { _ = try await $0.send(.stopWorkspace("dock", project: "harbor")) },
     "workspace-delete": { _ = try await $0.send(.deleteWorkspace("dock", project: "harbor", force: true)) },
     "refusal-workspace-holds-work": { _ = try await $0.send(.deleteWorkspace("dock", project: "harbor")) },
+    "workspaces": { _ = try await $0.send(.workspaces(project: "harbor")) },
+    "workspaces-three": { _ = try await $0.send(.workspaces(project: "harbor")) },
+    "workspaces-none": { _ = try await $0.send(.workspaces(project: "harbor")) },
+    "workspaces-made": { _ = try await $0.send(.workspaces(project: "harbor")) },
+    "refusal-read-only-credential-workspace": { _ = try await $0.send(.createWorkspace("new", project: "harbor")) },
+    "refusal-conflict-workspace-exists": { _ = try await $0.send(.createWorkspace("dock", project: "harbor")) },
+    "refusal-forbidden-not-assignee": { _ = try await $0.send(.startWorkspace("dock", project: "harbor")) },
     "attention": { _ = try await $0.send(.attention(conversation: "harbor-docks")) },
     "changes": { _ = try await $0.send(.changes(since: "golden.0.0")) },
     "board-specs": { _ = try await $0.send(.specs(SpecFilter(project: "harbor"))) },
@@ -74,7 +81,8 @@ func answer<Response>(
             #expect((200 ..< 300).contains(exchange.status))
         case let .failure(.refused(refusal)):
             #expect(exchange.status >= 400)
-            #expect("refusal-" + refusal.code.rawValue.replacingOccurrences(of: "_", with: "-") == name)
+            let named = "refusal-" + refusal.code.rawValue.replacingOccurrences(of: "_", with: "-")
+            #expect(name == named || name.hasPrefix(named + "-"), "\(name) is named for another code than \(named)")
         case let .failure(error):
             Issue.record("\(name): \(error)")
         }
@@ -101,6 +109,36 @@ func answer<Response>(
         let ticket = try Endpoint.terminalTicket(open: "harbor", workspace: "dock")
             .decode(response(try Exchange("terminal-ticket-workspace")))
         #expect(ticket.ticket == "tkt_harbor")
+    }
+
+    /// The project's workspaces as the server lists them: its own container as `main`, with no
+    /// owner, and each workspace its owner's while that person is active.
+    @Test func theWorkspacesOfAProjectAreReadAsListed() throws {
+        let listed = try Endpoint.workspaces(project: "harbor").decode(response(try Exchange("workspaces")))
+        #expect(listed == WorkspaceList(project: "harbor", workspaces: [
+            WorkspaceRow(name: "main", instance: "harbor", state: .known(.notCreated), owner: nil),
+            WorkspaceRow(name: "dock", instance: "harbor-dock", state: .known(.running), owner: "uday"),
+        ]))
+    }
+
+    /// A running workspace, a stopped one and another person's, as the server lists them and as
+    /// the pane orders them for their owner: theirs first, running first; a project with none of
+    /// its own lists only its container.
+    @Test func threeWorkspacesAndNoneAreReadAsListed() throws {
+        let three = try Endpoint.workspaces(project: "harbor").decode(response(try Exchange("workspaces-three")))
+        #expect(three.rows(for: "uday").map { $0.reading(for: "uday") } == ["dock · running", "pier · stopped", "quay · running · ana"])
+        let none = try Endpoint.workspaces(project: "harbor").decode(response(try Exchange("workspaces-none")))
+        #expect(none.workspaces.map(\.name) == ["main"] && none.rows(for: "uday").isEmpty)
+    }
+
+    /// A forced delete's fix is a command, typed, never an HTTP call.
+    @Test func aDeleteThatHoldsWorkNamesTheForcedDeleteAsACommand() async throws {
+        let (result, _) = try await answer("refusal-workspace-holds-work") { client in
+            try await client.send(.deleteWorkspace("dock", project: "harbor"))
+        }
+        guard case let .failure(.refused(refusal)) = result else { Issue.record("not refused: \(result)"); return }
+        #expect(refusal.remedy.contains(.command(run: .known(.sail), verb: "project workspace delete", args: ["harbor", "dock", "--force"])))
+        #expect(!(refusal.action ?? "").contains("/v1/"))
     }
 
     @Test func aWorkspaceDoorReadsWhatItMadeOrChanged() throws {
@@ -421,7 +459,7 @@ let refusalsOfRoutesNotYetCalled: Set<String> = [
 ]
 
 /// The answers of routes this client does not call yet, recorded for the apps that will.
-let answersOfRoutesNotYetCalled: Set<String> = ["spec-measures", "specs-measures", "workspaces"]
+let answersOfRoutesNotYetCalled: Set<String> = ["spec-measures", "specs-measures"]
 
 /// The member the golden writer seats in the room.
 func expectSeated(_ member: RoomMember?, sourceLocation: SourceLocation = #_sourceLocation) {

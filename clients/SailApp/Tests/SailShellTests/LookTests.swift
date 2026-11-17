@@ -161,9 +161,9 @@ import Testing
             #expect(shell.window.makeFirstResponder(field), "\(name): the field took no focus")
             let editor = try #require(field.currentEditor() as? NSTextView)
             #expect(field.focusRingType == .none)
-            let ring = try #require(field.layer)
-            #expect(ring.borderWidth == 2, "\(name): the field is not ringed")
-            #expect(ring.borderColor == NSColor(look.accent).cgColor, "\(name): the ring is not the accent")
+            let frame = try #require(field.superview as? FieldFrame, "\(name): the field is not in the shared field style")
+            #expect(frame.ring.width == 2, "\(name): the field is not ringed")
+            #expect(frame.ring.colour == NSColor(look.accent), "\(name): the ring is not the accent")
             #expect(editor.selectedTextAttributes[.backgroundColor] as? NSColor == NSColor(look.fillSelected))
             #expect(editor.insertionPointColor == NSColor(look.accent))
             #expect(field.action == action, "\(name): Return in the field does not send \(action)")
@@ -171,6 +171,8 @@ import Testing
             #expect(pane.enroll.keyEquivalent.isEmpty, "\(name): Enroll answers Return")
             #expect(pane.signIn.keyEquivalent.isEmpty, "\(name): Sign In answers Return")
         }
+        #expect(pane.enroll.controlSize == .large && pane.enroll.intrinsicContentSize.height == shell.workspaces.make.intrinsicContentSize.height,
+                "\(name): Enroll is not the size of the fields' buttons")
     }
 
     static func hex(_ rgb: RGB) -> UInt32 {

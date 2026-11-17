@@ -19,6 +19,7 @@ import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.WorkspaceOwner;
 import ai.singlr.sail.engine.Workspaces;
 import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.pty.PtyAdmission;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.util.Objects;
@@ -103,12 +104,14 @@ public final class WorkspaceDoors {
             + "'s node, where only "
             + keeper
             + " makes or enters a workspace; another person's workspaces live on main.",
-        "Make yours on main: POST /v1/projects/<project>/workspaces on main's API.");
+        "Workspaces are made on main: make yours there.");
   }
 
   /**
    * {@code door}'s answer, its refusals as the API says them: a busy runner, a refusal of what the
-   * workspace or the request is, and Incus failing, each with its own code.
+   * workspace or the request is, and Incus failing, each with its own code. Only words written for
+   * a person ({@link Remedied}) reach one: any other failure, a tool's output say, goes to the log,
+   * and the person reads {@link PtyAdmission.Unavailable#UNFINISHED}.
    */
   static <T> T answered(Callable<T> door) {
     try {
@@ -119,13 +122,23 @@ public final class WorkspaceDoors {
       throw new ApiException(ErrorCode.RUNNER_BUSY, busy.getMessage());
     } catch (Workspaces.Absent absent) {
       throw ApiException.of(ErrorCode.NOT_FOUND, absent);
-    } catch (IllegalStateException refused) {
-      throw ApiException.of(ErrorCode.CONFLICT, refused);
     } catch (InterruptedException interrupted) {
       Thread.currentThread().interrupt();
       throw new ApiException(ErrorCode.INTERNAL, "Interrupted.", interrupted);
     } catch (Exception failed) {
-      throw ApiException.of(ErrorCode.CONTAINER_ERROR, failed);
+      if (failed instanceof Remedied) {
+        throw ApiException.of(
+            failed instanceof IllegalStateException
+                ? ErrorCode.CONFLICT
+                : ErrorCode.CONTAINER_ERROR,
+            failed);
+      }
+      ApiLog.unexpected("a workspace door", failed);
+      throw new ApiException(
+          ErrorCode.CONTAINER_ERROR,
+          PtyAdmission.Unavailable.UNFINISHED,
+          PtyAdmission.Unavailable.REMEDY,
+          failed);
     }
   }
 

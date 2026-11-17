@@ -3885,7 +3885,7 @@ class WorkspacesTest {
             .on(
                 "sail-held",
                 new ShellExec.Result(
-                    1, "", "a token this build was given in /home/dev/.netrc, a gh login\n"));
+                    1, "a token this build was given in /home/dev/.netrc, a gh login\n", ""));
     var unsure =
         incus(DIR_AND_ZFS, list(template("v1", "an-older-definition")), snapshots("v1"))
             .on(
@@ -3919,9 +3919,14 @@ class WorkspacesTest {
   @Test
   void aTemplateStillHoldingACredentialFailsItsBuildAndTheVersionBeforeStaysCurrent() {
     for (var failing : List.of("sail-held", "sail-strip")) {
+      var started =
+          incus(DIR_AND_ZFS, list(template("v1", "an-older-definition")), snapshots("v1"));
       var shell =
-          incus(DIR_AND_ZFS, list(template("v1", "an-older-definition")), snapshots("v1"))
-              .onFail(failing, "it still holds .git-credentials user.email");
+          failing.equals("sail-held")
+              ? started.on(
+                  failing,
+                  new ShellExec.Result(1, "it still holds .git-credentials user.email\n", ""))
+              : started.onFail(failing, "it still holds .git-credentials user.email");
 
       var failure =
           assertThrows(IOException.class, () -> templates(shell).ensure(acme(), source()));

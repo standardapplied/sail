@@ -9,6 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.common.Remedied;
 import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.config.ProjectDefinition;
 import ai.singlr.sail.config.SyncConfig;
@@ -508,7 +509,8 @@ class WorkspaceDoorsTest {
       release.countDown();
       other.join();
     }
-    var conflict = answered(new IllegalStateException("taken"));
+    var conflict = answered(Remedied.state("Workspace 'try' of acme exists already.", Remedy.NONE));
+    var unwritten = answered(new IllegalStateException("taken"));
     var incus = answered(new IOException("Error: Failed to start device"));
     var interrupted = answered(new InterruptedException());
     var kept = Thread.interrupted();
@@ -518,8 +520,15 @@ class WorkspaceDoorsTest {
     assertEquals(
         "This runner is making another workspace, which takes about a minute.", busy.getMessage());
     assertEquals(ErrorCode.CONFLICT, conflict.failure().errorCode());
-    assertEquals(ErrorCode.CONTAINER_ERROR, incus.failure().errorCode());
-    assertEquals("Error: Failed to start device", incus.getMessage());
+    assertEquals("Workspace 'try' of acme exists already.", conflict.getMessage());
+    for (var unsaid : List.of(unwritten, incus)) {
+      assertEquals(ErrorCode.CONTAINER_ERROR, unsaid.failure().errorCode());
+      assertEquals(
+          "The runner could not finish that.",
+          unsaid.getMessage(),
+          "words written for no person go to the log, never to one");
+      assertEquals("An admin looks at the runner.", unsaid.failure().remedy().plain());
+    }
     assertEquals(ErrorCode.INTERNAL, interrupted.failure().errorCode());
     assertTrue(kept, "the interrupt is kept");
     assertEquals(
@@ -618,8 +627,7 @@ class WorkspaceDoorsTest {
               + " person's workspaces live on main.",
           capped.getMessage());
       assertEquals(
-          "Make yours on main: POST /v1/projects/<project>/workspaces on main's API.",
-          capped.failure().remedy().plain());
+          "Workspaces are made on main: make yours there.", capped.failure().remedy().plain());
       assertEquals(List.of("start"), changes(onNode));
       assertEquals(
           "Workspace 'try' has no owner, so only an admin may enter it.", mainRefuses.getMessage());

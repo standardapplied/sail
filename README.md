@@ -363,6 +363,17 @@ deleted it, as `stop` does. The same
 doors are on the API (`POST /v1/projects/{p}/workspaces`, `…/{w}/start`, `…/{w}/stop`, `DELETE
 …/{w}`), and a terminal ticket names its workspace (`"workspace": "fix-login"`).
 
+**From the Sail app.** Signed in to main, the rail shows Workspaces. Pick a project and you see its
+workspaces on the runner, yours first, each with its state; another person's is named as theirs.
+Name one and press Make to make your own (about 3 s). Open one (the button, Return or a double
+click) for a terminal in it, as a tab named `acme · try` beside your Mac's own tabs: it types,
+splits and pastes as a local tab does, reconnects on its own after a dropped network, and opens a
+stopped workspace by starting it. Stopped or deleted from elsewhere, the tab keeps its last screen
+with the server's line saying who did it, and offers Open Again. A refusal shows the server's
+sentence and what you can do in the app; the app never asks you to type a command. A terminal on
+the runner does not outlive the app: closing its tab ends it, and quitting asks once, then ends
+every runner terminal, saying any it could not reach.
+
 `create` says how long each phase took, for example `Created fix-login from v1 in 3.2 s (clone 0.5 s,
 start 0.4 s, ready 2.3 s)`; `--json` breaks the readiness down step by step (`ready_steps`).
 

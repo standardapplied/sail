@@ -1,4 +1,5 @@
 import AppKit
+import SailAPI
 import SailLook
 import SailSurface
 import SailTerminal
@@ -21,6 +22,11 @@ public final class WorkbenchView: NSView {
     var onTitle: @MainActor (String) -> Void = { _ in }
     /// Asked to show "This Mac", for a command given while it is not shown.
     var onShow: @MainActor () -> Void = {}
+    /// Who is signed in now and where they ask tickets, nil while no one is: a tab in a workspace
+    /// asks it at every ticket (``SignedInTickets``), so it never holds a sign-in of its own.
+    var signedIn: @MainActor @Sendable () -> (handle: String, tickets: any TicketSource)? = { nil }
+    /// Asked to show the account, where a runner tab's lapsed sign-in is signed in again.
+    var onSignIn: @MainActor () -> Void = {}
 
     let palette: Palette
     var look: Look {
@@ -38,6 +44,8 @@ public final class WorkbenchView: NSView {
     static let keepDelay = 0.3
     /// The arrangement is the person's from here on: restored, so worth keeping.
     private(set) var restored = false
+    /// Workspaces asked to open before the first restore, opened once it has replaced the model.
+    private var pendingWorkspaces: [Place] = []
 
     init(fonts directory: URL, helper: String?, look: Look) throws(ShellError) {
         self.look = look
@@ -87,7 +95,7 @@ public final class WorkbenchView: NSView {
             try await host.ensureServing { [weak self] sentence in await self?.tell(sentence) }
             listed = try await SessionListing.sessions(at: host.address)
         } catch {
-            banner.show(TerminalPane.sentence("\(error)"), button: "Try Again") { [weak self] in
+            banner.show(Said.sentence("\(error)"), button: "Try Again") { [weak self] in
                 Task { await self?.restore() }
             }
             return
@@ -100,7 +108,10 @@ public final class WorkbenchView: NSView {
             if makeView(pane, start: .attach, points: FontLadder.standard) == nil { model.close(pane.id) }
         }
         model.fit(in: room, minimum: minimum(of: Array(panes.values)), scale: scale)
-        if model.tabs.isEmpty { openTab() } else { apply() }
+        let waiting = pendingWorkspaces
+        pendingWorkspaces = []
+        if model.tabs.isEmpty, waiting.isEmpty { openTab() } else { apply() }
+        waiting.forEach(openTab(in:))
     }
 
     func detachAll() {
@@ -193,12 +204,14 @@ public final class WorkbenchView: NSView {
         guard let tab = model.tab(holding: pane.id) else { return nil }
         let view: TerminalPane
         do {
-            view = try TerminalPane(pane, start: start, host: host, fonts: fonts, points: points, look: look, palette: palette)
+            let tickets = pane.place.onRunner ? signedIn().map { SignedInTickets(for: $0.handle, current: signedIn) } : nil
+            view = try TerminalPane(pane, start: start, host: host, runner: tickets, fonts: fonts, points: points, look: look, palette: palette)
         } catch {
-            banner.show(TerminalPane.sentence(error.description))
+            banner.show(Said.sentence(error.description))
             return nil
         }
         view.onEvent = { [weak self] view, event in self?.handle(event, from: view) }
+        view.onSignIn = { [weak self] in self?.onSignIn() }
         view.terminal.contextMenu = { [weak self] in self?.paneMenu() }
         view.terminal.onFocus = { [weak self, id = pane.id] in self?.focusClicked(id) }
         panes[pane.id] = view
@@ -321,8 +334,36 @@ public final class WorkbenchView: NSView {
     }
 
     private func openTab() {
-        let place = newPlace()
+        openTab(in: newPlace())
+    }
+
+    /// A tab with a terminal in workspace `name` of `project`, beside this Mac's own; before the
+    /// first restore, once it is done, as it replaces the model.
+    func openWorkspace(project: String, name: String) {
+        let place = Place.workspace(project: project, name: name)
+        guard restored else { return pendingWorkspaces.append(place) }
+        openTab(in: place)
+    }
+
+    private func openTab(in place: Place) {
         open(model.newTab(session: place.newSessionName, place: place), points: points)
+    }
+
+    /// The panes whose sessions are on the runner, which do not outlive the app.
+    var runnerPanes: [TerminalPane] {
+        panes.values.filter(\.place.onRunner).sorted { $0.id < $1.id }
+    }
+
+    /// What a person calls `view`: its tab's title, never its session's name.
+    func title(of view: TerminalPane) -> String {
+        model.tab(holding: view.id).map { model.title(of: $0.id) } ?? view.place.label ?? "A terminal on the runner"
+    }
+
+    /// Takes every runner tab away, its session ended or left to the runner: what follows a
+    /// sign-out, so no tab outlives the sign-in it was opened under.
+    func removeRunnerPanes() {
+        runnerPanes.forEach(remove)
+        apply()
     }
 
     @objc public func newTab(_: Any?) {
@@ -340,7 +381,8 @@ public final class WorkbenchView: NSView {
     }
 
     private func split(_ axis: Axis) {
-        let place = newPlace(), size = points
+        let size = points
+        let place = if let focused = model.focusedPane, focused.place.onRunner { focused.place } else { newPlace() }
         guard let id = model.split(axis, session: place.newSessionName, place: place, in: room, minimum: minimum, scale: scale) else {
             return NSSound.beep()
         }
@@ -380,17 +422,42 @@ public final class WorkbenchView: NSView {
     /// attached may.
     private func confirm(ending views: [TerminalPane], question: String, detail: String) {
         guard views.contains(where: \.mayEndAProgram), let window else { return end(views) }
-        Confirmation.ask(question, detail: detail + " Quitting Sail instead leaves every terminal running.", action: "Close", on: window) { [weak self] close in
+        let onThisMac = views.allSatisfy { !$0.place.onRunner }
+        Confirmation.ask(question, detail: detail + (onThisMac ? " Quitting Sail instead leaves every terminal running." : ""), action: "Close", on: window) { [weak self] close in
             if close { self?.end(views) }
         }
     }
 
+    /// Ends `views`' sessions. A runner tab stays until the runner says its session ended (or had
+    /// already); when the runner does not confirm, the tab says so and offers to end it again or to
+    /// close it anyway, never vanishing as if it had ended.
     private func end(_ views: [TerminalPane]) {
         for view in views where panes[view.id] === view {
-            view.end()
-            remove(view)
+            guard view.place.onRunner, let ending = view.end() else {
+                view.end()
+                remove(view)
+                continue
+            }
+            view.showEnding()
+            Task { [weak self] in
+                let outcome = await ending.value
+                self?.settle(view, outcome)
+            }
         }
         apply()
+    }
+
+    private func settle(_ view: TerminalPane, _ outcome: EndOutcome) {
+        guard panes[view.id] === view else { return }
+        guard !outcome.closesTab, case let .unconfirmed(why) = outcome else {
+            remove(view)
+            return apply()
+        }
+        view.showUnended(why, endAgain: { [weak self] in self?.end([view]) }, closeAnyway: { [weak self] in
+            guard let self, panes[view.id] === view else { return }
+            remove(view)
+            apply()
+        })
     }
 
     @objc public func zoomSplit(_: Any?) {

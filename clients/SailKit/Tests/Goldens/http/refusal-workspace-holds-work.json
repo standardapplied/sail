@@ -6,10 +6,24 @@
   "response": {
     "body": {
       "error": {
-        "action": "Take what it holds first, or delete it anyway: DELETE /v1/projects/harbor/workspaces/dock?force=true",
+        "action": "Take what it holds first, or delete it anyway: project workspace delete harbor dock --force",
         "code": "workspace_holds_work",
         "field_errors": [],
-        "message": "Workspace dock of harbor, uday's, holds work: app holds uncommitted changes."
+        "message": "Workspace dock of harbor, uday's, holds work: app holds uncommitted changes.",
+        "remedy": [
+          {
+            "text": "Take what it holds first, or delete it anyway: "
+          },
+          {
+            "args": [
+              "harbor",
+              "dock",
+              "--force"
+            ],
+            "run": "sail",
+            "verb": "project workspace delete"
+          }
+        ]
       },
       "schema_version": 1
     },

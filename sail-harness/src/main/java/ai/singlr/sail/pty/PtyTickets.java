@@ -51,13 +51,20 @@ final class PtyTickets {
     }
 
     /**
-     * Why {@code message} lies outside this ticket, on a connection that opened {@code opened}
-     * (null for none), or null when it does not: an open ticket creates one session in its project
-     * and attaches to that session; an attach ticket attaches to its session; either then writes,
-     * resizes, takes the write token and detaches, and does nothing else.
+     * Why {@code message} lies outside this ticket, on a connection that opened {@code opened} and
+     * holds the write token of {@code writing} (null for none), or null when it does not: an open
+     * ticket creates one session in its project and attaches to that session; an attach ticket
+     * attaches to its session; either then writes, resizes, takes the write token and detaches,
+     * ends its own session while it holds that session's write token, and does nothing else.
      */
-    PtyMessage.Err refusal(PtyMessage message, String opened) {
+    PtyMessage.Err refusal(PtyMessage message, String opened, String writing) {
       var opens = action == PtyMessage.TicketAction.OPEN;
+      var own = opens ? opened : target;
+      if (message instanceof PtyMessage.Kill m
+          && m.session().equals(own)
+          && !m.session().equals(writing)) {
+        return new PtyMessage.Err(NOT_THE_WRITER);
+      }
       var covered =
           switch (message) {
             case PtyMessage.Create m ->
@@ -65,7 +72,8 @@ final class PtyTickets {
                     && opened == null
                     && target.equals(m.project())
                     && workspace.equals(m.workspace());
-            case PtyMessage.Attach m -> m.session().equals(opens ? opened : target);
+            case PtyMessage.Attach m -> m.session().equals(own);
+            case PtyMessage.Kill m -> m.session().equals(own) && m.session().equals(writing);
             case PtyMessage.Input m -> true;
             case PtyMessage.Resize m -> true;
             case PtyMessage.TakeWrite m -> true;
@@ -85,6 +93,14 @@ final class PtyTickets {
                   + ", and it admits nothing else; ask the API for a ticket for that.");
     }
   }
+
+  /**
+   * Why a connection's Kill of its own session is refused: it does not hold the session's write
+   * token, which another connection may, or none once the session ended.
+   */
+  static final String NOT_THE_WRITER =
+      "This connection does not hold the terminal's keyboard, so it was not ended; someone else"
+          + " may hold it.";
 
   private record Issued(byte[] hash, Ticket ticket, long issuedAt) {}
 

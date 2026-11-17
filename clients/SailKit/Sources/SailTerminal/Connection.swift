@@ -1,3 +1,4 @@
+import Foundation
 import SailTerminalWire
 import Synchronization
 
@@ -181,4 +182,12 @@ extension Frame {
         case .refused: "Refused"
         }
     }
+}
+
+/// What `work` answers, run on a thread of its own, as every blocking exchange with a host is.
+func offThread<T: Sendable>(_ work: @escaping @Sendable () throws(TerminalError) -> T) async throws(TerminalError) -> T {
+    let result: Result<T, TerminalError> = await withCheckedContinuation { answer in
+        Thread { answer.resume(returning: Result { () throws(TerminalError) in try work() }) }.start()
+    }
+    return try result.get()
 }

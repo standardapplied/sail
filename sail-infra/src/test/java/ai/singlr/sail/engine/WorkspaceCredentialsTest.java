@@ -59,7 +59,10 @@ class WorkspaceCredentialsTest {
     file.toFile().setExecutable(true);
   }
 
-  private record Ran(int exit, String err) {}
+  /**
+   * How the script ended, and all it said: its answer on stdout, why it could not tell on stderr.
+   */
+  private record Ran(int exit, String said) {}
 
   private static String read(Path file) {
     try {
@@ -104,17 +107,17 @@ class WorkspaceCredentialsTest {
             .replace("-o dev -g dev ", "");
     var command = new ArrayList<>(List.of("bash", "-c", rooted, "sail-test"));
     command.addAll(List.of(args));
-    var err = Files.createTempFile(bin, "err", ".txt");
+    var said = Files.createTempFile(bin, "said", ".txt");
     var process =
         environment(new ProcessBuilder(command))
-            .redirectOutput(ProcessBuilder.Redirect.DISCARD)
-            .redirectError(err.toFile())
+            .redirectErrorStream(true)
+            .redirectOutput(said.toFile())
             .start();
     try (var in = process.getOutputStream()) {
       in.write(stdin.getBytes(StandardCharsets.UTF_8));
     }
     assertTrue(process.waitFor(60, TimeUnit.SECONDS), "the script ends");
-    return new Ran(process.exitValue(), Files.readString(err));
+    return new Ran(process.exitValue(), Files.readString(said));
   }
 
   private void builderLeftEverything() throws Exception {
@@ -138,7 +141,7 @@ class WorkspaceCredentialsTest {
     assertEquals(0, script(WorkspaceCredentials.STRIP, "").exit());
     var checked = script(WorkspaceCredentials.HELD, TOKEN + "\n");
 
-    assertEquals(0, checked.exit(), checked.err());
+    assertEquals(0, checked.exit(), checked.said());
     assertFalse(Files.exists(root.resolve("home/dev/.git-credentials")));
     assertFalse(Files.exists(root.resolve("home/dev/.config/gh/hosts.yml")));
     assertEquals("", Files.readString(root.resolve("home/dev/.ssh/authorized_keys")));
@@ -188,8 +191,8 @@ class WorkspaceCredentialsTest {
     Files.writeString(root.resolve("home/dev/.git-credentials.sail-new"), TOKEN + "\n");
     var all = script(WorkspaceCredentials.STRIP, "");
 
-    assertEquals(0, some.exit(), some.err());
-    assertEquals(0, all.exit(), all.err());
+    assertEquals(0, some.exit(), some.said());
+    assertEquals(0, all.exit(), all.said());
     for (var file : WorkspaceCredentials.FILES) {
       assertFalse(Files.exists(root.resolve(file.substring(1))), file);
     }
@@ -224,9 +227,9 @@ class WorkspaceCredentialsTest {
 
       var checked = script(WorkspaceCredentials.HELD, TOKEN + "\n");
 
-      assertEquals(1, checked.exit(), hidden + ": " + checked.err());
-      assertTrue(checked.err().contains(hidden), checked.err());
-      assertFalse(checked.err().contains(TOKEN), "the check never says the token");
+      assertEquals(1, checked.exit(), hidden + ": " + checked.said());
+      assertTrue(checked.said().contains(hidden), checked.said());
+      assertFalse(checked.said().contains(TOKEN), "the check never says the token");
       Files.delete(file);
     }
   }
@@ -240,10 +243,10 @@ class WorkspaceCredentialsTest {
     git("config", "--global", "user.name", "Builder");
     var global = script(WorkspaceCredentials.HELD, "");
 
-    assertEquals(1, system.exit(), system.err());
-    assertTrue(system.err().contains("a system git user.email"), system.err());
-    assertEquals(1, global.exit(), global.err());
-    assertTrue(global.err().contains("a global git user.name"), global.err());
+    assertEquals(1, system.exit(), system.said());
+    assertTrue(system.said().contains("a system git user.email"), system.said());
+    assertEquals(1, global.exit(), global.said());
+    assertTrue(global.said().contains("a global git user.name"), global.said());
   }
 
   /** (c) A line in any home's authorized_keys fails the check. */
@@ -254,8 +257,8 @@ class WorkspaceCredentialsTest {
 
     var checked = script(WorkspaceCredentials.HELD, "");
 
-    assertEquals(1, checked.exit(), checked.err());
-    assertTrue(checked.err().contains("home/ubuntu/.ssh/authorized_keys"), checked.err());
+    assertEquals(1, checked.exit(), checked.said());
+    assertTrue(checked.said().contains("home/ubuntu/.ssh/authorized_keys"), checked.said());
   }
 
   /** (d) A gh login fails the check. */
@@ -266,8 +269,8 @@ class WorkspaceCredentialsTest {
 
     var checked = script(WorkspaceCredentials.HELD, "");
 
-    assertEquals(1, checked.exit(), checked.err());
-    assertTrue(checked.err().contains("a gh login"), checked.err());
+    assertEquals(1, checked.exit(), checked.said());
+    assertTrue(checked.said().contains("a gh login"), checked.said());
   }
 
   /**
@@ -279,8 +282,8 @@ class WorkspaceCredentialsTest {
 
     var checked = script(WorkspaceCredentials.HELD, "");
 
-    assertEquals(2, checked.exit(), checked.err());
-    assertTrue(checked.err().contains("git could not read"), checked.err());
+    assertEquals(2, checked.exit(), checked.said());
+    assertTrue(checked.said().contains("git could not read"), checked.said());
   }
 
   /**
@@ -303,10 +306,10 @@ class WorkspaceCredentialsTest {
             + " \"$@\"\n");
     var broken = script(WorkspaceCredentials.HELD, TOKEN + "\n");
 
-    assertEquals(2, empty.exit(), empty.err());
-    assertTrue(empty.err().contains("an empty token matches every file"), empty.err());
-    assertEquals(2, broken.exit(), broken.err());
-    assertTrue(broken.err().contains("the search for the build's tokens failed"), broken.err());
+    assertEquals(2, empty.exit(), empty.said());
+    assertTrue(empty.said().contains("an empty token matches every file"), empty.said());
+    assertEquals(2, broken.exit(), broken.said());
+    assertTrue(broken.said().contains("the search for the build's tokens failed"), broken.said());
   }
 
   /** A token in many files names three of them and how many more, never a list without end. */
@@ -319,10 +322,10 @@ class WorkspaceCredentialsTest {
 
     var checked = script(WorkspaceCredentials.HELD, TOKEN + "\n");
 
-    assertEquals(1, checked.exit(), checked.err());
-    assertTrue(checked.err().contains("copy "), checked.err());
-    assertTrue(checked.err().strip().endsWith("and 2 more"), checked.err());
-    assertFalse(checked.err().contains(TOKEN), checked.err());
+    assertEquals(1, checked.exit(), checked.said());
+    assertTrue(checked.said().contains("copy "), checked.said());
+    assertTrue(checked.said().strip().endsWith("and 2 more"), checked.said());
+    assertFalse(checked.said().contains(TOKEN), checked.said());
   }
 
   /** A clean container passes, with no token given or with the build's. */

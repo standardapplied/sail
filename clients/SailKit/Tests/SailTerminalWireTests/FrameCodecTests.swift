@@ -32,15 +32,15 @@ import Testing
             action: .known(.open), target: "harbor", credential: "sail_uday", workspace: "dock"
         ))
         #expect(frames["Ticket"] == .ticket("tkt_harbor"))
-        #expect(frames["TicketRefused"] == .ticketRefused(kind: .known(.notFound), remedy: [
-            .words("Project 'harbor' is not in the catalog. Run '"),
+        #expect(frames["TicketRefused"] == .ticketRefused(kind: .known(.notFound), reason: "Project 'harbor' is not in the catalog.", remedy: [
+            .words("Run '"),
             .command(run: .known(.sail), verb: "sync", args: []),
             .words("'."),
         ]))
         #expect(frames["Err"] == .refused(HostRefusal(
-            message: "You do not hold the write token. Run sail session take lounge to take it.",
+            message: "You do not hold the write token.",
             remedy: [
-                .words("You do not hold the write token. Run "),
+                .words("Run "),
                 .command(run: .known(.sail), verb: "session", args: ["take", "lounge"]),
                 .words(" to take it."),
             ]
@@ -53,7 +53,7 @@ import Testing
         let bare = lengthPrefixed(Array(err[4 ..< 5 + message]))
         let frame = try decoded(bare)
         #expect(frame == .refused(HostRefusal(
-            message: "You do not hold the write token. Run sail session take lounge to take it.",
+            message: "You do not hold the write token.",
             remedy: nil
         )))
         #expect(try FrameCodec.encode(frame) == bare)
@@ -66,9 +66,9 @@ import Testing
         grown.replaceSubrange(runner, with: Array("TUGS".utf8))
         let frame = try decoded(grown)
         #expect(frame == .refused(HostRefusal(
-            message: "You do not hold the write token. Run sail session take lounge to take it.",
+            message: "You do not hold the write token.",
             remedy: [
-                .words("You do not hold the write token. Run "),
+                .words("Run "),
                 .command(run: .unknown("TUGS"), verb: "session", args: ["take", "lounge"]),
                 .words(" to take it."),
             ]

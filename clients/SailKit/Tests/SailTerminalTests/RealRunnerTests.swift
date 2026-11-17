@@ -46,7 +46,7 @@ struct RealRunnerTests {
     @Test(.enabled(if: RealRunner.project != nil))
     func aTicketOlderThanThirtySecondsIsRefused() async throws {
         let runner = try RealRunner()
-        let ticket = try await runner.client.ticket(for: .open(project: try #require(RealRunner.project)))
+        let ticket = try await runner.client.ticket(for: .open(project: try #require(RealRunner.project), workspace: ""))
         try await Task.sleep(for: .seconds(max(0, ticket.expiresAt.timeIntervalSinceNow) + 2))
         await #expect(throws: TerminalError.self) { try await present(ticket) }
     }
@@ -77,8 +77,44 @@ struct RealRunnerTests {
         let theirs = TerminalSession(attach: name, write: true, door: .runner(runner.other), screen: try screen())
         let watch = Watch(theirs)
         theirs.start()
-        try await watch.phase(.ended(.refused("There is no session '\(name)' on this box that you may attach.")), within: 30)
+        let words = "There is no session '\(name)' on this box that you may attach."
+        try await watch.until(within: 30, "the API's refusal of the ticket, in the host's sentence") {
+            if case let .ended(.ticketRefused(refusal)) = theirs.state.phase { refusal.message == words } else { false }
+        }
         session.close()
+    }
+
+    /// Closing a runner tab ends its session at the host, through an attach ticket of its own
+    /// attached as the writer; an observer's Kill is refused in the door's words first, and the
+    /// ended session is not attached again.
+    @Test func aClosedTabEndsItsSessionAtTheHostAndAnObserverEndsNone() async throws {
+        let runner = try RealRunner()
+        let (session, _) = try await runner.ours()
+        let name = session.state.session
+        let observed = try await runner.client.ticket(for: .attach(session: name))
+        let observerRefused = try await onThread { () throws -> HostRefusal? in
+            let connection = try Connection.connect(to: try HostAddress(ticketAddress: observed.address), timeout: 10)
+            defer { connection.close() }
+            _ = try connection.admit(token: observed.ticket)
+            try connection.send(.attach(session: name, write: false))
+            try connection.send(.kill(session: name))
+            while let frame = try connection.next() {
+                if case let .refused(refusal) = frame { return refusal }
+            }
+            return nil
+        }
+        #expect(
+            observerRefused?.message
+                == "This connection does not hold the terminal's keyboard, so it was not ended; someone else may hold it.",
+            "an observer's Kill of its own session is refused, the door saying why")
+        session.close()
+        #expect(await Door.runner(runner.client).end(name) == .ended)
+        do {
+            _ = try await runner.client.ticket(for: .attach(session: name))
+            Issue.record("a ticket was issued to attach to the ended session")
+        } catch let .refused(refusal) {
+            #expect(refusal.message == "There is no session '\(name)' on this box that you may attach.")
+        }
     }
 }
 

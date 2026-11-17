@@ -5,6 +5,8 @@
 
 package ai.singlr.sail.engine;
 
+import java.io.IOException;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
@@ -18,7 +20,8 @@ import org.junit.jupiter.api.extension.ExtensionContext;
  * or the box's provisioned {@code /var/lib/sail}, whose lock files, database and configuration a
  * test would then share with that Sail and with every other test JVM. Registered for every test run
  * of every module, however it is started (Maven's surefire and failsafe, an IDE), through JUnit's
- * extension auto-detection; Maven's runs give each JVM a Sail of its own.
+ * extension auto-detection; Maven's runs give each JVM a Sail of its own, whose home and Sail
+ * directory this makes exist, as a box's Sail has them, whichever test of the JVM runs first.
  */
 public final class OwnSailGuard implements BeforeAllCallback {
 
@@ -31,7 +34,7 @@ public final class OwnSailGuard implements BeforeAllCallback {
           SailPaths.systemDataDir());
 
   @Override
-  public void beforeAll(ExtensionContext context) {
+  public void beforeAll(ExtensionContext context) throws IOException {
     if (!REAL.isEmpty()) {
       throw new IllegalStateException(
           "This test JVM would use a real Sail: "
@@ -41,6 +44,7 @@ public final class OwnSailGuard implements BeforeAllCallback {
               + SailPaths.NEVER_THE_SYSTEM_SAIL
               + "=true.");
     }
+    Files.createDirectories(SailPaths.sailDir());
   }
 
   /**

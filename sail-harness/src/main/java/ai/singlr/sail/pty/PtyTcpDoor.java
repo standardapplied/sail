@@ -6,7 +6,6 @@
 package ai.singlr.sail.pty;
 
 import ai.singlr.sail.common.Rebinding;
-import ai.singlr.sail.common.Remedied;
 import ai.singlr.sail.config.ListenConfig;
 import java.io.IOException;
 import java.net.InetAddress;
@@ -285,7 +284,7 @@ final class PtyTcpDoor implements AutoCloseable {
           ticket::refusal);
     } catch (IOException refused) {
       refused(refused.getMessage());
-      PtySessionHost.reply(channel, new PtyMessage.Err(Remedied.whole(refused)));
+      PtySessionHost.reply(channel, PtyMessage.Err.of(refused));
       return null;
     } catch (RuntimeException unavailable) {
       PtySessionHost.log("exception", "?", "-", "tcp: " + unavailable);

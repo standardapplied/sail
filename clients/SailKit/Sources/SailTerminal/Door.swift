@@ -20,17 +20,20 @@ public enum Door: Sendable {
                 ticket = try await source.ticket(for: request)
             } catch let .refused(refusal) {
                 throw .ticketRefused(refusal)
+            } catch let .signIn(needed) {
+                throw .signIn(needed)
             } catch {
-                throw .unreachable("the ticket could not be asked: \(error)")
+                throw .controlPlane(error)
             }
             return (try HostAddress(ticketAddress: ticket.address), ticket.ticket)
         }
     }
 }
 
-/// What a ticket is asked for: to open a session in a project, or to attach to one.
+/// What a ticket is asked for: to open a session in a project's workspace (blank for the project's
+/// own container), or to attach to one.
 public enum TicketRequest: Equatable, Sendable {
-    case open(project: String)
+    case open(project: String, workspace: String)
     case attach(session: String)
 }
 
@@ -42,8 +45,27 @@ public protocol TicketSource: Sendable {
 extension SailClient: TicketSource {
     public func ticket(for request: TicketRequest) async throws(SailError) -> TerminalTicket {
         switch request {
-        case let .open(project): try await send(.terminalTicket(open: project))
+        case let .open(project, workspace): try await send(.terminalTicket(open: project, workspace: workspace))
         case let .attach(session): try await send(.terminalTicket(attach: session))
         }
+    }
+}
+
+/// The tickets of whoever is signed in now, asked of at every ticket, for a terminal opened by
+/// `handle`: so a reconnect, Open Again or an end use the sign-in of the moment, never one the
+/// person signed out of, and a terminal opened by one person never asks as another.
+public final class SignedInTickets: TicketSource {
+    public let handle: String
+    private let current: @MainActor @Sendable () -> (handle: String, tickets: any TicketSource)?
+
+    public init(for handle: String, current: @escaping @MainActor @Sendable () -> (handle: String, tickets: any TicketSource)?) {
+        self.handle = handle
+        self.current = current
+    }
+
+    public func ticket(for request: TicketRequest) async throws(SailError) -> TerminalTicket {
+        guard let signedIn = await current() else { throw .signIn(.signedOut) }
+        guard signedIn.handle == handle else { throw .signIn(.another(owner: handle, signedIn: signedIn.handle)) }
+        return try await signedIn.tickets.ticket(for: request)
     }
 }

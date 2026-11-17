@@ -700,10 +700,6 @@ public final class ApiRouter implements HttpHandler, RouteTable {
     throw methodNotAllowed();
   }
 
-  /**
-   * A terminal ticket for the caller, issued for the credential it presented here; as a path no
-   * route serves on a box that offers no terminal over the network.
-   */
   /** {@code POST /v1/projects/{p}/workspaces} with {@code {"name": ...}}: the caller's own. */
   private ApiResponse createWorkspace(Call call) throws IOException {
     if (!(call.body().get("name") instanceof String name)) {
@@ -712,8 +708,18 @@ public final class ApiRouter implements HttpHandler, RouteTable {
     return ApiResponse.fromCreated(operations.createWorkspace(call.project(), name));
   }
 
+  /**
+   * A terminal ticket for the caller, issued for the credential it presented here; refused with its
+   * own code on a box that offers no terminal over the network, so a client tells that from a
+   * workspace that does not exist.
+   */
   private ApiResponse terminalTicket(Call call) throws IOException {
-    var tickets = terminal.orElseThrow(ApiRouter::notFound);
+    var tickets =
+        terminal.orElseThrow(
+            () ->
+                new ApiException(
+                    ErrorCode.TERMINAL_NOT_OFFERED,
+                    "This runner offers no terminal over the network; ask an admin."));
     return ApiResponse.created(tickets.issue(ApiAuth.credentialOf(call.exchange()), call.body()));
   }
 

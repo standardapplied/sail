@@ -168,12 +168,12 @@ class PtyTicketsTest {
             "This connection's ticket is to open a session in project 'acme', and it admits"
                 + " nothing else; ask the API for a ticket for that.");
 
-    assertNull(OPEN_ACME.refusal(create, null));
-    assertEquals(refusal, OPEN_ACME.refusal(create, "lounge"));
-    assertEquals(refusal, OPEN_ACME.refusal(elsewhere, null));
-    assertEquals(refusal, OPEN_ACME.refusal(new PtyMessage.Attach("lounge", true), null));
-    assertNull(OPEN_ACME.refusal(new PtyMessage.Attach("lounge", true), "lounge"));
-    assertEquals(refusal, OPEN_ACME.refusal(new PtyMessage.Attach("study", true), "lounge"));
+    assertNull(OPEN_ACME.refusal(create, null, null));
+    assertEquals(refusal, OPEN_ACME.refusal(create, "lounge", null));
+    assertEquals(refusal, OPEN_ACME.refusal(elsewhere, null, null));
+    assertEquals(refusal, OPEN_ACME.refusal(new PtyMessage.Attach("lounge", true), null, null));
+    assertNull(OPEN_ACME.refusal(new PtyMessage.Attach("lounge", true), "lounge", null));
+    assertEquals(refusal, OPEN_ACME.refusal(new PtyMessage.Attach("study", true), "lounge", null));
   }
 
   @Test
@@ -183,29 +183,45 @@ class PtyTicketsTest {
             "This connection's ticket is to attach to session 'lounge', and it admits nothing"
                 + " else; ask the API for a ticket for that.");
 
-    assertNull(ATTACH_LOUNGE.refusal(new PtyMessage.Attach("lounge", false), null));
-    assertEquals(refusal, ATTACH_LOUNGE.refusal(new PtyMessage.Attach("study", false), null));
+    assertNull(ATTACH_LOUNGE.refusal(new PtyMessage.Attach("lounge", false), null, null));
+    assertEquals(refusal, ATTACH_LOUNGE.refusal(new PtyMessage.Attach("study", false), null, null));
     assertEquals(
         refusal,
         ATTACH_LOUNGE.refusal(
-            new PtyMessage.Create("lounge", List.of(), "/tmp", "acme", "", 80, 24), null));
+            new PtyMessage.Create("lounge", List.of(), "/tmp", "acme", "", 80, 24), null, null));
     for (var driving :
         List.of(
             new PtyMessage.Input(1, new byte[] {'a'}),
             new PtyMessage.Resize(80, 24),
             new PtyMessage.TakeWrite(),
             new PtyMessage.Detach())) {
-      assertNull(ATTACH_LOUNGE.refusal(driving, null));
+      assertNull(ATTACH_LOUNGE.refusal(driving, null, null));
     }
     for (var other :
         List.<PtyMessage>of(
             new PtyMessage.ListSessions("", 16),
-            new PtyMessage.Kill("lounge"),
             new PtyMessage.Yield("lounge", "x"),
             new PtyMessage.IssueTicket(PtyMessage.TicketAction.ATTACH, "lounge", "tok-uday"),
             new PtyMessage.Hello("tok-uday"))) {
-      assertEquals(refusal, ATTACH_LOUNGE.refusal(other, null));
+      assertEquals(refusal, ATTACH_LOUNGE.refusal(other, null, null));
     }
+  }
+
+  @Test
+  void aTicketEndsOnlyItsOwnSessionAndOnlyWhileItsConnectionWrites() {
+    var lounge = new PtyMessage.Kill("lounge");
+    var study = new PtyMessage.Kill("study");
+
+    assertNull(ATTACH_LOUNGE.refusal(lounge, null, "lounge"));
+    assertNull(OPEN_ACME.refusal(lounge, "lounge", "lounge"));
+    assertEquals(
+        new PtyMessage.Err(PtyTickets.NOT_THE_WRITER),
+        ATTACH_LOUNGE.refusal(lounge, null, null),
+        "an observer never ends it, and is told it does not hold the keyboard");
+    assertNotNull(OPEN_ACME.refusal(lounge, "lounge", null), "an observer never ends it");
+    assertNotNull(OPEN_ACME.refusal(lounge, null, null), "nor one that opened nothing");
+    assertNotNull(ATTACH_LOUNGE.refusal(study, null, "study"), "another session is not its own");
+    assertNotNull(OPEN_ACME.refusal(study, "lounge", "study"), "another session is not its own");
   }
 
   /** R16: a ticket opens only the project and the workspace it was issued for. */
@@ -216,13 +232,14 @@ class PtyTicketsTest {
     var elsewhere = new PtyMessage.Create("s", List.of(), "/tmp", "acme", "", 80, 24, "b");
     var container = new PtyMessage.Create("s", List.of(), "/tmp", "acme", "", 80, 24);
 
-    assertNull(trying.refusal(there, null));
+    assertNull(trying.refusal(there, null, null));
     assertEquals(
         "This connection's ticket is to open a session in workspace 'try' of project 'acme', and"
             + " it admits nothing else; ask the API for a ticket for that.",
-        trying.refusal(elsewhere, null).message());
-    assertNotNull(trying.refusal(container, null));
-    assertNotNull(OPEN_ACME.refusal(there, null), "a ticket to the container opens no workspace");
-    assertNull(OPEN_ACME.refusal(container, null));
+        trying.refusal(elsewhere, null, null).message());
+    assertNotNull(trying.refusal(container, null, null));
+    assertNotNull(
+        OPEN_ACME.refusal(there, null, null), "a ticket to the container opens no workspace");
+    assertNull(OPEN_ACME.refusal(container, null, null));
   }
 }

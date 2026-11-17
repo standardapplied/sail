@@ -264,6 +264,17 @@ let held = PasskeySession(sessionToken: "sess_golden14", fde: "uday", expiresAt:
         #expect(try await other.current(at: plane()) == nil)
     }
 
+    /// The signed-in client speaks with the session the vault holds for that control plane, to
+    /// that control plane; with none held there is no client.
+    @Test func theSignedInClientCarriesTheSessionTheVaultHolds() async throws {
+        let (account, server) = try makeAccount([Exchange("workspaces")], vault: MemoryVault().holding(held, at: plane()))
+        let client = try #require(try account.client(at: plane()))
+        _ = try await client.send(.workspaces(project: "harbor"))
+        #expect(await server.requests.first?.headers["Authorization"] == "Bearer sess_golden14")
+        let (other, _) = try makeAccount([])
+        #expect(try other.client(at: plane()) == nil)
+    }
+
     @Test(arguments: [
         "example.com", "evil.standardapplied.com", "x.sail.standardapplied.com", "standardapplied.com", "sail.standardapplied.com.",
         "sail.example.com", "sail.standardapplied.co", "SAIL.standardapplied.com", "",

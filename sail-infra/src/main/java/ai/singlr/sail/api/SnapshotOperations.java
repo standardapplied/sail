@@ -257,7 +257,7 @@ final class SnapshotOperations {
       throw new ApiException(
           ErrorCode.NOT_FOUND,
           "Snapshot '" + label + "' does not exist for project '" + project + "'.",
-          "List snapshots with GET /v1/projects/" + project + "/snapshots.");
+          "List " + project + "'s snapshots to see which exist.");
     }
   }
 

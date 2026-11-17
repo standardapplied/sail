@@ -173,6 +173,9 @@ final class Driver {
         if let workbench = await performWorkbench(step) {
             return workbench
         }
+        if let workspaces = await performWorkspaces(step) {
+            return workspaces
+        }
         if let text = step.type {
             for character in text { key(character) }
             return (true, "typed \(text.count) keys")
@@ -299,8 +302,8 @@ final class Driver {
             return (found, found ? "" : "the screen never showed '\(text)'")
         }
         if let banner = step.banner {
-            let found = await waitUntil(step.seconds ?? 15) { self.pane?.status?.contains(banner) == true }
-            return (found, "the banner says '\(pane?.status ?? "nothing")'")
+            let found = await waitUntil(step.seconds ?? 15) { self.pane?.status.says?.contains(banner) == true }
+            return (found, "the banner says '\(pane?.status.says ?? "nothing")'")
         }
         if step.still == true {
             let before = screenText

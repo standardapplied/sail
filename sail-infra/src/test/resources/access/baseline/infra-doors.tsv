@@ -2703,8 +2703,8 @@ fde ada asks a ticket to attach to lounge	ok TicketResponse
 fde ada asks a ticket to open a terminal in acme	ok TicketResponse
 fde ada asks a ticket to open a terminal in beta	ok TicketResponse
 fde ada asks a ticket to open a terminal in delta	ok TicketResponse
-fde ada asks a ticket to open a terminal in omega	denied NOT_FOUND 404 Project 'omega' is not in the catalog. Create it with 'sail project create omega', or sync it from main with 'sail sync'. | 
-fde ada asks a ticket to open a terminal in workspace ghost of acme	denied NOT_FOUND 404 Project 'acme' has no workspace 'ghost' on this box. List them with: sail project workspace list acme. | 
+fde ada asks a ticket to open a terminal in omega	denied NOT_FOUND 404 Project 'omega' is not in the catalog. | Create it with 'sail project create omega', or sync it from main with 'sail sync'.
+fde ada asks a ticket to open a terminal in workspace ghost of acme	denied NOT_FOUND 404 Project 'acme' has no workspace 'ghost' on this box. | List them with: sail project workspace list acme.
 fde ada asks a ticket to open a terminal in workspace loose of acme	ok TicketResponse
 fde ada asks a ticket to open a terminal in workspace spare of acme	ok TicketResponse
 fde ada asks a ticket to open a terminal in workspace try of acme	ok TicketResponse
@@ -2724,14 +2724,14 @@ fde ada pins a terminal to s-ada on a node as cli admin root all	ok admitted
 fde ada pins a terminal to s-ada on main as cli admin root all	ok admitted
 fde bob asks a ticket to attach to ghost	denied NOT_FOUND 404 There is no session 'ghost' on this box that you may attach. | 
 fde bob asks a ticket to attach to lounge	denied NOT_FOUND 404 There is no session 'lounge' on this box that you may attach. | 
-fde bob asks a ticket to open a terminal in acme	denied FORBIDDEN 403 Box 'ada' belongs to 'ada', not you. Ask ada to operate it, or have an admin do it. | 
-fde bob asks a ticket to open a terminal in beta	denied FORBIDDEN 403 Box 'ada' belongs to 'ada', not you. Ask ada to operate it, or have an admin do it. | 
-fde bob asks a ticket to open a terminal in delta	denied FORBIDDEN 403 Box 'ada' belongs to 'ada', not you. Ask ada to operate it, or have an admin do it. | 
-fde bob asks a ticket to open a terminal in omega	denied FORBIDDEN 403 Box 'ada' belongs to 'ada', not you. Ask ada to operate it, or have an admin do it. | 
-fde bob asks a ticket to open a terminal in workspace ghost of acme	denied NOT_FOUND 404 Project 'acme' has no workspace 'ghost' on this box. List them with: sail project workspace list acme. | 
-fde bob asks a ticket to open a terminal in workspace loose of acme	denied FORBIDDEN 403 Workspace 'loose' has no owner, so only an admin may enter it. Have an admin enter it. | 
+fde bob asks a ticket to open a terminal in acme	denied FORBIDDEN 403 Box 'ada' belongs to 'ada', not you. | Ask ada to operate it, or have an admin do it.
+fde bob asks a ticket to open a terminal in beta	denied FORBIDDEN 403 Box 'ada' belongs to 'ada', not you. | Ask ada to operate it, or have an admin do it.
+fde bob asks a ticket to open a terminal in delta	denied FORBIDDEN 403 Box 'ada' belongs to 'ada', not you. | Ask ada to operate it, or have an admin do it.
+fde bob asks a ticket to open a terminal in omega	denied FORBIDDEN 403 Box 'ada' belongs to 'ada', not you. | Ask ada to operate it, or have an admin do it.
+fde bob asks a ticket to open a terminal in workspace ghost of acme	denied NOT_FOUND 404 Project 'acme' has no workspace 'ghost' on this box. | List them with: sail project workspace list acme.
+fde bob asks a ticket to open a terminal in workspace loose of acme	denied FORBIDDEN 403 Workspace 'loose' has no owner, so only an admin may enter it. | Have an admin enter it.
 fde bob asks a ticket to open a terminal in workspace spare of acme	ok TicketResponse
-fde bob asks a ticket to open a terminal in workspace try of acme	denied FORBIDDEN 403 Workspace 'try' belongs to 'ada', not you. Ask ada to enter it, or have an admin do it. | 
+fde bob asks a ticket to open a terminal in workspace try of acme	denied FORBIDDEN 403 Workspace 'try' belongs to 'ada', not you. | Ask ada to enter it, or have an admin do it.
 fde bob pins a terminal to attic on a node as cli admin root all	denied IOException Room 'attic' was not found. | 
 fde bob pins a terminal to attic on main as cli admin root all	denied IOException Room 'attic' was not found. | 
 fde bob pins a terminal to b-room on a node as cli admin root all	denied Io Your credential is read-only and cannot post in rooms. | Ask an admin for a member or admin credential.
@@ -2749,8 +2749,8 @@ fde root asks a ticket to attach to lounge	ok TicketResponse
 fde root asks a ticket to open a terminal in acme	ok TicketResponse
 fde root asks a ticket to open a terminal in beta	ok TicketResponse
 fde root asks a ticket to open a terminal in delta	ok TicketResponse
-fde root asks a ticket to open a terminal in omega	denied NOT_FOUND 404 Project 'omega' is not in the catalog. Create it with 'sail project create omega', or sync it from main with 'sail sync'. | 
-fde root asks a ticket to open a terminal in workspace ghost of acme	denied NOT_FOUND 404 Project 'acme' has no workspace 'ghost' on this box. List them with: sail project workspace list acme. | 
+fde root asks a ticket to open a terminal in omega	denied NOT_FOUND 404 Project 'omega' is not in the catalog. | Create it with 'sail project create omega', or sync it from main with 'sail sync'.
+fde root asks a ticket to open a terminal in workspace ghost of acme	denied NOT_FOUND 404 Project 'acme' has no workspace 'ghost' on this box. | List them with: sail project workspace list acme.
 fde root asks a ticket to open a terminal in workspace loose of acme	ok TicketResponse
 fde root asks a ticket to open a terminal in workspace spare of acme	ok TicketResponse
 fde root asks a ticket to open a terminal in workspace try of acme	ok TicketResponse
@@ -2768,14 +2768,14 @@ fde root pins a terminal to s-ada on a node as cli admin root all	denied Io Your
 fde root pins a terminal to s-ada on main as cli admin root all	ok admitted
 fde sam asks a ticket to attach to ghost	denied NOT_FOUND 404 There is no session 'ghost' on this box that you may attach. | 
 fde sam asks a ticket to attach to lounge	denied NOT_FOUND 404 There is no session 'lounge' on this box that you may attach. | 
-fde sam asks a ticket to open a terminal in acme	denied FORBIDDEN 403 Box 'ada' belongs to 'ada', not you. Ask ada to operate it, or have an admin do it. | 
-fde sam asks a ticket to open a terminal in beta	denied FORBIDDEN 403 Box 'ada' belongs to 'ada', not you. Ask ada to operate it, or have an admin do it. | 
-fde sam asks a ticket to open a terminal in delta	denied FORBIDDEN 403 Box 'ada' belongs to 'ada', not you. Ask ada to operate it, or have an admin do it. | 
-fde sam asks a ticket to open a terminal in omega	denied FORBIDDEN 403 Box 'ada' belongs to 'ada', not you. Ask ada to operate it, or have an admin do it. | 
-fde sam asks a ticket to open a terminal in workspace ghost of acme	denied NOT_FOUND 404 Project 'acme' is not in the catalog. Create it with 'sail project create acme', or sync it from main with 'sail sync'. | 
-fde sam asks a ticket to open a terminal in workspace loose of acme	denied NOT_FOUND 404 Project 'acme' is not in the catalog. Create it with 'sail project create acme', or sync it from main with 'sail sync'. | 
-fde sam asks a ticket to open a terminal in workspace spare of acme	denied NOT_FOUND 404 Project 'acme' is not in the catalog. Create it with 'sail project create acme', or sync it from main with 'sail sync'. | 
-fde sam asks a ticket to open a terminal in workspace try of acme	denied NOT_FOUND 404 Project 'acme' is not in the catalog. Create it with 'sail project create acme', or sync it from main with 'sail sync'. | 
+fde sam asks a ticket to open a terminal in acme	denied FORBIDDEN 403 Box 'ada' belongs to 'ada', not you. | Ask ada to operate it, or have an admin do it.
+fde sam asks a ticket to open a terminal in beta	denied FORBIDDEN 403 Box 'ada' belongs to 'ada', not you. | Ask ada to operate it, or have an admin do it.
+fde sam asks a ticket to open a terminal in delta	denied FORBIDDEN 403 Box 'ada' belongs to 'ada', not you. | Ask ada to operate it, or have an admin do it.
+fde sam asks a ticket to open a terminal in omega	denied FORBIDDEN 403 Box 'ada' belongs to 'ada', not you. | Ask ada to operate it, or have an admin do it.
+fde sam asks a ticket to open a terminal in workspace ghost of acme	denied NOT_FOUND 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+fde sam asks a ticket to open a terminal in workspace loose of acme	denied NOT_FOUND 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+fde sam asks a ticket to open a terminal in workspace spare of acme	denied NOT_FOUND 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+fde sam asks a ticket to open a terminal in workspace try of acme	denied NOT_FOUND 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
 fde sam pins a terminal to attic on a node as cli admin root all	denied IOException Room 'attic' was not found. | 
 fde sam pins a terminal to attic on main as cli admin root all	denied IOException Room 'attic' was not found. | 
 fde sam pins a terminal to b-room on a node as cli admin root all	denied Io Your credential is read-only and cannot post in rooms. | Ask an admin for a member or admin credential.
@@ -2790,14 +2790,14 @@ fde sam pins a terminal to s-ada on a node as cli admin root all	denied IOExcept
 fde sam pins a terminal to s-ada on main as cli admin root all	denied IOException Room 's-ada' was not found. | 
 fde vic asks a ticket to attach to ghost	denied NOT_FOUND 404 There is no session 'ghost' on this box that you may attach. | 
 fde vic asks a ticket to attach to lounge	denied NOT_FOUND 404 There is no session 'lounge' on this box that you may attach. | 
-fde vic asks a ticket to open a terminal in acme	denied FORBIDDEN 403 Box 'ada' belongs to 'ada', not you. Ask ada to operate it, or have an admin do it. | 
-fde vic asks a ticket to open a terminal in beta	denied FORBIDDEN 403 Box 'ada' belongs to 'ada', not you. Ask ada to operate it, or have an admin do it. | 
-fde vic asks a ticket to open a terminal in delta	denied FORBIDDEN 403 Box 'ada' belongs to 'ada', not you. Ask ada to operate it, or have an admin do it. | 
-fde vic asks a ticket to open a terminal in omega	denied FORBIDDEN 403 Box 'ada' belongs to 'ada', not you. Ask ada to operate it, or have an admin do it. | 
-fde vic asks a ticket to open a terminal in workspace ghost of acme	denied NOT_FOUND 404 Project 'acme' has no workspace 'ghost' on this box. List them with: sail project workspace list acme. | 
-fde vic asks a ticket to open a terminal in workspace loose of acme	denied FORBIDDEN 403 Your credential is read-only and cannot enter workspaces. Ask an admin for a member or admin credential. | 
-fde vic asks a ticket to open a terminal in workspace spare of acme	denied FORBIDDEN 403 Your credential is read-only and cannot enter workspaces. Ask an admin for a member or admin credential. | 
-fde vic asks a ticket to open a terminal in workspace try of acme	denied FORBIDDEN 403 Your credential is read-only and cannot enter workspaces. Ask an admin for a member or admin credential. | 
+fde vic asks a ticket to open a terminal in acme	denied FORBIDDEN 403 Box 'ada' belongs to 'ada', not you. | Ask ada to operate it, or have an admin do it.
+fde vic asks a ticket to open a terminal in beta	denied FORBIDDEN 403 Box 'ada' belongs to 'ada', not you. | Ask ada to operate it, or have an admin do it.
+fde vic asks a ticket to open a terminal in delta	denied FORBIDDEN 403 Box 'ada' belongs to 'ada', not you. | Ask ada to operate it, or have an admin do it.
+fde vic asks a ticket to open a terminal in omega	denied FORBIDDEN 403 Box 'ada' belongs to 'ada', not you. | Ask ada to operate it, or have an admin do it.
+fde vic asks a ticket to open a terminal in workspace ghost of acme	denied NOT_FOUND 404 Project 'acme' has no workspace 'ghost' on this box. | List them with: sail project workspace list acme.
+fde vic asks a ticket to open a terminal in workspace loose of acme	denied FORBIDDEN 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
+fde vic asks a ticket to open a terminal in workspace spare of acme	denied FORBIDDEN 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
+fde vic asks a ticket to open a terminal in workspace try of acme	denied FORBIDDEN 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
 fde vic pins a terminal to attic on a node as cli admin root all	denied IOException Room 'attic' was not found. | 
 fde vic pins a terminal to attic on main as cli admin root all	denied IOException Room 'attic' was not found. | 
 fde vic pins a terminal to b-room on a node as cli admin root all	denied Io Your credential is read-only and cannot post in rooms. | Ask an admin for a member or admin credential.

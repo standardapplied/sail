@@ -5,9 +5,9 @@
 
 package ai.singlr.sail.commands;
 
-import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.pty.Account;
 import ai.singlr.sail.pty.PtyEvents;
+import ai.singlr.sail.pty.PtyMessage;
 import ai.singlr.sail.pty.PtySessionHost;
 import ai.singlr.sail.pty.SdNotify;
 import java.io.IOException;
@@ -63,8 +63,8 @@ final class LocalPtyHost implements AutoCloseable {
   static final String LOCK = "pty.lock";
 
   /** What a ticket request hears: this host has no network door, and tickets are a server's. */
-  static final Remedy NO_DOOR =
-      Remedy.of(
+  static final PtyMessage.Err NO_DOOR =
+      new PtyMessage.Err(
           "This terminal host is this machine's own and listens on no network: a ticket to a"
               + " terminal comes from a server's terminal host.");
 

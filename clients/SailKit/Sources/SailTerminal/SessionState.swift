@@ -1,3 +1,4 @@
+import SailAPI
 import SailTerminalWire
 import SailVT
 
@@ -56,8 +57,12 @@ public enum SessionPhase: Equatable, Sendable {
 public enum SessionEnd: Equatable, Sendable, CustomStringConvertible {
     /// The host's run that held the session ended: a new boot id welcomed the reconnect.
     case hostRestarted
-    /// The host, or the API for it, refused the session, in these words.
-    case refused(String)
+    /// The host refused the session: its reason and its remedy, whole.
+    case refused(HostRefusal)
+    /// The API refused the session's ticket: the refusal whole, its fix included.
+    case ticketRefused(Refusal)
+    /// Its ticket needed a sign-in this client does not hold now.
+    case signIn(SignIn)
     /// The host ended the session, for this reason.
     case ended(String)
     /// The host sent what the protocol does not allow, which asking again would not mend.
@@ -68,10 +73,23 @@ public enum SessionEnd: Equatable, Sendable, CustomStringConvertible {
     public var description: String {
         switch self {
         case .hostRestarted: "the host restarted, which ends every session it held"
-        case let .refused(words): words
+        case let .refused(refusal): refusal.message
+        case let .ticketRefused(refusal): refusal.message
+        case let .signIn(needed): needed.lines[0]
         case let .ended(reason): "the session ended: \(reason)"
         case let .protocolViolation(what): "the terminal host broke the protocol: \(what)"
         case .closed: "closed"
+        }
+    }
+
+    /// What a person reads of this end, a line each: for a refusal its sentence and what they can
+    /// do in words, never a command; else the end itself as a sentence.
+    public var said: [String] {
+        switch self {
+        case let .refused(refusal): refusal.lines
+        case let .ticketRefused(refusal): refusal.lines
+        case let .signIn(needed): needed.lines
+        default: [Said.sentence(description)]
         }
     }
 }
@@ -99,7 +117,7 @@ enum Intent: Equatable, Sendable {
 
     var ticket: TicketRequest {
         switch self {
-        case let .open(create): .open(project: create.project)
+        case let .open(create): .open(project: create.project, workspace: create.workspace)
         case let .attach(session, _): .attach(session: session)
         }
     }
@@ -110,4 +128,14 @@ enum Intent: Equatable, Sendable {
         case let .attach(session, _): session
         }
     }
+}
+
+/// Whether a host holds a session, as its client can know it.
+public enum AtHost: Equatable, Sendable {
+    /// Never made: no `Create` went out, or the host refused it.
+    case none
+    /// A `Create` is out and its answer still to come: the host may be making it now.
+    case coming
+    /// Made, or a `Create` whose answer was lost: only the host can say.
+    case maybe
 }

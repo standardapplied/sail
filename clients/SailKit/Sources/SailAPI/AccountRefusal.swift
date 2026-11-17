@@ -59,9 +59,9 @@ public struct AccountRefusal: Error, Equatable, Sendable {
             if case let .unreachable(text) = error {
                 self.init(.unreachable, at: plane, system: text)
             } else if case let .unexpected(_, status) = error, (300 ..< 400).contains(status) {
-                self.init(.redirected, at: plane, system: Self.text(of: error))
+                self.init(.redirected, at: plane, system: error.description)
             } else {
-                self.init(.unreadable, at: plane, system: Self.text(of: error))
+                self.init(.unreadable, at: plane, system: error.description)
             }
             return
         }
@@ -89,16 +89,6 @@ public struct AccountRefusal: Error, Equatable, Sendable {
         case (.known(.invalidRequest), .enrolling) where refusal.message.hasPrefix(originRefused):
             .originNotAllowed(String(refusal.message.dropFirst(originRefused.count)))
         default: .refused
-        }
-    }
-
-    private static func text(of error: SailError) -> String {
-        switch error {
-        case let .undecodable(undecodable): undecodable.description
-        case let .unexpected(route, status): "\(route) answered \(status)"
-        case let .notAnEventStream(route, type): "\(route) answered \(type ?? "no content type")"
-        case let .unsendable(reason), let .unreachable(reason): reason
-        case let .refused(refusal): refusal.message
         }
     }
 

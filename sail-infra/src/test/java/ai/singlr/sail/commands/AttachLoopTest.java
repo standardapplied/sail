@@ -110,7 +110,7 @@ class AttachLoopTest {
     var sink = java.nio.channels.Channels.newChannel(frames);
     PtyWire.write(
         sink,
-        new PtyMessage.Err(Remedy.of("Room lounge is gone. Run '", Remedy.sail("sync"), "'.")));
+        new PtyMessage.Err("Room lounge is gone.", Remedy.of("Run '", Remedy.sail("sync"), "'.")));
     PtyWire.write(sink, new PtyMessage.SessionEnded("exited(0)"));
     var stdout = new ByteArrayOutputStream();
 

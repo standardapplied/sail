@@ -54,8 +54,8 @@ public final class SessionClient implements AutoCloseable {
 
   private String expectWelcome() throws IOException {
     var reply = PtyWire.read(channel);
-    if (reply instanceof PtyMessage.Err(var detail)) {
-      throw Remedied.io("", detail);
+    if (reply instanceof PtyMessage.Err(var reason, var remedy)) {
+      throw Remedied.io(reason, remedy);
     }
     if (!(reply instanceof PtyMessage.Welcome(var bootId))) {
       throw new IOException("Unexpected host reply to hello: " + reply.getClass());
@@ -149,8 +149,8 @@ public final class SessionClient implements AutoCloseable {
 
   private void expectOk(String verb) throws IOException {
     var reply = PtyWire.read(channel);
-    if (reply instanceof PtyMessage.Err(var detail)) {
-      throw Remedied.io("", detail);
+    if (reply instanceof PtyMessage.Err(var reason, var remedy)) {
+      throw Remedied.io(reason, remedy);
     }
     if (!(reply instanceof PtyMessage.Ok)) {
       throw new IOException("Unexpected host reply to " + verb + ": " + reply.getClass());

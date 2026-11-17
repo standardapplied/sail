@@ -48,13 +48,13 @@ struct Probe {
         let script = try Script.read(run.script)
         let size = GridSize(columns: script.size[0], rows: script.size[1])
         let screen = try Screen(size: size, scrollbackBytes: 10 << 20, palette: .dark)
-        let create = SessionCreate(
+        var create = SessionCreate(
             session: "probe-" + UUID().uuidString.prefix(8).lowercased(), command: script.command, workingDirectory: "",
             project: "", room: "", size: TerminalSize(columns: Int32(size.columns), rows: Int32(size.rows))
         )
         var host: LocalHostProcess?
         defer { host?.stop() }
-        let session: TerminalSession
+        let door: Door
         let echoBudget: Double
         switch run.host {
         case let .local(socket, binary, folder):
@@ -62,36 +62,58 @@ struct Probe {
                 host = LocalHostProcess(binary: binary)
                 try await host?.start()
             }
-            var local = create
-            local.workingDirectory = folder
-            let address = try socket.map { HostAddress.unix(path: $0) } ?? HostAddress.local()
-            session = TerminalSession(open: local, door: .local(address), screen: screen)
+            create.workingDirectory = folder
+            door = .local(try socket.map { HostAddress.unix(path: $0) } ?? HostAddress.local())
             echoBudget = echoBudgets.local
-        case let .runner(api, variable, project):
+        case let .runner(api, variable, project, workspace):
             guard let token = ProcessInfo.processInfo.environment[variable], !token.isEmpty else {
                 throw ProbeError("the environment variable \(variable) holds no token")
             }
-            var remote = create
-            remote.project = project
-            remote.workingDirectory = "/tmp"
-            let client = SailClient(transport: URLSessionTransport(base: api), token: token)
-            session = TerminalSession(open: remote, door: .runner(client), screen: screen)
+            create.project = project
+            create.workspace = workspace
+            create.workingDirectory = "/tmp"
+            door = .runner(SailClient(transport: URLSessionTransport(base: api), token: token))
             echoBudget = echoBudgets.runner
         }
+        let session = TerminalSession(open: create, door: door, screen: screen)
         let capture = try run.capture.map(Capture.init(path:))
         if let capture {
             session.tapOutput { capture.append($0) }
         }
         session.start()
+        say("session \(create.session)")
+        if script.endWhileOpening { return await endWhileOpening(session) }
         let report = await Runner(session: session, host: host, echoBudget: echoBudget) { result in
             say("\(result.ok ? "ok" : "FAILED") \(result.step) (\(String(format: "%.1f", result.milliseconds)) ms)\(result.detail.map { ": \($0)" } ?? "")")
         }.run(script)
+        if case let .ended(end) = session.state.phase {
+            say("a person reads: " + end.said.joined(separator: " | "))
+        }
         session.close()
         try capture?.close()
         print(try screen.text())
         report.budgets.forEach { say("\($0.name): \(String(format: "%.3f", $0.milliseconds)) ms (limit \($0.limit)) \($0.met ? "met" : "MISSED")") }
         try report.write(to: run.report)
         return report.passed
+    }
+
+    /// Ends `session` while its `Create` is out and unanswered, as closing a tab on a workspace
+    /// that is starting does: true when the end began with the `Create` still unanswered and the
+    /// runner ended what it made. The `Create` sends no event, so this looks every 10 ms.
+    private static func endWhileOpening(_ session: TerminalSession) async -> Bool {
+        let deadline = ContinuousClock.now + .seconds(60)
+        while session.atHost != .coming {
+            guard ContinuousClock.now < deadline, session.atHost == .none else {
+                say("FAILED the Create was never seen unanswered: \(session.state.phase)")
+                return false
+            }
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+        let began = ContinuousClock.now
+        let outcome = await session.end()
+        say("ended while opening: the Create unanswered when the end began; \(outcome) in \(began.duration(to: .now))")
+        session.close()
+        return outcome.closesTab
     }
 
     private static func say(_ line: String) {

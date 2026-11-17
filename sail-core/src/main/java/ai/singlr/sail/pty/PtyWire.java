@@ -126,7 +126,7 @@ public final class PtyWire {
               .string(m.workspace());
       case PtyMessage.Ticket m -> out.type(33).string(m.ticket());
       case PtyMessage.TicketRefused m ->
-          encodeRemedy(out.type(34).string(m.kind().wire()), m.detail());
+          encodeRemedy(out.type(34).string(m.kind().wire()).string(m.reason()), m.remedy());
       case PtyMessage.Output m -> {
         out.type(20);
         out.i64(m.lastInputSeq());
@@ -159,7 +159,7 @@ public final class PtyWire {
         }
       }
       case PtyMessage.Ok m -> out.type(30);
-      case PtyMessage.Err m -> encodeRemedy(out.type(31).string(m.message()), m.detail());
+      case PtyMessage.Err m -> encodeRemedy(out.type(31).string(m.reason()), m.remedy());
       case PtyMessage.Welcome m -> out.type(32).string(m.hostBootId());
     }
     return out.finish();
@@ -179,8 +179,8 @@ public final class PtyWire {
   }
 
   /**
-   * A refusal's remedy, after the plain message an older peer reads alone and stops at: each part
-   * as words ({@code 0, text}) or a command ({@code 1, runs, verb, args}).
+   * A refusal's remedy, after its reason: each part as words ({@code 0, text}) or a command ({@code
+   * 1, runs, verb, args}).
    */
   private static void encodeRemedy(Writer out, Remedy remedy) {
     out.i32(remedy.parts().size());
@@ -197,8 +197,8 @@ public final class PtyWire {
   }
 
   private static PtyMessage.Err decodeErr(ByteBuffer in) throws IOException {
-    var message = string(in);
-    return in.hasRemaining() ? new PtyMessage.Err(remedy(in)) : new PtyMessage.Err(message);
+    var reason = string(in);
+    return new PtyMessage.Err(reason, in.hasRemaining() ? remedy(in) : Remedy.NONE);
   }
 
   /** A refusal's remedy as {@link #encodeRemedy} writes it: its parts, each words or a command. */
@@ -271,7 +271,9 @@ public final class PtyWire {
           new PtyMessage.IssueTicket(
               PtyMessage.TicketAction.of(string(in)), string(in), string(in), string(in));
       case 33 -> new PtyMessage.Ticket(string(in));
-      case 34 -> new PtyMessage.TicketRefused(PtyMessage.TicketRefusal.of(string(in)), remedy(in));
+      case 34 ->
+          new PtyMessage.TicketRefused(
+              PtyMessage.TicketRefusal.of(string(in)), string(in), remedy(in));
       case 20 -> new PtyMessage.Output(in.getLong(), bytes(in));
       case 21 -> new PtyMessage.ReplayBegin(in.get() == 1);
       case 22 -> new PtyMessage.ReplayEnd();

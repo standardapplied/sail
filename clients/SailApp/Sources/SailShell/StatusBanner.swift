@@ -2,14 +2,16 @@ import AppKit
 import SailLook
 import SailTerminalView
 
-/// A card over the terminal saying where the session stands, with the one thing to do about it:
-/// the Sail look's surface and hairline, content corners at 6 pt, the action in the accent.
-/// Its button answers Return while it shows.
+/// A card over the terminal saying where the session stands, with the thing to do about it, and
+/// at most one other: the Sail look's surface and hairline, content corners at 6 pt, the action in
+/// the accent, the other a plain button. The action answers Return while it shows.
 @MainActor
 final class StatusBanner: NSView {
     private let message = NSTextField(wrappingLabelWithString: "")
     private let action: AccentButton
+    private let other = NSButton(title: "", target: nil, action: nil)
     private var handler: () -> Void = {}
+    private var otherHandler: () -> Void = {}
     /// The look it is drawn in; a new one repaints it.
     var look: Look {
         didSet { paint() }
@@ -26,7 +28,13 @@ final class StatusBanner: NSView {
         paint()
         action.keyEquivalent = "\r"
         action.target = self
-        let stack = NSStackView(views: [message, action])
+        other.target = self
+        other.action = #selector(actOther)
+        other.isHidden = true
+        let buttons = NSStackView(views: [action, other])
+        buttons.spacing = Look.Space.s
+        buttons.detachesHiddenViews = true
+        let stack = NSStackView(views: [message, buttons])
         stack.orientation = .vertical
         stack.alignment = .leading
         stack.spacing = Look.Space.m
@@ -37,6 +45,7 @@ final class StatusBanner: NSView {
             stack.leadingAnchor.constraint(equalTo: leadingAnchor), stack.trailingAnchor.constraint(equalTo: trailingAnchor),
             stack.topAnchor.constraint(equalTo: topAnchor), stack.bottomAnchor.constraint(equalTo: bottomAnchor),
             widthAnchor.constraint(lessThanOrEqualToConstant: 420),
+            message.widthAnchor.constraint(equalTo: stack.widthAnchor, constant: -2 * Look.Space.l),
         ])
         isHidden = true
     }
@@ -46,12 +55,19 @@ final class StatusBanner: NSView {
         nil
     }
 
-    /// Shows `text`, and `button` running `handler` when there is something to do.
-    func show(_ text: String, button: String? = nil, handler: @escaping () -> Void = {}) {
+    /// Shows `text`, and `button` running `handler` when there is something to do, and `second`
+    /// running `secondHandler` beside it when there is another.
+    func show(
+        _ text: String, button: String? = nil, handler: @escaping () -> Void = {}, second: String? = nil,
+        secondHandler: @escaping () -> Void = {}
+    ) {
         message.stringValue = text
         self.handler = handler
+        otherHandler = secondHandler
         action.isHidden = button == nil
         action.setTitle(button ?? "")
+        other.isHidden = second == nil
+        other.title = second ?? ""
         isHidden = false
     }
 
@@ -65,14 +81,33 @@ final class StatusBanner: NSView {
     func hide() {
         isHidden = true
         action.isHidden = true
+        other.isHidden = true
     }
 
-    /// What the banner says now, nil when hidden: for the drive harness.
+    /// What the banner says now, nil when hidden.
     var shown: String? {
         isHidden ? nil : message.stringValue
     }
 
+    /// The buttons it offers now, the action first; none while hidden.
+    var offers: [String] {
+        isHidden ? [] : ([action, other] as [NSButton]).filter { !$0.isHidden }.map(\.title)
+    }
+
+    /// Presses the button titled `title` it offers, as a click does; false when it offers none so
+    /// titled.
+    func press(_ title: String) -> Bool {
+        guard offers.contains(title) else { return false }
+        if action.title == title { handler() } else { otherHandler() }
+        return true
+    }
+
+
     @objc private func act() {
         handler()
+    }
+
+    @objc private func actOther() {
+        otherHandler()
     }
 }

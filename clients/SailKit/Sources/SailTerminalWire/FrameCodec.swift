@@ -119,7 +119,8 @@ private extension Frame {
         case let .issueTicket(action, target, credential, workspace):
             [.string(action.rawValue), .string(target), .string(credential), .string(workspace)]
         case let .ticket(ticket): [.string(ticket)]
-        case let .ticketRefused(kind, remedy): [.string(kind.rawValue), .count(remedy.count)] + remedy.flatMap(\.fields)
+        case let .ticketRefused(kind, reason, remedy):
+            [.string(kind.rawValue), .string(reason), .count(remedy.count)] + remedy.flatMap(\.fields)
         case let .output(lastInputSequence, bytes): [.int64(lastInputSequence), .blob(bytes)]
         case let .replayBegin(safe): [.bool(safe)]
         case let .writerChanged(fde): [.string(fde)]
@@ -213,7 +214,11 @@ private struct Cursor {
                 workspace: try string()
             )
         case 33: .ticket(try string())
-        case 34: .ticketRefused(kind: Open(rawValue: try string()), remedy: try list { (cursor: inout Cursor) throws(TerminalWireError) in try cursor.part() })
+        case 34:
+            .ticketRefused(
+                kind: Open(rawValue: try string()), reason: try string(),
+                remedy: try list { (cursor: inout Cursor) throws(TerminalWireError) in try cursor.part() }
+            )
         case 20: .output(lastInputSequence: try int64(), bytes: try blob())
         case 21: .replayBegin(safe: try bool())
         case 22: .replayEnd
