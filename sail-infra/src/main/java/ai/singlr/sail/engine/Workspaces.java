@@ -130,13 +130,16 @@ public final class Workspaces {
    * What makes a fresh clone a workspace of its own, run as root with the project ({@code $1}), the
    * workspace ({@code $2}), the branch its repositories go on ({@code $3}, empty for none) and each
    * repository's path and base branch after them, none of them ever part of the text: a machine-id
-   * of its own, the project's name as its hostname (which the in-container helpers read the project
-   * from; Incus rewrote it to the instance's name on the copy), SSH host keys of its own made under
-   * that name, every repository fetched and switched to the branch (the remote's when it has one,
-   * else a new one from the base) or, with no branch, left detached at the fetched base, sshd
-   * restarted onto the new keys once systemd answers (it does not yet when {@code incus start}
-   * returns, and it boots while the repositories are fetched), and the bus. It prints {@code
-   * sail-step <step> <epoch ms>} as each step ends, which the create reads as the steps' times.
+   * of its own, written beside the template's and renamed over it, so the {@code systemd-networkd}
+   * that may be configuring {@code eth0} at that moment never finds none (it fails the link for
+   * good when it does: no address, ever), the project's name as its hostname (which the
+   * in-container helpers read the project from; Incus rewrote it to the instance's name on the
+   * copy), SSH host keys of its own made under that name, every repository fetched and switched to
+   * the branch (the remote's when it has one, else a new one from the base) or, with no branch,
+   * left detached at the fetched base, sshd restarted onto the new keys once systemd answers (it
+   * does not yet when {@code incus start} returns, and it boots while the repositories are
+   * fetched), and the bus. It prints {@code sail-step <step> <epoch ms>} as each step ends, which
+   * the create reads as the steps' times.
    */
   /**
    * The clone's own SSH host keys, made beside the template's and renamed over them, so the sshd
@@ -160,8 +163,8 @@ public final class Workspaces {
       shift 3
       step() { printf 'sail-step %s %s\\n' "$1" "$(date +%s%3N)"; }
       step start
-      rm -f /etc/machine-id
-      systemd-machine-id-setup >/dev/null 2>&1
+      tr -d - < /proc/sys/kernel/random/uuid > /etc/machine-id.sail
+      mv -f /etc/machine-id.sail /etc/machine-id
       if [ -e /var/lib/dbus/machine-id ]; then ln -sf /etc/machine-id /var/lib/dbus/machine-id; fi
       printf '%s\\n' "$project" > /etc/hostname
       hostname "$project"
@@ -180,7 +183,8 @@ public final class Workspaces {
               sleep 0.1
             done
             if ! ip -4 -o addr show dev eth0 | grep -q inet; then
-              echo "$project-$workspace got no address on eth0 within 30 s, so its repos cannot be fetched; check that the network Incus gives it (incus config device show $project-$workspace) serves addresses (incus network show <network>)" >&2
+              seen=$(networkctl list eth0 --no-legend 2>/dev/null | awk '{print $4 ", " $5}')
+              echo "$project-$workspace got no address on eth0 within 30 s${seen:+ (networkd says $seen)}, so its repos cannot be fetched; check that the network Incus gives it (incus config device show $project-$workspace) serves addresses (incus network show <network>)" >&2
               exit 1
             fi
           fi

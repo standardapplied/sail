@@ -1361,8 +1361,8 @@ class WorkspacesTest {
         shift 3
         step() { printf 'sail-step %s %s\\n' "$1" "$(date +%s%3N)"; }
         step start
-        rm -f /etc/machine-id
-        systemd-machine-id-setup >/dev/null 2>&1
+        tr -d - < /proc/sys/kernel/random/uuid > /etc/machine-id.sail
+        mv -f /etc/machine-id.sail /etc/machine-id
         if [ -e /var/lib/dbus/machine-id ]; then ln -sf /etc/machine-id /var/lib/dbus/machine-id; fi
         printf '%s\\n' "$project" > /etc/hostname
         hostname "$project"
@@ -1399,7 +1399,8 @@ class WorkspacesTest {
             sleep 0.1
           done
           if ! ip -4 -o addr show dev eth0 | grep -q inet; then
-            echo "$project-$workspace got no address on eth0 within 30 s, so its repos cannot be fetched; check that the network Incus gives it (incus config device show $project-$workspace) serves addresses (incus network show <network>)" >&2
+            seen=$(networkctl list eth0 --no-legend 2>/dev/null | awk '{print $4 ", " $5}')
+            echo "$project-$workspace got no address on eth0 within 30 s${seen:+ (networkd says $seen)}, so its repos cannot be fetched; check that the network Incus gives it (incus config device show $project-$workspace) serves addresses (incus network show <network>)" >&2
             exit 1
           fi
         fi
