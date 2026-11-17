@@ -1,13 +1,6 @@
 name: Clients
 
 on:
-  # A release calls this for its app alone: the app then bundles the darwin binary the release
-  # built and signed, in the same run, verified first, and the lanes that test are not run again.
-  workflow_call:
-    inputs:
-      release:
-        type: boolean
-        default: false
   pull_request:
   push:
     branches:
@@ -32,7 +25,7 @@ jobs:
   host:
     name: The darwin sail of this commit
     needs: changes
-    if: needs.changes.outputs.clients == 'true' && !inputs.release
+    if: needs.changes.outputs.clients == 'true'
     runs-on: macos-15
     timeout-minutes: 30
     steps:
@@ -73,7 +66,7 @@ jobs:
   sailkit-linux:
     name: SailKit on Linux
     needs: changes
-    if: needs.changes.outputs.clients == 'true' && !inputs.release
+    if: needs.changes.outputs.clients == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     defaults:
@@ -114,7 +107,7 @@ jobs:
   sailkit-macos:
     name: SailKit on macOS
     needs: [changes, host]
-    if: needs.changes.outputs.clients == 'true' && !inputs.release
+    if: needs.changes.outputs.clients == 'true'
     runs-on: macos-15
     timeout-minutes: 20
     defaults:
@@ -179,7 +172,7 @@ jobs:
   # what the darwin sail the macOS lanes test against and bundle is built from (the build files and
   # the Java modules' main sources). A job skipped by `if:` reports success, unlike a
   # workflow-level path filter, so a required check is not left waiting. An unknown base (a new
-  # branch, a forced push, a tag), an empty change and a dispatch run the lanes.
+  # branch, a forced push), an empty change and a dispatch run the lanes.
   changes:
     name: What the change touches
     runs-on: ubuntu-24.04
@@ -207,9 +200,7 @@ jobs:
   app:
     name: SailApp on macOS
     needs: [changes, host]
-    if: >-
-      !cancelled() && needs.changes.outputs.clients == 'true'
-      && (needs.host.result == 'success' || inputs.release)
+    if: needs.changes.outputs.clients == 'true'
     runs-on: macos-15
     timeout-minutes: 45
     defaults:
@@ -261,27 +252,10 @@ jobs:
           name: sail-darwin-arm64
           path: ${{ runner.temp }}/sail
 
-      - name: Cosign, for the release's binary
-        if: inputs.release
-        uses: sigstore/cosign-installer@398d4b0eeef1380460a10c8013a76f728fb906ac # v3
-
-      # A release's binary is the one it publishes, used only once its signature is the release
-      # workflow's at this tag: one binary, built once, attested once, in the release and the app.
       - name: For the bundle and this machine's own host
-        env:
-          RELEASE: ${{ inputs.release && 'true' || 'false' }}
         run: |
-          binary="$RUNNER_TEMP/sail/sail"
-          if [[ $RELEASE == true ]]; then
-            binary="$RUNNER_TEMP/sail/sail-darwin-arm64"
-            cosign verify-blob \
-              --bundle "$binary.cosign.bundle" \
-              --certificate-identity "https://github.com/$GITHUB_REPOSITORY/.github/workflows/release.yml@$GITHUB_REF" \
-              --certificate-oidc-issuer https://token.actions.githubusercontent.com \
-              "$binary"
-          fi
-          chmod +x "$binary"
-          echo "SAIL_BINARY=$binary" >> "$GITHUB_ENV"
+          chmod +x "$RUNNER_TEMP/sail/sail"
+          echo "SAIL_BINARY=$RUNNER_TEMP/sail/sail" >> "$GITHUB_ENV"
 
       - name: Build
         run: swift build --build-tests

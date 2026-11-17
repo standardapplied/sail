@@ -19,21 +19,19 @@ import java.io.IOException;
 import java.net.StandardProtocolFamily;
 import java.net.UnixDomainSocketAddress;
 import java.nio.channels.SocketChannel;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermissions;
 import java.security.MessageDigest;
-import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
 import java.util.stream.Stream;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.api.condition.EnabledOnOs;
@@ -41,11 +39,10 @@ import org.junit.jupiter.api.condition.OS;
 import org.junit.jupiter.api.io.TempDir;
 
 /**
- * Uploads through a real host, its sessions real processes, into a container that is a directory
- * here: each script the host sends a container runs on this machine as this account, under a root
- * of the test's own, with this account standing for both root and the dev user. Each test tries the
- * wrong thing the rule it names forbids. The scripts are a Linux container's (GNU {@code find},
- * {@code stat} and {@code df}), so they run on Linux alone.
+ * The upload frames through a real host, its sessions real processes, into a {@link
+ * ContainerDirectory}: what the protocol answers, when, and to whom, and how it orders its copies,
+ * commits and removals. Each test tries the wrong thing the rule it names forbids. What the scripts
+ * do in a container is {@link UploadCopyTest}'s and {@link UploadCleanupTest}'s.
  */
 @EnabledOnOs(OS.LINUX)
 @Timeout(value = 60, unit = TimeUnit.SECONDS, threadMode = Timeout.ThreadMode.SEPARATE_THREAD)
@@ -55,163 +52,11 @@ class PtyUploadsTest {
 
   @TempDir Path dir;
 
-  private final LinkedBlockingQueue<List<String>> commands = new LinkedBlockingQueue<>();
+  private ContainerDirectory c;
 
-  /** Whether the next open never answers, as a frozen container's would not. */
-  private volatile boolean openHangs;
-
-  /** The status the next open exits with instead of running, when set. */
-  private volatile Integer openExits;
-
-  /** Whether each copy into the container keeps only its first byte, as a cut-off stream would. */
-  private volatile boolean copyTruncates;
-
-  /** The status every commit exits with instead of running, when set. */
-  private volatile Integer commitExits;
-
-  /** Held before a commit runs, when set: a commit the test releases. */
-  private volatile CountDownLatch commitHeld;
-
-  /** Held before the next open runs, when set, and cleared as it is taken. */
-  private volatile CountDownLatch openHeld;
-
-  /** Held before the next sweep runs, when set, and cleared as it is taken. */
-  private volatile CountDownLatch sweepHeld;
-
-  /** Each script but an open, put here once it exited, which its caller waits for anyway. */
-  private final LinkedBlockingQueue<String> finished = new LinkedBlockingQueue<>();
-
-  /** The status every removal exits with instead of running, when set. */
-  private volatile Integer removeExits;
-
-  /** Held before a removal runs, when set. */
-  private volatile CountDownLatch removeHeld;
-
-  /** Held as the host waits for a copy to exit, when set; {@link #copyReached} once it waits. */
-  private volatile CountDownLatch copyHeld;
-
-  private final CountDownLatch copyReached = new CountDownLatch(1);
-
-  private Path root() {
-    return dir.resolve("var-lib-sail-paste");
-  }
-
-  /** The container: each command run here after its {@code incus exec ... --}, every one kept. */
-  private final PtyUploads.Processes processes =
-      command -> {
-        commands.add(List.copyOf(command));
-        var inner = new ArrayList<>(command.subList(command.indexOf("--") + 1, command.size()));
-        var script = inner.size() > 2 ? inner.get(2) : "";
-        if (script.equals(PtyUploads.OPEN)) {
-          var held = openHeld;
-          openHeld = null;
-          await(held);
-        }
-        if (script.equals(PtyUploads.SWEEP)) {
-          var held = sweepHeld;
-          sweepHeld = null;
-          await(held);
-        }
-        if (script.equals(PtyUploads.OPEN) && copyTruncates) {
-          inner.set(2, script.replace("cat >&3", "{ head -c 1; cat > /dev/null; } >&3"));
-        }
-        if (script.equals(PtyUploads.OPEN) && openHangs) {
-          openHangs = false;
-          inner = new ArrayList<>(List.of("sh", "-c", "exec tail -f /dev/null"));
-        }
-        if (script.equals(PtyUploads.OPEN) && openExits != null) {
-          inner = new ArrayList<>(List.of("sh", "-c", "exit " + openExits));
-        }
-        if (script.equals(PtyUploads.COMMIT)) {
-          await(commitHeld);
-          if (commitExits != null) {
-            inner = new ArrayList<>(List.of("sh", "-c", "exit " + commitExits));
-          }
-        }
-        if (script.equals(PtyUploads.REMOVE)) {
-          await(removeHeld);
-          if (removeExits != null) {
-            inner = new ArrayList<>(List.of("sh", "-c", "exit " + removeExits));
-          }
-        }
-        var process =
-            new ProcessBuilder(inner).redirectError(ProcessBuilder.Redirect.DISCARD).start();
-        if (!script.equals(PtyUploads.OPEN)) {
-          try {
-            process.waitFor();
-          } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-          }
-          finished.add(script);
-        }
-        return script.equals(PtyUploads.OPEN) ? new HeldCopy(process) : process;
-      };
-
-  /** A copy whose exit the host waits for only once {@link #copyHeld} lets it, when set. */
-  private final class HeldCopy extends Process {
-    private final Process process;
-
-    HeldCopy(Process process) {
-      this.process = process;
-    }
-
-    @Override
-    public boolean waitFor(long timeout, TimeUnit unit) throws InterruptedException {
-      copyReached.countDown();
-      await(copyHeld);
-      return process.waitFor(timeout, unit);
-    }
-
-    @Override
-    public int waitFor() throws InterruptedException {
-      return waitFor(1, TimeUnit.MINUTES) ? process.exitValue() : -1;
-    }
-
-    @Override
-    public java.io.OutputStream getOutputStream() {
-      return process.getOutputStream();
-    }
-
-    @Override
-    public java.io.InputStream getInputStream() {
-      return process.getInputStream();
-    }
-
-    @Override
-    public java.io.InputStream getErrorStream() {
-      return process.getErrorStream();
-    }
-
-    @Override
-    public int exitValue() {
-      return process.exitValue();
-    }
-
-    @Override
-    public void destroy() {
-      process.destroy();
-    }
-  }
-
-  private static void await(CountDownLatch latch) {
-    if (latch == null) {
-      return;
-    }
-    try {
-      latch.await();
-    } catch (InterruptedException e) {
-      Thread.currentThread().interrupt();
-    }
-  }
-
-  private PtyUploads.Place place() throws IOException {
-    var uid = Files.getAttribute(dir, "unix:uid").toString();
-    var gid = Files.getAttribute(dir, "unix:gid").toString();
-    Function<String, List<String>> asRoot = container -> List.of("incus", "exec", container, "--");
-    Function<String, List<String>> asDev =
-        container -> List.of("incus", "exec", container, "--user", uid, "--");
-    return new PtyUploads.Place(
-        asRoot, asDev, root().toString(), uid, uid, gid, List.of(), Duration.ofSeconds(3));
+  @BeforeEach
+  void container() {
+    c = new ContainerDirectory(dir);
   }
 
   private final PtyIdentity.Resolver resolver =
@@ -240,7 +85,7 @@ class PtyUploadsTest {
 
   private PtySessionHost startHost(Function<PtySession.Origin, PtyUploads.Target> targets)
       throws IOException {
-    uploads = new PtyUploads(processes, place(), targets);
+    uploads = new PtyUploads(c.copies(), targets);
     var host =
         new PtySessionHost(
             dir.resolve("host.sock"),
@@ -306,9 +151,9 @@ class PtyUploadsTest {
   }
 
   private static PtyMessage send(SocketChannel channel, int id, byte[] bytes) throws Exception {
-    for (var offset = 0; offset < bytes.length; offset += PtyUploads.CHUNK) {
+    for (var offset = 0; offset < bytes.length; offset += UploadAllowance.CHUNK) {
       var chunk =
-          Arrays.copyOfRange(bytes, offset, Math.min(bytes.length, offset + PtyUploads.CHUNK));
+          Arrays.copyOfRange(bytes, offset, Math.min(bytes.length, offset + UploadAllowance.CHUNK));
       PtyWire.write(channel, new PtyMessage.PutChunk(id, offset, chunk));
       var acked = answer(channel);
       if (!(acked instanceof PtyMessage.PutAck)) {
@@ -334,38 +179,8 @@ class PtyUploadsTest {
     return MessageDigest.getInstance("SHA-256").digest(bytes);
   }
 
-  /** The files and links the session directory of {@code stored} holds, by name. */
-  private static List<String> held(Path directory) throws IOException {
-    if (!Files.exists(directory)) {
-      return List.of();
-    }
-    try (Stream<Path> entries = Files.list(directory)) {
-      return entries.map(path -> path.getFileName().toString()).sorted().toList();
-    }
-  }
-
   private Path inRoot(String path) {
     return Path.of(path);
-  }
-
-  private void awaitFinished(String script) throws InterruptedException {
-    while (true) {
-      var done = finished.poll(30, TimeUnit.SECONDS);
-      assertNotNull(done, "no script finished " + script.lines().findFirst().orElse(""));
-      if (done.equals(script)) {
-        return;
-      }
-    }
-  }
-
-  private void awaitCommand(String script) throws InterruptedException {
-    while (true) {
-      var command = commands.poll(30, TimeUnit.SECONDS);
-      assertNotNull(command, "no command ran " + script.lines().findFirst().orElse(""));
-      if (command.contains(script)) {
-        return;
-      }
-    }
   }
 
   @Test
@@ -373,14 +188,14 @@ class PtyUploadsTest {
       throws Exception {
     try (var ignored = startHost();
         var channel = writer("lounge")) {
-      var bytes = new byte[PtyUploads.CHUNK * 2 + 5];
+      var bytes = new byte[UploadAllowance.CHUNK * 2 + 5];
       bytes[bytes.length - 1] = 9;
 
       var stored =
           assertInstanceOf(PtyMessage.PutStored.class, upload(channel, 3, "shot.png", bytes));
 
       assertEquals(3, stored.id());
-      assertTrue(stored.path().matches(root() + "/[0-9a-f-]{36}/1-shot\\.png"), stored.path());
+      assertTrue(stored.path().matches(c.root() + "/[0-9a-f-]{36}/1-shot\\.png"), stored.path());
       var file = inRoot(stored.path());
       assertArrayEquals(bytes, Files.readAllBytes(file));
       assertEquals("rw-------", PosixFilePermissions.toString(Files.getPosixFilePermissions(file)));
@@ -388,36 +203,10 @@ class PtyUploadsTest {
           "rwx------",
           PosixFilePermissions.toString(Files.getPosixFilePermissions(file.getParent())));
       assertEquals(
-          "rwxr-xr-x", PosixFilePermissions.toString(Files.getPosixFilePermissions(root())));
-      assertEquals(List.of("1-shot.png"), held(file.getParent()), "no temporary is left");
-      assertFalse(Files.exists(dir.resolve("staging")), "nothing of the file sits on the host");
-    }
-  }
-
-  @Test
-  void noNameAFileOrALinkHoldsIsWrittenAndALinkAtTheTemporaryIsNeverWrittenThrough()
-      throws Exception {
-    try (var ignored = startHost();
-        var channel = writer("lounge")) {
-      var first =
-          (PtyMessage.PutStored)
-              upload(channel, 1, "a.png", "one".getBytes(StandardCharsets.UTF_8));
-      var session = inRoot(first.path()).getParent();
-      Files.writeString(session.resolve("2-a.png"), "a host before this one stored it");
-      var target = dir.resolve("elsewhere");
-      Files.createSymbolicLink(session.resolve("3-a.png"), target);
-      Files.createSymbolicLink(session.resolve(".4-a.png.part"), target);
-
-      var next =
-          (PtyMessage.PutStored)
-              upload(channel, 2, "a.png", "two".getBytes(StandardCharsets.UTF_8));
-
-      assertTrue(next.path().endsWith("/5-a.png"), next.path());
-      assertEquals("one", Files.readString(inRoot(first.path())));
+          "rwxr-xr-x", PosixFilePermissions.toString(Files.getPosixFilePermissions(c.root())));
       assertEquals(
-          "a host before this one stored it", Files.readString(session.resolve("2-a.png")));
-      assertEquals("two", Files.readString(inRoot(next.path())));
-      assertFalse(Files.exists(target), "nothing was written through a planted link");
+          List.of("1-shot.png"), ContainerDirectory.held(file.getParent()), "no temporary is left");
+      assertFalse(Files.exists(dir.resolve("staging")), "nothing of the file sits on the host");
     }
   }
 
@@ -435,7 +224,7 @@ class PtyUploadsTest {
       handled(watcher);
       PtyWire.write(writer, new PtyMessage.PutChunk(2, 0, new byte[] {1, 2, 3, 4}));
       assertEquals(new PtyMessage.PutRefused(2, PutRefusal.NOT_WRITER, 0), answer(writer));
-      awaitFinished(PtyUploads.ABORT);
+      c.awaitFinished(UploadCopy.ABORT);
 
       PtyWire.write(writer, new PtyMessage.TakeWrite());
       PtyWire.write(writer, new PtyMessage.PutBegin(3, "shot.png", 1));
@@ -446,8 +235,8 @@ class PtyUploadsTest {
       handled(watcher);
       PtyWire.write(writer, new PtyMessage.PutEnd(3, sha256(new byte[] {1})));
       assertEquals(new PtyMessage.PutRefused(3, PutRefusal.NOT_WRITER, 0), answer(writer));
-      awaitFinished(PtyUploads.ABORT);
-      assertEquals(List.of(), held(onlySession()));
+      c.awaitFinished(UploadCopy.ABORT);
+      assertEquals(List.of(), ContainerDirectory.held(onlySession()));
     }
   }
 
@@ -462,7 +251,7 @@ class PtyUploadsTest {
   }
 
   private Path onlySession() throws IOException {
-    try (Stream<Path> entries = Files.list(root())) {
+    try (Stream<Path> entries = Files.list(c.root())) {
       return entries.findFirst().orElseThrow();
     }
   }
@@ -480,59 +269,50 @@ class PtyUploadsTest {
     var own =
         new PtySession.Origin("lounge", "inst-1", "uday", "acme", "", List.of("bash"), "dock");
     assertEquals(PtyUploads.Target.own("acme-dock"), PtyUploads.targetOf(own));
-    assertFalse(Files.exists(root()));
+    assertFalse(Files.exists(c.root()));
   }
 
   @Test
   void aFileOverTheLargestOrAChunkOverItsBoundIsRefused() throws Exception {
     try (var ignored = startHost();
         var channel = writer("lounge")) {
-      PtyWire.write(channel, new PtyMessage.PutBegin(1, "big.mov", PtyUploads.ITEM + 1));
+      PtyWire.write(channel, new PtyMessage.PutBegin(1, "big.mov", UploadAllowance.ITEM + 1));
       assertEquals(
-          new PtyMessage.PutRefused(1, PutRefusal.TOO_LARGE, PtyUploads.ITEM), answer(channel));
+          new PtyMessage.PutRefused(1, PutRefusal.TOO_LARGE, UploadAllowance.ITEM),
+          answer(channel));
       PtyWire.write(channel, new PtyMessage.PutBegin(2, "less.mov", -1));
       assertEquals(
-          new PtyMessage.PutRefused(2, PutRefusal.TOO_LARGE, PtyUploads.ITEM), answer(channel));
-      PtyWire.write(channel, new PtyMessage.PutBegin(3, "a", PtyUploads.CHUNK + 1));
+          new PtyMessage.PutRefused(2, PutRefusal.TOO_LARGE, UploadAllowance.ITEM),
+          answer(channel));
+      PtyWire.write(channel, new PtyMessage.PutBegin(3, "a", UploadAllowance.CHUNK + 1));
       assertEquals(new PtyMessage.PutAck(3, 0), answer(channel));
-      PtyWire.write(channel, new PtyMessage.PutChunk(3, 0, new byte[PtyUploads.CHUNK + 1]));
+      PtyWire.write(channel, new PtyMessage.PutChunk(3, 0, new byte[UploadAllowance.CHUNK + 1]));
       assertEquals(new PtyMessage.PutRefused(3, PutRefusal.FAILED, 0), answer(channel));
     }
   }
 
   @Test
-  void aSessionHoldsAtMostItsFilesAndItsBytesAcrossItsConnectionsAndOnItsDisk() throws Exception {
+  void aSessionHoldsAtMostItsBytesAcrossItsConnections() throws Exception {
     try (var ignored = startHost();
         var first = writer("study")) {
       var holders = new ArrayList<SocketChannel>();
       try {
-        for (var i = 0; i < PtyUploads.SESSION / PtyUploads.ITEM; i++) {
+        for (var i = 0; i < UploadAllowance.SESSION / UploadAllowance.ITEM; i++) {
           var next = attached(connect(), "study", true);
           holders.add(next);
-          PtyWire.write(next, new PtyMessage.PutBegin(1, "part", PtyUploads.ITEM));
+          PtyWire.write(next, new PtyMessage.PutBegin(1, "part", UploadAllowance.ITEM));
           assertEquals(new PtyMessage.PutAck(1, 0), answer(next));
         }
         PtyWire.write(first, new PtyMessage.TakeWrite());
         PtyWire.write(first, new PtyMessage.PutBegin(1, "one-more", 1));
         assertEquals(
-            new PtyMessage.PutRefused(1, PutRefusal.SESSION_FULL, PtyUploads.SESSION),
+            new PtyMessage.PutRefused(1, PutRefusal.SESSION_FULL, UploadAllowance.SESSION),
             answer(first));
       } finally {
         for (var holder : holders) {
           holder.close();
         }
       }
-    }
-    try (var ignored = startHost();
-        var channel = writer("lounge")) {
-      var stored = (PtyMessage.PutStored) upload(channel, 1, "a", new byte[] {1});
-      var session = inRoot(stored.path()).getParent();
-      for (var i = 2; i <= PtyUploads.FILES; i++) {
-        Files.createFile(session.resolve(i + "-left"));
-      }
-      assertEquals(
-          new PtyMessage.PutRefused(2, PutRefusal.TOO_MANY, PtyUploads.FILES),
-          upload(channel, 2, "b", new byte[] {1}));
     }
   }
 
@@ -565,10 +345,10 @@ class PtyUploadsTest {
       assertEquals(new PtyMessage.PutRefused(4, PutRefusal.FAILED, 0), answer(channel));
 
       for (var aborted = 0; aborted < 4; aborted++) {
-        awaitFinished(PtyUploads.ABORT);
+        c.awaitFinished(UploadCopy.ABORT);
       }
       var session = onlySession();
-      assertEquals(List.of(), held(session), "no temporary and no file is left");
+      assertEquals(List.of(), ContainerDirectory.held(session), "no temporary and no file is left");
     }
   }
 
@@ -581,17 +361,17 @@ class PtyUploadsTest {
       PtyWire.write(channel, new PtyMessage.PutChunk(1, 0, new byte[] {1, 2}));
       assertEquals(new PtyMessage.PutAck(1, 2), answer(channel));
       PtyWire.write(channel, new PtyMessage.PutCancel(1));
-      awaitFinished(PtyUploads.ABORT);
+      c.awaitFinished(UploadCopy.ABORT);
       var session = onlySession();
-      assertEquals(List.of(), held(session));
+      assertEquals(List.of(), ContainerDirectory.held(session));
 
       PtyWire.write(channel, new PtyMessage.PutBegin(2, "b", 4));
       assertEquals(new PtyMessage.PutAck(2, 0), answer(channel));
       PtyWire.write(channel, new PtyMessage.PutChunk(2, 0, new byte[] {1, 2}));
       assertEquals(new PtyMessage.PutAck(2, 2), answer(channel));
       channel.close();
-      awaitFinished(PtyUploads.ABORT);
-      assertEquals(List.of(), held(session));
+      c.awaitFinished(UploadCopy.ABORT);
+      assertEquals(List.of(), ContainerDirectory.held(session));
     }
   }
 
@@ -599,21 +379,21 @@ class PtyUploadsTest {
   void aCancelAfterTheEndKeepsNothingUntilTheFileIsStoredAndNothingOnceItIs() throws Exception {
     try (var ignored = startHost();
         var channel = writer("lounge")) {
-      copyHeld = new CountDownLatch(1);
+      c.copyHeld = new CountDownLatch(1);
       PtyWire.write(channel, new PtyMessage.PutBegin(1, "a", 1));
       assertEquals(new PtyMessage.PutAck(1, 0), answer(channel));
       PtyWire.write(channel, new PtyMessage.PutChunk(1, 0, new byte[] {7}));
       assertEquals(new PtyMessage.PutAck(1, 1), answer(channel));
       PtyWire.write(channel, new PtyMessage.PutEnd(1, sha256(new byte[] {7})));
-      copyReached.await();
+      c.copyReached.await();
       PtyWire.write(channel, new PtyMessage.PutCancel(1));
       PtyWire.write(channel, new PtyMessage.PutQuery(99));
-      assertEquals(new PtyMessage.PutRefused(99, PutRefusal.UNKNOWN, 0), answer(channel));
-      copyHeld.countDown();
+      assertEquals(new PtyMessage.PutRefused(99, PutRefusal.NOT_KNOWN, 0), answer(channel));
+      c.copyHeld.countDown();
       assertEquals(new PtyMessage.PutRefused(1, PutRefusal.CANCELLED, 0), answer(channel));
-      assertEquals(List.of(), held(onlySession()));
+      assertEquals(List.of(), ContainerDirectory.held(onlySession()));
 
-      copyHeld = null;
+      c.copyHeld = null;
       var stored = (PtyMessage.PutStored) upload(channel, 2, "b", new byte[] {8});
       PtyWire.write(channel, new PtyMessage.PutCancel(2));
       PtyWire.write(channel, new PtyMessage.PutQuery(2));
@@ -626,17 +406,17 @@ class PtyUploadsTest {
   void aClientThatLostItsConnectionAfterTheEndHearsWhatBecameOfTheUpload() throws Exception {
     try (var ignored = startHost();
         var channel = writer("lounge")) {
-      commitHeld = new CountDownLatch(1);
+      c.commitHeld = new CountDownLatch(1);
       PtyWire.write(channel, new PtyMessage.PutBegin(5, "a", 1));
       assertEquals(new PtyMessage.PutAck(5, 0), answer(channel));
       PtyWire.write(channel, new PtyMessage.PutChunk(5, 0, new byte[] {7}));
       assertEquals(new PtyMessage.PutAck(5, 1), answer(channel));
       PtyWire.write(channel, new PtyMessage.PutEnd(5, sha256(new byte[] {7})));
-      awaitCommand(PtyUploads.COMMIT);
+      c.awaitCommand(UploadCopy.COMMIT);
       channel.close();
       try (var again = attached(connect(), "lounge", true)) {
         PtyWire.write(again, new PtyMessage.PutQuery(5));
-        commitHeld.countDown();
+        c.commitHeld.countDown();
         var stored = assertInstanceOf(PtyMessage.PutStored.class, answer(again));
         assertTrue(Files.exists(inRoot(stored.path())));
       }
@@ -647,32 +427,19 @@ class PtyUploadsTest {
   void theContainersRefusalIsToldByItsExitStatus() throws Exception {
     try (var ignored = startHost();
         var channel = writer("lounge")) {
-      openExits = PtyUploads.NO_SPACE;
+      c.openExits = UploadCopy.NO_SPACE;
       assertEquals(
           new PtyMessage.PutRefused(1, PutRefusal.NO_SPACE, 0),
           upload(channel, 1, "a", new byte[] {1}));
-      openExits = PtyUploads.UNSAFE;
+      c.openExits = UploadCopy.UNSAFE;
       assertEquals(
           new PtyMessage.PutRefused(2, PutRefusal.FAILED, 0),
           upload(channel, 2, "a", new byte[] {1}));
-      openExits = null;
-      commitExits = 1;
+      c.openExits = null;
+      c.commitExits = 1;
       assertEquals(
           new PtyMessage.PutRefused(3, PutRefusal.FAILED, 0),
           upload(channel, 3, "a", new byte[] {1}));
-    }
-  }
-
-  /** Major 1: a copy that kept fewer bytes than were sent never takes the file's name. */
-  @Test
-  void aCopyShorterThanTheFileIsNeverStored() throws Exception {
-    try (var ignored = startHost();
-        var channel = writer("lounge")) {
-      copyTruncates = true;
-      assertEquals(
-          new PtyMessage.PutRefused(1, PutRefusal.FAILED, 0),
-          upload(channel, 1, "a", new byte[] {1, 2, 3}));
-      assertEquals(List.of(), held(onlySession()));
     }
   }
 
@@ -686,21 +453,55 @@ class PtyUploadsTest {
     try (var ignored = startHost();
         var channel = writer("lounge")) {
       var id = 0;
-      openExits = PtyUploads.NO_SPACE;
-      for (var i = 0; i <= PtyUploads.FILES; i++, id++) {
+      c.openExits = UploadCopy.NO_SPACE;
+      for (var i = 0; i <= UploadAllowance.FILES; i++, id++) {
         assertEquals(
             new PtyMessage.PutRefused(id, PutRefusal.NO_SPACE, 0),
             upload(channel, id, "a", new byte[] {1}));
       }
-      openExits = null;
-      commitExits = 1;
-      for (var i = 0; i <= PtyUploads.FILES; i++, id++) {
+      c.openExits = null;
+      c.commitExits = 1;
+      for (var i = 0; i <= UploadAllowance.FILES; i++, id++) {
         assertEquals(
             new PtyMessage.PutRefused(id, PutRefusal.FAILED, 0),
             upload(channel, id, "a", new byte[] {1}));
       }
-      commitExits = null;
+      c.commitExits = null;
       assertInstanceOf(PtyMessage.PutStored.class, upload(channel, id, "a", new byte[] {1}));
+    }
+  }
+
+  /**
+   * Major 7: a commit the session's end came during keeps nothing and says so, its directory goes,
+   * and an upload begun after the end is refused.
+   */
+  @Test
+  void aCommitThatOutlivesItsSessionKeepsNothingAndAnUploadAfterIsRefused() throws Exception {
+    try (var ignored = startHost();
+        var channel = writer("lounge")) {
+      var first = (PtyMessage.PutStored) upload(channel, 1, "a", new byte[] {1});
+      var session = inRoot(first.path()).getParent();
+      c.commitHeld = new CountDownLatch(1);
+      try {
+        PtyWire.write(channel, new PtyMessage.PutBegin(2, "b", 1));
+        assertEquals(new PtyMessage.PutAck(2, 0), answer(channel));
+        PtyWire.write(channel, new PtyMessage.PutChunk(2, 0, new byte[] {2}));
+        assertEquals(new PtyMessage.PutAck(2, 1), answer(channel));
+        PtyWire.write(channel, new PtyMessage.PutEnd(2, sha256(new byte[] {2})));
+        c.awaitCommand(UploadCopy.COMMIT);
+        try (var killer = connect()) {
+          PtyWire.write(killer, new PtyMessage.Kill("lounge"));
+          assertInstanceOf(PtyMessage.Ok.class, PtyWire.read(killer));
+        }
+      } finally {
+        c.commitHeld.countDown();
+      }
+      assertEquals(new PtyMessage.PutRefused(2, PutRefusal.SESSION_ENDED, 0), answer(channel));
+      c.awaitFinished(UploadCleanup.REMOVE);
+      assertFalse(Files.exists(session, LinkOption.NOFOLLOW_LINKS));
+      PtyWire.write(channel, new PtyMessage.PutBegin(3, "c", 1));
+      assertEquals(new PtyMessage.PutRefused(3, PutRefusal.SESSION_ENDED, 0), answer(channel));
+      assertFalse(Files.exists(session), "nothing was made again after the session ended");
     }
   }
 
@@ -710,10 +511,10 @@ class PtyUploadsTest {
     try (var ignored = startHost();
         var study = writer("study");
         var lounge = writer("lounge")) {
-      openHeld = new CountDownLatch(1);
-      var release = openHeld;
+      c.openHeld = new CountDownLatch(1);
+      var release = c.openHeld;
       PtyWire.write(study, new PtyMessage.PutBegin(1, "a", 1));
-      awaitCommand(PtyUploads.OPEN);
+      c.awaitCommand(UploadCopy.OPEN);
       PtyWire.write(lounge, new PtyMessage.PutBegin(2, "b", 1));
       try (var killer = connect()) {
         PtyWire.write(killer, new PtyMessage.Kill("lounge"));
@@ -722,7 +523,7 @@ class PtyUploadsTest {
       release.countDown();
       assertEquals(new PtyMessage.PutAck(1, 0), answer(study));
       assertEquals(new PtyMessage.PutRefused(2, PutRefusal.SESSION_ENDED, 0), answer(lounge));
-      try (Stream<Path> entries = Files.list(root())) {
+      try (Stream<Path> entries = Files.list(c.root())) {
         assertEquals(1, entries.count(), "only the live session's directory was made");
       }
     }
@@ -733,7 +534,7 @@ class PtyUploadsTest {
   void anOpenThatNeverAnswersIsGivenUpAndTheNextUploadIsStored() throws Exception {
     try (var ignored = startHost();
         var channel = writer("lounge")) {
-      openHangs = true;
+      c.openHangs = true;
       assertEquals(
           new PtyMessage.PutRefused(1, PutRefusal.FAILED, 0),
           upload(channel, 1, "a", new byte[] {1}));
@@ -764,14 +565,14 @@ class PtyUploadsTest {
   @Test
   void aSweepNeverRemovesWhatALiveSessionsFirstUploadMakes() throws Exception {
     try (var ignored = startHost()) {
-      sweepHeld = new CountDownLatch(1);
-      var release = sweepHeld;
+      c.sweepHeld = new CountDownLatch(1);
+      var release = c.sweepHeld;
       try (var study = writer("study")) {
-        awaitCommand(PtyUploads.SWEEP);
+        c.awaitCommand(UploadCleanup.SWEEP);
         try (var lounge = writer("lounge")) {
           PtyWire.write(lounge, new PtyMessage.PutBegin(1, "a", 1));
           release.countDown();
-          awaitFinished(PtyUploads.SWEEP);
+          c.awaitFinished(UploadCleanup.SWEEP);
           assertEquals(new PtyMessage.PutAck(1, 0), answer(lounge));
           var stored =
               assertInstanceOf(PtyMessage.PutStored.class, send(lounge, 1, new byte[] {1}));
@@ -782,102 +583,25 @@ class PtyUploadsTest {
     }
   }
 
-  /** Major 5: a link a session's directory holds is removed as a link, never followed. */
-  @Test
-  void aLinkInASessionsDirectoryIsRemovedAsALink() throws Exception {
-    try (var ignored = startHost();
-        var channel = writer("lounge")) {
-      var stored = (PtyMessage.PutStored) upload(channel, 1, "a", new byte[] {1});
-      var session = inRoot(stored.path()).getParent();
-      var outside = Files.createDirectories(dir.resolve("home"));
-      Files.writeString(outside.resolve("work"), "the person's own");
-      Files.createSymbolicLink(session.resolve("2-a"), outside);
-      Files.createSymbolicLink(session.resolve("3-a"), outside.resolve("work"));
-      try (var killer = connect()) {
-        PtyWire.write(killer, new PtyMessage.Kill("lounge"));
-        assertInstanceOf(PtyMessage.Ok.class, PtyWire.read(killer));
-      }
-      awaitFinished(PtyUploads.REMOVE);
-      assertFalse(Files.exists(session, LinkOption.NOFOLLOW_LINKS));
-      assertEquals("the person's own", Files.readString(outside.resolve("work")));
-    }
-  }
-
-  /** Major 5: a session's directory that is a link is neither written through nor removed. */
-  @Test
-  void aSessionsDirectoryThatIsALinkIsNeitherWrittenThroughNorFollowed() throws Exception {
-    try (var ignored = startHost();
-        var channel = writer("lounge")) {
-      var stored = (PtyMessage.PutStored) upload(channel, 1, "a", new byte[] {1});
-      var session = inRoot(stored.path()).getParent();
-      Files.delete(inRoot(stored.path()));
-      Files.delete(session);
-      var outside = Files.createDirectories(dir.resolve("home"));
-      Files.writeString(outside.resolve("work"), "the person's own");
-      Files.createSymbolicLink(session, outside);
-
-      assertEquals(
-          new PtyMessage.PutRefused(2, PutRefusal.FAILED, 0),
-          upload(channel, 2, "b", new byte[] {2}));
-      try (var killer = connect()) {
-        PtyWire.write(killer, new PtyMessage.Kill("lounge"));
-        assertInstanceOf(PtyMessage.Ok.class, PtyWire.read(killer));
-      }
-      awaitFinished(PtyUploads.REMOVE);
-      assertFalse(Files.exists(session, LinkOption.NOFOLLOW_LINKS));
-      try (Stream<Path> entries = Files.list(outside)) {
-        assertEquals(List.of(outside.resolve("work")), entries.toList());
-      }
-      assertEquals("the person's own", Files.readString(outside.resolve("work")));
-    }
-  }
-
   /** Major 2: a container's slow removal holds no other session's create. */
   @Test
   void aSlowRemovalHoldsNoOtherSessionsCreate() throws Exception {
     try (var ignored = startHost();
         var channel = writer("lounge")) {
       upload(channel, 1, "a", new byte[] {1});
-      removeHeld = new CountDownLatch(1);
+      c.removeHeld = new CountDownLatch(1);
       try {
         try (var killer = connect()) {
           PtyWire.write(killer, new PtyMessage.Kill("lounge"));
           assertInstanceOf(PtyMessage.Ok.class, PtyWire.read(killer));
         }
-        awaitCommand(PtyUploads.REMOVE);
+        c.awaitCommand(UploadCleanup.REMOVE);
         try (var another = writer("study")) {
           assertTrue(another.isOpen(), "the create was answered while the removal was held");
         }
       } finally {
-        removeHeld.countDown();
+        c.removeHeld.countDown();
       }
-    }
-  }
-
-  @Test
-  void aNewSessionSweepsTheUploadsOfSessionsNoLongerLiveAndNothingElse() throws Exception {
-    try (var ignored = startHost();
-        var channel = writer("lounge")) {
-      var stored = (PtyMessage.PutStored) upload(channel, 1, "a", new byte[] {1});
-      var stale = root().resolve("0f0e0d0c-0000-0000-0000-000000000000");
-      Files.createDirectories(stale);
-      Files.writeString(stale.resolve("1-left.png"), "left by a stopped container");
-      var notAnId = root().resolve("keep-me");
-      Files.createDirectories(notAnId);
-      var outside = Files.createDirectories(dir.resolve("home"));
-      Files.writeString(outside.resolve("work"), "the person's own");
-      Files.createSymbolicLink(root().resolve("0a0b0c0d-1111-1111-1111-111111111111"), outside);
-
-      try (var second = writer("study")) {
-        awaitFinished(PtyUploads.SWEEP);
-        assertFalse(Files.exists(stale));
-        assertNotNull(second);
-      }
-
-      assertTrue(Files.exists(inRoot(stored.path())), "a live session's file is kept");
-      assertTrue(Files.exists(notAnId), "a name that is no instance id is kept");
-      assertEquals(
-          "the person's own", Files.readString(outside.resolve("work")), "no link followed");
     }
   }
 
@@ -887,50 +611,16 @@ class PtyUploadsTest {
     try (var ignored = startHost();
         var channel = writer("lounge")) {
       var stored = (PtyMessage.PutStored) upload(channel, 1, "a", new byte[] {1});
-      removeExits = 1;
+      c.removeExits = 1;
       PtyWire.write(channel, new PtyMessage.Input(1, new byte[] {4}));
-      awaitFinished(PtyUploads.REMOVE);
+      c.awaitFinished(UploadCleanup.REMOVE);
       assertTrue(Files.exists(inRoot(stored.path())), "the failed removal kept the file");
-      removeExits = null;
+      c.removeExits = null;
       try (var next = writer("study")) {
-        awaitFinished(PtyUploads.SWEEP);
+        c.awaitFinished(UploadCleanup.SWEEP);
         assertNotNull(next);
       }
       assertFalse(Files.exists(inRoot(stored.path()).getParent()));
-    }
-  }
-
-  /** Major 5: a root that is a link, or not root's, is neither swept nor written into. */
-  @Test
-  void aRootThatIsALinkIsNeitherSweptNorWrittenInto() throws Exception {
-    var outside = Files.createDirectories(dir.resolve("home"));
-    Files.writeString(outside.resolve("work"), "the person's own");
-    Files.createDirectories(outside.resolve("0f0e0d0c-0000-0000-0000-000000000000"));
-    Files.createSymbolicLink(root(), outside);
-    try (var ignored = startHost();
-        var channel = writer("lounge")) {
-      assertEquals(
-          new PtyMessage.PutRefused(1, PutRefusal.FAILED, 0),
-          upload(channel, 1, "a", new byte[] {1}));
-      var opened =
-          commands.stream().filter(c -> c.contains(PtyUploads.OPEN)).findFirst().orElseThrow();
-      var instanceId = opened.get(opened.indexOf(root().toString()) + 1);
-      Files.createDirectories(outside.resolve(instanceId));
-      try (var second = writer("study")) {
-        awaitFinished(PtyUploads.SWEEP);
-        assertNotNull(second);
-      }
-      try (var killer = connect()) {
-        PtyWire.write(killer, new PtyMessage.Kill("lounge"));
-        assertInstanceOf(PtyMessage.Ok.class, PtyWire.read(killer));
-      }
-      awaitFinished(PtyUploads.REMOVE);
-      assertTrue(Files.exists(outside.resolve(instanceId)), "no removal through the link");
-      assertTrue(Files.exists(outside.resolve("0f0e0d0c-0000-0000-0000-000000000000")));
-      assertEquals("the person's own", Files.readString(outside.resolve("work")));
-      try (Stream<Path> entries = Files.list(outside)) {
-        assertEquals(3, entries.count(), "nothing was made through the link");
-      }
     }
   }
 

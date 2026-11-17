@@ -1,0 +1,237 @@
+/*
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
+ * SPDX-License-Identifier: MIT
+ */
+
+package ai.singlr.sail.pty;
+
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.time.Duration;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.TimeUnit;
+import java.util.function.Function;
+import java.util.stream.Stream;
+
+/**
+ * A container that is a directory here, for the upload tests: each script the host sends a
+ * container runs on this machine as this account, under a root of the test's own, with this account
+ * standing for both root and the dev user. Each knob makes one script fail, hang or wait for the
+ * test the way a real container could. The scripts are a Linux container's (GNU {@code find},
+ * {@code stat} and {@code df}), so the tests that use it run on Linux alone.
+ */
+final class ContainerDirectory {
+
+  private final Path dir;
+
+  /** Every command a container was handed, in order. */
+  final LinkedBlockingQueue<List<String>> commands = new LinkedBlockingQueue<>();
+
+  /** Each script but an open, put here once it exited, which its caller waits for anyway. */
+  final LinkedBlockingQueue<String> finished = new LinkedBlockingQueue<>();
+
+  /** Whether the next open never answers, as a frozen container's would not. */
+  volatile boolean openHangs;
+
+  /** The status the next open exits with instead of running, when set. */
+  volatile Integer openExits;
+
+  /** Whether each copy into the container keeps only its first byte, as a cut-off stream would. */
+  volatile boolean copyTruncates;
+
+  /** The status every commit exits with instead of running, when set. */
+  volatile Integer commitExits;
+
+  /** Held before a commit runs, when set: a commit the test releases. */
+  volatile CountDownLatch commitHeld;
+
+  /** Held before the next open runs, when set, and cleared as it is taken. */
+  volatile CountDownLatch openHeld;
+
+  /** Held before the next sweep runs, when set, and cleared as it is taken. */
+  volatile CountDownLatch sweepHeld;
+
+  /** The status every removal exits with instead of running, when set. */
+  volatile Integer removeExits;
+
+  /** Held before a removal runs, when set. */
+  volatile CountDownLatch removeHeld;
+
+  /** Held as the host waits for a copy to exit, when set; {@link #copyReached} once it waits. */
+  volatile CountDownLatch copyHeld;
+
+  final CountDownLatch copyReached = new CountDownLatch(1);
+
+  ContainerDirectory(Path dir) {
+    this.dir = dir;
+  }
+
+  /** The uploads root, standing for {@link UploadCopy#ROOT}. */
+  Path root() {
+    return dir.resolve("var-lib-sail-paste");
+  }
+
+  /** The place: this account for root and the dev user, a 3 s patience. */
+  UploadCopy.Place place() throws IOException {
+    var uid = Files.getAttribute(dir, "unix:uid").toString();
+    var gid = Files.getAttribute(dir, "unix:gid").toString();
+    Function<String, List<String>> asRoot = container -> List.of("incus", "exec", container, "--");
+    Function<String, List<String>> asDev =
+        container -> List.of("incus", "exec", container, "--user", uid, "--");
+    return new UploadCopy.Place(
+        asRoot, asDev, root().toString(), uid, uid, gid, List.of(), Duration.ofSeconds(3));
+  }
+
+  /** Copies into this directory. */
+  UploadCopy copies() throws IOException {
+    return new UploadCopy(processes, place());
+  }
+
+  /** The container: each command run here after its {@code incus exec ... --}, every one kept. */
+  final UploadCopy.Processes processes =
+      command -> {
+        commands.add(List.copyOf(command));
+        var inner = new ArrayList<>(command.subList(command.indexOf("--") + 1, command.size()));
+        var script = inner.size() > 2 ? inner.get(2) : "";
+        if (script.equals(UploadCopy.OPEN)) {
+          var held = openHeld;
+          openHeld = null;
+          await(held);
+        }
+        if (script.equals(UploadCleanup.SWEEP)) {
+          var held = sweepHeld;
+          sweepHeld = null;
+          await(held);
+        }
+        if (script.equals(UploadCopy.OPEN) && copyTruncates) {
+          inner.set(2, script.replace("cat >&3", "{ head -c 1; cat > /dev/null; } >&3"));
+        }
+        if (script.equals(UploadCopy.OPEN) && openHangs) {
+          openHangs = false;
+          inner = new ArrayList<>(List.of("sh", "-c", "exec tail -f /dev/null"));
+        }
+        if (script.equals(UploadCopy.OPEN) && openExits != null) {
+          inner = new ArrayList<>(List.of("sh", "-c", "exit " + openExits));
+        }
+        if (script.equals(UploadCopy.COMMIT)) {
+          await(commitHeld);
+          if (commitExits != null) {
+            inner = new ArrayList<>(List.of("sh", "-c", "exit " + commitExits));
+          }
+        }
+        if (script.equals(UploadCleanup.REMOVE)) {
+          await(removeHeld);
+          if (removeExits != null) {
+            inner = new ArrayList<>(List.of("sh", "-c", "exit " + removeExits));
+          }
+        }
+        var process =
+            new ProcessBuilder(inner).redirectError(ProcessBuilder.Redirect.DISCARD).start();
+        if (!script.equals(UploadCopy.OPEN)) {
+          try {
+            process.waitFor();
+          } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+          }
+          finished.add(script);
+        }
+        return script.equals(UploadCopy.OPEN) ? new HeldCopy(process) : process;
+      };
+
+  /** A copy whose exit the host waits for only once {@link #copyHeld} lets it, when set. */
+  private final class HeldCopy extends Process {
+    private final Process process;
+
+    HeldCopy(Process process) {
+      this.process = process;
+    }
+
+    @Override
+    public boolean waitFor(long timeout, TimeUnit unit) throws InterruptedException {
+      copyReached.countDown();
+      await(copyHeld);
+      return process.waitFor(timeout, unit);
+    }
+
+    @Override
+    public int waitFor() throws InterruptedException {
+      return waitFor(1, TimeUnit.MINUTES) ? process.exitValue() : -1;
+    }
+
+    @Override
+    public OutputStream getOutputStream() {
+      return process.getOutputStream();
+    }
+
+    @Override
+    public InputStream getInputStream() {
+      return process.getInputStream();
+    }
+
+    @Override
+    public InputStream getErrorStream() {
+      return process.getErrorStream();
+    }
+
+    @Override
+    public int exitValue() {
+      return process.exitValue();
+    }
+
+    @Override
+    public void destroy() {
+      process.destroy();
+    }
+  }
+
+  static void await(CountDownLatch latch) {
+    if (latch == null) {
+      return;
+    }
+    try {
+      latch.await();
+    } catch (InterruptedException e) {
+      Thread.currentThread().interrupt();
+    }
+  }
+
+  /** Returns once {@code script} exited, after any that exited before it. */
+  void awaitFinished(String script) throws InterruptedException {
+    while (true) {
+      var done = finished.poll(30, TimeUnit.SECONDS);
+      assertNotNull(done, "no script finished " + script.lines().findFirst().orElse(""));
+      if (done.equals(script)) {
+        return;
+      }
+    }
+  }
+
+  /** Returns once a command running {@code script} was handed to a container. */
+  void awaitCommand(String script) throws InterruptedException {
+    while (true) {
+      var command = commands.poll(30, TimeUnit.SECONDS);
+      assertNotNull(command, "no command ran " + script.lines().findFirst().orElse(""));
+      if (command.contains(script)) {
+        return;
+      }
+    }
+  }
+
+  /** The files and links {@code directory} holds, by name. */
+  static List<String> held(Path directory) throws IOException {
+    if (!Files.exists(directory)) {
+      return List.of();
+    }
+    try (Stream<Path> entries = Files.list(directory)) {
+      return entries.map(path -> path.getFileName().toString()).sorted().toList();
+    }
+  }
+}

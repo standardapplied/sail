@@ -424,6 +424,9 @@ class ClientGoldensTest {
             .map(runs -> runs.name().toLowerCase(Locale.ROOT))
             .toList());
     vocabulary.put("roles", Arrays.stream(Role.values()).map(Role::attribute).toList());
+    vocabulary.put(
+        "upload_refusals",
+        Arrays.stream(PtyMessage.PutRefusal.values()).map(PtyMessage.PutRefusal::wire).toList());
     vocabulary.put("run_presences", List.of(RunPresence.WORKING, RunPresence.QUIET));
     vocabulary.put("run_statuses", Arrays.stream(RunStatus.values()).map(RunStatus::wire).toList());
     vocabulary.put(

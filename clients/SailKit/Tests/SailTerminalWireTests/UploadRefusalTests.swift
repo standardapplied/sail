@@ -1,4 +1,5 @@
 import SailAPI
+import SailKitTestSupport
 import SailTerminalWire
 import Testing
 
@@ -27,6 +28,12 @@ import Testing
         #expect(said(.known(.connectionLost))
             == "The connection to box-3 dropped while screenshot.png was uploading, before it was sent whole, so nothing was saved; paste it again.")
         #expect(said(.unknown("quota")) == said(.known(.failed)), "a kind from a newer host reads as a failure")
+    }
+
+    /// Every kind the host sends is one this client words, by the host's own list.
+    @Test func theHostsKindsAreTheVocabularysAndOnlyConnectionLostIsTheClientsOwn() throws {
+        #expect(UploadRefusal.Kind.allCases.filter { $0 != .connectionLost }.map(\.rawValue)
+            == (try Goldens.vocabulary("upload_refusals")))
     }
 
     @Test func theKindsAreTheHostsWords() {

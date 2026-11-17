@@ -3878,9 +3878,13 @@ runs the door and its keepalive options.
 it already holds, in frames 12-16 (`PutBegin`, `PutChunk`, `PutEnd`, `PutCancel`, `PutQuery`)
 answered by 35-37 (`PutAck`, `PutStored`, `PutRefused`, a kind and the bound it met, never a
 sentence: SailKit's `UploadRefusal.sentence` words each kind once). Nothing of a file is kept on
-the host: its bytes stream from the connection into the workspace. `PtyUploadsTest` drives each rule
-through a real host against a directory standing as the container; `PtyUploadIT` drives them against
-real Incus.
+the host: its bytes stream from the connection into the workspace. Four classes, one job each:
+`PtyUploads` answers the frames, names targets and files; `UploadAllowance` holds the bounds and a
+session's tally; `UploadCopy` is the shell that puts one file's bytes into a container, whole or not
+at all; `UploadCleanup` removes uploads from containers. Each has its tests (`PtyUploadsTest`
+through a real host, `UploadCopyTest` and `UploadCleanupTest` against a directory standing as the
+container, `UploadAllowanceTest` with no process at all); `PtyUploadIT` drives them against real
+Incus.
 - **U1. Only into the session's own workspace.** `PtyUploads.targetOf` alone names where a
   session's files go: a session in a workspace into that workspace's own instance
   (`<project>-<workspace>`, one person's); a session on the box itself has no container
@@ -3893,13 +3897,13 @@ real Incus.
   by SailKit's `UploadName`). `/var/lib/sail-paste` is root's (`0755`), made and checked by the host
   before every write and every delete; each session's directory is the dev user's alone (`0700`),
   its files `0600`. `<n>` is the first number no file, link or temporary of that name takes.
-- **U5. Bounded on the host:** 64 MiB a file (`ITEM`), 64 KiB a chunk (`CHUNK`), 256 files and 1 GiB a
-  session (`FILES`, `SESSION`), taken from the session's allowance across its connections when an
+- **U5. Bounded on the host:** 64 MiB a file, 64 KiB a chunk, 256 files and 1 GiB a session
+  (`UploadAllowance`), taken from the session's allowance across its connections when an
   upload begins and handed back by any upload that is not stored; the container checks the same
   bounds against what the directory holds, and its disk's free space, before it opens the file. A
   refusal is decided by a script's exit status, never by words: 11 `too_many`, 12 `session_full`,
   28 `no_space` (no room before the file opens, or under 64 KiB free once a write failed).
-- **U6. Whole or nothing.** One `incus exec` per upload (`OPEN`) runs as root to make the
+- **U6. Whole or nothing.** One `incus exec` per upload (`UploadCopy.OPEN`) runs as root to make the
   directories, then as the dev user (`setpriv`) creates `.<n>-<name>.part` with `O_EXCL` (a link at
   the name is refused, never written through) and copies its input into it; each chunk, in order and
   within the declared size, is written to that input and acknowledged once written. At `PutEnd`, from
@@ -3913,10 +3917,10 @@ real Incus.
   two unacknowledged, so a key waits behind at most 96 KiB
   (`UploadTests.aKeyTypedDuringAnUploadGoesOutAheadOfEveryChunkTheHostHasNotTaken`).
 - **U8. Gone with the session.** When a session ends no upload begins in it, and its directory is
-  removed as root on a thread of its own (`REMOVE`), never under the host's lock: a commit and the
+  removed as root on a thread of its own (`UploadCleanup.REMOVE`), never under the host's lock: a commit and the
   removal take the session's lock in turn, so a file is stored before the removal or the upload is
   answered `session_ended`. The next session made in a container removes, under that container's
-  lock, every directory there named as an instance id whose session is not live (`SWEEP`); a
+  lock, every directory there named as an instance id whose session is not live (`UploadCleanup.SWEEP`); a
   session's first upload takes the same lock, so the sweep never removes what a live session is
   making. No delete follows a link: each checks the root is a directory, not a link, and root's,
   and `rm -r` removes a link as itself, walking by descriptor, so nothing in the container can turn a
@@ -4681,9 +4685,7 @@ is skipped. Goldens are recorded only by the workflow's `record-goldens`
 input, never by a pull request's run. This job and the SailKit jobs run only when `clients/`, the
 workflow, or what the darwin `sail` is built from (the build files and the Java modules' main
 sources) changed (`ci/changes`; a job skipped by `if:` reports success, so no required check waits
-on it). A release calls the workflow for this job alone: its app bundles the `sail-darwin-arm64`
-the release built and signed in the same run, its cosign signature verified against the release
-workflow at that tag first, so the app and the release ship one binary, built and attested once.
+on it).
 
 ### The Sail app signs in with a passkey
 

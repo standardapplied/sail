@@ -231,7 +231,7 @@ public sealed interface PtyMessage {
 
   /**
    * What became of upload {@code id} of the attached session, asked by a client whose connection
-   * dropped after it sent the end: answered as the upload was, or {@link PutRefusal#UNKNOWN}.
+   * dropped after it sent the end: answered as the upload was, or {@link PutRefusal#NOT_KNOWN}.
    */
   record PutQuery(int id) implements PtyMessage {}
 
@@ -259,7 +259,7 @@ public sealed interface PtyMessage {
     NO_SPACE,
     FAILED,
     CANCELLED,
-    UNKNOWN;
+    NOT_KNOWN;
 
     /** The kind as the wire names it. */
     public String wire() {
