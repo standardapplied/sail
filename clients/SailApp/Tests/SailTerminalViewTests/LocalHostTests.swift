@@ -120,10 +120,12 @@ import Testing
     }
 
     /// The host's side of one connection: its magic, a welcome to the hello, an empty page to a
-    /// listing, until the client closes.
+    /// listing, until the client closes. A client already gone (``LocalHost/servingProcess()``
+    /// connects only to learn the pid) is not written to: XNU refuses a socket option on a socket
+    /// shut down both ways, so without `SO_NOSIGPIPE` the write would raise SIGPIPE in the test.
     private static func answer(_ client: Int32) {
         var on: Int32 = 1
-        setsockopt(client, SOL_SOCKET, SO_NOSIGPIPE, &on, socklen_t(MemoryLayout<Int32>.size))
+        guard setsockopt(client, SOL_SOCKET, SO_NOSIGPIPE, &on, socklen_t(MemoryLayout<Int32>.size)) == 0 else { return }
         let say = { (bytes: [UInt8]) in _ = bytes.withUnsafeBytes { write(client, $0.baseAddress, $0.count) } }
         say(Handshake.magic)
         var reader = FrameReader()
