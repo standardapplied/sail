@@ -45,6 +45,7 @@ public final class StatusBanner: NSView {
             stack.leadingAnchor.constraint(equalTo: leadingAnchor), stack.trailingAnchor.constraint(equalTo: trailingAnchor),
             stack.topAnchor.constraint(equalTo: topAnchor), stack.bottomAnchor.constraint(equalTo: bottomAnchor),
             widthAnchor.constraint(lessThanOrEqualToConstant: 420),
+            message.widthAnchor.constraint(equalTo: stack.widthAnchor, constant: -2 * Look.Space.l),
         ])
         isHidden = true
     }
@@ -101,13 +102,6 @@ public final class StatusBanner: NSView {
         return true
     }
 
-    /// Lines wrap at the message's own width, so its right margin is its left.
-    override public func layout() {
-        super.layout()
-        guard message.preferredMaxLayoutWidth != message.frame.width else { return }
-        message.preferredMaxLayoutWidth = message.frame.width
-        super.layout()
-    }
 
     @objc private func act() {
         handler()

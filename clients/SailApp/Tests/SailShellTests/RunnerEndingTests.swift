@@ -49,8 +49,8 @@ import Testing
         never.begin()
         #expect(door.sessions.count == 2, "the host's session list before: \(door.sessions)")
         let replies = Replies()
-        let asked = RunnerEnds.ask(panes + [never], titled: Self.titled, on: shell.window) { replies.given.append($0) }
-        #expect(asked)
+        let answeredLater = RunnerEnds.ask(panes + [never], titled: Self.titled, on: shell.window) { replies.given.append($0) }
+        #expect(answeredLater)
         let asked = Self.said(shell.window)
         #expect(asked.contains("Quit and End 2 Runner Terminals"), "only tabs holding a live session count: \(asked)")
         shell.window.endSheet(try #require(shell.window.attachedSheet), returnCode: .alertFirstButtonReturn)
