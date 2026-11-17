@@ -224,6 +224,95 @@ class AptTest {
     assertEquals(List.of("install", "update", "install"), verbs(shell));
   }
 
+  @Test
+  void everyProgressLineOfTheTriesAfterA404SaysWhichTryItIs() throws Exception {
+    var shell =
+        new ScriptedShellExecutor()
+            .onceOn(
+                INSTALL,
+                new ShellExec.Result(100, "dlstatus:1:10:Retrieving file 1 of 115\n", NOT_SERVED))
+            .on(REFRESH, new ShellExec.Result(0, "dlstatus:1:50:Retrieving file 1 of 4\n", ""))
+            .on(
+                "incus",
+                new ShellExec.Result(
+                    0,
+                    "Waiting for cache lock: Could not get lock /var/lib/dpkg/lock-frontend. It is"
+                        + " held by process 812 (unattended-upgr)...\n"
+                        + "dlstatus:1:99:Retrieving file 2 of 2\n"
+                        + "pmstatus:incus:40:Installing incus\n",
+                    ""));
+    var progress = new ArrayList<String>();
+
+    new Apt(shell, progress::add).install(List.of("incus"));
+
+    assertEquals(
+        List.of(
+            "10% Retrieving file 1 of 115",
+            "the mirror us-central1.gce.archive.ubuntu.com answered 404 for 2 of its files; trying"
+                + " again (2 of 4)",
+            "try 2 of 4 after a 404: 50% Retrieving file 1 of 4",
+            "try 2 of 4 after a 404: " + Apt.LOCK_WAIT,
+            "try 2 of 4 after a 404: 99% Retrieving file 2 of 2",
+            "try 2 of 4 after a 404: 40% Installing incus"),
+        progress);
+  }
+
+  @Test
+  void anInstallNoMirrorAnswered404ForShowsItsProgressAsItIs() throws Exception {
+    var shell =
+        new ScriptedShellExecutor()
+            .on("incus", new ShellExec.Result(0, "dlstatus:1:99:Retrieving file 2 of 2\n", ""));
+    var progress = new ArrayList<String>();
+
+    new Apt(shell, progress::add).install(List.of("incus"));
+
+    assertEquals(List.of("99% Retrieving file 2 of 2"), progress);
+  }
+
+  @ParameterizedTest
+  @ValueSource(
+      strings = {
+        "E: Sub-process /usr/bin/dpkg returned an error code (1)",
+        "E: You don't have enough free space in /var/cache/apt/archives/."
+      })
+  void a404BesideAnotherErrorIsNotTriedAgainAndNotBlamedOnTheMirror(String other) {
+    var stderr = NOT_SERVED + other + "\n";
+    var shell = new ScriptedShellExecutor().onOk(REFRESH).onceOnFail(INSTALL, stderr).onOk("incus");
+
+    var failure =
+        assertThrows(
+            IOException.class, () -> new Apt(shell, detail -> {}).install(List.of("incus")));
+
+    assertEquals(
+        "apt-get install incus failed: " + String.join(" ", stderr.strip().lines().toList()),
+        failure.getMessage());
+    assertEquals(List.of("install"), verbs(shell));
+  }
+
+  @Test
+  void aRefreshThatFailsBetweenTriesSaysTheInstallWasBeingTriedAgainForA404() {
+    var shell =
+        new ScriptedShellExecutor()
+            .onFail(
+                REFRESH,
+                "E: The repository 'https://pkgs.zabbly.com/incus/stable noble Release' no longer"
+                    + " has a Release file.\n")
+            .onceOnFail(INSTALL, NOT_SERVED)
+            .onOk("incus");
+
+    var failure =
+        assertThrows(
+            IOException.class, () -> new Apt(shell, detail -> {}).install(List.of("incus")));
+
+    assertEquals(
+        "apt-get install incus failed: the mirror us-central1.gce.archive.ubuntu.com answered 404"
+            + " for 2 of its files, and before trying again apt-get update failed: E: The"
+            + " repository 'https://pkgs.zabbly.com/incus/stable noble Release' no longer has a"
+            + " Release file.",
+        failure.getMessage());
+    assertEquals(List.of("install", "update"), verbs(shell));
+  }
+
   private static List<String> verbs(ScriptedShellExecutor shell) {
     return shell.unbounded().stream()
         .map(command -> command.endsWith(" update") ? "update" : "install")
