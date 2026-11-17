@@ -158,12 +158,14 @@ public final class TerminalPane: NSView {
     }
 
     /// Try Again on a parked pane: the host made to serve, saying what that did (another copy's
-    /// terminals closing, another copy using it), then the session reconnected.
+    /// terminals closing), then the session reconnected; what stops it is said with Try Again again.
     private func tryAgain() async {
         do {
             try await host.ensureServing { [weak self] sentence in await self?.say(sentence) }
         } catch {
-            return banner.show(Self.sentence("\(error)"))
+            return banner.show(Self.sentence("\(error)"), button: "Try Again") { [weak self] in
+                Task { await self?.tryAgain() }
+            }
         }
         session?.reconnectNow()
     }

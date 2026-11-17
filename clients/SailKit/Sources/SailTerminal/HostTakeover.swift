@@ -42,12 +42,14 @@ public enum HostTakeover: Equatable, Sendable {
 /// Ends a process and waits until it is gone, not merely silent: a host gives up its lock last, so
 /// one started while the old one is still exiting finds the lock held.
 public enum ProcessEnd {
-    /// `SIGTERM`, then up to `within` for the process to exit; then, only if `pid` still runs
-    /// `executable` (`runs` says what it runs now), `SIGKILL` and up to `within` again. True when it
-    /// is gone. A pid of 1 or less names no single process (`kill` would signal a group, or every
-    /// process of the account), so it is refused.
+    /// `SIGTERM`, then up to `within` for the process to exit; then `SIGKILL` and up to `within`
+    /// again. Each signal is sent only while `pid` still runs `executable` (`runs` says what it runs
+    /// now), so a pid reused by another process is never signalled. True when it is gone. A pid of 1
+    /// or less names no single process (`kill` would signal a group, or every process of the
+    /// account), so it is refused.
     public static func end(_ pid: Int32, running executable: String, runs: @Sendable (Int32) -> String?, within limit: Duration) async -> Bool {
         guard pid > 1 else { return false }
+        guard let before = runs(pid), HostTakeover.sameFile(before, executable) else { return await exited(pid, within: .zero) }
         kill(pid, SIGTERM)
         if await exited(pid, within: limit) { return true }
         guard let now = runs(pid), HostTakeover.sameFile(now, executable) else { return await exited(pid, within: .zero) }

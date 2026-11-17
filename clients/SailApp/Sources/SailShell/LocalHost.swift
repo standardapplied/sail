@@ -10,30 +10,35 @@ import Synchronization
 /// bundled binary under Application Support, named for its checksum, so no running host keeps an
 /// app bundle busy (P4). Another Sail app's host is ended only on three facts (the design note's
 /// rule): it is not this build's copy, a Sail app made it, and no client holds any of its sessions;
-/// with a client, nothing is ended and the person is asked to quit the other copy. A host the app
-/// started that then dies is started again at once, unless it died within ``shortestLife`` of
-/// starting or was stopped (`SIGTERM`), which is recorded in ``endedBy`` for its panes to say. Its
+/// with a client, nothing is ended and the person is told what holds it. A host the app started
+/// that then dies is started again at once, unless it died within ``shortestLife`` of starting or
+/// was stopped (`SIGTERM`, by whoever sent it), which is recorded in ``endedBy`` for its panes. Its
 /// standard error goes to a file only its owner reads, so when it refuses to start, its own last
 /// sentence is what the person is told; the host appends to it, and the file is emptied each time
 /// the app finds the host serving, so it holds at most what one run of the app saw.
 public final class LocalHost: Sendable {
     public static let startDeadline = Duration.seconds(15)
-    public static let shortestLife = Duration.seconds(2)
     /// How long another copy's host is given to exit once asked to stop, and again once killed.
     static let endDeadline = Duration.seconds(10)
 
     public static let closingAnother = "Your terminals from another copy of Sail are closing: this build is starting its own terminal host."
-    public static let anotherCopyOpen = "Another copy of Sail is using this Mac's terminal host. Quit it, then try again."
-    public static let endedUnderUs = "Another copy of Sail ended this Mac's terminal host, and with it these terminals."
-    public static let translocated = "Sail is running from a copy macOS made of the download. Move Sail to Applications and open it from there."
+    public static let startedElsewhere = "Another program started this Mac's terminal host while Sail was starting its own. Close it, then try again."
+    public static let stoppedSentence = "This Mac's terminal host was stopped, and with it these terminals."
+
+    /// What holds another copy's host: the host tells which of its terminals have a client, not
+    /// whose client it is (another copy of Sail, or a `sail session attach`).
+    public static func inUse(by sessions: [String]) -> String {
+        let named = sessions.map { "“\($0)”" }.joined(separator: ", ")
+        return "This Mac's terminal host is in use by another program, attached to its \(sessions.count == 1 ? "terminal" : "terminals") \(named). Close it, then try again."
+    }
 
     public let address: HostAddress
     private let binary: String?
     private let log: String
     private let copies: URL
+    private let shortestLife: Duration
     private let child = Mutex<pid_t?>(nil)
     private let stopped = Mutex<String?>(nil)
-    private let sentences = Mutex<[String]>([])
 
     public convenience init(binary: String?) throws(TerminalError) {
         try self.init(
@@ -42,11 +47,12 @@ public final class LocalHost: Sendable {
         )
     }
 
-    init(binary: String?, address: HostAddress, log: String, copies: URL) {
+    init(binary: String?, address: HostAddress, log: String, copies: URL, shortestLife: Duration = .seconds(2)) {
         self.address = address
         self.binary = binary
         self.log = log
         self.copies = copies
+        self.shortestLife = shortestLife
     }
 
     /// The pid of the host the app started, nil when it found one serving.
@@ -54,28 +60,16 @@ public final class LocalHost: Sendable {
         child.withLock { $0 }
     }
 
-    /// What ended the host this app started, when another copy of Sail stopped it.
+    /// What ended the host this app started, when something stopped it.
     public var endedBy: String? {
         stopped.withLock { $0 }
     }
 
-    /// Every sentence ``ensureServing(telling:)`` told, in order.
-    public var told: [String] {
-        sentences.withLock { $0 }
-    }
-
     /// Returns once a host answers: the one serving, unless the design note's rule ends it, or else
     /// this build's, started from its copy. What the person must know is passed to `tell` when it
-    /// happens: that another copy's terminals are closing (before they close), that the copy could
-    /// not be made and the host already serving is used, that the app runs translocated (once).
-    public func ensureServing(telling tell: @escaping @Sendable (String) async -> Void = { _ in }) async throws(ShellError) {
-        let say = { @Sendable (sentence: String) async in
-            self.sentences.withLock { $0.append(sentence) }
-            await tell(sentence)
-        }
-        if let binary, binary.contains("/AppTranslocation/"), Self.translocationTold.withLock({ told in defer { told = true }; return !told }) {
-            await say(Self.translocated)
-        }
+    /// happens: that another copy's terminals are closing (before they close, and only when it had
+    /// some), or that the copy could not be made and the host already serving is used.
+    public func ensureServing(telling say: @escaping @Sendable (String) async -> Void = { _ in }) async throws(ShellError) {
         var copy: String?
         var copyFailure: ShellError?
         if let binary {
@@ -105,12 +99,12 @@ public final class LocalHost: Sendable {
         let deadline = ContinuousClock.now + Self.startDeadline
         while ContinuousClock.now < deadline {
             if await answers() {
-                guard serves(copy) else { throw .host(Self.anotherCopyOpen) }
+                guard serves(copy) else { throw .host(Self.startedElsewhere) }
                 Self.prune(copies, keeping: copy)
                 return
             }
             guard startedPID != nil else {
-                if await answers(), !serves(copy) { throw .host(Self.anotherCopyOpen) }
+                if await answers(), !serves(copy) { throw .host(Self.startedElsewhere) }
                 throw .host("this Mac's terminal host stopped as it started\(said)")
             }
             try? await Task.sleep(for: .milliseconds(100))
@@ -118,19 +112,18 @@ public final class LocalHost: Sendable {
         throw .host("the bundled terminal host did not answer at \(address) within \(Self.startDeadline)\(said)")
     }
 
-    private static let translocationTold = Mutex(false)
-
-    /// Ends the host serving now when the rule allows it, saying so first; true when it did. With a
-    /// client on any of its sessions, nothing is ended and ``anotherCopyOpen`` is thrown.
+    /// Ends the host serving now when the rule allows it, saying first that its terminals are
+    /// closing when it has any; true when it did. With a client on any of its sessions, nothing is
+    /// ended, and what holds it is thrown (``inUse(by:)``).
     private func endAnother(keeping copy: String, before say: @Sendable (String) async -> Void) async throws(ShellError) -> Bool {
         guard let serving = servingProcess() else { return false }
         let sessions = try? await SessionListing.sessions(at: address, timeout: 1)
         switch HostTakeover.decide(serving: serving.executable, copy: copy, copies: copies.path, sessions: sessions) {
         case .keep: return false
-        case .refuse: throw .host(Self.anotherCopyOpen)
+        case .refuse: throw .host(Self.inUse(by: (sessions ?? []).filter { $0.attached > 0 }.map(\.name)))
         case .end: break
         }
-        await say(Self.closingAnother)
+        if sessions?.isEmpty == false { await say(Self.closingAnother) }
         guard await ProcessEnd.end(serving.pid, running: serving.executable, runs: { Self.executable(of: $0) }, within: Self.endDeadline) else {
             throw .host("the terminal host of another copy of Sail (pid \(serving.pid)) did not stop when asked to")
         }
@@ -221,7 +214,7 @@ public final class LocalHost: Sendable {
         (try? await SessionListing.sessions(at: address, timeout: 1)) != nil
     }
 
-    private func start(_ binary: String) throws(ShellError) {
+    func start(_ binary: String) throws(ShellError) {
         var attributes: posix_spawnattr_t?
         var actions: posix_spawn_file_actions_t?
         posix_spawnattr_init(&attributes)
@@ -252,8 +245,8 @@ public final class LocalHost: Sendable {
     }
 
     /// Waits for the host to exit on a thread of its own, and starts it again if it lived long
-    /// enough to have served and was not stopped: a `SIGTERM` is another copy of Sail ending it, so
-    /// it is recorded for the panes to say, never fought.
+    /// enough to have served and was not stopped: a `SIGTERM` (another copy of Sail, Activity
+    /// Monitor's Quit, a `kill`) is recorded for the panes to say, never fought.
     private func watch(_ pid: pid_t, binary: String, since started: ContinuousClock.Instant) {
         Thread { [self] in
             var status: Int32 = 0
@@ -265,10 +258,10 @@ public final class LocalHost: Sendable {
             }
             guard ours else { return }
             if status & 0x7F == SIGTERM {
-                stopped.withLock { $0 = Self.endedUnderUs }
+                stopped.withLock { $0 = Self.stoppedSentence }
                 return
             }
-            guard ContinuousClock.now - started >= Self.shortestLife else { return }
+            guard ContinuousClock.now - started >= shortestLife else { return }
             try? start(binary)
         }.start()
     }

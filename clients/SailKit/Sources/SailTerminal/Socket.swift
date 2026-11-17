@@ -100,6 +100,8 @@ final class Socket: Sendable {
         guard getsockopt(descriptor, SOL_LOCAL, LOCAL_PEERPID, &pid, &size) == 0, pid > 0 else { return nil }
         return pid
         #else
+        // Glibc's `struct ucred` is declared only under _GNU_SOURCE, which SwiftPM passes to a Swift
+        // target only as an unsafe flag; this tuple is its layout (pid_t, uid_t, gid_t).
         var credentials: (pid: Int32, uid: UInt32, gid: UInt32) = (0, 0, 0)
         var size = socklen_t(MemoryLayout<(Int32, UInt32, UInt32)>.size)
         guard getsockopt(descriptor, SOL_SOCKET, SO_PEERCRED, &credentials, &size) == 0, credentials.pid > 0 else { return nil }

@@ -93,8 +93,12 @@ final class FakeLink: TerminalLink {
 /// A display link the test ticks by hand.
 @MainActor
 final class ManualClock: FrameClock {
+    /// How many times the view resumed the clock: each a display refresh asked for.
+    private(set) var resumes = 0
+
     var isPaused = true {
         didSet {
+            if oldValue, !isPaused { resumes += 1 }
             guard !isPaused, let waiting else { return }
             self.waiting = nil
             waiting.resume()

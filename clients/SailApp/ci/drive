@@ -4,8 +4,8 @@
 # 7979, with uday an admin and a ticket to enroll him, and one with no relying party on 7980.
 # Tests/Drive/first.json runs, then the app is quit and opened again for Tests/Drive/second.json.
 # Then another copy of Sail's host runs from another bundle's path, with a client attached to one
-# of its sessions and a parent that restarts it as builds before this one do (when it lived 2 s),
-# and the app is opened once more for Tests/Drive/third.json.
+# of its sessions, and the app is opened once more for Tests/Drive/third.json; then once more for
+# Tests/Drive/shots.json, the window as the screen shows it.
 # Each run's texts, images and report land in OUT; what it prints, and the servers' logs, beside
 # them. The ticket is handed to the drive in its environment and printed nowhere.
 set -euo pipefail
@@ -42,17 +42,15 @@ SAIL_DRIVE_TICKET=$("$sail" fde enroll uday --json | plutil -extract ticket raw 
 export SAIL_DRIVE_TICKET SAIL_DRIVE_PASSKEY=$out/software-passkey.json
 rm -f "$SAIL_DRIVE_PASSKEY"
 
-for run in first second third; do
+for run in first second third shots; do
   if [[ $run == third ]]; then
-    echo "ci/drive: another copy's host, a client on it and a parent that restarts it"
+    echo "ci/drive: another copy's host, and a client on it"
     pkill -f '_pty-host --local' || true
     perl -e 'alarm shift; exec @ARGV' 30 bash -c 'while pgrep -f "_pty-host --local" > /dev/null; do :; done'
     other=$out/other-build/Sail.app/Contents/Helpers
     socket=$HOME/.sail/local/pty.sock
     mkdir -p "$other" && cp "$sail" "$other/sail"
-    printf '%s\n' '#!/usr/bin/env bash' 'while :; do started=$SECONDS; "$1" _pty-host --local >> "$2" 2>&1; (( SECONDS - started >= 2 )) || break; done' \
-      > "$out/other-parent.sh"
-    (bash "$out/other-parent.sh" "$other/sail" "$out/other-host.log" &)
+    ("$other/sail" _pty-host --local > "$out/other-host.log" 2>&1 &)
     perl -e 'alarm shift; exec @ARGV' 30 bash -c 'until "$1" session ls --socket "$2" > /dev/null 2>&1; do :; done' _ "$other/sail" "$socket"
     "$other/sail" session new held --socket "$socket" --command cat > /dev/null
     (tail -f /dev/null | script -q /dev/null "$other/sail" session attach held --socket "$socket" > /dev/null 2>&1 &)

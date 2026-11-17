@@ -30,11 +30,14 @@ public final class TerminalView: NSView {
     let pacer = FramePacer()
     let marks = ViewMarks()
     let input = DispatchQueue(label: "sh.standardapplied.sail.terminal.input", qos: .userInteractive)
-    /// Where the drawable is asked for: a thread of the view's own, so handing it the ask never
-    /// waits on the main thread for the system to make a worker thread (``WorkThread``).
+    /// Where the drawable is asked for: a thread of the view's own, so handing it the ask is a
+    /// semaphore signal, with no request for a worker thread made from the main thread (``WorkThread``).
     private let fetcher = WorkThread(name: "sh.standardapplied.sail.terminal.drawable")
     var makeClock: @MainActor (TerminalView) -> any FrameClock = { view in
-        DisplayLinkClock(view: view) { [weak view] target in _ = view?.refresh(target: target) }
+        DisplayLinkClock(view: view) { [weak view] target in
+            view?.linkFires += 1
+            _ = view?.refresh(target: target)
+        }
     }
     var composition = Composition()
     var committedDuringKey: [String]?
@@ -73,9 +76,13 @@ public final class TerminalView: NSView {
     private var blink: Timer?
     /// How many times the blink's timer woke the main thread: what the drive counts.
     public private(set) var blinkWakeups = 0
-    /// How many display refreshes reached the view: each blink resumes the link for at least two
-    /// (one that draws, one that finds nothing and pauses), so these count as wakeups too.
+    /// How many display refreshes reached the view, and how each ended: what an idle view's
+    /// wakeups are made of, for the drive to report.
     public private(set) var refreshes = 0
+    public private(set) var refreshesBy: [String: Int] = [:]
+    /// How many of those the display link asked for; the rest came from a drawable's arrival or
+    /// from output or a key drawn at once.
+    public internal(set) var linkFires = 0
 
     /// Whether a blink is due: the only thing that would wake this view while nothing changes.
     public var isBlinking: Bool {
@@ -404,38 +411,39 @@ public final class TerminalView: NSView {
     /// just brought, ask for one and draw on its arrival; else read the screen and draw when it or
     /// the view changed, or pause until something does. True when the link is wanted for the next
     /// refresh: a frame was drawn, or every buffer was still in flight, or the frame could not be
-    /// encoded (tried again then).
+    /// encoded (tried again then). A frame drawn only for the view (a blink, focus, a selection)
+    /// leaves the link paused: the screen did not change, so no output is under way.
     @discardableResult
     func refresh(target: Double) -> Bool {
         refreshes += 1
         guard let link else {
             pacer.pause()
-            return false
+            return refreshed("no session", false)
         }
         guard !isHiddenOrHasHiddenAncestor else {
             needsDraw = true
             pacer.pause()
-            return false
+            return refreshed("hidden", false)
         }
         guard fetched != nil else {
             owed = true
             pacer.pause()
             fetchDrawable()
-            return false
+            return refreshed("asked for a drawable", false)
         }
         let read = CACurrentMediaTime()
         let work = Duration.threadCPU
         defer { marks.refreshed(since: read, workSince: work) }
         guard let frame = try? link.screen.frame() else {
             pacer.pause()
-            return false
+            return refreshed("no frame", false)
         }
-        let changed = needsDraw || frame.changed != .nothing || frame.cursor != lastFrame?.cursor || frame.colors != lastFrame?.colors
+        let screenChanged = frame.changed != .nothing || frame.cursor != lastFrame?.cursor || frame.colors != lastFrame?.colors
             || frame.size != lastFrame?.size
-        guard changed, let metalLayer else {
+        guard needsDraw || screenChanged, let metalLayer else {
             marks.unchanged(read: read)
             pacer.pause()
-            return false
+            return refreshed("nothing changed", false)
         }
         switch renderer.draw(frame, overlay: overlay, from: { defer { self.fetched = nil }; return self.fetched }, presented: { [marks] in marks.presented(frame: $0, at: $1) }, completed: { [marks] in marks.completed(frame: $0, ok: $1) }) {
         case let .drawn(number):
@@ -444,17 +452,17 @@ public final class TerminalView: NSView {
             lastFrame = frame
             needsDraw = renderer.lastFrameWantsAnother
             updateBlink()
-            return true
+            return refreshed("drew", screenChanged || needsDraw)
         case .busy:
             marks.skipped(read: read)
             renderer.invalidate()
             needsDraw = true
-            return true
+            return refreshed("every buffer in flight", true)
         case .unavailable:
             marks.skipped(read: read)
             renderer.invalidate()
             needsDraw = true
-            return true
+            return refreshed("could not encode", true)
         }
     }
 
@@ -496,6 +504,11 @@ public final class TerminalView: NSView {
         }
         needFrame()
         updateBlink()
+    }
+
+    private func refreshed(_ outcome: String, _ wanted: Bool) -> Bool {
+        refreshesBy[outcome, default: 0] += 1
+        return wanted
     }
 
     /// The system's insertion-point blink: `NSTextInsertionPointBlinkPeriodOn` and `…Off`, in ms,
@@ -548,13 +561,16 @@ public final class TerminalView: NSView {
         blink = timer
     }
 
-    /// Half a blink: the cursor shown or hidden, one frame drawn (P2: no row laid out again).
+    /// Half a blink: the cursor shown or hidden, one frame drawn (P2: no row laid out again). An
+    /// idle view asks for its drawable at once, as typing's echo does, so the display link is not
+    /// woken for it.
     private func blinked() {
         blinkWakeups += 1
         blink = nil
         guard shouldBlink else { return updateBlink() }
         cursorOn.toggle()
-        needFrame()
+        needsDraw = true
+        drawNowIfIdle()
         let periods = Self.blinkPeriods
         scheduleBlink(after: cursorOn ? periods.on : periods.off)
     }

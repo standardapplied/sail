@@ -65,6 +65,15 @@ extension Driver {
         if step.blink == true {
             return await blinks()
         }
+        if let name = step.shot {
+            return await inBothLooks(name) { file in await self.capture(["-o", "-l", "\(self.shell.window.windowNumber)"], to: file) }
+        }
+        if let name = step.shotMenu {
+            return await inBothLooks(name) { file in self.captureWithTheMenuOpen(to: file) }
+        }
+        if let name = step.fullScreen {
+            return await fullScreen(name)
+        }
         if let state = step.otherHost {
             return await otherHost(state)
         }
@@ -401,7 +410,7 @@ extension Driver {
             return (false, "the grid did not attach four panes: \(arrangementSaid)")
         }
         let four = Self.footprint
-        print("panes4 idle, the echo pane focused: \(await wakeups(for: 5))")
+        print("panes4 idle, the echo pane focused: \(await wakeups(for: 5).said)")
         panes4["main thread's longest stall making the grid ms"] = mainThread.longest
         let echo = grid[1], floods = [grid[0], grid[2], grid[3]]
         func focus(_ view: TerminalPane) {
@@ -587,42 +596,127 @@ extension Driver {
         let idle = await waitUntil(2) { view.drawingState.contains("display link paused") && view.drawingState.contains("not awaiting a drawable") }
         let still = idle && !view.isBlinking && view.cursorOn
         shell.window.makeFirstResponder(view)
-        print("blink: \(rate) with \(workbench.panes.count) panes")
+        print("blink: \(rate.said) with \(workbench.panes.count) panes")
+        let linkSlept = rate.linkFires < Self.idleLinkFires
         return (
-            inside > 0 && outside == 0 && still,
+            inside > 0 && outside == 0 && still && linkSlept,
             "a blink apart, \(inside) pixels differ inside the cursor's cell and \(outside) outside it; unfocused, "
-                + (still ? "its link idle, no blink due, the cursor shown" : "idle \(idle), a blink due \(view.isBlinking), the cursor shown \(view.cursorOn)") + "; \(rate)"
+                + (still ? "its link idle, no blink due, the cursor shown" : "idle \(idle), a blink due \(view.isBlinking), the cursor shown \(view.cursorOn)")
+                + (linkSlept ? "; blinking, its display link slept" : "; blinking, its display link fired \(rate.linkFires) a second") + "; \(rate.said)"
         )
     }
 
+    /// A blinking idle pane draws each half-blink on a drawable it asks for at once, so its display
+    /// link does not fire; the old way fired it twice a half-blink, 4 a second.
+    static let idleLinkFires = 0.5
+
     /// The idle cost a second over `seconds`, across every pane: the blink's timer wakeups, the
-    /// display refreshes (each blink resumes the link for at least two) and the frames committed;
-    /// then each pane's frames, the focused one marked, so a pane drawing for another reason shows.
-    func wakeups(for seconds: Double) async -> String {
+    /// display refreshes and the frames committed; then each pane's frames, the focused one marked,
+    /// so a pane drawing for another reason shows; then how the focused pane's refreshes ended, and
+    /// how many a second its display link fired (`linkFires`).
+    func wakeups(for seconds: Double) async -> (said: String, linkFires: Double) {
         let views = orderedPanes.map(\.terminal)
         let counts = { views.map { ($0.blinkWakeups, $0.refreshes, Self.committed($0)) } }
-        let before = counts()
+        let focused = terminal
+        let outcomes = { (focused.refreshesBy, focused.linkFires) }
+        let before = counts(), outcomesBefore = outcomes()
         try? await Task.sleep(for: .seconds(seconds))
-        let after = counts()
+        let after = counts(), outcomesAfter = outcomes()
+        let by = outcomesAfter.0.keys.sorted().map { key in
+            key + String(format: " %.1f", Double(outcomesAfter.0[key, default: 0] - outcomesBefore.0[key, default: 0]) / seconds)
+        }.joined(separator: ", ")
         let per = zip(before, after).map { (Double($1.0 - $0.0) / seconds, Double($1.1 - $0.1) / seconds, Double($1.2 - $0.2) / seconds) }
         let total = per.reduce((0.0, 0.0, 0.0)) { ($0.0 + $1.0, $0.1 + $1.1, $0.2 + $1.2) }
         let panes = zip(views, per).map { view, rate in (view === terminal ? "*" : "") + String(format: "%.1f", rate.2) }.joined(separator: " ")
-        return String(format: "%.1f blink wakeups, %.1f display refreshes and %.1f frames a second; frames a second by pane (* focused): ", total.0, total.1, total.2) + panes
+        let fires = Double(outcomesAfter.1 - outcomesBefore.1) / seconds
+        let said = String(format: "%.1f blink wakeups, %.1f display refreshes and %.1f frames a second; frames a second by pane (* focused): ", total.0, total.1, total.2) + panes
+            + String(format: "; the focused pane's refreshes a second, %.1f asked for by the display link, ending: ", fires) + by
+        return (said, fires)
     }
 
-    /// P4 and the design note's rule, against another copy's host with a client and a parent that
-    /// restarts it (`ci/drive`'s third run).
+    /// `take` in the light look, then the dark, each once the window has been drawn in it; the
+    /// look the system gives comes back after. Fails when a file is missing or empty.
+    private func inBothLooks(_ name: String, _ take: (URL) async -> Void) async -> (Bool, String) {
+        let folder = out.deletingLastPathComponent().appending(path: "shots")
+        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        var taken: [String] = []
+        for (look, appearance) in [("light", NSAppearance.Name.aqua), ("dark", .darkAqua)] {
+            NSApp.appearance = NSAppearance(named: appearance)
+            _ = await waitUntil(5) { (self.shell.look == .dark) == (look == "dark") }
+            shell.window.displayIfNeeded()
+            try? await Task.sleep(for: .milliseconds(300))
+            let file = folder.appending(path: "\(name)-\(look).png")
+            await take(file)
+            let size = (try? FileManager.default.attributesOfItem(atPath: file.path)[.size] as? Int) ?? 0
+            taken.append("\(file.lastPathComponent) \(size) bytes")
+        }
+        NSApp.appearance = nil
+        return (taken.allSatisfy { !$0.hasSuffix(" 0 bytes") }, taken.joined(separator: ", "))
+    }
+
+    /// `screencapture -x` with `arguments`, into `file`; its own error, if any, is printed.
+    private func capture(_ arguments: [String], to file: URL) async {
+        let process = Process()
+        let errors = Pipe()
+        process.executableURL = URL(filePath: "/usr/sbin/screencapture")
+        process.arguments = ["-x"] + arguments + [file.path]
+        process.standardError = errors
+        await withCheckedContinuation { (done: CheckedContinuation<Void, Never>) in
+            process.terminationHandler = { _ in done.resume() }
+            guard (try? process.run()) == nil else { return }
+            process.terminationHandler = nil
+            print("screencapture did not run")
+            done.resume()
+        }
+        let said = String(decoding: errors.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+        if !said.isEmpty { print("screencapture: \(said)") }
+    }
+
+    /// The focused pane's context menu, popped up as a right-click shows it, the whole screen taken
+    /// a second later (the menu is a window of its own), then the menu closed.
+    private func captureWithTheMenuOpen(to file: URL) async {
+        let view = terminal
+        guard let event = NSEvent.mouseEvent(
+            with: .rightMouseDown, location: view.convert(NSPoint(x: 80, y: 60), to: nil), modifierFlags: [],
+            timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: shell.window.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 1
+        ), let menu = view.menu(for: event) else { return print("the pane offered no menu") }
+        let process = Process()
+        process.executableURL = URL(filePath: "/usr/sbin/screencapture")
+        process.arguments = ["-x", "-T", "1", file.path]
+        guard (try? process.run()) != nil else { return print("screencapture did not run") }
+        menu.perform(#selector(NSMenu.cancelTracking), with: nil, afterDelay: 2.5, inModes: [.common])
+        menu.popUp(positioning: nil, at: NSPoint(x: 80, y: 60), in: view)
+        process.waitUntilExit()
+    }
+
+    /// The window in full screen, the whole screen taken in both looks, then out of it again. The
+    /// shot is asked for only if the runner can: a window that does not enter full screen is said,
+    /// with no shot, and fails nothing.
+    private func fullScreen(_ name: String) async -> (Bool, String) {
+        let window = shell.window
+        window.toggleFullScreen(nil)
+        guard await waitUntil(10, { window.styleMask.contains(.fullScreen) }) else {
+            return (true, "this runner did not put the window in full screen within 10 s, so there is no full-screen shot")
+        }
+        try? await Task.sleep(for: .seconds(1))
+        let (taken, said) = await inBothLooks(name) { file in await self.capture([], to: file) }
+        window.toggleFullScreen(nil)
+        let back = await waitUntil(10) { !window.styleMask.contains(.fullScreen) }
+        return (taken && back, said + (back ? "" : "; the window did not leave full screen"))
+    }
+
+    /// P4 and the design note's rule, against another copy's host with a client on it
+    /// (`ci/drive`'s third run).
     private func otherHost(_ state: String) async -> (Bool, String) {
         let host = workbench.host
         func serving() -> String { host.servingProcess()?.executable ?? "none" }
         let ours = { serving().contains("/Application Support/Sail/Host/") }
         let other = { serving().contains("/other-build/") }
-        let usedByAnother = { self.workbench.bannerSays?.contains("Another copy of Sail is using this Mac's terminal host") == true }
+        let says = { (text: String) in self.workbench.bannerSays?.contains(text) == true }
         let reached: Bool
         switch state {
-        case "kept": reached = await waitUntil(20) { usedByAnother() && other() }
-        case "replaced": reached = await waitUntil(30) { host.told.contains(LocalHost.closingAnother) && (ours() || usedByAnother() && other()) }
-        case "ours": reached = await waitUntil(30) { ours() }
+        case "kept": reached = await waitUntil(20) { says("This Mac's terminal host is in use by another program, attached to its terminal “held”") && other() }
+        case "replaced": reached = await waitUntil(30) { says(LocalHost.closingAnother) && ours() }
         default: return (false, "no other-host state \(state)")
         }
         var hosts = await Self.processes(matching: "_pty-host --local")
@@ -633,7 +727,7 @@ extension Driver {
         }
         return (
             reached && hosts.count == 1,
-            "serving: \(serving()); the banner says: \(workbench.bannerSays ?? "nothing"); told: \(host.told); hosts: \(hosts)"
+            "serving: \(serving()); the banner says: \(workbench.bannerSays ?? "nothing"); hosts: \(hosts)"
         )
     }
 

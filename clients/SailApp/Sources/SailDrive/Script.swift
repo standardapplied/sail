@@ -138,13 +138,21 @@ struct Step: Decodable {
     var items: [String]?
     var choose: String?
     /// The focused pane's cursor blinks: two frames a blink apart differ only in the cursor's cell;
-    /// unfocused, nothing is drawn and nothing wakes; the wakeups a second are reported.
+    /// unfocused, nothing is drawn and nothing wakes; blinking, its display link does not fire; the
+    /// wakeups a second are reported.
     var blink: Bool?
     /// Another copy of Sail's host and this app (third run): "kept" (it has a client, so the app
-    /// ended nothing and asked to quit the other copy), "replaced" (no client: the app said its
-    /// terminals are closing and ended it; ours serves, or its parent restarted it and the app said
-    /// so), "ours" (one host serves, from this build's copy).
+    /// ended nothing and said what holds it), "replaced" (no client: the app said its terminals
+    /// are closing, ended it, and its own host serves, the only one).
     var otherHost: String?
+    /// The app's window as the screen shows it (`screencapture -l`, so what AppKit draws in the
+    /// title bar and the Metal layers are in it), in the light look and the dark, saved as
+    /// `shots/<this>-light.png` and `-dark.png`.
+    var shot: String?
+    /// The focused pane's context menu open, the whole screen taken while it shows, in both looks.
+    var shotMenu: String?
+    /// The window in full screen, the whole screen taken, in both looks; then out of full screen.
+    var fullScreen: String?
     /// Every process whose command line holds this is ended (`pkill -f`); none running is no failure.
     var kill: String?
     /// The tab strip's hit testing: a tab's middle reaches the tab, the empty end moves the window.

@@ -56,6 +56,11 @@ import Testing
         #expect(kill(other, 0) == 0, "a pid that no longer runs the same executable is not killed")
         kill(other, SIGKILL)
         #expect(await ProcessEnd.exited(other, within: .seconds(10)))
+        let untouched = try Self.spawn("exec tail -f /dev/null")
+        #expect(!(await ProcessEnd.end(untouched, running: "/bin/sh", runs: elsewhere, within: .milliseconds(300))))
+        #expect(kill(untouched, 0) == 0, "a pid that runs another executable is not even asked to stop")
+        kill(untouched, SIGKILL)
+        #expect(await ProcessEnd.exited(untouched, within: .seconds(10)))
         for pid: Int32 in [-1, 0, 1] {
             #expect(!(await ProcessEnd.end(pid, running: "/bin/sh", runs: runs, within: .milliseconds(10))))
         }

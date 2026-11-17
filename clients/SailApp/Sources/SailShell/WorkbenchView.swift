@@ -92,7 +92,7 @@ public final class WorkbenchView: NSView {
             }
             return
         }
-        if !host.told.contains(where: { banner.shown == $0 }) { banner.hide() }
+        if banner.shown != told { banner.hide() }
         let kept = UserDefaults.standard.data(forKey: Self.arrangementKey).flatMap { try? JSONDecoder().decode(Arrangement.self, from: $0) }
         model = Workbench.restore(kept, live: listed.filter(\.live).map(\.name), home: NSHomeDirectory())
         restored = true
@@ -307,8 +307,12 @@ public final class WorkbenchView: NSView {
         banner.shown
     }
 
+    /// The last sentence ``tell(_:)`` said, which the end of a restore leaves in the banner.
+    private var told: String?
+
     /// Says `sentence` in the banner for 10 s, unless something else is said meanwhile.
-    private func tell(_ sentence: String) {
+    func tell(_ sentence: String) {
+        told = sentence
         banner.show(sentence)
         Task { [weak self] in
             try? await Task.sleep(for: .seconds(10))

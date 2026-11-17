@@ -1,6 +1,6 @@
 import Dispatch
 import Foundation
-import SailSurface
+@testable import SailSurface
 import Synchronization
 import Testing
 
@@ -12,6 +12,7 @@ import Testing
         let caller = ObjectIdentifier(Thread.current)
         let done = DispatchSemaphore(value: 0)
         var thread: WorkThread? = WorkThread(name: "test")
+        let ended = try #require(thread?.ended)
         for index in 0 ..< 100 {
             thread?.run {
                 order.withLock { $0.append(index) }
@@ -23,5 +24,6 @@ import Testing
         #expect(done.wait(timeout: .now() + 10) == .success, "the work handed over before it was let go did not all run")
         #expect(order.withLock { $0 } == Array(0 ..< 100))
         #expect(elsewhere.withLock { $0 }, "work ran on the caller's thread")
+        #expect(ended.wait(timeout: .now() + 10) == .success, "the thread did not end once let go of")
     }
 }

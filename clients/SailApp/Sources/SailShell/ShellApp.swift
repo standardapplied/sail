@@ -21,6 +21,8 @@ import SailWorkbench
 @MainActor
 public final class ShellApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
     public static let title = "Sail"
+    /// Said once a launch when macOS runs the app from the temporary copy it makes of a download.
+    static let translocated = "Sail is running from a copy macOS made of the download. Move Sail to Applications and open it from there."
     static let paneKey = "shell.pane"
 
     public let window: NSWindow
@@ -89,6 +91,7 @@ public final class ShellApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         window.makeKeyAndOrderFront(nil)
         placeTheStrip()
         select(UserDefaults.standard.string(forKey: Self.paneKey).flatMap { Rail.Item(rawValue: $0) } ?? .account)
+        if Bundle.main.bundlePath.contains("/AppTranslocation/") { thisMac.tell(Self.translocated) }
         NSApp.activate(ignoringOtherApps: true)
     }
 

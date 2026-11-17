@@ -623,7 +623,8 @@ import Testing
     }
 
     /// P2: a focused view's blinking cursor hides and shows at the system's rate, each half one
-    /// frame; a key typed shows it at once; unfocused, it shows, steady, and nothing wakes.
+    /// frame, drawn without waking the display link; a key typed shows it at once; unfocused, it
+    /// shows, steady, and nothing wakes.
     @Test func aFocusedCursorBlinksAKeyShowsItAndUnfocusedItIsSteady() async throws {
         let harness = try Harness(blinks: true)
         await harness.drainMain()
@@ -631,9 +632,12 @@ import Testing
         await harness.tick()
         #expect(harness.view.cursorOn)
         let committed = Self.committed(harness.view)
+        let fires = harness.clock.resumes
         #expect(await harness.until(2) { !harness.view.cursorOn }, "the cursor did not blink off")
-        await harness.tick()
-        #expect(Self.committed(harness.view) == committed + 1, "the blink drew one frame")
+        await harness.drawn()
+        #expect(await harness.until { Self.committed(harness.view) == committed + 1 }, "the blink drew one frame")
+        #expect(harness.clock.isPaused, "a blink's frame wants no next display refresh")
+        #expect(harness.clock.resumes == fires, "a blink woke the display link")
         #expect(!harness.view.overlay.cursorOn)
         harness.key("a", code: 0)
         #expect(harness.view.cursorOn, "a key typed shows the cursor")
@@ -646,16 +650,18 @@ import Testing
     /// A program that asks for a steady cursor (DECSCUSR 2) gets one: no blink wakes the view.
     @Test func aSteadyCursorNeverBlinks() async throws {
         let harness = try Harness(blinks: true)
-        harness.link.output("\u{1b}[2 q")
         await harness.drainMain()
         await harness.tick()
+        await harness.tick()
+        #expect(harness.view.isBlinking, "the control: the same view blinks before the program asks for steady")
+        harness.link.output("\u{1b}[2 q")
+        await harness.drainMain()
+        harness.view.needFrame()
         await harness.tick()
         #expect(!harness.view.isBlinking, "a steady cursor would wake the view")
         #expect(harness.view.cursorOn)
     }
 
-    /// A program's clipboard write (OSC 52) from a session this client writes to reaches the
-    /// pasteboard.
     /// Copy is offered only with a selection, Paste only with text to paste, Select All with a
     /// session; and Select All then selects what Copy writes.
     @Test func theEditCommandsAreValidatedByWhatTheyWouldDo() async throws {
@@ -699,6 +705,8 @@ import Testing
         #expect(!harness.link.bytes.isEmpty, "the right button's press reached the program")
     }
 
+    /// A program's clipboard write (OSC 52) from a session this client writes to reaches the
+    /// pasteboard.
     @Test func aProgramsClipboardWriteReachesThePasteboard() async throws {
         let harness = try Harness()
         harness.pasteboard.clearContents()
