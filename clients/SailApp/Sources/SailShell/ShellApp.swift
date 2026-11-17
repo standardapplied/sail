@@ -114,7 +114,7 @@ public final class ShellApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         Task {
             await account.refresh()
             guard account.standing == nil else { return }
-            let lines = account.saying
+            let lines = account.lines
             if lines.isEmpty { workspaces.signedOut() } else { workspaces.signInUnknown(lines) }
         }
     }
@@ -135,12 +135,13 @@ public final class ShellApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         return true
     }
 
-    /// Quitting with terminals on the runner asks once, then ends them there (``RunnerQuit``); a
+    /// Quitting with terminals on the runner asks once, then ends them there (``RunnerEnds``); a
     /// quit the system asks for asks nothing.
     public func applicationShouldTerminate(_: NSApplication) -> NSApplication.TerminateReply {
-        RunnerQuit.ask(
-            thisMac.runnerPanes, titled: { [thisMac] in thisMac.title(of: $0) }, on: window, systemQuitting: RunnerQuit.systemIsQuitting()
+        let asked = RunnerEnds.ask(
+            thisMac.runnerPanes, titled: { [thisMac] in thisMac.title(of: $0) }, on: window, systemQuitting: RunnerEnds.systemIsQuitting()
         ) { NSApp.reply(toApplicationShouldTerminate: $0) }
+        return asked ? .terminateLater : .terminateNow
     }
 
     /// Quitting detaches this Mac's terminals and asks nothing: each session lives on at the host.
@@ -178,8 +179,11 @@ public final class ShellApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         workspaces.client = account.client()
         workspaces.person = (whoami?.fde ?? signedIn?.fde ?? "", whoami?.role == .known(.admin))
         rail.offer(.workspaces, signedIn != nil || rail.selected == .workspaces)
-        guard rail.selected == .workspaces else { return }
-        if signedIn == nil { workspaces.signedOut() } else { workspaces.shown() }
+        if signedIn == nil {
+            workspaces.signedOut()
+        } else if rail.selected == .workspaces {
+            workspaces.shown()
+        }
     }
 
     /// Who is signed in now and the API as them, which every runner tab asks at each ticket.
@@ -195,10 +199,10 @@ public final class ShellApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
             if go { thisMac.removeRunnerPanes() }
             proceed(go)
         }
-        let now = RunnerQuit.ask(
-            thisMac.runnerPanes, titled: { [thisMac] in thisMac.title(of: $0) }, on: window, asking: RunnerQuit.Question.signOut, reply: goOn
+        let asked = RunnerEnds.ask(
+            thisMac.runnerPanes, titled: { [thisMac] in thisMac.title(of: $0) }, on: window, asking: RunnerEnds.Question.signOut, reply: goOn
         )
-        if now == .terminateNow { goOn(true) }
+        if !asked { goOn(true) }
     }
 
     /// Draws the window in `look`: the chrome, the rail and the panes.
@@ -486,15 +490,17 @@ final class ShellWindow: NSWindow {
 
 /// What ends the app's runner terminals with it, asked once: a quit, or a sign-out, since a
 /// runner terminal outlives neither (the app cannot attach to it again after a relaunch, and it
-/// was opened under the sign-in). Only tabs that hold a live session count. Asked on a window that
-/// shows: one ordered out is brought back first, since a sheet on a window off screen is not shown.
-/// "Quit and End N Runner Terminals" ends them all at once under one deadline (``Door/endLimit``,
-/// the tickets included), the sheet saying so meanwhile; at the deadline what was not confirmed is
-/// named by its tab's title, said as possibly still running, and the app goes on. Cancel leaves
-/// everything as it was. A quit the system asks for (log out, restart, shut down) asks nothing:
-/// the terminals are ended within the deadline and the system proceeds.
+/// was opened under the sign-in). Only tabs whose session the runner holds or is making count.
+/// Asked on a window that shows: one ordered out is brought back first, since a sheet on a window
+/// off screen is not shown. "Quit and End N Runner Terminals" ends them all at once under one
+/// deadline (``Door/endLimit``, the tickets included), the sheet saying so meanwhile; what was not
+/// confirmed by then, or when the person goes on sooner, is named by its tab's title and said as
+/// what is true of it (``EndOutcome/mayStillRun(_:_:)``), and only then does the quit or the
+/// sign-out go on. Cancel leaves everything as it was. A quit the system asks for (log out,
+/// restart, shut down) asks nothing: the terminals are ended within the deadline and the system
+/// proceeds.
 @MainActor
-enum RunnerQuit {
+enum RunnerEnds {
     /// What is asked, and what the action does.
     struct Question {
         let question: String
@@ -520,21 +526,44 @@ enum RunnerQuit {
         }
     }
 
-    /// What AppKit is answered now; `reply` is told later whether to go on, when the answer is
-    /// later. `asked` makes the question for the count of live runner terminals.
+    /// The runner terminals not yet confirmed ended, by their tab's title: why, or nil while the
+    /// end is still under way.
+    @MainActor
+    final class Left {
+        private var waiting: [(title: String, why: [String]?)]
+
+        init(_ titles: [String]) {
+            waiting = titles.map { (title: $0, why: nil) }
+        }
+
+        /// What `title`'s end came to: gone from the list once ended, kept with why otherwise.
+        func settle(_ title: String, _ outcome: EndOutcome) {
+            guard let index = waiting.firstIndex(where: { $0.title == title }) else { return }
+            if case let .unconfirmed(why) = outcome { waiting[index].why = why } else { waiting.remove(at: index) }
+        }
+
+        /// Each one that may still run, said as what is true of it.
+        var said: [String] {
+            waiting.map { EndOutcome.mayStillRun($0.title, $0.why ?? ["Sail went on before the runner answered."]) }
+        }
+    }
+
+    /// Asks about ending `panes`' live runner sessions, then tells `reply` whether to go on: false
+    /// when it asks nothing, as nothing is live and the quit or sign-out goes on now.
     static func ask(
         _ panes: [TerminalPane], titled: @escaping @MainActor (TerminalPane) -> String, on window: NSWindow,
         asking asked: (Int) -> Question = Question.quit, systemQuitting: Bool = false, within limit: Duration = Door.endLimit,
         reply: @escaping @MainActor (Bool) -> Void
-    ) -> NSApplication.TerminateReply {
+    ) -> Bool {
         let live = panes.filter(\.holdsRunnerSession)
-        guard !live.isEmpty else { return .terminateNow }
+        guard !live.isEmpty else { return false }
+        let left = Left(live.map(titled))
         if systemQuitting {
             Task { @MainActor in
-                _ = await end(live, titled: titled, within: limit)
+                await end(live, titled: titled, within: limit, into: left)
                 reply(true)
             }
-            return .terminateLater
+            return true
         }
         if !window.isVisible { window.makeKeyAndOrderFront(nil) }
         let question = asked(live.count)
@@ -547,45 +576,48 @@ enum RunnerQuit {
             let answered = Once()
             progress.beginSheetModal(for: window) { response in
                 MainActor.assumeIsolated {
-                    if response == .alertFirstButtonReturn, answered.first() { reply(true) }
+                    guard response == .alertFirstButtonReturn, answered.first() else { return }
+                    say(left.said, on: window, then: reply)
                 }
             }
             Task { @MainActor in
-                let unended = await end(live, titled: titled, within: limit)
+                await end(live, titled: titled, within: limit, into: left)
                 guard answered.first() else { return }
                 window.endSheet(progress.window)
-                guard !unended.isEmpty else { return reply(true) }
-                say(unended, on: window, then: reply)
+                say(left.said, on: window, then: reply)
             }
         }
-        return .terminateLater
+        return true
     }
 
     /// Ends every pane's session at the runner, all at once, each within `limit`, an end already
-    /// under way joined rather than started again: for each not confirmed, its tab's title and why.
-    static func end(_ panes: [TerminalPane], titled: @MainActor (TerminalPane) -> String, within limit: Duration) async -> [String] {
-        let endings = panes.compactMap { pane in pane.end(within: limit).map { (titled(pane), $0) } }
-        return await withTaskGroup(of: String?.self) { group in
+    /// under way joined rather than started again, each outcome settled in `left` as it comes.
+    static func end(_ panes: [TerminalPane], titled: @MainActor (TerminalPane) -> String, within limit: Duration, into left: Left) async {
+        var endings: [(title: String, ending: Task<EndOutcome, Never>)] = []
+        for pane in panes {
+            guard let ending = pane.end(within: limit) else {
+                left.settle(titled(pane), .gone)
+                continue
+            }
+            endings.append((titled(pane), ending))
+        }
+        await withTaskGroup(of: (String, EndOutcome).self) { group in
             for (title, ending) in endings {
-                group.addTask {
-                    guard case let .unconfirmed(why) = await ending.value else { return nil }
-                    return "\(title): \(why.joined(separator: " "))"
-                }
+                group.addTask { (title, await ending.value) }
             }
-            var unended: [String] = []
-            for await line in group {
-                if let line { unended.append(line) }
+            for await (title, outcome) in group {
+                left.settle(title, outcome)
             }
-            return unended.sorted()
         }
     }
 
-    /// The runner terminals whose end was not confirmed, each by its tab's title and why, then on:
-    /// they may run on until the runner ends them.
+    /// The runner terminals that may still run, each said as what is true of it, then on; on at
+    /// once when there are none.
     private static func say(_ unended: [String], on window: NSWindow, then reply: @escaping @MainActor (Bool) -> Void) {
+        guard !unended.isEmpty else { return reply(true) }
         let alert = NSAlert()
         alert.messageText = "Some terminals on the runner may still be running"
-        alert.informativeText = (unended + ["Sail could not confirm they ended; the runner ends them in time."]).joined(separator: "\n")
+        alert.informativeText = unended.joined(separator: "\n\n")
         alert.addButton(withTitle: "OK")
         alert.beginSheetModal(for: window) { _ in MainActor.assumeIsolated { reply(true) } }
     }

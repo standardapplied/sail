@@ -47,9 +47,11 @@ public interface PtyAdmission {
    */
   default void workspace(String project, String workspace, PtyIdentity.Person who)
       throws IOException {
-    throw new IOException(
-        "This terminal host has no workspaces: a workspace lives on a runner. Open the project's"
-            + " own terminal here, or ask the runner for a ticket to the workspace.");
+    throw Remedied.io(
+        "This terminal host has no workspaces: a workspace lives on a runner.",
+        Remedy.of(
+            "Open the project's own terminal here, or ask the runner for a ticket to the"
+                + " workspace."));
   }
 
   /**
@@ -83,6 +85,31 @@ public interface PtyAdmission {
     @Override
     public Remedy remedy() {
       return remedy;
+    }
+  }
+
+  /**
+   * The box could not say what a workspace or an instance is (its tool failed, or did not answer in
+   * time): unavailable, never refused. Its words are a person's; what the tool said is its cause,
+   * for the host's log only.
+   */
+  final class Unavailable extends IOException implements Remedied {
+    public static final String REASON =
+        "The runner could not read its workspaces, so no terminal was opened.";
+    public static final Remedy REMEDY = Remedy.of("An admin looks at the runner.");
+
+    public Unavailable(Throwable cause) {
+      super(Remedied.message(REASON, REMEDY), cause);
+    }
+
+    @Override
+    public String reason() {
+      return REASON;
+    }
+
+    @Override
+    public Remedy remedy() {
+      return REMEDY;
     }
   }
 

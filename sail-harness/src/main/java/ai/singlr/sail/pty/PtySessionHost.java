@@ -1085,7 +1085,7 @@ public final class PtySessionHost implements AutoCloseable {
         admission.enter(m.project(), m.workspace(), who);
       } catch (IOException refused) {
         log("refused", who.fde(), m.session(), "workspace not entered");
-        return PtyMessage.Err.of(refused);
+        return told(refused, PtyMessage.TicketRefusal.FORBIDDEN, who, m.session()).err();
       } catch (RuntimeException unavailable) {
         log("workspace-check-failed", who.fde(), m.project(), unavailable.toString());
         return new PtyMessage.Err(UNSERVED);
@@ -1095,7 +1095,7 @@ public final class PtySessionHost implements AutoCloseable {
         admission.instance(m.project());
       } catch (IOException refused) {
         log("refused", who.fde(), m.session(), "not the project's instance");
-        return PtyMessage.Err.of(refused);
+        return told(refused, PtyMessage.TicketRefusal.FORBIDDEN, who, m.session()).err();
       } catch (RuntimeException unavailable) {
         log("instance-check-failed", who.fde(), m.project(), unavailable.toString());
         return new PtyMessage.Err(UNSERVED);
@@ -1208,11 +1208,6 @@ public final class PtySessionHost implements AutoCloseable {
   }
 
   /**
-   * Why {@code who} may not open a terminal in {@code project}, or null when it may or the session
-   * names none: a project must be one the caller holds on this box ({@link PtyAdmission#project}).
-   * A store that cannot answer opens nothing and keeps the connection, said as {@link #UNSERVED}.
-   */
-  /**
    * Why {@code who} may not enter workspace {@code workspace} of {@code project} ({@link
    * PtyAdmission#workspace}): not found when the project has no such workspace here, refused when
    * it is not theirs and they are no admin, unavailable when the store cannot answer.
@@ -1225,11 +1220,31 @@ public final class PtySessionHost implements AutoCloseable {
       return new Refusal(PtyMessage.TicketRefusal.NOT_FOUND, PtyMessage.Err.of(absent), false);
     } catch (IOException refused) {
       log("refused", who.fde(), project + "/" + workspace, "not their workspace");
-      return new Refusal(PtyMessage.TicketRefusal.FORBIDDEN, PtyMessage.Err.of(refused), false);
+      return told(refused, PtyMessage.TicketRefusal.FORBIDDEN, who, project + "/" + workspace);
     } catch (RuntimeException unavailable) {
       log("workspace-check-failed", who.fde(), project, unavailable.toString());
       return new Refusal(PtyMessage.TicketRefusal.UNAVAILABLE, new PtyMessage.Err(UNSERVED), false);
     }
+  }
+
+  /**
+   * What a person reads of an admission's {@code failure}, as a refusal of {@code kind}: its own
+   * words when they were written for a person ({@link Remedied}); else, and for {@link
+   * PtyAdmission.Unavailable}, the runner could not read its workspaces, unavailable, and what the
+   * tool said goes to this host's log under {@code target}, never to the person.
+   */
+  private Refusal told(
+      IOException failure, PtyMessage.TicketRefusal kind, PtyIdentity.Person who, String target) {
+    if (failure instanceof Remedied && !(failure instanceof PtyAdmission.Unavailable)) {
+      return new Refusal(kind, PtyMessage.Err.of(failure), false);
+    }
+    var cause = java.util.Objects.requireNonNullElse(failure.getCause(), failure);
+    log("unavailable", who.fde(), target, cause.toString());
+    var unavailable =
+        failure instanceof PtyAdmission.Unavailable said
+            ? said
+            : new PtyAdmission.Unavailable(failure);
+    return new Refusal(PtyMessage.TicketRefusal.UNAVAILABLE, PtyMessage.Err.of(unavailable), false);
   }
 
   private Refusal projectRefusal(String project, PtyIdentity.Person who) {

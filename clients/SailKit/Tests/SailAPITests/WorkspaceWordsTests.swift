@@ -36,7 +36,6 @@ import Testing
         ]
         for (part, said) in cases {
             let refused = Self.refusal("Refused.", action: "Do: sail it.", [.words("Do: "), part, .words(".")])
-            #expect(refused.fix == said, "\(part)")
             #expect(refused.lines == ["Refused."] + (said.map { [$0] } ?? []))
             #expect(!refused.lines.joined().contains("sail "), "a command reached the person: \(refused.lines)")
         }
@@ -120,7 +119,7 @@ import Testing
         #expect(said == [
             "Workspace 'try' exists already.",
             "The control plane sent an answer this app cannot read.",
-            "The control plane's proxy answered an error (502).",
+            "The control plane answered with an error (502).",
             "The control plane's proxy answered in place of its event stream.",
             "a body that does not encode",
             "Sail could not reach the control plane: The network connection was lost.",
@@ -136,14 +135,14 @@ import Testing
         var listing = WorkspaceListing()
         let first = listing.ask("acme")
         let second = listing.ask("beta")
-        let late = listing.take([dock], for: "acme", request: first)
+        let late = listing.take([dock], request: first)
         #expect(!late, "acme's answer, arriving after beta was chosen")
         #expect(listing.rows.isEmpty && listing.listed == nil)
-        let taken = listing.take([pier], for: "beta", request: second)
+        let taken = listing.take([pier], request: second)
         #expect(taken)
         #expect(listing.rows == [pier] && listing.listed == "beta")
         let third = listing.ask("beta")
-        let overtaken = listing.take([dock], for: "beta", request: second)
+        let overtaken = listing.take([dock], request: second)
         #expect(!overtaken, "overtaken by a later request for the same project")
         #expect(listing.isLatest(third) && !listing.isLatest(second))
         #expect(listing.rows == [pier] && listing.listed == "beta", "the rows shown keep the project they were listed for")

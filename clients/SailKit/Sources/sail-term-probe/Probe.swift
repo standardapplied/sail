@@ -81,7 +81,8 @@ struct Probe {
         }
         session.start()
         say("session \(create.session)")
-        let report = await Runner(session: session, door: door, host: host, echoBudget: echoBudget) { result in
+        if script.endWhileOpening { return await endWhileOpening(session) }
+        let report = await Runner(session: session, host: host, echoBudget: echoBudget) { result in
             say("\(result.ok ? "ok" : "FAILED") \(result.step) (\(String(format: "%.1f", result.milliseconds)) ms)\(result.detail.map { ": \($0)" } ?? "")")
         }.run(script)
         if case let .ended(end) = session.state.phase {
@@ -93,6 +94,23 @@ struct Probe {
         report.budgets.forEach { say("\($0.name): \(String(format: "%.3f", $0.milliseconds)) ms (limit \($0.limit)) \($0.met ? "met" : "MISSED")") }
         try report.write(to: run.report)
         return report.passed
+    }
+
+    /// Ends `session` once its `Create` went out and while the runner may still be answering it,
+    /// as closing a tab on a workspace that is starting does: true when the runner ended what it
+    /// made, or made nothing.
+    private static func endWhileOpening(_ session: TerminalSession) async -> Bool {
+        do {
+            try await Follower(session).until(within: 60, "its Create went out") { session.mayBeAtHost }
+        } catch {
+            say("FAILED the Create never went out: \(error)")
+            return false
+        }
+        let began = ContinuousClock.now
+        let outcome = await session.end()
+        say("ended while opening: \(outcome) in \(began.duration(to: .now))")
+        session.close()
+        return outcome.closesTab
     }
 
     private static func say(_ line: String) {

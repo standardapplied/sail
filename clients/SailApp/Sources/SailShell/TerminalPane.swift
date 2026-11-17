@@ -50,7 +50,8 @@ public final class TerminalPane: NSView {
 
     private let start: Start
     private let door: Door
-    private let banner: StatusBanner
+    /// The card saying where the session stands: what a test or the drive reads and presses.
+    public let banner: StatusBanner
     private let scrim = Scrim()
     private let latency = NSTextField(labelWithString: "")
     private var latencyTimer: Timer?
@@ -122,12 +123,12 @@ public final class TerminalPane: NSView {
     }
 
     /// Ends the session at its host, then this client's part: on this pane's connection when it is
-    /// attached to this Mac's host, else on one of its own through the pane's door once this pane's
-    /// is closed, which a runner's always is (its door ends a session only for a connection that
-    /// holds the write token, and says when it will not), within `limit` in all; the task answers
-    /// what the end came to, nil when nothing is left to end. An end under way is the one answered,
-    /// never a second. A local host that cannot be reached keeps the session, which the next
-    /// launch opens as a last tab.
+    /// attached to this Mac's host, else on one of its own through the pane's door (a runner's ends
+    /// a session only for a connection that holds the write token, and says when it will not),
+    /// within `limit` in all, a session the host is still making waited for first
+    /// (``TerminalSession/end(within:)``); the task answers what the end came to, nil when nothing
+    /// is left to end. An end under way is the one answered, never a second. A local host that
+    /// cannot be reached keeps the session, which the next launch opens as a last tab.
     @discardableResult
     func end(within limit: Duration = Door.endLimit) -> Task<EndOutcome, Never>? {
         if let ending { return ending }
@@ -137,11 +138,13 @@ public final class TerminalPane: NSView {
             detach()
             return nil
         }
-        detach()
-        if case .ended = phase, !unended { return nil }
-        let (name, door) = (session.state.session, door)
+        if case .ended = phase, !unended {
+            detach()
+            return nil
+        }
         let task = Task { [weak self] () -> EndOutcome in
-            let outcome = await door.end(name, within: limit)
+            let outcome = await session.end(within: limit)
+            self?.detach()
             self?.ending = nil
             if case .unconfirmed = outcome { self?.unended = true } else { self?.unended = false }
             return outcome
@@ -150,13 +153,13 @@ public final class TerminalPane: NSView {
         return task
     }
 
-    /// Whether this pane holds a live session on the runner: one it attached to that has not
-    /// ended, which a quit or a sign-out ends.
+    /// Whether this pane holds a live session on the runner, which a quit or a sign-out ends: one
+    /// made, or one the runner is still making (a workspace starting), until it ends.
     var holdsRunnerSession: Bool {
-        guard place.onRunner, attachedOnce, let session else { return false }
+        guard place.onRunner, let session else { return false }
         if ending != nil || unended { return true }
         if case .ended = session.state.phase { return false }
-        return true
+        return session.mayBeAtHost
     }
 
     /// The tab stays while its runner session is ended, saying so.
@@ -167,9 +170,8 @@ public final class TerminalPane: NSView {
     /// The runner did not confirm the end, said why: the tab stays, offering to end it again, or
     /// to close it anyway, which leaves the session to run on.
     func showUnended(_ why: [String], endAgain: @escaping @MainActor () -> Void, closeAnyway: @escaping @MainActor () -> Void) {
-        let words = ["This terminal may still be running on the runner."] + why + ["Close Anyway leaves it running there until the runner ends it."]
         banner.show(
-            words.joined(separator: " "), button: "End Again", handler: { MainActor.assumeIsolated { endAgain() } }, second: "Close Anyway",
+            EndOutcome.mayStillRun("This terminal", why) + " Close Anyway leaves it there.", button: "End Again", handler: { MainActor.assumeIsolated { endAgain() } }, second: "Close Anyway",
             secondHandler: { MainActor.assumeIsolated { closeAnyway() } }
         )
     }
@@ -212,21 +214,6 @@ public final class TerminalPane: NSView {
             latencyTimer = nil
             latency.isHidden = true
         }
-    }
-
-    /// What the banner says now, nil when it is hidden.
-    public var status: String? {
-        banner.shown
-    }
-
-    /// Presses the banner's button titled `title`, as a click does: false when none is offered so.
-    public func pressStatus(_ title: String) -> Bool {
-        banner.press(title)
-    }
-
-    /// The buttons the banner offers now, none when it offers none.
-    var statusButtons: [String] {
-        [banner.offered, banner.offeredOther].compactMap { $0 }
     }
 
     /// The latency overlay's lines, every one shown.
@@ -286,6 +273,7 @@ public final class TerminalPane: NSView {
     /// was away from the runner), Sign In where the sign-in lapsed, and nothing else.
     private func showEnded(_ end: SessionEnd) {
         let again: () -> Void = { [weak self] in MainActor.assumeIsolated { self?.openAgain() } }
+        let signIn: () -> Void = { [weak self] in MainActor.assumeIsolated { self?.onSignIn() } }
         switch end {
         case .closed:
             return
@@ -295,8 +283,10 @@ public final class TerminalPane: NSView {
             banner.show(Said.sentence(reason), button: "Open Again", handler: again)
         case let .ticketRefused(refusal) where refusal.code == .known(.notFound) && attachedOnce:
             banner.show("This terminal ended while Sail was away from the runner.", button: "Open Again", handler: again)
+        case .signIn:
+            banner.show(end.said.joined(separator: " "), button: "Sign In", handler: signIn)
         case let .ticketRefused(refusal) where [.known(.missingBearerToken), .known(.invalidBearerToken)].contains(refusal.code):
-            banner.show(end.said.joined(separator: " "), button: "Sign In") { [weak self] in MainActor.assumeIsolated { self?.onSignIn() } }
+            banner.show(end.said.joined(separator: " "), button: "Sign In", handler: signIn)
         default:
             banner.show(end.said.joined(separator: " "))
         }

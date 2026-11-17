@@ -37,7 +37,7 @@ final class RecordingTickets: TicketSource {
 final class DoorTickets: TicketSource {
     let door: FakeRunnerDoor
     private let asked = Mutex<[TicketRequest]>([])
-    private let silent = Mutex(false)
+    private let silent = Mutex<(on: Bool, held: [CheckedContinuation<Void, Never>])>((false, []))
 
     init(_ door: FakeRunnerDoor) {
         self.door = door
@@ -47,21 +47,36 @@ final class DoorTickets: TicketSource {
         asked.withLock { $0 }
     }
 
-    /// The control plane answers no ticket from now on, as one behind a dead network does.
+    /// The control plane answers no ticket from now on, as one behind a dead network does, until
+    /// ``answerAgain()``.
     func silence() {
-        silent.withLock { $0 = true }
+        silent.withLock { $0.on = true }
+    }
+
+    /// The tickets held go out, and the next are answered at once.
+    func answerAgain() {
+        let held = silent.withLock { silent in
+            silent.on = false
+            defer { silent.held = [] }
+            return silent.held
+        }
+        held.forEach { $0.resume() }
     }
 
     func ticket(for request: TicketRequest) async throws(SailError) -> TerminalTicket {
         asked.withLock { $0.append(request) }
-        if silent.withLock({ $0 }) {
-            try? await Task.sleep(for: .seconds(3600))
-            throw .unreachable("no answer")
+        await withCheckedContinuation { (held: CheckedContinuation<Void, Never>) in
+            let now = silent.withLock { silent -> Bool in
+                guard silent.on else { return true }
+                silent.held.append(held)
+                return false
+            }
+            if now { held.resume() }
         }
         if case let .attach(session) = request, !door.sessions.contains(session) {
             throw .refused(Refusal(code: .known(.notFound), message: "There is no session '\(session)' on this box that you may attach."))
         }
-        return door.issue()
+        return door.issue(for: request)
     }
 }
 
@@ -126,10 +141,10 @@ actor Proxied: Transport {
     @Test func aRunnerTabsTicketNamesItsWorkspaceAtEveryOpen() async throws {
         let tickets = RecordingTickets(answering: .refused(Self.notYours))
         let pane = try Self.pane(.workspace(project: "acme", name: "try"), runner: tickets)
-        #expect(pane.status == nil)
+        #expect(pane.banner.shown == nil)
         pane.begin()
-        #expect(await Self.until { pane.status == "Workspace 'dock' belongs to 'uday', not you. Ask uday to enter it, or have an admin do it." },
-                "the banner says \(pane.status ?? "nothing")")
+        #expect(await Self.until { pane.banner.shown == "Workspace 'dock' belongs to 'uday', not you. Ask uday to enter it, or have an admin do it." },
+                "the banner says \(pane.banner.shown ?? "nothing")")
         pane.openAgain()
         #expect(await Self.until { tickets.requests.count == 2 })
         #expect(tickets.requests == [.open(project: "acme", workspace: "try"), .open(project: "acme", workspace: "try")])
@@ -141,8 +156,8 @@ actor Proxied: Transport {
         let tickets = RecordingTickets(answering: .unreachable("the runner does not answer"))
         let pane = try Self.pane(.workspace(project: "harbor", name: "dock"), runner: tickets)
         pane.begin()
-        #expect(await Self.until { pane.status == "Reconnecting to harbor · dock…" }, "the banner says \(pane.status ?? "nothing")")
-        #expect(pane.statusButtons == ["Reconnect Now"])
+        #expect(await Self.until { pane.banner.shown == "Reconnecting to harbor · dock…" }, "the banner says \(pane.banner.shown ?? "nothing")")
+        #expect(pane.banner.offers == ["Reconnect Now"])
         pane.detach()
     }
 
@@ -153,17 +168,18 @@ actor Proxied: Transport {
         }
     }
 
-    /// Ruling 6: a runner tab's session does not outlive the app. Ended at the runner on its own
-    /// connection, through an attach ticket for it, within the end's deadline; a runner that cannot
-    /// be reached is said, so the close and the quit can say it may still be running.
-    @Test func runnerTerminalsAreEndedAtTheRunnerAndThoseThatCannotBeAreSaid() async throws {
+    /// N2: a runner tab whose session was never made (its ticket never came) leaves nothing at the
+    /// runner: its end is gone at once, asking no ticket to end what does not exist, and the quit
+    /// does not count it.
+    @Test func aRunnerTabWhoseSessionWasNeverMadeEndsAsGone() async throws {
         let tickets = RecordingTickets(answering: .unreachable("the runner does not answer"))
         let runner = try Self.pane(.workspace(project: "acme", name: "try"), runner: tickets)
         runner.begin()
         #expect(await Self.until { !tickets.requests.isEmpty })
-        let ending = try #require(runner.end(within: .seconds(2)), "a session not attached is ended on a connection of its own")
-        #expect(await ending.value == .unconfirmed(["Sail could not reach the control plane: the runner does not answer."]))
-        #expect(tickets.requests.contains(.attach(session: runner.name)), "\(tickets.requests)")
+        #expect(!runner.holdsRunnerSession)
+        let ending = try #require(runner.end(within: .seconds(2)))
+        #expect(await ending.value == .gone)
+        #expect(!tickets.requests.contains(.attach(session: runner.name)), "\(tickets.requests)")
     }
 
     /// The Workspaces item is on the rail only while someone is signed in.
@@ -252,7 +268,7 @@ actor Proxied: Transport {
         #expect(nowhere.text == "Workspaces\nNo project on this control plane is open to you yet.\nAn admin adds you to one.", "\(nowhere.text)")
         #expect(nowhere.projects.isHiddenOrHasHiddenAncestor && nowhere.name.isHiddenOrHasHiddenAncestor && nowhere.tryAgain.isHidden)
         let unread = try await Self.listed([try Exchange("projects")], answering502: "GET /v1/projects/harbor/workspaces")
-        #expect(unread.text.hasSuffix("The control plane's proxy answered an error (502)."), "\(unread.text)")
+        #expect(unread.text.hasSuffix("The control plane answered with an error (502)."), "\(unread.text)")
         #expect(!unread.text.contains("/v1/"), "no route reaches a person")
         #expect(!unread.tryAgain.isHidden && unread.open.isHidden)
         let before = unread.ended

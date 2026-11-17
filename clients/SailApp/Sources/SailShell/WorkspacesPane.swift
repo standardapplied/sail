@@ -106,12 +106,7 @@ public final class WorkspacesPane: NSView, NSTableViewDataSource, NSTableViewDel
     /// asked while no one is signed in.
     func shown() {
         guard client != nil else { return }
-        calls += 1
-        Task {
-            await refresh()
-            calls -= 1
-            enable()
-        }
+        asking()
     }
 
     /// Until the sign-in is known, at a launch onto this pane: nothing misleading is shown.
@@ -132,9 +127,15 @@ public final class WorkspacesPane: NSView, NSTableViewDataSource, NSTableViewDel
     }
 
     func refresh() async {
+        await asking().value
+    }
+
+    /// Asks the projects, then the chosen one's workspaces: one call, busy from now.
+    @discardableResult
+    private func asking() -> Task<Void, Never> {
         refreshes += 1
         let mine = refreshes
-        await run(failing: { self.show(.unreadable($0)) }) { () async throws(SailError) in
+        return run(failing: { self.show(.unreadable($0)) }) { () async throws(SailError) in
             guard let client = self.client else { return }
             let names = try await client.send(.projects).projects.map(\.name)
             guard mine == self.refreshes else { return }
@@ -147,7 +148,7 @@ public final class WorkspacesPane: NSView, NSTableViewDataSource, NSTableViewDel
     }
 
     @objc public func pickProject(_: Any?) {
-        Task { await run(failing: { self.show(.unreadable($0)) }) { () async throws(SailError) in try await self.listWorkspaces() } }
+        run(failing: { self.show(.unreadable($0)) }) { () async throws(SailError) in try await self.listWorkspaces() }
     }
 
     @objc public func refreshList(_: Any?) {
@@ -156,20 +157,14 @@ public final class WorkspacesPane: NSView, NSTableViewDataSource, NSTableViewDel
 
     @objc public func makeWorkspace(_: Any?) {
         let wanted = name.stringValue.trimmingCharacters(in: .whitespaces)
-        guard !busy, let project = listing.listed ?? projects.titleOfSelectedItem, let client, !wanted.isEmpty else { return }
+        guard !busy, let project = projects.titleOfSelectedItem, let client, !wanted.isEmpty else { return }
         say(["Making \(wanted) (about 3 s)"])
-        calls += 1
         make.title = "Making…"
-        [make, open].forEach { $0.isEnabled = false }
-        Task {
-            await run(failing: { self.say($0) }) { () async throws(SailError) in
-                let made = try await client.send(.createWorkspace(wanted, project: project))
-                self.name.stringValue = ""
-                try await self.listWorkspaces(selecting: made.workspace)
-                self.say(made.stale ? ["\(made.workspace) was made from an older template."] : [])
-            }
-            calls -= 1
-            enable()
+        run(failing: { self.say($0) }) { () async throws(SailError) in
+            let made = try await client.send(.createWorkspace(wanted, project: project))
+            self.name.stringValue = ""
+            try await self.listWorkspaces(selecting: made.workspace)
+            self.say(made.stale ? ["\(made.workspace) was made from an older template."] : [])
         }
     }
 
@@ -237,7 +232,7 @@ public final class WorkspacesPane: NSView, NSTableViewDataSource, NSTableViewDel
             guard listing.isLatest(number) else { return }
             throw error
         }
-        guard listing.take(listed, for: project, request: number) else { return }
+        guard listing.take(listed, request: number) else { return }
         list.reloadData()
         listHeight.constant = Rail.item * Double(min(rows.count, Self.shownRows))
         show(rows.isEmpty ? .noWorkspaces(project: project) : .listed)
@@ -299,9 +294,18 @@ public final class WorkspacesPane: NSView, NSTableViewDataSource, NSTableViewDel
         refreshButton.isEnabled = client != nil
     }
 
-    private func run(failing: @MainActor ([String]) -> Void, _ act: @MainActor () async throws(SailError) -> Void) async {
+    /// The pane's one call at a time, and its one busy count: busy from this call on (Open and Make
+    /// off), its failure said by `failing`, Open and Make offered again once it ends.
+    @discardableResult
+    private func run(
+        failing: @escaping @MainActor ([String]) -> Void, _ act: @escaping @MainActor () async throws(SailError) -> Void
+    ) -> Task<Void, Never> {
         calls += 1
         [make, open].forEach { $0.isEnabled = false }
+        return Task { await self.finish(failing: failing, act) }
+    }
+
+    private func finish(failing: @MainActor ([String]) -> Void, _ act: @MainActor () async throws(SailError) -> Void) async {
         defer {
             calls -= 1
             ended += 1

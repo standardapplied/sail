@@ -80,7 +80,7 @@ import Testing
         let session = TerminalSession(
             open: create, door: .runner(desk), screen: try screen(columns: 20, rows: 3), timeout: FakeHost.deadline, sleep: Naps().sleep
         )
-        let runner = Runner(session: session, door: .runner(desk), host: nil, echoBudget: 10) { _ in }
+        let runner = Runner(session: session, host: nil, echoBudget: 10) { _ in }
         session.start()
         let first = try await host.accept()
         try await first.welcome()
@@ -111,7 +111,7 @@ import Testing
             open: create, door: .local(host.address), screen: try screen(columns: 20, rows: 3), timeout: FakeHost.deadline, stableAfter: .zero,
             sleep: Naps().sleep
         )
-        let runner = Runner(session: session, door: .local(host.address), host: nil, echoBudget: 10) { _ in }
+        let runner = Runner(session: session, host: nil, echoBudget: 10) { _ in }
         let script = try JSONDecoder().decode(Script.self, from: Data("""
             {"size": [20, 3], "steps": [{"wait": "kept", "within": \(FakeHost.deadline)}, {"snapshot": "before"}, {"drop": true},
               {"phase": "attached", "within": \(FakeHost.deadline)}, {"same": "before"}]}

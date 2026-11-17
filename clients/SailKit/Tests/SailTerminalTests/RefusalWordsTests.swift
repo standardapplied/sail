@@ -9,8 +9,8 @@ import Testing
 
 /// What a person reads of a refusal names no command line and no route: every refusal the server
 /// recorded (each API refusal, and the terminal door's refusal frames), and every failure of a call,
-/// said as the app says it. The server's own test (`TerminalRefusalsNameNoCommandTest`) reads every
-/// site that builds a refusal on these paths, so a refusal added there is held to this too.
+/// said as the app says it. The server's own test (`RefusalsNameNoCommandTest`) reads every site
+/// that builds a refusal in its sources, so a refusal added there is held to this too.
 @Suite struct RefusalWordsTests {
     static func spelled(_ lines: [String]) -> [String] {
         lines.filter { $0.contains(/(^|[\s'`(:"])sail (?!system\b)[a-z][a-z-]*/) || $0.contains("/v1/") }
@@ -67,7 +67,7 @@ import Testing
         let said = failures.map(\.description) + failures.map { TerminalError.controlPlane($0).description }
         #expect(Self.spelled(said) == [], "\(said)")
         #expect(said.prefix(4) == [
-            "The control plane's proxy answered an error (502).", "The control plane sent an answer this app cannot read.",
+            "The control plane answered with an error (502).", "The control plane sent an answer this app cannot read.",
             "The control plane's proxy answered in place of its event stream.", "Sail could not reach the control plane: The request timed out.",
         ])
         #expect(failures.map(\.route) == ["POST /v1/terminal/tickets", "GET /v1/projects", "GET /v1/events", nil], "kept for a log")
@@ -96,17 +96,15 @@ import Testing
         let tickets = SignedInTickets(for: "uday") { standing.current }
         _ = try await tickets.ticket(for: .attach(session: "app-a"))
         standing.current = nil
-        await #expect(throws: SailError.refused(Refusal(
-            code: .known(.missingBearerToken), message: "You are signed out of the control plane.", action: "Sign in to reach the runner."
-        ))) { try await tickets.ticket(for: .attach(session: "app-a")) }
+        await #expect(throws: SailError.signIn(.signedOut)) { try await tickets.ticket(for: .attach(session: "app-a")) }
         standing.current = ("uday", again)
         _ = try await tickets.ticket(for: .attach(session: "app-a"))
         #expect(first.asked.withLock { $0 } == 1 && again.asked.withLock { $0 } == 1, "the sign-in of the moment, not the one at the open")
         standing.current = ("ana", again)
-        await #expect(throws: SailError.refused(Refusal(
-            code: .known(.invalidBearerToken), message: "This terminal is uday's, and ana is signed in.", action: "Sign in as uday to reach it."
-        ))) { try await tickets.ticket(for: .attach(session: "app-a")) }
+        await #expect(throws: SailError.signIn(.another(owner: "uday", signedIn: "ana"))) { try await tickets.ticket(for: .attach(session: "app-a")) }
         #expect(again.asked.withLock { $0 } == 1, "another person never asks for it")
+        #expect(SignIn.another(owner: "uday", signedIn: "ana").lines == ["This terminal is uday's, and ana is signed in.", "Sign in as uday to reach it."])
+        #expect(SailError.signIn(.signedOut).route == nil, "the client's own condition, never a server's answer")
     }
 }
 
@@ -120,8 +118,8 @@ import Testing
             self.door = door
         }
 
-        func ticket(for _: TicketRequest) async throws(SailError) -> TerminalTicket {
-            door.issue()
+        func ticket(for request: TicketRequest) async throws(SailError) -> TerminalTicket {
+            door.issue(for: request)
         }
     }
 
@@ -144,9 +142,9 @@ import Testing
         #expect(await Door.runner(Tickets(door)).end("app-ours") == .ended)
         door.holdWrite("app-theirs")
         theirs.close()
-        #expect(await Door.runner(Tickets(door)).end("app-theirs") == .unconfirmed([Door.someoneElseHoldsIt]))
+        #expect(await Door.runner(Tickets(door)).end("app-theirs") == .unconfirmed([FakeRunnerDoor.notTheWriter]))
         #expect(door.sessions == ["app-theirs"], "the host's session list after the ends")
-        let ticket = door.issue()
+        let ticket = door.issue(for: .attach(session: "app-theirs"))
         let spent = try await onThread { () throws -> [String] in
             var said: [String] = []
             for _ in 0 ..< 2 {
@@ -163,5 +161,28 @@ import Testing
             return said
         }
         #expect(spent == ["welcomed", "This ticket was presented already, and a ticket admits one connection; ask the API for a new one."])
+    }
+
+    /// A ticket covers what it was asked for and nothing else: an attach ticket presented to open a
+    /// session is refused in the real door's words, and the door hangs up.
+    @Test func aTicketCoversOnlyWhatItWasAskedFor() async throws {
+        let door = try FakeRunnerDoor()
+        defer { door.stop() }
+        let ticket = door.issue(for: .attach(session: "app-ours"))
+        let said = try await onThread { () throws -> String in
+            let connection = try Connection.connect(to: try HostAddress(ticketAddress: ticket.address), timeout: 5)
+            defer { connection.close() }
+            _ = try connection.admit(token: ticket.ticket)
+            let create = SessionCreate(session: "app-new", command: [], workingDirectory: "/tmp", project: "acme", room: "", size: TerminalSize(columns: 80, rows: 24), workspace: "try")
+            do {
+                try connection.request(.create(create))
+                return "made"
+            } catch {
+                guard case let TerminalError.refused(refusal) = error else { throw error }
+                return refusal.message
+            }
+        }
+        #expect(said == "This connection's ticket is to attach to session 'app-ours', and it admits nothing else; ask the API for a ticket for that.")
+        #expect(door.sessions.isEmpty && door.createsReceived == 0)
     }
 }

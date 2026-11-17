@@ -138,7 +138,8 @@ class PtySessionHostTest {
         public void instance(String project) throws IOException {
           instancesAsked.add(project);
           if (notTheirInstance.contains(project)) {
-            throw new IOException("Project " + project + " cannot take instance " + project + ".");
+            throw Remedied.io(
+                "Project " + project + " cannot take instance " + project + ".", Remedy.NONE);
           }
         }
 
@@ -149,8 +150,12 @@ class PtySessionHostTest {
             throw new PtyAdmission.Absent(
                 "Project '" + project + "' has no workspace 'gone'.", Remedy.NONE);
           }
+          if (workspace.equals("broken")) {
+            throw new IOException("incus list failed: run sail host doctor");
+          }
           if (!who.actor().isAdmin() && !who.fde().equals("mady")) {
-            throw new IOException("Workspace '" + workspace + "' belongs to 'mady', not you.");
+            throw Remedied.io(
+                "Workspace '" + workspace + "' belongs to 'mady', not you.", Remedy.NONE);
           }
         }
 
@@ -158,7 +163,8 @@ class PtySessionHostTest {
         public void enter(String project, String workspace, PtyIdentity.Person who)
             throws IOException {
           workspace(project, workspace, who);
-          throw new IOException("entered " + project + "-" + workspace + " for " + who.fde());
+          throw Remedied.io(
+              "entered " + project + "-" + workspace + " for " + who.fde(), Remedy.NONE);
         }
 
         @Override
@@ -1737,8 +1743,7 @@ class PtySessionHostTest {
         assertInstanceOf(PtyMessage.Ok.class, readControl(observer));
         PtyWire.write(observer, new PtyMessage.Kill("lounge"));
         assertEquals(
-            "This connection's ticket is to open a session in project 'beta', and it admits"
-                + " nothing else; ask the API for a ticket for that.",
+            PtyTickets.NOT_THE_WRITER,
             assertInstanceOf(PtyMessage.Err.class, readControl(observer)).message(),
             "an observer never ends a session, even the one it opened");
       }
@@ -1771,8 +1776,7 @@ class PtySessionHostTest {
         assertInstanceOf(PtyMessage.Ok.class, answerAfterItsEnd(writer), "its writer ends it");
         PtyWire.write(writer, new PtyMessage.Kill("lounge"));
         assertEquals(
-            "This connection's ticket is to attach to session 'lounge', and it admits nothing"
-                + " else; ask the API for a ticket for that.",
+            PtyTickets.NOT_THE_WRITER,
             assertInstanceOf(PtyMessage.Err.class, readControl(writer)).message(),
             "an ended session leaves its connection no token to end anything with");
       }
@@ -2070,5 +2074,26 @@ class PtySessionHostTest {
         PtySessionHost.childCommand(
                 new PtySession.Origin("w", "i", "mady", "acme", "", List.of("sh"), "try"), Map.of())
             .subList(0, 3));
+  }
+
+  /**
+   * A tool's failure in an admission never reaches a person: written for no one, it is said as the
+   * runner unable to read its workspaces, unavailable, and its own words go to the host's log.
+   */
+  @Test
+  void aToolsFailureReachesAPersonOnlyAsTheRunnerUnableToReadItsWorkspaces() throws IOException {
+    boxless.add("mady");
+    startHost();
+
+    try (var channel = connect("tok-mady")) {
+      PtyWire.write(
+          channel, new PtyMessage.Create("w", List.of("sh"), "/tmp", "acme", "", 80, 24, "broken"));
+      var refused = (PtyMessage.Err) PtyWire.read(channel);
+
+      assertEquals(PtyAdmission.Unavailable.REASON, refused.reason());
+      assertEquals(PtyAdmission.Unavailable.REMEDY, refused.remedy());
+      assertFalse(refused.message().contains("incus"), refused.message());
+      assertFalse(refused.message().contains("sail host"), refused.message());
+    }
   }
 }

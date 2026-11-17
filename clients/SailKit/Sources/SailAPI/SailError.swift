@@ -13,6 +13,25 @@ public enum SailError: Error, Equatable, Sendable {
     case notAnEventStream(route: String, contentType: String?)
     /// The request cannot be sent as it was written: why.
     case unsendable(String)
+    /// Nothing was asked: the call needs a sign-in this client does not hold now. This client's own
+    /// condition, never an answer of the server's.
+    case signIn(SignIn)
+}
+
+/// The sign-in a call needed and this client does not hold.
+public enum SignIn: Equatable, Sendable {
+    /// No one is signed in.
+    case signedOut
+    /// Someone other than `owner`, whose call it is, is signed in.
+    case another(owner: String, signedIn: String)
+
+    /// What a person reads: what is so, then what they can do.
+    public var lines: [String] {
+        switch self {
+        case .signedOut: ["You are signed out of the control plane.", "Sign in to reach the runner."]
+        case let .another(owner, signedIn): ["This terminal is \(owner)'s, and \(signedIn) is signed in.", "Sign in as \(owner) to reach it."]
+        }
+    }
 }
 
 /// A refusal as the server words it, kept verbatim: what it is, what happened, and what to do.
@@ -130,10 +149,11 @@ extension SailError: CustomStringConvertible {
         switch self {
         case let .refused(refusal): refusal.message
         case .undecodable: "The control plane sent an answer this app cannot read."
-        case let .unexpected(_, status): "The control plane's proxy answered an error (\(status))."
+        case let .unexpected(_, status): "The control plane answered with an error (\(status))."
         case .notAnEventStream: "The control plane's proxy answered in place of its event stream."
         case let .unsendable(reason): reason
         case let .unreachable(reason): "Sail could not reach the control plane: \(reason)"
+        case let .signIn(needed): needed.lines[0]
         }
     }
 
@@ -142,7 +162,7 @@ extension SailError: CustomStringConvertible {
         switch self {
         case let .undecodable(undecodable): undecodable.route
         case let .unexpected(route, _), let .notAnEventStream(route, _): route
-        case .refused, .unsendable, .unreachable: nil
+        case .refused, .unsendable, .unreachable, .signIn: nil
         }
     }
 }

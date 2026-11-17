@@ -28,7 +28,7 @@ public final class AccountPane: NSView, NSMenuItemValidation {
     /// Who is signed in now, nil for no one: said each time the pane learns it.
     var onStanding: @MainActor (SignedIn?) -> Void = { _ in }
     /// Asked before signing out, answering whether to go on: what the sign-in holds open is ended
-    /// first (``RunnerQuit``).
+    /// first (``RunnerEnds``).
     var askBeforeSigningOut: @MainActor (@escaping @MainActor (Bool) -> Void) -> Void = { $0(true) }
 
     private let account: Account
@@ -39,7 +39,8 @@ public final class AccountPane: NSView, NSMenuItemValidation {
     }
 
     private let mono: TerminalFonts
-    private var lines: [String] = []
+    /// What the pane says now beside who is signed in, a line each: why it could not ask, say.
+    private(set) var lines: [String] = []
     private var labels: [NSTextField] = []
     private lazy var addressFrame = FieldFrame(address, look: look)
     private lazy var ticketFrame = FieldFrame(ticket, look: look)
@@ -108,11 +109,6 @@ public final class AccountPane: NSView, NSMenuItemValidation {
         askBeforeSigningOut { [weak self] go in
             if go { self?.signOutNow() }
         }
-    }
-
-    /// What the pane says now beside who is signed in, a line each: why it could not ask, say.
-    var saying: [String] {
-        lines
     }
 
     private func signOutNow() {

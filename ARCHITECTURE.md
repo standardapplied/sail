@@ -4518,13 +4518,23 @@ against them before it is used. Both expose one module, `GhosttyVt`. The termina
   that died during sleep is found at once without resizing anything; the protocol has no no-op
   frame, and an empty `Input` would count as typing. A connect attempt a detach or a close overtook stands down
   before it sends anything for the session, and `kill()` while not attached, or through a runner's
-  door, throws: a session is ended by `Door.end(_:within:)`, on a connection of its own (through a
-  runner's door an attach ticket, attached as the writer, then `Kill`), within 10 s in all, the
-  ticket included, its outcome `EndOutcome`: ended, gone already (a ticket to attach refused as
-  not found, by code), or unconfirmed with why in words. A refusal is kept whole on every path
+  door, throws: a session is ended by `TerminalSession.end(within:)`, within 10 s in all. A `Create`
+  sent and not yet answered (a workspace starting) is waited for first, inside the same limit,
+  since the host makes the session before it answers and a closed connection does not undo it;
+  a session never made is gone already (`mayBeAtHost`, which also decides what a quit counts).
+  Then `Door.end(_:within:)` ends it on a connection of its own (through a runner's door an attach
+  ticket, attached as the writer, then `Kill`), the ticket included in the limit, its outcome
+  `EndOutcome`: ended, gone already (a ticket to attach refused as not found, by code), or
+  unconfirmed in the words of whoever refused it. What may still run is said in one sentence
+  (`EndOutcome.mayStillRun`): no timeout ends a detached session, so it keeps its workspace
+  running until someone ends it or stops the workspace. A refusal is kept whole on every path
   (`SessionEnd.refused(HostRefusal)`, `.ticketRefused(Refusal)`), the host's reason apart from its
-  typed remedy, and said by `Said`: the sentence and, for a command the app knows, who acts; a
-  call that fails is said by its kind, never its route (`SailError.description`).
+  typed remedy, and said by `Said.lines`, the one composition: the sentence and, for a command the
+  app knows, who acts; a call that fails is said by its kind, never its route
+  (`SailError.description`); a ticket asked while signed out, or as another person, is the
+  client's own `SailError.signIn`, never a server's code. The terminal door and the workspace
+  doors pass a person only words written for one (`Remedied`); anything else, a tool's output, is
+  logged, and the person reads `PtyAdmission.Unavailable` or "The runner could not finish that.".
 - **T7. No keystroke reaches a screen the person cannot see.** Input while not attached is
   dropped and counted exactly (`droppedInputs`), never queued; input written into a connection
   that then died is estimated lost (`possiblyLostInputs`) when the next attach shows the host's

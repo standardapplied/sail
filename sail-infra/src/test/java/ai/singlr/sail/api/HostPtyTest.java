@@ -6,6 +6,7 @@
 package ai.singlr.sail.api;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -127,20 +128,30 @@ class HostPtyTest {
         incus.asked);
   }
 
+  /**
+   * Incus failing, or not answering in time, is the runner unable to read its workspaces: said in a
+   * person's sentence, unavailable and never refused, the tool's own words kept as the cause for
+   * the log and out of what a person reads.
+   */
   @Test
-  void anOpenIsRefusedSayingSoWhenIncusDoesNotAnswerInTimeOrAtAll() {
-    var said =
-        "Incus did not say within 3 s what instance 'slow' is, so no terminal was opened in it."
-            + " Try again once Incus answers.";
-
-    assertEquals(
-        said, assertThrows(IOException.class, () -> pty.admitInstance("slow")).getMessage());
-    var interrupted = assertThrows(IOException.class, () -> pty.admitInstance("interrupted"));
-    assertEquals(said.replace("'slow'", "'interrupted'"), interrupted.getMessage());
+  void anOpenIsUnavailableInAPersonsWordsWhenIncusFailsOrDoesNotAnswer() {
+    var slow = assertThrows(PtyAdmission.Unavailable.class, () -> pty.admitInstance("slow"));
+    var interrupted =
+        assertThrows(PtyAdmission.Unavailable.class, () -> pty.admitInstance("interrupted"));
     assertTrue(Thread.interrupted(), "the interrupt is kept");
+    var denied = assertThrows(PtyAdmission.Unavailable.class, () -> pty.admitInstance("denied"));
+
+    for (var unavailable : List.of(slow, interrupted, denied)) {
+      assertEquals(
+          "The runner could not read its workspaces, so no terminal was opened.",
+          unavailable.reason());
+      assertEquals("An admin looks at the runner.", unavailable.remedy().plain());
+    }
     assertEquals(
         "incus list failed: Error: not authorized",
-        assertThrows(IOException.class, () -> pty.admitInstance("denied")).getMessage());
+        denied.getCause().getMessage(),
+        "what Incus said is the cause, for the log");
+    assertFalse(denied.getMessage().contains("incus"), denied.getMessage());
   }
 
   /**
@@ -289,17 +300,17 @@ class HostPtyTest {
             project -> Optional.of(TestDefinitions.named(project)),
             TestOwners::of);
 
-    var slow = assertThrows(IOException.class, () -> pty.admitWorkspace("acme", "slow", ada));
-    var cut = assertThrows(IOException.class, () -> pty.admitWorkspace("acme", "interrupted", ada));
+    var slow =
+        assertThrows(PtyAdmission.Unavailable.class, () -> pty.admitWorkspace("acme", "slow", ada));
+    var cut =
+        assertThrows(
+            PtyAdmission.Unavailable.class, () -> pty.admitWorkspace("acme", "interrupted", ada));
     assertTrue(Thread.interrupted(), "the interrupt is kept");
     var unstarted = assertThrows(IOException.class, () -> lane.enterWorkspace("acme", "try", ada));
     assertTrue(Thread.interrupted(), "the interrupt is kept");
 
-    assertEquals(
-        "Incus did not say within 3 s what instance 'acme-slow' is, so no terminal was opened in"
-            + " it. Try again once Incus answers.",
-        slow.getMessage());
-    assertTrue(cut.getMessage().contains("'acme-interrupted'"), cut.getMessage());
+    assertEquals(PtyAdmission.Unavailable.REASON, slow.reason());
+    assertEquals(PtyAdmission.Unavailable.REASON, cut.reason());
     assertTrue(unstarted.getMessage().contains("shutting down"), unstarted.getMessage());
   }
 

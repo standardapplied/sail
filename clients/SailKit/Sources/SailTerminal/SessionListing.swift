@@ -24,13 +24,6 @@ public enum SessionListing {
         try await Door.local(address).kill(session, timeout: timeout)
     }
 
-    static func offThread<T: Sendable>(_ work: @escaping @Sendable () throws(TerminalError) -> T) async throws(TerminalError) -> T {
-        let result: Result<T, TerminalError> = await withCheckedContinuation { answer in
-            Thread { answer.resume(returning: Result { () throws(TerminalError) in try work() }) }.start()
-        }
-        return try result.get()
-    }
-
     private static func list(at address: HostAddress, timeout: Int) throws(TerminalError) -> [SessionInfo] {
         let connection = try Connection.connect(to: address, timeout: timeout)
         defer { connection.close() }

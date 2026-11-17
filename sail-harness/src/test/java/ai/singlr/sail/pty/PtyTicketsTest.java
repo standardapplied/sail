@@ -200,7 +200,6 @@ class PtyTicketsTest {
     for (var other :
         List.<PtyMessage>of(
             new PtyMessage.ListSessions("", 16),
-            new PtyMessage.Kill("lounge"),
             new PtyMessage.Yield("lounge", "x"),
             new PtyMessage.IssueTicket(PtyMessage.TicketAction.ATTACH, "lounge", "tok-uday"),
             new PtyMessage.Hello("tok-uday"))) {
@@ -215,7 +214,10 @@ class PtyTicketsTest {
 
     assertNull(ATTACH_LOUNGE.refusal(lounge, null, "lounge"));
     assertNull(OPEN_ACME.refusal(lounge, "lounge", "lounge"));
-    assertNotNull(ATTACH_LOUNGE.refusal(lounge, null, null), "an observer never ends it");
+    assertEquals(
+        new PtyMessage.Err(PtyTickets.NOT_THE_WRITER),
+        ATTACH_LOUNGE.refusal(lounge, null, null),
+        "an observer never ends it, and is told it does not hold the keyboard");
     assertNotNull(OPEN_ACME.refusal(lounge, "lounge", null), "an observer never ends it");
     assertNotNull(OPEN_ACME.refusal(lounge, null, null), "nor one that opened nothing");
     assertNotNull(ATTACH_LOUNGE.refusal(study, null, "study"), "another session is not its own");

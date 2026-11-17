@@ -155,11 +155,10 @@ public struct HostRefusal: Equatable, Sendable {
         self.remedy = remedy
     }
 
-    /// What a person reads of it: the host's sentence, then what they can do, in words
-    /// (``Said/fix(_:otherwise:)``).
+    /// What a person reads of it, as every refusal is said (``Said/lines(_:remedy:otherwise:)``).
     public var lines: [String] {
         let words = (remedy ?? []).compactMap { part -> String? in if case let .words(text) = part { text } else { nil } }.joined()
-        return [message] + (Said.fix(remedy ?? [], otherwise: words.isEmpty ? nil : words).map { [$0] } ?? [])
+        return Said.lines(message, remedy: remedy ?? [], otherwise: words.isEmpty ? nil : words)
     }
 }
 

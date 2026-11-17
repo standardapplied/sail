@@ -5,29 +5,40 @@ import Glibc
 #endif
 import Foundation
 import SailAPI
+import SailTerminal
 import SailTerminalWire
 import Synchronization
 
 /// A runner's terminal door played by a test or the drive, on a loopback port, refusing what the
-/// real door refuses: it welcomes a ticket it issued, once (a ticket presented again, or one it
-/// never issued, is refused in the real door's words and the connection closed); it opens and
-/// attaches sessions; it ends a session only for the connection attached to it as its writer, and
-/// refuses any other Kill in the real door's words, hanging up as the real door does. A test can
-/// have someone else hold a session's write token. Its live sessions are its session list.
+/// real door refuses, in its words: it welcomes a ticket it issued, once, and nothing else; a
+/// connection does only what its ticket covers (an open ticket makes one session in its workspace
+/// and attaches to it, an attach ticket attaches to its session), and the door hangs up on any
+/// other frame; it ends a session only for the connection attached to it as its writer. A refused
+/// attach is answered and the connection goes on. A test can have someone else hold a session's
+/// write token, and hold a `Create`'s answer while the host makes it. Its live sessions are its
+/// session list.
 public final class FakeRunnerDoor: Sendable {
     public let port: UInt16
     private let listener: Int32
     private let state = Mutex(State())
+    private let creates = Mutex(Creates())
 
     private struct State {
         var issued = 0
-        var unused: Set<String> = []
+        var unused: [String: TicketRequest] = [:]
         var used: Set<String> = []
         var live: [String] = []
         /// Each live session's writer: the connection's number, or 0 for someone else.
         var writers: [String: Int] = [:]
         var connections = 0
         var kills: [String] = []
+    }
+
+    /// The `Create`s the door holds before it makes their sessions.
+    private struct Creates {
+        var holding = false
+        var received = 0
+        var held: [DispatchSemaphore] = []
     }
 
     public init() throws {
@@ -57,15 +68,36 @@ public final class FakeRunnerDoor: Sendable {
         "127.0.0.1:\(port)"
     }
 
-    /// A ticket for one connection, as the API hands one out for the real door.
-    public func issue() -> TerminalTicket {
+    /// A ticket for one connection doing `request`, as the API hands one out for the real door.
+    public func issue(for request: TicketRequest) -> TerminalTicket {
         let ticket = state.withLock { state in
             state.issued += 1
             let ticket = "tkt_door_\(state.issued)"
-            state.unused.insert(ticket)
+            state.unused[ticket] = request
             return ticket
         }
         return TerminalTicket(ticket: ticket, address: address, expiresAt: Date().addingTimeInterval(30))
+    }
+
+    /// From now on a `Create` waits, unanswered and its session not yet made, until ``releaseCreates()``:
+    /// a workspace still starting.
+    public func holdCreates() {
+        creates.withLock { $0.holding = true }
+    }
+
+    /// The `Create`s held go on: each session is made, then answered, as the real host does.
+    public func releaseCreates() {
+        let held = creates.withLock { creates in
+            creates.holding = false
+            defer { creates.held = [] }
+            return creates.held
+        }
+        held.forEach { $0.signal() }
+    }
+
+    /// How many `Create`s the door has received, held or not.
+    public var createsReceived: Int {
+        creates.withLock { $0.received }
     }
 
     /// The sessions it holds now, as the host lists them.
@@ -103,10 +135,9 @@ public final class FakeRunnerDoor: Sendable {
         close(listener)
     }
 
-    /// The real door's words for a frame outside an attach ticket.
-    public static func refusal(of session: String) -> String {
-        "This connection's ticket is to attach to session '\(session)', and it admits nothing else; ask the API for a ticket for that."
-    }
+    /// The real door's words for a Kill of its own session from a connection that does not hold
+    /// the session's write token.
+    public static let notTheWriter = "This connection does not hold the terminal's keyboard, so it was not ended; someone else may hold it."
 
     private static func socket() -> Int32 {
         #if canImport(Darwin)
@@ -144,32 +175,40 @@ public final class FakeRunnerDoor: Sendable {
         guard receive(8, on: connection) == Handshake.magic else { return }
         transmit(Handshake.magic, on: connection)
         guard case let .hello(token) = frame(on: connection) else { return }
-        guard let refused = admit(token) else {
+        switch admit(token) {
+        case let .success(ticket):
             answer(.welcome(hostBootID: "door-1"), on: connection)
-            return attached(connection, number)
+            attached(connection, number, ticket)
+        case let .failure(refused):
+            answer(.refused(HostRefusal(message: refused.description, remedy: nil)), on: connection)
         }
-        answer(.refused(HostRefusal(message: refused, remedy: nil)), on: connection)
     }
 
-    /// Why `token` is not welcomed, nil when it is: spent now.
-    private func admit(_ token: String) -> String? {
+    /// What `token` admits, spent now; or why it is not welcomed.
+    private func admit(_ token: String) -> Result<TicketRequest, DoorError> {
         state.withLock { state in
-            if state.unused.remove(token) != nil {
+            if let ticket = state.unused.removeValue(forKey: token) {
                 state.used.insert(token)
-                return nil
+                return .success(ticket)
             }
-            return state.used.contains(token)
-                ? "This ticket was presented already, and a ticket admits one connection; ask the API for a new one."
-                : "This is not a ticket this host issued; ask the API for a new one."
+            return .failure(DoorError(
+                state.used.contains(token)
+                    ? "This ticket was presented already, and a ticket admits one connection; ask the API for a new one."
+                    : "This is not a ticket this host issued; ask the API for a new one."
+            ))
         }
     }
 
-    private func attached(_ connection: Int32, _ number: Int) {
-        var mine: String?
+    private func attached(_ connection: Int32, _ number: Int, _ ticket: TicketRequest) {
+        var opened: String?
         while let frame = frame(on: connection) {
+            if let outside = Self.refusal(of: frame, under: ticket, opened: opened) {
+                return answer(.refused(HostRefusal(message: outside, remedy: nil)), on: connection)
+            }
             switch frame {
             case let .create(create):
-                state.withLock { $0.live.append(create.session) }
+                made(create.session)
+                opened = create.session
                 answer(.accepted, on: connection)
             case let .attach(session, write):
                 let live = state.withLock { state in
@@ -177,21 +216,17 @@ public final class FakeRunnerDoor: Sendable {
                     if write, state.writers[session] != 0 { state.writers[session] = number }
                     return true
                 }
-                guard live else {
-                    return answer(.refused(HostRefusal(message: "No session '\(session)'.", remedy: nil)), on: connection)
-                }
-                mine = session
-                answer(.accepted, on: connection)
+                answer(live ? .accepted : .refused(HostRefusal(message: "No live session '\(session)' to attach.", remedy: nil)), on: connection)
             case let .kill(session):
                 let ended = state.withLock { state in
                     state.kills.append(session)
-                    guard session == mine, state.writers[session] == number else { return false }
+                    guard state.writers[session] == number else { return false }
                     state.live.removeAll { $0 == session }
                     state.writers[session] = nil
                     return true
                 }
                 guard ended else {
-                    return answer(.refused(HostRefusal(message: Self.refusal(of: session), remedy: nil)), on: connection)
+                    return answer(.refused(HostRefusal(message: Self.notTheWriter, remedy: nil)), on: connection)
                 }
                 answer(.sessionEnded(reason: "ended"), on: connection)
                 answer(.accepted, on: connection)
@@ -199,6 +234,40 @@ public final class FakeRunnerDoor: Sendable {
                 continue
             }
         }
+    }
+
+    /// Makes `session`, once the `Create`s are no longer held: as the host does, before it answers.
+    private func made(_ session: String) {
+        let held = creates.withLock { creates -> DispatchSemaphore? in
+            creates.received += 1
+            guard creates.holding else { return nil }
+            let held = DispatchSemaphore(value: 0)
+            creates.held.append(held)
+            return held
+        }
+        held?.wait()
+        state.withLock { $0.live.append(session) }
+    }
+
+    /// The real door's words for a frame its ticket does not cover, nil when it does.
+    static func refusal(of frame: Frame, under ticket: TicketRequest, opened: String?) -> String? {
+        let own: String? = switch ticket {
+        case .open: opened
+        case let .attach(session): session
+        }
+        let covered = switch frame {
+        case let .create(create):
+            if case let .open(project, workspace) = ticket { opened == nil && create.project == project && create.workspace == workspace } else { false }
+        case let .attach(session, _): session == own
+        case let .kill(session): session == own
+        default: true
+        }
+        guard !covered else { return nil }
+        let scope = switch ticket {
+        case let .open(project, workspace): workspace.isEmpty ? "open a session in project '\(project)'" : "open a session in workspace '\(workspace)' of project '\(project)'"
+        case let .attach(session): "attach to session '\(session)'"
+        }
+        return "This connection's ticket is to \(scope), and it admits nothing else; ask the API for a ticket for that."
     }
 
     private func frame(on connection: Int32) -> Frame? {

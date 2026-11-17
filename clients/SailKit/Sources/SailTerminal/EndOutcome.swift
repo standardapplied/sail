@@ -19,14 +19,26 @@ public enum EndOutcome: Equatable, Sendable {
     }
 
     /// What `error`, an end's failure, comes to: a ticket to attach refused as not found is a
-    /// session gone already, by the refusal's code; anything else leaves the end unconfirmed.
+    /// session gone already, by the refusal's code; anything else leaves the end unconfirmed, in the
+    /// words of whoever refused it.
     static func of(_ error: TerminalError) -> EndOutcome {
         switch error {
         case let .ticketRefused(refusal) where refusal.code == .known(.notFound): .gone
         case let .ticketRefused(refusal): .unconfirmed(refusal.lines)
         case let .refused(refusal): .unconfirmed(refusal.lines)
+        case let .signIn(needed): .unconfirmed(needed.lines)
         default: .unconfirmed([Said.sentence(error.description)])
         }
+    }
+
+    /// What is true of a session whose end was not confirmed, `tab` naming it by its tab's title,
+    /// `why` the end's words: no timeout ends a session left detached, so it runs, and keeps its
+    /// workspace running, until someone ends it or stops the workspace. The one sentence a closed
+    /// tab, a quit and a sign-out say it in.
+    public static func mayStillRun(_ tab: String, _ why: [String]) -> String {
+        (["\(tab) may still be running on the runner."] + why
+            + ["If it is, it keeps running there, and keeps its workspace running, until someone ends it or stops the workspace."])
+            .joined(separator: " ")
     }
 }
 
@@ -39,7 +51,10 @@ extension Door {
     /// own and the end is unconfirmed. A runner's door admits Kill only from a connection attached
     /// to the session as its writer, so there it is an attach ticket for the session, attached as
     /// the writer, then Kill; when someone else holds the token the door refuses, in its words.
-    public func end(_ session: String, within limit: Duration = Door.endLimit) async -> EndOutcome {
+    /// `total` is the whole deadline this end is the rest of, which is what a person is told.
+    public func end(_ session: String, within limit: Duration = Door.endLimit, of total: Duration? = nil) async -> EndOutcome {
+        let said = "The runner did not answer within \(max(1, Int((total ?? limit).components.seconds))) s."
+        guard limit > .zero else { return .unconfirmed([said]) }
         let seconds = max(1, Int(limit.components.seconds))
         let ended: EndOutcome? = await Self.within(limit) { () async -> EndOutcome in
             do throws(TerminalError) {
@@ -49,14 +64,14 @@ extension Door {
                 return .of(error)
             }
         }
-        return ended ?? .unconfirmed(["The runner did not answer within \(seconds) s."])
+        return ended ?? .unconfirmed([said])
     }
 
     /// Ends `session` on a connection of its own, each answer awaited at most `timeout` seconds.
     func kill(_ session: String, timeout: Int) async throws(TerminalError) {
         let entry = try await entry(for: .attach(session: session))
         let asWriter = if case .runner = self { true } else { false }
-        try await SessionListing.offThread { () throws(TerminalError) in
+        try await offThread { () throws(TerminalError) in
             try Self.kill(session, at: entry.address, token: entry.token, asWriter: asWriter, timeout: timeout)
         }
     }
@@ -90,18 +105,8 @@ extension Door {
             try answer(to: "the attach to '\(session)'", on: connection, within: timeout)
         }
         try connection.send(.kill(session: session))
-        do throws(TerminalError) {
-            try answer(to: "the Kill of '\(session)'", on: connection, within: timeout)
-        } catch {
-            guard asWriter, case .refused = error else { throw error }
-            throw .refused(HostRefusal(message: someoneElseHoldsIt, remedy: nil))
-        }
+        try answer(to: "the Kill of '\(session)'", on: connection, within: timeout)
     }
-
-    /// Why a runner refuses the Kill of a session attached as its writer: the door admits it only
-    /// from the write token's holder, so someone else holds it. Said so, never in the door's words,
-    /// which name the session's own name.
-    static let someoneElseHoldsIt = "Someone else holds this terminal's keyboard, so the runner did not end it."
 
     /// Waits at most `timeout` seconds for the host's answer to `what`, past the frames an
     /// attachment streams meanwhile.

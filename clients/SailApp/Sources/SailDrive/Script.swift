@@ -129,6 +129,8 @@ struct Step: Decodable {
     /// when given; "none": no sheet asks within a second.
     var sheet: String?
     var asking: String?
+    /// The sheet on the window says these words, within `seconds` (5 by default), answered by none.
+    var sheetShows: String?
     /// The workspaces run's control plane answers this route (`["POST /v1/terminal/tickets",
     /// "refusal-forbidden-not-assignee"]`) as that golden from now on, held this many seconds when
     /// a third is given.

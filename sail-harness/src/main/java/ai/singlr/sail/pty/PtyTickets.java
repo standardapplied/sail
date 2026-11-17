@@ -60,6 +60,11 @@ final class PtyTickets {
     PtyMessage.Err refusal(PtyMessage message, String opened, String writing) {
       var opens = action == PtyMessage.TicketAction.OPEN;
       var own = opens ? opened : target;
+      if (message instanceof PtyMessage.Kill m
+          && m.session().equals(own)
+          && !m.session().equals(writing)) {
+        return new PtyMessage.Err(NOT_THE_WRITER);
+      }
       var covered =
           switch (message) {
             case PtyMessage.Create m ->
@@ -88,6 +93,14 @@ final class PtyTickets {
                   + ", and it admits nothing else; ask the API for a ticket for that.");
     }
   }
+
+  /**
+   * Why a connection's Kill of its own session is refused: it does not hold the session's write
+   * token, which another connection may, or none once the session ended.
+   */
+  static final String NOT_THE_WRITER =
+      "This connection does not hold the terminal's keyboard, so it was not ended; someone else"
+          + " may hold it.";
 
   private record Issued(byte[] hash, Ticket ticket, long issuedAt) {}
 

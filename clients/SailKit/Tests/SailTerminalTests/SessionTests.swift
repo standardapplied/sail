@@ -246,6 +246,28 @@ import Testing
         session.close()
     }
 
+    /// n6: a runner's patience counts the time its attempts took, not its waits alone. Against a
+    /// host that accepts no connection, each attempt takes its second to time out, and its waits
+    /// begin at 1 s; with patience half a second past those four waits, the attempts' seconds park
+    /// it after the fourth, where the waits alone would take a fifth.
+    @Test func aRunnersPatienceCountsTheTimeItsAttemptsTook() async throws {
+        let host = try FakeHost(tcp: ())
+        let desk = TicketDesk(address: host.address)
+        let naps = Naps()
+        let waits = Array(TerminalSession.retryWaits.dropFirst())
+        let patience = waits.reduce(.zero, +) + .milliseconds(500)
+        let session = TerminalSession(open: create, door: .runner(desk), screen: try screen(), timeout: 1, sleep: naps.sleep, patience: patience)
+        let watch = Watch(session)
+        session.start()
+        try await watch.until(within: 30, "parked") {
+            if case .parked = session.state.phase { return true }
+            return false
+        }
+        #expect(naps.durations == waits, "\(naps.durations)")
+        session.close()
+        host.stop()
+    }
+
     /// A runner whose control plane cannot be reached says so in words, which a parked tab shows.
     @Test func aTicketThatCannotBeAskedIsSaidInWords() async throws {
         struct Lost: TicketSource {

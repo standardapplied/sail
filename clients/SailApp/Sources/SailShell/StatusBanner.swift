@@ -6,7 +6,7 @@ import SailTerminalView
 /// at most one other: the Sail look's surface and hairline, content corners at 6 pt, the action in
 /// the accent, the other a plain button. The action answers Return while it shows.
 @MainActor
-final class StatusBanner: NSView {
+public final class StatusBanner: NSView {
     private let message = NSTextField(wrappingLabelWithString: "")
     private let action: AccentButton
     private let other = NSButton(title: "", target: nil, action: nil)
@@ -83,26 +83,30 @@ final class StatusBanner: NSView {
         other.isHidden = true
     }
 
-    /// What the banner says now, nil when hidden: for the drive harness.
-    var shown: String? {
+    /// What the banner says now, nil when hidden.
+    public var shown: String? {
         isHidden ? nil : message.stringValue
     }
 
-    /// The button the banner offers now, nil when it offers none.
-    var offered: String? {
-        isHidden || action.isHidden ? nil : action.title
+    /// The buttons it offers now, the action first; none while hidden.
+    public var offers: [String] {
+        isHidden ? [] : ([action, other] as [NSButton]).filter { !$0.isHidden }.map(\.title)
     }
 
-    /// The other button the banner offers now, nil when it offers none.
-    var offeredOther: String? {
-        isHidden || other.isHidden ? nil : other.title
-    }
-
-    /// Presses the button titled `title` the banner offers, as a click does; false when it offers
-    /// none so titled.
-    func press(_ title: String) -> Bool {
-        if offered == title { handler() } else if offeredOther == title { otherHandler() } else { return false }
+    /// Presses the button titled `title` it offers, as a click does; false when it offers none so
+    /// titled.
+    public func press(_ title: String) -> Bool {
+        guard offers.contains(title) else { return false }
+        if action.title == title { handler() } else { otherHandler() }
         return true
+    }
+
+    /// Lines wrap at the message's own width, so its right margin is its left.
+    override public func layout() {
+        super.layout()
+        guard message.preferredMaxLayoutWidth != message.frame.width else { return }
+        message.preferredMaxLayoutWidth = message.frame.width
+        super.layout()
     }
 
     @objc private func act() {

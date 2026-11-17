@@ -33,7 +33,7 @@ import Testing
     static func attached(_ names: [String], _ tickets: DoorTickets) async throws -> [TerminalPane] {
         let panes = try names.map { try RunnerTabTests.pane(.workspace(project: "harbor", name: $0), runner: tickets) }
         panes.forEach { $0.begin() }
-        #expect(await RunnerTabTests.until(10) { panes.allSatisfy { $0.holdsRunnerSession } }, "attached: \(panes.map { $0.status ?? "nothing said" })")
+        #expect(await RunnerTabTests.until(10) { panes.allSatisfy { $0.holdsRunnerSession } }, "attached: \(panes.map { $0.banner.shown ?? "nothing said" })")
         return panes
     }
 
@@ -49,8 +49,8 @@ import Testing
         never.begin()
         #expect(door.sessions.count == 2, "the host's session list before: \(door.sessions)")
         let replies = Replies()
-        let answered = RunnerQuit.ask(panes + [never], titled: Self.titled, on: shell.window) { replies.given.append($0) }
-        #expect(answered == .terminateLater)
+        let asked = RunnerEnds.ask(panes + [never], titled: Self.titled, on: shell.window) { replies.given.append($0) }
+        #expect(asked)
         let asked = Self.said(shell.window)
         #expect(asked.contains("Quit and End 2 Runner Terminals"), "only tabs holding a live session count: \(asked)")
         shell.window.endSheet(try #require(shell.window.attachedSheet), returnCode: .alertFirstButtonReturn)
@@ -65,11 +65,11 @@ import Testing
         let shell = try WorkbenchLookTests.shell(.light)
         let panes = try await Self.attached(["dock"], DoorTickets(door))
         let replies = Replies()
-        _ = RunnerQuit.ask(panes, titled: Self.titled, on: shell.window) { replies.given.append($0) }
+        _ = RunnerEnds.ask(panes, titled: Self.titled, on: shell.window) { replies.given.append($0) }
         #expect(Self.said(shell.window).contains("Quit and End 1 Runner Terminal"))
         shell.window.endSheet(try #require(shell.window.attachedSheet), returnCode: .alertSecondButtonReturn)
         #expect(await RunnerTabTests.until { replies.given == [false] })
-        #expect(door.kills.isEmpty && door.sessions == panes.map(\.name) && panes.allSatisfy { $0.status == nil })
+        #expect(door.kills.isEmpty && door.sessions == panes.map(\.name) && panes.allSatisfy { $0.banner.shown == nil })
     }
 
     /// M5: what may still run is named by its tab's title and said as possibly running; a session
@@ -82,12 +82,13 @@ import Testing
         door.holdWrite(panes[1].name)
         door.forget(panes[2].name)
         let replies = Replies()
-        _ = RunnerQuit.ask(panes, titled: Self.titled, on: shell.window) { replies.given.append($0) }
+        _ = RunnerEnds.ask(panes, titled: Self.titled, on: shell.window) { replies.given.append($0) }
         shell.window.endSheet(try #require(shell.window.attachedSheet), returnCode: .alertFirstButtonReturn)
         #expect(await RunnerTabTests.until(15) { Self.said(shell.window).contains("Some terminals on the runner may still be running") })
         let said = Self.said(shell.window).joined(separator: "\n")
-        #expect(said.contains("harbor · try: Someone else holds this terminal's keyboard, so the runner did not end it."), "\(said)")
-        #expect(!said.contains("harbor · quay") && !said.contains("harbor · dock:"), "only what may still run: \(said)")
+        #expect(said.contains(EndOutcome.mayStillRun("harbor · try", [FakeRunnerDoor.notTheWriter])), "\(said)")
+        #expect(!said.contains("harbor · quay") && !said.contains("harbor · dock "), "only what may still run: \(said)")
+        #expect(!said.contains("in time"), "no timeout ends it, and none is promised: \(said)")
         #expect(!said.contains("app-"), "no session's own name is shown: \(said)")
         #expect(replies.given.isEmpty, "the app waits for the person to read it")
         shell.window.endSheet(try #require(shell.window.attachedSheet), returnCode: .alertFirstButtonReturn)
@@ -105,12 +106,14 @@ import Testing
         tickets.silence()
         let replies = Replies()
         let started = ContinuousClock.now
-        _ = RunnerQuit.ask(panes, titled: Self.titled, on: shell.window, within: .seconds(1)) { replies.given.append($0) }
+        _ = RunnerEnds.ask(panes, titled: Self.titled, on: shell.window, within: .seconds(1)) { replies.given.append($0) }
         shell.window.endSheet(try #require(shell.window.attachedSheet), returnCode: .alertFirstButtonReturn)
         #expect(await RunnerTabTests.until(10) { Self.said(shell.window).contains("Some terminals on the runner may still be running") })
         #expect(ContinuousClock.now - started < .seconds(5), "both ended at once within the deadline")
         let said = Self.said(shell.window).joined(separator: "\n")
-        #expect(said.contains("harbor · dock:") && said.contains("harbor · try:"), "\(said)")
+        #expect(said.contains(EndOutcome.mayStillRun("harbor · dock", ["The runner did not answer within 1 s."])), "\(said)")
+        #expect(said.contains(EndOutcome.mayStillRun("harbor · try", ["The runner did not answer within 1 s."])), "\(said)")
+        tickets.answerAgain()
     }
 
     /// m9 and M8: a quit the system asks for (log out, restart, shut down) asks nothing: the
@@ -121,8 +124,8 @@ import Testing
         let shell = try WorkbenchLookTests.shell(.light)
         let panes = try await Self.attached(["dock"], DoorTickets(door))
         let replies = Replies()
-        let answered = RunnerQuit.ask(panes, titled: Self.titled, on: shell.window, systemQuitting: true) { replies.given.append($0) }
-        #expect(answered == .terminateLater && shell.window.attachedSheet == nil, "nothing is asked")
+        let asked = RunnerEnds.ask(panes, titled: Self.titled, on: shell.window, systemQuitting: true) { replies.given.append($0) }
+        #expect(asked && shell.window.attachedSheet == nil, "nothing is asked")
         #expect(await RunnerTabTests.until(15) { replies.given == [true] })
         #expect(door.sessions.isEmpty)
     }
@@ -135,7 +138,7 @@ import Testing
         let shell = try WorkbenchLookTests.shell(.light)
         let panes = try await Self.attached(["dock"], DoorTickets(door))
         shell.window.orderOut(nil)
-        _ = RunnerQuit.ask(panes, titled: Self.titled, on: shell.window) { _ in }
+        _ = RunnerEnds.ask(panes, titled: Self.titled, on: shell.window) { _ in }
         #expect(shell.window.isVisible && shell.window.attachedSheet != nil)
         shell.window.endSheet(try #require(shell.window.attachedSheet), returnCode: .alertSecondButtonReturn)
     }
@@ -160,7 +163,7 @@ import Testing
         let shell = try WorkbenchLookTests.shell(.light)
         let panes = try await Self.attached(["dock"], DoorTickets(door))
         let replies = Replies()
-        _ = RunnerQuit.ask(panes, titled: Self.titled, on: shell.window, asking: RunnerQuit.Question.signOut) { replies.given.append($0) }
+        _ = RunnerEnds.ask(panes, titled: Self.titled, on: shell.window, asking: RunnerEnds.Question.signOut) { replies.given.append($0) }
         #expect(Self.said(shell.window).contains("Sign Out and End 1 Runner Terminal"))
         shell.window.endSheet(try #require(shell.window.attachedSheet), returnCode: .alertFirstButtonReturn)
         #expect(await RunnerTabTests.until(15) { replies.given == [true] })
@@ -177,16 +180,60 @@ import Testing
         door.holdWrite(pane.name)
         let refused = try #require(pane.end())
         let outcome = await refused.value
-        #expect(outcome == .unconfirmed(["Someone else holds this terminal's keyboard, so the runner did not end it."]) && !outcome.closesTab)
+        #expect(outcome == .unconfirmed([FakeRunnerDoor.notTheWriter]) && !outcome.closesTab)
         #expect(pane.unended && pane.holdsRunnerSession, "it may still be running, and a quit still counts it")
         var again = 0
-        pane.showUnended(["Someone else holds this terminal's keyboard, so the runner did not end it."], endAgain: { again += 1 }, closeAnyway: {})
-        #expect(pane.status?.hasPrefix("This terminal may still be running on the runner.") == true)
-        #expect(pane.statusButtons == ["End Again", "Close Anyway"])
+        pane.showUnended([FakeRunnerDoor.notTheWriter], endAgain: { again += 1 }, closeAnyway: {})
+        #expect(pane.banner.shown == EndOutcome.mayStillRun("This terminal", [FakeRunnerDoor.notTheWriter]) + " Close Anyway leaves it there.")
+        #expect(pane.banner.offers == ["End Again", "Close Anyway"])
         door.release(pane.name)
         let ended = try #require(pane.end(), "End Again ends it again")
         #expect(await ended.value == .ended && door.sessions.isEmpty)
         #expect(again == 0)
+    }
+
+    /// N2: a tab whose workspace is still starting (its `Create` unanswered) holds a session coming:
+    /// a quit counts it, and its end waits for the runner's answer within the deadline, then ends
+    /// what was made, so nothing is left at the runner.
+    @Test func aTabStillOpeningIsCountedAndItsEndWaitsForWhatTheRunnerMakes() async throws {
+        let door = try FakeRunnerDoor()
+        defer { door.stop() }
+        let shell = try WorkbenchLookTests.shell(.light)
+        door.holdCreates()
+        let pane = try RunnerTabTests.pane(.workspace(project: "harbor", name: "dock"), runner: DoorTickets(door))
+        pane.begin()
+        #expect(await RunnerTabTests.until(10) { door.createsReceived == 1 })
+        #expect(pane.holdsRunnerSession, "a session coming counts")
+        let replies = Replies()
+        _ = RunnerEnds.ask([pane], titled: Self.titled, on: shell.window) { replies.given.append($0) }
+        #expect(Self.said(shell.window).contains("Quit and End 1 Runner Terminal"))
+        shell.window.endSheet(try #require(shell.window.attachedSheet), returnCode: .alertFirstButtonReturn)
+        door.releaseCreates()
+        #expect(await RunnerTabTests.until(15) { replies.given == [true] })
+        #expect(door.sessions.isEmpty, "the host's list: nothing left behind")
+    }
+
+    /// n10: going on before the ends answer says which terminals may still run, by title, before
+    /// the quit or sign-out goes on.
+    @Test func goingOnBeforeTheEndsAnswerSaysWhatMayStillRun() async throws {
+        let door = try FakeRunnerDoor()
+        defer { door.stop() }
+        let shell = try WorkbenchLookTests.shell(.light)
+        let tickets = DoorTickets(door)
+        let panes = try await Self.attached(["dock"], tickets)
+        tickets.silence()
+        let replies = Replies()
+        _ = RunnerEnds.ask(panes, titled: Self.titled, on: shell.window, asking: RunnerEnds.Question.signOut) { replies.given.append($0) }
+        shell.window.endSheet(try #require(shell.window.attachedSheet), returnCode: .alertFirstButtonReturn)
+        #expect(await RunnerTabTests.until(5) { Self.said(shell.window).contains("Go On Now") })
+        shell.window.endSheet(try #require(shell.window.attachedSheet), returnCode: .alertFirstButtonReturn)
+        #expect(await RunnerTabTests.until(5) { Self.said(shell.window).contains("Some terminals on the runner may still be running") })
+        let said = Self.said(shell.window).joined(separator: "\n")
+        #expect(said.contains(EndOutcome.mayStillRun("harbor · dock", ["Sail went on before the runner answered."])), "\(said)")
+        #expect(replies.given.isEmpty, "the sign-out waits for the person to read it")
+        shell.window.endSheet(try #require(shell.window.attachedSheet), returnCode: .alertFirstButtonReturn)
+        #expect(await RunnerTabTests.until { replies.given == [true] })
+        tickets.answerAgain()
     }
 
     /// M7: launched onto Workspaces, the pane says it is asking who is signed in, its rail item

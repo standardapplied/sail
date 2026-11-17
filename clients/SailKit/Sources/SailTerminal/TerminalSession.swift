@@ -63,6 +63,7 @@ public final class TerminalSession: Sendable {
     private let sleep: @Sendable (Duration) async throws -> Void
     private let timeout: Int
     private let stableAfter: Duration
+    private let patience: Duration
     private let eventSink: AsyncStream<SessionEvent>.Continuation
     private let screenSink: AsyncStream<ContinuousClock.Instant>.Continuation
     private let clock = ContinuousClock()
@@ -106,6 +107,10 @@ public final class TerminalSession: Sendable {
         /// The inputs left unconfirmed by a lost connection are accounted for by the next replay.
         var accounting = false
         var numbered = false
+        /// A `Create` was sent and its answer is still to come: the host may be making the session.
+        var creating = false
+        /// Who waits for that answer.
+        var createWaiters: [CheckedContinuation<Void, Never>] = []
         /// The last ticket asked of a runner's door while it has not been presented.
         var unpresented: (request: TicketRequest, entry: (address: HostAddress, token: String), asked: ContinuousClock.Instant)?
     }
@@ -130,12 +135,14 @@ public final class TerminalSession: Sendable {
     }
 
     /// As the public ones, waiting with `sleep`, giving each connect and answer `timeout` seconds,
-    /// and counting a connection a success once attached for `stableAfter`.
+    /// counting a connection a success once attached for `stableAfter`, and a runner's door
+    /// parking once its waits and attempts add up to `patience` (``runnerPatience`` by default).
     package convenience init(
         open create: SessionCreate, door: Door, screen: Screen, timeout: Int,
-        stableAfter: Duration = TerminalSession.stableAttachment, sleep: @escaping @Sendable (Duration) async throws -> Void
+        stableAfter: Duration = TerminalSession.stableAttachment, sleep: @escaping @Sendable (Duration) async throws -> Void,
+        patience: Duration = TerminalSession.runnerPatience
     ) {
-        self.init(intent: .open(create), door: door, screen: screen, timeout: timeout, stableAfter: stableAfter, sleep: sleep)
+        self.init(intent: .open(create), door: door, screen: screen, timeout: timeout, stableAfter: stableAfter, sleep: sleep, patience: patience)
     }
 
     package convenience init(
@@ -150,9 +157,11 @@ public final class TerminalSession: Sendable {
 
     private init(
         intent: Intent, door: Door, screen: Screen, timeout: Int = 10, stableAfter: Duration = TerminalSession.stableAttachment,
-        sleep: @escaping @Sendable (Duration) async throws -> Void = { try await Task.sleep(for: $0) }
+        sleep: @escaping @Sendable (Duration) async throws -> Void = { try await Task.sleep(for: $0) },
+        patience: Duration = TerminalSession.runnerPatience
     ) {
         self.door = door
+        self.patience = if case .runner = door { patience } else { .zero }
         self.screen = screen
         self.timeout = timeout
         self.stableAfter = stableAfter
@@ -230,6 +239,33 @@ public final class TerminalSession: Sendable {
             supervisor?.cancel()
             setPhase(.detached)
         }
+    }
+
+    /// Whether the host may hold this session: it was made, or its `Create` is still unanswered.
+    /// A session never made, or whose `Create` was refused, is at no host.
+    public var mayBeAtHost: Bool {
+        core.withLock { core in
+            if core.creating { return true }
+            if case .attach = core.intent { return true }
+            return false
+        }
+    }
+
+    /// Ends this session at its host on a connection of its own, within `limit` in all. An open
+    /// whose `Create` is still unanswered is waited for first, inside the same limit, so a session
+    /// the host is still making is ended, never left behind unseen; a session never made is gone
+    /// already. This client detaches either way.
+    public func end(within limit: Duration = Door.endLimit) async -> EndOutcome {
+        let began = clock.now
+        let creating = core.withLock { core -> Bool in
+            core.detaching = true
+            return core.creating
+        }
+        if creating { _ = await Door.within(limit) { await self.createAnswered() } }
+        let made = mayBeAtHost
+        detach()
+        guard made else { return .gone }
+        return await door.end(state.session, within: limit - (clock.now - began), of: limit)
     }
 
     /// Ends this client's part: the connection, or the one being admitted, closes and nothing
@@ -362,7 +398,6 @@ public final class TerminalSession: Sendable {
     }
 
     private func supervise(_ generation: Int) async {
-        let patience: Duration = if case .runner = door { Self.runnerPatience } else { .zero }
         var failures = 0
         var waited = Duration.zero
         var first = true
@@ -420,6 +455,8 @@ public final class TerminalSession: Sendable {
             entry = try await ticket(for: intent.ticket)
         } catch let .ticketRefused(refusal) where !Self.passes(refusal) {
             return .finished(.ticketRefused(refusal))
+        } catch let .signIn(needed) {
+            return .finished(.signIn(needed))
         } catch {
             return .failed(error)
         }
@@ -485,10 +522,11 @@ public final class TerminalSession: Sendable {
         let write: Bool
         do throws(TerminalError) {
             if case let .open(create) = core.withLock({ $0.intent }) {
-                if let standDown = current(generation) {
+                if let standDown = current(generation, creating: true) {
                     connection.close()
                     return standDown
                 }
+                defer { answeredCreate() }
                 try connection.request(.create(create))
                 core.withLock { $0.intent = .attach(session: create.session, write: true) }
             }
@@ -533,14 +571,39 @@ public final class TerminalSession: Sendable {
     }
 
     /// Nil while the attempt of `generation` is still the session's, recording `connection` as the
-    /// one being admitted; else what it stands down as.
-    private func current(_ generation: Int, admitting connection: Connection? = nil) -> Outcome? {
+    /// one being admitted, and, when `creating`, that its `Create` goes out now; else what it
+    /// stands down as. Checked and recorded at once, so an end sees either no `Create` or one it
+    /// waits for.
+    private func current(_ generation: Int, admitting connection: Connection? = nil, creating: Bool = false) -> Outcome? {
         core.withLock { core in
             guard !core.closed else { return .finished(.closed) }
             guard !core.detaching, core.generation == generation else { return .detached }
             if let connection { core.inFlight = connection }
+            if creating { core.creating = true }
             return nil
         }
+    }
+
+    /// Returns once no `Create` is unanswered.
+    private func createAnswered() async {
+        await withCheckedContinuation { (answered: CheckedContinuation<Void, Never>) in
+            let now = core.withLock { core -> Bool in
+                guard core.creating else { return true }
+                core.createWaiters.append(answered)
+                return false
+            }
+            if now { answered.resume() }
+        }
+    }
+
+    /// The `Create` was answered, or its connection lost: whoever waits for it goes on.
+    private func answeredCreate() {
+        let waiters = core.withLock { core in
+            core.creating = false
+            defer { core.createWaiters = [] }
+            return core.createWaiters
+        }
+        waiters.forEach { $0.resume() }
     }
 
     /// What an error before the attach means: the host's refusal, a skewed magic and a broken

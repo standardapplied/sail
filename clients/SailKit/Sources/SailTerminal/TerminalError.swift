@@ -16,6 +16,8 @@ public enum TerminalError: Error, Equatable, Sendable, CustomStringConvertible {
     /// The control plane could not answer for the ticket the connection needed: unreachable, or
     /// its proxy answering in its place.
     case controlPlane(SailError)
+    /// The connection needed a ticket asked as a person this client is not signed in as now.
+    case signIn(SignIn)
     /// The host sent what the protocol does not allow here.
     case protocolViolation(String)
     /// The host did not answer in time.
@@ -34,6 +36,7 @@ public enum TerminalError: Error, Equatable, Sendable, CustomStringConvertible {
         case let .refused(refusal): refusal.message
         case let .ticketRefused(refusal): refusal.message
         case let .controlPlane(error): error.description
+        case let .signIn(needed): needed.lines[0]
         case let .protocolViolation(what): "the terminal host broke the protocol: \(what)"
         case let .timedOut(what): "the terminal host did not answer \(what) in time"
         case .closed: "the terminal host closed the connection"

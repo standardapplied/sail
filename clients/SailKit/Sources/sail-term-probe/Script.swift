@@ -14,12 +14,16 @@ struct Script: Decodable, Equatable {
     var size: [Int]
     var command: [String]
     var steps: [Step]
+    /// Ends the session while its `Create` is still unanswered, as closing a tab then does, and runs
+    /// no step.
+    var endWhileOpening: Bool
 
     init(from decoder: any Decoder) throws {
         let fields = try decoder.container(keyedBy: Keys.self)
         size = try fields.decodeIfPresent([Int].self, forKey: .size) ?? [80, 24]
         command = try fields.decodeIfPresent([String].self, forKey: .command) ?? []
         steps = try fields.decode([Step].self, forKey: .steps)
+        endWhileOpening = try fields.decodeIfPresent(Bool.self, forKey: .endWhileOpening) ?? false
         guard size.count == 2, size.allSatisfy({ (1 ... 65535).contains($0) }) else {
             throw DecodingError.dataCorruptedError(forKey: .size, in: fields, debugDescription: "size is [columns, rows]")
         }
@@ -30,7 +34,7 @@ struct Script: Decodable, Equatable {
     }
 
     private enum Keys: String, CodingKey {
-        case size, command, steps
+        case size, command, steps, endWhileOpening
     }
 }
 

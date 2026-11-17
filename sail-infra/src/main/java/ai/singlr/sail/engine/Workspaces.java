@@ -1657,14 +1657,15 @@ public final class Workspaces {
             .map(BoxInstances.Instance::name)
             .toList();
     if (!strays.isEmpty()) {
-      throw new IllegalStateException(
+      throw Remedied.state(
           "Instance "
               + String.join(", ", strays)
               + " carries the keys of workspace '"
               + name
               + "' of "
               + project
-              + " under another name. Delete it or its keys before creating the workspace.");
+              + " under another name. Delete it or its keys before creating the workspace.",
+          Remedy.NONE);
     }
     var taken = instances.stream().filter(i -> i.name().equals(instance)).findFirst();
     if (taken.isPresent()
@@ -1672,14 +1673,15 @@ public final class Workspaces {
         && p.equals(project)
         && w.equals(name)) {
       if (ready) {
-        throw new IllegalStateException(
+        throw Remedied.state(
             "Workspace '"
                 + name
                 + "' of "
                 + project
                 + " exists already, as the instance '"
                 + instance
-                + "'.");
+                + "'.",
+            Remedy.NONE);
       }
       if (taken.get().key(CREATING_KEY).isEmpty()) {
         throw markTakenOff(project, name);
@@ -1740,7 +1742,7 @@ public final class Workspaces {
                 ")."));
       }
       if (!spec.get().equals(place.specId())) {
-        throw new IllegalStateException(
+        throw Remedied.state(
             "Workspace '"
                 + name
                 + "' of "
@@ -1751,7 +1753,8 @@ public final class Workspaces {
                 + place.specId()
                 + "'s is too, so no run of "
                 + place.specId()
-                + " goes in it. Give one of the two specs another id.");
+                + " goes in it. Give one of the two specs another id.",
+            Remedy.NONE);
       }
       if (!((BoxInstances.Workspace) taken.get().kind()).ready()
           && taken.get().key(CREATING_KEY).isEmpty()) {
@@ -1852,7 +1855,7 @@ public final class Workspaces {
       throw absent(project, name);
     }
     if (carrying.size() > 1 || !(carrying.getFirst().kind() instanceof BoxInstances.Workspace)) {
-      throw new IllegalStateException(
+      throw Remedied.state(
           (carrying.size() == 1 ? "Instance " : "Instances ")
               + String.join(", ", carrying.stream().map(BoxInstances.Instance::name).toList())
               + (carrying.size() == 1 ? " carries" : " carry")
@@ -1864,7 +1867,8 @@ public final class Workspaces {
               + project
               + "-"
               + name
-              + " may: nothing is done to any of them. Delete the copies, or their keys, first.");
+              + " may: nothing is done to any of them. Delete the copies, or their keys, first.",
+          Remedy.NONE);
     }
     if (changes) {
       WorkspaceTemplate.requireUsable(observer, carrying.getFirst().pool());

@@ -42,6 +42,11 @@ extension Driver {
         if let answer = step.sheet {
             return await sheet(answer, asking: step.asking, within: step.seconds ?? 5)
         }
+        if let words = step.sheetShows {
+            let said = { Self.texts(self.shell.window.attachedSheet?.contentView).joined(separator: " ") }
+            let shown = await waitUntil(step.seconds ?? 5) { said().contains(words) }
+            return (shown, "the sheet says '\(said())'")
+        }
         if step.remember == true {
             remembered = pane?.name
             return (remembered != nil, "kept \(remembered ?? "no session")")
@@ -329,7 +334,7 @@ extension Driver {
         if let asking, !words.contains(asking) { return (false, "the sheet says '\(words)', not '\(asking)'") }
         guard let button = Self.button(answer, in: sheet.contentView) else { return (false, "the sheet has no \(answer): '\(words)'") }
         button.performClick(nil)
-        let gone = await waitUntil(5) { self.shell.window.attachedSheet == nil }
+        let gone = await waitUntil(5) { self.shell.window.attachedSheet !== sheet }
         return (gone, "the sheet said '\(words)'; \(answer)")
     }
 

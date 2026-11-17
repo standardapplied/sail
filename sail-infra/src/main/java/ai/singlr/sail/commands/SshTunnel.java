@@ -161,9 +161,9 @@ public final class SshTunnel implements AutoCloseable {
     throw new IllegalStateException(
         "The SSH tunnel to "
             + host
-            + " is up, but "
+            + " is up, but the control plane's health check at "
             + ORIGIN
-            + "/v1/health did not answer within "
+            + " did not answer within "
             + interval.multipliedBy(attempts).toSeconds()
             + "s."
             + "\n  Is the control plane running on "

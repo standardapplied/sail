@@ -1,5 +1,6 @@
 import Foundation
 import SailAPI
+import SailKitTestSupport
 @testable import SailTerminal
 import SailTerminalWire
 import SailVT
@@ -500,9 +501,9 @@ import Testing
         #expect(try await peer.read() == .attach(session: "app-a", write: true))
         try peer.send([.accepted, .writerChanged(fde: "ana")])
         #expect(try await peer.read() == .kill(session: "app-a"))
-        let words = "This connection's ticket is to attach to session 'app-a', and it admits nothing else; ask the API for a ticket for that."
+        let words = FakeRunnerDoor.notTheWriter
         try peer.send(.refused(HostRefusal(message: words, remedy: nil)))
-        #expect(await ended.value == .unconfirmed(["Someone else holds this terminal's keyboard, so the runner did not end it."]), "said, never naming the session")
+        #expect(await ended.value == .unconfirmed([words]), "said in the door's words, decided by the door")
     }
 
     /// M5: a session the API has no ticket to attach to, refused as not found by its code, ended

@@ -375,19 +375,20 @@ final class HostLanes {
 
     /**
      * Refuses an open in {@code project} when the instance of its name is a workspace, a template
-     * or a copy, not its container (W10), or when Incus cannot say within {@value
-     * BoxInstances#LOOKUP_SECONDS} s what it is: asked of the one instance by name, once per open.
+     * or a copy, not its container (W10), and is {@link PtyAdmission.Unavailable} when Incus fails
+     * or cannot say within {@value BoxInstances#LOOKUP_SECONDS} s what it is: asked of the one
+     * instance by name, once per open.
      */
     @Override
     public void admitInstance(String project) throws IOException {
       Optional<BoxInstances.Instance> instance;
       try {
         instance = box.lookup(project, Duration.ofSeconds(BoxInstances.LOOKUP_SECONDS));
-      } catch (TimeoutException slow) {
-        throw unanswered(project);
+      } catch (IOException | TimeoutException failed) {
+        throw new PtyAdmission.Unavailable(failed);
       } catch (InterruptedException interrupted) {
         Thread.currentThread().interrupt();
-        throw unanswered(project);
+        throw new PtyAdmission.Unavailable(interrupted);
       }
       var taken = BoxInstances.taken(project, instance);
       if (taken.isPresent()) {
@@ -401,11 +402,11 @@ final class HostLanes {
       Optional<BoxInstances.Instance> found;
       try {
         found = workspaces.find(project, workspace);
-      } catch (TimeoutException slow) {
-        throw unanswered(project + "-" + workspace);
+      } catch (IOException | TimeoutException failed) {
+        throw new PtyAdmission.Unavailable(failed);
       } catch (InterruptedException interrupted) {
         Thread.currentThread().interrupt();
-        throw unanswered(project + "-" + workspace);
+        throw new PtyAdmission.Unavailable(interrupted);
       }
       if (found.isEmpty()) {
         var absent = Workspaces.absent(project, workspace);
@@ -454,15 +455,6 @@ final class HostLanes {
       if (refused.isPresent()) {
         throw Remedied.io(refused.get().message(), refused.get().fix());
       }
-    }
-
-    private static IOException unanswered(String project) {
-      return new IOException(
-          "Incus did not say within "
-              + BoxInstances.LOOKUP_SECONDS
-              + " s what instance '"
-              + project
-              + "' is, so no terminal was opened in it. Try again once Incus answers.");
     }
 
     @Override

@@ -769,8 +769,8 @@ public final class ApiRouter implements HttpHandler, RouteTable {
     throw new ApiException(
         ErrorCode.NOT_FOUND,
         "Room invites are retired: each room verb maps to one primitive.",
-        "Add a member (POST /v1/rooms/{id}/members) to converse, or dispatch a spec to"
-            + " delegate work.");
+        "Add the agent to the room as a member to converse, or dispatch a spec to delegate"
+            + " work.");
   }
 
   private ApiResponse roomMessages(Call call) {
@@ -941,8 +941,8 @@ public final class ApiRouter implements HttpHandler, RouteTable {
       throw new ApiException(
           ErrorCode.INVALID_REQUEST,
           "spec query parameter is required.",
-          "Use GET /v1/events?spec=<id> for a spec's history, or GET /v1/changes?since=<seq>"
-              + " for what changed.");
+          "Name the spec whose history you want, or ask for what changed since a sequence"
+              + " number instead.");
     }
     NameValidator.requireValidSpecId(specId);
     return ApiResponse.from(

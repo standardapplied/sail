@@ -123,7 +123,7 @@ class SshTunnelTest {
           assertThrows(
               IllegalStateException.class,
               () -> SshTunnel.open("devbox", port, cmd -> ssh, () -> false, 3, FAST));
-      assertTrue(error.getMessage().contains("/v1/health did not answer"));
+      assertTrue(error.getMessage().contains("health check at"));
       assertTrue(error.getMessage().contains("devbox"));
       assertTrue(error.getMessage().contains("sail host service install"));
       assertFalse(ssh.isAlive());

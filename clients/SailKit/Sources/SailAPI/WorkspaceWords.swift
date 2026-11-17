@@ -20,6 +20,12 @@ public enum Said {
         }
     }
 
+    /// What a person reads of a refusal, a line each: its sentence, then what they can do (``fix(_:otherwise:)``).
+    /// The one composition every refusal is said by, the API's and a terminal host's alike.
+    public static func lines(_ message: String, remedy: [RemedyPart], otherwise words: String?) -> [String] {
+        [message] + (fix(remedy, otherwise: words).map { [$0] } ?? [])
+    }
+
     /// `text` as a sentence: its first letter upper case and a full stop at its end.
     public static func sentence(_ text: String) -> String {
         let capital = text.prefix(1).uppercased() + text.dropFirst()
@@ -29,12 +35,7 @@ public enum Said {
 
 extension Refusal {
     public var lines: [String] {
-        [message] + (fix.map { [$0] } ?? [])
-    }
-
-    /// What the person can do, said as ``Said/fix(_:otherwise:)`` says it.
-    public var fix: String? {
-        Said.fix(remedy, otherwise: action)
+        Said.lines(message, remedy: remedy, otherwise: action)
     }
 }
 
@@ -113,19 +114,20 @@ public struct WorkspaceListing: Sendable {
 
     public init() {}
 
-    /// A request for `project`'s list: its number, which ``take(_:for:request:)`` checks.
+    /// A request for `project`'s list: its number, which ``take(_:request:)`` checks.
     public mutating func ask(_ project: String?) -> Int {
         latest += 1
         asking = project
         return latest
     }
 
-    /// Takes `rows`, listed for `project` by request `number`, when that is still the request
-    /// shown; false, and nothing taken, when a later request or another project overtook it.
-    public mutating func take(_ rows: [WorkspaceRow], for project: String, request number: Int) -> Bool {
-        guard number == latest, project == asking else { return false }
+    /// Takes `rows`, listed by request `number` for the project it asked, when that is still the
+    /// request shown; false, and nothing taken, when a later request overtook it. Every request
+    /// is a later one, another project's included.
+    public mutating func take(_ rows: [WorkspaceRow], request number: Int) -> Bool {
+        guard number == latest else { return false }
         self.rows = rows
-        listed = project
+        listed = asking
         return true
     }
 

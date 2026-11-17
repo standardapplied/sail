@@ -20,6 +20,8 @@ public enum Door: Sendable {
                 ticket = try await source.ticket(for: request)
             } catch let .refused(refusal) {
                 throw .ticketRefused(refusal)
+            } catch let .signIn(needed) {
+                throw .signIn(needed)
             } catch {
                 throw .controlPlane(error)
             }
@@ -62,15 +64,8 @@ public final class SignedInTickets: TicketSource {
     }
 
     public func ticket(for request: TicketRequest) async throws(SailError) -> TerminalTicket {
-        guard let signedIn = await current() else {
-            throw .refused(Refusal(code: .known(.missingBearerToken), message: "You are signed out of the control plane.", action: "Sign in to reach the runner."))
-        }
-        guard signedIn.handle == handle else {
-            throw .refused(Refusal(
-                code: .known(.invalidBearerToken), message: "This terminal is \(handle)'s, and \(signedIn.handle) is signed in.",
-                action: "Sign in as \(handle) to reach it."
-            ))
-        }
+        guard let signedIn = await current() else { throw .signIn(.signedOut) }
+        guard signedIn.handle == handle else { throw .signIn(.another(owner: handle, signedIn: signedIn.handle)) }
         return try await signedIn.tickets.ticket(for: request)
     }
 }

@@ -3,6 +3,7 @@ import Foundation
 import SailAPI
 import SailKitTestSupport
 import SailShell
+import SailTerminal
 
 /// The control plane of the drive's workspaces run: every route answered as the server answered
 /// it in the goldens its `ClientGoldensTest` writes, a step choosing which golden answers a route
@@ -44,10 +45,20 @@ actor GoldenDesk: Transport {
         guard let answer = answers[request.route] else { throw .unreachable("no golden answers \(request.route)") }
         guard request.route == "POST /v1/terminal/tickets", answer.status == 201, let door = Self.door,
               var body = (try? JSONSerialization.jsonObject(with: answer.body)) as? [String: Any] else { return answer }
-        let ticket = door.issue()
+        let ticket = door.issue(for: Self.ticketRequest(request))
         body["ticket"] = ticket.ticket
         body["address"] = ticket.address
         return HTTPResponse(status: answer.status, headers: answer.headers, body: (try? JSONSerialization.data(withJSONObject: body)) ?? answer.body)
+    }
+
+    /// What a ticket request asks, read from its body as the API reads it: a door's ticket covers
+    /// that and nothing else.
+    static func ticketRequest(_ request: HTTPRequest) -> TicketRequest {
+        let asked = (request.body.flatMap { try? JSONSerialization.jsonObject(with: $0) } as? [String: Any]) ?? [:]
+        guard asked["action"] as? String == "attach" else {
+            return .open(project: asked["project"] as? String ?? "", workspace: asked["workspace"] as? String ?? "")
+        }
+        return .attach(session: asked["session"] as? String ?? "")
     }
 
     func open(_ request: HTTPRequest) throws(SailError) -> HTTPStream {
@@ -104,7 +115,7 @@ extension Driver {
         }
         if let title = step.pressStatus {
             guard let focused = workbench.focused else { return (false, "no focused terminal") }
-            return (focused.pressStatus(title), "the banner said \(focused.status ?? "nothing")")
+            return (focused.banner.press(title), "the banner said \(focused.banner.shown ?? "nothing")")
         }
         if step.signOutNow == true {
             shell.account.signOutHere(nil)

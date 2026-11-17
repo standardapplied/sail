@@ -8,6 +8,8 @@ package ai.singlr.sail.commands;
 import ai.singlr.sail.api.OperationsFactory;
 import ai.singlr.sail.engine.AuthorizedKeysSync;
 import ai.singlr.sail.engine.OperatorCommand;
+import ai.singlr.sail.store.FdeSshKeyStore;
+import java.util.List;
 import picocli.CommandLine;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
@@ -52,30 +54,38 @@ public final class HostKeysCommand implements Runnable {
       CliCommand.run(
           () -> {
             var operator = OperatorCommand.here();
-            try (var operations = OperationsFactory.open()) {
-              var sync = new AuthorizedKeysSync();
-              if (dryRun) {
-                System.out.print(sync.render(operations.identity().sshKeys()));
-                return;
-              }
-              switch (sync.sync(operations.identity()::sshKeys)) {
-                case AuthorizedKeysSync.Synced synced ->
-                    System.out.println(
-                        Ansi.AUTO.string(
-                            "  @|green ✓|@ Synced "
-                                + synced.keyCount()
-                                + " key(s) to "
-                                + synced.destination()));
-                case AuthorizedKeysSync.NeedsRoot _ ->
-                    throw RootRequired.refusal(
-                        "Writing the sail user's authorized_keys requires root (preview it with"
-                            + " --dry-run).",
-                        spec);
-                case AuthorizedKeysSync.NotProvisioned _ ->
-                    throw new IllegalStateException(notProvisioned(operator));
-              }
+            var sync = new AuthorizedKeysSync();
+            if (dryRun) {
+              System.out.print(sync.render(registered()));
+              return;
+            }
+            switch (sync.sync(Sync::registered)) {
+              case AuthorizedKeysSync.Synced synced ->
+                  System.out.println(
+                      Ansi.AUTO.string(
+                          "  @|green ✓|@ Synced "
+                              + synced.keyCount()
+                              + " key(s) to "
+                              + synced.destination()));
+              case AuthorizedKeysSync.NeedsRoot _ ->
+                  throw RootRequired.refusal(
+                      "Writing the sail user's authorized_keys requires root (preview it with"
+                          + " --dry-run).",
+                      spec);
+              case AuthorizedKeysSync.NotProvisioned _ ->
+                  throw new IllegalStateException(notProvisioned(operator));
             }
           });
+    }
+
+    /**
+     * The keys the registry admits, the database opened only now: a caller who is not root is told
+     * so before the database is touched.
+     */
+    private static List<FdeSshKeyStore.SshKeyInfo> registered() {
+      try (var operations = OperationsFactory.open()) {
+        return operations.identity().sshKeys();
+      }
     }
 
     static String notProvisioned(OperatorCommand operator) {
