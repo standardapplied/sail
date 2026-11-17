@@ -2362,7 +2362,11 @@ class is `LiveMemberTest`'s):
   is what orders it before the turn: Claude Code prints a turn's `init` only after it read the
   message, so Sail's reader always finds the message handed when it sees that `init`. The
   `init` *takes* every message handed and not yet taken (Claude Code takes everything waiting
-  into one turn, `LiveStreamTest`), and the turn's first answer marks what it took *done*.
+  into one turn, `LiveStreamTest`), and the turn's first answer marks what it took *done*. A
+  turn that answers what it was handed with no `init` of its own takes nothing, so what it
+  answered is handed again; the log says so once per run, at the first such turn, naming the
+  run, so a harness whose stream stops marking its turns is loud at once
+  (`LiveMemberDisplacementTest.aTurnAnsweredWithNoInitIsSaidOncePerRunInTheLog`).
   Every finish of the run, whoever makes it (its member's end, a restart's reclaim, the
   missed-stop sweep, a stop), gives back in its own transaction what is handed or taken and not
   done (`RunStore.giveBack`): one no turn took is owed again; one a turn took is owed again

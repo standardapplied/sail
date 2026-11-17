@@ -950,6 +950,8 @@ public final class LiveMembers implements RoomWakeReactor.Live, AutoCloseable {
     private boolean loginSaid;
     private int turn;
     private boolean turnOpen;
+    private boolean initSeen;
+    private boolean unmarkedTurnTold;
     private boolean prompted;
     private boolean admitted;
     private boolean guarded;
@@ -1196,6 +1198,7 @@ public final class LiveMembers implements RoomWakeReactor.Live, AutoCloseable {
      */
     private void startTurn() {
       runStore.takeIntoTurn(runId);
+      initSeen = true;
     }
 
     /**
@@ -1203,12 +1206,33 @@ public final class LiveMembers implements RoomWakeReactor.Live, AutoCloseable {
      * took nothing Sail can name, so what its process was handed stays owed, given back at its end.
      */
     private void begin() {
+      if (prompted && !initSeen) {
+        tellUnmarkedTurn();
+      }
       runStore.answerTurn(runId);
       openTurn();
     }
 
+    /**
+     * Says once per run in the log that a turn answered what it was handed with no {@code init} of
+     * its own: the harness's stream no longer marks its turns, so each message it answers is given
+     * back at its end and answered again, and that is loud at the first such turn.
+     */
+    private void tellUnmarkedTurn() {
+      if (unmarkedTurnTold) {
+        return;
+      }
+      unmarkedTurnTold = true;
+      System.err.println(
+          "  [live] run "
+              + runId
+              + " answered a turn its stream never marked with an init: the harness's stream no"
+              + " longer marks its turns, so the messages it answers will be handed again.");
+    }
+
     /** Opens the turn the process's lines belong to. */
     private void openTurn() {
+      initSeen = false;
       turnOpen = true;
       prompted = false;
       turn++;

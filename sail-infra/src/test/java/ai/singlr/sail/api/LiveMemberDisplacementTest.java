@@ -781,6 +781,39 @@ class LiveMemberDisplacementTest {
   }
 
   /**
+   * A turn that answers what it was handed with no {@code init} of its own means the harness's
+   * stream no longer marks its turns, so every message it answers would be handed again: the log
+   * says so once per run, at the first such turn, and a turn that is marked says nothing.
+   */
+  @Test
+  void aTurnAnsweredWithNoInitIsSaidOncePerRunInTheLog() {
+    var process = room.prompted(SPEC, "full", "first");
+    var err = System.err;
+    var said = new ByteArrayOutputStream();
+    System.setErr(new PrintStream(said, true, StandardCharsets.UTF_8));
+    String marked;
+    try {
+      room.says(process, Lines.init("sess-1"), Lines.delta("One"), Lines.result("One"));
+      marked = said.toString(StandardCharsets.UTF_8);
+      room.says(SPEC, "second");
+      room.says(process, Lines.delta("Two"), Lines.result("Two"));
+      room.says(SPEC, "third");
+      room.says(process, Lines.delta("Three"), Lines.result("Three"));
+    } finally {
+      System.setErr(err);
+    }
+
+    var line =
+        "run "
+            + process.runId
+            + " answered a turn its stream never marked with an init: the harness's stream no"
+            + " longer marks its turns, so the messages it answers will be handed again.";
+    assertFalse(marked.contains("never marked with an init"), marked);
+    var log = said.toString(StandardCharsets.UTF_8);
+    assertEquals(1, log.lines().filter(logged -> logged.contains(line)).count(), log);
+  }
+
+  /**
    * A run another process finished is handed nothing, even while its member's process still reads:
    * a message meeting it is not written to that process and stays owed, so the room's next message
    * hands it to the next member.
