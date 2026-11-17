@@ -352,7 +352,7 @@ current version. It gets:
   no IPv4 address on `eth0` within 30 s is not made, and the create says so;
 - none of the template's own keys.
 
-A workspace is its owner's: the person it was made for, or the one its spec's runs act for. Only
+A workspace is its owner's: the person it was created for, or the one its spec's runs act for. Only
 its owner or an admin opens a terminal in it, or starts, stops or deletes it; a viewer makes
 none. Other people's workspaces live on main: on a node, every person but the node's own is
 refused one there, and the node's own person keeps any workspace on it that no one owns.
@@ -380,15 +380,15 @@ start 0.4 s, ready 2.3 s)`; `--json` breaks the readiness down step by step (`re
 A workspace counts as whole only once its create finished. One whose create was interrupted is
 listed as `incomplete`, is not started or entered, and is replaced by the next `create` of its
 name. One whose ready mark was taken off by hand is not replaced: `create`, `start` and `shell`
-name `workspace delete`. Two creates of one name make one workspace and refuse the other; two of
+name `workspace delete`. Two creates of one name create one workspace and refuse the other; two of
 different names build a missing or stale template once and both clone it. `delete` asks, once it
 finds the workspace, before it removes it and its uncommitted work.
 
-An edited definition is built as the next version at the next `create`. Workspaces made from an
+An edited definition is built as the next version at the next `create`. Workspaces created from an
 older version keep running on it. A stale template is converged on its disk, as `apply` converges
 a container, so what the definition dropped stays in it.
 
-On a box without ZFS, `list` shows `main` alone, and the verbs that make or change a workspace
+On a box without ZFS, `list` shows `main` alone, and the verbs that create or change a workspace
 name `sudo sail host init --storage zfs` to add a pool. `main` is never touched: `delete main`
 names `project destroy`.
 
@@ -483,7 +483,7 @@ An admin lists or removes another person's logins with `--fde
 
 A project's template holds no one's credentials: it is built with your token for its own clone,
 then the token, gh's login, the git identity and every SSH key are taken out before it is
-snapshotted. Each workspace is given its owner's when it is made, and a run's workspace is its
+snapshotted. Each workspace is given its owner's when it is created, and a run's workspace is its
 person's. Store the forge token your workspaces fetch, push and open pull requests with once, per
 host; it is read from stdin and never shown again:
 

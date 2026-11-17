@@ -1475,7 +1475,7 @@ Each row with the tests that prove it:
   each declaring `Gate.decides(ENTER_WORKSPACE)`. A start, a stop, a delete and a terminal's open
   hold the workspace's lock from their decision to their act, waiting for it no longer than 60 s
   (the sweep stopping or deleting it holds it), then `runner_busy`. A start of a workspace whose
-  labelled person is no longer active here is refused saying so, and that the next pass makes it
+  labelled person is no longer active here is refused saying so, and that the next pass leaves it
   no one's. A delete, at the CLI (`--force`) and the API alike, first reads under that lock what
   the workspace holds, with the idle sweep's reads (`WorkspaceHoldings`: `WorkspaceGit`, a
   stopped one started for it and stopped again when refused), and who is in it (Incus's running
@@ -1997,7 +1997,7 @@ the one whose name and keys match.
   `workspace-create.lock`, one create at a time, and refuses `runner_busy` when another create holds
   it past 60 s. The copy carries `user.sail.spec` and `user.sail.owner`; a reused workspace becomes
   the owner's of the run before anything of the run is staged. A create that fails releases the
-  run. Dispatch says `Workspace <w> made in 3.2 s` or `Workspace <w> reused`, and `--json` carries
+  run. Dispatch says `Workspace <w> created in 3.2 s` or `Workspace <w> reused`, and `--json` carries
   the instance, whether it was reused and its timings.
 - **One branch rule** (`WorkBranch.enter`). With B the run's branch: a fresh build whose B already
   exists, locally or on the remote, is refused naming `--restart`; a repo on B is left as it is,
@@ -3556,7 +3556,7 @@ a birth, as on main. A door's placement comes after `Access` too. The table is
 | Dispatch | dispatch or resume a spec; seat or remove a room agent | no | owner | yes | no | no | no |
 | Operate a run | stop it; attach to it; read its log | no | owner | yes | no | no | no |
 | Narrate | a run's reports about itself: events, session, inbox acks | no | owner | yes | its own | its own | no |
-| Enter a workspace | open a terminal in a workspace; make, start, stop or delete one | no | owner | yes | no | no | no |
+| Enter a workspace | open a terminal in a workspace; create, start, stop or delete one | no | owner | yes | no | no | no |
 | Share | add, change or remove project files and skills | no | yes | yes | no | no | no |
 | Serve | start and stop the project's processes | no | yes | yes | own work | no | yes |
 | Restore | restore or delete a snapshot | no | yes | yes | no | no | no |

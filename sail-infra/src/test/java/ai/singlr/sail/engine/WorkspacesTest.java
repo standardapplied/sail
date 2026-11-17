@@ -1153,7 +1153,7 @@ class WorkspacesTest {
                     .create(acme(), "fix-login", source(), tempDir, "eng", TestOwners::of));
 
     assertEquals(
-        "Workspace 'fix-login' could not be made its own: fatal: could not read from remote",
+        "Workspace 'fix-login' could not be finished: fatal: could not read from remote",
         failure.getMessage());
     assertTrue(
         indexOf(shell, List.of("incus", "delete", "acme-fix-login", "--force"))
@@ -1619,7 +1619,7 @@ class WorkspacesTest {
             .orElseThrow()
             .state());
     var refusal =
-        "Workspace 'fix-login' of acme was never made whole: a create of it did not finish. Create"
+        "Workspace 'fix-login' of acme was never finished: its create did not complete. Create"
             + " it again, which replaces it: sail project workspace create acme fix-login.";
     assertEquals(
         refusal,
@@ -2563,7 +2563,7 @@ class WorkspacesTest {
         refused
             .getMessage()
             .startsWith(
-                "Workspace acme-fix-login could not be made nobody's, so no run goes in it: "),
+                "Workspace acme-fix-login could not be left nobody's, so no run goes in it: "),
         refused.getMessage());
     assertFalse(
         shell.invocations().stream().anyMatch(c -> c.contains("sail-strip")),
@@ -2884,7 +2884,7 @@ class WorkspacesTest {
     assertTrue(running.invocations().stream().noneMatch(c -> c.startsWith("incus start")));
     assertEquals(
         "Spec fix-login has no workspace of acme on this runner (a done spec's is deleted), and an"
-            + " attach makes none: a run of the spec makes it. Dispatch one, which reopens a done"
+            + " attach creates none: a run of the spec creates it. Dispatch one, which reopens a done"
             + " spec, with: sail spec dispatch -p acme --spec fix-login --restart",
         refused.getMessage());
     var leaf =
@@ -4112,7 +4112,7 @@ class WorkspacesTest {
         refused
             .getMessage()
             .contains(
-                "Project acme is not destroyed: acme-new was made after the destroy read what it"
+                "Project acme is not destroyed: acme-new was created after the destroy read what it"
                     + " would delete."),
         refused.getMessage());
     assertTrue(refused.getMessage().contains("sail project destroy acme"), refused.getMessage());
@@ -4147,7 +4147,7 @@ class WorkspacesTest {
             .get()
             .getMessage()
             .contains(
-                "Project acme is not destroyed: This runner is making another workspace, which"
+                "Project acme is not destroyed: This runner is creating another workspace, which"
                     + " takes about a minute."),
         refused.get().getMessage());
     assertTrue(

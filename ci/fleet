@@ -99,14 +99,14 @@ Usage:
                                 own (create time in the report) that commits as client's person;
                                 on client's node eng is refused one of her own, told hers live on
                                 main; main is given a ZFS pool in a 10 GiB file and acme's template
-                                (built once, its time in the report), and there eng makes her own
+                                (built once, its time in the report), and there eng creates her own
                                 through main's API, labelled hers by her id, committing as her with
                                 none of main's person's forge token, refused to client and to obs
                                 (a viewer), opened by her ticket over TCP from client, refused a
                                 delete while a command runs in it, and deleted with force; a second
-                                is made and stopped,
+                                is created and stopped,
                                 apply --all leaves both and the template alone; with acme's repos set
-                                to octocat/Hello-World for the row (and given back after), ten made at
+                                to octocat/Hello-World for the row (and given back after), ten created at
                                 once are each whole on their own branch of it, each one's ready steps and
                                 fetch retries in the report; a dry run of destroying acme names them all,
                                 and destroying acme
@@ -1683,14 +1683,14 @@ storage() {
     on "$run" main "sudo sh -c 'sail git login github.com < /root/.fleet/gh'"
   check "$run" "acme's template is built once on main, its time in the report" \
     timed_on "$run" main "sudo sail project template build acme"
-  check "$run" "eng, a member, makes her own workspace of acme on main through main's API" \
+  check "$run" "eng, a member, creates her own workspace of acme on main through main's API" \
     http_token_door "$run" main eng member 201 POST /v1/projects/acme/workspaces '{"name":"eng-own"}' '"owner": "eng"'
   check "$run" "eng's workspace is labelled hers by her id" owned_by "$run" main acme-eng-own eng
   check "$run" "eng's workspace commits as eng" commits_as "$run" main acme-eng-own eng@fleet.example
   check "$run" "eng's workspace holds none of main's person's forge token" holds_no_forge_token "$run" main acme-eng-own
   check "$run" "client, a member, is refused eng's workspace on main, naming her" \
     http_token_door "$run" main client member 403 POST /v1/projects/acme/workspaces/eng-own/stop '' "belongs to 'eng'"
-  check "$run" "obs, a viewer, makes no workspace on main" \
+  check "$run" "obs, a viewer, creates no workspace on main" \
     http_token_door "$run" main obs viewer 403 POST /v1/projects/acme/workspaces '{"name":"obs-own"}' read_only_credential
   check "$run" "from client, eng's ticket for her workspace on main opens a session in it over TCP that echoes a line" \
     direct_terminal "$run" main client eng eng-own
@@ -1700,11 +1700,11 @@ storage() {
     until_true 30 2 http_token_door "$run" main eng member 409 DELETE /v1/projects/acme/workspaces/eng-own '' "is in use"
   check "$run" "eng deletes it with force" \
     http_token_door "$run" main eng member 200 DELETE '/v1/projects/acme/workspaces/eng-own?force=true' '' '"change": "deleted"'
-  check "$run" "a second workspace of acme is made and stopped" \
+  check "$run" "a second workspace of acme is created and stopped" \
     allowed "$run" client "sudo sail project workspace create acme fleet-v && sudo sail project workspace stop acme fleet-v"
   check "$run" "apply --all leaves the workspaces and the template as they are" \
     untouched_by_apply_all "$run" client
-  check "$run" "ten workspaces of acme made at once are each whole, each fetched hello onto its own branch (each one's ready steps, its fetch retries among them, in the report), and go" \
+  check "$run" "ten workspaces of acme created at once are each whole, each fetched hello onto its own branch (each one's ready steps, its fetch retries among them, in the report), and go" \
     ten_at_once "$run" client
   check "$run" "a dry run of destroying acme names its workspaces and template" \
     destroy_dry_run_names "$run" client

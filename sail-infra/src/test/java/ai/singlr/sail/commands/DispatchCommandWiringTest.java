@@ -332,7 +332,7 @@ class DispatchCommandWiringTest {
         "  Dry run: nothing was changed.\n"
             + "  Would dispatch spec auth (Add auth) to claude-code in the background, on branch"
             + " sail/auth, which it would create.\n"
-            + "  Would make workspace auth (acme-auth), from a template older than the"
+            + "  Would create workspace auth (acme-auth), from a template older than the"
             + " definition.\n",
         afterBranding(plain.out()));
     assertEquals(SpecStatus.PENDING, new SpecStore(db).findById("auth").orElseThrow().status());
@@ -354,7 +354,7 @@ class DispatchCommandWiringTest {
         "  Dry run: nothing was changed.\n"
             + "  Would dispatch spec auth (Add auth) to claude-code in the background, on branch"
             + " sail/auth, which it would check out.\n"
-            + "  Would make workspace auth (acme-auth), from a template older than the"
+            + "  Would create workspace auth (acme-auth), from a template older than the"
             + " definition.\n"
             + "  Would restart the spec first: its status would go back to pending.\n",
         afterBranding(restart.out()));

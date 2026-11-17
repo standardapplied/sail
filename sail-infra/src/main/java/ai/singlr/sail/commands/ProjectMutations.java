@@ -103,7 +103,7 @@ final class ProjectMutations {
     throw new IllegalStateException(
         "Project '"
             + config.name()
-            + "' sets no resources, so its container cannot be made. Set them with: "
+            + "' sets no resources, so its container cannot be created. Set them with: "
             + operator.sail(
                 "project config set "
                     + config.name()

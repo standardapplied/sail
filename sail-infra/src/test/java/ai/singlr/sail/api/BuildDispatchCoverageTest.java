@@ -830,7 +830,7 @@ class BuildDispatchCoverageTest {
     assertEquals(ErrorCode.RUNNER_BUSY, spaceRefusal.failure().errorCode());
     assertEquals(
         "Pool tank has 4.7 GiB free of 93.1 GiB, under the 10% this box keeps free, so no new"
-            + " workspace is made on it.",
+            + " workspace is created on it.",
         spaceRefusal.getMessage());
     assertEquals(ErrorCode.CONFLICT, nameRefusal.failure().errorCode());
     assertTrue(nameRefusal.getMessage().startsWith("Workspace 'auth' of acme is a person's"));
@@ -869,7 +869,7 @@ class BuildDispatchCoverageTest {
     assertEquals(ErrorCode.RUNNER_BUSY, refused.failure().errorCode());
     assertEquals(
         "This box has 1 spec workspace with a live run, as many as its memory holds at acme's 4GB"
-            + " each (a cap of 1), so no new workspace is made.",
+            + " each (a cap of 1), so no new workspace is created.",
         refused.getMessage());
     assertEquals(1, new RunStore(db).listForProject("acme").size());
   }
@@ -909,7 +909,7 @@ class BuildDispatchCoverageTest {
 
       assertEquals(ErrorCode.RUNNER_BUSY, refused.failure().errorCode());
       assertEquals(
-          "This runner is making another workspace, which takes about a minute.",
+          "This runner is creating another workspace, which takes about a minute.",
           refused.getMessage());
       assertEquals("Then dispatch again.", refused.failure().remedy().plain());
       assertEquals(
@@ -1010,7 +1010,7 @@ class BuildDispatchCoverageTest {
     assertTrue(dispatched.workspace().stale());
     assertEquals(
         List.of(
-            "This spec's workspace was made from acme's template as it was last built, which is"
+            "This spec's workspace was created from acme's template as it was last built, which is"
                 + " older than the project's definition. Build it again for the next workspace:"
                 + " sail project template build acme."),
         new MessageStore(db)

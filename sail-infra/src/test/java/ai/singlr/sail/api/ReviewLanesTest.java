@@ -154,13 +154,13 @@ class ReviewLanesTest {
     assertTrue(
         errored
             .error()
-            .endsWith(": This runner is making another workspace, which takes about a minute."),
+            .endsWith(": This runner is creating another workspace, which takes about a minute."),
         errored.error());
     assertEquals(
         List.of(
-            "This runner is making another workspace, which takes about a minute. The loop then"
+            "This runner is creating another workspace, which takes about a minute. The loop then"
                 + " tries again by itself, and hands the review to a person if it lasts."),
-        loop.roomLines("auth", "This runner is making"),
+        loop.roomLines("auth", "This runner is creating"),
         "said once, with the remedy of the lane it was said for");
 
     loop.reconciler(() -> Instant.now().plus(Duration.ofMinutes(5))).sweep();
@@ -193,7 +193,7 @@ class ReviewLanesTest {
     assertEquals(
         List.of(
             "The build ended with no exit anyone saw (its process vanished, its workspace stopped,"
-                + " or its dispatch died while making the workspace), so nothing of it is reviewed."
+                + " or its dispatch died while creating the workspace), so nothing of it is reviewed."
                 + " Build it again: sail spec dispatch -p test-project --spec auth --restart."),
         loop.roomLines("auth", "The build ended with no exit"));
   }
