@@ -145,7 +145,7 @@ struct Step: Decodable {
     /// terminals are closing and ended it; ours serves, or its parent restarted it and the app said
     /// so), "ours" (one host serves, from this build's copy).
     var otherHost: String?
-    /// Every process whose command line holds this is ended (`pkill -f`).
+    /// Every process whose command line holds this is ended (`pkill -f`); none running is no failure.
     var kill: String?
     /// The tab strip's hit testing: a tab's middle reaches the tab, the empty end moves the window.
     var stripHits: Bool?

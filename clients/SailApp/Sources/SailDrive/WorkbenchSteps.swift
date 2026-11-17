@@ -74,7 +74,7 @@ extension Driver {
             pkill.arguments = ["-f", pattern]
             try? pkill.run()
             pkill.waitUntilExit()
-            return (pkill.terminationStatus == 0, "pkill -f \(pattern) exited \(pkill.terminationStatus)")
+            return (pkill.terminationStatus <= 1, "pkill -f \(pattern) exited \(pkill.terminationStatus)" + (pkill.terminationStatus == 1 ? " (none was running)" : ""))
         }
         if step.panes4 == true {
             return await fourPanes()
@@ -553,7 +553,7 @@ extension Driver {
         guard let menu = target.menu(for: event) else { return (false, "the \(kind) offered no menu") }
         let titles = menu.items.map { $0.isSeparatorItem ? "-" : $0.title }
         let focused = kind != "pane" || shell.window.firstResponder === target
-        var said = "the menu holds \(titles); the \(kind) \(focused ? "was" : "was not") focused first"
+        var said = "the menu holds \(titles)" + (kind == "pane" ? "; the pane \(focused ? "was" : "was not") focused first" : "")
         guard items.map({ $0 == titles }) ?? true, focused else { return (false, said) }
         if let choose {
             guard let item = menu.items.firstIndex(where: { $0.title == choose }) else { return (false, said + "; no \(choose)") }
@@ -625,7 +625,12 @@ extension Driver {
         case "ours": reached = await waitUntil(30) { ours() }
         default: return (false, "no other-host state \(state)")
         }
-        let hosts = await Self.processes(matching: "_pty-host --local")
+        var hosts = await Self.processes(matching: "_pty-host --local")
+        let settled = ContinuousClock.now + .seconds(10)
+        while hosts.count != 1, ContinuousClock.now < settled {
+            try? await Task.sleep(for: .milliseconds(200))
+            hosts = await Self.processes(matching: "_pty-host --local")
+        }
         return (
             reached && hosts.count == 1,
             "serving: \(serving()); the banner says: \(workbench.bannerSays ?? "nothing"); told: \(host.told); hosts: \(hosts)"
