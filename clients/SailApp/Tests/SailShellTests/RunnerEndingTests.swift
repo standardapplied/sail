@@ -33,7 +33,10 @@ import Testing
     static func attached(_ names: [String], _ tickets: DoorTickets) async throws -> [TerminalPane] {
         let panes = try names.map { try RunnerTabTests.pane(.workspace(project: "harbor", name: $0), runner: tickets) }
         panes.forEach { $0.begin() }
-        #expect(await RunnerTabTests.until(10) { panes.allSatisfy { $0.holdsRunnerSession } }, "attached: \(panes.map { $0.banner.shown ?? "nothing said" })")
+        #expect(
+            await RunnerTabTests.until(10) { panes.allSatisfy { $0.attachedOnce && $0.banner.shown == nil } },
+            "attached: \(panes.map { $0.banner.shown ?? "nothing said" })"
+        )
         return panes
     }
 
