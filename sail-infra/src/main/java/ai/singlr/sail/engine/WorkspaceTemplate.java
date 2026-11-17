@@ -16,6 +16,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.TreeMap;
 import java.util.concurrent.TimeoutException;
 import java.util.function.LongSupplier;
 import java.util.function.Predicate;
@@ -51,24 +52,54 @@ public final class WorkspaceTemplate {
   }
 
   /**
+   * What is told of a build the lane runs, under the template's lock: that it started, and how it
+   * ended, its last step (strip, check, stop, record and snapshot) included.
+   */
+  public interface Recorder {
+    /** Told nothing. */
+    Recorder NONE = new Recorder() {};
+
+    /** A build begins, the lock held. */
+    default void started() {}
+
+    /** The build ended with {@code template} current. */
+    default void built(Template template) {}
+
+    /** The build failed with {@code failure}, which is thrown after this returns. */
+    default void failed(Exception failure) {}
+  }
+
+  /**
    * What a project's template is built from on this box: the base profile's pool ({@code host.yaml}
    * names it), the digest of the definition and key a build provisions from ({@link
-   * ProjectProvisioner#inputs}), whether the catalog holds a project by a name, the build, and the
-   * tokens the build is given, which its check searches the template for; {@link #toString} never
-   * shows them.
+   * ProjectProvisioner#inputs}), whether the catalog holds a project by a name, the build, the
+   * tokens the build is given, which its check searches the template for ({@link #toString} never
+   * shows them), and what is told of a build ({@link Recorder}).
    */
   public record Source(
       String basePool,
       String inputs,
       Predicate<String> held,
       Build build,
-      Collection<String> tokens) {
+      Collection<String> tokens,
+      Recorder recorder) {
     public Source {
       Objects.requireNonNull(basePool, "basePool");
       Objects.requireNonNull(inputs, "inputs");
       Objects.requireNonNull(held, "held");
       Objects.requireNonNull(build, "build");
       tokens = List.copyOf(tokens);
+      Objects.requireNonNull(recorder, "recorder");
+    }
+
+    /** A source whose builds are told to no one. */
+    public Source(
+        String basePool,
+        String inputs,
+        Predicate<String> held,
+        Build build,
+        Collection<String> tokens) {
+      this(basePool, inputs, held, build, tokens, Recorder.NONE);
     }
 
     @Override
@@ -208,26 +239,34 @@ public final class WorkspaceTemplate {
                     .max()
                     .orElse(0)
                 + 1);
-    build(source, project, template, pool, found);
-    var recorded =
-        new ContainerConfig(shell, locks)
-            .set(
-                template,
-                List.of(
-                    CURRENT_KEY + "=" + version,
-                    INPUTS_KEY + "=" + source.inputs(),
-                    LAST_KEY + "=" + version));
-    if (!recorded.ok()) {
-      throw new IOException(
-          "Failed to record "
-              + version
-              + " as "
-              + project
-              + "'s current template, so the version before stays current: "
-              + recorded.reason());
+    source.recorder().started();
+    try {
+      build(source, project, template, pool, found);
+      var recorded =
+          new ContainerConfig(shell, locks)
+              .set(
+                  template,
+                  List.of(
+                      CURRENT_KEY + "=" + version,
+                      INPUTS_KEY + "=" + source.inputs(),
+                      LAST_KEY + "=" + version));
+      if (!recorded.ok()) {
+        throw new IOException(
+            "Failed to record "
+                + version
+                + " as "
+                + project
+                + "'s current template, so the version before stays current: "
+                + recorded.reason());
+      }
+      new SnapshotManager(shell).create(template, version);
+      var built = new Template(project, template, version, source.inputs(), pool, true);
+      source.recorder().built(built);
+      return built;
+    } catch (Exception failure) {
+      source.recorder().failed(failure);
+      throw failure;
     }
-    new SnapshotManager(shell).create(template, version);
-    return new Template(project, template, version, source.inputs(), pool, true);
   }
 
   /**
@@ -255,11 +294,44 @@ public final class WorkspaceTemplate {
     }
   }
 
+  /**
+   * {@code project}'s current template as Incus has it now, read without its lock, so a read never
+   * waits on a build: empty when it has none, or on a box with no ZFS pool.
+   */
+  public Optional<Template> peek(String project)
+      throws IOException, InterruptedException, TimeoutException {
+    return recorded(project, nameOf(project), zfsPools(observer));
+  }
+
+  /**
+   * Each project's current template on this box, by project, as {@link #peek} reads one: Incus
+   * listed once, and each template's versions.
+   */
+  public Map<String, Template> peekAll()
+      throws IOException, InterruptedException, TimeoutException {
+    var zfs = zfsPools(observer);
+    var all = new TreeMap<String, Template>();
+    for (var instance : new BoxInstances(observer).all()) {
+      if (instance.kind() instanceof BoxInstances.Template(var project)
+          && instance.name().equals(nameOf(project))) {
+        recorded(project, Optional.of(instance), zfs)
+            .ifPresent(current -> all.put(project, current));
+      }
+    }
+    return all;
+  }
+
   private Optional<Template> recorded(String project, String template, List<String> zfs)
       throws IOException, InterruptedException, TimeoutException {
+    return recorded(project, new BoxInstances(observer).named(template), zfs);
+  }
+
+  private Optional<Template> recorded(
+      String project, Optional<BoxInstances.Instance> named, List<String> zfs)
+      throws IOException, InterruptedException, TimeoutException {
+    var template = nameOf(project);
     var found =
-        new BoxInstances(observer)
-            .named(template)
+        named
             .filter(i -> i.kind() instanceof BoxInstances.Template(var of) && of.equals(project))
             .filter(i -> zfs.contains(i.pool()));
     var version = found.flatMap(i -> i.key(CURRENT_KEY));
@@ -329,12 +401,7 @@ public final class WorkspaceTemplate {
    */
   static List<String> requireZfs(ShellExec observer)
       throws IOException, InterruptedException, TimeoutException {
-    var zfs =
-        new IncusStorage(observer)
-            .pools().stream()
-                .filter(pool -> HostYaml.BACKEND_ZFS.equals(pool.driver()))
-                .map(IncusStorage.Pool::name)
-                .toList();
+    var zfs = zfsPools(observer);
     if (zfs.isEmpty()) {
       throw Remedied.state(
           "This box has no ZFS pool, and a workspace is a ZFS clone of its project's template.",
@@ -344,6 +411,15 @@ public final class WorkspaceTemplate {
               ", or with --pool-file-size <size> in place of --disk to try ZFS in a file."));
     }
     return zfs;
+  }
+
+  private static List<String> zfsPools(ShellExec observer)
+      throws IOException, InterruptedException, TimeoutException {
+    return new IncusStorage(observer)
+        .pools().stream()
+            .filter(pool -> HostYaml.BACKEND_ZFS.equals(pool.driver()))
+            .map(IncusStorage.Pool::name)
+            .toList();
   }
 
   /**

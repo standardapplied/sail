@@ -1,0 +1,33 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/v1/projects/lighthouse/template"
+  },
+  "response": {
+    "body": {
+      "build": {
+        "by": "dana",
+        "ended_at": "2026-11-11T08:59:00.656Z",
+        "joined": false,
+        "kept": 0,
+        "outcome": "failed",
+        "reason": "The runner could not finish that.",
+        "remedy": [
+          {
+            "text": "An admin looks at the runner."
+          }
+        ],
+        "started_at": "2026-11-11T08:55:50.656Z",
+        "step": 13,
+        "step_started_at": "2026-11-11T08:58:30.656Z",
+        "steps": 20
+      },
+      "project": "lighthouse",
+      "schema_version": 1,
+      "stale": false,
+      "state": "failed",
+      "steps": 20
+    },
+    "status": 200
+  }
+}

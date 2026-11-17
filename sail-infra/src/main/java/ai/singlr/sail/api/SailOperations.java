@@ -28,6 +28,7 @@ import ai.singlr.sail.engine.AgentReporter;
 import ai.singlr.sail.engine.AgentSession;
 import ai.singlr.sail.engine.AgentUnit;
 import ai.singlr.sail.engine.BoxInstances;
+import ai.singlr.sail.engine.CheckedTokens;
 import ai.singlr.sail.engine.CliOperator;
 import ai.singlr.sail.engine.ConflictOperations;
 import ai.singlr.sail.engine.ConnectEnvironment;
@@ -37,14 +38,18 @@ import ai.singlr.sail.engine.ContainerState;
 import ai.singlr.sail.engine.HostInfo;
 import ai.singlr.sail.engine.NameValidator;
 import ai.singlr.sail.engine.ProjectProvisioner;
+import ai.singlr.sail.engine.ProvisionListener;
 import ai.singlr.sail.engine.RunPlace;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.SharedProjectFiles;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.engine.SyncOperations;
+import ai.singlr.sail.engine.TemplateBuild;
+import ai.singlr.sail.engine.TemplateBuilds;
 import ai.singlr.sail.engine.WatcherSpawner;
 import ai.singlr.sail.engine.WorkspaceOwner;
+import ai.singlr.sail.engine.WorkspaceTemplate;
 import ai.singlr.sail.engine.Workspaces;
 import ai.singlr.sail.harness.Harness;
 import ai.singlr.sail.harness.Harnesses;
@@ -103,6 +108,8 @@ public final class SailOperations implements HostOperations {
   private HostIdentity identity;
   private HostPty pty;
   private HostSchema schema;
+  private TemplateBuilds templateBuilds;
+  private Predicate<String> asksForCredentials = new ShellExecutor(false)::asksForCredentials;
 
   /** The host facets exist once the control-plane database is known; the web lane needs none. */
   public SailOperations useControlPlane(
@@ -1442,6 +1449,109 @@ public final class SailOperations implements HostOperations {
   }
 
   @Override
+  public Result<TemplateResponse> template(String project) {
+    return safe(
+        () ->
+            WorkspaceDoors.answered(
+                () ->
+                    new TemplateResponse(
+                        templateBuilds().status(projects.definition(readable(project))))));
+  }
+
+  @Override
+  public Result<TemplateResponse> buildTemplate(String project) {
+    return safe(
+        () ->
+            WorkspaceDoors.answered(
+                () -> {
+                  NameValidator.requireValidProjectName(project);
+                  var box = box();
+                  WorkspaceDoors.requireBuild(
+                      projectCatalog(), project, box.isNode() ? box.handle() : null);
+                  var definition = projects.definition(project);
+                  var joined = templateBuilds().joining(definition);
+                  if (joined.isPresent()) {
+                    return new TemplateResponse(joined.get());
+                  }
+                  var config = TemplateBuild.requireResources(definition);
+                  var host = TemplateBuild.hostOf(SailPaths.hostConfigPath());
+                  var caller = Actor.current().handle();
+                  var tokens =
+                      CheckedTokens.of(
+                          config,
+                          Optional.of(caller),
+                          gitTokensOf(caller),
+                          asksForCredentials,
+                          Map.of());
+                  var provision =
+                      TemplateBuild.provision(shell, host, config, tokens, projectSkills);
+                  return new TemplateResponse(
+                      templateBuilds()
+                          .start(
+                              config,
+                              caller,
+                              started ->
+                                  templateRecords()
+                                      .source(
+                                          config,
+                                          TemplateBuild.poolOf(host),
+                                          held -> projectCatalog().findByName(held).isPresent(),
+                                          tokens.values(),
+                                          SailPaths.templateProvisionState(project),
+                                          caller,
+                                          ProvisionListener.NOOP,
+                                          provision,
+                                          started,
+                                          false)));
+                }));
+  }
+
+  /**
+   * Asks a repo's host whether it wants credentials through {@code asks}, in place of the network:
+   * for a test, which must not reach a real host.
+   */
+  SailOperations useCredentialProbe(Predicate<String> asks) {
+    this.asksForCredentials = Objects.requireNonNull(asks, "asks");
+    return this;
+  }
+
+  /**
+   * Ends the template builds of this box's projects that a stop of sail-api cut short, as it
+   * starts: each template stripped of its builder's credentials and stopped before its record says
+   * so.
+   */
+  public void endCutShortTemplateBuilds() {
+    templateBuilds()
+        .endCutShort(projectCatalog().list().stream().map(ProjectStore.ProjectRow::name).toList());
+  }
+
+  private TemplateBuild templateRecords() {
+    return new TemplateBuild(SailPaths.locksDir(), projectsDir, DateTimeUtils::now);
+  }
+
+  private synchronized TemplateBuilds templateBuilds() {
+    if (templateBuilds == null) {
+      templateBuilds =
+          new TemplateBuilds(
+              templateRecords(),
+              new WorkspaceTemplate(shell.observer(), shell, SailPaths.locksDir()),
+              shell,
+              handle -> gitTokensOf(handle).values(),
+              failed -> ApiLog.unexpected("a template build", failed),
+              DateTimeUtils::now);
+    }
+    return templateBuilds;
+  }
+
+  /** The git tokens person {@code handle} stored on this box; none for one it does not know. */
+  private Map<String, String> gitTokensOf(String handle) {
+    return fdeStore
+        .byHandle(handle)
+        .map(fde -> fdeStore.logins().gitTokens(fde.id()))
+        .orElse(Map.of());
+  }
+
+  @Override
   public Result<WorkspaceCreateResponse> createWorkspace(String project, String name) {
     return safe(
         () ->
@@ -1715,13 +1825,31 @@ public final class SailOperations implements HostOperations {
     for (var container : listContainers()) {
       statuses.put(container.name(), statusName(container.state()));
     }
+    var readable =
+        ReadFilter.readable(Actor.reader(), List.copyOf(statuses.keySet()), name -> name);
+    var templates = templateStates(readable);
     return new ProjectListResponse(
-        ReadFilter.readable(
-            Actor.reader(),
-            statuses.entrySet().stream()
-                .map(entry -> new ProjectListItemView(entry.getKey(), entry.getValue()))
-                .toList(),
-            ProjectListItemView::name));
+        readable.stream()
+            .map(name -> new ProjectListItemView(name, statuses.get(name), templates.get(name)))
+            .toList());
+  }
+
+  /**
+   * The state of each of {@code names}' templates, none on a box that keeps no records of its
+   * projects; a box whose Incus cannot say is answered as the failure it is.
+   */
+  private Map<String, TemplateBuilds.State> templateStates(List<String> names) {
+    if (projectsDir == null || names.isEmpty()) {
+      return Map.of();
+    }
+    try {
+      return templateBuilds().states(names);
+    } catch (InterruptedException e) {
+      Thread.currentThread().interrupt();
+      throw new ApiException(ErrorCode.INTERNAL, "Interrupted.", e);
+    } catch (Exception e) {
+      throw new ApiException(ErrorCode.COMMAND_FAILED, "Failed to read project templates.", e);
+    }
   }
 
   private List<ContainerManager.ContainerInfo> listContainers() {

@@ -370,6 +370,7 @@ public final class ServerStartCommand implements Runnable {
             Ansi.AUTO.string(
                 "  @|green ✓|@ Refreshed sail helpers in " + refreshed + " running container(s)"));
       }
+      operations.endCutShortTemplateBuilds();
       var rearmed = rearmer.rearm();
       rearmer.start();
       presenceEmitter.start();

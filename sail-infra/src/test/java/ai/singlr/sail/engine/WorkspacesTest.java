@@ -1892,10 +1892,15 @@ class WorkspacesTest {
     return outcomes;
   }
 
-  /** Returns once {@code thread} is started and parked, as on a lock another thread holds. */
+  /**
+   * Returns once {@code thread} is started and parked, as on a lock another thread holds: a create
+   * waits for a template's build no longer than {@link Workspaces#CREATE_WAIT}, so it parks timed.
+   */
   private static void awaitParked(AtomicReference<Thread> thread) {
     var deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(30);
-    while (thread.get() == null || thread.get().getState() != Thread.State.WAITING) {
+    while (thread.get() == null
+        || !Set.of(Thread.State.WAITING, Thread.State.TIMED_WAITING)
+            .contains(thread.get().getState())) {
       assertTrue(System.nanoTime() < deadline, "the second create never waited on a lock");
       Thread.onSpinWait();
     }
@@ -2208,8 +2213,51 @@ class WorkspacesTest {
 
     var busy = assertInstanceOf(Workspaces.Busy.class, refused.get());
     assertEquals(
-        "acme's template is being built, and no workspace is cloned from it until it is.",
+        "acme's template is being built, and no workspace is created from it until it is. Try"
+            + " again once it is built: a build takes a few minutes.",
         busy.getMessage());
+    assertFalse(shell.invocations().stream().anyMatch(c -> c.startsWith("incus copy")));
+  }
+
+  /**
+   * Ruling A: a create from the command line that meets a build of its template waits no longer
+   * than {@link Workspaces#CREATE_WAIT}, as the app's does, and is refused as busy, naming the
+   * build's step of twenty and how long it has run, by the build's record.
+   */
+  @Test
+  void aCreateMeetingABuildOfItsTemplateIsBusyPastTheWaitNamingItsStepAndTime() throws Exception {
+    var shell = incus(DIR_AND_ZFS, list(template("v1", INPUTS)), snapshots("v1"));
+    var workspaces = workspaces(shell, ticks(0, Workspaces.CREATE_WAIT.toNanos()));
+    var record = TemplateRecord.fileOf(SailPaths.projectsDir(), "acme");
+    TemplateRecord.started("dana", NOW.minusSeconds(125), TemplateBuild.STEPS)
+        .at(9, NOW.minusSeconds(20))
+        .write(record);
+
+    var refused = new AtomicReference<Exception>();
+    try (var build = ContainerConfig.hold(locks(), "acme--tmpl")) {
+      var creating =
+          Thread.ofPlatform()
+              .start(
+                  () -> {
+                    try {
+                      workspaces.create(
+                          acme(), "fix-login", source(), tempDir, "eng", TestOwners::of);
+                    } catch (Exception e) {
+                      refused.set(e);
+                    }
+                  });
+      creating.join(TimeUnit.SECONDS.toMillis(30));
+      assertEquals(Thread.State.TERMINATED, creating.getState(), "the create waited unbounded");
+    } finally {
+      Files.deleteIfExists(record);
+    }
+
+    var busy = assertInstanceOf(Workspaces.Busy.class, refused.get());
+    assertEquals(
+        "acme's template is being built (step 9 of 20, 2 min 5 s in), and no workspace is created"
+            + " from it until it is. Try again once it is built: a build takes a few minutes.",
+        busy.getMessage());
+    assertEquals(List.of(), builtInto);
     assertFalse(shell.invocations().stream().anyMatch(c -> c.startsWith("incus copy")));
   }
 

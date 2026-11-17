@@ -16,10 +16,10 @@ import ai.singlr.sail.config.HostYaml;
 import ai.singlr.sail.config.ProjectDefinition;
 import ai.singlr.sail.config.TestDefinitions;
 import ai.singlr.sail.engine.CheckedTokens;
-import ai.singlr.sail.engine.ProjectPhase;
 import ai.singlr.sail.engine.ProjectProvisioner;
-import ai.singlr.sail.engine.ProvisionTracker;
+import ai.singlr.sail.engine.ProvisionListener;
 import ai.singlr.sail.engine.SailPaths;
+import ai.singlr.sail.engine.WorkspaceTemplate;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.store.HeldProjects;
 import ai.singlr.sail.store.ProjectStore;
@@ -99,23 +99,6 @@ class WorkspaceVerbsTest {
   }
 
   @Test
-  void aFreshTemplateOrAFinishedRecordStartsEveryStepAgainAndAnInterruptedOneResumes()
-      throws Exception {
-    var progress = tempDir.resolve("template-provision-state.yaml");
-    var earlier = new ProvisionTracker<>(ProjectPhase.class, progress, false).load("in");
-    earlier.advance(ProjectPhase.CONTAINER_LAUNCHED);
-
-    var resumed = WorkspaceVerbs.tracker(progress, "in", false, false);
-    assertTrue(
-        resumed.isCompleted(ProjectPhase.CONTAINER_LAUNCHED), "an interrupted build resumes");
-
-    var fresh = WorkspaceVerbs.tracker(progress, "in", true, false);
-    assertFalse(
-        fresh.isCompleted(ProjectPhase.CONTAINER_LAUNCHED),
-        "a template that does not exist yet starts from the first step");
-  }
-
-  @Test
   void aTemplateIsBuiltFromTheBaseProfilesPoolAndItsDigestIsTheDefinitionsAlone() throws Exception {
     var named =
         new HostYaml(
@@ -124,14 +107,11 @@ class WorkspaceVerbsTest {
         new HostYaml(
             "dir", null, null, "incusbr0", "singlr-base", "ubuntu/24.04", "6.0", null, null);
 
-    var source = WorkspaceVerbs.source(named, acme(), none(), name -> false, (into, fresh) -> {});
+    var source = source(named, none());
 
     assertEquals("devpool", source.basePool());
     assertEquals(ProjectProvisioner.inputs(acme(), Optional.empty()), source.inputs());
-    assertEquals(
-        HostYaml.DEFAULT_POOL,
-        WorkspaceVerbs.source(unnamed, acme(), none(), name -> false, (into, fresh) -> {})
-            .basePool());
+    assertEquals(HostYaml.DEFAULT_POOL, source(unnamed, none()).basePool());
   }
 
   /**
@@ -153,7 +133,7 @@ class WorkspaceVerbsTest {
                 Map.of())
             .check(acme());
 
-    var source = WorkspaceVerbs.source(host, acme(), given, name -> false, (into, fresh) -> {});
+    var source = source(host, given);
 
     assertEquals(List.of("ghp_stored_for_github"), List.copyOf(source.tokens()));
   }
@@ -188,5 +168,17 @@ class WorkspaceVerbsTest {
   private static CheckedTokens none() {
     return new WorkspaceVerbs.Keeper(Optional.empty(), Map.of(), url -> false, Map.of())
         .check(acme());
+  }
+
+  private static WorkspaceTemplate.Source source(HostYaml host, CheckedTokens tokens) {
+    return WorkspaceVerbs.source(
+        host,
+        acme(),
+        tokens,
+        name -> false,
+        "eng",
+        ProvisionListener.NOOP,
+        (into, tracker, listener) -> {},
+        false);
   }
 }

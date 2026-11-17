@@ -456,10 +456,16 @@ func answer<Response>(
 /// Refusals the server writes for routes this client does not call yet; each still decodes.
 let refusalsOfRoutesNotYetCalled: Set<String> = [
     "refusal-out-of-scope", "refusal-project-not-created", "refusal-run-on-other-node",
+    "refusal-template-2c-admin-only", "refusal-template-2c-read-only",
+    "refusal-template-2d-login-not-stored", "refusal-template-2d-no-resources",
 ]
 
 /// The answers of routes this client does not call yet, recorded for the apps that will.
-let answersOfRoutesNotYetCalled: Set<String> = ["spec-measures", "specs-measures"]
+let answersOfRoutesNotYetCalled: Set<String> = [
+    "spec-measures", "specs-measures",
+    "template-2d-missing", "template-2e-building", "template-2f-joined", "template-2g-built",
+    "template-2g-current", "template-2h-failed", "template-2h-interrupted",
+]
 
 /// The member the golden writer seats in the room.
 func expectSeated(_ member: RoomMember?, sourceLocation: SourceLocation = #_sourceLocation) {

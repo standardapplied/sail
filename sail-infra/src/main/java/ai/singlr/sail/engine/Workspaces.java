@@ -367,9 +367,38 @@ public final class Workspaces {
               + " says why.");
     }
 
+    /**
+     * The refusal of a create, a dispatch or a destroy that waited {@link #CREATE_WAIT} for {@code
+     * project}'s template to be built: how far the build is, by its record, when there is one.
+     */
     static Busy building(String project) {
+      var record =
+          TemplateRecord.read(TemplateRecord.fileOf(SailPaths.projectsDir(), project))
+              .filter(TemplateRecord::running);
+      var where =
+          record
+              .map(
+                  build ->
+                      " (step "
+                          + build.step()
+                          + " of "
+                          + build.steps()
+                          + ", "
+                          + spent(Duration.between(build.startedAt(), DateTimeUtils.now()))
+                          + " in)")
+              .orElse("");
       return new Busy(
-          project + "'s template is being built, and no workspace is cloned from it until it is.");
+          project
+              + "'s template is being built"
+              + where
+              + ", and no workspace is created from it until it is. Try again once it is built:"
+              + " a build takes a few minutes.");
+    }
+
+    /** {@code time} as a person reads a build's: minutes and seconds. */
+    static String spent(Duration time) {
+      var seconds = Math.max(0, time.toSeconds());
+      return seconds < 60 ? seconds + " s" : seconds / 60 + " min " + seconds % 60 + " s";
     }
   }
 
@@ -479,8 +508,10 @@ public final class Workspaces {
     var template = WorkspaceTemplate.requireName(project, source);
     try (var held = nameLock(instance)) {
       var unfinished = requireUnclaimed(project, name, instance, source.held(), box.all());
-      var built =
-          new WorkspaceTemplate(observer, shell, locks).ensure(config, source, template, zfs);
+      WorkspaceTemplate.Template built;
+      try (var building = templateLockForCreate(project)) {
+        built = new WorkspaceTemplate(observer, shell, locks).ensure(config, source, template, zfs);
+      }
       return make(
           config,
           name,
@@ -1000,6 +1031,18 @@ public final class Workspaces {
   }
 
   /**
+   * The lock every change of {@code listed} holds, when nothing holds it now: a template's, which
+   * its build holds from start to end, and a workspace's or container's {@link #holdIfFree(String)}
+   * of its name. Empty while another holds it.
+   */
+  public Optional<FileMutex> holdIfFree(BoxInstances.Instance listed)
+      throws IOException, InterruptedException {
+    return listed.kind() instanceof BoxInstances.Template
+        ? FileMutex.acquireUntil(ContainerConfig.lockOf(locks, listed.name()), 0, () -> 0)
+        : holdIfFree(listed.name());
+  }
+
+  /**
    * The lock a run's entry of {@code place}'s workspace holds, waited for while another change of
    * it, the sweep's stop or delete, holds it, no longer than {@link #CREATE_WAIT} on the create
    * lock's clock: past that the box is {@link Busy}, never a stranger's. None in a dry run.
@@ -1385,6 +1428,21 @@ public final class Workspaces {
             nanos.getAsLong() + CREATE_WAIT.toNanos(),
             nanos)
         .orElseThrow(() -> Busy.building(project));
+  }
+
+  /**
+   * The template's lock for a create that may build it: taken at once when free, and otherwise
+   * waited for as {@link #templateLock} waits, so a create meeting another's build is refused as
+   * busy past {@link #CREATE_WAIT}, never queued behind it.
+   */
+  private FileMutex templateLockForCreate(String project) throws IOException, InterruptedException {
+    if (shell.isDryRun()) {
+      return null;
+    }
+    var free =
+        FileMutex.acquireUntil(
+            ContainerConfig.lockOf(locks, WorkspaceTemplate.nameOf(project)), 0, () -> 0);
+    return free.isPresent() ? free.get() : templateLock(project);
   }
 
   /**

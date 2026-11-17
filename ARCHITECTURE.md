@@ -1288,6 +1288,35 @@ own, about three (2.9 to 4.3 s over 32 creates, median 3.2 s).
 - **Commands.**
   - `sudo sail project template build <p>` builds it unless its current version was built from the
     definition as it is.
+  - `POST /v1/projects/{p}/template:build` (an admin, Access's Build a template) builds it the same
+    way, through the same lane (`TemplateBuild`, one implementation behind both doors), cloning with
+    the caller's own stored git tokens; the CLI clones with the box's person's. Every refusal is
+    answered before anything changes: an admin's role, on a node its own person's (others are told
+    templates are built on main), resources in the definition, a set-up runner, and a token for
+    every repo host that asks (`login_not_stored`, its remedy typed). The build then runs on a
+    thread of sail-api's (`TemplateBuilds`), so it outlives the request: `202` once it holds the
+    template's lock, `200` with `outcome: current` when its version was built from the definition
+    as it is. A second request while one runs, the CLI's included, joins it (`202`,
+    `build.joined`) and needs no token of its own. Builds of different projects run side by side.
+  - `GET /v1/projects/{p}/template` reads it without waiting: `state` (`ready` while a version is
+    current, `building`, `failed` when none is current and the last build failed or was cut short,
+    else `missing`), `version`, `stale`, `steps` (20) and `build`, the last build's record, so a
+    rebuild that failed while an older version serves is told beside that version.
+    `GET /v1/projects` gives each project's `template` state, Incus listed once for all.
+  - **The record.** Each build, from either door, keeps `<projects>/<p>/template-build.json`, written
+    whole (a temporary file renamed over it) at every step: `by`, `started_at`, `step` of `steps`,
+    `step_started_at`, `kept` (steps a resumed build found done), and once it ends `outcome`
+    (`built`, `failed` or `interrupted`), `ended_at`, `reason` and `remedy`. Steps 1 to 19 are the
+    provisioner's; step 20 is the lane's finish (strip, check, stop, record, snapshot). A failure's
+    reason is its words when written for a person (`Remedied`); any other, a tool's output, goes to
+    the log, and the record says the runner could not finish. A template is building while its
+    lock is held and its record has no outcome: a create checking the version holds the lock too.
+  - **A build cut short** (sail-api restarted, the CLI killed) leaves a record with no outcome and a
+    free lock. sail-api ends every one it finds as it starts, and so does any read that meets one:
+    under the lock, the template is started if stopped, stripped, searched for its builder's tokens
+    and stopped, and only then is the record ended `interrupted`, "The build stopped when the runner
+    restarted.". One whose template still holds a token is stopped and its record left, counted
+    `failed`, for the next read. Building again resumes at the step that did not finish.
   - `sudo sail project workspace create <p> <name>` builds it first when there is none or it is
     stale. It then clones it with `incus copy <p>--tmpl/v<n> <p>-<name>`, passing the workspace's
     keys at the copy: `-c user.sail.project=<p> -c user.sail.workspace=<name> -c
@@ -1427,7 +1456,12 @@ Each row with the tests that prove it:
   - A stale template is converged on its disk, as apply converges a container: packages, repos and
     services the definition dropped stay in it. It is not built again from nothing.
   - The template's lock is held while it builds, and the template is read inside it, so a create
-    that waited for another's build clones what it built.
+    that waited for another's build clones what it built. A create, from either door, waits for
+    another's build no longer than `CREATE_WAIT` (60 s), then is refused `runner_busy` naming the
+    build's step of 20 and how long it has run, by its record.
+  - Whatever deletes a template holds that lock: a project's destroy, and a node's round that takes
+    a project main no longer grants it off the box (`Workspaces.holdIfFree(Instance)`), which
+    leaves a template whose build holds it to the round after.
 
   *`WorkspacesTest.aFailedBuildLeavesThePreviousVersionCurrentMakesNoSnapshotAndStopsTheTemplateItStarted`,
   `WorkspacesTest.aFailedBuildLeavesATemplateItFoundRunningRunningAndOneItLaunchedStopped`,
@@ -1436,7 +1470,10 @@ Each row with the tests that prove it:
   `WorkspacesTest.theTemplatesLockIsHeldWhileItBuilds`,
   `WorkspacesTest.twoCreatesOfOneStaleTemplateBuildItOnceAndBothCloneThatVersion`,
   `WorkspacesTest.twoCreatesOnABoxWithNoTemplateBuildItOnceIntoAFreshInstanceAndBothClone`,
-  `WorkspacesTest.aVersionNumberIsNeverGivenTwiceEvenWhenEverySnapshotIsGone`.*
+  `WorkspacesTest.aVersionNumberIsNeverGivenTwiceEvenWhenEverySnapshotIsGone`,
+  `WorkspacesTest.aCreateMeetingABuildOfItsTemplateIsBusyPastTheWaitNamingItsStepAndTime`,
+  `TemplateBuildsTest`, `ScopeChangeRoundTest.aTemplateBeingBuiltIsLeftToTheRoundAfterItsBuild`,
+  `WorkspaceIT.aNodesRoundLeavesATemplateItsBuildHoldsAndTheRoundAfterDeletesIt`.*
 - **W8. ZFS or nothing.**
   - A new template goes on the base profile's pool when it is ZFS, else on the one ZFS pool beside
     it. Several ZFS pools beside a pool that is not ZFS are refused, naming them.
@@ -3557,6 +3594,7 @@ a birth, as on main. A door's placement comes after `Access` too. The table is
 | Operate a run | stop it; attach to it; read its log | no | owner | yes | no | no | no |
 | Narrate | a run's reports about itself: events, session, inbox acks | no | owner | yes | its own | its own | no |
 | Enter a workspace | open a terminal in a workspace; create, start, stop or delete one | no | owner | yes | no | no | no |
+| Build a template | build or rebuild a project's template, which its workspaces are created from | no | no | yes | no | no | no |
 | Share | add, change or remove project files and skills | no | yes | yes | no | no | no |
 | Serve | start and stop the project's processes | no | yes | yes | own work | no | yes |
 | Restore | restore or delete a snapshot | no | yes | yes | no | no | no |

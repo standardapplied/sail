@@ -17,6 +17,8 @@ import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.AgentReporter;
 import ai.singlr.sail.engine.AgentSession;
 import ai.singlr.sail.engine.NameValidator;
+import ai.singlr.sail.engine.TemplateBuild;
+import ai.singlr.sail.engine.TemplateBuilds;
 import ai.singlr.sail.engine.Workspaces;
 import ai.singlr.sail.harness.Harnesses;
 import ai.singlr.sail.identity.ProjectScope;
@@ -120,12 +122,20 @@ record FdesResponse(List<FdeSummaryView> fdes) implements Mappable {
   }
 }
 
-record ProjectListItemView(String name, String containerStatus) implements Mappable {
+/**
+ * A project as the list shows it: its own container's status, and its template's state ({@link
+ * TemplateBuilds.State}), absent where this box keeps no templates.
+ */
+record ProjectListItemView(String name, String containerStatus, TemplateBuilds.State template)
+    implements Mappable {
   @Override
   public Map<String, Object> toMap() {
     var m = new LinkedHashMap<String, Object>();
     m.put("name", name);
     m.put("container_status", containerStatus);
+    if (template != null) {
+      m.put("template", template.wire());
+    }
     return m;
   }
 }
@@ -1989,6 +1999,32 @@ record WorkspaceCreateResponse(Workspaces.Created created, String owner, boolean
     m.put("template", created.template().version());
     m.put("stale", stale);
     m.put("timings", WorkspaceChangeResponse.timings(created.timings()));
+    return m;
+  }
+}
+
+/**
+ * A project's template: its state, the version workspaces are created from when one is current and
+ * whether the definition changed since it was built, the number of steps a build takes, and its
+ * last build, running or ended, whether a request to build found it under way ({@code joined}).
+ */
+record TemplateResponse(TemplateBuilds.Status status) implements Mappable {
+  @Override
+  public Map<String, Object> toMap() {
+    var m = new LinkedHashMap<String, Object>();
+    m.put("project", status.project());
+    m.put("state", status.state().wire());
+    status.current().ifPresent(current -> m.put("version", current.version()));
+    m.put("stale", status.stale());
+    m.put("steps", TemplateBuild.STEPS);
+    status
+        .build()
+        .ifPresent(
+            build -> {
+              var said = new LinkedHashMap<>(build.toMap());
+              said.put("joined", status.joined());
+              m.put("build", said);
+            });
     return m;
   }
 }

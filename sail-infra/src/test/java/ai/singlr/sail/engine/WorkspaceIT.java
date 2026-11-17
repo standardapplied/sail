@@ -1181,6 +1181,33 @@ class WorkspaceIT extends AbstractIncusIT {
   }
 
   /**
+   * The gap the template build's design found, on a real Incus: a node's round that takes a project
+   * main no longer grants it off the box holds the template's build lock, as its build does, never
+   * the workspace lock of its name. A round while the build holds it leaves the template whole; the
+   * first round after deletes it.
+   */
+  @Test
+  void aNodesRoundLeavesATemplateItsBuildHoldsAndTheRoundAfterDeletesIt(@TempDir Path dir)
+      throws Exception {
+    try (var node = new ScopedNode(dir, "sail-it-elsewhere", shell)) {
+      HeldLocks.whileHeld(
+          ContainerConfig.lockOf(SailPaths.locksDir(), TEMPLATE),
+          () -> {
+            node.round();
+            return null;
+          });
+
+      var kept = new BoxInstances(shell).named(TEMPLATE);
+      assertTrue(kept.isPresent(), "a round never deletes a template its build holds");
+      assertEquals(Optional.of("v1"), kept.get().key(WorkspaceTemplate.CURRENT_KEY));
+
+      node.round();
+    }
+
+    assertEquals(Optional.empty(), new BoxInstances(shell).named(TEMPLATE));
+  }
+
+  /**
    * A destroy on a real Incus deletes a project's workspaces and template only under their locks
    * and the box's create lock, read again there: a create that holds the create lock past the wait
    * refuses it and nothing goes; a workspace made after it read what it would delete refuses it,
