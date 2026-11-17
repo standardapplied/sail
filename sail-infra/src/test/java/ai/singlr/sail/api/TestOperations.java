@@ -349,6 +349,27 @@ class TestOperations implements Operations {
   }
 
   @Override
+  public Result<WorkspaceCreateResponse> createWorkspace(String project, String name) {
+    return Result.failure(ErrorCode.NOT_FOUND, "no workspaces here");
+  }
+
+  @Override
+  public Result<WorkspaceChangeResponse> startWorkspace(String project, String name) {
+    return Result.failure(ErrorCode.NOT_FOUND, "no workspaces here");
+  }
+
+  @Override
+  public Result<WorkspaceChangeResponse> stopWorkspace(String project, String name) {
+    return Result.failure(ErrorCode.NOT_FOUND, "no workspaces here");
+  }
+
+  @Override
+  public Result<WorkspaceChangeResponse> deleteWorkspace(
+      String project, String name, boolean force) {
+    return Result.failure(ErrorCode.NOT_FOUND, "no workspaces here");
+  }
+
+  @Override
   public Result<SnapshotActionResponse> restoreSnapshot(
       String project, String label, String localHandle) {
     return Result.success(new SnapshotActionResponse(project, label, "restore", "accepted"));

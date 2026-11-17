@@ -194,6 +194,10 @@ class ScopedReadsTest {
           "dispatch",
           "restoreSnapshot",
           "deleteSnapshot",
+          "createWorkspace",
+          "startWorkspace",
+          "stopWorkspace",
+          "deleteWorkspace",
           "stopRun",
           "createFollowupSpec",
           "restoreGlobalSpec",
@@ -255,7 +259,11 @@ class ScopedReadsTest {
           List.of("DELETE", "/v1/projects/{project}/files/{file}", ""),
           List.of("POST", "/v1/projects/{project}/dispatch", "{}"),
           List.of("POST", "/v1/projects/{project}/snapshots/a-label/restore", ""),
-          List.of("DELETE", "/v1/projects/{project}/snapshots/a-label", ""));
+          List.of("DELETE", "/v1/projects/{project}/snapshots/a-label", ""),
+          List.of("POST", "/v1/projects/{project}/workspaces", "{\"name\": \"w\"}"),
+          List.of("POST", "/v1/projects/{project}/workspaces/w/start", ""),
+          List.of("POST", "/v1/projects/{project}/workspaces/w/stop", ""),
+          List.of("DELETE", "/v1/projects/{project}/workspaces/w", ""));
 
   /** A retold {@code spec_dispatched} addressed to {@code project} and what {@code about} names. */
   private static String event(String project, String spec, String run) {

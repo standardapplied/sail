@@ -275,9 +275,13 @@ public final class ServerStartCommand implements Runnable {
                 terminal.map(
                     address ->
                         new TerminalTickets(
-                            (credential, action, target) ->
+                            (credential, action, target, workspace) ->
                                 SessionClient.ticket(
-                                    SailPaths.ptySocketPath(), credential, action, target),
+                                    SailPaths.ptySocketPath(),
+                                    credential,
+                                    action,
+                                    target,
+                                    workspace),
                             address))));
     var sweeper = new ExpiredRowSweeper(dbPath);
     var eventSweeper = new EventRetentionSweeper(eventStore);

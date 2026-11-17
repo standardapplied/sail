@@ -206,6 +206,32 @@ class RunPlacesTest {
   }
 
   /**
+   * A spec's workspace that got no address within its 30 s is not made: the dispatch is refused
+   * naming the wait, as any create that failed is, and the half-made workspace is deleted.
+   */
+  @Test
+  void aWorkspaceThatGotNoAddressIsNotMadeAndTheDispatchSaysWhy() throws Exception {
+    var noAddress =
+        TestWorkspaces.incus(definitions(), "acme")
+            .onFail(
+                "sail-workspace acme auth",
+                "acme-auth got no address on eth0 within 30 s, so its repos cannot be fetched");
+    var places = places(noAddress, new ScriptedShellExecutor());
+    var check = places.checkSpec("acme", config(), "auth", Lane.BUILD, "eng");
+
+    var failed = assertThrows(ApiException.class, () -> places.enter(check, config()));
+
+    assertEquals(ErrorCode.COMMAND_FAILED, failed.failure().errorCode());
+    assertEquals(
+        "Workspace auth of acme could not be made ready: Workspace 'auth' could not be made its"
+            + " own: acme-auth got no address on eth0 within 30 s, so its repos cannot be fetched",
+        failed.getMessage());
+    assertEquals("Then dispatch again.", failed.failure().remedy().plain());
+    assertTrue(
+        noAddress.invocations().stream().anyMatch(c -> c.startsWith("incus delete acme-auth")));
+  }
+
+  /**
    * D8 reads the box's memory as its host says it, and a box whose memory cannot be read refuses.
    */
   @Test
@@ -579,7 +605,7 @@ class RunPlacesTest {
   }
 
   private static WorkspaceOwner withoutEmail(String handle) {
-    return new WorkspaceOwner(handle, handle, "", Map.of(), List.of());
+    return new WorkspaceOwner(handle, handle, "", Map.of(), List.of(), "fde_" + handle);
   }
 
   /**
@@ -683,7 +709,8 @@ class RunPlacesTest {
                 handle,
                 handle + "@sail.invalid",
                 reads.getAndIncrement() == 0 ? Map.of("github.com", "ghp_gone") : Map.of(),
-                List.of());
+                List.of(),
+                "fde_" + handle);
     var places = owning(incus, owners, told);
     var check = places.checkSpec("acme", config(), "auth", Lane.BUILD, "ana");
 
@@ -693,7 +720,8 @@ class RunPlacesTest {
     assertEquals(
         "github.com asks for credentials to fetch acme's repo app, and ana keeps no token for it.",
         refused.getMessage());
-    assertEquals(2, reads.get(), "read at the check and again at the give");
+    assertEquals(
+        3, reads.get(), "read at the check, for the clone's owner id, and again at the give");
     assertFalse(incus.invocations().stream().anyMatch(c -> c.contains("sail-strip")));
     assertFalse(incus.invocations().stream().anyMatch(c -> c.startsWith("incus file push")));
     assertTrue(

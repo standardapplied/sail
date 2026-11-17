@@ -76,7 +76,7 @@ public final class AuthorizedKeysSync {
   }
 
   public Outcome sync(Sqlite db) throws Exception {
-    return sync(() -> new FdeSshKeyStore(db).list());
+    return sync(() -> new FdeSshKeyStore(db).admitted());
   }
 
   public Outcome sync(Supplier<List<FdeSshKeyStore.SshKeyInfo>> registry) throws Exception {

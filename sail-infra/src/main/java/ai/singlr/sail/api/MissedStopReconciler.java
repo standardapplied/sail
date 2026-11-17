@@ -457,10 +457,7 @@ public final class MissedStopReconciler implements AutoCloseable {
     try {
       var unreached =
           unitProbe.disown(
-              (handle, id) ->
-                  id == null
-                      ? roster.containsKey(handle) && !gone.contains(handle)
-                      : roster.containsValue(id),
+              (handle, id) -> id != null && roster.containsValue(id),
               instance -> {
                 var tries = stripTries.get(instance);
                 return tries == null || tries.due(now);

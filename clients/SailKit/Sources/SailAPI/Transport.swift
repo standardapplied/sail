@@ -4,6 +4,7 @@ import Foundation
 public enum HTTPMethod: String, Sendable {
     case get = "GET"
     case post = "POST"
+    case delete = "DELETE"
 }
 
 /// A request to the server, relative to wherever a ``Transport`` reaches it.

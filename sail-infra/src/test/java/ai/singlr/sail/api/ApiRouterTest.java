@@ -1382,7 +1382,7 @@ class ApiRouterTest {
           List.of("main", "fix-login"),
           ((List<?>) YamlUtil.parseMap(listed.body()).get("workspaces"))
               .stream().map(row -> ((Map<?, ?>) row).get("name")).toList());
-      assertEquals(405, post(server, "/v1/projects/acme/workspaces", "token", "").statusCode());
+      assertEquals(405, put(server, "/v1/projects/acme/workspaces", "token", "").statusCode());
     }
   }
 

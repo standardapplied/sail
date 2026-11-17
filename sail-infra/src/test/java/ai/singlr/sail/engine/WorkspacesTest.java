@@ -37,6 +37,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.TreeMap;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.FutureTask;
 import java.util.concurrent.TimeUnit;
@@ -147,6 +148,7 @@ class WorkspacesTest {
     return new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
         .onOk("incus storage list --format json", pools)
         .onOk("incus list --format json", instances)
+        .onOk("incus list ^", instances)
         .onOk("incus snapshot list acme--tmpl --format json", snapshots);
   }
 
@@ -237,7 +239,9 @@ class WorkspacesTest {
         "-c",
         "user.sail.creating=1",
         "-c",
-        "user.sail.owner=eng");
+        "user.sail.owner=eng",
+        "-c",
+        "user.sail.owner_id=fde_eng");
   }
 
   private static int indexOf(ScriptedShellExecutor shell, List<String> argv) {
@@ -682,7 +686,7 @@ class WorkspacesTest {
             .onceOnFail("gh auth login", "error connecting to api.github.com");
     var ana =
         new WorkspaceOwner(
-            "ana", "Ana", "ana@sail.invalid", Map.of("github.com", "ghp_a"), List.of());
+            "ana", "Ana", "ana@sail.invalid", Map.of("github.com", "ghp_a"), List.of(), "fde_ana");
 
     var failure =
         assertThrows(
@@ -946,7 +950,9 @@ class WorkspacesTest {
         assertThrows(
             IllegalArgumentException.class, () -> workspaces.start(acme(), "main", TestOwners::of));
     var shellIn =
-        assertThrows(IllegalArgumentException.class, () -> workspaces.running("acme", "main"));
+        assertThrows(
+            IllegalArgumentException.class,
+            () -> workspaces.startExisting(acme(), "main", TestOwners::of, Workspaces.Entry.ANY));
     var create =
         assertThrows(
             IllegalArgumentException.class,
@@ -1174,29 +1180,27 @@ class WorkspacesTest {
     assertFalse(shell.invocations().stream().anyMatch(c -> c.startsWith("incus delete")));
   }
 
+  /** Ruling 6: a shell opens in a running workspace as it is, and starts a stopped one first. */
   @Test
-  void aShellOpensOnlyInARunningWorkspace() throws Exception {
+  void aShellEntersARunningWorkspaceAsItIsAndStartsAStoppedOne() throws Exception {
     var shell =
         incus(
             DIR_AND_ZFS,
             list(
                 workspace("acme", "fix-login", "Running", "v1"),
-                workspace("acme", "second", "Stopped", "v1"),
-                workspace("acme", "paused", "Frozen", "v1")),
+                workspace("acme", "second", "Stopped", "v1")),
             "[]");
-    var workspaces = workspaces(shell, ticks());
+    var workspaces = workspaces(shell, ticks(0, 1, 2, 3));
 
-    assertEquals("acme-fix-login", workspaces.running("acme", "fix-login"));
     assertEquals(
-        "Workspace 'second' of acme is stopped. Start it with: sail project workspace start acme"
-            + " second.",
-        assertThrows(IllegalStateException.class, () -> workspaces.running("acme", "second"))
-            .getMessage());
+        "acme-fix-login",
+        workspaces.startExisting(acme(), "fix-login", TestOwners::of, Workspaces.Entry.ANY));
     assertEquals(
-        "Workspace 'paused' of acme is frozen. Start it with: sail project workspace start acme"
-            + " paused.",
-        assertThrows(IllegalStateException.class, () -> workspaces.running("acme", "paused"))
-            .getMessage());
+        "acme-second",
+        workspaces.startExisting(acme(), "second", TestOwners::of, Workspaces.Entry.ANY));
+    assertEquals(
+        List.of("incus start acme-second"),
+        shell.invocations().stream().filter(c -> c.startsWith("incus start")).toList());
   }
 
   @Test
@@ -1267,7 +1271,7 @@ class WorkspacesTest {
   }
 
   @Test
-  void aWorkspaceInAStateIncusCannotRunIsListedAndRefusedAShell() throws Exception {
+  void aWorkspaceInAStateIncusCannotRunIsListedAsItIs() throws Exception {
     var shell =
         incus(
             DIR_AND_ZFS,
@@ -1287,11 +1291,6 @@ class WorkspacesTest {
             new Workspaces.Row("main", "acme", "not_created", null, null, null, null, null),
             new Workspaces.Row("odd", "acme-odd", "error", null, null, null, null, null)),
         workspaces.list("acme", id -> true).workspaces());
-    assertEquals(
-        "Workspace 'odd' of acme is not running: Incus lists it as"
-            + " Error[message=Unexpected container status: Error].",
-        assertThrows(IllegalStateException.class, () -> workspaces.running("acme", "odd"))
-            .getMessage());
   }
 
   @Test
@@ -1336,7 +1335,7 @@ class WorkspacesTest {
     workspaces(stale, ticks(0, 1, 2, 3, 4, 5, 6, 7))
         .create(acme(), "fix-login", source(), tempDir, "eng", TestOwners::of);
     workspaces(stopped, ticks(0, 1, 2)).start(acme(), "w", TestOwners::of);
-    workspaces(live, ticks()).running("acme", "w");
+    workspaces(live, ticks()).startExisting(acme(), "w", TestOwners::of, Workspaces.Entry.ANY);
     workspaces(live, ticks()).stop("acme", "w", NO_RUN);
     workspaces(live, ticks()).delete("acme", "w", NO_RUN, instance -> {});
 
@@ -1399,6 +1398,10 @@ class WorkspacesTest {
             ip -4 -o addr show dev eth0 | grep -q inet && break
             sleep 0.1
           done
+          if ! ip -4 -o addr show dev eth0 | grep -q inet; then
+            echo "$project-$workspace got no address on eth0 within 30 s, so its repos cannot be fetched; check that the network Incus gives it (incus config device show $project-$workspace) serves addresses (incus network show <network>)" >&2
+            exit 1
+          fi
         fi
         step network
         while [ "$#" -ge 2 ]; do
@@ -1625,7 +1628,11 @@ class WorkspacesTest {
             .getMessage());
     assertEquals(
         refusal,
-        assertThrows(IllegalStateException.class, () -> workspaces.running("acme", "fix-login"))
+        assertThrows(
+                IllegalStateException.class,
+                () ->
+                    workspaces.startExisting(
+                        acme(), "fix-login", TestOwners::of, Workspaces.Entry.ANY))
             .getMessage());
     assertFalse(
         shell.invocations().stream()
@@ -1659,7 +1666,9 @@ class WorkspacesTest {
         List.<Executable>of(
             () -> workspaces.create(acme(), "fix-login", source(), tempDir, "eng", TestOwners::of),
             () -> workspaces.start(acme(), "fix-login", TestOwners::of),
-            () -> workspaces.running("acme", "fix-login"))) {
+            () ->
+                workspaces.startExisting(
+                    acme(), "fix-login", TestOwners::of, Workspaces.Entry.ANY))) {
       assertEquals(refusal, assertThrows(IllegalStateException.class, verb).getMessage());
     }
     assertTrue(
@@ -2083,8 +2092,9 @@ class WorkspacesTest {
         "tank",
         ("\"user.sail.project\": \"acme\", \"user.sail.workspace\": \"fix-login\","
                 + " \"user.sail.template\": \"v1\", \"user.sail.ready\": \"1762941601000\","
-                + " \"user.sail.spec\": \"%s\", \"user.sail.owner\": \"%s\"")
-            .formatted(spec, owner));
+                + " \"user.sail.spec\": \"%s\", \"user.sail.owner\": \"%s\","
+                + " \"user.sail.owner_id\": \"fde_%s\"")
+            .formatted(spec, owner, owner));
   }
 
   /**
@@ -2369,7 +2379,9 @@ class WorkspacesTest {
                     "-c",
                     "user.sail.spec=fix-login",
                     "-c",
-                    "user.sail.owner=uday"))
+                    "user.sail.owner=uday",
+                    "-c",
+                    "user.sail.owner_id=fde_uday"))
             >= 0,
         String.join("\n", shell.invocations()));
     assertTrue(
@@ -2509,7 +2521,7 @@ class WorkspacesTest {
                 "set",
                 "acme-fix-login",
                 "user.sail.owner=uday",
-                "user.sail.owner_id="));
+                "user.sail.owner_id=fde_uday"));
     assertTrue(0 <= start && start < owned, String.join("\n", shell.invocations()));
     assertFalse(shell.invocations().stream().anyMatch(c -> c.startsWith("incus copy")));
   }
@@ -2818,7 +2830,7 @@ class WorkspacesTest {
     assertTrue(shell.invocations().stream().anyMatch(c -> c.contains("sail-strip")), "given");
     assertEquals(
         List.of(
-            "incus config set acme-fix-login user.sail.owner=ana user.sail.owner_id=",
+            "incus config set acme-fix-login user.sail.owner=ana user.sail.owner_id=fde_ana",
             "incus config set acme-fix-login user.sail.kept="),
         shell.invocations().stream().filter(c -> c.startsWith("incus config set")).toList());
   }
@@ -3086,7 +3098,7 @@ class WorkspacesTest {
    * N4: a listing shows a workspace's owner by the id its label stores. One whose id is no active
    * person's (the handle given to someone new) is shown as removed, never under the handle the new
    * holder now has; one whose id is active is shown by its handle; a label with a handle alone is
-   * shown by it, as before ids were stored.
+   * nobody's, shown with no owner.
    */
   @Test
   void aListingShowsAWorkspaceWhoseOwnerIdIsNoActivePersonsAsRemoved() throws Exception {
@@ -3094,15 +3106,20 @@ class WorkspacesTest {
         incus(
             DIR_AND_ZFS,
             list(
-                owned("acme-a", "Running", "tmp\", \"user.sail.owner_id\": \"fde_old_tmp"),
-                owned("acme-b", "Running", "tmp\", \"user.sail.owner_id\": \"fde_new_tmp"),
-                owned("acme-c", "Running", "uday")),
+                owned("acme-a", "Running", "tmp").replace("\"fde_tmp\"", "\"fde_old_tmp\""),
+                owned("acme-b", "Running", "tmp").replace("\"fde_tmp\"", "\"fde_new_tmp\""),
+                owned("acme-c", "Running", "uday"),
+                owned("acme-d", "Running", "ana")
+                    .replace(", \"user.sail.owner_id\": \"fde_ana\"", "")),
             "[]");
 
-    var rows = workspaces(shell, ticks()).list("acme", id -> id.equals("fde_new_tmp")).workspaces();
+    var rows =
+        workspaces(shell, ticks())
+            .list("acme", id -> List.of("fde_new_tmp", "fde_uday").contains(id))
+            .workspaces();
 
     assertEquals(
-        List.of("main:null", "a:" + Workspaces.REMOVED_OWNER, "b:tmp", "c:uday"),
+        List.of("main:null", "a:" + Workspaces.REMOVED_OWNER, "b:tmp", "c:uday", "d:null"),
         rows.stream().map(row -> row.name() + ":" + row.owner()).toList());
   }
 
@@ -3112,14 +3129,16 @@ class WorkspacesTest {
           "Uday C",
           "uday@sail.invalid",
           Map.of("github.com", "ghp_uday"),
-          List.of("ssh-ed25519 AAAAuday uday@laptop", "ssh-ed25519 AAAAbox uday@box"));
+          List.of("ssh-ed25519 AAAAuday uday@laptop", "ssh-ed25519 AAAAbox uday@box"),
+          "fde_uday");
   private static final WorkspaceOwner ANA =
       new WorkspaceOwner(
           "ana",
           "Ana",
           "ana@sail.invalid",
           Map.of("github.com", "ghp_ana"),
-          List.of("ssh-ed25519 AAAAana ana@laptop"));
+          List.of("ssh-ed25519 AAAAana ana@laptop"),
+          "fde_ana");
 
   /** A shell that keeps what each push carried, by destination, before its staging file goes. */
   static final class Pushing implements ShellExec {
@@ -3220,7 +3239,12 @@ class WorkspacesTest {
         shell.pushed.get("acme-fix-login/home/dev/.git-credentials"));
     assertTrue(
         scripted.invocations().stream()
-            .anyMatch(c -> c.startsWith("incus copy ") && c.contains("user.sail.owner=uday")));
+            .anyMatch(
+                c ->
+                    c.startsWith("incus copy ")
+                        && c.contains("user.sail.owner=uday")
+                        && c.contains("user.sail.owner_id=fde_uday")),
+        "the clone carries its owner's id beside the handle, so no label is ever handle-only");
     assertFalse(
         scripted.invocations().stream().anyMatch(c -> c.contains("ghp_uday")),
         "a token is never on a command line");
@@ -3233,7 +3257,7 @@ class WorkspacesTest {
   @Test
   void aPersonsCreateForAnOwnerWithNoEmailIsRefusedBeforeAnythingIsCopied() {
     var shell = incus(DIR_AND_ZFS, list(template("v1", "an-older-definition")), snapshots("v1"));
-    var owner = new WorkspaceOwner("ana", "Ana", "", Map.of(), List.of());
+    var owner = new WorkspaceOwner("ana", "Ana", "", Map.of(), List.of(), "fde_ana");
 
     var refused =
         assertThrows(
@@ -3263,7 +3287,7 @@ class WorkspacesTest {
     var shell = new Pushing(scripted);
     var owner =
         new WorkspaceOwner(
-            "ana", "Ana", "ana@sail.invalid", Map.of(), List.of("ssh-ed25519 AAAAana"));
+            "ana", "Ana", "ana@sail.invalid", Map.of(), List.of("ssh-ed25519 AAAAana"), "fde_ana");
 
     new Workspaces(shell, shell, ticks(0, 1, 2, 3, 4, 5, 6, 7), locks(), () -> 65536, url -> false)
         .create(
@@ -3310,7 +3334,7 @@ class WorkspacesTest {
                 "set",
                 "acme-fix-login",
                 "user.sail.owner=ana",
-                "user.sail.owner_id="));
+                "user.sail.owner_id=fde_ana"));
     assertTrue(
         0 <= stripped && stripped < gh && gh < owned, String.join("\n", scripted.invocations()));
     assertEquals(
@@ -3399,8 +3423,9 @@ class WorkspacesTest {
         status,
         "tank",
         ("\"user.sail.project\": \"acme\", \"user.sail.workspace\": \"%s\","
-                + " \"user.sail.ready\": \"1\", \"user.sail.owner\": \"%s\"")
-            .formatted(instance.substring("acme-".length()), owner));
+                + " \"user.sail.ready\": \"1\", \"user.sail.owner\": \"%s\","
+                + " \"user.sail.owner_id\": \"fde_%s\"")
+            .formatted(instance.substring("acme-".length()), owner, owner));
   }
 
   /**
@@ -3422,7 +3447,12 @@ class WorkspacesTest {
     var shell = new Pushing(scripted);
     var replaced =
         new WorkspaceOwner(
-            "ana", "Ana", "ana@sail.invalid", Map.of("github.com", "ghp_new"), ANA.keys());
+            "ana",
+            "Ana",
+            "ana@sail.invalid",
+            Map.of("github.com", "ghp_new"),
+            ANA.keys(),
+            "fde_ana");
 
     var unreached =
         new Workspaces(shell, shell, ticks(), locks(), () -> 65536, url -> false)
@@ -3541,7 +3571,8 @@ class WorkspacesTest {
     assertFalse(
         shell
             .invocations()
-            .contains("incus config set acme-fix-login user.sail.owner=ana user.sail.owner_id="),
+            .contains(
+                "incus config set acme-fix-login user.sail.owner=ana user.sail.owner_id=fde_ana"),
         "already hers: no owner is written");
   }
 
@@ -3664,7 +3695,8 @@ class WorkspacesTest {
     var keys = indexOfFirst(ran, c -> c.endsWith("acme-fix-login/home/dev/.ssh/authorized_keys"));
     var store = indexOfFirst(ran, c -> c.endsWith("acme-fix-login/home/dev/.git-credentials"));
     var labelled =
-        ran.indexOf("incus config set acme-fix-login user.sail.owner=ana user.sail.owner_id=");
+        ran.indexOf(
+            "incus config set acme-fix-login user.sail.owner=ana user.sail.owner_id=fde_ana");
     assertTrue(
         0 <= stripped && stripped < keys && keys < store && store < labelled,
         String.join("\n", ran));
@@ -3903,5 +3935,247 @@ class WorkspacesTest {
           failing);
       assertTrue(shell.invocations().contains("incus stop acme--tmpl"), failing);
     }
+  }
+
+  /**
+   * Review 1's final F-M1: a removal pass that listed a workspace while it was being made, and then
+   * waited for its lock, reads it again under the lock and leaves it to its owner, whose id the
+   * make wrote before letting go; nothing is stripped, nothing relabelled.
+   */
+  @Test
+  void aRemovalPassThatListedAWorkspaceBeingMadeLeavesItToItsOwnerOnceTheMakeLetsGo()
+      throws Exception {
+    var idWritten = new AtomicBoolean(false);
+    var listedBeforeTheId = new CountDownLatch(1);
+    var commands = new CopyOnWriteArrayList<String>();
+    ShellExec incus =
+        new ShellExec() {
+          @Override
+          public Result exec(List<String> command) {
+            return exec(command, null, Duration.ZERO);
+          }
+
+          @Override
+          public Result exec(List<String> command, Path workDir, Duration timeout) {
+            var joined = String.join(" ", command);
+            commands.add(joined);
+            if (joined.startsWith("incus list")) {
+              var listed = being(idWritten.get());
+              if (joined.equals("incus list --format json")) {
+                listedBeforeTheId.countDown();
+              }
+              return new Result(0, listed, "");
+            }
+            return new Result(0, "", "");
+          }
+
+          @Override
+          public boolean isDryRun() {
+            return false;
+          }
+        };
+    var workspaces = new Workspaces(incus, incus, ticks(), locks(), () -> 65536, url -> false);
+    var making = new CountDownLatch(1);
+    var letGo = new CountDownLatch(1);
+    var make =
+        Thread.ofVirtual()
+            .start(
+                () -> {
+                  try (var lock = workspaces.holdIfFree("acme-try").orElseThrow()) {
+                    making.countDown();
+                    letGo.await();
+                    idWritten.set(true);
+                  } catch (Exception e) {
+                    throw new IllegalStateException(e);
+                  }
+                });
+    assertTrue(making.await(30, TimeUnit.SECONDS));
+    var unreached = new AtomicReference<List<String>>();
+    var pass =
+        Thread.ofVirtual()
+            .start(
+                () -> {
+                  try {
+                    unreached.set(
+                        workspaces.disown((handle, id) -> "fde_ada".equals(id), name -> true));
+                  } catch (Exception e) {
+                    throw new IllegalStateException(e);
+                  }
+                });
+    assertTrue(listedBeforeTheId.await(30, TimeUnit.SECONDS), "the pass listed it mid-make");
+    letGo.countDown();
+    make.join();
+    pass.join();
+
+    assertEquals(List.of(), unreached.get());
+    assertEquals(
+        List.of(),
+        commands.stream()
+            .filter(c -> c.contains("sail-strip") || c.startsWith("incus config set"))
+            .toList());
+  }
+
+  /**
+   * Workspace {@code try} of acme being made for ada: its id in the label once {@code idWritten}.
+   */
+  private static String being(boolean idWritten) {
+    return list(
+        instance(
+            "acme-try",
+            "Running",
+            "tank",
+            "\"user.sail.project\": \"acme\", \"user.sail.workspace\": \"try\","
+                + " \"user.sail.creating\": \"1\", \"user.sail.owner\": \"ada\""
+                + (idWritten ? ", \"user.sail.owner_id\": \"fde_ada\"" : "")));
+  }
+
+  /**
+   * A token change listed a workspace as its owner's, and found it someone else's once it held the
+   * workspace's lock: it renews nothing there.
+   */
+  @Test
+  void aTokenChangeRenewsNothingInAWorkspaceThatWasReOwnedBeforeItHeldTheLock() throws Exception {
+    var scripted =
+        new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
+            .onOk("incus list ^acme-a$", list(owned("acme-a", "Running", "bob")))
+            .onOk("incus list --format json", list(owned("acme-a", "Running", "ana")));
+    var shell = new Pushing(scripted);
+
+    var unreached =
+        new Workspaces(shell, shell, ticks(), locks(), () -> 65536, url -> false)
+            .refresh(TestOwners.of("ana"), project -> acme());
+
+    assertEquals(List.of(), unreached);
+    assertEquals(Map.of(), shell.pushed);
+    assertTrue(scripted.invocations().stream().noneMatch(c -> c.startsWith("incus exec acme-a")));
+  }
+
+  private static final String ACME_PARTS =
+      """
+      [{"name": "acme", "status": "Running"},
+       {"name": "acme--tmpl", "status": "Stopped", "config": {"user.sail.template.of": "acme"}},
+       {"name": "acme-fix", "status": "Stopped",
+        "config": {"user.sail.project": "acme", "user.sail.workspace": "fix",
+                   "user.sail.ready": "1"}}]
+      """;
+
+  private static final String ACME_PARTS_AND_NEW =
+      ACME_PARTS
+          .strip()
+          .replaceFirst(
+              "]$",
+              """
+          ,{"name": "acme-new", "status": "Running",
+            "config": {"user.sail.project": "acme", "user.sail.workspace": "new",
+                       "user.sail.ready": "1"}}]""");
+
+  /** A destroy deletes the project's workspaces and template as it reads them under its locks. */
+  @Test
+  void aDestroyDeletesTheWorkspacesAndTemplateItReadsUnderItsLocks() throws Exception {
+    var shell = new ScriptedShellExecutor().onOk("incus list --format json", ACME_PARTS);
+    var deleted = new ArrayList<List<String>>();
+
+    workspaces(shell, System::nanoTime)
+        .whileDestroying("acme", List.of("acme-fix", "acme--tmpl"), deleted::add);
+
+    assertEquals(List.of(List.of("acme-fix", "acme--tmpl")), deleted);
+  }
+
+  /**
+   * A workspace a create in flight made by the time the destroy holds the box's create lock is read
+   * again there, and refuses the destroy, naming it: nothing is deleted, so no workspace is left of
+   * a project that is gone, and nothing is deleted that the destroy did not show.
+   */
+  @Test
+  void aDestroyReadsAgainUnderTheCreateLockAndRefusesNamingAWorkspaceMadeMeanwhile()
+      throws Exception {
+    var shell =
+        new ScriptedShellExecutor()
+            .onceOnOk("incus list --format", ACME_PARTS)
+            .onOk("incus list --format json", ACME_PARTS_AND_NEW);
+    var deleted = new ArrayList<List<String>>();
+
+    var refused =
+        assertThrows(
+            IllegalStateException.class,
+            () ->
+                workspaces(shell, System::nanoTime)
+                    .whileDestroying("acme", List.of("acme-fix", "acme--tmpl"), deleted::add));
+
+    assertTrue(
+        refused
+            .getMessage()
+            .contains(
+                "Project acme is not destroyed: acme-new was made after the destroy read what it"
+                    + " would delete."),
+        refused.getMessage());
+    assertTrue(refused.getMessage().contains("sail project destroy acme"), refused.getMessage());
+    assertEquals(List.of(), deleted);
+  }
+
+  /**
+   * A create holding the box's create lock past {@link Workspaces#CREATE_WAIT} refuses the destroy,
+   * saying what holds it and how to try again; nothing is deleted.
+   */
+  @Test
+  void aDestroyThatACreateOutlastsIsRefusedSayingWhatHoldsItAndNothingGoes() throws Exception {
+    var shell = new ScriptedShellExecutor().onOk("incus list --format json", ACME_PARTS);
+    var deleted = new ArrayList<List<String>>();
+    var refused = new AtomicReference<Exception>();
+
+    HeldLocks.whileHeld(
+        locks().resolve(Workspaces.CREATE_LOCK),
+        () -> {
+          refused.set(
+              assertThrows(
+                  IllegalStateException.class,
+                  () ->
+                      workspaces(shell, HeldLocks.pastEveryWait())
+                          .whileDestroying(
+                              "acme", List.of("acme-fix", "acme--tmpl"), deleted::add)));
+          return null;
+        });
+
+    assertTrue(
+        refused
+            .get()
+            .getMessage()
+            .contains(
+                "Project acme is not destroyed: This runner is making another workspace, which"
+                    + " takes about a minute."),
+        refused.get().getMessage());
+    assertTrue(
+        refused.get().getMessage().contains("sail project destroy acme"),
+        refused.get().getMessage());
+    assertEquals(List.of(), deleted);
+  }
+
+  /** A workspace another change holds past the wait refuses the destroy the same way. */
+  @Test
+  void aDestroyOfAWorkspaceAnotherChangeHoldsIsRefusedAndNothingGoes() throws Exception {
+    var shell = new ScriptedShellExecutor().onOk("incus list --format json", ACME_PARTS);
+    var deleted = new ArrayList<List<String>>();
+    var refused = new AtomicReference<Exception>();
+
+    HeldLocks.whileHeld(
+        locks().resolve("acme-fix.workspace.lock"),
+        () -> {
+          refused.set(
+              assertThrows(
+                  IllegalStateException.class,
+                  () ->
+                      workspaces(shell, HeldLocks.pastEveryWait())
+                          .whileDestroying(
+                              "acme", List.of("acme-fix", "acme--tmpl"), deleted::add)));
+          return null;
+        });
+
+    assertTrue(
+        refused
+            .get()
+            .getMessage()
+            .contains("Project acme is not destroyed: Workspace fix of acme is being stopped"),
+        refused.get().getMessage());
+    assertEquals(List.of(), deleted);
   }
 }
