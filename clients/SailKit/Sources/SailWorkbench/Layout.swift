@@ -1,4 +1,5 @@
 import Foundation
+import SailTerminalWire
 
 /// A pane's identity in its workbench, made once and never given to another pane.
 public struct PaneID: Hashable, Comparable, Sendable, CustomStringConvertible {
@@ -54,6 +55,18 @@ public enum Place: Hashable, Codable, Sendable {
     public var newSessionName: String {
         let prefix = onRunner ? Self.runnerSessions : Self.thisMacSessions
         return prefix + UUID().uuidString.prefix(8).lowercased()
+    }
+
+    /// What a new tab here asks its host to make, the one place the app builds it: a login shell
+    /// named `session` at `size`, in this Mac's folder; in a workspace, where the runner starts it in
+    /// the instance's own directory, so it names no folder.
+    public func sessionCreate(session: String, size: TerminalSize) -> SessionCreate {
+        switch self {
+        case let .thisMac(folder):
+            SessionCreate(session: session, command: [], workingDirectory: folder, project: "", room: "", size: size)
+        case let .workspace(project, name):
+            SessionCreate(session: session, command: [], workingDirectory: "", project: project, room: "", size: size, workspace: name)
+        }
     }
 
     /// What a tab here is called until the person names it, words only: nil on this Mac, where its

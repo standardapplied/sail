@@ -14,7 +14,7 @@ import SailWorkbench
 @MainActor
 public final class TerminalPane: NSView {
     public enum Start: Equatable, Sendable {
-        case open(folder: String)
+        case open
         case attach
     }
 
@@ -102,15 +102,9 @@ public final class TerminalPane: NSView {
             return
         }
         let size = TerminalSize(columns: Int32(grid.columns), rows: Int32(grid.rows))
-        let (project, workspace) = if case let .workspace(project, workspace) = place { (project, workspace) } else { ("", "") }
         let next = switch start {
-        case let .open(folder):
-            TerminalSession(
-                open: SessionCreate(
-                    session: name, command: [], workingDirectory: folder, project: project, room: "", size: size, workspace: workspace
-                ),
-                door: door, screen: screen
-            )
+        case .open:
+            TerminalSession(open: place.sessionCreate(session: name, size: size), door: door, screen: screen)
         case .attach:
             TerminalSession(attach: name, write: true, door: door, screen: screen)
         }

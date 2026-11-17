@@ -8,6 +8,7 @@ package ai.singlr.sail.pty;
 import ai.singlr.sail.common.Remedied;
 import ai.singlr.sail.common.Remedy;
 import java.io.IOException;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
@@ -135,12 +136,12 @@ public interface PtyAdmission {
   void room(String room, String project, PtyIdentity.Person who) throws IOException;
 
   /**
-   * How a session {@code who} opens in the folder {@code named} runs there, or throws with the
-   * reason before any process starts. The server takes the folder as named ({@link
-   * Folder#asNamed}).
+   * How a session {@code who} opens on this box itself, in the folder {@code named}, runs there, or
+   * throws with the reason, for a person, before any process starts. The server opens it in the
+   * folder named, or in its own home when none is ({@link Folder#onThisBox}).
    */
   default Folder folder(Path named, PtyIdentity.Person who) throws IOException {
-    return Folder.asNamed(named);
+    return Folder.onThisBox(named);
   }
 
   /**
@@ -154,9 +155,33 @@ public interface PtyAdmission {
       env = Map.copyOf(env);
     }
 
+    /**
+     * Where a session in a container or a workspace runs on this box: its {@code incus exec} starts
+     * in {@code /}, and its shell in the instance's own {@code /home/dev/workspace}, as {@code sail
+     * project workspace shell}'s does; no folder a client names is used for it.
+     */
+    public static final Folder INSTANCE = asNamed(Path.of("/"));
+
     /** {@code path} as named, a login {@code bash}, nothing added: the server's sessions. */
     public static Folder asNamed(Path path) {
       return new Folder(path, List.of("bash", "-l"), Map.of());
+    }
+
+    /**
+     * A session on this box itself, in {@code named}: this process's home when nothing is named,
+     * else the folder named by its absolute path, which must be one here; refused for a person
+     * otherwise, the folder named and nothing else.
+     */
+    public static Folder onThisBox(Path named) throws IOException {
+      if (named.toString().isEmpty()) {
+        return asNamed(Path.of(System.getProperty("user.home")));
+      }
+      if (!named.isAbsolute() || !Files.isDirectory(named)) {
+        throw Remedied.io(
+            "There is no folder '" + named + "' on this box to open the terminal in.",
+            Remedy.of("Open it in a folder that exists here, or name none to open it at home."));
+      }
+      return asNamed(named);
     }
 
     /** The command a session that asked for {@code requested} runs here. */

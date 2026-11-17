@@ -2,6 +2,7 @@
 import CoreGraphics
 #endif
 import Foundation
+import SailTerminalWire
 import SailWorkbench
 import Testing
 
@@ -286,6 +287,12 @@ import Testing
         #expect(bench.title(of: tab.id) == "deploy")
         #expect(session.hasPrefix(Place.runnerSessions) && !session.hasPrefix(Place.thisMacSessions))
         #expect(place.folder.isEmpty)
+        let size = TerminalSize(columns: 80, rows: 24)
+        #expect(place.sessionCreate(session: session, size: size)
+            == SessionCreate(session: session, command: [], workingDirectory: "", project: "acme", room: "", size: size, workspace: "try"),
+            "a workspace tab names no folder: the runner starts it in the instance's own directory")
+        #expect(Place.thisMac(folder: "/Users/u/src").sessionCreate(session: "mac-1", size: size)
+            == SessionCreate(session: "mac-1", command: [], workingDirectory: "/Users/u/src", project: "", room: "", size: size))
         #expect(bench.folderForNewPane(hostNames: [], isFolder: { _ in true }) == nil)
         let restored = Workbench.restore(bench.arrangement, live: ["mac-t1"], home: "/home/u")
         #expect(restored.panes.values.map(\.session) == ["mac-t1"])
