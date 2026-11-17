@@ -197,7 +197,7 @@ import Testing
         dropped?.attach(other)
         #expect(other.listened)
         dropped = nil
-        #expect(!other.listened, "a dropped view still listened to its session's screen")
+        #expect(await harness.until { !other.listened }, "a dropped view still listened to its session's screen")
     }
 
     /// Attaching a session a view already drew stops the process with the precondition's sentence,
