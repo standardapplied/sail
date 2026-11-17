@@ -52,6 +52,8 @@ final class Driver {
     let mainThread = Heartbeat.onTheMainThread { CACurrentMediaTime() }
     let ownThread = Heartbeat.onItsOwnThread { CACurrentMediaTime() }
     lazy var mainStacks = MainStacks(watching: mainThread)
+    /// Every stretch of a judged wait excused as the machine's, with its evidence, once each.
+    private var excused: [String] = []
 
     struct Result: Encodable {
         let index: Int
@@ -154,6 +156,8 @@ final class Driver {
             Self.say("drive \(index) \(name): \(skipped ? "skipped" : ok ? "ok" : "FAILED") in \(String(format: "%.2f", seconds)) s \(detail)")
             if !ok { break }
         }
+        Self.say("drive: \(excused.count) stretch\(excused.count == 1 ? "" : "es") of a judged wait excused as the machine's"
+            + (excused.isEmpty ? "" : ": " + excused.joined(separator: "; ")) + "; the main thread's sampler took \(mainStacks.cost)")
         let passed = results.count == steps.count && results.allSatisfy(\.ok)
         let report = Report(
             passed: passed, hertz: shell.window.screen?.maximumFramesPerSecond ?? 0, scale: terminal.metrics.scale, steps: results,
@@ -404,15 +408,22 @@ final class Driver {
 
     /// A wait timed on a hosted runner, judged as the app's, in ms: less the machine's share of
     /// that same wait (sail#417), the larger of the drive's own thread's stall over it and the time
-    /// the main thread was runnable and got no CPU while the machine had none idle; what is left
-    /// is ours, against the same budget as before.
+    /// the main thread was proven runnable without CPU while the machine had none idle
+    /// (``MachineShare/starvation(in:looks:)``); what is left is ours, against the same budget as
+    /// before. Each excused stretch is said with its looks, and kept for the drive's last line.
     func ours(_ wait: Span?, less tick: Double = 0) -> (ours: Double, said: String) {
         let wait = wait ?? Span(0, 0)
         let own = ownThread.stalls, looks = mainStacks.looks
+        let proven = MachineShare.starvation(in: wait, looks: looks)
         let ownHeld = own.shared(with: wait), starved = MachineShare.starved(in: wait, looks: looks)
         let ours = max(0, wait.length - tick - MachineShare.of(wait, own: own, main: looks)) * 1000
+        let seen = looks.filter { $0.time >= wait.start && $0.time <= wait.end }.count
+        proven.map(\.told).filter { !excused.contains($0) }.forEach { excused.append($0) }
+        let evidence = proven.isEmpty
+            ? "no run of \(MachineShare.fewestLooks) looks proved it starved (\(seen) looks in the wait)"
+            : proven.map(\.told).joined(separator: "; ")
         return (ours, "waited \(Self.ms((wait.length - tick) * 1000)) ms, the drive's own thread held \(Self.ms(ownHeld * 1000)) ms of it, "
-            + "the main thread runnable without CPU on a machine with none idle \(Self.ms(starved * 1000)) ms of it, ours \(Self.ms(ours)) ms")
+            + "the main thread runnable without CPU on a machine with none idle \(Self.ms(starved * 1000)) ms of it (\(evidence)), ours \(Self.ms(ours)) ms")
     }
 
     /// The main thread's longest hold, its heartbeat's longest gap (in `span` when given) less one
