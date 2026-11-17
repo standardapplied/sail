@@ -723,9 +723,9 @@ extension Driver {
         process.waitUntilExit()
     }
 
-    /// The window in full screen, filling its screen, the whole screen taken in both looks, then out
-    /// of it again, to the frame it had before, inside its screen; each frame seen on the way back is
-    /// said. A window that does not enter full screen fails the step; one that cannot (on no screen,
+    /// The window in full screen once AppKit says the transition ended, filling its screen, the whole
+    /// screen taken in both looks, then out of it again once AppKit says so, to the frame it had
+    /// before, inside its screen; each frame seen on the way back is said. A window that does not enter full screen fails the step; one that cannot (on no screen,
     /// or not allowing full screen) is skipped, saying why.
     private func fullScreen(_ name: String) async -> (Bool, String) {
         let window = shell.window
@@ -734,9 +734,16 @@ extension Driver {
         guard window.styleMask.contains(.resizable), !window.collectionBehavior.contains(.fullScreenNone) else {
             return (true, "skipped: the window does not allow full screen")
         }
+        let entered = Mutex(false), exited = Mutex(false)
+        let center = NotificationCenter.default
+        let watches = [
+            center.addObserver(forName: NSWindow.didEnterFullScreenNotification, object: window, queue: nil) { _ in entered.withLock { $0 = true } },
+            center.addObserver(forName: NSWindow.didExitFullScreenNotification, object: window, queue: nil) { _ in exited.withLock { $0 = true } },
+        ]
+        defer { watches.forEach { center.removeObserver($0) } }
         window.toggleFullScreen(nil)
-        guard await waitUntil(10, { window.styleMask.contains(.fullScreen) && window.frame == screen.frame }) else {
-            return (false, "the window did not fill its screen in full screen within 10 s: its frame \(NSStringFromRect(window.frame)), the screen's \(NSStringFromRect(screen.frame))")
+        guard await waitUntil(10, { entered.withLock { $0 } && window.frame == screen.frame }) else {
+            return (false, "the window did not finish entering full screen within 10 s: its frame \(NSStringFromRect(window.frame)), the screen's \(NSStringFromRect(screen.frame))")
         }
         let (taken, said) = await inBothLooks(name) { file in await self.capture([], to: file) }
         var passed: [String] = []
@@ -747,7 +754,7 @@ extension Driver {
         window.toggleFullScreen(nil)
         let back = await waitUntil(10) {
             sample()
-            return !window.styleMask.contains(.fullScreen) && window.frame == before
+            return exited.withLock { $0 } && window.frame == before
         }
         let after = window.frame, visible = window.screen?.visibleFrame ?? .zero
         let same = abs(after.width - before.width) < 1 && abs(after.height - before.height) < 1
