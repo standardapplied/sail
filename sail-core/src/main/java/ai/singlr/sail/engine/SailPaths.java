@@ -42,6 +42,15 @@ public final class SailPaths {
    */
   public static final Path SYSTEM_UNIT = Path.of("/etc/systemd/system/sail-api.service");
 
+  /**
+   * Set ({@code -Dsail.never-the-system-sail=true}) by a JVM that must never take the box's own
+   * provisioned Sail for its own, a test run: {@link #dataDir()} and {@link #hostConfigPath()} then
+   * resolve as on a box with no provisioned Sail, to {@link #sailDir()}, which the run sets through
+   * {@code user.home}. Unlike {@code $SAIL_DATA_DIR}, it names no directory, so nothing reads it as
+   * a provisioned one.
+   */
+  public static final String NEVER_THE_SYSTEM_SAIL = "sail.never-the-system-sail";
+
   /** The provisioned system data directory, where a host's control-plane database lives. */
   public static Path systemDataDir() {
     return SYSTEM_DATA_DIR;
@@ -58,7 +67,13 @@ public final class SailPaths {
    */
   public static Path dataDir() {
     return dataDir(
-        System.getenv("SAIL_DATA_DIR"), Files.isReadable(SYSTEM_DATA_DIR.resolve("sail.db")));
+        System.getenv("SAIL_DATA_DIR"),
+        takesTheSystemSail() && Files.isReadable(SYSTEM_DATA_DIR.resolve("sail.db")));
+  }
+
+  /** Whether this JVM may take the box's provisioned Sail ({@link #NEVER_THE_SYSTEM_SAIL}). */
+  static boolean takesTheSystemSail() {
+    return !Boolean.getBoolean(NEVER_THE_SYSTEM_SAIL);
   }
 
   /**
@@ -152,7 +167,8 @@ public final class SailPaths {
    * unreadable to them. Solo/dev installs stay under {@code ~/.sail} unchanged.
    */
   public static Path hostConfigPath() {
-    return hostConfigPath(Files.exists(SYSTEM_DATA_DIR.resolve("host.yaml")));
+    return hostConfigPath(
+        takesTheSystemSail() && Files.exists(SYSTEM_DATA_DIR.resolve("host.yaml")));
   }
 
   /** Pure resolver; visible for tests so resolution can be exercised without the environment. */

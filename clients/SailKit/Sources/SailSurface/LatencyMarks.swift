@@ -4,7 +4,7 @@ import SailTerminal
 /// The view's latency, on the host clock in seconds (`CACurrentMediaTime`, which key event and
 /// drawable timestamps share): key event to bytes written; output (the moment the session's screen
 /// took it) to the frame that draws it, committed and then on the display; key event to the frame
-/// that shows its echo, a key's echo being the first output after its bytes were written. Output is
+/// that shows its echo, a key's echo being the first output after its bytes began to go. Output is
 /// drawn by the frame whose read of the screen came after it; output read by a frame that drew just
 /// before it was told is put to that frame, which did show it.
 ///
@@ -21,7 +21,7 @@ public struct LatencyMarks: Sendable {
         var keys: [Double]
     }
 
-    private var awaitingEcho: [(event: Double, written: Double)] = []
+    private var awaitingEcho: [(event: Double, sent: Double)] = []
     private var pending: [Output] = []
     private var committed: [UInt64: (time: Double, outputs: [Output])] = [:]
     private var targets: [UInt64: Double] = [:]
@@ -62,22 +62,31 @@ public struct LatencyMarks: Sendable {
 
     public init() {}
 
-    /// A key that happened at `event` had its bytes written at `written`.
-    public mutating func keyWritten(event: Double, written: Double) {
+    /// A key that happened at `event` had its bytes begin to go at `sent` and written at `written`.
+    /// Its echo may already have been told, even drawn, before the input queue got here: the key
+    /// is then put to the first output since `sent` that no frame has yet shown.
+    public mutating func keyWritten(event: Double, sent: Double, written: Double) {
         if (written - event).isFinite, written >= event {
             keyWrites.append(Span(event, written))
             if keyWrites.count > Self.capacity { keyWrites.removeFirst() }
         }
-        awaitingEcho.append((event, written))
-        if awaitingEcho.count > Self.capacity { awaitingEcho.removeFirst() }
+        let drawn = committed.keys.sorted().first { committed[$0]?.outputs.contains { $0.time >= sent } == true }
+        if let drawn, let index = committed[drawn]?.outputs.firstIndex(where: { $0.time >= sent }) {
+            committed[drawn]?.outputs[index].keys.append(event)
+        } else if let index = pending.firstIndex(where: { $0.time >= sent }) {
+            pending[index].keys.append(event)
+        } else {
+            awaitingEcho.append((event, sent))
+            if awaitingEcho.count > Self.capacity { awaitingEcho.removeFirst() }
+        }
     }
 
     /// The session's screen took output at `time`: one tick of its screen updates, which may hold
     /// several reads of output when the view had not yet taken the tick before.
     public mutating func output(at time: Double) {
         screenUpdates += 1
-        let echoed = awaitingEcho.filter { $0.written <= time }.map(\.event)
-        awaitingEcho.removeAll { $0.written <= time }
+        let echoed = awaitingEcho.filter { $0.sent <= time }.map(\.event)
+        awaitingEcho.removeAll { $0.sent <= time }
         pending.append(Output(time: time, keys: echoed))
         if pending.count > Self.capacity { pending.removeFirst() }
     }
