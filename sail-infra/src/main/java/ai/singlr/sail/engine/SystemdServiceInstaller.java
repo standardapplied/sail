@@ -10,6 +10,7 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -44,6 +45,12 @@ public final class SystemdServiceInstaller {
 
   /** Systemd unit name as understood by {@code systemctl}. */
   public static final String UNIT_NAME = "sail-api.service";
+
+  /**
+   * How long systemd waits for the server to stop before it kills it ({@code TimeoutStopSec}): set
+   * in the unit, not left to the host's default, so what stopping waits for is sized against it.
+   */
+  public static final Duration STOP_TIMEOUT = Duration.ofSeconds(90);
 
   /** Install mode — user-level vs system-level systemd. */
   public enum Mode {
@@ -187,12 +194,20 @@ public final class SystemdServiceInstaller {
         Restart=on-failure
         RestartSec=2
         SuccessExitStatus=143
+        TimeoutStopSec=%d
         LimitNOFILE=4096
 
         [Install]
         WantedBy=%s
         """
-        .formatted(userClause, sailBinary.get(), bindAddress, bindPort, remoteFlag, wantedBy);
+        .formatted(
+            userClause,
+            sailBinary.get(),
+            bindAddress,
+            bindPort,
+            remoteFlag,
+            STOP_TIMEOUT.toSeconds(),
+            wantedBy);
   }
 
   /**
