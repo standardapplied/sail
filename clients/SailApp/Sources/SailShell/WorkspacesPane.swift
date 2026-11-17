@@ -116,9 +116,12 @@ public final class WorkspacesPane: NSView, NSTableViewDataSource, NSTableViewDel
             rows = []
             return list.reloadData()
         }
+        let kept = wanted ?? (rows.indices.contains(list.selectedRow) ? rows[list.selectedRow].name : nil)
         rows = try await client.send(.workspaces(project: project)).rows(for: person.handle)
         list.reloadData()
-        if let index = rows.firstIndex(where: { $0.name == wanted }) { list.selectRowIndexes([index], byExtendingSelection: false) }
+        if let index = rows.firstIndex(where: { $0.name == kept }) ?? (rows.isEmpty ? nil : 0) {
+            list.selectRowIndexes([index], byExtendingSelection: false)
+        }
         enableOpen()
     }
 
@@ -183,6 +186,7 @@ public final class WorkspacesPane: NSView, NSTableViewDataSource, NSTableViewDel
         let scroll = NSScrollView()
         scroll.documentView = list
         scroll.hasVerticalScroller = true
+        scroll.autohidesScrollers = true
         scroll.drawsBackground = false
         open.target = self
         name.placeholderString = "name of a new workspace"
