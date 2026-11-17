@@ -91,6 +91,22 @@ class CiChangesTest {
     assertEquals(EVERY_LANE, lanes("pull_request", base));
   }
 
+  @ParameterizedTest(name = "{0} deleted: ci={1}, terminal={2}, clients={3}")
+  @CsvSource({
+    "sail-core/src/main/java/A.java, true, true, false",
+    "clients/SailKit/Kit.swift, false, true, true",
+    "clients/SailApp/App.swift, false, false, true"
+  })
+  void aDeletedFileRunsTheLanesThatReadIt(String path, String ci, String terminal, String clients)
+      throws Exception {
+    git("rm", "-q", path);
+    commit();
+
+    assertEquals(
+        List.of("clients=" + clients, "ci=" + ci, "terminal=" + terminal),
+        lanes("pull_request", base));
+  }
+
   @Test
   void anEmptyChangeRunsEveryLane() throws Exception {
     commit();
