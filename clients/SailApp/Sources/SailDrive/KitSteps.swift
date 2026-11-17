@@ -6,8 +6,11 @@ import Synchronization
 
 /// The controls' gallery: one sheet of controls in every state, in a window of its own for each
 /// look (light, dark, and each under Increase Contrast), with motion reduced so every shot is
-/// still. Each state is reached as a person reaches it: hover through the control's own
-/// `mouseEntered`, a press through its highlight, focus by Tab, text by typing. The window is taken
+/// still. Focus is reached by Tab, text by typing, and Space presses each focused button. Hover and
+/// a press are set through the control's own `mouseEntered` and its highlight: the window server,
+/// not `sendEvent`, makes a tracking area's enter events, and moving the real pointer needs the
+/// Accessibility permission the drive is built not to need; a real click ends its press before a
+/// shot can see it. The unit tests check the tracking area is the box. The window is taken
 /// as the screen shows it (`screencapture -l`), at rest and once per focused specimen, and cut into
 /// `<control>-<state>-<look>.png` beside the whole sheet's `<sheet>-<look>.png`.
 extension Driver {
@@ -50,7 +53,9 @@ extension Driver {
             cut += save(rest, specimen, window: window, as: "\(specimen.name)-\(look)") ? 1 : 0
         }
         for specimen in kit.specimens where specimen.focused {
-            guard await tab(to: specimen, in: window) else { return (false, "Tab never brought the keys to \(specimen.name)") }
+            guard await tab(to: specimen, in: window, skipping: kit.specimens.filter { $0.state.contains("disabled") }) else {
+                return (false, "Tab never brought the keys to \(specimen.name), or gave them to a disabled control on the way")
+            }
             if specimen.view is SailTextField, let right = Keys.named("arrowRight", modifiers: []) { send(right) }
             guard let shot = await take(window, kit: kit, as: nil) else { return (false, "the window could not be taken") }
             cut += save(shot, specimen, window: window, as: "\(specimen.name)-\(look)") ? 1 : 0
@@ -89,9 +94,12 @@ extension Driver {
         return true
     }
 
-    private func tab(to specimen: Specimen, in window: NSWindow) async -> Bool {
+    /// Tab pressed until `specimen` holds the keys; false if it never does or a disabled control
+    /// takes them on the way.
+    private func tab(to specimen: Specimen, in window: NSWindow, skipping disabled: [Specimen]) async -> Bool {
         window.makeFirstResponder(nil)
         for _ in 0 ..< 60 {
+            if disabled.contains(where: { $0.holdsTheKeys(window) }) { return false }
             if specimen.holdsTheKeys(window) { return true }
             key("\t")
         }
@@ -202,8 +210,8 @@ final class Kit {
         creating.busy = "Creating"
         row("In flight", [opening, starting, creating])
         let open = button("Open", .primary, size: .small), check = button("Check Again", .secondary)
-        open.hint("⏎", mono: mono)
-        check.hint("⌘R", mono: mono)
+        open.shortcut("\r", mono: mono)
+        check.shortcut("r", modifiers: .command, mono: mono)
         row("Sizes, symbols and hints", [
             held("button-small-create", button("Create", .primary, size: .small)), held("button-symbol-build-template", button("Build Template", .primary, symbol: "hammer")),
             held("button-large-sign-in", button("Sign In with Passkey", .primary, size: .large)),

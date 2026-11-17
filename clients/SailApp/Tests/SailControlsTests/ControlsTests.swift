@@ -83,28 +83,37 @@ import Testing
         }
     }
 
-    /// Focus: the canvas gap on the box's first point out, the halo on the next three, nothing
-    /// after; gone when the focus goes.
+    /// Focus: on a surface (so the canvas gap differs from what is under it), the gap on the box's
+    /// first point out, the halo on the next three and nothing on the fifth; gone when the focus goes,
+    /// and never in a window that is not key.
     @Test(arguments: [("light", Look.light), ("dark", Look.dark)])
     func aFocusedButtonHasTheGapAndTheHaloOutsideItsBox(_ name: String, _ look: Look) throws {
-        let canvas = NSColor(Tint(look.canvas))
-        let halo = Self.swatch(canvas, [NSColor(look.focusHalo)], scale: 1)
+        let surface = NSColor(Tint(look.surface))
         for kind in [ButtonKind.primary, .secondary, .quiet] {
             for scale in [1.0, 2.0] {
                 let button = Self.sized(SailButton("Open", kind: kind, look: look, target: nil, action: nil))
+                let holder = NSView(frame: button.frame.insetBy(dx: -4, dy: -4))
+                holder.addSubview(button)
+                button.setFrameOrigin(NSPoint(x: 4, y: 4))
+                let (window, backdrop) = Self.window(holding: holder, on: surface)
+                defer { window.orderOut(nil) }
                 let focused = button.becomeFirstResponder()
                 #expect(focused)
-                let box = button.box
-                let gap = Self.colour(button, on: canvas, at: NSPoint(x: box.minX - 0.5, y: box.midY), scale: scale)
-                let ring = Self.colour(button, on: canvas, at: NSPoint(x: box.minX - 2.5, y: box.midY), scale: scale)
-                let outer = Self.colour(button, on: canvas, at: NSPoint(x: box.minX - 3.5, y: box.midY), scale: scale)
-                let bare = Self.swatch(canvas, [], scale: scale)
-                #expect(Self.tells(gap, bare, from: halo), "\(name) \(kind) at \(scale)x: the gap is \(gap)")
-                #expect(Self.tells(ring, halo, from: bare) && Self.tells(outer, halo, from: bare), "\(name) \(kind) at \(scale)x: the halo is \(ring), \(outer), not \(halo)")
+                let box = button.box.offsetBy(dx: 4, dy: 4)
+                func at(_ out: Double) -> [Double] {
+                    backdrop.colour(at: NSPoint(x: Double(box.minX) - out, y: Double(box.midY)), scale: scale)
+                }
+                let under = Self.swatch(surface, [], scale: scale), gap = Self.swatch(surface, [NSColor(Tint(look.canvas))], scale: scale)
+                let halo = Self.swatch(surface, [NSColor(look.focusHalo)], scale: scale)
+                #expect(Self.tells(at(0.5), gap, from: under), "\(name) \(kind) at \(scale)x: the gap is \(at(0.5))")
+                #expect(Self.tells(at(2.5), halo, from: gap) && Self.tells(at(3.5), halo, from: under), "\(name) \(kind) at \(scale)x: the halo is \(at(2.5)), \(at(3.5))")
+                #expect(Self.tells(at(4.5), under, from: halo), "\(name) \(kind) at \(scale)x: the halo reaches past 4 pt: \(at(4.5))")
+                window.key = false
+                #expect(Self.tells(at(2.5), under, from: halo), "\(name) \(kind): the halo shows in a window that is not key")
+                window.key = true
                 let resigned = button.resignFirstResponder()
                 #expect(resigned)
-                let after = Self.colour(button, on: canvas, at: NSPoint(x: box.minX - 2.5, y: box.midY), scale: scale)
-                #expect(Self.tells(after, Self.swatch(canvas, [], scale: scale), from: halo), "\(name) \(kind): the halo stayed after the focus went")
+                #expect(Self.tells(at(2.5), under, from: halo), "\(name) \(kind): the halo stayed after the focus went")
             }
         }
     }
@@ -146,15 +155,24 @@ import Testing
         button.isDefault = true
         #expect(button.keyEquivalent == "\r")
         let icon = SailButton(icon: "arrow.clockwise", label: "List Again", look: .light, target: nil, action: nil)
-        #expect(icon.accessibilityLabel() == "List Again" && icon.intrinsicContentSize == NSSize(width: 32, height: 32))
+        #expect(icon.accessibilityLabel() == "List Again" && icon.intrinsicContentSize == NSSize(width: 32, height: 32) && icon.toolTip == "List Again")
+        button.title = "Start and Open"
+        #expect(button.accessibilityLabel() == "Start and Open", "VoiceOver reads the old title")
+        _ = Self.sized(button)
+        button.updateTrackingAreas()
+        #expect(button.trackingAreas.contains { $0.rect == button.box && $0.owner === button }, "hover is not tracked on the box")
     }
 
     /// The symbol leads the label by 6 pt and the hint trails it by 8, the three centred in the
     /// box; right to left they swap sides.
     @Test func theSymbolLeadsTheHintTrailsAndRightToLeftMirrors() throws {
         let button = SailButton("New Workspace", kind: .secondary, symbol: "plus", look: .light, target: nil, action: nil)
-        button.hint("⌘N", mono: try Self.mono())
+        button.shortcut("n", modifiers: .command, mono: try Self.mono())
         _ = Self.sized(button)
+        #expect(button.keyEquivalent == "n" && button.keyEquivalentModifierMask == .command && button.shortcutWords == "⌘N")
+        button.keyEquivalent = "r"
+        #expect(button.shortcutWords == "⌘R", "the hint does not follow the key equivalent")
+        button.keyEquivalent = "n"
         let (mark, label, hint) = button.arrangement()
         let first = try #require(mark), last = try #require(hint)
         #expect(abs(Double(label.minX - first.maxX) - 6) < 0.5 && abs(Double(last.minX - label.maxX) - 8) < 0.5)
@@ -178,8 +196,8 @@ import Testing
 
     // MARK: Text field
 
-    static func window(holding view: NSView, on base: NSColor) -> (NSWindow, Backdrop) {
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 400, height: 200), styleMask: [.titled], backing: .buffered, defer: false)
+    static func window(holding view: NSView, on base: NSColor) -> (TestWindow, Backdrop) {
+        let window = TestWindow(contentRect: NSRect(x: 0, y: 0, width: 400, height: 200), styleMask: [.titled], backing: .buffered, defer: false)
         let backdrop = Backdrop(base, holding: view)
         window.contentView = backdrop
         window.orderFront(nil)
@@ -281,9 +299,18 @@ import Testing
                 pill.layoutSubtreeIfNeeded()
                 #expect(Double(pill.frame.height) == size.height)
                 let dot = pill.dot.frame
+                #expect(Double(dot.minX) == size.leading, "\(name) \(state): the dot starts \(dot.minX) pt in, not \(size.leading)")
                 let middle = Self.colour(pill, on: canvas, at: NSPoint(x: dot.midX, y: dot.midY), scale: 2)
                 let wanted = state == .stopped ? Self.swatch(canvas, [], scale: 2) : Self.swatch(canvas, [NSColor(pill.paint.dot)], scale: 2)
                 #expect(Self.tells(middle, wanted, from: Self.swatch(canvas, [NSColor(look.text)], scale: 2)), "\(name) \(state) \(size): the dot is \(middle)")
+                if state == .stopped {
+                    let ring = Self.colour(pill, on: canvas, at: NSPoint(x: dot.minX + 0.5, y: dot.midY), scale: 2)
+                    #expect(Self.tells(ring, Self.swatch(canvas, [NSColor(look.textTertiary)], scale: 2), from: wanted), "\(name): the stopped dot's ring is \(ring)")
+                }
+                let top = Backdrop(canvas, holding: pill).colours(along: 0.5, from: 6, to: Double(pill.frame.width) - 6, scale: 2)
+                let line = Self.swatch(canvas, [NSColor(pill.paint.edge)], scale: 2), bare = Self.swatch(canvas, [], scale: 2)
+                let dashes = top.filter { Self.tells($0, line, from: bare) }.count, gaps = top.filter { Self.tells($0, bare, from: line) }.count
+                #expect(dashes > 0 && (gaps > 0) == (state == .noTemplate), "\(name) \(state): the top edge has \(dashes) edge and \(gaps) bare pixels")
                 guard state != .noTemplate else { continue }
                 let edge = Self.colour(pill, on: canvas, at: NSPoint(x: 0.5, y: Double(pill.frame.height) / 2), scale: 2)
                 let other = pill.paint.edge == look.separatorStrong ? Tint(look.error, alpha: 0.45) : look.separatorStrong
@@ -356,6 +383,18 @@ import Testing
     }
 }
 
+/// A window that says it is key, as the person's front window is, or not; a test process's own
+/// windows cannot be made key.
+final class TestWindow: NSWindow {
+    var key = true {
+        didSet { contentView?.needsDisplay = true }
+    }
+
+    override var isKeyWindow: Bool {
+        key
+    }
+}
+
 final class Presses: NSObject {
     var count = 0
 
@@ -406,6 +445,14 @@ final class Backdrop: NSView {
               let colour = image.colorAt(x: Int(point.x * scale), y: Int(point.y * scale))?.usingColorSpace(.sRGB)
         else { return [] }
         return [colour.redComponent, colour.greenComponent, colour.blueComponent].map { ($0 * 255).rounded() }
+    }
+
+    /// The colours along the row `y` points down, from `start` to `end`, every pixel, drawn once.
+    func colours(along y: Double, from start: Double, to end: Double, scale: Double) -> [[Double]] {
+        guard let image = drawn(scale: scale) else { return [] }
+        return stride(from: Int(start * scale), to: Int(end * scale), by: 1).compactMap { x in
+            image.colorAt(x: x, y: Int(y * scale))?.usingColorSpace(.sRGB).map { [$0.redComponent, $0.greenComponent, $0.blueComponent].map { ($0 * 255).rounded() } }
+        }
     }
 
     /// The rectangle, in points from the top left, of the pixels darker than mid grey: the ink.

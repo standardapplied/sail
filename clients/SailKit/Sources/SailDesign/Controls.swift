@@ -55,9 +55,15 @@ public struct ButtonSize: Equatable, Sendable {
     /// A leading symbol, the spinner, and the gaps after them and before a shortcut hint.
     public static let symbol = 14.0, symbolGap = 6.0, hintGap = 8.0
 
-    /// The box's width for a label, a leading symbol and a trailing hint of these widths.
+    /// An icon-only button's SF Symbol, and the ⋯ drawn as three dots: their size and their pitch.
+    public static let iconPoints = 12.0, dot = 1.6, dotPitch = 4.33
+    /// A leading symbol's SF Symbol size in its 14 pt room, and the shortcut hint's opacity.
+    public static let symbolPoints = 11.0, hintOpacity = 0.7
+
+    /// The box's width for a label, a leading symbol and a trailing hint of these widths: the
+    /// padding inside the 1 pt edge on each side.
     public func width(label: Double, symbol: Bool, hint: Double?) -> Double {
-        2 * padding + label + (symbol ? Self.symbol + Self.symbolGap : 0) + (hint.map { Self.hintGap + $0 } ?? 0)
+        2 * (padding + Look.hairline) + label + (symbol ? Self.symbol + Self.symbolGap : 0) + (hint.map { Self.hintGap + $0 } ?? 0)
     }
 }
 
@@ -129,8 +135,13 @@ public struct FieldSize: Equatable, Sendable {
 
     /// The gap between the eyebrow, the box and the line under it.
     public static let gap = 6.0
-    /// The error line's mark.
-    public static let mark = 14.0
+    /// The error line's mark: its room and the SF Symbol size drawn in it.
+    public static let mark = 14.0, markPoints = 12.0
+
+    /// Where the text starts: the inset inside the 1 pt edge.
+    public var textInset: Double {
+        inset + Look.hairline
+    }
 }
 
 /// What a text field is doing; `failed` is a refusal shown under it.
@@ -203,8 +214,15 @@ public struct PillSize: Equatable, Sendable {
     public let text: Double
     public let tracking: Double
 
-    public static let regular = PillSize(height: 20, leading: 7, trailing: 8, dot: 6, gap: 6, text: 10, tracking: Look.Tracking.pill)
-    public static let small = PillSize(height: 18, leading: 5, trailing: 6, dot: 5, gap: 5, text: 9, tracking: Look.Tracking.smallPill)
+    public static let regular = PillSize(height: 20, leading: 8, trailing: 9, dot: 6, gap: 6, text: 10, tracking: Look.Tracking.pill)
+    public static let small = PillSize(height: 18, leading: 6, trailing: 7, dot: 5, gap: 5, text: 9, tracking: Look.Tracking.smallPill)
+    /// No template's dashed edge: 3 pt on, 2 off.
+    public static let dash = [3.0, 2.0]
+
+    /// The pill's width for a label this wide.
+    public func width(label: Double) -> Double {
+        leading + dot + gap + label + trailing
+    }
 }
 
 /// How a pill is drawn: its label and edge inks, a dashed edge, and its dot, filled or hollow.
@@ -228,5 +246,15 @@ public struct PillPaint: Equatable, Sendable {
         case .incomplete, .buildFailed: Tint(look.error)
         case .stopped: look.textTertiary
         }
+    }
+}
+
+/// A key as a person reads it after a label: the modifiers in the platform's order (⌃⌥⇧⌘), then the
+/// key, a letter capitalised, Return as ⏎, Escape as esc, Delete as ⌫.
+public enum Shortcut {
+    public static func said(_ key: String, control: Bool = false, option: Bool = false, shift: Bool = false, command: Bool = false) -> String {
+        let named = ["\r": "⏎", "\u{1b}": "esc", "\u{7f}": "⌫", "\u{8}": "⌫", "\t": "⇥", " ": "Space"]
+        let modifiers = (control ? "⌃" : "") + (option ? "⌥" : "") + (shift ? "⇧" : "") + (command ? "⌘" : "")
+        return modifiers + (named[key] ?? key.uppercased())
     }
 }

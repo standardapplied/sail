@@ -502,8 +502,7 @@ final class WorkspaceRowView: NSTableRowView {
     }
 
     override func drawSelection(in _: NSRect) {
-        let fill = look.fillSelected
-        NSColor(fill).withAlphaComponent(isEmphasized ? fill.alpha : fill.alpha / 2).setFill()
+        NSColor(isEmphasized ? look.fillSelected : look.fillSelectedQuiet).setFill()
         NSBezierPath(roundedRect: Self.fill(in: bounds), xRadius: Look.contentRadius, yRadius: Look.contentRadius).fill()
         NSColor(look.accent).setFill()
         Self.bar(in: bounds).fill()

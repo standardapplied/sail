@@ -80,7 +80,7 @@ public final class SailTextField: NSView {
     }
 
     var state: FieldState {
-        FieldState(enabled: isEnabled, hovered: hovered, editing: field.currentEditor() != nil, failed: error != nil)
+        FieldState(enabled: isEnabled, hovered: hovered, editing: field.currentEditor() != nil && window?.isKeyWindow == true, failed: error != nil)
     }
 
     var paint: FieldPaint {
@@ -101,7 +101,7 @@ public final class SailTextField: NSView {
     static let textPadding = 2.0
 
     private var eyebrow: NSAttributedString? {
-        label.map { Draw.text($0, mono.regular(Look.Step.caption.points) as NSFont, paint.eyebrow, tracking: Look.Tracking.eyebrow, upper: true) }
+        label.map { Draw.text($0, mono.medium(Look.Step.caption.points) as NSFont, paint.eyebrow, tracking: Look.Tracking.eyebrow, upper: true) }
     }
 
     private var lineText: NSAttributedString? {
@@ -147,7 +147,8 @@ public final class SailTextField: NSView {
         super.layout()
         let box = self.box, height = Double(ceil(field.intrinsicContentSize.height)), padding = Self.textPadding
         field.frame = NSRect(
-            x: Double(box.minX) + size.inset - padding, y: (Double(box.midY) - height / 2).rounded(), width: Double(box.width) - 2 * size.inset + 2 * padding, height: height
+            x: Double(box.minX) + size.textInset - padding, y: (Double(box.midY) - height / 2).rounded(), width: Double(box.width) - 2 * size.textInset + 2 * padding,
+            height: height
         )
     }
 
@@ -166,7 +167,7 @@ public final class SailTextField: NSView {
             context.restoreGState()
         }
         guard let lineText, let line = lineRect(width: Double(bounds.width)) else { return }
-        if error != nil, let mark = Draw.symbol("exclamationmark.circle", points: 12, ink: Tint(look.error)) {
+        if error != nil, let mark = Draw.symbol("exclamationmark.circle", points: FieldSize.markPoints, ink: Tint(look.error)) {
             let x = rightToLeft ? Double(box.maxX) - FieldSize.mark / 2 : Double(box.minX) + FieldSize.mark / 2
             mark.draw(in: Draw.centred(mark.size, on: NSPoint(x: x, y: Double(line.minY) + 1 + FieldSize.mark / 2)), from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)
         }
@@ -182,7 +183,12 @@ public final class SailTextField: NSView {
     private func repaint() {
         field.textColor = NSColor(look.text)
         field.alphaValue = paint.boxOpacity
-        field.placeholderAttributedString = Draw.text(placeholder, .systemFont(ofSize: size.text), look.textTertiary)
+        field.alignment = rightToLeft ? .right : .left
+        let style = NSMutableParagraphStyle()
+        style.alignment = field.alignment
+        field.placeholderAttributedString = NSAttributedString(string: placeholder, attributes: [
+            .font: NSFont.systemFont(ofSize: size.text), .foregroundColor: NSColor(look.textTertiary), .paragraphStyle: style,
+        ])
         if let editor = field.currentEditor() as? NSTextView {
             editor.selectedTextAttributes = [.backgroundColor: NSColor(look.fillSelected), .foregroundColor: NSColor(look.text)]
             editor.insertionPointColor = NSColor(Tint(look.accent))
@@ -195,6 +201,14 @@ public final class SailTextField: NSView {
         focusWatch = window?.observe(\.firstResponder) { [weak self] _, _ in
             MainActor.assumeIsolated { self?.repaint() }
         }
+        guard let window else { return }
+        for name in [NSWindow.didBecomeKeyNotification, NSWindow.didResignKeyNotification] {
+            NotificationCenter.default.addObserver(self, selector: #selector(keyChanged), name: name, object: window)
+        }
+    }
+
+    @objc private func keyChanged() {
+        needsDisplay = true
     }
 
     override public func updateTrackingAreas() {

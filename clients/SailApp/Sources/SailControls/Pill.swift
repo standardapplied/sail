@@ -46,11 +46,11 @@ public final class Pill: NSView {
     }
 
     private var label: NSAttributedString {
-        Draw.text(state.label, mono.regular(size.text) as NSFont, paint.text, tracking: size.tracking, upper: true)
+        Draw.text(state.label, mono.medium(size.text) as NSFont, paint.text, tracking: size.tracking, upper: true)
     }
 
     override public var intrinsicContentSize: NSSize {
-        NSSize(width: size.leading + size.dot + size.gap + Double(ceil(label.size().width)) + size.trailing, height: size.height)
+        NSSize(width: size.width(label: Double(ceil(label.size().width))), height: size.height)
     }
 
     override public func setFrameSize(_ newSize: NSSize) {
@@ -66,10 +66,10 @@ public final class Pill: NSView {
     }
 
     override public func draw(_: NSRect) {
-        Draw.box(bounds, radius: Look.innerRadius, fill: nil, edge: paint.edge, dash: paint.dashed ? [3, 2] : [])
+        Draw.box(bounds, radius: Look.innerRadius, fill: nil, edge: paint.edge, dash: paint.dashed ? PillSize.dash.map { CGFloat($0) } : [])
         let label = self.label
         let x = userInterfaceLayoutDirection == .rightToLeft ? size.trailing : size.leading + size.dot + size.gap
-        label.draw(at: NSPoint(x: x, y: Double(bounds.height - label.size().height) / 2))
+        label.draw(at: NSPoint(x: x, y: (Double(bounds.height - label.size().height) / 2).rounded()))
     }
 
     private func repaint() {
@@ -143,7 +143,7 @@ public final class Keycap: NSView {
     }
 
     private var label: NSAttributedString {
-        Draw.text(key, mono.regular(Look.Step.caption.points) as NSFont, look.textSecondary)
+        Draw.text(key, mono.medium(Look.Step.caption.points) as NSFont, look.textSecondary)
     }
 
     /// Mast's kbd: 3 by 5 pt padding around a 10 pt line, a 1 pt edge and a 2 pt foot.
@@ -161,7 +161,7 @@ public final class Keycap: NSView {
         NSColor(look.separatorStrong).setFill()
         edge.fill()
         let label = self.label
-        label.draw(at: NSPoint(x: (bounds.width - label.size().width) / 2, y: inner.midY - label.size().height / 2))
+        label.draw(at: NSPoint(x: ((bounds.width - label.size().width) / 2).rounded(), y: (inner.midY - label.size().height / 2).rounded()))
     }
 }
 
@@ -204,6 +204,6 @@ public final class Initial: NSView {
         ring.lineWidth = 1
         ring.stroke()
         let letter = Draw.text(String(name.prefix(1)).uppercased(), .systemFont(ofSize: Look.Step.caption.points, weight: .semibold), look.text)
-        letter.draw(at: NSPoint(x: (bounds.width - letter.size().width) / 2, y: (bounds.height - letter.size().height) / 2))
+        letter.draw(at: NSPoint(x: ((bounds.width - letter.size().width) / 2).rounded(), y: ((bounds.height - letter.size().height) / 2).rounded()))
     }
 }

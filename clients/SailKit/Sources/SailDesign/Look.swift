@@ -96,6 +96,9 @@ public struct Look: Equatable, Sendable {
     public static let smallRadius = 5.0
     /// The room a control keeps around its box for the focus halo, so no bounds of its own clip it.
     public static let haloRoom = 4.0
+    /// The edge every bordered control has, transparent or not: its padding is measured inside it,
+    /// as the design's `border-box` measures it.
+    public static let hairline = 1.0
 
     /// The 4-point spacing grid (2.3), the steps the shell uses.
     public enum Space {

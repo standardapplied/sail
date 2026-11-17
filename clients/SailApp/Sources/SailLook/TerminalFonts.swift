@@ -12,8 +12,11 @@ public struct TerminalFonts {
         .italic: "JetBrainsMono-Italic.ttf", .boldItalic: "JetBrainsMono-BoldItalic.ttf",
     ]
     public static let family = "JetBrains Mono"
+    /// The Medium weight the controls' eyebrows, pills, keycaps and hints are set in.
+    public static let mediumFile = "JetBrainsMono-Medium.ttf"
 
     private let descriptors: [FontStyle: CTFontDescriptor]
+    private let mediumDescriptor: CTFontDescriptor
 
     public init(directory: URL) throws(LookError) {
         var descriptors: [FontStyle: CTFontDescriptor] = [:]
@@ -29,6 +32,13 @@ public struct TerminalFonts {
             descriptors[style] = descriptor
         }
         self.descriptors = descriptors
+        let url = directory.appending(path: Self.mediumFile)
+        guard let found = CTFontManagerCreateFontDescriptorsFromURL(url as CFURL) as? [CTFontDescriptor], let medium = found.first else {
+            throw .missing("no font in \(url.path)")
+        }
+        let name = CTFontCopyPostScriptName(CTFontCreateWithFontDescriptor(medium, 12, nil)) as String
+        guard name == "JetBrainsMono-Medium" else { throw .missing("\(url.path) is \(name), not JetBrainsMono-Medium") }
+        mediumDescriptor = medium
     }
 
     /// The faces at `points`, drawn at `scale` pixels a point: Core Text works in pixels.
@@ -44,6 +54,11 @@ public struct TerminalFonts {
     /// The regular face at `points`, for the eyebrows, pills and hints of the app's controls.
     public func regular(_ points: Double) -> CTFont {
         descriptors[.regular].map { CTFontCreateWithFontDescriptor($0, points, nil) } ?? CTFontCreateWithName("Menlo" as CFString, points, nil)
+    }
+
+    /// The Medium face at `points`, as the design sets eyebrows, pills, keycaps and hints.
+    public func medium(_ points: Double) -> CTFont {
+        CTFontCreateWithFontDescriptor(mediumDescriptor, points, nil)
     }
 
     private static func style(of font: CTFont) -> FontStyle {

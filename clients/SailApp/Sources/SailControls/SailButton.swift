@@ -19,7 +19,7 @@ public final class SailButton: NSButton {
     public private(set) var busyWord: String?
     private let symbolName: String?
     private let iconOnly: Bool
-    private var shortcut: String?
+    private var showsShortcut = false
     private var mono: TerminalFonts?
     private(set) var hovered = false
     private(set) var focused = false
@@ -59,6 +59,7 @@ public final class SailButton: NSButton {
         self.action = action
         isBordered = false
         focusRingType = .none
+        if iconOnly { toolTip = title }
         wantsLayer = true
         clipsToBounds = false
         layer?.addSublayer(spinner.layer)
@@ -69,12 +70,31 @@ public final class SailButton: NSButton {
         repaint()
     }
 
-    /// The shortcut a person learns from it, in mono after the label (Open ⏎, Create ⏎).
-    public func hint(_ text: String, mono: TerminalFonts) {
-        shortcut = text
+    /// The key that presses it, made its key equivalent and shown after the label in mono (Create ⏎,
+    /// New Workspace ⌘N): what it says is read from the key equivalent, so the two always agree.
+    public func shortcut(_ key: String, modifiers: NSEvent.ModifierFlags = [], mono: TerminalFonts) {
+        keyEquivalent = key
+        keyEquivalentModifierMask = modifiers
+        showsShortcut = true
         self.mono = mono
         invalidateIntrinsicContentSize()
         needsDisplay = true
+    }
+
+    /// The shortcut's words, from the key equivalent; nil when it shows none.
+    var shortcutWords: String? {
+        guard showsShortcut, !keyEquivalent.isEmpty else { return nil }
+        let held = keyEquivalentModifierMask
+        return Shortcut.said(keyEquivalent, control: held.contains(.control), option: held.contains(.option), shift: held.contains(.shift), command: held.contains(.command))
+    }
+
+    override public var title: String {
+        didSet {
+            guard busyWord == nil else { return }
+            setAccessibilityLabel(title)
+            if iconOnly { toolTip = title }
+            NSAccessibility.post(element: self, notification: .titleChanged)
+        }
     }
 
     /// Return presses it: a sheet's or a banner's primary. There is never a window-wide default.
@@ -87,18 +107,15 @@ public final class SailButton: NSButton {
         if busyWord == nil { heldWidth = intrinsicContentSize.width }
         busyWord = word
         setAccessibilityLabel(word.map { "\($0), busy" } ?? title)
+        NSAccessibility.post(element: self, notification: .titleChanged)
         spinner.turn(word != nil)
         invalidateIntrinsicContentSize()
         needsLayout = true
         needsDisplay = true
     }
 
-    /// SF Symbols at these sizes draw a glyph as big as the design's 14 pt leading icon and its 15 pt
-    /// icon-only ones, which sit in a 24-unit box with room around the stroke.
-    static let symbolPoints = 11.0, iconPoints = 12.0
-
     var drawnState: ButtonState {
-        ButtonState(enabled: isEnabled, hovered: hovered, pressed: isHighlighted, focused: focused, busy: busyWord != nil)
+        ButtonState(enabled: isEnabled, hovered: hovered, pressed: isHighlighted, focused: focused && window?.isKeyWindow == true, busy: busyWord != nil)
     }
 
     var paint: ButtonPaint {
@@ -123,12 +140,12 @@ public final class SailButton: NSButton {
     }
 
     private var hintText: NSAttributedString? {
-        guard busyWord == nil, let shortcut, let mono else { return nil }
-        return Draw.text(shortcut, mono.regular(Look.Step.caption.points) as NSFont, Tint(paint.label.rgb, alpha: paint.label.alpha * 0.7))
+        guard busyWord == nil, !iconOnly, let words = shortcutWords, let mono else { return nil }
+        return Draw.text(words, mono.medium(Look.Step.caption.points) as NSFont, Tint(paint.label.rgb, alpha: paint.label.alpha * ButtonSize.hintOpacity))
     }
 
     private var symbol: NSImage? {
-        symbolName.flatMap { Draw.symbol($0, points: iconOnly ? Self.iconPoints : Self.symbolPoints, ink: paint.label) }
+        symbolName.flatMap { Draw.symbol($0, points: iconOnly ? ButtonSize.iconPoints : ButtonSize.symbolPoints, ink: paint.label) }
     }
 
     override public var intrinsicContentSize: NSSize {
@@ -170,7 +187,13 @@ public final class SailButton: NSButton {
         context.beginTransparencyLayer(auxiliaryInfo: nil)
         if let halo = paint.halo { Draw.halo(halo, around: box, radius: size.radius) }
         Draw.box(box, radius: size.radius, fill: paint.fill, edge: paint.edge)
-        if busyWord == nil, let mark, let symbol {
+        if busyWord == nil, symbolName == Self.ellipsis, let mark {
+            NSColor(paint.label).setFill()
+            for step in -1 ... 1 {
+                let centre = NSPoint(x: Double(mark.midX) + Double(step) * ButtonSize.dotPitch, y: Double(mark.midY))
+                NSBezierPath(ovalIn: Draw.centred(NSSize(width: ButtonSize.dot, height: ButtonSize.dot), on: centre)).fill()
+            }
+        } else if busyWord == nil, let mark, let symbol {
             symbol.draw(in: Draw.centred(symbol.size, on: NSPoint(x: mark.midX, y: mark.midY)), from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)
         }
         if !iconOnly { label.draw(in: labelRect) }
@@ -182,6 +205,21 @@ public final class SailButton: NSButton {
     override public func setFrameSize(_ newSize: NSSize) {
         super.setFrameSize(newSize)
         needsLayout = true
+    }
+
+    /// The ⋯ of a row's menu, drawn as the design draws it: three small dots, lighter than the symbol.
+    static let ellipsis = "ellipsis"
+
+    override public func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        guard let window else { return }
+        for name in [NSWindow.didBecomeKeyNotification, NSWindow.didResignKeyNotification] {
+            NotificationCenter.default.addObserver(self, selector: #selector(keyChanged), name: name, object: window)
+        }
+    }
+
+    @objc private func keyChanged() {
+        needsDisplay = true
     }
 
     override public func layout() {
