@@ -1299,7 +1299,8 @@ own, about three (2.9 to 4.3 s over 32 creates, median 3.2 s).
     named after the workspace, sshd restarted onto the new keys once systemd answers (it boots
     while the repos are fetched), and the dev user's bus. Before any fetch it waits up to 30 s for
     `eth0` to get an IPv4 address; a clone that gets none is not made: the script fails naming
-    the wait and what to check ("acme-try got no address on eth0 within 30 s, …"), and the create
+    the wait, `systemd-networkd`'s state of the link when it has one, and what to check
+    ("acme-try got no address on eth0 within 30 s (networkd says carrier, failed), …"), and the create
     removes it as any failed create does. Each fetch first waits, up to 10 s, until
     its remote's host resolves, asking the resolver itself (`getent hosts`, `Workspaces.FETCH`, a
     deadline on bash's `SECONDS`), never reading a failed fetch's words: a clone's address comes up
@@ -1400,11 +1401,15 @@ Each row with the tests that prove it:
   `BoxInstancesTest.noProjectIsGivenAnInstanceThatIsAWorkspaceATemplateOrACopy`.*
 - **W5. A clone shares no machine identity.** The per-workspace step regenerates the machine-id
   and the SSH host keys, which every clone otherwise has from the template, the keys after the
-  hostname, so their comment names the project. The new keys are made beside the template's and
-  renamed over them, so an sshd systemd starts meanwhile never finds none, and sshd is restarted
+  hostname, so their comment names the project. The machine-id is written beside the template's
+  and renamed over it, so the clone's `systemd-networkd`, which reads it while it configures
+  `eth0` and fails the link for good when it finds none, never does. The new keys are made beside
+  the template's and renamed over them, so an sshd systemd starts meanwhile never finds none, and sshd is restarted
   onto them only once its unit has finished starting, within 30 s or the prepare fails saying the
   state it was still in; a restart that fails says the unit's result and its last journal lines. Its template's keys are cleared with the ready mark.
-  *`WorkspaceIT`; the script is pinned by `WorkspacesTest.theScriptThatMakesACloneItsOwnIsPinnedWhole`.*
+  *`WorkspaceIT` (`aWorkspaceTakesItsOwnMachineIdWithoutEverBeingLeftWithNone`: a watcher in the
+  clone from its boot records no moment without one); the script is pinned by
+  `WorkspacesTest.theScriptThatMakesACloneItsOwnIsPinnedWhole`.*
 - **W6. Times are measured and said.** `create` and `start` print each phase and return it in
   JSON (`timings.clone_ms`, `start_ms`, `ready_ms`, `total_ms`), measured on `System.nanoTime`;
   a create's `ready_steps` breaks the readiness down, the script's steps as it timed them in the
