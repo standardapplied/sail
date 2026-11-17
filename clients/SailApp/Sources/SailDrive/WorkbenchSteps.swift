@@ -65,6 +65,9 @@ extension Driver {
         if step.blink == true {
             return await blinks()
         }
+        if let renaming = step.renaming {
+            return (workbench.strip.isRenaming == renaming, "the field is \(workbench.strip.isRenaming ? "open" : "closed")")
+        }
         if let name = step.shot {
             return await inBothLooks(name) { file in await self.capture(["-o", "-l", "\(self.shell.window.windowNumber)"], to: file) }
         }
@@ -645,6 +648,7 @@ extension Driver {
             _ = await waitUntil(5) { (self.shell.look == .dark) == (look == "dark") }
             shell.window.displayIfNeeded()
             try? await Task.sleep(for: .milliseconds(300))
+            await onTheCursorsVisiblePhase()
             let file = folder.appending(path: "\(name)-\(look).png")
             await take(file)
             let size = (try? FileManager.default.attributesOfItem(atPath: file.path)[.size] as? Int) ?? 0
@@ -652,6 +656,16 @@ extension Driver {
         }
         NSApp.appearance = nil
         return (taken.allSatisfy { !$0.hasSuffix(" 0 bytes") }, taken.joined(separator: ", "))
+    }
+
+    /// Returns just after the focused pane's cursor was drawn shown, at the start of its visible
+    /// phase, so a shot shows what a person mostly sees; at once when no terminal shows or its
+    /// cursor does not blink.
+    private func onTheCursorsVisiblePhase() async {
+        guard !workbench.isHiddenOrHasHiddenAncestor, let view = workbench.focused?.terminal, view.isBlinking else { return }
+        _ = await waitUntil(2) { !view.cursorOn }
+        let hidden = Self.committed(view)
+        _ = await waitUntil(2) { view.cursorOn && Self.committed(view) > hidden }
     }
 
     /// `screencapture -x` with `arguments`, into `file`; its own error, if any, is printed.
@@ -689,20 +703,38 @@ extension Driver {
         process.waitUntilExit()
     }
 
-    /// The window in full screen, the whole screen taken in both looks, then out of it again. The
-    /// shot is asked for only if the runner can: a window that does not enter full screen is said,
-    /// with no shot, and fails nothing.
+    /// The window in full screen, the whole screen taken in both looks, then out of it again, to the
+    /// frame it had before, inside its screen; each frame seen on the way back is said. The shot is asked for only if the runner can: a window that does not enter full
+    /// screen is said, with no shot, and fails nothing.
     private func fullScreen(_ name: String) async -> (Bool, String) {
         let window = shell.window
+        let before = window.frame
         window.toggleFullScreen(nil)
         guard await waitUntil(10, { window.styleMask.contains(.fullScreen) }) else {
             return (true, "this runner did not put the window in full screen within 10 s, so there is no full-screen shot")
         }
         try? await Task.sleep(for: .seconds(1))
         let (taken, said) = await inBothLooks(name) { file in await self.capture([], to: file) }
+        var passed: [String] = []
+        func sample() {
+            let frame = NSStringFromRect(window.frame)
+            if passed.last != frame { passed.append(frame) }
+        }
         window.toggleFullScreen(nil)
-        let back = await waitUntil(10) { !window.styleMask.contains(.fullScreen) }
-        return (taken && back, said + (back ? "" : "; the window did not leave full screen"))
+        let back = await waitUntil(10) {
+            sample()
+            return !window.styleMask.contains(.fullScreen)
+        }
+        _ = await waitUntil(1) {
+            sample()
+            return false
+        }
+        let after = window.frame, visible = window.screen?.visibleFrame ?? .zero
+        let same = abs(after.width - before.width) < 1 && abs(after.height - before.height) < 1
+        let inside = after.width <= visible.width + 1 && after.height <= visible.height + 1
+        let frames = "before \(NSStringFromRect(before)), after \(NSStringFromRect(after)), the screen's visible frame \(NSStringFromRect(visible)); "
+            + "on the way back: \(passed.joined(separator: " → "))"
+        return (taken && back && same && inside, said + (back ? "; " : "; the window did not leave full screen; ") + frames)
     }
 
     /// P4 and the design note's rule, against another copy's host with a client on it

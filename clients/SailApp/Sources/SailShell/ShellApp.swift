@@ -87,6 +87,7 @@ public final class ShellApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         appearanceWatch = NSApp.observe(\.effectiveAppearance) { [weak self] application, _ in
             MainActor.assumeIsolated { self?.apply(Self.look(of: application.effectiveAppearance)) }
         }
+        if let visible = (window.screen ?? NSScreen.main)?.visibleFrame { window.setFrame(Self.fitted(window.frame, in: visible), display: false) }
         window.center()
         window.makeKeyAndOrderFront(nil)
         placeTheStrip()
@@ -157,6 +158,13 @@ public final class ShellApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
     /// The chrome around the pane's card (Mast's `.cockpit-main` margin).
     static let cardMargin = 2.0
 
+    /// `frame` no larger than `visible` in either direction. AppKit constrains a window's frame to its
+    /// screen only vertically (`constrainFrameRect(_:to:)`), so the window's designed 1180 pt is not
+    /// left as its frame on a narrower screen.
+    static func fitted(_ frame: NSRect, in visible: NSRect) -> NSRect {
+        NSRect(origin: frame.origin, size: NSSize(width: min(frame.width, visible.width), height: min(frame.height, visible.height)))
+    }
+
     /// The strip in the title bar's accessory after the window's buttons; in full screen, where the
     /// title bar and its toolbar hide, across the band the window draws at its top, 8 pt in.
     func placeTheStrip(fullScreen: Bool? = nil) {
@@ -177,6 +185,7 @@ public final class ShellApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
             NSLayoutConstraint.activate(stripInTheWindow)
         } else {
             strip.translatesAutoresizingMaskIntoConstraints = true
+            strip.setFrameSize(NSSize(width: 0, height: strip.frame.height))
             titleBarRow.view = strip
             window.addTitlebarAccessoryViewController(titleBarRow)
             fitTheStrip()

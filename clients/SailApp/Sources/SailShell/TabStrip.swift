@@ -288,22 +288,26 @@ public final class TabButton: NSView, NSTextFieldDelegate {
         return onMenu()
     }
 
-    /// The title becomes a field: Return, a click elsewhere or another tab selected names the tab
+    /// The title becomes a field where it is: the same font, baseline and centring, in the tab's own
+    /// pill ringed in the accent. Return, a click elsewhere or another tab selected names the tab
     /// what it holds (nothing clears the name); Escape leaves the name as it was.
     public func rename() {
         guard field == nil else { return }
+        layoutSubtreeIfNeeded()
         let field = NSTextField(string: label.stringValue)
         field.font = label.font
+        field.alignment = .center
         field.focusRingType = .none
+        field.isBezeled = false
         field.isBordered = false
-        field.drawsBackground = true
-        field.wantsLayer = true
-        field.layer?.borderWidth = 2
-        field.layer?.cornerRadius = Look.contentRadius
+        field.drawsBackground = false
+        field.usesSingleLineMode = true
+        field.cell?.isScrollable = true
         field.delegate = self
-        field.frame = bounds.insetBy(dx: 4, dy: 2)
+        field.frame = NSRect(x: Self.titleInset, y: label.frame.minY, width: max(0, bounds.width - 2 * Self.titleInset), height: label.frame.height)
         self.field = field
         cancelled = false
+        label.isHidden = true
         paint()
         addSubview(field)
         window?.makeFirstResponder(field)
@@ -328,27 +332,47 @@ public final class TabButton: NSView, NSTextFieldDelegate {
         }
     }
 
-    public func controlTextDidEndEditing(_: Notification) {
-        endRename()
+    /// Editing ended with Tab or Return: the name is kept. With no key (the field lost the keys),
+    /// what happens is decided once AppKit is done moving them, in ``keepOrEnd()``.
+    public func controlTextDidEndEditing(_ note: Notification) {
+        guard field != nil else { return }
+        guard note.userInfo?[NSText.movementUserInfoKey] as? Int == NSTextMovement.other.rawValue else { return endRename() }
+        DispatchQueue.main.async { [weak self] in
+            MainActor.assumeIsolated { self?.keepOrEnd() }
+        }
+    }
+
+    /// The field lost the keys. Taken by something (a click on a terminal, another tab selected),
+    /// the name typed is kept; taken by nothing (the title bar laid out again, as on a change of
+    /// appearance, leaves the window itself first responder), the field takes them back and the
+    /// rename goes on, so Escape still restores the name.
+    private func keepOrEnd() {
+        guard let field else { return }
+        guard let window = field.window, window.firstResponder === window else { return endRename() }
+        window.makeFirstResponder(field)
+        (field.currentEditor() as? NSTextView)?.moveToEndOfDocument(nil)
     }
 
     func endRename() {
         guard let field else { return }
         self.field = nil
         field.removeFromSuperview()
+        label.isHidden = false
+        paint()
         onRename(cancelled ? nil : field.stringValue)
     }
 
     private func paint() {
-        let fill = isSelected ? NSColor(look.fillSelected) : hovering ? NSColor(look.fillHover) : .clear
+        let renaming = field != nil
+        let fill = renaming ? NSColor(look.surface) : isSelected ? NSColor(look.fillSelected) : hovering ? NSColor(look.fillHover) : .clear
         layer?.backgroundColor = fill.cgColor
+        layer?.borderWidth = renaming ? 2 : 0
+        layer?.borderColor = NSColor(look.accent).cgColor
         label.textColor = NSColor(isSelected ? look.text : look.textSecondary)
         close.paint(look)
         zoomMark.contentTintColor = NSColor(look.textSecondary)
-        close.isHidden = !hovering
+        close.isHidden = !hovering || renaming
         field?.textColor = NSColor(look.text)
-        field?.backgroundColor = NSColor(look.surface)
-        field?.layer?.borderColor = NSColor(look.accent).cgColor
     }
 }
 

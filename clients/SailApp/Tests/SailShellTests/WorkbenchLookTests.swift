@@ -165,8 +165,9 @@ import Testing
         return context
     }
 
-    /// The rename field: no system focus ring, ringed in the accent, its selection `fillSelected`
-    /// and its caret the accent.
+    /// The rename field: no system focus ring and no box of its own; the tab's pill is the surface,
+    /// ringed in the accent; the field's font and centring are the title's; its selection
+    /// `fillSelected` and its caret the accent.
     @Test(arguments: [("dark", Look.dark), ("light", Look.light)])
     func theRenameFieldIsTheLooks(_ name: String, _ look: Look) throws {
         let shell = try Self.shell(look)
@@ -181,10 +182,108 @@ import Testing
         let field = try #require(tab.field)
         let editor = try #require(field.currentEditor() as? NSTextView)
         #expect(field.focusRingType == .none)
-        #expect(field.layer?.borderWidth == 2, "\(name): the field is not ringed")
-        #expect(field.layer?.borderColor == NSColor(look.accent).cgColor, "\(name): the ring is not the accent")
+        #expect(!field.isBezeled && !field.isBordered && !field.drawsBackground, "\(name): the field draws a box of its own")
+        #expect(field.font == tab.label.font && field.alignment == .center, "\(name): the field's text is not set as the title's")
+        #expect(tab.layer?.borderWidth == 2, "\(name): the tab is not ringed")
+        #expect(tab.layer?.borderColor == NSColor(look.accent).cgColor, "\(name): the ring is not the accent")
+        #expect(tab.layer?.backgroundColor == NSColor(look.surface).cgColor, "\(name): the pill is not the surface")
         #expect(editor.selectedTextAttributes[.backgroundColor] as? NSColor == NSColor(look.fillSelected))
         #expect(editor.insertionPointColor == NSColor(look.accent))
+    }
+
+    /// The name does not jump when the field opens: its text's ink is the title's, within half a
+    /// point in y, and both are centred in the tab.
+    @Test func theRenameFieldsTextIsWhereTheTitleWas() throws {
+        let shell = try Self.shell(.light)
+        shell.select(.thisMac)
+        shell.window.orderFront(nil)
+        defer { shell.window.orderOut(nil) }
+        let strip = shell.thisMac.strip
+        strip.show(Self.items(), selected: TabID(1))
+        strip.layoutSubtreeIfNeeded()
+        let tab = try #require(strip.tabs.first)
+        let title = try #require(Self.ink(tab), "the title drew no ink")
+        tab.rename()
+        let editor = try #require(tab.field?.currentEditor() as? NSTextView)
+        editor.setSelectedRange(NSRange(location: editor.string.utf16.count, length: 0))
+        let text = try #require(Self.ink(tab), "the field drew no ink")
+        let middle = Double(tab.bounds.midX)
+        #expect(abs(text.minY - title.minY) <= 0.5 && abs(text.maxY - title.maxY) <= 0.5, "the text is at \(text), the title was at \(title)")
+        #expect(abs(title.midX - middle) <= 1 && abs(text.midX - middle) <= 1, "the tab's middle is \(middle); the title's \(title.midX), the text's \(text.midX)")
+    }
+
+    /// A rename goes on when the field loses the keys to nothing (the window itself first responder,
+    /// as when the title bar is laid out again) and through a change of appearance, and Escape then
+    /// restores the name; the keys taken by another view, the name typed is kept.
+    @Test func aRenameOutlivesLosingTheKeysToNothingAndEscapeRestoresTheName() async throws {
+        let shell = try Self.shell(.light)
+        shell.select(.thisMac)
+        shell.window.orderFront(nil)
+        defer { shell.window.orderOut(nil) }
+        let strip = shell.thisMac.strip
+        strip.show(Self.items(), selected: TabID(1))
+        strip.layoutSubtreeIfNeeded()
+        var renamed: [String?] = []
+        strip.onRename = { _, name in renamed.append(name) }
+        let tab = try #require(strip.tabs.first)
+        func type(_ text: String) throws {
+            let editor = try #require(tab.field?.currentEditor() as? NSTextView)
+            editor.selectAll(nil)
+            editor.insertText(text, replacementRange: editor.selectedRange())
+        }
+        tab.rename()
+        try type("build")
+        shell.window.makeFirstResponder(nil)
+        await Self.mainQueueTurns()
+        #expect(strip.isRenaming, "the rename ended when the field lost the keys to nothing")
+        shell.window.appearance = NSAppearance(named: .darkAqua)
+        shell.apply(.dark)
+        shell.window.displayIfNeeded()
+        await Self.mainQueueTurns()
+        #expect(strip.isRenaming, "a change of appearance ended the rename")
+        let editor = try #require(tab.field?.currentEditor() as? NSTextView)
+        #expect(editor.string == "build")
+        editor.doCommand(by: #selector(NSResponder.cancelOperation(_:)))
+        #expect(!strip.isRenaming && renamed == [nil], "Escape did not restore the name: \(renamed)")
+        #expect(tab.label.stringValue == "api" && !tab.label.isHidden)
+        tab.rename()
+        try type("deploy")
+        let other = NSTextField()
+        shell.window.contentView?.addSubview(other)
+        shell.window.makeFirstResponder(other)
+        await Self.mainQueueTurns()
+        #expect(!strip.isRenaming && renamed.last == "deploy", "the keys taken by another view, the name typed was not kept: \(renamed)")
+    }
+
+    /// The window's first frame fits its screen: the designed 1180 × 800 on a 1024 × 743 visible
+    /// frame is 1024 × 743, and a frame that fits is kept.
+    @Test func theWindowsFirstFrameFitsItsScreen() {
+        let visible = NSRect(x: 0, y: 25, width: 1024, height: 743)
+        #expect(ShellApp.fitted(NSRect(x: 10, y: 20, width: 1180, height: 800), in: visible) == NSRect(x: 10, y: 20, width: 1024, height: 743))
+        #expect(ShellApp.fitted(NSRect(x: 10, y: 20, width: 900, height: 600), in: visible) == NSRect(x: 10, y: 20, width: 900, height: 600))
+    }
+
+    /// Turns of the main queue, each after whatever was queued before it.
+    static func mainQueueTurns(_ count: Int = 3) async {
+        for _ in 0 ..< count {
+            await withCheckedContinuation { (done: CheckedContinuation<Void, Never>) in DispatchQueue.main.async { done.resume() } }
+        }
+    }
+
+    /// The rectangle, in points, of `view`'s opaque pixels darker than `limit` (red, green and blue
+    /// summed): the text, in the light look.
+    static func ink(_ view: NSView, darkerThan limit: Int = 300) -> CGRect? {
+        guard let context = drawn(view), let data = context.data else { return nil }
+        let pixels = data.bindMemory(to: UInt8.self, capacity: context.width * context.height * 4)
+        var found: (minX: Int, minY: Int, maxX: Int, maxY: Int)?
+        for y in 0 ..< context.height {
+            for x in 0 ..< context.width {
+                let at = (y * context.width + x) * 4
+                guard pixels[at + 3] == 255, Int(pixels[at]) + Int(pixels[at + 1]) + Int(pixels[at + 2]) < limit else { continue }
+                found = found.map { (minX: min($0.minX, x), minY: min($0.minY, y), maxX: max($0.maxX, x), maxY: max($0.maxY, y)) } ?? (minX: x, minY: y, maxX: x, maxY: y)
+            }
+        }
+        return found.map { CGRect(x: Double($0.minX) / 2, y: Double($0.minY) / 2, width: Double($0.maxX - $0.minX + 1) / 2, height: Double($0.maxY - $0.minY + 1) / 2) }
     }
 
     @Test func theScrimIsTheTerminalBackgroundAt30PercentAndTakesNoClick() throws {
