@@ -30,6 +30,9 @@ final class Driver {
     var results: [Result] = []
     var measures: [Measure] = []
     private var bench: [String: Double] = [:]
+    /// A `resetLatency` step opened a measured window that a `shownWithin` step has not yet judged:
+    /// what the drive saves after each step inside it neither draws nor writes on the main thread.
+    private var measuring = false
     private var started = false
     var panes4: [String: Double] = [:]
     /// The session `remember` kept.
@@ -255,6 +258,7 @@ final class Driver {
         }
         if step.resetLatency == true {
             resetLatency()
+            measuring = true
             return (true, "")
         }
         if let wanted = step.line {
@@ -277,6 +281,7 @@ final class Driver {
             return (found, "the grid is \(columns) columns")
         }
         if let limit = step.shownWithin {
+            measuring = false
             let figures = terminal.latency
             let judged = flood(figures)
             if let gap = mainThread.stalls.longest() {
@@ -502,6 +507,11 @@ final class Driver {
         await Task.detached { psNow(arguments) }.value
     }
 
+    /// Makes the file at `path`, off the main thread: a signal a step sends never holds its frames.
+    static func touch(_ path: String) async {
+        await Task.detached { _ = FileManager.default.createFile(atPath: path, contents: nil) }.value
+    }
+
     nonisolated private static func psNow(_ arguments: [String]) -> String {
         let ps = Process()
         ps.executableURL = URL(filePath: "/bin/ps")
@@ -645,9 +655,14 @@ final class Driver {
             try? windowImage()?.write(to: out.appending(path: stem + ".png"))
             return
         }
+        let text = screenText, file = out.appending(path: stem + ".txt")
+        guard !measuring else {
+            Task.detached { try? text.write(to: file, atomically: true, encoding: .utf8) }
+            return
+        }
         if let image = try? terminal.snapshot(), let png = image.png() {
             try? png.write(to: out.appending(path: stem + ".png"))
         }
-        try? screenText.write(to: out.appending(path: stem + ".txt"), atomically: true, encoding: .utf8)
+        try? text.write(to: file, atomically: true, encoding: .utf8)
     }
 }

@@ -443,7 +443,7 @@ extension Driver {
         let (ok, said) = await measure(200, interval: 50, name: "panes4-echo")
         print(String(format: "panes4 phase echo measured %.3f", CACurrentMediaTime()))
         await Self.processes().forEach { print("panes4 ps at the echo's end: \($0)") }
-        FileManager.default.createFile(atPath: stop, contents: nil)
+        await Self.touch(stop)
         panes4["main thread's longest stall while four ran ms"] = mainThread.longest
         panes4["a thread of the drive's own, longest stall while four ran ms"] = ownThread.longest
         let refresh = 1000 / Double(max(1, shell.window.screen?.maximumFramesPerSecond ?? 60))
@@ -532,7 +532,7 @@ extension Driver {
         start()
         let shares = await cpuShares()
         try? await Task.sleep(for: .seconds(max(0, 2.5 - (CACurrentMediaTime() - began))))
-        FileManager.default.createFile(atPath: stop, contents: nil)
+        await Self.touch(stop)
         let marker = "xxxxxxxxxxxxxxxxxxxxflood-3"
         let shown = await waitUntil(60) { floods.allSatisfy { Self.shows($0, marker) } }
         print("panes4 unlimited 2.5 s (reported, not gated): CPU shares over its first second \(shares.said); "
@@ -637,7 +637,7 @@ extension Driver {
     /// `take` in the light look, then the dark, each once the window has been drawn in it; the
     /// look the system gives comes back after. Fails when a file is missing or empty.
     private func inBothLooks(_ name: String, _ take: (URL) async -> Void) async -> (Bool, String) {
-        let folder = out.deletingLastPathComponent().appending(path: "shots")
+        let folder = out.deletingLastPathComponent().appending(path: "window")
         try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         var taken: [String] = []
         for (look, appearance) in [("light", NSAppearance.Name.aqua), ("dark", .darkAqua)] {
