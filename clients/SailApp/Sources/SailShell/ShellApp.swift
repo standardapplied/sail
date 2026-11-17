@@ -526,18 +526,18 @@ enum RunnerEnds {
         }
     }
 
-    /// The runner terminals not yet confirmed ended, each by its pane (the panes of a split share a
-    /// title) and said by its tab's title: why, or nil while the end is still under way.
+    /// The runner terminals not yet confirmed ended, each by its pane itself (the panes of a split
+    /// share a title) and said by its tab's title: why, or nil while the end is still under way.
     @MainActor
     final class Left {
-        private var waiting: [(pane: PaneID, title: String, why: [String]?)]
+        private var waiting: [(pane: ObjectIdentifier, title: String, why: [String]?)]
 
-        init(_ panes: [(pane: PaneID, title: String)]) {
+        init(_ panes: [(pane: ObjectIdentifier, title: String)]) {
             waiting = panes.map { (pane: $0.pane, title: $0.title, why: nil) }
         }
 
         /// What `pane`'s end came to: gone from the list once ended, kept with why otherwise.
-        func settle(_ pane: PaneID, _ outcome: EndOutcome) {
+        func settle(_ pane: ObjectIdentifier, _ outcome: EndOutcome) {
             guard let index = waiting.firstIndex(where: { $0.pane == pane }) else { return }
             if case let .unconfirmed(why) = outcome { waiting[index].why = why } else { waiting.remove(at: index) }
         }
@@ -557,7 +557,7 @@ enum RunnerEnds {
     ) -> Bool {
         let live = panes.filter(\.holdsRunnerSession)
         guard !live.isEmpty else { return false }
-        let left = Left(live.map { (pane: $0.id, title: titled($0)) })
+        let left = Left(live.map { (pane: ObjectIdentifier($0), title: titled($0)) })
         if systemQuitting {
             Task { @MainActor in
                 await end(live, within: limit, into: left)
@@ -593,15 +593,15 @@ enum RunnerEnds {
     /// Ends every pane's session at the runner, all at once, each within `limit`, an end already
     /// under way joined rather than started again, each outcome settled in `left` as it comes.
     static func end(_ panes: [TerminalPane], within limit: Duration, into left: Left) async {
-        var endings: [(pane: PaneID, ending: Task<EndOutcome, Never>)] = []
+        var endings: [(pane: ObjectIdentifier, ending: Task<EndOutcome, Never>)] = []
         for pane in panes {
             guard let ending = pane.end(within: limit) else {
-                left.settle(pane.id, .gone)
+                left.settle(ObjectIdentifier(pane), .gone)
                 continue
             }
-            endings.append((pane.id, ending))
+            endings.append((ObjectIdentifier(pane), ending))
         }
-        await withTaskGroup(of: (PaneID, EndOutcome).self) { group in
+        await withTaskGroup(of: (ObjectIdentifier, EndOutcome).self) { group in
             for (pane, ending) in endings {
                 group.addTask { (pane, await ending.value) }
             }
