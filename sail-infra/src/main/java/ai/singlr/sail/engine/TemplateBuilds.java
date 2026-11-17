@@ -81,6 +81,8 @@ public final class TemplateBuilds {
   private final Supplier<Instant> clock;
   private final ConcurrentHashMap<String, CompletableFuture<Optional<WorkspaceTemplate.Template>>>
       running = new ConcurrentHashMap<>();
+  private final ConcurrentHashMap<String, CompletableFuture<Void>> ending =
+      new ConcurrentHashMap<>();
 
   /**
    * @param builds keeps each build's record
@@ -118,6 +120,11 @@ public final class TemplateBuilds {
    * whose record has no outcome. A person joining one needs none of what starting one needs.
    */
   public Optional<Status> joining(ProjectDefinition config) throws Exception {
+    try {
+      endCutShort(config.name());
+    } catch (Exception failed) {
+      log.accept(failed);
+    }
     return running.containsKey(config.name()) || runningElsewhere(config.name())
         ? Optional.of(status(config, true))
         : Optional.empty();
@@ -271,12 +278,32 @@ public final class TemplateBuilds {
         && builds.building(project);
   }
 
+  /**
+   * Ends {@code project}'s build cut short, if it has one: a caller that meets another thread of
+   * this process ending it waits for that end, no longer than {@link Workspaces#CREATE_WAIT}, so
+   * nothing reads the cut build as one under way while its template is being cleaned.
+   */
   private void endCutShort(String project) throws Exception {
     var record = builds.record(project).filter(TemplateRecord::running);
     if (record.isEmpty() || running.containsKey(project)) {
       return;
     }
-    builds.endCutShort(project, shell, tokensOf.apply(record.get().by()), CUT_SHORT);
+    var mine = new CompletableFuture<Void>();
+    var other = ending.putIfAbsent(project, mine);
+    if (other != null) {
+      try {
+        other.get(Workspaces.CREATE_WAIT.toSeconds(), TimeUnit.SECONDS);
+      } catch (ExecutionException | TimeoutException notEnded) {
+        log.accept(notEnded);
+      }
+      return;
+    }
+    try {
+      builds.endCutShort(project, shell, tokensOf.apply(record.get().by()), CUT_SHORT);
+    } finally {
+      ending.remove(project, mine);
+      mine.complete(null);
+    }
   }
 
   private static String inputsOf(ProjectDefinition config) {

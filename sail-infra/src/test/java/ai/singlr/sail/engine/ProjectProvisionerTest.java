@@ -497,8 +497,9 @@ class ProjectProvisionerTest {
     assertTrue(steps.get(5).contains("skipped:5/"));
     assertTrue(steps.get(6).contains("step:6/"));
     var waited = indexOf(shell, "ip -4 addr show eth0 | grep -q inet");
+    var finished = indexOf(shell, "dpkg --configure -a");
     var next = indexOf(shell, "id dev");
-    assertTrue(waited >= 0 && waited < next, shell.invocations().toString());
+    assertTrue(waited >= 0 && waited < finished && finished < next, shell.invocations().toString());
   }
 
   @Test
@@ -530,6 +531,18 @@ class ProjectProvisionerTest {
     assertTrue(steps.get(3).contains("step:4/"), steps.get(3));
     assertTrue(steps.get(6).contains("skipped:6/"));
     assertTrue(steps.get(7).contains("step:7/"));
+  }
+
+  /** A first run, which nothing cut short before it, has no packages to finish. */
+  @Test
+  void aFirstRunAsksDpkgToFinishNothing() throws Exception {
+    var shell = allSuccessShell();
+    var tracker = tracker();
+
+    new ProjectProvisioner(shell, tracker, null, Optional.empty(), OperatorCommand.PLAIN)
+        .provision(fullConfig(), hostYaml(), none(fullConfig()), GIT, null);
+
+    assertEquals(-1, indexOf(shell, "dpkg --configure -a"), shell.invocations().toString());
   }
 
   @Test

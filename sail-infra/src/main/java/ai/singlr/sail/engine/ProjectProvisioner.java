@@ -165,6 +165,7 @@ public final class ProjectProvisioner {
       tracker.load(inputs);
     }
     var name = into.name();
+    var resumed = tracker.currentState().completedPhase() != null && !tracker.isComplete();
     try {
       launchContainer(config, into, host);
       if (!tracker.isComplete()) {
@@ -173,6 +174,9 @@ public final class ProjectProvisioner {
       setDiskQuota(config, name, host);
       setResourceLimits(config, name);
       waitForNetwork(name);
+      if (resumed) {
+        finishInterruptedPackages(name);
+      }
       installPackages(config, name);
       configureSsh(config, name, host);
       installSailMachinery(config, name);
@@ -420,6 +424,24 @@ public final class ProjectProvisioner {
       }
     }
     return true;
+  }
+
+  /**
+   * Finishes configuring what a run cut short left of the container's packages: a run killed while
+   * apt installed (a restart of sail-api in a template's build, then its cleanup's stop) leaves
+   * dpkg interrupted, and every later apt step refuses until it is configured. A run that resumes
+   * asks dpkg once, which does nothing when nothing was left.
+   */
+  private void finishInterruptedPackages(String name) throws Exception {
+    var finished =
+        execInContainer(
+            name,
+            List.of("bash", "-c", "DEBIAN_FRONTEND=noninteractive dpkg --configure -a"),
+            INSTALL_TIMEOUT);
+    if (!finished.ok()) {
+      throw new IOException(
+          "Could not finish the packages an earlier run left half installed: " + finished.stderr());
+    }
   }
 
   /**

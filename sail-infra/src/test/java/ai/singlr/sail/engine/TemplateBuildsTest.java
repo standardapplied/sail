@@ -415,6 +415,62 @@ class TemplateBuildsTest {
     assertTrue(shell.invocations().contains("incus stop acme--tmpl"), "it is never left running");
   }
 
+  /**
+   * A read that meets a cut build while sail-api, starting, is still cleaning its template waits
+   * for that end and reads it interrupted, never as a build under way: the cleanup holds the lock.
+   */
+  @Test
+  void aReadThatMeetsACutBuildBeingEndedWaitsForItsEnd() throws Exception {
+    var scripted = incus(ZFS, template("Running", ""), "[]");
+    var stripping = new CountDownLatch(1);
+    var release = new CountDownLatch(1);
+    var shell =
+        new ShellExec() {
+          @Override
+          public Result exec(List<String> command) throws IOException {
+            return exec(command, null, null);
+          }
+
+          @Override
+          public Result exec(List<String> command, Path workDir, java.time.Duration timeout)
+              throws IOException {
+            if (String.join(" ", command).contains("sail-strip")) {
+              stripping.countDown();
+              try {
+                assertTrue(release.await(10, TimeUnit.SECONDS));
+              } catch (InterruptedException e) {
+                throw new IOException(e);
+              }
+            }
+            return scripted.exec(command, workDir, timeout);
+          }
+
+          @Override
+          public boolean isDryRun() {
+            return false;
+          }
+        };
+    write(running("dana", 9));
+    var builds = builds(shell);
+    var starting = Thread.ofPlatform().start(() -> builds.endCutShort(List.of("acme")));
+    assertTrue(stripping.await(10, TimeUnit.SECONDS), "the cleanup reached the strip");
+
+    var read = new java.util.concurrent.FutureTask<>(() -> builds.status(acme()));
+    var reader = Thread.ofPlatform().start(read);
+    var deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+    while (!waitsOnTheCleanup(reader) && !read.isDone()) {
+      assertTrue(System.nanoTime() < deadline, "the read never waited");
+      Thread.onSpinWait();
+    }
+    assertFalse(read.isDone(), "the read answered while the cleanup held the template");
+    release.countDown();
+    var status = read.get(30, TimeUnit.SECONDS);
+    starting.join(TimeUnit.SECONDS.toMillis(30));
+
+    assertEquals(TemplateBuilds.State.FAILED, status.state());
+    assertEquals(TemplateRecord.Outcome.INTERRUPTED, status.build().orElseThrow().outcome());
+  }
+
   @Test
   void sailApiStartingEndsEveryCutBuildItCan() throws Exception {
     var shell = incus(ZFS, "[]", "[]");
@@ -553,6 +609,15 @@ class TemplateBuildsTest {
       throws Exception {
     return Actor.call(
         new Actor(by, Role.ADMIN, Actor.Lane.API), () -> builds.start(config, by, source));
+  }
+
+  /** Whether {@code thread} is parked waiting for the end another thread is making. */
+  private static boolean waitsOnTheCleanup(Thread thread) {
+    return java.util.Arrays.stream(thread.getStackTrace())
+        .anyMatch(
+            frame ->
+                frame.getClassName().equals(java.util.concurrent.CompletableFuture.class.getName())
+                    && Set.of("get", "timedGet").contains(frame.getMethodName()));
   }
 
   private static int indexOf(List<String> calls, String part) {

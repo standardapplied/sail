@@ -989,7 +989,9 @@ SHA-256, and strips the Gatekeeper quarantine flag.
 **Container provisioning** (`ProjectProvisioner`) is an idempotent, resumable pipeline of
 nineteen steps, one per `ProjectPhase`, and a `ProvisionTracker` lets a failed run pick up where
 it stopped. The network wait (step 4) is never taken as done while a later step will run: the
-container may have been started again since, and its address is waited for anew. The tracker resumes only for the definition it was written for: its state carries the
+container may have been started again since, and its address is waited for anew. A run that
+resumes then finishes what dpkg was left doing (`dpkg --configure -a`), since a run cut short while
+apt installed leaves every later apt step refused. The tracker resumes only for the definition it was written for: its state carries the
 SHA-256 of the definition's JSON document (`ProjectDefinitionJson.write`) and the workstation
 key's fingerprint (`ProjectProvisioner.inputs`), and progress recorded for another (or by a release that recorded none)
 restarts the run from the first step, each step re-checking its own effect. A finished run records
@@ -1317,7 +1319,9 @@ own, about three (2.9 to 4.3 s over 32 creates, median 3.2 s).
     under the lock, the template is started if stopped, stripped, searched for its builder's tokens
     and stopped, and only then is the record ended `interrupted`, "The build stopped when the runner
     restarted.". One whose template still holds a token is stopped and its record left, counted
-    `failed`, for the next read. Building again resumes at the step that did not finish.
+    `failed`, for the next read. A read or a request to build that meets one this process is
+    ending waits for the end (up to `CREATE_WAIT`). Building again resumes at the step that did not
+    finish, dpkg's interrupted work finished first.
   - `sudo sail project workspace create <p> <name>` builds it first when there is none or it is
     stale. It then clones it with `incus copy <p>--tmpl/v<n> <p>-<name>`, passing the workspace's
     keys at the copy: `-c user.sail.project=<p> -c user.sail.workspace=<name> -c
