@@ -450,7 +450,7 @@ final class DoorTickets: TicketSource {
             rect(pane.open).minY - rect(new).maxY, rect(new).minY - rect(making).maxY,
         ]
         #expect(gaps.map { $0.rounded() } == [8, 24, 12, 24, 8], "gaps \(gaps)")
-        #expect(rect(scroll).height.rounded() == Rail.item, "one row, one row's height")
+        #expect(Double(rect(scroll).height).rounded() == Rail.item, "one row, one row's height")
         #expect(rect(making).width.rounded() == WorkspacesPane.width && rect(pane.make).maxX.rounded() == rect(scroll).maxX.rounded(),
                 "the name and Make span the list's width: \(rect(making)), \(rect(pane.make)), \(rect(scroll))")
     }
