@@ -540,7 +540,8 @@ public final class TerminalSession: Sendable {
             let updated = clock.now
             latency.withLock { $0.screenUpdated(at: updated) }
             sendInput(effects.reply, handedIn: nil)
-            effects.events.forEach { emit(.screen($0)) }
+            let writing = core.withLock { $0.writing }
+            effects.events.filter { writing || !$0.writesTheClipboard }.forEach { emit(.screen($0)) }
             screenSink.yield(updated)
             armHoldTick()
         case let .replayBegin(safe):

@@ -91,6 +91,24 @@ final class Socket: Sendable {
         return value
     }
 
+    /// The pid of the process at the other end of a unix socket: the one that listened, as the
+    /// kernel records it (`LOCAL_PEERPID`, `SO_PEERCRED` on Linux); nil for TCP or when not told.
+    var peerPID: Int32? {
+        #if canImport(Darwin)
+        var pid: pid_t = 0
+        var size = socklen_t(MemoryLayout<pid_t>.size)
+        guard getsockopt(descriptor, SOL_LOCAL, LOCAL_PEERPID, &pid, &size) == 0, pid > 0 else { return nil }
+        return pid
+        #else
+        // Glibc's `struct ucred` is declared only under _GNU_SOURCE, which SwiftPM passes to a Swift
+        // target only as an unsafe flag; this tuple is its layout (pid_t, uid_t, gid_t).
+        var credentials: (pid: Int32, uid: UInt32, gid: UInt32) = (0, 0, 0)
+        var size = socklen_t(MemoryLayout<(Int32, UInt32, UInt32)>.size)
+        guard getsockopt(descriptor, SOL_SOCKET, SO_PEERCRED, &credentials, &size) == 0, credentials.pid > 0 else { return nil }
+        return credentials.pid
+        #endif
+    }
+
     /// Ends both directions: a blocked read returns, and the peer sees the end of the stream.
     func shutdown() {
         _ = Self.shutdownBoth(descriptor)

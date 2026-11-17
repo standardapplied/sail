@@ -5,16 +5,24 @@ import SailLook
 import SailTerminalView
 import SailWorkbench
 
-/// "Sail": one window, 1180 by 800 and no smaller than 480 by 600, an icon rail beside the pane it
-/// selects: "This Mac" (the local terminals, in tabs and splits) or the account. The window's chrome
-/// is drawn from the look: a transparent title bar over a full-size content view, so the rail's tint
-/// and the pane's surface run to the top edge under the platform's own window buttons, which keep
-/// dragging and double-click to zoom; with "This Mac" shown, its tabs fill the title bar's row after
-/// those buttons. The look follows the appearance while the app runs. It asks the control plane who
-/// it is signed in as at launch and each time the app is activated.
+/// "Sail": one window, 1180 by 800 and no smaller than 480 by 600, laid out as Mast's shell: one band
+/// across the window's top in the chrome, the window buttons' home and its drag surface; under it
+/// the icon rail on the chrome at the left, and beside the rail the selected pane ("This Mac", the
+/// local terminals in tabs and splits, or the account) as a card with 6 pt corners and a 2 pt
+/// margin of chrome. The band is the title bar–toolbar area of a full-size-content window with an
+/// empty toolbar in the unified style, so AppKit gives it its height and centres the window buttons
+/// in it; its row after the buttons is a title bar accessory (`.left`) holding the tab strip, whose
+/// empty part is inside the title bar's own view: a drag there moves the window and a double-click
+/// does what System Settings says, as AppKit does it. The tabs start past the buttons' 96 pt
+/// inset. In full screen, where macOS hides the title bar and the buttons, the toolbar is hidden
+/// and the band is drawn in the window's top row, its inset 8 pt. The look follows the appearance
+/// while the app runs. It asks the control plane who it is signed in as at launch and each time
+/// the app is activated.
 @MainActor
 public final class ShellApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
     public static let title = "Sail"
+    /// Said once a launch when macOS runs the app from the temporary copy it makes of a download.
+    static let translocated = "Sail is running from a copy macOS made of the download. Move Sail to Applications and open it from there."
     static let paneKey = "shell.pane"
 
     public let window: NSWindow
@@ -26,7 +34,9 @@ public final class ShellApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private let root = NSView()
     private let content = NSView()
     private var appearanceWatch: NSKeyValueObservation?
-    private var stripStart = NSLayoutConstraint()
+    private let titleBarRow = NSTitlebarAccessoryViewController()
+    private let band = NSToolbar(identifier: "sh.standardapplied.sail.band")
+    private var stripInTheWindow: [NSLayoutConstraint] = []
 
     /// The app from its bundle: the fonts in `Contents/Resources/Fonts`, the host in
     /// `Contents/Helpers/sail`, the look the appearance names. `passkeys` makes the authenticator,
@@ -50,7 +60,7 @@ public final class ShellApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         fonts: URL, helper: String?, look: Look, passkeys: (@escaping @MainActor @Sendable () -> NSWindow?) -> any PasskeyAuthenticator
     ) throws(ShellError) {
         self.look = look
-        let window = NSWindow(
+        let window = ShellWindow(
             contentRect: NSRect(x: 0, y: 0, width: 1180, height: 800),
             styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView], backing: .buffered, defer: false
         )
@@ -77,10 +87,12 @@ public final class ShellApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         appearanceWatch = NSApp.observe(\.effectiveAppearance) { [weak self] application, _ in
             MainActor.assumeIsolated { self?.apply(Self.look(of: application.effectiveAppearance)) }
         }
+        if let visible = (window.screen ?? NSScreen.main)?.visibleFrame { window.setFrame(Self.fitted(window.frame, in: visible), display: false) }
         window.center()
         window.makeKeyAndOrderFront(nil)
         placeTheStrip()
         select(UserDefaults.standard.string(forKey: Self.paneKey).flatMap { Rail.Item(rawValue: $0) } ?? .account)
+        if Bundle.main.bundlePath.contains("/AppTranslocation/") { thisMac.tell(Self.translocated) }
         NSApp.activate(ignoringOtherApps: true)
     }
 
@@ -100,10 +112,10 @@ public final class ShellApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
     /// Shows `item`'s pane and remembers it for the next launch.
     public func select(_ item: Rail.Item) {
         thisMac.isHidden = item != .thisMac
-        thisMac.strip.isHidden = thisMac.isHidden
+        thisMac.strip.showsTabs = !thisMac.isHidden
         account.isHidden = !thisMac.isHidden
         rail.show(item)
-        paintStrip()
+        paintChrome()
         UserDefaults.standard.set(item.rawValue, forKey: Self.paneKey)
         if item == .thisMac {
             thisMac.shown()
@@ -121,7 +133,7 @@ public final class ShellApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         rail.look = look
         account.look = look
         thisMac.look = look
-        paintStrip()
+        paintChrome()
     }
 
     public func windowDidEnterFullScreen(_: Notification) {
@@ -132,20 +144,68 @@ public final class ShellApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         placeTheStrip()
     }
 
-    /// The tabs' row is the title bar's, and keeps this height in full screen, where the title bar
-    /// is hidden.
-    static let stripHeight = 28.0
-
-    /// The tabs start a space after the window's zoom button, where the window put it; in full
-    /// screen, where the buttons hide, after the rail.
-    private func placeTheStrip() {
-        let zoomEnd = window.styleMask.contains(.fullScreen) ? 0 : Double(window.standardWindowButton(.zoomButton)?.frame.maxX ?? 0)
-        stripStart.constant = max(Rail.width, zoomEnd + Look.Space.s)
+    public func windowDidResize(_: Notification) {
+        fitTheStrip()
     }
 
-    /// The title bar's row beside the rail: the tabs' `chrome` for "This Mac", else the pane's surface.
-    private func paintStrip() {
-        root.layer?.backgroundColor = NSColor(rail.selected == .thisMac ? look.chrome : look.canvas).cgColor
+    /// The band's height in full screen, where the band is drawn by the window: the unified title
+    /// bar–toolbar area's in a window (Mast's band is 44 px; AppKit sets this one).
+    static let bandHeight = 52.0
+    /// What the band keeps clear for the window buttons before the tabs (Mast's `.topbar__inset`),
+    /// and in full screen, where macOS hides them.
+    static let buttonsInset = 96.0
+    static let fullScreenInset = 8.0
+    /// The chrome around the pane's card (Mast's `.cockpit-main` margin).
+    static let cardMargin = 2.0
+
+    /// `frame` no larger than `visible` in either direction. AppKit constrains a window's frame to its
+    /// screen only vertically (`constrainFrameRect(_:to:)`), so the window's designed 1180 pt is not
+    /// left as its frame on a narrower screen.
+    static func fitted(_ frame: NSRect, in visible: NSRect) -> NSRect {
+        NSRect(origin: frame.origin, size: NSSize(width: min(frame.width, visible.width), height: min(frame.height, visible.height)))
+    }
+
+    /// The strip in the title bar's accessory after the window's buttons; in full screen, where the
+    /// title bar and its toolbar hide, across the band the window draws at its top, 8 pt in.
+    func placeTheStrip(fullScreen: Bool? = nil) {
+        let strip = thisMac.strip
+        let full = fullScreen ?? window.styleMask.contains(.fullScreen)
+        if let index = window.titlebarAccessoryViewControllers.firstIndex(of: titleBarRow) { window.removeTitlebarAccessoryViewController(at: index) }
+        strip.removeFromSuperview()
+        NSLayoutConstraint.deactivate(stripInTheWindow)
+        band.isVisible = !full
+        if full {
+            strip.translatesAutoresizingMaskIntoConstraints = false
+            strip.leading = Self.fullScreenInset
+            root.addSubview(strip)
+            stripInTheWindow = [
+                strip.leadingAnchor.constraint(equalTo: root.leadingAnchor), strip.trailingAnchor.constraint(equalTo: root.trailingAnchor),
+                strip.topAnchor.constraint(equalTo: root.topAnchor), strip.heightAnchor.constraint(equalToConstant: Self.bandHeight),
+            ]
+            NSLayoutConstraint.activate(stripInTheWindow)
+        } else {
+            strip.translatesAutoresizingMaskIntoConstraints = true
+            strip.setFrameSize(NSSize(width: 0, height: strip.frame.height))
+            titleBarRow.view = strip
+            window.addTitlebarAccessoryViewController(titleBarRow)
+            fitTheStrip()
+        }
+    }
+
+    /// The accessory reaches the window's trailing edge, so all the row after the buttons is the
+    /// title bar's (AppKit sets a `.left` accessory's height, its view's frame its width).
+    private func fitTheStrip() {
+        let strip = thisMac.strip
+        guard !window.styleMask.contains(.fullScreen), strip.superview != nil else { return }
+        window.contentView?.superview?.layoutSubtreeIfNeeded()
+        let start = strip.window == nil ? Double(window.standardWindowButton(.zoomButton)?.frame.maxX ?? 0) : Double(strip.convert(NSPoint.zero, to: nil).x)
+        strip.leading = max(Look.Space.s, Self.buttonsInset - start)
+        strip.setFrameSize(NSSize(width: max(0, Double(window.frame.width) - start), height: strip.frame.height))
+    }
+
+    /// The band, the rail and the card's margin are one chrome surface, as Mast's `--chrome-bg`.
+    private func paintChrome() {
+        root.layer?.backgroundColor = NSColor(look.chrome).cgColor
     }
 
     /// Runs the app, `configure` given it before it launches; a bundle missing its fonts or host
@@ -180,11 +240,18 @@ public final class ShellApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         apply(look)
         window.titlebarAppearsTransparent = true
         window.titleVisibility = .hidden
+        band.allowsUserCustomization = false
+        band.allowsDisplayModeCustomization = false
+        window.toolbar = band
+        window.toolbarStyle = .unified
+        window.titlebarSeparatorStyle = .none
+        content.wantsLayer = true
+        content.layer?.cornerRadius = Look.contentRadius
+        content.layer?.masksToBounds = true
         root.wantsLayer = true
-        paintStrip()
-        let strip = thisMac.strip
-        stripStart = strip.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: Rail.width)
-        for view in [rail, content, strip] as [NSView] {
+        paintChrome()
+        titleBarRow.layoutAttribute = .left
+        for view in [rail, content] as [NSView] {
             view.translatesAutoresizingMaskIntoConstraints = false
             root.addSubview(view)
         }
@@ -194,20 +261,20 @@ public final class ShellApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
             side.isHidden = true
             content.addSubview(side)
         }
-        strip.isHidden = true
+        thisMac.strip.showsTabs = false
         window.contentView = root
         let belowTheTitleBar = (window.contentLayoutGuide as? NSLayoutGuide)?.topAnchor ?? root.topAnchor
-        let titleBarRow = strip.bottomAnchor.constraint(equalTo: belowTheTitleBar)
-        titleBarRow.priority = .defaultHigh
+        let underTheRow = content.topAnchor.constraint(equalTo: belowTheTitleBar)
+        underTheRow.priority = .defaultHigh
         NSLayoutConstraint.activate([
-            rail.leadingAnchor.constraint(equalTo: root.leadingAnchor), rail.topAnchor.constraint(equalTo: root.topAnchor),
-            rail.bottomAnchor.constraint(equalTo: root.bottomAnchor), content.leadingAnchor.constraint(equalTo: rail.trailingAnchor),
-            content.trailingAnchor.constraint(equalTo: root.trailingAnchor), content.topAnchor.constraint(equalTo: strip.bottomAnchor),
-            content.bottomAnchor.constraint(equalTo: root.bottomAnchor),
-            stripStart,
-            strip.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -Look.Space.s), strip.topAnchor.constraint(equalTo: root.topAnchor),
-            strip.heightAnchor.constraint(greaterThanOrEqualToConstant: Self.stripHeight), titleBarRow,
+            rail.leadingAnchor.constraint(equalTo: root.leadingAnchor), rail.topAnchor.constraint(equalTo: content.topAnchor),
+            rail.bottomAnchor.constraint(equalTo: root.bottomAnchor),
+            content.leadingAnchor.constraint(equalTo: rail.trailingAnchor, constant: Self.cardMargin),
+            content.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -Self.cardMargin), underTheRow,
+            content.topAnchor.constraint(greaterThanOrEqualTo: root.topAnchor, constant: Self.bandHeight),
+            content.bottomAnchor.constraint(equalTo: root.bottomAnchor, constant: -Self.cardMargin),
         ])
+        placeTheStrip()
         rail.onSelect = { [weak self] item in self?.select(item) }
         thisMac.onShow = { [weak self] in
             guard let self, rail.selected != .thisMac else { return }
@@ -255,22 +322,19 @@ public final class ShellApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
             item("Quit \(Self.title)", #selector(NSApplication.terminate(_:)), "q"),
         ]
         let file: [NSMenuItem] = [
-            item("New Tab", #selector(WorkbenchView.newTab(_:)), "t", target: terminals), .separator(),
-            item("Split Right", #selector(WorkbenchView.splitRight(_:)), "d", target: terminals),
-            item("Split Down", #selector(WorkbenchView.splitDown(_:)), "D", [.command, .shift], target: terminals), .separator(),
-            item("Close", #selector(WorkbenchView.closePane(_:)), "w", target: terminals),
-            item("Close Tab", #selector(WorkbenchView.closeTab(_:)), "w", [.command, .option], target: terminals),
+            Command.newTab.item(target: terminals), .separator(),
+            Command.splitRight.item(target: terminals), Command.splitDown.item(target: terminals), .separator(),
+            Command.close.item(target: terminals), Command.closeTab.item(target: terminals), Command.closeOtherTabs.item(target: terminals),
             item("Close Window", #selector(NSWindow.performClose(_:)), "W", [.command, .shift]),
         ]
         let edit: [NSMenuItem] = [
-            item("Cut", #selector(NSText.cut(_:)), "x"), item("Copy", #selector(NSText.copy(_:)), "c"),
-            item("Paste", #selector(NSText.paste(_:)), "v"), item("Select All", #selector(NSText.selectAll(_:)), "a"),
+            item("Cut", #selector(NSText.cut(_:)), "x"), Command.copy.item(target: nil), Command.paste.item(target: nil), Command.selectAll.item(target: nil),
         ]
         let view: [NSMenuItem] = [
             item("Bigger", #selector(TerminalView.increaseFontSize(_:)), "+"), hidden(item("Bigger", #selector(TerminalView.increaseFontSize(_:)), "=")),
             item("Smaller", #selector(TerminalView.decreaseFontSize(_:)), "-"),
             item("Actual Size", #selector(TerminalView.resetFontSize(_:)), "0"), .separator(),
-            item("Rename Tab", #selector(WorkbenchView.renameTab(_:)), "", target: terminals),
+            Command.renameTab.item(target: terminals),
             item("Show Latency", #selector(WorkbenchView.toggleLatency(_:)), "l", [.command, .option], target: terminals),
         ]
         func directed(_ title: String, _ action: Selector, _ direction: Direction, _ modifiers: NSEvent.ModifierFlags) -> NSMenuItem {
@@ -291,7 +355,7 @@ public final class ShellApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         ]
         var windows: [NSMenuItem] = [
             item("Minimize", #selector(NSWindow.performMiniaturize(_:)), "m"), .separator(),
-            item("Zoom Split", #selector(WorkbenchView.zoomSplit(_:)), "\r", [.command, .shift], target: terminals),
+            Command.zoomSplit.item(target: terminals),
             item("Select Previous Split", #selector(WorkbenchView.selectPreviousSplit(_:)), "[", target: terminals),
             item("Select Next Split", #selector(WorkbenchView.selectNextSplit(_:)), "]", target: terminals),
             submenu("Select Split", selectSplit), submenu("Resize Split", resizeSplit), .separator(),
@@ -317,5 +381,15 @@ public enum ShellError: Error, Equatable, CustomStringConvertible {
         switch self {
         case let .host(what), let .resources(what): what
         }
+    }
+}
+
+/// The window, whose toolbar is the band and nothing else: it cannot be hidden (that would leave a
+/// 28 pt title bar over a card laid out for the band), and offers no display modes.
+final class ShellWindow: NSWindow {
+    override func toggleToolbarShown(_: Any?) {}
+
+    override func validateMenuItem(_ item: NSMenuItem) -> Bool {
+        item.action == #selector(toggleToolbarShown(_:)) ? false : super.validateMenuItem(item)
     }
 }

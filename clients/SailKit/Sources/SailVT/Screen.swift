@@ -132,11 +132,6 @@ public final class Screen: Sendable {
         parts.withLock { $0.core.scrollToBottom() }
     }
 
-    /// Whether a program may write the clipboard; allowed until the app says otherwise.
-    public func setClipboardWrites(_ policy: ClipboardWritePolicy) {
-        parts.withLock { $0.core.sink.clipboardPolicy = policy }
-    }
-
     /// Which option keys type as alt; libghostty-vt cannot know it from the terminal.
     public func setOptionAsAlt(_ optionAsAlt: OptionAsAlt) {
         parts.withLock { $0.core.optionAsAlt = optionAsAlt }
@@ -245,6 +240,11 @@ public final class Screen: Sendable {
 
     public func clearSelection() {
         parts.withLock { _ = ghostty_terminal_set($0.core.handle, GHOSTTY_TERMINAL_OPT_SELECTION, nil) }
+    }
+
+    /// Whether something is selected: what a menu asks, without making the text.
+    public var hasSelection: Bool {
+        parts.withLock { $0.core.hasSelection }
     }
 
     /// The selected text, wrapped lines joined; nil with no selection.

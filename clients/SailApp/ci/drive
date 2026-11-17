@@ -3,6 +3,9 @@
 # here, each on a data directory of its own: one taking passkeys for sail.standardapplied.com on
 # 7979, with uday an admin and a ticket to enroll him, and one with no relying party on 7980.
 # Tests/Drive/first.json runs, then the app is quit and opened again for Tests/Drive/second.json.
+# Then another copy of Sail's host runs from another bundle's path, with a client attached to one
+# of its sessions, and the app is opened once more for Tests/Drive/third.json; then, with no host
+# and no saved arrangement, once more for Tests/Drive/shots.json: the window as the screen shows it.
 # Each run's texts, images and report land in OUT; what it prints, and the servers' logs, beside
 # them. The ticket is handed to the drive in its environment and printed nowhere.
 set -euo pipefail
@@ -39,7 +42,26 @@ SAIL_DRIVE_TICKET=$("$sail" fde enroll uday --json | plutil -extract ticket raw 
 export SAIL_DRIVE_TICKET SAIL_DRIVE_PASSKEY=$out/software-passkey.json
 rm -f "$SAIL_DRIVE_PASSKEY"
 
-for run in first second; do
+for run in first second third shots; do
+  if [[ $run == third ]]; then
+    echo "ci/drive: another copy's host, and a client on it"
+    pkill -f '_pty-host --local' || true
+    perl -e 'alarm shift; exec @ARGV' 30 bash -c 'while pgrep -f "_pty-host --local" > /dev/null; do :; done'
+    other=$out/other-build/Sail.app/Contents/Helpers
+    socket=$HOME/.sail/local/pty.sock
+    mkdir -p "$other" && cp "$sail" "$other/sail"
+    ("$other/sail" _pty-host --local > "$out/other-host.log" 2>&1 &)
+    perl -e 'alarm shift; exec @ARGV' 30 bash -c 'until "$1" session ls --socket "$2" > /dev/null 2>&1; do :; done' _ "$other/sail" "$socket"
+    "$other/sail" session new held --socket "$socket" --command cat > /dev/null
+    (tail -f /dev/null | script -q /dev/null "$other/sail" session attach held --socket "$socket" > /dev/null 2>&1 &)
+    perl -e 'alarm shift; exec @ARGV' 30 bash -c 'until "$1" session ls --socket "$2" --json | grep -Eq "\"attached\" *: *1"; do :; done' _ "$other/sail" "$socket"
+  fi
+  if [[ $run == shots ]]; then
+    echo "ci/drive: a fresh start for the shots: no host, no saved arrangement"
+    pkill -f '_pty-host --local' || true
+    perl -e 'alarm shift; exec @ARGV' 30 bash -c 'while pgrep -f "_pty-host --local" > /dev/null; do :; done'
+    defaults delete "$(plutil -extract CFBundleIdentifier raw "$app/Contents/Info.plist")" workbench.arrangement 2> /dev/null || true
+  fi
   echo "ci/drive: $run"
   perl -e 'alarm shift; exec @ARGV' 600 "$drive" --drive "Tests/Drive/$run.json" --out "$out/$run" 2>&1 | tee "$out/$run-output.txt"
 done

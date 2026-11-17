@@ -20,6 +20,23 @@ import Testing
         #expect(builder.rebuilt.isEmpty)
     }
 
+    /// P2: a blink's frame lays out no row; it differs from the frame before only in the cursor.
+    @Test func aBlinkLaysOutNoRowAndChangesOnlyTheCursor() throws {
+        let screen = try screen(10, 3).fed("one\r\ntwo")
+        var builder = try InstanceBuilder(metrics: metrics(points: 15))
+        let glyphs = Glyphs()
+        let shown = builder.build(try screen.frame(), overlay: Overlay(), glyphs: glyphs)
+        let hidden = builder.build(try screen.frame(), overlay: Overlay(cursorOn: false), glyphs: glyphs)
+        #expect(builder.rebuilt.isEmpty)
+        #expect(hidden.backgrounds == shown.backgrounds)
+        #expect(hidden.glyphs == shown.glyphs)
+        #expect(hidden.decorations.count == shown.decorations.count - 1, "the cursor's one instance, and only it, is gone")
+        #expect(shown.decorations.starts(with: hidden.decorations))
+        let back = builder.build(try screen.frame(), overlay: Overlay(cursorOn: true), glyphs: glyphs)
+        #expect(builder.rebuilt.isEmpty)
+        #expect(back == shown)
+    }
+
     /// A frame asks the glyph source once per distinct item, however many cells use it, and a frame
     /// that lays nothing out still asks for every item its cached rows show, so each stays marked
     /// used by the frames that draw it (V5).

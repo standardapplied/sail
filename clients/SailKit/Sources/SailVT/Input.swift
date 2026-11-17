@@ -101,4 +101,6 @@ public enum SelectionRequest: Equatable, Sendable {
     case words(from: CellPoint, to: CellPoint)
     /// From the line at one cell to the line at the other, whole lines at both ends.
     case lines(from: CellPoint, to: CellPoint)
+    /// Everything the terminal holds, its history included.
+    case all
 }
