@@ -123,6 +123,56 @@ import Testing
         #expect(abs(MachineShare.starved(in: Self.wait, looks: edges) - 0.1) < 1e-9)
     }
 
+    /// The CI run that asked for this rule (PR #450's head e7e20062c, drive step 57): the output
+    /// waited 154.4 ms and the main thread's longest hold was 39.3 ms. The sampler looked only
+    /// once the heartbeat was 30 ms late, and in the hold it left one look, 46 ms in, of the main
+    /// thread runnable in `mach_msg2_trap` with no CPU since the hold began; in the output's wait
+    /// it left fewer than two. One look proves nothing: that run is not excused.
+    @Test func theRunThatAskedForThisRuleLeftTooFewLooksToBeExcused() {
+        let hold = Span(20.0, 20.0393)
+        let theOne = ThreadLook(time: 20.046, runnable: true, cpu: 1.25, processCPU: 9.0, idleTicks: 400, busyTicks: 900)
+        #expect(MachineShare.starvation(in: Span(19.9, 20.06), looks: [theOne]).isEmpty)
+        #expect(MachineShare.starved(in: hold, looks: [theOne]) == 0)
+    }
+
+    @Test func noLooksExcuseNothing() {
+        #expect(MachineShare.starvation(in: Self.wait, looks: []).isEmpty)
+    }
+
+    /// Looks further apart than ``MachineShare/longestGap`` are missing samples: a thread runnable
+    /// with flat CPU at two looks 150 ms apart may have run and waited many times between them.
+    @Test func missingLooksExcuseNothing() {
+        let apart = [
+            ThreadLook(time: 10.0, runnable: true, cpu: 1, processCPU: 1, idleTicks: 100, busyTicks: 500),
+            ThreadLook(time: 10.15, runnable: true, cpu: 1, processCPU: 1, idleTicks: 100, busyTicks: 545),
+        ]
+        #expect(MachineShare.starvation(in: Self.wait, looks: apart).isEmpty)
+        let sparse = Self.looks(count: 11).enumerated().filter { $0.offset % 2 == 0 }.map(\.element)
+        #expect(MachineShare.starvation(in: Self.wait, looks: sparse).isEmpty, "looks 20 ms apart prove nothing")
+    }
+
+    /// Three looks in a row are as likely a thread caught on its way into a wait; four prove it.
+    @Test func itTakesFourLooksInARow() {
+        #expect(MachineShare.starvation(in: Self.wait, looks: Self.looks(count: 3)).isEmpty)
+        let four = MachineShare.starvation(in: Self.wait, looks: Self.looks(count: 4))
+        #expect(four.count == 1)
+        #expect(abs(four[0].machines - 0.03) < 1e-9)
+    }
+
+    /// A blocked thread, a busy one and one on an idle machine are each the app's, with dense looks.
+    @Test func denseLooksOfABlockedABusyOrAnUnstarvedThreadExcuseNothing() {
+        #expect(MachineShare.starvation(in: Self.wait, looks: Self.looks(runnable: { _ in false })).isEmpty, "blocked")
+        #expect(MachineShare.starvation(in: Self.wait, looks: Self.looks(cpuPerLook: 0.002)).isEmpty, "used a fifth of the time")
+        #expect(MachineShare.starvation(in: Self.wait, looks: Self.looks(idlePerLook: 1)).isEmpty, "a CPU was idle")
+    }
+
+    /// Each excused stretch says what proved it, so a reader can check it.
+    @Test func anExcusedStretchSaysItsEvidence() {
+        let proven = MachineShare.starvation(in: Self.wait, looks: Self.looks(processPerLook: 0.015))
+        #expect(proven.count == 1)
+        #expect(proven[0].told == "100.0 ms excused at 10.000–10.200 s: 21 looks at most 10.0 ms apart, run state running at each, the thread's CPU +0.00 ms, the machine's idle ticks +0 and busy ticks +60, our process 50% of that busy CPU")
+    }
+
     /// A tail budget's samples, each net of the own thread's stall over it alone.
     @Test func eachSampleIsNetOfTheStallOverItAlone() {
         var own = Stalls(tick: 0.01)
