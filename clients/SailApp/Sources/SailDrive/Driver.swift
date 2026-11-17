@@ -148,9 +148,10 @@ final class Driver {
                 Self.captureTheScreen(to: out.appending(path: String(format: "%02d-", index) + name + "-screen.png"))
             }
             let seconds = (ContinuousClock.now - began) / .seconds(1)
-            results.append(Result(index: index, name: name, ok: ok, skipped: false, seconds: seconds, detail: detail))
+            let skipped = ok && detail.hasPrefix("skipped: ")
+            results.append(Result(index: index, name: name, ok: ok, skipped: skipped, seconds: seconds, detail: detail))
             save(index: index, name: name)
-            Self.say("drive \(index) \(name): \(ok ? "ok" : "FAILED") in \(String(format: "%.2f", seconds)) s \(detail)")
+            Self.say("drive \(index) \(name): \(skipped ? "skipped" : ok ? "ok" : "FAILED") in \(String(format: "%.2f", seconds)) s \(detail)")
             if !ok { break }
         }
         let passed = results.count == steps.count && results.allSatisfy(\.ok)
@@ -465,18 +466,22 @@ final class Driver {
         return path
     }()
 
+    /// Every process whose command line holds `text`, as `ps` lists them.
+    static func processes(matching text: String) async -> [String] {
+        await ps(["-axo", "pid=,command="]).split(separator: "\n").map(String.init).filter { $0.contains(text) && !$0.contains("ps -axo") }
+    }
+
     /// What the floods' processes and their neighbours cost the machine now, as `ps` says.
     static func processes() async -> [String] {
         await ps(["-axo", "pid,pri,%cpu,comm", "-r"]).split(separator: "\n").prefix(16).map(String.init)
     }
 
-    /// The share of a CPU, in %, the terminal host and the app each used over the next `seconds`,
-    /// from their CPU times; nil for one `ps` did not list. The host is the bundled one, which may
-    /// have been started by an earlier launch, so it is found by its path, not by a pid kept.
-    static func cpuShares(over seconds: Double) async -> (host: Double?, app: Double?) {
-        let before = await cpuTimes(), started = CACurrentMediaTime()
+    /// The share of a CPU, in %, the terminal host (the process serving at the app's socket) and
+    /// the app each used over the next `seconds`, from their CPU times; nil for one `ps` did not list.
+    static func cpuShares(host: pid_t?, over seconds: Double) async -> (host: Double?, app: Double?) {
+        let before = await cpuTimes(host: host), started = CACurrentMediaTime()
         try? await Task.sleep(for: .seconds(seconds))
-        let after = await cpuTimes(), elapsed = CACurrentMediaTime() - started
+        let after = await cpuTimes(host: host), elapsed = CACurrentMediaTime() - started
         func share(_ was: Double?, _ now: Double?) -> Double? {
             guard let was, let now else { return nil }
             return (now - was) / elapsed * 100
@@ -485,15 +490,15 @@ final class Driver {
     }
 
     /// The terminal host's and the app's CPU time so far in seconds, from `ps`'s `[[hh:]mm:]ss.ss`.
-    static func cpuTimes() async -> (host: Double?, app: Double?) {
-        let helper = Bundle.main.bundleURL.appending(path: "Contents/Helpers/sail").path, app = getpid()
+    static func cpuTimes(host: pid_t?) async -> (host: Double?, app: Double?) {
+        let app = getpid()
         var times: (host: Double?, app: Double?) = (nil, nil)
-        for line in await ps(["-axo", "pid=,time=,comm="]).split(separator: "\n") {
-            let fields = line.split(separator: " ", maxSplits: 2)
-            guard fields.count == 3, let pid = pid_t(fields[0]) else { continue }
+        for line in await ps(["-axo", "pid=,time="]).split(separator: "\n") {
+            let fields = line.split(separator: " ")
+            guard fields.count == 2, let pid = pid_t(fields[0]) else { continue }
             let time = fields[1].split(separator: ":").compactMap { Double($0) }.reduce(0) { $0 * 60 + $1 }
             if pid == app { times.app = time }
-            if fields[2] == helper { times.host = (times.host ?? 0) + time }
+            if pid == host { times.host = time }
         }
         return times
     }

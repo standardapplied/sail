@@ -1,5 +1,5 @@
 size 40x3
-cursor 17,1 block visible steady
+cursor 17,1 block visible blinking
 colors fg #f6f1e9 bg #0a0e11 cursor #fc4926
 row 0 |family 👨‍👩‍👧 end|
   7 wide

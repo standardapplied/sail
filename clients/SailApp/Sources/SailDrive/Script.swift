@@ -102,8 +102,6 @@ struct Step: Decodable {
     var accent: Bool?
     /// The window's title bar: transparent, the platform's buttons, the rail and the pane under it.
     var titleBar: Bool?
-    /// The window's own zoom, twice: the frame changes and comes back.
-    var zoomAndRestore: Bool?
     /// Searches everywhere a token could be left for the session token and for `sess_`.
     var sweep: Bool?
     /// The step runs only on a signed build, or only on an unsigned one; skipped otherwise.
@@ -124,6 +122,9 @@ struct Step: Decodable {
     var renameTab: Int?
     var rename: String?
     var renameWith: String?
+    /// A tab's name is being edited with the keys in its field (true), or no field is open (false),
+    /// within 2 s.
+    var renaming: Bool?
     /// The sheet on the window answered with its button of this title, the sheet saying `asking`
     /// when given; "none": no sheet asks within a second.
     var sheet: String?
@@ -132,6 +133,32 @@ struct Step: Decodable {
     var remember: Bool?
     /// The session `remember` kept is listed live by the host, or not, within `seconds`.
     var listed: Bool?
+    /// The context menu of the selected tab's pane, or of the tab, at `at`, asked as a right-click
+    /// asks it (a pane is focused first, a tab selected); it must hold `items` ("-" a separator),
+    /// and `choose` is done as a click on it.
+    var contextMenu: String?
+    var at: Int?
+    var items: [String]?
+    var choose: String?
+    /// The focused pane's cursor blinks: two frames a blink apart differ only in the cursor's cell;
+    /// unfocused, nothing is drawn and nothing wakes; blinking, its display link does not fire; the
+    /// wakeups a second are reported.
+    var blink: Bool?
+    /// Another copy of Sail's host and this app (third run): "kept" (it has a client, so the app
+    /// ended nothing and said what holds it), "free" (the host serving lists no session with a
+    /// client: a client that quit has been seen to leave), "replaced" (no client: the app said its
+    /// terminals are closing, ended it, and its own host serves, the only one).
+    var otherHost: String?
+    /// The app's window as the screen shows it (`screencapture -l`, so what AppKit draws in the
+    /// title bar and the Metal layers are in it), in the light look and the dark, saved as
+    /// `window/<this>-light.png` and `-dark.png` beside the runs' folders.
+    var shot: String?
+    /// The focused pane's context menu open, the whole screen taken while it shows, in both looks.
+    var shotMenu: String?
+    /// The window in full screen, the whole screen taken, in both looks; then out of full screen.
+    var fullScreen: String?
+    /// Every process whose command line holds this is ended (`pkill -f`); none running is no failure.
+    var kill: String?
     /// The tab strip's hit testing: a tab's middle reaches the tab, the empty end moves the window.
     var stripHits: Bool?
     /// The four-pane measure (scenario 32).
