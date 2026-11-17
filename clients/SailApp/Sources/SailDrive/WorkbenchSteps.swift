@@ -124,16 +124,18 @@ extension Driver {
             return (lines.first == markedTop, "the top line is '\(lines.first ?? "")', it was '\(markedTop ?? "")'")
         }
         if let times = step.titleBurst {
-            let writes = await arrangementWrites(within: 2) {
+            let last = "t\(times)"
+            let made = await arrangementWrites({ _ in self.workbench.model.focusedPane?.programTitle == last }) {
                 typeText("for i in $(seq 1 \(times)); do printf '\\e]2;t%s\\a' $i; done\r")
             }
-            return (writes == 0, "the program set its title \(times) times; the arrangement was written \(writes) times")
+            return (made.settled && made.writes == 0, "the program set its title \(times) times"
+                + (made.settled ? "" : ", but its last title was not taken within 10 s") + "; " + made.said)
         }
         if let times = step.dividerBurst {
-            let writes = await arrangementWrites(within: 1.5) {
+            let made = await arrangementWrites({ $0 >= 1 }) {
                 for _ in 0 ..< times { press("arrowRight", ["command", "control"]) }
             }
-            return (writes == 1, "⌃⌘→ \(times) times at once; the arrangement was written \(writes) times")
+            return (made.settled && made.writes == 1, "⌃⌘→ \(times) times at once; " + made.said)
         }
         if step.hold == true {
             guard let view = pane?.terminal else { return (false, "no pane is focused") }
@@ -826,19 +828,34 @@ extension Driver {
         return (1 ... holds + 1).contains(sizes.count) && sizes.last == "winch-\(columns)"
     }
 
-    /// How many times the app writes its user defaults while `act` runs and for `seconds` after it
-    /// (each write posts `UserDefaults.didChangeNotification` in the process), after a write the
-    /// steps before left pending has landed.
-    private func arrangementWrites(within seconds: Double, _ act: () -> Void) async -> Int {
-        try? await Task.sleep(for: .seconds(1))
+    /// How many times `act` wrote the arrangement itself (``WorkbenchView/arrangementKey``), counted
+    /// from once no keep of an earlier step is pending until `processed` (given the writes so far)
+    /// holds and no keep is pending, so a write `act` caused has come; and which other defaults
+    /// changed meanwhile, named and never counted. `settled` is false when that took over 10 s.
+    private func arrangementWrites(
+        _ processed: @escaping @MainActor (Int) -> Bool, _ act: () -> Void
+    ) async -> (writes: Int, settled: Bool, said: String) {
+        _ = await waitUntil(10) { !self.workbench.isKeepingSoon }
+        let defaults = UserDefaults.standard, key = WorkbenchView.arrangementKey
+        let before = defaults.dictionaryRepresentation()
+        let last = Mutex(defaults.data(forKey: key))
         let writes = Mutex(0)
         let watch = NotificationCenter.default.addObserver(forName: UserDefaults.didChangeNotification, object: nil, queue: nil) { _ in
-            writes.withLock { $0 += 1 }
+            let now = UserDefaults.standard.data(forKey: key)
+            let changed = last.withLock { kept in
+                defer { kept = now }
+                return kept != now
+            }
+            if changed { writes.withLock { $0 += 1 } }
         }
         defer { NotificationCenter.default.removeObserver(watch) }
         act()
-        try? await Task.sleep(for: .seconds(seconds))
-        return writes.withLock { $0 }
+        let settled = await waitUntil(10) { processed(writes.withLock { $0 }) && !self.workbench.isKeepingSoon }
+        let after = defaults.dictionaryRepresentation()
+        let others = Set(before.keys).union(after.keys).filter { $0 != key && before[$0] as? NSObject != after[$0] as? NSObject }.sorted()
+        let count = writes.withLock { $0 }
+        return (count, settled, "the arrangement was written \(count) times"
+            + (others.isEmpty ? "" : "; other defaults changed meanwhile, not counted: " + others.joined(separator: ", ")))
     }
 
     /// How many frames `view` has committed, as its drawing state says.
