@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.72.0
+
+- **Open terminals follow a light/dark change while they run.** When macOS switches between light and dark, every open terminal (every tab and split, focused or not) takes the other look's colours at once. What it shows, its scrollback, its selection and its cursor are kept, and colours a program set itself (OSC 4, 10, 11) stay as it set them. Before this build a terminal kept the colours it opened in until its next session, so a dark Mac showed light terminals. A program that asks for the colours (OSC 10, 11, 4) or the scheme (`CSI ? 996 n`) is answered with the new ones. A program subscribed to scheme reports (mode 2031) is told of the change, and told the scheme once more whenever this client attaches, reattaches or takes the write, so a change made while the client was away is not left unsaid; a program that did not subscribe learns only by asking. Only the client holding the write token tells the program: with two people attached in different looks the program hears the writer's, and an observer's look never reaches it. The drive switches the look four times with four panes' scrollback full and fails on any wait, or main-thread hold, over 100 ms; its screenshots are taken in each look switched while the app runs, once every terminal shown has drawn it.
+
 ## 0.71.0
 
 **Updating from a build before this one** (its terminal host runs from inside its app bundle, so Finder cannot replace it while that host runs, error -47): quit Sail; open the new build once from where it unzipped, which ends the old build's host when no terminal is attached to it; then quit it and move it to Applications.

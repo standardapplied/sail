@@ -436,6 +436,54 @@ final class Driver {
         return ("/tmp/sail-drive-flood-lines", "/tmp/sail-drive-flood-tail")
     }()
 
+    /// A program asking the terminal for its colours, run by the system's perl in a pane. `ask`
+    /// asks the background (OSC 11), palette colour 5 (OSC 4) and the colour scheme (996) and
+    /// prints `asked bg <rgb> c5 <rgb> <light|dark|none>`, short enough for a narrow pane; `set` first sets
+    /// colour 5 to `rgb:12/34/56` as a program's own. `watch` subscribes to colour scheme reports
+    /// (mode 2031), prints `subscribed`, and once a report comes prints `scheme report <scheme>`.
+    static let colourAsker: String = {
+        let path = "/tmp/sail-drive-colours.pl"
+        let script = #"""
+            use strict;
+            use IO::Select;
+            my ($mode) = @ARGV;
+            $| = 1;
+            system('stty -icanon -echo min 1');
+            my $in = IO::Select->new(\*STDIN);
+            sub replies {
+                my $got = '';
+                while ($got !~ /997;\dn/ && $in->can_read(5)) {
+                    sysread(STDIN, my $chunk, 256) or last;
+                    $got .= $chunk;
+                }
+                return $got;
+            }
+            sub scheme {
+                my ($digit) = @_;
+                return 'none' unless defined $digit;
+                return $digit eq '1' ? 'dark' : $digit eq '2' ? 'light' : 'none';
+            }
+            if ($mode eq 'watch') {
+                print "\e[?2031hsubscribed\n";
+                my ($digit) = replies() =~ /997;(\d)n/;
+                print "\e[?2031l";
+                system('stty sane');
+                print "scheme report ", scheme($digit), "\n";
+                exit;
+            }
+            print "\e]4;5;rgb:12/34/56\e\\" if $mode eq 'set';
+            print "\e]11;?\e\\\e]4;5;?\e\\\e[?996n";
+            my $got = replies();
+            system('stty sane');
+            my ($background) = $got =~ /\]11;(rgb:[0-9a-f\/]+)/;
+            my ($own) = $got =~ /\]4;5;(rgb:[0-9a-f\/]+)/;
+            my ($digit) = $got =~ /997;(\d)n/;
+            print "asked bg ", $background // 'none', " c5 ", $own // 'none', " ", scheme($digit), "\n";
+            """#
+        FileManager.default.createFile(atPath: path, contents: Data(script.utf8))
+        return path
+    }()
+
     /// A pane's generator, run by the system's perl: it writes the prepared lines (its first
     /// argument) `block` bytes at a time, one block each `period` seconds, until `stop` exists. A
     /// block the pty took late is not made up for, so the rate is a ceiling; with a period of zero

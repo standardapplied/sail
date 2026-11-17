@@ -201,8 +201,14 @@ struct Step: Decodable {
     var kill: String?
     /// The tab strip's hit testing: a tab's middle reaches the tab, the empty end moves the window.
     var stripHits: Bool?
-    /// The four-pane measure (scenario 32).
+    /// The four-pane measure (scenario 32), the look switched with their scrollback full among it.
     var panes4: Bool?
+    /// Makes the colour asker, once, at ``Driver/colourAsker``.
+    var colourScript: Bool?
+    /// The app's look set to "light", "dark" or "system" (the system's again), as the system's
+    /// appearance changing sets it; the shell must take it and every terminal shown draw a frame
+    /// in its palette within 5 s.
+    var look: String?
     /// Waits this many seconds.
     var wait: Double?
     /// Each pane of the selected tab shows a line `winch-<columns>` (a program printing one at each

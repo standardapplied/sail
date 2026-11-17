@@ -798,6 +798,28 @@ import Testing
         #expect(TerminalView.lines(in: "one\rtwo\rthree") == 3)
         #expect(TerminalView.lines(in: "one\r\ntwo\r\n") == 2)
     }
+
+    /// The look changes while the terminal runs: the next frame is drawn in the other palette with
+    /// what it showed kept; a program told of the scheme only once it subscribed (mode 2031).
+    @Test func aRunningViewTakesTheOtherPaletteAtOnce() async throws {
+        let harness = try Harness()
+        harness.link.output("\u{1b}[31mred\u{1b}[0m")
+        await harness.drainMain()
+        await harness.tick()
+        await harness.tick()
+        try #require(harness.clock.isPaused)
+        #expect(harness.view.lastFrame?.colors.background == Palette.dark.background)
+        harness.link.forget()
+        harness.view.recolour(.light)
+        harness.flush()
+        #expect(await harness.until { harness.view.lastFrame?.colors.background == Palette.light.background }, "the other palette was not drawn")
+        #expect(harness.view.visibleText.contains("red"))
+        #expect(harness.link.bytes.isEmpty, "a program that did not subscribe is told nothing")
+        harness.link.output("\u{1b}[?2031h")
+        harness.view.recolour(.dark)
+        harness.flush()
+        #expect(harness.link.bytes == Array("\u{1b}[?997;1n".utf8))
+    }
 }
 
 /// V2: the app parses and makes no escape sequence; the screen's encoders and libghostty-vt do.

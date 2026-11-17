@@ -302,7 +302,7 @@ import Testing
         let id = bench.newTab(session: "mac-scrim", place: .thisMac(folder: "/"))
         let pane = try TerminalPane(
             try #require(bench.panes[id]), start: .attach, host: shell.thisMac.host, runner: nil, fonts: TerminalFonts(directory: LookTests.fonts),
-            points: 15, look: .dark, palette: Look.dark.palette
+            points: 15, look: .dark
         )
         let scrim = try #require(pane.subviews.first { $0 is Scrim })
         #expect(scrim.layer?.backgroundColor == NSColor(Look.dark.palette.background).withAlphaComponent(0.3).cgColor)
@@ -310,6 +310,22 @@ import Testing
         pane.isDimmed = true
         #expect(!scrim.isHidden)
         #expect(scrim.hitTest(NSPoint(x: 10, y: 10)) == nil)
+    }
+
+    /// The look changes while the pane runs: its background and scrim take the other palette's.
+    @Test func aPaneTakesTheOtherLooksBackgroundAndScrimAtOnce() throws {
+        let shell = try Self.shell(.dark)
+        var bench = Workbench()
+        let id = bench.newTab(session: "mac-look", place: .thisMac(folder: "/"))
+        let pane = try TerminalPane(
+            try #require(bench.panes[id]), start: .attach, host: shell.thisMac.host, runner: nil, fonts: TerminalFonts(directory: LookTests.fonts),
+            points: 15, look: .dark
+        )
+        let scrim = try #require(pane.subviews.first { $0 is Scrim })
+        #expect(pane.layer?.backgroundColor == NSColor(Look.dark.palette.background).cgColor)
+        pane.look = .light
+        #expect(pane.layer?.backgroundColor == NSColor(Look.light.palette.background).cgColor)
+        #expect(scrim.layer?.backgroundColor == NSColor(Look.light.palette.background).withAlphaComponent(0.3).cgColor)
     }
 
     /// W8: every command is a menu item with the table's key and modifiers.

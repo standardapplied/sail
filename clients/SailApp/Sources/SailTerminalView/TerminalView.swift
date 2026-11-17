@@ -188,6 +188,13 @@ public final class TerminalView: NSView {
         needFrame()
     }
 
+    /// Draws the screen in `palette` from the next frame on, its content, scrollback, selection and
+    /// cursor kept; the link tells a program that subscribed of a changed scheme.
+    public func recolour(_ palette: Palette) {
+        guard let link else { return }
+        input.async { try? link.setPalette(palette) }
+    }
+
     /// Whether `link` may be attached: no view has drawn it before.
     public static func canAttach(_ link: any TerminalLink) -> Bool {
         !attached.contains(link)

@@ -28,7 +28,6 @@ public final class WorkbenchView: NSView {
     /// Asked to show the account, where a runner tab's lapsed sign-in is signed in again.
     var onSignIn: @MainActor () -> Void = {}
 
-    let palette: Palette
     var look: Look {
         didSet { paint() }
     }
@@ -49,7 +48,6 @@ public final class WorkbenchView: NSView {
 
     init(fonts directory: URL, helper: String?, look: Look) throws(ShellError) {
         self.look = look
-        palette = look.palette
         do {
             fonts = try TerminalFonts(directory: directory)
         } catch {
@@ -205,7 +203,7 @@ public final class WorkbenchView: NSView {
         let view: TerminalPane
         do {
             let tickets = pane.place.onRunner ? signedIn().map { SignedInTickets(for: $0.handle, current: signedIn) } : nil
-            view = try TerminalPane(pane, start: start, host: host, runner: tickets, fonts: fonts, points: points, look: look, palette: palette)
+            view = try TerminalPane(pane, start: start, host: host, runner: tickets, fonts: fonts, points: points, look: look)
         } catch {
             banner.show(Said.sentence(error.description))
             return nil
@@ -578,7 +576,7 @@ public final class WorkbenchView: NSView {
     }
 
     private func paint() {
-        layer?.backgroundColor = NSColor(palette.background).cgColor
+        layer?.backgroundColor = NSColor(look.palette.background).cgColor
         emptyLabel.textColor = NSColor(look.textSecondary)
         newTerminal.look = look
         banner.look = look

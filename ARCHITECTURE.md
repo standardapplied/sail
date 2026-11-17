@@ -4674,7 +4674,12 @@ always bold, large text by the HIG's measure), content corners at 6 pt, a 60 pt 
 Mac" and the account. The title bar is transparent over a full-size content view: the rail's tint and
 the pane's surface run to the top edge under the platform's own window buttons. Focus rings,
 selection and the caret are the accent's, through the window's own field editor; the look follows a
-dark/light change while the app runs (the terminal's palette at its next session). The artifact is the
+dark/light change while the app runs, every open terminal's palette with it: the screen is recoloured
+in place (`Screen.setPalette`), its content, scrollback, selection and cursor kept and colours a
+program set itself (OSC 4/10/11) kept; colour queries (OSC 10/11/4, `CSI ? 996 n`) are answered in
+the new look; a program subscribed to scheme reports (mode 2031) is told by the writer only, at the
+change and once more at every attach as the writer or take of the write, so an observer's look never
+reaches it and a change made while the client was away is not left unsaid. The artifact is the
 zip `ditto` made, uploaded unarchived, so one unzip gives `Sail.app`; CI checks the download as
 Finder unpacks it.
 
