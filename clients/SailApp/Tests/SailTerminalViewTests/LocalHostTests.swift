@@ -46,7 +46,7 @@ import Testing
         )
         try host.start(binary.path)
         let first = try #require(host.startedPID)
-        defer { host.startedPID.map { _ = kill($0, SIGTERM) } }
+        defer { if let pid = host.startedPID { kill(pid, SIGTERM) } }
         kill(first, SIGKILL)
         #expect(await Self.until { host.startedPID.map { $0 != first } ?? false }, "a killed host was not started again")
         #expect(host.endedBy == nil)
@@ -72,9 +72,9 @@ import Testing
             binary: binary.path, address: .unix(path: path), log: folder.appending(path: "host.log").path,
             copies: folder.appending(path: "copies"), shortestLife: .seconds(60)
         )
-        defer { host.startedPID.map { _ = kill($0, SIGTERM) } }
+        defer { if let pid = host.startedPID { kill(pid, SIGTERM) } }
         let serving = Task { () -> ShellError? in
-            do {
+            do throws(ShellError) {
                 try await host.ensureServing()
                 return nil
             } catch {

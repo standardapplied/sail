@@ -147,7 +147,7 @@ struct Step: Decodable {
     var otherHost: String?
     /// The app's window as the screen shows it (`screencapture -l`, so what AppKit draws in the
     /// title bar and the Metal layers are in it), in the light look and the dark, saved as
-    /// `shots/<this>-light.png` and `-dark.png`.
+    /// `window/<this>-light.png` and `-dark.png` beside the runs' folders.
     var shot: String?
     /// The focused pane's context menu open, the whole screen taken while it shows, in both looks.
     var shotMenu: String?

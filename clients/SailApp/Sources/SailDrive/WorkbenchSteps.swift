@@ -674,7 +674,7 @@ extension Driver {
 
     /// The focused pane's context menu, popped up as a right-click shows it, the whole screen taken
     /// a second later (the menu is a window of its own), then the menu closed.
-    private func captureWithTheMenuOpen(to file: URL) async {
+    private func captureWithTheMenuOpen(to file: URL) {
         let view = terminal
         guard let event = NSEvent.mouseEvent(
             with: .rightMouseDown, location: view.convert(NSPoint(x: 80, y: 60), to: nil), modifierFlags: [],

@@ -481,4 +481,4 @@ jobs:
           name: sailapp-screenshots-${{ github.sha }}
           if-no-files-found: ignore
           retention-days: 14
-          path: ${{ runner.temp }}/drive-out/shots
+          path: ${{ runner.temp }}/drive-out/window
