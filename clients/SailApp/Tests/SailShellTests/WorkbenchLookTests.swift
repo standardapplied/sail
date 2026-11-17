@@ -270,20 +270,30 @@ import Testing
         }
     }
 
-    /// The rectangle, in points, of `view`'s opaque pixels darker than `limit` (red, green and blue
-    /// summed): the text, in the light look.
-    static func ink(_ view: NSView, darkerThan limit: Int = 300) -> CGRect? {
-        guard let context = drawn(view), let data = context.data else { return nil }
-        let pixels = data.bindMemory(to: UInt8.self, capacity: context.width * context.height * 4)
+    /// The rectangle, in points from the top left, of `view`'s mostly opaque pixels darker than
+    /// `limit` (red, green and blue summed, of 765): the text, in the light look. Drawn at 2x as
+    /// AppKit draws views (`cacheDisplay`): a layer's render left out the title's text.
+    static func ink(_ view: NSView, darkerThan limit: Double = 300) -> CGRect? {
+        view.layoutSubtreeIfNeeded()
+        guard view.bounds.width > 0, view.bounds.height > 0, let image = NSBitmapImageRep(
+            bitmapDataPlanes: nil, pixelsWide: Int(view.bounds.width * 2), pixelsHigh: Int(view.bounds.height * 2), bitsPerSample: 8,
+            samplesPerPixel: 4, hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0
+        ) else { return nil }
+        image.size = view.bounds.size
+        view.cacheDisplay(in: view.bounds, to: image)
+        let scale = Double(image.pixelsWide) / Double(view.bounds.width)
         var found: (minX: Int, minY: Int, maxX: Int, maxY: Int)?
-        for y in 0 ..< context.height {
-            for x in 0 ..< context.width {
-                let at = (y * context.width + x) * 4
-                guard pixels[at + 3] == 255, Int(pixels[at]) + Int(pixels[at + 1]) + Int(pixels[at + 2]) < limit else { continue }
+        for y in 0 ..< image.pixelsHigh {
+            for x in 0 ..< image.pixelsWide {
+                guard let colour = image.colorAt(x: x, y: y)?.usingColorSpace(.sRGB), colour.alphaComponent > 0.5,
+                      Double(colour.redComponent + colour.greenComponent + colour.blueComponent) * 255 < limit
+                else { continue }
                 found = found.map { (minX: min($0.minX, x), minY: min($0.minY, y), maxX: max($0.maxX, x), maxY: max($0.maxY, y)) } ?? (minX: x, minY: y, maxX: x, maxY: y)
             }
         }
-        return found.map { CGRect(x: Double($0.minX) / 2, y: Double($0.minY) / 2, width: Double($0.maxX - $0.minX + 1) / 2, height: Double($0.maxY - $0.minY + 1) / 2) }
+        return found.map {
+            CGRect(x: Double($0.minX) / scale, y: Double($0.minY) / scale, width: Double($0.maxX - $0.minX + 1) / scale, height: Double($0.maxY - $0.minY + 1) / scale)
+        }
     }
 
     @Test func theScrimIsTheTerminalBackgroundAt30PercentAndTakesNoClick() throws {

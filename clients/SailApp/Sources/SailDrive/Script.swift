@@ -122,7 +122,8 @@ struct Step: Decodable {
     var renameTab: Int?
     var rename: String?
     var renameWith: String?
-    /// A tab's name is being edited (true) or not (false).
+    /// A tab's name is being edited with the keys in its field (true), or no field is open (false),
+    /// within 2 s.
     var renaming: Bool?
     /// The sheet on the window answered with its button of this title, the sheet saying `asking`
     /// when given; "none": no sheet asks within a second.

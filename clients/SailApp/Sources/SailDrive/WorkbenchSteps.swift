@@ -66,7 +66,14 @@ extension Driver {
             return await blinks()
         }
         if let renaming = step.renaming {
-            return (workbench.strip.isRenaming == renaming, "the field is \(workbench.strip.isRenaming ? "open" : "closed")")
+            let window = shell.window
+            let field = { self.workbench.strip.tabs.compactMap(\.field).first }
+            let reached = await waitUntil(2) {
+                guard renaming else { return field() == nil }
+                return field().map { $0.currentEditor() != nil && window.firstResponder === $0.currentEditor() } ?? false
+            }
+            let holder = window.firstResponder.map { String(describing: type(of: $0)) } ?? "nothing"
+            return (reached, "the field is \(field() == nil ? "closed" : "open"); the keys are with \(holder)")
         }
         if let name = step.shot {
             return await inBothLooks(name) { file in await self.capture(["-o", "-l", "\(self.shell.window.windowNumber)"], to: file) }
@@ -640,6 +647,7 @@ extension Driver {
     /// `take` in the light look, then the dark, each once the window has been drawn in it; the
     /// look the system gives comes back after. Fails when a file is missing or empty.
     private func inBothLooks(_ name: String, _ take: (URL) async -> Void) async -> (Bool, String) {
+        let given = shell.look
         let folder = out.deletingLastPathComponent().appending(path: "window")
         try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         var taken: [String] = []
@@ -655,6 +663,8 @@ extension Driver {
             taken.append("\(file.lastPathComponent) \(size) bytes")
         }
         NSApp.appearance = nil
+        _ = await waitUntil(5) { self.shell.look == given }
+        try? await Task.sleep(for: .milliseconds(300))
         return (taken.allSatisfy { !$0.hasSuffix(" 0 bytes") }, taken.joined(separator: ", "))
     }
 
