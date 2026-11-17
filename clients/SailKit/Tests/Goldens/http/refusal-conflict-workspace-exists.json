@@ -1,0 +1,20 @@
+{
+  "request": {
+    "body": {
+      "name": "dock"
+    },
+    "method": "POST",
+    "path": "/v1/projects/harbor/workspaces"
+  },
+  "response": {
+    "body": {
+      "error": {
+        "code": "conflict",
+        "field_errors": [],
+        "message": "Workspace 'dock' of harbor exists already, as the instance 'harbor-dock'."
+      },
+      "schema_version": 1
+    },
+    "status": 409
+  }
+}

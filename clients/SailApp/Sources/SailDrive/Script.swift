@@ -129,6 +129,22 @@ struct Step: Decodable {
     /// when given; "none": no sheet asks within a second.
     var sheet: String?
     var asking: String?
+    /// The workspaces run's control plane answers this route (`["POST /v1/terminal/tickets",
+    /// "refusal-forbidden-not-assignee"]`) as that golden from now on.
+    var golden: [String]?
+    /// The Workspaces pane says this, within `seconds` (10 by default), no call under way.
+    var workspaces: String?
+    /// This name typed into the Workspaces pane's field and Make pressed; the call waited for.
+    var make: String?
+    /// The Workspaces row of this name selected and Open pressed: a tab on the runner.
+    var open: String?
+    /// A ticket was asked with these fields (`{"action": "open", "workspace": "dock"}`), within
+    /// `seconds` (15 by default).
+    var ticketAsked: [String: String]?
+    /// The app is asked to quit, as Quit Sail does.
+    var quit: Bool?
+    /// The whole screen in both looks, a sheet over the window included, saved as `window/<this>`.
+    var shotScreen: String?
     /// The focused pane's session kept for `listed`.
     var remember: Bool?
     /// The session `remember` kept is listed live by the host, or not, within `seconds`.

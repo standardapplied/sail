@@ -314,6 +314,23 @@ class ClientGoldensTest {
       Acting.system(() -> new ProjectStore(db).upsert(HARBOR));
       var dana = box.session("dana", "Dana", "dana@example.com", Role.ADMIN);
       var dock = "/v1/projects/" + PROJECT + "/workspaces/dock";
+      var workspaces = "/v1/projects/" + PROJECT + "/workspaces";
+      var ana = box.token("ana", Role.MEMBER);
+      box.record(
+          http,
+          "refusal-read-only-credential-workspace",
+          "POST",
+          workspaces,
+          vik,
+          Map.of("name", "new"));
+      box.record(
+          http,
+          "refusal-conflict-workspace-exists",
+          "POST",
+          workspaces,
+          dana,
+          Map.of("name", "dock"));
+      box.record(http, "refusal-forbidden-not-assignee", "POST", dock + "/start", ana, null);
       box.record(
           http,
           "workspace-create",

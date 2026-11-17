@@ -173,6 +173,9 @@ final class Driver {
         if let workbench = await performWorkbench(step) {
             return workbench
         }
+        if let workspaces = await performWorkspaces(step) {
+            return workspaces
+        }
         if let text = step.type {
             for character in text { key(character) }
             return (true, "typed \(text.count) keys")

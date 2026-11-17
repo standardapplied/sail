@@ -1,7 +1,8 @@
 import Foundation
 import SailTerminalWire
 
-/// The sessions this machine's own host holds for its person: listed, or one ended unattached.
+/// The sessions this machine's own host holds for its person, listed; and one ended unattached, at
+/// this host or a runner's.
 public enum SessionListing {
     /// How many sessions one page asks for.
     public static let pageSize: Int32 = 100
@@ -19,8 +20,15 @@ public enum SessionListing {
     /// Ends `session` at the local host at `address`, as closing a pane that holds no connection
     /// to the host does; the answer awaited at most `timeout` seconds.
     public static func end(_ session: String, at address: HostAddress, timeout: Int = 10) async throws(TerminalError) {
+        try await end(session, through: .local(address), timeout: timeout)
+    }
+
+    /// Ends `session` at the host `door` reaches, on a connection of its own: for a runner, through
+    /// an attach ticket for that session.
+    public static func end(_ session: String, through door: Door, timeout: Int = 10) async throws(TerminalError) {
         guard timeout >= 1 else { throw .unsupported("ending a session waits 1 s or more for the answer, not \(timeout) s") }
-        try await offThread { () throws(TerminalError) in try kill(session, at: address, timeout: timeout) }
+        let entry = try await door.entry(for: .attach(session: session))
+        try await offThread { () throws(TerminalError) in try kill(session, at: entry.address, token: entry.token, timeout: timeout) }
     }
 
     private static func offThread<T: Sendable>(_ work: @escaping @Sendable () throws(TerminalError) -> T) async throws(TerminalError) -> T {
@@ -30,10 +38,10 @@ public enum SessionListing {
         return try result.get()
     }
 
-    private static func kill(_ session: String, at address: HostAddress, timeout: Int) throws(TerminalError) {
+    private static func kill(_ session: String, at address: HostAddress, token: String, timeout: Int) throws(TerminalError) {
         let connection = try Connection.connect(to: address, timeout: timeout)
         defer { connection.close() }
-        _ = try connection.admit(token: "")
+        _ = try connection.admit(token: token)
         try connection.send(.kill(session: session))
         switch try connection.next() {
         case .accepted?: return

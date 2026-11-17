@@ -103,7 +103,7 @@ public final class WorkspaceDoors {
             + "'s node, where only "
             + keeper
             + " makes or enters a workspace; another person's workspaces live on main.",
-        "Make yours on main: POST /v1/projects/<project>/workspaces on main's API.");
+        "Workspaces are made on main: make yours there.");
   }
 
   /**

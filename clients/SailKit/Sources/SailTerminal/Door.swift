@@ -28,9 +28,10 @@ public enum Door: Sendable {
     }
 }
 
-/// What a ticket is asked for: to open a session in a project, or to attach to one.
+/// What a ticket is asked for: to open a session in a project's workspace (blank for the project's
+/// own container), or to attach to one.
 public enum TicketRequest: Equatable, Sendable {
-    case open(project: String)
+    case open(project: String, workspace: String)
     case attach(session: String)
 }
 
@@ -42,7 +43,7 @@ public protocol TicketSource: Sendable {
 extension SailClient: TicketSource {
     public func ticket(for request: TicketRequest) async throws(SailError) -> TerminalTicket {
         switch request {
-        case let .open(project): try await send(.terminalTicket(open: project))
+        case let .open(project, workspace): try await send(.terminalTicket(open: project, workspace: workspace))
         case let .attach(session): try await send(.terminalTicket(attach: session))
         }
     }

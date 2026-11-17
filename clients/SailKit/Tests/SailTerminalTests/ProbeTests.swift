@@ -6,6 +6,18 @@ import SailTerminalWire
 import Testing
 
 @Suite struct ProbeTests {
+    /// `--workspace` names the workspace a runner session opens in; without it, the project's own
+    /// container, as before.
+    @Test func aRunnerRunNamesItsWorkspace() throws {
+        let given = ["--api", "http://10.0.0.2:7443", "--token-env", "T", "--project", "acme", "--script", "s.json"]
+        let inTry = try Arguments.parse(given + ["--workspace", "try"], currentDirectory: "/")
+        let bare = try Arguments.parse(given, currentDirectory: "/")
+        guard case let .run(run) = inTry, case let .run(plain) = bare else { Issue.record("not runs"); return }
+        #expect(run.host == .runner(api: URL(string: "http://10.0.0.2:7443")!, tokenVariable: "T", project: "acme", workspace: "try"))
+        #expect(plain.host == .runner(api: URL(string: "http://10.0.0.2:7443")!, tokenVariable: "T", project: "acme", workspace: ""))
+        #expect(throws: UsageError.self) { try Arguments.parse(["--local", "--workspace", "try", "--script", "s.json"], currentDirectory: "/") }
+    }
+
     /// MINOR 11: a capture is a new file only its owner reads; one that exists is not overwritten.
     @Test func aCaptureIsANewFileOnlyItsOwnerReads() throws {
         let path = FileManager.default.temporaryDirectory.appending(path: "capture-\(UUID().uuidString)").path

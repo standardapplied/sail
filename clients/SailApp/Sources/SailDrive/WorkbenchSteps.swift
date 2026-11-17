@@ -646,7 +646,7 @@ extension Driver {
 
     /// `take` in the light look, then the dark, each once the window has been drawn in it; the
     /// look the system gives comes back after. Fails when a file is missing or empty.
-    private func inBothLooks(_ name: String, _ take: (URL) async -> Void) async -> (Bool, String) {
+    func inBothLooks(_ name: String, _ take: (URL) async -> Void) async -> (Bool, String) {
         let given = shell.look
         let folder = out.deletingLastPathComponent().appending(path: "window")
         try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
@@ -689,7 +689,7 @@ extension Driver {
     }
 
     /// `screencapture -x` with `arguments`, into `file`; its own error, if any, is printed.
-    private func capture(_ arguments: [String], to file: URL) async {
+    func capture(_ arguments: [String], to file: URL) async {
         let process = Process()
         let errors = Pipe()
         process.executableURL = URL(filePath: "/usr/sbin/screencapture")

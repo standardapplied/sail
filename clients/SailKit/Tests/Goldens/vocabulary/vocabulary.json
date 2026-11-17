@@ -106,6 +106,10 @@
       "status": 503
     },
     {
+      "code": "terminal_not_offered",
+      "status": 404
+    },
+    {
       "code": "spec_not_found",
       "status": 404
     },

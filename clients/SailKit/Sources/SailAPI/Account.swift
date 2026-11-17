@@ -128,15 +128,24 @@ public struct Account: Sendable {
     /// Who this Mac is signed in as, nil when it holds no session; a session the server ended, or
     /// one the vault could not read, is gone and said.
     public func current(at plane: ControlPlane) async throws(AccountRefusal) -> SignedIn? {
-        let held: PasskeySession?
+        guard let stored = try held(at: plane) else { return nil }
+        return try await standing(stored, at: plane, on: connect(plane))
+    }
+
+    /// The API as the person signed in at `plane`, with the session the vault holds there; nil with
+    /// none held.
+    public func client(at plane: ControlPlane) throws(AccountRefusal) -> SailClient? {
+        try held(at: plane).map { SailClient(transport: connect(plane), token: $0.sessionToken) }
+    }
+
+    /// The session the vault holds for `plane`; one it could not read is said as gone.
+    private func held(at plane: ControlPlane) throws(AccountRefusal) -> PasskeySession? {
         do {
-            held = try vault.session(for: plane)
+            return try vault.session(for: plane)
         } catch {
             guard error.unreadable else { throw AccountRefusal(.keychain("read", error.status), remedy: error.remedy) }
             throw AccountRefusal(.unreadableSignIn, at: plane)
         }
-        guard let stored = held else { return nil }
-        return try await standing(stored, at: plane, on: connect(plane))
     }
 
     /// Forgets the session on this Mac. The server keeps it until it expires or an admin revokes it.

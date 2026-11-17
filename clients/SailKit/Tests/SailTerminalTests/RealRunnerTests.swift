@@ -46,7 +46,7 @@ struct RealRunnerTests {
     @Test(.enabled(if: RealRunner.project != nil))
     func aTicketOlderThanThirtySecondsIsRefused() async throws {
         let runner = try RealRunner()
-        let ticket = try await runner.client.ticket(for: .open(project: try #require(RealRunner.project)))
+        let ticket = try await runner.client.ticket(for: .open(project: try #require(RealRunner.project), workspace: ""))
         try await Task.sleep(for: .seconds(max(0, ticket.expiresAt.timeIntervalSinceNow) + 2))
         await #expect(throws: TerminalError.self) { try await present(ticket) }
     }

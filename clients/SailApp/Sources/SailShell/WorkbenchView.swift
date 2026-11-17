@@ -21,6 +21,9 @@ public final class WorkbenchView: NSView {
     var onTitle: @MainActor (String) -> Void = { _ in }
     /// Asked to show "This Mac", for a command given while it is not shown.
     var onShow: @MainActor () -> Void = {}
+    /// Where a tab in a workspace asks its tickets: the API as the person signed in, nil while no
+    /// one is.
+    var runner: (any TicketSource)?
 
     let palette: Palette
     var look: Look {
@@ -38,6 +41,8 @@ public final class WorkbenchView: NSView {
     static let keepDelay = 0.3
     /// The arrangement is the person's from here on: restored, so worth keeping.
     private(set) var restored = false
+    /// Workspaces asked to open before the first restore, opened once it has replaced the model.
+    private var pendingWorkspaces: [Place] = []
 
     init(fonts directory: URL, helper: String?, look: Look) throws(ShellError) {
         self.look = look
@@ -100,7 +105,10 @@ public final class WorkbenchView: NSView {
             if makeView(pane, start: .attach, points: FontLadder.standard) == nil { model.close(pane.id) }
         }
         model.fit(in: room, minimum: minimum(of: Array(panes.values)), scale: scale)
-        if model.tabs.isEmpty { openTab() } else { apply() }
+        let waiting = pendingWorkspaces
+        pendingWorkspaces = []
+        if model.tabs.isEmpty, waiting.isEmpty { openTab() } else { apply() }
+        waiting.forEach(openTab(in:))
     }
 
     func detachAll() {
@@ -193,7 +201,7 @@ public final class WorkbenchView: NSView {
         guard let tab = model.tab(holding: pane.id) else { return nil }
         let view: TerminalPane
         do {
-            view = try TerminalPane(pane, start: start, host: host, fonts: fonts, points: points, look: look, palette: palette)
+            view = try TerminalPane(pane, start: start, host: host, runner: runner, fonts: fonts, points: points, look: look, palette: palette)
         } catch {
             banner.show(TerminalPane.sentence(error.description))
             return nil
@@ -321,8 +329,35 @@ public final class WorkbenchView: NSView {
     }
 
     private func openTab() {
-        let place = newPlace()
+        openTab(in: newPlace())
+    }
+
+    /// A tab with a terminal in workspace `name` of `project`, beside this Mac's own; before the
+    /// first restore, once it is done, as it replaces the model.
+    func openWorkspace(project: String, name: String) {
+        let place = Place.workspace(project: project, name: name)
+        guard restored else { return pendingWorkspaces.append(place) }
+        openTab(in: place)
+    }
+
+    private func openTab(in place: Place) {
         open(model.newTab(session: place.newSessionName, place: place), points: points)
+    }
+
+    /// The panes whose sessions are on the runner, which do not outlive the app.
+    var runnerPanes: [TerminalPane] {
+        panes.values.filter { if case .workspace = $0.place { true } else { false } }.sorted { $0.id < $1.id }
+    }
+
+    /// Ends every runner pane's session at the runner and waits for each: the tab and what stopped
+    /// it, for each that could not be ended.
+    func endRunnerTerminals() async -> [String] {
+        var unended: [String] = []
+        for view in runnerPanes {
+            let label = view.place.label ?? view.name
+            if let ending = view.end(), let error = await ending.value { unended.append("\(label): \(TerminalPane.sentence(error.description))") }
+        }
+        return unended
     }
 
     @objc public func newTab(_: Any?) {
@@ -340,7 +375,8 @@ public final class WorkbenchView: NSView {
     }
 
     private func split(_ axis: Axis) {
-        let place = newPlace(), size = points
+        let size = points
+        let place = if let focused = model.focusedPane, case .workspace = focused.place { focused.place } else { newPlace() }
         guard let id = model.split(axis, session: place.newSessionName, place: place, in: room, minimum: minimum, scale: scale) else {
             return NSSound.beep()
         }
@@ -380,7 +416,8 @@ public final class WorkbenchView: NSView {
     /// attached may.
     private func confirm(ending views: [TerminalPane], question: String, detail: String) {
         guard views.contains(where: \.mayEndAProgram), let window else { return end(views) }
-        Confirmation.ask(question, detail: detail + " Quitting Sail instead leaves every terminal running.", action: "Close", on: window) { [weak self] close in
+        let onThisMac = views.allSatisfy { if case .thisMac = $0.place { true } else { false } }
+        Confirmation.ask(question, detail: detail + (onThisMac ? " Quitting Sail instead leaves every terminal running." : ""), action: "Close", on: window) { [weak self] close in
             if close { self?.end(views) }
         }
     }

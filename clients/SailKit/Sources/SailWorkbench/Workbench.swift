@@ -283,18 +283,19 @@ public struct Workbench: Hashable, Sendable {
         panes[pane]?.reportedFolder = reported
     }
 
-    /// The person's name for the tab, else its focused pane's program title, else ``untitled``.
+    /// The person's name for the tab, else where its focused pane is when that is a workspace, else
+    /// that pane's program title, else ``untitled``.
     public func title(of tab: TabID) -> String {
         guard let tab = tabs.first(where: { $0.id == tab }) else { return Self.untitled }
         let program = panes[tab.focused]?.programTitle ?? ""
-        return tab.name ?? (program.isEmpty ? Self.untitled : program)
+        return tab.name ?? panes[tab.focused]?.place.label ?? (program.isEmpty ? Self.untitled : program)
     }
 
     /// Where a new tab or split opens: the selected tab's focused pane's reported folder when it is
     /// on this Mac (see ``ReportedFolder``) and `isFolder` says it is a folder, else the folder that
-    /// pane opened in; nil with no tab.
+    /// pane opened in; nil with no tab, or when that pane is in a workspace, which has no folder here.
     public func folderForNewPane(hostNames: Set<String>, isFolder: (String) -> Bool) -> String? {
-        guard let pane = focusedPane else { return nil }
+        guard let pane = focusedPane, case .thisMac = pane.place else { return nil }
         return ReportedFolder.path(pane.reportedFolder, hostNames: hostNames).flatMap { isFolder($0) ? $0 : nil } ?? pane.place.folder
     }
 

@@ -470,6 +470,20 @@ import Testing
         await #expect(throws: TerminalError.refused(refusal)) { try await refused.value }
     }
 
+    /// A runner's session is ended the same way through its door: an attach ticket for it, presented
+    /// once, then Kill.
+    @Test func aRunnersSessionIsEndedThroughItsDoor() async throws {
+        let host = try FakeHost(tcp: ())
+        let desk = TicketDesk(address: host.address)
+        async let ended: Void = SessionListing.end("app-a", through: .runner(desk), timeout: 5)
+        let peer = try await host.accept()
+        #expect(try await peer.welcome() == "ticket-1")
+        #expect(try await peer.read() == .kill(session: "app-a"))
+        try peer.send(.accepted)
+        try await ended
+        #expect(desk.requests == [.attach(session: "app-a")])
+    }
+
     @Test func everyPageIsReadInOrder() async throws {
         let host = try FakeHost()
         async let listed = SessionListing.sessions(at: host.address, timeout: 5)

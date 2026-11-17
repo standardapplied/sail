@@ -3839,7 +3839,8 @@ FDE (`HostAccess.holder`), for that decision alone, and decides it as it decides
 (`openRefusal`, a project being required: the network opens no shell on the host) or that attach
 (`attachRefusal`, the one decision an `Attach` frame asks too), so there is no second rule. Its
 refusal carries a kind (`PtyMessage.TicketRefused`): not found is `404`, refused `403`, a cap `429`,
-an outage or a door not listening `503` (`terminal_unavailable`). A ticket to attach hears every
+an outage or a door not listening `503` (`terminal_unavailable`); a box that offers no terminal over
+the network answers the route `404 terminal_not_offered`. A ticket to attach hears every
 refusal as one sentence, "There is no session 'x' on this box that you may attach.", so the network
 cannot tell a session that is not the caller's from one that does not exist; the unix socket keeps
 its words. A ticket (`PtyTickets`) is a record that the decision was made, never a credential that

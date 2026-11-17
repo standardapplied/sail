@@ -66,12 +66,13 @@ struct Probe {
             let address = try socket.map { HostAddress.unix(path: $0) } ?? HostAddress.local()
             session = TerminalSession(open: local, door: .local(address), screen: screen)
             echoBudget = echoBudgets.local
-        case let .runner(api, variable, project):
+        case let .runner(api, variable, project, workspace):
             guard let token = ProcessInfo.processInfo.environment[variable], !token.isEmpty else {
                 throw ProbeError("the environment variable \(variable) holds no token")
             }
             var remote = create
             remote.project = project
+            remote.workspace = workspace
             remote.workingDirectory = "/tmp"
             let client = SailClient(transport: URLSessionTransport(base: api), token: token)
             session = TerminalSession(open: remote, door: .runner(client), screen: screen)

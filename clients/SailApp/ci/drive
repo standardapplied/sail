@@ -5,7 +5,8 @@
 # Tests/Drive/first.json runs, then the app is quit and opened again for Tests/Drive/second.json.
 # Then another copy of Sail's host runs from another bundle's path, with a client attached to one
 # of its sessions, and the app is opened once more for Tests/Drive/third.json; then, with no host
-# and no saved arrangement, once more for Tests/Drive/shots.json: the window as the screen shows it.
+# and no saved arrangement, once more for Tests/Drive/shots.json: the window as the screen shows it;
+# then once more for Tests/Drive/workspaces.json, every control-plane call answered from the goldens.
 # Each run's texts, images and report land in OUT; what it prints, and the servers' logs, beside
 # them. The ticket is handed to the drive in its environment and printed nowhere.
 set -euo pipefail
@@ -42,7 +43,7 @@ SAIL_DRIVE_TICKET=$("$sail" fde enroll uday --json | plutil -extract ticket raw 
 export SAIL_DRIVE_TICKET SAIL_DRIVE_PASSKEY=$out/software-passkey.json
 rm -f "$SAIL_DRIVE_PASSKEY"
 
-for run in first second third shots; do
+for run in first second third shots workspaces; do
   if [[ $run == third ]]; then
     echo "ci/drive: another copy's host, and a client on it"
     pkill -f '_pty-host --local' || true
@@ -56,12 +57,15 @@ for run in first second third shots; do
     (tail -f /dev/null | script -q /dev/null "$other/sail" session attach held --socket "$socket" > /dev/null 2>&1 &)
     perl -e 'alarm shift; exec @ARGV' 30 bash -c 'until "$1" session ls --socket "$2" --json | grep -Eq "\"attached\" *: *1"; do :; done' _ "$other/sail" "$socket"
   fi
-  if [[ $run == shots ]]; then
-    echo "ci/drive: a fresh start for the shots: no host, no saved arrangement"
+  if [[ $run == shots || $run == workspaces ]]; then
+    echo "ci/drive: a fresh start for the $run: no host, no saved arrangement"
     pkill -f '_pty-host --local' || true
     perl -e 'alarm shift; exec @ARGV' 30 bash -c 'while pgrep -f "_pty-host --local" > /dev/null; do :; done'
     defaults delete "$(plutil -extract CFBundleIdentifier raw "$app/Contents/Info.plist")" workbench.arrangement 2> /dev/null || true
   fi
   echo "ci/drive: $run"
-  perl -e 'alarm shift; exec @ARGV' 600 "$drive" --drive "Tests/Drive/$run.json" --out "$out/$run" 2>&1 | tee "$out/$run-output.txt"
+  goldens=off
+  [[ $run == workspaces ]] && goldens=on
+  SAIL_DRIVE_GOLDENS=$goldens perl -e 'alarm shift; exec @ARGV' 600 "$drive" --drive "Tests/Drive/$run.json" --out "$out/$run" 2>&1 \
+    | tee "$out/$run-output.txt"
 done

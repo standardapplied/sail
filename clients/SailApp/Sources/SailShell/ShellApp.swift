@@ -28,6 +28,7 @@ public final class ShellApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
     public let window: NSWindow
     public let rail: Rail
     public let account: AccountPane
+    public let workspaces: WorkspacesPane
     public let thisMac: WorkbenchView
     public private(set) var look: Look
 
@@ -42,13 +43,14 @@ public final class ShellApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
     /// `Contents/Helpers/sail`, the look the appearance names. `passkeys` makes the authenticator,
     /// given the window its sheets show on.
     public convenience init(
-        bundle: Bundle, passkeys: (@escaping @MainActor @Sendable () -> NSWindow?) -> any PasskeyAuthenticator = { PlatformPasskeys(anchor: $0) }
+        bundle: Bundle, passkeys: (@escaping @MainActor @Sendable () -> NSWindow?) -> any PasskeyAuthenticator = { PlatformPasskeys(anchor: $0) },
+        connect: @escaping @Sendable (ControlPlane) -> any Transport = { URLSessionTransport(base: $0.url) }
     ) throws(ShellError) {
         guard let resources = bundle.resourceURL else { throw .resources("the app's bundle has no resources folder") }
         let helper = bundle.bundleURL.appending(path: "Contents/Helpers/sail").path
         try self.init(
             fonts: resources.appending(path: "Fonts"), helper: FileManager.default.isExecutableFile(atPath: helper) ? helper : nil,
-            look: Self.look(of: NSApplication.shared.effectiveAppearance), passkeys: passkeys
+            look: Self.look(of: NSApplication.shared.effectiveAppearance), passkeys: passkeys, connect: connect
         )
     }
 
@@ -57,7 +59,8 @@ public final class ShellApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     init(
-        fonts: URL, helper: String?, look: Look, passkeys: (@escaping @MainActor @Sendable () -> NSWindow?) -> any PasskeyAuthenticator
+        fonts: URL, helper: String?, look: Look, passkeys: (@escaping @MainActor @Sendable () -> NSWindow?) -> any PasskeyAuthenticator,
+        connect: @escaping @Sendable (ControlPlane) -> any Transport = { URLSessionTransport(base: $0.url) }
     ) throws(ShellError) {
         self.look = look
         let window = ShellWindow(
@@ -75,8 +78,10 @@ public final class ShellApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         }
         thisMac = try WorkbenchView(fonts: fonts, helper: helper, look: look)
         account = AccountPane(
-            account: Account(authenticator: passkeys { [weak window] in window }, vault: KeychainVault()), look: look, title: title, mono: mono
+            account: Account(authenticator: passkeys { [weak window] in window }, vault: KeychainVault(), connect: connect), look: look, title: title,
+            mono: mono
         )
+        workspaces = WorkspacesPane(look: look, title: title)
         rail = Rail(look: look)
         super.init()
         compose()
@@ -104,7 +109,37 @@ public final class ShellApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         true
     }
 
-    /// Quitting detaches every terminal and asks nothing: each session lives on at the host.
+    /// Quitting with terminals on the runner asks once, then ends them there, since the app cannot
+    /// attach to them again after a relaunch; one it could not end is said before the app quits.
+    public func applicationShouldTerminate(_: NSApplication) -> NSApplication.TerminateReply {
+        let count = thisMac.runnerPanes.count
+        guard count > 0 else { return .terminateNow }
+        let terminals = count == 1 ? "Runner Terminal" : "\(count) Runner Terminals"
+        Confirmation.ask(
+            "Quit Sail?", detail: "A terminal on the runner ends when Sail quits; this Mac's own keep running.",
+            action: "Quit and End \(count == 1 ? "1 " : "")\(terminals)", on: window
+        ) { [weak self] quit in
+            guard quit, let self else { return NSApp.reply(toApplicationShouldTerminate: false) }
+            Task {
+                let unended = await self.thisMac.endRunnerTerminals()
+                guard !unended.isEmpty else { return NSApp.reply(toApplicationShouldTerminate: true) }
+                self.sayUnended(unended)
+            }
+        }
+        return .terminateLater
+    }
+
+    /// The runner terminals a quit could not end, each with what stopped it, then the quit: they run
+    /// on until the runner ends them.
+    private func sayUnended(_ unended: [String]) {
+        let alert = NSAlert()
+        alert.messageText = "Some terminals on the runner could not be ended"
+        alert.informativeText = (unended + ["They keep running on the runner."]).joined(separator: "\n")
+        alert.addButton(withTitle: "Quit")
+        alert.beginSheetModal(for: window) { _ in MainActor.assumeIsolated { NSApp.reply(toApplicationShouldTerminate: true) } }
+    }
+
+    /// Quitting detaches this Mac's terminals and asks nothing: each session lives on at the host.
     public func applicationWillTerminate(_: Notification) {
         thisMac.detachAll()
     }
@@ -113,17 +148,34 @@ public final class ShellApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
     public func select(_ item: Rail.Item) {
         thisMac.isHidden = item != .thisMac
         thisMac.strip.showsTabs = !thisMac.isHidden
-        account.isHidden = !thisMac.isHidden
+        workspaces.isHidden = item != .workspaces
+        account.isHidden = item != .account
         rail.show(item)
         paintChrome()
         UserDefaults.standard.set(item.rawValue, forKey: Self.paneKey)
-        if item == .thisMac {
+        switch item {
+        case .thisMac:
             thisMac.shown()
             thisMac.apply()
-        } else {
+        case .workspaces:
+            window.title = Self.title
+            workspaces.shown()
+        case .account:
             window.title = Self.title
             window.makeFirstResponder(account.address)
         }
+    }
+
+    /// Who is signed in, as the account learnt it: the Workspaces item and the runner's tickets
+    /// are theirs, and go with them.
+    private func standing(_ signedIn: SignedIn?) {
+        let whoami = signedIn.flatMap { try? $0.whoami.get() }
+        let client = account.client()
+        workspaces.client = client
+        workspaces.person = (whoami?.fde ?? signedIn?.fde ?? "", whoami?.role == .known(.admin))
+        thisMac.runner = client
+        rail.offer(.workspaces, signedIn != nil)
+        if signedIn == nil, rail.selected == .workspaces { select(.account) }
     }
 
     /// Draws the window in `look`: the chrome, the rail and the panes.
@@ -132,6 +184,7 @@ public final class ShellApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         window.backgroundColor = NSColor(look.canvas)
         rail.look = look
         account.look = look
+        workspaces.look = look
         thisMac.look = look
         paintChrome()
     }
@@ -212,13 +265,14 @@ public final class ShellApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
     /// says so in an alert and quits.
     public static func run(
         passkeys: (@escaping @MainActor @Sendable () -> NSWindow?) -> any PasskeyAuthenticator = { PlatformPasskeys(anchor: $0) },
+        connect: @escaping @Sendable (ControlPlane) -> any Transport = { URLSessionTransport(base: $0.url) },
         configure: @MainActor (ShellApp) -> Void = { _ in }
     ) -> Never {
         let application = NSApplication.shared
         application.setActivationPolicy(.regular)
         let shell: ShellApp
         do {
-            shell = try ShellApp(bundle: .main, passkeys: passkeys)
+            shell = try ShellApp(bundle: .main, passkeys: passkeys, connect: connect)
         } catch {
             let alert = NSAlert()
             alert.messageText = "\(title) cannot start"
@@ -255,7 +309,7 @@ public final class ShellApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
             view.translatesAutoresizingMaskIntoConstraints = false
             root.addSubview(view)
         }
-        for side in [thisMac, account] as [NSView] {
+        for side in [thisMac, workspaces, account] as [NSView] {
             side.frame = content.bounds
             side.autoresizingMask = [.width, .height]
             side.isHidden = true
@@ -276,6 +330,11 @@ public final class ShellApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         ])
         placeTheStrip()
         rail.onSelect = { [weak self] item in self?.select(item) }
+        account.onStanding = { [weak self] signedIn in self?.standing(signedIn) }
+        workspaces.onOpen = { [weak self] project, name in
+            self?.select(.thisMac)
+            self?.thisMac.openWorkspace(project: project, name: name)
+        }
         thisMac.onShow = { [weak self] in
             guard let self, rail.selected != .thisMac else { return }
             select(.thisMac)

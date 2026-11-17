@@ -218,6 +218,16 @@ class WorkspaceRoutesTest {
 
     assertEquals(409, refused.status());
     assertEquals("workspace_holds_work", refused.code());
+    assertEquals(
+        Map.of(
+            "run",
+            "sail",
+            "verb",
+            "project workspace delete",
+            "args",
+            List.of("acme", "try", "--force")),
+        ((List<?>) ((Map<?, ?>) refused.body().get("error")).get("remedy")).get(1),
+        "the fix to force names the command, not an HTTP call");
     assertEquals(200, forced.status());
     assertEquals("deleted", forced.body().get("change"));
     assertTrue(incus.invocations().stream().anyMatch(c -> c.startsWith("incus delete")));

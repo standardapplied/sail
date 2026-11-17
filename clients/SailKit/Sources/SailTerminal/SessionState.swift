@@ -1,3 +1,4 @@
+import SailAPI
 import SailTerminalWire
 import SailVT
 
@@ -58,6 +59,8 @@ public enum SessionEnd: Equatable, Sendable, CustomStringConvertible {
     case hostRestarted
     /// The host, or the API for it, refused the session, in these words.
     case refused(String)
+    /// The API refused the session's ticket: the refusal whole, its fix included.
+    case ticketRefused(Refusal)
     /// The host ended the session, for this reason.
     case ended(String)
     /// The host sent what the protocol does not allow, which asking again would not mend.
@@ -69,6 +72,7 @@ public enum SessionEnd: Equatable, Sendable, CustomStringConvertible {
         switch self {
         case .hostRestarted: "the host restarted, which ends every session it held"
         case let .refused(words): words
+        case let .ticketRefused(refusal): refusal.message
         case let .ended(reason): "the session ended: \(reason)"
         case let .protocolViolation(what): "the terminal host broke the protocol: \(what)"
         case .closed: "closed"
@@ -99,7 +103,7 @@ enum Intent: Equatable, Sendable {
 
     var ticket: TicketRequest {
         switch self {
-        case let .open(create): .open(project: create.project)
+        case let .open(create): .open(project: create.project, workspace: create.workspace)
         case let .attach(session, _): .attach(session: session)
         }
     }

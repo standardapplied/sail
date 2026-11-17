@@ -398,7 +398,7 @@ public final class TerminalSession: Sendable {
         do throws(TerminalError) {
             entry = try await door.entry(for: intent.ticket)
         } catch let .ticketRefused(refusal) where !Self.passes(refusal) {
-            return .finished(.refused(refusal.message))
+            return .finished(.ticketRefused(refusal))
         } catch {
             return .failed(error)
         }

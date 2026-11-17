@@ -172,10 +172,12 @@ class DirectTerminalTest {
 
       assertEquals(Optional.empty(), hostAlone.tcpAddress());
       assertEquals(Optional.empty(), apiAlone.privateAddress());
-      var absent = "404 not_found API endpoint was not found.";
       assertEquals(
-          absent, statusAndError(send(base, "POST", "/v1/terminal/tickets", ada, OPEN_ACME)));
-      assertEquals(absent, statusAndError(send(base, "GET", "/v1/terminal/tickets", ada, null)));
+          "404 terminal_not_offered This runner offers no terminal over the network; ask an admin.",
+          statusAndError(send(base, "POST", "/v1/terminal/tickets", ada, OPEN_ACME)));
+      assertEquals(
+          "404 not_found API endpoint was not found.",
+          statusAndError(send(base, "GET", "/v1/terminal/tickets", ada, null)));
       assertEquals(
           "Session token is not valid or has expired.",
           assertThrows(IOException.class, () -> SessionClient.connect(alone, ada).close())

@@ -40,7 +40,7 @@ let package = Package(
             name: "SailDrive",
             dependencies: [
                 "SailShell", "SailAccount", "SailTestPasskey", "SailTerminalView", "SailRenderer", kit("SailAPI"), kit("SailMeasures"), kit("SailSurface"),
-                kit("SailTerminal"), kit("SailVT"), kit("SailWorkbench"),
+                kit("SailTerminal"), kit("SailVT"), kit("SailWorkbench"), kit("SailKitTestSupport"),
             ],
             swiftSettings: strict
         ),
@@ -56,7 +56,10 @@ let package = Package(
         ),
         .testTarget(
             name: "SailShellTests",
-            dependencies: ["SailShell", "SailAccount", "SailLook", "SailTerminalView", "SailTestPasskey", kit("SailAPI"), kit("SailVT"), kit("SailWorkbench")],
+            dependencies: [
+                "SailShell", "SailAccount", "SailLook", "SailTerminalView", "SailTestPasskey", kit("SailAPI"), kit("SailVT"), kit("SailWorkbench"),
+                kit("SailTerminal"), kit("SailKitTestSupport"),
+            ],
             swiftSettings: strict
         ),
     ],

@@ -44,7 +44,50 @@ import Testing
         let second = try await host.accept()
         #expect(try await second.welcome() == "ticket-2")
         #expect(try await second.read() == .attach(session: "work", write: true))
-        #expect(desk.requests == [.open(project: ""), .attach(session: "work")])
+        #expect(desk.requests == [.open(project: "", workspace: ""), .attach(session: "work")])
+        session.close()
+    }
+
+    /// A session opened in a workspace asks a ticket naming that workspace, and its reconnect asks
+    /// an attach for the session, which names no workspace.
+    @Test func aWorkspaceSessionsTicketNamesItsWorkspaceAndItsReconnectAttaches() async throws {
+        let host = try FakeHost(tcp: ())
+        let desk = TicketDesk(address: host.address)
+        var inTry = create
+        inTry.project = "acme"
+        inTry.workspace = "try"
+        let session = TerminalSession(open: inTry, door: .runner(desk), screen: try screen(), timeout: 5, sleep: Naps().sleep)
+        let watch = Watch(session)
+        session.start()
+        let first = try await host.accept()
+        _ = try await first.welcome()
+        #expect(try await first.read() == .create(inTry))
+        try first.send(.accepted)
+        _ = try await first.read()
+        try first.send(.accepted)
+        try await watch.attached()
+        first.close()
+        let second = try await host.accept()
+        _ = try await second.welcome()
+        #expect(try await second.read() == .attach(session: "work", write: true))
+        #expect(desk.requests == [.open(project: "acme", workspace: "try"), .attach(session: "work")])
+        session.close()
+    }
+
+    /// A ticket refused ends the session with the server's refusal whole, its fix included, so the
+    /// app can say what the person can do.
+    @Test func aRefusedTicketEndsTheSessionWithTheRefusalWhole() async throws {
+        let desk = TicketDesk(address: .tcp(host: "127.0.0.1", port: 9))
+        let refusal = Refusal(
+            code: .known(.forbiddenNotAssignee), message: "Workspace 'dock' belongs to 'uday', not you.",
+            action: "Ask uday to enter it, or have an admin do it."
+        )
+        desk.refuse(refusal)
+        let session = TerminalSession(open: create, door: .runner(desk), screen: try screen(), timeout: 5, sleep: Naps().sleep)
+        let watch = Watch(session)
+        session.start()
+        try await watch.until("ended") { session.state.phase == .ended(.ticketRefused(refusal)) }
+        #expect(SessionEnd.ticketRefused(refusal).description == "Workspace 'dock' belongs to 'uday', not you.")
         session.close()
     }
 
@@ -111,11 +154,12 @@ import Testing
     @Test func aRefusedTicketEndsTheSessionWithTheAPIsWords() async throws {
         let desk = TicketDesk(address: .tcp(host: "127.0.0.1", port: 9))
         let words = "There is no session 'theirs' on this box that you may attach."
-        desk.refuse(Refusal(code: .known(.notFound), message: words))
+        let refusal = Refusal(code: .known(.notFound), message: words)
+        desk.refuse(refusal)
         let session = TerminalSession(attach: "theirs", write: true, door: .runner(desk), screen: try screen())
         let watch = Watch(session)
         session.start()
-        try await watch.phase(.ended(.refused(words)))
+        try await watch.phase(.ended(.ticketRefused(refusal)))
         #expect(desk.requests == [.attach(session: "theirs")])
     }
 

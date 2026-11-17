@@ -25,6 +25,8 @@ public final class AccountPane: NSView, NSMenuItemValidation {
     /// Whether a ceremony or a call is under way, and how many have ended.
     public private(set) var busy = false
     public private(set) var ended = 0
+    /// Who is signed in now, nil for no one: said each time the pane learns it.
+    var onStanding: @MainActor (SignedIn?) -> Void = { _ in }
 
     private let account: Account
     private let defaults: UserDefaults
@@ -109,6 +111,11 @@ public final class AccountPane: NSView, NSMenuItemValidation {
         ended += 1
     }
 
+    /// The API as the person signed in, nil when no one is or the vault cannot say.
+    func client() -> SailClient? {
+        standing.flatMap { try? account.client(at: $0.controlPlane) }
+    }
+
     public func validateMenuItem(_ item: NSMenuItem) -> Bool {
         item.action != #selector(signOutHere(_:)) || (standing != nil && !busy)
     }
@@ -141,6 +148,7 @@ public final class AccountPane: NSView, NSMenuItemValidation {
         standing = signedIn
         signedOutRows.isHidden = signedIn != nil
         signedInRows.isHidden = signedIn == nil
+        onStanding(signedIn)
         guard let signedIn else {
             heading.stringValue = "Sign in to Sail"
             return

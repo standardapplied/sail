@@ -18,8 +18,9 @@ struct Run: Equatable {
         /// This machine's own host: its socket, the binary that serves it when the probe owns it,
         /// and the folder a session opens in.
         case local(socket: String?, binary: String?, folder: String)
-        /// A runner, through tickets the API at `api` hands the token in `tokenVariable`.
-        case runner(api: URL, tokenVariable: String, project: String)
+        /// A runner, through tickets the API at `api` hands the token in `tokenVariable`, a session
+        /// opened in `workspace` of `project` (blank: the project's own container).
+        case runner(api: URL, tokenVariable: String, project: String, workspace: String)
     }
 
     var host: Host
@@ -38,7 +39,7 @@ enum Arguments {
       sail-term-probe --dump BYTES --size COLUMNSxROWS
       sail-term-probe --bench [--report FILE]
       sail-term-probe --local [--socket PATH] [--host-binary SAIL] [--folder PATH] --script FILE [--report FILE] [--capture FILE]
-      sail-term-probe --api URL --token-env NAME --project PROJECT --script FILE [--report FILE]
+      sail-term-probe --api URL --token-env NAME --project PROJECT [--workspace NAME] --script FILE [--report FILE]
     """
 
     static func parse(_ arguments: [String], currentDirectory: String) throws(UsageError) -> Mode {
@@ -50,7 +51,7 @@ enum Arguments {
             case "--local", "--bench":
                 flags.insert(name)
             case "--dump", "--size", "--socket", "--host-binary", "--folder", "--script", "--report", "--capture", "--api",
-                 "--token-env", "--project":
+                 "--token-env", "--project", "--workspace":
                 guard let value = rest.popFirst(), !value.hasPrefix("--") else { throw UsageError(description: "\(name) needs a value") }
                 guard options.updateValue(value, forKey: name) == nil else { throw UsageError(description: "\(name) is given twice") }
             default:
@@ -75,14 +76,15 @@ enum Arguments {
                 report: options["--report"], capture: options["--capture"]
             ))
         }
-        try only(options, flags, ["--api", "--token-env", "--project", "--script", "--report"])
+        try only(options, flags, ["--api", "--token-env", "--project", "--workspace", "--script", "--report"])
         guard let api = options["--api"], let url = URL(string: api), ["http", "https"].contains(url.scheme), url.host != nil else {
             throw UsageError(description: "--api must be an http or https URL")
         }
         guard let variable = options["--token-env"], !variable.isEmpty else { throw UsageError(description: "--token-env is required") }
         guard let project = options["--project"], !project.isEmpty else { throw UsageError(description: "--project is required") }
         return .run(Run(
-            host: .runner(api: url, tokenVariable: variable, project: project), script: script, report: options["--report"],
+            host: .runner(api: url, tokenVariable: variable, project: project, workspace: options["--workspace"] ?? ""), script: script,
+            report: options["--report"],
             capture: nil
         ))
     }

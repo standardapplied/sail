@@ -26,22 +26,38 @@ public struct TabID: Hashable, Sendable {
     }
 }
 
-/// Where a pane's session lives: this Mac's own host, opened in `folder`.
+/// Where a pane's session lives: this Mac's own host, opened in `folder`, or workspace `name` of
+/// `project` on the runner the app is signed in to.
 public enum Place: Hashable, Codable, Sendable {
     case thisMac(folder: String)
+    case workspace(project: String, name: String)
 
     /// What a session this Mac's host holds for the app is named after: a live one no pane holds is
     /// the app's still, and comes back as a tab.
     public static let thisMacSessions = "mac-"
+    /// What a session the app opens on a runner is named after, never taken for one of this Mac's.
+    public static let runnerSessions = "app-"
 
+    /// The folder a session here opens in: none in a workspace, whose shell starts where it starts.
     public var folder: String {
         switch self {
         case let .thisMac(folder): folder
+        case .workspace: ""
         }
     }
 
     public var newSessionName: String {
-        Self.thisMacSessions + UUID().uuidString.prefix(8).lowercased()
+        let prefix = if case .thisMac = self { Self.thisMacSessions } else { Self.runnerSessions }
+        return prefix + UUID().uuidString.prefix(8).lowercased()
+    }
+
+    /// What a tab here is called until the person names it: nil on this Mac, where its program's
+    /// title names it; in a workspace, where it is ("acme · try").
+    public var label: String? {
+        switch self {
+        case .thisMac: nil
+        case let .workspace(project, name): "\(project) · \(name)"
+        }
     }
 }
 

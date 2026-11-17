@@ -618,8 +618,7 @@ class WorkspaceDoorsTest {
               + " person's workspaces live on main.",
           capped.getMessage());
       assertEquals(
-          "Make yours on main: POST /v1/projects/<project>/workspaces on main's API.",
-          capped.failure().remedy().plain());
+          "Workspaces are made on main: make yours there.", capped.failure().remedy().plain());
       assertEquals(List.of("start"), changes(onNode));
       assertEquals(
           "Workspace 'try' has no owner, so only an admin may enter it.", mainRefuses.getMessage());
