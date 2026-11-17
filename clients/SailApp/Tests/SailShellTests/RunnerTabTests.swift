@@ -8,6 +8,7 @@ import SailLook
 import SailTerminal
 import SailTerminalWire
 import SailTestPasskey
+import SailVT
 import SailWorkbench
 import Synchronization
 import Testing
@@ -339,7 +340,7 @@ final class DoorTickets: TicketSource {
     /// A1, A2, A7: the pane lists the person's workspaces from the server's own answers, theirs
     /// first; Make says it is under way; a refusal is the server's sentence and the fix in words.
     @Test func thePaneListsMakesAndRefusesInTheServersWords() async throws {
-        let pane = WorkspacesPane(look: .light, title: try TitleFont(directory: LookTests.fonts))
+        let pane = WorkspacesPane(look: .light, title: try TitleFont(directory: LookTests.fonts), mono: try TerminalFonts(directory: LookTests.fonts))
         pane.person = ("uday", true)
         pane.client = SailClient(transport: RecordedServer([try Exchange("projects"), try Exchange("workspaces"), try Exchange("workspace-create")]), token: "tok")
         await pane.refresh()
@@ -352,9 +353,10 @@ final class DoorTickets: TicketSource {
         let before = pane.ended
         pane.makeWorkspace(nil)
         #expect(pane.text.contains("Making new (about 3 s)"))
+        #expect(pane.make.title == "Making…" && !pane.make.isEnabled && !pane.open.isEnabled, "a make under way says so and is not pressed twice")
         #expect(await Self.until { pane.ended > before })
         #expect(!pane.text.contains("Making"), "\(pane.text)")
-        let viewer = WorkspacesPane(look: .light, title: try TitleFont(directory: LookTests.fonts))
+        let viewer = WorkspacesPane(look: .light, title: try TitleFont(directory: LookTests.fonts), mono: try TerminalFonts(directory: LookTests.fonts))
         viewer.client = SailClient(
             transport: RecordedServer([try Exchange("projects"), try Exchange("workspaces"), try Exchange("refusal-read-only-credential-workspace")]),
             token: "tok"
@@ -365,5 +367,121 @@ final class DoorTickets: TicketSource {
         viewer.makeWorkspace(nil)
         #expect(await Self.until { viewer.ended > asked })
         #expect(viewer.text.hasSuffix("Your credential is read-only and cannot enter workspaces.\nAsk an admin for a member or admin credential."), "\(viewer.text)")
+    }
+
+    /// A pane signed in as `handle`, its projects and workspaces answered by `exchanges`, listed.
+    static func listed(_ exchanges: [Exchange], as handle: String = "uday", admin: Bool = false) async throws -> WorkspacesPane {
+        let pane = WorkspacesPane(look: .light, title: try TitleFont(directory: LookTests.fonts), mono: try TerminalFonts(directory: LookTests.fonts))
+        pane.frame = NSRect(x: 0, y: 0, width: 800, height: 640)
+        pane.person = (handle, admin)
+        pane.client = SailClient(transport: RecordedServer(exchanges), token: "tok")
+        await pane.refresh()
+        pane.layoutSubtreeIfNeeded()
+        return pane
+    }
+
+    /// A stopped workspace's button says what opening it does; another person's is not offered to
+    /// a member; an open under way says so and is not pressed twice.
+    @Test func theButtonSaysWhatOpeningDoesAndIsPressedOnce() async throws {
+        let pane = try await Self.listed([try Exchange("projects"), try Exchange("workspaces-three")])
+        #expect(pane.rows.map(\.name) == ["dock", "pier", "quay"])
+        var opened: [String] = []
+        pane.onOpen = { _, name in opened.append(name) }
+        #expect(pane.open.title == "Open" && pane.open.isEnabled, "dock runs")
+        pane.list.selectRowIndexes([1], byExtendingSelection: false)
+        #expect(pane.open.title == "Start and Open" && pane.open.isEnabled, "pier is stopped: opening starts it")
+        pane.list.selectRowIndexes([2], byExtendingSelection: false)
+        #expect(pane.open.title == "Open" && !pane.open.isEnabled, "ana's is not offered to a member")
+        pane.list.selectRowIndexes([1], byExtendingSelection: false)
+        pane.open.performClick(nil)
+        pane.openSelected(nil)
+        #expect(opened == ["pier"], "pressed twice, opened once")
+        #expect(pane.open.title == "Starting…" && !pane.open.isEnabled)
+    }
+
+    /// The body says what is true where the list would be: a project with no workspaces of its own;
+    /// no project at all; a list that could not be read, with Try Again, which asks again.
+    @Test func theEmptyStatesSayWhatIsTrue() async throws {
+        let none = try await Self.listed([try Exchange("projects"), try Exchange("workspaces-none")])
+        #expect(none.body == .noWorkspaces(project: "harbor") && none.list.enclosingScrollView?.isHidden == true && none.open.isHidden)
+        #expect(none.text.hasSuffix("No workspaces in harbor yet.\nName one below to make it."), "\(none.text)")
+        #expect(none.tryAgain.isHidden && !none.name.isHiddenOrHasHiddenAncestor, "the new workspace's name is where it is made")
+        let nowhere = try await Self.listed([try Exchange("projects").altered(at: ["projects"], to: [Any]())])
+        #expect(nowhere.text == "Workspaces\nNo project on this control plane is open to you yet.\nAn admin adds you to one.", "\(nowhere.text)")
+        #expect(nowhere.projects.isHiddenOrHasHiddenAncestor && nowhere.name.isHiddenOrHasHiddenAncestor && nowhere.tryAgain.isHidden)
+        let unread = try await Self.listed([try Exchange("projects")])
+        #expect(unread.text.hasSuffix("No golden answers GET /v1/projects/harbor/workspaces."), "\(unread.text)")
+        #expect(!unread.tryAgain.isHidden && unread.open.isHidden)
+        let before = unread.ended
+        unread.tryAgain.performClick(nil)
+        #expect(await Self.until { unread.ended > before }, "Try Again asks again")
+    }
+
+    /// Look, 1: a chosen row takes the selected fill (half as strong when the list is not what the
+    /// keys act on) from 9 pt in, and the accent bar, 2 by 24 pt at its leading edge, in both looks.
+    @Test(arguments: [("light", Look.light), ("dark", Look.dark)])
+    func theChosenRowTakesTheFillAndTheBar(_ name: String, _ look: Look) throws {
+        for emphasized in [true, false] {
+            let row = WorkspaceRowView(look: look)
+            row.frame = NSRect(x: 0, y: 0, width: 380, height: Rail.item)
+            row.isSelected = true
+            row.isEmphasized = emphasized
+            let alpha = emphasized ? look.fillSelected.alpha : look.fillSelected.alpha / 2
+            let fill = Self.over(look.fillSelected.rgb, alpha: alpha, on: look.canvas)
+            #expect(Self.colour(of: row, at: NSPoint(x: 1, y: 21)).near(Self.channels(look.accent)), "\(name): the bar")
+            #expect(Self.colour(of: row, at: NSPoint(x: 200, y: 21)).near(fill), "\(name) \(emphasized): the fill is \(Self.colour(of: row, at: NSPoint(x: 200, y: 21))), not \(fill)")
+            #expect(Self.colour(of: row, at: NSPoint(x: 5, y: 21)).near(Self.channels(look.canvas)), "\(name): nothing between the bar and the fill")
+            #expect(Self.colour(of: row, at: NSPoint(x: 1, y: 4)).near(Self.channels(look.canvas)), "\(name): the bar is 24 pt, not the row's height")
+            row.isSelected = false
+            #expect(Self.colour(of: row, at: NSPoint(x: 200, y: 21)).near(Self.channels(look.canvas)), "\(name): an unchosen row is the canvas")
+        }
+    }
+
+    /// Look, 2: the pane's groups keep the account pane's rhythm (8 pt within a group, 24 between
+    /// groups), the list hugs its one row, and Open sits 12 pt under it.
+    @Test func theGroupsKeepTheirRhythmAndTheListHugsItsRows() async throws {
+        let pane = try await Self.listed([try Exchange("projects"), try Exchange("workspaces")])
+        let scroll = try #require(pane.list.enclosingScrollView)
+        let project = try #require(Self.label("PROJECT", in: pane)), new = try #require(Self.label("NEW WORKSPACE", in: pane))
+        let making = try #require(pane.name.superview)
+        let rect = { (view: NSView) in pane.convert(view.alignmentRect(forFrame: view.frame), from: view.superview) }
+        let gaps = [
+            rect(project).minY - rect(pane.projects).maxY, rect(pane.projects).minY - rect(scroll).maxY, rect(scroll).minY - rect(pane.open).maxY,
+            rect(pane.open).minY - rect(new).maxY, rect(new).minY - rect(making).maxY,
+        ]
+        #expect(gaps.map { $0.rounded() } == [8, 24, 12, 24, 8], "gaps \(gaps)")
+        #expect(rect(scroll).height == Rail.item, "one row, one row's height")
+    }
+
+    /// The text field reading `text`, wherever it is in `view`.
+    static func label(_ text: String, in view: NSView) -> NSTextField? {
+        if let field = view as? NSTextField, field.stringValue == text { return field }
+        return view.subviews.lazy.compactMap { label(text, in: $0) }.first
+    }
+
+    /// `rgb` at `alpha` over `base`, as 0–255 channels.
+    static func over(_ rgb: RGB, alpha: Double, on base: RGB) -> [Double] {
+        zip(channels(rgb), channels(base)).map { alpha * $0 + (1 - alpha) * $1 }
+    }
+
+    static func channels(_ rgb: RGB) -> [Double] {
+        [Double(rgb.red), Double(rgb.green), Double(rgb.blue)]
+    }
+
+    /// The colour `view` draws at `point` (points from its bottom left), as 0–255 sRGB channels.
+    static func colour(of view: NSView, at point: NSPoint) -> [Double] {
+        guard let image = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { return [] }
+        view.cacheDisplay(in: view.bounds, to: image)
+        let scale = Double(image.pixelsWide) / view.bounds.width
+        let y = view.isFlipped ? point.y : view.bounds.height - point.y
+        guard let colour = image.colorAt(x: Int(point.x * scale), y: Int(y * scale))?.usingColorSpace(.sRGB) else { return [] }
+        return [colour.redComponent, colour.greenComponent, colour.blueComponent].map { ($0 * 255).rounded() }
+    }
+}
+
+extension [Double] {
+    /// Within 3 of `other` in every channel: a colour drawn and read back.
+    func near(_ other: [Double]) -> Bool {
+        count == other.count && zip(self, other).allSatisfy { abs($0 - $1) <= 3 }
     }
 }

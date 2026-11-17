@@ -10,6 +10,7 @@ import SailShell
 actor GoldenDesk: Transport {
     static let shared = GoldenDesk()
     private var answers: [String: HTTPResponse] = [:]
+    private var held: [String: Duration] = [:]
     private(set) var asked: [HTTPRequest] = []
 
     init() {
@@ -19,14 +20,17 @@ actor GoldenDesk: Transport {
         }
     }
 
-    /// From now on `route` is answered as the golden `name` was.
-    func answer(_ route: String, as name: String) throws {
+    /// From now on `route` is answered as the golden `name` was, `after` it was asked: a call
+    /// under way long enough to be seen.
+    func answer(_ route: String, as name: String, after: Duration = .zero) throws {
         let exchange = try Exchange(name)
         answers[route] = HTTPResponse(status: exchange.status, headers: exchange.headers, body: exchange.body)
+        held[route] = after
     }
 
-    func send(_ request: HTTPRequest) throws(SailError) -> HTTPResponse {
+    func send(_ request: HTTPRequest) async throws(SailError) -> HTTPResponse {
         asked.append(request)
+        if let after = held[request.route], after > .zero { try? await Task.sleep(for: after) }
         guard let answer = answers[request.route] else { throw .unreachable("no golden answers \(request.route)") }
         return answer
     }
@@ -41,9 +45,11 @@ extension Driver {
     func performWorkspaces(_ step: Step) async -> (Bool, String)? {
         let pane = shell.workspaces
         if let pair = step.golden {
-            guard pair.count == 2 else { return (false, "golden takes a route and a golden's name") }
+            guard pair.count == 2 || pair.count == 3, let seconds = Int(pair.count == 3 ? pair[2] : "0") else {
+                return (false, "golden takes a route, a golden's name and, to hold the answer, its seconds")
+            }
             do {
-                try await GoldenDesk.shared.answer(pair[0], as: pair[1])
+                try await GoldenDesk.shared.answer(pair[0], as: pair[1], after: .seconds(seconds))
                 return (true, "")
             } catch {
                 return (false, "\(pair[1]): \(error)")
@@ -55,6 +61,16 @@ extension Driver {
             let focused = pane.window?.firstResponder === pane.list
             return (found, "the pane says: " + pane.text.replacingOccurrences(of: "\n", with: " | ")
                 + "; selected \(chosen)\(focused ? ", the list focused" : ""), Open \(pane.open.isEnabled ? "enabled" : "disabled")")
+        }
+        if let wanted = step.choose {
+            guard let index = pane.rows.firstIndex(where: { $0.name == wanted }) else { return (false, "no row \(wanted)") }
+            pane.list.selectRowIndexes([index], byExtendingSelection: false)
+            return (pane.list.selectedRow == index, "the button says \(pane.open.title), \(pane.open.isEnabled ? "enabled" : "disabled")")
+        }
+        if let wanted = step.makeStarts {
+            pane.name.stringValue = wanted
+            pane.make.performClick(nil)
+            return (pane.busy && !pane.make.isEnabled, "while making: Make says \(pane.make.title); \(pane.text.replacingOccurrences(of: "\n", with: " | "))")
         }
         if let wanted = step.make {
             let before = pane.ended

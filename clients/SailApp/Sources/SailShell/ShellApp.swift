@@ -81,7 +81,7 @@ public final class ShellApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
             account: Account(authenticator: passkeys { [weak window] in window }, vault: KeychainVault(), connect: connect), look: look, title: title,
             mono: mono
         )
-        workspaces = WorkspacesPane(look: look, title: title)
+        workspaces = WorkspacesPane(look: look, title: title, mono: mono)
         rail = Rail(look: look)
         super.init()
         compose()

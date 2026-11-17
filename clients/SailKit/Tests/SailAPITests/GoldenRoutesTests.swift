@@ -31,6 +31,8 @@ let calls: [String: @Sendable (SailClient) async throws -> Void] = [
     "workspace-delete": { _ = try await $0.send(.deleteWorkspace("dock", project: "harbor", force: true)) },
     "refusal-workspace-holds-work": { _ = try await $0.send(.deleteWorkspace("dock", project: "harbor")) },
     "workspaces": { _ = try await $0.send(.workspaces(project: "harbor")) },
+    "workspaces-three": { _ = try await $0.send(.workspaces(project: "harbor")) },
+    "workspaces-none": { _ = try await $0.send(.workspaces(project: "harbor")) },
     "refusal-read-only-credential-workspace": { _ = try await $0.send(.createWorkspace("new", project: "harbor")) },
     "refusal-conflict-workspace-exists": { _ = try await $0.send(.createWorkspace("dock", project: "harbor")) },
     "refusal-forbidden-not-assignee": { _ = try await $0.send(.startWorkspace("dock", project: "harbor")) },
@@ -116,6 +118,16 @@ func answer<Response>(
             WorkspaceRow(name: "main", instance: "harbor", state: .known(.notCreated), owner: nil),
             WorkspaceRow(name: "dock", instance: "harbor-dock", state: .known(.running), owner: "uday"),
         ]))
+    }
+
+    /// A running workspace, a stopped one and another person's, as the server lists them and as
+    /// the pane orders them for their owner: theirs first, running first; a project with none of
+    /// its own lists only its container.
+    @Test func threeWorkspacesAndNoneAreReadAsListed() throws {
+        let three = try Endpoint.workspaces(project: "harbor").decode(response(try Exchange("workspaces-three")))
+        #expect(three.rows(for: "uday").map { "\($0.title(for: "uday")) · \($0.said)" } == ["dock · running", "pier · stopped", "ana's quay · running"])
+        let none = try Endpoint.workspaces(project: "harbor").decode(response(try Exchange("workspaces-none")))
+        #expect(none.workspaces.map(\.name) == ["main"] && none.rows(for: "uday").isEmpty)
     }
 
     /// A forced delete's fix is a command, typed, never an HTTP call.

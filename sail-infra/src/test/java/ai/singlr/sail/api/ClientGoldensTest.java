@@ -179,13 +179,18 @@ class ClientGoldensTest {
 
   /** Workspace {@code dock} of harbor, running, uday's by {@code udayId}. */
   private static String dock(String udayId) {
+    return workspace("dock", "Running", "uday", udayId);
+  }
+
+  /** Workspace {@code name} of harbor as Incus lists it, {@code status}, {@code handle}'s by id. */
+  private static String workspace(String name, String status, String handle, String id) {
     return """
-        {"name": "harbor-dock", "status": "Running", "type": "container",
-         "config": {"user.sail.project": "harbor", "user.sail.workspace": "dock",
-                    "user.sail.ready": "1762941601000", "user.sail.owner": "uday",
+        {"name": "harbor-%s", "status": "%s", "type": "container",
+         "config": {"user.sail.project": "harbor", "user.sail.workspace": "%s",
+                    "user.sail.ready": "1762941601000", "user.sail.owner": "%s",
                     "user.sail.owner_id": "%s"},
          "expanded_devices": {"root": {"path": "/", "pool": "tank", "type": "disk"}}}"""
-        .formatted(udayId);
+        .formatted(name, status, name, handle, id);
   }
 
   private static final String RP_ID = "sail.standardapplied.com";
@@ -342,6 +347,13 @@ class ClientGoldensTest {
       box.record(http, "workspace-stop", "POST", dock + "/stop", dana, null);
       box.record(http, "refusal-workspace-holds-work", "DELETE", dock, dana, null);
       box.record(http, "workspace-delete", "DELETE", dock + "?force=true", dana, null);
+      box.lists(
+          workspace("dock", "Running", "uday", box.idOf("uday")),
+          workspace("pier", "Stopped", "uday", box.idOf("uday")),
+          workspace("quay", "Running", "ana", box.idOf("ana")));
+      box.record(http, "workspaces-three", "GET", workspaces, dana, null);
+      box.lists();
+      box.record(http, "workspaces-none", "GET", workspaces, dana, null);
 
       assertAll(
           () -> GoldenFiles.check(GOLDENS.resolve("http"), http),
@@ -1105,10 +1117,21 @@ class ClientGoldensTest {
 
     /** Makes Incus list workspace {@code dock} of harbor, {@code handle}'s by their id. */
     void holdsDockOf(String handle) {
-      var dock = dock(new FdeStore(db).byHandle(handle).orElseThrow().id());
+      var dock = dock(idOf(handle));
       incus
           .onOk("incus list ^harbor-dock$", "[" + dock + "]")
           .onOk("incus list --format json", "[" + TEMPLATE + "," + dock + "]");
+    }
+
+    /** Makes Incus list harbor's template and {@code workspaces}, and nothing else. */
+    void lists(String... workspaces) {
+      var listed = new ArrayList<String>(List.of(TEMPLATE));
+      listed.addAll(List.of(workspaces));
+      incus.onOk("incus list --format json", "[" + String.join(",", listed) + "]");
+    }
+
+    String idOf(String handle) {
+      return new FdeStore(db).byHandle(handle).orElseThrow().id();
     }
 
     /** Sends what a golden needs written first, which must succeed. */

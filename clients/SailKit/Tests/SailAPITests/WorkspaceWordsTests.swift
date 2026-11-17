@@ -95,6 +95,9 @@ import Testing
         #expect(rows.map(\.said) == ["running", "stopped", "not whole, make it again", "running", "paused"])
         #expect(rows.map { $0.opens(for: "ana", admin: false) } == [true, true, true, false, false])
         #expect(rows.allSatisfy { $0.opens(for: "uday", admin: true) })
+        #expect(rows.map { $0.owner(apartFrom: "ana") } == [nil, nil, nil, "uday", nil])
+        #expect(rows.map(\.startsWhenOpened) == [false, true, false, false, false], "only a stopped one: opening starts it")
+        #expect(rows.map(\.isUp) == [true, false, false, true, false])
     }
 
     /// A call that ended in anything but an answer is said in words, never as the enum's name:

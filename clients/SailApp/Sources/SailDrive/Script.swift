@@ -130,7 +130,8 @@ struct Step: Decodable {
     var sheet: String?
     var asking: String?
     /// The workspaces run's control plane answers this route (`["POST /v1/terminal/tickets",
-    /// "refusal-forbidden-not-assignee"]`) as that golden from now on.
+    /// "refusal-forbidden-not-assignee"]`) as that golden from now on, held this many seconds when
+    /// a third is given.
     var golden: [String]?
     /// The Workspaces pane says this, within `seconds` (10 by default), no call under way.
     var workspaces: String?
@@ -138,11 +139,15 @@ struct Step: Decodable {
     var make: String?
     /// The Workspaces row of this name selected and Open pressed: a tab on the runner.
     var open: String?
+    /// The Workspaces row of this name selected, what its button then says told.
+    var choose: String?
+    /// This name typed into the Workspaces pane's field and Make pressed; the call not waited for.
+    var makeStarts: String?
     /// A ticket was asked with these fields (`{"action": "open", "workspace": "dock"}`), within
     /// `seconds` (15 by default).
     var ticketAsked: [String: String]?
-    /// The app is asked to quit, as Quit Sail does, on the next turn of the main queue: AppKit waits
-    /// in the quit until a sheet it asks on is answered, which a later step does.
+    /// The app is asked to quit, as Quit Sail does, from the run loop: AppKit waits in the quit
+    /// until a sheet it asks on is answered, which a later step does.
     var quit: Bool?
     /// The whole screen in both looks, a sheet over the window included, saved as `window/<this>`.
     var shotScreen: String?

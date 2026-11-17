@@ -54,6 +54,22 @@ extension WorkspaceRow {
         }
     }
 
+    /// Its owner when that is not `handle`, said at its row's trailing edge.
+    public func owner(apartFrom handle: String) -> String? {
+        owner == handle ? nil : owner
+    }
+
+    /// Whether opening it starts it first: the server starts a stopped workspace it is asked to
+    /// open a terminal in (`Workspaces.startExisting`).
+    public var startsWhenOpened: Bool {
+        state == .known(.stopped)
+    }
+
+    /// Whether it is up, its dot filled.
+    public var isUp: Bool {
+        state == .known(.running)
+    }
+
     /// Whether the app offers Open on it: a person's own, or any to an admin. The server decides
     /// either way.
     public func opens(for handle: String, admin: Bool) -> Bool {

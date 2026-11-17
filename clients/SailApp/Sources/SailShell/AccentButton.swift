@@ -33,6 +33,7 @@ public final class AccentButton: NSButton {
         attributedTitle = NSAttributedString(
             string: title, attributes: [.foregroundColor: NSColor(look.onAccent), .font: NSFont.systemFont(ofSize: Look.Step.body.points, weight: .bold)]
         )
+        invalidateIntrinsicContentSize()
     }
 
     override public var intrinsicContentSize: NSSize {

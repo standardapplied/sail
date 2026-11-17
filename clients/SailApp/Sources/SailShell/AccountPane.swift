@@ -213,16 +213,13 @@ public final class AccountPane: NSView, NSMenuItemValidation {
     }
 
     private func label(_ text: String) -> NSTextField {
-        let label = NSTextField(labelWithString: text.uppercased())
-        label.font = monospaced(.micro)
+        let label = eyebrow(text, mono: mono)
         labels.append(label)
         return label
     }
 
-    /// JetBrains Mono at `step`, the face the terminal uses.
     private func monospaced(_ step: Look.Step) -> NSFont {
-        (try? mono.faces(points: step.points, scale: 1).font(.regular)).map { $0 as NSFont }
-            ?? .monospacedSystemFont(ofSize: step.points, weight: .regular)
+        monoFont(step, from: mono)
     }
 
     private func compose() {
@@ -271,4 +268,20 @@ public final class AccountPane: NSView, NSMenuItemValidation {
         ])
         paint()
     }
+}
+
+/// JetBrains Mono at `step`, the face the terminal uses.
+@MainActor
+func monoFont(_ step: Look.Step, from mono: TerminalFonts) -> NSFont {
+    (try? mono.faces(points: step.points, scale: 1).font(.regular)).map { $0 as NSFont }
+        ?? .monospacedSystemFont(ofSize: step.points, weight: .regular)
+}
+
+/// A group's eyebrow, as "CONTROL PLANE" is: its name upper case in JetBrains Mono at the micro
+/// step, which its pane paints in the secondary text colour.
+@MainActor
+func eyebrow(_ text: String, mono: TerminalFonts) -> NSTextField {
+    let label = NSTextField(labelWithString: text.uppercased())
+    label.font = monoFont(.micro, from: mono)
+    return label
 }
