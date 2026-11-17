@@ -242,6 +242,10 @@ public final class WorkbenchView: NSView {
         switch event {
         case let .screen(.title(title)):
             model.setTitle(title, of: view.id)
+            if title.hasPrefix("t"), Int(title.dropFirst()) != nil, let tab = model.tab(holding: view.id) {
+                model.rename(tab.id, to: title)
+                keepSoon()
+            }
             showTitles()
         case let .screen(.workingDirectory(folder)):
             model.setFolder(folder, of: view.id)
