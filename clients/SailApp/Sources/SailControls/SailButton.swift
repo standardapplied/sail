@@ -92,12 +92,12 @@ public final class SailButton: NSButton {
         needsDisplay = true
     }
 
-    var state: ButtonState {
+    var drawnState: ButtonState {
         ButtonState(enabled: isEnabled, hovered: hovered, pressed: isHighlighted, focused: focused, busy: busyWord != nil)
     }
 
     var paint: ButtonPaint {
-        ButtonPaint(kind, state, look: look)
+        ButtonPaint(kind, drawnState, look: look)
     }
 
     var box: NSRect {
@@ -109,12 +109,12 @@ public final class SailButton: NSButton {
         NSEdgeInsets(top: Look.haloRoom, left: Look.haloRoom, bottom: Look.haloRoom, right: Look.haloRoom)
     }
 
-    private var font: NSFont {
+    private var labelFont: NSFont {
         .systemFont(ofSize: size.label, weight: paint.bold ? .bold : .semibold)
     }
 
     private var label: NSAttributedString {
-        Draw.text(busyWord ?? title, font, paint.label)
+        Draw.text(busyWord ?? title, labelFont, paint.label)
     }
 
     private var hintText: NSAttributedString? {
