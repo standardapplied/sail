@@ -12,6 +12,8 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.common.Remedied;
+import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.config.HostYaml;
 import ai.singlr.sail.config.ProjectDefinition;
 import ai.singlr.sail.config.ProjectDefinitionJson;
@@ -454,8 +456,14 @@ class ProjectProvisionerTest {
     assertTrue(steps.get(3).contains("step:4/"));
   }
 
+  /**
+   * A run that resumes skips the steps done, but waits for the container's network again before the
+   * next: the container may have been started again since (a restart of sail-api cut a template's
+   * build short, and its cleanup stopped it), and a step that downloads would otherwise meet no
+   * network.
+   */
   @Test
-  void resumeFromPackagesSkipsFirstFiveSteps() throws Exception {
+  void resumeFromPackagesSkipsTheStepsDoneButWaitsForTheNetworkAgain() throws Exception {
     var stateFile = tempDir.resolve("provision-state.yaml");
     var setupTracker = new ProvisionTracker<>(ProjectPhase.class, stateFile, false);
     setupTracker.load(ProjectProvisioner.inputs(fullConfig(), Optional.empty()));
@@ -481,10 +489,16 @@ class ProjectProvisionerTest {
 
     provisioner.provision(fullConfig(), hostYaml(), none(fullConfig()), GIT, null);
 
-    assertEquals(30, steps.size());
+    assertEquals(31, steps.size());
     assertTrue(steps.get(0).contains("skipped:1/"));
-    assertTrue(steps.get(4).contains("skipped:5/"));
-    assertTrue(steps.get(5).contains("step:6/"));
+    assertTrue(steps.get(2).contains("skipped:3/"));
+    assertTrue(steps.get(3).contains("step:4/"), steps.get(3));
+    assertTrue(steps.get(4).contains("done:4/"), steps.get(4));
+    assertTrue(steps.get(5).contains("skipped:5/"));
+    assertTrue(steps.get(6).contains("step:6/"));
+    var waited = indexOf(shell, "ip -4 addr show eth0 | grep -q inet");
+    var next = indexOf(shell, "id dev");
+    assertTrue(waited >= 0 && waited < next, shell.invocations().toString());
   }
 
   @Test
@@ -511,10 +525,11 @@ class ProjectProvisionerTest {
 
     provisioner.provision(fullConfig(), hostYaml(), none(fullConfig()), GIT, null);
 
-    assertEquals(29, steps.size());
+    assertEquals(30, steps.size());
     assertTrue(steps.get(0).contains("skipped:1/"));
-    assertTrue(steps.get(5).contains("skipped:6/"));
-    assertTrue(steps.get(6).contains("step:7/"));
+    assertTrue(steps.get(3).contains("step:4/"), steps.get(3));
+    assertTrue(steps.get(6).contains("skipped:6/"));
+    assertTrue(steps.get(7).contains("step:7/"));
   }
 
   @Test
@@ -2406,12 +2421,43 @@ class ProjectProvisionerTest {
 
     var ex =
         assertThrows(
-            IOException.class,
+            IllegalStateException.class,
             () ->
                 provisioner.provision(
                     configWithRepos(repos), hostYaml(), none(configWithRepos(repos)), GIT, null));
-    assertTrue(ex.getMessage().contains("Failed to clone"));
+    var refused = (Remedied) ex;
+    assertEquals(
+        "github.com did not give acme-health's repo acme: the repo may ask for a token, or may not"
+            + " exist.",
+        refused.reason());
+    assertEquals(
+        Remedy.of(
+            "Store a token for github.com that reads it, then try again: ",
+            Remedy.sail("git login", "github.com"),
+            "."),
+        refused.remedy());
+    assertTrue(ex.getCause().getMessage().contains("fatal: repository not found"));
     assertEquals("REPOS_CLONED", tracker.currentState().error().failedPhase());
+  }
+
+  /** A clone refused to the token given for its host says so, and never git's own words. */
+  @Test
+  void aCloneRefusedToTheTokenStoredForItsHostSaysSoInAPersonsWords() {
+    var repo = new ProjectDefinition.Repo("https://github.com/acme/app.git", "app", null);
+
+    var refused =
+        (Remedied)
+            ProjectProvisioner.cloneRefused(
+                minimalConfig(),
+                repo,
+                Map.of("github.com", "ghp_given"),
+                "remote: Repository not found.\nfatal: repository not found");
+
+    assertEquals(
+        "github.com did not give simple's repo app to the token stored for it: the token may not"
+            + " read the repo, or the repo may not exist.",
+        refused.reason());
+    assertFalse(refused.reason().contains("fatal"));
   }
 
   @Test
@@ -3168,5 +3214,15 @@ class ProjectProvisionerTest {
     public void onStepFailed() {
       events.add("failed");
     }
+  }
+
+  private static int indexOf(ScriptedShellExecutor shell, String part) {
+    var calls = shell.invocations();
+    for (var i = 0; i < calls.size(); i++) {
+      if (calls.get(i).contains(part)) {
+        return i;
+      }
+    }
+    return -1;
   }
 }

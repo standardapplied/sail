@@ -7,6 +7,8 @@ package ai.singlr.sail.engine;
 
 import ai.singlr.sail.api.ProjectSkills;
 import ai.singlr.sail.common.DateTimeUtils;
+import ai.singlr.sail.common.Remedied;
+import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.config.HostYaml;
 import ai.singlr.sail.config.ProjectDefinition;
 import ai.singlr.sail.config.ProjectDefinitionJson;
@@ -198,6 +200,42 @@ public final class ProjectProvisioner {
   }
 
   /**
+   * A clone of {@code repo} its host refused, in a person's words: whether a token was given for
+   * the host ({@code tokens}, keyed as the repo URLs spell their hosts), and the typed remedy that
+   * stores one. What git said ({@code said}) stays the cause, for the log: a person reads a build's
+   * record and the API, never a tool's output.
+   */
+  static IllegalStateException cloneRefused(
+      ProjectDefinition config,
+      ProjectDefinition.Repo repo,
+      Map<String, String> tokens,
+      String said) {
+    var cause = new IOException("Failed to clone " + repo.url() + ": " + said);
+    var hosts = GitCredentials.extractHttpsHosts(List.of(repo));
+    var named = config.name() + "'s repo " + repo.path();
+    if (hosts.isEmpty()) {
+      return Remedied.state(
+          named + " could not be cloned.",
+          Remedy.of("Check its address in the project's definition."),
+          cause);
+    }
+    var host = hosts.getFirst();
+    return Remedied.state(
+        host
+            + " did not give "
+            + named
+            + (tokens.containsKey(host)
+                ? " to the token stored for it: the token may not read the repo, or the repo may"
+                    + " not exist."
+                : ": the repo may ask for a token, or may not exist."),
+        Remedy.of(
+            "Store a token for " + host + " that reads it, then try again: ",
+            Remedy.sail("git login", host),
+            "."),
+        cause);
+  }
+
+  /**
    * The digest of what a run provisions from, the definition and the box's workstation key: the
    * {@link ProvisionTracker} keeps progress only for the inputs it was recorded for, so an edited
    * definition, or a workstation key registered, replaced or revoked, is provisioned again. With no
@@ -384,9 +422,14 @@ public final class ProjectProvisioner {
     return true;
   }
 
+  /**
+   * Waits for the container's address before any later step, whenever one runs: a run that resumes
+   * may meet the container started again since the run before (a restart, a build's failure that
+   * stopped it), whose network is not up yet, so the wait is never taken as done.
+   */
   private void waitForNetwork(String name) throws Exception {
     currentPhase = ProjectPhase.NETWORK_READY;
-    if (tracker.isCompleted(currentPhase)) {
+    if (tracker.isComplete()) {
       stepSkipped(4, "network already ready");
       return;
     }
@@ -406,7 +449,9 @@ public final class ProjectProvisioner {
         execInContainer(
             name, List.of("bash", "-c", "ip -4 addr show eth0 | grep -oP '(?<=inet )\\S+'"));
     var ipDetail = ipResult.ok() ? ipResult.stdout().strip() : "";
-    tracker.advance(currentPhase);
+    if (!tracker.isCompleted(currentPhase)) {
+      tracker.advance(currentPhase);
+    }
     stepDone(4, "Network connected" + (ipDetail.isEmpty() ? "" : " (" + ipDetail + ")"));
   }
 
@@ -961,7 +1006,7 @@ public final class ProjectProvisioner {
 
       var result = execAsDevUser(name, cmd, INSTALL_TIMEOUT);
       if (!result.ok()) {
-        throw new IOException("Failed to clone " + repo.url() + ": " + result.stderr());
+        throw cloneRefused(config, repo, gitTokens.byHostFor(config.repos()), result.stderr());
       }
       cloned++;
     }

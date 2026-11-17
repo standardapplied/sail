@@ -988,7 +988,8 @@ SHA-256, and strips the Gatekeeper quarantine flag.
 
 **Container provisioning** (`ProjectProvisioner`) is an idempotent, resumable pipeline of
 nineteen steps, one per `ProjectPhase`, and a `ProvisionTracker` lets a failed run pick up where
-it stopped. The tracker resumes only for the definition it was written for: its state carries the
+it stopped. The network wait (step 4) is never taken as done while a later step will run: the
+container may have been started again since, and its address is waited for anew. The tracker resumes only for the definition it was written for: its state carries the
 SHA-256 of the definition's JSON document (`ProjectDefinitionJson.write`) and the workstation
 key's fingerprint (`ProjectProvisioner.inputs`), and progress recorded for another (or by a release that recorded none)
 restarts the run from the first step, each step re-checking its own effect. A finished run records
