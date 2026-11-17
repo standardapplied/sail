@@ -199,6 +199,19 @@ import Testing
 }
 
 @Suite struct LatencyMarksTests {
+    /// The hop from the session's thread to the main one is kept: the wake the main thread took
+    /// latest after the oldest change it carried, how many wakes it took and how many changes.
+    @Test func theLongestHopFromTheScreenToTheMainThreadIsKept() {
+        var marks = LatencyMarks()
+        marks.told(at: 1.002, since: 1.000, changes: 1)
+        marks.told(at: 2.180, since: 2.000, changes: 3)
+        marks.told(at: 3.000, since: 3.001, changes: 1)
+        #expect(marks.figures.longestToTold == Span(2.000, 2.180))
+        #expect(marks.figures.wakes == 3)
+        #expect(marks.figures.changes == 5)
+        #expect(LatencyMarks().figures.longestToTold == nil)
+    }
+
     @Test func aKeysEchoIsTheFirstOutputAfterItsBytesAndShowsWhenItsFrameIsPresented() {
         var marks = LatencyMarks()
         marks.keyWritten(event: 1.000, sent: 1.0005, written: 1.001)

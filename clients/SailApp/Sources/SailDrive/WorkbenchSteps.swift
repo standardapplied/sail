@@ -449,6 +449,7 @@ extension Driver {
         panes4["app CPU share at the measure's start, %"] = shares.app
         await Self.processes().forEach { print("panes4 ps: \($0)") }
         floods.forEach { $0.terminal.resetLatency() }
+        let measuredFrom = CACurrentMediaTime()
         let framesBefore = floods.map { Self.committed($0.terminal) }
         let (ok, said) = await measure(200, interval: 50, name: "panes4-echo")
         print(String(format: "panes4 phase echo measured %.3f", CACurrentMediaTime()))
@@ -462,11 +463,13 @@ extension Driver {
         let keyToEcho = presented ? echoed.keyToEcho.p95 : echoed.keyToEchoEstimated.p95
         let marker = "xxxxxxxxxxxxxxxxxxxxflood-2"
         var ran = [LatencyFigures?](repeating: nil, count: floods.count), frames = [Int](repeating: 0, count: floods.count)
+        var lasted = [Double](repeating: 0, count: floods.count)
         let shown = await waitUntil(180) {
             for (index, view) in floods.enumerated() where ran[index] == nil && Self.shows(view, marker) {
                 print(String(format: "panes4 phase flood %d shown to its end %.3f", index + 1, CACurrentMediaTime()))
                 ran[index] = view.terminal.latency
                 frames[index] = Self.committed(view.terminal) - framesBefore[index]
+                lasted[index] = CACurrentMediaTime() - measuredFrom
             }
             return !ran.contains(nil)
         }
@@ -489,6 +492,8 @@ extension Driver {
             panes4["flood \(index + 1) longest gap between committed frames ms"] = (figures.longestBetweenCommits?.length ?? 0) * 1000
             panes4["flood \(index + 1), ours (the larger of its longest output wait and the main thread's longest hold, less the machine's share), ms"] = judged.ours
             panes4["flood \(index + 1) frames committed"] = Double(frames[index])
+            panes4["flood \(index + 1) screen changes a second"] = Double(figures.changes) / max(lasted[index], 1e-9)
+            panes4["flood \(index + 1) main-thread wakes for them a second"] = Double(figures.wakes) / max(lasted[index], 1e-9)
             panes4["flood \(index + 1) outputs that reached the screen in its longest commit gap"] = Double(figures.longestGapOutputs)
             panes4["flood \(index + 1) ms a drawable was being asked for in its longest commit gap"] = figures.longestGapFetching
             panes4["flood \(index + 1) longest wait to be shown ms"] = figures.outputToShown.max

@@ -6,8 +6,9 @@ import SailVT
 /// view makes them on a queue of its own, never on the main thread.
 public protocol TerminalLink: AnyObject, Sendable {
     var screen: Screen { get }
-    /// When the screen took each output; read by one view, once, for the link's life.
-    var screenChanges: AsyncStream<ContinuousClock.Instant> { get }
+    /// Tells `listener`, on the thread that changed the screen, each time it changed, with when it
+    /// took the output; nil stops new calls, while a call already begun may still finish.
+    func onScreenChange(_ listener: (@Sendable (ContinuousClock.Instant) -> Void)?)
     var events: AsyncStream<SessionEvent> { get }
     func send(_ key: KeyInput)
     func paste(_ text: String, confirmed: Bool) -> PasteOutcome

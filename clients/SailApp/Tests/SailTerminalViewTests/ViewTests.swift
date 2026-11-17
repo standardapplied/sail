@@ -182,21 +182,24 @@ import Testing
         #expect(String(decoding: harness.link.bytes, as: UTF8.self) == "\u{1b}[<0;2;1M\u{1b}[<0;2;1m")
     }
 
-    /// M3: a view draws a session for its life. Detaching ends its reading of the session's
-    /// streams, and the session cannot be attached again; a view that is dropped stops reading too.
-    @Test func aSessionIsDrawnByOneViewForLife() async throws {
+    /// M3: a view draws a session for its life. Detaching stops its listening to the session's
+    /// screen, and the session cannot be attached again; a view that is dropped stops listening too.
+    @Test func aSessionIsDrawnByOneViewForLife() throws {
         let harness = try Harness()
         #expect(!TerminalView.canAttach(harness.link))
+        #expect(harness.link.listened)
         harness.view.detach()
-        for await _ in harness.link.readerGone {}
+        #expect(!harness.link.listened)
         #expect(!TerminalView.canAttach(harness.link))
         let other = try FakeLink()
         #expect(TerminalView.canAttach(other))
-        var dropped: TerminalView? = try TerminalView(fonts: TerminalFonts(directory: Harness.fonts))
-        dropped?.attach(other)
-        dropped = nil
-        for await _ in other.readerGone {}
-        #expect(dropped == nil)
+        try autoreleasepool {
+            var dropped: TerminalView? = try TerminalView(fonts: TerminalFonts(directory: Harness.fonts))
+            dropped?.attach(other)
+            #expect(other.listened)
+            dropped = nil
+        }
+        #expect(!other.listened, "a dropped view still listened to its session's screen")
     }
 
     /// Attaching a session a view already drew stops the process with the precondition's sentence,
@@ -392,6 +395,50 @@ import Testing
         await harness.clock.nextResume()
         #expect(!harness.clock.isPaused)
         #expect(harness.view.visibleText.contains("hello"), "drawn as it arrived, before the next refresh")
+    }
+
+    /// A key whose echo came in the second of two changes one wake carries is put to that change:
+    /// the wake marks its newest change too, so the echo is shown by the frame that reads them,
+    /// never held for a later, unrelated output.
+    @Test func aKeysEchoFoldedIntoAWakeIsPutToTheNewestChange() throws {
+        let marks = ViewMarks()
+        let queue = DispatchQueue(label: "sh.standardapplied.sail.tests.wake")
+        let drew = DispatchSemaphore(value: 0)
+        let wake = ScreenWake(on: queue, marks: marks) { drew.signal() }
+        queue.suspend()
+        wake.changed(at: 10.0)
+        marks.keyWritten(event: 10.4, sent: 10.5, interval: marks.keyBegan())
+        wake.changed(at: 10.6)
+        queue.resume()
+        try #require(drew.wait(timeout: .now() + 2) == .success)
+        marks.committed(frame: 1, read: 10.7, target: 10.71)
+        marks.completed(frame: 1, ok: true)
+        let figures = marks.figures
+        #expect(figures.wakes == 1 && figures.changes == 2)
+        #expect(figures.keyToEchoEstimated.count == 1, "the key's echo was not put to the wake's newest change")
+    }
+
+    /// Changes the main thread has not yet taken make one wake, which carries the oldest of them:
+    /// output to shown is measured from the change that waited longest, never the newest.
+    @Test func oneWakeCarriesTheOldestChangeItWasPostedFor() async throws {
+        let harness = try Harness()
+        await harness.drainMain()
+        await harness.tick()
+        await harness.tick()
+        let link = harness.link
+        let before = CACurrentMediaTime()
+        let between = Moment()
+        onItsOwnThread {
+            link.output("first")
+            between.mark()
+            link.output(" second")
+        }
+        await harness.drainMain()
+        let figures = harness.view.latency
+        #expect(figures.wakes == 1 && figures.changes == 2, "\(figures.wakes) wakes for \(figures.changes) changes")
+        let oldest = try #require(figures.longestToTold).start
+        #expect(oldest >= before - 0.001 && oldest < between.time, "the wake carried a change at \(oldest), not the first")
+        await harness.drawn()
     }
 
     /// A key that changes nothing on screen leaves an idle view idle, so its echo is drawn the
@@ -771,5 +818,30 @@ import Testing
             }
         }
         #expect(read >= 10)
+    }
+}
+
+/// Swift's shared pool held at every priority, in a suite of its own run alone: CI runs every suite
+/// in a process of its own (`ci/test-suites`); a plain local `swift test` runs suites side by side in
+/// one process, and holding the pool there stalls the others for as long as the holders take to
+/// start (well under a second).
+@MainActor
+@Suite(.serialized) struct SharedPoolTests {
+    /// A change of the screen, told on the session's thread, reaches the queue that draws while
+    /// Swift's shared pool is held at every priority: nothing between the change and that queue
+    /// needs one of its threads. The wake's queue is a private one here, and the test waits for it
+    /// on a semaphore, since any wait of Swift concurrency's would need the pool too.
+    @Test func aScreenChangeReachesItsQueueWhileTheSharedPoolIsHeld() throws {
+        let marks = ViewMarks()
+        let drew = DispatchSemaphore(value: 0)
+        let wake = ScreenWake(on: DispatchQueue(label: "sh.standardapplied.sail.tests.wake"), marks: marks) { drew.signal() }
+        let pool = PoolHold()
+        defer { pool.release() }
+        try #require(pool.holdsEveryPriority, "the pool is not held at every priority: holders ran \(pool.running)")
+        onItsOwnThread { wake.changed(at: CACurrentMediaTime()) }
+        let reached = drew.wait(timeout: .now() + 2) == .success
+        pool.release()
+        #expect(reached, "the change did not reach its queue while the shared pool was held")
+        #expect(marks.figures.wakes == 1)
     }
 }
