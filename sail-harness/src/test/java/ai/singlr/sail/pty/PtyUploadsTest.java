@@ -53,6 +53,7 @@ class PtyUploadsTest {
 
   private final LinkedBlockingQueue<List<String>> commands = new LinkedBlockingQueue<>();
   private volatile String pushFailure;
+  private volatile String placeAnswer;
 
   private Path container() {
     return dir.resolve("container");
@@ -70,6 +71,9 @@ class PtyUploadsTest {
           commands.add(List.copyOf(command));
           if (command.subList(0, 3).equals(List.of("incus", "file", "push"))) {
             return push(command);
+          }
+          if (placeAnswer != null && command.contains("sail-place")) {
+            return new Result(0, placeAnswer, "");
           }
           var inner =
               command.subList(command.indexOf("--") + 1, command.size()).stream()
@@ -469,6 +473,12 @@ class PtyUploadsTest {
       assertEquals(
           new PtyMessage.PutRefused(2, PutRefusal.FAILED, 0),
           upload(channel, 2, "a", new byte[] {1}));
+      pushFailure = null;
+      placeAnswer = "1 0";
+      assertEquals(
+          new PtyMessage.PutRefused(3, PutRefusal.FAILED, 0),
+          upload(channel, 3, "a", new byte[] {1}),
+          "a directory that answers no count and size is a failure, never a silence");
       assertEquals(List.of(), staged());
     }
   }

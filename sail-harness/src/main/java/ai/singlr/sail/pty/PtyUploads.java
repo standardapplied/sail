@@ -69,7 +69,7 @@ final class PtyUploads {
   static final String PLACE =
       "mkdir -p -m 0700 \"$1\" && cd \"$1\" && n=$2"
           + " && while [ -e \"$n-$3\" ]; do n=$((n + 1)); done"
-          + " && echo \"$n $(ls -A | wc -l) $(du -sb . | cut -f1)\"";
+          + " && ls -An | awk -v n=\"$n\" '!/^total / {k++; b += $5} END {print n, k + 0, b + 0}'";
 
   /** Removes every directory under {@code $1} not named among the rest of the arguments. */
   static final String SWEEP =
@@ -326,6 +326,8 @@ final class PtyUploads {
           new PtyMessage.PutRefused(upload.id, full ? PutRefusal.NO_SPACE : PutRefusal.FAILED, 0);
     } catch (InterruptedException e) {
       Thread.currentThread().interrupt();
+    } catch (RuntimeException e) {
+      PtySessionHost.log("upload-failed", "-", upload.instanceId, e.getClass().getSimpleName());
     } finally {
       delete(upload.staged);
     }
@@ -362,6 +364,12 @@ final class PtyUploads {
       throw new IOException("Could not make the session's upload directory: " + placed.reason());
     }
     var held = placed.stdout().strip().split(" ");
+    if (held.length != 3
+        || !held[0].matches("[0-9]{1,9}")
+        || !held[1].matches("[0-9]{1,9}")
+        || !held[2].matches("[0-9]{1,18}")) {
+      throw new IOException("The session's upload directory answered no number, count and size.");
+    }
     if (Integer.parseInt(held[1]) >= FILES) {
       return new PtyMessage.PutRefused(upload.id, PutRefusal.TOO_MANY, FILES);
     }
