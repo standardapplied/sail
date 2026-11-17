@@ -156,9 +156,11 @@ final class Driver {
             Self.say("drive \(index) \(name): \(skipped ? "skipped" : ok ? "ok" : "FAILED") in \(String(format: "%.2f", seconds)) s \(detail)")
             if !ok { break }
         }
+        let withinClaim = mainStacks.watcherShare <= MainStacks.claim
         Self.say("drive: \(excused.count) stretch\(excused.count == 1 ? "" : "es") of a judged wait excused as the machine's"
-            + (excused.isEmpty ? "" : ": " + excused.joined(separator: "; ")) + "; the main thread's sampler took \(mainStacks.cost)")
-        let passed = results.count == steps.count && results.allSatisfy(\.ok)
+            + (excused.isEmpty ? "" : ": " + excused.joined(separator: "; ")) + "; the main thread's sampler took \(mainStacks.cost)"
+            + (withinClaim ? "" : "; FAILED: the watcher took more of a CPU than its claim"))
+        let passed = results.count == steps.count && results.allSatisfy(\.ok) && withinClaim
         let report = Report(
             passed: passed, hertz: shell.window.screen?.maximumFramesPerSecond ?? 0, scale: terminal.metrics.scale, steps: results,
             measures: measures, bench: bench, panes4: panes4

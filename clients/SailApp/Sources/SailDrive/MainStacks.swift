@@ -38,6 +38,16 @@ final class MainStacks: @unchecked Sendable {
     static let interval = 0.005
     /// The most looks kept: two minutes of them.
     static let kept = 24000
+    /// The watcher's real-time claim (`THREAD_TIME_CONSTRAINT_POLICY`), in seconds: in every
+    /// ``interval`` it may run up to `computation`, done within `constraint` of waking, preemptible.
+    /// Apple's guide sets a real-time thread's values in these proportions (period HZ/160,
+    /// computation HZ/3300, constraint HZ/2200); XNU takes a computation of at least half the
+    /// constraint, and a thread that keeps running past its quantum is demoted by its fail-safe.
+    /// A look costs about 36 µs, so 250 µs leaves room for the late samples' stack walk.
+    static let computation = 0.000_25
+    static let constraint = 0.000_5
+    /// The most of one CPU the watcher may take: its computation in each period, 5 %.
+    static var claim: Double { computation / interval }
 
     static let depth = 48
     private let thread: thread_act_t
@@ -48,6 +58,8 @@ final class MainStacks: @unchecked Sendable {
     private var samples: [Sample] = []
     private var dense: [ThreadLook] = []
     private var spent: (looks: Int, total: Double, longest: Double) = (0, 0, 0)
+    /// Whether the kernel took the watcher's real-time policy, when it began, and its own CPU time.
+    private var watcher: (realTime: Bool, since: Double, cpu: Double) = (false, 0, 0)
 
     /// Made on the main thread, which it then watches through `beat`.
     @MainActor init(watching beat: Heartbeat) {
@@ -56,11 +68,15 @@ final class MainStacks: @unchecked Sendable {
         high = UInt(bitPattern: pthread_get_stackaddr_np(main))
         low = high - UInt(pthread_get_stacksize_np(main))
         let watcher = Thread { [self] in
+            let me = mach_thread_self()
+            let realTime = MainStacks.becomeRealTime(me)
+            lock.withLock { self.watcher = (realTime, CACurrentMediaTime(), MainStacks.cpu(of: me) ?? 0) }
             while true {
                 Thread.sleep(forTimeInterval: MainStacks.interval)
                 let now = CACurrentMediaTime()
                 look(at: now)
                 if now - beat.lastTick > 0.03 { sample(at: now) }
+                if let used = MainStacks.cpu(of: me) { lock.withLock { self.watcher.cpu = used } }
             }
         }
         watcher.qualityOfService = .userInteractive
@@ -94,11 +110,52 @@ final class MainStacks: @unchecked Sendable {
         }
     }
 
-    /// How many looks were taken and what one cost the watcher, on average and at most.
+    /// The watcher made a real-time thread (``computation``, ``constraint`` in every ``interval``),
+    /// so it keeps its looks while every core is busy; whether the kernel took the policy.
+    private static func becomeRealTime(_ thread: thread_act_t) -> Bool {
+        var timebase = mach_timebase_info_data_t()
+        _ = mach_timebase_info(&timebase)
+        func ticks(_ seconds: Double) -> UInt32 {
+            UInt32(seconds * 1e9 * Double(timebase.denom) / Double(timebase.numer))
+        }
+        var policy = thread_time_constraint_policy(
+            period: ticks(interval), computation: ticks(computation), constraint: ticks(constraint), preemptible: 1
+        )
+        let count = mach_msg_type_number_t(MemoryLayout<thread_time_constraint_policy>.size / MemoryLayout<integer_t>.size)
+        let set = withUnsafeMutablePointer(to: &policy) {
+            $0.withMemoryRebound(to: integer_t.self, capacity: Int(count)) {
+                thread_policy_set(thread, thread_policy_flavor_t(THREAD_TIME_CONSTRAINT_POLICY), $0, count)
+            }
+        }
+        return set == KERN_SUCCESS
+    }
+
+    /// `thread`'s CPU time so far, in seconds, or nil when it cannot be read.
+    private static func cpu(of thread: thread_act_t) -> Double? {
+        var info = thread_basic_info()
+        var infoCount = mach_msg_type_number_t(MemoryLayout<thread_basic_info>.size / MemoryLayout<integer_t>.size)
+        let got = withUnsafeMutablePointer(to: &info) {
+            $0.withMemoryRebound(to: integer_t.self, capacity: Int(infoCount)) { thread_info(thread, thread_flavor_t(THREAD_BASIC_INFO), $0, &infoCount) }
+        }
+        guard got == KERN_SUCCESS else { return nil }
+        return Double(info.user_time.seconds + info.system_time.seconds) + Double(info.user_time.microseconds + info.system_time.microseconds) / 1e6
+    }
+
+    /// The share of one CPU the watcher has used since it began, which must stay within ``claim``.
+    var watcherShare: Double {
+        let watcher = lock.withLock { self.watcher }
+        let elapsed = CACurrentMediaTime() - watcher.since
+        return elapsed > 0 ? watcher.cpu / elapsed : 0
+    }
+
+    /// How many looks were taken and what one cost the watcher, and what the watcher took of a CPU.
     var cost: String {
         let spent = lock.withLock { self.spent }
-        return String(format: "%ld looks every %.0f ms, each %.1f µs on average and %.1f µs at most", spent.looks, Self.interval * 1000,
-                      spent.looks > 0 ? spent.total / Double(spent.looks) * 1e6 : 0, spent.longest * 1e6)
+        let watcher = lock.withLock { self.watcher }
+        return String(format: "%ld looks every %.0f ms, each %.1f µs on average and %.1f µs at most; the watcher %@ (period %.0f ms, computation %.2f ms, constraint %.2f ms) used %.1f ms of CPU, %.2f%% of one CPU against its claim of %.0f%%",
+                      spent.looks, Self.interval * 1000, spent.looks > 0 ? spent.total / Double(spent.looks) * 1e6 : 0, spent.longest * 1e6,
+                      watcher.realTime ? "ran real-time" : "was REFUSED its real-time policy and ran at its QoS", Self.interval * 1000,
+                      Self.computation * 1000, Self.constraint * 1000, watcher.cpu * 1000, watcherShare * 100, Self.claim * 100)
     }
 
     private func sample(at time: Double) {

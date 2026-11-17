@@ -2,7 +2,7 @@
 
 ## 0.72.0
 
-- **The app's drive excuses a starved main thread only on evidence it prints, and counts every excuse.** Its sampler now looks at the main thread every 5 ms throughout, not only once it is late, recording the thread's run state and CPU time, this process's CPU time and the machine's CPU ticks. A judged wait is the machine's for a stretch only when at least 4 looks in a row, none more than 15 ms apart, find the main thread runnable, its CPU time flat (under a tenth of the time) and no CPU idle. Missing looks, a blocked thread or one that used CPU excuse nothing. Each flood's line names the looks that excused each stretch, and the drive's last line counts every stretch it excused and says what the sampler cost.
+- **The app's drive excuses a starved main thread only on evidence it prints, and counts every excuse.** Its sampler now looks at the main thread every 5 ms throughout, not only once it is late, from a real-time thread of the drive's own (period 5 ms, computation 0.25 ms; it may take at most 5% of one CPU, and the drive fails if it takes more), so it keeps looking while every core is busy, recording the thread's run state and CPU time, this process's CPU time and the machine's CPU ticks. A judged wait is the machine's for a stretch only when at least 4 looks in a row, none more than 15 ms apart, find the main thread runnable, its CPU time flat (under a tenth of the time) and no CPU idle. Missing looks, a blocked thread or one that used CPU excuse nothing. Each flood's line names the looks that excused each stretch, and the drive's last line counts every stretch it excused and says what the sampler cost.
 
 ## 0.71.0
 
