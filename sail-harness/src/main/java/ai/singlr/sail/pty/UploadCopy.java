@@ -50,19 +50,22 @@ final class UploadCopy {
   static final int NO_SPACE = 28;
 
   /**
-   * Run as root: checks the disk has room for {@code $4} bytes, before anything is made on it,
-   * makes {@code $1} root's own and {@code $1/$2} the dev user's alone, refusing a link at either,
-   * then, as the dev user ({@code shift 9; "$@"}), counts what the directory holds against {@code
-   * $5} files and {@code $6} bytes, creates the temporary for the first number no file takes with
-   * {@code O_EXCL} (a link at the name is refused, never written through), prints that number, and
-   * copies its input into it through the descriptor it opened. A copy that fails is {@code
-   * no_space} when it left the disk under 64 KiB free; the host removes its temporary.
+   * Run as root: checks the disk the uploads are kept on (the root's, or its parent's before it is
+   * made) has room for {@code $4} bytes, before anything is made on it, makes {@code $1} root's own
+   * and {@code $1/$2} the dev user's alone, refusing a link at either, then, as the dev user
+   * ({@code shift 9; "$@"}), counts what the directory holds against {@code $5} files and {@code
+   * $6} bytes, creates the temporary for the first number no file takes with {@code O_EXCL} (a link
+   * at the name is refused, never written through), prints that number, and copies its input into
+   * it through the descriptor it opened. A copy that fails is {@code no_space} when it left the
+   * disk under 64 KiB free; the host removes its temporary.
    */
   static final String OPEN =
       """
       root=$1 id=$2 name=$3 size=$4 files=$5 bytes=$6 rootuid=$7 devuid=$8 devgid=$9
       shift 9
-      free=$(df -Pk "${root%/*}" | awk "NR == 2 { print \\$4 * 1024 }")
+      at=$root
+      [ -d "$at" ] || at=${root%/*}
+      free=$(df -Pk "$at" | awk "NR == 2 { print \\$4 * 1024 }")
       [ "$free" -ge "$size" ] || exit 28
       [ -d "$root" ] || mkdir -m 0755 "$root" || exit 10
       [ -d "$root" ] && [ ! -L "$root" ] && [ "$(stat -c %u "$root")" = "$rootuid" ] || exit 10

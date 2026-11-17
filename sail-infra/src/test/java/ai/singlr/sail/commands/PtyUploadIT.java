@@ -302,7 +302,7 @@ class PtyUploadIT extends AbstractIncusIT {
         assertEquals(
             new PtyMessage.PutRefused(2, PtyMessage.PutRefusal.NO_SPACE, 0),
             tryUpload(channel, 2, "big.bin", new byte[2 << 20], () -> {}));
-        assertEquals("1-first.txt", held(directory));
+        awaitInInstance("ls -A " + directory + " | tr '\\n' ' '", "1-first.txt");
 
         var filling = new byte[600 << 10];
         new Random(13).nextBytes(filling);
