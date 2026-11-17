@@ -31,7 +31,8 @@ struct Probe {
             print(try screen.dump(after: screen.feed([UInt8](try Data(contentsOf: URL(filePath: file))))), terminator: "")
             return true
         case let .bench(path):
-            let report = Report(steps: [], latency: nil, droppedInputs: nil, budgets: try Bench.run())
+            let bench = try Bench.run()
+            let report = Report(steps: [], latency: nil, droppedInputs: nil, budgets: bench.budgets, samples: bench.samples)
             report.budgets.forEach { budget in
                 let verdict = budget.reported ? "" : " (limit \(budget.limit)) \(budget.met ? "met" : "MISSED")"
                 print("\(budget.name): \(String(format: "%.3f", budget.milliseconds))\(verdict)")
