@@ -212,7 +212,8 @@ import Testing
         print("upload pacing: chunk \(UploadPacing.chunk), window \(UploadPacing.window), \(delays.count) keys,"
             + " median \(delays[delays.count / 2]), p95 \(delays[delays.count * 95 / 100]), worst \(worst)")
         #expect(received == bytes.count)
-        #expect(delays.count >= 20, "enough keys typed through the upload to measure it")
+        let keysTypedDuringTheUpload = delays.count
+        #expect(keysTypedDuringTheUpload >= 20, "the worst delay below is over at least a second of the upload's keys, not a handful")
         #expect(worst <= .milliseconds(110))
         session.close()
         _ = host

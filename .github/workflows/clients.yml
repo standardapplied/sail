@@ -58,49 +58,33 @@ jobs:
           retention-days: 3
           if-no-files-found: error
 
-  # SailKit builds and tests on both platforms. Linux builds libghostty-vt from its release
-  # tarballs (scripts/libghostty-vt, cached under the script, which holds every pin); macOS takes
-  # the pinned xcframework through SwiftPM and runs the terminal tests against this machine's own
-  # host, the darwin sail of this commit.
-  sailkit:
-    name: SailKit on ${{ matrix.name }}
-    needs: [changes, host]
+  # SailKit builds and tests on both platforms, as two jobs, so Linux never waits for the darwin
+  # sail only macOS uses. Linux builds libghostty-vt from its release tarballs
+  # (scripts/libghostty-vt, cached under the script, which holds every pin); macOS takes the pinned
+  # xcframework through SwiftPM and runs the terminal tests against this machine's own host, the
+  # darwin sail of this commit. Both run the suites as scripts/suites says.
+  sailkit-linux:
+    name: SailKit on Linux
+    needs: changes
     if: needs.changes.outputs.clients == 'true'
-    runs-on: ${{ matrix.runner }}
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - name: Linux
-            runner: ubuntu-24.04
-          - name: macOS
-            runner: macos-15
-            xcode: /Applications/Xcode_26.3.app
     defaults:
       run:
         working-directory: clients/SailKit
-    env:
-      EXHAUSTIVE_SUITES: '^(SailWorkbenchTests\.(WholenessTests|ReviewPropertyTests)|SailEventsTests\.EventStreamParserTests|SailVTTests\.FixtureTests)/'
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-
-      - name: Xcode
-        if: matrix.xcode
-        run: sudo xcode-select --switch ${{ matrix.xcode }}
 
       - name: Swift
         run: swift --version
 
       - name: Keep libghostty-vt built from its pins
-        if: runner.os == 'Linux'
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: ~/.cache/sailkit/libghostty-vt
           key: libghostty-vt-install-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('clients/SailKit/scripts/libghostty-vt') }}
 
       - name: libghostty-vt
-        if: runner.os == 'Linux'
         run: |
           scripts/libghostty-vt "$HOME/.cache/sailkit/libghostty-vt" "$RUNNER_TEMP/libghostty-vt-downloads"
           echo "PKG_CONFIG_PATH=$HOME/.cache/sailkit/libghostty-vt/lib/pkgconfig" >> "$GITHUB_ENV"
@@ -108,20 +92,49 @@ jobs:
       - name: Keep SwiftPM's downloads
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
-          path: |
-            ~/Library/Caches/org.swift.swiftpm
-            ~/.cache/org.swift.swiftpm
+          path: ~/.cache/org.swift.swiftpm
+          key: swiftpm-${{ runner.os }}-${{ hashFiles('clients/SailKit/Package.swift') }}
+
+      - name: Build
+        run: swift build --build-tests
+
+      - name: Test
+        run: scripts/suites rest
+
+      - name: Exhaustive and seeded suites
+        run: scripts/suites exhaustive "$RUNNER_TEMP/exhaustive-suites.log"
+
+  sailkit-macos:
+    name: SailKit on macOS
+    needs: [changes, host]
+    if: needs.changes.outputs.clients == 'true'
+    runs-on: macos-15
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: clients/SailKit
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Xcode
+        run: sudo xcode-select --switch /Applications/Xcode_26.3.app
+
+      - name: Swift
+        run: swift --version
+
+      - name: Keep SwiftPM's downloads
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: ~/Library/Caches/org.swift.swiftpm
           key: swiftpm-${{ runner.os }}-${{ hashFiles('clients/SailKit/Package.swift') }}
 
       - name: The darwin sail of this commit
-        if: runner.os == 'macOS'
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: sail-darwin-arm64
           path: ${{ runner.temp }}/sail
 
       - name: For this machine's own host
-        if: runner.os == 'macOS'
         run: |
           chmod +x "$RUNNER_TEMP/sail/sail"
           echo "SAIL_BINARY=$RUNNER_TEMP/sail/sail" >> "$GITHUB_ENV"
@@ -129,30 +142,16 @@ jobs:
       - name: Build
         run: swift build --build-tests
 
-      # The exhaustive and seeded suites, which compute for tens of seconds, run on their own after
-      # the rest, so no other test waits on them for a thread or a core. Test skips exactly what the
-      # next step runs, so every suite, one added later included, runs in one of the two; the next
-      # step fails unless each of them printed every case it was meant to run.
       - name: Test
-        run: swift test --skip "$EXHAUSTIVE_SUITES"
+        run: scripts/suites rest
 
       - name: Exhaustive and seeded suites
-        run: |
-          log=$RUNNER_TEMP/exhaustive-suites.log
-          swift test --skip-build --filter "$EXHAUSTIVE_SUITES" 2>&1 | tee "$log"
-          grep -q 'WholenessTests ran 10000 sequences' "$log"
-          grep -q 'ReviewPropertyTests ran 20000 sequences' "$log"
-          cuts=$(grep -oE 'EventStreamParserTests cut [^ ]+ at [0-9]+ of [0-9]+ offsets' "$log" | awk '$5 == $7' | wc -l)
-          endings=$(grep -oE 'EventStreamParserTests ended [A-Z]+ at [0-9]+ of [0-9]+ offsets and in [0-9]+ of 500 seeded' "$log" | awk '$5 == $7 && $11 == 500' | wc -l)
-          fixtures=$(grep -oE 'FixtureTests fed [^ ]+ in [0-9]+ of 500 seeded' "$log" | awk '$5 == 500' | wc -l)
-          echo "cut at every offset: $cuts of 2 goldens; ended otherwise: $endings of 2 endings; fixtures fed in 500 chunkings: $fixtures of $(grep -c . Tests/Fixtures/vt/sizes)"
-          [[ $cuts -eq 2 && $endings -eq 2 && $fixtures -eq $(grep -c . Tests/Fixtures/vt/sizes) ]]
+        run: scripts/suites exhaustive "$RUNNER_TEMP/exhaustive-suites.log"
 
       # The scenarios ran in the Test step; this measures, on the machine the renderer will run on,
       # the screen's own overhead (release, as the app ships) and the echo through this machine's
       # own host.
       - name: Overhead and echo latency on macOS
-        if: runner.os == 'macOS'
         run: |
           mkdir -p "$RUNNER_TEMP/reports"
           swift build -c release --product sail-term-probe
@@ -161,7 +160,7 @@ jobs:
             --script Tests/Probe/measure.json --report "$RUNNER_TEMP/reports/macos-measure.json"
 
       - name: Leave the probe's reports
-        if: always() && runner.os == 'macOS'
+        if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: sailkit-macos-probe-reports
@@ -171,9 +170,7 @@ jobs:
   # Whether this change can affect the client lanes: SailKit's and SailApp's whole input is under
   # clients/ (SailApp's one dependency is ../SailKit by path) and this workflow. A job skipped by
   # `if:` reports success, unlike a workflow-level path filter, so a required check is not left
-  # waiting; a skipped matrix job reports under its unexpanded name (`SailKit on ${{ matrix.name }}`),
-  # so a required check on a SailKit leg would name that. An unknown base (a new branch, a forced
-  # push) runs the lane.
+  # waiting. An unknown base (a new branch, a forced push) runs the lane.
   changes:
     name: What the change touches
     runs-on: ubuntu-24.04
