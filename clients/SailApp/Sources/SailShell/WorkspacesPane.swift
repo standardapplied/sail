@@ -121,6 +121,7 @@ public final class WorkspacesPane: NSView, NSTableViewDataSource, NSTableViewDel
         list.reloadData()
         if let index = rows.firstIndex(where: { $0.name == kept }) ?? (rows.isEmpty ? nil : 0) {
             list.selectRowIndexes([index], byExtendingSelection: false)
+            if !isHiddenOrHasHiddenAncestor { window?.makeFirstResponder(list) }
         }
         enableOpen()
     }

@@ -121,6 +121,7 @@ final class RecordingTickets: TicketSource {
         pane.client = SailClient(transport: RecordedServer([try Exchange("projects"), try Exchange("workspaces"), try Exchange("workspace-create")]), token: "tok")
         await pane.refresh()
         #expect(pane.rows.map(\.name) == ["dock"], "the project's own container is not shown")
+        #expect(pane.list.selectedRow == 0 && pane.open.isEnabled, "the first row is chosen, so Return or Open opens it")
         #expect(pane.text.contains("dock · running"), "\(pane.text)")
         pane.name.stringValue = "new"
         let before = pane.ended

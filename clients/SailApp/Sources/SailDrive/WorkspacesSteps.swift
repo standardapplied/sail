@@ -51,7 +51,10 @@ extension Driver {
         }
         if let text = step.workspaces {
             let found = await waitUntil(step.seconds ?? 10) { !pane.busy && pane.text.contains(text) }
-            return (found, "the pane says: " + pane.text.replacingOccurrences(of: "\n", with: " | "))
+            let chosen = pane.rows.indices.contains(pane.list.selectedRow) ? pane.rows[pane.list.selectedRow].name : "none"
+            let focused = pane.window?.firstResponder === pane.list
+            return (found, "the pane says: " + pane.text.replacingOccurrences(of: "\n", with: " | ")
+                + "; selected \(chosen)\(focused ? ", the list focused" : ""), Open \(pane.open.isEnabled ? "enabled" : "disabled")")
         }
         if let wanted = step.make {
             let before = pane.ended
@@ -73,7 +76,10 @@ extension Driver {
             return (found, "tickets asked: \(asked)")
         }
         if step.quit == true {
-            DispatchQueue.main.async { NSApp.terminate(nil) }
+            // As ⌘Q arrives, from the run loop: a terminate answered "later" waits in a nested run
+            // loop, and from a main-queue block that loop would starve the main queue, the drive's
+            // own steps with it.
+            NSApp.perform(#selector(NSApplication.terminate(_:)), with: nil, afterDelay: 0)
             return (true, "")
         }
         if let name = step.shotScreen {
