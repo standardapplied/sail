@@ -800,6 +800,64 @@ class WorkspaceIT extends AbstractIncusIT {
    * address on ({@code ipv4.address=none}) and making that its current snapshot, so its clone's
    * {@code eth0} comes up with none.
    */
+  /**
+   * A workspace takes its own machine-id without ever being left with none. systemd-networkd reads
+   * it while it configures {@code eth0}, and, finding none, fails the link for good: no address,
+   * ever. That is the CI lane's "got no address": six packets sent, a lease dnsmasq gave that the
+   * clone never took, networkd saying "Failed to configure DHCPv6 client: No such file or
+   * directory". The make's own script runs in a copy of the template whose watcher, already
+   * running, records every machine-id the copy has and every moment it has none.
+   */
+  @Test
+  void aWorkspaceTakesItsOwnMachineIdWithoutEverBeingLeftWithNone() throws Exception {
+    plant(
+        """
+        cat > /etc/systemd/system/sail-it-id-watch.service <<'UNIT'
+        [Unit]
+        Description=Records every machine-id this machine has, and every moment it has none
+        DefaultDependencies=no
+        [Service]
+        ExecStart=/bin/bash -c 'seen=; while [ "$SECONDS" -lt 300 ]; do if read -r id < /etc/machine-id 2>/dev/null && [ -n "$id" ]; then [ "$id" = "$seen" ] || { echo "$id" >> /run/sail-it-ids; seen=$id; }; else echo missing >> /run/sail-it-id-gaps; fi; done'
+        [Install]
+        WantedBy=sysinit.target
+        UNIT
+        ln -sf /etc/systemd/system/sail-it-id-watch.service \
+          /etc/systemd/system/sysinit.target.wants/sail-it-id-watch.service
+        """);
+    var template = read(TEMPLATE + "/etc/machine-id");
+    var copy = PROJECT + "-" + FIX;
+    assertTrue(shell.exec(List.of("incus", "copy", TEMPLATE, copy)).ok());
+    containers.start(copy);
+    var watching =
+        exec(
+            copy,
+            List.of(
+                "bash",
+                "-c",
+                "for _ in $(seq 1 300); do [ -s /run/sail-it-ids ] && exit 0; sleep 0.1; done;"
+                    + " exit 1"));
+    assertTrue(watching.ok(), "the watcher never started");
+
+    var made =
+        shell.exec(
+            ContainerExec.asRoot(
+                copy,
+                List.of("bash", "-c", Workspaces.PREPARE, "sail-workspace", PROJECT, FIX, "")),
+            null,
+            Duration.ofMinutes(2));
+
+    assertTrue(made.ok(), made.stderr());
+    var ids = exec(copy, List.of("cat", "/run/sail-it-ids")).stdout().strip().lines().toList();
+    assertEquals(2, ids.size(), "the template's machine-id, then its own: " + ids);
+    assertEquals(template, ids.getFirst());
+    assertNotEquals(template, ids.getLast());
+    assertTrue(ids.getLast().matches("[0-9a-f]{32}"), ids.getLast());
+    assertEquals(
+        "",
+        exec(copy, List.of("bash", "-c", "cat /run/sail-it-id-gaps 2>/dev/null")).stdout().strip(),
+        "moments the workspace had no machine-id");
+  }
+
   @Test
   void aWorkspaceThatGetsNoAddressIsNotMadeAndNothingOfItIsLeft() throws Exception {
     var made =
@@ -847,8 +905,12 @@ class WorkspaceIT extends AbstractIncusIT {
                     + PROJECT
                     + "-"
                     + FIX
-                    + " got no address on eth0 within 30 s, so its repos cannot be fetched; check"
-                    + " that the network Incus gives it"),
+                    + " got no address on eth0 within 30 s (networkd says "),
+        refused.getMessage());
+    assertTrue(
+        refused
+            .getMessage()
+            .contains("), so its repos cannot be fetched; check that the network Incus gives it"),
         refused.getMessage());
     assertEquals(Optional.empty(), new BoxInstances(shell).named(PROJECT + "-" + FIX));
     var kept = keptEvidenceOf(PROJECT + "-" + FIX);

@@ -591,8 +591,9 @@ public final class TerminalView: NSView {
         let interval = marks.keyBegan()
         input.async { [weak self] in
             link.screen.scrollToBottom()
+            let sent = CACurrentMediaTime()
             link.send(key)
-            marks.keyWritten(event: event, interval: interval)
+            marks.keyWritten(event: event, sent: sent, interval: interval)
             Task { @MainActor in self?.drawNowIfIdle() }
         }
     }

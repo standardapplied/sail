@@ -91,13 +91,16 @@ final class UserUnitFixture implements AutoCloseable {
     }
   }
 
-  /** Installs and starts the unit; returns once the host's socket accepts a Hello. */
+  /**
+   * Installs and starts the unit; returns once the host's socket accepts a Hello. The unit goes
+   * where the account's systemd reads user units, its real home, whatever this JVM's own {@code
+   * user.home} (a test JVM's Sail) is.
+   */
   static UserUnitFixture start() throws Exception {
     var tmp = Files.createTempDirectory("sail-fdstore-it");
     var unit = "sail-it-pty-host-" + ProcessHandle.current().pid() + ".service";
     var unitDir =
-        Files.createDirectories(
-            Path.of(System.getProperty("user.home"), ".config", "systemd", "user"));
+        Files.createDirectories(Path.of(System.getenv("HOME"), ".config", "systemd", "user"));
     var fixture = new UserUnitFixture(tmp, unit, unitDir.resolve(unit));
     fixture.prepareHome();
     var wrapper = fixture.writeWrapper();
