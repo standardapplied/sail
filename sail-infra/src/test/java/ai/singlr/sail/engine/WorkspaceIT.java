@@ -1227,7 +1227,8 @@ class WorkspaceIT extends AbstractIncusIT {
             IllegalStateException.class,
             () -> workspaces.whileDestroying(PROJECT, List.of(fix.instance(), TEMPLATE), destroy));
     assertTrue(
-        unseen.getMessage().contains(second.instance() + " was created after"), unseen.getMessage());
+        unseen.getMessage().contains(second.instance() + " was created after"),
+        unseen.getMessage());
     assertTrue(new BoxInstances(shell).named(second.instance()).isPresent());
 
     workspaces.whileDestroying(
