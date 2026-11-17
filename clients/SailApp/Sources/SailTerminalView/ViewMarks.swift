@@ -56,10 +56,10 @@ final class ViewMarks: Sendable {
         Self.signposter.beginInterval("key to bytes written")
     }
 
-    func keyWritten(event: Double, interval: OSSignpostIntervalState) {
+    func keyWritten(event: Double, sent: Double, interval: OSSignpostIntervalState) {
         Self.signposter.endInterval("key to bytes written", interval)
         let written = CACurrentMediaTime()
-        marks.withLock { $0.keyWritten(event: event, written: written) }
+        marks.withLock { $0.keyWritten(event: event, sent: sent, written: written) }
     }
 
     /// The session's screen took output at `time` on the host clock.
