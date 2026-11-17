@@ -2414,10 +2414,34 @@ class is `LiveMemberTest`'s):
   `PromptConversation.MAX_CODE_POINTS` holds and none cut or left out: what does not fit is
   the next prompt, written straight after, and a message longer than a prompt is written
   across several, each part saying that more follows (`LiveMemberPrompt.messages`). A message
-  is recorded as delivered to the run only once the prompt that ends it was written, so one a
-  process took part of, or never took, is handed whole to the next; a fresh session's room
-  follows its opening the same way.
+  is recorded on the run's ledger (`run_delivered_messages.state`) as *handed* before the
+  prompt that ends it is written, and taken back if that write fails, so one a process took
+  part of, or never took, is handed whole to the next; a run that is not `running` is handed
+  nothing; a fresh session's room follows its opening the same way. Recording before the write
+  is what orders it before the turn: Claude Code prints a turn's `init` only after it read the
+  message, so Sail's reader always finds the message handed when it sees that `init`. The
+  `init` *takes* every message handed and not yet taken (Claude Code takes everything waiting
+  into one turn, `LiveStreamTest`), and the turn's first answer marks what it took *done*. A
+  turn that answers what it was handed with no `init` of its own takes nothing, so what it
+  answered is handed again; the log says so once per run, at the first such turn, naming the
+  run, so a harness whose stream stops marking its turns is loud at once
+  (`LiveMemberDisplacementTest.aTurnAnsweredWithNoInitIsSaidOncePerRunInTheLog`).
+  Every finish of the run, whoever makes it (its member's end, a restart's reclaim, the
+  missed-stop sweep, a stop), gives back in its own transaction what is handed or taken and not
+  done (`RunStore.giveBack`): one no turn took is owed again; one a turn took is owed again
+  marked *unanswered*, and the member that resumes that session is told in one line that its
+  session may already show it. A message the process read but whose turn's `init` Sail never
+  saw before the process ended is given back as never taken, without that line: the next
+  member may answer it a second time but never not at all, since only the session transcript
+  could say whether the session holds it, and a repeated reply costs the room less than an
+  unanswered message.
   *`aHumanMessageStartsOneLiveProcessAndIsItsFirstPrompt`,
+  `LiveMemberDisplacementTest.aTurnsInitReadBeforeItsWriteReturnsTakesTheMessageItAnswers`,
+  `LiveMemberDisplacementTest.aRunFinishedElsewhereIsHandedNothing`,
+  `LiveMemberDisplacementTest.aMessageATurnTookAndNeverAnsweredIsHandedAgainWithItsLineAcrossARestart`,
+  `LiveMemberLanesTest.aRunReclaimedAtStartGivesBackWhatItWasHandedAndNeverAnswered`,
+  `RunStoreTest.aFinishGivesBackWhatTheRunsTurnsDidNotAnswer`,
+  `RunStoreTest.aFinishBySweepGivesBackToo`,
   `aMessageDuringATurnIsWrittenAtOnceAndStartsTheNextTurn`,
   `aMessageAfterATurnGoesToTheSameProcess`,
   `LiveMemberEdgesTest.aMessageLongerThanAPromptIsWrittenAcrossPromptsAndIsDeliveredOnceAllOfItIs`,
@@ -2494,7 +2518,7 @@ class is `LiveMemberTest`'s):
   turn cut short is posted as far as it got and told with `is_error` and the reason. Every end
   is `running` to `stopped` (or `failed`, for a process that died unasked while it owed an
   answer or before its run recorded its pid, with the end of its log as the reason) as one
-  compare-and-set that revokes the credential, then the `agent_session_stopped` its watcher
+  compare-and-set that revokes the credential and gives back what the run did not answer (L1), then the `agent_session_stopped` its watcher
   would have published, `source` `live`. The next message starts a process that resumes the
   newest session a live run of the same member and lane recorded. A process is prompted only
   for a run that still holds what it reserved and a seat that is still its member's: once it

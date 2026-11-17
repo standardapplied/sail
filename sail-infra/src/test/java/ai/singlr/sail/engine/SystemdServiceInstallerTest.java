@@ -221,6 +221,7 @@ class SystemdServiceInstallerTest {
     assertTrue(unit.contains("Restart=on-failure"));
     assertTrue(unit.contains("WantedBy=default.target"));
     assertTrue(unit.contains("LimitNOFILE=4096"));
+    assertTrue(unit.contains("TimeoutStopSec=90\n"), "stopping is sized against it");
     assertFalse(
         unit.contains("RuntimeDirectory"),
         "the socket moved to a persistent dir off /run; no systemd RuntimeDirectory is used");

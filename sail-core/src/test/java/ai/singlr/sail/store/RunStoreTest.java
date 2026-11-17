@@ -19,6 +19,7 @@ import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.Lane;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.engine.RunPlace;
+import ai.singlr.sail.harness.RunReport;
 import ai.singlr.sail.identity.ActingAs;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.PrincipalHandle;
@@ -2300,6 +2301,59 @@ class RunStoreTest {
         store.deliveredMessageIds(id),
         "a replayed acknowledgement is a no-op, never an error");
     assertEquals(revBefore, store.latestRev(id), "delivery bookkeeping never journals a revision");
+  }
+
+  /**
+   * A live run's ledger holds each message's state: handed before it is written, taken into a turn
+   * at its {@code init}, done at the turn's first answer. The finish that ends the run gives back,
+   * in its own transaction, what was not done: a message no turn took leaves the delivered set, one
+   * a turn took is marked unanswered; a write that failed takes back what it handed.
+   */
+  @Test
+  void aFinishGivesBackWhatTheRunsTurnsDidNotAnswer() {
+    var id = newRun("backend", "auth");
+    var messages = new MessageStore(db);
+    var answered = messages.append("auth", "ada", "answered", null).id();
+    var inTurn = messages.append("auth", "ada", "taken, never answered", null).id();
+    var queued = messages.append("auth", "ada", "never taken", null).id();
+    var unwritten = messages.append("auth", "ada", "its write failed", null).id();
+
+    assertTrue(store.hand(id, List.of(answered)));
+    store.takeIntoTurn(id);
+    store.answerTurn(id);
+    assertTrue(store.hand(id, List.of(inTurn)));
+    store.takeIntoTurn(id);
+    assertTrue(store.hand(id, List.of(queued, unwritten)));
+    store.unhand(id, List.of(unwritten));
+    assertEquals(Set.of(answered, inTurn, queued), store.deliveredMessageIds(id));
+    assertEquals(List.of(), store.givenBack(id), "nothing is given back while the run runs");
+
+    assertTrue(store.finishAsTurnsRecorded(id, "stopped", 0));
+
+    assertEquals(List.of(inTurn, queued).stream().sorted().toList(), store.givenBack(id));
+    assertEquals(Set.of(answered), store.deliveredMessageIds(id));
+    assertEquals(Set.of(inTurn), store.unansweredMessageIds(id));
+    assertFalse(store.hand(id, List.of(unwritten)), "a finished run is handed nothing");
+    assertEquals(Set.of(answered), store.deliveredMessageIds(id));
+    assertThrows(IllegalArgumentException.class, () -> store.hand(id, List.of("not-a-uuid")));
+    assertThrows(IllegalArgumentException.class, () -> store.unhand(id, List.of("not-a-uuid")));
+  }
+
+  /**
+   * Every finish gives back, whichever finished the run: here the sweep's compare-and-set. An
+   * answer with no {@code init} before it took nothing, so what was handed stays owed.
+   */
+  @Test
+  void aFinishBySweepGivesBackToo() {
+    var id = newRun("backend", "auth");
+    var handed = new MessageStore(db).append("auth", "ada", "handed", null).id();
+    assertTrue(store.hand(id, List.of(handed)));
+    store.answerTurn(id);
+
+    assertTrue(store.finish(id, "running", "stopped", null, RunReport.NONE));
+
+    assertEquals(List.of(handed), store.givenBack(id));
+    assertEquals(Set.of(), store.deliveredMessageIds(id));
   }
 
   @Test
