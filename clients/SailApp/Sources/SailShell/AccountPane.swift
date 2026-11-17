@@ -217,6 +217,7 @@ public final class AccountPane: NSView, NSMenuItemValidation {
         ticket.action = #selector(enrollWithTicket(_:))
         enroll.target = self
         enroll.action = #selector(enrollWithTicket(_:))
+        enroll.controlSize = .large
         signOut.target = self
         signOut.action = #selector(signOutHere(_:))
         said.isSelectable = true
