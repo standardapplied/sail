@@ -83,17 +83,20 @@ final class PtyUploads {
   static final int NO_SPACE = 28;
 
   /**
-   * Run as root: makes {@code $1} root's own and {@code $1/$2} the dev user's alone, refusing a
-   * link at either, then, as the dev user ({@code shift 9; "$@"}), counts what the directory holds
-   * against {@code $5} files and {@code $6} bytes, checks the disk has room for {@code $4} bytes,
-   * creates the temporary for the first number no file takes with {@code O_EXCL} (a link at the
-   * name is refused, never written through), prints that number, and copies its input into it
-   * through the descriptor it opened. A copy that fails removes the temporary.
+   * Run as root: checks the disk has room for {@code $4} bytes, before anything is made on it,
+   * makes {@code $1} root's own and {@code $1/$2} the dev user's alone, refusing a link at either,
+   * then, as the dev user ({@code shift 9; "$@"}), counts what the directory holds against {@code
+   * $5} files and {@code $6} bytes, creates the temporary for the first number no file takes with
+   * {@code O_EXCL} (a link at the name is refused, never written through), prints that number, and
+   * copies its input into it through the descriptor it opened. A copy that fails is {@code
+   * no_space} when it left the disk under 64 KiB free; the host removes its temporary.
    */
   static final String OPEN =
       """
       root=$1 id=$2 name=$3 size=$4 files=$5 bytes=$6 rootuid=$7 devuid=$8 devgid=$9
       shift 9
+      free=$(df -Pk "${root%/*}" | awk "NR == 2 { print \\$4 * 1024 }")
+      [ "$free" -ge "$size" ] || exit 28
       [ -d "$root" ] || mkdir -m 0755 "$root" || exit 10
       [ -d "$root" ] && [ ! -L "$root" ] && [ "$(stat -c %u "$root")" = "$rootuid" ] || exit 10
       chmod 0755 "$root"
@@ -107,8 +110,6 @@ final class PtyUploads {
       [ "$held" -lt "$4" ] || exit 11
       used=$(find . -mindepth 1 -maxdepth 1 -type f -printf "%s\\n" | awk "{ s += \\$1 } END { print s + 0 }")
       [ $((used + $3)) -le "$5" ] || exit 12
-      free=$(df -Pk . | awk "NR == 2 { print \\$4 * 1024 }")
-      [ "$free" -ge "$3" ] || exit 28
       n=1
       while [ -e "$n-$2" ] || [ -L "$n-$2" ] || [ -e ".$n-$2.part" ] || [ -L ".$n-$2.part" ]; do
         n=$((n + 1))

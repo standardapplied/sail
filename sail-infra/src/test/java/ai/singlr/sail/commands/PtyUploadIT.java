@@ -190,7 +190,7 @@ class PtyUploadIT extends AbstractIncusIT {
     return path.substring(0, path.lastIndexOf('/'));
   }
 
-  /** What the session directory holds, temporaries included, by name. */
+  /** What the session directory holds, temporaries included, by name, a space between each. */
   private String held(String directory) throws Exception {
     return inInstance("ls -A " + directory + " | tr '\\n' ' '");
   }
@@ -228,7 +228,7 @@ class PtyUploadIT extends AbstractIncusIT {
             "600 1000 1000 " + (5 << 20), inInstance("stat -c '%a %u %g %s' " + stored.path()));
         assertEquals("700 1000", inInstance("stat -c '%a %u' " + directoryOf(stored.path())));
         assertEquals("755 0", inInstance("stat -c '%a %u' /var/lib/sail-paste"));
-        assertEquals("1-shot.png ", held(directoryOf(stored.path())));
+        assertEquals("1-shot.png", held(directoryOf(stored.path())));
         assertEquals(
             HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(bytes)),
             inInstance("sha256sum " + stored.path() + " | cut -d' ' -f1"));
@@ -302,7 +302,7 @@ class PtyUploadIT extends AbstractIncusIT {
         assertEquals(
             new PtyMessage.PutRefused(2, PtyMessage.PutRefusal.NO_SPACE, 0),
             tryUpload(channel, 2, "big.bin", new byte[2 << 20], () -> {}));
-        assertEquals("1-first.txt ", held(directory));
+        assertEquals("1-first.txt", held(directory));
 
         var filling = new byte[600 << 10];
         new Random(13).nextBytes(filling);
@@ -314,7 +314,7 @@ class PtyUploadIT extends AbstractIncusIT {
                 filling,
                 () -> inInstance("head -c 700000 /dev/zero > /var/lib/sail-paste/filler || true"));
         assertEquals(new PtyMessage.PutRefused(3, PtyMessage.PutRefusal.NO_SPACE, 0), filled);
-        awaitInInstance("ls -A " + directory + " | tr '\\n' ' '", "1-first.txt ");
+        awaitInInstance("ls -A " + directory + " | tr '\\n' ' '", "1-first.txt");
         inInstance("rm /var/lib/sail-paste/filler");
 
         var killed =
@@ -333,7 +333,14 @@ class PtyUploadIT extends AbstractIncusIT {
                                     .anyMatch("sail-open"::equals))
                         .forEach(ProcessHandle::destroyForcibly));
         assertEquals(new PtyMessage.PutRefused(4, PtyMessage.PutRefusal.FAILED, 0), killed);
-        awaitInInstance("ls -A " + directory + " | tr '\\n' ' '", "1-first.txt ");
+        awaitInInstance("ls -A " + directory + " | tr '\\n' ' '", "1-first.txt");
+
+        inInstance("head -c 2000000 /dev/zero > /var/lib/sail-paste/filler || true");
+        try (var another = session("p16")) {
+          assertEquals(
+              new PtyMessage.PutRefused(1, PtyMessage.PutRefusal.NO_SPACE, 0),
+              tryUpload(another, 1, "a.txt", new byte[] {1}, () -> {}));
+        }
       }
     } finally {
       deleteContainerQuietly(INSTANCE);
