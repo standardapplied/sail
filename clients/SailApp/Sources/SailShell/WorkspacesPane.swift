@@ -110,6 +110,7 @@ public final class WorkspacesPane: NSView, NSTableViewDataSource, NSTableViewDel
         Task {
             await refresh()
             calls -= 1
+            enable()
         }
     }
 

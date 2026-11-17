@@ -236,6 +236,9 @@ actor Proxied: Transport {
         pane.openSelected(nil)
         #expect(opened == ["pier"], "pressed twice, opened once")
         #expect(pane.open.title == "Starting…" && !pane.open.isEnabled)
+        pane.shown()
+        #expect(await Self.until { !pane.busy }, "asked again")
+        #expect(pane.open.title == "Start and Open" && pane.open.isEnabled, "come back to, the row still chosen is offered again")
     }
 
     /// The body says what is true where the list would be: a project with no workspaces of its own;
