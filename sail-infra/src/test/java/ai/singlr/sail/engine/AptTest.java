@@ -12,9 +12,27 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Timeout;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 class AptTest {
+
+  private static final String MIRROR = "http://us-central1.gce.archive.ubuntu.com/ubuntu/pool/main";
+  private static final String NOT_SERVED =
+      "E: Failed to fetch "
+          + MIRROR
+          + "/i/iw/iw_6.7-1build1_amd64.deb  404  Not Found [IP: 35.184.25.42 80]\n"
+          + "E: Failed to fetch "
+          + MIRROR
+          + "/libx/libxrender/libxrender1_0.9.10-1.1build1_amd64.deb  404  Not Found [IP:"
+          + " 35.184.213.5 80]\n"
+          + "E: Unable to fetch some archives, maybe run apt-get update or try with"
+          + " --fix-missing?\n";
+  private static final String INSTALL = "install -y incus";
+  private static final String REFRESH = "Error-Mode=any update";
 
   @Test
   void everyCallSpeaksTheCLocaleAsksNothingWaitsOnTheLockRetriesAndReportsItsStatus()
@@ -72,7 +90,7 @@ class AptTest {
                     "Waiting for cache lock: Could not get lock /var/lib/dpkg/lock-frontend. It is"
                         + " held by process 812 (unattended-upgr)...\n"
                         + "dlstatus:1:0.0000:Retrieving file 1 of 1\n",
-                    "E: Failed to fetch https://pkgs.zabbly.com/x.deb  404  Not Found\n"));
+                    "E: Sub-process /usr/bin/dpkg returned an error code (1)\n"));
     var progress = new ArrayList<String>();
 
     var failure =
@@ -80,8 +98,7 @@ class AptTest {
             IOException.class, () -> new Apt(shell, progress::add).install(List.of("incus")));
 
     assertEquals(
-        "apt-get install incus failed: E: Failed to fetch https://pkgs.zabbly.com/x.deb  404  Not"
-            + " Found",
+        "apt-get install incus failed: E: Sub-process /usr/bin/dpkg returned an error code (1)",
         failure.getMessage());
     assertEquals(List.of(Apt.LOCK_WAIT, "0% Retrieving file 1 of 1"), progress);
   }
@@ -109,5 +126,107 @@ class AptTest {
     assertEquals(Optional.empty(), Apt.status("dlstatus:1:soon:Retrieving"));
     assertEquals(Optional.empty(), Apt.status("dlstatus:1:12.0"));
     assertEquals(Optional.empty(), Apt.status("Get:1 https://pkgs.zabbly.com incus [9 MB]"));
+  }
+
+  @Test
+  void anInstallTheMirrorAnswered404ForIsSaidAndTriedAgainAfterOneRefresh() throws Exception {
+    var shell =
+        new ScriptedShellExecutor().onOk(REFRESH).onceOnFail(INSTALL, NOT_SERVED).onOk("incus");
+    var progress = new ArrayList<String>();
+
+    new Apt(shell, progress::add).install(List.of("incus"));
+
+    assertEquals(List.of("install", "update", "install"), verbs(shell));
+    assertEquals(
+        List.of(
+            "the mirror us-central1.gce.archive.ubuntu.com answered 404 for 2 of its files; trying"
+                + " again (2 of 4)"),
+        progress);
+  }
+
+  @Test
+  void aSecondTryTheMirrorAnswered404ForIsTriedAgainWithoutAnotherRefresh() throws Exception {
+    var shell =
+        new ScriptedShellExecutor()
+            .onOk(REFRESH)
+            .onceOnFail(INSTALL, NOT_SERVED)
+            .onceOnFail("-y incus", NOT_SERVED.lines().skip(1).findFirst().orElseThrow())
+            .onOk("incus");
+    var progress = new ArrayList<String>();
+
+    new Apt(shell, progress::add).install(List.of("incus"));
+
+    assertEquals(List.of("install", "update", "install", "install"), verbs(shell));
+    assertEquals(
+        List.of(
+            "the mirror us-central1.gce.archive.ubuntu.com answered 404 for 2 of its files; trying"
+                + " again (2 of 4)",
+            "the mirror us-central1.gce.archive.ubuntu.com answered 404 for 1 of its files; trying"
+                + " again (3 of 4)"),
+        progress);
+  }
+
+  @Test
+  @Timeout(value = 10, unit = TimeUnit.SECONDS, threadMode = Timeout.ThreadMode.SEPARATE_THREAD)
+  void aMirrorThatKeepsAnswering404StopsAfterFourTriesSayingItIsTheMirrorsFault() {
+    var shell =
+        new ScriptedShellExecutor()
+            .onOk(REFRESH)
+            .on(INSTALL, new ShellExec.Result(100, "", NOT_SERVED));
+    var progress = new ArrayList<String>();
+
+    var failure =
+        assertThrows(
+            IOException.class, () -> new Apt(shell, progress::add).install(List.of("incus")));
+
+    assertEquals(
+        "apt-get install incus failed: the mirror us-central1.gce.archive.ubuntu.com is not"
+            + " serving files its own index names (4 tries; the last answered 404 for"
+            + " iw_6.7-1build1_amd64.deb, libxrender1_0.9.10-1.1build1_amd64.deb). That is the"
+            + " mirror's fault, not this box's: run the same command again, and apt fetches only"
+            + " the files still missing.",
+        failure.getMessage());
+    assertEquals(List.of("install", "update", "install", "install", "install"), verbs(shell));
+    assertEquals(3, progress.size());
+  }
+
+  @ParameterizedTest
+  @ValueSource(
+      strings = {
+        "E: Failed to fetch http://mirror/pool/main/i/iw/iw_6.7_amd64.deb  Hash Sum mismatch\n",
+        "E: Failed to fetch http://mirror/pool/p404/p404_1_amd64.deb  Could not connect to mirror:80"
+            + " (10.0.0.1), connection timed out [IP: 10.0.0.1 80]\n",
+        "E: Sub-process /usr/bin/dpkg returned an error code (1)\n"
+      })
+  void anyOtherFailureIsNotTriedAgain(String stderr) {
+    var shell = new ScriptedShellExecutor().onOk(REFRESH).onceOnFail(INSTALL, stderr).onOk("incus");
+    var progress = new ArrayList<String>();
+
+    var failure =
+        assertThrows(
+            IOException.class, () -> new Apt(shell, progress::add).install(List.of("incus")));
+
+    assertEquals("apt-get install incus failed: " + stderr.strip(), failure.getMessage());
+    assertEquals(List.of("install"), verbs(shell));
+    assertEquals(List.of(), progress);
+  }
+
+  @Test
+  void aMoveOfHeldPackagesTheMirrorAnswered404ForIsTriedAgainToo() throws Exception {
+    var shell =
+        new ScriptedShellExecutor()
+            .onOk(REFRESH)
+            .onceOnFail("--only-upgrade", NOT_SERVED)
+            .onOk("incus");
+
+    new Apt(shell, detail -> {}).upgradeHeld(List.of("incus"));
+
+    assertEquals(List.of("install", "update", "install"), verbs(shell));
+  }
+
+  private static List<String> verbs(ScriptedShellExecutor shell) {
+    return shell.unbounded().stream()
+        .map(command -> command.endsWith(" update") ? "update" : "install")
+        .toList();
   }
 }
