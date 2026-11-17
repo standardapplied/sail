@@ -12,7 +12,7 @@ import SailWorkbench
 /// and `apply()` draws it, kept in user defaults; the first showing restores what lives.
 @MainActor
 public final class WorkbenchView: NSView {
-    public static let arrangementKey = "workbench.arrangement"
+    package static let arrangementKey = "workbench.arrangement"
     static let dividerStep = 10.0
 
     public let host: LocalHost
@@ -180,7 +180,7 @@ public final class WorkbenchView: NSView {
 
     /// Whether a keep of the arrangement is scheduled and not yet done: what tells a change's write
     /// is still to come.
-    public var isKeepingSoon: Bool {
+    package var isKeepingSoon: Bool {
         pendingKeep != nil
     }
 
