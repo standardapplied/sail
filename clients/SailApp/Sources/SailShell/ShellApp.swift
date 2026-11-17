@@ -109,34 +109,9 @@ public final class ShellApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         true
     }
 
-    /// Quitting with terminals on the runner asks once, then ends them there, since the app cannot
-    /// attach to them again after a relaunch; one it could not end is said before the app quits.
+    /// Quitting with terminals on the runner asks once, then ends them there (``RunnerQuit``).
     public func applicationShouldTerminate(_: NSApplication) -> NSApplication.TerminateReply {
-        let count = thisMac.runnerPanes.count
-        guard count > 0 else { return .terminateNow }
-        let terminals = count == 1 ? "Runner Terminal" : "\(count) Runner Terminals"
-        Confirmation.ask(
-            "Quit Sail?", detail: "A terminal on the runner ends when Sail quits; this Mac's own keep running.",
-            action: "Quit and End \(count == 1 ? "1 " : "")\(terminals)", on: window
-        ) { [weak self] quit in
-            guard quit, let self else { return NSApp.reply(toApplicationShouldTerminate: false) }
-            Task {
-                let unended = await self.thisMac.endRunnerTerminals()
-                guard !unended.isEmpty else { return NSApp.reply(toApplicationShouldTerminate: true) }
-                self.sayUnended(unended)
-            }
-        }
-        return .terminateLater
-    }
-
-    /// The runner terminals a quit could not end, each with what stopped it, then the quit: they run
-    /// on until the runner ends them.
-    private func sayUnended(_ unended: [String]) {
-        let alert = NSAlert()
-        alert.messageText = "Some terminals on the runner could not be ended"
-        alert.informativeText = (unended + ["They keep running on the runner."]).joined(separator: "\n")
-        alert.addButton(withTitle: "Quit")
-        alert.beginSheetModal(for: window) { _ in MainActor.assumeIsolated { NSApp.reply(toApplicationShouldTerminate: true) } }
+        RunnerQuit.ask(thisMac.runnerPanes, on: window) { NSApp.reply(toApplicationShouldTerminate: $0) }
     }
 
     /// Quitting detaches this Mac's terminals and asks nothing: each session lives on at the host.
@@ -450,5 +425,50 @@ final class ShellWindow: NSWindow {
 
     override func validateMenuItem(_ item: NSMenuItem) -> Bool {
         item.action == #selector(toggleToolbarShown(_:)) ? false : super.validateMenuItem(item)
+    }
+}
+
+/// A quit with terminals on the runner open: asked once, since the app cannot attach to them again
+/// after a relaunch; then each is ended at the runner through its door and the app told to quit,
+/// those that could not be ended named first. Cancel leaves everything as it was.
+@MainActor
+enum RunnerQuit {
+    /// What AppKit is answered now; `reply` is told later whether to quit, when the answer is later.
+    static func ask(_ panes: [TerminalPane], on window: NSWindow, reply: @escaping @MainActor (Bool) -> Void) -> NSApplication.TerminateReply {
+        guard !panes.isEmpty else { return .terminateNow }
+        let terminals = panes.count == 1 ? "1 Runner Terminal" : "\(panes.count) Runner Terminals"
+        Confirmation.ask(
+            "Quit Sail?", detail: "A terminal on the runner ends when Sail quits; this Mac's own keep running.",
+            action: "Quit and End \(terminals)", on: window
+        ) { quit in
+            guard quit else { return reply(false) }
+            Task { @MainActor in
+                let unended = await end(panes)
+                guard !unended.isEmpty else { return reply(true) }
+                say(unended, on: window, then: reply)
+            }
+        }
+        return .terminateLater
+    }
+
+    /// Ends every pane's session at the runner and waits for each: the tab and what stopped it, for
+    /// each that could not be ended.
+    static func end(_ panes: [TerminalPane]) async -> [String] {
+        var unended: [String] = []
+        for pane in panes {
+            let label = pane.place.label ?? pane.name
+            if let ending = pane.end(), let error = await ending.value { unended.append("\(label): \(TerminalPane.sentence(error.description))") }
+        }
+        return unended
+    }
+
+    /// The runner terminals a quit could not end, each with what stopped it, then the quit: they run
+    /// on until the runner ends them.
+    private static func say(_ unended: [String], on window: NSWindow, then reply: @escaping @MainActor (Bool) -> Void) {
+        let alert = NSAlert()
+        alert.messageText = "Some terminals on the runner could not be ended"
+        alert.informativeText = (unended + ["They keep running on the runner."]).joined(separator: "\n")
+        alert.addButton(withTitle: "Quit")
+        alert.beginSheetModal(for: window) { _ in MainActor.assumeIsolated { reply(true) } }
     }
 }

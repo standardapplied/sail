@@ -58,7 +58,7 @@ let package = Package(
             name: "SailShellTests",
             dependencies: [
                 "SailShell", "SailAccount", "SailLook", "SailTerminalView", "SailTestPasskey", kit("SailAPI"), kit("SailVT"), kit("SailWorkbench"),
-                kit("SailTerminal"), kit("SailKitTestSupport"),
+                kit("SailTerminal"), kit("SailTerminalWire"), kit("SailKitTestSupport"),
             ],
             swiftSettings: strict
         ),

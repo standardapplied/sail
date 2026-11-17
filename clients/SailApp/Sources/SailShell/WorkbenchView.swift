@@ -349,17 +349,6 @@ public final class WorkbenchView: NSView {
         panes.values.filter { if case .workspace = $0.place { true } else { false } }.sorted { $0.id < $1.id }
     }
 
-    /// Ends every runner pane's session at the runner and waits for each: the tab and what stopped
-    /// it, for each that could not be ended.
-    func endRunnerTerminals() async -> [String] {
-        var unended: [String] = []
-        for view in runnerPanes {
-            let label = view.place.label ?? view.name
-            if let ending = view.end(), let error = await ending.value { unended.append("\(label): \(TerminalPane.sentence(error.description))") }
-        }
-        return unended
-    }
-
     @objc public func newTab(_: Any?) {
         onShow()
         guard restored else { return }
