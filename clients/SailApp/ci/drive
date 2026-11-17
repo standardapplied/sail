@@ -66,6 +66,35 @@ for run in first second third shots workspaces; do
   echo "ci/drive: $run"
   goldens=off
   [[ $run == workspaces ]] && goldens=on
-  SAIL_DRIVE_GOLDENS=$goldens perl -e 'alarm shift; exec @ARGV' 600 "$drive" --drive "Tests/Drive/$run.json" --out "$out/$run" 2>&1 \
-    | tee "$out/$run-output.txt"
+  SAIL_DRIVE_GOLDENS=$goldens perl -e 'alarm shift; exec @ARGV' 600 "$drive" --drive "Tests/Drive/$run.json" --out "$out/$run" 2>&1 | tee "$out/$run-output.txt" || {
+    status=$?
+    reports=$HOME/Library/Logs/DiagnosticReports
+    # A signal killed the drive (138 is SIGBUS, 139 SIGSEGV): ReportCrash writes its report some
+    # seconds later. Any other failure is a step's, with no report to wait for.
+    if (( status > 128 )); then
+      perl -e 'alarm shift; exec @ARGV' 90 bash -c 'until compgen -G "$1/SailDrive*.ips" > /dev/null; do sleep 1; done' _ "$reports" || true
+    fi
+    if compgen -G "$reports/SailDrive*.ips" > /dev/null; then
+      cp "$reports"/SailDrive*.ips "$out/"
+      for report in "$reports"/SailDrive*.ips; do
+        python3 - "$report" <<'PY'
+import json, sys
+text = open(sys.argv[1]).read()
+body = json.loads(text[text.index("\n") + 1:])
+images = body.get("usedImages", [])
+print("ci/drive: crash report", sys.argv[1], body.get("exception"), body.get("termination", {}).get("indicator"))
+for index, thread in enumerate(body.get("threads", [])):
+    if index != body.get("faultingThread") and not thread.get("triggered"):
+        continue
+    print("faulting thread", index, thread.get("name", ""), thread.get("queue", ""))
+    for frame in thread.get("frames", [])[:60]:
+        image = images[frame["imageIndex"]].get("name", "?") if frame.get("imageIndex", -1) < len(images) else "?"
+        print("  ", image, frame.get("symbol", hex(frame.get("imageOffset", 0))), frame.get("symbolLocation", ""))
+PY
+      done
+    elif (( status > 128 )); then
+      echo "ci/drive: the drive left no crash report in $reports within 90 s" >&2
+    fi
+    exit "$status"
+  }
 done

@@ -4,6 +4,7 @@ import SailKitTestSupport
 @testable import SailTerminal
 import SailTerminalWire
 import SailVT
+import Synchronization
 @testable import sail_term_probe
 import Testing
 
@@ -391,25 +392,36 @@ import Testing
     /// Fix 2: a render hold left open when the output stops ticks the screen at its limit, so a
     /// renderer that draws only on a tick shows what the program left.
     @Test func aHoldLeftOpenTicksTheScreenAtItsLimit() async throws {
-        let timeline = Timeline()
         let hands = Hands()
+        let timers = ManualTimers()
         let host = try FakeHost()
         let create = SessionCreate(session: "work", command: [], workingDirectory: "/tmp", project: "", room: "", size: TerminalSize(columns: 20, rows: 3))
         let screen = try Screen(size: GridSize(columns: 20, rows: 3), scrollbackBytes: 0, palette: .dark, now: { hands.now })
-        let session = TerminalSession(open: create, door: .local(host.address), screen: screen, timeout: 5, stableAfter: .zero, sleep: timeline.sleep)
-        var ticks = session.screenChanges.makeAsyncIterator()
+        let session = TerminalSession(
+            open: create, door: .local(host.address), screen: screen, timeout: 5, stableAfter: .zero, sleep: Naps().sleep,
+            after: timers.after
+        )
+        let ticks = Mutex(0)
+        let (changes, sink) = AsyncStream.makeStream(of: ContinuousClock.Instant.self)
+        session.onScreenChange { time in
+            ticks.withLock { $0 += 1 }
+            sink.yield(time)
+        }
+        var told = changes.makeAsyncIterator()
         session.start()
         let peer = try await host.accept()
         try await peer.welcome()
         _ = try await peer.acceptAttach(columns: 20, rows: 3)
         try peer.send(output("old\u{1b}[?2026h\r\u{1b}[2Kstuck"))
         while try screen.text() != "old" {
-            _ = await ticks.next()
+            _ = await told.next()
         }
-        try await timeline.until(held: [Screen.holdLimit])
+        try await timers.awaitSet()
+        #expect(timers.live == [Screen.holdLimit])
+        let before = ticks.withLock { $0 }
         hands.advance(Screen.holdLimit)
-        timeline.passAll()
-        _ = await ticks.next()
+        timers.fireAll()
+        #expect(ticks.withLock { $0 } == before + 1, "the hold's timer told no change")
         #expect(try Screen.text(of: [screen.frame().rows[0]]) == "stuck")
         session.close()
     }

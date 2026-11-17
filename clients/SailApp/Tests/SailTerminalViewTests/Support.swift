@@ -12,22 +12,15 @@ import Testing
 /// libghostty-vt's, as a session would send them.
 final class FakeLink: TerminalLink {
     let screen: Screen
-    let screenChanges: AsyncStream<ContinuousClock.Instant>
     let events: AsyncStream<SessionEvent>
-    let changesSink: AsyncStream<ContinuousClock.Instant>.Continuation
     let eventsSink: AsyncStream<SessionEvent>.Continuation
-    /// Ends when the screen stream's reader stops.
-    let readerGone: AsyncStream<Void>
+    private let listener = Relay<ContinuousClock.Instant>()
     private let sent = Mutex<[UInt8]>([])
     private let sizes = Mutex<[GridSize]>([])
     private let focus = Mutex(true)
 
     init(columns: Int = 80, rows: Int = 24) throws {
         screen = try Screen(size: GridSize(columns: columns, rows: rows), scrollbackBytes: 1 << 20, palette: .dark)
-        (screenChanges, changesSink) = AsyncStream.makeStream(of: ContinuousClock.Instant.self, bufferingPolicy: .bufferingOldest(1))
-        let (gone, goneSink) = AsyncStream.makeStream(of: Void.self)
-        readerGone = gone
-        changesSink.onTermination = { _ in goneSink.finish() }
         (events, eventsSink) = AsyncStream.makeStream(of: SessionEvent.self)
     }
 
@@ -43,11 +36,20 @@ final class FakeLink: TerminalLink {
         sent.withLock { $0 = [] }
     }
 
+    /// Whether a view listens for the screen's changes.
+    var listened: Bool {
+        listener.isSet
+    }
+
+    func onScreenChange(_ listener: (@Sendable (ContinuousClock.Instant) -> Void)?) {
+        self.listener.set(listener)
+    }
+
     /// Output from the program: fed to the screen, what it asks of the app told as a writer's
-    /// session tells it, and the screen's tick told.
+    /// session tells it, and the change told on this thread, as a session's reader thread tells it.
     func output(_ text: String) {
         screen.feed(Array(text.utf8)).events.forEach { eventsSink.yield(.screen($0)) }
-        changesSink.yield(.now)
+        listener(.now)
     }
 
     func send(_ key: KeyInput) {
@@ -233,6 +235,107 @@ struct Harness {
         default: window.sendEvent(event)
         }
     }
+}
+
+/// Swift's shared pool held at every priority: at each, twice as many tasks as the machine has
+/// cores wait, as a task stuck in a blocking call does, until the test lets them go, never on a
+/// timer. The pool runs only some of them; those left waiting at every priority are what shows each
+/// priority's share of the pool is full, so a task at any priority waits for a thread.
+final class PoolHold: Sendable {
+    static let priorities: [TaskPriority] = [.background, .utility, .medium, .userInitiated, .high]
+
+    private let gate: DispatchSemaphore
+    private let count: Int
+    private let released = Mutex(false)
+    /// How many holders were set going at each priority, by its raw value.
+    let asked: [UInt8: Int]
+    /// How many of them run, by priority's raw value, once the starts stopped coming.
+    let running: [UInt8: Int]
+
+    init() {
+        let gate = DispatchSemaphore(value: 0), started = DispatchSemaphore(value: 0)
+        let each = ProcessInfo.processInfo.activeProcessorCount * 2
+        let ran = Tally()
+        var asked: [UInt8: Int] = [:]
+        for priority in Self.priorities {
+            asked[priority.rawValue, default: 0] += each
+            for _ in 0 ..< each {
+                Task.detached(priority: priority) {
+                    ran.add(priority)
+                    Self.hold(gate, started: started)
+                }
+            }
+        }
+        Self.awaitStartsToStop(started, upTo: each * Self.priorities.count)
+        self.gate = gate
+        count = each * Self.priorities.count
+        self.asked = asked
+        running = ran.counts
+    }
+
+    /// Whether at every priority some holders never started: the pool runs no more at any of them.
+    var holdsEveryPriority: Bool {
+        asked.allSatisfy { priority, asked in running[priority, default: 0] < asked }
+    }
+
+    func release() {
+        let first = released.withLock { released in
+            defer { released = true }
+            return !released
+        }
+        if first { for _ in 0 ..< count { gate.signal() } }
+    }
+
+    /// How many holders ran, by priority, counted from the holders' own threads.
+    private final class Tally: Sendable {
+        private let ran = Mutex<[UInt8: Int]>([:])
+
+        var counts: [UInt8: Int] {
+            ran.withLock { $0 }
+        }
+
+        func add(_ priority: TaskPriority) {
+            ran.withLock { $0[priority.rawValue, default: 0] += 1 }
+        }
+    }
+
+    private static func hold(_ gate: DispatchSemaphore, started: DispatchSemaphore) {
+        started.signal()
+        gate.wait()
+    }
+
+    /// Waits for the first start, at most 5 s, then for the starts to stop: no new one in 50 ms.
+    private static func awaitStartsToStop(_ started: DispatchSemaphore, upTo limit: Int) {
+        guard started.wait(timeout: .now() + 5) == .success else { return }
+        var counted = 1
+        while counted < limit, started.wait(timeout: .now() + .milliseconds(50)) == .success {
+            counted += 1
+        }
+    }
+}
+
+/// A moment one thread marks and another reads, on the host clock.
+final class Moment: Sendable {
+    private let marked = Mutex(0.0)
+
+    var time: Double {
+        marked.withLock { $0 }
+    }
+
+    func mark() {
+        let now = CACurrentMediaTime()
+        marked.withLock { $0 = now }
+    }
+}
+
+/// Runs `work` on a thread of its own, as a session's reader thread runs, and returns once it ran.
+func onItsOwnThread(_ work: @escaping @Sendable () -> Void) {
+    let done = DispatchSemaphore(value: 0)
+    Thread {
+        work()
+        done.signal()
+    }.start()
+    done.wait()
 }
 
 /// The paste confirmations the view asks for, handed to the test one at a time.

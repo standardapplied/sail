@@ -18,7 +18,7 @@ import Synchronization
 /// wait is judged less the stall of a thread of the probe's own over it, before its p95 is taken,
 /// and the raw p95 is reported beside it: a stall of the whole process is the machine's.
 enum Bench {
-    static func run() throws -> [Budget] {
+    static func run() throws -> (budgets: [Budget], samples: [BenchSeries]) {
         let clock = ContinuousClock()
         let origin = clock.now
         let own = Heartbeat.onItsOwnThread { (ContinuousClock.now - origin) / .seconds(1) }
@@ -40,18 +40,20 @@ enum Bench {
         }
         let elapsed: Double = (clock.now - started).milliseconds
         let rate = Double(stream.count) / 1_048_576 / (elapsed / 1000)
+        var samples: [BenchSeries] = []
         var budgets = [
             Budget(name: "4 KiB output to screen updated at 200x60, p95", milliseconds: Percentiles(updates).p95, limit: 2),
             Budget(name: "20 MiB fed, milliseconds per MiB (50 MiB/s is 20)", milliseconds: 1000 / rate, limit: 20),
         ]
         for (label, size) in [("1 MiB", 1 << 20), ("13 KiB", 13 * 1024)] {
             own.reset()
-            let (frames, waits) = try framesWhileFeeding(stride(from: 0, to: stream.count, by: size).map {
+            let (frames, waits, slices) = try framesWhileFeeding(stride(from: 0, to: stream.count, by: size).map {
                 Array(stream[$0 ..< min(stream.count, $0 + size)])
             }, origin: origin)
             let frame = Percentiles(frames)
             let wait = Percentiles(MachineShare.net(waits, own: own.stalls).map { Duration.seconds($0) })
             let raw = Percentiles(waits.map { Duration.seconds($0.length) })
+            samples.append(series("frame() at 120 Hz, \(label) feeds back to back", frames: frames, waits: waits, slices: slices, own: own.stalls))
             budgets += [
                 Budget(name: "frame() at 120 Hz, \(label) feeds back to back, p95", milliseconds: frame.p95, limit: 4),
                 Budget(name: "frame() at 120 Hz, \(label) feeds back to back, max (reported)", milliseconds: frame.max, limit: .infinity),
@@ -60,15 +62,32 @@ enum Bench {
                 Budget(name: "frame()'s wait for the lock, \(label) feeds back to back, max raw (reported)", milliseconds: raw.max, limit: .infinity),
             ]
         }
-        return budgets
+        return (budgets, samples)
+    }
+
+    /// `frames` with the waits and slices measured beside them, and the stalls of `own` over
+    /// them: what an over-limit series is read from.
+    static func series(_ name: String, frames: [Duration], waits: [Span], slices: [Int], own: Stalls) -> BenchSeries {
+        BenchSeries(
+            name: name,
+            frames: zip(zip(frames, waits), slices).map { measured, slices in
+                let (frame, wait) = measured
+                return FrameSample(
+                    at: wait.start, milliseconds: frame.milliseconds, waitMilliseconds: wait.length * 1000,
+                    slicesWaited: slices, heldMilliseconds: own.held(over: wait) * 1000
+                )
+            },
+            stalls: own.gaps
+        )
     }
 
     /// How many times the stream is fed, so the frames taken meanwhile are enough to rank.
     static let rounds = 20
 
-    /// How long each `frame()` took, and when it waited for the lock (seconds since `origin`), while
-    /// `chunks` were fed ``rounds`` times back to back on another thread.
-    private static func framesWhileFeeding(_ chunks: [[UInt8]], origin: ContinuousClock.Instant) throws -> (frames: [Duration], waits: [Span]) {
+    /// How long each `frame()` took, when it waited for the lock (seconds since `origin`) and how many
+    /// slices the feeder fed meanwhile, while `chunks` were fed ``rounds`` times back to back on
+    /// another thread.
+    private static func framesWhileFeeding(_ chunks: [[UInt8]], origin: ContinuousClock.Instant) throws -> (frames: [Duration], waits: [Span], slices: [Int]) {
         let clock = ContinuousClock()
         let screen = try Screen(size: GridSize(columns: 200, rows: 60), scrollbackBytes: 10 << 20, palette: .dark)
         let fed = Atomic<Bool>(false)
@@ -83,15 +102,17 @@ enum Bench {
         feeder.start()
         var frames: [Duration] = []
         var waits: [Span] = []
+        var slices: [Int] = []
         while !fed.load(ordering: .acquiring) {
             let started = clock.now
-            let waited = try screen.timedFrame().waited
+            let timed = try screen.timedFrame()
             frames.append(clock.now - started)
+            slices.append(timed.slicesWaited)
             let at = (started - origin) / .seconds(1)
-            waits.append(Span(at, at + waited / .seconds(1)))
+            waits.append(Span(at, at + timed.waited / .seconds(1)))
             Thread.sleep(forTimeInterval: 1.0 / 120)
         }
-        return (frames, waits)
+        return (frames, waits, slices)
     }
 
     /// Lines of coloured output as a build log or `ls --color` writes them.
