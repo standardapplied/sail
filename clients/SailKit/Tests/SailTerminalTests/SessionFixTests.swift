@@ -394,7 +394,9 @@ import Testing
         let create = SessionCreate(session: "work", command: [], workingDirectory: "/tmp", project: "", room: "", size: TerminalSize(columns: 20, rows: 3))
         let screen = try Screen(size: GridSize(columns: 20, rows: 3), scrollbackBytes: 0, palette: .dark, now: { hands.now })
         let session = TerminalSession(open: create, door: .local(host.address), screen: screen, timeout: 5, stableAfter: .zero, sleep: timeline.sleep)
-        var ticks = session.screenChanges.makeAsyncIterator()
+        let (changes, sink) = AsyncStream.makeStream(of: ContinuousClock.Instant.self)
+        session.onScreenChange { sink.yield($0) }
+        var ticks = changes.makeAsyncIterator()
         session.start()
         let peer = try await host.accept()
         try await peer.welcome()

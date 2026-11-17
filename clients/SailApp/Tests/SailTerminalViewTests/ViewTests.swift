@@ -182,21 +182,22 @@ import Testing
         #expect(String(decoding: harness.link.bytes, as: UTF8.self) == "\u{1b}[<0;2;1M\u{1b}[<0;2;1m")
     }
 
-    /// M3: a view draws a session for its life. Detaching ends its reading of the session's
-    /// streams, and the session cannot be attached again; a view that is dropped stops reading too.
+    /// M3: a view draws a session for its life. Detaching stops its listening to the session's
+    /// screen, and the session cannot be attached again; a view that is dropped stops listening too.
     @Test func aSessionIsDrawnByOneViewForLife() async throws {
         let harness = try Harness()
         #expect(!TerminalView.canAttach(harness.link))
+        #expect(harness.link.listened)
         harness.view.detach()
-        for await _ in harness.link.readerGone {}
+        #expect(!harness.link.listened)
         #expect(!TerminalView.canAttach(harness.link))
         let other = try FakeLink()
         #expect(TerminalView.canAttach(other))
         var dropped: TerminalView? = try TerminalView(fonts: TerminalFonts(directory: Harness.fonts))
         dropped?.attach(other)
+        #expect(other.listened)
         dropped = nil
-        for await _ in other.readerGone {}
-        #expect(dropped == nil)
+        #expect(!other.listened, "a dropped view still listened to its session's screen")
     }
 
     /// Attaching a session a view already drew stops the process with the precondition's sentence,
@@ -392,6 +393,55 @@ import Testing
         await harness.clock.nextResume()
         #expect(!harness.clock.isPaused)
         #expect(harness.view.visibleText.contains("hello"), "drawn as it arrived, before the next refresh")
+    }
+
+    /// A change of the screen, told on the session's thread, reaches the main thread and asks for
+    /// its frame while Swift's shared pool is held at every priority: nothing between the change and
+    /// the main queue needs one of its threads. Waiting here is one turn of the main queue, which
+    /// runs in order, since any wait of the pool's (a task's sleep) would itself wait for it.
+    @Test func aScreenChangeReachesTheMainThreadWhileTheSharedPoolIsHeld() async throws {
+        let harness = try Harness()
+        await harness.drainMain()
+        await harness.tick()
+        await harness.tick()
+        try #require(harness.clock.isPaused)
+        let committed = Self.committed(harness.view)
+        let pool = PoolHold()
+        defer { pool.release() }
+        try #require(pool.holdsEveryPriority, "the pool is not held at every priority: holders ran \(pool.running)")
+        let link = harness.link
+        onItsOwnThread { link.output("through") }
+        await harness.drainMain()
+        let reached = harness.view.latency.longestToTold
+        let asked = harness.view.drawingState.contains("; awaiting a drawable") || Self.committed(harness.view) > committed
+        pool.release()
+        #expect(reached != nil, "the change did not reach the main thread while the shared pool was held")
+        #expect(asked, "no frame was asked for while the shared pool was held: \(harness.view.drawingState)")
+        await harness.drawn()
+        #expect(harness.view.visibleText.contains("through"))
+    }
+
+    /// Changes the main thread has not yet taken make one wake, which carries the oldest of them:
+    /// output to shown is measured from the change that waited longest, never the newest.
+    @Test func oneWakeCarriesTheOldestChangeItWasPostedFor() async throws {
+        let harness = try Harness()
+        await harness.drainMain()
+        await harness.tick()
+        await harness.tick()
+        let link = harness.link
+        let before = CACurrentMediaTime()
+        let between = Moment()
+        onItsOwnThread {
+            link.output("first")
+            between.mark()
+            link.output(" second")
+        }
+        await harness.drainMain()
+        let figures = harness.view.latency
+        #expect(figures.wakes == 1 && figures.changes == 2, "\(figures.wakes) wakes for \(figures.changes) changes")
+        let oldest = try #require(figures.longestToTold).start
+        #expect(oldest >= before - 0.001 && oldest < between.time, "the wake carried a change at \(oldest), not the first")
+        await harness.drawn()
     }
 
     /// A key that changes nothing on screen leaves an idle view idle, so its echo is drawn the

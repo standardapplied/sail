@@ -63,5 +63,9 @@ for run in first second third shots; do
     defaults delete "$(plutil -extract CFBundleIdentifier raw "$app/Contents/Info.plist")" workbench.arrangement 2> /dev/null || true
   fi
   echo "ci/drive: $run"
-  perl -e 'alarm shift; exec @ARGV' 600 "$drive" --drive "Tests/Drive/$run.json" --out "$out/$run" 2>&1 | tee "$out/$run-output.txt"
+  perl -e 'alarm shift; exec @ARGV' 600 "$drive" --drive "Tests/Drive/$run.json" --out "$out/$run" 2>&1 | tee "$out/$run-output.txt" || {
+    status=$?
+    cp "$HOME"/Library/Logs/DiagnosticReports/SailDrive*.ips "$out/" 2> /dev/null || echo "ci/drive: the drive left no crash report" >&2
+    exit "$status"
+  }
 done

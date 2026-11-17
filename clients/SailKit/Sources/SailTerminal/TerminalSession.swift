@@ -41,10 +41,6 @@ public final class TerminalSession: Sendable {
     public let screen: Screen
     /// What the session tells the app, the newest ``eventBacklog`` kept for a slow reader.
     public let events: AsyncStream<SessionEvent>
-    /// A tick each time the screen changed, carrying when it took the output; ticks the app has not
-    /// read yet are one tick, the earliest. One reader for the session's life: a stream whose reader
-    /// stops is over.
-    public let screenChanges: AsyncStream<ContinuousClock.Instant>
 
     private let door: Door
     private let core: Mutex<Core>
@@ -56,7 +52,7 @@ public final class TerminalSession: Sendable {
     private let timeout: Int
     private let stableAfter: Duration
     private let eventSink: AsyncStream<SessionEvent>.Continuation
-    private let screenSink: AsyncStream<ContinuousClock.Instant>.Continuation
+    private let screenListener = Mutex<(@Sendable (ContinuousClock.Instant) -> Void)?>(nil)
     private let clock = ContinuousClock()
 
     private struct Core {
@@ -155,7 +151,17 @@ public final class TerminalSession: Sendable {
         }
         core = Mutex(initial)
         (events, eventSink) = AsyncStream.makeStream(of: SessionEvent.self, bufferingPolicy: .bufferingNewest(Self.eventBacklog))
-        (screenChanges, screenSink) = AsyncStream.makeStream(of: ContinuousClock.Instant.self, bufferingPolicy: .bufferingOldest(1))
+    }
+
+    /// Tells `listener`, in place of any before it and on the thread that changed the screen, each
+    /// time the screen changed, with when it took the output; nil stops telling. Nothing stands
+    /// between the change and the call, so it must return at once: what draws hands the change on.
+    public func onScreenChange(_ listener: (@Sendable (ContinuousClock.Instant) -> Void)?) {
+        screenListener.withLock { $0 = listener }
+    }
+
+    private func screenChanged(at time: ContinuousClock.Instant) {
+        screenListener.withLock { $0 }?(time)
     }
 
     public var state: SessionState {
@@ -542,7 +548,7 @@ public final class TerminalSession: Sendable {
             sendInput(effects.reply, handedIn: nil)
             let writing = core.withLock { $0.writing }
             effects.events.filter { writing || !$0.writesTheClipboard }.forEach { emit(.screen($0)) }
-            screenSink.yield(updated)
+            screenChanged(at: updated)
             armHoldTick()
         case let .replayBegin(safe):
             screen.beginReplay()
@@ -568,7 +574,7 @@ public final class TerminalSession: Sendable {
             if let refit {
                 send(.resize(refit), on: connection)
             }
-            screenSink.yield(clock.now)
+            screenChanged(at: clock.now)
         case let .resized(size):
             let grid = GridSize(columns: Int(size.columns), rows: Int(size.rows))
             guard Self.fits(grid), let effects = try? screen.resize(grid) else {
@@ -577,7 +583,7 @@ public final class TerminalSession: Sendable {
             core.withLock { $0.ptySize = size }
             sendInput(effects.reply, handedIn: nil)
             emit(.resized(size))
-            screenSink.yield(clock.now)
+            screenChanged(at: clock.now)
         case let .writerChanged(fde):
             let fit = core.withLock { core -> TerminalSize? in
                 core.state.writer = fde
@@ -698,7 +704,7 @@ public final class TerminalSession: Sendable {
                     } catch {
                         return
                     }
-                    self.screenSink.yield(self.clock.now)
+                    self.screenChanged(at: self.clock.now)
                 }
             }
             return core.holdTimer
@@ -720,7 +726,6 @@ public final class TerminalSession: Sendable {
         core.withLock { $0.supervisor = nil }
         setPhase(.ended(end))
         eventSink.finish()
-        screenSink.finish()
     }
 
     private func emit(_ event: SessionEvent) {

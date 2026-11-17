@@ -44,6 +44,9 @@ public struct LatencyMarks: Sendable {
     private var unreported = 0
     private var presentedBeforeCommit = 0
     private var longestToShown: Span?
+    private var longestToTold: Span?
+    private var wakes = 0
+    private var changes = 0
     private var longestBetweenCommits: Span?
     private var longestGapOutputs = 0
     private var fetches: [Span] = []
@@ -81,8 +84,8 @@ public struct LatencyMarks: Sendable {
         }
     }
 
-    /// The session's screen took output at `time`: one tick of its screen updates, which may hold
-    /// several reads of output when the view had not yet taken the tick before.
+    /// The session's screen took output at `time`: the oldest of the changes one wake of the view
+    /// carried, so a frame that shows it is measured from the change that waited longest.
     public mutating func output(at time: Double) {
         screenUpdates += 1
         let echoed = awaitingEcho.filter { $0.sent <= time }.map(\.event)
@@ -93,6 +96,14 @@ public struct LatencyMarks: Sendable {
 
     /// A refresh that read the screen at `read` drew `frame`, committed at `time`, for the display
     /// refresh at `target`.
+    /// The main thread took the view's wake at `time`, for `changes` changes of the screen, the
+    /// oldest at `since`: the hop a frame request waits on, from the session's thread to the main one.
+    public mutating func told(at time: Double, since: Double, changes: Int) {
+        wakes += 1
+        self.changes += changes
+        Self.keepLongest(Span(since, max(since, time)), in: &longestToTold)
+    }
+
     public mutating func committed(frame: UInt64, at time: Double, read: Double, target: Double) {
         targets[frame] = target
         targets = targets.filter { $0.key + 64 > frame }
@@ -202,7 +213,7 @@ public struct LatencyMarks: Sendable {
             keyToEchoEstimated: Self.percentiles(keyToEchoEstimated), refresh: Self.percentiles(refreshes),
             refreshWork: Self.percentiles(refreshWork), screenUpdates: screenUpdates,
             lateOutputs: late, reportedPresents: reported, unreportedPresents: unreported,
-            presentedBeforeCommit: presentedBeforeCommit, longestToShown: longestToShown,
+            presentedBeforeCommit: presentedBeforeCommit, longestToShown: longestToShown, longestToTold: longestToTold, wakes: wakes, changes: changes,
             longestBetweenCommits: longestBetweenCommits, longestGapOutputs: longestGapOutputs,
             longestGapFetching: longestBetweenCommits.map { gap in fetches.reduce(0) { $0 + $1.overlap(gap) } * 1000 } ?? 0,
             commitToCompleted: Self.percentiles(commitToCompleted),
@@ -281,6 +292,14 @@ public struct LatencyFigures: Equatable, Sendable, Codable {
     public var presentedBeforeCommit: Int
     /// When the output that waited longest to be shown was told and shown, in seconds.
     public var longestToShown: Span?
+    /// When the output that took longest to reach the main thread was taken by the screen and when
+    /// the main thread took the view's wake for it, in seconds: a frame is asked for no sooner.
+    public var longestToTold: Span?
+    /// How many wakes the main thread took for screen changes: one at most is outstanding per view,
+    /// however many changes come meanwhile.
+    public var wakes: Int
+    /// How many changes of the screen those wakes carried.
+    public var changes: Int
     /// The longest time between two committed frames, in seconds.
     public var longestBetweenCommits: Span?
     /// How many outputs reached the screen inside that gap, and for how many ms a drawable was being
