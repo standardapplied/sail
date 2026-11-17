@@ -51,13 +51,15 @@ final class PtyTickets {
     }
 
     /**
-     * Why {@code message} lies outside this ticket, on a connection that opened {@code opened}
-     * (null for none), or null when it does not: an open ticket creates one session in its project
-     * and attaches to that session; an attach ticket attaches to its session; either then writes,
-     * resizes, takes the write token and detaches, and does nothing else.
+     * Why {@code message} lies outside this ticket, on a connection that opened {@code opened} and
+     * holds the write token of {@code writing} (null for none), or null when it does not: an open
+     * ticket creates one session in its project and attaches to that session; an attach ticket
+     * attaches to its session; either then writes, resizes, takes the write token and detaches,
+     * ends its own session while it holds that session's write token, and does nothing else.
      */
-    PtyMessage.Err refusal(PtyMessage message, String opened) {
+    PtyMessage.Err refusal(PtyMessage message, String opened, String writing) {
       var opens = action == PtyMessage.TicketAction.OPEN;
+      var own = opens ? opened : target;
       var covered =
           switch (message) {
             case PtyMessage.Create m ->
@@ -65,7 +67,8 @@ final class PtyTickets {
                     && opened == null
                     && target.equals(m.project())
                     && workspace.equals(m.workspace());
-            case PtyMessage.Attach m -> m.session().equals(opens ? opened : target);
+            case PtyMessage.Attach m -> m.session().equals(own);
+            case PtyMessage.Kill m -> m.session().equals(own) && m.session().equals(writing);
             case PtyMessage.Input m -> true;
             case PtyMessage.Resize m -> true;
             case PtyMessage.TakeWrite m -> true;

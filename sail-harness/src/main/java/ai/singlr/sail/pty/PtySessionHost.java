@@ -691,7 +691,7 @@ public final class PtySessionHost implements AutoCloseable {
         reply(channel, new PtyMessage.Welcome(bootId));
         while (true) {
           var message = PtyWire.read(channel);
-          var uncovered = bound.refusal(message, opened);
+          var uncovered = bound.refusal(message, opened, writing(attached, subscriberId));
           if (uncovered != null) {
             log("refused", principal, "-", "outside its ticket");
             reply(channel, uncovered);
@@ -938,14 +938,20 @@ public final class PtySessionHost implements AutoCloseable {
   /**
    * What a connection may do beyond what its person may: everything on the unix socket ({@link
    * #NOTHING}), and on TCP what its ticket admits ({@link PtyTickets.Ticket#refusal}). Asked of
-   * every frame before it is served, with the session the connection opened, if any.
+   * every frame before it is served, with the session the connection opened and the session whose
+   * write token it holds, if any.
    */
   @FunctionalInterface
   interface Bound {
-    Bound NOTHING = (message, opened) -> null;
+    Bound NOTHING = (message, opened, writing) -> null;
 
     /** Why {@code message} lies outside what this connection may do, or null when it does not. */
-    PtyMessage.Err refusal(PtyMessage message, String opened);
+    PtyMessage.Err refusal(PtyMessage message, String opened, String writing);
+  }
+
+  /** The session whose write token subscriber {@code subscriberId} of {@code attached} holds. */
+  private static String writing(PtySession attached, long subscriberId) {
+    return attached != null && attached.writerId() == subscriberId ? attached.name() : null;
   }
 
   /**

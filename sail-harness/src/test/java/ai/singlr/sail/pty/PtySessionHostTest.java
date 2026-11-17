@@ -1714,6 +1714,92 @@ class PtySessionHostTest {
 
   @Test
   @Timeout(value = 30, unit = TimeUnit.SECONDS)
+  void aTicketedConnectionEndsOnlyItsOwnSessionAndOnlyWhileItHoldsTheWriteToken() throws Exception {
+    network =
+        PtySessionHost.Network.listening(
+            new InetSocketAddress(InetAddress.getLoopbackAddress(), 0), now::get, holders);
+    var shim =
+        new PtySessionHost.Handoff(
+            SdNotify.NONE,
+            Map.of(),
+            exit -> PtyChildShimTest.shim(exit, "sh", "-c", "echo up; read a", "--"));
+    try (var host = startHost(PtySessionHost.Limits.DEFAULTS, shim)) {
+      var open = (PtyMessage.Ticket) askTicket("tok-uday", PtyMessage.TicketAction.OPEN, "beta");
+      try (var observer = presentTcp(host, open.ticket())) {
+        assertEquals(new PtyMessage.Welcome(host.bootId()), PtyWire.read(observer));
+        PtyWire.write(
+            observer, new PtyMessage.Create("lounge", List.of(), "/tmp", "beta", "", 80, 24));
+        assertInstanceOf(PtyMessage.Ok.class, readControl(observer));
+        PtyWire.write(observer, new PtyMessage.Attach("lounge", false));
+        assertInstanceOf(PtyMessage.Ok.class, readControl(observer));
+        PtyWire.write(observer, new PtyMessage.Kill("lounge"));
+        assertEquals(
+            "This connection's ticket is to open a session in project 'beta', and it admits"
+                + " nothing else; ask the API for a ticket for that.",
+            assertInstanceOf(PtyMessage.Err.class, readControl(observer)).message(),
+            "an observer never ends a session, even the one it opened");
+      }
+      try (var unix = connect("tok-uday")) {
+        PtyWire.write(unix, new PtyMessage.Create("study", List.of(), "/tmp", "beta", "", 80, 24));
+        assertInstanceOf(PtyMessage.Ok.class, readControl(unix));
+      }
+
+      var attach =
+          (PtyMessage.Ticket) askTicket("tok-uday", PtyMessage.TicketAction.ATTACH, "lounge");
+      try (var writer = presentTcp(host, attach.ticket())) {
+        assertEquals(new PtyMessage.Welcome(host.bootId()), PtyWire.read(writer));
+        PtyWire.write(writer, new PtyMessage.Attach("lounge", true));
+        assertInstanceOf(PtyMessage.Ok.class, readControl(writer));
+        PtyWire.write(writer, new PtyMessage.Kill("study"));
+        assertEquals(
+            "This connection's ticket is to attach to session 'lounge', and it admits nothing"
+                + " else; ask the API for a ticket for that.",
+            assertInstanceOf(PtyMessage.Err.class, readControl(writer)).message(),
+            "a writer ends no session but its own");
+      }
+
+      var again =
+          (PtyMessage.Ticket) askTicket("tok-uday", PtyMessage.TicketAction.ATTACH, "lounge");
+      try (var writer = presentTcp(host, again.ticket())) {
+        assertEquals(new PtyMessage.Welcome(host.bootId()), PtyWire.read(writer));
+        PtyWire.write(writer, new PtyMessage.Attach("lounge", true));
+        assertInstanceOf(PtyMessage.Ok.class, readControl(writer));
+        PtyWire.write(writer, new PtyMessage.Kill("lounge"));
+        assertInstanceOf(PtyMessage.Ok.class, answerAfterItsEnd(writer), "its writer ends it");
+        PtyWire.write(writer, new PtyMessage.Kill("lounge"));
+        assertEquals(
+            "This connection's ticket is to attach to session 'lounge', and it admits nothing"
+                + " else; ask the API for a ticket for that.",
+            assertInstanceOf(PtyMessage.Err.class, readControl(writer)).message(),
+            "an ended session leaves its connection no token to end anything with");
+      }
+      assertEquals(
+          "not_found There is no session 'lounge' on this box that you may attach.",
+          said(askTicket("tok-uday", PtyMessage.TicketAction.ATTACH, "lounge")),
+          "nor is a ticket issued to end it again");
+      try (var unix = connect("tok-uday")) {
+        PtyWire.write(unix, new PtyMessage.ListSessions("", PtyMessage.PAGE_LIMIT));
+        assertEquals(
+            List.of("study"),
+            ((PtyMessage.Sessions) PtyWire.read(unix))
+                .sessions().stream().map(PtyMessage.SessionInfo::name).toList(),
+            "only the ticket's own session ended");
+      }
+    }
+  }
+
+  /** The answer to a frame that ended this connection's session, past the news of its end. */
+  private static PtyMessage answerAfterItsEnd(SocketChannel channel) throws IOException {
+    while (true) {
+      var answer = readControl(channel);
+      if (!(answer instanceof PtyMessage.SessionEnded)) {
+        return answer;
+      }
+    }
+  }
+
+  @Test
+  @Timeout(value = 30, unit = TimeUnit.SECONDS)
   void aTcpConnectionThatPresentsNoTicketIsClosedAtTheDeadlineAndAnyOtherFrameAtOnce()
       throws Exception {
     try (var host = startTcpHost();
