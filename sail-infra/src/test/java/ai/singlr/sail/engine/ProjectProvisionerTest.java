@@ -633,6 +633,11 @@ class ProjectProvisionerTest {
     var cmds = shell.invocations();
     assertTrue(cmds.contains("incus exec simple -- dpkg -s temurin-25-jdk"));
     assertTrue(cmds.stream().anyMatch(c -> c.endsWith("apt-get install -y -qq temurin-25-jdk")));
+    assertTrue(
+        cmds.stream()
+            .anyMatch(
+                c -> c.contains("gpg --batch --yes --dearmor -o /usr/share/keyrings/adoptium")),
+        "a keyring a run cut short left is replaced, never asked about on a terminal it has none of");
     assertAlreadyProvisioned(steps, cmds);
     assertTrue(steps.contains("done:9/19:JDK 25 (Temurin)"), steps.toString());
   }

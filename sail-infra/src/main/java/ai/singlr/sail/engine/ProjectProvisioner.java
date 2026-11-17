@@ -751,7 +751,7 @@ public final class ProjectProvisioner {
                 "bash",
                 "-c",
                 "curl -fsSL https://packages.adoptium.net/artifactory/api/gpg/key/public"
-                    + " | gpg --dearmor -o /usr/share/keyrings/adoptium.gpg"),
+                    + " | gpg --batch --yes --dearmor -o /usr/share/keyrings/adoptium.gpg"),
             INSTALL_TIMEOUT);
     if (!gpgKey.ok()) {
       throw new IOException("Failed to import Adoptium GPG key: " + gpgKey.stderr());
