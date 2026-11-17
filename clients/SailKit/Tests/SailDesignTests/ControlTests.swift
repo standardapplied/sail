@@ -84,9 +84,9 @@ import Testing
     @Test func sizesAreTheSheets() {
         let measures = [ButtonSize.small, .regular, .large].map { [$0.height, $0.padding, $0.label, $0.radius] }
         #expect(measures == [[26, 10, 12, 5], [32, 14, 13, 6], [36, 18, 14, 6]])
-        #expect(ButtonSize.regular.width(label: 40, symbol: false, hint: nil) == 70)
-        #expect(ButtonSize.regular.width(label: 40, symbol: true, hint: nil) == 90)
-        #expect(ButtonSize.small.width(label: 40, symbol: false, hint: 7) == 77)
+        #expect(ButtonSize.regular.width(label: 40, mark: false, hint: nil) == 70)
+        #expect(ButtonSize.regular.width(label: 40, mark: true, hint: nil) == 90)
+        #expect(ButtonSize.small.width(label: 40, mark: false, hint: 7) == 77)
     }
 
     @Test(arguments: [("light", Look.light), ("dark", Look.dark)])
@@ -130,7 +130,7 @@ import Testing
 
     /// The measures the sheet sets that no other test pins: inside each control's 1 pt edge, the
     /// pills' paddings and gaps (Running is 76.61 pt in the design's DOM: 1 + 7 + 6 + 6 + 47.61 + 8 + 1),
-    /// the field's gap, inset and mark, the halo, the symbols, the inner corners, the eyebrow's
+    /// the field's gap, inset and mark, the halo, the icons, the inner corners, the eyebrow's
     /// tracking, the timings, and the destructive spinner's track.
     @Test func metricsAreTheSheets() {
         #expect(Look.hairline == 1 && Look.innerRadius == 4 && Look.smallRadius == 5 && Look.haloRoom == 4)
@@ -138,9 +138,9 @@ import Testing
         #expect([PillSize.regular.leading, PillSize.regular.trailing, PillSize.regular.gap] == [8, 9, 6])
         #expect([PillSize.small.leading, PillSize.small.trailing, PillSize.small.gap] == [6, 7, 5] && PillSize.dash == [3, 2])
         #expect(abs(PillSize.regular.width(label: 47.61) - 76.61) < 0.001)
-        #expect([FieldSize.gap, FieldSize.mark, FieldSize.markPoints, FieldSize.regular.textInset, FieldSize.small.textInset] == [6, 14, 12, 11, 9])
-        #expect([ButtonSize.symbol, ButtonSize.symbolGap, ButtonSize.hintGap, ButtonSize.iconPoints, ButtonSize.dot, ButtonSize.dotPitch] == [14, 6, 8, 12, 1.6, 4.33])
-        #expect(ButtonSize.symbolPoints == 11 && ButtonSize.hintOpacity == 0.7)
+        #expect([FieldSize.gap, FieldSize.mark, FieldSize.regular.textInset, FieldSize.small.textInset] == [6, 14, 11, 9])
+        #expect([ButtonSize.mark, ButtonSize.markGap, ButtonSize.hintGap, ButtonSize.icon] == [14, 6, 8, 15])
+        #expect(ButtonSize.hintOpacity == 0.7)
         #expect(Look.Tracking.eyebrow == 0.14 && Look.Tracking.pill == 0.08 && Look.Tracking.smallPill == 0.06)
         #expect(Look.Timing.hover == 0.12 && Look.Timing.turn == 0.7 && Look.Timing.pulse == 1.2 && Look.Timing.skeletonDelay == 0.15)
         for look in [Look.light, Look.dark] {

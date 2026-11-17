@@ -52,18 +52,18 @@ public struct ButtonSize: Equatable, Sendable {
     public static let regular = ButtonSize(height: 32, padding: 14, label: 13, radius: Look.contentRadius)
     public static let large = ButtonSize(height: 36, padding: 18, label: 14, radius: Look.contentRadius)
 
-    /// A leading symbol, the spinner, and the gaps after them and before a shortcut hint.
-    public static let symbol = 14.0, symbolGap = 6.0, hintGap = 8.0
+    /// A leading icon or the spinner, and the gaps after them and before a shortcut hint.
+    public static let mark = 14.0, markGap = 6.0, hintGap = 8.0
 
     /// An icon-only button's SF Symbol, and the ⋯ drawn as three dots: their size and their pitch.
-    public static let iconPoints = 12.0, dot = 1.6, dotPitch = 4.33
-    /// A leading symbol's SF Symbol size in its 14 pt room, and the shortcut hint's opacity.
-    public static let symbolPoints = 11.0, hintOpacity = 0.7
+    public static let icon = 15.0
+    /// The shortcut hint's opacity.
+    public static let hintOpacity = 0.7
 
-    /// The box's width for a label, a leading symbol and a trailing hint of these widths: the
+    /// The box's width for a label, a leading icon or spinner and a trailing hint of these widths: the
     /// padding inside the 1 pt edge on each side.
-    public func width(label: Double, symbol: Bool, hint: Double?) -> Double {
-        2 * (padding + Look.hairline) + label + (symbol ? Self.symbol + Self.symbolGap : 0) + (hint.map { Self.hintGap + $0 } ?? 0)
+    public func width(label: Double, mark: Bool, hint: Double?) -> Double {
+        2 * (padding + Look.hairline) + label + (mark ? Self.mark + Self.markGap : 0) + (hint.map { Self.hintGap + $0 } ?? 0)
     }
 }
 
@@ -136,7 +136,7 @@ public struct FieldSize: Equatable, Sendable {
     /// The gap between the eyebrow, the box and the line under it.
     public static let gap = 6.0
     /// The error line's mark: its room and the SF Symbol size drawn in it.
-    public static let mark = 14.0, markPoints = 12.0
+    public static let mark = 14.0
 
     /// Where the text starts: the inset inside the 1 pt edge.
     public var textInset: Double {

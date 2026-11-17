@@ -59,15 +59,32 @@ enum Draw {
         )
     }
 
-    /// An SF Symbol at `points` in one ink.
-    static func symbol(_ name: String, points: Double, ink: Tint) -> NSImage? {
-        let configuration = NSImage.SymbolConfiguration(pointSize: points, weight: .regular)
-            .applying(NSImage.SymbolConfiguration(paletteColors: [NSColor(ink)]))
-        return NSImage(systemSymbolName: name, accessibilityDescription: nil)?.withSymbolConfiguration(configuration)
-    }
-
-    /// `size` centred on `point`, its edges on whole points.
-    static func centred(_ size: NSSize, on point: NSPoint) -> NSRect {
-        NSRect(x: (point.x - size.width / 2).rounded(), y: (point.y - size.height / 2).rounded(), width: size.width, height: size.height)
+    /// One of the design's line icons filling `rect`, its strokes scaled with it as an SVG's are.
+    static func icon(_ icon: LineIcon, in rect: NSRect, ink: Tint) {
+        let scale = Double(rect.width) / LineIcon.side, down = NSGraphicsContext.current?.isFlipped ?? true
+        func at(_ point: LineIcon.Point) -> NSPoint {
+            NSPoint(x: Double(rect.minX) + point.x * scale, y: down ? Double(rect.minY) + point.y * scale : Double(rect.maxY) - point.y * scale)
+        }
+        let strokes = NSBezierPath(), dots = NSBezierPath()
+        for stroke in icon.strokes {
+            switch stroke {
+            case let .lines(points, closed):
+                strokes.move(to: at(points[0]))
+                for point in points.dropFirst() { strokes.line(to: at(point)) }
+                if closed { strokes.close() }
+            case let .circle(centre, radius):
+                strokes.appendOval(in: NSRect(origin: at(LineIcon.Point(centre.x - radius, centre.y - (down ? radius : -radius))), size: NSSize(width: 2 * radius * scale, height: 2 * radius * scale)))
+            case let .arc(centre, radius, from, to):
+                strokes.appendArc(withCenter: at(centre), radius: radius * scale, startAngle: down ? from : -from, endAngle: down ? to : -to, clockwise: !down)
+            case let .dot(centre, radius):
+                dots.appendOval(in: NSRect(origin: at(LineIcon.Point(centre.x - radius, centre.y - (down ? radius : -radius))), size: NSSize(width: 2 * radius * scale, height: 2 * radius * scale)))
+            }
+        }
+        NSColor(ink).set()
+        strokes.lineWidth = LineIcon.width * scale
+        strokes.lineCapStyle = .round
+        strokes.lineJoinStyle = .round
+        strokes.stroke()
+        dots.fill()
     }
 }

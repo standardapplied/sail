@@ -169,7 +169,7 @@ import Testing
         button.isDefault = true
         #expect(button.keyEquivalent == "\r")
         let icon = SailButton(icon: "arrow.clockwise", label: "List Again", look: .light, target: nil, action: nil)
-        #expect(icon.accessibilityLabel() == "List Again" && icon.intrinsicContentSize == NSSize(width: 32, height: 32) && icon.toolTip == "List Again")
+        #expect(icon.accessibilityLabel() == "List Again" && icon.intrinsicContentSize == NSSize(width: 32, height: 32) && icon.tooltip != nil && icon.toolTip == nil)
         button.title = "Start and Open"
         #expect(button.accessibilityLabel() == "Start and Open", "VoiceOver reads the old title")
         _ = Self.sized(button)
@@ -177,10 +177,10 @@ import Testing
         #expect(button.trackingAreas.contains { $0.rect == button.box && $0.owner === button }, "hover is not tracked on the box")
     }
 
-    /// The symbol leads the label by 6 pt and the hint trails it by 8, the three centred in the
+    /// The icon leads the label by 6 pt and the hint trails it by 8, the three centred in the
     /// box; right to left they swap sides.
-    @Test func theSymbolLeadsTheHintTrailsAndRightToLeftMirrors() throws {
-        let button = SailButton("New Workspace", kind: .secondary, symbol: "plus", look: .light, target: nil, action: nil)
+    @Test func theIconLeadsTheHintTrailsAndRightToLeftMirrors() throws {
+        let button = SailButton("New Workspace", kind: .secondary, icon: .plus, look: .light, target: nil, action: nil)
         button.shortcut("n", modifiers: .command, mono: try Self.mono())
         _ = Self.sized(button)
         #expect(button.keyEquivalent == "n" && button.keyEquivalentModifierMask == .command && button.shortcutWords == "⌘N")
@@ -301,22 +301,18 @@ import Testing
         #expect(abs(Double(ink.maxY) - baseline) <= 0.25, "the eyebrow's capitals end at \(ink.maxY), not on the baseline at \(baseline)")
     }
 
-    /// The ⋯'s three dots are evenly spaced wherever the button's middle falls.
-    @Test(arguments: [NSPoint(x: 16, y: 16), NSPoint(x: 16.3, y: 16.6), NSPoint(x: 13.5, y: 13.5)])
-    func theEllipsisDotsAreEvenlySpaced(_ middle: NSPoint) {
-        let dots = SailButton.dots(around: middle)
-        let first = Double(dots[1].minX - dots[0].minX), second = Double(dots[2].minX - dots[1].minX)
-        #expect(dots.count == 3 && abs(first - ButtonSize.dotPitch) < 1e-9 && abs(second - ButtonSize.dotPitch) < 1e-9, "the gaps are \(first) and \(second)")
-        #expect(Double(dots[1].midX) == Double(dots[1].midX).rounded() && Double(dots[1].width) == ButtonSize.dot)
-    }
-
-    /// The ⋯ group's middle dot is the box's middle, in both sizes.
-    @Test func theEllipsisIsCentredOnTheBox() {
-        for size in [ButtonSize.small, .regular] {
-            let more = Self.sized(SailButton(icon: "ellipsis", label: "More", size: size, look: .light, target: nil, action: nil))
-            let middle = more.ellipsisDots[1], box = more.box
-            #expect(middle.midX == box.midX && middle.midY == box.midY, "the middle dot is at \(middle.midX), \(middle.midY); the box's middle at \(box.midX), \(box.midY)")
-        }
+    /// An icon-only button's icon is the design's, 15 pt and centred on the box exactly: the ⋯'s
+    /// middle dot is inked at the box's middle, and the canvas shows between the dots.
+    @Test(arguments: [ButtonSize.small, .regular])
+    func theIconIsCentredOnTheBox(_ size: ButtonSize) {
+        let more = Self.sized(SailButton(icon: .more, label: "More", size: size, look: .light, target: nil, action: nil))
+        let icon = more.arrangement().mark ?? .zero, box = more.box
+        #expect(Double(icon.width) == ButtonSize.icon && icon.midX == box.midX && icon.midY == box.midY, "the icon is \(icon) in \(box)")
+        let canvas = NSColor(Look.light.canvas), ink = NSColor(ButtonPaint(.quiet, ButtonState(), look: .light).label)
+        let middle = NSPoint(x: box.midX, y: box.midY), between = NSPoint(x: box.midX + 2, y: box.midY)
+        let right = Self.swatch(canvas, [ink], scale: 2), wrong = Self.swatch(canvas, [], scale: 2)
+        #expect(Self.tells(Self.colour(more, on: canvas, at: middle, scale: 2), right, from: wrong), "the middle dot is not at the box's middle")
+        #expect(Self.tells(Self.colour(more, on: canvas, at: between, scale: 2), wrong, from: right), "ink between the dots")
     }
 
     @Test(arguments: [("light", Look.light), ("dark", Look.dark)])

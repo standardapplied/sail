@@ -11,41 +11,51 @@ import SailLook
 @MainActor
 public final class SailButton: NSButton {
     public var look: Look {
-        didSet { repaint() }
+        didSet {
+            tooltip?.look = look
+            repaint()
+        }
     }
+
+    /// An icon-only button's tooltip, saying its label.
+    public private(set) var tooltip: Tooltip?
 
     public let kind: ButtonKind
     public let size: ButtonSize
     public private(set) var busyWord: String?
-    private let symbolName: String?
+    private let icon: LineIcon?
     private let iconOnly: Bool
     private var showsShortcut = false
     private var mono: LabelFont?
     private(set) var hovered = false
+    private var hoverArea: NSTrackingArea?
     private(set) var focused = false
     private var heldWidth = 0.0
     let spinner = SpinnerRing()
 
-    /// A labelled button, with a leading SF Symbol when `symbol` names one.
-    public init(_ title: String, kind: ButtonKind, size: ButtonSize = .regular, symbol: String? = nil, look: Look, target: AnyObject?, action: Selector?) {
+    /// A labelled button, with a leading line icon when `icon` names one.
+    public init(_ title: String, kind: ButtonKind, size: ButtonSize = .regular, icon: LineIcon? = nil, look: Look, target: AnyObject?, action: Selector?) {
         self.look = look
         self.kind = kind
         self.size = size
-        symbolName = symbol
+        self.icon = icon
         iconOnly = false
         super.init(frame: .zero)
         prepare(title, target: target, action: action)
     }
 
-    /// A square button showing only `symbol`; `label` is what VoiceOver reads and the tooltip says.
-    public init(icon symbol: String, label: String, kind: ButtonKind = .quiet, size: ButtonSize = .regular, look: Look, target: AnyObject?, action: Selector?) {
+    /// A square button showing only `icon`; `label` is what VoiceOver reads and the tooltip says.
+    public init(icon: LineIcon, label: String, kind: ButtonKind = .quiet, size: ButtonSize = .regular, look: Look, target: AnyObject?, action: Selector?) {
         self.look = look
         self.kind = kind
         self.size = size
-        symbolName = symbol
+        self.icon = icon
         iconOnly = true
         super.init(frame: .zero)
         prepare(label, target: target, action: action)
+        let tooltip = Tooltip(label, look: look, mono: nil)
+        tooltip.attach(to: self, saying: label)
+        self.tooltip = tooltip
     }
 
     @available(*, unavailable)
@@ -59,7 +69,6 @@ public final class SailButton: NSButton {
         self.action = action
         isBordered = false
         focusRingType = .none
-        if iconOnly { toolTip = title }
         wantsLayer = true
         clipsToBounds = false
         layer?.addSublayer(spinner.layer)
@@ -77,6 +86,7 @@ public final class SailButton: NSButton {
         keyEquivalentModifierMask = modifiers
         showsShortcut = true
         self.mono = mono
+        if let words = shortcutWords { tooltip?.chip.hint(words, mono: mono) }
         invalidateIntrinsicContentSize()
         needsDisplay = true
     }
@@ -92,8 +102,14 @@ public final class SailButton: NSButton {
         didSet {
             guard busyWord == nil else { return }
             setAccessibilityLabel(title)
-            if iconOnly { toolTip = title }
             NSAccessibility.post(element: self, notification: .titleChanged)
+        }
+    }
+
+    override public var keyEquivalent: String {
+        didSet {
+            invalidateIntrinsicContentSize()
+            needsDisplay = true
         }
     }
 
@@ -144,24 +160,21 @@ public final class SailButton: NSButton {
         return Draw.text(words, mono.font(Look.Step.caption.points) as NSFont, Tint(paint.label.rgb, alpha: paint.label.alpha * ButtonSize.hintOpacity))
     }
 
-    private var symbol: NSImage? {
-        symbolName.flatMap { Draw.symbol($0, points: iconOnly ? ButtonSize.iconPoints : ButtonSize.symbolPoints, ink: paint.label) }
-    }
-
     override public var intrinsicContentSize: NSSize {
         guard !iconOnly else { return NSSize(width: size.height, height: size.height) }
         let hint: Double? = hintText.map { Double(ceil($0.size().width)) }
-        let width = size.width(label: Double(ceil(label.size().width)), symbol: busyWord != nil || symbolName != nil, hint: hint)
+        let width = size.width(label: Double(ceil(label.size().width)), mark: busyWord != nil || icon != nil, hint: hint)
         return NSSize(width: max(width, busyWord == nil ? 0 : heldWidth), height: size.height)
     }
 
-    /// Where the leading mark (symbol or spinner), the label and the hint sit in the box, centred
-    /// together, in reading order: mirrored right to left.
+    /// Where the leading mark (icon or spinner), the label and the hint sit in the box, centred
+    /// together, in reading order: mirrored right to left. An icon-only button's icon is centred on
+    /// the box exactly, as the design's grid centres it.
     func arrangement() -> (mark: NSRect?, label: NSRect, hint: NSRect?) {
         let box = self.box, labelSize = label.size()
-        guard !iconOnly else { return (Draw.centred(symbol?.size ?? .zero, on: NSPoint(x: box.midX, y: box.midY)), .zero, nil) }
-        let marked = busyWord != nil || symbolName != nil, hintSize = hintText?.size()
-        let mark: Double = marked ? ButtonSize.symbol + ButtonSize.symbolGap : 0
+        guard !iconOnly else { return (box.insetBy(dx: (box.width - ButtonSize.icon) / 2, dy: (box.height - ButtonSize.icon) / 2), .zero, nil) }
+        let marked = busyWord != nil || icon != nil, hintSize = hintText?.size()
+        let mark: Double = marked ? ButtonSize.mark + ButtonSize.markGap : 0
         let hinted: Double = hintSize.map { ButtonSize.hintGap + Double($0.width) } ?? 0
         let total = mark + Double(labelSize.width) + hinted
         var x = (Double(box.midX) - total / 2).rounded()
@@ -169,7 +182,7 @@ public final class SailButton: NSButton {
             defer { x += width + gap }
             return NSRect(x: x, y: (Double(box.midY) - height / 2).rounded(), width: width, height: height)
         }
-        let markRect = marked ? next(ButtonSize.symbol, ButtonSize.symbol, gap: ButtonSize.symbolGap) : nil
+        let markRect = marked ? next(ButtonSize.mark, ButtonSize.mark, gap: ButtonSize.markGap) : nil
         let labelRect = next(Double(labelSize.width), Double(labelSize.height), gap: ButtonSize.hintGap)
         let hintRect = hintSize.map { next(Double($0.width), Double($0.height), gap: 0) }
         guard userInterfaceLayoutDirection == .rightToLeft else { return (markRect, labelRect, hintRect) }
@@ -187,14 +200,7 @@ public final class SailButton: NSButton {
         context.beginTransparencyLayer(auxiliaryInfo: nil)
         if let halo = paint.halo { Draw.halo(halo, around: box, radius: size.radius) }
         Draw.box(box, radius: size.radius, fill: paint.fill, edge: paint.edge)
-        if busyWord == nil, symbolName == Self.ellipsis {
-            NSColor(paint.label).setFill()
-            for dot in ellipsisDots {
-                NSBezierPath(ovalIn: dot).fill()
-            }
-        } else if busyWord == nil, let mark, let symbol {
-            symbol.draw(in: Draw.centred(symbol.size, on: NSPoint(x: mark.midX, y: mark.midY)), from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)
-        }
+        if busyWord == nil, let mark, let icon { Draw.icon(icon, in: mark, ink: paint.label) }
         if !iconOnly { label.draw(in: labelRect) }
         if let hintRect, let hintText {
             let points = Look.Step.caption.points, top = Double(box.minY) + (Double(box.height) - TextLine.height(points: points)) / 2
@@ -207,23 +213,6 @@ public final class SailButton: NSButton {
     override public func setFrameSize(_ newSize: NSSize) {
         super.setFrameSize(newSize)
         needsLayout = true
-    }
-
-    /// The ⋯ of a row's menu, drawn as the design draws it: three small dots, lighter than the symbol.
-    static let ellipsis = "ellipsis"
-
-    /// The ⋯'s dots, centred on the box, as the design centres its glyph.
-    var ellipsisDots: [NSRect] {
-        Self.dots(around: NSPoint(x: box.midX, y: box.midY))
-    }
-
-    /// The three dots, the group placed once on a whole point and each dot at the exact pitch from
-    /// its middle, so the two gaps are always equal.
-    static func dots(around point: NSPoint) -> [NSRect] {
-        let middle = NSPoint(x: Double(point.x).rounded(), y: Double(point.y).rounded())
-        return (-1 ... 1).map { step in
-            NSRect(x: Double(middle.x) + Double(step) * ButtonSize.dotPitch - ButtonSize.dot / 2, y: Double(middle.y) - ButtonSize.dot / 2, width: ButtonSize.dot, height: ButtonSize.dot)
-        }
     }
 
     override public func viewWillMove(toWindow newWindow: NSWindow?) {
@@ -270,8 +259,10 @@ public final class SailButton: NSButton {
 
     override public func updateTrackingAreas() {
         super.updateTrackingAreas()
-        trackingAreas.forEach(removeTrackingArea)
-        addTrackingArea(NSTrackingArea(rect: box, options: [.mouseEnteredAndExited, .activeInKeyWindow], owner: self))
+        if let hoverArea { removeTrackingArea(hoverArea) }
+        let area = NSTrackingArea(rect: box, options: [.mouseEnteredAndExited, .activeInKeyWindow], owner: self)
+        addTrackingArea(area)
+        hoverArea = area
     }
 
     override public func mouseEntered(with _: NSEvent) {
