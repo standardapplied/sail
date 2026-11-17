@@ -34,6 +34,12 @@ import Testing
         return backdrop.colour(at: point, scale: scale)
     }
 
+    /// `found` is `right` and not `wrong`, and the two differ: a test of a colour that could not
+    /// tell the right one from a wrong one proves nothing.
+    static func tells(_ found: [Double], _ right: [Double], from wrong: [Double]) -> Bool {
+        found.near(right) && !found.near(wrong) && !right.near(wrong)
+    }
+
     static func swatch(_ base: NSColor, _ layers: [NSColor], opacity: Double = 1, scale: Double) -> [Double] {
         Swatch(base, layers, opacity: opacity).colour(at: NSPoint(x: 2, y: 2), scale: scale)
     }
@@ -67,8 +73,11 @@ import Testing
                     let edged = fills + [paint.edge].compactMap { $0 }.map { NSColor($0) }
                     let inside = Self.colour(button, on: canvas, at: NSPoint(x: box.minX + 1.5, y: box.midY), scale: scale)
                     let edge = Self.colour(button, on: canvas, at: NSPoint(x: box.minX + 0.5, y: box.midY), scale: scale)
-                    #expect(inside.near(Self.swatch(canvas, fills, opacity: paint.opacity, scale: scale)), "\(name) \(kind) \(state) at \(scale)x: the fill is \(inside)")
-                    #expect(edge.near(Self.swatch(canvas, edged, opacity: paint.opacity, scale: scale)), "\(name) \(kind) \(state) at \(scale)x: the edge is \(edge)")
+                    let inked = Self.swatch(canvas, fills + [NSColor(look.text)], opacity: paint.opacity, scale: scale)
+                    let unedged = paint.edge == nil ? fills + [NSColor(look.separatorStrong)] : fills
+                    #expect(Self.tells(inside, Self.swatch(canvas, fills, opacity: paint.opacity, scale: scale), from: inked), "\(name) \(kind) \(state) at \(scale)x: the fill is \(inside)")
+                    #expect(Self.tells(edge, Self.swatch(canvas, edged, opacity: paint.opacity, scale: scale), from: Self.swatch(canvas, unedged, opacity: paint.opacity, scale: scale)),
+                            "\(name) \(kind) \(state) at \(scale)x: the edge is \(edge)")
                 }
             }
         }
@@ -89,12 +98,13 @@ import Testing
                 let gap = Self.colour(button, on: canvas, at: NSPoint(x: box.minX - 0.5, y: box.midY), scale: scale)
                 let ring = Self.colour(button, on: canvas, at: NSPoint(x: box.minX - 2.5, y: box.midY), scale: scale)
                 let outer = Self.colour(button, on: canvas, at: NSPoint(x: box.minX - 3.5, y: box.midY), scale: scale)
-                #expect(gap.near(Self.swatch(canvas, [], scale: scale)), "\(name) \(kind) at \(scale)x: the gap is \(gap)")
-                #expect(ring.near(halo) && outer.near(halo), "\(name) \(kind) at \(scale)x: the halo is \(ring), \(outer), not \(halo)")
+                let bare = Self.swatch(canvas, [], scale: scale)
+                #expect(Self.tells(gap, bare, from: halo), "\(name) \(kind) at \(scale)x: the gap is \(gap)")
+                #expect(Self.tells(ring, halo, from: bare) && Self.tells(outer, halo, from: bare), "\(name) \(kind) at \(scale)x: the halo is \(ring), \(outer), not \(halo)")
                 let resigned = button.resignFirstResponder()
                 #expect(resigned)
                 let after = Self.colour(button, on: canvas, at: NSPoint(x: box.minX - 2.5, y: box.midY), scale: scale)
-                #expect(after.near(Self.swatch(canvas, [], scale: scale)), "\(name) \(kind): the halo stayed after the focus went")
+                #expect(Self.tells(after, Self.swatch(canvas, [], scale: scale), from: halo), "\(name) \(kind): the halo stayed after the focus went")
             }
         }
     }
@@ -201,9 +211,11 @@ import Testing
             let ring = backdrop.colour(at: NSPoint(x: box.minX - 1.5, y: box.midY), scale: scale)
             let edge = backdrop.colour(at: NSPoint(x: box.minX + 0.5, y: box.midY), scale: scale)
             let fill = backdrop.colour(at: NSPoint(x: box.minX + 1.5, y: box.midY), scale: scale)
-            #expect(ring.near(Self.swatch(canvas, [NSColor(look.focusHalo)], scale: scale)), "\(name) at \(scale)x: the halo is \(ring)")
-            #expect(edge.near(Self.swatch(canvas, [NSColor(Tint(look.surface)), NSColor(Tint(look.accent))], scale: scale)), "\(name) at \(scale)x: the edge is \(edge)")
-            #expect(fill.near(Self.swatch(canvas, [NSColor(Tint(look.surface))], scale: scale)), "\(name) at \(scale)x: the fill is \(fill)")
+            let surface = NSColor(Tint(look.surface)), bare = Self.swatch(canvas, [], scale: scale)
+            #expect(Self.tells(ring, Self.swatch(canvas, [NSColor(look.focusHalo)], scale: scale), from: bare), "\(name) at \(scale)x: the halo is \(ring)")
+            #expect(Self.tells(edge, Self.swatch(canvas, [surface, NSColor(Tint(look.accent))], scale: scale), from: Self.swatch(canvas, [surface, NSColor(look.separatorStrong)], scale: scale)),
+                    "\(name) at \(scale)x: the edge is \(edge)")
+            #expect(Self.tells(fill, Self.swatch(canvas, [surface], scale: scale), from: Self.swatch(canvas, [surface, NSColor(look.focusHalo)], scale: scale)), "\(name) at \(scale)x: the fill is \(fill)")
         }
         let left = window.makeFirstResponder(nil)
         #expect(left)
@@ -216,7 +228,9 @@ import Testing
         let field = try Self.field(look)
         field.mouseEntered(with: try Self.entered())
         let edge = Self.colour(field, on: canvas, at: NSPoint(x: field.box.minX + 0.5, y: field.box.midY), scale: 2)
-        #expect(edge.near(Self.swatch(canvas, [NSColor(Tint(look.surface)), NSColor(look.text)], scale: 2)), "\(name): the hovered edge is \(edge)")
+        let surface = NSColor(Tint(look.surface))
+        #expect(Self.tells(edge, Self.swatch(canvas, [surface, NSColor(look.text)], scale: 2), from: Self.swatch(canvas, [surface, NSColor(look.separatorStrong)], scale: 2)),
+                "\(name): the hovered edge is \(edge)")
     }
 
     /// A refusal: the error colour on the edge and the eyebrow, the error in place of the help as
@@ -242,7 +256,8 @@ import Testing
         field.isEnabled = false
         #expect(abs(Double(field.field.alphaValue) - 0.45) < 0.001 && field.paint.eyebrow == look.textTertiary)
         let fill = Self.colour(field, on: canvas, at: NSPoint(x: field.box.minX + 3, y: field.box.midY), scale: 2)
-        #expect(fill.near(Self.swatch(canvas, [NSColor(Tint(look.surface))], opacity: 0.45, scale: 2)), "the disabled box is \(fill)")
+        #expect(Self.tells(fill, Self.swatch(canvas, [NSColor(Tint(look.surface))], opacity: 0.45, scale: 2), from: Self.swatch(canvas, [NSColor(look.separatorStrong)], scale: 2)),
+                "the disabled box is \(fill)")
     }
 
     @Test func theSmallFieldIsTwentyEightOnTheCanvasAndSecureIsSecure() throws {
@@ -268,10 +283,11 @@ import Testing
                 let dot = pill.dot.frame
                 let middle = Self.colour(pill, on: canvas, at: NSPoint(x: dot.midX, y: dot.midY), scale: 2)
                 let wanted = state == .stopped ? Self.swatch(canvas, [], scale: 2) : Self.swatch(canvas, [NSColor(pill.paint.dot)], scale: 2)
-                #expect(middle.near(wanted), "\(name) \(state) \(size): the dot is \(middle)")
+                #expect(Self.tells(middle, wanted, from: Self.swatch(canvas, [NSColor(look.text)], scale: 2)), "\(name) \(state) \(size): the dot is \(middle)")
                 guard state != .noTemplate else { continue }
                 let edge = Self.colour(pill, on: canvas, at: NSPoint(x: 0.5, y: Double(pill.frame.height) / 2), scale: 2)
-                #expect(edge.near(Self.swatch(canvas, [NSColor(pill.paint.edge)], scale: 2)), "\(name) \(state): the edge is \(edge)")
+                let other = pill.paint.edge == look.separatorStrong ? Tint(look.error, alpha: 0.45) : look.separatorStrong
+                #expect(Self.tells(edge, Self.swatch(canvas, [NSColor(pill.paint.edge)], scale: 2), from: Self.swatch(canvas, [NSColor(other)], scale: 2)), "\(name) \(state): the edge is \(edge)")
             }
         }
     }
@@ -288,7 +304,8 @@ import Testing
         let under = Self.colour(key, on: canvas, at: NSPoint(x: middle, y: 1.5), scale: 2)
         let foot = Self.colour(key, on: canvas, at: NSPoint(x: middle, y: height - 1.5), scale: 2)
         let over = Self.colour(key, on: canvas, at: NSPoint(x: middle, y: height - 2.5), scale: 2)
-        #expect(top.near(edge) && under.near(face) && foot.near(edge) && over.near(face), "the keycap's edge, face, foot and face: \(top) \(under) \(foot) \(over)")
+        #expect(Self.tells(top, edge, from: face) && Self.tells(under, face, from: edge) && Self.tells(foot, edge, from: face) && Self.tells(over, face, from: edge),
+                "the keycap's edge, face, foot and face: \(top) \(under) \(foot) \(over)")
     }
 
     /// Starting pulses, running does not; a spinner turns; with Reduce Motion neither moves, and
