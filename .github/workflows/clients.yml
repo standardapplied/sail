@@ -130,12 +130,13 @@ jobs:
           if-no-files-found: ignore
           path: ${{ runner.temp }}/reports
 
-  # Whether this change can affect the client lanes: SailKit's and SailApp's whole input is under
-  # clients/ (SailApp's one dependency is ../SailKit by path) and this workflow. A job skipped by
+  # Whether this change can affect the client lanes, as ci/changes decides it for this workflow and
+  # CI: SailKit's and SailApp's whole input is under clients/ (SailApp's one dependency is
+  # ../SailKit by path), this workflow and that script. A job skipped by
   # `if:` reports success, unlike a workflow-level path filter, so a required check is not left
   # waiting; a skipped matrix job reports under its unexpanded name (`SailKit on ${{ matrix.name }}`),
   # so a required check on a SailKit leg would name that. An unknown base (a new branch, a forced
-  # push) runs the lane.
+  # push), an empty change and a dispatch run the lanes.
   changes:
     name: What the change touches
     runs-on: ubuntu-24.04
@@ -151,17 +152,7 @@ jobs:
         env:
           EVENT: ${{ github.event_name }}
           BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
-        run: |
-          if [[ $EVENT == workflow_dispatch ]] || ! git cat-file -e "${BASE}^{commit}" 2>/dev/null; then
-            echo "clients=true" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          changed=$(git diff --name-only "$BASE" HEAD)
-          if grep -qE '^(clients/|\.github/workflows/clients\.yml$)' <<< "$changed"; then
-            echo "clients=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "clients=false" >> "$GITHUB_OUTPUT"
-          fi
+        run: ci/changes "$EVENT" "$BASE" >> "$GITHUB_OUTPUT"
 
   # The macOS app: the Metal device first; the renderer's goldens, the view's input tests and the
   # shell's; the app driven, with a software passkey, against the pinned darwin sail's own local host

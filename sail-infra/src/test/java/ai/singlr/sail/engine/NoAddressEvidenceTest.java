@@ -41,6 +41,9 @@ class NoAddressEvidenceTest {
             .onOk("incus network list-leases incusbr0", "LEASES")
             .onOk("incus info " + instance, "INFO")
             .onOk("incus config show " + instance, "CONFIG")
+            .onOk("incus list --format csv", "INSTANCES")
+            .onOk("networkctl list", "eth0 failed")
+            .onOk("-u systemd-networkd", "NETWORKD")
             .onOk("journalctl", "DNSMASQ");
 
     var answered =
@@ -58,6 +61,9 @@ class NoAddressEvidenceTest {
             "== incus network list-leases incusbr0\nexit 0\nLEASES",
             "== incus info " + instance + "\nexit 0\nINFO",
             "== incus config show " + instance + " --expanded\nexit 0\nCONFIG",
+            "== incus list --format csv --columns ns4\nexit 0\nINSTANCES",
+            "-- networkctl list --no-legend\nexit 0\neth0 failed",
+            "-u systemd-networkd\nexit 0\nNETWORKD",
             "dnsmasq-dhcp\nexit 0\nDNSMASQ")) {
       assertTrue(said.contains(section), section + " in:\n" + said);
     }

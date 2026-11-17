@@ -23,9 +23,11 @@ import java.util.regex.Pattern;
  * fails for want of an address, and only then. The make's prepare says "<instance> got no address
  * on eth0"; before that answer goes back, and so before the half-made workspace is deleted, this
  * saves what the box saw at that moment: the host's load, every managed bridge's leases, the
- * instance's {@code incus info} and expanded config, and the bridge's dnsmasq lines in the journal
- * since this JVM started. It goes to {@code target/incus-evidence/<instance>-<millis>.txt}, which
- * the lane keeps with the test reports of a failed job.
+ * instance's {@code incus info} and expanded config, every instance with its addresses, the
+ * instance's own {@code systemd-networkd} (its links' states and its journal since boot), and the
+ * bridge's dnsmasq lines in the journal since this JVM started. It goes to {@code
+ * target/incus-evidence/<instance>-<millis>.txt}, which the lane keeps with the test reports of a
+ * failed job.
  */
 final class NoAddressEvidence implements ShellExec {
 
@@ -99,6 +101,23 @@ final class NoAddressEvidence implements ShellExec {
     }
     said.append(asked(List.of("incus", "info", instance)));
     said.append(asked(List.of("incus", "config", "show", instance, "--expanded")));
+    said.append(asked(List.of("incus", "list", "--format", "csv", "--columns", "ns4")));
+    said.append(
+        asked(List.of("incus", "exec", instance, "--", "networkctl", "list", "--no-legend")));
+    said.append(
+        asked(
+            List.of(
+                "incus",
+                "exec",
+                instance,
+                "--",
+                "journalctl",
+                "-b",
+                "--no-pager",
+                "-o",
+                "short-precise",
+                "-u",
+                "systemd-networkd")));
     var journal =
         List.of(
             "journalctl",
