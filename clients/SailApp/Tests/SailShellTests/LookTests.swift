@@ -110,10 +110,9 @@ import Testing
     }
 
     /// A: the title bar is transparent over a full-size content view, the platform's buttons in
-    /// place; under it the rail is clear over the chrome, Mast's gradient from `chrome` at the top to
-    /// `chromeEnd` at the bottom, and the row beside it in the account's surface, or for "This Mac"
-    /// in the tabs' `chrome` (the layers' own colours; the drive checks the pixels of the running
-    /// window).
+    /// place; under it the rail is clear over the chrome, one flat fill, and the row beside it in the
+    /// account's surface, or for "This Mac" in the tabs' `chrome` (the layers' own colours; the drive
+    /// checks the pixels of the running window).
     @MainActor @Test(arguments: [("dark", Look.dark), ("light", Look.light)])
     func theTitleBarShowsTheRailAndThePanesSurface(_ name: String, _ look: Look) throws {
         let folder = FileManager.default.temporaryDirectory.appending(path: "sail-look-\(UUID().uuidString.prefix(8))")
@@ -134,8 +133,6 @@ import Testing
         shell.select(.thisMac)
         let chosen = try #require(shell.rail.bar(.thisMac))
         #expect(!chosen.isHidden && chosen.layer?.backgroundColor == NSColor(look.accentText).cgColor, "\(name): the rail's chosen item has no accentText bar, as a tab's")
-        let root = try #require(content as? ChromeView)
-        #expect(root.colours == [NSColor(look.chromeEnd).cgColor, NSColor(look.chrome).cgColor], "\(name): the chrome is not Mast's gradient")
         for item in [Rail.Item.account, .thisMac] {
             shell.select(item)
             #expect(content.layer?.backgroundColor == NSColor(look.chrome).cgColor, "\(name) \(item): the band under the title bar is not the chrome")

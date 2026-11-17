@@ -132,7 +132,7 @@ import Testing
                     #expect(isChrome(x, band / 2, look.chrome), "\(name) \(pane) full \(full): the band at x \(x) is not the chrome")
                 }
                 #expect(isChrome(Rail.width / 2, band + 4, look.chrome), "\(name) \(pane) full \(full): the rail under the band is not the chrome")
-                #expect(isChrome(4, Double(root.bounds.height) - 4, look.chromeEnd), "\(name) \(pane) full \(full): the chrome at the bottom is not its end")
+                #expect(isChrome(4, Double(root.bounds.height) - 4, look.chrome), "\(name) \(pane) full \(full): the chrome at the bottom is not the band's one fill")
                 let railTop = Double(root.bounds.height - shell.rail.frame.maxY)
                 #expect(abs(railTop - band) < 0.5, "\(name) \(pane) full \(full): the rail starts at \(railTop), the band ends at \(band)")
                 #expect(band >= 44, "\(name): the band is \(band) pt")

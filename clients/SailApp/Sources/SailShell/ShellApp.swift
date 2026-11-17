@@ -34,7 +34,7 @@ public final class ShellApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
     public let thisMac: WorkbenchView
     public private(set) var look: Look
 
-    private let root = ChromeView()
+    private let root = NSView()
     private let content = NSView()
     private var appearanceWatch: NSKeyValueObservation?
     private let titleBarRow = NSTitlebarAccessoryViewController()
@@ -293,7 +293,6 @@ public final class ShellApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
     /// The band, the rail and the card's margin are one chrome surface, as Mast's `--chrome-bg`.
     private func paintChrome() {
         root.layer?.backgroundColor = NSColor(look.chrome).cgColor
-        root.paint(look)
     }
 
     /// Runs the app, `configure` given it before it launches; a bundle missing its fonts or host
@@ -654,23 +653,3 @@ final class Once {
     }
 }
 
-/// The window's content view, drawn as the chrome: a gradient from the look's `chrome` at the top
-/// to its `chromeEnd` at the bottom. The view is not flipped, so its layer's unit space starts at
-/// the bottom and the gradient's first colour is the bottom's.
-@MainActor
-final class ChromeView: NSView {
-    private let gradient = CAGradientLayer()
-
-    override func makeBackingLayer() -> CALayer {
-        gradient
-    }
-
-    func paint(_ look: Look) {
-        gradient.colors = [NSColor(look.chromeEnd).cgColor, NSColor(look.chrome).cgColor]
-    }
-
-    /// The colours from the bottom to the top, for tests.
-    var colours: [CGColor] {
-        (gradient.colors as? [CGColor]) ?? []
-    }
-}
