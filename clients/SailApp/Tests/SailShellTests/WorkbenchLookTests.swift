@@ -322,6 +322,25 @@ import Testing
         return zip(found, [Int(rgb.red), Int(rgb.green), Int(rgb.blue)]).allSatisfy { abs($0 - $1) <= 12 }
     }
 
+    /// A change of look recolours a tab's dividers where they are: nothing is laid out again, and
+    /// the line takes the new look's colour at once.
+    @Test func aChangeOfLookRecoloursTheDividersWhereTheyAre() throws {
+        var bench = Workbench()
+        _ = bench.newTab(session: "mac-left", place: .thisMac(folder: "/"))
+        let size = CGSize(width: 800, height: 600)
+        _ = try #require(bench.split(.sideBySide, session: "mac-right", place: .thisMac(folder: "/"), in: size, minimum: CGSize(width: 100, height: 100), scale: 2))
+        let dividers = bench.frames(in: size, scale: 2).dividers
+        try #require(dividers.count == 1)
+        let room = TabView(frame: NSRect(origin: .zero, size: size))
+        room.show(dividers, look: .dark)
+        let divider = try #require(room.subviews.compactMap { $0 as? DividerView }.first)
+        let frame = divider.frame, line = divider.line.frame
+        #expect(divider.line.backgroundColor == NSColor(Look.dark.separatorStrong).cgColor)
+        room.paint(.light)
+        #expect(divider.line.backgroundColor == NSColor(Look.light.separatorStrong).cgColor, "the divider kept the dark look's colour")
+        #expect(divider.frame == frame && divider.line.frame == line, "a change of look moved the divider")
+    }
+
     @Test func theScrimIsTheTerminalBackgroundAt30PercentAndTakesNoClick() throws {
         let shell = try Self.shell(.dark)
         var bench = Workbench()

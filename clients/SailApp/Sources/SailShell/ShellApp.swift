@@ -206,8 +206,14 @@ public final class ShellApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         if !asked { goOn(true) }
     }
 
+    /// How long the last change of look took on the main thread, in seconds: the app's own part of a
+    /// switch, apart from AppKit drawing the window again in the new appearance.
+    public private(set) var lookTook = 0.0
+
     /// Draws the window in `look`: the chrome, the rail and the panes.
     func apply(_ look: Look) {
+        let began = CACurrentMediaTime()
+        defer { lookTook = CACurrentMediaTime() - began }
         self.look = look
         window.backgroundColor = NSColor(look.canvas)
         rail.look = look

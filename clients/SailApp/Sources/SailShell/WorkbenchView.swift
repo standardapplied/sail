@@ -582,7 +582,7 @@ public final class WorkbenchView: NSView {
         banner.look = look
         strip.look = look
         panes.values.forEach { $0.look = look }
-        model.tabs.forEach { tab in tabViews[tab.id].map { layout(tab, in: $0) } }
+        tabViews.values.forEach { $0.paint(look) }
     }
 }
 
@@ -630,13 +630,22 @@ final class TabView: NSView {
             view.show(divider, color: NSColor(look.separatorStrong))
         }
     }
+
+    /// The dividers take `look`'s colour where they are: a change of look moves nothing, so it lays
+    /// nothing out, and a line's colour changes at once, never fading through both looks.
+    func paint(_ look: Look) {
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        dividers.forEach { $0.line.backgroundColor = NSColor(look.separatorStrong).cgColor }
+        CATransaction.commit()
+    }
 }
 
 final class DividerView: NSView {
     var onDrag: @MainActor ([Side], Double) -> Void = { _, _ in }
     var onDragEnded: @MainActor () -> Void = {}
     private var divider: Divider?
-    private let line = CALayer()
+    let line = CALayer()
 
     override init(frame: NSRect) {
         super.init(frame: frame)
