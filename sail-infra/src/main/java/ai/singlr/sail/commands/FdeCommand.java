@@ -1521,7 +1521,7 @@ public final class FdeCommand implements Runnable {
                 registerKey(db, fde, publicKey, operator);
                 var keys = new ContainerAuthorizedKeys(key.box().shell());
                 say(
-                    () -> keys.addToWorkspacesOf(SshPublicKey.parse(publicKey), fde.handle()),
+                    () -> keys.addToWorkspacesOf(SshPublicKey.parse(publicKey), fde.id()),
                     "does not trust this key yet");
               }
             });

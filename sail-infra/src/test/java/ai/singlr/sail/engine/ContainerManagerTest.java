@@ -315,14 +315,35 @@ class ContainerManagerTest {
     assertTrue(ex.getMessage().contains("permission denied"));
   }
 
+  /** A renamed project's container carries its new name as its project key: still told its own. */
   @Test
-  void renameInvokesIncusRename() throws Exception {
+  void aRenameCarriesTheProjectKeyToTheNewName() throws Exception {
     var shell = new ScriptedShellExecutor(new ShellExec.Result(0, "", ""));
     var mgr = new ContainerManager(shell);
 
     mgr.rename("old", "renamed");
 
-    assertEquals("incus rename old renamed", shell.invocations().getFirst());
+    assertEquals(
+        List.of("incus rename old renamed", "incus config set renamed user.sail.project=renamed"),
+        shell.invocations());
+  }
+
+  /**
+   * A key that cannot follow the name puts the name back, so the container is never left unowned.
+   */
+  @Test
+  void aRenameWhoseKeyCannotFollowPutsTheNameBack() {
+    var shell =
+        new ScriptedShellExecutor()
+            .onOk("incus rename", "")
+            .onFail("incus config set renamed", "disk full");
+    var mgr = new ContainerManager(shell);
+
+    var ex = assertThrows(IOException.class, () -> mgr.rename("old", "renamed"));
+
+    assertTrue(ex.getMessage().contains("keeps the name 'old'"), ex.getMessage());
+    assertTrue(ex.getMessage().contains("disk full"), ex.getMessage());
+    assertEquals("incus rename renamed old", shell.invocations().getLast());
   }
 
   @Test

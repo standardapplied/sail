@@ -127,14 +127,18 @@ final class RunPlaces {
    * go in between.
    */
   private void requireOwner(Workspaces.SpecCheck check, ProjectDefinition config, String handle) {
-    var theirs =
-        check.whole()
-            && check.found().flatMap(i -> i.key(BoxInstances.OWNER_KEY)).orElse("").equals(handle);
-    if (theirs) {
-      return;
-    }
     try {
-      workspaces.requireOwner(owners.apply(handle), config);
+      var owner = owners.apply(handle);
+      var theirs =
+          check.whole()
+              && check
+                  .found()
+                  .flatMap(i -> i.key(BoxInstances.OWNER_ID_KEY))
+                  .filter(id -> id.equals(owner.id()))
+                  .isPresent();
+      if (!theirs) {
+        workspaces.requireOwner(owner, config);
+      }
     } catch (IllegalStateException refused) {
       throw ApiException.of(ErrorCode.CONFLICT, refused);
     }

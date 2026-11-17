@@ -20,6 +20,7 @@ import java.nio.channels.Pipe;
 import java.nio.channels.ReadableByteChannel;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
+import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
 
 class PtyWireTest {
@@ -356,5 +357,77 @@ class PtyWireTest {
     pipe.sink().write(frame);
     pipe.sink().close();
     PtyWire.read(pipe.source());
+  }
+
+  /**
+   * R16's wire: a create, a ticket request and a listed session carry the workspace (and the
+   * listing its opener); the default workspace {@code main} is the project's own container, and a
+   * frame a peer sent before the field existed reads as none.
+   */
+  @Test
+  void theWorkspaceRidesTheCreateTheTicketAndTheListingAndMainIsTheContainer() throws IOException {
+    var create =
+        (PtyMessage.Create)
+            roundTrip(new PtyMessage.Create("s", List.of(), "/tmp", "acme", "", 80, 24, "try"));
+    var ticket =
+        (PtyMessage.IssueTicket)
+            roundTrip(
+                new PtyMessage.IssueTicket(PtyMessage.TicketAction.OPEN, "acme", "tok", "try"));
+    var info =
+        (PtyMessage.SessionInfo)
+            roundTrip(
+                new PtyMessage.SessionInfo(
+                    "s", "i", true, 1, "ada", "", List.of("bash"), "acme", "try", "ada"));
+
+    assertEquals("try", create.workspace());
+    assertEquals("try", ticket.workspace());
+    assertEquals(
+        List.of("acme", "try", "ada"), List.of(info.project(), info.workspace(), info.opener()));
+    assertEquals(
+        "", new PtyMessage.Create("s", List.of(), "/tmp", "acme", "", 80, 24, "main").workspace());
+    assertEquals("", new PtyMessage.Create("s", List.of(), "/tmp", "acme", "", 80, 24).workspace());
+  }
+
+  /** A session as written before its place: no workspace or opener after its command. */
+  private static ByteBuffer unplacedSession(ByteBuffer out, String name) {
+    put(out, name);
+    put(out, "i");
+    out.put((byte) 1).putInt(0);
+    put(out, "");
+    put(out, "");
+    return out.putInt(0);
+  }
+
+  private static void put(ByteBuffer out, String text) {
+    var bytes = text.getBytes(StandardCharsets.UTF_8);
+    out.putInt(bytes.length).put(bytes);
+  }
+
+  /**
+   * A page's places follow its cursor, one for each of its sessions; a page placing other than its
+   * sessions is refused, never misread.
+   */
+  @Test
+  void aPagePlacesEachOfItsSessionsAfterItsCursorAndNoOtherCount() throws IOException {
+    var misplaced = ByteBuffer.allocate(256).put((byte) 29).putInt(1);
+    unplacedSession(misplaced, "a");
+    put(misplaced, "");
+    misplaced.putInt(2);
+
+    assertEquals(
+        "Corrupt pty frame: a page places 2 sessions but holds 1.",
+        assertThrows(IOException.class, () -> readPayload(misplaced)).getMessage());
+    assertEquals(
+        List.of("acme", "try", "ada"),
+        ((PtyMessage.Sessions)
+                roundTrip(
+                    new PtyMessage.Sessions(
+                        List.of(
+                            new PtyMessage.SessionInfo(
+                                "s", "i", true, 1, "", "", List.of(), "acme", "try", "ada")),
+                        "")))
+            .sessions().stream()
+                .flatMap(placed -> Stream.of(placed.project(), placed.workspace(), placed.opener()))
+                .toList());
   }
 }

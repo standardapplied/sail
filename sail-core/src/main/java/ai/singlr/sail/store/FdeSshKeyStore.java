@@ -21,7 +21,7 @@ import java.util.Optional;
 public final class FdeSshKeyStore {
 
   private static final String SELECT =
-      "SELECT k.fingerprint, k.fde_id, f.handle, k.public_key, k.comment, k.created_at"
+      "SELECT k.fingerprint, k.fde_id, f.handle, k.public_key, k.comment, k.created_at, f.status"
           + " FROM fde_ssh_keys k JOIN fdes f ON f.id = k.fde_id";
 
   private final Sqlite db;
@@ -36,7 +36,8 @@ public final class FdeSshKeyStore {
       String fdeHandle,
       String publicKey,
       String comment,
-      Instant createdAt) {}
+      Instant createdAt,
+      String state) {}
 
   /** Registers {@code key} to {@code fdeId}. Throws if the fingerprint is already registered. */
   public void add(String fdeId, SshPublicKey key) {
@@ -59,9 +60,14 @@ public final class FdeSshKeyStore {
    * aside) keeps their keys here, and gets no line in {@code authorized_keys} until they are active
    * again.
    */
-  public List<SshKeyInfo> list() {
+  public List<SshKeyInfo> admitted() {
     return db.query(
         SELECT + " WHERE f.status = 'active' ORDER BY f.handle, k.created_at", FdeSshKeyStore::map);
+  }
+
+  /** Every registered key, each with its person's state, a disabled person's included. */
+  public List<SshKeyInfo> list() {
+    return db.query(SELECT + " ORDER BY f.handle, k.created_at", FdeSshKeyStore::map);
   }
 
   public List<SshKeyInfo> listForFde(String fdeId) {
@@ -76,6 +82,12 @@ public final class FdeSshKeyStore {
 
   private static SshKeyInfo map(Sqlite.Row row) {
     return new SshKeyInfo(
-        row.text(0), row.text(1), row.text(2), row.text(3), row.text(4), row.instant(5));
+        row.text(0),
+        row.text(1),
+        row.text(2),
+        row.text(3),
+        row.text(4),
+        row.instant(5),
+        row.text(6));
   }
 }

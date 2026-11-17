@@ -824,6 +824,7 @@ class SpecWorkspacesTest {
     var held = box.workspace("d", "Stopped").repo("app").repo("web/site").ahead("app", 1);
     held.pushUnreached = true;
     held.keys.remove(BoxInstances.OWNER_KEY);
+    held.keys.remove(BoxInstances.OWNER_ID_KEY);
     ended("d");
     later(IDLE);
 
@@ -1310,6 +1311,7 @@ class SpecWorkspacesTest {
       var held = new Held(project, place.workspace(), state);
       held.keys.put(BoxInstances.SPEC_KEY, specId);
       held.keys.put(BoxInstances.OWNER_KEY, NODE);
+      held.keys.put(BoxInstances.OWNER_ID_KEY, "fde_" + NODE);
       instances.put(place.instance(), held);
       return held;
     }

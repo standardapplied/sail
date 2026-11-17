@@ -32,6 +32,7 @@ import java.time.Instant;
 import java.util.EnumSet;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
@@ -1968,6 +1969,54 @@ record SnapshotView(String name, String createdAt, String source) implements Map
     m.put("name", name);
     m.put("created_at", createdAt);
     m.put("source", source);
+    return m;
+  }
+}
+
+/**
+ * A workspace a person made through the API: its owner, the template version it was cloned from,
+ * whether that template is older than the definition, and what the make took.
+ */
+record WorkspaceCreateResponse(Workspaces.Created created, String owner, boolean stale)
+    implements Mappable {
+  @Override
+  public Map<String, Object> toMap() {
+    var m = new LinkedHashMap<String, Object>();
+    m.put("project", created.project());
+    m.put("workspace", created.workspace());
+    m.put("instance", created.instance());
+    m.put("owner", owner);
+    m.put("template", created.template().version());
+    m.put("stale", stale);
+    m.put("timings", WorkspaceChangeResponse.timings(created.timings()));
+    return m;
+  }
+}
+
+/** A workspace started, stopped, deleted or left as it was, with a start's times. */
+record WorkspaceChangeResponse(Workspaces.Changed changed) implements Mappable {
+  @Override
+  public Map<String, Object> toMap() {
+    var m = new LinkedHashMap<String, Object>();
+    m.put("project", changed.project());
+    m.put("workspace", changed.workspace());
+    m.put("instance", changed.instance());
+    m.put("change", changed.change().name().toLowerCase(Locale.ROOT));
+    m.put("timings", timings(changed.timings()));
+    return m;
+  }
+
+  /** What a make or start took, in milliseconds; none for a change that started nothing. */
+  static Map<String, Object> timings(Workspaces.Timings timings) {
+    if (timings == null) {
+      return null;
+    }
+    var m = new LinkedHashMap<String, Object>();
+    m.put("clone_ms", timings.cloneMs());
+    m.put("start_ms", timings.startMs());
+    m.put("ready_ms", timings.readyMs());
+    m.put("total_ms", timings.totalMs());
+    m.put("ready_steps", timings.readySteps());
     return m;
   }
 }

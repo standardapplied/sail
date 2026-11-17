@@ -25,6 +25,7 @@ import ai.singlr.sail.commands.DownCommand;
 import ai.singlr.sail.commands.ExecCommand;
 import ai.singlr.sail.commands.ProjectDestroyCommand;
 import ai.singlr.sail.commands.RestoreCommand;
+import ai.singlr.sail.commands.ScopedNode;
 import ai.singlr.sail.commands.ShellCommand;
 import ai.singlr.sail.commands.SnapCommand;
 import ai.singlr.sail.commands.SnapDeleteCommand;
@@ -34,6 +35,7 @@ import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.ProjectDefinition;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.config.SyncConfig;
+import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.harness.RunReport;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.store.BoxCredentialStore;
@@ -55,19 +57,26 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermissions;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.Callable;
+import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Predicate;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 import picocli.CommandLine;
 
 /**
@@ -97,6 +106,7 @@ class WorkspaceIT extends AbstractIncusIT {
   private static final String HELD = "held";
   private static final String BACKED = "backed";
   private static final String TREE = "tree";
+  private static final String NO_ADDRESS = "sail-it-noaddr";
   private static final Path CONTAINER_DIR = Path.of("/var/lib/sail/run");
 
   private static final String SEAL =
@@ -194,6 +204,10 @@ class WorkspaceIT extends AbstractIncusIT {
     deleteContainerQuietly(PROJECT + "-" + TREE);
     deleteContainerQuietly(TEMPLATE);
     deleteContainerQuietly(PROJECT);
+    try {
+      shell.exec(List.of("incus", "network", "delete", NO_ADDRESS));
+    } catch (Exception ignored) {
+    }
     try {
       shell.exec(List.of("incus", "storage", "delete", POOL));
     } catch (Exception ignored) {
@@ -353,14 +367,20 @@ class WorkspaceIT extends AbstractIncusIT {
   void twoWorkspacesOfTwoPeopleEachCommitAsTheirOwnerWithTheirOwnStore() throws Exception {
     var uday =
         new WorkspaceOwner(
-            "uday", "Uday", "uday@sail.invalid", Map.of("example.invalid", "tok-uday"), List.of());
+            "uday",
+            "Uday",
+            "uday@sail.invalid",
+            Map.of("example.invalid", "tok-uday"),
+            List.of(),
+            "fde_uday");
     var ana =
         new WorkspaceOwner(
             "ana",
             "Ana",
             "ana@sail.invalid",
             Map.of("example.invalid", "tok-ana"),
-            List.of("ssh-ed25519 AAAAana ana@laptop"));
+            List.of("ssh-ed25519 AAAAana ana@laptop"),
+            "fde_ana");
 
     var fix = workspaces.create(definition(), FIX, source(), null, uday.handle(), h -> uday);
     var second = workspaces.create(definition(), SECOND, source(), null, ana.handle(), h -> ana);
@@ -505,7 +525,12 @@ class WorkspaceIT extends AbstractIncusIT {
             null);
     var owner =
         new WorkspaceOwner(
-            "uday", "Uday", "uday@sail.invalid", Map.of(host, "tok-private"), List.of());
+            "uday",
+            "Uday",
+            "uday@sail.invalid",
+            Map.of(host, "tok-private"),
+            List.of(),
+            "fde_uday");
 
     var made =
         workspaces.create(
@@ -688,9 +713,172 @@ class WorkspaceIT extends AbstractIncusIT {
     assertHoldsNoOnesCredentials(stopped.instance());
   }
 
+  /**
+   * Ruling 4 of {@code sail-a-workspace-is-its-creators} on a real Incus: a spec's workspace its
+   * previous owner worked in, kept for what it holds and made nobody's when that owner left, is
+   * entered by the box's person's run. It holds the previous work, and none of the previous owner's
+   * token, gh login, git identity or keys: only the new owner's. The work keeps its own history (a
+   * reflog entry the previous owner's checkout wrote names them, as a commit of theirs would); the
+   * identity a new commit takes is the new owner's alone.
+   */
+  @Test
+  void aDisownedKeptWorkspaceEnteredByTheNextRunHoldsTheWorkAndOnlyItsNewOwnersCredentials()
+      throws Exception {
+    var place = (RunPlace.SpecWorkspace) RunPlace.of(PROJECT, KEPT);
+    var inputs = ProjectProvisioner.inputs(definition(), Optional.empty());
+    var instance =
+        workspaces
+            .enterSpec(
+                workspaces.checkSpec(place, inputs, name -> false),
+                definition(),
+                "tmp",
+                h -> leaving(),
+                null,
+                whole -> {})
+            .instance();
+    plantLeftovers(instance);
+    var worked =
+        shell.exec(
+            ContainerExec.asDevUser(
+                instance,
+                List.of(
+                    "bash",
+                    "-c",
+                    "cd /home/dev/workspace/app && echo by-tmp >> README && echo mine > notes")));
+    assertTrue(worked.ok(), worked.stderr());
+    containers.stop(instance);
+    var kept =
+        shell.exec(
+            List.of("incus", "config", "set", instance, BoxInstances.KEPT_KEY + "=app holds work"));
+    assertTrue(kept.ok(), kept.reason());
+    assertEquals(
+        List.of(), workspaces.disown((handle, id) -> !"fde_old_tmp".equals(id), name -> true));
+    var ana =
+        new WorkspaceOwner(
+            "ana",
+            "Ana",
+            "ana@sail.invalid",
+            Map.of("example.invalid", "tok-ana-0123456789abcdef"),
+            List.of("ssh-ed25519 AAAAana ana@laptop"),
+            "fde_ana");
+
+    workspaces.enterSpec(
+        workspaces.checkSpec(place, inputs, name -> false),
+        definition(),
+        "ana",
+        h -> ana,
+        null,
+        whole -> {});
+
+    var entered = new BoxInstances(shell).named(instance).orElseThrow();
+    assertEquals(Optional.of("ana"), entered.key(BoxInstances.OWNER_KEY));
+    assertEquals(Optional.of("fde_ana"), entered.key(BoxInstances.OWNER_ID_KEY));
+    assertEquals(Optional.empty(), entered.key(BoxInstances.KEPT_KEY).filter(k -> !k.isBlank()));
+    assertEquals("seed\nby-tmp\n", pulled(instance, "/home/dev/workspace/app/README"));
+    assertEquals("mine\n", pulled(instance, "/home/dev/workspace/app/notes"));
+    var held =
+        exec(
+            instance,
+            List.of(
+                "bash",
+                "-c",
+                "grep -r -l -F -e "
+                    + STRIPPED_TOKEN
+                    + " -e AAAAtmp /home/dev /root;"
+                    + " runuser -u dev -- env HOME=/home/dev git config --global --get user.email;"
+                    + " cat /home/dev/.ssh/authorized_keys; grep -c tok-ana /home/dev/.git-credentials"));
+    assertEquals(
+        "ana@sail.invalid\nssh-ed25519 AAAAana ana@laptop\n1\n",
+        held.stdout(),
+        "only ana's credentials: " + held.stderr());
+  }
+
+  /**
+   * Round 2 of {@code sail-a-workspace-is-its-creators} on a real Incus: a workspace that gets no
+   * IPv4 address within its 30 s is not made. The create fails naming the wait and what to check,
+   * and nothing of the workspace is left. Staged by giving the template a network Incus serves no
+   * address on ({@code ipv4.address=none}) and making that its current snapshot, so its clone's
+   * {@code eth0} comes up with none.
+   */
+  @Test
+  void aWorkspaceThatGetsNoAddressIsNotMadeAndNothingOfItIsLeft() throws Exception {
+    var made =
+        shell.exec(
+            List.of(
+                "incus",
+                "network",
+                "create",
+                NO_ADDRESS,
+                "ipv4.address=none",
+                "ipv6.address=none"));
+    assertTrue(made.ok(), made.reason());
+    var moved =
+        shell.exec(
+            List.of(
+                "incus",
+                "config",
+                "device",
+                "override",
+                TEMPLATE,
+                "eth0",
+                "network=" + NO_ADDRESS));
+    if (!moved.ok()) {
+      moved =
+          shell.exec(
+              List.of(
+                  "incus", "config", "device", "set", TEMPLATE, "eth0", "network=" + NO_ADDRESS));
+    }
+    assertTrue(moved.ok(), moved.reason());
+    new SnapshotManager(shell).create(TEMPLATE, "v2");
+    var current =
+        shell.exec(List.of("incus", "config", "set", TEMPLATE, "user.sail.template.current=v2"));
+    assertTrue(current.ok(), current.reason());
+
+    var refused =
+        assertThrows(
+            IOException.class,
+            () -> workspaces.create(definition(), FIX, source(), null, "tmp", h -> leaving()));
+
+    assertTrue(
+        refused
+            .getMessage()
+            .startsWith(
+                "Workspace 'fix-login' could not be made its own: "
+                    + PROJECT
+                    + "-"
+                    + FIX
+                    + " got no address on eth0 within 30 s, so its repos cannot be fetched; check"
+                    + " that the network Incus gives it"),
+        refused.getMessage());
+    assertEquals(Optional.empty(), new BoxInstances(shell).named(PROJECT + "-" + FIX));
+    var kept = keptEvidenceOf(PROJECT + "-" + FIX);
+    assertTrue(
+        kept.contains("== incus info " + PROJECT + "-" + FIX + "\nexit 0\n"),
+        "the evidence was kept while the half-made workspace still existed: " + kept);
+    assertTrue(kept.contains("== incus network list-leases "), kept);
+    assertTrue(kept.contains("== /proc/loadavg\n"), kept);
+  }
+
+  /** The newest evidence {@link NoAddressEvidence} kept of {@code instance}. */
+  private static String keptEvidenceOf(String instance) throws IOException {
+    try (var files = Files.list(Path.of("target", "incus-evidence"))) {
+      var newest =
+          files
+              .filter(file -> file.getFileName().toString().startsWith(instance + "-"))
+              .max(Comparator.comparing(Path::toString))
+              .orElseThrow(() -> new AssertionError("no evidence kept of " + instance));
+      return Files.readString(newest);
+    }
+  }
+
   private static WorkspaceOwner udayWith(String token) {
     return new WorkspaceOwner(
-        "uday", "Uday", "uday@sail.invalid", Map.of("example.invalid", token), List.of());
+        "uday",
+        "Uday",
+        "uday@sail.invalid",
+        Map.of("example.invalid", token),
+        List.of(),
+        "fde_uday");
   }
 
   private static final String WATCH =
@@ -886,6 +1074,156 @@ class WorkspaceIT extends AbstractIncusIT {
         List.of(),
         new SnapshotManager(shell)
             .list(ws).stream().map(SnapshotManager.SnapshotInfo::name).toList());
+  }
+
+  /**
+   * Round 3's blocker on a real Incus: a workspace made and stopped on a node while the node's
+   * rounds run is still there afterwards, whole and with its keys. Each round lists the box through
+   * {@link #unrendering}, so it finds the workspace as Incus lists an instance it cannot render
+   * mid-stop, the listing that made a node take a workspace for a project of its own name, out of
+   * its scope, and delete it; every other call, the round's re-read and delete among them, reaches
+   * this host's Incus, and its locks are this box's.
+   */
+  @Test
+  void aWorkspaceMadeAndStoppedOnANodeWhileItsRoundsRunIsStillThereWithItsKeys(@TempDir Path dir)
+      throws Exception {
+    var instance = PROJECT + "-" + FIX;
+    var stopped = new AtomicBoolean();
+    var rounds = new AtomicInteger();
+    var runner = Executors.newSingleThreadExecutor();
+    try (var node = new ScopedNode(dir, PROJECT, unrendering(instance))) {
+      var running =
+          runner.submit(
+              () -> {
+                while (!stopped.get()) {
+                  node.round();
+                  rounds.incrementAndGet();
+                }
+                return null;
+              });
+      workspaces.create(definition(), FIX, source(), null, "eng", TestOwners::of);
+      workspaces.stop(PROJECT, FIX, NO_RUN);
+      stopped.set(true);
+      running.get(5, TimeUnit.MINUTES);
+      node.round();
+    } finally {
+      runner.shutdownNow();
+    }
+
+    assertTrue(rounds.get() > 0, "a round ran while the workspace was made and stopped");
+    var found = new BoxInstances(shell).named(instance).orElseThrow();
+    assertEquals(new ContainerState.Stopped(), found.state());
+    assertEquals(new BoxInstances.Workspace(PROJECT, FIX, true), found.kind());
+    assertEquals(Optional.of("eng"), found.key(BoxInstances.OWNER_KEY));
+    assertEquals(Optional.of(TestOwners.of("eng").id()), found.key(BoxInstances.OWNER_ID_KEY));
+  }
+
+  /**
+   * A destroy on a real Incus deletes a project's workspaces and template only under their locks
+   * and the box's create lock, read again there: a create that holds the create lock past the wait
+   * refuses it and nothing goes; a workspace made after it read what it would delete refuses it,
+   * naming it; read again as it is, it deletes every workspace and the template, and no other
+   * instance.
+   */
+  @Test
+  void aDestroyActsOnlyUnderTheLocksAndOnWhatItReadsThereSoNoWorkspaceOutlivesItsProject(
+      @TempDir Path dir) throws Exception {
+    var before = bystander();
+    var fix = workspaces.create(definition(), FIX, source(), null, "eng", TestOwners::of);
+    var teardown = new ProjectTeardown(shell, dir);
+    Workspaces.Destroy destroy = parts -> teardown.tearDown(PROJECT, parts);
+    var outwaited =
+        new Workspaces(
+            shell,
+            shell,
+            HeldLocks.pastEveryWait(),
+            SailPaths.locksDir(),
+            Workspaces.memoryOf(new HostDetector()),
+            url -> false);
+    var busy = new AtomicReference<Exception>();
+
+    HeldLocks.whileHeld(
+        SailPaths.locksDir().resolve(Workspaces.CREATE_LOCK),
+        () -> {
+          busy.set(
+              assertThrows(
+                  IllegalStateException.class,
+                  () ->
+                      outwaited.whileDestroying(
+                          PROJECT, List.of(fix.instance(), TEMPLATE), destroy)));
+          return null;
+        });
+    assertTrue(
+        busy.get().getMessage().contains("Project " + PROJECT + " is not destroyed: This runner"),
+        busy.get().getMessage());
+    assertTrue(new BoxInstances(shell).named(fix.instance()).isPresent());
+    assertTrue(new BoxInstances(shell).named(TEMPLATE).isPresent());
+
+    var second = workspaces.create(definition(), SECOND, source(), null, "eng", TestOwners::of);
+    var unseen =
+        assertThrows(
+            IllegalStateException.class,
+            () -> workspaces.whileDestroying(PROJECT, List.of(fix.instance(), TEMPLATE), destroy));
+    assertTrue(
+        unseen.getMessage().contains(second.instance() + " was made after"), unseen.getMessage());
+    assertTrue(new BoxInstances(shell).named(second.instance()).isPresent());
+
+    workspaces.whileDestroying(
+        PROJECT, List.of(fix.instance(), second.instance(), TEMPLATE), destroy);
+
+    var left = new BoxInstances(shell).all().stream().map(BoxInstances.Instance::name).toList();
+    assertFalse(left.contains(fix.instance()), String.valueOf(left));
+    assertFalse(left.contains(second.instance()), String.valueOf(left));
+    assertFalse(left.contains(TEMPLATE), String.valueOf(left));
+    assertEquals(before, bystander(), "the project's own container is untouched");
+  }
+
+  /**
+   * This host's Incus, except that a listing of every instance shows {@code instance} as Incus
+   * shows one it cannot render: its name, an Error status and no config.
+   */
+  private ShellExec unrendering(String instance) {
+    return new ShellExec() {
+      @Override
+      public Result exec(List<String> command)
+          throws IOException, InterruptedException, TimeoutException {
+        return rendered(command, shell.exec(command));
+      }
+
+      @Override
+      public Result exec(List<String> command, Path workDir, Duration timeout)
+          throws IOException, InterruptedException, TimeoutException {
+        return rendered(command, shell.exec(command, workDir, timeout));
+      }
+
+      @Override
+      public boolean isDryRun() {
+        return false;
+      }
+
+      private Result rendered(List<String> command, Result listed) {
+        if (!command.equals(List.of("incus", "list", "--format", "json")) || !listed.ok()) {
+          return listed;
+        }
+        var entries =
+            YamlUtil.parseList(listed.stdout()).stream()
+                .map(
+                    entry ->
+                        instance.equals(entry.get("name"))
+                            ? Map.<String, Object>of(
+                                "name",
+                                instance,
+                                "status",
+                                "Error",
+                                "status_code",
+                                400,
+                                "type",
+                                "container")
+                            : entry)
+                .toList();
+        return new Result(0, YamlUtil.dumpJsonValue(entries), listed.stderr());
+      }
+    };
   }
 
   @Test

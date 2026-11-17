@@ -18,7 +18,7 @@ import Testing
         let frames = try Dictionary(uniqueKeysWithValues: Goldens.frames().map { ($0.name, try decoded($0.wire)) })
         #expect(frames["Create"] == .create(SessionCreate(
             session: "lounge", command: ["bash", "-l"], workingDirectory: "/home/dev", project: "harbor",
-            room: "harbor-design", size: TerminalSize(columns: 132, rows: 43)
+            room: "harbor-design", size: TerminalSize(columns: 132, rows: 43), workspace: "dock"
         )))
         #expect(frames["Attach"] == .attach(session: "lounge", write: true))
         #expect(frames["Input"] == .input(sequence: 42, bytes: Array("ls -la\r".utf8)))
@@ -28,7 +28,9 @@ import Testing
         #expect(frames["ListSessions"] == .listSessions(after: "", limit: 16))
         #expect(frames["Sessions"] == .sessions(SessionPage(sessions: [lounge, shell], next: "shell")))
         #expect(frames["SessionInfo"] == .sessionInfo(lounge))
-        #expect(frames["IssueTicket"] == .issueTicket(action: .known(.open), target: "harbor", credential: "sail_uday"))
+        #expect(frames["IssueTicket"] == .issueTicket(
+            action: .known(.open), target: "harbor", credential: "sail_uday", workspace: "dock"
+        ))
         #expect(frames["Ticket"] == .ticket("tkt_harbor"))
         #expect(frames["TicketRefused"] == .ticketRefused(kind: .known(.notFound), remedy: [
             .words("Project 'harbor' is not in the catalog. Run '"),
@@ -86,12 +88,39 @@ import Testing
     @Test func everyFrameCutShortIsTruncatedNeverAFrame() throws {
         for (name, wire) in try Goldens.frames() {
             let payload = Array(wire.dropFirst(4))
-            let complete = name == "Err" ? try errWithoutRemedy(payload) : payload.count
+            let complete = name == "Err" ? try errWithoutRemedy(payload) : withoutWorkspace(name, payload)
             for end in 0 ..< payload.count where end != complete {
                 #expect(throws: TerminalWireError.truncated, "\(name) cut at \(end)") {
                     try FrameCodec.decode(payload: payload[..<end])
                 }
             }
+        }
+    }
+
+    /// The macOS lanes run the app against a pinned released host, whose sessions carry no place.
+    @Test func aSessionOrAPageWithoutItsPlacesIsInTheProjectsContainer() throws {
+        let info = Array(try golden("SessionInfo").dropFirst(4))
+        let page = Array(try golden("Sessions").dropFirst(4))
+        #expect(try FrameCodec.decode(payload: info[..<withoutWorkspace("SessionInfo", info)])
+            == .sessionInfo(SessionInfo(
+                name: "lounge", instanceID: "inst-1", live: true, attached: 2, writerFDE: "uday",
+                room: "harbor-design", command: ["claude", "--resume"]
+            )))
+        guard case let .sessions(older) = try FrameCodec.decode(payload: page[..<withoutWorkspace("Sessions", page)])
+        else {
+            Issue.record("a page without its places decodes as another frame")
+            return
+        }
+        #expect(older.sessions.map(\.workspace) == ["", ""])
+        #expect(older.next == "shell")
+    }
+
+    @Test func aPagePlacingOtherThanItsSessionsIsMalformed() throws {
+        var page = Array(try golden("Sessions").dropFirst(4))
+        let placed = withoutWorkspace("Sessions", page)
+        page.replaceSubrange(placed ..< placed + 4, with: [0, 0, 0, 3])
+        #expect(throws: TerminalWireError.malformed("a page places 3 sessions but holds 2")) {
+            try FrameCodec.decode(payload: page)
         }
     }
 
@@ -162,7 +191,8 @@ import Testing
 
 let lounge = SessionInfo(
     name: "lounge", instanceID: "inst-1", live: true, attached: 2, writerFDE: "uday",
-    room: "harbor-design", command: ["claude", "--resume"]
+    room: "harbor-design", command: ["claude", "--resume"], project: "harbor", workspace: "dock",
+    opener: "uday"
 )
 let shell = SessionInfo(
     name: "shell", instanceID: "inst-2", live: false, attached: 0, writerFDE: "", room: "", command: ["bash"]
@@ -194,6 +224,22 @@ func decodedLength(_ wire: [UInt8], at offset: Int) throws -> Int32 {
 /// Where an `Err` payload ends when it carries its message alone, as an older host writes it.
 func errWithoutRemedy(_ payload: [UInt8]) throws -> Int {
     1 + 4 + Int(try decodedLength(payload, at: 1))
+}
+
+/// Where `name`'s golden frame ends without its sessions' places: `lounge`'s in `dock` of `harbor`
+/// opened by `uday`, and `shell`'s in none.
+func withoutWorkspace(_ name: String, _ payload: [UInt8]) -> Int {
+    let lounge = field("harbor") + field("dock") + field("uday")
+    return switch name {
+    case "SessionInfo": payload.count - lounge
+    case "Sessions": payload.count - 4 - lounge - 3 * field("")
+    default: payload.count
+    }
+}
+
+/// The bytes a string field takes: its length and its UTF-8.
+func field(_ text: String) -> Int {
+    4 + text.utf8.count
 }
 
 /// The name of the host's `PtyMessage` record `frame` is.

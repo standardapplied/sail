@@ -8,12 +8,16 @@ package ai.singlr.sail.engine;
 import java.util.List;
 import java.util.Map;
 
-/** Owners of workspaces as tests give them: a person with an email, no token and no key. */
+/**
+ * Owners of workspaces as tests give them: a person with an email, no token and no key, whose id is
+ * {@code fde_<handle>}.
+ */
 public final class TestOwners {
 
   private TestOwners() {}
 
   public static WorkspaceOwner of(String handle) {
-    return new WorkspaceOwner(handle, handle, handle + "@sail.invalid", Map.of(), List.of());
+    return new WorkspaceOwner(
+        handle, handle, handle + "@sail.invalid", Map.of(), List.of(), "fde_" + handle);
   }
 }

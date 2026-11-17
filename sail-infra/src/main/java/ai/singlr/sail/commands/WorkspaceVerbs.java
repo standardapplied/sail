@@ -8,6 +8,8 @@ package ai.singlr.sail.commands;
 import ai.singlr.sail.api.HostOperations;
 import ai.singlr.sail.api.OperationsFactory;
 import ai.singlr.sail.api.ProjectSkills;
+import ai.singlr.sail.api.SessionYield;
+import ai.singlr.sail.api.WorkspaceDoors;
 import ai.singlr.sail.common.Remedied;
 import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.config.HostYaml;
@@ -28,6 +30,7 @@ import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.engine.WorkspaceOwner;
 import ai.singlr.sail.engine.WorkspaceTemplate;
 import ai.singlr.sail.engine.Workspaces;
+import ai.singlr.sail.identity.Actor;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -91,6 +94,40 @@ final class WorkspaceVerbs {
   /** The workspaces of this box, reading Incus for real and changing it unless {@code dryRun}. */
   static Workspaces workspaces(boolean dryRun) {
     return Workspaces.onThisBox(new ShellExecutor(dryRun));
+  }
+
+  /**
+   * {@code door} over this box's workspace doors ({@link WorkspaceDoors}), asked as this box's
+   * operator, so each verb is decided as Enter a workspace on the workspace's owner, a dry run
+   * ({@code dryRun}) too, which changes nothing and ends no terminal.
+   */
+  static <T> T entering(boolean dryRun, Door<T> door) throws Exception {
+    var doors =
+        new WorkspaceDoors(
+            workspaces(dryRun),
+            new ShellExecutor(dryRun),
+            WorkspaceVerbs::ownerOf,
+            dryRun ? SessionYield.NONE : new PtyHostYield(),
+            keeper());
+    return Actor.call(SailCommandLine.operator(), () -> door.through(doors));
+  }
+
+  /** This box's own person when it is a node, who keeps the workspaces nobody owns; else null. */
+  private static String keeper() {
+    var sync = HostSync.config();
+    return HostSync.isNode(sync) ? sync.handle() : null;
+  }
+
+  /** What a verb does through the workspace doors. */
+  @FunctionalInterface
+  interface Door<T> {
+    T through(WorkspaceDoors doors) throws Exception;
+  }
+
+  /** Refuses a create of workspace {@code name} of {@code project} its operator may not make. */
+  static void requireMaking(String project, String name) throws Exception {
+    var actor = SailCommandLine.operator();
+    WorkspaceDoors.requireEnter(actor, project, name, actor.handle(), keeper());
   }
 
   /**

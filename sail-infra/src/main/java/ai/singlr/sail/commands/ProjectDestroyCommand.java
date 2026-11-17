@@ -17,6 +17,7 @@ import ai.singlr.sail.engine.ProjectTeardown;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.ShellExecutor;
+import ai.singlr.sail.engine.Workspaces;
 import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -116,20 +117,24 @@ public final class ProjectDestroyCommand implements Runnable {
       confirm(yes, dryRun, json, name, purge, others.stream().map(Other::said).toList());
     }
 
-    var deleted = new ArrayList<String>();
-    for (var other : others) {
-      deleted.add(other.instance());
-    }
-    if (containerPresent) {
-      deleted.add(name);
-    }
-    if (!json) {
-      for (var instance : deleted) {
-        System.out.println();
-        System.out.println(Ansi.AUTO.string("  @|bold Deleting container|@ " + instance + "..."));
-      }
-    }
-    new ProjectTeardown(shell, SailPaths.projectsDir()).tearDown(name, deleted);
+    Workspaces.onThisBox(shells.apply(false), shell)
+        .whileDestroying(
+            name,
+            others.stream().map(Other::instance).toList(),
+            parts -> {
+              var deleted = new ArrayList<>(parts);
+              if (containerPresent) {
+                deleted.add(name);
+              }
+              if (!json) {
+                for (var instance : deleted) {
+                  System.out.println();
+                  System.out.println(
+                      Ansi.AUTO.string("  @|bold Deleting container|@ " + instance + "..."));
+                }
+              }
+              new ProjectTeardown(shell, SailPaths.projectsDir()).tearDown(name, deleted);
+            });
     var destroyed = purge ? purgeFromCatalog(erases, operator) : null;
 
     emitResult(containerPresent, dirPresent, destroyed);

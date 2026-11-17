@@ -13,6 +13,7 @@ import java.security.MessageDigest;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 
 /**
  * The tickets a host issued: each a record that the host decided its action on its target for the
@@ -29,10 +30,20 @@ final class PtyTickets {
   private static final long LIFE = PtyMessage.TICKET_LIFE.toNanos();
 
   /**
-   * What a presented ticket admits: {@code action} on {@code target}, for the credential whose hash
-   * is {@code holder}.
+   * What a presented ticket admits: {@code action} on {@code target}, in {@code workspace} of it
+   * for an open (blank for the project's own container), for the credential whose hash is {@code
+   * holder}.
    */
-  record Ticket(PtyMessage.TicketAction action, String target, String holder) {
+  record Ticket(PtyMessage.TicketAction action, String target, String holder, String workspace) {
+
+    Ticket {
+      workspace = Objects.toString(workspace, "");
+    }
+
+    /** A ticket to the project's own container, or to attach to a session. */
+    Ticket(PtyMessage.TicketAction action, String target, String holder) {
+      this(action, target, holder, "");
+    }
 
     @Override
     public String toString() {
@@ -49,7 +60,11 @@ final class PtyTickets {
       var opens = action == PtyMessage.TicketAction.OPEN;
       var covered =
           switch (message) {
-            case PtyMessage.Create m -> opens && opened == null && target.equals(m.project());
+            case PtyMessage.Create m ->
+                opens
+                    && opened == null
+                    && target.equals(m.project())
+                    && workspace.equals(m.workspace());
             case PtyMessage.Attach m -> m.session().equals(opens ? opened : target);
             case PtyMessage.Input m -> true;
             case PtyMessage.Resize m -> true;
@@ -62,7 +77,10 @@ final class PtyTickets {
           : new PtyMessage.Err(
               "This connection's ticket is to "
                   + (opens
-                      ? "open a session in project '" + target + "'"
+                      ? "open a session in "
+                          + (workspace.isBlank()
+                              ? "project '" + target + "'"
+                              : "workspace '" + workspace + "' of project '" + target + "'")
                       : "attach to session '" + target + "'")
                   + ", and it admits nothing else; ask the API for a ticket for that.");
     }

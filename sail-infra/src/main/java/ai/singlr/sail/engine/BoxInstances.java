@@ -28,13 +28,18 @@ import java.util.function.Predicate;
  * {@value #PROJECT_KEY} and {@value #WORKSPACE_KEY} of that pair; a template, the one named {@code
  * <project>--tmpl} that carries {@value #TEMPLATE_OF_KEY} from its launch; a stray, an instance
  * carrying either under another name (a hand copy); or plain, carrying neither, which is the
- * container of the project it is named after when the box holds one and otherwise not Sail's. Every
- * command that walks the box's instances reads them here, so none takes a workspace, a template or
- * a stray for a project.
+ * container of the project it is named after when the box holds one and otherwise not Sail's. Sail
+ * launches a project's own container carrying {@value #PROJECT_KEY} of its own name, so it is told
+ * positively from any other plain instance ({@link Instance#projectsOwn}). Every command that walks
+ * the box's instances reads them here, so none takes a workspace, a template or a stray for a
+ * project.
  */
 public final class BoxInstances {
 
-  /** The project a workspace instance belongs to. */
+  /**
+   * The project an instance belongs to: a workspace's, set at its copy, and a project's own
+   * container's, set at its launch.
+   */
   public static final String PROJECT_KEY = "user.sail.project";
 
   /** The workspace an instance is. */
@@ -157,6 +162,15 @@ public final class BoxInstances {
       return isWorkspaceOf(place) && key(SPEC_KEY).filter(place.specId()::equals).isPresent();
     }
 
+    /**
+     * Whether this is the own container of the project it is named after, told positively: plain,
+     * and carrying {@value #PROJECT_KEY} of its own name, as Sail's launch writes it. An instance
+     * Incus lists without its config, as it lists one it cannot render, never is.
+     */
+    public boolean projectsOwn() {
+      return kind() instanceof Plain && key(PROJECT_KEY).filter(name()::equals).isPresent();
+    }
+
     /** Whether this is a plain instance, the only kind a project's own container is. */
     public boolean plain() {
       return kind() instanceof Plain;
@@ -201,12 +215,18 @@ public final class BoxInstances {
   }
 
   /**
-   * Every whole workspace {@code handle} owns, running or not: what reaches a person's workspaces
-   * when their key or git token changes.
+   * Every whole workspace the person whose id is {@code ownerId} owns, by the id its label stores,
+   * running or not: what reaches a person's workspaces when their key or git token changes.
    */
-  public List<Instance> wholeWorkspacesOf(String handle)
+  public List<Instance> wholeWorkspacesOf(String ownerId)
       throws IOException, InterruptedException, TimeoutException {
-    return all().stream().filter(wholeWorkspaceOf(handle)).toList();
+    return all().stream()
+        .filter(
+            i ->
+                i.kind() instanceof Workspace workspace
+                    && workspace.ready()
+                    && i.key(OWNER_ID_KEY).filter(id -> id.equals(ownerId)).isPresent())
+        .toList();
   }
 
   /** Whether an instance is a whole workspace {@code handle} owns. */

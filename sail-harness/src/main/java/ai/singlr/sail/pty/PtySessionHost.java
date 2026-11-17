@@ -850,7 +850,11 @@ public final class PtySessionHost implements AutoCloseable {
    * this box ({@link PtyAdmission#box}), as attaching needs operating the opener's, and hold the
    * project when the session names one ({@link #projectRefusal}).
    */
-  private Refusal openRefusal(String project, PtyIdentity.Person who) {
+  private Refusal openRefusal(String project, String workspace, PtyIdentity.Person who) {
+    if (!workspace.isBlank()) {
+      var unheld = projectRefusal(project, who);
+      return unheld != null ? unheld : workspaceRefusal(project, workspace, who);
+    }
     try {
       admission.box(who);
     } catch (IOException refused) {
@@ -891,7 +895,12 @@ public final class PtySessionHost implements AutoCloseable {
     var target = request.target();
     try {
       switch (request.action()) {
-        case OPEN -> NameValidator.requireValidProjectName(target);
+        case OPEN -> {
+          NameValidator.requireValidProjectName(target);
+          if (!request.workspace().isBlank()) {
+            NameValidator.requireValidWorkspaceName(request.workspace());
+          }
+        }
         case ATTACH -> NameValidator.requireValidSessionName(target);
       }
     } catch (IllegalArgumentException bad) {
@@ -910,7 +919,7 @@ public final class PtySessionHost implements AutoCloseable {
     }
     var refused =
         switch (request.action()) {
-          case OPEN -> openRefusal(target, who);
+          case OPEN -> openRefusal(target, request.workspace(), who);
           case ATTACH -> attachRefusal(target, sessions.get(target), who);
         };
     if (refused != null) {
@@ -919,7 +928,7 @@ public final class PtySessionHost implements AutoCloseable {
     try {
       return new PtyMessage.Ticket(
           tickets.issue(
-              new PtyTickets.Ticket(request.action(), target, holder),
+              new PtyTickets.Ticket(request.action(), target, holder, request.workspace()),
               network.clock().getAsLong()));
     } catch (IOException full) {
       return new PtyMessage.TicketRefused(PtyMessage.TicketRefusal.LIMITED, Remedied.whole(full));
@@ -1012,7 +1021,8 @@ public final class PtySessionHost implements AutoCloseable {
     var project = origin.project();
     return project == null || project.isBlank()
         ? origin.command()
-        : ai.singlr.sail.engine.ContainerExec.asDevUserTty(project, env, origin.command());
+        : ai.singlr.sail.engine.ContainerExec.asDevUserTty(
+            origin.instance(), env, origin.command());
   }
 
   /**
@@ -1044,18 +1054,35 @@ public final class PtySessionHost implements AutoCloseable {
       if (m.project() != null && !m.project().isBlank()) {
         NameValidator.requireValidProjectName(m.project());
       }
+      if (!m.workspace().isBlank()) {
+        if (m.project() == null || m.project().isBlank()) {
+          throw new IllegalArgumentException(
+              "Workspace '" + m.workspace() + "' names no project; a workspace is a project's.");
+        }
+        NameValidator.requireValidWorkspaceName(m.workspace());
+      }
       requireValidGeometry(m.cols(), m.rows());
       cwd = requireValidCwd(m.cwd());
     } catch (IllegalArgumentException bad) {
       log("refused", who.fde(), m.session(), bad.getMessage());
       return new PtyMessage.Err(Remedied.whole(bad));
     }
-    var unopened = openRefusal(m.project(), who);
+    var unopened = openRefusal(m.project(), m.workspace(), who);
     if (unopened != null) {
       log("refused", who.fde(), m.session(), "not opened");
       return unopened.err();
     }
-    if (m.project() != null && !m.project().isBlank()) {
+    if (!m.workspace().isBlank()) {
+      try {
+        admission.enter(m.project(), m.workspace(), who);
+      } catch (IOException refused) {
+        log("refused", who.fde(), m.session(), "workspace not entered");
+        return new PtyMessage.Err(Remedied.whole(refused));
+      } catch (RuntimeException unavailable) {
+        log("workspace-check-failed", who.fde(), m.project(), unavailable.toString());
+        return new PtyMessage.Err(UNSERVED);
+      }
+    } else if (m.project() != null && !m.project().isBlank()) {
       try {
         admission.instance(m.project());
       } catch (IOException refused) {
@@ -1143,7 +1170,8 @@ public final class PtySessionHost implements AutoCloseable {
               who.fde(),
               m.project(),
               room,
-              folder.command(m.command()));
+              folder.command(m.command()),
+              m.workspace());
       var env = childEnv(room, version);
       env.putAll(folder.env());
       var argv = new ArrayList<>(handoff.shim().apply(files.exit()));
@@ -1175,6 +1203,28 @@ public final class PtySessionHost implements AutoCloseable {
    * names none: a project must be one the caller holds on this box ({@link PtyAdmission#project}).
    * A store that cannot answer opens nothing and keeps the connection, said as {@link #UNSERVED}.
    */
+  /**
+   * Why {@code who} may not enter workspace {@code workspace} of {@code project} ({@link
+   * PtyAdmission#workspace}): not found when the project has no such workspace here, refused when
+   * it is not theirs and they are no admin, unavailable when the store cannot answer.
+   */
+  private Refusal workspaceRefusal(String project, String workspace, PtyIdentity.Person who) {
+    try {
+      admission.workspace(project, workspace, who);
+      return null;
+    } catch (PtyAdmission.Absent absent) {
+      return new Refusal(
+          PtyMessage.TicketRefusal.NOT_FOUND, new PtyMessage.Err(Remedied.whole(absent)), false);
+    } catch (IOException refused) {
+      log("refused", who.fde(), project + "/" + workspace, "not their workspace");
+      return new Refusal(
+          PtyMessage.TicketRefusal.FORBIDDEN, new PtyMessage.Err(Remedied.whole(refused)), false);
+    } catch (RuntimeException unavailable) {
+      log("workspace-check-failed", who.fde(), project, unavailable.toString());
+      return new Refusal(PtyMessage.TicketRefusal.UNAVAILABLE, new PtyMessage.Err(UNSERVED), false);
+    }
+  }
+
   private Refusal projectRefusal(String project, PtyIdentity.Person who) {
     if (project == null || project.isBlank()) {
       return null;
@@ -1244,7 +1294,10 @@ public final class PtySessionHost implements AutoCloseable {
         session.attachedCount(),
         session.writerFde(),
         session.origin().room(),
-        session.origin().command());
+        session.origin().command(),
+        session.origin().project(),
+        session.origin().workspace(),
+        session.ownerFde());
   }
 
   private synchronized PtyMessage kill(String name, PtyIdentity who) {
