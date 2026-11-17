@@ -15,12 +15,16 @@ struct Script: Decodable, Equatable {
     var size: [Int]
     var command: [String]
     var steps: [Step]
+    /// Ends the session while its `Create` is still unanswered, as closing a tab then does, and runs
+    /// no step.
+    var endWhileOpening: Bool
 
     init(from decoder: any Decoder) throws {
         let fields = try decoder.container(keyedBy: Keys.self)
         size = try fields.decodeIfPresent([Int].self, forKey: .size) ?? [80, 24]
         command = try fields.decodeIfPresent([String].self, forKey: .command) ?? []
         steps = try fields.decode([Step].self, forKey: .steps)
+        endWhileOpening = try fields.decodeIfPresent(Bool.self, forKey: .endWhileOpening) ?? false
         guard size.count == 2, size.allSatisfy({ (1 ... 65535).contains($0) }) else {
             throw DecodingError.dataCorruptedError(forKey: .size, in: fields, debugDescription: "size is [columns, rows]")
         }
@@ -31,7 +35,7 @@ struct Script: Decodable, Equatable {
     }
 
     private enum Keys: String, CodingKey {
-        case size, command, steps
+        case size, command, steps, endWhileOpening
     }
 }
 
@@ -54,6 +58,14 @@ enum Step: Decodable, Equatable, CustomStringConvertible {
     case attach
     /// Kills the local host the probe owns, as a crash would, and starts another.
     case killHost
+    /// Tries at once, as Reconnect Now does.
+    case reconnectNow
+    /// Does nothing for this many seconds, as a person away from the keyboard: the GCP proof's
+    /// network comes back while a parked session waits.
+    case hold(Int)
+    /// Closes the session as a tab is closed: this client's part let go, then the session ended at
+    /// its host on a connection of its own, through the door it came through.
+    case close
     /// Waits for the session to reach a phase: attached, detached, parked or ended, optionally
     /// ended for a reason containing the text after `ended:`.
     case phase(String, within: Int)
@@ -82,6 +94,9 @@ enum Step: Decodable, Equatable, CustomStringConvertible {
         case .detach: self = .detach
         case .attach: self = .attach
         case .killHost: self = .killHost
+        case .reconnectNow: self = .reconnectNow
+        case .hold: self = .hold(try fields.decode(Int.self, forKey: key))
+        case .close: self = .close
         case .phase: self = .phase(try fields.decode(String.self, forKey: key), within: within)
         case .measure: self = .measure(try fields.decode(Int.self, forKey: key))
         case .upload: self = .upload(path: try fields.decode(String.self, forKey: key), within: within)
@@ -100,6 +115,9 @@ enum Step: Decodable, Equatable, CustomStringConvertible {
         case .detach: "detach"
         case .attach: "attach"
         case .killHost: "kill the host as a crash would and start another"
+        case .reconnectNow: "reconnect now"
+        case let .hold(seconds): "hold \(seconds) s"
+        case .close: "close, ending the session at its host"
         case let .phase(phase, within): "phase \(phase) within \(within) s"
         case let .measure(keys): "measure \(keys) echoed keys"
         case let .upload(path, within): "upload \(URL(filePath: path).lastPathComponent) within \(within) s"
@@ -107,6 +125,6 @@ enum Step: Decodable, Equatable, CustomStringConvertible {
     }
 
     private enum Keys: String, CodingKey {
-        case type, wait, within, resize, snapshot, same, drop, detach, attach, killHost, phase, measure, upload
+        case type, wait, within, resize, snapshot, same, drop, detach, attach, killHost, reconnectNow, hold, close, phase, measure, upload
     }
 }

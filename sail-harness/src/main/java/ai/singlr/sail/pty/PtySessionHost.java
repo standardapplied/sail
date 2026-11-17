@@ -159,16 +159,18 @@ public final class PtySessionHost implements AutoCloseable {
       Optional<InetSocketAddress> tcp,
       LongSupplier clock,
       PtyIdentity.Holders holders,
-      Remedy closed) {
+      PtyMessage.Err closed) {
     public static final Network NONE =
         closed(
-            Remedy.of(
-                "This host listens for no terminal over the network. Name an address with '",
-                Remedy.sail("host config set terminal-listen", "<address>:<port>"),
-                "' and restart the sail-pty-host service."));
+            new PtyMessage.Err(
+                "This host listens for no terminal over the network.",
+                Remedy.of(
+                    "Name an address with '",
+                    Remedy.sail("host config set terminal-listen", "<address>:<port>"),
+                    "' and restart the sail-pty-host service.")));
 
     /** Listening nowhere else, a ticket request hearing {@code why}. */
-    public static Network closed(Remedy why) {
+    public static Network closed(PtyMessage.Err why) {
       return new Network(Optional.empty(), System::nanoTime, PtyIdentity.Holders.NONE, why);
     }
 
@@ -244,7 +246,7 @@ public final class PtySessionHost implements AutoCloseable {
           ? new PtyMessage.TicketRefused(
               PtyMessage.TicketRefusal.NOT_FOUND,
               "There is no session '" + target + "' on this box that you may attach.")
-          : new PtyMessage.TicketRefused(kind, err.detail());
+          : new PtyMessage.TicketRefused(kind, err);
     }
   }
 
@@ -695,7 +697,7 @@ public final class PtySessionHost implements AutoCloseable {
     try {
       return new Admission(new Credential.Hello(token), identify(token), Bound.NOTHING);
     } catch (IOException refused) {
-      reply(channel, new PtyMessage.Err(Remedied.whole(refused)));
+      reply(channel, PtyMessage.Err.of(refused));
       return null;
     }
   }
@@ -722,7 +724,7 @@ public final class PtySessionHost implements AutoCloseable {
         reply(channel, new PtyMessage.Welcome(bootId));
         while (true) {
           var message = PtyWire.read(channel);
-          var uncovered = bound.refusal(message, opened);
+          var uncovered = bound.refusal(message, opened, writing(attached, subscriberId));
           if (uncovered != null) {
             log("refused", principal, "-", "outside its ticket");
             reply(channel, uncovered);
@@ -919,8 +921,7 @@ public final class PtySessionHost implements AutoCloseable {
       admission.box(who);
     } catch (IOException refused) {
       log("refused", who.fde(), project, "not this box's person");
-      return new Refusal(
-          PtyMessage.TicketRefusal.FORBIDDEN, new PtyMessage.Err(Remedied.whole(refused)), false);
+      return new Refusal(PtyMessage.TicketRefusal.FORBIDDEN, PtyMessage.Err.of(refused), false);
     } catch (RuntimeException unavailable) {
       log("box-check-failed", who.fde(), project, unavailable.toString());
       return new Refusal(PtyMessage.TicketRefusal.UNAVAILABLE, new PtyMessage.Err(UNSERVED), false);
@@ -964,7 +965,7 @@ public final class PtySessionHost implements AutoCloseable {
         case ATTACH -> NameValidator.requireValidSessionName(target);
       }
     } catch (IllegalArgumentException bad) {
-      return new PtyMessage.TicketRefused(PtyMessage.TicketRefusal.INVALID, Remedied.whole(bad));
+      return new PtyMessage.TicketRefused(PtyMessage.TicketRefusal.INVALID, PtyMessage.Err.of(bad));
     }
     var holder = Secrets.hash(request.credential());
     PtyIdentity.Person who;
@@ -972,7 +973,7 @@ public final class PtySessionHost implements AutoCloseable {
       who = network.holders().holder(holder);
     } catch (IOException refused) {
       return new PtyMessage.TicketRefused(
-          PtyMessage.TicketRefusal.FORBIDDEN, Remedied.whole(refused));
+          PtyMessage.TicketRefusal.FORBIDDEN, PtyMessage.Err.of(refused));
     } catch (RuntimeException unavailable) {
       log("holder-check-failed", "?", target, unavailable.toString());
       return new PtyMessage.TicketRefused(PtyMessage.TicketRefusal.UNAVAILABLE, UNSERVED);
@@ -991,21 +992,28 @@ public final class PtySessionHost implements AutoCloseable {
               new PtyTickets.Ticket(request.action(), target, holder, request.workspace()),
               network.clock().getAsLong()));
     } catch (IOException full) {
-      return new PtyMessage.TicketRefused(PtyMessage.TicketRefusal.LIMITED, Remedied.whole(full));
+      return new PtyMessage.TicketRefused(
+          PtyMessage.TicketRefusal.LIMITED, PtyMessage.Err.of(full));
     }
   }
 
   /**
    * What a connection may do beyond what its person may: everything on the unix socket ({@link
    * #NOTHING}), and on TCP what its ticket admits ({@link PtyTickets.Ticket#refusal}). Asked of
-   * every frame before it is served, with the session the connection opened, if any.
+   * every frame before it is served, with the session the connection opened and the session whose
+   * write token it holds, if any.
    */
   @FunctionalInterface
   interface Bound {
-    Bound NOTHING = (message, opened) -> null;
+    Bound NOTHING = (message, opened, writing) -> null;
 
     /** Why {@code message} lies outside what this connection may do, or null when it does not. */
-    PtyMessage.Err refusal(PtyMessage message, String opened);
+    PtyMessage.Err refusal(PtyMessage message, String opened, String writing);
+  }
+
+  /** The session whose write token subscriber {@code subscriberId} of {@code attached} holds. */
+  private static String writing(PtySession attached, long subscriberId) {
+    return attached != null && attached.writerId() == subscriberId ? attached.name() : null;
   }
 
   /**
@@ -1151,7 +1159,7 @@ public final class PtySessionHost implements AutoCloseable {
       cwd = requireValidCwd(m.cwd());
     } catch (IllegalArgumentException bad) {
       log("refused", who.fde(), m.session(), bad.getMessage());
-      return new PtyMessage.Err(Remedied.whole(bad));
+      return PtyMessage.Err.of(bad);
     }
     var unopened = openRefusal(m.project(), m.workspace(), who);
     if (unopened != null) {
@@ -1163,7 +1171,7 @@ public final class PtySessionHost implements AutoCloseable {
         admission.enter(m.project(), m.workspace(), who);
       } catch (IOException refused) {
         log("refused", who.fde(), m.session(), "workspace not entered");
-        return new PtyMessage.Err(Remedied.whole(refused));
+        return told(refused, PtyMessage.TicketRefusal.FORBIDDEN, who, m.session()).err();
       } catch (RuntimeException unavailable) {
         log("workspace-check-failed", who.fde(), m.project(), unavailable.toString());
         return new PtyMessage.Err(UNSERVED);
@@ -1173,7 +1181,7 @@ public final class PtySessionHost implements AutoCloseable {
         admission.instance(m.project());
       } catch (IOException refused) {
         log("refused", who.fde(), m.session(), "not the project's instance");
-        return new PtyMessage.Err(Remedied.whole(refused));
+        return told(refused, PtyMessage.TicketRefusal.FORBIDDEN, who, m.session()).err();
       } catch (RuntimeException unavailable) {
         log("instance-check-failed", who.fde(), m.project(), unavailable.toString());
         return new PtyMessage.Err(UNSERVED);
@@ -1230,8 +1238,8 @@ public final class PtySessionHost implements AutoCloseable {
         admission.room(room, m.project(), who);
       } catch (IllegalArgumentException | IOException refused) {
         return new PtyMessage.Err(
-            Remedy.of("Refusing room for session '" + m.session() + "': ")
-                .then(Remedied.whole(refused)));
+            "Refusing room for session '" + m.session() + "': " + Remedied.reasonOf(refused),
+            Remedied.remedyOf(refused));
       }
     }
     PtyAdmission.Folder folder;
@@ -1240,8 +1248,8 @@ public final class PtySessionHost implements AutoCloseable {
     } catch (IOException refused) {
       log("refused", who.fde(), m.session(), "folder");
       return new PtyMessage.Err(
-          Remedy.of("Refusing folder for session '" + m.session() + "': ")
-              .then(Remedied.whole(refused)));
+          "Refusing folder for session '" + m.session() + "': " + Remedied.reasonOf(refused),
+          Remedied.remedyOf(refused));
     }
     if (existing != null) {
       remove(m.session(), existing);
@@ -1286,15 +1294,11 @@ public final class PtySessionHost implements AutoCloseable {
     } catch (IOException e) {
       deleteFiles(files, who.fde(), m.session());
       return new PtyMessage.Err(
-          Remedy.of("Could not start session '" + m.session() + "': ").then(Remedied.whole(e)));
+          "Could not start session '" + m.session() + "': " + Remedied.reasonOf(e),
+          Remedied.remedyOf(e));
     }
   }
 
-  /**
-   * Why {@code who} may not open a terminal in {@code project}, or null when it may or the session
-   * names none: a project must be one the caller holds on this box ({@link PtyAdmission#project}).
-   * A store that cannot answer opens nothing and keeps the connection, said as {@link #UNSERVED}.
-   */
   /**
    * Why {@code who} may not enter workspace {@code workspace} of {@code project} ({@link
    * PtyAdmission#workspace}): not found when the project has no such workspace here, refused when
@@ -1305,16 +1309,34 @@ public final class PtySessionHost implements AutoCloseable {
       admission.workspace(project, workspace, who);
       return null;
     } catch (PtyAdmission.Absent absent) {
-      return new Refusal(
-          PtyMessage.TicketRefusal.NOT_FOUND, new PtyMessage.Err(Remedied.whole(absent)), false);
+      return new Refusal(PtyMessage.TicketRefusal.NOT_FOUND, PtyMessage.Err.of(absent), false);
     } catch (IOException refused) {
       log("refused", who.fde(), project + "/" + workspace, "not their workspace");
-      return new Refusal(
-          PtyMessage.TicketRefusal.FORBIDDEN, new PtyMessage.Err(Remedied.whole(refused)), false);
+      return told(refused, PtyMessage.TicketRefusal.FORBIDDEN, who, project + "/" + workspace);
     } catch (RuntimeException unavailable) {
       log("workspace-check-failed", who.fde(), project, unavailable.toString());
       return new Refusal(PtyMessage.TicketRefusal.UNAVAILABLE, new PtyMessage.Err(UNSERVED), false);
     }
+  }
+
+  /**
+   * What a person reads of an admission's {@code failure}, as a refusal of {@code kind}: its own
+   * words when they were written for a person ({@link Remedied}); else, and for {@link
+   * PtyAdmission.Unavailable}, the runner could not read its workspaces, unavailable, and what the
+   * tool said goes to this host's log under {@code target}, never to the person.
+   */
+  private Refusal told(
+      IOException failure, PtyMessage.TicketRefusal kind, PtyIdentity.Person who, String target) {
+    if (failure instanceof Remedied && !(failure instanceof PtyAdmission.Unavailable)) {
+      return new Refusal(kind, PtyMessage.Err.of(failure), false);
+    }
+    var cause = java.util.Objects.requireNonNullElse(failure.getCause(), failure);
+    log("unavailable", who.fde(), target, cause.toString());
+    var unavailable =
+        failure instanceof PtyAdmission.Unavailable said
+            ? said
+            : new PtyAdmission.Unavailable(failure);
+    return new Refusal(PtyMessage.TicketRefusal.UNAVAILABLE, PtyMessage.Err.of(unavailable), false);
   }
 
   private Refusal projectRefusal(String project, PtyIdentity.Person who) {
@@ -1325,8 +1347,7 @@ public final class PtySessionHost implements AutoCloseable {
       admission.project(project, who);
       return null;
     } catch (IOException refused) {
-      return new Refusal(
-          PtyMessage.TicketRefusal.NOT_FOUND, new PtyMessage.Err(Remedied.whole(refused)), false);
+      return new Refusal(PtyMessage.TicketRefusal.NOT_FOUND, PtyMessage.Err.of(refused), false);
     } catch (RuntimeException unavailable) {
       log("project-check-failed", who.fde(), project, unavailable.toString());
       return new Refusal(PtyMessage.TicketRefusal.UNAVAILABLE, new PtyMessage.Err(UNSERVED), false);

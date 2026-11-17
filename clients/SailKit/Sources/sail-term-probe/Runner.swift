@@ -96,6 +96,16 @@ struct Runner {
             guard let host else { throw ProbeError("killHost needs --host-binary, so the probe owns the host") }
             host.crash()
             try await host.start()
+        case .reconnectNow:
+            session.reconnectNow()
+        case let .hold(seconds):
+            try await Task.sleep(for: .seconds(seconds))
+        case .close:
+            let outcome = await session.end()
+            session.close()
+            if case let .unconfirmed(said) = outcome {
+                throw ProbeError("not ended: " + said.joined(separator: " "))
+            }
         case let .phase(name, within):
             try await follower.until(within: within, "reached \(name)") { Self.matches(session.state.phase, name) }
         case .measure, .upload:

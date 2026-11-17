@@ -85,8 +85,8 @@ public final class TerminalTickets {
               ticket,
               ListenConfig.hostPort(address),
               DateTimeUtils.format(DateTimeUtils.now().plus(PtyMessage.TICKET_LIFE)));
-      case PtyMessage.TicketRefused(var kind, var detail) ->
-          throw new ApiException(code(kind), detail.plain());
+      case PtyMessage.TicketRefused(var kind, var reason, var remedy) ->
+          throw new ApiException(code(kind), reason, remedy);
       default ->
           throw new ApiException(
               ErrorCode.TERMINAL_UNAVAILABLE, "The terminal host answered no ticket.");

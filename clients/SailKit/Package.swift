@@ -54,7 +54,7 @@ let package = Package(
         ),
         .target(
             name: "SailKitTestSupport",
-            dependencies: ["SailAPI"],
+            dependencies: ["SailAPI", "SailTerminal", "SailTerminalWire"],
             path: "Tests/SailKitTestSupport",
             swiftSettings: strict
         ),
@@ -84,7 +84,7 @@ let package = Package(
         ),
         .testTarget(
             name: "SailTerminalTests",
-            dependencies: ["SailTerminal", "SailTerminalWire", "SailVT", "sail-term-probe", "SailKitTestSupport"],
+            dependencies: ["SailMeasures", "SailSurface", "SailTerminal", "SailTerminalWire", "SailVT", "sail-term-probe", "SailKitTestSupport"],
             swiftSettings: strict
         ),
         .testTarget(

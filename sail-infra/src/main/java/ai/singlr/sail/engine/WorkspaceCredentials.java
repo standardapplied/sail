@@ -112,7 +112,7 @@ final class WorkspaceCredentials {
         esac
       done
       if [ -e /home/dev/.config/gh/hosts.yml ]; then add "a gh login"; fi
-      if [ -n "$held" ]; then echo "$held" >&2; exit 1; fi
+      if [ -n "$held" ]; then echo "$held"; exit 1; fi
       """;
 
   private static final Duration HELD_TIMEOUT = Duration.ofMinutes(10);
@@ -138,7 +138,7 @@ final class WorkspaceCredentials {
       var project =
           template.substring(0, template.length() - BoxInstances.TEMPLATE_SUFFIX.length());
       throw Remedied.io(
-          template + " was not snapshotted: it still holds " + held.stderr().strip() + ".",
+          template + " was not snapshotted: it still holds " + held.stdout().strip() + ".",
           Remedy.of(
               "Remove what wrote it, a step of "
                   + project

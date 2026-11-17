@@ -32,7 +32,7 @@ import Testing
             action: .known(.open), target: "harbor", credential: "sail_uday", workspace: "dock"
         ))
         #expect(frames["Ticket"] == .ticket("tkt_harbor"))
-        let chunk = (0 ..< FrameCodec.maxPutChunk).map { UInt8(truncatingIfNeeded: $0) }
+        let chunk = (0 ..< 64 * 1024).map { UInt8(truncatingIfNeeded: $0) }
         #expect(frames["PutBegin"] == .putBegin(id: 7, name: "", size: 64 << 20))
         #expect(frames["PutChunk"] == .putChunk(id: 7, offset: .max, bytes: chunk))
         if case let .putEnd(id, sha256) = frames["PutEnd"] {
@@ -44,15 +44,15 @@ import Testing
         #expect(frames["PutAck"] == .putAck(id: 7, received: 65536))
         #expect(frames["PutStored"] == .putStored(id: 7, path: "/tmp/sail-paste/inst-1/1-shot.png"))
         #expect(frames["PutRefused"] == .putRefused(id: -1, kind: .known(.tooLarge), limit: 64 << 20))
-        #expect(frames["TicketRefused"] == .ticketRefused(kind: .known(.notFound), remedy: [
-            .words("Project 'harbor' is not in the catalog. Run '"),
+        #expect(frames["TicketRefused"] == .ticketRefused(kind: .known(.notFound), reason: "Project 'harbor' is not in the catalog.", remedy: [
+            .words("Run '"),
             .command(run: .known(.sail), verb: "sync", args: []),
             .words("'."),
         ]))
         #expect(frames["Err"] == .refused(HostRefusal(
-            message: "You do not hold the write token. Run sail session take lounge to take it.",
+            message: "You do not hold the write token.",
             remedy: [
-                .words("You do not hold the write token. Run "),
+                .words("Run "),
                 .command(run: .known(.sail), verb: "session", args: ["take", "lounge"]),
                 .words(" to take it."),
             ]
@@ -73,9 +73,9 @@ import Testing
         grown.replaceSubrange(runner, with: Array("TUGS".utf8))
         let frame = try decoded(grown)
         #expect(frame == .refused(HostRefusal(
-            message: "You do not hold the write token. Run sail session take lounge to take it.",
+            message: "You do not hold the write token.",
             remedy: [
-                .words("You do not hold the write token. Run "),
+                .words("Run "),
                 .command(run: .unknown("TUGS"), verb: "session", args: ["take", "lounge"]),
                 .words(" to take it."),
             ]

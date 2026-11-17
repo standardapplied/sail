@@ -1,0 +1,38 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/v1/projects/harbor/workspaces"
+  },
+  "response": {
+    "body": {
+      "project": "harbor",
+      "schema_version": 1,
+      "workspaces": [
+        {
+          "instance": "harbor",
+          "name": "main",
+          "state": "not_created"
+        },
+        {
+          "instance": "harbor-dock",
+          "name": "dock",
+          "owner": "uday",
+          "state": "running"
+        },
+        {
+          "instance": "harbor-pier",
+          "name": "pier",
+          "owner": "uday",
+          "state": "stopped"
+        },
+        {
+          "instance": "harbor-quay",
+          "name": "quay",
+          "owner": "ana",
+          "state": "running"
+        }
+      ]
+    },
+    "status": 200
+  }
+}

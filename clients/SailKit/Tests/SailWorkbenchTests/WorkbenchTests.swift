@@ -256,6 +256,41 @@ import Testing
         #expect(restored.panes.values.first { $0.session == "mac-stray" }?.place == .thisMac(folder: "/home/u"))
     }
 
+    /// A tab in a workspace says where it is, "acme · try", whatever its program titles itself;
+    /// the person's name for it wins. Its sessions are named apart from this Mac's, a new tab from
+    /// it opens on this Mac at home, and a relaunch, which lists this Mac's live sessions only,
+    /// m10: two unnamed tabs in one workspace are told apart; `onRunner` is the one runner-or-local
+    /// decision.
+    @Test func twoTabsInOneWorkspaceAreToldApart() {
+        var bench = Workbench()
+        let place = Place.workspace(project: "acme", name: "try")
+        _ = bench.newTab(session: "app-1", place: place)
+        _ = bench.newTab(session: "app-2", place: place)
+        _ = bench.newTab(session: "mac-1", place: .thisMac(folder: "/"))
+        _ = bench.newTab(session: "app-3", place: place)
+        #expect(bench.tabs.map { bench.title(of: $0.id) } == ["acme · try", "acme · try 2", Workbench.untitled, "acme · try 3"])
+        #expect(place.onRunner && !Place.thisMac(folder: "/").onRunner)
+    }
+
+    /// brings back none of its panes.
+    @Test func aWorkspaceTabSaysWhereItIsAndStaysOutOfThisMacs() throws {
+        var bench = Self.bench()
+        let place = Place.workspace(project: "acme", name: "try")
+        let session = place.newSessionName
+        let pane = bench.newTab(session: session, place: place)
+        let tab = try #require(bench.selectedTab)
+        bench.setTitle("runner@acme: ~", of: pane)
+        #expect(bench.title(of: tab.id) == "acme · try")
+        #expect(bench.title(of: bench.tabs[0].id) == Workbench.untitled)
+        bench.rename(tab.id, to: "deploy")
+        #expect(bench.title(of: tab.id) == "deploy")
+        #expect(session.hasPrefix(Place.runnerSessions) && !session.hasPrefix(Place.thisMacSessions))
+        #expect(place.folder.isEmpty)
+        #expect(bench.folderForNewPane(hostNames: [], isFolder: { _ in true }) == nil)
+        let restored = Workbench.restore(bench.arrangement, live: ["mac-t1"], home: "/home/u")
+        #expect(restored.panes.values.map(\.session) == ["mac-t1"])
+    }
+
     @Test func nothingLiveRestoresNothingAndAnUnknownVersionIsNotTrusted() throws {
         var bench = Self.bench(tabs: 2)
         #expect(Workbench.restore(bench.arrangement, live: [], home: "/").tabs.isEmpty)

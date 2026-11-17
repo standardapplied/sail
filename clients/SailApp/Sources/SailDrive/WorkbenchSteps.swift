@@ -42,6 +42,11 @@ extension Driver {
         if let answer = step.sheet {
             return await sheet(answer, asking: step.asking, within: step.seconds ?? 5)
         }
+        if let words = step.sheetShows {
+            let said = { Self.texts(self.shell.window.attachedSheet?.contentView).joined(separator: " ") }
+            let shown = await waitUntil(step.seconds ?? 5) { said().contains(words) }
+            return (shown, "the sheet says '\(said())'")
+        }
         if step.remember == true {
             remembered = pane?.name
             return (remembered != nil, "kept \(remembered ?? "no session")")
@@ -329,7 +334,7 @@ extension Driver {
         if let asking, !words.contains(asking) { return (false, "the sheet says '\(words)', not '\(asking)'") }
         guard let button = Self.button(answer, in: sheet.contentView) else { return (false, "the sheet has no \(answer): '\(words)'") }
         button.performClick(nil)
-        let gone = await waitUntil(5) { self.shell.window.attachedSheet == nil }
+        let gone = await waitUntil(5) { self.shell.window.attachedSheet !== sheet }
         return (gone, "the sheet said '\(words)'; \(answer)")
     }
 
@@ -449,6 +454,7 @@ extension Driver {
         panes4["app CPU share at the measure's start, %"] = shares.app
         await Self.processes().forEach { print("panes4 ps: \($0)") }
         floods.forEach { $0.terminal.resetLatency() }
+        let measuredFrom = CACurrentMediaTime()
         let framesBefore = floods.map { Self.committed($0.terminal) }
         let (ok, said) = await measure(200, interval: 50, name: "panes4-echo")
         print(String(format: "panes4 phase echo measured %.3f", CACurrentMediaTime()))
@@ -462,11 +468,13 @@ extension Driver {
         let keyToEcho = presented ? echoed.keyToEcho.p95 : echoed.keyToEchoEstimated.p95
         let marker = "xxxxxxxxxxxxxxxxxxxxflood-2"
         var ran = [LatencyFigures?](repeating: nil, count: floods.count), frames = [Int](repeating: 0, count: floods.count)
+        var lasted = [Double](repeating: 0, count: floods.count)
         let shown = await waitUntil(180) {
             for (index, view) in floods.enumerated() where ran[index] == nil && Self.shows(view, marker) {
                 print(String(format: "panes4 phase flood %d shown to its end %.3f", index + 1, CACurrentMediaTime()))
                 ran[index] = view.terminal.latency
                 frames[index] = Self.committed(view.terminal) - framesBefore[index]
+                lasted[index] = CACurrentMediaTime() - measuredFrom
             }
             return !ran.contains(nil)
         }
@@ -489,6 +497,8 @@ extension Driver {
             panes4["flood \(index + 1) longest gap between committed frames ms"] = (figures.longestBetweenCommits?.length ?? 0) * 1000
             panes4["flood \(index + 1), ours (the larger of its longest output wait and the main thread's longest hold, less the machine's share), ms"] = judged.ours
             panes4["flood \(index + 1) frames committed"] = Double(frames[index])
+            panes4["flood \(index + 1) screen changes a second"] = Double(figures.changes) / max(lasted[index], 1e-9)
+            panes4["flood \(index + 1) main-thread wakes for them a second"] = Double(figures.wakes) / max(lasted[index], 1e-9)
             panes4["flood \(index + 1) outputs that reached the screen in its longest commit gap"] = Double(figures.longestGapOutputs)
             panes4["flood \(index + 1) ms a drawable was being asked for in its longest commit gap"] = figures.longestGapFetching
             panes4["flood \(index + 1) longest wait to be shown ms"] = figures.outputToShown.max
@@ -646,7 +656,7 @@ extension Driver {
 
     /// `take` in the light look, then the dark, each once the window has been drawn in it; the
     /// look the system gives comes back after. Fails when a file is missing or empty.
-    private func inBothLooks(_ name: String, _ take: (URL) async -> Void) async -> (Bool, String) {
+    func inBothLooks(_ name: String, _ take: (URL) async -> Void) async -> (Bool, String) {
         let given = shell.look
         let folder = out.deletingLastPathComponent().appending(path: "window")
         try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
@@ -689,7 +699,7 @@ extension Driver {
     }
 
     /// `screencapture -x` with `arguments`, into `file`; its own error, if any, is printed.
-    private func capture(_ arguments: [String], to file: URL) async {
+    func capture(_ arguments: [String], to file: URL) async {
         let process = Process()
         let errors = Pipe()
         process.executableURL = URL(filePath: "/usr/sbin/screencapture")

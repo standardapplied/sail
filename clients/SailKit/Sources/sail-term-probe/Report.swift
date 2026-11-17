@@ -1,4 +1,5 @@
 import Foundation
+import SailSurface
 import SailTerminal
 
 /// What a probe run leaves as evidence: each step and how it went, the latency numbers and the
@@ -9,6 +10,8 @@ struct Report: Encodable {
     var latency: LatencyReport?
     var droppedInputs: Int?
     var budgets: [Budget]
+    /// What the bench measured, frame by frame, beside its budgets: none for a scripted run.
+    var samples: [BenchSeries]? = nil
     var uploads: [UploadResult] = []
     var connections: [String] = []
 
@@ -17,7 +20,7 @@ struct Report: Encodable {
     }
 
     private enum Keys: String, CodingKey {
-        case passed, steps, latency, droppedInputs, budgets, uploads, connections
+        case passed, steps, latency, droppedInputs, budgets, samples, uploads, connections
     }
 
     func encode(to encoder: any Encoder) throws {
@@ -27,6 +30,7 @@ struct Report: Encodable {
         try fields.encodeIfPresent(latency, forKey: .latency)
         try fields.encodeIfPresent(droppedInputs, forKey: .droppedInputs)
         try fields.encode(budgets, forKey: .budgets)
+        try fields.encodeIfPresent(samples, forKey: .samples)
         try fields.encode(uploads, forKey: .uploads)
         try fields.encode(connections, forKey: .connections)
     }
@@ -54,6 +58,25 @@ struct StepResult: Encodable {
     var ok: Bool
     var milliseconds: Double
     var detail: String?
+}
+
+/// One gated `frame()` series of the bench, each frame as it was measured, and the stalls of the
+/// probe's own reference thread over the series: an over-limit run says where its time went.
+struct BenchSeries: Encodable, Equatable {
+    var name: String
+    var frames: [FrameSample]
+    var stalls: [Span]
+}
+
+/// One `frame()` taken while another thread fed: when it began (seconds since the bench began),
+/// how long it took, how long of that it waited for the lock, how many slices the feeder fed while
+/// it waited, and how much of its wait the reference thread was held over too.
+struct FrameSample: Encodable, Equatable {
+    var at: Double
+    var milliseconds: Double
+    var waitMilliseconds: Double
+    var slicesWaited: Int
+    var heldMilliseconds: Double
 }
 
 /// One of T10's budgets and what was measured against it.

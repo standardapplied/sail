@@ -1,8 +1,10 @@
 import Foundation
 import SailAPI
+import SailKitTestSupport
 @testable import SailTerminal
 import SailTerminalWire
 import SailVT
+import Synchronization
 @testable import sail_term_probe
 import Testing
 
@@ -41,13 +43,15 @@ import Testing
         session.close()
     }
 
-    @Test func aRunnerThatAttachesAndClosesIsAskedSixTicketsThenParks() async throws {
+    /// A runner's door goes on at the 8 s cap until a minute of waits is spent: the open, then 11
+    /// reconnects.
+    @Test func aRunnerThatAttachesAndClosesIsAskedTwelveTicketsThenParks() async throws {
         let host = try FakeHost(tcp: ())
         let desk = TicketDesk(address: host.address)
         let session = TerminalSession(open: create, door: .runner(desk), screen: try screen(), timeout: 5, sleep: Naps().sleep)
         let watch = Watch(session)
         session.start()
-        for _ in 1 ... 6 {
+        for _ in 1 ... 12 {
             let peer = try await host.accept()
             try await peer.welcome()
             _ = try await peer.acceptAttach()
@@ -57,7 +61,7 @@ import Testing
             if case .parked = session.state.phase { return true }
             return false
         }
-        #expect(desk.requests.count == 6)
+        #expect(desk.requests.count == 12)
         session.close()
     }
 
@@ -388,25 +392,36 @@ import Testing
     /// Fix 2: a render hold left open when the output stops ticks the screen at its limit, so a
     /// renderer that draws only on a tick shows what the program left.
     @Test func aHoldLeftOpenTicksTheScreenAtItsLimit() async throws {
-        let timeline = Timeline()
         let hands = Hands()
+        let timers = ManualTimers()
         let host = try FakeHost()
         let create = SessionCreate(session: "work", command: [], workingDirectory: "/tmp", project: "", room: "", size: TerminalSize(columns: 20, rows: 3))
         let screen = try Screen(size: GridSize(columns: 20, rows: 3), scrollbackBytes: 0, palette: .dark, now: { hands.now })
-        let session = TerminalSession(open: create, door: .local(host.address), screen: screen, timeout: 5, stableAfter: .zero, sleep: timeline.sleep)
-        var ticks = session.screenChanges.makeAsyncIterator()
+        let session = TerminalSession(
+            open: create, door: .local(host.address), screen: screen, timeout: 5, stableAfter: .zero, sleep: Naps().sleep,
+            after: timers.after
+        )
+        let ticks = Mutex(0)
+        let (changes, sink) = AsyncStream.makeStream(of: ContinuousClock.Instant.self)
+        session.onScreenChange { time in
+            ticks.withLock { $0 += 1 }
+            sink.yield(time)
+        }
+        var told = changes.makeAsyncIterator()
         session.start()
         let peer = try await host.accept()
         try await peer.welcome()
         _ = try await peer.acceptAttach(columns: 20, rows: 3)
         try peer.send(output("old\u{1b}[?2026h\r\u{1b}[2Kstuck"))
         while try screen.text() != "old" {
-            _ = await ticks.next()
+            _ = await told.next()
         }
-        try await timeline.until(held: [Screen.holdLimit])
+        try await timers.awaitSet()
+        #expect(timers.live == [Screen.holdLimit])
+        let before = ticks.withLock { $0 }
         hands.advance(Screen.holdLimit)
-        timeline.passAll()
-        _ = await ticks.next()
+        timers.fireAll()
+        #expect(ticks.withLock { $0 } == before + 1, "the hold's timer told no change")
         #expect(try Screen.text(of: [screen.frame().rows[0]]) == "stuck")
         session.close()
     }
@@ -468,6 +483,91 @@ import Testing
         let refusal = HostRefusal(message: "No session mac-b.", remedy: [.words("No session mac-b.")])
         try second.send(.refused(refusal))
         await #expect(throws: TerminalError.refused(refusal)) { try await refused.value }
+    }
+
+    /// A runner's door admits Kill only from a connection that attached to the session and holds
+    /// its write token, so a runner's session is ended through an attach ticket of its own,
+    /// presented once: attached as the writer, past what the attachment streams, then Kill.
+    @Test func aRunnersSessionIsEndedThroughItsDoorAsItsWriter() async throws {
+        let host = try FakeHost(tcp: ())
+        let desk = TicketDesk(address: host.address)
+        async let ended = Door.runner(desk).end("app-a")
+        let peer = try await host.accept()
+        #expect(try await peer.welcome() == "ticket-1")
+        #expect(try await peer.read() == .attach(session: "app-a", write: true))
+        try peer.send([.accepted, .replayBegin(safe: true), output("$ "), .replayEnd, .writerChanged(fde: "uday")])
+        #expect(try await peer.read() == .kill(session: "app-a"))
+        try peer.send([.sessionEnded(reason: "ended"), .accepted])
+        #expect(await ended == .ended)
+        #expect(desk.requests == [.attach(session: "app-a")])
+    }
+
+    /// When someone else holds the write token the attachment only observes, and the door refuses
+    /// the Kill in its own words: the end is unconfirmed, saying so.
+    @Test func aRunnersSessionAnotherHoldsIsNotEndedAndTheDoorsWordsAreSaid() async throws {
+        let host = try FakeHost(tcp: ())
+        let desk = TicketDesk(address: host.address)
+        let ended = Task { await Door.runner(desk).end("app-a") }
+        let peer = try await host.accept()
+        try await peer.welcome()
+        #expect(try await peer.read() == .attach(session: "app-a", write: true))
+        try peer.send([.accepted, .writerChanged(fde: "ana")])
+        #expect(try await peer.read() == .kill(session: "app-a"))
+        let words = FakeRunnerDoor.notTheWriter
+        try peer.send(.refused(HostRefusal(message: words, remedy: [])))
+        #expect(await ended.value == .unconfirmed([words]), "said in the door's words, decided by the door")
+    }
+
+    /// M5: a session the API has no ticket to attach to, refused as not found by its code, ended
+    /// already: it is gone, never "could not be ended"; nothing is connected to.
+    @Test func aRunnersSessionTheAPIFindsNoneOfIsGoneAlready() async throws {
+        let desk = TicketDesk(address: .tcp(host: "127.0.0.1", port: 9))
+        desk.refuse(Refusal(code: .known(.notFound), message: "There is no session 'app-a' on this box that you may attach."))
+        #expect(await Door.runner(desk).end("app-a") == .gone)
+        desk.refuse(Refusal(code: .known(.forbidden), message: "Session 'app-a' is not yours."))
+        #expect(await Door.runner(desk).end("app-a") == .unconfirmed(["Session 'app-a' is not yours."]), "any other refusal is said")
+    }
+
+    /// M3: a tab closes only once its session ended, or had; an end not confirmed keeps the tab.
+    @Test func aTabClosesOnlyOnceItsSessionEnded() {
+        #expect(EndOutcome.ended.closesTab && EndOutcome.gone.closesTab)
+        #expect(!EndOutcome.unconfirmed(["The runner did not answer within 10 s."]).closesTab)
+    }
+
+    /// A host that streams the session forever and never answers the Kill is given up on at the
+    /// end's deadline, not read for ever.
+    @Test(.timeLimit(.minutes(1))) func aRunnerThatNeverAnswersTheKillIsGivenUpOn() async throws {
+        let host = try FakeHost(tcp: ())
+        let desk = TicketDesk(address: host.address)
+        let ended = Task { await Door.runner(desk).end("app-a", within: .seconds(1)) }
+        let peer = try await host.accept()
+        try await peer.welcome()
+        _ = try await peer.read()
+        try peer.send(.accepted)
+        _ = try await peer.read()
+        let streaming = Task.detached {
+            while !Task.isCancelled { try peer.send(output("x")) }
+        }
+        let outcome = await ended.value
+        streaming.cancel()
+        guard case .unconfirmed = outcome else {
+            Issue.record("the end was \(outcome)")
+            return
+        }
+    }
+
+    /// M4: the ticket is inside the end's deadline: a control plane that never answers it leaves the
+    /// end unconfirmed at the deadline, not at the transport's own 60 s.
+    @Test(.timeLimit(.minutes(1))) func aTicketThatNeverComesIsInsideTheEndsDeadline() async {
+        struct Silent: TicketSource {
+            func ticket(for _: TicketRequest) async throws(SailError) -> TerminalTicket {
+                try? await Task.sleep(for: .seconds(3600))
+                throw .unreachable("no answer")
+            }
+        }
+        let asked = ContinuousClock.now
+        #expect(await Door.runner(Silent()).end("app-a", within: .seconds(1)) == .unconfirmed(["The runner did not answer within 1 s."]))
+        #expect(ContinuousClock.now - asked < .seconds(5))
     }
 
     @Test func everyPageIsReadInOrder() async throws {

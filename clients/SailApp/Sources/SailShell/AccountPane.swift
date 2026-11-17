@@ -25,6 +25,11 @@ public final class AccountPane: NSView, NSMenuItemValidation {
     /// Whether a ceremony or a call is under way, and how many have ended.
     public private(set) var busy = false
     public private(set) var ended = 0
+    /// Who is signed in now, nil for no one: said each time the pane learns it.
+    var onStanding: @MainActor (SignedIn?) -> Void = { _ in }
+    /// Asked before signing out, answering whether to go on: what the sign-in holds open is ended
+    /// first (``RunnerEnds``).
+    var askBeforeSigningOut: @MainActor (@escaping @MainActor (Bool) -> Void) -> Void = { $0(true) }
 
     private let account: Account
     private let defaults: UserDefaults
@@ -34,9 +39,11 @@ public final class AccountPane: NSView, NSMenuItemValidation {
     }
 
     private let mono: TerminalFonts
-    private var lines: [String] = []
+    /// What the pane says now beside who is signed in, a line each: why it could not ask, say.
+    private(set) var lines: [String] = []
     private var labels: [NSTextField] = []
-    private var focusWatch: NSKeyValueObservation?
+    private lazy var addressFrame = FieldFrame(address, look: look)
+    private lazy var ticketFrame = FieldFrame(ticket, look: look)
     private let heading = NSTextField(labelWithString: "Sign in to Sail")
     private let who = NSTextField(wrappingLabelWithString: "")
     private let signedOutRows = NSStackView()
@@ -98,6 +105,13 @@ public final class AccountPane: NSView, NSMenuItemValidation {
     }
 
     @objc public func signOutHere(_: Any?) {
+        guard standing != nil else { return }
+        askBeforeSigningOut { [weak self] go in
+            if go { self?.signOutNow() }
+        }
+    }
+
+    private func signOutNow() {
         guard let plane = standing?.controlPlane else { return }
         do {
             try account.signOut(at: plane)
@@ -107,6 +121,11 @@ public final class AccountPane: NSView, NSMenuItemValidation {
             say(error.lines)
         }
         ended += 1
+    }
+
+    /// The API as the person signed in, nil when no one is or the vault cannot say.
+    func client() -> SailClient? {
+        standing.flatMap { try? account.client(at: $0.controlPlane) }
     }
 
     public func validateMenuItem(_ item: NSMenuItem) -> Bool {
@@ -141,6 +160,7 @@ public final class AccountPane: NSView, NSMenuItemValidation {
         standing = signedIn
         signedOutRows.isHidden = signedIn != nil
         signedInRows.isHidden = signedIn == nil
+        onStanding(signedIn)
         guard let signedIn else {
             heading.stringValue = "Sign in to Sail"
             return
@@ -160,34 +180,15 @@ public final class AccountPane: NSView, NSMenuItemValidation {
         ].filter { !$0.isEmpty }.joined(separator: "\n")
     }
 
-    override public func viewDidMoveToWindow() {
-        super.viewDidMoveToWindow()
-        focusWatch = window?.observe(\.firstResponder) { [weak self] _, _ in
-            MainActor.assumeIsolated { self?.focus() }
-        }
-        focus()
-    }
-
-    /// The field being edited ringed in the accent, its editor's selection and caret the look's.
-    private func focus() {
-        if let editor = window?.firstResponder as? NSTextView, editor.isFieldEditor {
-            editor.selectedTextAttributes = [.backgroundColor: NSColor(look.fillSelected), .foregroundColor: NSColor(look.text)]
-            editor.insertionPointColor = NSColor(look.accent)
-        }
-        for field in [address, ticket] {
-            field.layer?.borderWidth = field.currentEditor() == nil ? 0 : 2
-            field.layer?.borderColor = NSColor(look.accent).cgColor
-        }
-    }
-
     private func paint() {
         layer?.backgroundColor = NSColor(look.canvas).cgColor
         heading.textColor = NSColor(look.text)
         who.textColor = NSColor(look.textSecondary)
         labels.forEach { $0.textColor = NSColor(look.textSecondary) }
         signIn.look = look
+        addressFrame.look = look
+        ticketFrame.look = look
         say(lines)
-        focus()
     }
 
     private func say(_ lines: [String]) {
@@ -205,16 +206,13 @@ public final class AccountPane: NSView, NSMenuItemValidation {
     }
 
     private func label(_ text: String) -> NSTextField {
-        let label = NSTextField(labelWithString: text.uppercased())
-        label.font = monospaced(.micro)
+        let label = eyebrow(text, mono: mono)
         labels.append(label)
         return label
     }
 
-    /// JetBrains Mono at `step`, the face the terminal uses.
     private func monospaced(_ step: Look.Step) -> NSFont {
-        (try? mono.faces(points: step.points, scale: 1).font(.regular)).map { $0 as NSFont }
-            ?? .monospacedSystemFont(ofSize: step.points, weight: .regular)
+        monoFont(step, from: mono)
     }
 
     private func compose() {
@@ -224,19 +222,18 @@ public final class AccountPane: NSView, NSMenuItemValidation {
         address.font = monospaced(.callout)
         ticket.placeholderString = "enr_… or the link sail fde enroll printed"
         for field in [address, ticket] {
-            field.focusRingType = .none
-            field.wantsLayer = true
             field.target = self
         }
         address.action = #selector(signInWithPasskey(_:))
         ticket.action = #selector(enrollWithTicket(_:))
         enroll.target = self
         enroll.action = #selector(enrollWithTicket(_:))
+        enroll.controlSize = .large
         signOut.target = self
         signOut.action = #selector(signOutHere(_:))
         said.isSelectable = true
         said.isHidden = true
-        for row in [label("Control plane"), address, signIn, label("Enrollment ticket"), ticket, enroll] {
+        for row in [label("Control plane"), addressFrame, signIn, label("Enrollment ticket"), ticketFrame, enroll] {
             signedOutRows.addArrangedSubview(row)
         }
         signedOutRows.setCustomSpacing(Look.Space.xxl, after: signIn)
@@ -258,9 +255,25 @@ public final class AccountPane: NSView, NSMenuItemValidation {
             column.topAnchor.constraint(equalTo: topAnchor, constant: Look.Space.x3l + Look.Space.l),
             column.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Look.Space.x3l),
             column.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -Look.Space.x3l),
-            address.widthAnchor.constraint(equalToConstant: 380), ticket.widthAnchor.constraint(equalToConstant: 380),
+            addressFrame.widthAnchor.constraint(equalToConstant: 380), ticketFrame.widthAnchor.constraint(equalToConstant: 380),
             said.widthAnchor.constraint(lessThanOrEqualToConstant: 560),
         ])
         paint()
     }
+}
+
+/// JetBrains Mono at `step`, the face the terminal uses.
+@MainActor
+func monoFont(_ step: Look.Step, from mono: TerminalFonts) -> NSFont {
+    (try? mono.faces(points: step.points, scale: 1).font(.regular)).map { $0 as NSFont }
+        ?? .monospacedSystemFont(ofSize: step.points, weight: .regular)
+}
+
+/// A group's eyebrow, as "CONTROL PLANE" is: its name upper case in JetBrains Mono at the micro
+/// step, which its pane paints in the secondary text colour.
+@MainActor
+func eyebrow(_ text: String, mono: TerminalFonts) -> NSTextField {
+    let label = NSTextField(labelWithString: text.uppercased())
+    label.font = monoFont(.micro, from: mono)
+    return label
 }

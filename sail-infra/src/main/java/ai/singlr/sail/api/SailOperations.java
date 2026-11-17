@@ -1498,11 +1498,8 @@ public final class SailOperations implements HostOperations {
                                 liveIn(project),
                                 force,
                                 Remedy.of(
-                                    "DELETE /v1/projects/"
-                                        + project
-                                        + "/workspaces/"
-                                        + name
-                                        + "?force=true"),
+                                    Remedy.sail(
+                                        "project workspace delete", project, name, "--force")),
                                 instance -> {}))));
   }
 

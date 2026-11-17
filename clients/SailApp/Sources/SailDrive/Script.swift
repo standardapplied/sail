@@ -129,6 +129,46 @@ struct Step: Decodable {
     /// when given; "none": no sheet asks within a second.
     var sheet: String?
     var asking: String?
+    /// The sheet on the window says these words, within `seconds` (5 by default), answered by none.
+    var sheetShows: String?
+    /// The workspaces run's control plane answers this route (`["POST /v1/terminal/tickets",
+    /// "refusal-forbidden-not-assignee"]`) as that golden from now on, held this many seconds when
+    /// a third is given.
+    var golden: [String]?
+    /// The Workspaces pane says this, within `seconds` (10 by default), no call under way.
+    var workspaces: String?
+    /// This name typed into the Workspaces pane's field and Make pressed; the call waited for.
+    var make: String?
+    /// The Workspaces row of this name selected and Open pressed: a tab on the runner.
+    var open: String?
+    /// The Workspaces row of this name selected, what its button then says told.
+    var chooseRow: String?
+    /// The Workspaces row chosen is the one of this name, within `seconds` (10 by default).
+    var listChosen: String?
+    /// A proxy answers this route ("GET /v1/projects/harbor/workspaces") with a 502 from now on;
+    /// empty, no route.
+    var proxyFails: String?
+    /// The drive's runner door holds this many sessions, within `seconds` (15 by default): the
+    /// host's session list.
+    var doorLists: Int?
+    /// Someone else holds the focused terminal's write token at the runner's door from now on.
+    var doorHoldsWrite: Bool?
+    /// Someone else lets go of it.
+    var doorReleasesWrite: Bool?
+    /// The focused terminal's banner button of this title pressed.
+    var pressStatus: String?
+    /// Sign Out pressed on the account, answered no further: what follows it asks.
+    var signOutNow: Bool?
+    /// This name typed into the Workspaces pane's field and Make pressed; the call not waited for.
+    var makeStarts: String?
+    /// A ticket was asked with these fields (`{"action": "open", "workspace": "dock"}`), within
+    /// `seconds` (15 by default).
+    var ticketAsked: [String: String]?
+    /// The app is asked to quit, as Quit Sail does, from the run loop: AppKit waits in the quit
+    /// until a sheet it asks on is answered, which a later step does.
+    var quit: Bool?
+    /// The whole screen in both looks, a sheet over the window included, saved as `window/<this>`.
+    var shotScreen: String?
     /// The focused pane's session kept for `listed`.
     var remember: Bool?
     /// The session `remember` kept is listed live by the host, or not, within `seconds`.

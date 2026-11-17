@@ -17,11 +17,7 @@ final class Follower: Sendable {
             }
             tick.ring()
         }
-        Task { [tick] in
-            for await _ in session.screenChanges {
-                tick.ring()
-            }
-        }
+        session.onScreenChange { [tick] _ in tick.ring() }
     }
 
     /// Every event the session told, in order.

@@ -6,6 +6,18 @@ import SailTerminalWire
 import Testing
 
 @Suite struct ProbeTests {
+    /// `--workspace` names the workspace a runner session opens in; without it, the project's own
+    /// container, as before.
+    @Test func aRunnerRunNamesItsWorkspace() throws {
+        let given = ["--api", "http://10.0.0.2:7443", "--token-env", "T", "--project", "acme", "--script", "s.json"]
+        let inTry = try Arguments.parse(given + ["--workspace", "try"], currentDirectory: "/")
+        let bare = try Arguments.parse(given, currentDirectory: "/")
+        guard case let .run(run) = inTry, case let .run(plain) = bare else { Issue.record("not runs"); return }
+        #expect(run.host == .runner(api: URL(string: "http://10.0.0.2:7443")!, tokenVariable: "T", project: "acme", workspace: "try"))
+        #expect(plain.host == .runner(api: URL(string: "http://10.0.0.2:7443")!, tokenVariable: "T", project: "acme", workspace: ""))
+        #expect(throws: UsageError.self) { try Arguments.parse(["--local", "--workspace", "try", "--script", "s.json"], currentDirectory: "/") }
+    }
+
     /// MINOR 11: a capture is a new file only its owner reads; one that exists is not overwritten.
     @Test func aCaptureIsANewFileOnlyItsOwnerReads() throws {
         let path = FileManager.default.temporaryDirectory.appending(path: "capture-\(UUID().uuidString)").path
@@ -49,6 +61,41 @@ import Testing
             ])
         }
         #expect(steps.map(\.ok) == [true, true, true, true, true, true])
+    }
+
+    /// The GCP proof's close and Reconnect Now: close lets the client's part go, then ends the
+    /// session through its door as its writer, as a runner tab's close does.
+    @Test func closeEndsTheSessionThroughItsDoorAndReconnectNowTriesAtOnce() async throws {
+        let held = try JSONDecoder().decode(Script.self, from: Data(#"{"size": [20, 3], "steps": [{"hold": 12}]}"#.utf8))
+        #expect(held.steps == [.hold(12)] && held.steps.map(\.description) == ["hold 12 s"])
+        let script = try JSONDecoder().decode(Script.self, from: Data(#"{"size": [20, 3], "steps": [{"reconnectNow": true}, {"close": true}]}"#.utf8))
+        #expect(script.steps == [.reconnectNow, .close])
+        #expect(script.steps.map(\.description) == ["reconnect now", "close, ending the session at its host"])
+        let host = try FakeHost(tcp: ())
+        let desk = TicketDesk(address: host.address)
+        let create = SessionCreate(
+            session: "work", command: [], workingDirectory: "/tmp", project: "acme", room: "", size: TerminalSize(columns: 20, rows: 3),
+            workspace: "try"
+        )
+        let session = TerminalSession(
+            open: create, door: .runner(desk), screen: try screen(columns: 20, rows: 3), timeout: FakeHost.deadline, sleep: Naps().sleep
+        )
+        let runner = Runner(session: session, host: nil, echoBudget: 10) { _ in }
+        session.start()
+        let first = try await host.accept()
+        try await first.welcome()
+        _ = try await first.acceptAttach(columns: 20, rows: 3)
+        let report = Task { await runner.run(script) }
+        #expect(try await first.read() == .resize(TerminalSize(columns: 20, rows: 3)), "reconnect now")
+        let ending = try await host.accept()
+        #expect(try await ending.welcome() == "ticket-2")
+        #expect(try await ending.read() == .attach(session: "work", write: true))
+        try ending.send(.accepted)
+        #expect(try await ending.read() == .kill(session: "work"))
+        try ending.send(.accepted)
+        #expect(await report.value.steps.map(\.ok) == [true, true, true])
+        #expect(desk.requests == [.open(project: "acme", workspace: "try"), .attach(session: "work")])
+        _ = first
     }
 
     /// Runs snapshot, drop, attached, same against a fake host whose reattach `answer` gives. The

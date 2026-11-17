@@ -181,13 +181,18 @@ class ClientGoldensTest {
 
   /** Workspace {@code dock} of harbor, running, uday's by {@code udayId}. */
   private static String dock(String udayId) {
+    return workspace("dock", "Running", "uday", udayId);
+  }
+
+  /** Workspace {@code name} of harbor as Incus lists it, {@code status}, {@code handle}'s by id. */
+  private static String workspace(String name, String status, String handle, String id) {
     return """
-        {"name": "harbor-dock", "status": "Running", "type": "container",
-         "config": {"user.sail.project": "harbor", "user.sail.workspace": "dock",
-                    "user.sail.ready": "1762941601000", "user.sail.owner": "uday",
+        {"name": "harbor-%s", "status": "%s", "type": "container",
+         "config": {"user.sail.project": "harbor", "user.sail.workspace": "%s",
+                    "user.sail.ready": "1762941601000", "user.sail.owner": "%s",
                     "user.sail.owner_id": "%s"},
          "expanded_devices": {"root": {"path": "/", "pool": "tank", "type": "disk"}}}"""
-        .formatted(udayId);
+        .formatted(name, status, name, handle, id);
   }
 
   private static final String RP_ID = "sail.standardapplied.com";
@@ -316,6 +321,23 @@ class ClientGoldensTest {
       Acting.system(() -> new ProjectStore(db).upsert(HARBOR));
       var dana = box.session("dana", "Dana", "dana@example.com", Role.ADMIN);
       var dock = "/v1/projects/" + PROJECT + "/workspaces/dock";
+      var workspaces = "/v1/projects/" + PROJECT + "/workspaces";
+      var ana = box.token("ana", Role.MEMBER);
+      box.record(
+          http,
+          "refusal-read-only-credential-workspace",
+          "POST",
+          workspaces,
+          vik,
+          Map.of("name", "new"));
+      box.record(
+          http,
+          "refusal-conflict-workspace-exists",
+          "POST",
+          workspaces,
+          dana,
+          Map.of("name", "dock"));
+      box.record(http, "refusal-forbidden-not-assignee", "POST", dock + "/start", ana, null);
       box.record(
           http,
           "workspace-create",
@@ -327,6 +349,17 @@ class ClientGoldensTest {
       box.record(http, "workspace-stop", "POST", dock + "/stop", dana, null);
       box.record(http, "refusal-workspace-holds-work", "DELETE", dock, dana, null);
       box.record(http, "workspace-delete", "DELETE", dock + "?force=true", dana, null);
+      box.lists(
+          workspace("dock", "Running", "uday", box.idOf("uday")),
+          workspace("pier", "Stopped", "uday", box.idOf("uday")),
+          workspace("quay", "Running", "ana", box.idOf("ana")));
+      box.record(http, "workspaces-three", "GET", workspaces, dana, null);
+      box.lists();
+      box.record(http, "workspaces-none", "GET", workspaces, dana, null);
+      box.lists(
+          workspace("dock", "Running", "uday", box.idOf("uday")),
+          workspace("new", "Running", "uday", box.idOf("uday")));
+      box.record(http, "workspaces-made", "GET", workspaces, dana, null);
 
       assertAll(
           () -> GoldenFiles.check(GOLDENS.resolve("http"), http),
@@ -554,7 +587,8 @@ class ClientGoldensTest {
         new PtyMessage.PutRefused(-1, PtyMessage.PutRefusal.TOO_LARGE, 64L << 20),
         new PtyMessage.TicketRefused(
             PtyMessage.TicketRefusal.NOT_FOUND,
-            Remedy.of("Project 'harbor' is not in the catalog. Run '", Remedy.sail("sync"), "'.")),
+            "Project 'harbor' is not in the catalog.",
+            Remedy.of("Run '", Remedy.sail("sync"), "'.")),
         new PtyMessage.Output(42, "héllo ✅\u001b[0m\r\n".getBytes(StandardCharsets.UTF_8)),
         new PtyMessage.ReplayBegin(true),
         new PtyMessage.ReplayEnd(),
@@ -567,9 +601,10 @@ class ClientGoldensTest {
         new PtyMessage.Sessions(List.of(lounge, shell), "shell"),
         new PtyMessage.Ok(),
         new PtyMessage.Err(
+            "You do not hold the write token.",
             new Remedy(
                 List.of(
-                    new Remedy.Words("You do not hold the write token. Run "),
+                    new Remedy.Words("Run "),
                     new Remedy.Command(Remedy.Runs.SAIL, "session", List.of("take", "lounge")),
                     new Remedy.Words(" to take it.")))));
   }
@@ -1114,10 +1149,21 @@ class ClientGoldensTest {
 
     /** Makes Incus list workspace {@code dock} of harbor, {@code handle}'s by their id. */
     void holdsDockOf(String handle) {
-      var dock = dock(new FdeStore(db).byHandle(handle).orElseThrow().id());
+      var dock = dock(idOf(handle));
       incus
           .onOk("incus list ^harbor-dock$", "[" + dock + "]")
           .onOk("incus list --format json", "[" + TEMPLATE + "," + dock + "]");
+    }
+
+    /** Makes Incus list harbor's template and {@code workspaces}, and nothing else. */
+    void lists(String... workspaces) {
+      var listed = new ArrayList<String>(List.of(TEMPLATE));
+      listed.addAll(List.of(workspaces));
+      incus.onOk("incus list --format json", "[" + String.join(",", listed) + "]");
+    }
+
+    String idOf(String handle) {
+      return new FdeStore(db).byHandle(handle).orElseThrow().id();
     }
 
     /** Sends what a golden needs written first, which must succeed. */

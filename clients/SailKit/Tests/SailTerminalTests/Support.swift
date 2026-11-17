@@ -83,6 +83,56 @@ final class Timeline: Sendable {
     }
 }
 
+/// Timers the test fires by hand: each one set is kept, with its delay, until fired or called off.
+final class ManualTimers: Sendable {
+    private final class Entry: Scheduled {
+        let delay: Duration
+        let work: @Sendable () -> Void
+        let cancelled = Mutex(false)
+
+        init(delay: Duration, work: @escaping @Sendable () -> Void) {
+            self.delay = delay
+            self.work = work
+        }
+
+        func cancel() {
+            cancelled.withLock { $0 = true }
+        }
+    }
+
+    private let entries = Mutex<[Entry]>([])
+    private let set = DispatchSemaphore(value: 0)
+
+    var after: HoldTick.After {
+        { delay, work in
+            let entry = Entry(delay: delay, work: work)
+            self.entries.withLock { $0.append(entry) }
+            self.set.signal()
+            return entry
+        }
+    }
+
+    /// The delays of the timers set and neither fired nor called off.
+    var live: [Duration] {
+        entries.withLock { $0.filter { !$0.cancelled.withLock { $0 } }.map(\.delay) }
+    }
+
+    /// Returns once a timer is set, at most `seconds` after the call.
+    func awaitSet(within seconds: Int = FakeHost.deadline) async throws {
+        let came = try await onThread { [set] in set.wait(timeout: .now() + .seconds(seconds)) == .success }
+        if !came { throw HostError("no timer was set within \(seconds) s") }
+    }
+
+    /// Runs every live timer's work on this thread, as its timer would.
+    func fireAll() {
+        let due = entries.withLock { entries in
+            defer { entries = [] }
+            return entries
+        }
+        due.filter { !$0.cancelled.withLock { $0 } }.forEach { $0.work() }
+    }
+}
+
 /// Tickets as a control plane hands them out, each one new, every request kept.
 final class TicketDesk: TicketSource {
     private let state = Mutex<(issued: Int, requests: [TicketRequest], refusal: Refusal?)>((0, [], nil))

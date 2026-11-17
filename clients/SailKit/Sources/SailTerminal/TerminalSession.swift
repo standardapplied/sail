@@ -17,8 +17,16 @@ import Synchronization
 /// input against a stuck peer, blocks its caller, so an app sends from a thread that may wait, not
 /// its main thread.
 public final class TerminalSession: Sendable {
-    /// The waits before each reconnect after a drop; one more failure in a row and the session parks.
+    /// The waits before each reconnect after a drop; one more failure in a row and a local door's
+    /// session parks.
     public static let retryWaits: [Duration] = [.milliseconds(500), .seconds(1), .seconds(2), .seconds(4), .seconds(8)]
+    /// How long a runner's door waits in all before it parks: past ``retryWaits`` it goes on at their
+    /// cap, so a network that is gone for well under a minute, as on a train or a moved laptop, is
+    /// ridden out.
+    public static let runnerPatience = Duration.seconds(60)
+    /// How long a ticket never presented is asked again for the next attempt instead of a new one:
+    /// well inside its life (``PtyMessage``'s 30 s), so it is still good when presented.
+    public static let unpresentedReuse = Duration.seconds(20)
     /// How long a connection must stay attached to count as a success: one lost sooner is a failed
     /// attempt, so a host that attaches and then drops parks the session like one that never answers.
     public static let stableAttachment = Duration.seconds(5)
@@ -41,23 +49,21 @@ public final class TerminalSession: Sendable {
     public let screen: Screen
     /// What the session tells the app, the newest ``eventBacklog`` kept for a slow reader.
     public let events: AsyncStream<SessionEvent>
-    /// A tick each time the screen changed, carrying when it took the output; ticks the app has not
-    /// read yet are one tick, the earliest. One reader for the session's life: a stream whose reader
-    /// stops is over.
-    public let screenChanges: AsyncStream<ContinuousClock.Instant>
 
     private let door: Door
     private let core: Mutex<Core>
     private let sequence = Mutex<Int64>(0)
     private let latency = Mutex(LatencyRecorder())
-    private let tap = Mutex<(@Sendable ([UInt8]) -> Void)?>(nil)
+    private let tap = Relay<[UInt8]>()
     private let uploads = Uploads()
     private let alarm: Alarm
     private let sleep: @Sendable (Duration) async throws -> Void
+    private let after: HoldTick.After
     private let timeout: Int
     private let stableAfter: Duration
+    private let patience: Duration
     private let eventSink: AsyncStream<SessionEvent>.Continuation
-    private let screenSink: AsyncStream<ContinuousClock.Instant>.Continuation
+    private let screenListener = Relay<ContinuousClock.Instant>()
     private let clock = ContinuousClock()
 
     private struct Core {
@@ -76,7 +82,7 @@ public final class TerminalSession: Sendable {
         /// pty has exactly this size, unless the client is a reader that thinks it writes, and a
         /// reader's `Resize` changes nothing.
         var ptySize: TerminalSize?
-        var holdTimer: Task<Void, Never>?
+        var holdTimer: (any Scheduled)?
         var focused = true
         var detaching = false
         var closed = false
@@ -99,6 +105,14 @@ public final class TerminalSession: Sendable {
         /// The inputs left unconfirmed by a lost connection are accounted for by the next replay.
         var accounting = false
         var numbered = false
+        /// Whether the host holds, or may hold, this session.
+        var atHost: AtHost = .none
+        /// What ``atHost`` was before the `Create` now out: a refused `Create` leaves it so.
+        var beforeCreate: AtHost = .none
+        /// Who waits for that answer.
+        var createWaiters: [CheckedContinuation<Void, Never>] = []
+        /// The last ticket asked of a runner's door while it has not been presented.
+        var unpresented: (request: TicketRequest, entry: (address: HostAddress, token: String), asked: ContinuousClock.Instant)?
     }
 
     private enum Outcome: Sendable {
@@ -121,12 +135,18 @@ public final class TerminalSession: Sendable {
     }
 
     /// As the public ones, waiting with `sleep`, giving each connect and answer `timeout` seconds,
-    /// and counting a connection a success once attached for `stableAfter`.
+    /// counting a connection a success once attached for `stableAfter`, timing a render hold's
+    /// end with `after`, and a runner's door parking once its waits and attempts add up to
+    /// `patience` (``runnerPatience`` by default).
     package convenience init(
         open create: SessionCreate, door: Door, screen: Screen, timeout: Int,
-        stableAfter: Duration = TerminalSession.stableAttachment, sleep: @escaping @Sendable (Duration) async throws -> Void
+        stableAfter: Duration = TerminalSession.stableAttachment, sleep: @escaping @Sendable (Duration) async throws -> Void,
+        after: @escaping HoldTick.After = HoldTick.dispatch, patience: Duration = TerminalSession.runnerPatience
     ) {
-        self.init(intent: .open(create), door: door, screen: screen, timeout: timeout, stableAfter: stableAfter, sleep: sleep)
+        self.init(
+            intent: .open(create), door: door, screen: screen, timeout: timeout, stableAfter: stableAfter, sleep: sleep, after: after,
+            patience: patience
+        )
     }
 
     package convenience init(
@@ -141,22 +161,38 @@ public final class TerminalSession: Sendable {
 
     private init(
         intent: Intent, door: Door, screen: Screen, timeout: Int = 10, stableAfter: Duration = TerminalSession.stableAttachment,
-        sleep: @escaping @Sendable (Duration) async throws -> Void = { try await Task.sleep(for: $0) }
+        sleep: @escaping @Sendable (Duration) async throws -> Void = { try await Task.sleep(for: $0) },
+        after: @escaping HoldTick.After = HoldTick.dispatch,
+        patience: Duration = TerminalSession.runnerPatience
     ) {
         self.door = door
+        self.patience = if case .runner = door { patience } else { .zero }
         self.screen = screen
         self.timeout = timeout
         self.stableAfter = stableAfter
         self.sleep = sleep
+        self.after = after
         alarm = Alarm(sleep: sleep)
         var initial = Core(state: SessionState(phase: .connecting, session: intent.session), intent: intent)
+        if case .attach = intent { initial.atHost = .maybe }
         if case let .open(create) = intent {
             initial.viewSize = create.size
             initial.ptySize = create.size
         }
         core = Mutex(initial)
         (events, eventSink) = AsyncStream.makeStream(of: SessionEvent.self, bufferingPolicy: .bufferingNewest(Self.eventBacklog))
-        (screenChanges, screenSink) = AsyncStream.makeStream(of: ContinuousClock.Instant.self, bufferingPolicy: .bufferingOldest(1))
+    }
+
+    /// Tells `listener`, in place of any before it and on the thread that changed the screen, each
+    /// time the screen changed, with when it took the output; nil stops new calls, while a call
+    /// already begun may still finish. Nothing stands between the change and the call, so it must
+    /// return at once: what draws hands the change on.
+    public func onScreenChange(_ listener: (@Sendable (ContinuousClock.Instant) -> Void)?) {
+        screenListener.set(listener)
+    }
+
+    private func screenChanged(at time: ContinuousClock.Instant) {
+        screenListener(time)
     }
 
     public var state: SessionState {
@@ -223,6 +259,28 @@ public final class TerminalSession: Sendable {
         }
     }
 
+    /// Whether the host holds, or may hold, this session: what an end and a quit's count go by.
+    public var atHost: AtHost {
+        core.withLock { $0.atHost }
+    }
+
+    /// Ends this session at its host on a connection of its own, within `limit` in all. An open
+    /// whose `Create` is still unanswered is waited for first, inside the same limit, so a session
+    /// the host is still making is ended, never left behind unseen; a session never made is gone
+    /// already. This client detaches either way.
+    public func end(within limit: Duration = Door.endLimit) async -> EndOutcome {
+        let began = clock.now
+        let coming = core.withLock { core -> Bool in
+            core.detaching = true
+            return core.atHost == .coming
+        }
+        if coming { _ = await Door.within(limit) { await self.createAnswered() } }
+        let held = self.atHost
+        detach()
+        guard held != .none else { return .gone }
+        return await door.end(state.session, within: limit - (clock.now - began), of: limit)
+    }
+
     /// Ends this client's part: the connection, or the one being admitted, closes and nothing
     /// reconnects.
     public func close() {
@@ -233,10 +291,11 @@ public final class TerminalSession: Sendable {
                 core.connection = nil
                 core.inFlight = nil
             }
-            return ([core.connection, core.inFlight].compactMap(\.self), core.supervisor, [core.resizeTimer, core.holdTimer])
+            return ([core.connection, core.inFlight].compactMap(\.self), core.supervisor, (core.resizeTimer, core.holdTimer))
         }
         supervisor?.cancel()
-        timers.forEach { $0?.cancel() }
+        timers.0?.cancel()
+        timers.1?.cancel()
         connections.forEach { $0.close() }
         finish(.closed)
     }
@@ -324,7 +383,7 @@ public final class TerminalSession: Sendable {
     /// Hands every byte of output to `tap` as it reaches the screen. For the probe's capture of a
     /// fixture, the one place terminal bytes leave the session.
     package func tapOutput(_ tap: @escaping @Sendable ([UInt8]) -> Void) {
-        self.tap.withLock { $0 = tap }
+        self.tap.set(tap)
     }
 
     /// Uploads `source` as `name` into the session's own workspace, on the attached connection: the
@@ -407,12 +466,13 @@ public final class TerminalSession: Sendable {
         send(.takeWrite, on: connection)
     }
 
-    /// Asks this machine's own host to end the session, on the attached connection. A runner's door
-    /// is refused before anything is sent (its ticket admits a session's input, size and write token,
-    /// and closes on anything else), and so is a session not attached now.
+    /// Asks this machine's own host to end the session, on the attached connection, and is refused
+    /// for a session not attached now. A runner's door is refused before anything is sent: it admits
+    /// Kill only from the write token's holder and hangs up on a Kill it refuses, so a runner's
+    /// session is ended by ``SessionListing/end(_:through:timeout:)``, which waits for the answer.
     public func kill() throws(TerminalError) {
         if case .runner = door {
-            throw .unsupported("a runner's terminal door ends no session: its ticket admits only this session's input, size and write token")
+            throw .unsupported("a runner's session is ended through its door, on a connection that waits for the answer")
         }
         guard let connection = core.withLock({ $0.connection }) else {
             throw .unsupported("the session is not attached, so there is no connection to ask the host to end it on")
@@ -422,31 +482,38 @@ public final class TerminalSession: Sendable {
 
     private func supervise(_ generation: Int) async {
         var failures = 0
+        var waited = Duration.zero
         var first = true
         var retrying = false
         var reason = ""
         while !Task.isCancelled {
             if !first {
-                if failures >= Self.retryWaits.count {
+                if failures >= Self.retryWaits.count, waited >= patience {
                     setPhase(.parked(reason: reason))
                     await alarm.wait(nil)
                     failures = 0
+                    waited = .zero
                 } else {
+                    let wait = Self.retryWaits[min(failures, Self.retryWaits.count - 1)]
                     setPhase(.reconnecting(attempt: failures + 1))
-                    await alarm.wait(Self.retryWaits[failures])
+                    await alarm.wait(wait)
+                    waited += wait
                 }
                 guard !Task.isCancelled else { return }
             }
             retrying = !first
             first = false
+            let began = clock.now
             let outcome = await attempt(generation)
             guard core.withLock({ $0.generation == generation }) else { return }
+            if retrying { waited += clock.now - began }
             switch outcome {
             case let .failed(error):
                 failures += 1
                 reason = error.description
             case let .dropped(error, attachedFor):
                 failures = attachedFor >= stableAfter || !retrying ? 0 : failures + 1
+                if failures == 0 { waited = .zero }
                 reason = error.description
             case .detached:
                 core.withLock { $0.supervisor = nil }
@@ -462,13 +529,17 @@ public final class TerminalSession: Sendable {
     private func attempt(_ generation: Int) async -> Outcome {
         let intent = core.withLock { $0.intent }
         if case let .open(create) = intent, !Self.fits(GridSize(columns: Int(create.size.columns), rows: Int(create.size.rows))) {
-            return .finished(.refused("a terminal of \(create.size.columns)x\(create.size.rows) cells is larger than \(Self.largestGrid)"))
+            return .finished(.refused(HostRefusal(
+                message: "a terminal of \(create.size.columns)x\(create.size.rows) cells is larger than \(Self.largestGrid)", remedy: []
+            )))
         }
         let entry: (address: HostAddress, token: String)
         do throws(TerminalError) {
-            entry = try await door.entry(for: intent.ticket)
+            entry = try await ticket(for: intent.ticket)
         } catch let .ticketRefused(refusal) where !Self.passes(refusal) {
-            return .finished(.refused(refusal.message))
+            return .finished(.ticketRefused(refusal))
+        } catch let .signIn(needed) {
+            return .finished(.signIn(needed))
         } catch {
             return .failed(error)
         }
@@ -477,6 +548,24 @@ public final class TerminalSession: Sendable {
                 result.resume(returning: self.connect(to: entry.address, token: entry.token, generation: generation))
             }.start()
         }
+    }
+
+    /// The entry for `request`: a ticket asked of the door, or the last one asked for it when that
+    /// was never presented (its connect failed before the `Hello`) and is under
+    /// ``unpresentedReuse`` old, so attempts against a door that cannot be reached do not spend the
+    /// person's tickets, which the host bounds.
+    private func ticket(for request: TicketRequest) async throws(TerminalError) -> (address: HostAddress, token: String) {
+        let kept = core.withLock { core -> (address: HostAddress, token: String)? in
+            guard let held = core.unpresented, held.request == request, clock.now - held.asked < Self.unpresentedReuse else { return nil }
+            return held.entry
+        }
+        if let kept { return kept }
+        let entry = try await door.entry(for: request)
+        if case .runner = door {
+            let asked = clock.now
+            core.withLock { $0.unpresented = (request, entry, asked) }
+        }
+        return entry
     }
 
     /// One connection, from its connect to its end, on its own thread. Before each step that
@@ -493,6 +582,7 @@ public final class TerminalSession: Sendable {
             connection.close()
             return standDown
         }
+        core.withLock { $0.unpresented = nil }
         defer { core.withLock { if $0.inFlight === connection { $0.inFlight = nil } } }
         let bootID: String
         do throws(TerminalError) {
@@ -515,12 +605,20 @@ public final class TerminalSession: Sendable {
         let write: Bool
         do throws(TerminalError) {
             if case let .open(create) = core.withLock({ $0.intent }) {
-                if let standDown = current(generation) {
+                if let standDown = current(generation, creating: true) {
                     connection.close()
                     return standDown
                 }
-                try connection.request(.create(create))
+                do throws(TerminalError) {
+                    try connection.request(.create(create))
+                } catch {
+                    var refused = false
+                    if case .refused = error { refused = true }
+                    answeredCreate(refused: refused)
+                    throw error
+                }
                 core.withLock { $0.intent = .attach(session: create.session, write: true) }
+                answeredCreate(refused: false)
             }
             guard case let .attach(session, wantsWrite) = core.withLock({ $0.intent }) else { return .failed(.closed) }
             write = wantsWrite
@@ -564,22 +662,51 @@ public final class TerminalSession: Sendable {
     }
 
     /// Nil while the attempt of `generation` is still the session's, recording `connection` as the
-    /// one being admitted; else what it stands down as.
-    private func current(_ generation: Int, admitting connection: Connection? = nil) -> Outcome? {
+    /// one being admitted, and, when `creating`, that its `Create` goes out now; else what it
+    /// stands down as. Checked and recorded at once, so an end sees either no `Create` or one it
+    /// waits for.
+    private func current(_ generation: Int, admitting connection: Connection? = nil, creating: Bool = false) -> Outcome? {
         core.withLock { core in
             guard !core.closed else { return .finished(.closed) }
             guard !core.detaching, core.generation == generation else { return .detached }
             if let connection { core.inFlight = connection }
+            if creating {
+                core.beforeCreate = core.atHost
+                core.atHost = .coming
+            }
             return nil
         }
+    }
+
+    /// Returns once no `Create` is unanswered.
+    private func createAnswered() async {
+        await withCheckedContinuation { (answered: CheckedContinuation<Void, Never>) in
+            let now = core.withLock { core -> Bool in
+                guard core.atHost == .coming else { return true }
+                core.createWaiters.append(answered)
+                return false
+            }
+            if now { answered.resume() }
+        }
+    }
+
+    /// The `Create` was answered, or its connection lost: whoever waits for it goes on. Refused, the
+    /// host made nothing of it; made, or its answer lost, only the host can say whether it holds it.
+    private func answeredCreate(refused: Bool) {
+        let waiters = core.withLock { core in
+            core.atHost = refused ? core.beforeCreate : .maybe
+            defer { core.createWaiters = [] }
+            return core.createWaiters
+        }
+        waiters.forEach { $0.resume() }
     }
 
     /// What an error before the attach means: the host's refusal, a skewed magic and a broken
     /// protocol end the session; anything else is a failed attempt, to try again.
     private static func outcome(of error: TerminalError) -> Outcome {
         switch error {
-        case let .refused(refusal): .finished(.refused(refusal.message))
-        case .skew: .finished(.refused(error.description))
+        case let .refused(refusal): .finished(.refused(refusal))
+        case .skew: .finished(.refused(HostRefusal(message: error.description, remedy: [])))
         case let .protocolViolation(what): .finished(.protocolViolation(what))
         default: .failed(error)
         }
@@ -606,14 +733,14 @@ public final class TerminalSession: Sendable {
                 return .finished(.protocolViolation("it named input \(applied) applied, outside -1 through \(Self.largestApplied)"))
             }
             account(applied)
-            tap.withLock { $0 }?(bytes)
+            tap(bytes)
             let effects = Signposts.outputToScreen { screen.feed(bytes) }
             let updated = clock.now
             latency.withLock { $0.screenUpdated(at: updated) }
             sendInput(effects.reply, handedIn: nil)
             let writing = core.withLock { $0.writing }
             effects.events.filter { writing || !$0.writesTheClipboard }.forEach { emit(.screen($0)) }
-            screenSink.yield(updated)
+            screenChanged(at: updated)
             armHoldTick()
         case let .replayBegin(safe):
             screen.beginReplay()
@@ -639,7 +766,7 @@ public final class TerminalSession: Sendable {
             if let refit {
                 send(.resize(refit), on: connection)
             }
-            screenSink.yield(clock.now)
+            screenChanged(at: clock.now)
         case let .resized(size):
             let grid = GridSize(columns: Int(size.columns), rows: Int(size.rows))
             guard Self.fits(grid), let effects = try? screen.resize(grid) else {
@@ -648,7 +775,7 @@ public final class TerminalSession: Sendable {
             core.withLock { $0.ptySize = size }
             sendInput(effects.reply, handedIn: nil)
             emit(.resized(size))
-            screenSink.yield(clock.now)
+            screenChanged(at: clock.now)
         case let .writerChanged(fde):
             let fit = core.withLock { core -> TerminalSize? in
                 core.state.writer = fde
@@ -759,21 +886,17 @@ public final class TerminalSession: Sendable {
         send(.resize(size), on: connection)
     }
 
-    /// When output left the program's render hold open, a screen tick at the hold's limit: the
-    /// frame then goes on without the program, and a renderer that draws only on a tick draws it.
+    /// When output left the program's render hold open, a screen tick at the hold's limit, on a
+    /// timer of its own: the frame then goes on without the program, and a renderer that draws only
+    /// on a tick draws it.
     private func armHoldTick() {
         guard let remaining = screen.holdRemaining else { return }
+        let next = after(remaining) { [weak self] in
+            guard let self else { return }
+            screenChanged(at: clock.now)
+        }
         let previous = core.withLock { core in
-            defer {
-                core.holdTimer = Task {
-                    do {
-                        try await self.sleep(remaining)
-                    } catch {
-                        return
-                    }
-                    self.screenSink.yield(self.clock.now)
-                }
-            }
+            defer { core.holdTimer = next }
             return core.holdTimer
         }
         previous?.cancel()
@@ -793,7 +916,6 @@ public final class TerminalSession: Sendable {
         core.withLock { $0.supervisor = nil }
         setPhase(.ended(end))
         eventSink.finish()
-        screenSink.finish()
     }
 
     private func emit(_ event: SessionEvent) {

@@ -5,6 +5,7 @@ import SailRenderer
 import SailSurface
 import SailTerminal
 import SailVT
+import Synchronization
 
 /// A terminal session in an AppKit view. It draws only what the screen's frame says and sends only
 /// what the screen's encoders make (V2). Output is drawn on the first display refresh after it
@@ -172,14 +173,10 @@ public final class TerminalView: NSView {
         input.async { try? link.setCellPixels(width: cell.width, height: cell.height) }
         grid = nil
         layoutGrid()
-        let changes = link.screenChanges
-        let marks = marks
-        tasks.append(Task.detached { [weak self] in
-            for await updated in changes {
-                marks.output(at: CACurrentMediaTime() - (ContinuousClock.now - updated) / .seconds(1))
-                await self?.drawNowIfIdle()
-            }
-        })
+        let wake = ScreenWake(marks: marks) { [weak self] in
+            MainActor.assumeIsolated { self?.drawNowIfIdle() }
+        }
+        link.onScreenChange { updated in wake.changed(at: CACurrentMediaTime() - (ContinuousClock.now - updated) / .seconds(1)) }
         let events = link.events
         tasks.append(Task { [weak self] in
             for await event in events {
@@ -204,6 +201,7 @@ public final class TerminalView: NSView {
     public func detach() {
         blink?.invalidate()
         blink = nil
+        link?.onScreenChange(nil)
         tasks.forEach { $0.cancel() }
         tasks = []
         link = nil
@@ -600,6 +598,7 @@ public final class TerminalView: NSView {
 
     isolated deinit {
         blink?.invalidate()
+        link?.onScreenChange(nil)
         tasks.forEach { $0.cancel() }
     }
 
@@ -613,6 +612,60 @@ public final class TerminalView: NSView {
 
     override public func accessibilityValue() -> Any? {
         visibleText
+    }
+}
+
+/// A view's wake for its screen's changes, told on the session's own thread: a change that finds no
+/// wake outstanding posts one block to the main queue, which takes the wake, marks the oldest change
+/// it carries (so output to shown is the longest any of them waited) and, when it carries more than
+/// one, the newest (so a key whose echo came in a later change is put to it), and draws the screen as
+/// it is then. The session's thread only takes a lock and, at most once per wake, posts; nothing between a
+/// change and the main queue runs on a shared pool, and however fast a session's screen changes, one
+/// wake per view waits on the main queue at a time.
+final class ScreenWake: Sendable {
+    private struct Outstanding {
+        var oldest: Double
+        var newest: Double
+        var changes: Int
+    }
+
+    private let queue: DispatchQueue
+    private let marks: ViewMarks
+    private let draw: @Sendable () -> Void
+    /// The changes since the queue last took the wake; nil while none is outstanding.
+    private let outstanding = Mutex<Outstanding?>(nil)
+
+    /// A wake that `queue`, the main queue unless a test gives another, takes to call `draw`.
+    init(on queue: DispatchQueue = .main, marks: ViewMarks, draw: @escaping @Sendable () -> Void) {
+        self.queue = queue
+        self.marks = marks
+        self.draw = draw
+    }
+
+    func changed(at time: Double) {
+        let post = outstanding.withLock { outstanding in
+            guard outstanding == nil else {
+                outstanding?.changes += 1
+                outstanding?.newest = time
+                return false
+            }
+            outstanding = Outstanding(oldest: time, newest: time, changes: 1)
+            return true
+        }
+        guard post else { return }
+        queue.async { self.taken() }
+    }
+
+    /// The wake is cleared before the screen is read, so a change after the read posts another.
+    private func taken() {
+        guard let taken = outstanding.withLock({ outstanding in
+            defer { outstanding = nil }
+            return outstanding
+        }) else { return }
+        marks.output(at: taken.oldest)
+        if taken.changes > 1 { marks.output(at: taken.newest) }
+        marks.told(since: taken.oldest, changes: taken.changes)
+        draw()
     }
 }
 

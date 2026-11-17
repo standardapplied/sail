@@ -1299,7 +1299,8 @@ own, about three (2.9 to 4.3 s over 32 creates, median 3.2 s).
     named after the workspace, sshd restarted onto the new keys once systemd answers (it boots
     while the repos are fetched), and the dev user's bus. Before any fetch it waits up to 30 s for
     `eth0` to get an IPv4 address; a clone that gets none is not made: the script fails naming
-    the wait and what to check ("acme-try got no address on eth0 within 30 s, …"), and the create
+    the wait, `systemd-networkd`'s state of the link when it has one, and what to check
+    ("acme-try got no address on eth0 within 30 s (networkd says carrier, failed), …"), and the create
     removes it as any failed create does. Each fetch first waits, up to 10 s, until
     its remote's host resolves, asking the resolver itself (`getent hosts`, `Workspaces.FETCH`, a
     deadline on bash's `SECONDS`), never reading a failed fetch's words: a clone's address comes up
@@ -1400,11 +1401,15 @@ Each row with the tests that prove it:
   `BoxInstancesTest.noProjectIsGivenAnInstanceThatIsAWorkspaceATemplateOrACopy`.*
 - **W5. A clone shares no machine identity.** The per-workspace step regenerates the machine-id
   and the SSH host keys, which every clone otherwise has from the template, the keys after the
-  hostname, so their comment names the project. The new keys are made beside the template's and
-  renamed over them, so an sshd systemd starts meanwhile never finds none, and sshd is restarted
+  hostname, so their comment names the project. The machine-id is written beside the template's
+  and renamed over it, so the clone's `systemd-networkd`, which reads it while it configures
+  `eth0` and fails the link for good when it finds none, never does. The new keys are made beside
+  the template's and renamed over them, so an sshd systemd starts meanwhile never finds none, and sshd is restarted
   onto them only once its unit has finished starting, within 30 s or the prepare fails saying the
   state it was still in; a restart that fails says the unit's result and its last journal lines. Its template's keys are cleared with the ready mark.
-  *`WorkspaceIT`; the script is pinned by `WorkspacesTest.theScriptThatMakesACloneItsOwnIsPinnedWhole`.*
+  *`WorkspaceIT` (`aWorkspaceTakesItsOwnMachineIdWithoutEverBeingLeftWithNone`: a watcher in the
+  clone from its boot records no moment without one); the script is pinned by
+  `WorkspacesTest.theScriptThatMakesACloneItsOwnIsPinnedWhole`.*
 - **W6. Times are measured and said.** `create` and `start` print each phase and return it in
   JSON (`timings.clone_ms`, `start_ms`, `ready_ms`, `total_ms`), measured on `System.nanoTime`;
   a create's `ready_steps` breaks the readiness down, the script's steps as it timed them in the
@@ -3839,7 +3844,8 @@ FDE (`HostAccess.holder`), for that decision alone, and decides it as it decides
 (`openRefusal`, a project being required: the network opens no shell on the host) or that attach
 (`attachRefusal`, the one decision an `Attach` frame asks too), so there is no second rule. Its
 refusal carries a kind (`PtyMessage.TicketRefused`): not found is `404`, refused `403`, a cap `429`,
-an outage or a door not listening `503` (`terminal_unavailable`). A ticket to attach hears every
+an outage or a door not listening `503` (`terminal_unavailable`); a box that offers no terminal over
+the network answers the route `404 terminal_not_offered`. A ticket to attach hears every
 refusal as one sentence, "There is no session 'x' on this box that you may attach.", so the network
 cannot tell a session that is not the caller's from one that does not exist; the unix socket keeps
 its words. A ticket (`PtyTickets`) is a record that the decision was made, never a credential that
@@ -3859,7 +3865,9 @@ passed over after 100 ms and never ends the door. A presented ticket's credentia
 again against the roster. The connection then keeps `TCP_NODELAY` and TCP keepalive (a vanished peer
 found dead within about a minute, its slot, attachment and write token released), speaks the unix
 socket's `SAILPTY4` frames for its ticket's one action on its one target alone (an open ticket
-creates one session in its project and attaches to it), each frame decided again as on the unix
+creates one session in its project and attaches to it), and may end that one session only while it
+holds its write token, so an observer never ends one (`PtyTickets.Ticket#refusal`, the host's
+ownership check still deciding the kill), each frame decided again as on the unix
 socket, and is resolved again at every sweep and severed as a unix connection is. No ticket is
 issued for no credential, for the host's own token (the box's person exists only on the unix
 socket) or for a machine token. `sail _pty-selftest`, the release smoke test, opens a loopback
@@ -4526,7 +4534,10 @@ against them before it is used. Both expose one module, `GhosttyVt`. The termina
   `Int64.max - 2^32`, which leaves every client room to number its input without overflow); no
   integer from a frame is added to, multiplied or used as a size, count or index before it is
   bounded. After 5 failed reconnects in a row (0.5, 1, 2, 4 and 8 s apart) it parks, saying why,
-  until the app calls `reconnectNow()`. A connection lost within 5 s of attaching is a failed
+  until the app calls `reconnectNow()`; a runner's door goes on every 8 s until its waits and the
+  time its attempts took add up to 60 s or more (`runnerPatience`), so a network gone for well under
+  a minute is ridden out, and an attempt whose ticket was never presented uses it again for 20 s
+  (`unpresentedReuse`). A connection lost within 5 s of attaching is a failed
   attempt, so a host that attaches and drops parks the session too; the first drop after a stable
   attachment still gets all five waits. A dead TCP peer with anything unacknowledged in flight is
   found within 10 s (`TCP_USER_TIMEOUT` / `TCP_RXT_CONNDROPTIME`); a quiet one within 45 s, by
@@ -4537,7 +4548,25 @@ against them before it is used. Both expose one module, `GhosttyVt`. The termina
   new writer's pty takes it. `reconnectNow()` while attached sends the pty's size, so a connection
   that died during sleep is found at once without resizing anything; the protocol has no no-op
   frame, and an empty `Input` would count as typing. A connect attempt a detach or a close overtook stands down
-  before it sends anything for the session, and `kill()` while not attached throws.
+  before it sends anything for the session, and `kill()` while not attached, or through a runner's
+  door, throws: a session is ended by `TerminalSession.end(within:)`, within 10 s in all. A `Create`
+  sent and not yet answered (a workspace starting) is waited for first, inside the same limit,
+  since the host makes the session before it answers and a closed connection does not undo it;
+  a session never made is gone already (`atHost`, which also decides what a quit counts; a `Create`
+  whose answer was lost may be at the host, so the door decides).
+  Then `Door.end(_:within:)` ends it on a connection of its own (through a runner's door an attach
+  ticket, attached as the writer, then `Kill`), the ticket included in the limit, its outcome
+  `EndOutcome`: ended, gone already (a ticket to attach refused as not found, by code), or
+  unconfirmed in the words of whoever refused it. What may still run is said in one sentence
+  (`EndOutcome.mayStillRun`): no timeout ends a detached session, so it keeps its workspace
+  running until someone ends it or stops the workspace. A refusal is kept whole on every path
+  (`SessionEnd.refused(HostRefusal)`, `.ticketRefused(Refusal)`), the host's reason apart from its
+  typed remedy, and said by `Said.lines`, the one composition: the sentence and, for a command the
+  app knows, who acts; a call that fails is said by its kind, never its route
+  (`SailError.description`); a ticket asked while signed out, or as another person, is the
+  client's own `SailError.signIn`, never a server's code. The terminal door and the workspace
+  doors pass a person only words written for one (`Remedied`); anything else, a tool's output, is
+  logged, and the person reads `PtyAdmission.Unavailable` or "The runner could not finish that.".
 - **T7. No keystroke reaches a screen the person cannot see.** Input while not attached is
   dropped and counted exactly (`droppedInputs`), never queued; input written into a connection
   that then died is estimated lost (`possiblyLostInputs`) when the next attach shows the host's

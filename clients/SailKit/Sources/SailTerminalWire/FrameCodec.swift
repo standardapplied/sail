@@ -128,7 +128,8 @@ private extension Frame {
         case let .issueTicket(action, target, credential, workspace):
             [.string(action.rawValue), .string(target), .string(credential), .string(workspace)]
         case let .ticket(ticket): [.string(ticket)]
-        case let .ticketRefused(kind, remedy): [.string(kind.rawValue), .count(remedy.count)] + remedy.flatMap(\.fields)
+        case let .ticketRefused(kind, reason, remedy):
+            [.string(kind.rawValue), .string(reason), .count(remedy.count)] + remedy.flatMap(\.fields)
         case let .putBegin(id, name, size): [.int32(id), .string(name), .int64(size)]
         case let .putChunk(id, offset, bytes): [.int32(id), .int64(offset), .blob(bytes)]
         case let .putEnd(id, sha256): [.int32(id), .blob(sha256)]
@@ -236,7 +237,11 @@ private struct Cursor {
         case 36: .putStored(id: try int32(), path: try string())
         case 37: .putRefused(id: try int32(), kind: Open(rawValue: try string()), limit: try int64())
         case 33: .ticket(try string())
-        case 34: .ticketRefused(kind: Open(rawValue: try string()), remedy: try list { (cursor: inout Cursor) throws(TerminalWireError) in try cursor.part() })
+        case 34:
+            .ticketRefused(
+                kind: Open(rawValue: try string()), reason: try string(),
+                remedy: try list { (cursor: inout Cursor) throws(TerminalWireError) in try cursor.part() }
+            )
         case 20: .output(lastInputSequence: try int64(), bytes: try blob())
         case 21: .replayBegin(safe: try bool())
         case 22: .replayEnd

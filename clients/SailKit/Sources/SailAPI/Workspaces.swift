@@ -1,3 +1,44 @@
+/// A project's workspaces on the box that answered: its own container as `main`, and every
+/// workspace of it, other people's included.
+public struct WorkspaceList: Codable, Equatable, Sendable {
+    public let project: String
+    public let workspaces: [WorkspaceRow]
+
+    public init(project: String, workspaces: [WorkspaceRow]) {
+        self.project = project
+        self.workspaces = workspaces
+    }
+}
+
+/// One workspace: its name, its instance, its state, and its owner while that person is active.
+public struct WorkspaceRow: Codable, Equatable, Sendable {
+    public let name: String
+    public let instance: String
+    public let state: Open<WorkspaceState>
+    public let owner: String?
+
+    public init(name: String, instance: String, state: Open<WorkspaceState>, owner: String?) {
+        self.name = name
+        self.instance = instance
+        self.state = state
+        self.owner = owner
+    }
+}
+
+/// Where a workspace's instance is.
+public enum WorkspaceState: String, CaseIterable, Sendable {
+    case running, stopped, frozen
+    case notCreated = "not_created"
+    case incomplete
+}
+
+extension Endpoint where Response == WorkspaceList {
+    /// The workspaces of `project`.
+    public static func workspaces(project: String) -> Self {
+        Self(.get, Route.workspaces(project: project))
+    }
+}
+
 /// A workspace the caller made: theirs, a clone of the project's current template.
 public struct WorkspaceCreated: Codable, Equatable, Sendable {
     public let project: String

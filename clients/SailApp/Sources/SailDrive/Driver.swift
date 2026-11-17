@@ -173,6 +173,9 @@ final class Driver {
         if let workbench = await performWorkbench(step) {
             return workbench
         }
+        if let workspaces = await performWorkspaces(step) {
+            return workspaces
+        }
         if let text = step.type {
             for character in text { key(character) }
             return (true, "typed \(text.count) keys")
@@ -299,8 +302,8 @@ final class Driver {
             return (found, found ? "" : "the screen never showed '\(text)'")
         }
         if let banner = step.banner {
-            let found = await waitUntil(step.seconds ?? 15) { self.pane?.status?.contains(banner) == true }
-            return (found, "the banner says '\(pane?.status ?? "nothing")'")
+            let found = await waitUntil(step.seconds ?? 15) { self.pane?.status.says?.contains(banner) == true }
+            return (found, "the banner says '\(pane?.status.says ?? "nothing")'")
         }
         if step.still == true {
             let before = screenText
@@ -380,7 +383,9 @@ final class Driver {
         let gap = figures.longestBetweenCommits?.length ?? 0
         return (max(verdict.shown, verdict.held) * 1000, "the longest any output waited to be shown: \(ours(figures.longestToShown).said); "
             + "the main thread's longest hold: \(mainHeld().said); its longest gap between commits \(Self.ms(gap * 1000)) ms, "
-            + "\(figures.longestGapOutputs) outputs reached the screen in it, a drawable was being asked for \(Self.ms(figures.longestGapFetching)) ms of it")
+            + "\(figures.longestGapOutputs) outputs reached the screen in it, a drawable was being asked for \(Self.ms(figures.longestGapFetching)) ms of it; "
+            + "the main thread took the wake for an output at most \(Self.ms((figures.longestToTold?.length ?? 0) * 1000)) ms after the screen took it, "
+            + "\(figures.wakes) wakes for \(figures.changes) screen changes")
     }
 
     func measurement(_ name: String, keys: Int, figures: LatencyFigures, budgets: [String: Bool]) -> Measure {

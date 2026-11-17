@@ -35,29 +35,35 @@ class PtyWireTest {
   }
 
   @Test
-  void aRefusalKeepsItsCommandsAsDataAndLeadsWithItsPlainMessage() throws Exception {
-    var detail =
-        Remedy.of(
-            "This box has no FDE identity. Set one with '",
-            Remedy.sail("host config set sync-handle", "<handle>"),
-            "' or run '",
-            Remedy.program("ssh-keygen", "-R", "main"),
-            "'.");
+  void aRefusalKeepsItsReasonApartFromItsRemedyAndItsCommandsAsData() throws Exception {
+    var refusal =
+        new PtyMessage.Err(
+            "This box has no FDE identity.",
+            Remedy.of(
+                "Set one with '",
+                Remedy.sail("host config set sync-handle", "<handle>"),
+                "' or run '",
+                Remedy.program("ssh-keygen", "-R", "main"),
+                "'."));
     var bytes = new java.io.ByteArrayOutputStream();
-    PtyWire.write(java.nio.channels.Channels.newChannel(bytes), new PtyMessage.Err(detail));
+    PtyWire.write(java.nio.channels.Channels.newChannel(bytes), refusal);
 
     assertEquals(
-        new PtyMessage.Err(detail),
+        refusal,
         PtyWire.read(
             java.nio.channels.Channels.newChannel(
                 new java.io.ByteArrayInputStream(bytes.toByteArray()))));
     var frame = ByteBuffer.wrap(bytes.toByteArray(), 5, bytes.size() - 5);
-    var message = new byte[frame.getInt()];
-    frame.get(message);
+    var reason = new byte[frame.getInt()];
+    frame.get(reason);
+    assertEquals(
+        "This box has no FDE identity.",
+        new String(reason, StandardCharsets.UTF_8),
+        "the reason names no command; the remedy follows as data");
     assertEquals(
         "This box has no FDE identity. Set one with 'sail host config set sync-handle <handle>'"
             + " or run 'ssh-keygen -R main'.",
-        new String(message, StandardCharsets.UTF_8));
+        refusal.message());
   }
 
   @Test
@@ -227,6 +233,7 @@ class PtyWireTest {
     var refusal =
         new PtyMessage.TicketRefused(
             PtyMessage.TicketRefusal.LIMITED,
+            "Too many tickets are waiting.",
             Remedy.of("Wait, then run '", Remedy.sail("session ls"), "'."));
     assertEquals(refusal, roundTrip(refusal));
     assertEquals(

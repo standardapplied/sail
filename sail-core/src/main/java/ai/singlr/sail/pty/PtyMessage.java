@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.pty;
 
+import ai.singlr.sail.common.Remedied;
 import ai.singlr.sail.common.Remedy;
 import java.io.IOException;
 import java.time.Duration;
@@ -194,10 +195,18 @@ public sealed interface PtyMessage {
     }
   }
 
-  /** A ticket request refused: what kind of refusal, and its words, kept as a refusal's are. */
-  record TicketRefused(TicketRefusal kind, Remedy detail) implements PtyMessage {
-    public TicketRefused(TicketRefusal kind, String message) {
-      this(kind, Remedy.of(message));
+  /**
+   * A ticket request refused: what kind of refusal, what happened, and what to do about it, kept
+   * apart as a refusal's are, so the API answers the reason and the typed remedy as they are.
+   */
+  record TicketRefused(TicketRefusal kind, String reason, Remedy remedy) implements PtyMessage {
+    public TicketRefused(TicketRefusal kind, String reason) {
+      this(kind, reason, Remedy.NONE);
+    }
+
+    /** {@code err}'s reason and remedy, heard as {@code kind}. */
+    public TicketRefused(TicketRefusal kind, Err err) {
+      this(kind, err.reason(), err.remedy());
     }
   }
 
@@ -322,17 +331,22 @@ public sealed interface PtyMessage {
   record Ok() implements PtyMessage {}
 
   /**
-   * A refusal: what happened and what to do about it, each command kept as data so the client that
-   * prints it renders it for its own reader.
+   * A refusal: what happened, naming no command, and what to do about it, each command kept as data
+   * so the client that prints it renders it for its own reader; never one flattened into the other.
    */
-  record Err(Remedy detail) implements PtyMessage {
-    public Err(String message) {
-      this(Remedy.of(message));
+  record Err(String reason, Remedy remedy) implements PtyMessage {
+    public Err(String reason) {
+      this(reason, Remedy.NONE);
+    }
+
+    /** The refusal {@code failure} is: its reason and its remedy as they are. */
+    public static Err of(Throwable failure) {
+      return new Err(Remedied.reasonOf(failure), Remedied.remedyOf(failure));
     }
 
     /** The refusal as an account whose own plain {@code sail} runs reads it. */
     public String message() {
-      return detail.plain();
+      return Remedied.message(reason, remedy);
     }
   }
 }

@@ -44,7 +44,50 @@ import Testing
         let second = try await host.accept()
         #expect(try await second.welcome() == "ticket-2")
         #expect(try await second.read() == .attach(session: "work", write: true))
-        #expect(desk.requests == [.open(project: ""), .attach(session: "work")])
+        #expect(desk.requests == [.open(project: "", workspace: ""), .attach(session: "work")])
+        session.close()
+    }
+
+    /// A session opened in a workspace asks a ticket naming that workspace, and its reconnect asks
+    /// an attach for the session, which names no workspace.
+    @Test func aWorkspaceSessionsTicketNamesItsWorkspaceAndItsReconnectAttaches() async throws {
+        let host = try FakeHost(tcp: ())
+        let desk = TicketDesk(address: host.address)
+        var inTry = create
+        inTry.project = "acme"
+        inTry.workspace = "try"
+        let session = TerminalSession(open: inTry, door: .runner(desk), screen: try screen(), timeout: 5, sleep: Naps().sleep)
+        let watch = Watch(session)
+        session.start()
+        let first = try await host.accept()
+        _ = try await first.welcome()
+        #expect(try await first.read() == .create(inTry))
+        try first.send(.accepted)
+        _ = try await first.read()
+        try first.send(.accepted)
+        try await watch.attached()
+        first.close()
+        let second = try await host.accept()
+        _ = try await second.welcome()
+        #expect(try await second.read() == .attach(session: "work", write: true))
+        #expect(desk.requests == [.open(project: "acme", workspace: "try"), .attach(session: "work")])
+        session.close()
+    }
+
+    /// A ticket refused ends the session with the server's refusal whole, its fix included, so the
+    /// app can say what the person can do.
+    @Test func aRefusedTicketEndsTheSessionWithTheRefusalWhole() async throws {
+        let desk = TicketDesk(address: .tcp(host: "127.0.0.1", port: 9))
+        let refusal = Refusal(
+            code: .known(.forbiddenNotAssignee), message: "Workspace 'dock' belongs to 'uday', not you.",
+            action: "Ask uday to enter it, or have an admin do it."
+        )
+        desk.refuse(refusal)
+        let session = TerminalSession(open: create, door: .runner(desk), screen: try screen(), timeout: 5, sleep: Naps().sleep)
+        let watch = Watch(session)
+        session.start()
+        try await watch.until("ended") { session.state.phase == .ended(.ticketRefused(refusal)) }
+        #expect(SessionEnd.ticketRefused(refusal).description == "Workspace 'dock' belongs to 'uday', not you.")
         session.close()
     }
 
@@ -102,20 +145,46 @@ import Testing
         let peer = try await host.accept()
         try await peer.welcome()
         #expect(try await peer.read() == .attach(session: "theirs", write: true))
-        let words = "There is no session 'theirs' on this box that you may attach."
-        try peer.send(.refused(HostRefusal(message: words, remedy: [.words(words)])))
-        try await watch.phase(.ended(.refused(words)))
+        let refusal = HostRefusal(message: "There is no session 'theirs' on this box that you may attach.", remedy: [])
+        try peer.send(.refused(refusal))
+        try await watch.phase(.ended(.refused(refusal)))
+    }
+
+    /// M1: a refused open keeps the host's refusal whole, its typed remedy included, and a person
+    /// reads its sentence and, for a fix the app knows, what they can do: never a command.
+    @Test func aRefusedOpenIsKeptWholeAndSaidWithoutACommand() async throws {
+        let host = try FakeHost()
+        let session = TerminalSession(open: create, door: .local(host.address), screen: try screen())
+        let watch = Watch(session)
+        session.start()
+        let peer = try await host.accept()
+        try await peer.welcome()
+        _ = try await peer.read()
+        let absent = HostRefusal(message: "Project 'acme' has no workspace 'try' on this box.", remedy: [
+            .words("List them with: "), .command(run: .known(.sail), verb: "project workspace list", args: ["acme"]), .words("."),
+        ])
+        try peer.send(.refused(absent))
+        try await watch.phase(.ended(.refused(absent)))
+        #expect(SessionEnd.refused(absent).said == ["Project 'acme' has no workspace 'try' on this box."])
+        let token = HostRefusal(
+            message: "Workspace 'try' fetches acme's repo app, and uday keeps no token for it.",
+            remedy: [.words("Store one with "), .command(run: .known(.sail), verb: "git login", args: ["github.com"]), .words(".")]
+        )
+        #expect(SessionEnd.refused(token).said == [
+            "Workspace 'try' fetches acme's repo app, and uday keeps no token for it.", "An admin stores it on the runner for now.",
+        ])
     }
 
     /// Scenario 8, the client's half: the API's refusal of the attach ticket is the end, in its words.
     @Test func aRefusedTicketEndsTheSessionWithTheAPIsWords() async throws {
         let desk = TicketDesk(address: .tcp(host: "127.0.0.1", port: 9))
         let words = "There is no session 'theirs' on this box that you may attach."
-        desk.refuse(Refusal(code: .known(.notFound), message: words))
+        let refusal = Refusal(code: .known(.notFound), message: words)
+        desk.refuse(refusal)
         let session = TerminalSession(attach: "theirs", write: true, door: .runner(desk), screen: try screen())
         let watch = Watch(session)
         session.start()
-        try await watch.phase(.ended(.refused(words)))
+        try await watch.phase(.ended(.ticketRefused(refusal)))
         #expect(desk.requests == [.attach(session: "theirs")])
     }
 
@@ -140,6 +209,77 @@ import Testing
         #expect(try await again.read() == .attach(session: "work", write: true))
         #expect(naps.durations == TerminalSession.retryWaits)
         session.close()
+    }
+
+    /// A runner's door keeps trying for a minute before it parks: past the five waits its waits go
+    /// on at their 8 s cap until 60 s or more of them are spent, so a cut of 20 s is ridden out and
+    /// one of 70 s parks, after which Reconnect Now tries at once. A ticket asked while the door
+    /// cannot be reached is never presented, so the next attempts use it again (m8): the person's
+    /// tickets, which the host bounds, are not spent on a dead door.
+    @Test func aRunnerKeepsTryingForAMinuteAtTheCapThenParksUntilReconnectNow() async throws {
+        let host = try FakeHost(tcp: ())
+        let desk = TicketDesk(address: host.address)
+        let naps = Naps()
+        let session = TerminalSession(open: create, door: .runner(desk), screen: try screen(), timeout: 5, sleep: naps.sleep)
+        let watch = Watch(session)
+        session.start()
+        let peer = try await host.accept()
+        try await peer.welcome()
+        _ = try await peer.acceptAttach()
+        try await watch.attached()
+        host.stop()
+        peer.close()
+        try await watch.until("parked") {
+            if case .parked = session.state.phase { return true }
+            return false
+        }
+        let waits = TerminalSession.retryWaits + Array(repeating: Duration.seconds(8), count: 6)
+        #expect(naps.durations == waits)
+        #expect(naps.durations.dropLast().reduce(.zero, +) < TerminalSession.runnerPatience)
+        #expect(naps.durations.reduce(.zero, +) >= TerminalSession.runnerPatience)
+        #expect(watch.seen.contains(.phase(.reconnecting(attempt: 11))))
+        #expect(desk.requests.first == .open(project: "", workspace: ""))
+        #expect(desk.requests.count <= 3, "\(desk.requests.count) tickets for \(waits.count) attempts: one never presented serves the next")
+        let attempts = naps.durations.count
+        session.reconnectNow()
+        try await watch.until("tried again at once") { naps.durations.count > attempts }
+        session.close()
+    }
+
+    /// n6: a runner's patience counts the time its attempts took, not its waits alone. Against a
+    /// host that accepts no connection, each attempt takes its second to time out, and its waits
+    /// begin at 1 s; with patience half a second past those four waits, the attempts' seconds park
+    /// it after the fourth, where the waits alone would take a fifth.
+    @Test func aRunnersPatienceCountsTheTimeItsAttemptsTook() async throws {
+        let host = try FakeHost(tcp: ())
+        let desk = TicketDesk(address: host.address)
+        let naps = Naps()
+        let waits = Array(TerminalSession.retryWaits.dropFirst())
+        let patience = waits.reduce(.zero, +) + .milliseconds(500)
+        let session = TerminalSession(open: create, door: .runner(desk), screen: try screen(), timeout: 1, sleep: naps.sleep, patience: patience)
+        let watch = Watch(session)
+        session.start()
+        try await watch.until(within: 30, "parked") {
+            if case .parked = session.state.phase { return true }
+            return false
+        }
+        #expect(naps.durations == waits, "\(naps.durations)")
+        session.close()
+        host.stop()
+    }
+
+    /// A runner whose control plane cannot be reached says so in words, which a parked tab shows.
+    @Test func aTicketThatCannotBeAskedIsSaidInWords() async throws {
+        struct Lost: TicketSource {
+            func ticket(for _: TicketRequest) async throws(SailError) -> TerminalTicket {
+                throw .unreachable("The network connection was lost.")
+            }
+        }
+        await #expect(throws: TerminalError.controlPlane(.unreachable("The network connection was lost."))) {
+            _ = try await Door.runner(Lost()).entry(for: .attach(session: "work"))
+        }
+        #expect(TerminalError.controlPlane(.unreachable("The network connection was lost.")).description
+            == "Sail could not reach the control plane: The network connection was lost.")
     }
 
     /// Scenario 10 and T7: keys typed while reconnecting are dropped and counted, never sent later.
@@ -343,7 +483,7 @@ import Testing
         session.start()
         let peer = try await host.accept()
         try peer.send(raw: Array("SAILPTY2".utf8))
-        try await watch.phase(.ended(.refused("the terminal host is older than this app: upgrade sail on it")))
+        try await watch.phase(.ended(.refused(HostRefusal(message: "the terminal host is older than this app: upgrade sail on it", remedy: []))))
     }
 
     @Test func aHostThatRefusesTheHelloEndsTheSessionInItsWords() async throws {
@@ -353,7 +493,7 @@ import Testing
         session.start()
         let peer = try await host.accept()
         _ = try await peer.hello()
-        try peer.send(.refused(HostRefusal(message: "That token is not this machine's person.", remedy: [.words("That token is not this machine's person.")])))
-        try await watch.phase(.ended(.refused("That token is not this machine's person.")))
+        try peer.send(.refused(HostRefusal(message: "That token is not this machine's person.", remedy: [])))
+        try await watch.phase(.ended(.refused(HostRefusal(message: "That token is not this machine's person.", remedy: []))))
     }
 }

@@ -26,13 +26,14 @@ public enum Frame: Equatable, Sendable {
     case issueTicket(action: Open<TicketAction>, target: String, credential: String, workspace: String = "")
     /// A ticket, presented as the `hello` token of one TCP connection to the host.
     case ticket(String)
-    /// A ticket request refused: what kind of refusal, and its remedy as words and commands.
-    case ticketRefused(kind: Open<TicketRefusal>, remedy: [RemedyPart])
+    /// A ticket request refused: what kind of refusal, what happened, and its remedy as words and
+    /// commands, kept apart.
+    case ticketRefused(kind: Open<TicketRefusal>, reason: String, remedy: [RemedyPart])
     /// Begins upload `id` of a file of `size` bytes named `name` into the attached session; the
     /// host chooses where it is stored, from the name reduced to characters a shell takes as they
     /// are.
     case putBegin(id: Int32, name: String, size: Int64)
-    /// The bytes of upload `id` from `offset`, at most ``FrameCodec/maxPutChunk`` of them.
+    /// The bytes of upload `id` from `offset`, at most 64 KiB of them: the host's bound.
     case putChunk(id: Int32, offset: Int64, bytes: [UInt8])
     /// Upload `id` is all sent; `sha256` is the digest of its bytes, which the host checks.
     case putEnd(id: Int32, sha256: [UInt8])
@@ -157,8 +158,9 @@ public struct SessionPage: Equatable, Sendable {
     }
 }
 
-/// The host's refusal: its message, and the remedy behind it as words and commands, the same parts
-/// an API refusal carries.
+/// The host's refusal: what happened, naming no command, and the remedy behind it as words and
+/// commands, the same parts an API refusal carries, kept apart; the remedy is empty when there is
+/// none.
 public struct HostRefusal: Equatable, Sendable {
     public var message: String
     public var remedy: [RemedyPart]
@@ -166,6 +168,12 @@ public struct HostRefusal: Equatable, Sendable {
     public init(message: String, remedy: [RemedyPart]) {
         self.message = message
         self.remedy = remedy
+    }
+
+    /// What a person reads of it, as every refusal is said (``Said/lines(_:remedy:otherwise:)``).
+    public var lines: [String] {
+        let words = remedy.compactMap { part -> String? in if case let .words(text) = part { text } else { nil } }.joined()
+        return Said.lines(message, remedy: remedy, otherwise: words.isEmpty ? nil : words)
     }
 }
 
