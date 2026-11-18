@@ -49,10 +49,15 @@ package final class ProjectView: NSView, NSTextFieldDelegate {
         newWorkspace.action = #selector(pressed(_:))
         list.onChoose = { [weak self] in self?.on(.chose($0)) }
         field.field.delegate = self
+        for label in [title, lede] {
+            label.lineBreakMode = .byTruncatingTail
+            label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        }
         frameView.look = look
         frameView.addSubview(list)
         column.orientation = .vertical
         column.alignment = .width
+        Self.shrinks(column)
         column.spacing = 0
         column.translatesAutoresizingMaskIntoConstraints = false
         addSubview(column)
@@ -167,6 +172,7 @@ package final class ProjectView: NSView, NSTextFieldDelegate {
         let row = NSStackView(views: [words, buttons])
         row.alignment = .top
         row.distribution = .equalSpacing
+        Self.shrinks(words, row)
         return row
     }
 
@@ -202,7 +208,14 @@ package final class ProjectView: NSView, NSTextFieldDelegate {
         keys.spacing = 6
         let row = NSStackView(views: [left, keys])
         row.distribution = .equalSpacing
+        Self.shrinks(keys, row)
         return row
+    }
+
+    /// `stacks` may be narrower than their views: a narrow card clips them rather than refuse its
+    /// width, as stacks otherwise hold the window at their views' widths.
+    private static func shrinks(_ stacks: NSStackView...) {
+        for stack in stacks { stack.setClippingResistancePriority(.defaultLow, for: .horizontal) }
     }
 
     /// Words in mono 11, tertiary: the foot's.

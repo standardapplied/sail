@@ -165,7 +165,8 @@ public struct WorkspacesModel: Sendable {
     // MARK: Projects and lists
 
     /// Takes the projects listed; the first is chosen when none still is. Returns the list request
-    /// the chosen project needs, if any.
+    /// the chosen project needs: a project chosen again is listed again too, as what was shown
+    /// before may have changed, keeping what is under way on it.
     @discardableResult
     public mutating func projectsListed(_ result: Result<ProjectList, SailError>) -> Int? {
         switch result {
@@ -177,7 +178,7 @@ public struct WorkspacesModel: Sendable {
                 listing.clear()
                 return nil
             }
-            return name == chosen ? nil : choose(name)
+            return name == chosen ? listAgain() : choose(name)
         case let .failure(error):
             projectsFailure = error.description
             return nil

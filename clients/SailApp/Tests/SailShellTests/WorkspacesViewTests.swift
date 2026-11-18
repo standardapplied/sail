@@ -41,12 +41,12 @@ import Testing
     /// A listing under way (the section shown again) holds nothing: only a person's action does (#462).
     @Test func aListingUnderWayHoldsNothing() async throws {
         let exchanges = [try Exchange("projects"), try Exchange("workspaces"), try Exchange("projects"), try Exchange("workspaces")]
-        let transport = Held(RecordedServer(exchanges), holding: "projects", after: 1)
+        let transport = Held(RecordedServer(exchanges), holding: "workspaces", after: 1)
         let (view, _) = try Self.view(transport)
         view.shown()
         #expect(await RunnerTabTests.until { view.text.contains("dock") }, "\(view.text)")
         let listing = Task { await view.refresh() }
-        #expect(await RunnerTabTests.until { transport.routes.filter { $0.contains("projects") }.count == 2 }, "the listing asked nothing")
+        #expect(await RunnerTabTests.until { transport.routes.filter { $0.contains("workspaces") }.count == 2 }, "the listing asked nothing")
         #expect(!view.busy && view.project.newWorkspace.isEnabled, "a listing under way held New Workspace")
         transport.release()
         await listing.value

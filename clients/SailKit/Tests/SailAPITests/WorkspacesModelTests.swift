@@ -132,6 +132,16 @@ import Testing
         guard case .empty? = Self.page(model)?.body else { Issue.record("beacon's list was not taken"); return }
     }
 
+    /// Listing the projects again (the section shown again, ⌘R) lists the chosen project again too.
+    @Test func theProjectsListedAgainListTheChosenOneAgain() throws {
+        var model = Self.listed(Self.uday, "workspaces")
+        #expect(Self.table(model)?.yours.map(\.name) == ["dock"])
+        let asked = model.projectsListed(Self.answer(.projects, "projects"))
+        let again = try #require(asked, "the chosen project is not listed again")
+        model.listed(Self.answer(.workspaces(project: "harbor"), "workspaces-three"), request: again, at: Self.at)
+        #expect(Self.table(model)?.yours.map(\.name) == ["dock", "pier"] && model.chosen == "harbor")
+    }
+
     /// Frame "A refresh fails while a list is shown": the list stays, dimmed, under an error banner.
     @Test func aFailedRefreshKeepsTheListUnderABanner() throws {
         var model = Self.listed(Self.ana)
