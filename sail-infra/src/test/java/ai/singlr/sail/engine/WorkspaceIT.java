@@ -715,13 +715,14 @@ class WorkspaceIT extends AbstractIncusIT {
   }
 
   /**
-   * A build whose process was killed leaves its record without an outcome and its lock free: sail-
-   * api, starting, strips the template of what the build wrote, finds no token, stops it and only
-   * then ends the record interrupted; Build Again builds it whole.
+   * What a build whose process was killed leaves, its record without an outcome and its lock free
+   * (planted here; the GCP proof kills a real one): sail-api's cleanup strips the template of what
+   * the build wrote, finds no token, stops it and only then ends the record interrupted; the next
+   * build then ends built. A resume of the real provisioner after a cut is proven by {@link
+   * #aRefusedCloneThenAStoredTokenResumesAtTheCloneAndEndsBuilt}.
    */
   @Test
-  void aKilledBuildIsCleanedOfItsTokenAsSailApiStartsAndBuildAgainBuildsIt(@TempDir Path dir)
-      throws Exception {
+  void aCutBuildIsCleanedOfItsTokenAndTheNextBuildEndsBuilt(@TempDir Path dir) throws Exception {
     var logged = new ArrayList<Exception>();
     var builds = service(dir, logged);
     containers.start(TEMPLATE);
@@ -738,7 +739,6 @@ class WorkspaceIT extends AbstractIncusIT {
     var now = DateTimeUtils.now();
     TemplateRecord.started("ada", now, TemplateBuild.STEPS)
         .at(9, now)
-        .proving(TemplateRecord.TokenProof.of(List.of(FAKE_TOKEN)))
         .write(TemplateRecord.fileOf(dir, PROJECT));
 
     var read = builds.status(edited());
@@ -767,20 +767,20 @@ class WorkspaceIT extends AbstractIncusIT {
   }
 
   /**
-   * A cut build whose token was replaced since cannot be shown absent: sail-api, starting, strips
-   * and stops the template and marks it unproven; Build Again restores the newest version's
-   * snapshot first, so nothing the cut build left reaches v2, and the mark goes with the restore.
+   * A cut build whose template still holds its builder's token where no strip looks: the search
+   * finds it, so sail-api's cleanup stops the template and marks it unproven; Build Again restores
+   * the newest version's snapshot first, so nothing the cut build left reaches v2, and the mark
+   * goes with the restore.
    */
   @Test
-  void aCutBuildWhoseTokenWasReplacedIsRolledBackBeforeBuildAgain(@TempDir Path dir)
-      throws Exception {
+  void aCutBuildWhoseTemplateStillHoldsATokenIsMarkedAndRolledBackBeforeBuildAgain(
+      @TempDir Path dir) throws Exception {
     var logged = new ArrayList<Exception>();
     var builds = service(dir, logged);
-    plant("echo left-by-the-cut-build > /home/dev/cut-marker");
+    plant("echo 'machine example.invalid password " + FAKE_TOKEN + "' > /home/dev/.netrc");
     var now = DateTimeUtils.now();
     TemplateRecord.started("ada", now, TemplateBuild.STEPS)
         .at(9, now)
-        .proving(TemplateRecord.TokenProof.of(List.of("ghp_itReplacedSince0042")))
         .write(TemplateRecord.fileOf(dir, PROJECT));
 
     builds.endCutShort(List.of(PROJECT));
@@ -802,8 +802,8 @@ class WorkspaceIT extends AbstractIncusIT {
     assertEquals(TemplateRecord.Outcome.BUILT, after.build().orElseThrow().outcome());
     assertEquals("v2", after.current().orElseThrow().version());
     assertEquals(Optional.empty(), rebuilt.key(WorkspaceTemplate.UNPROVEN_KEY));
-    assertEquals(null, inSnapshot("v2", "/home/dev/cut-marker"), "the cut's leftovers are gone");
-    assertEquals(List.of(), logged);
+    assertEquals(null, inSnapshot("v2", "/home/dev/.netrc"), "the cut's leftovers are gone");
+    assertEquals(1, logged.size(), "the cleanup that found the token is said in the log");
   }
 
   /**

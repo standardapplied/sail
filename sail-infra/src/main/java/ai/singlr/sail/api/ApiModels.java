@@ -2006,7 +2006,9 @@ record WorkspaceCreateResponse(Workspaces.Created created, String owner, boolean
 /**
  * A project's template: its state, the version workspaces are created from when one is current and
  * whether the definition changed since it was built, the number of steps a build takes, and its
- * last build, running or ended, whether a request to build found it under way ({@code joined}).
+ * last build, running or ended, whether a request to build found it under way ({@code joined}), and
+ * {@code outcome: current} when a request to build found the version built from the definition as
+ * it is and built nothing.
  */
 record TemplateResponse(TemplateBuildService.Status status) implements Mappable {
   @Override
@@ -2017,6 +2019,9 @@ record TemplateResponse(TemplateBuildService.Status status) implements Mappable 
     status.current().ifPresent(current -> m.put("version", current.version()));
     m.put("stale", status.stale());
     m.put("steps", TemplateBuild.STEPS);
+    if (status.builtNothing()) {
+      m.put("outcome", "current");
+    }
     status
         .build()
         .ifPresent(

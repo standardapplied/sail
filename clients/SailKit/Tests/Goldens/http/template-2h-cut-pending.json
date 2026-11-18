@@ -10,7 +10,7 @@
         "joined": false,
         "kept": 0,
         "outcome": "interrupted",
-        "reason": "The build stopped before it finished; its template is cleaned when the runner next starts, or when it is built again.",
+        "reason": "The build stopped before it finished; its template is being cleaned, or is cleaned within a minute.",
         "remedy": [
           {
             "text": "Build it again: it picks up at the step that did not finish."

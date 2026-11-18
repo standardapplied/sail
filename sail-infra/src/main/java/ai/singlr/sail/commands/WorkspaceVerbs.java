@@ -72,13 +72,13 @@ final class WorkspaceVerbs {
 
   /**
    * Project {@code name}'s definition, when its template can be built on this box: it sets
-   * resources, {@code host init} has run and sail-api has, since every container mounts its socket.
+   * resources and {@code host init} has run, refused in the words the route's are ({@link
+   * TemplateBuild#requireResources}, {@link TemplateBuild#hostOf}), and sail-api has, since every
+   * container mounts its socket.
    */
-  static ProjectDefinition buildable(String name, OperatorCommand operator) {
-    var config = ProjectMutations.requireResources(readable(name, operator), operator);
-    if (!Files.exists(SailPaths.hostConfigPath())) {
-      throw HostInitCommand.notInitialized(operator);
-    }
+  static ProjectDefinition buildable(String name, OperatorCommand operator) throws IOException {
+    var config = TemplateBuild.requireResources(readable(name, operator));
+    TemplateBuild.hostOf(SailPaths.hostConfigPath());
     ContainerSailSetup.requireApi(SailPaths.apiSocketHostDir());
     return config;
   }

@@ -2541,8 +2541,7 @@ class ProjectProvisionerTest {
 
     assertEquals(
         List.of(
-            "simple's repo app could be read but not written into the container: its disk may be"
-                + " full.",
+            "simple's repo app could be read, but its clone did not finish.",
             "github.com has no branch develop in simple's repo app.",
             "github.com did not give simple's repo app to the token stored for it: the token may"
                 + " not read the repo, or the repo may not exist.",
@@ -2596,8 +2595,7 @@ class ProjectProvisionerTest {
 
     assertEquals(
         List.of(
-            "acme-health's repo acme could be read but not written into the container: its disk"
-                + " may be full.",
+            "acme-health's repo acme could be read, but its clone did not finish.",
             "github.com has no branch develop in acme-health's repo acme.",
             "github.com could not be reached to clone acme-health's repo acme."),
         said);

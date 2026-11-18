@@ -18,7 +18,6 @@ import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.EngagementMode;
 import ai.singlr.sail.config.FileLimits;
-import ai.singlr.sail.config.HostYaml;
 import ai.singlr.sail.config.ProjectDefinition;
 import ai.singlr.sail.config.RetentionConfig;
 import ai.singlr.sail.config.Spec;
@@ -78,7 +77,6 @@ import ai.singlr.sail.store.SyncHealth;
 import ai.singlr.sail.sync.SyncTransportException;
 import java.io.IOException;
 import java.io.UncheckedIOException;
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Clock;
 import java.time.Instant;
@@ -1475,8 +1473,8 @@ public final class SailOperations implements HostOperations {
                   if (joined.isPresent()) {
                     return new TemplateResponse(joined.get());
                   }
-                  var config = requireResources(definition);
-                  var host = hostOf(SailPaths.hostConfigPath());
+                  var config = TemplateBuild.requireResources(definition);
+                  var host = TemplateBuild.hostOf(SailPaths.hostConfigPath());
                   var caller = Actor.current().handle();
                   var tokens =
                       CheckedTokens.of(
@@ -1517,11 +1515,20 @@ public final class SailOperations implements HostOperations {
   }
 
   /**
-   * Ends the template builds of this box's projects that a stop of sail-api cut short, as it
-   * starts: each template stripped of its builder's credentials and stopped before its record says
-   * so.
+   * Ends the template builds of this box's projects cut short, now and then every {@link
+   * TemplateBuild#CLEANUP_EVERY}: a build sail-api's stop cut, and one whose own process ended (a
+   * command-line build killed) while sail-api ran, each template stripped of its builder's
+   * credentials and stopped before its record says so. Answers the passes, to close as sail-api
+   * stops.
    */
-  public void endCutShortTemplateBuilds() {
+  public AutoCloseable cleanCutTemplateBuilds() {
+    var passes = new PeriodicPass("templates", this::endCutShortTemplateBuilds);
+    passes.runIfIdle();
+    passes.start(TemplateBuild.CLEANUP_EVERY);
+    return passes;
+  }
+
+  private void endCutShortTemplateBuilds() {
     templateBuildService()
         .endCutShort(projectCatalog().list().stream().map(ProjectStore.ProjectRow::name).toList());
   }
@@ -1542,35 +1549,6 @@ public final class SailOperations implements HostOperations {
     }
     return templateBuildService;
   }
-
-  /**
-   * {@code config}, refused when it sets no resources, before anything is built: a template is
-   * launched with the project's own CPU, memory and disk.
-   */
-  private static ProjectDefinition requireResources(ProjectDefinition config) {
-    if (config.resources() != null) {
-      return config;
-    }
-    throw Remedied.state(
-        config.name()
-            + "'s definition sets no CPU, memory or disk, so its template cannot be built.",
-        Remedy.of(
-            "Set them first: ",
-            Remedy.sail("project config set", config.name(), "resources", RESOURCES),
-            "."));
-  }
-
-  /** This box's {@code host.yaml} at {@code file}, refused when the box was never set up. */
-  private static HostYaml hostOf(Path file) throws IOException {
-    if (!Files.isRegularFile(file)) {
-      throw Remedied.state(
-          "This runner is not set up, so no template can be built on it.",
-          Remedy.of("Set it up first: ", Remedy.sail("host init"), "."));
-    }
-    return HostYaml.fromMap(YamlUtil.parseFile(file));
-  }
-
-  private static final String RESOURCES = "{\"cpu\": 2, \"memory\": \"8GB\", \"disk\": \"50GB\"}";
 
   /** The git tokens person {@code handle} stored on this box; none for one it does not know. */
   private Map<String, String> gitTokensOf(String handle) {

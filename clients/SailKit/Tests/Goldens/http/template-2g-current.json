@@ -16,6 +16,7 @@
         "step_started_at": "2026-11-11T08:59:40.656Z",
         "steps": 20
       },
+      "outcome": "current",
       "project": "lighthouse",
       "schema_version": 1,
       "stale": false,

@@ -53,7 +53,7 @@ public final class TemplateBuildService {
    * A project's template now: its state, the version workspaces are created from when one is
    * current, whether that version was built from the definition as it is, and its last build's
    * record, running or ended; {@code joined} when a request that asked for a build found this one
-   * under way.
+   * under way, and {@code builtNothing} when it found the version current and built nothing.
    */
   public record Status(
       String project,
@@ -61,7 +61,8 @@ public final class TemplateBuildService {
       Optional<WorkspaceTemplate.Template> current,
       boolean stale,
       Optional<TemplateRecord> build,
-      boolean joined) {
+      boolean joined,
+      boolean builtNothing) {
     public Status {
       Objects.requireNonNull(project, "project");
       Objects.requireNonNull(state, "state");
@@ -75,7 +76,7 @@ public final class TemplateBuildService {
   private final ShellExec shell;
   private final Function<String, Collection<String>> tokensOf;
   private final Consumer<Exception> log;
-  private final ConcurrentHashMap<String, CompletableFuture<Void>> running =
+  private final ConcurrentHashMap<String, CompletableFuture<Boolean>> running =
       new ConcurrentHashMap<>();
   private final Set<String> ending = ConcurrentHashMap.newKeySet();
 
@@ -132,7 +133,7 @@ public final class TemplateBuildService {
   public Status start(ProjectDefinition config, Function<Runnable, WorkspaceTemplate.Source> source)
       throws Exception {
     var project = config.name();
-    var answer = new CompletableFuture<Void>();
+    var answer = new CompletableFuture<Boolean>();
     var under = running.putIfAbsent(project, answer);
     if (under != null) {
       return joined(config, under);
@@ -143,8 +144,8 @@ public final class TemplateBuildService {
             Actor.carrying(
                 () -> {
                   try {
-                    lane.ensure(config, source.apply(() -> answer.complete(null)));
-                    answer.complete(null);
+                    lane.ensure(config, source.apply(() -> answer.complete(true)));
+                    answer.complete(false);
                   } catch (Exception failed) {
                     if (!answer.completeExceptionally(failed)) {
                       log.accept(failed);
@@ -153,8 +154,12 @@ public final class TemplateBuildService {
                     running.remove(project, answer);
                   }
                 }));
-    awaitHeld(answer);
-    return status(config, false);
+    var began = awaitHeld(answer);
+    var now = status(config, false);
+    return began
+        ? now
+        : new Status(
+            now.project(), now.state(), now.current(), now.stale(), now.build(), false, true);
   }
 
   /**
@@ -191,7 +196,8 @@ public final class TemplateBuildService {
     return states;
   }
 
-  private Status joined(ProjectDefinition config, CompletableFuture<Void> under) throws Exception {
+  private Status joined(ProjectDefinition config, CompletableFuture<Boolean> under)
+      throws Exception {
     try {
       awaitHeld(under);
     } catch (Exception refusedToItsStarter) {
@@ -202,14 +208,15 @@ public final class TemplateBuildService {
 
   /**
    * Waits until {@code build} holds the template's lock, or ended, no longer than {@link
-   * Workspaces#CREATE_WAIT}: a build that waits on another process's lock past it is answered as
-   * the record and the lock say then.
+   * Workspaces#CREATE_WAIT}: whether it began a build, false when it ended without one, its version
+   * current; one that waits on another process's lock past it is answered as the record and the
+   * lock say then.
    */
-  private static void awaitHeld(CompletableFuture<Void> build) throws Exception {
+  private static boolean awaitHeld(CompletableFuture<Boolean> build) throws Exception {
     try {
-      build.get(Workspaces.CREATE_WAIT.toSeconds(), TimeUnit.SECONDS);
+      return build.get(Workspaces.CREATE_WAIT.toSeconds(), TimeUnit.SECONDS);
     } catch (TimeoutException stillWaiting) {
-      return;
+      return true;
     } catch (ExecutionException failed) {
       throw failed.getCause() instanceof Exception cause ? cause : failed;
     }
@@ -225,7 +232,8 @@ public final class TemplateBuildService {
             .map(t -> !t.inputs().equals(ProjectProvisioner.inputs(config, Optional.empty())))
             .orElse(false),
         now.build(),
-        joined && now.state() == State.BUILDING);
+        joined && now.state() == State.BUILDING,
+        false);
   }
 
   /**
@@ -250,7 +258,8 @@ public final class TemplateBuildService {
                         TemplateBuild.CUT_PENDING,
                         TemplateBuild.RESUMES)
                     : last);
-    return new Status(project, stateOf(building, current, told), current, false, told, false);
+    return new Status(
+        project, stateOf(building, current, told), current, false, told, false, false);
   }
 
   private static State stateOf(

@@ -91,21 +91,27 @@ public final class WorkspaceDoors {
 
   /**
    * Refuses the bound actor building {@code project}'s template, as {@code catalog} holds it,
-   * unless an admin: on a node ({@code keeper} its own person, null elsewhere) a person the node
-   * caps is told the templates of their workspaces are built on main.
+   * unless an admin, as Access's table has it: a member is told only an admin builds it, a node's
+   * own person among them; on a node ({@code keeper} its own person, null elsewhere) a person the
+   * node caps is told the templates of their workspaces are built on main.
    */
   static void requireBuild(ProjectStore catalog, String project, String keeper) {
     ProjectGate.refusing(catalog, Action.BUILD_TEMPLATE, project)
         .map(
             refusal ->
-                onTheNode(
-                    refusal,
-                    Actor.current(),
-                    keeper,
-                    " builds a template; "
-                        + project
-                        + "'s template for your workspaces is built on main.",
-                    "Templates are built on main, where your workspaces are created."))
+                refusal.kind() == Refusal.Kind.ADMIN_ONLY
+                    ? new Refusal(
+                        Refusal.Kind.ADMIN_ONLY,
+                        "Only an admin builds " + project + "'s template.",
+                        "Ask an admin to build it.")
+                    : onTheNode(
+                        refusal,
+                        Actor.current(),
+                        keeper,
+                        " builds a template; "
+                            + project
+                            + "'s template for your workspaces is built on main.",
+                        "Templates are built on main, where your workspaces are created."))
         .ifPresent(WorkspaceDoors::refuse);
   }
 

@@ -6,10 +6,10 @@
   "response": {
     "body": {
       "error": {
-        "action": "Ask an admin to do it.",
+        "action": "Ask an admin to build it.",
         "code": "forbidden_admin_only",
         "field_errors": [],
-        "message": "Only an admin may build templates."
+        "message": "Only an admin builds lighthouse's template."
       },
       "schema_version": 1
     },

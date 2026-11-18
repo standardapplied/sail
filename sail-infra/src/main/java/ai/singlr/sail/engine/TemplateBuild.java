@@ -10,9 +10,12 @@ import ai.singlr.sail.common.Remedied;
 import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.config.HostYaml;
 import ai.singlr.sail.config.ProjectDefinition;
+import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.pty.PtyAdmission;
 import java.io.IOException;
+import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.Collection;
 import java.util.Objects;
@@ -35,24 +38,28 @@ public final class TemplateBuild {
   /** The steps a build reports: the provisioner's own, then the lane's finish. */
   public static final int STEPS = ProjectPhase.values().length + 1;
 
-  /** Why a build cut short ended, once sail-api cleaned its template as it started. */
-  public static final String CUT_SHORT = "The build stopped when the runner restarted.";
+  /** Why a build cut short ended, once sail-api cleaned its template. */
+  public static final String CUT_SHORT =
+      "The build stopped before it finished: the runner restarted, or its process ended.";
 
   /**
-   * Why a build cut short ended, when its template could not be shown to hold none of the tokens
-   * its build was given: the next build starts from the template's last version, never from it.
+   * Why a build cut short ended, when the strip of its template or the search for its builder's
+   * tokens failed: the next build starts from the template's last version, never from it.
    */
   public static final String UNPROVEN =
-      "The build stopped when the runner restarted, and Sail could not show its template holds none"
-          + " of its builder's credentials; the next build starts it again from its last version.";
+      "The build stopped before it finished, and its template could not be cleaned of its"
+          + " builder's credentials; the next build starts it again from its last version.";
 
   /**
-   * What a read says of a build cut short that no one has ended yet: a read never cleans, so it
-   * says when that happens.
+   * What a read says of a build cut short that sail-api has not ended yet: it ends each one as it
+   * starts and then once a minute ({@link #CLEANUP_EVERY}), so this is true at every moment.
    */
   public static final String CUT_PENDING =
-      "The build stopped before it finished; its template is cleaned when the runner next starts,"
-          + " or when it is built again.";
+      "The build stopped before it finished; its template is being cleaned, or is cleaned within a"
+          + " minute.";
+
+  /** How often sail-api looks for builds cut short to end, beside once as it starts. */
+  public static final Duration CLEANUP_EVERY = Duration.ofMinutes(1);
 
   /** What a build cut short or failed is told to do: build again, from where it stopped. */
   public static final Remedy RESUMES =
@@ -127,9 +134,7 @@ public final class TemplateBuild {
         new WorkspaceTemplate.Recorder() {
           @Override
           public void started() {
-            record.set(
-                TemplateRecord.started(by, clock.get(), STEPS)
-                    .proving(TemplateRecord.TokenProof.of(tokens)));
+            record.set(TemplateRecord.started(by, clock.get(), STEPS));
             record.get().write(file);
             started.run();
           }
@@ -155,16 +160,13 @@ public final class TemplateBuild {
   }
 
   /**
-   * Ends a build cut short ({@code record} has no outcome, and the template's lock is free), as
-   * sail-api starts: under the lock, the template is stripped of every credential, searched for
+   * Ends a build cut short ({@code record} has no outcome, and the template's lock is free, its
+   * builder gone): under the lock, the template is stripped of every credential, searched for
    * {@code tokens} (its builder's, as stored now) and stopped, as a failed build is; only then is
-   * its record ended {@code interrupted}. The build's own token values lived only in its process,
-   * so absence is shown only when {@code tokens} hold every value the record's proof was made of
-   * ({@link TemplateRecord.TokenProof}: salted fingerprints, never a value) and the search finds
-   * none. Otherwise, a token replaced since, or a strip or search that failed, the template is
-   * stopped and marked {@link WorkspaceTemplate#UNPROVEN_KEY}, so the next build rolls it back to
-   * its last version; workspaces clone that version's snapshot, never the template as it stands.
-   * Empty when there was nothing to end, or another holds the lock.
+   * its record ended {@code interrupted}. A strip or search that fails, or a token found, leaves
+   * the template stopped and marked {@link WorkspaceTemplate#UNPROVEN_KEY}, so the next build rolls
+   * it back to its last version; workspaces clone that version's snapshot, never the template as it
+   * stands. Empty when there was nothing to end, or another holds the lock.
    */
   public Optional<TemplateRecord> endCutShort(
       String project, ShellExec shell, Collection<String> tokens) throws Exception {
@@ -179,14 +181,13 @@ public final class TemplateBuild {
       if (record.isEmpty()) {
         return Optional.empty();
       }
-      var proof = record.get().proof();
       Exception failed = null;
-      var proven = false;
       try {
-        proven = !clean(shell, template, tokens) || (proof != null && proof.heldIn(tokens));
+        clean(shell, template, tokens);
       } catch (Exception e) {
         failed = e;
       }
+      var proven = failed == null;
       if (!proven) {
         var unmarked = WorkspaceTemplate.markUnproven(shell, locks, template);
         if (failed == null && unmarked.isPresent()) {
@@ -209,15 +210,12 @@ public final class TemplateBuild {
     }
   }
 
-  /**
-   * Strips, searches and stops {@code template}, when there is one: whether there was, since a
-   * template never launched holds nothing.
-   */
-  private static boolean clean(ShellExec shell, String template, Collection<String> tokens)
+  /** Strips, searches and stops {@code template}, when there is one. */
+  private static void clean(ShellExec shell, String template, Collection<String> tokens)
       throws Exception {
     var found = new BoxInstances(shell).named(template);
     if (found.isEmpty()) {
-      return false;
+      return;
     }
     var containers = new ContainerManager(shell);
     if (!(found.get().state() instanceof ContainerState.Running)) {
@@ -229,7 +227,6 @@ public final class TemplateBuild {
     } finally {
       containers.stop(template);
     }
-    return true;
   }
 
   /** Whether {@code project}'s template is being built now: its lock is held. */
@@ -245,6 +242,35 @@ public final class TemplateBuild {
   public Optional<TemplateRecord> record(String project) {
     return TemplateRecord.read(TemplateRecord.fileOf(projectsDir, project));
   }
+
+  /**
+   * {@code config}, refused when it sets no resources, before anything is built: a template is
+   * launched with the project's own CPU, memory and disk.
+   */
+  public static ProjectDefinition requireResources(ProjectDefinition config) {
+    if (config.resources() != null) {
+      return config;
+    }
+    throw Remedied.state(
+        config.name()
+            + "'s definition sets no CPU, memory or disk, so its template cannot be built.",
+        Remedy.of(
+            "Set them first: ",
+            Remedy.sail("project config set", config.name(), "resources", RESOURCES),
+            "."));
+  }
+
+  /** This box's {@code host.yaml} at {@code file}, refused when the box was never set up. */
+  public static HostYaml hostOf(Path file) throws IOException {
+    if (!Files.isRegularFile(file)) {
+      throw Remedied.state(
+          "This runner is not set up, so no template can be built on it.",
+          Remedy.of("Set it up first: ", Remedy.sail("host init"), "."));
+    }
+    return HostYaml.fromMap(YamlUtil.parseFile(file));
+  }
+
+  private static final String RESOURCES = "{\"cpu\": 2, \"memory\": \"8GB\", \"disk\": \"50GB\"}";
 
   /** The pool a new template goes on: the base profile's, as {@code host} names it. */
   public static String poolOf(HostYaml host) {

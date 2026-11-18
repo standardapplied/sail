@@ -992,13 +992,14 @@ it stopped. The network wait (step 4) is never taken as done while a later step 
 container may have been started again since, and its address is waited for anew. A run that
 resumes then finishes what dpkg was left doing (`dpkg --configure -a`), since a run cut short while
 apt installed leaves every later apt step refused; every apt call, and that finish, waits up to five
-minutes for dpkg's lock a container's own apt timers may hold. A repo is cloned beside its
+minutes for dpkg's lock a container's own apt timers may hold (`/etc/apt/apt.conf.d/90sail-lock-wait`,
+which a template's workspaces inherit, harmlessly). A repo is cloned beside its
 directory and renamed into place, so a run cut mid-clone resumes to a whole repo. Every step is
 safe to run twice: none asks on a terminal or collides with what a run before it left. A failed
 clone is said by how far its repo could be read, asked by exit status (`git ls-remote
---exit-code` through the same credentials, then the host's own 401 to a plain request): not
-written (the disk), no such branch, refused (the token sentence, with the typed remedy that stores
-one), or not reached. The tracker resumes only for the definition it was written for: its state carries the
+--exit-code` through the same credentials, then the host's own 401 to a plain request): read
+but not finished (a cause no status names: a dropped connection, a timeout, the disk), no such
+branch, refused (the token sentence, with the typed remedy that stores one), or not reached. The tracker resumes only for the definition it was written for: its state carries the
 SHA-256 of the definition's JSON document (`ProjectDefinitionJson.write`) and the workstation
 key's fingerprint (`ProjectProvisioner.inputs`), and progress recorded for another (or by a release that recorded none)
 restarts the run from the first step, each step re-checking its own effect. A finished run records
@@ -1303,10 +1304,13 @@ own, about three (2.9 to 4.3 s over 32 creates, median 3.2 s).
     the caller's own stored git tokens; the CLI clones with the box's person's and records them as
     the builder. Every refusal is answered before anything changes: an admin's role, on a node its
     own person's (others are told templates are built on main), resources in the definition, a
-    set-up runner, and a token for every repo host that asks (`login_not_stored`, its remedy
-    typed). The build then runs on a thread of sail-api's (`TemplateBuildService`), so it outlives
+    set-up runner (the command line's build refuses those two in the same words, from
+    `TemplateBuild.requireResources` and `hostOf`), and a token for every repo host that asks
+    (`login_not_stored`, its remedy typed). A member is told "Only an admin builds <p>'s
+    template.", a node's own person who is a member among them. The build then runs on a thread of sail-api's (`TemplateBuildService`), so it outlives
     the request: `202` once it holds the template's lock, `200` when its version was built from the
-    definition as it is, answered as a read right after would answer. A second request while one
+    definition as it is, answered as a read right after would answer with `outcome: current`
+    beside it. A second request while one
     runs joins it (`202`, `build.joined`) and needs no token of its own, the CLI's build included;
     one that arrives before this process's build holds the lock waits for it. Builds of different
     projects run side by side.
@@ -1325,26 +1329,24 @@ own, about three (2.9 to 4.3 s over 32 creates, median 3.2 s).
     a person (`Remedied`); any other, a tool's output, goes to the log, and the record says the
     runner could not finish. A template is building while its lock is held and its record has no
     outcome: a create checking the version holds the lock too.
-  - **A build cut short** (sail-api restarted, the CLI killed) leaves a record with no outcome and a
-    free lock. A read says it as it is, at once: `interrupted`, its template cleaned when the runner
-    next starts or when it is built again. sail-api ends every one as it starts, once: under the
-    lock, the template is started if stopped, stripped, searched for its builder's tokens (as
-    stored then: the values a build is given live only in its process and are never written) and
-    stopped, and only then is the record ended `interrupted`, "The build stopped when the runner
-    restarted.". While it does, a read says the build was cut short, not that it runs. The strip
-    needs no dev user, so a template cut before step 6 made one is stripped too.
+  - **A build cut short** (sail-api restarted, a command-line build killed) leaves a record with no
+    outcome and a free lock. A read says it as it is, at once: `interrupted`, its template being
+    cleaned or cleaned within a minute. sail-api ends every one as it starts and then once a minute
+    (`TemplateBuild.CLEANUP_EVERY`), so a command-line build killed while sail-api runs is ended
+    within a minute, never left running with its builder's token until a restart: under the lock,
+    the template is started if stopped, stripped, searched for its builder's tokens (as stored
+    then; the values a build is given live only in its process and are never written) and
+    stopped, and only then is the record ended `interrupted`. A build whose process still holds
+    the lock is never touched. While it ends one, a read says the build was cut short, not that it
+    runs. The strip needs no dev user, so a template cut before step 6 made one is stripped too.
   - **No token survives in a template, structurally.** Workspaces clone a version's snapshot
     (`<p>--tmpl/v<n>`), made only after that build's strip and its search for the tokens it was
-    given passed; never the template as it stands. A build that failed or was cut short, and whose
-    template could not be shown to hold none of its builder's tokens, is marked
-    `user.sail.template.unproven`, and the next build never builds on it: it restores the newest
-    version's snapshot (or, with none, deletes the template and launches it anew), clears the mark
-    and runs every step. Absence is shown by a search for the token values the build was given:
-    in the build's process, its own; after a restart, the builder's as stored then, and only when
-    they hold every value the record's proof was made of (a salt of the build's own and each
-    value's SHA-256 under it, kept in the record's file, never on the wire, never a value). A
-    token replaced in between, a strip or a search that fails, or a record with no proof, marks the
-    template unproven, and its record says so.
+    given passed; never the template as it stands. A build that failed or was cut short, whose
+    strip or search failed or found a token, marks its template `user.sail.template.unproven`, and
+    the next build never builds on it: it restores the newest version's snapshot (or, with none,
+    deletes the template and launches it anew), clears the mark and runs every step. A strip and
+    search that passed is proof enough, as it is for a build that finished: the strip removes every
+    file a build writes a token to.
   - `sudo sail project workspace create <p> <name>` builds it first when there is none or it is
     stale. It then clones it with `incus copy <p>--tmpl/v<n> <p>-<name>`, passing the workspace's
     keys at the copy: `-c user.sail.project=<p> -c user.sail.workspace=<name> -c

@@ -683,7 +683,37 @@ class WorkspaceDoorsTest {
           "Templates are built on main, where your workspaces are created.",
           capped.failure().remedy().plain());
       assertEquals(ErrorCode.FORBIDDEN_ADMIN_ONLY, member.failure().errorCode());
-      assertEquals("Only an admin may build templates.", member.getMessage());
+      assertEquals("Only an admin builds acme's template.", member.getMessage());
+      assertEquals("Ask an admin to build it.", member.failure().remedy().plain());
+    }
+  }
+
+  /**
+   * Access's table says who builds a template: an admin. A node's own person who is a member is
+   * refused on their own node as on main, in the same sentence, not sent to main.
+   */
+  @Test
+  void aNodesOwnPersonWhoIsAMemberIsRefusedAsAMemberIsOnMain() throws Exception {
+    try (var db = Sqlite.open(tempDir.resolve("keeper.db"))) {
+      new SchemaManager(db).migrate();
+      var fdes = new FdeStore(db);
+      fdes.add("client", null, "client@x", "member");
+      var catalog = new ProjectStore(db);
+      Acting.system(() -> catalog.upsert(ACME));
+      var node =
+          new RoleRule(() -> new SyncConfig("node", "sail@main", "client", "client-box"), fdes);
+      var keeper = node.principal(RoleRule.Credential.token("client", "member")).orElseThrow();
+
+      var refused =
+          refused(
+              keeper,
+              () -> {
+                WorkspaceDoors.requireBuild(catalog, "acme", "client");
+                return null;
+              });
+
+      assertEquals(ErrorCode.FORBIDDEN_ADMIN_ONLY, refused.failure().errorCode());
+      assertEquals("Only an admin builds acme's template.", refused.getMessage());
     }
   }
 

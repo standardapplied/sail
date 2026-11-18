@@ -244,8 +244,9 @@ public final class ProjectProvisioner {
   /**
    * What a failed clone of {@code repo} says of the repo, asked again by exit status alone, never
    * by git's words: {@code git ls-remote --exit-code} through the same credentials answers 0 when
-   * the repo (and its branch) can be read, 2 when the branch is not there, anything else when it
-   * cannot be read; then the host's own answer to a plain request without credentials (401, see
+   * the repo (and its branch) can be read, so the clone failed for a cause its status does not say
+   * (a dropped connection, a timeout, the disk), 2 when the branch is not there, anything else when
+   * it cannot be read; then the host's own answer to a plain request without credentials (401, see
    * {@link ShellExec#asksForCredentials}) tells a refusal from a host that cannot be reached.
    */
   private CloneReach readable(String name, ProjectDefinition.Repo repo) throws Exception {
@@ -290,8 +291,8 @@ public final class ProjectProvisioner {
     return switch (reach) {
       case READ ->
           Remedied.state(
-              named + " could be read but not written into the container: its disk may be full.",
-              Remedy.of("An admin looks at the runner's disk."),
+              named + " could be read, but its clone did not finish.",
+              Remedy.of("Try again; if it does not finish again, an admin looks at the runner."),
               cause);
       case NO_BRANCH ->
           Remedied.state(

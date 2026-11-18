@@ -11,7 +11,7 @@
         "joined": false,
         "kept": 0,
         "outcome": "interrupted",
-        "reason": "The build stopped when the runner restarted.",
+        "reason": "The build stopped before it finished: the runner restarted, or its process ended.",
         "remedy": [
           {
             "text": "Build it again: it picks up at the step that did not finish."

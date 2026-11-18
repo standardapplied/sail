@@ -8,6 +8,7 @@ package ai.singlr.sail.commands;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.api.OperationsFactory;
@@ -16,9 +17,11 @@ import ai.singlr.sail.config.HostYaml;
 import ai.singlr.sail.config.ProjectDefinition;
 import ai.singlr.sail.config.TestDefinitions;
 import ai.singlr.sail.engine.CheckedTokens;
+import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.ProjectProvisioner;
 import ai.singlr.sail.engine.ProvisionListener;
 import ai.singlr.sail.engine.SailPaths;
+import ai.singlr.sail.engine.TemplateBuild;
 import ai.singlr.sail.engine.WorkspaceTemplate;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.store.HeldProjects;
@@ -28,6 +31,7 @@ import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.Sqlite;
 import com.sun.net.httpserver.HttpServer;
 import java.net.InetSocketAddress;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
@@ -90,6 +94,73 @@ class WorkspaceVerbsTest {
     assertTrue(live.test("auth"));
     assertFalse(live.test("billing"), "billing's run is another box's");
     assertFalse(live.test("docs"));
+  }
+
+  /**
+   * The command line's build refuses what the route refuses in the route's words, from the same
+   * checks: a definition without resources, then a runner never set up.
+   */
+  @Test
+  void theCommandLinesBuildRefusesInTheRoutesWords() throws Exception {
+    var host = SailPaths.hostConfigPath();
+    Files.deleteIfExists(host);
+    try (var db = Sqlite.open(SailPaths.controlPlaneDb())) {
+      new SchemaManager(db).migrate();
+      var bare =
+          new ProjectDefinition(
+              "bare-build", "", null, null, null, null, List.of(), null, null, null, null);
+      Acting.system(
+          () -> {
+            new ProjectStore(db).upsert(bare);
+            new ProjectStore(db)
+                .upsert(
+                    new ProjectDefinition(
+                        "set-build",
+                        "",
+                        new ProjectDefinition.Resources(2, "4GB", "20GB"),
+                        null,
+                        null,
+                        null,
+                        List.of(),
+                        null,
+                        null,
+                        null,
+                        null));
+          });
+    }
+
+    var noResources =
+        assertThrows(
+            IllegalStateException.class,
+            () -> WorkspaceVerbs.buildable("bare-build", OperatorCommand.PLAIN));
+    var notSetUp =
+        assertThrows(
+            IllegalStateException.class,
+            () -> WorkspaceVerbs.buildable("set-build", OperatorCommand.PLAIN));
+
+    assertEquals(
+        assertThrows(
+                IllegalStateException.class,
+                () ->
+                    TemplateBuild.requireResources(
+                        new ProjectDefinition(
+                            "bare-build",
+                            "",
+                            null,
+                            null,
+                            null,
+                            null,
+                            List.of(),
+                            null,
+                            null,
+                            null,
+                            null)))
+            .getMessage(),
+        noResources.getMessage());
+    assertEquals(
+        "This runner is not set up, so no template can be built on it. Set it up first: sail host"
+            + " init.",
+        notSetUp.getMessage());
   }
 
   @Test
