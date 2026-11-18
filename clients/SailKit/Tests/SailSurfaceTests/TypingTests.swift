@@ -200,15 +200,22 @@ import Testing
 
 @Suite struct LatencyMarksTests {
     /// The hop from the session's thread to the main one is kept: the wake the main thread took
-    /// latest after the oldest change it carried, how many wakes it took and how many changes.
+    /// latest after the oldest change it carried, the two stamps of that wake's hand-off (so a late
+    /// hand-off and a late take are told apart, and a stamp the take overtook stays unknown), how
+    /// many wakes it took and how many changes.
     @Test func theLongestHopFromTheScreenToTheMainThreadIsKept() {
         var marks = LatencyMarks()
-        marks.told(at: 1.002, since: 1.000, changes: 1)
-        marks.told(at: 2.180, since: 2.000, changes: 3)
-        marks.told(at: 3.000, since: 3.001, changes: 1)
+        marks.told(at: 1.002, since: 1.000, handing: 1.0005, handed: 1.001, changes: 1)
+        marks.told(at: 2.180, since: 2.000, handing: 2.165, handed: 2.170, changes: 3)
+        marks.told(at: 3.000, since: 3.001, handing: 3.001, handed: 3.001, changes: 1)
         #expect(marks.figures.longestToTold == Span(2.000, 2.180))
+        #expect(marks.figures.longestToToldHanding == 2.165 && marks.figures.longestToToldHanded == 2.170, "the longest wake's hand-off, not the last one's")
+        #expect(LatencyMarks().figures.longestToToldHanding == nil && LatencyMarks().figures.longestToToldHanded == nil)
         #expect(marks.figures.wakes == 3)
         #expect(marks.figures.changes == 5)
+        marks.told(at: 4.400, since: 4.000, handing: 4.001, handed: nil, changes: 1)
+        #expect(marks.figures.longestToToldHanding == 4.001 && marks.figures.longestToToldHanded == nil,
+                "a wake the main thread took before its hand-off was stamped keeps that stamp unknown, never the take's time")
         #expect(LatencyMarks().figures.longestToTold == nil)
     }
 

@@ -32,6 +32,8 @@ public final class TerminalSession: Sendable {
     public static let stableAttachment = Duration.seconds(5)
     /// How long a size must hold before it is sent to the host.
     public static let resizeHold = Duration.milliseconds(60)
+    /// The name of the thread that reads the host's frames and feeds the screen, so a sampler finds it.
+    public static let readerName = "sh.standardapplied.sail.terminal.reader"
     /// How many events wait for an app that is not reading them; the oldest go first.
     public static let eventBacklog = 256
     /// The largest grid a session takes, from the app or from its host.
@@ -63,6 +65,7 @@ public final class TerminalSession: Sendable {
     private let patience: Duration
     private let eventSink: AsyncStream<SessionEvent>.Continuation
     private let screenListener = Relay<ContinuousClock.Instant>()
+    private let reader = Mutex<QualityOfService?>(nil)
     private let clock = ContinuousClock()
 
     private struct Core {
@@ -186,6 +189,11 @@ public final class TerminalSession: Sendable {
     /// time the screen changed, with when it took the output; nil stops new calls, while a call
     /// already begun may still finish. Nothing stands between the change and the call, so it must
     /// return at once: what draws hands the change on.
+    /// The quality of service the reader thread of the latest connection runs at; nil before one.
+    public var readerQuality: QualityOfService? {
+        reader.withLock { $0 }
+    }
+
     public func onScreenChange(_ listener: (@Sendable (ContinuousClock.Instant) -> Void)?) {
         screenListener.set(listener)
     }
@@ -474,9 +482,12 @@ public final class TerminalSession: Sendable {
             return .failed(error)
         }
         return await withCheckedContinuation { result in
-            Thread {
+            let reader = Thread {
+                self.reader.withLock { $0 = Thread.current.qualityOfService }
                 result.resume(returning: self.connect(to: entry.address, token: entry.token, generation: generation))
-            }.start()
+            }
+            reader.name = Self.readerName
+            reader.start()
         }
     }
 
